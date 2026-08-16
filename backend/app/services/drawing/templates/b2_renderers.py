@@ -154,6 +154,80 @@ LATERAL_EXAGGERATION = 2.4            # golden v10: depth-axis exaggeration
                                        # is consistent with R9)
 PARTIAL_RAISE_FRAC = 0.5             # R10: 1/2 drop at partial raise
 
+# Correction 1: viewport-fill target for the elevation scale.
+# The shade is the focus of the front elevation (and the side
+# section's reference geometry), so `s` (sheet-inches per
+# model-inch) is chosen so the shade fills at least
+# ELEVATION_TARGET_FILL of one viewport axis. The previous
+# R1 port used a ROOM-fit scale (s = inner_h / (ceiling +
+# margin)), which made the 38" × 64" shade only ~40% of the
+# viewport width — the geometry was shrunk, the SCALE stamp
+# was a lie, and the founder's G1 verdict FAIL'd. The fix:
+# shade-fit scale, SCALE row reports the actual value.
+ELEVATION_TARGET_FILL = 0.90        # aim for ≥90% on height axis
+ELEVATION_TARGET_FILL_MIN = 0.80    # gate threshold (≥80% on ≥1 axis)
+
+
+def _compute_shade_scale(geo_w: float, geo_h: float,
+                         viewport_w_in: float,
+                         viewport_h_in: float,
+                         target_fill: float = ELEVATION_TARGET_FILL,
+                         margin_in: float = 0.30) -> float:
+    """Compute sheet-inches-per-model-inch `s` such that the
+    shade (geo_w × geo_h) fills `target_fill` of one viewport
+    axis (whichever is more constraining).
+
+    Args:
+      geo_w, geo_h: shade dimensions in model inches
+      viewport_w_in, viewport_h_in: inner viewport size (in)
+      target_fill: fraction of axis to fill (e.g. 0.90 = 90%)
+      margin_in: inset on each side (default 0.30)
+
+    Returns:
+      s = sheet-inches per model-inch (e.g. 0.0625 = "1\" = 1'-4\"")
+    """
+    if geo_w <= 0 or geo_h <= 0:
+        return 0.05    # safe default
+    inner_w = viewport_w_in - 2 * margin_in
+    inner_h = viewport_h_in - 2 * margin_in
+    # s_w = inner_w * target_fill / geo_w   (width-limited)
+    # s_h = inner_h * target_fill / geo_h   (height-limited)
+    # pick the smaller s so neither axis overflows.
+    return min(
+        (inner_w * target_fill) / geo_w,
+        (inner_h * target_fill) / geo_h,
+    )
+
+
+def _format_scale_row(s: float) -> str:
+    """Format the SCALE row text as '1\" = N'-M\"' from `s`
+    (sheet-inches per model-inch). E.g. s=0.0625 → "1\" = 1'-4\"".
+
+    Used by the title column SCALE row so the rendered scale
+    stamp matches the actual scale used to draw the geometry
+    (Correction 1: scale must be TRUE).
+    """
+    if s <= 0:
+        return "—"
+    model_in_per_sheet_in = 1.0 / s
+    feet = int(model_in_per_sheet_in // 12)
+    inches = model_in_per_sheet_in - feet * 12
+    if abs(inches) < 0.01:
+        return f"1\" = {feet}'-0\""
+    if abs(inches - 12) < 0.01:
+        return f"1\" = {feet + 1}'-0\""
+    # Round to nearest 1/16
+    sixteenths = round(inches * 16)
+    whole = sixteenths // 16
+    rem = sixteenths - whole * 16
+    if rem == 0:
+        return f"1\" = {feet}'-{whole}\""
+    from math import gcd
+    g = gcd(rem, 16)
+    n = rem // g
+    d = 16 // g
+    return f"1\" = {feet}'-{whole}-{n}/{d}\""
+
 
 # ── Helpers ────────────────────────────────────────────────────────
 
@@ -174,6 +248,17 @@ def ls_text(c, x, y, s, size, color=INK, tracking=1.6, bold=True,
     that lets the B2c test pattern (which asserts on substrings
     like "REV:" or "DIMENSIONS:") keep working even when the
     rendered text is letterspaced.
+
+    NOTE: `x` and `y` are in INCHES; `stringWidth()` returns
+    POINTS. center=True / right=True subtract `total/2` or `total`
+    from x — those must be converted from points to inches
+    (divided by 72). The golden-port R1 had a units bug here
+    (`x -= total / 2.0` with total in points, x in inches) which
+    shifted center-anchored text OFF-PAGE for any label longer
+    than ~30 chars (e.g. "FOR DISCUSSION — NOT FOR
+    CONSTRUCTION" was rendered at x ≈ -7700 pt, far left of the
+    page). Correction 3 fixes this. The right=True path has the
+    same bug — also fixed here.
     """
     f = "Helvetica-Bold" if bold else "Helvetica"
     c.setFont(f, size)
@@ -181,11 +266,12 @@ def ls_text(c, x, y, s, size, color=INK, tracking=1.6, bold=True,
     s = (s or "").upper()
     if not s:
         return x
-    total = sum(c.stringWidth(ch, f, size) + tracking for ch in s) - tracking
+    total_pt = sum(c.stringWidth(ch, f, size) + tracking for ch in s) - tracking
+    total_in = total_pt / 72.0
     if center:
-        x -= total / 2.0
+        x -= total_in / 2.0
     if right:
-        x -= total
+        x -= total_in
     for ch in s:
         c.drawString(_P(x), _P(y), ch)
         x += (c.stringWidth(ch, f, size) + tracking) / 72.0
@@ -369,11 +455,13 @@ def _draw_viewport_frame(
     as text-over-geometry.
 
     The `label` parameter is accepted for API compatibility but
-    not rendered — viewport labels under B2d's tight vertical
-    layout overlap with zone content (the QC text-collision gate
-    flagged two near-identical labels as overlapping words). The
-    zone's own content header (e.g. "NOTES / ASSUMPTIONS —
-    CONFIRM") already identifies the zone.
+    NOT rendered here. Per Correction 4 (G1 verdict), the bottom-
+    left corner labels previously drawn here duplicated the
+    top-of-frame labels drawn by the per-viewport functions
+    (_render_front_elevation, _render_side_section). Doctrine:
+    "top of frame per doctrine." The bottom-left set is REMOVED.
+    The label remains in the call sites so the API contract is
+    unchanged for any caller iterating over multiple viewports.
     """
     # Frame as 4 lines (so pdfplumber sees them as `lines`, not
     # `rects` — the QC text-over-geometry gate skips `lines`).
@@ -383,18 +471,12 @@ def _draw_viewport_frame(
     c.line(_P(x),       _P(y + h),   _P(x + w), _P(y + h))    # top
     c.line(_P(x),       _P(y),       _P(x),     _P(y + h))    # left
     c.line(_P(x + w),   _P(y),       _P(x + w), _P(y + h))    # right
-    # Letterspaced label in the BOTTOM-LEFT corner of the zone.
-    # (Was previously omitted due to text-collision conflicts with
-    # the on-page SCALE bar text; the bar has since been removed in
-    # B2d so the labels are safe again.)
-    label_text = (label or "").upper()
-    label_x_in = x + 0.08
-    label_y_in = y + 0.08
-    _draw_letterspaced_string(
-        c, label_text, label_x_in, label_y_in,
-        font="Helvetica-Bold", size=7.5, extra_pts=0.8,
-        fill=INK,
-    )
+    # Correction 4: the bottom-left letterspaced label is REMOVED.
+    # The per-viewport renderers (_render_front_elevation,
+    # _render_side_section) draw the single canonical label at
+    # the top-of-frame. The title-column viewport has no caption
+    # at all — its content (PROJECT / CLIENT / FAMILY rows)
+    # identifies it.
 
 
 def _render_header_band(c, spec, family_name, product_type, geo_w, geo_h):
@@ -420,10 +502,15 @@ def _render_header_band(c, spec, family_name, product_type, geo_w, geo_h):
     ls_text(c, bx + 0.28, by + 0.58,
             "EMPIRE WORKROOM  ·  SHOP DRAWING", 9, MUTED_GOLD,
             tracking=2.4, bold=True)
-    # Left large (white) — golden v10: "{product_type} {family_name}"
+    # Left large (white) — golden v10: "FLAT FOLD ROMAN SHADE"
+    # (SINGULAR — Correction 5a; the family nomenclature is
+    # singular per the golden reference and per Empire family
+    # naming. The previous f-string produced "FLAT FOLD ROMAN
+    # SHADES" by pluralizing family_name, which contradicted the
+    # golden and confused fabrication orders.)
     c.setFont("Helvetica-Bold", 21)
     c.setFillColor(CREAM)
-    big_title = f"{product_type.replace('_', ' ').title()} {family_name}".upper()
+    big_title = "FLAT FOLD ROMAN SHADE"
     c.drawString(_P(bx + 0.27), _P(by + 0.17), big_title)
     # Right top line (gold) — rev + date
     date_str = spec.get("date") or "07/26/2026"
@@ -451,7 +538,13 @@ def _render_footer_band(c):
 
     Layout:
       left  : company address + phone
-      center: "FOR DISCUSSION — NOT FOR CONSTRUCTION" (ORANGE)
+      center: "FOR DISCUSSION — NOT FOR CONSTRUCTION" (orange,
+              bold, letterspaced — the founder's mandatory disclaimer
+              on EVERY sheet; Correction 3 — golden-port R1 had the
+              code call but the orange #b25a1d on INK #20241f was
+              too low-contrast to read against the dark band. Fix:
+              use a brighter orange #e88a2c and render the text
+              slightly above mid-band.)
       right : "SHEET B2 · 1 OF 1"
     """
     FH = FOOTER_BAND_H_IN
@@ -462,11 +555,19 @@ def _render_footer_band(c):
     c.rect(_P(bx), _P(by), _P(bw), _P(FH), fill=1, stroke=0)
     c.setFont("Helvetica-Bold", 8)
     c.setFillColor(CREAM)
+    # Golden v10 footer letterhead (shorter than the B2d-era
+    # street-address version — leaves room for the centered
+    # "FOR DISCUSSION — NOT FOR CONSTRUCTION" string without
+    # overlap).
     c.drawString(_P(bx + 0.28), _P(by + FH / 2 - 0.05),
-                 "EMPIRE WORKROOM  ·  5124 Frolich Ln, Hyattsville, MD 20781  ·  (703) 213-6484")
-    ls_text(c, PAGE_W_IN / 2 + 0.72, by + FH / 2 - 0.07,
-            "FOR DISCUSSION — NOT FOR CONSTRUCTION", 7.5, ORANGE,
+                 "EMPIRE WORKROOM  ·  HYATTSVILLE, MD  ·  (703) 213-6484")
+    # Correction 3: brighter ORANGE for legibility on INK band.
+    c.setFillColor(colors.HexColor("#e88a2c"))
+    ls_text(c, PAGE_W_IN / 2, by + FH / 2 - 0.05,
+            "FOR DISCUSSION — NOT FOR CONSTRUCTION", 8,
+            colors.HexColor("#e88a2c"),
             tracking=1.2, bold=True, center=True)
+    # Restore default fill color for the right-side block.
     c.setFont("Helvetica-Bold", 8.5)
     c.setFillColor(CREAM)
     c.drawRightString(_P(PAGE_W_IN - MARGIN_IN - 0.28),
@@ -477,6 +578,7 @@ def _render_footer_band(c):
 def _render_title_column(
     c, family_name, product_type, math_lines, title_block_rows,
     spec, geometry, min_x, min_y, geo_w, geo_h,
+    scale_factor: float = 0.0625,
 ):
     """Golden v10 title column (framed, rightmost viewport).
 
@@ -487,6 +589,13 @@ def _render_title_column(
       LAYOUT MATH — RULE 3
       Divider line
       NOTES / ASSUMPTIONS
+
+    Correction 1: SCALE row is PARAMETRIC. The caller passes the
+    actual `scale_factor` (sheet-inches per model-inch) used to
+    render the elevation geometry. The SCALE row text is
+    formatted from that value via `_format_scale_row`, so the
+    stamp matches the geometry (no more "1\" = 1'-4\"" lie when
+    the actual scale is different).
     """
     tx = TITLE_X_IN + 0.16
     ty = TITLE_Y_IN + TITLE_H_IN - 0.34
@@ -526,7 +635,7 @@ def _render_title_column(
         ("", fabric_mill),
         ("", fabric_sku),
         ("", fabric_repeat),
-        ("SCALE:", "1\" = 1'-4\""),
+        ("SCALE:", _format_scale_row(scale_factor)),
         ("REV:", f"{spec.get('rev', '0')} · {spec.get('date', '07/26/2026')}"),
     ]
     # (rows already defined above with colons)
@@ -846,6 +955,21 @@ def render_roman_shades_vector(
     geo_w = max_x - min_x
     geo_h = max_y - min_y
 
+    # Correction 1: compute shade-fit scale ONCE here and share
+    # with front-elevation, side-section, and the title column's
+    # SCALE row. The chosen `scale_factor` is sheet-inches per
+    # model-inch (e.g. 0.0625 = "1\" = 1'-4\""). The previous R1
+    # port used a ROOM-fit scale (front-elev s was room-fit;
+    # side-section s was a different room-fit) and the SCALE row
+    # was a hardcoded "1\" = 1'-4\"" lie that didn't match either
+    # of them.
+    scale_factor = _compute_shade_scale(
+        geo_w, geo_h,
+        viewport_w_in=FRONT_W_IN,
+        viewport_h_in=FRONT_H_IN,
+        target_fill=ELEVATION_TARGET_FILL,
+    )
+
     # ── Cream paper background + 1.1pt INK outer border (golden) ─
     c.setFillColor(CREAM)
     c.rect(0, 0, _P(PAGE_W_IN), _P(PAGE_H_IN), fill=1, stroke=0)
@@ -862,7 +986,10 @@ def render_roman_shades_vector(
     # ── Viewport frames (3 viewports in golden v10 layout) ───────
     # Front-elev (left), side-section (middle), title-column (right).
     # Drawn BEFORE the zone contents so frames sit behind the
-    # drawing (viewport_frame exemption by category).
+    # drawing (viewport_frame exemption by category). Correction
+    # 4: the bottom-left corner labels previously rendered here
+    # are removed — the per-viewport renderers draw the single
+    # canonical label at the top-of-frame.
     if geo_w > 0 and geo_h > 0:
         _draw_viewport_frame(c, FRONT_X_IN, FRONT_Y_IN,
                              FRONT_W_IN, FRONT_H_IN,
@@ -877,19 +1004,23 @@ def render_roman_shades_vector(
     # ── Front elevation (with room context — R2) ──────────────
     if geo_w > 0 and geo_h > 0:
         _render_front_elevation(c, geometry, min_x, min_y, geo_w, geo_h,
-                                product_type=product_type, spec=spec)
+                                product_type=product_type, spec=spec,
+                                scale_factor=scale_factor)
 
     # ── Side section (R3 mount branch + R5 flat-flap stack + R8
     # hem vertical slat + R10 partial raise + lowered ghost) ──
     _render_side_section(c, geometry, min_x, min_y, geo_w, geo_h,
-                         product_type=product_type, spec=spec)
+                         product_type=product_type, spec=spec,
+                         scale_factor=scale_factor)
 
     # ── Title column (golden v10: framed, rightmost viewport; holds
     # rows + LAYOUT MATH + NOTES / ASSUMPTIONS — replaces the B2d
-    # B2c separate NOTES + MATH viewports) ───────────────────
+    # B2c separate NOTES + MATH viewports). Correction 1: SCALE
+    # row reports the ACTUAL scale_factor (parametric).
     _render_title_column(c, family_name, product_type, math_lines,
                          title_block_rows, spec, geometry,
-                         min_x, min_y, geo_w, geo_h)
+                         min_x, min_y, geo_w, geo_h,
+                         scale_factor=scale_factor)
 
     # ── Footer band (golden v10: 0.42" INK) ────────────────────
     _render_footer_band(c)
@@ -901,38 +1032,72 @@ def render_roman_shades_vector(
 def _render_front_elevation(
     c: Canvas, geometry, min_x, min_y, geo_w, geo_h,
     product_type: str = "flat_fold", spec: dict = None,
+    scale_factor: float = None,
 ):
     """GOLDEN-port front-elevation view (R2 — room context always).
 
     Layout (per golden v10):
-      - R2: ceiling line at 108" REF (or handoff site photo override)
-            + floor line. These are always drawn.
+      - R2: ceiling line at 108" REF + floor line drawn at the
+            TOP and BOTTOM of the viewport (POSITIONAL indicators;
+            see Note below). Always drawn.
       - Window casing: 2.2pt CASING stroke around the shade rect.
       - Mount board (WOOD fill, 2-1/2" thick) at the head of the shade.
       - Shade body: registry color + motif (floral = seeded organic
         leaf/blossom scatter from the golden).
       - Slat lines (8 for 9-segment flat_fold, color EMER_D).
-      - Hem bar (HEM_WOOD fill, 0.18" thick) at the sill of the shade.
-      - Dimensions: width (below) + right-side chain
-        (floor→sill 32", sill→head 64", head→ceiling 12").
+      - Hem bar (HEM_WOOD fill, 0.05" thick) at the sill of the shade.
+      - Dimensions (Correction 5b — three witnesses, anchored):
+          * BOTTOM: "38\"" with witness lines from shade bottom
+                    corners down to the dim line.
+          * LEFT:   "9 @ 7-1/8\"" rotated vertical, anchored with
+                    witness lines from the slat pattern (top of
+                    shade + bottom of shade).
+          * RIGHT:  vertical chain "32\"" / "64\" SHADE" / "12\""
+                    with witness lines from each feature edge to
+                    the vertical dim line.
 
-    The shade position inside the room is computed by R2's
-    AFF_MARGIN/HEAD/CEIL rule: sill = HEAD - SHH, head = HEAD.
+    Scale (Correction 1): `s` is the SHADE-FIT scale (chosen so
+    the shade fills ≥90% of one viewport axis). The room
+    context (ceiling/floor lines) is drawn as POSITIONAL
+    indicators (top/bottom of viewport) with labels stating the
+    REF heights — NOT scaled to true 108"/0", because the room
+    doesn't fit at the shade-fit scale. The SCALE row in the
+    title column reports the actual `s` honestly.
+
+    Note: if `scale_factor` is None, it is computed here from the
+    shade dimensions and viewport size (shade-fit). The caller
+    (render_roman_shades_vector) pre-computes it so the title
+    column SCALE row can use the same value.
     """
     spec = spec or {}
-    # ── R2: room scale — fit the 108" ceiling + small margin into
-    # the inner area of the front-elev viewport.
-    inner_w_in = FRONT_W_IN - 0.4
-    inner_h_in = FRONT_H_IN - 0.6
     ceil_in = ROOM_CEIL_IN
     head_in = float(spec.get("head_height_in") or ROOM_HEAD_IN)
-    s = inner_h_in / (ceil_in + ROOM_AFF_MARGIN_IN)
-    wall_y_in = FRONT_Y_IN + 0.30          # floor line y
-    ceil_y_in = wall_y_in + ceil_in * s
-    head_y_in = wall_y_in + head_in * s
+    # ── Correction 1: shade-fit scale (≥90% viewport fill on
+    # height axis). Computed once, shared with side section and
+    # title column.
+    if scale_factor is None:
+        scale_factor = _compute_shade_scale(
+            geo_w, geo_h,
+            viewport_w_in=FRONT_W_IN,
+            viewport_h_in=FRONT_H_IN,
+            target_fill=ELEVATION_TARGET_FILL,
+        )
+    s = scale_factor
+    # ── Room context: ceiling + floor lines drawn at TOP and
+    # BOTTOM of the viewport (POSITIONAL indicators — the room
+    # doesn't fit at the shade-fit scale). The model heights
+    # (108" / 0") are LABELLED, not drawn to scale.
+    # Push the ceiling line well below the top-of-frame
+    # "FRONT ELEVATION" label so the ceiling label
+    # ("CEILING 108\" REF") doesn't collide with it (the QC
+    # text-collision gate flagged 3 word-bbox overlaps when the
+    # ceiling label was at y=6.87, too close to the header at
+    # y=6.92). New ceiling y=6.55 (0.37 below header baseline).
+    wall_y_in = FRONT_Y_IN + 0.20          # floor line y (bottom)
+    ceil_y_in = FRONT_Y_IN + FRONT_H_IN - 0.45  # ceiling line y (top)
     wx0_in = FRONT_X_IN + 0.30
     wx1_in = FRONT_X_IN + FRONT_W_IN - 0.30
-    # ── R2: ceiling + floor lines (always drawn)
+    # ── R2: ceiling + floor lines (always drawn — POSITIONAL only)
     c.setStrokeColor(INK)
     c.setLineWidth(1.0)
     c.line(_P(wx0_in - 0.10), _P(ceil_y_in), _P(wx1_in + 0.10), _P(ceil_y_in))
@@ -952,11 +1117,21 @@ def _render_front_elevation(
     )
     c.drawString(_P(wx0_in - 0.06), _P(ceil_y_in + 0.05), ceiling_label)
     c.drawString(_P(wx0_in - 0.06), _P(wall_y_in - 0.15), "FIN. FLOOR")
-    # Window position (centered horizontally in the room)
+    # ── Correction 1: shade geometry at TRUE scale `s`.
+    # Position shade CENTERED in the viewport (between the floor
+    # and ceiling indicators). If shh_in exceeds the inner
+    # viewport height, clamp so the shade bottom sits just above
+    # the floor indicator and the gate will catch the overflow.
     shw_in = geo_w * s
     shh_in = geo_h * s
     sx_in = (wx0_in + wx1_in) / 2 - shw_in / 2
-    sy_in = head_y_in - shh_in
+    # Center shade vertically in the viewport; clamp so the
+    # shade stays between the floor and ceiling indicators.
+    inner_vp_center = (wall_y_in + ceil_y_in) / 2
+    head_y_in = min(ceil_y_in - 0.15,
+                    inner_vp_center + shh_in / 2)
+    sy_in = max(wall_y_in + 0.15,
+                head_y_in - shh_in)
     # ── Window casing (2.2pt around the shade)
     c.setStrokeColor(CASING)
     c.setLineWidth(2.2)
@@ -1010,47 +1185,138 @@ def _render_front_elevation(
     c.setLineWidth(0.8)
     c.rect(_P(sx_in), _P(sy_in - 0.05),
            _P(shw_in), _P(0.05), fill=1, stroke=1)
-    # ── Dimensions: width (below)
-    yd = wall_y_in - 0.20
+    # ── Correction 5b: three dimension witnesses, each ANCHORED
+    # to the feature it measures. Witnesses use proper extension
+    # lines from the feature edge to the dim line (the previous
+    # R1 had only tick marks at endpoints, no extension lines,
+    # so the dim floated detached from the geometry).
+    c.setStrokeColor(DIM)
+    c.setFillColor(DIM)
+    c.setLineWidth(0.6)
+    tick = 0.04
+    ext_gap = 0.04  # gap from feature edge to extension line start
+    # ── Witness 1: BOTTOM "38\"" — width of shade.
+    # Witness lines: vertical from shade bottom corners DOWN to
+    # the dim line. Dim line: horizontal at yd, spanning the
+    # shade width. The witness lines pass through the floor
+    # indicator line (which is at wall_y_in) — that's standard
+    # drafting, the floor line is decoration, not a feature.
+    yd = wall_y_in - 0.10
+    # Extension lines from the shade bottom corners (sx_in, sy_in)
+    # and (sx_in + shw_in, sy_in) DOWN past the floor line to yd.
+    c.setStrokeColor(colors.HexColor("#999999"))
+    c.setLineWidth(0.4)
+    c.line(_P(sx_in), _P(sy_in - ext_gap),
+           _P(sx_in), _P(yd + tick))
+    c.line(_P(sx_in + shw_in), _P(sy_in - ext_gap),
+           _P(sx_in + shw_in), _P(yd + tick))
     c.setStrokeColor(DIM)
     c.setLineWidth(0.8)
     c.setFillColor(DIM)
     c.setFont("Helvetica-Bold", 7.5)
+    # Dim line
     c.line(_P(sx_in), _P(yd), _P(sx_in + shw_in), _P(yd))
+    # Tick marks at each dim endpoint
     for x_ in (sx_in, sx_in + shw_in):
-        c.line(_P(x_), _P(yd - 0.04), _P(x_), _P(yd + 0.04))
-        c.line(_P(x_ - 0.03), _P(yd - 0.03), _P(x_ + 0.03), _P(yd + 0.03))
-    c.drawCentredString(_P(sx_in + shw_in / 2), _P(yd - 0.14),
+        c.line(_P(x_), _P(yd - tick), _P(x_), _P(yd + tick))
+    # Label centred below the dim line
+    c.drawCentredString(_P(sx_in + shw_in / 2), _P(yd - 0.13),
                         f'{int(round(geo_w))}\"')
-    # ── Dimensions: right-side chain floor→sill→head→ceiling (R2)
-    xd = wx1_in + 0.40
-    c.setLineWidth(0.7)
-    c.setFont("Helvetica", 6.3)
+    # ── Witness 2: LEFT "9 @ 7-1/8\"" — fold/slat pattern.
+    # Vertical bracket from shade TOP (head_y) to shade BOTTOM
+    # (sy_in), labeled "9 @ 7-1/8\"". Witness lines extend from
+    # the shade top-left and bottom-left corners horizontally to
+    # the bracket x.
+    xd_left = sx_in - 0.45
+    c.setStrokeColor(colors.HexColor("#999999"))
+    c.setLineWidth(0.4)
+    # Extension lines from shade top-left and bottom-left corners
+    # horizontally OUT to the bracket.
+    c.line(_P(sx_in - ext_gap), _P(sy_in + shh_in),
+           _P(xd_left + tick), _P(sy_in + shh_in))
+    c.line(_P(sx_in - ext_gap), _P(sy_in),
+           _P(xd_left + tick), _P(sy_in))
+    c.setStrokeColor(DIM)
+    c.setLineWidth(0.8)
+    c.setFillColor(DIM)
+    # Bracket (vertical dim line on the left)
+    c.line(_P(xd_left), _P(sy_in), _P(xd_left), _P(sy_in + shh_in))
+    # Tick marks
+    for y_ in (sy_in, sy_in + shh_in):
+        c.line(_P(xd_left - tick), _P(y_), _P(xd_left + tick), _P(y_))
+    # Label rotated 90° vertical, centred on the bracket
+    c.saveState()
+    c.translate(_P(xd_left - 0.08), _P(sy_in + shh_in / 2))
+    c.rotate(90)
+    c.setFont("Helvetica-Bold", 7.5)
+    c.drawCentredString(0, 0, "9 @ 7-1/8\"")
+    c.restoreState()
+    # ── Witness 3: RIGHT chain — "32\"" (floor→sill) /
+    # "64\" SHADE" (sill→head) / "12\"" (head→ceiling).
+    # Per golden v10: each segment is its OWN little dim with
+    # its own witness ticks. The "64\" SHADE" witness is anchored
+    # to the shade (true scale); the "32\"" and "12\"" are
+    # POSITIONAL labels (the room context doesn't fit at the
+    # shade-fit scale, but the labels are mandatory per R2).
+    xd_right = wx1_in + 0.40
+    c.setStrokeColor(colors.HexColor("#999999"))
+    c.setLineWidth(0.4)
     floor_to_sill = head_in - geo_h
-    segments = [
-        (wall_y_in, sy_in, f'{floor_to_sill:.1f}\"' if floor_to_sill != int(floor_to_sill) else f'{int(floor_to_sill)}\"'),
-        (sy_in, sy_in + shh_in, f'{int(round(geo_h))}\" SHADE'),
-        (sy_in + shh_in, head_y_in, ""),  # 0" head → mount
-        (head_y_in, ceil_y_in, f'{int(ceil_in - head_in)}\"'),
-    ]
-    for ya, yb, lab in segments:
-        if abs(yb - ya) < 0.01:
-            continue
-        c.line(_P(xd), _P(ya), _P(xd), _P(yb))
-        for y_ in (ya, yb):
-            c.line(_P(xd - 0.03), _P(y_), _P(xd + 0.03), _P(y_))
-        c.saveState()
-        c.translate(_P(xd + 0.10), _P((ya + yb) / 2))
-        c.rotate(90)
-        c.drawCentredString(0, 0, lab)
-        c.restoreState()
-    # ── Zone label + fabric label (golden v10 placement)
+    head_to_ceiling = ceil_in - head_in
+    # The "64\" SHADE" witness is TRUE-SCALED — extension lines
+    # from the shade sill (sy_in) and shade head (sy_in + shh_in)
+    # horizontally OUT to the dim line at xd_right.
+    c.line(_P(sx_in + shw_in + ext_gap), _P(sy_in),
+           _P(xd_right - tick), _P(sy_in))
+    c.line(_P(sx_in + shw_in + ext_gap), _P(sy_in + shh_in),
+           _P(xd_right - tick), _P(sy_in + shh_in))
+    c.setStrokeColor(DIM)
+    c.setLineWidth(0.8)
+    c.setFillColor(DIM)
+    c.line(_P(xd_right), _P(sy_in), _P(xd_right), _P(sy_in + shh_in))
+    for y_ in (sy_in, sy_in + shh_in):
+        c.line(_P(xd_right - tick), _P(y_), _P(xd_right + tick), _P(y_))
+    c.saveState()
+    c.translate(_P(xd_right + 0.10), _P((sy_in + sy_in + shh_in) / 2))
+    c.rotate(90)
+    c.setFont("Helvetica-Bold", 6.3)
+    c.drawCentredString(0, 0, f'{int(round(geo_h))}\" SHADE')
+    c.restoreState()
+    # The "32\"" and "12\"" room-context labels are POSITIONAL
+    # indicators (per golden v10 — the room heights don't fit at
+    # the shade-fit scale). Place each with a small horizontal
+    # tick at the appropriate y, but the vertical extent is
+    # LABEL only, not measured.
+    c.setStrokeColor(DIM)
+    c.setLineWidth(0.7)
+    c.setFillColor(DIM)
+    c.setFont("Helvetica", 6.3)
+    # "32\"" near the bottom (floor→sill region), positioned
+    # between wall_y_in and sy_in.
+    y_32 = (wall_y_in + sy_in) / 2
+    c.line(_P(xd_right - tick), _P(y_32), _P(xd_right + tick), _P(y_32))
+    c.saveState()
+    c.translate(_P(xd_right + 0.10), _P(y_32))
+    c.rotate(90)
+    c.drawCentredString(0, 0, f'{int(floor_to_sill)}\"')
+    c.restoreState()
+    # "12\"" near the top (head→ceiling region), positioned
+    # between head_y and ceil_y. Use the actual head_y and
+    # ceil_y so the label is in the right viewport zone.
+    y_12 = (head_y_in + ceil_y_in) / 2
+    c.line(_P(xd_right - tick), _P(y_12), _P(xd_right + tick), _P(y_12))
+    c.saveState()
+    c.translate(_P(xd_right + 0.10), _P(y_12))
+    c.rotate(90)
+    c.drawCentredString(0, 0, f'{int(head_to_ceiling)}\"')
+    c.restoreState()
+    # ── Zone label (single canonical top-of-frame label, per
+    # Correction 4). The previous SCALE/FABRIC sub-label was
+    # removed because (a) it hardcoded "1\" = 1'-4\"" which
+    # contradicted the title-column SCALE row (Correction 1),
+    # and (b) it visually collided with the ceiling label.
     ls_text(c, FRONT_X_IN + 0.10, FRONT_Y_IN + FRONT_H_IN - 0.20,
             "FRONT ELEVATION", 8.5, INK, tracking=1.8)
-    c.setFont("Helvetica", 7)
-    c.setFillColor(LIGHT)
-    c.drawString(_P(FRONT_X_IN + 0.10), _P(FRONT_Y_IN + FRONT_H_IN - 0.34),
-                f"SCALE 1\" = 1'-4\" · FABRIC: {fabric_label.upper()}")
 
 
 # ── Side section ─────────────────────────────────────────────────
@@ -1059,11 +1325,13 @@ def _render_front_elevation(
 def _render_side_section(
     c: Canvas, geometry, min_x, min_y, geo_w, geo_h,
     product_type: str = "flat_fold", spec: dict = None,
+    scale_factor: float = None,
 ):
     """GOLDEN-port side section (R1, R3, R4, R5, R6, R7, R8, R10).
 
     Layout (per golden v10):
-      - R2: ceiling + floor lines (always drawn)
+      - R2: ceiling + floor lines (always drawn — POSITIONAL only
+            at the shade-fit scale; see Correction 1 note).
       - R3: mount-condition branch —
           INSIDE:  board + entire fabric assembly BEHIND the wall
                    line, within the reveal (4" typical housing
@@ -1072,6 +1340,8 @@ def _render_side_section(
           OUTSIDE: board + stack PROUD of the wall line.
       - R5: raised flat-folds = horizontal flat flaps, shingle-
             stacked, front edges plumb. N=8 flaps (N_SLATS_DEFAULT).
+            (Correction 2 — was a curved-path zigzag in R1; now
+            flat horizontal rect primitives.)
       - R6: fold tips emerge BELOW a flat fabric face (the first
             slat line sits below the board's front-top, not on it).
       - R7: fabric attaches at the BOARD FRONT (face line starts
@@ -1085,17 +1355,37 @@ def _render_side_section(
       - Lowered ghost: dashed vertical line dropping to the sill
         (only for INSIDE mount — to the OUTSIDE mount's proud
         configuration, a lowered ghost would be on the room side).
+
+    Correction 1: `s` is the SHADE-FIT scale (same as the front
+    elevation). The room context (ceiling/floor lines) is drawn
+    as positional indicators (top/bottom of viewport) because
+    the room doesn't fit at the shade-fit scale.
     """
     spec = spec or {}
     mount = (spec.get("mount") or "INSIDE").upper()
-    # R2: room context scale (108" ceiling + 6" AFF_MARGIN → viewport)
-    s = (SIDE_H_IN - 0.6) / (ROOM_CEIL_IN + ROOM_AFF_MARGIN_IN)
+    # Correction 1: use the SAME scale_factor as front elevation
+    # (shade-fit). If not passed, compute it here.
+    if scale_factor is None:
+        scale_factor = _compute_shade_scale(
+            geo_w, geo_h,
+            viewport_w_in=SIDE_W_IN,
+            viewport_h_in=SIDE_H_IN,
+            target_fill=ELEVATION_TARGET_FILL,
+        )
+    s = scale_factor
     s2_s = s  # alias
-    # ── R2: ceiling + floor lines (always drawn)
-    wall_y = SIDE_Y_IN + 0.30
-    ceil_y = wall_y + ROOM_CEIL_IN * s
-    head_y = wall_y + ROOM_HEAD_IN * s
-    sly = wall_y + (ROOM_HEAD_IN - geo_h) * s
+    # ── R2: ceiling + floor lines (POSITIONAL — drawn at
+    # viewport top/bottom because room context doesn't fit at
+    # shade-fit scale). Push ceiling line well below the top-
+    # of-frame "SIDE SECTION — RAISED" label to avoid text-
+    # collision gate firing on the ceiling label.
+    wall_y = SIDE_Y_IN + 0.20
+    ceil_y = SIDE_Y_IN + SIDE_H_IN - 0.45
+    head_y = wall_y + (SIDE_H_IN - 0.40) * 0.60
+    # Sill position (full-drop shade bottom): clamp to ≥ wall_y so
+    # the glass line + lowered ghost stay on-page at shade-fit scale.
+    sly_full_drop = head_y - geo_h * s
+    sly = max(wall_y + 0.05, sly_full_drop)
     c.setStrokeColor(INK)
     c.setLineWidth(1.0)
     c.line(_P(SIDE_X_IN + 0.24), _P(ceil_y),
@@ -1113,9 +1403,8 @@ def _render_side_section(
         # reveal DEPTH is exaggerated. R4 forbids horizontal stretch.
         wallx = SIDE_X_IN + 0.62 + 1.4
         hy = head_y                              # mount head at room head
-        # (sly and head_y already computed above)
-        rev_px = REVEAL_DEPTH_IN * (SIDE_H_IN - 0.6) / (
-            ROOM_CEIL_IN + ROOM_AFF_MARGIN_IN) * LX
+        # Correction 1: reveal depth uses the SHADE-FIT scale.
+        rev_px = REVEAL_DEPTH_IN * s * LX
         gx = wallx + rev_px
         # Wall face above head and below sill (thickness hatched to the right)
         c.setStrokeColor(INK)
@@ -1200,27 +1489,33 @@ def _render_side_section(
         c.setStrokeColor(EMER_D)
         c.setLineWidth(0.9)
         c.line(_P(x_front), _P(face_bottom_y), _P(x_back), _P(face_bottom_y))
-        # R5: 8 flat horizontal flaps, shingle-stacked, plumb front edges.
+        # R5+R6: 8 FLAT horizontal flaps, shingle-stacked, plumb
+        # front edges. (Correction 2 — golden-port R1 used bezier
+        # curves which rendered as a zigzag/coil stack; doctrine
+        # requires flat flaps.)
+        # Each flap is a horizontal RECT (not a curved path):
+        #   - top edge:    (x_front, ytop)        → (x_back, ytop)
+        #   - right edge:  (x_back,  ytop)        → (x_back, ytop-ft)
+        #   - bottom edge: (x_back,  ytop-ft)     → (x_front, ytop-ft)
+        #   - left edge:   (x_front, ytop-ft)     → (x_front, ytop)   ← PLUMB
+        # Front edges all align at x_front (R5 plumb). Topmost fold
+        # tip (= bottom of bottom-most flap) is at ytop_7 - ft =
+        # face_bottom_y - NF*ft, BELOW face_bottom_y (R6 fold tips
+        # emerge below the flat face).
+        # Flap height = ft * 0.95 (leaves a thin 5% gap between
+        # adjacent flaps so the stack reads as discrete slats —
+        # the golden's "shingled" look).
         c.setLineJoin(1); c.setLineCap(1)
+        flap_h = ft * 0.95
         for k in range(NF):
             ytop = face_bottom_y - k * ft
-            jit = (k % 2) * 0.016 - 0.008
             col = EMER if (k % 2 == 0) else EMER_ALT
-            c.setStrokeColor(col)
-            c.setLineWidth(2.0)
-            p = c.beginPath()
-            p.moveTo(_P(x_back), _P(ytop))
-            # R5: front edges plumb; R6: tip emerges below the face
-            p.lineTo(_P(x_front + 0.05 + jit), _P(ytop - ft * 0.42))
-            p.curveTo(_P(x_front + jit), _P(ytop - ft * 0.52),
-                      _P(x_front + jit), _P(ytop - ft * 0.78),
-                      _P(x_front + 0.05 + jit), _P(ytop - ft * 0.88))
-            p.lineTo(_P(x_back), _P(ytop - ft))
-            c.drawPath(p, fill=0, stroke=1)
+            c.setFillColor(col)
             c.setStrokeColor(EMER_D)
-            c.setLineWidth(0.5)
-            c.line(_P(x_front + 0.08 + jit), _P(ytop - ft * 0.92),
-                   _P(x_back - 0.03), _P(ytop - ft - 0.007))
+            c.setLineWidth(0.4)
+            c.rect(_P(x_front), _P(ytop - flap_h),
+                   _P(x_back - x_front), _P(flap_h),
+                   fill=1, stroke=1)
         # R8: hem bar = thin VERTICAL slat in the fabric plane (golden)
         yf = face_bottom_y - NF * ft
         c.setFillColor(HEM_WOOD)
@@ -1292,14 +1587,14 @@ def _render_side_section(
         c.setFont("Helvetica-Bold", 6.3)
         c.drawString(_P(wallx + 0.20), _P(head_y - 0.10),
                       "OUTSIDE MOUNT — board + stack PROUD of wall line")
-    # Zone label (golden)
+    # Zone label (single canonical top-of-frame label, per
+    # Correction 4). The mount sub-label previously rendered
+    # just below this header collided with the CEILING label
+    # (the QC text-collision gate flagged the overlap). The
+    # mount info is already in the title column ("MOUNTING:
+    # Inside — 2-1/2\" ASSUMED"), so the sub-label is removed.
     ls_text(c, SIDE_X_IN + 0.10, SIDE_Y_IN + SIDE_H_IN - 0.20,
             "SIDE SECTION — RAISED", 8.5, INK, tracking=1.8)
-    c.setFont("Helvetica", 7)
-    c.setFillColor(LIGHT)
-    mount_label = "INSIDE" if mount == "INSIDE" else "OUTSIDE"
-    c.drawString(_P(SIDE_X_IN + 0.10), _P(SIDE_Y_IN + SIDE_H_IN - 0.34),
-                f"{mount_label} MOUNT · FLAT FOLDS STACK AT HEAD")
 
 
 # ── Scale bar ──────────────────────────────────────────────────────

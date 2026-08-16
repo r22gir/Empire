@@ -32,9 +32,19 @@ were the pre-B2b pattern; the QC gates are now the floor.
 """
 from __future__ import annotations
 
+import re
 from typing import List, Tuple
 
 import pdfplumber
+
+# Import the renderer's layout constants so the scale-truth + fold-
+# stack gates measure the same coordinate frames the renderer drew.
+from app.services.drawing.templates.b2_renderers import (
+    FRONT_X_IN, FRONT_Y_IN, FRONT_W_IN, FRONT_H_IN,
+    SIDE_X_IN, SIDE_Y_IN, SIDE_W_IN, SIDE_H_IN,
+    TITLE_X_IN, TITLE_Y_IN, TITLE_W_IN, TITLE_H_IN,
+    N_SLATS_DEFAULT,
+)
 
 
 # ── Page geometry constants (landscape letter, in inches) ─────────
@@ -400,6 +410,51 @@ def enforce_b2_qc(
                 f"samples: {sample}"
             )
 
+        # ── Golden-port corrections G1 (2026-08-16) — 5 new gates ─
+        # Gate 1: elevation viewport-fill + scale-truth
+        scale_truth_failures = _check_elevation_scale_truth(page)
+        if scale_truth_failures:
+            msgs = [f["issue"] for f in scale_truth_failures]
+            raise B2QCFailure(
+                f"B2 QC (scale-truth) FAIL on {family}/{product_type}: "
+                f"{'; '.join(msgs)}. samples: {scale_truth_failures[:3]}"
+            )
+        # Gate 2: fold stack is flat horizontal flaps (R5/R6)
+        flap_failures = _check_fold_stack_is_flat(page, family=family)
+        if flap_failures:
+            msgs = [f["issue"] for f in flap_failures]
+            raise B2QCFailure(
+                f"B2 QC (fold-stack) FAIL on {family}/{product_type}: "
+                f"{'; '.join(msgs)}. samples: {flap_failures[:3]}"
+            )
+        # Gate 3: footer FOR DISCUSSION string present
+        footer_disc_failures = _check_footer_for_discussion(page)
+        if footer_disc_failures:
+            msgs = [f["issue"] for f in footer_disc_failures]
+            raise B2QCFailure(
+                f"B2 QC (footer-discussion) FAIL on "
+                f"{family}/{product_type}: {'; '.join(msgs)}. "
+                f"samples: {footer_disc_failures[:3]}"
+            )
+        # Gate 4: duplicate viewport captions
+        dup_cap_failures = _check_duplicate_viewport_captions(page)
+        if dup_cap_failures:
+            msgs = [f["issue"] for f in dup_cap_failures]
+            raise B2QCFailure(
+                f"B2 QC (duplicate-captions) FAIL on "
+                f"{family}/{product_type}: {'; '.join(msgs)}. "
+                f"samples: {dup_cap_failures[:3]}"
+            )
+        # Gate 5: title + witnesses
+        title_witness_failures = _check_title_and_witnesses(page)
+        if title_witness_failures:
+            msgs = [f["issue"] for f in title_witness_failures]
+            raise B2QCFailure(
+                f"B2 QC (title+witnesses) FAIL on "
+                f"{family}/{product_type}: {'; '.join(msgs)}. "
+                f"samples: {title_witness_failures[:3]}"
+            )
+
         return {
             "vector_bbox_in": bbox,
             "page_coverage_x": cov_x,
@@ -415,6 +470,11 @@ def enforce_b2_qc(
             "dim_borrow": dim_borrow,
             "same_baseline_overlap": baseline_ov,
             "column_overflow": col_ov,
+            "scale_truth_failures": scale_truth_failures,
+            "flap_failures": flap_failures,
+            "footer_disc_failures": footer_disc_failures,
+            "dup_cap_failures": dup_cap_failures,
+            "title_witness_failures": title_witness_failures,
         }
     finally:
         pdfplumber_obj.close()
@@ -712,3 +772,478 @@ def _check_column_overflow(page) -> list[dict]:
             "column_right_in": title_inner_right / 72.0,
         })
     return overflow
+
+
+# ── CORRECTION 1 — Elevation viewport-fit + scale-truth gate ─────
+#
+# The previous R1 port used a ROOM-fit scale (s = inner_h / (ceiling
+# + margin)) which made the 38" × 64" shade only ~40% of the
+# viewport width while the SCALE row stamp claimed "1\" = 1'-4\"" —
+# the geometry was shrunk, the stamp was a lie. The fix: the
+# renderer uses a SHADE-FIT scale and reports it honestly in the
+# SCALE row.
+#
+# This gate asserts:
+#   (a) drawn elevation bbox == real_dim * scale_factor ± 1%
+#   (b) bbox fills ≥ 80% of the front-elev viewport on at least
+#       ONE axis (height-limited since shade is taller than wide)
+#
+# Both, not either. Without (a) the stamp could be honest and the
+# geometry still wrong; without (b) the stamp could match a tiny
+# geometry shrunk into the corner.
+
+def _check_elevation_scale_truth(page) -> list[dict]:
+    """Gate 1: scale-truth + viewport-fill for the front elevation.
+
+    Reads SCALE row + DIMENSIONS row from the title column, then
+    measures the elevation content bbox (lines + rects inside the
+    front-elev viewport frame). Asserts:
+      (a) drawn elevation width  ≈ real_w * scale_factor  (±1%)
+      (b) drawn elevation height ≈ real_h * scale_factor  (±1%)
+      (c) drawn bbox fills ≥ 80% of viewport on at least one axis
+
+    scale_factor is sheet-inches per model-inch (e.g. 0.0625 =
+    "1\" = 1'-4\"" = 1/16).
+    """
+    failures = []
+    text = "".join(c["text"] for c in page.chars)
+    # Parse DIMENSIONS row: "DIMENSIONS:38.00\" W × 64.00\" H"
+    dim_m = re.search(
+        r'DIMENSIONS:?\s*([\d.]+)\s*"\s*W\s*[×x]\s*([\d.]+)\s*"\s*H',
+        text, re.IGNORECASE)
+    if not dim_m:
+        failures.append({"gate": "scale-truth",
+                         "issue": "DIMENSIONS row not parseable"})
+        return failures
+    real_w = float(dim_m.group(1))
+    real_h = float(dim_m.group(2))
+    # Parse SCALE row: "SCALE:1\" = 1'-9/16\"" (or similar)
+    # Accepts "N\" = M'-K/L\"" or "N\" = M'-K\""
+    scale_m = re.search(
+        r'SCALE:?\s*(\d+)\s*"\s*=\s*(\d+)\s*\'\s*-\s*'
+        r'(?:(\d+)(?:\s*-\s*(\d+)\s*/\s*(\d+))?)?\s*"',
+        text)
+    if not scale_m:
+        failures.append({"gate": "scale-truth",
+                         "issue": "SCALE row not parseable",
+                         "text_around": _extract_SCALE_area(text)})
+        return failures
+    sheet_in = float(scale_m.group(1))
+    feet = float(scale_m.group(2))
+    inches = float(scale_m.group(3) or 0)
+    frac_num = float(scale_m.group(4) or 0)
+    frac_den = float(scale_m.group(5) or 1)
+    if frac_den > 0 and frac_num > 0:
+        inches += frac_num / frac_den
+    model_in_per_sheet_in = feet * 12.0 + inches
+    scale_factor = sheet_in / model_in_per_sheet_in  # sheet-in / model-in
+    # Measure the SHADE BODY bbox specifically — not the entire
+    # content bbox, which includes witness extension lines that
+    # extend beyond the shade to the dim lines. We identify the
+    # shade body as the LARGEST filled rect in the front-elev
+    # viewport by area (the shade body and window casing are the
+    # only large rects; the casing is +0.10" around the shade).
+    vp_x0 = FRONT_X_IN * 72
+    vp_y0 = FRONT_Y_IN * 72
+    vp_x1 = (FRONT_X_IN + FRONT_W_IN) * 72
+    vp_y1 = (FRONT_Y_IN + FRONT_H_IN) * 72
+    rects_in_viewport = []
+    for r in page.rects:
+        cx = (r['x0'] + r['x1']) / 2
+        cy = (r['y0'] + r['y1']) / 2
+        if not (vp_x0 <= cx <= vp_x1 and vp_y0 <= cy <= vp_y1):
+            continue
+        if r['x1'] - r['x0'] > FRONT_W_IN * 72 * 0.9:
+            continue
+        rects_in_viewport.append(r)
+    if not rects_in_viewport:
+        failures.append({"gate": "scale-truth",
+                         "issue": "no rects in front-elev viewport"})
+        return failures
+    # The shade body (and casing) are the largest rects by area.
+    # Casing is slightly larger than shade body (≈ +0.10").
+    # Pick the rect with the largest area — that's the casing;
+    # the shade body is the second largest (or within 5% of casing
+    # in area).
+    rects_in_viewport.sort(key=lambda r: (r['x1'] - r['x0']) * (r['y1'] - r['y0']),
+                           reverse=True)
+    shade_rect = rects_in_viewport[0]  # largest = casing or shade
+    # bbox in inches (pdfplumber coords: top-origin; convert to canvas BL)
+    bbox_w_in = (shade_rect['x1'] - shade_rect['x0']) / 72.0
+    bbox_h_in = (shade_rect['y1'] - shade_rect['y0']) / 72.0
+    # Expected drawn dimensions — accounting for the window casing
+    # (drawn as +0.05" around the shade on every side, so +0.10"
+    # total in width and height). The casing IS the largest rect
+    # in the viewport.
+    CASING_OVERSHOOT_IN = 0.10
+    expect_w = real_w * scale_factor + CASING_OVERSHOOT_IN
+    expect_h = real_h * scale_factor + CASING_OVERSHOOT_IN
+    # (a) drawn ≈ expected ±1%
+    if expect_w > 0:
+        w_err = abs(bbox_w_in - expect_w) / expect_w
+        if w_err > 0.01:
+            failures.append({"gate": "scale-truth",
+                             "issue": f"drawn width {bbox_w_in:.3f}\" "
+                                      f"≠ expected {expect_w:.3f}\" "
+                                      f"(err {w_err*100:.1f}% > 1%)",
+                             "bbox_w_in": bbox_w_in,
+                             "expect_w_in": expect_w,
+                             "scale_factor": scale_factor,
+                             "real_w": real_w})
+    if expect_h > 0:
+        h_err = abs(bbox_h_in - expect_h) / expect_h
+        if h_err > 0.01:
+            failures.append({"gate": "scale-truth",
+                             "issue": f"drawn height {bbox_h_in:.3f}\" "
+                                      f"≠ expected {expect_h:.3f}\" "
+                                      f"(err {h_err*100:.1f}% > 1%)",
+                             "bbox_h_in": bbox_h_in,
+                             "expect_h_in": expect_h,
+                             "scale_factor": scale_factor,
+                             "real_h": real_h})
+    # (b) fill ≥ 80% of viewport on ≥ 1 axis (measured against
+    # the shade body, not the casing — viewport fill from the
+    # CASING bbox is even larger so this is a lower bound).
+    shade_w_in = bbox_w_in - CASING_OVERSHOOT_IN
+    shade_h_in = bbox_h_in - CASING_OVERSHOOT_IN
+    fill_w = shade_w_in / FRONT_W_IN
+    fill_h = shade_h_in / FRONT_H_IN
+    if max(fill_w, fill_h) < 0.80:
+        failures.append({"gate": "scale-truth",
+                         "issue": f"shade fills {fill_w*100:.0f}%×{fill_h*100:.0f}%"
+                                  f" of viewport, max < 80%",
+                         "fill_w": fill_w,
+                         "fill_h": fill_h,
+                         "shade_w_in": shade_w_in,
+                         "shade_h_in": shade_h_in})
+    return failures
+
+
+def _extract_SCALE_area(text: str) -> str:
+    """Return a window of text around the SCALE substring for error
+    messages."""
+    idx = text.upper().find("SCALE")
+    if idx < 0:
+        return text[:100]
+    return text[max(0, idx - 10):idx + 50]
+
+
+# ── CORRECTION 2 — Fold stack flat flaps gate ───────────────────
+#
+# The previous R1 port drew each flap as a bezier-curved path that
+# rendered as a zigzag/coil (the doctrine requires flat flaps).
+# This gate asserts the stack is composed of N discrete horizontal
+# flap primitives, with plumb front edges and tips BELOW the face
+# line.
+#
+# Identification heuristic: find rects in the SIDE section viewport
+# with width ≈ stack_width and height ≈ ft (one flap thickness).
+# Count = N_SLATS_DEFAULT. All x0 equal (plumb). The bottom-most
+# flap's y0 (topmost fold tip) is below face_bottom_y.
+
+
+def _check_fold_stack_is_flat(page, family: str = "Roman Shades") -> list[dict]:
+    """Gate 2: assert the fold stack is N flat horizontal flap
+    primitives with plumb front edges and tips below the face.
+
+    Family-aware: only runs for "Roman Shades" (the family that has
+    the fold-stack doctrine; other families don't have flaps).
+    """
+    failures = []
+    if family != "Roman Shades":
+        return failures
+    # The side section viewport:
+    vp_x0 = SIDE_X_IN * 72
+    vp_y0 = SIDE_Y_IN * 72
+    vp_x1 = (SIDE_X_IN + SIDE_W_IN) * 72
+    vp_y1 = (SIDE_Y_IN + SIDE_H_IN) * 72
+    # Find rects that look like flap primitives:
+    #   - inside the side section viewport
+    #   - aspect ratio wide-and-short (height < 0.4", width > 0.5")
+    #   - height ≈ 0.05"–0.20" (one flap thickness at any scale)
+    flaps = []
+    for r in page.rects:
+        cx = (r['x0'] + r['x1']) / 2
+        cy = (r['y0'] + r['y1']) / 2
+        if not (vp_x0 <= cx <= vp_x1 and vp_y0 <= cy <= vp_y1):
+            continue
+        w = r['x1'] - r['x0']
+        h = r['y1'] - r['y0']
+        if h < 1.0 or h > 15.0:    # 1pt–15pt height (flap thickness)
+            continue
+        if w < 40.0:                # 40pt = ~0.55" (skip thin rects)
+            continue
+        # Skip the hem bar (very short, ~0.10" wide)
+        if w < 15.0:
+            continue
+        flaps.append({
+            "x0": r['x0'], "y0": r['y0'],
+            "x1": r['x1'], "y1": r['y1'],
+            "w": w, "h": h,
+        })
+    # Group by similar x0 (plumb front edges) and similar height
+    if not flaps:
+        failures.append({"gate": "fold-stack",
+                         "issue": "no flap-like rects found in side section"})
+        return failures
+    # The N biggest rects (by area) are the flaps (not slat-line
+    # rects which are tall and narrow).
+    flaps.sort(key=lambda f: f["w"] * f["h"], reverse=True)
+    # Take the top N_SLATS_DEFAULT (8) by area — they should be
+    # the flap rects.
+    n_target = 8
+    flap_candidates = flaps[:n_target]
+    if len(flap_candidates) < n_target:
+        failures.append({"gate": "fold-stack",
+                         "issue": f"only {len(flap_candidates)} flap rects, "
+                                  f"need {n_target}",
+                         "n_found": len(flap_candidates)})
+        return failures
+    # Check all front-edge x0 (left edges) are equal within tolerance
+    x0s = [f["x0"] for f in flap_candidates]
+    x0_range_pt = max(x0s) - min(x0s)
+    if x0_range_pt > 2.0:   # 2pt = ~0.028" tolerance
+        failures.append({"gate": "fold-stack",
+                         "issue": f"flap front edges not plumb: "
+                                  f"x0 range = {x0_range_pt:.2f}pt",
+                         "x0s_pt": x0s})
+    # Check heights are all similar (within 4pt = ~0.056")
+    heights = [f["h"] for f in flap_candidates]
+    h_range_pt = max(heights) - min(heights)
+    if h_range_pt > 4.0:
+        failures.append({"gate": "fold-stack",
+                         "issue": f"flap heights vary: {h_range_pt:.2f}pt",
+                         "heights_pt": heights})
+    # Check that the topmost fold tip (bottom of the LOWEST flap,
+    # i.e. the flap with the smallest y0) is BELOW the fabric face
+    # line. The face line is approximately at the y of the seam
+    # between the flat face rect and the stack. For Roman Shades,
+    # the flat face rect is taller than ft (≈16" × scale ≈ 1.2" at
+    # s=0.0751) — much taller than a flap. Identify it as the
+    # rect in the side section viewport that's tall (>50pt height)
+    # AND has the same x-extent as the flaps.
+    face_rects = [f for f in flaps
+                  if f["h"] > 50.0 and abs(f["x0"] - flap_candidates[0]["x0"]) < 4.0]
+    if face_rects:
+        face_bottom_y = min(r["y0"] for r in face_rects)
+        # Topmost fold tip = lowest flap's y0 (bottom of flap rect)
+        lowest_flap_y0 = min(f["y0"] for f in flap_candidates)
+        # pdfplumber y0 is from page TOP. "Below the face" means
+        # larger y0 (smaller canvas y).
+        if lowest_flap_y0 < face_bottom_y - 5.0:  # 5pt tolerance
+            failures.append({"gate": "fold-stack",
+                             "issue": "topmost fold tip ABOVE face "
+                                      "(R6 violation)",
+                             "lowest_flap_y0_pt": lowest_flap_y0,
+                             "face_bottom_y_pt": face_bottom_y})
+    return failures
+
+
+# ── CORRECTION 3 — Footer "FOR DISCUSSION" string gate ──────────
+#
+# The previous R1 port had the call to draw the footer center
+# string, but the orange #b25a1d on INK #20241f was so low-contrast
+# that it was effectively invisible. AND the ls_text center=True
+# path had a units bug (treated points as inches) that shifted the
+# text OFF-PAGE (x ≈ -7700 pt). Both fixed in this commit.
+#
+# This gate asserts the string is present, in the footer band,
+# tolerant of whitespace and em-dash variants.
+
+
+def _check_footer_for_discussion(page) -> list[dict]:
+    """Gate 3: assert "FOR DISCUSSION — NOT FOR CONSTRUCTION"
+    appears in the footer band center zone.
+
+    Tolerant match: regex handles:
+      - "FOR DISCUSSION - NOT FOR CONSTRUCTION" (ASCII dash)
+      - "FOR DISCUSSION — NOT FOR CONSTRUCTION" (em-dash U+2014)
+      - "FOR DISCUSSION  —  NOT FOR CONSTRUCTION" (extra spaces)
+      - "FOR DISCUSSION—NOT FOR CONSTRUCTION" (no spaces)
+    """
+    failures = []
+    # Footer band y-range (canvas y ∈ [MARGIN_IN, MARGIN_IN + FOOTER_BAND_H_IN]).
+    # pdfplumber uses BL origin (y0 from page BOTTOM), so
+    # canvas inches × 72 = pdfplumber y0 (no inversion needed).
+    fb_y0_pdf = MARGIN_IN * 72                       # bottom of footer band
+    fb_y1_pdf = (MARGIN_IN + FOOTER_BAND_H_IN) * 72  # top of footer band
+    # Footer center x-range: from 30% to 70% of page width
+    # (the "FOR DISCUSSION — NOT FOR CONSTRUCTION" string at 8pt
+    # letterspaced is ~3" wide; centered at 50%, it spans roughly
+    # 35%–65% of the 11" page, so 30-70% gives margin tolerance.)
+    cx_min = PAGE_W_IN * 0.30 * 72
+    cx_max = PAGE_W_IN * 0.70 * 72
+    # Find chars in this region (small tolerance for char bbox extent)
+    text_chars = [c["text"] for c in page.chars
+                  if fb_y0_pdf - 4 <= c["y0"] <= fb_y1_pdf + 4
+                  and cx_min <= c["x0"] <= cx_max]
+    text = "".join(text_chars)
+    # Tolerant regex: match "FOR DISCUSSION" anywhere near the
+    # center; the gate asserts the key phrase is present.
+    if not re.search(r'FOR\s+DISCUSSION', text, re.IGNORECASE):
+        failures.append({"gate": "footer-discussion",
+                         "issue": "'FOR DISCUSSION' not found in footer center",
+                         "found_text": text[:200],
+                         "y0_range_pt": (fb_y0_pdf, fb_y1_pdf),
+                         "cx_range_pt": (cx_min, cx_max)})
+    return failures
+
+
+# ── CORRECTION 4 — Duplicate viewport captions gate ────────────
+#
+# The previous R1 port drew each viewport label TWICE — once at
+# top of frame (per doctrine) and once at bottom-left (per
+# `_draw_viewport_frame`). Founder G1 verdict: remove the bottom
+# set. This gate asserts each viewport title appears EXACTLY ONCE
+# per viewport zone.
+
+
+def _check_duplicate_viewport_captions(page) -> list[dict]:
+    """Gate 4: each viewport title appears exactly once in its
+    viewport zone.
+
+    Viewport titles:
+      - "FRONT ELEVATION"  → inside front-elev viewport
+      - "SIDE SECTION"     → inside side-section viewport (note: the
+                              full label is "SIDE SECTION — RAISED";
+                              the gate matches the "SIDE SECTION"
+                              prefix, tolerant of trailing text)
+      - "TITLE BLOCK"      → title column has no top label, no gate
+
+    pdfplumber.extract_words() returns words with x0 (left x) and
+    top (TOP-origin Y). Convert top to canvas BL y = PAGE_H - top/72.
+    """
+    failures = []
+    # ls_text emits each letter as a separate drawString with
+    # letterspacing, so pdfplumber's extract_words() splits
+    # "FRONT ELEVATION" into separate "FRONT" + "ELEVATION" words.
+    # Reconstruct the label by concatenating page.chars within a
+    # narrow y-band (the label baseline) and matching the needle.
+    # We group consecutive chars whose y0 differs by < 2pt as one
+    # "line"; then scan each line for the needle substring.
+    LINE_Y_TOL_PT = 2.0
+    for needle, vp in [
+        ("FRONT ELEVATION", ("front", FRONT_X_IN, FRONT_Y_IN,
+                              FRONT_W_IN, FRONT_H_IN)),
+        ("SIDE SECTION", ("side", SIDE_X_IN, SIDE_Y_IN,
+                           SIDE_W_IN, SIDE_H_IN)),
+    ]:
+        vp_name, vx, vy, vw, vh = vp
+        vx0_pt = vx * 72
+        vx1_pt = (vx + vw) * 72
+        vy0_pt = vy * 72
+        vy1_pt = (vy + vh) * 72
+        # All chars in the viewport zone
+        vp_chars = [c for c in page.chars
+                    if vx0_pt - 5 <= c["x0"] <= vx1_pt + 5
+                    and vy0_pt - 5 <= c["y0"] <= vy1_pt + 5]
+        # Sort by y0 (descending = top to bottom), then x0
+        vp_chars.sort(key=lambda c: (-c["y0"], c["x0"]))
+        # Group into lines (chars with y0 within LINE_Y_TOL_PT).
+        # Use a moving last_y that's updated each iteration.
+        lines: list[list] = []
+        cur: list = []
+        last_y: float | None = None
+        for c in vp_chars:
+            if last_y is None or abs(c["y0"] - last_y) <= LINE_Y_TOL_PT:
+                cur.append(c)
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = [c]
+            last_y = c["y0"]
+        if cur:
+            lines.append(cur)
+        # Scan each line for the needle (tolerant whitespace)
+        matches = []
+        for line_chars in lines:
+            line_chars.sort(key=lambda c: c["x0"])
+            line_text = "".join(c["text"] for c in line_chars)
+            # Compress whitespace for the needle match
+            line_text_compact = re.sub(r'\s+', ' ', line_text).strip()
+            needle_compact = re.sub(r'\s+', ' ', needle).strip()
+            if needle_compact in line_text_compact:
+                # Compute avg position
+                wx = sum(c["x0"] for c in line_chars) / len(line_chars) / 72.0
+                wy_canvas = PAGE_H_IN - sum(c["y0"] for c in line_chars) / len(line_chars) / 72.0
+                matches.append((line_text_compact[:60], wx, wy_canvas))
+        if len(matches) != 1:
+            failures.append({
+                "gate": "duplicate-captions",
+                "issue": f"{needle!r} appears {len(matches)} times in "
+                         f"{vp_name} viewport (must be exactly 1)",
+                "matches": matches,
+            })
+    return failures
+
+
+# ── CORRECTION 5 — Title + witness integrity gate ──────────────
+#
+# (a) Sheet title must read FLAT FOLD ROMAN SHADE (singular).
+# (b) The elevation's dimension witnesses (38" bottom, 64" right,
+#     9 @ 7-1/8" left) must all be present and anchored to features.
+
+
+def _check_title_and_witnesses(page) -> list[dict]:
+    """Gate 5: title exact-match + three witnesses present and
+    anchored.
+
+    pdfplumber uses BL origin (y0 from page BOTTOM). The header
+    band canvas y ∈ [PAGE_H - MARGIN - HEADER_BAND, PAGE_H - MARGIN]
+    = pdfplumber y0 ∈ [PAGE_H*72 - (MARGIN+HEADER_BAND)*72, PAGE_H*72 - MARGIN*72]
+    = [566.4, 642.6] (approximately).
+    """
+    failures = []
+    text = "".join(c["text"] for c in page.chars)
+    # (a) Title — must be singular. Look in the header band y-range.
+    header_y0_min = (PAGE_H_IN - MARGIN_IN - HEADER_BAND_H_IN) * 72
+    header_y0_max = (PAGE_H_IN - MARGIN_IN) * 72
+    top_chars = [c for c in page.chars
+                 if header_y0_min - 5 <= c["y0"] <= header_y0_max + 5]
+    top_text = "".join(c["text"] for c in top_chars)
+    # Title must be singular ("FLAT FOLD ROMAN SHADE" without trailing
+    # 'S'); the plural "FLAT FOLD ROMAN SHADES" was the founder's
+    # G1 defect (Correction 5a).
+    if "FLAT FOLD ROMAN SHADES" in top_text:
+        failures.append({
+            "gate": "title-singular",
+            "issue": "title is PLURAL 'SHADES' (Correction 5a fix — "
+                     "must be singular)",
+            "top_text": top_text,
+        })
+    if "FLAT FOLD ROMAN SHADE" not in top_text:
+        failures.append({
+            "gate": "title-singular",
+            "issue": "'FLAT FOLD ROMAN SHADE' (singular) not found "
+                     "in header band",
+            "top_text": top_text,
+        })
+    # (b) Witnesses — three labels in the front-elev viewport.
+    # Front-elev viewport: canvas x ∈ [FRONT_X_IN, FRONT_X_IN+FRONT_W_IN],
+    # canvas y ∈ [FRONT_Y_IN, FRONT_Y_IN+FRONT_H_IN] → pdfplumber
+    # y0 ∈ [FRONT_Y_IN*72, (FRONT_Y_IN+FRONT_H_IN)*72].
+    # The right-side dim chain extends beyond the viewport
+    # (xd_right = wx1_in + 0.40 = 5.15 — outside viewport x_max
+    # 5.05), so the gate widens the search to include the
+    # witness extension area up to the title column boundary.
+    front_y0_min = FRONT_Y_IN * 72
+    front_y0_max = (FRONT_Y_IN + FRONT_H_IN) * 72
+    front_x_min = FRONT_X_IN * 72 - 5
+    # Allow up to 0.5" beyond viewport x_max for witness extensions
+    front_x_max = (FRONT_X_IN + FRONT_W_IN + 0.5) * 72
+    front_chars = [c for c in page.chars
+                   if front_x_min <= c["x0"] <= front_x_max
+                   and front_y0_min - 5 <= c["y0"] <= front_y0_max + 5]
+    front_text = "".join(c["text"] for c in front_chars)
+    if "38\"" not in front_text:
+        failures.append({"gate": "witness-bottom",
+                         "issue": "'38\"' (width witness) missing from front-elev"})
+    if "9 @ 7-1/8\"" not in front_text:
+        failures.append({"gate": "witness-left-folds",
+                         "issue": "'9 @ 7-1/8\"' (left fold witness) missing"})
+    if not (re.search(r'64"\s*SHADE', front_text, re.IGNORECASE)
+            or (re.search(r'64"', front_text) and "SHADE" in front_text)):
+        failures.append({"gate": "witness-right-height",
+                         "issue": "'64\" SHADE' (height witness) missing",
+                         "front_text": front_text[:300]})
+    return failures

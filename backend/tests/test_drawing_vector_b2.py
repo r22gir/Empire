@@ -42,6 +42,8 @@ from pathlib import Path
 
 import pytest
 
+from reportlab.lib.units import inch
+
 
 _BACKEND = Path(__file__).resolve().parents[1]
 
@@ -90,10 +92,14 @@ class TestHeaderNoCollision:
     own row at the top of the title block — no overlap."""
 
     def test_address_phone_email_each_on_own_row(self):
-        # GOLDEN v10 footer carries company address + phone in a
-        # single line (the address + phone are not interleaved — that
-        # was the B2c-era "B1 data sheet" defect). Email is NOT in
-        # the footer per golden v10; address + phone are present.
+        # GOLDEN v10 footer carries company letterhead + phone in a
+        # single line (the letterhead + phone are not interleaved —
+        # that was the B2c-era "B1 data sheet" defect). Email is NOT
+        # in the footer per golden v10; letterhead + phone are present.
+        # 2026-08-16 G1 corrections: footer shortened to fit the
+        # centered "FOR DISCUSSION — NOT FOR CONSTRUCTION" string —
+        # full street address would overlap. The footer now reads
+        # "EMPIRE WORKROOM · HYATTSVILLE, MD · (703) 213-6484".
         from app.services.drawing.templates import render_spec
         pdf = render_spec({
             "product_type": "flat_fold",
@@ -101,35 +107,37 @@ class TestHeaderNoCollision:
         })
         text = _pdf_text(pdf)
         for needle, desc in [
-            ("Frolich Ln, Hyattsville, MD 20781", "address row"),
+            ("EMPIRE WORKROOM", "letterhead row"),
+            ("HYATTSVILLE, MD", "city/state row"),
             ("(703) 213-6484", "phone row"),
         ]:
             assert needle in text, f"{desc} ({needle!r}) missing"
 
     def test_no_garbled_interleaving_in_header(self):
         """The B1 bug interleaved address digits into phone digits.
-        Pin: the rendered PDF must contain the three fields in
-        non-interleaved order — address first, then phone, then
-        email. The BUG substring ('Hyattsvil(l7e0, 3M)D 2 1230-7684184')
-        was address text interleaved with phone text in the same row;
-        B2 puts each on its own line so the chars are in strict
-        order."""
+        Pin: the rendered PDF must contain the letterhead + phone
+        in non-interleaved order. The BUG substring
+        ('Hyattsvil(l7e0, 3M)D 2 1230-7684184') was address text
+        interleaved with phone text in the same row; B2 puts each
+        on its own logical line so the chars are in strict order."""
         from app.services.drawing.templates import render_spec
         pdf = render_spec({
             "product_type": "flat_fold",
             "dims": {"width": 38, "height": 64},
         })
         text = _pdf_text(pdf)
-        # GOLDEN v10: address + phone in one line, no email.
-        addr = text.find("Frolich Ln, Hyattsville, MD 20781")
+        # GOLDEN v10 footer: letterhead + city/state + phone in one
+        # line, no email. The street address is NOT in the footer
+        # (removed in the 2026-08-16 G1 fix to fit the centered
+        # "FOR DISCUSSION — NOT FOR CONSTRUCTION" string).
+        lh = text.find("EMPIRE WORKROOM")
         phone = text.find("(703) 213-6484")
-        assert addr >= 0 and phone >= 0, (
-            f"address/phone not all present; addr={addr} "
-            f"phone={phone} email={email}"
+        assert lh >= 0 and phone >= 0, (
+            f"letterhead/phone not all present; lh={lh} phone={phone}"
         )
-        assert addr < phone, (
-            f"header fields out of order: addr@{addr}, "
-            f"phone@{phone} — they must be in strict order"
+        assert lh < phone, (
+            f"footer fields out of order: lh@{lh}, phone@{phone} — "
+            f"they must be in strict order"
         )
 
 
@@ -936,3 +944,592 @@ class TestB2cCorrections:
             f"B2c R1 render must have no dim-witness borrows; got: "
             f"{borrows[:3]}"
         )
+
+
+# ───────────────────────────────────────────────────────────────────
+# 2026-08-16 G1 corrections — 5 new gates + negative fixtures
+# ───────────────────────────────────────────────────────────────────
+
+
+class TestGoldenPortG1Corrections:
+    """HOTFIX G1 (2026-08-16) — 5 founder corrections to the golden-
+    port R1. Each gate is paired with a negative fixture that proves
+    the gate WOULD have caught the original defect (per directive:
+    "if the gate would not have caught the original defect, the
+    gate is wrong").
+
+    Corrections:
+      1. Elevation under-fills viewport + scale stamp is a lie.
+      2. Fold stack renders as zigzag, not flat flaps.
+      3. Footer missing "FOR DISCUSSION — NOT FOR CONSTRUCTION".
+      4. Duplicate viewport captions (top + bottom).
+      5. Title plural "SHADES" + witness integrity.
+    """
+
+    def _render_R2(self):
+        """Render the corrected R2 PDF (all 5 fixes applied)."""
+        from app.services.drawing.templates import render_spec
+        return render_spec({
+            "product_type": "flat_fold",
+            "dims": {"width": 38, "height": 64},
+            "fabric_sku": "BP10814-2",
+            "client_name": "Test Client",
+        })
+
+    def test_gate1_scale_truth_passes_on_R2(self):
+        """Gate 1 — drawn elevation matches declared scale ±1%, fills
+        ≥80% of viewport on at least one axis. PASSES on R2."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R2()
+        # Should NOT raise
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats["scale_truth_failures"] == [], (
+            f"Gate 1 (scale-truth) must pass on R2; got: "
+            f"{stats['scale_truth_failures'][:3]}"
+        )
+
+    def test_gate1_scale_truth_catches_lie(self):
+        """NEGATIVE FIXTURE — Gate 1 must catch the R1 defect class
+        (SCALE row says "1\" = 1'-4\"" but actual geometry is drawn
+        at a different scale, or vice versa).
+
+        Construct a PDF with: SCALE row says "1\" = 1'-4"" (16x),
+        but the elevation rect is drawn at ~2x reduction (a 19"
+        rect, simulating the R1 room-fit bug that shrunk the
+        geometry). Gate 1 must detect the mismatch.
+        """
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from reportlab.lib.units import inch
+        from app.services.drawing.templates.b2_qc import (
+            enforce_b2_qc, B2QCFailure,
+        )
+        import io as _io
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(1.1)
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(8.5 - 0.64),
+               stroke=1, fill=0)
+        # Header band fill
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(8.5 - 0.32 - 0.92),
+               _P_in(11.0 - 0.64), _P_in(0.92), fill=1, stroke=0)
+        # Title (correct)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 21)
+        c.drawString(_P_in(0.32 + 0.27), _P_in(8.5 - 0.32 - 0.92 + 0.17),
+                     "FLAT FOLD ROMAN SHADE")
+        # Viewport frames (3)
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(0.4)
+        c.rect(_P_in(0.50), _P_in(0.86), _P_in(4.55), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(5.19), _P_in(0.86), _P_in(2.49), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(7.82), _P_in(0.86), _P_in(2.62), _P_in(6.26),
+               fill=0, stroke=1)
+        # Helper rects to spread the pile (so the PILE gate passes)
+        _make_pile_passes_decorator(c, None, None, None, None)
+        # Elevation "shade" — drawn at WRONG scale (the R1 bug).
+        # SCALE row will say "1\" = 1'-4"" (16x) but we draw at 32x
+        # (a 38" shade drawn at 38/32 = 1.19" — half the expected).
+        # This is the exact R1 defect (geometry shrunk, stamp lies).
+        LIE_SCALE = 1.0 / 32.0   # half the declared scale
+        sx_in = 0.50 + 0.30 + (4.55 - 0.60 - 38 * LIE_SCALE) / 2
+        sy_in = 0.86 + 0.20 + (6.26 - 0.40 - 64 * LIE_SCALE) / 2
+        c.setFillColor((0.07, 0.23, 0.16))
+        c.rect(_P_in(sx_in), _P_in(sy_in),
+               _P_in(38 * LIE_SCALE), _P_in(64 * LIE_SCALE),
+               fill=1, stroke=1)
+        # Title column rows (DIMENSIONS + SCALE — the SCALE is the lie)
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 7)
+        c.drawString(_P_in(7.98), _P_in(7.0), "DIMENSIONS:38.00\" W × 64.00\" H")
+        c.drawString(_P_in(7.98), _P_in(4.8), "SCALE:1\" = 1'-4\"")
+        # Footer (with FOR DISCUSSION)
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(0.42), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(_P_in(0.60), _P_in(0.53),
+                     "EMPIRE WORKROOM  ·  HYATTSVILLE, MD  ·  (703) 213-6484")
+        c.setFillColor((0.91, 0.54, 0.17))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(_P_in(11.0 / 2), _P_in(0.50),
+                            "FOR DISCUSSION — NOT FOR CONSTRUCTION")
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawRightString(_P_in(11.0 - 0.32 - 0.28), _P_in(0.50),
+                          "SHEET B2  ·  1 OF 1")
+        c.save()
+        bad_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
+        msg = str(exc_info.value)
+        assert "scale-truth" in msg.lower(), (
+            f"Gate 1 (scale-truth) must catch a scale-stamp-lies "
+            f"defect; got: {msg}"
+        )
+
+    def test_gate2_fold_stack_passes_on_R2(self):
+        """Gate 2 — fold stack is N=8 flat horizontal flaps with plumb
+        front edges and tips below face. PASSES on R2."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R2()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats["flap_failures"] == [], (
+            f"Gate 2 (fold-stack) must pass on R2; got: "
+            f"{stats['flap_failures'][:3]}"
+        )
+
+    def test_gate2_fold_stack_catches_zigzag(self):
+        """NEGATIVE FIXTURE — Gate 2 must catch the R1 zigzag defect.
+        Construct a PDF with curved-path "flaps" (bezier coils)
+        instead of flat horizontal rects."""
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from reportlab.lib.units import inch
+        from app.services.drawing.templates.b2_qc import (
+            enforce_b2_qc, B2QCFailure,
+        )
+        import io as _io
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        # Frame
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(1.1)
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(8.5 - 0.64),
+               stroke=1, fill=0)
+        # Title
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(8.5 - 0.32 - 0.92),
+               _P_in(11.0 - 0.64), _P_in(0.92), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 21)
+        c.drawString(_P_in(0.32 + 0.27), _P_in(8.5 - 0.32 - 0.92 + 0.17),
+                     "FLAT FOLD ROMAN SHADE")
+        # Viewport frames
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(0.4)
+        c.rect(_P_in(0.50), _P_in(0.86), _P_in(4.55), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(5.19), _P_in(0.86), _P_in(2.49), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(7.82), _P_in(0.86), _P_in(2.62), _P_in(6.26),
+               fill=0, stroke=1)
+        # Helper rects to spread the pile
+        _make_pile_passes_decorator(c, None, None, None, None)
+        # Add a properly-sized shade rect in the FRONT ELEVATION
+        # viewport so Gate 1 (scale-truth) passes (Gate 2 should be
+        # the failing gate in this fixture).
+        REAL_SCALE = 1.0 / 12.0   # shade-fit scale (1" = 1'-0"; matches _format_scale_row exactly)
+        sx_in = 0.50 + 0.30 + (4.55 - 0.60 - 38 * REAL_SCALE) / 2
+        sy_in = 0.86 + 0.20 + (6.26 - 0.40 - 64 * REAL_SCALE) / 2
+        # Window casing (drawn as a 0.4pt stroke outline, +0.05"
+        # around the shade on every side = +0.10" total width/height)
+        c.setStrokeColor((0.54, 0.51, 0.44))
+        c.setLineWidth(2.2)
+        c.rect(_P_in(sx_in - 0.05), _P_in(sy_in - 0.05),
+               _P_in(38 * REAL_SCALE + 0.10),
+               _P_in(64 * REAL_SCALE + 0.10),
+               fill=0, stroke=1)
+        # Shade body (filled)
+        c.setFillColor((0.07, 0.23, 0.16))
+        c.rect(_P_in(sx_in), _P_in(sy_in),
+               _P_in(38 * REAL_SCALE), _P_in(64 * REAL_SCALE),
+               fill=1, stroke=1)
+        # Side section: render CURVED PATH "flaps" (the R1 defect)
+        # — no flat horizontal rects, just bezier coils.
+        s2 = 0.07
+        NF = 8
+        ft = 0.875 * s2
+        x_back = 6.0
+        x_front = 5.5
+        ytop = 4.5
+        c.setStrokeColor((0.07, 0.23, 0.16))
+        c.setLineWidth(2.0)
+        for k in range(NF):
+            p = c.beginPath()
+            p.moveTo(_P_in(x_back), _P_in(ytop - k * ft))
+            p.lineTo(_P_in(x_front + 0.05), _P_in(ytop - k * ft - ft * 0.42))
+            p.curveTo(_P_in(x_front), _P_in(ytop - k * ft - ft * 0.52),
+                      _P_in(x_front), _P_in(ytop - k * ft - ft * 0.78),
+                      _P_in(x_front + 0.05), _P_in(ytop - k * ft - ft * 0.88))
+            p.lineTo(_P_in(x_back), _P_in(ytop - k * ft - ft))
+            c.drawPath(p, fill=0, stroke=1)
+        # Title column rows
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 7)
+        c.drawString(_P_in(7.98), _P_in(7.0), "DIMENSIONS:38.00\" W × 64.00\" H")
+        c.drawString(_P_in(7.98), _P_in(4.8), f"SCALE:{_format_scale_row(REAL_SCALE)}")
+        # Footer
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(0.42), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(_P_in(0.60), _P_in(0.53),
+                     "EMPIRE WORKROOM  ·  HYATTSVILLE, MD  ·  (703) 213-6484")
+        c.setFillColor((0.91, 0.54, 0.17))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(_P_in(11.0 / 2), _P_in(0.50),
+                            "FOR DISCUSSION — NOT FOR CONSTRUCTION")
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawRightString(_P_in(11.0 - 0.32 - 0.28), _P_in(0.50),
+                          "SHEET B2  ·  1 OF 1")
+        c.save()
+        bad_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
+        msg = str(exc_info.value)
+        assert "fold-stack" in msg.lower(), (
+            f"Gate 2 (fold-stack) must catch a zigzag defect; got: {msg}"
+        )
+
+    def test_gate3_footer_discussion_passes_on_R2(self):
+        """Gate 3 — footer "FOR DISCUSSION — NOT FOR CONSTRUCTION"
+        is present. PASSES on R2."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R2()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats["footer_disc_failures"] == [], (
+            f"Gate 3 (footer-discussion) must pass on R2; got: "
+            f"{stats['footer_disc_failures'][:3]}"
+        )
+
+    def test_gate3_footer_discussion_catches_missing(self):
+        """NEGATIVE FIXTURE — Gate 3 catches a footer missing the
+        "FOR DISCUSSION — NOT FOR CONSTRUCTION" string."""
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from reportlab.lib.units import inch
+        from app.services.drawing.templates.b2_qc import (
+            enforce_b2_qc, B2QCFailure,
+        )
+        import io as _io
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        # Page
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(1.1)
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(8.5 - 0.64), stroke=1, fill=0)
+        # Footer with ONLY letterhead + sheet number (NO FOR DISCUSSION)
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(0.42), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(_P_in(0.60), _P_in(0.50),
+                     "EMPIRE WORKROOM  ·  HYATTSVILLE, MD  ·  (703) 213-6484")
+        c.drawRightString(_P_in(11.0 - 0.32 - 0.28), _P_in(0.50),
+                          "SHEET B2  ·  1 OF 1")
+        # Title + viewport frames + title col (so SCALE row exists)
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(8.5 - 0.32 - 0.92),
+               _P_in(11.0 - 0.64), _P_in(0.92), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 21)
+        c.drawString(_P_in(0.32 + 0.27), _P_in(8.5 - 0.32 - 0.92 + 0.17),
+                     "FLAT FOLD ROMAN SHADE")
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(0.4)
+        c.rect(_P_in(0.50), _P_in(0.86), _P_in(4.55), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(5.19), _P_in(0.86), _P_in(2.49), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(7.82), _P_in(0.86), _P_in(2.62), _P_in(6.26),
+               fill=0, stroke=1)
+        # Helper rects to spread the pile
+        _make_pile_passes_decorator(c, None, None, None, None)
+        # Properly-sized shade rect (real scale)
+        REAL_SCALE = 1.0 / 12.0   # shade-fit scale (1" = 1'-0"; matches _format_scale_row exactly)
+        sx_in = 0.50 + 0.30 + (4.55 - 0.60 - 38 * REAL_SCALE) / 2
+        sy_in = 0.86 + 0.20 + (6.26 - 0.40 - 64 * REAL_SCALE) / 2
+        # Window casing
+        c.setStrokeColor((0.54, 0.51, 0.44))
+        c.setLineWidth(2.2)
+        c.rect(_P_in(sx_in - 0.05), _P_in(sy_in - 0.05),
+               _P_in(38 * REAL_SCALE + 0.10),
+               _P_in(64 * REAL_SCALE + 0.10),
+               fill=0, stroke=1)
+        c.setFillColor((0.07, 0.23, 0.16))
+        c.rect(_P_in(sx_in), _P_in(sy_in),
+               _P_in(38 * REAL_SCALE), _P_in(64 * REAL_SCALE),
+               fill=1, stroke=1)
+        # Side section: 8 flat flap rects (so Gate 2 passes — this
+        # fixture is testing Gate 3, the missing footer text).
+        # Width must be > 40pt (0.55") for Gate 2's heuristic to
+        # recognize them as flaps.
+        x_back = 6.50
+        x_front = 5.50
+        ytop = 4.5
+        ft = 0.10
+        c.setFillColor((0.07, 0.23, 0.16))
+        for k in range(8):
+            c.rect(_P_in(x_front), _P_in(ytop - (k + 1) * ft),
+                   _P_in(x_back - x_front), _P_in(ft * 0.95),
+                   fill=1, stroke=1)
+        # Title col rows
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 7)
+        c.drawString(_P_in(7.98), _P_in(7.0), "DIMENSIONS:38.00\" W × 64.00\" H")
+        c.drawString(_P_in(7.98), _P_in(4.8), f"SCALE:{_format_scale_row(REAL_SCALE)}")
+        c.save()
+        bad_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
+        msg = str(exc_info.value)
+        assert "footer-discussion" in msg.lower(), (
+            f"Gate 3 (footer-discussion) must catch a missing "
+            f"FOR DISCUSSION; got: {msg}"
+        )
+
+    def test_gate4_duplicate_captions_passes_on_R2(self):
+        """Gate 4 — each viewport title appears exactly once. PASSES on R2."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R2()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats["dup_cap_failures"] == [], (
+            f"Gate 4 (duplicate-captions) must pass on R2; got: "
+            f"{stats['dup_cap_failures'][:3]}"
+        )
+
+    def test_gate4_duplicate_captions_catches_double(self):
+        """NEGATIVE FIXTURE — Gate 4 catches a duplicate viewport
+        caption (top label + bottom label, the R1 defect)."""
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from reportlab.lib.units import inch
+        from app.services.drawing.templates.b2_qc import (
+            enforce_b2_qc, B2QCFailure,
+        )
+        import io as _io
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        # Frame + viewport
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(1.1)
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(8.5 - 0.64), stroke=1, fill=0)
+        c.setLineWidth(0.4)
+        c.rect(_P_in(0.50), _P_in(0.86), _P_in(4.55), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(5.19), _P_in(0.86), _P_in(2.49), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(7.82), _P_in(0.86), _P_in(2.62), _P_in(6.26),
+               fill=0, stroke=1)
+        # Helper rects to spread the pile
+        _make_pile_passes_decorator(c, None, None, None, None)
+        # Add a properly-sized shade rect so earlier gates pass
+        REAL_SCALE = 1.0 / 12.0   # shade-fit scale (1" = 1'-0"; matches _format_scale_row exactly)
+        sx_in = 0.50 + 0.30 + (4.55 - 0.60 - 38 * REAL_SCALE) / 2
+        sy_in = 0.86 + 0.20 + (6.26 - 0.40 - 64 * REAL_SCALE) / 2
+        # Window casing
+        c.setStrokeColor((0.54, 0.51, 0.44))
+        c.setLineWidth(2.2)
+        c.rect(_P_in(sx_in - 0.05), _P_in(sy_in - 0.05),
+               _P_in(38 * REAL_SCALE + 0.10),
+               _P_in(64 * REAL_SCALE + 0.10),
+               fill=0, stroke=1)
+        c.setFillColor((0.07, 0.23, 0.16))
+        c.rect(_P_in(sx_in), _P_in(sy_in),
+               _P_in(38 * REAL_SCALE), _P_in(64 * REAL_SCALE),
+               fill=1, stroke=1)
+        # Side section flat flaps (Gate 2)
+        x_back = 6.50
+        x_front = 5.50
+        ytop = 4.5
+        ft = 0.10
+        c.setFillColor((0.07, 0.23, 0.16))
+        for k in range(8):
+            c.rect(_P_in(x_front), _P_in(ytop - (k + 1) * ft),
+                   _P_in(x_back - x_front), _P_in(ft * 0.95),
+                   fill=1, stroke=1)
+        # TWO copies of "FRONT ELEVATION" — top and bottom (the R1 bug)
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(_P_in(0.60), _P_in(6.92), "FRONT ELEVATION")
+        c.drawString(_P_in(0.60), _P_in(1.00), "FRONT ELEVATION")  # duplicate
+        # Title etc.
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(8.5 - 0.32 - 0.92),
+               _P_in(11.0 - 0.64), _P_in(0.92), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 21)
+        c.drawString(_P_in(0.32 + 0.27), _P_in(8.5 - 0.32 - 0.92 + 0.17),
+                     "FLAT FOLD ROMAN SHADE")
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(0.4)
+        # Shade
+        c.setFillColor((0.07, 0.23, 0.16))
+        c.rect(_P_in(1.0), _P_in(1.5), _P_in(2.8), _P_in(4.5), fill=1, stroke=1)
+        # Title col
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 7)
+        c.drawString(_P_in(7.98), _P_in(7.0), "DIMENSIONS:38.00\" W × 64.00\" H")
+        c.drawString(_P_in(7.98), _P_in(4.8), f"SCALE:{_format_scale_row(REAL_SCALE)}")
+        # Footer
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(0.42), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(_P_in(0.60), _P_in(0.50),
+                     "EMPIRE WORKROOM  ·  HYATTSVILLE, MD  ·  (703) 213-6484")
+        c.setFillColor((0.91, 0.54, 0.17))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(_P_in(11.0 / 2), _P_in(0.50),
+                            "FOR DISCUSSION — NOT FOR CONSTRUCTION")
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawRightString(_P_in(11.0 - 0.32 - 0.28), _P_in(0.50),
+                          "SHEET B2  ·  1 OF 1")
+        c.save()
+        bad_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
+        msg = str(exc_info.value)
+        assert "duplicate-captions" in msg.lower(), (
+            f"Gate 4 (duplicate-captions) must catch duplicate "
+            f"captions; got: {msg}"
+        )
+
+    def test_gate5_title_witnesses_passes_on_R2(self):
+        """Gate 5 — title is singular and all three witnesses present.
+        PASSES on R2."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R2()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats["title_witness_failures"] == [], (
+            f"Gate 5 (title+witnesses) must pass on R2; got: "
+            f"{stats['title_witness_failures'][:3]}"
+        )
+
+    def test_gate5_title_plural_caught(self):
+        """NEGATIVE FIXTURE — Gate 5 catches plural "SHADES" title."""
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from reportlab.lib.units import inch
+        from app.services.drawing.templates.b2_qc import (
+            enforce_b2_qc, B2QCFailure,
+        )
+        import io as _io
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(1.1)
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(8.5 - 0.64), stroke=1, fill=0)
+        # Header with PLURAL title (the R1 defect)
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(8.5 - 0.32 - 0.92),
+               _P_in(11.0 - 0.64), _P_in(0.92), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 21)
+        c.drawString(_P_in(0.32 + 0.27), _P_in(8.5 - 0.32 - 0.92 + 0.17),
+                     "FLAT FOLD ROMAN SHADES")  # PLURAL
+        # Viewport frames
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(0.4)
+        c.rect(_P_in(0.50), _P_in(0.86), _P_in(4.55), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(5.19), _P_in(0.86), _P_in(2.49), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(7.82), _P_in(0.86), _P_in(2.62), _P_in(6.26),
+               fill=0, stroke=1)
+        # Helper rects to spread the pile
+        _make_pile_passes_decorator(c, None, None, None, None)
+        # Properly-sized shade + casing (Gate 1 passes)
+        REAL_SCALE = 1.0 / 12.0
+        sx_in = 0.50 + 0.30 + (4.55 - 0.60 - 38 * REAL_SCALE) / 2
+        sy_in = 0.86 + 0.20 + (6.26 - 0.40 - 64 * REAL_SCALE) / 2
+        c.setStrokeColor((0.54, 0.51, 0.44))
+        c.setLineWidth(2.2)
+        c.rect(_P_in(sx_in - 0.05), _P_in(sy_in - 0.05),
+               _P_in(38 * REAL_SCALE + 0.10),
+               _P_in(64 * REAL_SCALE + 0.10),
+               fill=0, stroke=1)
+        c.setFillColor((0.07, 0.23, 0.16))
+        c.rect(_P_in(sx_in), _P_in(sy_in),
+               _P_in(38 * REAL_SCALE), _P_in(64 * REAL_SCALE),
+               fill=1, stroke=1)
+        # Side section flat flaps (Gate 2)
+        x_back = 6.50
+        x_front = 5.50
+        ytop = 4.5
+        ft = 0.10
+        c.setFillColor((0.07, 0.23, 0.16))
+        for k in range(8):
+            c.rect(_P_in(x_front), _P_in(ytop - (k + 1) * ft),
+                   _P_in(x_back - x_front), _P_in(ft * 0.95),
+                   fill=1, stroke=1)
+        # Canonical viewport labels (Gate 4 passes)
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(_P_in(0.60), _P_in(6.92), "FRONT ELEVATION")
+        c.drawString(_P_in(5.30), _P_in(6.92), "SIDE SECTION — RAISED")
+        # Title col with correct dims
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 7)
+        c.drawString(_P_in(7.98), _P_in(7.0), "DIMENSIONS:38.00\" W × 64.00\" H")
+        c.drawString(_P_in(7.98), _P_in(4.8), f"SCALE:{_format_scale_row(REAL_SCALE)}")
+        # Footer
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(0.42), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(_P_in(0.60), _P_in(0.50),
+                     "EMPIRE WORKROOM  ·  HYATTSVILLE, MD  ·  (703) 213-6484")
+        c.setFillColor((0.91, 0.54, 0.17))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(_P_in(11.0 / 2), _P_in(0.50),
+                            "FOR DISCUSSION — NOT FOR CONSTRUCTION")
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawRightString(_P_in(11.0 - 0.32 - 0.28), _P_in(0.50),
+                          "SHEET B2  ·  1 OF 1")
+        c.save()
+        bad_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
+        msg = str(exc_info.value)
+        assert "title" in msg.lower() or "singular" in msg.lower(), (
+            f"Gate 5 (title singular) must catch plural SHADES; "
+            f"got: {msg}"
+        )
+
+
+def _P_in(inches):
+    """Helper for the negative fixtures above."""
+    return inches * inch
+
+
+# Pre-imported so the synthetic fixtures can call _format_scale_row
+# to build a SCALE row that matches the actual shade geometry
+# (otherwise Gate 1 fires before the target gate).
+from app.services.drawing.templates.b2_renderers import _format_scale_row
+
+
+def _make_pile_passes_decorator(c, target_x, target_y, target_w, target_h):
+    """Add 8 small spread-out rects to a synthetic PDF so the
+    element-pile gate (<=20% cluster) passes. The rects are placed
+    in the SIDE SECTION viewport (x in [5.19, 7.68], y in [0.86,
+    7.12]) — away from the FRONT ELEVATION zone (so Gate 1 sees the
+    real shade bbox) and away from text chars (so text-over-geometry
+    gate doesn't fire)."""
+    c.setFillColor((0.7, 0.7, 0.7))
+    # Spread across the SIDE SECTION viewport in a 4x2 grid
+    positions = [
+        (5.30, 1.0), (5.30, 2.5), (5.30, 4.0), (5.30, 5.5),
+        (6.40, 1.0), (6.40, 2.5), (6.40, 4.0), (6.40, 5.5),
+    ]
+    for x, y in positions:
+        c.rect(_P_in(x), _P_in(y), _P_in(0.15), _P_in(0.15),
+               fill=1, stroke=1)
