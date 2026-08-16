@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Weigh">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#16211d">
+<title>Weigh &amp; Label Station</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+:root{
+  --ink:#14181a;
+  --paper:#ecefea;
+  --card:#ffffff;
+  --equip:#3f5149;
+  --equip-dk:#16211d;
+  --lcd:#ffc24a;
+  --lcd-dim:#6b5626;
+  --rule:#c9cfc9;
+  --muted:#65706b;
+  --radius:3px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,sans-serif;
+  font-size:15px;
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;cursor:pointer}
+input,select{font:inherit;color:inherit}
+
+/* ---------- header ---------- */
+.rail{
+  display:flex;align-items:center;gap:14px;
+  padding:12px 18px;
+  background:var(--equip-dk);
+  color:#dfe6e1;
+  border-bottom:3px solid var(--equip);
+}
+.mark{
+  font-family:Archivo,sans-serif;font-weight:800;
+  font-size:15px;letter-spacing:.14em;text-transform:uppercase;
+}
+.mark span{color:var(--lcd)}
+.rail .spacer{flex:1}
+.railbtn{
+  background:transparent;border:1px solid #46564f;color:#c3cdc7;
+  padding:7px 13px;border-radius:var(--radius);
+  font-family:Archivo,sans-serif;font-weight:600;font-size:12px;
+  letter-spacing:.09em;text-transform:uppercase;
+}
+.railbtn:hover{border-color:var(--lcd);color:var(--lcd)}
+.railbtn:focus-visible{outline:2px solid var(--lcd);outline-offset:2px}
+
+/* ---------- layout ---------- */
+.stage{
+  display:grid;grid-template-columns:minmax(320px,1fr) minmax(300px,420px);
+  gap:20px;padding:20px;max-width:1180px;margin:0 auto;align-items:start;
+}
+@media (max-width:860px){ .stage{grid-template-columns:1fr;padding:14px;gap:14px} }
+
+/* ---------- readout: the scale head ---------- */
+.head{
+  background:var(--equip-dk);
+  border:1px solid #0b120f;
+  border-radius:var(--radius);
+  padding:16px 18px 18px;
+  box-shadow:inset 0 1px 0 #4b5c55, 0 1px 2px rgba(0,0,0,.25);
+}
+.head .who{
+  font-family:Archivo,sans-serif;font-weight:600;font-size:13px;
+  letter-spacing:.1em;text-transform:uppercase;
+  color:#8fa39a;
+  padding-bottom:10px;margin-bottom:12px;
+  border-bottom:1px dashed #2e3d37;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.head .who.none{color:var(--lcd-dim)}
+.strip{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:9px}
+.strip dt{
+  font-family:Archivo,sans-serif;font-weight:600;font-size:11px;
+  letter-spacing:.13em;text-transform:uppercase;color:#7d918a;margin:0;
+}
+.strip dd{
+  margin:0;font-family:"IBM Plex Mono",monospace;font-weight:600;
+  font-size:20px;color:var(--lcd);font-variant-numeric:tabular-nums;
+  text-shadow:0 0 9px rgba(255,194,74,.3);
+}
+.total{
+  margin-top:14px;padding-top:13px;border-top:1px solid #2e3d37;
+  display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+}
+.total dt{
+  font-family:Archivo,sans-serif;font-weight:700;font-size:12px;
+  letter-spacing:.15em;text-transform:uppercase;color:#8fa39a;margin:0;
+}
+.total dd{
+  margin:0;font-family:"IBM Plex Mono",monospace;font-weight:700;
+  font-size:clamp(38px,8vw,54px);line-height:1;color:var(--lcd);
+  font-variant-numeric:tabular-nums;letter-spacing:.02em;
+  text-shadow:0 0 16px rgba(255,194,74,.42);
+}
+.caret{animation:blink 1.1s steps(1,end) infinite}
+@keyframes blink{50%{opacity:.15}}
+@media (prefers-reduced-motion:reduce){ .caret{animation:none} }
+
+/* entry unit selector + segmented weight readout */
+.units{display:flex;flex-wrap:wrap;gap:5px;margin-top:12px}
+.unit{
+  background:transparent;border:1px solid #33443d;color:#8fa39a;
+  padding:6px 10px;border-radius:var(--radius);
+  font-family:Archivo,sans-serif;font-weight:600;font-size:11px;
+  letter-spacing:.09em;text-transform:uppercase;
+}
+.unit[aria-pressed="true"]{border-color:var(--lcd);color:var(--lcd);background:rgba(255,194,74,.09)}
+.unit:focus-visible{outline:2px solid var(--lcd);outline-offset:2px}
+.seg{
+  background:none;border:none;padding:0 0 2px;margin:0;
+  font:inherit;color:var(--lcd-dim);border-bottom:2px solid transparent;
+}
+.seg[aria-pressed="true"]{color:var(--lcd);border-bottom-color:var(--lcd)}
+.seg:focus-visible{outline:2px solid var(--lcd);outline-offset:3px}
+.equiv{
+  font-family:"IBM Plex Mono",monospace;font-size:12px;color:#7d918a;
+  text-align:right;margin:-4px 0 9px;
+}
+
+/* ---------- keypad ---------- */
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.key{
+  background:var(--card);border:1px solid var(--rule);border-radius:var(--radius);
+  padding:16px 0;font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:21px;
+  box-shadow:0 1px 0 var(--rule);
+}
+.key:active{transform:translateY(1px);box-shadow:none}
+.key:focus-visible{outline:2px solid var(--equip);outline-offset:2px}
+.key.wide{grid-column:span 2}
+.key.alt{
+  background:var(--equip);color:#eef2ef;border-color:var(--equip-dk);
+  font-family:Archivo,sans-serif;font-size:13px;letter-spacing:.1em;text-transform:uppercase;
+}
+
+/* ---------- product picker ---------- */
+.panel{
+  background:var(--card);border:1px solid var(--rule);
+  border-radius:var(--radius);padding:14px;
+}
+.panel + .panel{margin-top:14px}
+.eyebrow{
+  font-family:Archivo,sans-serif;font-weight:700;font-size:11px;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--muted);
+  margin:0 0 11px;
+}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{
+  background:var(--paper);border:1px solid var(--rule);border-radius:var(--radius);
+  padding:9px 12px;text-align:left;line-height:1.25;max-width:100%;
+}
+.chip b{
+  display:block;font-family:Archivo,sans-serif;font-weight:600;font-size:14px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:22ch;
+}
+.chip i{
+  font-style:normal;font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted);
+}
+.chip[aria-pressed="true"]{
+  background:var(--equip);border-color:var(--equip-dk);color:#fff;
+}
+.chip[aria-pressed="true"] i{color:var(--lcd)}
+.chip:focus-visible{outline:2px solid var(--equip);outline-offset:2px}
+.blank{color:var(--muted);font-size:14px;margin:0}
+
+/* ---------- label preview ----------
+   203 dpi monochrome head: solid black, heavy type, no hairlines, no grey.
+   Weight and rate carry the middle band; the QR owns the right column.
+------------------------------------ */
+.proofwrap{display:flex;justify-content:center;padding:16px 8px;background:var(--paper);border-radius:var(--radius)}
+#label{
+  --t:1;
+  --f:1;
+  background:#fff;color:#000;overflow:hidden;position:relative;
+  box-shadow:0 2px 10px rgba(20,24,26,.16);
+  display:flex;flex-direction:column;padding:0;
+  font-family:Archivo,Helvetica,Arial,sans-serif;
+}
+.lb-stamp{
+  background:#000;color:#fff;
+  padding:1.1mm 1.5mm 1.2mm;
+  display:flex;align-items:center;gap:1.3mm;
+}
+.lb-mark{flex-shrink:0;display:block}
+.lb-name{
+  font-weight:800;line-height:1.12;text-transform:uppercase;
+  letter-spacing:.012em;flex:1;min-width:0;
+  overflow:hidden;word-break:break-word;hyphens:none;
+}
+.lb-when{
+  font-family:"IBM Plex Mono",monospace;font-weight:600;
+  white-space:nowrap;flex-shrink:0;opacity:.95;
+}
+.lb-mid{
+  display:flex;align-items:flex-start;gap:1.5mm;
+  padding:1.4mm 1.5mm .9mm;flex:1;min-height:0;
+}
+.lb-figs{flex:1;min-width:0}
+.lb-wt{
+  font-weight:800;line-height:1.16;letter-spacing:.018em;
+  white-space:nowrap;
+}
+.lb-rate{
+  font-weight:700;line-height:1.16;letter-spacing:.018em;
+  white-space:nowrap;margin-top:1.1mm;
+}
+.lb-code{
+  font-family:"IBM Plex Mono",monospace;font-weight:600;
+  white-space:nowrap;margin-top:.9mm;letter-spacing:.03em;
+}
+.lb-note{
+  font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+  line-height:1.3;margin-top:1mm;
+}
+.lb-qrwrap{flex-shrink:0;text-align:center}
+.lb-qr img,.lb-qr canvas{display:block;width:100%;height:100%}
+.lb-cap{
+  font-weight:800;text-transform:uppercase;letter-spacing:.05em;
+  line-height:1.2;margin-top:.7mm;
+}
+.lb-foot{
+  display:flex;align-items:baseline;justify-content:space-between;gap:1.2mm;
+  border-top:2.4pt solid #000;margin:0 1.5mm;padding:1mm 0 1.3mm;
+}
+.lb-total{
+  font-family:"IBM Plex Mono",monospace;font-weight:700;
+  line-height:1.08;letter-spacing:.01em;white-space:nowrap;
+}
+.lb-org{
+  font-weight:800;text-transform:uppercase;letter-spacing:.07em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;
+}
+/* ---------- fire button ---------- */
+.fire{
+  width:100%;margin-top:14px;padding:17px;
+  background:var(--equip);color:var(--lcd);
+  border:1px solid var(--equip-dk);border-radius:var(--radius);
+  font-family:Archivo,sans-serif;font-weight:700;font-size:15px;
+  letter-spacing:.14em;text-transform:uppercase;
+}
+.fire:hover:not(:disabled){background:#4a5e55}
+.fire:disabled{opacity:.4;cursor:not-allowed}
+.fire:focus-visible{outline:2px solid var(--equip-dk);outline-offset:2px}
+.fire.ghost{
+  margin-top:8px;padding:12px;background:transparent;color:var(--muted);
+  border-color:var(--rule);font-size:12px;
+}
+.fire.ghost:hover:not(:disabled){background:var(--paper);color:var(--ink)}
+
+/* ---------- dialogs ---------- */
+dialog{
+  border:1px solid var(--rule);border-radius:var(--radius);padding:0;
+  width:min(560px,94vw);background:var(--card);color:var(--ink);
+}
+dialog::backdrop{background:rgba(20,24,26,.55)}
+.dlg-head{
+  display:flex;align-items:center;gap:12px;padding:14px 18px;
+  background:var(--equip-dk);color:#dfe6e1;
+}
+.dlg-head h2{
+  margin:0;font-family:Archivo,sans-serif;font-weight:700;font-size:14px;
+  letter-spacing:.13em;text-transform:uppercase;flex:1;
+}
+.dlg-body{padding:18px;max-height:min(66vh,560px);overflow:auto}
+.field{margin-bottom:13px}
+.field label{
+  display:block;font-family:Archivo,sans-serif;font-weight:600;font-size:11px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:5px;
+}
+.field input,.field select{
+  width:100%;padding:10px 11px;border:1px solid var(--rule);
+  border-radius:var(--radius);background:var(--paper);
+}
+.field input:focus,.field select:focus{outline:2px solid var(--equip);outline-offset:0}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:11px}
+.hint{font-size:12.5px;color:var(--muted);margin:-6px 0 13px}
+.hint.warn{color:#a35a2e;font-weight:600}
+.hint code{font-family:"IBM Plex Mono",monospace;background:var(--paper);padding:1px 4px;border-radius:2px}
+.btn{
+  padding:10px 15px;border:1px solid var(--rule);background:var(--paper);
+  border-radius:var(--radius);font-family:Archivo,sans-serif;font-weight:600;
+  font-size:12px;letter-spacing:.09em;text-transform:uppercase;
+}
+.btn.primary{background:var(--equip);color:#fff;border-color:var(--equip-dk)}
+.btn:focus-visible{outline:2px solid var(--equip);outline-offset:2px}
+.btnrow{display:flex;gap:9px;flex-wrap:wrap;margin-top:6px}
+.list{border-top:1px solid var(--rule);margin-top:16px}
+.item{
+  display:flex;align-items:center;gap:11px;padding:11px 0;
+  border-bottom:1px solid var(--rule);
+}
+.item .grow{flex:1;min-width:0}
+.item b{display:block;font-family:Archivo,sans-serif;font-weight:600;font-size:14.5px}
+.item span{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--muted)}
+.x{
+  background:none;border:none;color:var(--muted);font-size:19px;
+  padding:2px 8px;border-radius:2px;line-height:1;
+}
+.x:hover{color:#a32e24;background:var(--paper)}
+
+/* ---------- toast ---------- */
+.toast{
+  position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+  background:var(--equip-dk);color:#dfe6e1;border:1px solid var(--equip);
+  padding:12px 20px;border-radius:var(--radius);z-index:99;
+  font-family:Archivo,sans-serif;font-weight:600;font-size:13px;
+  letter-spacing:.05em;max-width:88vw;text-align:center;
+}
+.toast.bad{border-color:#a35a2e;color:#ffcf9a}
+.toast.good{border-color:var(--lcd);color:var(--lcd)}
+
+/* ---------- print ---------- */
+@media print{
+  html,body{margin:0;padding:0;background:#fff}
+  .rail,.stage,dialog,.toast{display:none !important}
+  #printroot{display:block !important;margin:0;padding:0}
+  #label{
+    box-shadow:none;margin:0;border:0;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+}
+#printroot{display:none}
+</style>
+</head>
+<body>
+
+<header class="rail">
+  <div class="mark">Weigh <span>&amp;</span> Label</div>
+  <div class="spacer"></div>
+  <button class="railbtn" id="openProducts">Products</button>
+  <button class="railbtn" id="openSettings">Settings</button>
+</header>
+
+<main class="stage">
+  <!-- LEFT: scale head + keypad -->
+  <section>
+    <div class="head">
+      <div class="who none" id="rdName">No product selected</div>
+      <dl style="margin:0">
+        <div class="strip"><dt>Unit price</dt><dd id="rdUnit">—</dd></div>
+        <div class="strip"><dt id="rdQtyLabel">Weight</dt><dd id="rdQty">0.00</dd></div>
+        <div class="equiv" id="rdEquiv" hidden></div>
+        <div class="total"><dt>Total</dt><dd id="rdTotal">$0.00</dd></div>
+      </dl>
+      <div class="units" id="units"></div>
+    </div>
+
+    <div class="pad">
+      <button class="key" data-k="7">7</button>
+      <button class="key" data-k="8">8</button>
+      <button class="key" data-k="9">9</button>
+      <button class="key" data-k="4">4</button>
+      <button class="key" data-k="5">5</button>
+      <button class="key" data-k="6">6</button>
+      <button class="key" data-k="1">1</button>
+      <button class="key" data-k="2">2</button>
+      <button class="key" data-k="3">3</button>
+      <button class="key" data-k=".">.</button>
+      <button class="key" data-k="0">0</button>
+      <button class="key alt" data-k="del">Del</button>
+      <button class="key alt wide" data-k="clear">Clear</button>
+      <button class="key alt" data-k="00" id="altKey">00</button>
+    </div>
+  </section>
+
+  <!-- RIGHT: picker + label -->
+  <section>
+    <div class="panel">
+      <p class="eyebrow">Product</p>
+      <div class="chips" id="chips"></div>
+      <p class="blank" id="chipsBlank" hidden>No products yet. Open Products to add your first one.</p>
+    </div>
+
+    <div class="panel">
+      <p class="eyebrow">Label &mdash; shown at actual size</p>
+      <div class="proofwrap"><div id="label"></div></div>
+      <button class="fire" id="print" disabled>Make label image</button>
+      <button class="fire ghost" id="sysprint" disabled>AirPrint (Brother only)</button>
+    </div>
+  </section>
+</main>
+
+<div id="printroot"></div>
+
+<!-- PRODUCTS -->
+<dialog id="dlgProducts">
+  <div class="dlg-head"><h2>Products</h2><button class="btn" data-close>Close</button></div>
+  <div class="dlg-body">
+    <div class="row">
+      <div class="field"><label for="pName">Name</label><input id="pName" placeholder="Walnut offcuts"></div>
+      <div class="field"><label for="pCode">Code (optional)</label><input id="pCode" placeholder="WAL-01"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label for="pPrice">Price</label><input id="pPrice" type="number" step="0.01" min="0" placeholder="12.50"></div>
+      <div class="field"><label for="pUnit">Sold by</label>
+        <select id="pUnit">
+          <option value="lb">Pound (lb)</option>
+          <option value="oz">Ounce (oz)</option>
+          <option value="kg">Kilogram (kg)</option>
+          <option value="g">Gram (g)</option>
+          <option value="ft">Linear foot (ft)</option>
+          <option value="ea">Each</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="pNote">Note on label (optional)</label>
+      <input id="pNote" placeholder="Keep refrigerated">
+    </div>
+    <div class="btnrow">
+      <button class="btn primary" id="pSave">Save product</button>
+      <button class="btn" id="pCancel" hidden>Cancel edit</button>
+    </div>
+    <p class="hint" id="storeNote"></p>
+    <div class="list" id="pList"></div>
+    <div class="btnrow" style="margin-top:16px">
+      <button class="btn primary" id="linkBtn2">Back up as link</button>
+      <button class="btn" id="expBtn">Export file</button>
+      <button class="btn" id="impBtn">Import file</button>
+      <input type="file" id="impFile" accept="application/json" hidden>
+    </div>
+    <p class="hint" style="margin-top:10px">The link holds your whole list. Open it, then
+      Share &rarr; Add to Home Screen &mdash; the icon will reload these products even if the
+      phone clears its storage.</p>
+  </div>
+</dialog>
+
+<!-- LABEL IMAGE -->
+<dialog id="dlgImage">
+  <div class="dlg-head"><h2>Your label</h2><button class="btn" data-close>Close</button></div>
+  <div class="dlg-body" style="text-align:center">
+    <p class="hint" id="saveHow" style="margin:0 0 14px"></p>
+    <img id="labelImg" alt="Label ready to print"
+         style="max-width:100%;border:1px solid var(--rule);background:#fff;
+                -webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto;
+                pointer-events:auto">
+    <div class="btnrow" style="justify-content:center;margin-top:16px">
+      <button class="btn primary" id="shareImg">Share</button>
+      <button class="btn" id="openImg">Open in browser</button>
+      <button class="btn" id="dlImg">Save to Files</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- SETTINGS -->
+<dialog id="dlgSettings">
+  <div class="dlg-head"><h2>Settings</h2><button class="btn" data-close>Close</button></div>
+  <div class="dlg-body">
+    <p class="eyebrow">Share this station</p>
+    <p class="hint">Copy a link that carries your whole product list. Anyone who opens it gets
+      the same catalog on their own phone. Send it again after you change prices.</p>
+    <div class="btnrow" style="margin-bottom:18px">
+      <button class="btn primary" id="linkBtn">Copy setup link</button>
+    </div>
+
+    <p class="eyebrow" style="margin-top:22px">Label stock</p>
+    <div class="field">
+      <label for="sPreset">Size</label>
+      <select id="sPreset">
+        <optgroup label="Supvan T50M Pro">
+          <option value="40x30">40 &times; 30 mm &mdash; in the box</option>
+          <option value="50x80">50 &times; 80 mm &mdash; in the box</option>
+          <option value="50x50">50 &times; 50 mm &mdash; round stock</option>
+          <option value="45x25">45 &times; 25 mm</option>
+          <option value="30x20">30 &times; 20 mm</option>
+        </optgroup>
+        <optgroup label="Brother DK rolls">
+          <option value="62x40">DK-2205 cut to 40 mm &mdash; 62 &times; 40 mm</option>
+          <option value="62x50">DK-2205 cut to 50 mm &mdash; 62 &times; 50 mm</option>
+          <option value="38x90">DK-1208 &mdash; 38 &times; 90 mm</option>
+          <option value="29x90">DK-1201 &mdash; 29 &times; 90 mm</option>
+          <option value="62x100">DK-1202 &mdash; 62 &times; 100 mm</option>
+        </optgroup>
+        <option value="custom">Custom</option>
+      </select>
+    </div>
+    <div class="row" id="customSize" hidden>
+      <div class="field"><label for="sW">Width (mm)</label><input id="sW" type="number" step="1" min="10" max="110"></div>
+      <div class="field"><label for="sH">Length (mm)</label><input id="sH" type="number" step="1" min="10"></div>
+    </div>
+    <p class="hint" id="widthWarn" hidden>Wider than the Supvan's 48&nbsp;mm printhead. Fine on a Brother DK roll; on the Supvan anything past 48&nbsp;mm is cropped.</p>
+
+    <p class="eyebrow" style="margin-top:22px">Business</p>
+    <div class="field"><label for="sOrg">Name on label</label><input id="sOrg" placeholder="Empire Workroom"></div>
+    <div class="field"><label for="sLine">Second line (optional)</label><input id="sLine" placeholder="Hyattsville, MD"></div>
+
+    <p class="eyebrow" style="margin-top:22px">QR code</p>
+    <div class="field"><label for="sQR">Contents</label><input id="sQR" placeholder="https://example.com/menu"></div>
+    <p class="hint">Blank prints a placeholder code so you can judge the layout &mdash; it
+      scans to a dummy address, so put your real link here before selling anything. Tokens get swapped in when the label prints:
+      <code>{product}</code> <code>{code}</code> <code>{qty}</code> <code>{typed}</code> <code>{unit}</code> <code>{total}</code> <code>{date}</code></p>
+    <p class="hint" id="qrWarn" hidden></p>
+    <div class="field">
+      <label for="sQRcap">Caption under the QR</label>
+      <input id="sQRcap" placeholder="SCAN FOR MENU">
+    </div>
+    <p class="hint">A bare QR code gets ignored. Tell people what it does.</p>
+    <div class="field">
+      <label for="sQRsize">QR size</label>
+      <select id="sQRsize">
+        <option value="0">Off</option>
+        <option value="9">Small &mdash; 9 mm</option>
+        <option value="12" selected>Medium &mdash; 12 mm</option>
+        <option value="16">Large &mdash; 16 mm</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="sLogo">Logo mark</label>
+      <select id="sLogo">
+        <option value="yes">Placeholder stamp</option>
+        <option value="no">Off</option>
+      </select>
+    </div>
+    <p class="hint">Stand-in roundel using the initials of your business name. Send me real
+      artwork and I'll drop it in.</p>
+    <div class="field">
+      <label for="sType">Text size</label>
+      <select id="sType">
+        <option value="1">Normal</option>
+        <option value="1.15">Large</option>
+        <option value="1.3">Extra large</option>
+        <option value="1.5">Biggest that fits</option>
+      </select>
+    </div>
+    <p class="hint">If the label runs out of room the text shrinks to fit, so turning this
+      up on a crowded label may do nothing. Fewer lines, or bigger stock, buys real size.</p>
+    <div class="field">
+      <label for="sDate">Pack date on label</label>
+      <select id="sDate">
+        <option value="no">Off</option>
+        <option value="yes">Show today's date</option>
+      </select>
+    </div>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+
+/* ---------------- storage --------------------------------------------------
+   Three tiers, best available wins. Every write is read back, because a
+   silent failure here looks exactly like the app forgetting your products.
+--------------------------------------------------------------------------- */
+const mem = {};
+let storageMode = "checking";
+
+async function put(k, v){
+  const raw = JSON.stringify(v);
+  try{
+    if(window.storage){
+      await window.storage.set(k, raw, false);
+      const back = await window.storage.get(k, false);
+      if(back && back.value === raw){ storageMode = "app"; return true; }
+    }
+  }catch(e){}
+  try{
+    localStorage.setItem(k, raw);
+    if(localStorage.getItem(k) === raw){ storageMode = "browser"; return true; }
+  }catch(e){}
+  mem[k] = raw;
+  storageMode = "memory";
+  return false;
+}
+
+async function get(k){
+  try{ if(window.storage){ const r = await window.storage.get(k, false); if(r && r.value) return JSON.parse(r.value); } }catch(e){}
+  try{ const v = localStorage.getItem(k); if(v) return JSON.parse(v); }catch(e){}
+  return mem[k] ? JSON.parse(mem[k]) : null;
+}
+
+/* ---------------- optional Empire backend ----------------------------------
+   If this page is served by the label_station module, ./api/catalog answers
+   and the product list is shared across every phone. Anywhere else it stays
+   on-device. Nothing to configure either way.
+--------------------------------------------------------------------------- */
+let backend = false;
+
+async function probeBackend(){
+  try{
+    const r = await fetch("./api/health", { credentials: "include" });
+    backend = r.ok;
+  }catch(e){ backend = false; }
+  return backend;
+}
+
+async function pullCatalog(){
+  const r = await fetch("./api/catalog", { credentials: "include" });
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const d = await r.json();
+  if(Array.isArray(d.products)) S.products = d.products;
+  if(d.settings && Object.keys(d.settings).length) Object.assign(S.cfg, d.settings);
+  return d;
+}
+
+async function pushCatalog(){
+  const r = await fetch("./api/catalog", {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ products: S.products, settings: S.cfg })
+  });
+  if(!r.ok) throw new Error("HTTP " + r.status);
+}
+
+/* ---------------- toast + label export -------------------------------------
+   No server anywhere in this app. The phone draws the label, the phone
+   rasterises it, and the phone hands the PNG to whatever prints it.
+--------------------------------------------------------------------------- */
+let toastTimer;
+function toast(msg, kind){
+  clearTimeout(toastTimer);
+  let el = document.querySelector(".toast");
+  if(!el){ el = document.createElement("div"); document.body.appendChild(el); }
+  el.className = "toast" + (kind ? " " + kind : "");
+  el.textContent = msg;
+  toastTimer = setTimeout(() => el.remove(), 3400);
+}
+
+/* render the label at the printhead's own resolution: 203 dpi */
+async function rasterise(){
+  const canvas = await html2canvas($("label"), {
+    scale: (203 / 96) * 2,
+    backgroundColor: "#ffffff",
+    logging: false, useCORS: true
+  });
+  // iOS offers "Save to Photos" on a long press far more reliably for a
+  // data: URL than for a blob: URL, so we carry both.
+  const dataUrl = canvas.toDataURL("image/png");
+  const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+  return { dataUrl, blob };
+}
+
+function labelFilename(){
+  const p = S.sel || {};
+  const slug = (p.name || "label").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const t = new Date();
+  const hhmm = String(t.getHours()).padStart(2,"0") + String(t.getMinutes()).padStart(2,"0");
+  return slug + "-" + hhmm + ".png";
+}
+
+/* ---------------- setup link -----------------------------------------------
+   The catalog rides in the URL fragment, so sharing the app and sharing the
+   products is one action. Fragments are never sent to any web server.
+--------------------------------------------------------------------------- */
+function encodeSetup(){
+  const payload = { v: 1, products: S.products, cfg: S.cfg, entry: S.entry };
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  let bin = "";
+  bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeSetup(frag){
+  const b64 = frag.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64);
+  const bytes = Uint8Array.from(bin, ch => ch.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function setupLink(){
+  return location.origin + location.pathname + "#c=" + encodeSetup();
+}
+
+/* ---------------- state ---------------- */
+const S = {
+  products: [],
+  sel: null,
+  a: "",            // primary field (lb / kg / whole unit)
+  b: "",            // secondary field (oz), compound entry only
+  focus: "a",
+  entry: "lboz",    // how the operator types it in
+  editing: null,
+  cfg: {
+    w: 40, h: 30, preset: "40x30",
+    org: "", line: "", qr: "", qrsize: 12,
+    qrcap: "SCAN FOR MENU", showdate: false, type: 1, logo: true
+  }
+};
+
+/* grams per unit — the single source of truth for every conversion */
+const GRAMS = { lb: 453.59237, oz: 28.349523125, kg: 1000, g: 1 };
+const isWeight = u => Object.prototype.hasOwnProperty.call(GRAMS, u);
+
+/* entry modes offered when a product is priced by weight */
+const ENTRY = [
+  { id:"lboz", label:"lb + oz", parts:[["lb","lb"],["oz","oz"]] },
+  { id:"lb",   label:"lb",      parts:[["lb","lb"]] },
+  { id:"oz",   label:"oz",      parts:[["oz","oz"]] },
+  { id:"kg",   label:"kg",      parts:[["kg","kg"]] },
+  { id:"g",    label:"g",       parts:[["g","g"]] }
+];
+const entryDef = () => ENTRY.find(e => e.id === S.entry) || ENTRY[1];
+const compound = () => S.sel && isWeight(S.sel.unit) && entryDef().parts.length === 2;
+
+const money = n => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(n||0);
+const $ = id => document.getElementById(id);
+const isCount = u => u === "ea";
+const num = s => { const n = parseFloat(s); return isFinite(n) ? n : 0; };
+
+/* trim trailing zeros so 3.4380 reads as 3.438 */
+const tidy = n => parseFloat(n.toFixed(4)).toString();
+
+/* quantity expressed in the product's own pricing unit */
+function pricedQty(){
+  const p = S.sel;
+  if(!p) return 0;
+  if(!isWeight(p.unit)) return num(S.a);
+  const parts = entryDef().parts;
+  let grams = num(S.a) * GRAMS[parts[0][0]];
+  if(parts[1]) grams += num(S.b) * GRAMS[parts[1][0]];
+  return grams / GRAMS[p.unit];
+}
+
+/* what the operator actually typed, for the label and the readout */
+function typedText(){
+  const p = S.sel;
+  if(!p) return "0";
+  if(!isWeight(p.unit)) return (S.a || "0");
+  const parts = entryDef().parts;
+  const bits = [(S.a || "0") + " " + parts[0][1]];
+  if(parts[1]) bits.push((S.b || "0") + " " + parts[1][1]);
+  return bits.join(" ");
+}
+
+function total(){ return S.sel ? pricedQty() * S.sel.price : 0; }
+function clearQty(){ S.a = ""; S.b = ""; S.focus = "a"; }
+
+/* ---------------- readout ---------------- */
+function drawHead(){
+  const n = $("rdName");
+  if(S.sel){ n.textContent = S.sel.name; n.classList.remove("none"); }
+  else { n.textContent = "No product selected"; n.classList.add("none"); }
+
+  const p = S.sel;
+  $("rdUnit").textContent = p ? money(p.price) + (isCount(p.unit) ? " ea" : " /" + p.unit) : "—";
+  $("rdQtyLabel").textContent = p && isCount(p.unit) ? "Quantity"
+                              : p && p.unit === "ft" ? "Length" : "Weight";
+
+  // segmented, tappable quantity display
+  const box = $("rdQty");
+  box.innerHTML = "";
+  if(!p || !isWeight(p.unit)){
+    box.textContent = S.a === "" ? "0" : S.a;
+    if(S.a === "") box.innerHTML = '0<span class="caret">_</span>';
+  } else {
+    entryDef().parts.forEach((part, i) => {
+      const key = i === 0 ? "a" : "b";
+      const val = S[key];
+      const seg = document.createElement("button");
+      seg.className = "seg";
+      seg.type = "button";
+      seg.setAttribute("aria-pressed", String(S.focus === key));
+      seg.setAttribute("aria-label", "Enter " + part[1]);
+      seg.innerHTML = (val === "" ? "0" : val) + " " + part[1] +
+        (S.focus === key && val === "" ? '<span class="caret">_</span>' : "");
+      seg.onclick = () => { S.focus = key; drawHead(); };
+      box.appendChild(seg);
+      if(i === 0 && entryDef().parts[1]) box.append(" ");
+    });
+  }
+
+  drawUnits();
+
+  // show the priced quantity whenever it isn't literally what was typed
+  const eq = $("rdEquiv");
+  const converting = p && isWeight(p.unit) && S.entry !== p.unit;
+  eq.hidden = !converting;
+  if(converting) eq.textContent = "= " + tidy(pricedQty()) + " " + p.unit + " priced";
+
+  $("rdTotal").textContent = money(total());
+
+  const alt = $("altKey");
+  if(compound()){
+    alt.dataset.k = "next";
+    alt.textContent = S.focus === "a" ? "→ " + entryDef().parts[1][1] : "→ " + entryDef().parts[0][1];
+  } else {
+    alt.dataset.k = "00";
+    alt.textContent = "00";
+  }
+
+  const ready = !!(p && pricedQty() > 0);
+  $("print").disabled = !ready;
+  $("sysprint").disabled = !ready;
+}
+
+function drawUnits(){
+  const row = $("units");
+  const p = S.sel;
+  if(!p || !isWeight(p.unit)){ row.innerHTML = ""; return; }
+  row.innerHTML = "";
+  ENTRY.forEach(e => {
+    const b = document.createElement("button");
+    b.className = "unit";
+    b.type = "button";
+    b.textContent = e.label;
+    b.setAttribute("aria-pressed", String(S.entry === e.id));
+    b.onclick = () => { S.entry = e.id; clearQty(); put("wl.entry", S.entry); drawAll(); };
+    row.appendChild(b);
+  });
+}
+
+/* ---------------- product chips ---------------- */
+function drawChips(){
+  const box = $("chips");
+  box.innerHTML = "";
+  $("chipsBlank").hidden = S.products.length > 0;
+  S.products.forEach(p => {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.setAttribute("aria-pressed", String(S.sel && S.sel.id === p.id));
+    b.innerHTML = "<b></b><i></i>";
+    b.querySelector("b").textContent = p.name;
+    b.querySelector("i").textContent = money(p.price) + (isCount(p.unit) ? " ea" : " /" + p.unit);
+    b.onclick = () => { S.sel = p; clearQty(); drawAll(); };
+    box.appendChild(b);
+  });
+}
+
+/* ---------------- label ---------------- */
+function fill(t){
+  const p = S.sel || {};
+  return String(t)
+    .replace(/{product}/g, p.name || "")
+    .replace(/{code}/g, p.code || "")
+    .replace(/{qty}/g, S.sel && isWeight(S.sel.unit) ? tidy(pricedQty()) : (S.a || "0"))
+    .replace(/{typed}/g, typedText())
+    .replace(/{unit}/g, p.unit || "")
+    .replace(/{total}/g, total().toFixed(2))
+    .replace(/{date}/g, new Date().toISOString().slice(0,10));
+}
+
+/* placeholder identity mark — a butcher's roundel, swap for real art later */
+function logoMark(initials, mm){
+  return '<svg class="lb-mark" viewBox="0 0 100 100" ' +
+    'style="width:' + mm.toFixed(2) + 'mm;height:' + mm.toFixed(2) + 'mm" aria-hidden="true">' +
+    '<circle cx="50" cy="50" r="49" fill="#fff"/>' +
+    '<circle cx="50" cy="50" r="41" fill="none" stroke="#000" stroke-width="6"/>' +
+    '<text x="50" y="52" text-anchor="middle" dominant-baseline="central" ' +
+    'font-family="Archivo,Helvetica,sans-serif" font-weight="800" font-size="42" ' +
+    'fill="#000">' + initials + '</text></svg>';
+}
+
+function initialsFrom(name){
+  const words = (name || "").trim().split(/\s+/).filter(Boolean);
+  if(!words.length) return "EM";
+  if(words.length === 1) return words[0].slice(0,2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+const QR_PLACEHOLDER = "https://example.com/menu";
+
+function drawLabel(){
+  const L = $("label");
+  const w = S.cfg.w, h = S.cfg.h;          // millimetres
+  L.style.width  = w + "mm";
+  L.style.height = h + "mm";
+
+  const k = Math.min(w / 40, h / 30);
+  const px  = v => "calc(var(--t) * " + (v * k).toFixed(2) + "mm)";
+  // weight, rate and total all ride --f, so they can only ever change together
+  const fig = v => "calc(var(--t) * var(--f) * " + (v * k).toFixed(2) + "mm)";
+  L.style.setProperty("--t", S.cfg.type);
+  L.style.setProperty("--f", 1);
+
+  const p = S.sel;
+  if(!p){
+    L.innerHTML = '<div style="margin:auto;font-size:' + px(3) +
+      ';opacity:.4;text-align:center;font-weight:600;padding:2mm">Pick a product<br>to preview the label</div>';
+    return;
+  }
+
+  const qrText = S.cfg.qr.trim() === "" ? QR_PLACEHOLDER : fill(S.cfg.qr);
+  const qrOn   = S.cfg.qrsize > 0;
+  const qrMm   = Math.min(S.cfg.qrsize * k, w * 0.36, h * 0.44);
+  const capOn  = qrOn && S.cfg.qrcap.trim() !== "";
+
+  const rate = money(p.price) + (isCount(p.unit) ? " ea" : " / " + p.unit);
+  const wt   = isCount(p.unit) ? (S.a || "0") + " ea" : typedText();
+  const date = S.cfg.showdate
+    ? new Date().toLocaleDateString("en-US", { month:"2-digit", day:"2-digit" })
+    : "";
+
+  L.innerHTML =
+    '<div class="lb-stamp">' +
+      (S.cfg.logo ? logoMark(initialsFrom(S.cfg.org), 5.0 * k) : "") +
+      '<div class="lb-name" style="font-size:' + px(4.8) + '"></div>' +
+      (date ? '<div class="lb-when" style="font-size:' + px(2.1) + '"></div>' : "") +
+    '</div>' +
+    '<div class="lb-mid">' +
+      '<div class="lb-figs">' +
+        '<div class="lb-wt" style="font-size:' + fig(8.6) + '"></div>' +
+        '<div class="lb-rate" style="font-size:' + fig(8.6) + '"></div>' +
+        (p.code ? '<div class="lb-code" style="font-size:' + px(2.1) + '"></div>' : "") +
+        (p.note ? '<div class="lb-note" style="font-size:' + px(2.5) + '"></div>' : "") +
+      '</div>' +
+      (qrOn ? '<div class="lb-qrwrap" style="width:' + qrMm.toFixed(2) + 'mm">' +
+                '<div class="lb-qr" style="width:' + qrMm.toFixed(2) + 'mm;height:' + qrMm.toFixed(2) + 'mm"></div>' +
+                (capOn ? '<div class="lb-cap" style="font-size:' + px(1.9) + '"></div>' : "") +
+              '</div>' : "") +
+    '</div>' +
+    '<div class="lb-foot">' +
+      '<div class="lb-total" style="font-size:' + fig(8.6) + '"></div>' +
+      (S.cfg.org ? '<div class="lb-org" style="font-size:' + px(2.3) + '"></div>' : "") +
+    '</div>';
+
+  L.querySelector(".lb-name").textContent = p.name.replace(/'/g, "\u2019");
+  if(date) L.querySelector(".lb-when").textContent = date;
+  L.querySelector(".lb-wt").textContent = wt;
+  L.querySelector(".lb-rate").textContent = rate;
+  if(p.code) L.querySelector(".lb-code").textContent = p.code;
+  if(p.note) L.querySelector(".lb-note").textContent = p.note;
+  L.querySelector(".lb-total").textContent = money(total());
+  if(S.cfg.org) L.querySelector(".lb-org").textContent = S.cfg.org;
+  if(capOn) L.querySelector(".lb-cap").textContent = S.cfg.qrcap;
+
+  const figsW  = (qrOn ? w - qrMm - 4.0 : w - 2.8) / 25.4 * 96;
+  const totalW = (w - 2.8) * (S.cfg.org ? 0.62 : 1) / 25.4 * 96;
+
+  // width first: find the biggest shared size where all three figures fit
+  fitFigures(L, [[".lb-wt", figsW], [".lb-rate", figsW], [".lb-total", totalW]]);
+  // then height, which scales the whole label and can only help the widths
+  fitHeight(L, h);
+
+  shrinkName(L.querySelector(".lb-name"), (h * 0.22) / 25.4 * 96);
+  shrinkToWidth(L.querySelector(".lb-code"), figsW);
+  if(S.cfg.org) shrinkToWidth(L.querySelector(".lb-org"), (w - 2.8) * 0.36 / 25.4 * 96);
+  if(capOn) shrinkToWidth(L.querySelector(".lb-cap"), qrMm / 25.4 * 96);
+
+  if(qrOn && window.QRCode){
+    const box = L.querySelector(".lb-qr");
+    const dots = Math.max(140, Math.round(qrMm / 25.4 * 420));
+    try{
+      new QRCode(box, { text: qrText, width: dots, height: dots,
+                        correctLevel: QRCode.CorrectLevel.M });
+    }catch(e){ box.remove(); }
+  }
+}
+
+/* shrink the shared figure scale until every one of them fits its column */
+function fitFigures(L, pairs){
+  let f = 1, guard = 0;
+  const over = () => pairs.some(([sel, cap]) => {
+    const el = L.querySelector(sel);
+    return el && el.scrollWidth > cap;
+  });
+  while(over() && f > 0.3 && guard++ < 80){
+    f -= 0.02;
+    L.style.setProperty("--f", f.toFixed(3));
+  }
+}
+
+/* drop the global type scale until the label's content fits its height */
+function fitHeight(L, hMm){
+  const capPx = hMm / 25.4 * 96;
+  const fixed = L.style.height;
+  L.style.height = "auto";
+  let t = parseFloat(S.cfg.type) || 1;
+  let guard = 0;
+  while(L.offsetHeight > capPx && t > 0.45 && guard++ < 60){
+    t -= 0.02;
+    L.style.setProperty("--t", t.toFixed(3));
+  }
+  L.style.height = fixed;
+}
+
+/* squeeze a single-line row until it fits the label width */
+function shrinkToWidth(el, capPx){
+  if(!el) return;
+  let size = parseFloat(getComputedStyle(el).fontSize);
+  let guard = 0;
+  while(el.scrollWidth > capPx && size > 4 && guard++ < 40){
+    size -= 0.4;
+    el.style.fontSize = size + "px";
+  }
+}
+
+function shrinkName(el, capPx){
+  if(!el) return;
+  let size = parseFloat(getComputedStyle(el).fontSize);
+  let guard = 0;
+  while(el.scrollHeight > capPx && size > 6 && guard++ < 40){
+    size -= 0.7;
+    el.style.fontSize = size + "px";
+  }
+}
+
+/* keep @page in step with the chosen stock so the printer trims correctly */
+const pageRule = document.createElement("style");
+document.head.appendChild(pageRule);
+function syncPage(){
+  pageRule.textContent = "@page{size:" + S.cfg.w + "mm " + S.cfg.h + "mm;margin:0}";
+  const warn = $("widthWarn");
+  if(warn) warn.hidden = S.cfg.w <= 48;
+}
+
+function drawAll(){ drawHead(); drawChips(); drawLabel(); syncPage(); }
+
+/* ---------------- keypad ---------------- */
+document.querySelectorAll(".key").forEach(b => {
+  b.onclick = () => {
+    const k = b.dataset.k;
+    const f = compound() ? S.focus : "a";
+
+    if(k === "clear"){ clearQty(); }
+    else if(k === "del"){ S[f] = S[f].slice(0,-1); }
+    else if(k === "next"){ S.focus = S.focus === "a" ? "b" : "a"; }
+    else if(k === "."){ if(!S[f].includes(".")) S[f] = (S[f] || "0") + "."; }
+    else {
+      const next = S[f] + k;
+      const dec = next.split(".")[1];
+      if(dec && dec.length > 3) return;
+      if(next.replace(".","").length > 7) return;
+      S[f] = next.replace(/^0(?=\d)/,"");
+    }
+    drawHead(); drawLabel();
+  };
+});
+document.addEventListener("keydown", e => {
+  if(document.querySelector("dialog[open]")) return;
+  const hit = sel => { const t = document.querySelector(sel); if(t){ t.click(); e.preventDefault(); } };
+  if(/^[0-9]$/.test(e.key) || e.key === ".") hit('.key[data-k="' + e.key + '"]');
+  else if(e.key === "Backspace") hit('.key[data-k="del"]');
+  else if(e.key === "Escape") hit('.key[data-k="clear"]');
+  else if(e.key === "Tab" && compound()){ S.focus = S.focus === "a" ? "b" : "a"; drawHead(); e.preventDefault(); }
+});
+
+/* ---------------- print ---------------- */
+let lastLabel = null;   // { blob, url, name }
+
+$("print").onclick = async () => {
+  const btn = $("print"), was = btn.textContent;
+  btn.disabled = true; btn.textContent = "Preparing…";
+  try{
+    const { dataUrl, blob } = await rasterise();
+    lastLabel = { blob, dataUrl, name: labelFilename() };
+    $("labelImg").src = dataUrl;
+    const ok = canShareFiles(blob, lastLabel.name) && !embedded();
+    $("shareImg").hidden = !canShareFiles(blob, lastLabel.name);
+    describeSave(ok);
+    $("dlgImage").showModal();
+  }catch(err){
+    toast("Couldn't build the label image.", "bad");
+  }finally{
+    btn.textContent = was; drawHead();
+  }
+};
+
+/* iOS gives no API for writing to the camera roll — it is always a human
+   action. Inside an embedded viewer even those actions get blocked, so say so. */
+function embedded(){
+  try{ return window.self !== window.top; }catch(e){ return true; }
+}
+function canShareFiles(blob, name){
+  try{
+    return !!(navigator.canShare &&
+      navigator.canShare({ files: [new File([blob], name, { type: "image/png" })] }));
+  }catch(e){ return false; }
+}
+function describeSave(ok){
+  const el = $("saveHow");
+  if(ok){
+    el.className = "hint";
+    el.innerHTML = "<b>Press and hold the label</b>, then tap <b>Save to Photos</b> \u2014 " +
+      "or use Share below. Either one puts it in your camera roll.";
+  } else {
+    el.className = "hint warn";
+    el.innerHTML = "This preview window blocks saving to Photos. Try <b>Open in browser</b>, " +
+      "then long-press the image there. If that fails, <b>Save to Files</b> and look in " +
+      "<b>Files \u2192 Browse \u2192 Downloads</b> (check both iCloud Drive and On My iPhone).";
+  }
+}
+
+$("shareImg").onclick = async () => {
+  if(!lastLabel) return;
+  try{
+    await navigator.share({ files: [new File([lastLabel.blob], lastLabel.name, { type: "image/png" })] });
+  }catch(err){
+    if(!(err && err.name === "AbortError")) toast("Sharing was blocked here — press and hold the label instead.", "bad");
+  }
+};
+
+/* Downloads get silently dropped by some embedded browsers. Opening the PNG
+   as its own page gives a plain image you can long-press and save. */
+$("openImg").onclick = () => {
+  if(!lastLabel) return;
+  const url = URL.createObjectURL(lastLabel.blob);
+  const win = window.open(url, "_blank");
+  if(!win){
+    toast("Your browser blocked the new tab. Try Share, or long-press the label.", "bad");
+    URL.revokeObjectURL(url);
+    return;
+  }
+  toast("Long-press the image there, then Save to Photos.", "good");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+};
+
+$("dlImg").onclick = () => {
+  if(!lastLabel) return;
+  const a = document.createElement("a");
+  a.href = lastLabel.dataUrl; a.download = lastLabel.name; a.click();
+  toast("In Files \u2192 Downloads. Tap it, then Share \u2192 Save Image.", "good");
+};
+
+$("sysprint").onclick = () => {
+  const root = $("printroot"), L = $("label"), home = L.parentNode;
+  root.appendChild(L);
+  const back = () => { home.appendChild(L); window.removeEventListener("afterprint", back); };
+  window.addEventListener("afterprint", back);
+  window.print();
+  setTimeout(() => { if(L.parentNode === root) back(); }, 1500);
+};
+
+async function shareSetupLink(){
+  const url = setupLink();
+  if(url.length > 8000){
+    toast("Catalog is too big for a link — use Export instead.", "bad"); return;
+  }
+  try{
+    if(navigator.share){ await navigator.share({ title: "Weigh & Label", url }); return; }
+    await navigator.clipboard.writeText(url);
+    toast("Link copied. Send it to whoever needs it.", "good");
+  }catch(err){
+    if(!(err && err.name === "AbortError")) toast("Couldn't copy — long-press the address bar instead.", "bad");
+  }
+}
+$("linkBtn").onclick  = shareSetupLink;
+$("linkBtn2").onclick = shareSetupLink;
+
+const MAX_PRODUCTS = 10;
+
+async function saveCatalog(){
+  const ok = await put("wl.products", S.products);
+  if(!ok) toast("This browser won't keep the list. Use Copy setup link to save it.", "bad");
+  drawStorageNote();
+  return ok;
+}
+
+function drawStorageNote(){
+  const el = $("storeNote");
+  if(!el) return;
+  const n = S.products.length;
+  if(backend){
+    el.textContent = n + " of " + MAX_PRODUCTS + " slots used. Shared with every phone on this link.";
+    el.className = "hint";
+    return;
+  }
+  const where = storageMode === "app"     ? "Saved on this device."
+              : storageMode === "browser" ? "Saved in this browser."
+              : storageMode === "memory"  ? "NOT saved — this list disappears when you close the tab."
+              : "";
+  el.textContent = n + " of " + MAX_PRODUCTS + " slots used. " + where;
+  el.className = "hint" + (storageMode === "memory" ? " warn" : "");
+}
+
+/* ---------------- products dialog ---------------- */
+const dP = $("dlgProducts"), dS = $("dlgSettings");
+$("openProducts").onclick = () => { drawList(); drawStorageNote(); dP.showModal(); };
+$("openSettings").onclick = () => { loadSettingsForm(); dS.showModal(); };
+document.querySelectorAll("[data-close]").forEach(b => b.onclick = e => e.target.closest("dialog").close());
+
+function clearForm(){
+  ["pName","pCode","pPrice","pNote"].forEach(i => $(i).value = "");
+  $("pUnit").value = "lb"; S.editing = null;
+  $("pSave").textContent = "Save product"; $("pCancel").hidden = true;
+}
+$("pCancel").onclick = clearForm;
+
+$("pSave").onclick = async () => {
+  const name = $("pName").value.trim();
+  const price = parseFloat($("pPrice").value);
+  if(!name){ $("pName").focus(); return; }
+  if(!isFinite(price) || price < 0){ $("pPrice").focus(); return; }
+  const rec = { id: S.editing || ("p" + Date.now()), name, code: $("pCode").value.trim(),
+                price, unit: $("pUnit").value, note: $("pNote").value.trim() };
+  const at = S.products.findIndex(x => x.id === rec.id);
+  if(at > -1){
+    S.products[at] = rec;
+  } else {
+    if(S.products.length >= MAX_PRODUCTS){
+      toast("That's all " + MAX_PRODUCTS + " slots. Delete one to add another.", "bad");
+      return;
+    }
+    S.products.push(rec);
+  }
+  if(S.sel && S.sel.id === rec.id) S.sel = rec;
+  clearForm(); await saveCatalog(); drawList(); drawAll();
+};
+
+function drawList(){
+  const box = $("pList"); box.innerHTML = "";
+  S.products.forEach(p => {
+    const row = document.createElement("div");
+    row.className = "item";
+    row.innerHTML = '<div class="grow"><b></b><span></span></div>' +
+                    '<button class="btn">Edit</button><button class="x" title="Delete">&times;</button>';
+    row.querySelector("b").textContent = p.name;
+    row.querySelector("span").textContent =
+      (p.code ? p.code + " · " : "") + money(p.price) + (isCount(p.unit) ? " each" : " per " + p.unit);
+    row.querySelector(".btn").onclick = () => {
+      S.editing = p.id; $("pName").value = p.name; $("pCode").value = p.code || "";
+      $("pPrice").value = p.price; $("pUnit").value = p.unit;
+      $("pNote").value = p.note || "";
+      $("pSave").textContent = "Update product"; $("pCancel").hidden = false;
+      $("pName").focus();
+    };
+    row.querySelector(".x").onclick = async () => {
+      S.products = S.products.filter(x => x.id !== p.id);
+      if(S.sel && S.sel.id === p.id){ S.sel = null; clearQty(); }
+      if(S.editing === p.id) clearForm();
+      await saveCatalog(); drawList(); drawAll();
+    };
+    box.appendChild(row);
+  });
+}
+
+/* export / import */
+$("expBtn").onclick = () => {
+  const blob = new Blob([JSON.stringify({products:S.products, cfg:S.cfg}, null, 2)],
+                        {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "weigh-label-catalog.json";
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$("impBtn").onclick = () => $("impFile").click();
+$("impFile").onchange = async e => {
+  const f = e.target.files[0]; if(!f) return;
+  try{
+    const d = JSON.parse(await f.text());
+    if(Array.isArray(d.products)) S.products = d.products;
+    if(d.cfg) Object.assign(S.cfg, d.cfg);
+    await saveCatalog(); await put("wl.cfg", S.cfg);
+    drawList(); loadSettingsForm(); drawAll();
+  }catch(err){ alert("That file isn't a catalog this app can read."); }
+  e.target.value = "";
+};
+
+/* ---------------- settings dialog ---------------- */
+function loadSettingsForm(){
+  $("sPreset").value = S.cfg.preset;
+  $("customSize").hidden = S.cfg.preset !== "custom";
+  $("sW").value = S.cfg.w; $("sH").value = S.cfg.h;
+  $("sOrg").value = S.cfg.org; $("sLine").value = S.cfg.line;
+  $("sQR").value = S.cfg.qr; $("sQRsize").value = String(S.cfg.qrsize);
+  $("sQRcap").value = S.cfg.qrcap; $("sDate").value = S.cfg.showdate ? "yes" : "no";
+  $("sType").value = String(S.cfg.type);
+  $("sLogo").value = S.cfg.logo ? "yes" : "no";
+  checkQR();
+}
+async function saveCfg(){
+  await put("wl.cfg", S.cfg);
+  drawAll();
+  if(backend) pushCatalog().catch(() => {});
+}
+
+$("sPreset").onchange = e => {
+  S.cfg.preset = e.target.value;
+  if(S.cfg.preset !== "custom"){
+    const [w,h] = S.cfg.preset.split("x").map(Number);
+    S.cfg.w = w; S.cfg.h = h;
+    $("sW").value = w; $("sH").value = h;
+  }
+  $("customSize").hidden = S.cfg.preset !== "custom";
+  saveCfg();
+};
+["sW","sH"].forEach(id => $(id).oninput = () => {
+  const w = parseFloat($("sW").value), h = parseFloat($("sH").value);
+  if(w >= 10) S.cfg.w = w;
+  if(h >= 10) S.cfg.h = h;
+  saveCfg();
+});
+$("sOrg").oninput  = e => { S.cfg.org  = e.target.value; saveCfg(); };
+$("sLine").oninput = e => { S.cfg.line = e.target.value; saveCfg(); };
+$("sQR").oninput   = e => { S.cfg.qr = e.target.value; checkQR(); saveCfg(); };
+$("sQRsize").onchange = e => { S.cfg.qrsize = parseFloat(e.target.value); saveCfg(); };
+$("sQRcap").oninput   = e => { S.cfg.qrcap = e.target.value; saveCfg(); };
+$("sDate").onchange   = e => { S.cfg.showdate = e.target.value === "yes"; saveCfg(); };
+$("sType").onchange   = e => { S.cfg.type = parseFloat(e.target.value); saveCfg(); };
+$("sLogo").onchange   = e => { S.cfg.logo = e.target.value === "yes"; saveCfg(); };
+
+/* a long URL means more modules, and modules get unscannable fast at 203 dpi */
+function checkQR(){
+  const el = $("qrWarn"); if(!el) return;
+  const n = (S.cfg.qr.trim() === "" ? QR_PLACEHOLDER : fill(S.cfg.qr)).length;
+  if(n <= 47){ el.hidden = true; return; }
+  el.hidden = false;
+  el.className = "hint warn";
+  el.textContent = n + " characters is long for a " + S.cfg.qrsize +
+    " mm code. Shorten the link or the printer won't resolve the squares.";
+}
+
+/* ---------------- boot ---------------- */
+(async function boot(){
+  const p = await get("wl.products");
+  if(Array.isArray(p)) S.products = p;
+  const c = await get("wl.cfg");
+  if(c) Object.assign(S.cfg, c);
+  const e = await get("wl.entry");
+  if(typeof e === "string" && ENTRY.some(x => x.id === e)) S.entry = e;
+
+  // someone opened a setup link
+  const frag = (location.hash || "").match(/^#c=(.+)$/);
+  if(frag){
+    try{
+      const d = decodeSetup(frag[1]);
+      const n = Array.isArray(d.products) ? d.products.length : 0;
+      if(!S.products.length || confirm("Replace the " + S.products.length +
+          " product(s) on this phone with the " + n + " from this link?")){
+        if(Array.isArray(d.products)) S.products = d.products;
+        if(d.cfg) Object.assign(S.cfg, d.cfg);
+        if(d.entry) S.entry = d.entry;
+        await put("wl.products", S.products);
+        await put("wl.cfg", S.cfg);
+        await put("wl.entry", S.entry);
+        toast("Loaded " + n + " product(s) from the link.", "good");
+      }
+    }catch(err){ toast("That setup link was unreadable.", "bad"); }
+    history.replaceState(null, "", location.pathname);
+  }
+
+  // probe storage once so the status line is truthful before any edit
+  await put("wl.probe", Date.now());
+  drawAll(); drawStorageNote();
+
+  // if an Empire backend is serving this page, its catalog wins
+  if(await probeBackend()){
+    try{
+      await pullCatalog();
+      await put("wl.products", S.products);
+      await put("wl.cfg", S.cfg);
+      drawAll(); drawList(); drawStorageNote();
+    }catch(err){
+      toast("Server catalog unavailable — using this phone's copy.", "bad");
+    }
+  }
+})();
+</script>
+</body>
+</html>

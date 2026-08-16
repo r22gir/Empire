@@ -671,3 +671,9 @@ except Exception as e:
 
 # TranscriptForge — Legal/High-Risk Transcription Pipeline
 load_router("app.routers.transcriptforge", "", ["transcriptforge"])
+
+# Label Station — Weigh & Label PWA
+from app.modules.label_station import router as label_station_router
+
+app.include_router(label_station_router)
+print("✓ Loaded: /label")
