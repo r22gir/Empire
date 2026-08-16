@@ -287,6 +287,45 @@ SAFE_CLAIM_PHRASES = [
 OPERATIONAL_CLAIM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in OPERATIONAL_CLAIM_PHRASES]
 SAFE_CLAIM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in SAFE_CLAIM_PHRASES]
 
+
+# ── 2026-08-16 (F3) ── Present-tense action claims ─────────────────
+# Pre-F3, the runtime only caught past-tense operational claims
+# ("I sent", "I created", etc.). The model could emit "Sending now."
+# or "Done." without any tool call, and the response shipped. The
+# 2026-08-16 truth sweep classified this as a FABRICATED ACTION
+# (Class 1). The new patterns require proof for present-tense
+# action claims the same way past-tense claims require proof.
+#
+# A claim is "present-tense action" if:
+#   - subject is "I" / "I'm" / "I am" + a present-progressive verb, OR
+#   - a bare deliverable noun (Sending / Done / Sent / Created / Posted
+#     / Approved / Rejected / Deployed / Dispatched / Delivered / Emailed
+#     / Submitted / On it / Will do) appears as a standalone sentence
+#     or final clause.
+#
+# These trigger the same fail-closed path as past-tense claims.
+PRESENT_CLAIM_PHRASES = [
+    # "I'm sending" / "I'm creating" / "I'm dispatching" / ...
+    r"\bI'm\s+(sending|creating|dispatching|running|executing|deploying|posting|uploading|submitting|adding|saving|building|setting up|attaching|completing|starting|launching|finalizing|pushing|writing|updating|approving|rejecting|delivering|shipping|emailing|emailed|sending it|doing it)\b",
+    # "I am sending" / "I am creating" / ...
+    r"\bI am\s+(sending|creating|dispatching|running|executing|deploying|posting|uploading|submitting|adding|saving|building|setting up|attaching|completing|starting|launching|finalizing|pushing|writing|updating|approving|rejecting|delivering|shipping|emailing)\b",
+    # Bare present-progressive as a clause opener
+    r"\b(Sending|Creating|Dispatching|Executing|Deploying|Submitting|Approving|Rejecting|Saving|Pushing|Emailing|Finalizing|Updating|Completing|Enqueueing|Queuing)\s+(it|that|this|now|right now)\b",
+    # Standalone deliverable-noun sentence
+    r"^\s*(Done|Completed|Sent|Dispatched|Created|Delivered|Emailed|Submitted|Approved|Rejected|Deployed|Posted|Uploaded|Queued|Scheduled)\.?\s*$",
+    r"^\s*Done!\s*$",
+    # Soft commitments
+    r"^\s*On it\.?\s*$",
+    r"^\s*Will do\.?\s*$",
+    r"^\s*Processing\.?\s*$",
+    # "Sending now" / "Doing now" standalone
+    r"\b(Sending|Doing|Dispatching|Executing|Deploying|Submitting|Emailing) now\b\.?",
+]
+
+# Compile.
+PRESENT_CLAIM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in PRESENT_CLAIM_PHRASES]
+
+
 # Tool keys that count as proof for an operational claim.
 # Any entry in tool_results with a tool key that matches one of these
 # prefixes OR an exact name is considered a valid proof object.
@@ -340,6 +379,28 @@ PROOF_TOOL_EXACT = frozenset({
     "code_mode_honesty",
     "accuracy_monitor",
     "grounding_verification",
+    # 2026-08-16 (F3) — read-path data tools count as proof for claims
+    # about the data the model returns. Without these, the runtime
+    # could not verify an "✅ Verified" badge after a search_quotes call.
+    # Per the H48 fix in the 2026-08-16 truth sweep — these are the
+    # canonical read-path tools for Empire Workroom + WoodCraft.
+    "search_quotes",
+    "get_quote",
+    "search_contacts",
+    "get_contact",
+    "get_tasks",
+    "get_desk_status",
+    "list_quotes_awaiting_review",
+    "show_quote_for_review",
+    "search_conversations",
+    "get_services_health",
+    "get_system_stats",
+    "get_weather",
+    "search_inventory",
+    "get_inventory_item",
+    "search_invoices",
+    "search_payments",
+    "search_customers",
 })
 
 
@@ -455,6 +516,71 @@ def _claim_failure_reason(claim_phrase: str) -> str:
         f"Claim '{claim_phrase}' has no structured proof object. "
         f"MAX must say 'I have not run that yet.' or include a real tool result."
     )
+
+
+def _response_has_present_claim(response_text: str) -> Optional[str]:
+    """Return the matched present-tense action claim, or None.
+
+    2026-08-16 (F3) — present-tense action claims require proof the same
+    way past-tense claims do. Without this, the model could emit "Sending
+    now." or "Done." without ever calling a tool and the response
+    shipped. See PRESENT_CLAIM_PHRASES for the allowlist.
+    """
+    if not response_text:
+        return None
+    for pat in PRESENT_CLAIM_PATTERNS:
+        m = pat.search(response_text)
+        if m:
+            return m.group(0)
+    return None
+
+
+def _present_claim_failure_reason(claim_phrase: str) -> str:
+    """Format a failure reason for an unsupported present-tense action claim."""
+    return (
+        f"Present-tense action claim {claim_phrase!r} has no structured proof object. "
+        f"MAX must include a real tool result or downgrade to a future-tense phrasing "
+        f"(e.g., 'I will send', 'I can send')."
+    )
+
+
+_BADGE_VERIFIED_RE = re.compile(r"✅\s*[Vv]erified")
+_HAS_BADGE_RE = re.compile(r"✅|Verified", re.IGNORECASE)
+
+
+def strip_unverified_badge(
+    response_text: str | None,
+    tool_results: list | None,
+) -> tuple[str, list[str]]:
+    """Strip or downgrade "✅ Verified" badges that lack runtime proof.
+
+    2026-08-16 (F3) — the runtime truth gate fail-closes on text claims
+    (replaces the response with a failure message). However, the "✅ Verified"
+    badge is a model-emitted decoration that the runtime does NOT
+    authoritatively produce. Pre-F3, the model could emit the badge even
+    when no proof tool was called (e.g., after a search_quotes call that
+    legitimately does NOT count as proof under the old PROOF_TOOL_EXACT
+    allowlist). The strip is a soft fail-closed: replace "✅ Verified"
+    with "⚠️ Unverified" so the founder sees the runtime flag.
+
+    Returns (cleaned_text, warnings). The cleaned text is unchanged
+    if no badge is present, or if proof IS found.
+    """
+    warnings: list[str] = []
+    if not response_text:
+        return response_text or "", warnings
+    if not _HAS_BADGE_RE.search(response_text):
+        return response_text, warnings
+    if _has_proof(tool_results):
+        return response_text, warnings
+    cleaned = _BADGE_VERIFIED_RE.sub("⚠️ Unverified", response_text)
+    if cleaned != response_text:
+        warnings.append("stripped_unverified_badge")
+        logger.warning(
+            "[runtime_truth_enforcer] Stripped unverified ✅ Verified badge "
+            "(no proof tool in tool_results) — replaced with ⚠️ Unverified"
+        )
+    return cleaned, warnings
 
 
 # ── HOTFIX 2026-07-16 (a): helpers ───────────────────────────────────
@@ -697,6 +823,22 @@ def runtime_truth_failures(
                 f"PIN in chat: {pin_match!r}"
             )
 
+    # Failure mode 6 (2026-08-16 F3): present-tense action claims.
+    # Pre-F3, the runtime only caught past-tense claims ("I sent", "I
+    # created"). The model could emit "Sending now." or "Done." without
+    # ever calling a tool and the response shipped. Caught as a
+    # fabricated action (Class 1) in the 2026-08-16 truth sweep. Treat
+    # present-tense action claims the same as past-tense ones: require
+    # a structured proof object in tool_results.
+    if response_text:
+        present_claim = _response_has_present_claim(response_text)
+        if present_claim and not _has_proof(tool_results):
+            failures.append(_present_claim_failure_reason(present_claim))
+            logger.warning(
+                f"runtime_truth_failures: blocking response with unverified "
+                f"present-tense action claim {present_claim!r}"
+            )
+
     return failures, warnings
 
 
@@ -746,10 +888,18 @@ def enforce_runtime_truth_response(
 
     Hotfix 2026-07-15: return shape changed to tuple[str, list[str]]
     so callers can surface theater-detector warnings in metadata.
+
+    2026-08-16 (F3): even when no claim failure fires, the runtime
+    strips a model-emitted "✅ Verified" badge that lacks a proof
+    object, replacing it with "⚠️ Unverified" (failure mode 7). The
+    badge is a model decoration; the runtime owns its truthfulness.
     """
     failures, warnings = runtime_truth_failures(
         tool_results, user_message=user_message, response_text=response_text
     )
     if failures:
         return runtime_truth_failure_message(failures), warnings
-    return response_text, warnings
+    # F3: strip the badge even when no claim failure fired
+    cleaned, badge_warnings = strip_unverified_badge(response_text, tool_results)
+    warnings.extend(badge_warnings)
+    return cleaned, warnings
