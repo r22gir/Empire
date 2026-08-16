@@ -58,25 +58,29 @@ def test_h44_legacy_post_accept_uses_canonical():
 
 def test_h44_search_quotes_tagged_canonical():
     """The search_quotes tool tags each result with source='canonical'."""
-    r = requests.post(
-        f"{API_BASE}/api/v1/max/chat",
-        json={
-            "message": "search_quotes for status proposal",
-            "channel": "web",
-            "chat_id": "h44-test",
-            "conversation_id": "h44-canonical-test",
-        },
-        timeout=180,
-    )
-    assert r.status_code == 200
+    # The model is non-deterministic — retry once if it doesn't call the tool.
     found_canonical = False
-    for tr in r.json().get("tool_results") or []:
-        if tr.get("tool") == "search_quotes":
-            for q in tr.get("result", {}).get("quotes", []):
-                if q.get("source") == "canonical":
-                    found_canonical = True
-                    break
-    assert found_canonical, "search_quotes returned no canonical-tagged results"
+    for attempt in range(2):
+        r = requests.post(
+            f"{API_BASE}/api/v1/max/chat",
+            json={
+                "message": "search_quotes for status proposal",
+                "channel": "web",
+                "chat_id": "h44-test",
+                "conversation_id": f"h44-canonical-test-{attempt}",
+            },
+            timeout=180,
+        )
+        assert r.status_code == 200
+        for tr in r.json().get("tool_results") or []:
+            if tr.get("tool") == "search_quotes":
+                for q in tr.get("result", {}).get("quotes", []):
+                    if q.get("source") == "canonical":
+                        found_canonical = True
+                        break
+        if found_canonical:
+            break
+    assert found_canonical, "search_quotes returned no canonical-tagged results (after 2 attempts)"
 
 
 def test_h44_get_quote_tool_returns_canonical():
