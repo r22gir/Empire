@@ -118,6 +118,66 @@ def _window_conversation(history: list[dict]) -> list[dict]:
     return [context_msg] + recent
 
 
+def _build_replay_messages(
+    windowed_history: list[dict],
+    conversation_id: str | None,
+    current_message: str,
+    max_replay_turns: int = 3,
+) -> list:
+    """Build the model's messages array for the chat path.
+
+    PHASE 2 · F1 (H48 fix). Replaces the naive
+    ``[AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]``
+    pattern at router.py:2366 / :3132. The original dropped the
+    ``tool_results`` field from previous turns; this helper re-injects
+    the most recent N turns' tool results as a system-prompt-style user
+    message so the model can see what previous turns actually observed.
+
+    Windowing-aware: the dialogue history is already windowed by
+    ``_window_conversation`` (recent verbatim, older summarized). The
+    tool_results replay is independent — bounded by ``max_replay_turns``
+    so the prompt stays within budget.
+
+    Used by both /chat (:2366) and /chat/stream (:3132) so the same
+    UX applies regardless of door.
+    """
+    messages = [AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]
+    if conversation_id:
+        try:
+            from app.services.max.chat_session import (
+                load_recent_turns,
+                format_replay_block,
+            )
+            recent = load_recent_turns(conversation_id, max_turns=max_replay_turns)
+            block = format_replay_block(recent)
+            if block:
+                messages.append(AIMessage(role="user", content=block))
+        except Exception as exc:
+            logger.debug(f"[chat_session] replay load failed: {exc}")
+    messages.append(AIMessage(role="user", content=current_message))
+    return messages
+
+
+def _record_session_turn(
+    conversation_id: str | None,
+    role: str,
+    content: str,
+    tool_results: list | None,
+) -> None:
+    """Persist one turn to the chat session store.
+
+    Best-effort: a DB failure must not break the chat response. Used
+    by both /chat and /chat/stream for symmetry with the replay helper.
+    """
+    if not conversation_id:
+        return
+    try:
+        from app.services.max.chat_session import record_turn
+        record_turn(conversation_id, role, content, tool_results)
+    except Exception as exc:
+        logger.debug(f"[chat_session] record failed: {exc}")
+
+
 async def _safe_background(coro, label: str):
     """Run a coroutine in background, logging any errors without crashing."""
     try:
@@ -2363,8 +2423,12 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         if len(windowed_history) < len(request.history):
             logger.info(f"Conversation windowed: {len(request.history)} -> {len(windowed_history)} messages")
 
-        messages = [AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]
-        messages.append(AIMessage(role="user", content=request.message))
+        # PHASE 2 · F1 — windowing-aware replay with prior tool_results
+        messages = _build_replay_messages(
+            windowed_history,
+            request.conversation_id,
+            request.message,
+        )
         model = None
         if request.model:
             try:
@@ -2953,6 +3017,13 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # Prevent phone/browser caching stale responses
         http_response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         http_response.headers["Pragma"] = "no-cache"
+
+        # PHASE 2 · F1 — persist this turn so the next request can replay
+        # the tool_results. Best-effort: a DB failure here MUST NOT break
+        # the response. Recording happens for both doors identically.
+        _record_session_turn(conv_id, "user", request.message, None)
+        _record_session_turn(conv_id, "assistant", final_content, tool_results_list)
+
         return resp
     except asyncio.TimeoutError:
         # The 45s / configured cap was hit. Be truthful: the primary
@@ -3129,8 +3200,13 @@ async def chat_stream(request: ChatRequest):
     if len(windowed_history) < len(request.history):
         logger.info(f"[stream] Conversation windowed: {len(request.history)} -> {len(windowed_history)} messages")
 
-    messages = [AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]
-    messages.append(AIMessage(role="user", content=request.message))
+    # PHASE 2 · F1 — same helper as /chat, so both doors rebuild
+    # tool_results-aware context identically.
+    messages = _build_replay_messages(
+        windowed_history,
+        request.conversation_id,
+        request.message,
+    )
     model = None
     if request.model:
         try:
@@ -3598,6 +3674,11 @@ async def chat_stream(request: ChatRequest):
             if _quality_badge:
                 _done_data['quality'] = _quality_badge
             yield f"data: {json.dumps(_done_data)}\n\n"
+
+            # PHASE 2 · F1 — persist this turn so the next request can
+            # replay the tool_results. Mirrors the /chat side. Best-effort.
+            _record_session_turn(conv_id, "user", request.message, None)
+            _record_session_turn(conv_id, "assistant", full_response, tool_results_list)
         except Exception as e:
             logger.error(f"Stream error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
