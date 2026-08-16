@@ -183,6 +183,22 @@ def _quote_path(quote_id: str) -> str:
 
 
 def _load_quote(quote_id: str) -> dict:
+    """Load a quote. PHASE 2 · F5-H44: try canonical `quotes_v2` SQL
+    first; fall back to legacy JSON only if the canonical lookup fails.
+
+    The canonical SQL store (quotes_v2) is the single source of truth
+    per the F5-H44 fix. The legacy JSON files at QUOTES_DIR are an
+    audit-only mirror (pre-consolidation records); they are NOT
+    silently deleted. This loader prefers canonical so callers never
+    see stale data.
+    """
+    try:
+        from app.services.quote_service import get_quote as _qs_get_quote
+        q = _qs_get_quote(quote_id)
+        if q:
+            return q
+    except Exception:
+        pass
     path = _quote_path(quote_id)
     if not os.path.exists(path):
         raise HTTPException(404, f"Quote {quote_id} not found")
