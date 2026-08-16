@@ -63,42 +63,48 @@ QUOTE_NUMBER_RE = re.compile(r"\bEST-\d{4}-\d{3}\b")
 # language prompts; explicit JSON-shape PIN entry (e.g. {"pin": ...})
 # in tool-call-shaped prose is the theater detector's territory.
 PIN_REQUEST_PATTERNS = (
-    # PIN-keyword patterns — covers "what's the pin", "give me the
-    # founder pin", "enter your pin", "tell me the pin", "what's the
-    # founder pin now", etc. The optional privilege noun (founder /
-    # admin / owner) slots between the determiner and the keyword.
+    # PHASE 2 · F5.3 H50 — expanded to catch "Drop me your founder PIN"
+    # and other imperative phrasings. The pre-F5.3 pattern only matched
+    # give/send/tell/enter/need/share/provide. Added "drop" + "paste"
+    # + "type" + "post" + "hand over" + "do you have" + "what's your".
     re.compile(
         r"\b(?:"
-        # Question forms: "what is the founder pin"
-        r"what(?:'s| is)\s+(?:the\s+|your\s+|that\s+)?(?:founder\s+|admin\s+|owner\s+|approval\s+)?pin\b"
-        r"|"
-        # Imperative forms: "give me the pin", "give me the founder pin",
-        # "enter your pin", "enter the founder pin", "tell me the
-        # pin", "tell me your pin", "need the pin", "need the
-        # founder pin"
-        r"(?:give|send|tell|enter|need|share|provide)\s+"
-        r"(?:me\s+|us\s+)?"
-        r"(?:the\s+|your\s+|that\s+|my\s+our\s+)?"
-        r"(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
-        r"pin\b"
-        r")",
-        re.IGNORECASE,
-    ),
-    # OTP / verification-code patterns — covering same verbs + bare
-    # "what's the otp" form. The CODE suffix is optional; "otp" alone
-    # is enough.
-    re.compile(
-        r"\b(?:"
-        r"(?:send|share|provide|give|tell)\s+"
-        r"(?:me\s+|us\s+)?"
-        r"(?:the\s+|your\s+|that\s+)?"
+        # Question forms: "what is the founder pin", "do you have the pin"
+        r"(?:what(?:'s| is)|do\s+you\s+have|do\s+you\s+know|where\s+is|where's)\s+"
+        r"(?:the\s+|your\s+|that\s+|my\s+|our\s+)?"
         r"(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
         r"(?:pin|otp|verification\s+code|verification\s+token)\b"
         r"|"
-        r"what(?:'s| is)\s+(?:the\s+|your\s+|that\s+)?"
+        # Imperative forms: "give me the pin", "drop me your pin",
+        # "paste the pin", "send me the pin", "tell me the pin",
+        # "enter your pin", "share the pin", "post the pin",
+        # "type the pin", "type in the pin", "hand over the founder
+        # pin", "I need the pin"
+        r"(?:give|send|tell|enter|need|share|provide|drop|paste|post|type|hand)\s+"
+        r"(?:in\s+|out\s+|me\s+|us\s+|over\s+)?"
+        r"(?:the\s+|your\s+|that\s+|my\s+|our\s+)?"
         r"(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
-        r"(?:otp|verification\s+code|verification\s+token)\b"
+        r"(?:pin|otp|verification\s+code|verification\s+token)\b"
         r")",
+        re.IGNORECASE,
+    ),
+    # Bare "your PIN" / "the founder PIN" / "your OTP" in a request
+    # context — catches "do you have your PIN ready?" style phrasings.
+    re.compile(
+        r"\b(?:"
+        r"(?:send|share|provide|give|tell|drop|paste|post|type)\s+"
+        r"(?:me\s+|us\s+|over\s+)?"
+        r"(?:the\s+|your\s+|that\s+|my\s+|our\s+)?"
+        r"(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
+        r"(?:pin|otp|verification\s+code|verification\s+token)\b"
+        r")",
+        re.IGNORECASE,
+    ),
+    # Bare request: "Founder PIN please" / "PIN?" / "founder PIN right now"
+    re.compile(
+        r"\b(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
+        r"(?:pin|otp|verification\s+code|verification\s+token)"
+        r"(?:\s+please|[\s\?\.\!,\)]*$|\s+(?:now|right\s+now|here))",
         re.IGNORECASE,
     ),
 )
