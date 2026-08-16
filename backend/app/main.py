@@ -122,6 +122,13 @@ load_router("app.routers.crypto_payments", "/api/v1/crypto-payments", ["crypto"]
 load_router("app.routers.economic", "/api/v1/economic", ["economic"])
 load_router("app.routers.chat_backup", "/api/v1/chat-backup", ["chat-backup"])
 load_router("app.routers.memory", "/api/v1", ["memory"])
+# PHASE 2 · F5-H43 — Portal button compat. Mounted BEFORE the legacy
+# quotes.py so FastAPI dispatches its routes in preference to the
+# broken legacy implementations (which read stale-fork JSON). The
+# compat router covers /quotes/{id}/accept, /send, /pdf, DELETE,
+# /jobs/from-quote, /finance/invoices/from-quote. The legacy quotes.py
+# still handles everything else it already handled correctly.
+load_router("app.routers.portal_button_compat", "/api/v1", ["portal-button-compat"])
 load_router("app.routers.quotes", "/api/v1", ["quotes"])
 load_router("app.routers.quotes_v2", "/api/v1", ["quotes-v2"])
 load_router("app.routers.pricing", "/api/v1", ["pricing"])
