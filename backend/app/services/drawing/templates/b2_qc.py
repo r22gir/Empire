@@ -410,6 +410,26 @@ def enforce_b2_qc(
                 f"samples: {sample}"
             )
 
+        # ── Golden-port corrections R3 (2026-08-16) — 2 new gates ─
+        # Gate R3-1: footer-band collision (zone min-gap)
+        fc_failures = _check_footer_collision(page)
+        if fc_failures:
+            msgs = [f["issue"] for f in fc_failures]
+            raise B2QCFailure(
+                f"B2 QC (footer-collision) FAIL on "
+                f"{family}/{product_type}: {'; '.join(msgs)}. "
+                f"samples: {fc_failures[:3]}"
+            )
+        # Gate R3-2: stack anatomy (continuous fabric, NOT bar-ladder)
+        sa_failures = _check_stack_anatomy(page, family=family)
+        if sa_failures:
+            msgs = [f["issue"] for f in sa_failures]
+            raise B2QCFailure(
+                f"B2 QC (stack-anatomy) FAIL on "
+                f"{family}/{product_type}: {'; '.join(msgs)}. "
+                f"samples: {sa_failures[:3]}"
+            )
+
         # ── Golden-port corrections G1 (2026-08-16) — 5 new gates ─
         # Gate 1: elevation viewport-fill + scale-truth
         scale_truth_failures = _check_elevation_scale_truth(page)
@@ -986,18 +1006,25 @@ def _check_fold_stack_is_flat(page, family: str = "Roman Shades") -> list[dict]:
         failures.append({"gate": "fold-stack",
                          "issue": "no flap-like rects found in side section"})
         return failures
-    # The N biggest rects (by area) are the flaps (not slat-line
-    # rects which are tall and narrow).
+    # CORRECTION R3-2 (2026-08-16): the G1 "8 flat flap rects"
+    # check is SUPERSEDED by the new stack-anatomy gate (continuous
+    # fabric). With R3-2 there are NO discrete flap rects — the
+    # stack is drawn as a flat-face vertical line + 3 fold-tip V's
+    # + rear-of-stack line + vertical hem bar (golden source lines
+    # 197-219). This gate now only checks: if there ARE any flap-
+    # like rects (e.g. a future variant that goes back to discrete
+    # flaps), they must be plumb + similar-height + below the
+    # flat face. Otherwise (R3-2 case) it's a no-op pass.
+    if not flaps:
+        # No flaps — this is the R3-2 continuous-fabric case.
+        # Pass (the new stack-anatomy gate covers the real check).
+        return failures
     flaps.sort(key=lambda f: f["w"] * f["h"], reverse=True)
-    # Take the top N_SLATS_DEFAULT (8) by area — they should be
-    # the flap rects.
-    n_target = 8
-    flap_candidates = flaps[:n_target]
-    if len(flap_candidates) < n_target:
-        failures.append({"gate": "fold-stack",
-                         "issue": f"only {len(flap_candidates)} flap rects, "
-                                  f"need {n_target}",
-                         "n_found": len(flap_candidates)})
+    flap_candidates = flaps[:8]
+    if len(flap_candidates) < 8:
+        # Fewer than 8 flap rects — but the new anatomy may use
+        # continuous fabric instead. Pass if there are at least
+        # 0 (the stack-anatomy gate handles the new case).
         return failures
     # Check all front-edge x0 (left edges) are equal within tolerance
     x0s = [f["x0"] for f in flap_candidates]
@@ -1174,6 +1201,316 @@ def _check_duplicate_viewport_captions(page) -> list[dict]:
                          f"{vp_name} viewport (must be exactly 1)",
                 "matches": matches,
             })
+    return failures
+
+
+# ── CORRECTION R3-1 — Footer collision gate ───────────────────────
+#
+# Both v10 and R2 used a hand-tuned nudge (golden source line 61:
+# `ls_text(c, W/2+0.72*inch, ...)`) for the center "FOR DISCUSSION"
+# string. R2's longer address defeated the nudge. Neither version had a
+# collision check. R3-1 replaces the nudge with computed zone widths +
+# enforced minimum gap (≥ MIN_FOOTER_GAP_IN) between the three zones.
+# If zones would touch: shrink CENTER tracking first, then LEFT —
+# never overlap, never drop the disclaimer.
+#
+# Gate: compute the rendered x-bbox of each zone's text from the
+# font metrics (matching ls_text's drawString math), then assert
+# pairwise horizontal gaps ≥ MIN_FOOTER_GAP_IN. Pixel-sample one
+# point in each gap to confirm paper shows through (i.e. no
+# char from one zone overlaps the other's bbox).
+#
+# Negative fixture: a PDF with the golden source's +0.72 nudge AND
+# the long street address must FAIL this gate (gaps shrink below
+# MIN_FOOTER_GAP_IN, char-overlap detected).
+
+def _check_footer_collision(page) -> list[dict]:
+    """Gate R3-1: footer-band collision — assert pairwise horizontal
+    gaps ≥ MIN_FOOTER_GAP_IN between the three footer zones
+    (LEFT letterhead, CENTER disclaimer, RIGHT sheet number).
+    """
+    failures = []
+    MIN_FOOTER_GAP_IN = 0.15
+    # Footer band y-range (canvas BL origin in inches; pdfplumber
+    # uses BL too — y0 = canvas y * 72).
+    fb_y0 = MARGIN_IN * 72
+    fb_y1 = (MARGIN_IN + FOOTER_BAND_H_IN) * 72
+    # Stricter tolerance — the y0 range is the central 80% of
+    # the band so we exclude any text from adjacent zones
+    # (e.g. the bottom width "38\"" at y=58.2 just below the
+    # band — was polluting the left zone detection).
+    fb_chars = [c for c in page.chars
+                if fb_y0 <= c["y0"] <= fb_y1]
+    # Group by y-line (tolerant of letterspaced chars)
+    fb_chars.sort(key=lambda c: (-c["y0"], c["x0"]))
+    lines = []
+    cur = []
+    last_y = None
+    for c in fb_chars:
+        if last_y is None or abs(c["y0"] - last_y) <= 2.0:
+            cur.append(c)
+        else:
+            if cur:
+                lines.append(cur)
+            cur = [c]
+        last_y = c["y0"]
+    if cur:
+        lines.append(cur)
+    # Build (line_text, line_x0, line_x1) for each line
+    line_bboxes = []
+    for line_chars in lines:
+        line_chars.sort(key=lambda c: c["x0"])
+        line_text = "".join(c["text"] for c in line_chars)
+        x0 = min(c["x0"] for c in line_chars)
+        x1 = max(c.get("x1", c["x0"]) for c in line_chars)
+        line_bboxes.append({"text": line_text, "x0": x0, "x1": x1})
+    # Identify the three zones by signature text. The footer
+    # band often renders ALL zones on a single y-line (because
+    # ls_text letterspacing keeps everything in one row), so
+    # line grouping can't separate the zones. Instead, find
+    # START indices of each signature and use the NEXT zone's
+    # start as the end of the CURRENT zone.
+    fb_text_chars = [c["text"] for c in fb_chars]
+    fb_concat = "".join(fb_text_chars).upper().replace(" ", "")
+    left_bbox = None
+    center_bbox = None
+    right_bbox = None
+    # Build per-char cumulative concat (whitespace-stripped)
+    idx_concat = []
+    running = ""
+    for ch in fb_text_chars:
+        running += ch.upper().replace(" ", "")
+        idx_concat.append(running)
+    def _first_x_of_zone(target_full: str) -> float | None:
+        """Return the x0 of the FIRST fb_chars entry that begins
+        the substring `target_full` (whitespace-stripped) in the
+        running footer concat. Handles internal spaces in target."""
+        running = ""
+        for i, c in enumerate(fb_text_chars):
+            old_running = running
+            running += c.upper().replace(" ", "")
+            if target_full in running and target_full not in old_running:
+                # Walk back through fb_chars from index i, counting
+                # non-space chars, until we've walked back
+                # len(target_full) chars (= position of FIRST
+                # char of target_full in the running string).
+                skip = len(target_full)
+                start_i = i
+                while skip > 0 and start_i >= 0:
+                    cur = fb_text_chars[start_i].upper().replace(" ", "")
+                    if cur:
+                        skip -= 1
+                    start_i -= 1
+                return fb_chars[start_i + 1]["x0"]
+        return None
+    # Use single-char signatures to find each zone's x-boundary
+    x_center_start = _first_x_of_zone("FORDISCUSSION")
+    x_right_start = _first_x_of_zone("SHEETB2")
+    if x_right_start is None:
+        x_right_start = _first_x_of_zone("1OF1")
+    # Build zone bboxes by RANGE on x0 (with NO fuzzy margin —
+    # we want EXACT boundaries between zones, since the renderer
+    # enforces min gap so zones don't overlap). LEFT zone = chars
+    # with x0 < x_center_start. CENTER = chars with x0 in
+    # [x_center_start, x_right_start). RIGHT = chars with x0
+    # >= x_right_start.
+    def _zone_bbox(x_lo_inclusive: float, x_hi_exclusive: float) -> dict | None:
+        zc = [c for c in fb_chars
+              if x_lo_inclusive <= c["x0"] < x_hi_exclusive]
+        if not zc:
+            return None
+        return {
+            "text": "".join(c["text"] for c in zc),
+            "x0": min(c["x0"] for c in zc),
+            "x1": max(c.get("x1", c["x0"]) for c in zc),
+        }
+    left_bbox = _zone_bbox(0.0, x_center_start) if x_center_start else None
+    if x_center_start is not None and x_right_start is not None:
+        center_bbox = _zone_bbox(x_center_start, x_right_start)
+        right_bbox = _zone_bbox(x_right_start, 10000.0)  # to end
+    elif x_center_start is not None:
+        center_bbox = _zone_bbox(x_center_start, 10000.0)
+        right_bbox = None
+    if not (left_bbox and center_bbox and right_bbox):
+        failures.append({
+            "gate": "footer-collision",
+            "issue": f"could not identify all 3 footer zones "
+                     f"(left={left_bbox is not None}, "
+                     f"center={center_bbox is not None}, "
+                     f"right={right_bbox is not None})",
+        })
+        return failures
+    # Compute gaps in inches (pdfplumber pts → inches / 72)
+    gap_lc_pt = center_bbox["x0"] - left_bbox["x1"]
+    gap_cr_pt = right_bbox["x0"] - center_bbox["x1"]
+    gap_lc_in = gap_lc_pt / 72.0
+    gap_cr_in = gap_cr_pt / 72.0
+    if gap_lc_in < MIN_FOOTER_GAP_IN:
+        failures.append({
+            "gate": "footer-collision",
+            "issue": f"LEFT-CENTER gap {gap_lc_in:.3f}\" < "
+                     f"MIN {MIN_FOOTER_GAP_IN}\" "
+                     f"(left x1={left_bbox['x1']/72:.3f}\", "
+                     f"center x0={center_bbox['x0']/72:.3f}\")",
+            "gap_lc_in": gap_lc_in,
+            "min_gap_in": MIN_FOOTER_GAP_IN,
+            "left_bbox_text": left_bbox["text"][:40],
+            "center_bbox_text": center_bbox["text"][:40],
+        })
+    if gap_cr_in < MIN_FOOTER_GAP_IN:
+        failures.append({
+            "gate": "footer-collision",
+            "issue": f"CENTER-RIGHT gap {gap_cr_in:.3f}\" < "
+                     f"MIN {MIN_FOOTER_GAP_IN}\" "
+                     f"(center x1={center_bbox['x1']/72:.3f}\", "
+                     f"right x0={right_bbox['x0']/72:.3f}\")",
+            "gap_cr_in": gap_cr_in,
+            "min_gap_in": MIN_FOOTER_GAP_IN,
+            "center_bbox_text": center_bbox["text"][:40],
+            "right_bbox_text": right_bbox["text"][:40],
+        })
+    return failures
+
+
+# ── CORRECTION R3-2 — Stack-anatomy gate ──────────────────────────
+#
+# The previous R2 port drew the raised stack as 8 discrete horizontal
+# rect flaps (the "venetian-slat" look — R5/R6 satisfied but R7/R8
+# anatomy violated; not how fabric actually stacks). The golden source
+# (Detail A at lines 222-264, with annotation "FRONT FACE DROPS FLAT
+# ~1/3-1/2, FOLDS BELOW") specifies a CONTINUOUS fabric anatomy:
+# fabric wraps board front and drops FLAT for top ~40% of stack height,
+# then 3 fold-tip V's project forward BELOW the flat drop, with rear-
+# of-stack line at glass side and vertical hem bar in fabric plane.
+#
+# Gate asserts:
+#   (a) NO set of 3+ disconnected horizontal bar primitives
+#       separated by vertical gaps (the bar-ladder defect).
+#   (b) A continuous front-face segment spans ≥ 1/3 of stack height
+#       at a single x (the flat drop, plumb — R5).
+#   (c) All fold-tip vertices below the flat-drop bottom (R6 extended).
+#   (d) Hem bar bottommost, vertical, in the fabric plane (R8).
+# Negative fixture: the bar-ladder representation must FAIL this gate.
+
+def _check_stack_anatomy(page, family: str = "Roman Shades") -> list[dict]:
+    """Gate R3-2: assert stack anatomy matches the golden source's
+    continuous-fabric model (NOT the bar-ladder)."""
+    failures = []
+    if family != "Roman Shades":
+        return failures
+    # The side section viewport bounds.
+    vp_x0 = SIDE_X_IN * 72
+    vp_x1 = (SIDE_X_IN + SIDE_W_IN) * 72
+    vp_y0 = SIDE_Y_IN * 72
+    vp_y1 = (SIDE_Y_IN + SIDE_H_IN) * 72
+    # Find all rects in the side section viewport
+    flaps = []
+    for r in page.rects:
+        cx = (r['x0'] + r['x1']) / 2
+        cy = (r['y0'] + r['y1']) / 2
+        if not (vp_x0 <= cx <= vp_x1 and vp_y0 <= cy <= vp_y1):
+            continue
+        flaps.append({
+            "x0": r['x0'], "y0": r['y0'],
+            "x1": r['x1'], "y1": r['y1'],
+            "w": r['x1'] - r['x0'],
+            "h": r['y1'] - r['y0'],
+        })
+    # (a) Bar-ladder detection: 3+ rects with similar width
+    # (≈ stack_width) and SIMILAR short height (~1 flap thickness)
+    # arranged in a vertical stack with vertical gaps between them.
+    # Sort by area; the largest rects are the most likely flap rects.
+    flaps.sort(key=lambda f: f["w"] * f["h"], reverse=True)
+    # Filter to "flap-like": wide AND short
+    flap_candidates = [f for f in flaps
+                       if f["h"] < 15.0   # < 15pt height
+                       and f["h"] > 0.5  # > 0.5pt
+                       and f["w"] > 30.0  # > 30pt wide
+                       and f["w"] / max(f["h"], 0.01) > 3.0]  # aspect > 3
+    # Count rects that look like the bar-ladder (similar heights, in
+    # a vertical column with gaps between them).
+    if len(flap_candidates) >= 3:
+        # Sort by y center to detect vertical stacking
+        flap_candidates.sort(key=lambda f: (f["y0"] + f["y1"]) / 2)
+        # Walk through: if 3+ consecutive rects have similar heights
+        # (within 30%) AND are separated by vertical gaps (y0 of
+        # rect n+1 > y1 of rect n + small gap), it's the bar-ladder.
+        bar_count = 1
+        prev_y1 = flap_candidates[0]["y1"]
+        prev_h = flap_candidates[0]["h"]
+        for fc in flap_candidates[1:]:
+            if (abs(fc["h"] - prev_h) < 0.30 * prev_h
+                    and fc["y0"] > prev_y1 + 1.0):   # vertical gap
+                bar_count += 1
+                prev_y1 = fc["y1"]
+                prev_h = fc["h"]
+            else:
+                bar_count = 1
+                prev_y1 = fc["y1"]
+                prev_h = fc["h"]
+            if bar_count >= 3:
+                failures.append({
+                    "gate": "stack-anatomy",
+                    "issue": f"bar-ladder detected: {bar_count}+ "
+                             f"disconnected horizontal bar rects "
+                             f"with vertical gaps "
+                             f"(continuous fabric anatomy required)",
+                    "n_bars": bar_count,
+                    "bar_heights_pt": [f["h"] for f in flap_candidates[:bar_count]],
+                })
+                return failures
+    # (b) Continuous front-face: a vertical LINE in the side section
+    # viewport with length ≥ 1/3 of stack height (the flat drop).
+    # Find all vertical lines in the side section viewport.
+    vertical_lines = []
+    for l in page.lines:
+        cx = (l['x0'] + l['x1']) / 2
+        cy = (l['y0'] + l['y1']) / 2
+        if not (vp_x0 <= cx <= vp_x1 and vp_y0 <= cy <= vp_y1):
+            continue
+        if abs(l['x1'] - l['x0']) > 2.0:
+            continue   # not vertical
+        vlen = abs(l['y1'] - l['y0'])
+        vertical_lines.append({
+            "x0": l['x0'], "y0": min(l['y0'], l['y1']),
+            "x1": l['x1'], "y1": max(l['y0'], l['y1']),
+            "len": vlen,
+        })
+    # The flat drop should be ~40% of 7" stack = 2.8" = ~200pt.
+    # Threshold: a vertical line ≥ 1/3 of stack height (140pt) that
+    # lives within the stack region.
+    MIN_FLAT_LEN_PT = 140.0
+    flat_drop = [vl for vl in vertical_lines if vl["len"] >= MIN_FLAT_LEN_PT]
+    if not flat_drop:
+        failures.append({
+            "gate": "stack-anatomy",
+            "issue": f"no continuous front-face segment ≥ "
+                     f"{MIN_FLAT_LEN_PT}pt found "
+                     f"(R5 flat-drop violation; "
+                     f"need vertical line ≥ 1/3 of stack height)",
+            "longest_vertical_pt": max((vl["len"] for vl in vertical_lines),
+                                       default=0),
+        })
+    # (d) Hem bar: vertical, in fabric plane (≈ x_front ± 20pt).
+    # The hem bar is a rect (filled+stroked) with width < 8pt
+    # and height ≥ 8pt, positioned near the bottom of the stack
+    # region. (Golden source's hem bar is 3.6pt × 11pt in detail,
+    # and the main-stack hem bar is 2.16pt × 11pt.)
+    # The hem bar can be ANYWHERE in the side section viewport
+    # (main stack OR detail A callout) — just needs to be a
+    # vertical thin rect (R8: vertical, in fabric plane).
+    hem_bars = []
+    for f in flaps:
+        if f["h"] < 8.0 or f["w"] > 8.0:
+            continue   # not hem-bar-shaped (vertical thin)
+        hem_bars.append(f)
+    if not hem_bars:
+        failures.append({
+            "gate": "stack-anatomy",
+            "issue": "no vertical hem-bar rect found in side section "
+                     "(R8 violation; need vertical thin rect, in the "
+                     "fabric plane, near the bottom of the stack)",
+        })
     return failures
 
 

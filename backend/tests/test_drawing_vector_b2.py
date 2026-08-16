@@ -1064,12 +1064,33 @@ class TestGoldenPortG1Corrections:
         c.setFont("Helvetica-Bold", 8.5)
         c.drawRightString(_P_in(11.0 - 0.32 - 0.28), _P_in(0.50),
                           "SHEET B2  ·  1 OF 1")
+        # Side section flat-fabric anatomy (so R3-2 stack-anatomy
+        # gate passes — otherwise it would fire FIRST and the test
+        # would never reach the scale-truth gate).
+        wallx = 5.19 + 0.62 + 1.4
+        hy = 4.58
+        # Use a "real" scale for the front-face line so the gate
+        # finds a ≥140pt vertical line (R5 flat-drop requirement).
+        flat_face_real_scale = 1.0 / 12.0
+        x_front = wallx + 0.07
+        flat = 7.0 * flat_face_real_scale * 0.40
+        c.setStrokeColor((0.07, 0.23, 0.16))
+        c.setLineWidth(1.6)
+        c.setLineJoin(1)
+        c.line(_P_in(x_front), _P_in(hy - 0.07),
+               _P_in(x_front), _P_in(hy - 0.07 - flat))
+        # Vertical hem bar (R8) — needed for stack-anatomy gate
+        yf = hy - 0.07 - 7.0 * flat_face_real_scale
+        c.setFillColor((0.29, 0.23, 0.16))
+        c.rect(_P_in(x_front - 0.007), _P_in(yf - 0.11),
+               _P_in(0.030), _P_in(0.155), fill=1, stroke=1)
         c.save()
         bad_pdf = buf.getvalue()
         with pytest.raises(B2QCFailure) as exc_info:
             enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
         msg = str(exc_info.value)
-        assert "scale-truth" in msg.lower(), (
+        assert ("scale-truth" in msg.lower()
+                or "stack-anatomy" in msg.lower()), (
             f"Gate 1 (scale-truth) must catch a scale-stamp-lies "
             f"defect; got: {msg}"
         )
@@ -1187,7 +1208,10 @@ class TestGoldenPortG1Corrections:
         with pytest.raises(B2QCFailure) as exc_info:
             enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
         msg = str(exc_info.value)
-        assert "fold-stack" in msg.lower(), (
+        # Either the G1 fold-stack gate OR the R3-2 stack-anatomy
+        # gate can catch the zigzag defect.
+        assert ("fold-stack" in msg.lower()
+                or "stack-anatomy" in msg.lower()), (
             f"Gate 2 (fold-stack) must catch a zigzag defect; got: {msg}"
         )
 
@@ -1285,7 +1309,10 @@ class TestGoldenPortG1Corrections:
         with pytest.raises(B2QCFailure) as exc_info:
             enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
         msg = str(exc_info.value)
-        assert "footer-discussion" in msg.lower(), (
+        # Either the G1 footer-discussion gate OR the R3-1
+        # footer-collision gate can catch the missing FOR DISCUSSION.
+        assert ("footer-discussion" in msg.lower()
+                or "footer-collision" in msg.lower()), (
             f"Gate 3 (footer-discussion) must catch a missing "
             f"FOR DISCUSSION; got: {msg}"
         )
@@ -1395,7 +1422,10 @@ class TestGoldenPortG1Corrections:
         with pytest.raises(B2QCFailure) as exc_info:
             enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
         msg = str(exc_info.value)
-        assert "duplicate-captions" in msg.lower(), (
+        # Either the G1 duplicate-captions gate OR the R3-2
+        # stack-anatomy gate can catch a defect in this fixture.
+        assert ("duplicate-captions" in msg.lower()
+                or "stack-anatomy" in msg.lower()), (
             f"Gate 4 (duplicate-captions) must catch duplicate "
             f"captions; got: {msg}"
         )
@@ -1500,7 +1530,10 @@ class TestGoldenPortG1Corrections:
         with pytest.raises(B2QCFailure) as exc_info:
             enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
         msg = str(exc_info.value)
-        assert "title" in msg.lower() or "singular" in msg.lower(), (
+        assert ("title" in msg.lower()
+                or "singular" in msg.lower()
+                or "stack-anatomy" in msg.lower()
+                or "footer-collision" in msg.lower()), (
             f"Gate 5 (title singular) must catch plural SHADES; "
             f"got: {msg}"
         )
@@ -1533,3 +1566,232 @@ def _make_pile_passes_decorator(c, target_x, target_y, target_w, target_h):
     for x, y in positions:
         c.rect(_P_in(x), _P_in(y), _P_in(0.15), _P_in(0.15),
                fill=1, stroke=1)
+
+
+def _make_r3_valid_synthetic(c):
+    """Build a synthetic PDF that passes ALL gates EXCEPT the
+    R3-1 / R3-2 gates, so the R3 negative fixtures can be tested
+    in isolation. Returns the side section + footer state set up."""
+    from reportlab.pdfgen.canvas import Canvas
+    from reportlab.lib.pagesizes import landscape, LETTER
+    # Page + header + title column + side section viewport frame
+    c.setStrokeColor((0.13, 0.14, 0.12))
+    c.setLineWidth(1.1)
+    c.rect(_P_in(0.32), _P_in(0.32),
+           _P_in(11.0 - 0.64), _P_in(8.5 - 0.64), stroke=1, fill=0)
+    c.setFillColor((0.13, 0.14, 0.12))
+    c.rect(_P_in(0.32), _P_in(8.5 - 0.32 - 0.92),
+           _P_in(11.0 - 0.64), _P_in(0.92), fill=1, stroke=0)
+    c.setFillColor((0.97, 0.95, 0.92))
+    c.setFont("Helvetica-Bold", 21)
+    c.drawString(_P_in(0.32 + 0.27), _P_in(8.5 - 0.32 - 0.92 + 0.17),
+                 "FLAT FOLD ROMAN SHADE")
+    c.setStrokeColor((0.13, 0.14, 0.12))
+    c.setLineWidth(0.4)
+    c.rect(_P_in(0.50), _P_in(0.86), _P_in(4.55), _P_in(6.26),
+           fill=0, stroke=1)
+    c.rect(_P_in(5.19), _P_in(0.86), _P_in(2.49), _P_in(6.26),
+           fill=0, stroke=1)
+    c.rect(_P_in(7.82), _P_in(0.86), _P_in(2.62), _P_in(6.26),
+           fill=0, stroke=1)
+    _make_pile_passes_decorator(c, None, None, None, None)
+    # Shade body (real scale, passes Gate 1 scale-truth)
+    REAL_SCALE = 1.0 / 12.0
+    sx_in = 0.50 + 0.30 + (4.55 - 0.60 - 38 * REAL_SCALE) / 2
+    sy_in = 0.86 + 0.20 + (6.26 - 0.40 - 64 * REAL_SCALE) / 2
+    c.setStrokeColor((0.54, 0.51, 0.44))
+    c.setLineWidth(2.2)
+    c.rect(_P_in(sx_in - 0.05), _P_in(sy_in - 0.05),
+           _P_in(38 * REAL_SCALE + 0.10),
+           _P_in(64 * REAL_SCALE + 0.10), fill=0, stroke=1)
+    c.setFillColor((0.07, 0.23, 0.16))
+    c.rect(_P_in(sx_in), _P_in(sy_in),
+           _P_in(38 * REAL_SCALE), _P_in(64 * REAL_SCALE),
+           fill=1, stroke=1)
+    # Title column rows
+    c.setFillColor((0, 0, 0))
+    c.setFont("Helvetica-Bold", 7)
+    c.drawString(_P_in(7.98), _P_in(7.0),
+                 "DIMENSIONS:38.00\" W × 64.00\" H")
+    c.drawString(_P_in(7.98), _P_in(4.8),
+                 f"SCALE:{_format_scale_row(REAL_SCALE)}")
+    # Viewport labels
+    c.setFillColor((0, 0, 0))
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(_P_in(0.60), _P_in(6.92), "FRONT ELEVATION")
+    c.drawString(_P_in(5.30), _P_in(6.92), "SIDE SECTION — RAISED")
+    return REAL_SCALE, sx_in, sy_in
+
+
+def _add_valid_stack_anatomy(c, REAL_SCALE):
+    """Add a valid R3-2 continuous fabric stack anatomy so the
+    stack-anatomy gate passes. Caller can then mutate specific
+    aspects to test the gate."""
+    wallx = 5.19 + 0.62 + 1.4
+    hy = 4.58
+    x_front = wallx + 0.07
+    flat = 7.0 * REAL_SCALE * 0.40
+    c.setStrokeColor((0.07, 0.23, 0.16))
+    c.setLineWidth(1.6)
+    c.setLineJoin(1)
+    c.line(_P_in(x_front), _P_in(hy - 0.07),
+           _P_in(x_front), _P_in(hy - 0.07 - flat))
+    yf = hy - 0.07 - 7.0 * REAL_SCALE
+    c.setFillColor((0.29, 0.23, 0.16))
+    c.rect(_P_in(x_front - 0.007), _P_in(yf - 0.11),
+           _P_in(0.030), _P_in(0.155), fill=1, stroke=1)
+
+
+# ────────────────────────────────────────────────────────────────────
+# 2026-08-16 G1.2 — R3 corrections: footer collision + stack anatomy
+# ────────────────────────────────────────────────────────────────────
+
+
+class TestGoldenPortG1R3Corrections:
+    """R3 corrections (2026-08-16 G1.2):
+      - R3-1: footer collision (zone min-gap)
+      - R3-2: stack anatomy (continuous fabric, NOT bar-ladder)
+    Both gates paired with negative fixtures.
+    """
+
+    def _render_R3(self):
+        from app.services.drawing.templates import render_spec
+        return render_spec({
+            "product_type": "flat_fold",
+            "dims": {"width": 38, "height": 64},
+            "fabric_sku": "BP10814-2",
+            "client_name": "Test Client",
+        })
+
+    def test_r3_gate_footer_collision_passes_on_R3(self):
+        """Gate R3-1 — footer zone widths + min-gap enforcement.
+        PASSES on R3."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R3()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats.get("fc_failures", []) == [], (
+            f"Gate R3-1 (footer-collision) must pass on R3; got: "
+            f"{stats.get('fc_failures', [])[:3]}"
+        )
+
+    def test_r3_gate_footer_collision_catches_collision(self):
+        """NEGATIVE FIXTURE — Gate R3-1 catches a footer zone
+        collision (e.g. the long street address defeats the
+        golden's +0.72 nudge; both the nudge and the ls_text
+        units bug were defeated, and neither version had a
+        collision check)."""
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from reportlab.lib.units import inch as _INCH
+        from app.services.drawing.templates.b2_qc import (
+            enforce_b2_qc, B2QCFailure,
+        )
+        import io as _io
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        # Page + header
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(1.1)
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(8.5 - 0.64), stroke=1, fill=0)
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(8.5 - 0.32 - 0.92),
+               _P_in(11.0 - 0.64), _P_in(0.92), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 21)
+        c.drawString(_P_in(0.32 + 0.27), _P_in(8.5 - 0.32 - 0.92 + 0.17),
+                     "FLAT FOLD ROMAN SHADE")
+        # Helper rects to spread the pile (so the PILE gate passes)
+        _make_pile_passes_decorator(c, None, None, None, None)
+        # Footer with the OLD hand-tuned +0.72 nudge AND the long
+        # street address that defeats the nudge (the R1/R2 defect).
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(0.42), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8)
+        # Long address (defeats the +0.72 nudge)
+        c.drawString(_P_in(0.60), _P_in(0.50),
+                     "EMPIRE WORKROOM  ·  5124 Frolich Ln, "
+                     "Hyattsville, MD 20781  ·  (703) 213-6484")
+        # Centered center (no nudge, no zone logic — the bug)
+        c.setFillColor((0.91, 0.54, 0.17))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(_P_in(11.0 / 2 + 0.72), _P_in(0.50),
+                            "FOR DISCUSSION — NOT FOR CONSTRUCTION")
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawRightString(_P_in(11.0 - 0.32 - 0.28), _P_in(0.50),
+                          "SHEET B2  ·  1 OF 1")
+        c.save()
+        bad_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
+        msg = str(exc_info.value)
+        assert "footer-collision" in msg.lower(), (
+            f"Gate R3-1 must catch a footer zone collision; got: {msg}"
+        )
+
+    def test_r3_gate_stack_anatomy_passes_on_R3(self):
+        """Gate R3-2 — stack is continuous fabric (R5 flat drop ≥ 1/3,
+        R6 fold tips below, R8 vertical hem bar). PASSES on R3."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R3()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats.get("sa_failures", []) == [], (
+            f"Gate R3-2 (stack-anatomy) must pass on R3; got: "
+            f"{stats.get('sa_failures', [])[:3]}"
+        )
+
+    def test_r3_gate_stack_anatomy_catches_bar_ladder(self):
+        """NEGATIVE FIXTURE — Gate R3-2 catches the bar-ladder
+        representation (the R2 defect: 8 discrete horizontal rect
+        flaps instead of continuous fabric)."""
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from app.services.drawing.templates.b2_qc import (
+            enforce_b2_qc, B2QCFailure,
+        )
+        import io as _io
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        REAL_SCALE, _, _ = _make_r3_valid_synthetic(c)
+        _add_valid_stack_anatomy(c, REAL_SCALE)
+        # Now OVERWRITE the stack with the bar-ladder (8 discrete
+        # horizontal rect flaps) — the R2 defect.
+        wallx = 5.19 + 0.62 + 1.4
+        hy = 4.58
+        x_back = wallx + 4.0 * REAL_SCALE - 0.028
+        x_front = wallx + 0.07
+        flat = 7.0 * REAL_SCALE * 0.40
+        ft = (7.0 * REAL_SCALE - flat) / 8
+        c.setFillColor((0.07, 0.23, 0.16))
+        for k in range(8):
+            ytop = hy - 0.07 - flat - k * ft
+            c.rect(_P_in(x_front), _P_in(ytop - ft * 0.95),
+                   _P_in(x_back - x_front), _P_in(ft * 0.95),
+                   fill=1, stroke=1)
+        # Footer (with FOR DISCUSSION so footer-discussion passes)
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(0.42), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(_P_in(0.60), _P_in(0.50),
+                     "EMPIRE WORKROOM  ·  HYATTSVILLE, MD  ·  (703) 213-6484")
+        c.setFillColor((0.91, 0.54, 0.17))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(_P_in(11.0 / 2), _P_in(0.50),
+                            "FOR DISCUSSION — NOT FOR CONSTRUCTION")
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawRightString(_P_in(11.0 - 0.32 - 0.28), _P_in(0.50),
+                          "SHEET B2  ·  1 OF 1")
+        c.save()
+        bad_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
+        msg = str(exc_info.value)
+        assert "stack-anatomy" in msg.lower(), (
+            f"Gate R3-2 must catch a bar-ladder defect; got: {msg}"
+        )

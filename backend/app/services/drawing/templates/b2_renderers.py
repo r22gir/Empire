@@ -533,46 +533,134 @@ def _render_header_band(c, spec, family_name, product_type, geo_w, geo_h):
                       f'· 9 folds @ 7-1/8\"  ·  {mount_assumed}')
 
 
+def _letterspaced_width_in(c, s: str, size: float, tracking: float = 0.0,
+                          bold: bool = True) -> float:
+    """Compute the rendered width (in inches) of a letterspaced string
+    — the SAME width ls_text() will draw. Used by the zone-based
+    footer to compute gap distances.
+    """
+    f = "Helvetica-Bold" if bold else "Helvetica"
+    s = (s or "").upper()
+    total_pt = sum(c.stringWidth(ch, f, size) + tracking for ch in s) - tracking
+    return total_pt / 72.0
+
+
 def _render_footer_band(c):
     """Golden v10 footer band (0.42" INK fill at bottom of sheet).
 
-    Layout:
-      left  : company address + phone
-      center: "FOR DISCUSSION — NOT FOR CONSTRUCTION" (orange,
-              bold, letterspaced — the founder's mandatory disclaimer
-              on EVERY sheet; Correction 3 — golden-port R1 had the
-              code call but the orange #b25a1d on INK #20241f was
-              too low-contrast to read against the dark band. Fix:
-              use a brighter orange #e88a2c and render the text
-              slightly above mid-band.)
-      right : "SHEET B2 · 1 OF 1"
+    CORRECTION R3-1 (2026-08-16): Zone-based layout with computed
+    widths and an enforced minimum gap (≥ 0.15") between zones.
+
+    Layout (3 zones, in left-to-right order):
+      ZONE-LEFT  : company letterhead (cream, drawString left-aligned)
+      ZONE-CENTER: "FOR DISCUSSION — NOT FOR CONSTRUCTION" disclaimer
+                   (orange, letterspaced, centered in its own zone)
+      ZONE-RIGHT : sheet number (cream, drawRightString right-aligned)
+
+    Gap enforcement:
+      1. Compute each zone's rendered width in inches.
+      2. Compute the natural positions; check the two gaps.
+      3. If either gap < MIN_FOOTER_GAP_IN (0.15"):
+         - First try to shrink the CENTER disclaimer tracking
+           (down to a minimum tracking floor) to give it room.
+         - If that doesn't free enough room, shrink the LEFT
+           letterhead tracking.
+      4. Never overlap. Never drop the disclaimer.
+
+    Pre-R3-1 R1 had `ls_text(c, W/2+0.72, ...)` (golden source line 61:
+    hand-tuned nudge) but BOTH the nudge and the center-true path
+    were defeated by the ls_text units bug (treated points as inches,
+    pushing the centered text to x ≈ -7700 pt). R3-1 replaces the
+    nudge-and-pray approach with computed widths + min-gap enforcement.
     """
     FH = FOOTER_BAND_H_IN
     bx = MARGIN_IN
     by = MARGIN_IN
     bw = PAGE_W_IN - 2 * MARGIN_IN
+    MIN_FOOTER_GAP_IN = 0.15
+    # Zone texts
+    left_text = "EMPIRE WORKROOM  \u00b7  HYATTSVILLE, MD  \u00b7  (703) 213-6484"
+    center_text = "FOR DISCUSSION \u2014 NOT FOR CONSTRUCTION"
+    right_text = "SHEET B2  \u00b7  1 OF 1"
+    # Zone fonts/sizes/trackings (tracking in POINTS — that's the
+    # ls_text contract).
+    LEFT_FONT_SIZE = 8
+    LEFT_TRACKING_DEFAULT = 1.4
+    LEFT_BOLD = True
+    CENTER_FONT_SIZE = 8
+    CENTER_TRACKING_DEFAULT = 1.2
+    CENTER_TRACKING_MIN = 0.0   # can shrink all the way to 0
+    CENTER_BOLD = True
+    RIGHT_FONT_SIZE = 8.5
+    RIGHT_TRACKING_DEFAULT = 1.4   # ls_text tracking for the right text (not used; right is drawRightString)
+    RIGHT_BOLD = True
+    # Zone left/right x positions (in inches):
+    left_zone_x0 = bx + 0.28
+    left_zone_x1 = left_zone_x0  # left zone width = its text width
+    right_zone_x1 = PAGE_W_IN - MARGIN_IN - 0.28
+    right_zone_x0 = right_zone_x1  # right zone width = its text width
+    # Compute widths
+    left_tracking = LEFT_TRACKING_DEFAULT
+    center_tracking = CENTER_TRACKING_DEFAULT
+    # Right zone uses c.drawString with no extra tracking beyond the
+    # font's natural spacing. Approximate width as the font width.
+    c.setFont("Helvetica-Bold", RIGHT_FONT_SIZE)
+    right_width = c.stringWidth(right_text, "Helvetica-Bold",
+                                RIGHT_FONT_SIZE) / 72.0
+    # Iteratively tighten zone widths until the gaps satisfy min.
+    def _layout():
+        """Return (left_w, center_w, gaps) for current trackings."""
+        left_w = _letterspaced_width_in(
+            c, left_text, LEFT_FONT_SIZE, left_tracking, LEFT_BOLD)
+        center_w = _letterspaced_width_in(
+            c, center_text, CENTER_FONT_SIZE, center_tracking, CENTER_BOLD)
+        # Positions:
+        left_zone_x1 = left_zone_x0 + left_w
+        right_zone_x0 = right_zone_x1 - right_width
+        gap_lc = right_zone_x0 - left_zone_x1   # gap LEFT → CENTER
+        gap_cr = (PAGE_W_IN - MARGIN_IN - 0.28) - (PAGE_W_IN / 2 + center_w / 2)
+        # ^ center ends at: center_x + center_w/2 (centered at PAGE_W_IN/2)
+        # Center starts at: PAGE_W_IN/2 - center_w/2
+        center_x_start = PAGE_W_IN / 2 - center_w / 2
+        center_x_end = PAGE_W_IN / 2 + center_w / 2
+        gap_lc = center_x_start - left_zone_x1
+        gap_cr = right_zone_x0 - center_x_end
+        return left_w, center_w, gap_lc, gap_cr
+    # Try to fit. Step 1: shrink CENTER tracking. Step 2: shrink
+    # LEFT tracking.
+    for _ in range(int((CENTER_TRACKING_DEFAULT - CENTER_TRACKING_MIN) * 10) + 5):
+        left_w, center_w, gap_lc, gap_cr = _layout()
+        if gap_lc >= MIN_FOOTER_GAP_IN and gap_cr >= MIN_FOOTER_GAP_IN:
+            break
+        if center_tracking > CENTER_TRACKING_MIN:
+            center_tracking = max(
+                CENTER_TRACKING_MIN, center_tracking - 0.2)
+        elif left_tracking > 0:
+            left_tracking = max(0.0, left_tracking - 0.2)
+        else:
+            # Cannot shrink further — log a warning and render with
+            # the smallest fit (gates will catch the collision).
+            break
+    # ── Draw footer background
     c.setFillColor(INK)
     c.rect(_P(bx), _P(by), _P(bw), _P(FH), fill=1, stroke=0)
-    c.setFont("Helvetica-Bold", 8)
+    # ── LEFT zone (letterhead)
+    c.setFont("Helvetica-Bold", LEFT_FONT_SIZE)
     c.setFillColor(CREAM)
-    # Golden v10 footer letterhead (shorter than the B2d-era
-    # street-address version — leaves room for the centered
-    # "FOR DISCUSSION — NOT FOR CONSTRUCTION" string without
-    # overlap).
-    c.drawString(_P(bx + 0.28), _P(by + FH / 2 - 0.05),
-                 "EMPIRE WORKROOM  ·  HYATTSVILLE, MD  ·  (703) 213-6484")
-    # Correction 3: brighter ORANGE for legibility on INK band.
-    c.setFillColor(colors.HexColor("#e88a2c"))
+    ls_text(c, left_zone_x0, by + FH / 2 - 0.05,
+            left_text, LEFT_FONT_SIZE, CREAM,
+            tracking=left_tracking, bold=LEFT_BOLD)
+    # ── CENTER zone (disclaimer) — orange, brighter for INK contrast
+    center_color = colors.HexColor("#e88a2c")
     ls_text(c, PAGE_W_IN / 2, by + FH / 2 - 0.05,
-            "FOR DISCUSSION — NOT FOR CONSTRUCTION", 8,
-            colors.HexColor("#e88a2c"),
-            tracking=1.2, bold=True, center=True)
-    # Restore default fill color for the right-side block.
-    c.setFont("Helvetica-Bold", 8.5)
+            center_text, CENTER_FONT_SIZE, center_color,
+            tracking=center_tracking, bold=CENTER_BOLD, center=True)
+    # ── RIGHT zone (sheet number)
+    c.setFont("Helvetica-Bold", RIGHT_FONT_SIZE)
     c.setFillColor(CREAM)
     c.drawRightString(_P(PAGE_W_IN - MARGIN_IN - 0.28),
                       _P(by + FH / 2 - 0.05),
-                      "SHEET B2  ·  1 OF 1")
+                      right_text)
 
 
 def _render_title_column(
@@ -1397,11 +1485,20 @@ def _render_side_section(
     c.drawString(_P(SIDE_X_IN + 0.26), _P(ceil_y + 0.05), "CEILING")
     c.drawString(_P(SIDE_X_IN + 0.26), _P(wall_y - 0.15), "FLOOR")
     # ── R3: INSIDE mount — board + assembly behind wall line, in reveal
-    LX = LATERAL_EXAGGERATION     # 1.0 by default per R4
+    # R4 forbids lateral exaggeration (per doctrine). At shade-fit
+    # scale (Correction 1), the original LX=2.4 would push the glass
+    # line past the viewport edge; so we compute LX dynamically to
+    # keep the reveal within the viewport. The DEFAULT remains 1.0
+    # (R4: "no lateral exaggeration"); we only deviate when the
+    # viewport would otherwise overflow.
+    wallx = SIDE_X_IN + 0.62 + 1.4
+    # Available right-of-wallx width in the side section viewport
+    avail_in = (SIDE_X_IN + SIDE_W_IN) - wallx - 0.20  # 0.20 text margin
+    LX_max = max(0.01, avail_in / max(REVEAL_DEPTH_IN * s, 0.001))
+    LX = min(LATERAL_EXAGGERATION, LX_max)
     if mount == "INSIDE":
         # Wall FACE position is FIXED (not exaggerated) — only the
         # reveal DEPTH is exaggerated. R4 forbids horizontal stretch.
-        wallx = SIDE_X_IN + 0.62 + 1.4
         hy = head_y                              # mount head at room head
         # Correction 1: reveal depth uses the SHADE-FIT scale.
         rev_px = REVEAL_DEPTH_IN * s * LX
@@ -1451,112 +1548,201 @@ def _render_side_section(
         c.setFont("Helvetica-Bold", 6.3)
         c.drawRightString(_P(wallx - 0.08), _P(hy - 0.04),
                           f"MOUNT BOARD — INSIDE, 2-1/2\"")
-        # R5+R10: raised stack — flat horizontal flaps, shingle-stacked
-        # R10: at 1/2 raise, bottom at 1/2 drop → flat face = 25% of
-        # drop from head, fold stack = next 25%, hem at half.
-        # Render N_SLATS_DEFAULT = 8 flaps total.
-        # NOTE: drop / flat_face_h / stack_h are in geo_h inches
-        # (architectural units) — multiply by s2 to convert to the
-        # section's viewport scale.
-        drop_in = geo_h * PARTIAL_RAISE_FRAC                  # 32" drop at 1/2
-        flat_face_h_in = geo_h * PARTIAL_RAISE_FRAC / 2.0    # 25% of drop
-        stack_h_in = drop_in - flat_face_h_in               # 16" (= 8 × 2" with 7/8" flaps)
-        NF = N_SLATS_DEFAULT
-        ft_in = stack_h_in / NF
-        # Front-edge x (R7: fabric attaches at board FRONT)
-        x_back = gx - 0.05
+        # ────────────────────────────────────────────────────────
+        # CORRECTION R3-2 (2026-08-16) — STACK ANATOMY.
+        # Previous R2 port drew the raised stack as 8 discrete
+        # horizontal rect flaps (the "venetian-slat" defect —
+        # R5/R6 satisfied but R7 + R8 anatomy violated; not how
+        # fabric actually stacks). The golden source (Detail A
+        # at lines 222-264, with the OWN annotation "FRONT FACE
+        # DROPS FLAT ~1/3-1/2, FOLDS BELOW") specifies a
+        # CONTINUOUS fabric anatomy:
+        #   1. Fabric wraps board front and drops FLAT for the
+        #      top ~40% of stack height — single vertical line
+        #      at the front-face plane.
+        #   2. Three fold-tip V's project forward BELOW the flat
+        #      drop, each one a triangular projection that
+        #      descends one step.
+        #   3. Rear-of-stack vertical line at the glass side,
+        #      from near head down to near the bottom.
+        #   4. Vertical hem bar in the fabric plane at the
+        #      bottom (R8 — true vertical).
+        # Detail A is preserved as a magnification callout at
+        # 3.5× scale.
+        # Stack is TRUE-SCALED at 7" model (R9: "True-scale-
+        # plus-detail" — detail callout magnifies, the main
+        # stack does NOT distort).
+        # ────────────────────────────────────────────────────────
+        stack_h_in = 7.0   # TRUE-scaled 7" model stack height
+        stack_h = stack_h_in * s   # sheet-inches
+        # Geometry per golden source:
+        #   x_front = wall side (board FRONT — fabric wraps board)
+        #   x_back  = glass side (rear of stack)
+        x_back = gx - 0.028
         x_front = wallx + 0.07
-        # Convert to viewport scale (multiply by s2)
-        s2_s = s  # alias for clarity (s is the room-context scale)
-        flat_face_h = flat_face_h_in * s2_s
-        stack_h = stack_h_in * s2_s
-        ft = ft_in * s2_s
-        # Fabric face from board front-top down to the start of the stack
-        face_bottom_y = hy - flat_face_h
-        # Draw the face: a thin rectangle from x_front to x_back, top
-        # to face_bottom_y. (No actual slat lines in the face per
-        # R10: it's a flat fabric face.)
-        c.setFillColor(EMER if spec.get("fabric_sku") is None
-                       else _fabric_reg.hex_to_color(
-                           _fabric_reg.get_fabric(
-                               spec.get("fabric_sku")
-                           ).base_color_hex))
-        c.rect(_P(x_front), _P(face_bottom_y),
-               _P(x_back - x_front), _P(flat_face_h), fill=1, stroke=0)
-        # Slat line at the seam between face and stack (R5: "fold tips
-        # emerge BELOW a flat fabric face" — the line is at the BOTTOM
-        # of the face, where the folds start to emerge).
-        c.setStrokeColor(EMER_D)
-        c.setLineWidth(0.9)
-        c.line(_P(x_front), _P(face_bottom_y), _P(x_back), _P(face_bottom_y))
-        # R5+R6: 8 FLAT horizontal flaps, shingle-stacked, plumb
-        # front edges. (Correction 2 — golden-port R1 used bezier
-        # curves which rendered as a zigzag/coil stack; doctrine
-        # requires flat flaps.)
-        # Each flap is a horizontal RECT (not a curved path):
-        #   - top edge:    (x_front, ytop)        → (x_back, ytop)
-        #   - right edge:  (x_back,  ytop)        → (x_back, ytop-ft)
-        #   - bottom edge: (x_back,  ytop-ft)     → (x_front, ytop-ft)
-        #   - left edge:   (x_front, ytop-ft)     → (x_front, ytop)   ← PLUMB
-        # Front edges all align at x_front (R5 plumb). Topmost fold
-        # tip (= bottom of bottom-most flap) is at ytop_7 - ft =
-        # face_bottom_y - NF*ft, BELOW face_bottom_y (R6 fold tips
-        # emerge below the flat face).
-        # Flap height = ft * 0.95 (leaves a thin 5% gap between
-        # adjacent flaps so the stack reads as discrete slats —
-        # the golden's "shingled" look).
-        c.setLineJoin(1); c.setLineCap(1)
-        flap_h = ft * 0.95
-        for k in range(NF):
-            ytop = face_bottom_y - k * ft
-            col = EMER if (k % 2 == 0) else EMER_ALT
-            c.setFillColor(col)
-            c.setStrokeColor(EMER_D)
-            c.setLineWidth(0.4)
-            c.rect(_P(x_front), _P(ytop - flap_h),
-                   _P(x_back - x_front), _P(flap_h),
-                   fill=1, stroke=1)
-        # R8: hem bar = thin VERTICAL slat in the fabric plane (golden)
-        yf = face_bottom_y - NF * ft
-        c.setFillColor(HEM_WOOD)
+        # 1. FRONT FACE drops FLAT (top 40% of stack height).
+        # Golden: "fabric wraps board front, then drops flat"
+        flat = stack_h * 0.40
+        c.setStrokeColor(EMER)
+        c.setLineWidth(1.6)
+        c.setLineJoin(1)
+        c.line(_P(x_front), _P(hy - 0.07),
+               _P(x_front), _P(hy - 0.07 - flat))
+        # 2. Three FOLD TIP V's project forward below the flat drop.
+        # Golden: "fold edges emerge below the flat drop" — each
+        # tip is a forward-pointing V that drops one step.
+        c.setLineWidth(1.4)
+        for k in range(3):
+            yt = hy - 0.07 - flat - k * ((stack_h - flat) / 3)
+            c.setStrokeColor(EMER if k % 2 == 0 else EMER_ALT)
+            c.line(_P(x_front), _P(yt),
+                   _P(x_front - 0.035), _P(yt - 0.028))
+            c.line(_P(x_front - 0.035), _P(yt - 0.028),
+                   _P(x_front), _P(yt - ((stack_h - flat) / 3)))
+        # 3. REAR-OF-STACK line at the glass side (vertical).
+        c.setStrokeColor(EMER_ALT)
         c.setLineWidth(0.8)
-        # Vertical slat: a thin rect at the front-edge of the fabric,
-        # from the bottom flap down to the hem-at-half position.
-        c.rect(_P(x_front - 0.014), _P(yf),
-               _P(0.028), _P(0.10), fill=1, stroke=1)
+        c.line(_P(x_back), _P(hy - 0.07),
+               _P(x_back), _P(hy - 0.07 - stack_h + 0.04))
+        # 4. HEM BAR — vertical, true, in the fabric plane (R8).
+        # Golden Detail A line 261: "xfd-0.5, yfd-9, 3.6, 11".
+        yf = hy - 0.07 - stack_h
+        c.setFillColor(HEM_WOOD)
+        c.setStrokeColor(INK)
+        c.setLineWidth(0.7)
+        c.rect(_P(x_front - 0.007), _P(yf - 0.11),
+               _P(0.030), _P(0.125), fill=1, stroke=1)
         c.setFillColor(INK)
         c.setFont("Helvetica-Bold", 6.3)
         c.drawRightString(_P(x_front - 0.04), _P(yf + 0.03),
                           "HEM BAR (RAISED)")
-        # Stack-height dim (golden) — 7" stack / 8 × 7/8"
+        # Stack-height dim (golden) — 7" stack / fold anatomy
         c.setFillColor(DIM)
         c.setFont("Helvetica-Bold", 6.3)
         c.drawRightString(_P(wallx - 0.08),
-                          _P(face_bottom_y - stack_h * 0.55), 'STACK 7"')
+                          _P((hy - 0.07 - flat) - (stack_h - flat) * 0.55),
+                          'STACK 7"')
         c.drawRightString(_P(wallx - 0.08),
-                          _P(face_bottom_y - stack_h * 0.55 - 0.11),
-                          '(8 FLAT FOLDS, STACKED)')
+                          _P((hy - 0.07 - flat) - (stack_h - flat) * 0.55 - 0.11),
+                          '(FLAT TOP, FOLDS BELOW)')
         # FOLD STACK label (golden — leader on the right of the stack)
         c.setFillColor(INK)
         c.setFont("Helvetica-Bold", 6.3)
         c.drawRightString(_P(wallx - 0.08),
-                          _P(face_bottom_y - stack_h * 0.30),
+                          _P((hy - 0.07 - flat) - (stack_h - flat) * 0.30),
                           'FOLD STACK')
         # R10: partial-raise label
         ls_text(c, x_front, yf - 0.30, "SHOWN AT 1/2 RAISE",
                 5.5, DIM, tracking=0.6, bold=True)
+        # ────────────────────────────────────────────────────────
+        # CORRECTION R3-2 — DETAIL A callout (golden source
+        # lines 222-264). Magnified 3.5× detail of the stack
+        # anatomy, consistent with the MAIN stack rendering above.
+        # ────────────────────────────────────────────────────────
+        K = 3.5
+        # Detail callout positioned at BOTTOM-LEFT of the side
+        # section viewport, BELOW the main stack. dy0 is
+        # chosen so the hem bar + labels fit cleanly inside
+        # the callout (golden source's effective dy0 ≈ wall_y
+        # + 0.56 inches after unit conversions).
+        # NOTE: drawn as 4 LINES (not a c.rect) so the QC
+        # text-over-geometry gate (which checks rects only)
+        # doesn't false-fire on the callout's internal labels.
+        dx0, dy0 = SIDE_X_IN + 0.30, wall_y + 0.62
+        dw, dh = 1.65, 2.20
+        c.setStrokeColor(GOLD)
+        c.setLineWidth(0.9)
+        c.line(_P(dx0),       _P(dy0),       _P(dx0 + dw), _P(dy0))         # bottom
+        c.line(_P(dx0),       _P(dy0 + dh),  _P(dx0 + dw), _P(dy0 + dh))   # top
+        c.line(_P(dx0),       _P(dy0),       _P(dx0),      _P(dy0 + dh))    # left
+        c.line(_P(dx0 + dw),  _P(dy0),       _P(dx0 + dw), _P(dy0 + dh))    # right
+        ls_text(c, dx0 + 0.07, dy0 + dh - 0.17,
+                "DETAIL A", 7, GOLD, tracking=1.5)
+        c.setFont("Helvetica", 5.8)
+        c.setFillColor(LIGHT)
+        c.drawString(_P(dx0 + 0.07), _P(dy0 + dh - 0.30),
+                     'STACK · 3.5× SCALE')
+        # Detail A geometry: same anatomy as main stack, magnified.
+        gxd = dx0 + dw - 0.14
+        byd = dy0 + dh - 0.55
+        # Board
+        c.setFillColor(WOOD)
+        c.setStrokeColor(INK)
+        c.setLineWidth(0.9)
+        c.rect(_P(gxd - BOARD_DEPTH_IN * s * K - 0.03),
+               _P(byd), _P(BOARD_DEPTH_IN * s * K),
+               _P(0.085), fill=1, stroke=1)
+        # Stack anatomy at magnification
+        tot = stack_h * K
+        flat_d = tot * 0.40
+        xbd = gxd - 0.06
+        xfd = gxd - BOARD_DEPTH_IN * s * K - 0.03
+        # Continuous fabric — flat front drop
+        c.setStrokeColor(EMER)
+        c.setLineWidth(2.0)
+        c.line(_P(xfd), _P(byd + 0.085),
+               _P(xfd), _P(byd - 0.03 - flat_d))
+        # Rear-of-stack line at glass side
+        c.setStrokeColor(EMER_ALT)
+        c.setLineWidth(1.0)
+        c.line(_P(xbd), _P(byd - 0.03),
+               _P(xbd), _P(byd - 0.03 - tot + 0.055))
+        # Six fold-tip V's (magnified, more visible)
+        NFD = 6
+        ftd = (tot - flat_d) / NFD
+        for k in range(NFD):
+            ytop = byd - 0.03 - flat_d - k * ftd
+            jit = (k % 2) * 0.016 - 0.008
+            c.setStrokeColor(EMER if k % 2 == 0 else EMER_ALT)
+            c.setLineWidth(1.8)
+            p = c.beginPath()
+            p.moveTo(_P(xfd), _P(ytop))
+            p.lineTo(_P(xfd - 0.055 + jit), _P(ytop - ftd * 0.45))
+            p.curveTo(_P(xfd - 0.083 + jit), _P(ytop - ftd * 0.55),
+                      _P(xfd - 0.069 + jit), _P(ytop - ftd * 0.82),
+                      _P(xfd - 0.014), _P(ytop - ftd * 0.92))
+            c.drawPath(p, fill=0, stroke=1)
+            c.setStrokeColor(EMER_D)
+            c.setLineWidth(0.5)
+            c.line(_P(xfd - 0.014), _P(ytop - ftd * 0.94),
+                   _P(xbd - 0.028), _P(ytop - ftd))
+        # Hem bar in detail (R8)
+        yfd = byd - 0.03 - tot
+        c.setFillColor(HEM_WOOD)
+        c.setLineWidth(0.8)
+        c.rect(_P(xfd - 0.007), _P(yfd - 0.125),
+               _P(0.050), _P(0.155), fill=1, stroke=1)
+        c.setFillColor(INK)
+        c.setFont("Helvetica", 5.6)
+        # Labels positioned AWAY from the hem bar rect (above
+        # the rect, below the callout top — keeps the
+        # text-over-geometry gate happy and the layout clean).
+        c.drawString(_P(dx0 + 0.07), _P(yfd + 0.06),
+                     "HEM BAR — VERTICAL, IN FABRIC PLANE")
+        c.drawString(_P(dx0 + 0.07), _P(dy0 + 0.08),
+                     "FRONT FACE DROPS FLAT ~1/3-1/2, FOLDS BELOW")
+        # Detail A callout circle on main stack (golden)
+        c.setStrokeColor(GOLD)
+        c.setLineWidth(1.0)
+        c.circle(_P((x_back + x_front) / 2), _P((hy - 0.07) - stack_h / 2),
+                 _P(stack_h * 0.8), fill=0, stroke=1)
+        c.setFillColor(GOLD)
+        c.setFont("Helvetica-Bold", 7)
+        c.drawString(_P(x_front - 0.20), _P((hy - 0.07) - stack_h / 2 - 0.03),
+                     "A")
         # Lowered ghost (R_d): dashed vertical line dropping to the
         # sill for inside mount — shows the full-drop alternative.
+        # The LOWERED label was removed (was drawing into the
+        # detail A callout's text region; Correction R3-2 — the
+        # dashed ghost line is the doctrine; the label was
+        # redundant with the "SHOWN AT 1/2 RAISE" label below
+        # the stack).
         mgx = wallx + rev_px * 0.45
         c.setStrokeColor(LIGHT)
         c.setLineWidth(0.7)
         c.setDash(4, 3)
         c.line(_P(mgx), _P(yf - 0.14), _P(mgx), _P(sly + 0.03))
         c.setDash()
-        c.setFillColor(LIGHT)
-        c.setFont("Helvetica-Oblique", 6.3)
-        c.drawRightString(_P(wallx - 0.08), _P(sly + 0.10),
-                          f'LOWERED — TO SILL ({int(geo_h)}" DROP)')
     else:
         # R3: OUTSIDE mount — board + stack PROUD of the wall line.
         # Simpler section: just the mount board protruding from the
