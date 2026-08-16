@@ -886,3 +886,49 @@ def search_quotes(q: str, limit: int = 20) -> list:
             ORDER BY created_at DESC LIMIT ?
         """, (s, s, s, s, s, limit)).fetchall()
         return [_quote_to_dict(r) for r in rows]
+
+
+# ── PHASE 2 · F5.2 — shared resolver (canonical-first) ─────────
+# Single source of truth for quote-by-id resolution. Used by both
+# routers/quotes.py and services/max/tool_executor.py so the logic
+# is NOT duplicated. Pre-F5, the tool layer had three independent
+# paths that read legacy JSON directly (send_quote_telegram,
+# send_quote_email, _generate_pdf_for_quote, sketch_to_drawing)
+# and broke for canonical quotes. The H44 fix put canonical-first
+# into _load_quote; this finishes the job by making the SAME
+# resolver available to the tool layer.
+
+def resolve_quote(quote_id: str) -> Optional[dict]:
+    """Canonical-first resolver. Returns the quote dict or None.
+
+    Tries `quotes_v2` SQL first (canonical). Falls back to the legacy
+    JSON store at `data_paths.quotes_data_dir()` (audit trail).
+
+    Used by:
+      - routers/quotes.py:_load_quote
+      - services/max/tool_executor.py tools that need a quote by id
+
+    Always returns a dict (legacy JSON shape) or None. Callers that
+    need to distinguish canonical from JSON can check for the
+    canonical-only fields (e.g. `line_items` always present in
+    canonical, may be missing in legacy).
+    """
+    if not quote_id:
+        return None
+    # 1. Canonical: quotes_v2 SQL
+    try:
+        q = get_quote(quote_id)
+        if q:
+            return q
+    except Exception:
+        pass
+    # 2. Legacy JSON fallback
+    try:
+        from app.services.data_paths import quotes_data_dir
+        path = quotes_data_dir() / f"{quote_id}.json"
+        if path.exists():
+            with open(path) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return None

@@ -131,8 +131,16 @@ class QuoteVerifier:
         """Normalize AI-generated quote format to match verification expectations.
 
         AI quotes use design_proposals + proposal_totals; verification expects tiers + items.
+        Canonical (quotes_v2) quotes use line_items directly. The normalizer
+        fills in tiers/items as empty dicts/lists so later code can `.get()`
+        without None checks.
         """
         q = dict(quote)  # shallow copy
+
+        # PHASE 2 · F5.2 — canonical quotes have tiers=None. Build an empty
+        # dict so downstream .get() calls don't crash on None.
+        if q.get("tiers") is None:
+            q["tiers"] = {}
 
         # Build tiers from proposal_totals if tiers missing
         if not q.get("tiers") and q.get("proposal_totals"):

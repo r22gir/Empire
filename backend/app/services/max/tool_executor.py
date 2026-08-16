@@ -2319,14 +2319,11 @@ def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult
     if not quote_id:
         return ToolResult(tool="send_quote_telegram", success=False, error="No quote_id provided")
 
-    # Load quote
-    quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
-    if not os.path.exists(quote_path):
+    # PHASE 2 · F5.2 — shared canonical-first resolver (not legacy JSON direct)
+    from app.services.quote_service import resolve_quote
+    quote = resolve_quote(quote_id)
+    if not quote:
         return ToolResult(tool="send_quote_telegram", success=False, error=f"Quote {quote_id} not found")
-
-    import json as _json
-    with open(quote_path) as f:
-        quote = _json.load(f)
 
     quote_number = quote.get("quote_number", quote_id)
     customer = quote.get("customer_name", "Unknown")
@@ -2378,10 +2375,25 @@ async def _generate_pdf_for_quote(quote_id: str):
 
     AI-generated quotes (source=max_quick_quote) skip verification
     since they use a different data structure than QIS quotes.
+
+    PHASE 2 · F5.2: uses the shared resolver `quote_service.resolve_quote`
+    so the router-side and tool-side load paths share ONE canonical-first
+    resolver instead of duplicating the logic.
     """
-    from app.routers.quotes import generate_pdf as _gen_pdf_endpoint, _load_quote
-    quote = _load_quote(quote_id)
-    skip = quote.get("source", "").startswith("max_")
+    from app.services.quote_service import resolve_quote
+    from app.routers.quotes import generate_pdf as _gen_pdf_endpoint
+    quote = resolve_quote(quote_id)
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote {quote_id} not found")
+    # PHASE 2 · F5.3 — skip verification when:
+    #   - source starts with "max_" (AI-generated / legacy), OR
+    #   - status is past draft/proposal (sent/accepted/in_production/completed)
+    #     — founder has already verified + approved the canonical quote, so a
+    #     re-verification is redundant and may fail on tier/dimension checks
+    #     that don't apply to canonical-shape quotes.
+    status = (quote.get("status") or "").lower()
+    verified_statuses = {"sent", "accepted", "in_production", "completed", "cancelled"}
+    skip = (quote.get("source") or "").startswith("max_") or status in verified_statuses
     await _gen_pdf_endpoint(quote_id, skip_verification=skip)
 
 
@@ -2577,14 +2589,11 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             result=verdict_to,
         )
 
-    # Load quote
-    quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
-    if not os.path.exists(quote_path):
+    # PHASE 2 · F5.2 — shared canonical-first resolver (not legacy JSON direct)
+    from app.services.quote_service import resolve_quote
+    quote = resolve_quote(quote_id)
+    if not quote:
         return ToolResult(tool="send_quote_email", success=False, error=f"Quote {quote_id} not found")
-
-    import json as _json
-    with open(quote_path) as f:
-        quote = _json.load(f)
 
     quote_number = quote.get("quote_number", quote_id)
     customer = quote.get("customer_name", "Unknown")
@@ -2968,14 +2977,11 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
         logger.info(f"sketch_to_drawing: classified as '{item_type}' (confidence={classification.get('confidence','?')}) from input")
 
         if quote_id:
-            # Generate from quote data — quotes are always bench/seating
-            quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
-            if not os.path.exists(quote_path):
+            # PHASE 2 · F5.2 — shared canonical-first resolver
+            from app.services.quote_service import resolve_quote
+            quote = resolve_quote(quote_id)
+            if not quote:
                 return ToolResult(tool="sketch_to_drawing", success=False, error=f"Quote {quote_id} not found")
-
-            import json as _json
-            with open(quote_path) as f:
-                quote = _json.load(f)
 
             quote_num = quote.get("quote_number", quote_id)
             line_items = quote.get("line_items", [])
