@@ -156,11 +156,31 @@ async def require_intake_admin(user=Depends(get_current_user)):
 
 
 def _next_intake_code() -> str:
+    """Return the next intake_code for the current year.
+
+    Gap-and-race-safe allocator (iX-day R1-INT-FIX): returns
+    MAX(numeric suffix) + 1 scoped to the "INT-{year}-" prefix. Year
+    rollover starts fresh at 0001. This CLOSES the COUNT(*)+1 bug —
+    migration fragmented code numbering so COUNT no longer matched
+    the next free number.
+
+    The caller MUST retry on UNIQUE constraint failure: a concurrent
+    INSERT between MAX and INSERT can still race. The retry loop in
+    create_project() handles this with a bounded re-derivation.
+    """
+    year = datetime.now().strftime('%Y')
+    prefix = f"INT-{year}-"
+    # The prefix is exactly 9 chars ("INT-" + 4-digit year + "-"), so the
+    # numeric suffix starts at position 10 (1-indexed).
     conn = get_db()
-    row = conn.execute("SELECT COUNT(*) as c FROM intake_projects").fetchone()
+    row = conn.execute(
+        "SELECT MAX(CAST(SUBSTR(intake_code, 10) AS INTEGER)) as m "
+        "FROM intake_projects WHERE intake_code LIKE ?",
+        (prefix + "%",),
+    ).fetchone()
     conn.close()
-    num = (row["c"] or 0) + 1
-    return f"INT-{datetime.now().strftime('%Y')}-{num:04d}"
+    num = (row["m"] or 0) + 1
+    return f"{prefix}{num:04d}"
 
 
 # ── Schemas ───────────────────────────────────────────────────
@@ -349,22 +369,43 @@ async def update_profile(request: Request, update: ProfileUpdate, user=Depends(g
 @router.post("/projects")
 async def create_project(request: Request, project: ProjectCreate, user=Depends(get_current_user)):
     project_id = str(uuid.uuid4())
-    intake_code = _next_intake_code()
     conn = get_db()
-    conn.execute(
-        """INSERT INTO intake_projects
-           (id, user_id, intake_code, name, address, treatment, style, scope,
-            rooms, measurements, notes, business)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            project_id, user["id"], intake_code, project.name, project.address,
-            project.treatment, project.style, project.scope,
-            json.dumps(project.rooms), json.dumps(project.measurements), project.notes,
-            project.business,
-        ),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        last_error = None
+        intake_code = None
+        for attempt in range(5):
+            intake_code = _next_intake_code()
+            try:
+                conn.execute(
+                    """INSERT INTO intake_projects
+                       (id, user_id, intake_code, name, address, treatment, style, scope,
+                        rooms, measurements, notes, business)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        project_id, user["id"], intake_code, project.name, project.address,
+                        project.treatment, project.style, project.scope,
+                        json.dumps(project.rooms), json.dumps(project.measurements), project.notes,
+                        project.business,
+                    ),
+                )
+                conn.commit()
+                break
+            except sqlite3.IntegrityError as e:
+                # UNIQUE constraint on intake_code — re-derive and retry.
+                # Other IntegrityErrors (FK, etc.) bubble up immediately.
+                last_error = e
+                if "intake_code" in str(e) and attempt < 4:
+                    continue
+                raise
+        else:
+            # All 5 attempts exhausted (should be rare; means a hot
+            # concurrent insert kept grabbing each candidate back).
+            raise HTTPException(
+                status_code=500,
+                detail=f"intake_code allocator exhausted after 5 retries: {last_error}",
+            )
+    finally:
+        conn.close()
     return {"id": project_id, "intake_code": intake_code, "status": "draft"}
 
 
