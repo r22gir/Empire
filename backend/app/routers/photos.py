@@ -2,7 +2,7 @@
 Unified Photo Storage API.
 All photos from all sources (intake, quote builder, telegram, web) go through here.
 
-Storage layout: backend/data/photos/{entity_type}/{entity_id}/
+Storage layout: ~/empire-data/photos/{entity_type}/{entity_id}/
 Entity types: quote, intake, telegram, craftforge, general
 """
 import json
@@ -19,15 +19,32 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 
+from app.services.drawing.canonical_path import (
+    canonical_photos_dir,
+    canonical_intake_uploads_dir,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/photos", tags=["photos"])
 
-PHOTOS_BASE = Path(os.path.expanduser("~/empire-repo/backend/data/photos"))
+# iX-day R1X-INT-FIX: PHOTOS_BASE and INTAKE_UPLOADS now resolve through
+# the canonical-path guard. The stale-fork
+# `~/empire-repo/backend/data/photos/` and
+# `~/empire-repo/backend/data/intake_uploads/` paths are dead.
+# New uploads go to ~/empire-data/photos/ and ~/empire-data/intake_uploads/.
+PHOTOS_BASE = Path(canonical_photos_dir())
 PHOTOS_BASE.mkdir(parents=True, exist_ok=True)
 
-# Legacy paths for migration/linking
-INTAKE_UPLOADS = Path(os.path.expanduser("~/empire-repo/backend/data/intake_uploads"))
+# Intake uploads target dir for the unified photo store. New uploads still
+# write file blobs here (per-project subdir by intake_id); the public
+# /intake_uploads mount is owned by main.py and reads from the canonical
+# intake_uploads dir.
+INTAKE_UPLOADS = Path(canonical_intake_uploads_dir())
+INTAKE_UPLOADS.mkdir(parents=True, exist_ok=True)
+
+# Telegram uploads are read-only here (legacy archive); the live telegram
+# upload path is a different module.
 TELEGRAM_UPLOADS = Path(os.path.expanduser("~/empire-repo/uploads/images"))
 
 VALID_ENTITY_TYPES = {"quote", "intake", "telegram", "craftforge", "general"}

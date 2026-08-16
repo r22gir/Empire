@@ -18,6 +18,11 @@ import logging
 from pathlib import Path
 
 from app.middleware.rate_limiter import limiter
+from app.services.drawing.canonical_path import (
+    canonical_empire_db_path,
+    canonical_intake_uploads_dir,
+    canonical_photos_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +35,14 @@ JWT_EXPIRE_HOURS = 72
 CUSTOMER_INTAKE_ROLES = {"client", "designer", "contractor", "installer"}
 INTAKE_ADMIN_ROLES = {"admin", "founder", "operator"}
 
-DB_PATH = os.path.expanduser("~/empire-repo/backend/data/intake.db")
-UPLOADS_DIR = os.path.expanduser("~/empire-repo/backend/data/intake_uploads")
-PHOTOS_DIR = os.path.expanduser("~/empire-repo/backend/data/photos")
+# iX-day R1X-INT-FIX: intake_users / intake_projects / intake_fabrics now
+# live in the canonical empire.db (~/empire-data/empire.db). The previous
+# hard-coded `~/empire-repo/backend/data/intake.db` was a stale-fork leak —
+# the canonical-path guard raises RuntimeError on stale-fork paths so this
+# class of drift can never silently return.
+DB_PATH = str(canonical_empire_db_path())
+UPLOADS_DIR = str(canonical_intake_uploads_dir())
+PHOTOS_DIR = str(canonical_photos_dir())
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
@@ -59,6 +69,7 @@ def init_db():
             password_hash TEXT NOT NULL,
             company TEXT,
             role TEXT DEFAULT 'client',
+            business TEXT NOT NULL,
             created_at TEXT DEFAULT (datetime('now')),
             deleted_at TEXT
         );
@@ -80,6 +91,7 @@ def init_db():
             quote_pdf TEXT,
             selected_proposal TEXT,
             messages TEXT DEFAULT '[]',
+            business TEXT NOT NULL,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
             deleted_at TEXT,
@@ -89,11 +101,17 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_projects_code ON intake_projects(intake_code);
     """)
     # Additive migration for existing databases — add deleted_at columns
+    # and business column (Doctrine #4). IF column already exists, the ALTER
+    # raises "duplicate column" — swallow that case.
     for table in ("intake_users", "intake_projects"):
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT")
         except Exception:
-            pass  # Column already exists
+            pass
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN business TEXT")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -153,6 +171,12 @@ class SignupRequest(BaseModel):
     password: str
     company: Optional[str] = None
     role: str = "client"  # designer, installer, client
+    # iX-day R1X-INT-FIX (Doctrine #4):
+    # business is REQUIRED from the request context. The module does not
+    # default it. The front-end (lib/intake-auth.ts:signup) supplies the
+    # canonical business for the public surface (e.g. 'workroom' for the
+    # luxe.empirebox.store intake).
+    business: str
 
 
 class LoginRequest(BaseModel):
@@ -174,6 +198,10 @@ class ProjectCreate(BaseModel):
     rooms: list = Field(default_factory=list)
     measurements: list = Field(default_factory=list)
     notes: Optional[str] = None
+    # iX-day R1X-INT-FIX (Doctrine #4): business is required from the
+    # request context. Typical flow: page.tsx:buildProjectData() injects
+    # the same business declared at signup.
+    business: str
 
 
 class ProjectUpdate(BaseModel):
@@ -227,14 +255,14 @@ async def signup(request: Request, req: SignupRequest):
     user_id = str(uuid.uuid4())
     password_hash = pwd_context.hash(req.password)
     conn.execute(
-        "INSERT INTO intake_users (id, name, email, phone, password_hash, company, role) VALUES (?,?,?,?,?,?,?)",
-        (user_id, req.name.strip(), req.email.lower().strip(), req.phone, password_hash, req.company, role),
+        "INSERT INTO intake_users (id, name, email, phone, password_hash, company, role, business) VALUES (?,?,?,?,?,?,?,?)",
+        (user_id, req.name.strip(), req.email.lower().strip(), req.phone, password_hash, req.company, role, req.business),
     )
     conn.commit()
     conn.close()
 
     token = create_token(user_id, req.email.lower().strip())
-    return {"token": token, "user": {"id": user_id, "name": req.name, "email": req.email, "role": role}}
+    return {"token": token, "user": {"id": user_id, "name": req.name, "email": req.email, "role": role, "business": req.business}}
 
 
 @limiter.limit("10/minute")
@@ -325,12 +353,14 @@ async def create_project(request: Request, project: ProjectCreate, user=Depends(
     conn = get_db()
     conn.execute(
         """INSERT INTO intake_projects
-           (id, user_id, intake_code, name, address, treatment, style, scope, rooms, measurements, notes)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+           (id, user_id, intake_code, name, address, treatment, style, scope,
+            rooms, measurements, notes, business)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             project_id, user["id"], intake_code, project.name, project.address,
             project.treatment, project.style, project.scope,
             json.dumps(project.rooms), json.dumps(project.measurements), project.notes,
+            project.business,
         ),
     )
     conn.commit()

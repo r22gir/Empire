@@ -252,7 +252,9 @@ load_router("app.routers.recovery_control", "/api/v1", ["recovery"])
 
 # Serve intake uploads as static files
 from fastapi.staticfiles import StaticFiles
-_intake_uploads = os.path.expanduser("~/empire-repo/backend/data/intake_uploads")
+from app.services.drawing.canonical_path import canonical_intake_uploads_dir
+
+_intake_uploads = str(canonical_intake_uploads_dir())
 os.makedirs(_intake_uploads, exist_ok=True)
 app.mount("/intake_uploads", StaticFiles(directory=_intake_uploads), name="intake_uploads")
 

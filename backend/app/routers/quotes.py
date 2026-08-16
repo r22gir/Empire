@@ -19,6 +19,7 @@ import logging
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.business_routing import route_to_for_item_type
 from app.services.data_paths import quote_pdf_dir, quotes_data_dir
+from app.services.drawing.canonical_path import canonical_empire_db_path
 from app.db.database import get_db, dict_row
 
 logger = logging.getLogger(__name__)
@@ -1219,11 +1220,13 @@ async def get_quote_intake_photos(quote_id: str):
     photos = quote.get("photos", [])
     intake_project_id = quote.get("intake_project_id")
 
-    # If the quote has an intake_project_id, also look up photos from intake.db
+    # If the quote has an intake_project_id, also look up photos from empire.db
+    # (iX-day R1X-INT-FIX: was `~/empire-repo/backend/data/intake.db` — stale fork.
+    # intake_projects now lives in canonical empire.db with the business column.)
     if intake_project_id:
         try:
             import sqlite3
-            db_path = os.path.expanduser("~/empire-repo/backend/data/intake.db")
+            db_path = str(canonical_empire_db_path())
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             row = conn.execute(

@@ -2,7 +2,35 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const LUXE_PUBLIC_HOST = "luxe.empirebox.store";
-const LUXE_PUBLIC_REDIRECT_PATHS = new Set(["/", "/luxe", "/luxe/", "/luxeforge", "/luxeforge/"]);
+// LUXE bucket is HARD-SCOPED — only intake-related routes are allowed on the
+// client-facing hostname. The allowlist is iX-day I1-R1X-INT-VHOST: without
+// this, a request to luxe.empirebox.store/dashboard or /platform would render
+// the founder's Command Center to anonymous clients. The first arg of every
+// OR is the exact path; the second is the prefix form (path + "/" delimiter).
+// Don't add /api/v1/* wholesale — admin endpoints MUST stay auth-gated and
+// out of the public surface even if they live under a permitted prefix.
+const LUXE_ALLOWED_EXACT = new Set([
+  "/intake",
+  "/api/v1/intake",
+  "/api/v1/fabrics/intake-project",
+  "/favicon.ico",
+  "/robots.txt",
+]);
+const LUXE_ALLOWED_PREFIXES = [
+  "/intake/",
+  "/api/v1/intake/",
+  "/api/v1/fabrics/intake-project/",
+  "/_next/",
+  "/intake_uploads/",
+];
+
+function isLuxeAllowed(pathname: string): boolean {
+  if (LUXE_ALLOWED_EXACT.has(pathname)) return true;
+  for (const prefix of LUXE_ALLOWED_PREFIXES) {
+    if (pathname.startsWith(prefix)) return true;
+  }
+  return false;
+}
 
 // R1X-PUB-EMPIREBOX: Public apex landing hosts.
 // The apex (and www) is a public, scrollable, SEO-renderable surface that
@@ -54,15 +82,21 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // --- Existing LUXE block (untouched) ---
-  if (host !== LUXE_PUBLIC_HOST) {
-    // fall through to FORGE block
-  } else if (!LUXE_PUBLIC_REDIRECT_PATHS.has(pathname)) {
+  // --- LUXE bucket: HARD-SCOPED to intake ---
+  // Founder's CF Access bypass (iX-day dispatch) opens luxe.empirebox.store
+  // to anonymous clients. This block is the safety gate: anonymous traffic
+  // can ONLY reach intake pages, the intake API, the fabrics-intake-project
+  // API, the photos mount, and Next.js assets. Anything else (the Command
+  // Center, /platform, /max, /quote, /api/v1/admin/*, /api/v1/quotes/*, etc.)
+  // is 307-redirected to /intake so a wrong URL never renders the founder
+  // surface.
+  if (host === LUXE_PUBLIC_HOST) {
+    if (!isLuxeAllowed(pathname)) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/intake";
+      return NextResponse.redirect(url);
+    }
     return NextResponse.next();
-  } else {
-    const url = request.nextUrl.clone();
-    url.pathname = "/intake";
-    return NextResponse.redirect(url);
   }
 
   // --- FORGE block: operator platform infrastructure surface ---

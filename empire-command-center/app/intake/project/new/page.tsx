@@ -102,6 +102,12 @@ export default function NewProject() {
       style: items[0]?.style || '',
       scope,
       rooms,
+      // iX-day R1X-INT-FIX (Doctrine #4): business is required from the
+      // request context. The luxe.empirebox.store public surface is the
+      // Workroom intake. The default mirrors lib/intake-auth.ts:signup — the
+      // only place "workroom" is named on the front-end, and it is the
+      // public surface's self-identification, not a backend default.
+      business: 'workroom',
     };
   };
 

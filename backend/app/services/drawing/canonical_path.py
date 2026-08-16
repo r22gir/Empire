@@ -126,3 +126,120 @@ if _is_stale_fork_root(_resolved_default):
         "Set MAX_DRAWINGS_OUTPUT_DIR or fix the canonical repo path.",
         _resolved_default,
     )
+
+
+# ── EMPIRE.DB canonical path (iX-day R1X-INT-FIX) ────────────────
+# iX-day dispatch: the LuxeForge intake router was hard-coded to
+# `~/empire-repo/backend/data/intake.db` (the stale fork). That path
+# was a hot-bed for silent drift — every other backend module reads
+# `~/empire-data/empire.db` (the canonical data dir). Resolution here
+# mirrors the drawings resolver: env override first, then canonical
+# default, with a RuntimeError on stale-fork detection so the bug
+# class can never silently return.
+_EMPIRE_DB_ENV_OVERRIDE = "EMPIRE_DB_PATH"
+
+# Canonical default: the active data dir declared in CLAUDE.md.
+_DEFAULT_EMPIRE_DB_PATH = Path.home() / "empire-data" / "empire.db"
+
+
+def canonical_empire_db_path() -> Path:
+    """Return the canonical path to empire.db (the canonical data DB).
+
+    Resolution order:
+      1. $EMPIRE_DB_PATH (if set) — checked for staleness.
+      2. ~/empire-data/empire.db — the canonical data dir.
+
+    Returns the path. Raises RuntimeError if the resolved path lives
+    under a known stale fork root (~/empire-repo/, ~/empire-repo-main-old/).
+    The caller is expected to coerce to str() as needed for sqlite3.connect.
+    """
+    override = os.getenv(_EMPIRE_DB_ENV_OVERRIDE)
+    candidate = Path(override) if override else _DEFAULT_EMPIRE_DB_PATH
+
+    if _is_stale_fork_root(candidate):
+        logger.critical(
+            "empire.db canonical path resolved to a stale fork root: "
+            "%s (override=%s). Refusing to operate — set EMPIRE_DB_PATH "
+            "to a path under the active data dir (~/empire-data/) or "
+            "remove the env var to use the default.",
+            candidate, override,
+        )
+        raise RuntimeError(
+            f"empire.db canonical path resolved to a stale fork root: "
+            f"{candidate}. Set EMPIRE_DB_PATH to a path under the active "
+            f"data dir (~/empire-data/) or remove the env var to use the "
+            f"default."
+        )
+
+    return candidate
+
+
+# ── EMPIRE intake uploads / photos canonical dirs (iX-day R1X-INT-FIX) ──
+# The stale-fork wrote client uploads to `~/empire-repo/backend/data/intake_uploads/`
+# and `~/empire-repo/backend/data/photos/`. Both have canonical homes under
+# `~/empire-data/`. The same `_is_stale_fork_root` guard fires on any
+# override that lands under the stale fork.
+_INTAKE_UPLOADS_ENV_OVERRIDE = "EMPIRE_INTAKE_UPLOADS_DIR"
+_PHOTOS_ENV_OVERRIDE = "EMPIRE_PHOTOS_DIR"
+_DEFAULT_INTAKE_UPLOADS_DIR = Path.home() / "empire-data" / "intake_uploads"
+_DEFAULT_PHOTOS_DIR = Path.home() / "empire-data" / "photos"
+
+
+def canonical_intake_uploads_dir() -> Path:
+    """Return the canonical directory for client intake uploads.
+
+    Resolution order:
+      1. $EMPIRE_INTAKE_UPLOADS_DIR (if set) — checked for staleness.
+      2. ~/empire-data/intake_uploads/ — the canonical data dir.
+
+    Returns the path with mkdir(parents=True, exist_ok=True) applied.
+    Raises RuntimeError if the resolved path lives under a stale fork
+    root (~/empire-repo/, ~/empire-repo-main-old/).
+    """
+    override = os.getenv(_INTAKE_UPLOADS_ENV_OVERRIDE)
+    candidate = Path(override) if override else _DEFAULT_INTAKE_UPLOADS_DIR
+
+    if _is_stale_fork_root(candidate):
+        logger.critical(
+            "intake_uploads canonical path resolved to a stale fork "
+            "root: %s (override=%s). Refusing to operate.",
+            candidate, override,
+        )
+        raise RuntimeError(
+            f"intake_uploads canonical path resolved to a stale fork "
+            f"root: {candidate}. Set EMPIRE_INTAKE_UPLOADS_DIR to a "
+            f"path under the active data dir (~/empire-data/) or "
+            f"remove the env var."
+        )
+
+    candidate.mkdir(parents=True, exist_ok=True)
+    return candidate
+
+
+def canonical_photos_dir() -> Path:
+    """Return the canonical directory for the unified photos store.
+
+    Resolution order:
+      1. $EMPIRE_PHOTOS_DIR (if set) — checked for staleness.
+      2. ~/empire-data/photos/ — the canonical data dir.
+
+    Returns the path with mkdir(parents=True, exist_ok=True) applied.
+    Raises RuntimeError if the resolved path lives under a stale fork root.
+    """
+    override = os.getenv(_PHOTOS_ENV_OVERRIDE)
+    candidate = Path(override) if override else _DEFAULT_PHOTOS_DIR
+
+    if _is_stale_fork_root(candidate):
+        logger.critical(
+            "photos canonical path resolved to a stale fork root: "
+            "%s (override=%s). Refusing to operate.",
+            candidate, override,
+        )
+        raise RuntimeError(
+            f"photos canonical path resolved to a stale fork root: "
+            f"{candidate}. Set EMPIRE_PHOTOS_DIR to a path under the "
+            f"active data dir (~/empire-data/) or remove the env var."
+        )
+
+    candidate.mkdir(parents=True, exist_ok=True)
+    return candidate

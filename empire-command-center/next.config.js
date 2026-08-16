@@ -22,11 +22,19 @@ const nextConfig = {
   },
   // Same-origin /api/v1 proxy to the local FastAPI backend. Mirrors
   // next.config.ts; see the TS file for the full rationale.
+  // /intake_uploads/:path* is proxied too so client-uploaded photos
+  // (mounted by the FastAPI StaticFiles at /intake_uploads) render
+  // inside the same host. Without this proxy, the front-end would 404
+  // photos served from the backend (iX-day R1X-INT-FIX).
   async rewrites() {
     return [
       {
         source: '/api/v1/:path*',
         destination: `${BACKEND_UPSTREAM}/api/v1/:path*`,
+      },
+      {
+        source: '/intake_uploads/:path*',
+        destination: `${BACKEND_UPSTREAM}/intake_uploads/:path*`,
       },
     ];
   },

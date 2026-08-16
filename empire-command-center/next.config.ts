@@ -29,11 +29,19 @@ const nextConfig: NextConfig = {
   // (which Cloudflare Access 302s to its login page, breaking fetch()).
   // The rewrite is server-side, so the browser never touches the
   // upstream backend directly; CF Access only sees the portal host.
+  // /intake_uploads/:path* is proxied too so client-uploaded photos
+  // (mounted by the FastAPI StaticFiles at /intake_uploads) render
+  // inside the same host. Without this proxy, the front-end would 404
+  // photos served from the backend (iX-day R1X-INT-FIX).
   async rewrites() {
     return [
       {
         source: "/api/v1/:path*",
         destination: `${BACKEND_UPSTREAM}/api/v1/:path*`,
+      },
+      {
+        source: "/intake_uploads/:path*",
+        destination: `${BACKEND_UPSTREAM}/intake_uploads/:path*`,
       },
     ];
   },
