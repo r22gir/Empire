@@ -81,7 +81,9 @@ def record_turn(
         return
     ensure_table()
     tool_results = tool_results or []
-    # Strip None and unserializable entries; cap result payload at 8KB per entry
+    # Strip None and unserializable entries; item-aware truncation at 12KB
+    # (PHASE 2 · F5.3 H49): never cut mid-array. Cap raised from 8KB to
+    # 12KB so a 6-item quote (with full metadata per item) fits whole.
     sanitized: list[dict] = []
     for entry in tool_results:
         if not isinstance(entry, dict):
@@ -90,8 +92,8 @@ def record_turn(
             blob = json.dumps(entry, default=str)
         except Exception:
             blob = "{}"
-        if len(blob) > 8192:
-            blob = blob[:8192] + "…[truncated]"
+        if len(blob) > 12288:
+            blob = _maybe_truncate_at_array_boundary(blob, max_chars=12288)
         sanitized.append({**entry, "result_preview": blob})
     index = _next_turn_index(conversation_id)
     with _connect() as conn:
@@ -189,12 +191,56 @@ def summarize_tool_results(tool_results: list[dict]) -> str:
     return "; ".join(parts)
 
 
+def _maybe_truncate_at_array_boundary(preview: str, max_chars: int = 1500) -> str:
+    """Truncate a JSON preview at an item boundary when possible.
+
+    The pre-F5.3 truncation cut at a fixed char count, which would
+    slice mid-array (e.g. returning only the first `line_items` entry
+    of a 6-item quote). The model then lost items 2–6. This is
+    item-aware: when the JSON has recognizable item separators
+    (`, {` from json.dumps default), we cut at the LAST item
+    boundary before the cap so items are never cut mid-record.
+
+    Strategy (best-effort, never raises):
+      1. If preview is short enough, return as-is.
+      2. Otherwise, find the LAST `, {` (item separator) before the
+         cap. Cut there and add a hint.
+      3. Count items kept vs total so the model can see "N more
+         items truncated" rather than guessing.
+      4. If no separator found, fall back to the hard cap.
+    """
+    if len(preview) <= max_chars:
+        return preview
+    cut = preview[:max_chars]
+    # json.dumps default separator is `, ` (comma + space). Item
+    # boundaries in a list of dicts look like `}, {`. We find the
+    # LAST `, {` before the cap so we keep complete items.
+    sep_idx = cut.rfind(", {")
+    if sep_idx > 0:
+        # Keep up to and including the `}` BEFORE the separator.
+        # The `},{` pattern contains the `}` of the previous item.
+        end_idx = sep_idx + 1  # cut AT the comma (keep `}`)
+        kept = preview[:end_idx]
+        # Count items in the kept prefix.
+        # Items in JSON are between `[{` and `}]`; each item except
+        # the first is preceded by `, {`.
+        kept_items = kept.count(", {") + (1 if "[{" in kept else 0)
+        total_items = preview.count(", {") + (1 if "[{" in preview else 0)
+        if total_items > kept_items:
+            return f"{kept} …[{total_items - kept_items} more items truncated]"
+        return f"{kept} …[truncated]"
+    return cut + "…[truncated]"
+
+
 def format_replay_block(recent_turns: list[dict]) -> str:
     """Format a system-style block the model can read to recall prior tool evidence.
 
     Returns an empty string if there's nothing to replay. The block is
     sized to stay within ~3000 tokens; per-turn tool result JSON is
-    capped at 1.5KB.
+    capped at 1.5KB. The 1.5KB cap is item-aware (PHASE 2 · F5.3
+    H49): we cut at the LAST top-level array close when possible so
+    a 6-item quote returns the full line_items array rather than
+    cutting mid-array at item 1.
     """
     if not recent_turns:
         return ""
@@ -219,8 +265,10 @@ def format_replay_block(recent_turns: list[dict]) -> str:
             tool = tr.get("tool", "?")
             success = tr.get("success", False)
             preview = tr.get("result_preview", "{}")
-            if len(preview) > 1500:
-                preview = preview[:1500] + "…[truncated]"
+            # PHASE 2 · F5.3 H49 — item-aware truncation: never cut mid-array.
+            # Cap raised to 12KB so a 6-line quote (with full metadata
+            # per item) fits whole; larger quotes get item-aware truncation.
+            preview = _maybe_truncate_at_array_boundary(preview, max_chars=12288)
             status = "OK" if success else "FAIL"
             err = tr.get("error")
             extra = f" error={err!r}" if err else ""
