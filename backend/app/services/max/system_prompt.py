@@ -58,6 +58,16 @@ def get_compact_system_prompt(channel: str = "web") -> str:
     openclaw_url = os.getenv("OPENCLAW_URL", "http://localhost:7878")
     today = datetime.now().strftime("%B %d, %Y")
 
+    # PHASE 2 · F4-A — live channel-status line from real probes
+    # (cached 60s). Lets the model pick the right channel instead of
+    # asking. Inline-imported so the cache survives the prompt cache.
+    channel_status = ""
+    try:
+        from app.services.max.channel_probe import channel_status_line
+        channel_status = channel_status_line()
+    except Exception:
+        channel_status = "channels: email ? · telegram ? · sendgrid ?"
+
     # Cross-channel context: what was said on other surfaces recently
     cross_ctx_lines = []
     try:
@@ -98,6 +108,8 @@ EMPIREBOX DEFAULT: You are the brain for **EmpireBox** — the founder's real bu
 
 {hermes_context}
 
+{channel_status}
+
 Founder email: {founder_email}. OpenClaw URL: {openclaw_url}. Today's date: {today}.
 """
 
@@ -135,7 +147,21 @@ def get_system_prompt() -> str:
     except Exception:
         hermes_bridge_section = ""
 
+    # PHASE 2 · F4-A — live channel-status line. Probe is cached 60s,
+    # prompt cache is also 60s — so the value is at most 60s stale,
+    # which is the right granularity for "is this channel up?".
+    channels_section = ""
+    try:
+        from .channel_probe import channel_status_line
+        channels_section = channel_status_line()
+    except Exception:
+        channels_section = "channels: email ? · telegram ? · sendgrid ?"
+
     dynamic_sections = ""
+    if channels_section:
+        # PHASE 2 · F4-A — live channel status line goes FIRST so the
+        # model sees it on every prompt, before any other context.
+        dynamic_sections += f"\n\n## Live Channel Status\n{channels_section}"
     if capabilities_section:
         dynamic_sections += f"\n\n{capabilities_section}"
     if operating_truth_section:
