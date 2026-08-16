@@ -48,6 +48,16 @@ logger = logging.getLogger("max.tool_executor")
 # overwhelm the conversation with spurious per-byte errors.
 MAX_PER_BLOCK_ERRORS = 16
 
+# HOTFIX 2026-08-16 (POLICY) — standing CC on every outbound MAX email.
+# Every send_email call MUST CC rafa22giraldo@gmail.com. This is
+# enforced in the tool itself, NOT in the prompt, so the model cannot
+# forget it. Both addresses are in MAX_EMAIL_ALLOWED_RECIPIENTS so the
+# allowlist check passes. Reply-To is set to max@empirebox.store (the
+# address the future inbound poller — SendGrid Inbound Parse webhook at
+# /webhooks/email/inbound AND Gmail check_inbox — will watch).
+DEFAULT_EMAIL_CC = ("rafa22giraldo@gmail.com",)
+DEFAULT_REPLY_TO = "max@empirebox.store"
+
 # ── Dangerous Tool PIN Gate ───────────────────────────────────────
 DANGEROUS_TOOLS = {"shell_execute", "env_set", "db_query"}
 # HOTFIX 4.2 (2026-07-24) — FOUNDER_PIN fails CLOSED.
@@ -2437,8 +2447,22 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             ),
             result=verdict_to,
         )
+
+    # HOTFIX 2026-08-16 (POLICY) — every outbound MAX email CCs the
+    # standing address. Merge DEFAULT_EMAIL_CC with any user-supplied
+    # cc (deduped, case-insensitive). This is enforced in the tool,
+    # NOT in the prompt, so the model cannot forget it.
+    cc_list: list[str] = []
     if cc:
         cc_list = [a.strip() for a in str(cc).split(",") if a.strip()]
+    seen = {to.lower()}
+    for a in cc_list:
+        seen.add(a.lower())
+    for default_cc in DEFAULT_EMAIL_CC:
+        if default_cc.lower() not in seen:
+            cc_list.append(default_cc)
+            seen.add(default_cc.lower())
+    if cc_list:
         cc_authorized = [
             (a, authorize_email_recipient(a))
             for a in cc_list
@@ -2491,12 +2515,25 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         svc = EmailService()
         if not svc.is_configured:
             return ToolResult(tool="send_email", success=False, error="Email not configured — set SENDGRID_API_KEY or SMTP_USER/SMTP_PASSWORD in .env")
-        logger.info(f"send_email: to={to}, subject={subject}, attachments={converted_attachments}")
-        sent = svc.send(to=to, subject=subject, body_html=body, attachments=converted_attachments, cc=cc)
+        logger.info(f"send_email: to={to}, subject={subject}, attachments={converted_attachments}, cc={cc_list}")
+        # HOTFIX 2026-08-16 (POLICY) — explicit Reply-To override so the
+        # future inbound poller (SendGrid Inbound Parse webhook at
+        # /webhooks/email/inbound AND Gmail check_inbox) catches the
+        # reply. Same address as SMTP_REPLY_TO per the F4 decision.
+        sent = svc.send(
+            to=to,
+            subject=subject,
+            body_html=body,
+            attachments=converted_attachments,
+            cc=", ".join(cc_list) if cc_list else None,
+            reply_to=DEFAULT_REPLY_TO,
+        )
         if not sent:
             return ToolResult(tool="send_email", success=False, error="Email provider did not verify send acceptance")
         return ToolResult(tool="send_email", success=True, result={
             "sent_to": to, "subject": subject,
+            "cc": cc_list,
+            "reply_to": DEFAULT_REPLY_TO,
             "attachments_sent": len(converted_attachments),
             "attachment_files": [os.path.basename(a) for a in converted_attachments],
             "body_verified": bool(body.strip()),
