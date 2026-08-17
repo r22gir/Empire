@@ -758,26 +758,44 @@ def _render_title_column(
         # by allowing multi-line values via _wrap_value). The
         # doctrine placeholder is "TBC — CONFIRM BEFORE CUT" when
         # fabric_sku is unset; this MUST appear COMPLETE.
+        # D-R3-4 (2026-08-17): orientation is shown in the FABRIC
+        # rows so the founder can confirm "STANDARD" vs
+        # "RAILROADED" at a glance.
         ("FABRIC:", fabric_name),
         ("", fabric_mill),
         ("", fabric_sku),
         ("", fabric_repeat),
+        ("", _fabric_reg.orientation_label(
+            fabric_obj.orientation if fabric_obj else "standard")),
         ("SCALE:", _format_scale_row(scale_factor)),
         ("REV:", f"{spec.get('rev', '0')} · {spec.get('date', '07/26/2026')}"),
     ]
-    # (rows already defined above with colons)
+    # (rows already defined above with colons). Compute the value
+    # column offset based on the actual width of the longest TRACKED
+    # label so letterspacing on "DIMENSIONS:" / "PROJECT:" etc.
+    # cannot bleed into the value column. D-R3-5 layout fix:
+    # previously hardcoded 0.70" — too narrow for tracking=1.5 on
+    # the 11-char "DIMENSIONS:" label (0.86" wide with tracking),
+    # which caused the label/value chars to merge in pdfplumber's
+    # word grouping AND the raster to show "DIMENSIO*N*87.00" overlap.
+    c.setFont("Helvetica-Bold", 7)
+    label_widths = []
+    for lab, _ in rows:
+        if not lab:
+            continue
+        s = lab.upper()
+        total_pt = sum(c.stringWidth(ch, "Helvetica-Bold", 7) + 1.5
+                       for ch in s) - 1.5
+        label_widths.append(total_pt / 72.0)
+    max_label_w_in = max(label_widths) if label_widths else 0.86
+    value_x_in = tx + max_label_w_in + 0.05   # 0.05" margin past label
     for lab, val in rows:
         if lab:
             ls_text(c, tx, ty, lab, 7, LIGHT, tracking=1.5, bold=True)
         c.setFont("Helvetica-Bold" if lab else "Helvetica", 6.0)
         c.setFillColor(INK)
-        # Truncate values that overflow the title column right edge
-        # (column x1=10.50, safe right=10.44). At 6.0pt font,
-        # ~0.04"/char → 38 chars max from value column start at
-        # tx+0.70=8.96. Truncate at 28 chars to be safe (allows
-        # descender margin).
-        val_draw = val[:28] if len(val) > 28 else val
-        c.drawString(_P(tx + 0.70), _P(ty), val_draw)
+        # D-R2-2: doctrine strings are NEVER truncated.
+        c.drawString(_P(value_x_in), _P(ty), val)
         ty -= row_gap
     # ── Divider 1
     c.setStrokeColor(DIVIDER)
@@ -1957,19 +1975,18 @@ def _get_assumptions(geometry, product_type: str, spec: dict = None) -> list[str
     dims = (spec or {}).get("dims", {}) or {}
     if "mounting_depth" in dims:
         out.append(
-            f"Mounting: {dims['mounting_depth']:.2f}\" (spec) — "
-            f"founder MUST verify."
+            f"Mount: {dims['mounting_depth']:.2f}\" — verify"
         )
     else:
         out.append(
-            "Mounting: ASSUMED 2-1/2\" inside — founder MUST verify."
+            "Mount: 2-1/2\" inside ASSUMED — verify"
         )
     if any(p.name.startswith("ring_") for p in geometry.points):
         out.append(
-            "Rings: see markers on elevation — founder MUST verify."
+            "Rings: see elev markers — verify"
         )
     out.append(
-        "CONFIRM-before-fab: dims MUST be verified."
+        "Verify dims before fabrication"
     )
     return out
 

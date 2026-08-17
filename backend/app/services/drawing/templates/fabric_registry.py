@@ -5,13 +5,21 @@ HOTFIX B2d (2026-07-25) — DATA module, not DB. The B2d directive
 registry; 'TBC — CONFIRM BEFORE CUT' when absent") requires the
 renderer to look up a fabric's visual identity at render time.
 
+D-R3-4 (2026-08-17, founder directive): each Fabric record
+carries ORIENTATION ("standard" | "railroaded") and an optional
+SOURCE_URL (founder may provide a fabric-website link — store the
+field, do NOT fetch in this round). Railroaded fabric runs
+horizontally — the renderer flips the pattern/motif repeat direction
+on the elevation and the title column lists the orientation.
+
 Per founder directive:
   - Registry is a Python data module, ADDITIVE — new fabrics land
     in `_REGISTRY` below. Renderer logic contains no fabric-
     specific hardcoding.
   - Each Fabric record carries: name, mill, base_color_hex
     (the dominant tone that fills the fabric zone), pattern_class,
-    width_in, repeat_in (vertical repeat for pattern alignment).
+    width_in, repeat_in (vertical repeat for pattern alignment),
+    orientation, source_url.
   - pattern_class ∈ {floral, geometric, solid, texture, stripe}.
     The renderer maps each pattern_class → stylized motif marks:
       floral    → leaf + blossom shapes (GP&J Baker Nympheus
@@ -31,7 +39,7 @@ Seed (B2d): fabrics we know.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from reportlab.lib import colors as _rl_colors
@@ -54,6 +62,16 @@ VALID_PATTERN_CLASSES: frozenset[str] = frozenset({
 })
 
 
+# ── Orientation (D-R3-4, 2026-08-17) ────────────────────────────
+
+ORIENTATION_STANDARD = "standard"      # fabric runs vertically (default)
+ORIENTATION_RAILROADED = "railroaded"  # fabric runs horizontally
+VALID_ORIENTATIONS: frozenset[str] = frozenset({
+    ORIENTATION_STANDARD,
+    ORIENTATION_RAILROADED,
+})
+
+
 # ── Fabric record ─────────────────────────────────────────────────
 
 
@@ -66,6 +84,8 @@ class Fabric:
     pattern_class: str      # one of VALID_PATTERN_CLASSES
     width_in: float
     repeat_in: Optional[float] = None   # None = no vertical repeat
+    orientation: str = ORIENTATION_STANDARD   # standard or railroaded
+    source_url: Optional[str] = None          # fabric-website link
 
 
 # ── Seed data (additive — new fabrics land here) ─────────────────
@@ -80,6 +100,8 @@ _REGISTRY: Dict[str, Fabric] = {
         pattern_class=PATTERN_FLORAL,
         width_in=54.0,
         repeat_in=35.46,                # vertical repeat (in)
+        orientation=ORIENTATION_STANDARD,
+        source_url=None,
     ),
     "SVI001": Fabric(
         sku="SVI001",
@@ -89,6 +111,8 @@ _REGISTRY: Dict[str, Fabric] = {
         pattern_class=PATTERN_SOLID,
         width_in=54.0,
         repeat_in=None,
+        orientation=ORIENTATION_STANDARD,
+        source_url=None,
     ),
     "R357": Fabric(
         sku="R357",
@@ -98,6 +122,8 @@ _REGISTRY: Dict[str, Fabric] = {
         pattern_class=PATTERN_TEXTURE,
         width_in=54.0,
         repeat_in=None,
+        orientation=ORIENTATION_STANDARD,
+        source_url=None,
     ),
     "D3967": Fabric(
         sku="D3967",
@@ -107,6 +133,8 @@ _REGISTRY: Dict[str, Fabric] = {
         pattern_class=PATTERN_SOLID,
         width_in=54.0,
         repeat_in=None,
+        orientation=ORIENTATION_STANDARD,
+        source_url=None,
     ),
     "5937": Fabric(
         sku="5937",
@@ -116,6 +144,8 @@ _REGISTRY: Dict[str, Fabric] = {
         pattern_class=PATTERN_SOLID,
         width_in=54.0,
         repeat_in=None,
+        orientation=ORIENTATION_RAILROADED,   # oxford often RR
+        source_url=None,
     ),
 }
 
@@ -144,6 +174,11 @@ def fallback_label() -> str:
     """The literal text to print when fabric is missing or unknown —
     both inside the fabric zone and as a NOTES / ASSUMPTIONS row."""
     return "FABRIC: TBC — CONFIRM BEFORE CUT"
+
+
+def orientation_label(orientation: str) -> str:
+    """Short label for the title column FABRIC rows."""
+    return orientation.upper() if orientation else "STANDARD"
 
 
 # ── Color helpers (used by renderer for motif marks) ──────────────

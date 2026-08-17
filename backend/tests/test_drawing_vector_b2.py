@@ -1752,28 +1752,53 @@ def _make_r3_valid_synthetic_drapery(c, family="Drapery", heading="pinch_pleat")
            _P_in(SIDE_W_IN), _P_in(SIDE_H_IN), fill=0, stroke=1)
     c.rect(_P_in(TITLE_X_IN), _P_in(TITLE_Y_IN),
            _P_in(TITLE_W_IN), _P_in(TITLE_H_IN), fill=0, stroke=1)
-    # ── FRONT ELEVATION fabric (Drapery — vertical panel seams)
-    # Drapery width × height drawn at TRUE scale. Need at least
-    # ONE rect in the front-elev viewport so the scale-truth gate
-    # doesn't fail with "no rects in front-elev viewport".
+    # ── FRONT ELEVATION fabric (D-R3-1 GATHERED default — panels
+    # stacked back, glass visible between; same layout as the
+    # production renderer). Synthetic fixture keeps the side-
+    # section sail (the defect under test).
     geo_w = 87.0
     geo_h = 84.0
     drapery_scale = min(
         ((FRONT_W_IN - 0.40) * 0.90) / geo_w,
         ((FRONT_H_IN - 0.40) * 0.90) / geo_h)
+    returns = 4.0
+    STACK_W = 22.0
+    body_w = geo_w - 2 * returns
+    glass_w = body_w - 2 * STACK_W
     sx0 = FRONT_X_IN + (FRONT_W_IN - 0.40 - geo_w * drapery_scale) / 2
     sy0 = FRONT_Y_IN + (FRONT_H_IN - 0.40 - geo_h * drapery_scale) / 2
-    # Casing (the largest rect — passes scale-truth identification)
+    # Window casing (outlines the window opening)
     c.setStrokeColor((0.54, 0.51, 0.44))
     c.setLineWidth(2.2)
     c.rect(_P_in(sx0 - 0.05), _P_in(sy0 - 0.05),
            _P_in(geo_w * drapery_scale + 0.10),
            _P_in(geo_h * drapery_scale + 0.10), fill=0, stroke=1)
-    # Drape body fill
-    c.setFillColor((0.07, 0.23, 0.16))
-    c.rect(_P_in(sx0), _P_in(sy0),
-           _P_in(geo_w * drapery_scale), _P_in(geo_h * drapery_scale),
+    # Returns (L + R, brown)
+    c.setFillColor((0.35, 0.27, 0.20))
+    c.rect(_P_in(sx0 + returns * drapery_scale), _P_in(sy0),
+           _P_in(returns * drapery_scale), _P_in(geo_h * drapery_scale),
            fill=1, stroke=1)
+    c.rect(_P_in(sx0 + (geo_w - returns) * drapery_scale), _P_in(sy0),
+           _P_in(returns * drapery_scale), _P_in(geo_h * drapery_scale),
+           fill=1, stroke=1)
+    # Stacks (L + R, fabric fill)
+    c.setFillColor((0.07, 0.23, 0.16))
+    # Left stack
+    c.rect(_P_in(sx0 + returns * drapery_scale), _P_in(sy0),
+           _P_in(STACK_W * drapery_scale), _P_in(geo_h * drapery_scale),
+           fill=1, stroke=1)
+    # Right stack
+    c.rect(_P_in(sx0 + (returns + body_w - STACK_W) * drapery_scale),
+           _P_in(sy0),
+           _P_in(STACK_W * drapery_scale), _P_in(geo_h * drapery_scale),
+           fill=1, stroke=1)
+    # Glass border (thin outline, no fill)
+    c.setStrokeColor((0.48, 0.54, 0.60))
+    c.setLineWidth(0.5)
+    c.rect(_P_in(sx0 + (returns + STACK_W) * drapery_scale),
+           _P_in(sy0),
+           _P_in(glass_w * drapery_scale), _P_in(geo_h * drapery_scale),
+           fill=0, stroke=1)
     # ── Viewport labels
     c.setFillColor((0, 0, 0))
     c.setFont("Helvetica-Bold", 8.5)
@@ -1844,7 +1869,10 @@ def _make_r3_valid_synthetic_drapery(c, family="Drapery", heading="pinch_pleat")
     sail_y = []
     for i in range(n_pts + 1):
         t = i / n_pts
-        depth_at_t = 1.20 - 0.80 * t
+        # Constrain depth so the sail stays within the SIDE viewport
+        # (SIDE_X_IN = 5.19). The sail's leftmost x = wall_x - depth
+        # must be ≥ SIDE_X_IN. wall_x ≈ 5.94, so depth ≤ 0.70.
+        depth_at_t = 0.60 - 0.30 * t   # tapers from 0.60" → 0.30" sheet
         sail_x.append(wall_x - depth_at_t)
         sail_y.append(rod_y - (rod_y - floor_y) * t)
     # Sail fill (drawn as a path so the gate's main-drape
@@ -1912,7 +1940,10 @@ def _overlay_sail_drapery(c, page):
     sail_y = []
     for i in range(n_pts + 1):
         t = i / n_pts
-        depth_at_t = 1.20 - 0.80 * t
+        # Constrain depth so the sail stays within the SIDE viewport
+        # (SIDE_X_IN = 5.19). The sail's leftmost x = wall_x - depth
+        # must be ≥ SIDE_X_IN. wall_x ≈ 5.94, so depth ≤ 0.70.
+        depth_at_t = 0.60 - 0.30 * t   # tapers from 0.60" → 0.30" sheet
         sail_x.append(wall_x - depth_at_t)
         sail_y.append(rod_y - (rod_y - floor_y) * t)
     # White-out the existing drape fabric by drawing a cream rect
@@ -2309,6 +2340,164 @@ class TestGoldenPortG1R2DraperyCorrections:
                 or "text-bounds" in msg.lower()
                 or "text-over-geometry" in msg.lower()), (
             f"Gate D-R2-2 must catch intra-title overlap; got: {msg}"
+        )
+
+    def test_d_r3_1_gathered_elevation_fails_on_closed_panels(self):
+        """NEGATIVE FIXTURE — Gate D-R3-1 (gathered elevation).
+        Founder correction (2026-08-17): the R2 closed-panels
+        elevation (one big fabric rect, no glass between stacks)
+        MUST FAIL this gate. The synthetic fixture builds a full
+        Drapery R3 sheet but draws the elevation CLOSED (no
+        stack-back)."""
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from app.services.drawing.templates.b2_renderers import (
+            FRONT_X_IN, FRONT_Y_IN, FRONT_W_IN, FRONT_H_IN,
+            PAGE_W_IN, PAGE_H_IN, MARGIN_IN,
+            HEADER_BAND_H_IN, FOOTER_BAND_H_IN,
+        )
+        from app.services.drawing.templates.b2_qc import (
+            enforce_b2_qc, B2QCFailure,
+        )
+        import io as _io
+        from reportlab.lib.units import inch as _INCH
+        _P_in_local = lambda x: x * _INCH
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        # ── Page background + frame ──
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.rect(_P_in_local(0), _P_in_local(0),
+               _P_in_local(PAGE_W_IN), _P_in_local(PAGE_H_IN),
+               fill=1, stroke=0)
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(1.1)
+        c.rect(_P_in_local(MARGIN_IN), _P_in_local(MARGIN_IN),
+               _P_in_local(PAGE_W_IN - 2 * MARGIN_IN),
+               _P_in_local(PAGE_H_IN - 2 * MARGIN_IN), fill=0, stroke=1)
+        # ── Header band + title ──
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in_local(MARGIN_IN),
+               _P_in_local(PAGE_H_IN - MARGIN_IN - HEADER_BAND_H_IN),
+               _P_in_local(PAGE_W_IN - 2 * MARGIN_IN),
+               _P_in_local(HEADER_BAND_H_IN), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 21)
+        c.drawString(_P_in_local(MARGIN_IN + 0.27),
+                     _P_in_local(
+                         PAGE_H_IN - MARGIN_IN - HEADER_BAND_H_IN + 0.17),
+                     "PINCH PLEAT DRAPERY")
+        # ── Viewport frames (4 LINES per Correction 4) ──
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(0.4)
+        for vx, vy, vw, vh in [
+            (FRONT_X_IN, FRONT_Y_IN, FRONT_W_IN, FRONT_H_IN),
+        ]:
+            c.line(_P_in_local(vx), _P_in_local(vy),
+                   _P_in_local(vx + vw), _P_in_local(vy))
+            c.line(_P_in_local(vx), _P_in_local(vy + vh),
+                   _P_in_local(vx + vw), _P_in_local(vy + vh))
+            c.line(_P_in_local(vx), _P_in_local(vy),
+                   _P_in_local(vx), _P_in_local(vy + vh))
+            c.line(_P_in_local(vx + vw), _P_in_local(vy),
+                   _P_in_local(vx + vw), _P_in_local(vy + vh))
+        # ── Pile-pass decorator (spread small rects in side section
+        # so the B2b pile gate passes — keeps the test focused on
+        # gathered-elevation, not pile) ──
+        from tests.test_drawing_vector_b2 import _make_pile_passes_decorator
+        _make_pile_passes_decorator(c, None, None, None, None)
+        # ── CLOSED ELEVATION (the R2 defect — one big fabric
+        # rect filling the body, NO glass visible between stacks) ──
+        geo_w = 87.0
+        geo_h = 84.0
+        drapery_scale = min(
+            ((FRONT_W_IN - 0.40) * 0.90) / geo_w,
+            ((FRONT_H_IN - 0.40) * 0.90) / geo_h)
+        sx0 = FRONT_X_IN + (FRONT_W_IN - 0.40 - geo_w * drapery_scale) / 2
+        sy0 = FRONT_Y_IN + (FRONT_H_IN - 0.40 - geo_h * drapery_scale) / 2
+        c.setStrokeColor((0.54, 0.51, 0.44))
+        c.setLineWidth(2.2)
+        c.rect(_P_in_local(sx0 - 0.05), _P_in_local(sy0 - 0.05),
+               _P_in_local(geo_w * drapery_scale + 0.10),
+               _P_in_local(geo_h * drapery_scale + 0.10),
+               fill=0, stroke=1)
+        c.setFillColor((0.07, 0.23, 0.16))
+        c.rect(_P_in_local(sx0), _P_in_local(sy0),
+               _P_in_local(geo_w * drapery_scale),
+               _P_in_local(geo_h * drapery_scale),
+               fill=1, stroke=1)   # CLOSED — no glass!
+        # ── Front elev label ──
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(_P_in_local(FRONT_X_IN + 0.20),
+                     _P_in_local(FRONT_Y_IN + FRONT_H_IN - 0.20),
+                     "FRONT ELEVATION")
+        # ── Title column (minimal — satisfies zone title-block gate)
+        from app.services.drawing.templates.b2_renderers import (
+            TITLE_X_IN, TITLE_Y_IN, TITLE_W_IN, TITLE_H_IN,
+            ls_text, _letterspaced_width_in, _format_scale_row,
+        )
+        from app.services.drawing.templates.b2_renderers import INK, LIGHT, GOLD
+        tx = TITLE_X_IN + 0.16
+        ty = TITLE_Y_IN + TITLE_H_IN - 0.34
+        row_gap = 0.215
+        rows = [
+            ("PROJECT:", "—"),
+            ("CLIENT:", "Test Client"),
+            ("FAMILY:", "Drapery · Pinch Pleat"),
+            ("DIMENSIONS:", "87.00\" W × 84.00\" H"),
+            ("PANELS:", "4 × 24.0\" max"),
+            ("FABRIC:", "Nympheus Velvet Emerald"),
+            ("", "GP&J Baker"),
+            ("", "BP10814-2"),
+            ("", "54\" W  ·  35.46\" VR"),
+            ("SCALE:", "1\" = 1'-11-5/16\""),
+            ("REV:", "0 · 08/17/2026"),
+        ]
+        # Compute value_x_in (max label width + margin)
+        c.setFont("Helvetica-Bold", 7)
+        max_w = 0.86
+        for lab, _ in rows:
+            if not lab: continue
+            s = lab.upper()
+            total_pt = sum(c.stringWidth(ch, "Helvetica-Bold", 7) + 1.5
+                           for ch in s) - 1.5
+            max_w = max(max_w, total_pt / 72.0)
+        value_x_in = tx + max_w + 0.05
+        for lab, val in rows:
+            if lab:
+                ls_text(c, tx, ty, lab, 7, LIGHT, tracking=1.5, bold=True)
+            c.setFont("Helvetica-Bold" if lab else "Helvetica", 6.0)
+            c.setFillColor(INK)
+            c.drawString(_P_in_local(value_x_in), _P_in_local(ty), val)
+            ty -= row_gap
+        # ── Footer band + text (satisfies footer-collision gate) ──
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in_local(MARGIN_IN), _P_in_local(MARGIN_IN),
+               _P_in_local(PAGE_W_IN - 2 * MARGIN_IN),
+               _P_in_local(FOOTER_BAND_H_IN), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(_P_in_local(MARGIN_IN + 0.28),
+                     _P_in_local(MARGIN_IN + FOOTER_BAND_H_IN / 2 - 0.05),
+                     "EMPIRE WORKROOM  ·  HYATTSVILLE, MD  ·  (703) 213-6484")
+        c.setFillColor((0.91, 0.54, 0.17))
+        c.drawCentredString(_P_in_local(PAGE_W_IN / 2),
+                            _P_in_local(MARGIN_IN + FOOTER_BAND_H_IN / 2 - 0.05),
+                            "FOR DISCUSSION — NOT FOR CONSTRUCTION")
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawRightString(_P_in_local(PAGE_W_IN - MARGIN_IN - 0.28),
+                          _P_in_local(MARGIN_IN + FOOTER_BAND_H_IN / 2 - 0.05),
+                          "SHEET B2  ·  1 OF 1")
+        c.save()
+        bad_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(bad_pdf, "Drapery", "pinch_pleat")
+        msg = str(exc_info.value)
+        assert ("gathered-elevation" in msg.lower()
+                or "text-over-geometry" in msg.lower()), (
+            f"Gate D-R3-1 must catch closed-panels elevation; "
+            f"got: {msg}"
         )
 
     def test_d_r2_3_layout_math_complete(self):

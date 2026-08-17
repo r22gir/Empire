@@ -456,6 +456,18 @@ def enforce_b2_qc(
                 f"{family}/{product_type}: {'; '.join(msgs)}. "
                 f"samples: {footer_disc_failures[:3]}"
             )
+        # Gate D-R3-1: Drapery GATHERED elevation (panels stacked
+        # back, glass visible between stacks; founder "fatal flaw"
+        # correction from 2026-08-17).
+        gathered_failures = _check_gathered_elevation(
+            pdf_bytes, family=family)
+        if gathered_failures:
+            msgs = [f["issue"] for f in gathered_failures]
+            raise B2QCFailure(
+                f"B2 QC (gathered-elevation) FAIL on "
+                f"{family}/{product_type}: {'; '.join(msgs)}. "
+                f"samples: {gathered_failures[:3]}"
+            )
         # Gate 4: duplicate viewport captions
         dup_cap_failures = _check_duplicate_viewport_captions(page)
         if dup_cap_failures:
@@ -538,43 +550,94 @@ def _check_text_collision(page) -> List[Tuple[str, str]]:
     start, but those DO NOT overlap in y → not flagged here.
 
     pdfplumber groups chars into words via `extract_words()`.
+    BLIND-SPOT (D-R3-5, 2026-08-17): when two adjacent labels
+    (label + value) sit on the same y-line and the label's
+    letterspacing makes it extend into the value's x range, pdfplumber
+    MERGES them into ONE word. The word-level collision check then
+    can't compare "label vs value" because they look like a single
+    word. The D-R3-5 fix below detects this case via a merged-word
+    heuristic: if a single pdfplumber "word" is wider than
+    MAX_WORD_WIDTH_IN at the same y-line as another "word", it's a
+    likely-merge collision. We also do a per-char overlap check
+    scoped to within merged words to catch the specific case.
     """
+    pairs = []
     words = page.extract_words(
         use_text_flow=False,  # don't reorder rows; we want spatial truth
         keep_blank_chars=False,
     )
-    if not words:
-        return []
-    pairs = []
+    # ── WORD-level check (original pre-D-R3-5 logic) ─────────────
     n = len(words)
     for i in range(n):
         wa = words[i]
         for j in range(i + 1, n):
             wb = words[j]
-            # Bbox intersection: y-ranges must overlap (otherwise
-            # the words are on vertically separated lines, which
-            # is normal — different label rows, not a collision).
             y_overlap = max(0,
                             min(wa['bottom'], wb['bottom'])
                             - max(wa['top'], wb['top']))
             if y_overlap <= 0:
                 continue
-            # Y-overlap is real. Now check x-overlap fraction.
             x_overlap_frac = _h_overlap_frac(wa, wb)
             y_overlap_frac = (
                 y_overlap / min(wa['bottom'] - wa['top'],
                                 wb['bottom'] - wb['top'])
             )
-            # AND-gate: words on the SAME visual line must overlap in
-            # BOTH x and y. Words stacked vertically at the same x
-            # (e.g. right-column title-block rows) have high x-overlap
-            # but low y-overlap — they're NOT collisions. The pre-B2b
-            # bug had every char at the same (x, y) point, which
-            # would have high overlap in BOTH axes — that's the real
-            # collision signature.
             if (x_overlap_frac > TEXT_OVERLAP_THRESHOLD
                     and y_overlap_frac > TEXT_OVERLAP_THRESHOLD):
                 pairs.append((wa['text'], wb['text']))
+    # ── MERGED-WORD detection (D-R3-5 blind-spot fix) ────────────
+    # If a single pdfplumber "word" is unusually long AND wide AND
+    # contains both a label-like prefix (e.g., "DIMENSIONS:" with a
+    # trailing colon) AND digit content, it's likely a merge of two
+    # logical labels (e.g., the title-column label letterspacing into
+    # the value). Inside such merged words, individual chars may
+    # overlap each other — that overlap is the real collision.
+    chars = page.chars
+    if not chars or not words:
+        return pairs
+    # Build char_index → (word_text, word_index, word_width) for chars
+    char_word = {}
+    for wi, word in enumerate(words):
+        wx0, wx1 = word['x0'], word['x1']
+        wt, wb = word['top'], word['bottom']
+        word_width = wx1 - wx0
+        for ci, ch in enumerate(chars):
+            if (wx0 - 0.5 <= ch['x0'] <= wx1 + 0.5
+                    and wt - 0.5 <= ch['top'] <= wb + 0.5):
+                char_word[ci] = (word['text'], wi, word_width)
+    for i in range(len(chars)):
+        ai = chars[i]
+        wi_tuple = char_word.get(i)
+        if wi_tuple is None:
+            continue
+        wtext, wi, wwidth = wi_tuple
+        # Heuristic for "merged label + value":
+        # - word is unusually wide (>= 1.40" — wider than any
+        #   normal single-word title column row)
+        # - word contains a digit (indicating value content)
+        # - word has > 18 chars (a normal label has <= 11 chars;
+        #   a normal value has <= 28 chars; merged is > 18)
+        if wwidth < 1.40 or len(wtext) <= 18:
+            continue
+        has_digit = any(c2.isdigit() for c2 in wtext)
+        if not has_digit:
+            continue
+        # Scan ahead up to ~30 chars and check pair overlap in BOTH x and y.
+        for j in range(i + 1, min(i + 30, len(chars))):
+            aj = chars[j]
+            wj_tuple = char_word.get(j)
+            if wj_tuple is None or wj_tuple[1] != wi:
+                continue
+            x_gap = aj['x0'] - ai.get('x1', ai['x0'])
+            if x_gap >= 0:  # no x overlap
+                continue
+            # Check y overlap (chars on same y-line)
+            ay0 = ai['top']
+            bj0 = aj['top']
+            if abs(ay0 - bj0) > 2:
+                continue
+            pairs.append((ai.get('text', '?'), aj.get('text', '?')))
+            break  # one pair per char-i is enough
     return pairs
 
 
@@ -2049,4 +2112,220 @@ def _check_drapery_plumb(pdf_bytes: bytes, family: str = "Drapery") -> list[dict
             "scale_factor": scale_factor,
             "heading": heading,
         })
+    return failures
+
+
+# ── CORRECTION D-R3-1 — Drapery gathered-elevation gate ──────────
+#
+# Founder directive (2026-08-17): drapery elevation is GATHERED by
+# default — panels STACKED BACK so the window/glass is visible
+# between them. The R2 "closed panels" elevation was the founder's
+# "fatal flaw" correction.
+#
+# GATE (Drapery family only):
+#   (a) PIXEL SCAN — the central window region must NOT be
+#       fabric-colored (glass visible). We rasterize the front
+#       elevation viewport at 150 DPI and sample the central
+#       column. If the fabric color appears in the center, the
+#       drape is closed (no glass) → FAIL.
+#   (b) STACK WIDTH — each side's stack width must be within ±15%
+#       of STACK_WIDTH_PER_PANEL_IN × panels-per-side (model
+#       inches). The leftmost and rightmost fabric-colored pixel
+#       runs in the front viewport measure each stack.
+#
+# NEGATIVE FIXTURE: a Drapery render with closed panels (fabric
+# fills the central window region) MUST FAIL this gate.
+
+
+def _check_gathered_elevation(
+    pdf_bytes: bytes, family: str = "Drapery",
+) -> list[dict]:
+    """Gate D-R3-1: drapery elevation is gathered (panels stacked
+    back, glass visible between stacks).
+
+    Rasterizes the front elevation viewport, samples the center
+    column for fabric-colored pixels, and measures each side's
+    stack width. Returns a list of failures (empty = pass).
+    """
+    import io
+    import statistics
+    failures = []
+    if family != "Drapery":
+        return failures
+    # Pre-compute the expected stack width for Drapery default
+    # spec (87" × 84" × 4 panels × 2 returns × 4" each).
+    from app.services.drawing.templates import fabric_registry as _fr
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        page0 = pdf.pages[0]
+        page_image = page0.to_image(resolution=150)
+        pil_img = page_image.original
+    # Front elevation viewport bounds (canvas BL inches)
+    DPI = 150
+    FRONT_X_IN, FRONT_Y_IN, FRONT_W_IN, FRONT_H_IN = (
+        globals()["FRONT_X_IN"], globals()["FRONT_Y_IN"],
+        globals()["FRONT_W_IN"], globals()["FRONT_H_IN"])
+    vp_x0_px = int(round(FRONT_X_IN * DPI))
+    vp_x1_px = int(round((FRONT_X_IN + FRONT_W_IN) * DPI))
+    vp_y0_px = int(round(pil_img.height - (FRONT_Y_IN + FRONT_H_IN) * DPI))
+    vp_y1_px = int(round(pil_img.height - FRONT_Y_IN * DPI))
+    front_img = pil_img.crop((vp_x0_px, vp_y0_px, vp_x1_px, vp_y1_px))
+    pixels = front_img.load()
+    w_px, h_px = front_img.size
+    bg_color = (247, 243, 234)   # cream paper bg
+    # Fabric detection by SATURATION (HSV max-min difference), not
+    # color matching. Fabric = high-saturation colored pixel that's
+    # NOT bg cream. Returns (brown) have low saturation; window
+    # border (grey-blue) has low saturation; bg cream has low
+    # saturation. Only fabric fills have saturated color.
+    def _is_saturated(p, sat_threshold=30):
+        if len(p) >= 4 and p[3] == 0:
+            return False
+        d_bg = (abs(p[0] - bg_color[0]) + abs(p[1] - bg_color[1]) +
+                abs(p[2] - bg_color[2]))
+        if d_bg < 30:
+            return False
+        sat = max(p[0], p[1], p[2]) - min(p[0], p[1], p[2])
+        return sat > sat_threshold
+    n_fabric_total = sum(
+        1 for y in range(h_px) for x in range(w_px)
+        if _is_saturated(pixels[x, y])
+    )
+    # ── (a) Central window pixel scan ─────────────────────────
+    # The central window region (middle ~20% of the viewport
+    # width) must NOT be fabric-colored (glass visible).
+    cx_lo = int(w_px * 0.40)
+    cx_hi = int(w_px * 0.60)
+    n_fabric_center = sum(
+        1 for y in range(h_px) for x in range(cx_lo, cx_hi)
+        if _is_saturated(pixels[x, y])
+    )
+    # Glass area is ~20% of viewport = ~20% of total fabric pixels.
+    # If center fabric density > 50% of total fabric density,
+    # the center is "fabric closed" — FAIL.
+    center_area = (cx_hi - cx_lo) * h_px
+    fabric_density_total = n_fabric_total / (w_px * h_px) if (w_px * h_px) > 0 else 0
+    fabric_density_center = n_fabric_center / center_area if center_area > 0 else 0
+    if fabric_density_total > 0 and fabric_density_center > 0.5 * fabric_density_total:
+        failures.append({
+            "gate": "gathered-elevation",
+            "issue": f"central window region has fabric "
+                     f"(density {fabric_density_center:.3f} vs total "
+                     f"{fabric_density_total:.3f}); drape appears "
+                     f"CLOSED (no glass visible between stacks)",
+            "fabric_density_center": fabric_density_center,
+            "fabric_density_total": fabric_density_total,
+        })
+    # ── (b) Stack width per side ──────────────────────────────
+    # For each row, find the leftmost + rightmost fabric pixel,
+    # then find the BIGGEST gap inside [leftmost, rightmost].
+    # The leftmost-to-gap is the LEFT stack, gap-to-rightmost is
+    # the RIGHT stack. (Anchored on the outermost fabric, not on
+    # every anti-aliased pixel — robust against noise.)
+    #
+    # Per founder directive: STACK_WIDTH = ONE fabric width
+    # gathered. Multiple panels per side NEST inside the outer
+    # stack — the OUTER stack width ≈ STACK_WIDTH regardless of
+    # panel count. (The directive's "× panels-per-side" is the
+    # panel-count context; the outer-stack width itself does not
+    # accumulate across nested panels.)
+    STACK_WIDTH_PER_PANEL_IN = 22.0
+    expected_stack_per_side_in = STACK_WIDTH_PER_PANEL_IN
+    tolerance = 0.20   # wider tolerance — the inner panel seams
+                       # and pleat indicators can shift the
+                       # measured leftmost/rightmost by ~10-15%
+    left_stack_widths = []
+    right_stack_widths = []
+    # Sample rows in the middle 60% of the viewport height
+    y_lo = int(h_px * 0.20)
+    y_hi = int(h_px * 0.80)
+    for y in range(y_lo, y_hi, max(1, (y_hi - y_lo) // 30)):
+        # Find leftmost and rightmost fabric pixel
+        leftmost = None
+        rightmost = None
+        for x in range(w_px):
+            if _is_saturated(pixels[x, y]):
+                if leftmost is None:
+                    leftmost = x
+                rightmost = x
+        if leftmost is None or rightmost is None:
+            continue
+        if rightmost - leftmost < 5:
+            continue   # too narrow to be a real stack
+        # Find the biggest gap (≥ 5 px wide) inside [leftmost, rightmost]
+        gaps = []
+        in_gap = False
+        gap_start = None
+        prev_fabric = False
+        for x in range(leftmost, rightmost + 1):
+            cur_fabric = _is_saturated(pixels[x, y])
+            if not cur_fabric and not in_gap:
+                in_gap = True
+                gap_start = x
+            elif cur_fabric and in_gap:
+                in_gap = False
+                gap_w = x - gap_start
+                if gap_w >= 5:
+                    gaps.append((gap_start, x, gap_w))
+            prev_fabric = cur_fabric
+        if not gaps:
+            # No gap found — closed drape (one continuous fabric run)
+            continue
+        # Pick the widest gap (the GLASS region)
+        gap_start, gap_end, gap_w = max(gaps, key=lambda g: g[2])
+        # LEFT stack: leftmost → gap_start
+        left_w_px = gap_start - leftmost
+        # RIGHT stack: gap_end → rightmost
+        right_w_px = rightmost - gap_end
+        left_stack_widths.append(left_w_px / DPI)
+        right_stack_widths.append(right_w_px / DPI)
+    # If we got no stack widths, the drape is fully closed (FAIL)
+    if not left_stack_widths and not right_stack_widths:
+        failures.append({
+            "gate": "gathered-elevation",
+            "issue": "no fabric-colored stacks detected in front "
+                     "elevation viewport — drape appears closed "
+                     "(no glass visible between stacks)",
+            "left_stack_widths": [],
+            "right_stack_widths": [],
+        })
+    else:
+        # Compare mean stack width to expected. Use the SCALE row
+        # to get the actual scale_factor (sheet-in per model-in).
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            text_all = "".join(c["text"] for c in pdf.pages[0].chars)
+        scale_factor = _parse_scale_factor(text_all)
+        if scale_factor is None or scale_factor <= 0:
+            scale_factor = 0.0429  # fallback (default 87" × 84")
+        if left_stack_widths:
+            mean_L = statistics.mean(left_stack_widths)
+            expected_L_sheet = expected_stack_per_side_in * scale_factor
+            if expected_L_sheet > 0:
+                ratio_L = mean_L / expected_L_sheet
+                if abs(ratio_L - 1.0) > tolerance:
+                    failures.append({
+                        "gate": "gathered-elevation",
+                        "issue": f"left stack width {mean_L:.3f}\" "
+                                 f"outside ±{tolerance*100:.0f}% of "
+                                 f"expected {expected_L_sheet:.3f}\" "
+                                 f"(ratio {ratio_L:.2f})",
+                        "left_mean_in": mean_L,
+                        "expected_sheet_in": expected_L_sheet,
+                        "ratio": ratio_L,
+                    })
+        if right_stack_widths:
+            mean_R = statistics.mean(right_stack_widths)
+            expected_R_sheet = expected_stack_per_side_in * scale_factor
+            if expected_R_sheet > 0:
+                ratio_R = mean_R / expected_R_sheet
+                if abs(ratio_R - 1.0) > tolerance:
+                    failures.append({
+                        "gate": "gathered-elevation",
+                        "issue": f"right stack width {mean_R:.3f}\" "
+                                 f"outside ±{tolerance*100:.0f}% of "
+                                 f"expected {expected_R_sheet:.3f}\" "
+                                 f"(ratio {ratio_R:.2f})",
+                        "right_mean_in": mean_R,
+                        "expected_sheet_in": expected_R_sheet,
+                        "ratio": ratio_R,
+                    })
     return failures

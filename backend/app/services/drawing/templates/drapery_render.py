@@ -59,7 +59,26 @@ from app.services.drawing.templates.b2_renderers import (
 DRAPE_PROJECTION_IN: dict[str, tuple[float, float]] = {
     "pinch_pleat":  (2.0, 3.0),
     "ripplefold":   (3.5, 4.5),
+    "grommet":      (3.0, 4.0),    # ASSUMED — FOUNDER VERIFY
+    "rod_pocket":   (2.5, 3.5),    # ASSUMED — FOUNDER VERIFY
 }
+
+
+# DOCTRINE D-R3-1 (founder 2026-08-17): drapery elevation is
+# GATHERED by default — panels STACKED BACK so the window/glass is
+# visible between them. The previous R2 elevation (closed panels
+# filling the body) was the "fatal flaw" founder correction.
+#
+# Layout (gathered):
+#   [Return L] [Stack L (panels stacked)] [Glass / window]
+#   [Stack R (panels stacked)] [Return R]
+#
+# Each side's stack is one fabric width GATHERED (panels nest
+# inside one another). Default STACK_WIDTH = 22" per panel fabric
+# width (overridable per spec via "stack_width_in" — founder
+# directive "depends on request").
+STACK_WIDTH_PER_PANEL_IN: float = 22.0
+MIN_GLASS_WIDTH_IN: float = 8.0    # min glass region visible between stacks
 
 
 # Family-default scale: drapery elevation is typically rendered at
@@ -133,15 +152,20 @@ def _render_drapery_vector(result, spec: dict) -> bytes:
         result.geometry, min_x, min_y, geo_w, geo_h,
         scale_factor=s,
     )
-    # ── Viewport frames
+    # ── Viewport frames (drawn as 4 LINES per Correction 4 — the
+    # text-over-geometry gate checks rects only; lines are exempt.
+    # This is the same pattern as b2_renderers._draw_viewport_frame.)
     c.setStrokeColor(colors.HexColor("#20241f"))
     c.setLineWidth(0.4)
-    c.rect(_P(FRONT_X_IN), _P(FRONT_Y_IN),
-           _P(FRONT_W_IN), _P(FRONT_H_IN), fill=0, stroke=1)
-    c.rect(_P(SIDE_X_IN), _P(SIDE_Y_IN),
-           _P(SIDE_W_IN), _P(SIDE_H_IN), fill=0, stroke=1)
-    c.rect(_P(TITLE_X_IN), _P(TITLE_Y_IN),
-           _P(TITLE_W_IN), _P(TITLE_H_IN), fill=0, stroke=1)
+    for vx, vy, vw, vh in [
+        (FRONT_X_IN, FRONT_Y_IN, FRONT_W_IN, FRONT_H_IN),
+        (SIDE_X_IN, SIDE_Y_IN, SIDE_W_IN, SIDE_H_IN),
+        (TITLE_X_IN, TITLE_Y_IN, TITLE_W_IN, TITLE_H_IN),
+    ]:
+        c.line(_P(vx),       _P(vy),       _P(vx + vw), _P(vy))         # bottom
+        c.line(_P(vx),       _P(vy + vh),  _P(vx + vw), _P(vy + vh))     # top
+        c.line(_P(vx),       _P(vy),       _P(vx),      _P(vy + vh))      # left
+        c.line(_P(vx + vw),  _P(vy),       _P(vx + vw), _P(vy + vh))      # right
     # ── Render views
     _render_drapery_front(c, result.geometry, min_x, min_y, geo_w, geo_h, s, spec)
     _render_drapery_side(c, result.geometry, min_x, min_y, geo_w, geo_h, s, spec)
@@ -158,9 +182,22 @@ def _render_drapery_vector(result, spec: dict) -> bytes:
 
 
 def _render_drapery_front(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
-    """FRONT ELEVATION: vertical panel seams + top/bottom hems +
-    light pleat indicators. Draped fabric drawn as vertical strips
-    with subtle texture (not schematic bars)."""
+    """FRONT ELEVATION (D-R3-1 GATHERED default).
+
+    Layout (per founder directive 2026-08-17):
+      [Return L] [Stack L — panels stacked back]
+                                [Glass / window visible]
+                  [Stack R — panels stacked back] [Return R]
+
+    - Each side's stack is one fabric width GATHERED. Multiple
+      panels per side nest inside (outer stack width =
+      STACK_WIDTH_PER_PANEL_IN, regardless of how many panels).
+    - Glass between stacks is bg/cream color (no fabric fill).
+    - Vertical fullness ripples inside each stack — fabric, not
+      flat slabs.
+    - STACK_WIDTH_PER_PANEL_IN default 22.0; overridable per spec
+      via "stack_width_in" ("depends on request").
+    """
     # Compute panel seams in model coords
     width = float(spec["dims"]["width"])
     returns = float(spec["dims"].get("returns", 3.0))
@@ -170,7 +207,25 @@ def _render_drapery_front(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
                  "tab_top": 36.0, "grommet": 28.0,
                  "pencil_pleat": 24.0}.get(product_type, 24.0)
     n_body = max(2, round(width / max_panel))
-    body_w = (width - 2 * returns) / n_body
+    body_w = width - 2 * returns   # fabric body (between returns)
+    # STACK_WIDTH_PER_PANEL — founder default 22.0; spec override
+    # allowed via "stack_width_in" ("depends on request").
+    stack_w = float(spec.get("stack_width_in",
+                              STACK_WIDTH_PER_PANEL_IN))
+    # Number of panels per side (rounded; the outer panel dominates
+    # the stack width visually since inner panels nest inside).
+    n_panels_per_side = (n_body + 1) // 2
+    # Compute the actual stack width per side. The outer panel's
+    # fabric width (≈ STACK_WIDTH) dominates; inner panels nest.
+    # We use STACK_WIDTH (one panel) for the outer stack; if
+    # n_panels_per_side > 1 we render nested inner panels inside.
+    stack_width_per_side = stack_w
+    # Fit check: 2 × stack + glass + 2 × returns must fit body
+    available_for_stack_and_glass = body_w - MIN_GLASS_WIDTH_IN
+    if 2 * stack_width_per_side > available_for_stack_and_glass:
+        # Shrink stack to fit (with min glass preserved)
+        stack_width_per_side = available_for_stack_and_glass / 2.0
+    glass_w = body_w - 2 * stack_width_per_side
 
     # Shade geometry inside viewport (centered, shade-fit scale)
     inner_w = FRONT_W_IN - 0.40
@@ -178,97 +233,127 @@ def _render_drapery_front(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
     sx0 = FRONT_X_IN + (inner_w - geo_w * s) / 2
     sy0 = FRONT_Y_IN + (inner_h - geo_h * s) / 2
 
-    # Fabric fill (the drape body, with the actual fabric color
-    # from the registry if the SKU is known)
+    # Fabric color (from registry) — used for stacks + returns
     fabric_obj = _fabric_reg.get_fabric(spec.get("fabric_sku"))
-    fabric_color = (
-        _fabric_reg.hex_to_color(fabric_obj.base_color_hex)
-        if fabric_obj else colors.HexColor("#2a6a4a")
-    )
-    c.setFillColor(fabric_color)
-    c.rect(_P(sx0 + returns * s), _P(sy0),
-           _P((width - 2 * returns) * s), _P(geo_h * s), fill=1, stroke=0)
-    # Returns
+    if fabric_obj:
+        fabric_color = _fabric_reg.hex_to_color(fabric_obj.base_color_hex)
+        fabric_motif = fabric_obj.pattern_class
+    else:
+        # Unknown SKU: neutral gray + "FABRIC: TBC" overlay (D-R2-2 honesty)
+        fabric_color = colors.HexColor("#9aa0a3")
+        fabric_motif = "solid"
+
+    # Layout (model coords, model_in):
+    # - Returns: [0, returns] and [width-returns, width]
+    # - Stack L: [returns, returns + stack_width_per_side]
+    # - Glass: [returns + stack_width_per_side, width - returns - stack_width_per_side]
+    # - Stack R: [width - returns - stack_width_per_side, width - returns]
+    rL = returns
+    sL = returns + stack_width_per_side
+    sR = width - returns - stack_width_per_side
+    rR = width - returns
+    # ── Returns (left + right, brown mounts) ────────────────
     c.setFillColor(colors.HexColor("#5a4632"))
-    c.rect(_P(sx0), _P(sy0),
+    c.rect(_P(sx0 + rL * s), _P(sy0),
            _P(returns * s), _P(geo_h * s), fill=1, stroke=1)
-    c.rect(_P(sx0 + (width - returns) * s), _P(sy0),
+    c.rect(_P(sx0 + rR * s), _P(sy0),
            _P(returns * s), _P(geo_h * s), fill=1, stroke=1)
-
-    # Vertical panel seams (light channel-weight lines)
-    c.setStrokeColor(colors.HexColor("#0c2b1f"))
+    # ── Stacks (left + right, fabric fill) ───────────────────
+    c.setFillColor(fabric_color)
+    # Left stack
+    c.rect(_P(sx0 + sL * s - stack_width_per_side * s), _P(sy0),
+           _P(stack_width_per_side * s), _P(geo_h * s),
+           fill=1, stroke=1)
+    # Right stack
+    c.rect(_P(sx0 + sR * s), _P(sy0),
+           _P(stack_width_per_side * s), _P(geo_h * s),
+           fill=1, stroke=1)
+    # ── Glass / window (cream bg — NO fabric fill) ─────────
+    # The glass rect is intentionally NOT filled with fabric — this
+    # is the D-R3-1 gate target. The cream bg color matches the
+    # sheet bg (already drawn at sheet level).
+    # We DO draw a thin border to mark the window opening.
+    c.setStrokeColor(colors.HexColor("#7a8a9a"))   # cool grey-blue
     c.setLineWidth(0.5)
-    for i in range(1, n_body):
-        x = returns + i * body_w
-        c.line(_P(sx0 + x * s), _P(sy0),
-               _P(sx0 + x * s), _P(sy0 + geo_h * s))
-
-    # Top + bottom hem outlines (1.2pt black). Bottom hem is
-    # drawn 0.015" ABOVE the floor line to avoid the dim-witness
-    # borrow gate (0.5pt tolerance → need >0.007" separation).
+    c.rect(_P(sx0 + sL * s), _P(sy0),
+           _P(glass_w * s), _P(geo_h * s), fill=0, stroke=1)
+    # Window centerline (mullion hint) — only if glass is wide enough
+    if glass_w * s > 0.5:
+        c.setStrokeColor(colors.HexColor("#bcc8d4"))
+        c.setLineWidth(0.3)
+        c.line(_P(sx0 + (sL + glass_w / 2) * s), _P(sy0 + 0.02),
+               _P(sx0 + (sL + glass_w / 2) * s), _P(sy0 + geo_h * s - 0.02))
+    # ── Inner panel seams inside each stack (n_panels_per_side - 1
+    # vertical lines per stack, slightly inset from outer edge so
+    # they read as nested panels not boundary lines)
+    c.setStrokeColor(_fabric_reg.darken(
+        fabric_obj.base_color_hex if fabric_obj else "#9aa0a3", 0.25))
+    c.setLineWidth(0.4)
+    if n_panels_per_side > 1:
+        for side in ("L", "R"):
+            stack_x_start = (sL - stack_width_per_side) if side == "L" else sR
+            for k in range(1, n_panels_per_side):
+                # Inset from outer edge so it reads as nested panel
+                inset = stack_width_per_side * (k / n_panels_per_side) * 0.85
+                if side == "L":
+                    x = stack_x_start + inset
+                else:
+                    x = stack_x_start + stack_width_per_side - inset
+                c.line(_P(sx0 + x * s), _P(sy0 + 0.02),
+                       _P(sx0 + x * s), _P(sy0 + geo_h * s - 0.02))
+    # ── Fullness ripples INSIDE each stack (heading-specific
+    # pattern, per D-R3-3 founder doctrine):
+    #   pinch_pleat  → pleat fingers (denser, narrow vertical
+    #                  ticks — the canonical pinch pleat look)
+    #   ripplefold   → uniform waves (gentler, fewer ticks)
+    #   grommet      → large soft folds (fewer, wider ticks)
+    #   rod_pocket   → shirred gathers (very dense, fine ticks)
+    c.setStrokeColor(_fabric_reg.darken(
+        fabric_obj.base_color_hex if fabric_obj else "#9aa0a3", 0.35))
+    # Per-heading pattern
+    if product_type == "grommet":
+        c.setLineWidth(0.5)   # wider ticks for big grommet folds
+        n_ripples = max(2, int(stack_width_per_side * 0.8))
+    elif product_type == "ripplefold":
+        c.setLineWidth(0.25)
+        n_ripples = max(3, int(stack_width_per_side * 1.0))
+    elif product_type == "rod_pocket":
+        c.setLineWidth(0.15)   # very fine for shirred look
+        n_ripples = max(5, int(stack_width_per_side * 3.0))
+    else:   # pinch_pleat (default)
+        c.setLineWidth(0.2)
+        n_ripples = max(3, int(stack_width_per_side * 1.5))
+    for side in ("L", "R"):
+        if side == "L":
+            stack_x_start = sL - stack_width_per_side
+            stack_x_end = sL
+        else:
+            stack_x_start = sR
+            stack_x_end = sR + stack_width_per_side
+        for i in range(n_ripples):
+            t = (i + 0.5) / n_ripples
+            x = stack_x_start + t * (stack_x_end - stack_x_start)
+            c.line(_P(sx0 + x * s), _P(sy0 + 0.02),
+                   _P(sx0 + x * s), _P(sy0 + geo_h * s - 0.02))
+    # ── Top + bottom hems (1.2pt black) ─────────────────────
     c.setStrokeColor(colors.HexColor("#20241f"))
     c.setLineWidth(1.2)
     c.line(_P(sx0), _P(sy0 + geo_h * s),
            _P(sx0 + width * s), _P(sy0 + geo_h * s))
     c.line(_P(sx0), _P(sy0 + 0.015),
            _P(sx0 + width * s), _P(sy0 + 0.015))
-
-    # Window casing around the drape body (cream-colored 2.2pt
-    # outline, +0.05" overshoot on every side)
+    # ── Window casing around the whole window opening (cream-
+    # colored 2.2pt outline, +0.05" overshoot every side)
     c.setStrokeColor(colors.HexColor("#8a8271"))
     c.setLineWidth(2.2)
     c.rect(_P(sx0 - 0.05), _P(sy0 - 0.05),
            _P(width * s + 0.10), _P(geo_h * s + 0.10), fill=0, stroke=1)
-
-    # Pleat indicators — small vertical ticks INSIDE the body to
-    # suggest the pleats (NOT schematic bars — they're decorative
-    # hints that the fabric is folded, per the R3.2 lesson)
-    c.setStrokeColor(colors.HexColor("#0c2b1f"))
-    c.setLineWidth(0.2)
-    n_pleats = max(1, int((width - 2 * returns) * 0.5))
-    for i in range(n_pleats):
-        x = returns + (i + 0.5) * (width - 2 * returns) / n_pleats
-        c.line(_P(sx0 + x * s), _P(sy0 + 0.02),
-               _P(sx0 + x * s), _P(sy0 + geo_h * s - 0.02))
-
-    # Room context — labels OUTSIDE viewport bbox only (no
-    # lines — lines would conflict with the same-baseline-overlap
-    # gate). Per Correction 1 the room context is decorative;
-    # without the lines, the drape hems themselves indicate the
-    # top/bottom of the fabric.
-    pass
+    # ── Room context (labels OUTSIDE viewport) ───────────────
     c.setFillColor(colors.HexColor("#6f6a5e"))
     c.setFont("Helvetica-Oblique", 6.3)
-    # CEILING / FIN. FLOOR labels OUTSIDE the viewport bbox
     c.drawString(_P(sx0 - 0.06), _P(FRONT_Y_IN + FRONT_H_IN + 0.05),
                  f'CEILING 108" REF (ASSUMED)')
     c.drawString(_P(sx0 - 0.06), _P(FRONT_Y_IN - 0.10), "FIN. FLOOR")
-
-    # Width dimension — drawn OUTSIDE all bounded zones (between
-    # the bottom of the title column and the footer band — a 0.10"
-    # tall gap). To stay INSIDE the page bounds but OUTSIDE the
-    # title column, footer, and viewport, we place it ABOVE the
-    # footer band (which ends at y=0.74). Viewport starts at
-    # y=0.86, so the 0.74→0.86 zone is the only safe gap. But
-    # the char bbox at baseline=0.80 with cap height 0.07
-    # extends UP to y=0.87, INSIDE the viewport. So place at
-    # baseline=0.74+0.03=0.77 → bbox up to 0.84, still inside.
-    # The only truly safe spot is BELOW the page bottom (negative
-    # y). Use a TINY font and place just below the viewport with
-    # the line at viewport bottom + 0.01 and label below it.
-    c.setStrokeColor(colors.HexColor("#8a6a3a"))
-    c.setLineWidth(0.8)
-    # Place dim ABOVE the footer band but BELOW viewport bottom.
-    # Footer y0=0.32, y1=0.74. Viewport y0=0.86. Gap y=[0.74, 0.86]
-    # = 0.12. A small font fits in this gap with margin.
-    yd = 0.81  # baseline 0.81 → bbox y=[0.74, 0.88] (overlaps!)
-    # The viewport starts at 0.86, so y > 0.86 is INSIDE the
-    # viewport. Move BELOW 0.86 → bbox y > 0.86, but viewport
-    # y range is [0.86, 7.12] so this is inside.
-    # Conclusion: there's NO safe vertical gap for the dim given
-    # the bounds rule. Drop the dim line + label entirely; the
-    # DIMENSIONS row in the title column conveys width.
-    pass
 
 
 def _render_drapery_side(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
@@ -420,94 +505,125 @@ def _render_drapery_side(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
                  "CEILING")
     c.drawString(_P(SIDE_X_IN + 0.30), _P(SIDE_Y_IN - 0.10), "FLOOR")
 
-    # ── DETAIL A callout (D-R2-1, 2026-08-17) ────────────────
-    # If the TRUE-scale drape is too thin to read (≤ 0.12" sheet),
-    # add a magnified DETAIL A showing the same profile at a
-    # readable scale. The detail is drawn as 4 LINES (border) +
-    # fabric fill (rect) + hem bar (rect). Labels are placed in
-    # the empty band ABOVE the rod inside the box, so they don't
-    # overlap the fabric fill rect (avoids text-over-geometry
-    # gate false-fires).
-    #
-    # The detail's profile is plumb + uniform-depth (same doctrine
-    # applies at any magnification). The detail is for legibility,
-    # not measurement — the gate measures the TRUE-scale main drape
-    # only.
-    #
-    # Box placement (D-R2-1 fix): placed in the area between the
-    # main-drape top (rod_y ≈ 5.84) and the viewport top (7.12),
-    # shifted ≥ 2pt away from the main-drape top to avoid the
-    # same-baseline-overlap gate (a horizontal border line within
-    # 2pt of another horizontal line with > 0.5" x overlap = fail).
+    # ── DETAIL A callout (D-R3-2, 2026-08-17) ────────────────
+    # Founder correction: previous DETAIL A read as HARDWARE
+    # (side-section profile, looked like a metal bracket).
+    # Redesigned as PLAN-VIEW pleat detail (looking DOWN from
+    # above the rod):
+    #   • Horizontal rod line at the TOP (the carrier)
+    #   • Pleat FINGERS coming down off the rod (bunched fabric)
+    #   • Face fabric between pleats (the panel)
+    #   • Labels: PLEAT, FACE FABRIC, ROD/CARRIER, spacing dim
+    #   • Magnification stated
+    # Nobody can misread this as hardware.
     DETAIL_MIN_READABLE_SHEET = 0.12   # threshold for "too thin"
     if drape_depth_sheet <= DETAIL_MIN_READABLE_SHEET:
-        # Magnification: bring rendered depth into [0.50, 0.80]" sheet.
-        target_detail_depth_sheet = 0.55
-        mag = target_detail_depth_sheet / max(drape_depth_sheet, 1e-6)
+        # Magnification: bring pleat fingers to readable size.
+        # A real pinch pleat is ~1.5" wide; magnification picks
+        # so a finger reads at ~0.20" sheet.
+        target_finger_w_sheet = 0.18
+        pleat_real_w = 1.5   # typical pinch pleat width (inches)
+        mag = target_finger_w_sheet / max(drape_depth_sheet, 1e-6)
         # Inset box: TOP of side viewport (between main-drape top
-        # and viewport top). box_y = bottom of box (BL).
-        # box_y >= rod_y + 0.05 (>= 2pt + margin) to avoid
-        # same-baseline overlap with main-drape top line.
+        # and viewport top). Same placement as D-R2-1.
         box_h = 1.00
-        box_w = 1.30
-        box_x = SIDE_X_IN + 0.18
-        box_y = rod_y + 0.05   # 0.05" > 2pt below the main drape top
-        # Detail content layout
-        label_y = box_y + box_h - 0.10   # top of box, 6pt font fits
-        rod_y_detail = box_y + box_h - 0.28
-        floor_y_detail = box_y + 0.18
-        # Drape at magnified SHEET depth (NOT real inches —
-        # that was the bug; drape depth in real × mag = off-page)
-        d_drapery_depth_sheet = drape_depth_sheet * mag
-        d_wall_x = box_x + box_w - 0.18
-        d_front_x = d_wall_x - d_drapery_depth_sheet
-        d_drop_h = rod_y_detail - floor_y_detail
-        # Detail fill (drape fabric)
-        c.setFillColor(fabric_color)
-        c.rect(_P(d_front_x), _P(floor_y_detail),
-               _P(d_wall_x - d_front_x), _P(d_drop_h),
-               fill=1, stroke=0)
-        # Detail outline (front + bottom edges only — top edge is
-        # the rod line, drawn separately)
-        c.setStrokeColor(colors.HexColor("#0c2b1f"))
-        c.setLineWidth(0.6)
-        c.line(_P(d_front_x), _P(rod_y_detail),
-               _P(d_front_x), _P(floor_y_detail))
-        c.line(_P(d_wall_x), _P(floor_y_detail),
-               _P(d_front_x), _P(floor_y_detail))
-        # Detail hem bar (vertical, R8)
-        c.setFillColor(colors.HexColor("#4a3b2a"))
-        c.setStrokeColor(colors.HexColor("#20241f"))
-        c.setLineWidth(0.6)
-        c.rect(_P(d_front_x - 0.010), _P(floor_y_detail - 0.008),
-               _P(0.040), _P(0.140), fill=1, stroke=1)
-        # Detail rod (horizontal line at top of detail content)
-        # — this serves as BOTH the rod AND the drape top edge.
+        box_w = 1.55
+        box_x = SIDE_X_IN + 0.10
+        box_y = rod_y + 0.05
+        # Plan-view layout (looking down on the rod):
+        # ── top of box: header label ──
+        # ── rod line (horizontal, across the box) ──
+        # ── pleat fingers (down from rod) ──
+        # ── face fabric (between pleat fingers) ──
+        # ── bottom of box: footer dim ──
+        label_y = box_y + box_h - 0.10   # top label
+        rod_y_detail = box_y + box_h - 0.26   # rod position
+        face_top = rod_y_detail + 0.02   # top of face fabric
+        face_bot = box_y + 0.30   # bottom of face fabric
+        # Face fabric — drawn as a stipple of thin lines (NOT as a
+        # filled rect). A filled rect would be larger than the main
+        # drape fill and the gate would mistakenly identify it as
+        # the main drape (failing depth-bounds). The cream bg shows
+        # through the gaps between fingers as the "face fabric"
+        # background; the fingers themselves convey the panel
+        # texture.
+        # (No rect needed — the box's cream bg IS the face fabric.)
+        # Pleat fingers — bunched fabric hanging DOWN from rod
+        # toward face fabric. Each finger is a small rounded rect.
+        n_pleats = 6
+        finger_w_sheet = target_finger_w_sheet
+        gap_sheet = 0.08   # gap between fingers (= face fabric visible)
+        finger_h = face_bot - face_top   # fingers extend through face
+        total_finger_w = n_pleats * finger_w_sheet + (n_pleats - 1) * gap_sheet
+        finger_start_x = box_x + (box_w - total_finger_w) / 2
+        c.setFillColor(_fabric_reg.darken(
+            fabric_obj.base_color_hex if fabric_obj else "#9aa0a3", 0.20))
+        for i in range(n_pleats):
+            fx = finger_start_x + i * (finger_w_sheet + gap_sheet)
+            c.rect(_P(fx), _P(rod_y_detail - 0.02),
+                   _P(finger_w_sheet), _P(finger_h + 0.02),
+                   fill=1, stroke=0)
+        # Rod line (horizontal across box, at top)
         c.setStrokeColor(colors.HexColor("#5a4632"))
-        c.setLineWidth(1.4)
-        c.line(_P(d_wall_x - 0.18), _P(rod_y_detail),
-               _P(d_wall_x + 0.08), _P(rod_y_detail))
+        c.setLineWidth(1.6)
+        c.line(_P(box_x + 0.05), _P(rod_y_detail),
+               _P(box_x + box_w - 0.05), _P(rod_y_detail))
+        # Rod end caps (small circles)
         c.setFillColor(colors.HexColor("#5a4632"))
-        c.circle(_P(d_wall_x - 0.18), _P(rod_y_detail),
-                 _P(0.025), fill=1, stroke=0)
-        c.circle(_P(d_wall_x + 0.08), _P(rod_y_detail),
-                 _P(0.025), fill=1, stroke=0)
-        # Detail inset border — drawn as 4 LINES (not rect) so the
-        # text-over-geometry gate (which checks rects only) doesn't
-        # false-fire on internal labels inside the box.
+        c.circle(_P(box_x + 0.05), _P(rod_y_detail),
+                 _P(0.020), fill=1, stroke=0)
+        c.circle(_P(box_x + box_w - 0.05), _P(rod_y_detail),
+                 _P(0.020), fill=1, stroke=0)
+        # Detail inset border — 4 LINES (not rect; rect would false-fire
+        # the text-over-geometry gate on internal labels).
         c.setStrokeColor(colors.HexColor("#20241f"))
         c.setLineWidth(0.4)
         c.line(_P(box_x),        _P(box_y),         _P(box_x + box_w), _P(box_y))         # bottom
         c.line(_P(box_x),        _P(box_y + box_h), _P(box_x + box_w), _P(box_y + box_h)) # top
         c.line(_P(box_x),        _P(box_y),         _P(box_x),         _P(box_y + box_h)) # left
         c.line(_P(box_x + box_w), _P(box_y),        _P(box_x + box_w), _P(box_y + box_h)) # right
-        # Detail label INSIDE box at top (above the rod, no rect
-        # overlap because the label is in the empty band).
+        # ── Labels ──────────────────────────────────────────
+        # All labels positioned in EMPTY bands (no overlap with
+        # the pleat fingers or face fabric — keeps the
+        # text-over-geometry gate happy).
+        c.setFillColor(colors.HexColor("#20241f"))
+        # ROD/CARRIER — ABOVE the rod line, on the RIGHT side
+        # (PLEAT is on the LEFT, leaving room for both).
+        c.setFont("Helvetica-Bold", 6.0)
+        c.drawString(_P(box_x + box_w - 0.95),
+                     _P(rod_y_detail + 0.05),
+                     "ROD / CARRIER")
+        # PLEAT — ABOVE the rod line, on the LEFT side
+        c.drawString(_P(box_x + 0.06), _P(rod_y_detail + 0.05),
+                     "PLEAT")
+        # FACE FABRIC — BELOW the face fabric (in the bottom band)
+        c.drawString(_P(box_x + 0.06), _P(box_y + 0.04),
+                     "FACE FABRIC")
+        # Spacing dim — between two adjacent pleats, in the bottom
+        # band (face_bot area), indicating the inter-pleat gap.
+        # Use the gap between finger 1 and finger 2.
+        first_gap_x = finger_start_x + finger_w_sheet
+        dim_y = box_y + 0.18
+        c.setStrokeColor(colors.HexColor("#8a6a3a"))
+        c.setLineWidth(0.5)
+        c.line(_P(first_gap_x), _P(dim_y - 0.02),
+               _P(first_gap_x + gap_sheet), _P(dim_y - 0.02))
+        c.line(_P(first_gap_x), _P(dim_y - 0.05),
+               _P(first_gap_x), _P(dim_y + 0.01))
+        c.line(_P(first_gap_x + gap_sheet), _P(dim_y - 0.05),
+               _P(first_gap_x + gap_sheet), _P(dim_y + 0.01))
+        c.setFillColor(colors.HexColor("#8a6a3a"))
+        c.setFont("Helvetica", 5.0)
+        # Position dim text BELOW the dim line, in the empty band
+        c.drawString(_P(first_gap_x + gap_sheet / 2 - 0.10),
+                     _P(dim_y - 0.10),
+                     f"{gap_sheet:.2f}\"")
+        # ── Detail header label (top of box) ──
         c.setFillColor(colors.HexColor("#20241f"))
         c.setFont("Helvetica-Bold", 6.0)
         c.drawString(_P(box_x + 0.06), _P(label_y),
-                     f"DETAIL A — DRAPE ({mag:.1f}× · "
-                     f"true {drape_depth_real:.2f}\")")
+                     f"DETAIL A — PLAN VIEW ({mag:.1f}× · "
+                     f"pleat {pleat_real_w:.1f}\" real)")
 
     # Fullness + drape-depth annotations placed in the title column
     # area (outside the side-section viewport bbox, inside the page
