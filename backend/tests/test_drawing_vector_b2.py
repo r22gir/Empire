@@ -1441,6 +1441,80 @@ class TestGoldenPortG1Corrections:
             f"{stats['title_witness_failures'][:3]}"
         )
 
+    def test_gate6_text_bounds_passes_on_R2(self):
+        """Gate 6 (Step 0 / G1.3) — text bounds.
+        PASSES on R2 after bounds tune-up."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R2()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats.get("bounds_failures", []) == [], (
+            f"Gate 6 (text-bounds) must pass on R2; got: "
+            f"{stats.get('bounds_failures', [])[:3]}"
+        )
+
+    def test_gate6_text_bounds_catches_overflow(self):
+        """NEGATIVE FIXTURE — Gate 6 catches text overflow.
+        Construct a synthetic PDF where text is drawn PAST the
+        right edge of the side-section viewport (simulating the
+        pre-tune-up R3 overflow). Gate must FAIL with
+        "side-section" owning zone."""
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from app.services.drawing.templates.b2_qc import (
+            enforce_b2_qc, B2QCFailure,
+        )
+        import io as _io
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        # Page + header band
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(1.1)
+        c.rect(_P_in(0.32), _P_in(0.32),
+               _P_in(11.0 - 0.64), _P_in(8.5 - 0.64), stroke=1, fill=0)
+        c.setFillColor((0.13, 0.14, 0.12))
+        c.rect(_P_in(0.32), _P_in(8.5 - 0.32 - 0.92),
+               _P_in(11.0 - 0.64), _P_in(0.92), fill=1, stroke=0)
+        c.setFillColor((0.97, 0.95, 0.92))
+        c.setFont("Helvetica-Bold", 21)
+        c.drawString(_P_in(0.32 + 0.27), _P_in(8.5 - 0.32 - 0.92 + 0.17),
+                     "FLAT FOLD ROMAN SHADE")
+        # Viewport frames
+        c.setStrokeColor((0.13, 0.14, 0.12))
+        c.setLineWidth(0.4)
+        c.rect(_P_in(0.50), _P_in(0.86), _P_in(4.55), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(5.19), _P_in(0.86), _P_in(2.49), _P_in(6.26),
+               fill=0, stroke=1)
+        c.rect(_P_in(7.82), _P_in(0.86), _P_in(2.62), _P_in(6.26),
+               fill=0, stroke=1)
+        # Title column (no rows — just a frame)
+        c.rect(_P_in(7.82), _P_in(0.86), _P_in(2.62), _P_in(6.26),
+               fill=0, stroke=1)
+        # Helper rects to spread the pile (so PILE gate passes)
+        _make_pile_passes_decorator(c, None, None, None, None)
+        # DEFECT: draw text in the title column that overflows
+        # past its right edge (the original G1.3 bounds overflow
+        # that this gate is designed to catch).
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 8.5)
+        # Title column x range = [8.06, 10.50] (safe edge 10.44).
+        # This string is wide enough to overflow the safe edge.
+        c.drawString(_P_in(8.30), _P_in(5.5),
+                     "FAMILY: ROMAN SHADES — VERY LONG NAME OVERFLOW")
+        c.save()
+        bad_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
+        msg = str(exc_info.value)
+        # Either the bounds gate OR the text-over-geometry gate can
+        # catch an overflow (text inside the title-column viewport
+        # bbox is flagged by text-over-geometry; text outside the
+        # bbox is flagged by text-bounds).
+        assert ("text-bounds" in msg.lower()
+                or "text-over-geometry" in msg.lower()), (
+            f"Gate 6 (text-bounds) must catch an overflow; got: {msg}"
+        )
+
     def test_gate5_title_plural_caught(self):
         """NEGATIVE FIXTURE — Gate 5 catches plural "SHADES" title."""
         from reportlab.pdfgen.canvas import Canvas

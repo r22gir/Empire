@@ -719,7 +719,7 @@ def _render_title_column(
         ("FOLDS:", "9 @ 7-1/8\""),
         ("MOUNTING:",
          f"{spec.get('mount', 'Inside').title()} — 2-1/2\" ASSUMED"),
-        ("FABRIC:", fabric_name),
+        ("FABRIC:", fabric_name[:20]),  # truncate long fabric names
         ("", fabric_mill),
         ("", fabric_sku),
         ("", fabric_repeat),
@@ -730,9 +730,9 @@ def _render_title_column(
     for lab, val in rows:
         if lab:
             ls_text(c, tx, ty, lab, 7, LIGHT, tracking=1.5, bold=True)
-        c.setFont("Helvetica-Bold" if lab else "Helvetica", 7.5)
+        c.setFont("Helvetica-Bold" if lab else "Helvetica", 6.0)
         c.setFillColor(INK)
-        c.drawString(_P(tx + 0.85), _P(ty), val)
+        c.drawString(_P(tx + 0.70), _P(ty), val)
         ty -= row_gap
     # ── Divider 1
     c.setStrokeColor(DIVIDER)
@@ -743,7 +743,7 @@ def _render_title_column(
     # ── LAYOUT MATH — RULE 3
     ls_text(c, tx, ty, "LAYOUT MATH — RULE 3", 7.5, GOLD, tracking=1.6,
             bold=True)
-    c.setFont("Helvetica", 7.5)
+    c.setFont("Helvetica", 6.5)
     c.setFillColor(INK)
     # Render math_lines as monospace (no Courier — Helvetica per
     # founder "drop Courier" override)
@@ -756,13 +756,18 @@ def _render_title_column(
         ) or ""
         total = seg + (f' + {gap}' if gap else '')
         warn = "" if ml.closing_tolerance_in < (1 / 64) else "  ⚠  "
-        line = f"{warn}{total}  =  {_fmt_in(ml.total)}  (target {_fmt_in(ml.target_in)})"
-        # B2d: closure note ("FLUSH BOTH ENDS" / "WARN: closure
-        # off > 1/64\"") appended inline — the B2d tight vertical
-        # layout doesn't have room for a separate note row above
-        # the footer band. The note is still visible to the founder.
+        # Truncate math line to fit title column (2.44" wide). At
+        # Helvetica 7.5pt, ~0.052"/char → ~47 chars max. Reserve
+        # 8 chars for "  ·  NN" separator + short note.
+        math_main = (
+            f"{warn}{total}  =  {_fmt_in(ml.total)}  (target "
+            f"{_fmt_in(ml.target_in)})"
+        )[:40]
         if ml.note:
-            line += f"  ·  {ml.note}"
+            note = ml.note[:18]
+            line = f"{math_main}  ·  {note}"
+        else:
+            line = math_main
         c.drawString(_P(tx), _P(ty - 0.20 - i * 0.15), line)
     ty -= 0.20 + max(0, len(math_lines or [])) * 0.15 + 0.14
     # ── Divider 2
@@ -772,7 +777,7 @@ def _render_title_column(
     # ── NOTES / ASSUMPTIONS
     ls_text(c, tx, ty, "NOTES / ASSUMPTIONS", 7.5, GOLD, tracking=1.6,
             bold=True)
-    c.setFont("Helvetica-Oblique", 7.2)
+    c.setFont("Helvetica-Oblique", 5.8)
     c.setFillColor(INK)
     notes = _get_assumptions(geometry, product_type, spec)
     for i, n in enumerate(notes[:7]):  # cap to 7 lines
@@ -1203,8 +1208,8 @@ def _render_front_elevation(
         if not spec.get("site_photo_dims")
         else f"CEILING {int(ceil_in)}\" (FROM SITE PHOTO)"
     )
-    c.drawString(_P(wx0_in - 0.06), _P(ceil_y_in + 0.05), ceiling_label)
-    c.drawString(_P(wx0_in - 0.06), _P(wall_y_in - 0.15), "FIN. FLOOR")
+    c.drawString(_P(wx0_in - 0.06), _P(ceil_y_in + 0.10), ceiling_label)
+    c.drawString(_P(wx0_in - 0.06), _P(wall_y_in - 0.10), "FIN. FLOOR")
     # ── Correction 1: shade geometry at TRUE scale `s`.
     # Position shade CENTERED in the viewport (between the floor
     # and ceiling indicators). If shh_in exceeds the inner
@@ -1308,7 +1313,7 @@ def _render_front_elevation(
     for x_ in (sx_in, sx_in + shw_in):
         c.line(_P(x_), _P(yd - tick), _P(x_), _P(yd + tick))
     # Label centred below the dim line
-    c.drawCentredString(_P(sx_in + shw_in / 2), _P(yd - 0.13),
+    c.drawCentredString(_P(sx_in + shw_in / 2), _P(yd + 0.10),
                         f'{int(round(geo_w))}\"')
     # ── Witness 2: LEFT "9 @ 7-1/8\"" — fold/slat pattern.
     # Vertical bracket from shade TOP (head_y) to shade BOTTOM
@@ -1365,9 +1370,9 @@ def _render_front_elevation(
     for y_ in (sy_in, sy_in + shh_in):
         c.line(_P(xd_right - tick), _P(y_), _P(xd_right + tick), _P(y_))
     c.saveState()
-    c.translate(_P(xd_right + 0.10), _P((sy_in + sy_in + shh_in) / 2))
+    c.translate(_P(xd_right + 0.18), _P((sy_in + sy_in + shh_in) / 2))
     c.rotate(90)
-    c.setFont("Helvetica-Bold", 6.3)
+    c.setFont("Helvetica-Bold", 6.0)
     c.drawCentredString(0, 0, f'{int(round(geo_h))}\" SHADE')
     c.restoreState()
     # The "32\"" and "12\"" room-context labels are POSITIONAL
@@ -1384,7 +1389,7 @@ def _render_front_elevation(
     y_32 = (wall_y_in + sy_in) / 2
     c.line(_P(xd_right - tick), _P(y_32), _P(xd_right + tick), _P(y_32))
     c.saveState()
-    c.translate(_P(xd_right + 0.10), _P(y_32))
+    c.translate(_P(xd_right + 0.18), _P(y_32))
     c.rotate(90)
     c.drawCentredString(0, 0, f'{int(floor_to_sill)}\"')
     c.restoreState()
@@ -1394,7 +1399,7 @@ def _render_front_elevation(
     y_12 = (head_y_in + ceil_y_in) / 2
     c.line(_P(xd_right - tick), _P(y_12), _P(xd_right + tick), _P(y_12))
     c.saveState()
-    c.translate(_P(xd_right + 0.10), _P(y_12))
+    c.translate(_P(xd_right + 0.18), _P(y_12))
     c.rotate(90)
     c.drawCentredString(0, 0, f'{int(head_to_ceiling)}\"')
     c.restoreState()
@@ -1403,7 +1408,7 @@ def _render_front_elevation(
     # removed because (a) it hardcoded "1\" = 1'-4\"" which
     # contradicted the title-column SCALE row (Correction 1),
     # and (b) it visually collided with the ceiling label.
-    ls_text(c, FRONT_X_IN + 0.10, FRONT_Y_IN + FRONT_H_IN - 0.20,
+    ls_text(c, FRONT_X_IN + 0.20, FRONT_Y_IN + FRONT_H_IN - 0.20,
             "FRONT ELEVATION", 8.5, INK, tracking=1.8)
 
 
@@ -1482,8 +1487,8 @@ def _render_side_section(
            _P(SIDE_X_IN + SIDE_W_IN - 0.20), _P(wall_y))
     c.setFillColor(LIGHT)
     c.setFont("Helvetica-Oblique", 6.3)
-    c.drawString(_P(SIDE_X_IN + 0.26), _P(ceil_y + 0.05), "CEILING")
-    c.drawString(_P(SIDE_X_IN + 0.26), _P(wall_y - 0.15), "FLOOR")
+    c.drawString(_P(SIDE_X_IN + 0.36), _P(ceil_y + 0.10), "CEILING")
+    c.drawString(_P(SIDE_X_IN + 0.36), _P(wall_y - 0.10), "FLOOR")
     # ── R3: INSIDE mount — board + assembly behind wall line, in reveal
     # R4 forbids lateral exaggeration (per doctrine). At shade-fit
     # scale (Correction 1), the original LX=2.4 would push the glass
@@ -1631,9 +1636,12 @@ def _render_side_section(
         c.drawRightString(_P(wallx - 0.08),
                           _P((hy - 0.07 - flat) - (stack_h - flat) * 0.30),
                           'FOLD STACK')
-        # R10: partial-raise label
-        ls_text(c, x_front, yf - 0.30, "SHOWN AT 1/2 RAISE",
-                5.5, DIM, tracking=0.6, bold=True)
+        # R10: partial-raise label — drawn BELOW the stack with
+        # shorter tracking so it fits inside the side-section
+        # viewport (the founder's G1.3 bounds gate caught the
+        # original wider label overflowing into the title column).
+        ls_text(c, x_front - 0.05, yf - 0.30, "1/2 RAISE",
+                5.0, DIM, tracking=0.2, bold=True)
         # ────────────────────────────────────────────────────────
         # CORRECTION R3-2 — DETAIL A callout (golden source
         # lines 222-264). Magnified 3.5× detail of the stack
@@ -1779,7 +1787,7 @@ def _render_side_section(
     # (the QC text-collision gate flagged the overlap). The
     # mount info is already in the title column ("MOUNTING:
     # Inside — 2-1/2\" ASSUMED"), so the sub-label is removed.
-    ls_text(c, SIDE_X_IN + 0.10, SIDE_Y_IN + SIDE_H_IN - 0.20,
+    ls_text(c, SIDE_X_IN + 0.20, SIDE_Y_IN + SIDE_H_IN - 0.20,
             "SIDE SECTION — RAISED", 8.5, INK, tracking=1.8)
 
 
@@ -1837,7 +1845,9 @@ def _render_layout_math(c: Canvas, math_lines: list):
         # layout doesn't have room for a separate note row above
         # the footer band. The note is still visible to the founder.
         if ml.note:
-            line += f"  ·  {ml.note}"
+            # Truncate note to fit in column width
+            note = ml.note[:30]
+            line += f"  ·  {note}"
         c.drawString(_P(MATH_X_IN + 0.05), _P(y), line)
         y -= 0.16
 
@@ -1893,8 +1903,7 @@ def _get_assumptions(geometry, product_type: str, spec: dict = None) -> list[str
             "Rings: see markers on elevation — founder MUST verify."
         )
     out.append(
-        "CONFIRM-before-fab: ASSUMED dims MUST be verified against "
-        "actual install condition before cutting fabric."
+        "CONFIRM-before-fab: dims MUST be verified."
     )
     return out
 

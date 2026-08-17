@@ -474,6 +474,18 @@ def enforce_b2_qc(
                 f"{family}/{product_type}: {'; '.join(msgs)}. "
                 f"samples: {title_witness_failures[:3]}"
             )
+        # Gate 6 (Step 0 / G1.3): text-bounds — every rendered
+        # text bbox must sit fully inside its owning frame/viewport
+        # with ≥ 0.06" margin. Overflowing text shrinks or wraps,
+        # never clips or spills.
+        bounds_failures = _check_text_bounds(page)
+        if bounds_failures:
+            msgs = [f["issue"] for f in bounds_failures]
+            raise B2QCFailure(
+                f"B2 QC (text-bounds) FAIL on "
+                f"{family}/{product_type}: {'; '.join(msgs)}. "
+                f"samples: {bounds_failures[:3]}"
+            )
 
         return {
             "vector_bbox_in": bbox,
@@ -1583,4 +1595,152 @@ def _check_title_and_witnesses(page) -> list[dict]:
         failures.append({"gate": "witness-right-height",
                          "issue": "'64\" SHADE' (height witness) missing",
                          "front_text": front_text[:300]})
+    return failures
+
+
+# ── CORRECTION G1.3 — Text bounds gate ──────────────────────────────
+#
+# Founder note from G1.3: text still overflows text boxes in places.
+# Every rendered text bbox must sit fully inside its owning
+# frame/viewport with ≥ 0.06" margin. Overflowing text shrinks or
+# wraps, never clips or spills.
+#
+# Zones checked:
+#   - Header band: y in [PAGE_H - MARGIN - HEADER_BAND_H, PAGE_H - MARGIN]
+#   - Footer band: y in [MARGIN, MARGIN + FOOTER_BAND_H]
+#   - Front-elev viewport: x ∈ [FRONT_X_IN, FRONT_X_IN+FRONT_W_IN],
+#     y ∈ [FRONT_Y_IN, FRONT_Y_IN+FRONT_H_IN]
+#   - Side-section viewport: same logic
+#   - Title column: x ∈ [TITLE_X_IN, TITLE_X_IN+TITLE_W_IN],
+#     y ∈ [TITLE_Y_IN, TITLE_Y_IN+TITLE_H_IN]
+# Chars in the header/footer are bounded by the band; chars in
+# the viewports are bounded by the viewport frame. Tolerance:
+# 0.06" inside each edge (per founder directive).
+
+def _check_text_bounds(page) -> list[dict]:
+    """Gate 6 (Step 0 / G1.3): every rendered text bbox must
+    sit fully inside its owning frame/viewport with ≥ 0.06" margin.
+
+    pdfplumber's `x0, x1, y0, y1` for chars are in BL-canvas
+    points (y0 = BOTTOM of char bbox). We need to map each char
+    to the zone it's drawn in (header / footer / front-elev /
+    side-section / title column) by canvas x/y, then assert the
+    char bbox sits ≥ MARGIN_BOUND (0.06") inside the zone edges.
+
+    Negative fixture: a synthetic PDF that draws text past the
+    right page margin (e.g. a very long row in the title column)
+    must FAIL this gate.
+    """
+    failures = []
+    MARGIN_BOUND = 0.06  # inches — char bbox must be ≥ this far
+                          # inside each zone edge
+
+    # Helper: compute char bbox in canvas inches (BL).
+    def _char_bbox_in(c):
+        x0 = c["x0"] / 72.0
+        x1 = c.get("x1", c["x0"]) / 72.0
+        y0 = c["y0"] / 72.0
+        y1 = c.get("y1", c["y0"]) / 72.0
+        return x0, y0, x1, y1
+
+    # Define zones in canvas BL inches.
+    zones = []
+
+    # Header band: y ∈ [PAGE_H_IN - MARGIN_IN - HEADER_BAND_H_IN,
+    #                     PAGE_H_IN - MARGIN_IN]
+    zones.append({
+        "name": "header",
+        "x0": MARGIN_IN,
+        "y0": PAGE_H_IN - MARGIN_IN - HEADER_BAND_H_IN,
+        "x1": PAGE_W_IN - MARGIN_IN,
+        "y1": PAGE_H_IN - MARGIN_IN,
+    })
+    # Footer band
+    zones.append({
+        "name": "footer",
+        "x0": MARGIN_IN,
+        "y0": MARGIN_IN,
+        "x1": PAGE_W_IN - MARGIN_IN,
+        "y1": MARGIN_IN + FOOTER_BAND_H_IN,
+    })
+    # Front-elev viewport
+    zones.append({
+        "name": "front-elev",
+        "x0": FRONT_X_IN,
+        "y0": FRONT_Y_IN,
+        "x1": FRONT_X_IN + FRONT_W_IN,
+        "y1": FRONT_Y_IN + FRONT_H_IN,
+    })
+    # Side-section viewport
+    zones.append({
+        "name": "side-section",
+        "x0": SIDE_X_IN,
+        "y0": SIDE_Y_IN,
+        "x1": SIDE_X_IN + SIDE_W_IN,
+        "y1": SIDE_Y_IN + SIDE_H_IN,
+    })
+    # Title column
+    zones.append({
+        "name": "title-column",
+        "x0": TITLE_X_IN,
+        "y0": TITLE_Y_IN,
+        "x1": TITLE_X_IN + TITLE_W_IN,
+        "y1": TITLE_Y_IN + TITLE_H_IN,
+    })
+
+    # For each char, find its owning zone (first zone whose bbox
+    # contains the char's center, in BL coords) and check bounds.
+    overflow_count = 0
+    for c in page.chars:
+        cx0, cy0, cx1, cy1 = _char_bbox_in(c)
+        # Char CENTER
+        cx_c = (cx0 + cx1) / 2.0
+        cy_c = (cy0 + cy1) / 2.0
+        # Skip chars outside any zone — they may be in the header
+        # right band, footer band, or other. Try each zone; the
+        # one containing the center is the owning zone.
+        owning = None
+        for z in zones:
+            if z["x0"] <= cx_c <= z["x1"] and z["y0"] <= cy_c <= z["y1"]:
+                owning = z
+                break
+        if owning is None:
+            continue
+        # Check bounds with MARGIN_BOUND padding (char must be
+        # ≥ MARGIN_BOUND inside each edge of the owning zone).
+        violations = []
+        if cx0 < owning["x0"] + MARGIN_BOUND:
+            violations.append(
+                f"left edge x={cx0:.3f}\" < "
+                f"zone {owning['name']} x0={owning['x0']:.3f}\" "
+                f"+ margin {MARGIN_BOUND}\""
+            )
+        if cx1 > owning["x1"] - MARGIN_BOUND:
+            violations.append(
+                f"right edge x={cx1:.3f}\" > "
+                f"zone {owning['name']} x1={owning['x1']:.3f}\" "
+                f"- margin {MARGIN_BOUND}\""
+            )
+        if cy0 < owning["y0"] + MARGIN_BOUND:
+            violations.append(
+                f"bottom edge y={cy0:.3f}\" < "
+                f"zone {owning['name']} y0={owning['y0']:.3f}\" "
+                f"+ margin {MARGIN_BOUND}\""
+            )
+        if cy1 > owning["y1"] - MARGIN_BOUND:
+            violations.append(
+                f"top edge y={cy1:.3f}\" > "
+                f"zone {owning['name']} y1={owning['y1']:.3f}\" "
+                f"- margin {MARGIN_BOUND}\""
+            )
+        if violations:
+            overflow_count += 1
+            if overflow_count <= 30:  # cap sample list
+                failures.append({
+                    "gate": "text-bounds",
+                    "issue": f"char '{c['text']}' overflows "
+                             f"{owning['name']}: " + "; ".join(violations),
+                    "char_bbox_in": (cx0, cy0, cx1, cy1),
+                    "owning_zone": owning["name"],
+                })
     return failures
