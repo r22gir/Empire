@@ -330,7 +330,16 @@ def render_spec_to_bytes(result: GeometryFamilyResult, spec: dict) -> bytes:
     """
     if result.family == "Roman Shades":
         return _render_b2_vector(result, spec)
-    # Non-Roman families: keep the B1 textual preview so existing
+    if result.family == "Drapery":
+        # CORRECTION R3.2 generalization: each family gets a
+        # vector renderer in the v11 sheet language. Drapery uses
+        # its own panel/pleat anatomy (NOT the Roman-shades bar
+        # ladder). See templates/drapery_render.py.
+        from app.services.drawing.templates.drapery_render import (
+            render_drapery,
+        )
+        return render_drapery(spec)
+    # Non-vector families: keep the B1 textual preview so existing
     # tests + the live chat path keep producing a PDF for every
     # family. The vector renderer for each family lands in B2
     # follow-on commits.

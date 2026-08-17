@@ -505,12 +505,21 @@ def _render_header_band(c, spec, family_name, product_type, geo_w, geo_h):
     # Left large (white) — golden v10: "FLAT FOLD ROMAN SHADE"
     # (SINGULAR — Correction 5a; the family nomenclature is
     # singular per the golden reference and per Empire family
-    # naming. The previous f-string produced "FLAT FOLD ROMAN
-    # SHADES" by pluralizing family_name, which contradicted the
-    # golden and confused fabrication orders.)
+    # naming). Other families (e.g. Drapery) pass a different
+    # title via the `title_override` parameter (default: family +
+    # product).
     c.setFont("Helvetica-Bold", 21)
     c.setFillColor(CREAM)
-    big_title = "FLAT FOLD ROMAN SHADE"
+    if spec.get("title_override"):
+        big_title = spec["title_override"]
+    elif family_name == "Roman Shades":
+        big_title = "FLAT FOLD ROMAN SHADE"
+    else:
+        # Default for new families: "{product_type} {family}".
+        # The DraperyTemplate passes title_override explicitly
+        # ("PINCH PLEAT DRAPERY" etc.), but this default is a
+        # sensible fallback.
+        big_title = f"{product_type.replace('_', ' ').upper()} {family_name.upper()}"
     c.drawString(_P(bx + 0.27), _P(by + 0.17), big_title)
     # Right top line (gold) — rev + date
     date_str = spec.get("date") or "07/26/2026"
@@ -527,10 +536,23 @@ def _render_header_band(c, spec, family_name, product_type, geo_w, geo_h):
     )
     c.setFont("Helvetica", 8.5)
     c.setFillColor(MUTED_GOLD)
+    # Right smaller line — dims + (family-specific descriptor) +
+    # mount. Roman Shades has 9 folds @ 7-1/8"; Drapery has its
+    # own descriptor (panel count + max panel width).
+    descriptor = spec.get("dim_descriptor")
+    if descriptor is None:
+        if family_name == "Roman Shades":
+            descriptor = "9 folds @ 7-1/8\""
+        else:
+            descriptor = ""  # family-specific; caller may override
+    if descriptor:
+        descriptor_part = f'· {descriptor}  '
+    else:
+        descriptor_part = ""
     c.drawRightString(_P(PAGE_W_IN - MARGIN_IN - 0.28),
                       _P(by + 0.19),
                       f'{int(round(geo_w))}\" W × {int(round(geo_h))}\" H '
-                      f'· 9 folds @ 7-1/8\"  ·  {mount_assumed}')
+                      f'{descriptor_part}·  {mount_assumed}')
 
 
 def _letterspaced_width_in(c, s: str, size: float, tracking: float = 0.0,
@@ -711,14 +733,26 @@ def _render_title_column(
     # Add colons to row labels for the B2d-era tests that assert on
     # "REV:" etc. Golden v10 doesn't have colons visually, but the
     # colon is appended for QC-assertion backward compat.
+    # Family-specific rows. Roman Shades has folds + inside mount.
+    # Drapery (and other families) use their own descriptor rows.
+    # The caller can override these via spec["title_rows"].
     rows = [
         ("PROJECT:", "—"),
         ("CLIENT:", client_name),
         ("FAMILY:", f"{family_name} · {product_type.replace('_', ' ').title()}"),
         ("DIMENSIONS:", f'{geo_w:.2f}\" W × {geo_h:.2f}\" H'),
-        ("FOLDS:", "9 @ 7-1/8\""),
-        ("MOUNTING:",
-         f"{spec.get('mount', 'Inside').title()} — 2-1/2\" ASSUMED"),
+    ]
+    if family_name == "Roman Shades":
+        rows += [
+            ("FOLDS:", "9 @ 7-1/8\""),
+            ("MOUNTING:",
+             f"{spec.get('mount', 'Inside').title()} — 2-1/2\" ASSUMED"),
+        ]
+    elif family_name == "Drapery":
+        # Family-appropriate descriptor row (panel count + max width)
+        n_body = max(2, round(geo_w / 24.0))
+        rows.append(("PANELS:", f"{n_body} × {24.0:.1f}\" max"))
+    rows += [
         ("FABRIC:", fabric_name[:20]),  # truncate long fabric names
         ("", fabric_mill),
         ("", fabric_sku),
@@ -732,7 +766,13 @@ def _render_title_column(
             ls_text(c, tx, ty, lab, 7, LIGHT, tracking=1.5, bold=True)
         c.setFont("Helvetica-Bold" if lab else "Helvetica", 6.0)
         c.setFillColor(INK)
-        c.drawString(_P(tx + 0.70), _P(ty), val)
+        # Truncate values that overflow the title column right edge
+        # (column x1=10.50, safe right=10.44). At 6.0pt font,
+        # ~0.04"/char → 38 chars max from value column start at
+        # tx+0.70=8.96. Truncate at 28 chars to be safe (allows
+        # descender margin).
+        val_draw = val[:28] if len(val) > 28 else val
+        c.drawString(_P(tx + 0.70), _P(ty), val_draw)
         ty -= row_gap
     # ── Divider 1
     c.setStrokeColor(DIVIDER)
@@ -757,17 +797,31 @@ def _render_title_column(
         total = seg + (f' + {gap}' if gap else '')
         warn = "" if ml.closing_tolerance_in < (1 / 64) else "  ⚠  "
         # Truncate math line to fit title column (2.44" wide). At
-        # Helvetica 7.5pt, ~0.052"/char → ~47 chars max. Reserve
-        # 8 chars for "  ·  NN" separator + short note.
-        math_main = (
+        # Helvetica 7.5pt, ~0.052"/char → ~47 chars max. Build the
+        # line with PRIORITY on the note (must be visible to
+        # founder) — truncate math_main to fit alongside the note.
+        note = ml.note if ml.note else ""
+        # Title column x range ≈ 8.06→10.50; safe right at 10.44;
+        # value starts at tx=8.22 → ~2.22" wide. At 0.052"/char
+        # ~42 chars max. Reserve "  ·  N" (5 chars) for the
+        # separator + a 1-char note minimum.
+        note_chars = len(note)
+        avail_chars = max(0, 35 - 5 - note_chars)
+        base_main = (
             f"{warn}{total}  =  {_fmt_in(ml.total)}  (target "
             f"{_fmt_in(ml.target_in)})"
-        )[:40]
+        )
+        math_main = base_main[:avail_chars]
         if ml.note:
-            note = ml.note[:18]
             line = f"{math_main}  ·  {note}"
         else:
             line = math_main
+        # Final safety: truncate the whole line if it would still
+        # overflow the title column. Title column x range ≈
+        # 8.06→10.50; safe right at 10.44. At 6.0pt ≈ 0.04"/char
+        # → 35 chars max from tx=8.22.
+        if len(line) > 35:
+            line = line[:35]
         c.drawString(_P(tx), _P(ty - 0.20 - i * 0.15), line)
     ty -= 0.20 + max(0, len(math_lines or [])) * 0.15 + 0.14
     # ── Divider 2
@@ -1845,8 +1899,12 @@ def _render_layout_math(c: Canvas, math_lines: list):
         # layout doesn't have room for a separate note row above
         # the footer band. The note is still visible to the founder.
         if ml.note:
-            # Truncate note to fit in column width
-            note = ml.note[:30]
+            # Truncate note to fit in column width (60 chars max
+            # at 7.5pt ≈ 0.05"/char = 3" wide; column x range
+            # MATH_X_IN + 0.05 to PAGE_W_IN - MARGIN_IN - 0.34
+            # ≈ 0.05 to 10.34, width 10.29 ÷ 0.05 ≈ 205 chars
+            # but allow margin: 60 chars max).
+            note = ml.note[:10]   # truncate to 10 chars (fits at 7.5pt)
             line += f"  ·  {note}"
         c.drawString(_P(MATH_X_IN + 0.05), _P(y), line)
         y -= 0.16

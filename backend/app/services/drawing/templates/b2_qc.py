@@ -466,7 +466,7 @@ def enforce_b2_qc(
                 f"samples: {dup_cap_failures[:3]}"
             )
         # Gate 5: title + witnesses
-        title_witness_failures = _check_title_and_witnesses(page)
+        title_witness_failures = _check_title_and_witnesses(page, family=family)
         if title_witness_failures:
             msgs = [f["issue"] for f in title_witness_failures]
             raise B2QCFailure(
@@ -1533,7 +1533,7 @@ def _check_stack_anatomy(page, family: str = "Roman Shades") -> list[dict]:
 #     9 @ 7-1/8" left) must all be present and anchored to features.
 
 
-def _check_title_and_witnesses(page) -> list[dict]:
+def _check_title_and_witnesses(page, family: str = "Roman Shades") -> list[dict]:
     """Gate 5: title exact-match + three witnesses present and
     anchored.
 
@@ -1541,6 +1541,14 @@ def _check_title_and_witnesses(page) -> list[dict]:
     band canvas y ∈ [PAGE_H - MARGIN - HEADER_BAND, PAGE_H - MARGIN]
     = pdfplumber y0 ∈ [PAGE_H*72 - (MARGIN+HEADER_BAND)*72, PAGE_H*72 - MARGIN*72]
     = [566.4, 642.6] (approximately).
+
+    Family-aware: Roman Shades has the title "FLAT FOLD ROMAN SHADE"
+    + 38" width / 9 @ 7-1/8" folds / 64" SHADE height witnesses.
+    Other families (e.g. Drapery) use family-specific title +
+    family-appropriate dimensions. The witnesses for non-Roman
+    families are SKIPPED (the gate is silent for them — the
+    family-specific row in the title column conveys the
+    dimension info).
     """
     failures = []
     text = "".join(c["text"] for c in page.chars)
@@ -1550,9 +1558,8 @@ def _check_title_and_witnesses(page) -> list[dict]:
     top_chars = [c for c in page.chars
                  if header_y0_min - 5 <= c["y0"] <= header_y0_max + 5]
     top_text = "".join(c["text"] for c in top_chars)
-    # Title must be singular ("FLAT FOLD ROMAN SHADE" without trailing
-    # 'S'); the plural "FLAT FOLD ROMAN SHADES" was the founder's
-    # G1 defect (Correction 5a).
+    # Roman-shades title must be singular (Correction 5a):
+    # "FLAT FOLD ROMAN SHADE" (no trailing 'S').
     if "FLAT FOLD ROMAN SHADES" in top_text:
         failures.append({
             "gate": "title-singular",
@@ -1560,14 +1567,20 @@ def _check_title_and_witnesses(page) -> list[dict]:
                      "must be singular)",
             "top_text": top_text,
         })
-    if "FLAT FOLD ROMAN SHADE" not in top_text:
+    # Roman-shades title must be present (other families can have
+    # their own title via title_override).
+    if family == "Roman Shades" and "FLAT FOLD ROMAN SHADE" not in top_text:
         failures.append({
             "gate": "title-singular",
             "issue": "'FLAT FOLD ROMAN SHADE' (singular) not found "
                      "in header band",
             "top_text": top_text,
         })
-    # (b) Witnesses — three labels in the front-elev viewport.
+    # (b) Witnesses — Roman-shades specific (38", 9 @ 7-1/8",
+    # 64" SHADE). Other families have their own family-specific
+    # dimensions and don't need these witnesses.
+    if family != "Roman Shades":
+        return failures
     # Front-elev viewport: canvas x ∈ [FRONT_X_IN, FRONT_X_IN+FRONT_W_IN],
     # canvas y ∈ [FRONT_Y_IN, FRONT_Y_IN+FRONT_H_IN] → pdfplumber
     # y0 ∈ [FRONT_Y_IN*72, (FRONT_Y_IN+FRONT_H_IN)*72].
