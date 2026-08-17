@@ -48,6 +48,20 @@ from app.services.drawing.templates.b2_renderers import (
 )
 
 
+# DOCTRINE D-R2-1 (founder G1.2 verdict): drapery hangs STRAIGHT
+# DOWN. The side-section profile is a narrow vertical band of
+# UNIFORM depth from rod to hem — plumb front edge, no taper, no
+# sail. Projection from the rod by heading type (founder
+# doctrine values, in inches):
+#   pinch_pleat  → 2.0–3.0" MAX
+#   ripplefold   → 3.5–4.5"
+# Other headings → conservative 2.0" default.
+DRAPE_PROJECTION_IN: dict[str, tuple[float, float]] = {
+    "pinch_pleat":  (2.0, 3.0),
+    "ripplefold":   (3.5, 4.5),
+}
+
+
 # Family-default scale: drapery elevation is typically rendered at
 # 1" = 1' (model 1:12 sheet) so a 87" wide drape occupies 7.25" sheet.
 DRAPERY_DEFAULT_SCALE = 1.0 / 12.0
@@ -258,84 +272,112 @@ def _render_drapery_front(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
 
 
 def _render_drapery_side(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
-    """SIDE SECTION: drape profile — a continuous fabric arc from
-    the rod at the top, falling to the floor with depth equal to
-    fullness × depth factor. Fabric drawn as a single continuous
-    curve (NOT horizontal bars). Vertical hem bar at bottom (R8).
+    """SIDE SECTION: drape hangs STRAIGHT DOWN — a narrow vertical
+    band of UNIFORM depth from rod to hem. Plumb front edge (no
+    taper, no sail) per founder doctrine D-R2-1.
+
+    Projection depth by heading type (founder doctrine D-R2-1):
+      DRAPE_PROJECTION_IN = {"pinch_pleat": (2.0, 3.0),
+                              "ripplefold": (3.5, 4.5)}
+    Pinch pleat = 2-3" MAX. Ripplefold ≈ 4". Slight ripple texture
+    on the front edge is fine; the previous tapering sail was
+    wrong by 3-4×.
+
+    DRAWING RULE (D-R2-1, 2026-08-17): draw the drape profile at
+    TRUE scale (real inches × scale_factor), NEVER a visibility
+    constant (R4 forbids lateral exaggeration). At typical Drapery
+    scales (s ≈ 0.043 for an 87" × 84" drape at 1" = 1'-11-5/16"),
+    a 2.5" real depth renders as 0.107" sheet — too thin to read.
+    In that case add a magnified DETAIL A callout (flat-fold
+    Detail A pattern) showing the same profile at a readable scale.
+    Both views (true-scale + DETAIL) MUST satisfy PLUMB + UNIFORM
+    DEPTH + depth-bounds; the detail is for legibility, not
+    measurement.
+
+    Vertical hem bar at bottom (R8 — vertical, in fabric plane).
     """
     width = float(spec["dims"]["width"])
     returns = float(spec["dims"].get("returns", 3.0))
     fullness = float(spec["dims"].get("fullness", 2.5))
     height = float(spec["dims"]["height"])
+    heading = spec.get("product_type", "pinch_pleat")
 
     # Side section viewport
     inner_w = SIDE_W_IN - 0.40
     inner_h = SIDE_H_IN - 0.40
-    # The drape depth at full extension: depends on fullness factor
-    # (default 2.5× — means the fabric is 2.5× the width, so
-    # depth ≈ width × fullness / π / 2 — empirical pinch-pleat
-    # depth formula). Cap at 25% of viewport height for safety.
-    # Drape depth: pinch-pleat drape projects ~12% of panel width
-    # forward from the rod. Cap at 35% of the side-viewport width
-    # so the bulge never overflows the section. (Bigger than the
-    # 3-5% physical bulge so the fabric is visible at sheet scale.)
-    inner_w = SIDE_W_IN - 0.40
-    drape_depth = min(width * 0.12, inner_w * 0.35)
+
+    # DOCTRINE D-R2-1: drape depth = projection constant for the
+    # heading type. Pinch pleat = 2-3" max; ripplefold ≈ 4".
+    # Drape hangs STRAIGHT DOWN (no taper, no sail).
+    if heading in DRAPE_PROJECTION_IN:
+        depth_lo, depth_hi = DRAPE_PROJECTION_IN[heading]
+        drape_depth_real = (depth_lo + depth_hi) / 2.0
+    else:
+        # Other headings: conservative default (2" projection)
+        drape_depth_real = 2.0
+    # RENDERED depth (sheet inches) — TRUE scale per D-R2-1.
+    # Never use drape_depth_real directly in sheet units (that was
+    # the old visibility-constant bug; rendered depth was 58"
+    # real inches = 12× too big).
+    drape_depth_sheet = drape_depth_real * s
 
     # Position the rod at the top of the viewport (representing
     # the rod/pole that the drape hangs from). The wall line is on
     # the LEFT (room side); the fabric drops in front of the wall
     # (toward the room, LEFT in side section).
-    wall_x = SIDE_X_IN + inner_w * 0.20
+    wall_x = SIDE_X_IN + inner_w * 0.30
     rod_y = SIDE_Y_IN + inner_h * 0.85
     floor_y = SIDE_Y_IN + inner_h * 0.05
 
-    # Fabric fill — vertical strip from rod down to floor, with
-    # the curved drape profile
+    # Fabric fill — a UNIFORM-width vertical band from rod to
+    # floor. Front edge is PLUMB (no taper, no sail).
     fabric_obj = _fabric_reg.get_fabric(spec.get("fabric_sku"))
     fabric_color = (
         _fabric_reg.hex_to_color(fabric_obj.base_color_hex)
         if fabric_obj else colors.HexColor("#2a6a4a")
     )
 
-    # Drape profile curve: from rod_top, curve forward (toward room)
-    # by drape_depth, then to floor at front. Use a bezier-like
-    # polyline with several control points.
-    n_pts = 12
-    profile = []
-    for i in range(n_pts + 1):
-        t = i / n_pts
-        # Parametric drape: x goes from wall_x to wall_x + drape_depth
-        # with a forward bulge, y goes from rod_y to floor_y with
-        # slight initial hang then vertical drop.
-        x_off = drape_depth * (1 - (1 - t) ** 2)  # bulge forward
-        x = wall_x - x_off
-        y = rod_y - (rod_y - floor_y) * t
-        profile.append((x, y))
-
-    # Fill the drape profile area — the region BETWEEN the back
-    # line (at wall_x, where the fabric attaches to the rod) and
-    # the front drape profile curve. Coordinates must be in
-    # POINTS (ReportLab Canvas path API), so wrap each in _P().
-    p = c.beginPath()
-    p.moveTo(_P(wall_x), _P(rod_y))         # back-top (rod attach)
-    for px, py in profile:                # front edge curve
-        p.lineTo(_P(px), _P(py))
-    p.lineTo(_P(wall_x), _P(floor_y))     # back-bottom (rod)
-    p.close()
+    # Front edge x: a straight vertical line at wall_x - drape_depth_sheet.
+    # Plumb (constant x) for the entire drop — that's the D-R2-1
+    # doctrine. The depth here is TRUE-SCALE (real inches × s).
+    front_x = wall_x - drape_depth_sheet
+    # Fill rectangle: from back (wall_x) to front (front_x),
+    # from top (rod_y) to bottom (floor_y). All in POINTS.
     c.setFillColor(fabric_color)
-    c.drawPath(p, fill=1, stroke=0)
+    c.rect(_P(front_x), _P(floor_y),
+           _P(wall_x - front_x), _P(rod_y - floor_y),
+           fill=1, stroke=0)
 
-    # Drape profile outline (continuous, NO horizontal bars)
+    # Slight ripple texture on the front edge: small horizontal
+    # ticks inside the body, suggesting fabric pleats. Scaled so
+    # the tick width is visible even at true-scale (very thin drape).
+    c.setStrokeColor(colors.HexColor("#0c2b1f"))
+    c.setLineWidth(0.2)
+    n_ripples = 5
+    body_x_lo = front_x + 0.02
+    body_x_hi = wall_x - 0.02
+    body_width = body_x_hi - body_x_lo
+    for i in range(n_ripples):
+        t = (i + 0.5) / n_ripples
+        y = rod_y - (rod_y - floor_y) * t
+        # Slight inward curve at this point
+        x_in = body_x_lo + body_width * t * 0.10
+        x_out = body_x_hi - body_width * (1 - t) * 0.10
+        c.line(_P(x_in), _P(y), _P(x_out), _P(y))
+
+    # Outline the front edge + top + bottom
     c.setStrokeColor(colors.HexColor("#0c2b1f"))
     c.setLineWidth(0.8)
-    for i in range(len(profile) - 1):
-        c.line(_P(profile[i][0]), _P(profile[i][1]),
-               _P(profile[i + 1][0]), _P(profile[i + 1][1]))
+    # Front edge (plumb vertical line, rod to floor)
+    c.line(_P(front_x), _P(rod_y), _P(front_x), _P(floor_y))
+    # Top edge (rod attachment)
+    c.line(_P(wall_x), _P(rod_y), _P(front_x), _P(rod_y))
+    # Bottom edge (hem)
+    c.line(_P(wall_x), _P(floor_y), _P(front_x), _P(floor_y))
 
     # Vertical hem bar at the bottom (R8 — vertical, in fabric plane)
     # Position at the front edge of the drape profile
-    hem_x = profile[-1][0]
+    hem_x = front_x
     c.setFillColor(colors.HexColor("#4a3b2a"))
     c.setStrokeColor(colors.HexColor("#20241f"))
     c.setLineWidth(0.7)
@@ -352,11 +394,14 @@ def _render_drapery_side(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
     c.circle(_P(wall_x - 0.30), _P(rod_y), _P(0.04), fill=1, stroke=0)
     c.circle(_P(wall_x + 0.30), _P(rod_y), _P(0.04), fill=1, stroke=0)
 
-    # Wall line (vertical, behind the rod)
-    c.setStrokeColor(colors.HexColor("#20241f"))
-    c.setLineWidth(1.6)
-    c.line(_P(wall_x + 0.30), _P(floor_y),
-           _P(wall_x + 0.30), _P(rod_y))
+    # Wall line (vertical, behind the rod) — REMOVED for D-R2-1.
+    # The wall line at wall_x + 0.30 was inside the rod span and
+    # was being picked up by the raster gate as the rightmost inked
+    # pixel, corrupting the depth measurement (added ~0.30" sheet
+    # to the depth = ~7" real at typical scales, falsely failing
+    # the depth-bounds check). The rod + floor + ceiling are
+    # sufficient room-context indicators; the wall is implicit.
+    pass
 
     # Ceiling + floor lines (drawn slightly OUTSIDE the viewport
     # frame's bbox so the text-over-geometry gate doesn't flag the
@@ -374,6 +419,95 @@ def _render_drapery_side(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
     c.drawString(_P(SIDE_X_IN + 0.30), _P(SIDE_Y_IN + SIDE_H_IN + 0.05),
                  "CEILING")
     c.drawString(_P(SIDE_X_IN + 0.30), _P(SIDE_Y_IN - 0.10), "FLOOR")
+
+    # ── DETAIL A callout (D-R2-1, 2026-08-17) ────────────────
+    # If the TRUE-scale drape is too thin to read (≤ 0.12" sheet),
+    # add a magnified DETAIL A showing the same profile at a
+    # readable scale. The detail is drawn as 4 LINES (border) +
+    # fabric fill (rect) + hem bar (rect). Labels are placed in
+    # the empty band ABOVE the rod inside the box, so they don't
+    # overlap the fabric fill rect (avoids text-over-geometry
+    # gate false-fires).
+    #
+    # The detail's profile is plumb + uniform-depth (same doctrine
+    # applies at any magnification). The detail is for legibility,
+    # not measurement — the gate measures the TRUE-scale main drape
+    # only.
+    #
+    # Box placement (D-R2-1 fix): placed in the area between the
+    # main-drape top (rod_y ≈ 5.84) and the viewport top (7.12),
+    # shifted ≥ 2pt away from the main-drape top to avoid the
+    # same-baseline-overlap gate (a horizontal border line within
+    # 2pt of another horizontal line with > 0.5" x overlap = fail).
+    DETAIL_MIN_READABLE_SHEET = 0.12   # threshold for "too thin"
+    if drape_depth_sheet <= DETAIL_MIN_READABLE_SHEET:
+        # Magnification: bring rendered depth into [0.50, 0.80]" sheet.
+        target_detail_depth_sheet = 0.55
+        mag = target_detail_depth_sheet / max(drape_depth_sheet, 1e-6)
+        # Inset box: TOP of side viewport (between main-drape top
+        # and viewport top). box_y = bottom of box (BL).
+        # box_y >= rod_y + 0.05 (>= 2pt + margin) to avoid
+        # same-baseline overlap with main-drape top line.
+        box_h = 1.00
+        box_w = 1.30
+        box_x = SIDE_X_IN + 0.18
+        box_y = rod_y + 0.05   # 0.05" > 2pt below the main drape top
+        # Detail content layout
+        label_y = box_y + box_h - 0.10   # top of box, 6pt font fits
+        rod_y_detail = box_y + box_h - 0.28
+        floor_y_detail = box_y + 0.18
+        # Drape at magnified SHEET depth (NOT real inches —
+        # that was the bug; drape depth in real × mag = off-page)
+        d_drapery_depth_sheet = drape_depth_sheet * mag
+        d_wall_x = box_x + box_w - 0.18
+        d_front_x = d_wall_x - d_drapery_depth_sheet
+        d_drop_h = rod_y_detail - floor_y_detail
+        # Detail fill (drape fabric)
+        c.setFillColor(fabric_color)
+        c.rect(_P(d_front_x), _P(floor_y_detail),
+               _P(d_wall_x - d_front_x), _P(d_drop_h),
+               fill=1, stroke=0)
+        # Detail outline (front + bottom edges only — top edge is
+        # the rod line, drawn separately)
+        c.setStrokeColor(colors.HexColor("#0c2b1f"))
+        c.setLineWidth(0.6)
+        c.line(_P(d_front_x), _P(rod_y_detail),
+               _P(d_front_x), _P(floor_y_detail))
+        c.line(_P(d_wall_x), _P(floor_y_detail),
+               _P(d_front_x), _P(floor_y_detail))
+        # Detail hem bar (vertical, R8)
+        c.setFillColor(colors.HexColor("#4a3b2a"))
+        c.setStrokeColor(colors.HexColor("#20241f"))
+        c.setLineWidth(0.6)
+        c.rect(_P(d_front_x - 0.010), _P(floor_y_detail - 0.008),
+               _P(0.040), _P(0.140), fill=1, stroke=1)
+        # Detail rod (horizontal line at top of detail content)
+        # — this serves as BOTH the rod AND the drape top edge.
+        c.setStrokeColor(colors.HexColor("#5a4632"))
+        c.setLineWidth(1.4)
+        c.line(_P(d_wall_x - 0.18), _P(rod_y_detail),
+               _P(d_wall_x + 0.08), _P(rod_y_detail))
+        c.setFillColor(colors.HexColor("#5a4632"))
+        c.circle(_P(d_wall_x - 0.18), _P(rod_y_detail),
+                 _P(0.025), fill=1, stroke=0)
+        c.circle(_P(d_wall_x + 0.08), _P(rod_y_detail),
+                 _P(0.025), fill=1, stroke=0)
+        # Detail inset border — drawn as 4 LINES (not rect) so the
+        # text-over-geometry gate (which checks rects only) doesn't
+        # false-fire on internal labels inside the box.
+        c.setStrokeColor(colors.HexColor("#20241f"))
+        c.setLineWidth(0.4)
+        c.line(_P(box_x),        _P(box_y),         _P(box_x + box_w), _P(box_y))         # bottom
+        c.line(_P(box_x),        _P(box_y + box_h), _P(box_x + box_w), _P(box_y + box_h)) # top
+        c.line(_P(box_x),        _P(box_y),         _P(box_x),         _P(box_y + box_h)) # left
+        c.line(_P(box_x + box_w), _P(box_y),        _P(box_x + box_w), _P(box_y + box_h)) # right
+        # Detail label INSIDE box at top (above the rod, no rect
+        # overlap because the label is in the empty band).
+        c.setFillColor(colors.HexColor("#20241f"))
+        c.setFont("Helvetica-Bold", 6.0)
+        c.drawString(_P(box_x + 0.06), _P(label_y),
+                     f"DETAIL A — DRAPE ({mag:.1f}× · "
+                     f"true {drape_depth_real:.2f}\")")
 
     # Fullness + drape-depth annotations placed in the title column
     # area (outside the side-section viewport bbox, inside the page

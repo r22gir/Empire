@@ -753,7 +753,12 @@ def _render_title_column(
         n_body = max(2, round(geo_w / 24.0))
         rows.append(("PANELS:", f"{n_body} × {24.0:.1f}\" max"))
     rows += [
-        ("FABRIC:", fabric_name[:20]),  # truncate long fabric names
+        # D-R2-2 (2026-08-17): doctrine strings are NEVER truncated.
+        # The title column may grow rows as needed (handled below
+        # by allowing multi-line values via _wrap_value). The
+        # doctrine placeholder is "TBC — CONFIRM BEFORE CUT" when
+        # fabric_sku is unset; this MUST appear COMPLETE.
+        ("FABRIC:", fabric_name),
         ("", fabric_mill),
         ("", fabric_sku),
         ("", fabric_repeat),
@@ -785,8 +790,12 @@ def _render_title_column(
             bold=True)
     c.setFont("Helvetica", 6.5)
     c.setFillColor(INK)
-    # Render math_lines as monospace (no Courier — Helvetica per
-    # founder "drop Courier" override)
+    # Render math_lines (D-R2-3: WRAP not truncate — the closure
+    # equation MUST be COMPLETE; if the full line doesn't fit in
+    # the title column, break it at the "=" boundary and render
+    # the closure note on a second line).
+    MATH_LINE_MAX_CHARS = 35
+    y_offset = 0.20
     for i, ml in enumerate(math_lines or []):
         seg = " + ".join(
             f'{n} × {_fmt_in(v)}' for n, v in ml.segments
@@ -796,34 +805,33 @@ def _render_title_column(
         ) or ""
         total = seg + (f' + {gap}' if gap else '')
         warn = "" if ml.closing_tolerance_in < (1 / 64) else "  ⚠  "
-        # Truncate math line to fit title column (2.44" wide). At
-        # Helvetica 7.5pt, ~0.052"/char → ~47 chars max. Build the
-        # line with PRIORITY on the note (must be visible to
-        # founder) — truncate math_main to fit alongside the note.
         note = ml.note if ml.note else ""
-        # Title column x range ≈ 8.06→10.50; safe right at 10.44;
-        # value starts at tx=8.22 → ~2.22" wide. At 0.052"/char
-        # ~42 chars max. Reserve "  ·  N" (5 chars) for the
-        # separator + a 1-char note minimum.
-        note_chars = len(note)
-        avail_chars = max(0, 35 - 5 - note_chars)
-        base_main = (
+        # Build the FULL equation (D-R2-3: never truncate).
+        full_main = (
             f"{warn}{total}  =  {_fmt_in(ml.total)}  (target "
             f"{_fmt_in(ml.target_in)})"
         )
-        math_main = base_main[:avail_chars]
-        if ml.note:
-            line = f"{math_main}  ·  {note}"
+        # Build the rendered line(s). If the full line + note
+        # fits in MATH_LINE_MAX_CHARS, render as one line. Else
+        # split: closure equation on line 1, note on line 2.
+        if note:
+            line_with_note = f"{full_main}  ·  {note}"
+            if len(line_with_note) <= MATH_LINE_MAX_CHARS:
+                lines_to_draw = [line_with_note]
+            else:
+                # Closure equation on line 1 (no truncation);
+                # note on line 2.
+                lines_to_draw = [full_main, f"·  {note}"]
         else:
-            line = math_main
-        # Final safety: truncate the whole line if it would still
-        # overflow the title column. Title column x range ≈
-        # 8.06→10.50; safe right at 10.44. At 6.0pt ≈ 0.04"/char
-        # → 35 chars max from tx=8.22.
-        if len(line) > 35:
-            line = line[:35]
-        c.drawString(_P(tx), _P(ty - 0.20 - i * 0.15), line)
-    ty -= 0.20 + max(0, len(math_lines or [])) * 0.15 + 0.14
+            lines_to_draw = [full_main]
+        # Draw each line. Wrap lines use a tighter gap (0.13")
+        # so the wrapped line sits close to its source; advance
+        # by 0.15" between math lines so they don't collide.
+        for j, ln in enumerate(lines_to_draw):
+            c.drawString(_P(tx), _P(ty - y_offset - j * 0.13), ln)
+        # Advance y_offset: wrap-line gap + inter-math-line gap
+        y_offset += (len(lines_to_draw) - 1) * 0.13 + 0.15
+    ty -= y_offset + 0.14
     # ── Divider 2
     c.setStrokeColor(DIVIDER)
     c.line(_P(tx), _P(ty), _P(PAGE_W_IN - MARGIN_IN - 0.34), _P(ty))

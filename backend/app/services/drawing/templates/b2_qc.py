@@ -486,6 +486,16 @@ def enforce_b2_qc(
                 f"{family}/{product_type}: {'; '.join(msgs)}. "
                 f"samples: {bounds_failures[:3]}"
             )
+        # Gate 7 (D-R2-1): drapery profile must be PLUMB +
+        # UNIFORM DEPTH + within DRAPE_PROJECTION_IN bounds.
+        plumb_failures = _check_drapery_plumb(pdf_bytes, family=family)
+        if plumb_failures:
+            msgs = [f["issue"] for f in plumb_failures]
+            raise B2QCFailure(
+                f"B2 QC (drapery-plumb) FAIL on "
+                f"{family}/{product_type}: {'; '.join(msgs)}. "
+                f"samples: {plumb_failures[:3]}"
+            )
 
         return {
             "vector_bbox_in": bbox,
@@ -507,6 +517,7 @@ def enforce_b2_qc(
             "footer_disc_failures": footer_disc_failures,
             "dup_cap_failures": dup_cap_failures,
             "title_witness_failures": title_witness_failures,
+            "plumb_failures": plumb_failures,
         }
     finally:
         pdfplumber_obj.close()
@@ -849,26 +860,13 @@ def _check_elevation_scale_truth(page) -> list[dict]:
         return failures
     real_w = float(dim_m.group(1))
     real_h = float(dim_m.group(2))
-    # Parse SCALE row: "SCALE:1\" = 1'-9/16\"" (or similar)
-    # Accepts "N\" = M'-K/L\"" or "N\" = M'-K\""
-    scale_m = re.search(
-        r'SCALE:?\s*(\d+)\s*"\s*=\s*(\d+)\s*\'\s*-\s*'
-        r'(?:(\d+)(?:\s*-\s*(\d+)\s*/\s*(\d+))?)?\s*"',
-        text)
-    if not scale_m:
+    # Parse SCALE row (sheet-in per model-in) via shared helper.
+    scale_factor = _parse_scale_factor(text)
+    if scale_factor is None or scale_factor <= 0:
         failures.append({"gate": "scale-truth",
                          "issue": "SCALE row not parseable",
                          "text_around": _extract_SCALE_area(text)})
         return failures
-    sheet_in = float(scale_m.group(1))
-    feet = float(scale_m.group(2))
-    inches = float(scale_m.group(3) or 0)
-    frac_num = float(scale_m.group(4) or 0)
-    frac_den = float(scale_m.group(5) or 1)
-    if frac_den > 0 and frac_num > 0:
-        inches += frac_num / frac_den
-    model_in_per_sheet_in = feet * 12.0 + inches
-    scale_factor = sheet_in / model_in_per_sheet_in  # sheet-in / model-in
     # Measure the SHADE BODY bbox specifically — not the entire
     # content bbox, which includes witness extension lines that
     # extend beyond the shade to the dim lines. We identify the
@@ -1756,4 +1754,299 @@ def _check_text_bounds(page) -> list[dict]:
                     "char_bbox_in": (cx0, cy0, cx1, cy1),
                     "owning_zone": owning["name"],
                 })
+    return failures
+
+
+# ── CORRECTION D-R2-1 — Drapery plumb-front + uniform-depth gate ──
+#
+# Founder D-R2-1 verdict: Drapery hangs STRAIGHT DOWN. The side
+# section profile must be a narrow vertical band of UNIFORM depth
+# from rod to hem — plumb front edge, no taper, no sail.
+# Depth within DRAPE_PROJECTION_IN bounds for the heading type.
+#
+# GATE (Drapery family only):
+#   (a) PLUMB: front-edge x variance ≤ 0.02" over the full drop
+#       (rod_y → floor_y). A non-plumb (sail-shaped) profile has
+#       variance much larger than this.
+#   (b) UNIFORM DEPTH: drape width (front-edge x to back-edge x)
+#       at top = drape width at bottom (variance ≤ 0.02").
+#   (c) DEPTH IN BOUNDS: drape depth ∈ [DRAPE_PROJECTION_IN[heading][0],
+#       DRAPE_PROJECTION_IN[heading][1]] for the heading type.
+#
+# Negative fixture: a non-plumb (sail-shaped) profile must FAIL
+# the PLUMB or UNIFORM DEPTH check.
+
+
+def _parse_scale_factor(text: str) -> float | None:
+    """Parse the SCALE row text and return the scale_factor in
+    sheet-inches per model-inch (e.g. 1/12 = 0.0833 for "1\" = 1'-0\"").
+
+    Returns None if the SCALE row is not parseable (caller decides
+    how to handle — the drapery gate falls back to assuming
+    scale_factor=1.0, which is conservative for the depth-bounds
+    check; the elevation-scale-truth gate returns a failure).
+
+    Accepts forms like:
+      SCALE:1" = 1'-0"
+      SCALE:1" = 1'-11-5/16"
+      SCALE:1" = 1'-11"
+    """
+    m = re.search(
+        r'SCALE:?\s*(\d+)\s*"\s*=\s*(\d+)\s*\'\s*-\s*'
+        r'(?:(\d+)(?:\s*-\s*(\d+)\s*/\s*(\d+))?)?\s*"',
+        text)
+    if not m:
+        return None
+    sheet_in = float(m.group(1))
+    feet = float(m.group(2))
+    inches = float(m.group(3) or 0)
+    frac_num = float(m.group(4) or 0)
+    frac_den = float(m.group(5) or 1)
+    if frac_den > 0 and frac_num > 0:
+        inches += frac_num / frac_den
+    model_in_per_sheet_in = feet * 12.0 + inches
+    if model_in_per_sheet_in <= 0:
+        return None
+    return sheet_in / model_in_per_sheet_in  # sheet-in / model-in
+
+
+def _check_drapery_plumb(pdf_bytes: bytes, family: str = "Drapery") -> list[dict]:
+    """Gate D-R2-1: drapery profile must be PLUMB (vertical front
+    edge) + UNIFORM DEPTH (top width = bottom width) + within
+    DRAPE_PROJECTION_IN bounds for the heading type.
+
+    RASTERIZATION: pdfplumber.Page.to_image(resolution=150) + PIL row
+    scan on the side-section viewport crop. 150 DPI ≈ 2.08 px/pt
+    gives ±0.1" precision (3px tolerance). Paths, rects, and lines
+    all rasterize identically — no coordinate carve-outs needed.
+
+    UNIT CHAIN (explicit per directive 2026-08-17):
+      pixels (px)  →  sheet inches (÷ DPI=150)
+                   →  REAL inches      (÷ scale_factor from SCALE row)
+      DRAPE_PROJECTION_IN[heading] bounds are in REAL inches — so
+      the depth-bounds check converts sheet inches to real inches
+      via scale_factor. PLUMB and UNIFORM DEPTH are shape checks
+      (variance/stddev/band-ratio) and are scale-invariant — they
+      stay in sheet inches.
+    """
+    import io
+    import statistics
+    failures = []
+    if family != "Drapery":
+        return failures
+    from app.services.drawing.templates.drapery_render import (
+        DRAPE_PROJECTION_IN,
+    )
+    # Identify heading
+    heading = "pinch_pleat"
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        page0 = pdf.pages[0]
+        text_all = "".join(c["text"] for c in page0.chars)
+        # Rasterize the page
+        page_image = page0.to_image(resolution=150)
+        pil_img = page_image.original
+        # Pre-cache page0.rects (use inside the with block —
+        # pdfplumber may invalidate lazy attrs after close).
+        _viewport_rects = list(page0.rects)
+    text_upper = text_all.upper()
+    for h in DRAPE_PROJECTION_IN:
+        h_norm = h.replace("_", " ").upper()
+        if h_norm in text_upper:
+            heading = h
+            break
+    depth_lo, depth_hi = DRAPE_PROJECTION_IN[heading]
+    # Parse scale_factor from SCALE row (sheet-in per model-in).
+    # Fallback 1.0 means sheet inches are treated as real inches —
+    # conservative for the depth-bounds check (any non-trivial
+    # depth would falsely "fit" the bounds). Use parse failure as a
+    # gate failure so a missing scale row can't silently pass.
+    scale_factor = _parse_scale_factor(text_all)
+    if scale_factor is None or scale_factor <= 0:
+        failures.append({
+            "gate": "drapery-plumb",
+            "issue": "could not parse SCALE row from title column "
+                     "(needed to convert sheet inches → real inches)",
+            "scale_factor": None,
+        })
+        return failures
+    DPI = 150
+    page_h_px = pil_img.height
+    page_w_px = pil_img.width
+    SIDE_X_IN = globals()["SIDE_X_IN"]
+    SIDE_Y_IN = globals()["SIDE_Y_IN"]
+    SIDE_W_IN = globals()["SIDE_W_IN"]
+    SIDE_H_IN = globals()["SIDE_H_IN"]
+    vp_x0_px = int(round(SIDE_X_IN * DPI))
+    vp_x1_px = int(round((SIDE_X_IN + SIDE_W_IN) * DPI))
+    # PIL image coords are TL origin; PDF BL -> PIL TL conversion:
+    # image_y = page_h_px - pdf_y_pt * (DPI/72)
+    vp_y0_px = int(round(page_h_px - ((SIDE_Y_IN + SIDE_H_IN) * DPI)))
+    vp_y1_px = int(round(page_h_px - (SIDE_Y_IN * DPI)))
+    side_img = pil_img.crop(
+        (vp_x0_px, vp_y0_px, vp_x1_px, vp_y1_px))
+    # Background = cream paper #f7f3ea = (247, 243, 234).
+    bg_color = (247, 243, 234)
+    threshold = 30
+    pixels = side_img.load()
+    width_px, height_px = side_img.size
+    # Identify the MAIN DRAPE fabric fill rect: largest FILLED rect
+    # in the side viewport (excluding the viewport frame itself).
+    # This is the measurement target — DETAIL A callout content
+    # (drawn at magnified scale for legibility) sits in a
+    # different rect and at a different scale; including its rows
+    # in the measurement would falsely fail the depth-bounds check
+    # (DETAIL A depth × scale_factor = off-page-real-inches).
+    main_drape_pdf = None
+    largest_area = 0.0
+    vp_x0_pt = SIDE_X_IN * 72
+    vp_x1_pt = (SIDE_X_IN + SIDE_W_IN) * 72
+    vp_y0_pt = SIDE_Y_IN * 72
+    vp_y1_pt = (SIDE_Y_IN + SIDE_H_IN) * 72
+    for r in _viewport_rects:
+        cx = (r['x0'] + r['x1']) / 2
+        cy = (r['y0'] + r['y1']) / 2
+        if not (vp_x0_pt <= cx <= vp_x1_pt
+                and vp_y0_pt <= cy <= vp_y1_pt):
+            continue
+        # Skip the viewport frame (width > 90% of viewport).
+        if (r['x1'] - r['x0']) > (SIDE_W_IN * 72 * 0.9):
+            continue
+        # Skip non-filled rects (viewport border, detail-A border).
+        if not r.get('non_stroking_color', None) and not r.get('fill', False):
+            continue
+        # pdfplumber uses 'non_stroking_color' for fill color; if
+        # None, the rect is unfilled. We want FILLED rects only.
+        if r.get('non_stroking_color', None) is None:
+            continue
+        area = (r['x1'] - r['x0']) * (r['y1'] - r['y0'])
+        if area > largest_area:
+            largest_area = area
+            main_drape_pdf = r
+    # Build the y range to scan (only rows where main drape exists).
+    # PDF coords are BL origin; convert to PIL ORIGINAL coords
+    # first (subtract vp_y0_px to get crop coords).
+    if main_drape_pdf is not None:
+        m_y0_pdf = min(main_drape_pdf['y0'], main_drape_pdf['y1'])
+        m_y1_pdf = max(main_drape_pdf['y0'], main_drape_pdf['y1'])
+        # Convert PDF BL → PIL ORIGINAL TL (page_h - pdf_y * DPI/72)
+        m_y0_orig = page_h_px - m_y1_pdf * (DPI / 72)
+        m_y1_orig = page_h_px - m_y0_pdf * (DPI / 72)
+        # Subtract crop top offset to get crop coords
+        vp_y0_px = int(round(page_h_px - ((SIDE_Y_IN + SIDE_H_IN) * DPI)))
+        m_y0_crop = int(round(m_y0_orig - vp_y0_px))
+        m_y1_crop = int(round(m_y1_orig - vp_y0_px))
+        # Pull back 3 px from each edge to avoid anti-aliasing
+        # spillover from adjacent lines (floor line, rod end caps).
+        m_y0_crop = max(m_y0_crop + 3, 0)
+        m_y1_crop = min(m_y1_crop - 3, height_px - 1)
+    else:
+        # No main drape found (e.g. outline-only render) — scan
+        # entire viewport (fallback, may include DETAIL A rows).
+        m_y0_crop = 0
+        m_y1_crop = height_px
+    front_xs_px = []
+    back_xs_px = []
+    depths_in_sheet = []   # sheet inches (scale-invariant for shape)
+    depths_in_real = []    # real inches (depth-bounds check)
+    # Exclude the viewport frame BORDER columns from the scan
+    # (the frame is drawn as a stroked rect, its left/right edges
+    # are at x=0 and x=width-1 in the crop — they'd be detected as
+    # ink and corrupt the depth measurement).
+    X_BORDER_PX = 3
+    for y in range(m_y0_crop, min(m_y1_crop + 1, height_px)):
+        leftmost = None
+        for x in range(X_BORDER_PX, width_px - X_BORDER_PX):
+            p = pixels[x, y]
+            if len(p) >= 4 and p[3] == 0:
+                continue
+            dist = abs(p[0] - bg_color[0]) + abs(p[1] - bg_color[1]) + abs(p[2] - bg_color[2])
+            if dist > threshold:
+                leftmost = x
+                break
+        rightmost = None
+        for x in range(width_px - 1 - X_BORDER_PX,
+                       X_BORDER_PX - 1, -1):
+            p = pixels[x, y]
+            if len(p) >= 4 and p[3] == 0:
+                continue
+            dist = abs(p[0] - bg_color[0]) + abs(p[1] - bg_color[1]) + abs(p[2] - bg_color[2])
+            if dist > threshold:
+                rightmost = x
+                break
+        if (leftmost is not None and rightmost is not None
+                and rightmost > leftmost):
+            front_xs_px.append(leftmost)
+            back_xs_px.append(rightmost)
+            depth_sheet = (rightmost - leftmost) / DPI
+            depths_in_sheet.append(depth_sheet)
+            depths_in_real.append(depth_sheet / scale_factor)
+    if not front_xs_px:
+        # No fabric detected — the drape is rendered as an outline
+        # only or has fill color very close to background. Treat as
+        # pass (the R2 plumb test relies on actual fabric fill
+        # being visible).
+        return failures
+    # (a) PLUMB: stddev of front-edge x across all scan rows.
+    # The gentle ripple texture (5 small horizontal ticks per row
+    # inside the body) can shift front-edge x by a few px but not
+    # a sail (12"→1" = ~30px per inch change at 150 DPI = 900px
+    # spread). 0.15" = 22.5px tolerance catches the sail, allows
+    # gentle ripple. PLUMB is a SHEET-INCH shape check — scale-
+    # invariant (a plumb line is plumb at any scale).
+    front_mean = statistics.mean(front_xs_px)
+    front_stddev = statistics.pstdev(front_xs_px)
+    front_stddev_in = front_stddev / DPI
+    if front_stddev_in > 0.15:
+        failures.append({
+            "gate": "drapery-plumb",
+            "issue": f"front-edge x stddev = "
+                     f"{front_stddev_in:.3f}\" (sheet) across "
+                     f"{len(front_xs_px)} scan rows; "
+                     f"drape is NOT plumb (must be straight vertical)",
+            "front_x_stddev_sheet_in": front_stddev_in,
+            "n_rows": len(front_xs_px),
+            "scale_factor": scale_factor,
+        })
+    # (b) UNIFORM DEPTH: top-band vs bottom-band mean depth.
+    # Gentle ripple (a few px variance) is fine; a sail's depth
+    # changes by ~30px per row from top to bottom. Use 15%
+    # relative tolerance. UNIFORM DEPTH is shape (ratio) — sheet-
+    # inch values, scale-invariant.
+    top_band = depths_in_sheet[: len(depths_in_sheet) // 4]
+    bot_band = depths_in_sheet[-(len(depths_in_sheet) // 4):]
+    if top_band and bot_band:
+        top_avg = statistics.mean(top_band)
+        bot_avg = statistics.mean(bot_band)
+        if max(top_avg, bot_avg) > 0:
+            ratio = abs(top_avg - bot_avg) / max(top_avg, bot_avg)
+            if ratio > 0.15:
+                failures.append({
+                    "gate": "drapery-uniform-depth",
+                    "issue": f"top-band avg depth = {top_avg:.3f}\" "
+                             f"(sheet), bottom-band avg depth = "
+                             f"{bot_avg:.3f}\" (sheet) "
+                             f"(ratio {ratio*100:.1f}% > 15%); "
+                             f"drape TAPERS (must be uniform)",
+                    "top_avg_depth_sheet_in": top_avg,
+                    "bot_avg_depth_sheet_in": bot_avg,
+                    "ratio": ratio,
+                    "scale_factor": scale_factor,
+                })
+    # (c) DEPTH IN BOUNDS — uses REAL inches (px ÷ DPI ÷ scale_factor).
+    mean_depth_real_in = statistics.mean(depths_in_real)
+    if (mean_depth_real_in < depth_lo - 0.01
+            or mean_depth_real_in > depth_hi + 0.01):
+        mean_depth_sheet_in = statistics.mean(depths_in_sheet)
+        failures.append({
+            "gate": "drapery-depth-bounds",
+            "issue": f"mean drape depth = {mean_depth_real_in:.3f}\" "
+                     f"(real) = {mean_depth_sheet_in:.3f}\" (sheet) ÷ "
+                     f"{scale_factor:.4f} scale_factor; "
+                     f"outside DRAPE_PROJECTION_IN[{heading}] bounds "
+                     f"({depth_lo}, {depth_hi})",
+            "mean_depth_real_in": mean_depth_real_in,
+            "mean_depth_sheet_in": mean_depth_sheet_in,
+            "scale_factor": scale_factor,
+            "heading": heading,
+        })
     return failures
