@@ -76,10 +76,17 @@ localhost:8000). The founder ("rg") is the only human operator.
   Empire sheet STYLE (B2d): black header/footer bands, cream paper #f7f3ea, ink
   #20241f, gold #b8912f, uppercase letterspaced type, framed viewports, fabric
   zones rendered with color + stylized motif.
-- B2 sheet standard = the golden reference (`reports/GOLDEN_flat_fold_empire.pdf`,
-  v10). The ten drafting doctrine rules (R1–R10, see reports/2026-07-26 port
-  dispatch) govern every family renderer. Style disputes resolve against the
-  golden, not against prose.
+- B2 sheet standard = the golden reference. As of 2026-08-16 G1.3
+  founder PASS, the binding gold is **`reports/2026-08-16_golden_port_r3.{pdf,png}`
+  (REFERENCE v11)** — supersedes v10. v10 remains in `reports/` as history
+  (`reports/GOLDEN_flat_fold_empire.pdf`, `reports/2026-07-26_golden_reference_v10.pdf`)
+  and is NEVER edited or regenerated. The lineage source (`reports/golden-lineage/
+  golden_flatfold1.py` + iterations 8/9/10 PDFs + `reference_photo_flatfold_raised.png`)
+  is the founding evidence for v11 (continuous-fabric stack anatomy, zone-based
+  footer). All family rollouts from this point compare against v11 + the photo.
+  The ten drafting doctrine rules (R1–R10, see reports/2026-07-26 port dispatch)
+  govern every family renderer. Style disputes resolve against the golden, not
+  against prose.
 - Presentation/board engine (`presentation/` package) = client-facing documents,
   governed by `EMPIRE_CLIENT_DOC_STANDARD.md`: ONE spec object drives every sheet,
   quantities are derived never typed, QC gates before emit, docs are records in a
