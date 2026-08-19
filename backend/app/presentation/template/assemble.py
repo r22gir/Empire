@@ -91,7 +91,8 @@ def assemble(spec: JobSpec) -> BuildResult:
         raise SpecIncomplete(missing=["rev (single stamp across set)"])
 
     # Build each sheet with a SHEET-SCOPED placed accumulator
-    # (Amendment C: pure builders, no module-global state).
+    # (per the P1-T·c builder-interface ruling: pure builders, no
+    # module-global state).
     sheets: List[str] = []
     for fn_name, fn in (
         ("cover", builder["cover"]),

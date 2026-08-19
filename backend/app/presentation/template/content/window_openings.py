@@ -24,7 +24,7 @@ from typing import List
 from app.presentation.template.chrome import (
     CREAM, FIREBX, FRAME, GLASS, GLASS2, GOLD, HAIR, INK, MOULD,
     DOORF, DOORS, MUTE, STONE, SANS, MONO,
-    RECT, LINE, T, hdim, vdim, VDIM_STEP,
+    RECT, LINE, T, hdim, vdim, VDIM_STEP, _fmt_in,
 )
 
 
@@ -216,8 +216,14 @@ def draw_panel(panel: dict, ox: float, oy_floor: float, k: float,
             out.append(hdim(ox + d[0] * k, ox + d[1] * k, lvl, d[2],
                             above=False,
                             flag=("NOT TAGGED" in d[2])))
-    if panel.get("dim_h"):
-        out.append(vdim(top, oy_floor, ox - 24, panel["dim_h"]))
+    if panel.get("dim_h") or panel.get("h") is not None:
+        # Per founder correction (2026-08-19): display strings are
+        # FORMATTED from the float (panel["h"]), never typed. The
+        # hand-typed panel["dim_h"] is no longer the source — gates.py
+        # G-dim-h verifies it equals _fmt_in(panel["h"]).
+        h_text = (_fmt_in(panel["h"]) if panel.get("h") is not None
+                  else panel["dim_h"])
+        out.append(vdim(top, oy_floor, ox - 24, h_text))
     for n, d in enumerate(panel.get("dims_right", [])):
         out.append(vdim(oy_floor - d[1] * k, oy_floor - d[0] * k,
                         ox + W * k + 24 + n * VDIM_STEP, d[2], left=False))

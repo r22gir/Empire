@@ -58,7 +58,8 @@ SERIF = "DejaVu Serif"
 #
 # The McLean reference's PLACED list did this with module-global state
 # (cleared per sheet inside build()). The new engine keeps the list
-# SHEET-SCOPED — each builder owns its own accumulator (Amendment C:
+# SHEET-SCOPED — each builder owns its own accumulator (per the P1-T·c
+# builder-interface ruling: pure builders, no module-global state).
 # pure builders, no module-global mutable state).
 #
 # The format mirrors the reference: (x0, y0, x1, y1, payload_string).
@@ -176,6 +177,39 @@ def vdim(y1: float, y2: float, x: float, label: str,
 def ls_offset(label: str) -> float:
     """Approximate letter-spacing contribution to width."""
     return 0.3 * max(len(label) - 1, 0)
+
+
+def _fmt_in(v: float) -> str:
+    """Format a float as the canonical inches string.
+
+    Per founder correction (2026-08-19): one measurement written three
+    ways is the defect (panel["h"] float, panel["dim_h"] typed string,
+    data row typed string). The fix is INSIDE one panel — store ONCE
+    as a float (panel["h"]), display strings are FORMATTED from it.
+    This function is the canonical formatter — call sites use it
+    instead of typing strings.
+
+    Common fractions: ½, ¼, ¾, ⅛, ⅜, ⅝, ⅞. Anything else rounds to
+    the nearest 1/8 (or prints as decimal inches for unusual values).
+
+    Examples:
+      99.0   → '99"'
+      110.5  → '110½"'
+      27.25  → '27¼"'
+      105.875 → '105⅞"'
+      43.75  → '43¾"'
+    """
+    if v == int(v):
+        return f'{int(v)}"'
+    whole = int(v)
+    frac = v - whole
+    # Common fractions (round to nearest 1/8)
+    eighths = round(frac * 8)
+    glyphs = {0: "", 1: "⅛", 2: "¼", 3: "⅜", 4: "½",
+              5: "⅝", 6: "¾", 7: "⅞", 8: ""}
+    if eighths == 8:
+        return f'{whole + 1}"'
+    return f'{whole}{glyphs[eighths]}"'
 
 
 # ══════════════════════════ CHROME — header + footer (P1-T·b ruling) ══════

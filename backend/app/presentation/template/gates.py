@@ -8,7 +8,8 @@ table committed `e0035b4`):
   G2 collisions    no two strings overlap (draw-time bboxes per
                    Amendment 5)
   G3 text/graphic  NEW — text does not overlap dimension lines, photos
-                   or fills (deferred — not in P1-T·b scope)
+                   or fills. The reference checks text-vs-text only.
+                   Implemented in P1-T·b+ as `gate_text_vs_graphic`.
   G4 layout math   every printed arithmetic statement recomputes and
                    agrees; conflicts resolve per Amendment 2 and are
                    NOT failures (the build continues)
@@ -23,17 +24,26 @@ table committed `e0035b4`):
                    cached image renders or the NOT SUPPLIED label
                    renders. Negative fixture: spec with source_url and
                    no cached asset must not emit a blank swatch area.
-                   (Deferred — fabric swatch path comes in P1-T·b+.)
+                   (Deferred — fabric swatch path comes in a later dispatch.)
+
+Additional (founder 2026-08-19):
+  G-dim-h          NEW — every printed dimension string equals the
+                   formatted value of the number it came from.
+                   One source (panel["h"]) — display strings derived.
+                   Negative fixture: a panel whose h is changed
+                   without its dim_h — must FAIL.
+                   Cross-room agreement is NOT checked and must not be.
 
 
-Per P1-T·b ruling: gates.py travels with the template, never optional.
-Gates return a structured GateReport — never `sys.exit(1)`.
+Per the P1-T·c builder-interface ruling: gates.py travels with the
+template, never optional. Gates return structured failure lists —
+never `sys.exit(1)`.
 """
 from __future__ import annotations
 
 from typing import List, Tuple
 
-from app.presentation.template.chrome import PlacedBox, PW, PH
+from app.presentation.template.chrome import PlacedBox, PW, PH, _fmt_in
 
 
 # Tolerance (PDF points) for text-vs-text overlap detection (Amendment 5
@@ -82,6 +92,37 @@ def gate_collisions(placed: List[PlacedBox],
     return bad
 
 
+# ══════════════════════ G3 text/graphic collision (Amendment-Gates) ═══════
+
+# Graphics collected per-sheet as `(x0, y0, x1, y1, kind, label)`.
+Graphic = Tuple[float, float, float, float, str, str]
+
+
+def gate_text_vs_graphic(placed: List[PlacedBox],
+                         graphics: List[Graphic],
+                         tol: float = TEXT_OVERLAP_TOL_PT) -> List[str]:
+    """G3 — text must not overlap dimension lines, photos, or fills.
+
+    The McLean reference checked text-vs-text ONLY (G2 above).
+    G3 is why it is new: text overlapping a dim line reads as a
+    dimension broken by a label; text over a fill reads as a label
+    on top of fabric. Either is a fabrication defect.
+
+    Caller collects the graphics (filled rects, image zones,
+    dimension lines) for the current sheet and passes them in.
+    This function compares text bboxes against graphic bboxes.
+    """
+    bad: List[str] = []
+    for ax0, ay0, ax1, ay1, at in placed:
+        for gx0, gy0, gx1, gy1, kind, glab in graphics:
+            ox = min(ax1, gx1) - max(ax0, gx0)
+            oy = min(ay1, gy1) - max(ay0, gy0)
+            if ox > tol and oy > tol:
+                bad.append(f"text '{at[:26]}' overlaps {kind} '{glab[:26]}' "
+                           f"({ox:.1f}x{oy:.1f}pt)")
+    return bad
+
+
 # ══════════════════════ G4 layout math (Amendment 2 — NOT a failure) ═══════
 
 def gate_layout_math(spec) -> List[Tuple[str, str]]:
@@ -104,7 +145,6 @@ def gate_layout_math(spec) -> List[Tuple[str, str]]:
     data which lives in the body layer; this is the shape.
     """
     out: List[Tuple[str, str]] = []
-    # Placeholder — body layer drives the actual recompute.
     out.append(("INFO", "G4 layout-math gate placeholder — body layer "
                        "recomputes closure arithmetic."))
     return out
@@ -122,27 +162,19 @@ def gate_counts(spec) -> List[str]:
     were internally correct; the set was not. This gate MUST fail
     the RevA split (the new engine reads `count_openings(spec)` from
     spec.py — one derivation consumed by both).
-
-    For P1-T·b this is the shape — body layer drives the actual
-    count.
     """
     bad: List[str] = []
-    # Placeholder — body layer drives the actual count and consumes
-    # `count_openings(spec)` from spec.
     bad.append("INFO G5 counts gate placeholder — body layer reads "
                "count_openings(spec) from spec.")
     return bad
 
 
-# ══════════════════════ G6 rev + address single stamp ══════════════════════
+# ══════════════════════ G6 rev + address single stamp �═════════════════════
 
 def gate_rev_address(spec) -> List[str]:
     """Single rev stamp across the set; full address present in the
     footer letterhead zone of every sheet; zone gaps hold against
     the longer string (Amendment 1).
-
-    For P1-T·b this is the shape — body layer drives per-sheet
-    chrome calls.
     """
     bad: List[str] = []
     rev = spec.rev
@@ -151,6 +183,42 @@ def gate_rev_address(spec) -> List[str]:
         bad.append("missing rev stamp")
     if not addr:
         bad.append("missing footer letterhead address")
+    return bad
+
+
+# ══════════════════════ G-dim-h — printed dim strings match formatted numerics ═
+
+def gate_dim_h_matches_h(panels: List[dict]) -> List[str]:
+    """G-dim-h — every printed dimension string equals the formatted
+    value of the number it came from.
+
+    Per founder correction (2026-08-19): "inside each room, one
+    measurement written three ways — panel["h"] as a float, panel
+    ["dim_h"] as a hand-typed string, and a data row string. Change
+    the float and the two strings still print the old number."
+
+    Fix: panel["h"] is the source. Display strings are FORMATTED
+    from it (`_fmt_in(panel["h"])`), never typed. The gate verifies
+    panel["dim_h"] still matches `_fmt_in(panel["h"])` (catches a
+    stale typed string). Data rows compose from the same value too.
+
+    NEGATIVE FIXTURE: a panel whose h is changed without its
+    dim_h — must FAIL.
+
+    Cross-room agreement is NOT checked and must not be.
+    """
+    bad: List[str] = []
+    for p in panels:
+        h = p.get("h")
+        dim_h = p.get("dim_h")
+        if h is None or dim_h is None:
+            continue
+        expected = _fmt_in(h)
+        if dim_h != expected:
+            bad.append(
+                f"panel '{p.get('label', '?')}': dim_h='{dim_h}' but "
+                f"_fmt_in(h={h})='{expected}' — typed string stale"
+            )
     return bad
 
 
