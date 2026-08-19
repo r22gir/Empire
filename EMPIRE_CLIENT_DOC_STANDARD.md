@@ -75,10 +75,10 @@ project_spec = {
 1. **True scale on plans.** Curvature exaggeration is permitted on ISO/assembly views only, and must be labeled.
 2. **Assumptions are printed.** Anything not field-verified carries an explicit flag with the verification method (e.g. arc rise = string-across-chord check).
 3. **Open decisions get a callout box**, not silence — see B0 "REV — CAP RESOLVED".
-4. **Materials show real images**, not color swatches, wherever a scan or mill photo exists.
+4. **Materials show real images**, not color swatches, wherever a scan or mill photo exists. Any person in a site photo is soft-feathered Gaussian-blurred and baked into the JPEG pixels before embedding (Amendment 7) — blurred region covers the person and adjacent floor only, never any window, trim, moulding or measurable feature.
 5. **FR status per component**, with the code path stated and pending items listed.
 6. **Every sheet carries rev + date.** A set with mixed revs is a defect — assembly must refuse to emit.
-7. **Footer is fixed:** letterhead · FOR DISCUSSION — NOT FOR CONSTRUCTION · sheet number.
+7. **Footer letterhead zone carries the full business address** — `NELMA'S WORKROOM · 5124 FROLICH LN · HYATTSVILLE MD 20781` — followed by `FOR DISCUSSION — NOT FOR CONSTRUCTION` and the sheet number. The `POWERED BY EMPIRE WORKROOM` line is **dropped from the footer**; it already appears in the header band (Amendment 1).
 8. **Yardage sheets show the calc**, not just the answer, so the client/designer can audit it.
 
 ---
