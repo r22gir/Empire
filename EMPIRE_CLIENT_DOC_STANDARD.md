@@ -198,6 +198,18 @@ Photos are per-job upload. If a photo cannot be processed, it degrades to **`NO 
 
 ---
 
+### AMENDMENT 8 · FABRIC SWATCH IMAGE (founder 2026-08-19)
+
+Where a fabric carries `source_url`, the document MUST include the actual fabric picture.
+
+- **Fetch ONCE, cache with the job, render from the stored copy.** A document must rebuild identically after the vendor page moves.
+- **Label always:** `REFERENCE IMAGE — <source> — NOT A COLOUR MATCH · CONFIRM AGAINST MEMO SAMPLE BEFORE CUT`. A screen image is not a dye lot and never becomes the colour of record.
+- **No source_url, fetch fails, or host refuses** (Fabricut has already returned 403 on the INOUYE job) → swatch area prints **`FABRIC IMAGE NOT SUPPLIED`** and **the build continues**. Never blank, never a crash.
+- **Fetching lives in the asset intake path.** `build(spec)` stays pure and offline.
+- **Type scope, ASSUMED — FOUNDER VERIFY:** `estimate`, `invoice`, `presentation_sheet`, `board` carry the swatch. `measurement_set` is pre-election and keeps `FABRIC: TBC - CONFIRM BEFORE CUT`.
+
+---
+
 ## AMENDMENT-GATES (2026-08-19)
 
 These gates strengthen Section 5's gate table for the amended rules. All have negative fixtures.
@@ -211,4 +223,5 @@ These gates strengthen Section 5's gate table for the amended rules. All have ne
 | **Counts** *(new, replaces INFO-only)* | every count appearing more than once derives from one source and agrees. **Negative fixture:** the McLean RevA 21-vs-22 split MUST fail this gate |
 | **Rev + address** *(new)* | single rev stamp across the set; full address present in the footer letterhead zone of every sheet; zone gaps hold against the longer string (Amendment 1) |
 | **Photo privacy** *(new)* | every embedded site photo has the privacy blur baked into its pixels; the blurred region does not cover any measurable feature (Amendment 7) |
+| **Fabric swatch** *(new, G7)* | with `source_url` present, assert either the cached image renders or the `NOT SUPPLIED` label renders. **Negative fixture:** spec with `source_url` and no cached asset must NOT emit a blank swatch area (Amendment 8) |
 
