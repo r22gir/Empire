@@ -150,8 +150,13 @@ def room_sheet(spec: JobSpec, room: dict, no: int, total: int,
                size=6.2, anchor="end", fill=MUTE, font=MONO, ls=0.4)
     o.append(_t); placed_local.append(_b)
 
-    # Reference band
+    # Reference band. Per founder 2026-08-19: data row values may
+    # be callables deriving from a panel — pass the primary panel
+    # so render_band can resolve them. The room's first panel
+    # is used as the "primary" (rooms with one panel — typical;
+    # rooms with multiple panels share a common height).
     photos = spec.photos.get(room["key"], [])
+    primary_panel = room["panels"][0] if room.get("panels") else None
     o.extend(render_band(
         photos=photos,
         data_rows=room.get("data", []),
@@ -162,6 +167,7 @@ def room_sheet(spec: JobSpec, room: dict, no: int, total: int,
             "MOUNT: NOT RECORDED ON FIELD SHEET"
         ),
         placed=placed_local,
+        panel=primary_panel,
     ))
 
     placed.extend(placed_local)

@@ -51,14 +51,20 @@ class TestAddressSingleSource:
 
     def test_changing_components_changes_footer(self):
         """Single source — one source, one output. No derivation
-        in two places."""
+        in two places. Use dataclasses.replace to mutate one field
+        and verify the formatted output follows — proves the output
+        derives from the source, not just that the constructor
+        works."""
+        import dataclasses
         addr = Address("123 Main St", "Anytown", "VA", "22000")
-        assert "123 Main St" in addr.footer_letterhead()
-        assert "Anytown VA 22000" in addr.footer_letterhead()
-        # Address is frozen — verify that re-creating produces the
-        # new value. (Frozen dataclass by design; one source.)
-        addr2 = Address("999 New Rd", "Anytown", "VA", "22000")
+        assert addr.footer_letterhead() == "123 Main St  ·  Anytown VA 22000"
+        # Mutate via replace — frozen dataclass semantics, but the
+        # output must reflect the new value because the output derives
+        # from the (now-changed) source.
+        addr2 = dataclasses.replace(addr, street="999 New Rd")
         assert addr2.footer_letterhead() == "999 New Rd  ·  Anytown VA 22000"
+        # Original unchanged (replace is non-mutating)
+        assert addr.footer_letterhead() == "123 Main St  ·  Anytown VA 22000"
 
 
 # ══════════════════════ SPEC VALIDATION — structured refusal ══════════════
@@ -177,6 +183,97 @@ class TestAmendment4CountDerivesOnce:
                                           {"kind": "window", "w": 30}]}]}],
         )
         assert count_openings(spec_sched) == count_openings(spec_rooms) == 3
+
+    def test_g5_catches_rev_a_split(self):
+        """G5 must FAIL on the McLean RevA pattern: two independent
+        derivations that disagree with count_openings(spec)."""
+        from app.presentation.template.gates import gate_counts
+        spec_split = JobSpec(
+            project="P", client="C", client_loc="L", scope="S",
+            address=Address("", "", "", ""),
+            header_tagline="", footer_letterhead="", locale="",
+            rev="A", date="19 AUG 2026", source="", status="",
+            document_type="measurement_set",
+            content_family="window_openings",
+            schedule=[("R", "M-1", 22, "43\"", "79\"", "n")],   # 22
+            rooms=[
+                {"key": "R", "name": "R", "sub": "s",
+                 "panels": [{"label": "P1", "w": 100, "h": 50,
+                             "items": [{"kind": "window", "w": 30}]}]}],
+        )
+        # count_openings(spec) prefers schedule (22) over rooms (1)
+        # → 22. But rooms say 1 — G5 fails.
+        failures = gate_counts(spec_split)
+        assert len(failures) == 1
+        assert "G5 counts disagree" in failures[0]
+
+    def test_g5_passes_when_agree(self):
+        """G5 passes when derivations agree with count_openings(spec)."""
+        import dataclasses
+        from app.presentation.template.gates import gate_counts
+        base = JobSpec(
+            project="P", client="C", client_loc="L", scope="S",
+            address=Address("", "", "", ""),
+            header_tagline="", footer_letterhead="", locale="",
+            rev="A", date="19 AUG 2026", source="", status="",
+            document_type="measurement_set",
+            content_family="window_openings",
+            schedule=[("R", "M-1", 3, "43\"", "79\"", "n")],
+            rooms=[],
+        )
+        # 3 windows in rooms matches schedule qty 3
+        spec_agree = dataclasses.replace(base, rooms=[
+            {"key": "R", "name": "R", "sub": "s",
+             "panels": [{"label": "P1", "w": 100, "h": 50,
+                         "items": [{"kind": "window", "w": 30},
+                                   {"kind": "window", "w": 30},
+                                   {"kind": "window", "w": 30}]}]},
+        ])
+        failures = gate_counts(spec_agree)
+        assert failures == []
+
+
+# ══════════════════════ G4 LAYOUT MATH ════════════════════════════════════
+
+class TestG4LayoutMath:
+    """G4 — closure arithmetic recomputed from spec; per Amendment 2
+    the build continues (WARN, not FAIL)."""
+
+    def test_g4_warns_when_parts_disagree_with_overall(self):
+        """McLean LRB center: tagged overall 222", parts 77.5+69.25+78.25=225.
+        G4 reports the delta (3") as WARN — Amendment 2 says build
+        continues. The gate compares TYPED dim widths (from dims_top
+        end-start) against IMPLIED widths (from divisions + panel.w)."""
+        from app.presentation.template.gates import gate_layout_math
+        room = {
+            "key": "LRB-CENTER", "name": "Living Room center wall",
+            "sub": "Three windows",
+            "math": "77½+69¼+78¼ = 225 vs 222 OVERALL - Δ 3\"",
+            "panels": [{
+                "label": "CENTER WALL", "w": 222.0, "h": 114.25,
+                "divisions": [77.5, 146.75],
+                "items": [],
+                # TYPED dims: 77.5, 69.25, 78.25 (third is TAGGED
+                # at 78¼ = 78.25, NOT implied from panel.w - 146.75
+                # = 75.25). The 3" delta IS the conflict.
+                "dims_top": [(0.0, 77.5, "77½\""),
+                             (77.5, 146.75, "69¼\""),
+                             (146.75, 225.0, "78¼\" TAGGED")],
+            }],
+        }
+        spec = JobSpec(
+            project="P", client="C", client_loc="L", scope="S",
+            address=Address("", "", "", ""),
+            header_tagline="", footer_letterhead="", locale="",
+            rev="A", date="19 AUG 2026", source="", status="",
+            document_type="measurement_set", content_family="window_openings",
+            rooms=[room],
+        )
+        results = gate_layout_math(spec)
+        statuses = [s for s, _ in results]
+        # WARN (not FAIL) per Amendment 2 — the build continues.
+        assert "WARN" in statuses, f"expected WARN, got {results}"
+        assert "FAIL" not in statuses
 
 
 # ══════════════════════ SCAFFOLDS — 4 doc types refuse SpecIncomplete ═════
@@ -367,3 +464,40 @@ class TestAmendment4DuplicationFix:
         assert "STALE" in failures[0]
         assert "110½\"" in failures[0]    # _fmt_in(110.5)
         assert "99\"" in failures[0]      # stale dim_h
+
+    def test_gate_dim_h_catches_stale_data_row(self):
+        """Per founder correction: data rows compose from the same
+        value. A TYPED string data row that disagrees with _fmt_in
+        (panel["h"]) must FAIL — same failure class as the dim_h
+        stale case."""
+        from app.presentation.template.gates import gate_dim_h_matches_h
+        room = {
+            "key": "STALE_DATA", "name": "Stale data room",
+            "sub": "sub",
+            "panels": [{"label": "P", "w": 100.0, "h": 110.5,
+                        "items": []}],
+            "data": [
+                ("WALL HEIGHT", "99\""),   # STALE — doesn't match _fmt_in(110.5)
+            ],
+        }
+        failures = gate_dim_h_matches_h(panels=[], rooms=[room])
+        assert len(failures) == 1
+        assert "WALL HEIGHT" in failures[0]
+        assert "99\"" in failures[0]      # stale typed value
+        assert "110½\"" in failures[0]    # expected _fmt_in(110.5)
+
+    def test_gate_dim_h_passes_callable_data_row(self):
+        """Callable data rows derive at render time — gate skips them."""
+        from app.presentation.template.gates import gate_dim_h_matches_h
+        from app.presentation.template.chrome import _fmt_in
+        room = {
+            "key": "DERIVED", "name": "Derived room",
+            "sub": "sub",
+            "panels": [{"label": "P", "w": 100.0, "h": 110.5,
+                        "items": []}],
+            "data": [
+                ("WALL HEIGHT", lambda p: _fmt_in(p["h"])),
+            ],
+        }
+        failures = gate_dim_h_matches_h(panels=[], rooms=[room])
+        assert failures == []

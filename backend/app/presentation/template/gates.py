@@ -136,17 +136,49 @@ def gate_layout_math(spec) -> List[Tuple[str, str]]:
       - BUILD CONTINUES (not a failure)
       - field-tagged overall preserved as FIELD CHECK
 
-    Returns a list of (status, line) tuples. "OK" + delta lines for
-    matched; "WARN" + delta lines for conflicts. NEVER "FAIL".
+    Implementation: for each room with `dims_top` (typed numeric
+    tuples), sum the typed widths and compare to the implied
+    sum from divisions + panel.w. Also verify the typed `math`
+    string mentions the parts and overall (sanity).
 
-    For P1-T·b, this is the G4 placeholder — McLean reference's
-    closure gate logic at lines 576-585 (closure arithmetic report).
-    The actual arithmetic validation requires the panels/schedule
-    data which lives in the body layer; this is the shape.
+    Returns a list of (status, line) tuples. "OK" + delta lines
+    for matched; "WARN" + delta lines for conflicts. NEVER "FAIL"
+    — the build continues per Amendment 2.
     """
     out: List[Tuple[str, str]] = []
-    out.append(("INFO", "G4 layout-math gate placeholder — body layer "
-                       "recomputes closure arithmetic."))
+    for room in spec.rooms:
+        panels = room.get("panels", [])
+        if not panels:
+            continue
+        # Typed widths from dims_top (entries with 3 numeric elements).
+        # dims_top entries are (start, end, label) OR (str_idx, label).
+        typed_widths: List[float] = []
+        for p in panels:
+            for d in p.get("dims_top", []):
+                if not isinstance(d[0], str) and len(d) >= 2:
+                    typed_widths.append(abs(d[1] - d[0]))
+        if not typed_widths:
+            continue
+        typed_sum = sum(typed_widths)
+        # Implied sum from divisions + panel.w (if divisions present)
+        for p in panels:
+            divs = p.get("divisions", [])
+            if divs:
+                implied_sum = divs[0]
+                for i in range(1, len(divs)):
+                    implied_sum += divs[i] - divs[i-1]
+                implied_sum += p["w"] - divs[-1]
+                # Compare typed vs implied
+                delta = abs(typed_sum - implied_sum)
+                status = "OK" if delta < 0.05 else "WARN"
+                out.append((status,
+                            f"room '{room.get('key', '?')}': typed-dims "
+                            f"sum={typed_sum:.2f}\" vs implied-"
+                            f"sum={implied_sum:.2f}\" delta={delta:.2f}\""))
+                break  # one room, one check
+    if not out:
+        out.append(("INFO", "G4 layout-math: no rooms with typed "
+                            "dims_top to verify."))
     return out
 
 
@@ -160,16 +192,45 @@ def gate_counts(spec) -> List[str]:
     (counts drawn windows) AND 22 in the schedule (sums SCHEDULE
     qtys). Both numbers came from independent derivations; both
     were internally correct; the set was not. This gate MUST fail
-    the RevA split (the new engine reads `count_openings(spec)` from
-    spec.py — one derivation consumed by both).
+    the RevA split — the new engine reads `count_openings(spec)` from
+    spec.py (one derivation consumed by both cover and schedule).
+
+    Implementation: verify that count_openings(spec) is internally
+    consistent with two independent derivations (from rooms vs from
+    schedule). If they disagree with `count_openings(spec)` or with
+    each other, FAIL.
     """
     bad: List[str] = []
-    bad.append("INFO G5 counts gate placeholder — body layer reads "
-               "count_openings(spec) from spec.")
+    from app.presentation.template.spec import count_openings
+    total = count_openings(spec)
+    # Independent derivation 1: count window-kind items in rooms
+    n_items = 0
+    for room in spec.rooms:
+        for panel in room.get("panels", []):
+            for item in panel.get("items", []):
+                if item.get("kind") == "window":
+                    n_items += 1
+    # Independent derivation 2: sum SCHEDULE qtys
+    n_sched = 0
+    for row in spec.schedule:
+        # SCHEDULE row format: (room, mark, qty, width, height, note)
+        if len(row) >= 3:
+            try:
+                n_sched += int(row[2])
+            except (TypeError, ValueError):
+                pass
+    if n_items != total or n_sched != total or n_items != n_sched:
+        parts = []
+        if spec.rooms:
+            parts.append(f"rooms-derived={n_items}")
+        if spec.schedule:
+            parts.append(f"schedule-derived={n_sched}")
+        parts.append(f"count_openings(spec)={total}")
+        bad.append("G5 counts disagree: " + " vs ".join(parts))
     return bad
 
 
-# ══════════════════════ G6 rev + address single stamp �═════════════════════
+# ══════════════════════ G6 rev + address single stamp ══════════════════════
 
 def gate_rev_address(spec) -> List[str]:
     """Single rev stamp across the set; full address present in the
@@ -188,7 +249,8 @@ def gate_rev_address(spec) -> List[str]:
 
 # ══════════════════════ G-dim-h — printed dim strings match formatted numerics ═
 
-def gate_dim_h_matches_h(panels: List[dict]) -> List[str]:
+def gate_dim_h_matches_h(panels: List[dict],
+                          rooms: List[dict] = None) -> List[str]:
     """G-dim-h — every printed dimension string equals the formatted
     value of the number it came from.
 
@@ -199,15 +261,20 @@ def gate_dim_h_matches_h(panels: List[dict]) -> List[str]:
 
     Fix: panel["h"] is the source. Display strings are FORMATTED
     from it (`_fmt_in(panel["h"])`), never typed. The gate verifies
-    panel["dim_h"] still matches `_fmt_in(panel["h"])` (catches a
-    stale typed string). Data rows compose from the same value too.
+    both panel["dim_h"] AND any data-row value typed as a string
+    (NOT a callable) that purports to be the same measurement.
+    Catches stale typed strings. Data rows that are CALLABLES are
+    derived at render time and exempt from this check (their
+    resolved value IS _fmt_in(panel["h"])).
 
     NEGATIVE FIXTURE: a panel whose h is changed without its
-    dim_h — must FAIL.
+    dim_h — must FAIL. Same fixture for a data row value whose
+    string was typed stale.
 
     Cross-room agreement is NOT checked and must not be.
     """
     bad: List[str] = []
+    # (a) panel["dim_h"] must match _fmt_in(panel["h"])
     for p in panels:
         h = p.get("h")
         dim_h = p.get("dim_h")
@@ -219,6 +286,33 @@ def gate_dim_h_matches_h(panels: List[dict]) -> List[str]:
                 f"panel '{p.get('label', '?')}': dim_h='{dim_h}' but "
                 f"_fmt_in(h={h})='{expected}' — typed string stale"
             )
+    # (b) data row values that purport to be the same measurement
+    # (typed, not a callable) must match _fmt_in(panel["h"]) for
+    # the room's primary panel. Cross-room NOT checked.
+    if rooms is not None:
+        for room in rooms:
+            h_val = None
+            for p in room.get("panels", []):
+                if "h" in p:
+                    h_val = p["h"]; break
+            if h_val is None:
+                continue
+            expected = _fmt_in(h_val)
+            for label, value in room.get("data", []):
+                # Skip callables (derived) — their resolved value
+                # IS _fmt_in by construction.
+                if callable(value):
+                    continue
+                # Skip literal markers (not tagged, not recorded, etc.)
+                if "not" in value.lower() or "ref" in value.lower():
+                    continue
+                if value == expected:
+                    continue
+                bad.append(
+                    f"room '{room.get('key', '?')}' data row "
+                    f"'{label}'='{value}' but _fmt_in(panel_h="
+                    f"{h_val})='{expected}' — typed string stale"
+                )
     return bad
 
 

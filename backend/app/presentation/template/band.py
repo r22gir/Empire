@@ -16,12 +16,21 @@ Per Amendment 1: the band reads spec.header_tagline / spec.address
 """
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import Callable, List, Tuple, Union
 
 from app.presentation.template.chrome import (
     GOLD, HAIR, INK, MUTE, SANS, MONO,
     RECT, LINE, T, wrap, section,
 )
+
+
+# A data row value is either a typed string ("99\"") OR a callable
+# that takes a panel and returns the formatted string. Callables are
+# the mechanism for "this value derives from panel['h']" — the body
+# layer passes a panel to a lambda and the result is rendered.
+# Per founder correction (2026-08-19): one measurement written
+# three ways was the defect. This makes the third copy derivable.
+DataValue = Union[str, Callable[[dict], str]]
 
 
 # Band geometry (per McLean reference lines 795-796)
@@ -30,10 +39,11 @@ BAND = (30.0, 402.0, 762.0, 562.0)  # reference band (photos | data | check)
 
 
 def render_band(photos: List[Tuple[str, str]],
-                data_rows: List[Tuple[str, str]],
+                data_rows: List[Tuple[str, DataValue]],
                 check_lines: List[str],
                 fabric_strip: str,
-                placed: list = None) -> List[str]:
+                placed: list = None,
+                panel: dict = None) -> List[str]:
     """Render the three-zone reference band.
 
     Args:
@@ -44,9 +54,15 @@ def render_band(photos: List[Tuple[str, str]],
                       "NO SITE PHOTO ON FILE", we render the empty
                       placeholder).
       data_rows     : list of (label, value) for the FIELD DATA zone.
+                      `value` may be a string OR a callable taking
+                      a panel (per founder 2026-08-19 data-row
+                      derivation fix). If callable, the caller
+                      passes `panel` so the value is formatted from
+                      the source float — never typed twice.
       check_lines   : list of strings for the FIELD CHECK zone.
       fabric_strip  : single-line string for the fabric/heading strip.
       placed        : OPTIONAL list of placed text boxes (Amendment 5).
+      panel         : OPTIONAL panel dict for derived data rows.
 
     Returns:
       SVG fragments for the three zones + fabric strip.
@@ -128,11 +144,22 @@ def render_band(photos: List[Tuple[str, str]],
         out.append(_t)
         if placed is not None and _b is not None:
             placed.append(_b)
+        # Per founder 2026-08-19: data row values may be a callable
+        # deriving from a panel (e.g. lambda p: _fmt_in(p["h"])).
+        # Resolve once — never typed twice.
+        if callable(b):
+            if panel is None:
+                resolved = "—"  # defensive: spec didn't pass panel
+            else:
+                resolved = b(panel)
+        else:
+            resolved = b
         vy = y + lead
-        for ln in wrap(b, wrapn)[:2]:
+        for ln in wrap(resolved, wrapn)[:2]:
             _t, _b = T(dx, vy, ln, size=val_s, anchor="start",
                        fill=INK, font=SANS,
-                       bold=("not tagged" not in b and "not recorded" not in b))
+                       bold=("not tagged" not in resolved
+                             and "not recorded" not in resolved))
             out.append(_t)
             if placed is not None and _b is not None:
                 placed.append(_b)
