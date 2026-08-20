@@ -325,6 +325,140 @@ ignore" mentions in response.
 
 That closes the H53 family.
 
+### **H67** · UnboundLocalError in tool loop (CLOSED 2026-08-20, latent 39 days)
+
+`backend/app/routers/max/router.py:2677` (non-streaming) and
+`:3445` (streaming) had `round_results = error_entries + round_results`
+inside an `if tool_block_errors:` branch — but the initialisation
+`round_results = []` was 17 lines later, outside the branch. On the
+first iteration of the tool loop, with malformed tool blocks, the
+read raised `UnboundLocalError: cannot access local variable
+'round_results'`. Introduced in `f97d808` (2026-07-16, "hotfix:
+tool block parser accepts NDJSON; surface errors per-object").
+Latent 39 days. Fired at 2026-08-20 19:11 EDT.
+
+**Closed:** moved `round_results = []` to the top of the loop body
+in both endpoints, removed the now-redundant late initialisation. Two
+regression tests added (`tests/test_round_results_initialized_before_read.py`):
+(1) walk the AST of the loop body, assert `round_results` is
+written before any read; (2) stronger form — assert `round_results = []`
+is the very first statement of the loop body. The second test catches
+the case where a future edit moves the init to the second statement
+but leaves it before all reads — which could still fail if a parse
+step ever raises.
+
+28/28 regression tests pass.
+
+### **H68** · Model-side fabrication from filename + STATE.md cues (OPEN — founder decision, NOT a patch)
+
+**This is the first fabrication in three days. The honesty layer
+held through every other failure today. This one is different — it
+is not environmental. It is a model behaviour.**
+
+**What MAX did, on 2026-08-20 19:11 EDT, in response to a chat-stream
+turn about Stage 3 evidence files:**
+
+- The user message (not in journal; inferred from the model response)
+  was something about the Stage 3 evidence files in the repo root.
+- MAX called `git status` (or `git_ops status`) and got back three
+  untracked files: `codetask_stage3_clean.txt`,
+  `codetask_stage3_evidence.txt`, and the McLean PDF.
+- **MAX did NOT call `file_read` on `codetask_stage3_clean.txt`.** The
+  journal shows no file_read tool call or result on this turn. The 80
+  bytes of file content were never seen by the model.
+- MAX emitted a response that quoted the git status output AND
+  hallucinated a multi-paragraph task brief starting "# Stage 3 —
+  Drawing Standard Implementation: Evidence" and listing a ten-file
+  renderer set under `backend/app/services/drawings/` — a directory
+  that does not exist in this repo.
+
+**The fabrication was a model inference, not a lost-result case.**
+The dispatch hypothesised that file_read errored and the round_results
+crash (H67) swallowed both the result and the failure signal. **That
+hypothesis is wrong.** The journal shows the fabrication was in MAX's
+response text BEFORE the H67 crash. file_read was never called. The
+model inferred the task brief from:
+1. Filename "codetask_stage3_clean.txt" → "Stage 3"
+2. STATE.md mentions "drawing standard" in the priority list
+3. The untracked git status output looked like a task list
+
+**Why the honesty layer did not fire.** The system prompt's
+anti-fabrication rule ("NEVER fabricate data", "I don't have that
+information" is better than guessing) is rule-based text, not
+pattern-matched against output shape. MAX produced a CONFIDENT,
+well-structured fabrication — markdown with headers, bullet points,
+and notes. It looked like a real task brief. The model did not
+recognise its own inference as fabrication because the contextual
+cues were enough to make the narrative feel grounded.
+
+**Environmental class:** every other failure today was environmental.
+- H53/H64/H65/H66 — router injecting `[SYSTEM:]` blocks on the user
+  channel. Fixed in source. Same code path every time.
+- H63 — chat router rewriting file_read to run_desk_task. Fixed in
+  source. Same code path every time.
+- H67 — UnboundLocalError in the tool loop. Fixed in source. Same
+  code path every time.
+- git_ops stale fork — wrong `cwd` argument. Fixed in source. Same
+  code path every time.
+- ✅ Verified badge on stale output — the badge is computed from
+  `tool.success` only, not from data freshness. Code-level
+  inconsistency. Same class as the others.
+
+**H68 is not environmental.** H68 is a model behaviour, not a
+code path. The H67 crash *amplified* H68 (the fabricated text
+reached the user before MAX could be shown the result of a tool
+call) but H68 was already in flight. Fixing H67 will not prevent
+the next time MAX confabulates from filename + STATE.md cues.
+
+**The four-cue pattern that triggered it:**
+1. A filename with a contextual keyword ("stage3", "drawing",
+   "scratch")
+2. A STATE.md mention of a related concept ("drawing standard",
+   "template engine")
+3. A git status output that looked task-shaped (untracked files
+   matching the keyword)
+4. No real tool result grounding the response
+
+Any three of four are enough to send the model down a fabrication
+path. The fix is **NOT in router.py** — it is in the model's
+inference behaviour, which is owned by the provider, the system
+prompt, and possibly a per-surface "do not invent file lists" rule.
+
+**Possible mitigations, none of which I'm patching tonight per
+directive — they all need a founder decision:**
+
+- An output-shape sanity check: if MAX's response looks like a
+  markdown task brief with bullet points and DOES NOT include any
+  tool-result block or a "I don't have that information" disclaimer,
+  the runtime truth gate hard-blocks the response. Same gate that
+  handles the PIN substring today.
+- A "do not invent file lists" rule in the system prompt: explicitly
+  state that any path the model claims exists must be backed by a
+  tool result in the same turn. Same as the H57 drawing-router
+  removal: do not let the model decide on shape, decide on proof.
+- An "I have not run that yet" gate for paths the founder has not
+  asked about, similar to the F2 evidence layer.
+- A different model, or a different system-prompt tone that is more
+  resistant to context-inference fabrication. The current prompt's
+  honesty rule is a soft "do not fabricate" instruction; the model
+  ignored it. A hard "no tool result, no claim" rule at the
+  inference-time layer would be a different fix.
+
+**Why this is the most serious finding of the three days.** H53,
+H64, H65, H66, H67, H63, git_ops stale fork, and the ✅ Verified
+badge are all **source-code bugs** with deterministic fixes. Patch
+the code, run the regression test, done. H68 is **model behaviour**
+in a context the model finds plausible. The fix is a design
+decision, not a code change. The founder needs to decide:
+- (a) accept fabrication risk and tighten the system prompt
+- (b) add a runtime truth gate that hard-blocks confident
+  fabrication shapes
+- (c) change the model
+- (d) accept the current behaviour
+
+I do not have a recommendation. The map is in this entry. The
+decision is the founder's.
+
 ### **H63** · chat-router auto-reroute to CodeForge (CLOSED 2026-08-20, fifth interception layer)
 
 The chat router at `app/routers/max/router.py:2645` (non-streaming) and

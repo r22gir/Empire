@@ -2605,6 +2605,14 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         current_response = response
 
         for _tool_round in range(3):
+            # H67 FIX (2026-08-20): initialize round_results at the top of
+            # the loop body so the tool_block_errors branch below can
+            # safely read+extend it. Pre-fix this initialisation lived 17
+            # lines later; on the first iteration with malformed tool
+            # blocks the read at "round_results = error_entries + round_results"
+            # raised UnboundLocalError. Introduced 2026-07-16 in f97d808,
+            # latent 39 days, fired once on 2026-08-20 at 19:11 EDT.
+            round_results = []
             # Check for ```tool ... ``` blocks first (existing text-based format).
             # HOTFIX 2026-07-16 (parser fix): when multiple NDJSON objects
             # appear in a single block, parse_tool_blocks_with_errors
@@ -2691,7 +2699,6 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             # see _should_reroute_to_codeforge and the H52-Phase-2-follow-up doctrine
             # comment on _CODEFORGE_WRITE_TOOLS above.
 
-            round_results = []
             for tc in tool_calls:
                 # Inject image_filename into quote tools so uploaded photos flow through
                 if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
@@ -3414,6 +3421,11 @@ async def chat_stream(request: ChatRequest):
             current_text = full_response
 
             for _tool_round in range(3):
+                # H67 FIX (2026-08-20): see non-streaming version above.
+                # round_results must be initialised before the
+                # tool_block_errors branch reads it. Latent since
+                # f97d808 (2026-07-16), fired 2026-08-20 19:11 EDT.
+                round_results = []
                 # HOTFIX 2026-07-16 (parser fix): same NDJSON-tolerant
                 # parse + structured error feedback as the non-streaming
                 # chat path above.
@@ -3455,7 +3467,6 @@ async def chat_stream(request: ChatRequest):
                 # File-WRITE tool calls from main chat get re-routed to CodeForge desk
                 # (reads NEVER — see _should_reroute_to_codeforge).
 
-                round_results = []
                 for tc in tool_calls:
                     # Inject image_filename into quote tools so uploaded photos flow through
                     if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
