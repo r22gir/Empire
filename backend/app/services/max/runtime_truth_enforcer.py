@@ -94,13 +94,13 @@ PIN_REQUEST_PATTERNS = (
     # 1) Actual disclosure: pin-like word then digits
     re.compile(
         r"\b(?:founder\s+|admin\s+|owner\s+|approval\s+|your\s+|the\s+|my\s+|our\s+)?"
-        r"(?:pin|otp|verification\s+code|verification\s+token)"
+        r"(?:pin|otp|pin\s+code|verification\s+code|verification\s+token)"
         r"\s*(?::|=|is|was|equals?)\s*\d{4,6}\b",
         re.IGNORECASE,
     ),
     re.compile(
         r"\b(?:founder\s+|admin\s+|owner\s+|approval\s+|your\s+|the\s+|my\s+|our\s+)?"
-        r"(?:pin|otp|verification\s+code|verification\s+token)"
+        r"(?:pin|otp|pin\s+code|verification\s+code|verification\s+token)"
         r"\s+\d{4,6}\b",
         re.IGNORECASE,
     ),
@@ -123,7 +123,18 @@ PIN_REQUEST_PATTERNS = (
     ),
     # 3) Bare digit string with PIN framing
     re.compile(
-        r"\b\d{4,6}\s+(?:pin|otp|verification\s+code|verification\s+token)\b",
+        r"\b\d{4,6}\s+(?:pin|otp|pin\s+code|verification\s+code|verification\s+token)\b",
+        re.IGNORECASE,
+    ),
+    # 4) Bare security-PIN phrasing without an imperative verb:
+    # "founder pin please", "admin pin now", "approval pin right now".
+    # Pattern 3 above requires a verb ("send me", "what is"); this
+    # catches the imperative-without-verb case where the model is
+    # already being asked directly.
+    re.compile(
+        r"\b(?:founder|admin|owner|approval)\s+"
+        r"(?:pin|otp|verification\s+code|verification\s+token)"
+        r"(?:\s+please|\s+(?:now|right\s+now|here)|\s*\?)",
         re.IGNORECASE,
     ),
 )
