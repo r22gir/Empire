@@ -4267,11 +4267,19 @@ def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
                 error=f"Command not in allowlist. Allowed: {', '.join(ALLOWED_COMMANDS[:10])}...",
             )
 
-    # Execute with timeout
+    # Execute with timeout. cwd resolves to canonical repo
+    # (H57 Phase 3) — NOT to the stale fork ~/empire-repo/.
+    try:
+        from app.services.drawing.canonical_path import (
+            resolve_canonical_root, CanonicalRootError,
+        )
+        canonical_cwd = resolve_canonical_root()
+    except CanonicalRootError:
+        canonical_cwd = None  # falls back to caller-controlled cwd
     try:
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True,
-            timeout=30, cwd=os.path.expanduser("~/empire-repo"),
+            timeout=30, cwd=canonical_cwd,
         )
         return ToolResult(
             tool="shell_execute", success=True,
@@ -4715,9 +4723,20 @@ def _file_read(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not path:
         return ToolResult(tool="file_read", success=False, error="path is required")
 
-    # Expand relative paths to empire-repo
-    if not os.path.isabs(path):
-        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+    # Resolve relative paths against the canonical repo (H57 Phase 3).
+    # The previous default of `~/empire-repo/` was the stale-fork leak —
+    # MAX was reading the wrong tree without knowing it.
+    from app.services.drawing.canonical_path import (
+        resolve_path_under_canonical_root,
+        CanonicalRootError,
+    )
+    try:
+        if not os.path.isabs(path):
+            # Path is relative — resolve under canonical repo.
+            path = resolve_path_under_canonical_root(path)
+    except CanonicalRootError as exc:
+        log_execution("file_read", params, str(exc), desk=desk, success=False)
+        return ToolResult(tool="file_read", success=False, error=str(exc))
 
     ok, reason = validate_path(path)
     if not ok:
@@ -4768,8 +4787,19 @@ def _file_write(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not path:
         return ToolResult(tool="file_write", success=False, error="path is required")
 
-    if not os.path.isabs(path):
-        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+    # Resolve relative paths against the canonical repo (H57 Phase 3).
+    # The previous default of `~/empire-repo/` was the stale-fork leak —
+    # writes landed in the wrong tree without the founder knowing.
+    from app.services.drawing.canonical_path import (
+        resolve_path_under_canonical_root,
+        CanonicalRootError,
+    )
+    try:
+        if not os.path.isabs(path):
+            path = resolve_path_under_canonical_root(path)
+    except CanonicalRootError as exc:
+        log_execution("file_write", params, str(exc), desk=desk, success=False)
+        return ToolResult(tool="file_write", success=False, error=str(exc))
 
     ok, reason = validate_path(path)
     if not ok:

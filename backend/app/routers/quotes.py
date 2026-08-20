@@ -1488,7 +1488,15 @@ class PhotoAttach(BaseModel):
 async def attach_photos(quote_id: str, photos: list[PhotoAttach]):
     """Attach photos to specific rooms/windows/upholstery items in a quote."""
     quote = _load_quote(quote_id)
-    uploads_dir = os.path.expanduser("~/empire-repo/backend/data/uploads/images")
+    # H57 Phase 3: write target is under canonical repo, NOT the
+    # stale fork. canonical_path.resolve_path_under_canonical_root
+    # refuses escapes (symlinks/..) and refuses the stale fork.
+    from app.services.drawing.canonical_path import (
+        resolve_path_under_canonical_root,
+    )
+    uploads_dir = resolve_path_under_canonical_root(
+        "backend/data/uploads/images"
+    )
 
     if "photos" not in quote or not isinstance(quote.get("photos"), list):
         quote["photos"] = []
@@ -2812,10 +2820,16 @@ def _download_image_as_data_uri(url: str) -> str:
     """Download an external image URL and return a base64 data URI for reliable PDF embedding."""
     if not url or url.startswith("data:"):
         return url
-    # Handle local API paths — read directly from disk
+    # Handle local API paths — read directly from disk. H57 Phase 3:
+    # path resolved via canonical repo marker (NOT `~/empire-repo/`).
     if url.startswith("/api/v1/vision/images/"):
         fname = url.split("/")[-1]
-        local_path = os.path.expanduser(f"~/empire-repo/backend/data/generated/{fname}")
+        from app.services.drawing.canonical_path import (
+            resolve_path_under_canonical_root,
+        )
+        local_path = resolve_path_under_canonical_root(
+            f"backend/data/generated/{fname}"
+        )
         if os.path.exists(local_path):
             try:
                 with open(local_path, "rb") as f:

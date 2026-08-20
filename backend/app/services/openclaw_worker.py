@@ -1320,8 +1320,15 @@ async def _handle_drawing_task(task: dict) -> str:
 
     if resp.status_code == 200:
         data = resp.json()
-        # Save SVG to file
-        out_dir = os.path.expanduser("~/empire-repo/uploads/openclaw_drawings")
+        # Save SVG to file. H57 Phase 3: out_dir resolves via
+        # canonical repo marker (NOT `~/empire-repo/`). Drawings
+        # from HERMES render jobs now land in the canonical tree.
+        from app.services.drawing.canonical_path import (
+            resolve_path_under_canonical_root,
+        )
+        out_dir = resolve_path_under_canonical_root(
+            "uploads/openclaw_drawings"
+        )
         os.makedirs(out_dir, exist_ok=True)
         svg_path = os.path.join(out_dir, f"task_{task['id']}_{bench_type}.svg")
         with open(svg_path, "w") as f:

@@ -29,7 +29,6 @@ FIX:
   underneath `/home/rg/empire-repo/` (the stale fork) — preventing
   any caller from accidentally re-introducing the bug.
 """
-from __future__ import annotations
 
 import logging
 import os
@@ -39,6 +38,86 @@ logger = logging.getLogger("drawing.canonical_path")
 
 
 _ENV_OVERRIDE = "MAX_DRAWINGS_OUTPUT_DIR"
+
+# Canonical-repo marker file. The single source of truth for "this
+# directory IS the active canonical repo." All path resolvers —
+# drawing output, file_read, file_write, system_prompt git cwd,
+# upload sinks — must verify this marker before treating any path as
+# canonical. If the marker is missing, the path is REJECTED — even
+# if it lands inside the historical canonical dir string.
+#
+# Stale fork MUST NOT have this file. If a botched clone ever drops a
+# marker into ~/empire-repo/, the resolver will misidentify that tree
+# as canonical. The dispatch's "eradicate the stale fork" item is the
+# structural fix; the marker is the runtime guardrail that should
+# survive even after eradication (defends against the next stale tree).
+_CANONICAL_MARKER_FILENAME = ".empire-canonical"
+_CANONICAL_MARKER_TOKEN = "EmpireBox canonical root\n"
+
+
+class CanonicalRootError(Exception):
+    """Raised when path resolution cannot find/verify the canonical
+    repo. Caller is expected to refuse the operation rather than
+    fall back to a non-canonical default.
+    """
+
+
+def resolve_canonical_root(start: os.PathLike | str | None = None) -> Path:
+    """Return the absolute path of the canonical repo root, verified
+    by the presence of the `.empire-canonical` marker.
+
+    Walks up from `start` (default: this file's directory) until it
+    finds the marker. Raises CanonicalRootError if no marker is found
+    within 6 levels.
+
+    The marker is a file containing the canonical token. Its presence
+    is the single source of truth — NOT the string `~/empire-repo-main/`.
+    A different clone location with the same marker file is equally
+    canonical.
+
+    Used by:
+      - file_read / file_write (relative paths resolved against this root)
+      - system_prompt.py git cwd (MAX's git context is always canonical)
+      - quotes.py uploads_dir (client uploads land in the canonical tree)
+      - openclaw_worker.py drawings_dir (rendered SVGs land in canonical)
+      - canonical_drawings_dir() (this module's own drawing output)
+
+    No fallback. Caller must refuse if CanonicalRootError is raised.
+    """
+    start_path = Path(start).resolve() if start else Path(__file__).resolve().parent
+    cur = start_path
+    for _ in range(8):  # 8 levels: enough for nested clones
+        if (cur / _CANONICAL_MARKER_FILENAME).is_file():
+            # Verify the marker content matches the token (catches
+            # accidentally-created empty or wrong-content files).
+            try:
+                content = (cur / _CANONICAL_MARKER_FILENAME).read_text(
+                    encoding="utf-8"
+                ).strip()
+            except OSError:
+                pass
+            else:
+                if content.startswith("EmpireBox canonical root"):
+                    return cur
+            # Marker exists but content is wrong — refuse loudly
+            logger.critical(
+                "canonical marker at %s has wrong content; refusing "
+                "to treat this directory as canonical",
+                cur / _CANONICAL_MARKER_FILENAME,
+            )
+            raise CanonicalRootError(
+                f"canonical marker at {cur} has wrong content"
+            )
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    raise CanonicalRootError(
+        f"no { _CANONICAL_MARKER_FILENAME} marker found within 8 levels "
+        f"of {start_path}. Refusing to treat any directory as canonical "
+        f"without the explicit marker."
+    )
+
 
 # The canonical output dir lives under the active repo's data tree.
 # Tests can override via MAX_DRAWINGS_OUTPUT_DIR (e.g. to a tmp_path).
@@ -69,6 +148,56 @@ def _is_stale_fork_root(candidate: Path) -> bool:
         except ValueError:
             continue
     return False
+
+
+def resolve_path_under_canonical_root(
+    relative_or_absolute: os.PathLike | str,
+    start: os.PathLike | str | None = None,
+) -> Path:
+    """Resolve a path argument against the canonical repo root.
+
+    Behavior:
+      - absolute path → resolve canonical repo, verify the absolute
+        path is INSIDE the canonical repo, return the resolved
+        absolute path. Refuse if it escapes (via .. or symlinks).
+      - relative path → resolve against canonical root, return
+        absolute path under canonical repo.
+      - canonical repo missing the `.empire-canonical` marker →
+        CanonicalRootError (refuse).
+
+    This is the single validator for MAX's file/repo tools and for
+    any other call site that previously used `~/empire-repo/`.
+    """
+    canonical = resolve_canonical_root(start)
+    candidate = Path(relative_or_absolute).expanduser()
+    if not candidate.is_absolute():
+        candidate = (canonical / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    # Refuse escapes outside the canonical root (covers `..` and
+    # symlinks).
+    try:
+        candidate.relative_to(canonical.resolve())
+    except ValueError:
+        raise CanonicalRootError(
+            f"path {candidate} escapes canonical root {canonical}. "
+            f"Refusing — only paths under the canonical repo are allowed."
+        )
+    # Refuse stale-fork leakage.
+    if _is_stale_fork_root(candidate):
+        raise CanonicalRootError(
+            f"path {candidate} lives under the stale fork. "
+            f"Refusing — only paths under the canonical repo are allowed."
+        )
+    return candidate
+
+
+# Backward-compat alias — older callers used this name.
+def resolve_canonical_path(
+    relative_or_absolute: os.PathLike | str,
+    start: os.PathLike | str | None = None,
+) -> Path:
+    return resolve_path_under_canonical_root(relative_or_absolute, start)
 
 
 def canonical_drawings_dir() -> Path:

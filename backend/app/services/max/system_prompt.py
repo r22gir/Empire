@@ -557,8 +557,16 @@ def get_max_brain_context() -> str:
         logger.debug(f"Brain context: session memories unavailable: {e}")
 
     # ── b. Last 5 git commits ──
+    # H57 Phase 3: cwd resolves via canonical-root marker (NOT a
+    # hardcoded `~/empire-repo/` string — that was the stale-fork
+    # leak MAX was reporting). If the marker is missing, MAX's
+    # git context is unavailable (and we skip the section rather
+    # than fabricate stale context).
     try:
-        repo = os.path.expanduser("~/empire-repo")
+        from app.services.drawing.canonical_path import (
+            resolve_canonical_root, CanonicalRootError,
+        )
+        repo = resolve_canonical_root()
         result = subprocess.run(
             ["git", "log", "--oneline", "-10"],
             cwd=repo, capture_output=True, text=True, timeout=5,
