@@ -285,11 +285,46 @@ call the model made; the same rule for scaffolding it injects into the
 model's context — never on user channel, never with a fake `[SYSTEM:]`
 prefix, never with no content.
 
-NOTE: a third site with the same pattern lives at `router.py:2752-2754`
-and `:3507-3509` — the inter-round follow-up instruction. It also uses
-role="user" with `[SYSTEM:]` prefix. NOT fixed in this commit — the
-dispatch asked for "ONE MORE" and that was the pre-search guard. Logged
-for follow-up.
+### **H65** · H53 harmonisation — inter-round follow-up (CLOSED 2026-08-20, seventh interception layer)
+
+The third H53-shaped site. Inter-round follow-up at `router.py:2760-2768`
+(non-streaming) and `:3512-3520` (streaming) built a tool-result
+scaffolding message on role="user" with a `[SYSTEM: ...]` prefix,
+injected between tool rounds. Same shape as the H53 replay block and
+the pre-search guard.
+
+**Closed 2026-08-20 in c67dce0.** Matched H53 fix: role="user" →
+role="system`, `[SYSTEM: ...]` prefix removed. The "Task identity
+rule" suffix (a third `[SYSTEM:]` string in this scope) also stripped.
+tool_summary content (real tool result data) stays attached.
+
+Tests: H53 (15) + H63 (10) = 25/25 pass.
+
+### **H66** · H53 harmonisation — `factual_guard` at router.py:2829 (OPEN — fourth interception layer)
+
+The grep for `[SYSTEM:` on non-system role across `backend/app/` finds
+4 code sites matched the pattern; 3 are now closed (H53, H64, H65).
+**One remaining active site:**
+
+```
+backend/app/routers/max/router.py:2829
+    grounded_messages.append(AIMessage(role="user", content=(
+        "[SYSTEM: You must answer using only the verified web search data below. "
+        "Do not fall back to training data. Cite sources from the search results.]\n\n"
+        f"{tool_summary}\n\nQuestion: {request.message}"
+    )))
+```
+
+Triggered by the factual_guard at router.py:2809 — auto-invokes
+web_search for factual questions, then re-queries with verified data.
+Same shape as the other three sites. Same fix: role="user" → role="system",
+drop `[SYSTEM: ...]` prefix.
+
+**Not fixed in this lane.** Per founder directive: "If there is a
+fourth, we stop guessing and do a sweep." A coordinated sweep is the
+right next move — the four H53-shaped injections are all the same
+fix, all in one file, all on role="user", all with `[SYSTEM:` prefix.
+A sweep can update the sweep in a single commit, retest, and push.
 
 ### **H63** · chat-router auto-reroute to CodeForge (CLOSED 2026-08-20, fifth interception layer)
 
