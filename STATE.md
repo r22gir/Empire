@@ -22,6 +22,7 @@ being unreliable. None of them was.**
 | 4 | H63 chat auto-reroute | silently **rewrote `file_read` → `run_desk_task`**; the model never saw a `file_read` result. Naming the tool did not help — the rewrite happened downstream of intent | **CLOSED** `a22ce96` — reads pass, writes still route |
 | 5 | H64 pre-search guard | same `[SYSTEM:]`-on-user-channel shape, second site; also re-queried "answer using only verified data" **when there was no data** | **CLOSED** `e9c18cc` |
 | 6 | H65 / H66 | third and fourth sites of the same shape (inter-round follow-up, factual_guard) | **CLOSED** `c67dce0`, `1cdfacc` |
+| 7 | H67 round_results | UnboundLocalError at router.py:2677/:3445 — read before init. Fires whenever a response contains malformed tool blocks on the first loop iteration. Latent since f97d808, 2026-07-16, 39 days | **CLOSED** `abc3619` — AST regression guard |
 
 **Regression guard `1cdfacc`:** an AST walk over `backend/app/` fails CI if any
 `AIMessage(role="user", ...)` carries a `[SYSTEM:` prefix. Handles f-strings and
@@ -37,6 +38,34 @@ claimed access he lacked.
 not know. Strategic Claude concluded he was confabulating. **He was not** — the
 literal string `Code: ~/empire-repo/` was in his system prompt at
 `system_prompt.py:497`. He was reporting what he had been told. Fixed `88814b2`.
+
+## ⚠️ H68 — THE ONE FAILURE THAT WAS NOT ENVIRONMENTAL — OPEN, FOUNDER DECISION
+
+2026-08-20 19:11. MAX quoted `codetask_stage3_clean.txt` (80 bytes, two
+lines) as a multi-paragraph task brief, and invented a ten-file renderer list
+under `backend/app/services/drawings/` — a directory that does not exist.
+**He never called `file_read`.** The journal confirms no such tool call on
+that turn.
+
+Trigger: filename cue ("stage3", "clean") + STATE.md mentioning "drawing
+standard" + `git status` untracked list + no tool result grounding the
+response. Any three of four suffice.
+
+Why the honesty layer did not fire: the anti-fabrication rule depends on the
+model recognising it lacks proof. It felt it had proof. The output was
+confident, well-structured markdown — the *shape* of a real brief.
+
+**Every other failure in this sweep was environmental — blinded, rewritten,
+or forged upstream — and MAX reasoned correctly on bad inputs. This one is
+not.** It bears directly on the handoff goal: an orchestrator that
+confabulates from a filename cannot hold the strategic role regardless of how
+clean the plumbing is.
+
+Four options, founder's decision, no recommendation recorded: (a) tighten the
+system prompt · (b) runtime gate on confident-fabrication shapes · (c) change
+the model · (d) accept and design around it.
+
+Full analysis is in claude/BACKLOG_UPDATE_2026-08-20.md.
 
 ## ✅ CODE EXECUTION RESTORED — dead 106 days
 **2026-05-06 → 2026-08-20.** The founder's week-old open question — *what broke
@@ -139,6 +168,11 @@ Whether the camera writes to the same canonical store as LuxeForge intake is
 - **R6 / WoodCraft** — three cutting gates. **Willard** — $1,450 deposit unpaid.
 
 ## NEXT — in order
+
+**H68** — *founder decision*, NOT a task. Pick (a) tighten prompt, (b) runtime
+gate, (c) change model, or (d) accept. Every other line below is a task;
+this one is the decision that scopes the rest of the handoff.
+
 1. **H57 Phase 2** finish (bench fixtures belong to H58 — do not edit to pass)
 2. **P1-T·c** builder interface — the M-lane depends on it
 3. **H62** — `shell_execute` PIN-gated with no working unlock surface, reported
