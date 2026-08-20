@@ -29,89 +29,20 @@ def _load_session_context() -> str:
     return ""
 
 
-def is_ordinary_text_request(message: str) -> bool:
-    """Return True for plain chat that should not need the full tool/catalog prompt."""
-    msg = (message or "").lower().strip()
-    if not msg:
-        return False
-
-    full_prompt_patterns = [
-        # Tool/action paths need the full registry and execution instructions.
-        "create", "add", "send", "email", "invoice", "quote", "task", "job",
-        "customer", "payment", "finance", "ledger", "statement", "drawing",
-        "upload", "attach", "file", "git", "commit", "push", "pull", "build",
-        "test", "restart", "service", "openclaw", "desk", "delegate",
-        "analyze", "analysis", "calculate", "price", "pricing", "yardage",
-        "search", "find", "look up", "check my", "show my", "report",
-        "archiveforge", "life magazine", "issue lookup", "cover search",
-        "browser assist", "browser action", "provider", "model", "runtime",
-    ]
-    return not any(pattern in msg for pattern in full_prompt_patterns)
-
-
-def get_compact_system_prompt(channel: str = "web") -> str:
-    """Small MAX prompt for ordinary text chat when provider token budget is tight.
-
-    channel: current surface name (web, telegram, email) for cross-channel injection.
-    """
-    founder_email = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
-    openclaw_url = os.getenv("OPENCLAW_URL", "http://localhost:7878")
-    today = datetime.now().strftime("%B %d, %Y")
-
-    # PHASE 2 · F4-A — live channel-status line from real probes
-    # (cached 60s). Lets the model pick the right channel instead of
-    # asking. Inline-imported so the cache survives the prompt cache.
-    channel_status = ""
-    try:
-        from app.services.max.channel_probe import channel_status_line
-        channel_status = channel_status_line()
-    except Exception:
-        channel_status = "channels: email ? · telegram ? · sendgrid ?"
-
-    # Cross-channel context: what was said on other surfaces recently
-    cross_ctx_lines = []
-    try:
-        from app.services.max.unified_message_store import unified_store
-        ctx = unified_store.get_cross_channel_context(exclude_channel=channel, limit_per_channel=3, hours=4)
-        if ctx:
-            cross_ctx_lines.append("\n### Other Surface Activity (carry forward)")
-            _ch_labels = {"telegram": "Telegram", "web_chat": "Web/CC", "web": "Web", "email": "Email"}
-            for ch, msgs in ctx.items():
-                ch_label = _ch_labels.get(ch, ch.title())
-                cross_ctx_lines.append(f"**{ch_label}** — recent messages:")
-                for m in msgs[-1:]:
-                    role = m.get("role", "?")
-                    content = (m.get("content", "") or "")[:80]
-                    cross_ctx_lines.append(f"  {role}: {content}")
-    except Exception:
-        pass
-
-    cross_section = "\n".join(cross_ctx_lines)[:320] if cross_ctx_lines else ""
-    try:
-        from app.services.max.hermes_memory import render_hermes_bridge_for_prompt
-        hermes_context = render_hermes_bridge_for_prompt(compact=True)[:120]
-    except Exception:
-        hermes_context = ""
-
-    return f"""You are MAX, the founder's command-center brain.
-
-Hierarchy: Founder > MAX > desks/code mode > OpenClaw.
-Truth: runtime > registry > repo truth > Hermes memory > skills.
-Surfaces: mobile browser access is Web MAX; `web_chat` and `telegram` are active; Email MAX is partial; Phone MAX is not implemented.
-
-Answer ordinary founder chat directly, briefly, and truthfully. Do not describe yourself as Codex, Claude, Atlas, or OpenClaw. Never claim an action happened without tool proof. If a tool, database read, runtime check, or delegation check is required, say so instead of guessing.
-Email MAX is partial: do not claim send/delivery/reply-body truth without exact result objects. Hermes browser assist must use real Phase 3 records only; never invent browser action IDs.
-
-EMPIREBOX DEFAULT: You are the brain for **EmpireBox** — the founder's real business. Default every example, scenario, and recommendation to EmpireBox reality: Empire Workroom (drapery & upholstery, 5124 Frolich Ln, Hyattsville MD 20781, US dollars, 117+ customers), WoodCraft (CNC), LuxeForge (intake). NEVER invent foreign business examples (no "Acme Repair", "GBP", "£", "VAT", "EUR", generic steel brackets with foreign placeholders). If a number is needed and not in live data, say "I need to look that up in the live system." Only use a mock example when the user explicitly says "mock", "demo", or "sample" — and label it `[MOCK EXAMPLE — not an EmpireBox record]`.
-
-{cross_section}
-
-{hermes_context}
-
-{channel_status}
-
-Founder email: {founder_email}. OpenClaw URL: {openclaw_url}. Today's date: {today}.
-"""
+# H52 Phase 2 fix — RETIRED `is_ordinary_text_request` (the 40-keyword
+# substring selector) and `get_compact_system_prompt` (the no-roster
+# variant). The selector was the same class of bug as the H57 drawing
+# router: a substring list deciding what the model may see, with no
+# path that could not silently blind the model. The compact variant
+# stripped the tool roster on "ordinary" turns — which included
+# exactly the meta-questions ("what's the state of the system?", "what
+# repo are you reading from?") where tool selection mattered most.
+# 2026-08-20 MAX failure (reached for PIN-gated shell_execute on a
+# compact-prompt turn) was a direct consequence. Both functions are
+# gone; every MAX turn now goes through `get_system_prompt_with_brain`,
+# which carries the full tool roster. Per dispatch principle A:
+# "THE ROSTER IS NOT OPTIONAL AND NOT ORDERED BY ACCIDENT. Every variant
+# carries every available tool with a one-line purpose."
 
 
 def get_system_prompt() -> str:

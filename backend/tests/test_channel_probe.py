@@ -125,18 +125,6 @@ def test_channel_status_line_fallback_on_error():
         channel_probe.invalidate_cache()
 
 
-def test_compact_prompt_contains_channel_status():
-    """The compact prompt carries the channel-status line for the model."""
-    from app.services.max.system_prompt import get_compact_system_prompt
-    from app.services.max.channel_probe import channel_status_line
-
-    prompt = get_compact_system_prompt(channel="web")
-    # The exact line or its prefix should be present
-    assert "channels:" in prompt
-    # The status should match what the probe returns
-    assert channel_status_line() in prompt
-
-
 def test_full_prompt_contains_channel_status():
     """The full prompt (brain-enriched) also carries the channel-status line."""
     from app.services.max.system_prompt import get_system_prompt, _prompt_cache

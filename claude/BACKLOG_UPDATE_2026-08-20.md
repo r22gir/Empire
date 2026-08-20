@@ -36,6 +36,7 @@ installed unit patched and daemon-reloaded.
 | 5 | `openclaw_worker.py drawings_dir` | worker loop | now resolves canonical |
 | 6 | env vars from drop-in vs hardcoded defaults | MAX provider selection | env wins; re-audit owed |
 | **7** | **`systemd/empire-backend.service` has `StandardError=journal`** | **`~/.config/systemd/user/empire-backend.service` had no `StandardError=` line → stderr inherited → unjournaled** | **installed unit patched 2026-08-20; daemon-reload + restart confirmed** |
+| **8** | **`tool_executor.py:_git_ops` should resolve canonical root** | **H57 Phase 3 fix routed most paths through `resolve_canonical_root()`, but `_git_ops` was missed — `repo = os.path.expanduser("~/empire-repo")` (stale fork).** | **`tool_executor.py:_git_ops` rewritten to use the canonical resolver 2026-08-20; also added `empty` / `truncated` markers on success-with-empty-output per dispatch principle C.** |
 
 Doctrine rule 5 ("One source per fact") extends to: the SOURCE-OF-RECORD
 must be the source-of-force. A repo unit file that no reinstall ever

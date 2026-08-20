@@ -4631,7 +4631,7 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
   ⚠️ ONLY use this tool when the founder EXPLICITLY asks for a "presentation", "report", "briefing", or "research document". Do NOT auto-generate presentations for casual conversation topics, analogies, or keywords mentioned in passing. If unsure, ask: "Would you like me to create a presentation about X?"
 
 ### Shell Execution
-- **shell_execute** — Execute a safe, allowlisted shell command. Blocked patterns are rejected.
+- **shell_execute** — ⚠️ **PIN-GATED. Founder PIN required via portal approval flow.** As of 2026-08-20 there is no working unlock surface on this lane (H62); calls without a PIN return an honest refusal, not a silent fallback. Per DOCTRINE rule 31, PIN approval never travels through chat or email — the model must NOT ask for a PIN in chat. **For inspect-only status / freshness / commit-divergence questions, use `empire_runtime_truth_check` instead — it does not require a PIN and returns the same kind of information.** When reachable, executes a safe, allowlisted shell command. Blocked patterns are rejected.
   `{"tool": "shell_execute", "command": "git status"}`
   `{"tool": "shell_execute", "command": "df -h"}`
   Allowed commands: ls, cat, head, tail, wc, echo, sort, uniq, tee, touch, mkdir, cp, mv, df, du, free, ps, uptime, date, whoami, hostname, pwd, find, grep, python3, sqlite3, git (all operations), curl, wget, pip, pip3, npm, npx, sudo systemctl, systemctl (status/restart/start/stop/is-active), journalctl, ollama list/ps, docker ps/images, chmod 600.
@@ -5143,7 +5143,21 @@ def _db_query(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("git_ops")
 def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Run git operations in ~/empire-repo."""
+    """Run git operations in the canonical repo.
+
+    H52 Phase 2 fix: cwd was hardcoded to ~/empire-repo (the stale fork
+    per H57 Phase 3). It now goes through the canonical-root resolver,
+    so MAX's git context is about the repo MAX is actually reasoning
+    about. Logged under H61 — same "config on disk correct, config in
+    force wrong" class as the systemd unit.
+
+    Also fixed: the prior return shape was `{output, exit_code}` with
+    success=True even on stdout+stderr == "". A success-with-empty-output
+    is indistinguishable from "ran and produced output". Per dispatch
+    principle C: a tool that runs and produces nothing must self-report
+    so. Added `empty: true` when stdout+stderr is empty on exit 0, and
+    `truncated: true` when output was capped at 3000 chars.
+    """
     start = _time.time()
     raw_command = params.get("command", "")
     args = params.get("args", "")
@@ -5175,7 +5189,26 @@ def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
     else:  # push
         level = 3
 
-    repo = os.path.expanduser("~/empire-repo")
+    # H52 Phase 2 fix — resolve canonical repo, not the stale fork.
+    try:
+        from app.services.drawing.canonical_path import (
+            resolve_canonical_root,
+            CanonicalRootError,
+        )
+        repo = str(resolve_canonical_root())
+    except CanonicalRootError as exc:
+        return ToolResult(
+            tool="git_ops",
+            success=False,
+            error=f"Canonical repo not found: {exc}",
+        )
+    except Exception as exc:
+        return ToolResult(
+            tool="git_ops",
+            success=False,
+            error=f"Could not resolve canonical repo: {exc}",
+        )
+
     cmd_parts = ["git", command]
     if command_args:
         cmd_parts.extend(shlex.split(command_args))
@@ -5191,13 +5224,26 @@ def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
             cmd_parts, cwd=repo,
             capture_output=True, text=True, timeout=30,
         )
-        output = result.stdout + result.stderr
+        raw_output = result.stdout + result.stderr
+        truncated = len(raw_output) > 3000
+        output = raw_output[:3000]
+        is_empty = (output == "")
         duration = int((_time.time() - start) * 1000)
         success = result.returncode == 0
-        log_execution("git_ops", params, {"exit_code": result.returncode}, access_level=level, desk=desk, success=success, duration_ms=duration)
-        return ToolResult(tool="git_ops", success=success, result={
-            "command": full_cmd, "output": output[:3000], "exit_code": result.returncode,
-        })
+        log_execution("git_ops", params, {"exit_code": result.returncode, "empty": is_empty}, access_level=level, desk=desk, success=success, duration_ms=duration)
+        return ToolResult(
+            tool="git_ops",
+            success=success,
+            result={
+                "command": full_cmd,
+                "output": output,
+                "output_byte_length": len(raw_output),
+                "empty": is_empty,
+                "truncated": truncated,
+                "exit_code": result.returncode,
+                "cwd": repo,
+            },
+        )
     except subprocess.TimeoutExpired:
         log_execution("git_ops", params, "timeout", access_level=level, desk=desk, success=False)
         return ToolResult(tool="git_ops", success=False, error="Git command timed out")

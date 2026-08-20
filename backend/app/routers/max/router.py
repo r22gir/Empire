@@ -39,7 +39,7 @@ from app.services.max.grounding_verifier import verify_web_response, log_to_audi
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.factual_guard import is_factual_question, enforce_web_search
 from app.services.max.guardrails import uncertainty_fallback, should_defer_uncertain
-from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt_with_brain, is_ordinary_text_request
+from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.runtime_truth_check import (
     format_runtime_truth_check,
     should_run_runtime_truth_check,
@@ -2457,25 +2457,21 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             except ValueError:
                 pass
 
-        # Build brain-enriched system prompt (non-desk requests only)
+        # Build brain-enriched system prompt (non-desk requests only).
+        # H52 Phase 2: always use the full prompt with the tool roster.
+        # The retired is_ordinary_text_request selector used to route
+        # "ordinary" turns to get_compact_system_prompt (no roster) —
+        # which silently blinded the model on meta-questions where tool
+        # selection mattered most. Every turn now gets the roster.
         enriched_prompt = None
         if not request.desk:
-            # Normalize channel for cross-channel context injection
-            _ch = request.channel
-            if _ch in {"web", "web_cc", "dashboard"}:
-                _ch_normalized = "web_chat"
-            else:
-                _ch_normalized = _ch or "web"
-            if not request.image_filename and is_ordinary_text_request(request.message):
-                enriched_prompt = get_compact_system_prompt(channel=_ch_normalized)
-            else:
-                try:
-                    enriched_prompt = await get_system_prompt_with_brain(
-                        user_message=request.message,
-                        conversation_history=request.history,
-                    )
-                except Exception as e:
-                    logger.warning(f"Brain context failed, using base prompt: {e}")
+            try:
+                enriched_prompt = await get_system_prompt_with_brain(
+                    user_message=request.message,
+                    conversation_history=request.history,
+                )
+            except Exception as e:
+                logger.warning(f"Brain context failed, using base prompt: {e}")
 
         # Append channel-specific directives
         if request.channel == "telegram" and enriched_prompt:
@@ -3267,25 +3263,17 @@ async def chat_stream(request: ChatRequest):
         logger.info("Budget threshold reached — auto-switching to Ollama")
         model = AIModel.OLLAMA
 
-    # Build brain-enriched system prompt before streaming (non-desk only)
+    # Build brain-enriched system prompt before streaming (non-desk only).
+    # H52 Phase 2: always full prompt (see /chat note above).
     enriched_prompt = None
     if not request.desk:
-        # Normalize channel for cross-channel context injection
-        _stream_ch = request.channel
-        if _stream_ch in {"web", "web_cc", "dashboard"}:
-            _stream_ch_normalized = "web_chat"
-        else:
-            _stream_ch_normalized = _stream_ch or "web"
-        if not request.image_filename and is_ordinary_text_request(request.message):
-            enriched_prompt = get_compact_system_prompt(channel=_stream_ch_normalized)
-        else:
-            try:
-                enriched_prompt = await get_system_prompt_with_brain(
-                    user_message=request.message,
-                    conversation_history=request.history,
-                )
-            except Exception as e:
-                logger.warning(f"Brain context failed, using base prompt: {e}")
+        try:
+            enriched_prompt = await get_system_prompt_with_brain(
+                user_message=request.message,
+                conversation_history=request.history,
+            )
+        except Exception as e:
+            logger.warning(f"Brain context failed, using base prompt: {e}")
 
     # Append channel-specific directives
     if request.channel == "telegram" and enriched_prompt:
