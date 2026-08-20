@@ -15,6 +15,12 @@ from __future__ import annotations
 import json
 import os
 
+# Use the local AIMessage (app.services.max.ai_router) instead of
+# langchain_core — that package is not installed in this repo. The
+# AIMessage is a dataclass with `role` as a plain string, so role
+# identity checks ("system" vs "user") work directly.
+from app.services.max.ai_router import AIMessage
+
 
 # Use the canonical DB path; the module under test already derives this
 # from ``EMPIRE_TASK_DB`` or ``~/empire-data/empire.db``.
@@ -183,7 +189,7 @@ def test_build_replay_messages_includes_replay_block():
     assert len(messages) == 4, f"expected 4 messages, got {len(messages)}"
     assert messages[0].role == "user" and messages[0].content == "search_quotes"
     assert messages[1].role == "assistant" and messages[1].content == "Found 4 quotes."
-    assert messages[2].role == "user" and "[SYSTEM: Prior-turn tool results" in messages[2].content
+    assert messages[2].role == "system" and "[SYSTEM: Prior-turn tool results" in messages[2].content
     assert "EST-2026-006" in messages[2].content
     assert messages[3].role == "user" and messages[3].content == "What was the raw JSON?"
 
@@ -207,3 +213,182 @@ def test_record_turn_no_conversation_id_is_noop():
     # Just check it doesn't throw
     chat_session.record_turn(None, "user", "hi", None)
     chat_session.record_turn("", "user", "hi", None)
+
+
+# ── H53 FIX tests (2026-08-19) ─────────────────────────────────────
+
+def test_replay_block_empty_when_no_tool_results():
+    """H53 NEGATIVE FIXTURE 1: a turn with ZERO prior tool results
+    renders NO replay block at all — not even the [SYSTEM:] header.
+    Absence must look like absence.
+    """
+    from app.services.max import chat_session
+
+    block = chat_session.format_replay_block([
+        {"turn_index": 1, "role": "user",
+         "content": "what is the status of the registry?",
+         "tool_results": []},
+        {"turn_index": 2, "role": "assistant",
+         "content": "Let me check.",
+         "tool_results": []},
+    ])
+    assert block == "", (
+        f"replay block must be empty when no tool_results present, "
+        f"got: {block[:80]!r}"
+    )
+
+
+def test_replay_block_empty_when_turns_have_only_no_results():
+    """H53 variant: even with multiple turns, if NONE has tool_results
+    (all []), the block is empty.
+    """
+    from app.services.max import chat_session
+
+    block = chat_session.format_replay_block([
+        {"turn_index": i, "role": "user" if i % 2 == 0 else "assistant",
+         "content": "x", "tool_results": []}
+        for i in range(1, 7)
+    ])
+    assert block == ""
+
+
+def test_replay_block_emitted_when_any_turn_has_results():
+    """H53 POSITIVE FIXTURE 5: real prior tool results still replay
+    correctly across turns (F1, 430e071). When AT LEAST ONE turn has
+    tool_results, the block renders (with the [SYSTEM:] header).
+    """
+    from app.services.max import chat_session
+
+    block = chat_session.format_replay_block([
+        {"turn_index": 1, "role": "user", "content": "search_quotes",
+         "tool_results": None},
+        {"turn_index": 2, "role": "assistant", "content": "Found 1.",
+         "tool_results": [{"tool": "search_quotes", "success": True,
+                          "result": {"quotes": [{"quote_number": "EST-2026-006"}]},
+                          "result_preview": '{"quotes": [{"quote_number": "EST-2026-006"}]}'}]},
+    ])
+    assert "[SYSTEM: Prior-turn tool results" in block
+    assert "EST-2026-006" in block
+
+
+def test_build_replay_messages_uses_role_system():
+    """H53 FIX (router.py:154): the replay block is appended with
+    role='system' (not role='user'). MAX must never see system-
+    prompt content in the user channel — that shape triggered the
+    correct prior refusal.
+    """
+    from app.routers.max.router import _build_replay_messages
+
+    msgs = _build_replay_messages(
+        windowed_history=[],
+        conversation_id=None,  # no replay injection
+        current_message="hello",
+    )
+    # No conversation_id → no replay block at all (correct)
+    assert all(m.role != "user" or "SYSTEM:" not in m.content
+               for m in msgs), (
+        "replay block leaked as user-channel content"
+    )
+
+
+def test_build_replay_messages_replay_block_is_system_message():
+    """H53 FIX: when conversation_id + recent tool_results exist,
+    the replay block must be SystemMessage, NOT HumanMessage.
+    """
+    from app.routers.max.router import _build_replay_messages
+    from app.services.max import chat_session
+    from app.routers.max.router import _build_replay_messages
+
+    import os
+    os.environ.setdefault(
+        "EMPIRE_TASK_DB",
+        os.path.expanduser("~/empire-data/empire.db"),
+    )
+
+    conv = "test-h53-role-system"
+    # Clean and seed
+    chat_session._connect().execute(
+        "DELETE FROM chat_session_turns WHERE conversation_id = ?", (conv,)
+    ).connection.commit()
+    chat_session.record_turn(
+        conv, "user", "search_quotes", None,
+    )
+    chat_session.record_turn(
+        conv, "assistant", "Found 1.",
+        [{"tool": "search_quotes", "success": True,
+          "result": {"quotes": [{"quote_number": "EST-2026-006"}]},
+          "result_preview": '{"quotes": [{"quote_number": "EST-2026-006"}]}'}],
+    )
+
+    msgs = _build_replay_messages(
+        windowed_history=[],
+        conversation_id=conv,
+        current_message="hello",
+    )
+    # The replay block must be role="system" (the [SYSTEM:]
+    # scaffolding is NOT user-channel content). The current user
+    # message is role="user" by design — that's the founder's
+    # turn and is correct. Scope the check to the replay block
+    # (the one with [SYSTEM:] in content), not to all role="user"
+    # messages (which would falsely flag the founder's turn).
+    replay_block = next(
+        (m for m in msgs if "[SYSTEM:" in m.content), None
+    )
+    assert replay_block is not None, (
+        f"replay block must exist when recent tool_results are "
+        f"present. Got msgs: {[(m.role, m.content[:40]) for m in msgs]}"
+    )
+    assert replay_block.role == "system", (
+        f"replay block must be role='system' (H53 fix). "
+        f"Got role={replay_block.role!r}"
+    )
+    # The current founder turn stays role='user' (correct).
+    current_turn = msgs[-1]
+    assert current_turn.role == "user", (
+        f"founder's current turn must be role='user' (correct). "
+        f"Got role={current_turn.role!r}"
+    )
+
+
+def test_no_tool_results_yet_returns_only_current_message():
+    """H53: a turn with conversation_id but NO recorded tool_results
+    anywhere yet still routes only the current user message —
+    no fabricated replay header.
+    """
+    from app.routers.max.router import _build_replay_messages
+    from app.services.max import chat_session
+    from app.routers.max.router import _build_replay_messages
+
+    import os
+    os.environ.setdefault(
+        "EMPIRE_TASK_DB",
+        os.path.expanduser("~/empire-data/empire.db"),
+    )
+
+    conv = "test-h53-no-tool-results-yet"
+    chat_session._connect().execute(
+        "DELETE FROM chat_session_turns WHERE conversation_id = ?", (conv,)
+    ).connection.commit()
+    # Seed with user + assistant but NO tool_results on either.
+    chat_session.record_turn(
+        conv, "user", "what is the registry?", None,
+    )
+    chat_session.record_turn(
+        conv, "assistant", "Let me check that.", None,
+    )
+
+    msgs = _build_replay_messages(
+        windowed_history=[],
+        conversation_id=conv,
+        current_message="thanks",
+    )
+    sys_msgs = [m for m in msgs if m.role == "system"]
+    hum_msgs = [m for m in msgs if m.role == "user"]
+    assert not sys_msgs, (
+        f"no tool_results → no system scaffolding → replay block must "
+        f"NOT exist. Got {len(sys_msgs)} system msgs."
+    )
+    assert len(hum_msgs) == 1, (
+        f"only the current user message should land as user. "
+        f"Got {len(hum_msgs)}: {[m.content[:50] for m in hum_msgs]}"
+    )

@@ -241,8 +241,24 @@ def format_replay_block(recent_turns: list[dict]) -> str:
     H49): we cut at the LAST top-level array close when possible so
     a 6-item quote returns the full line_items array rather than
     cutting mid-array at item 1.
+
+    H53 FIX (2026-08-19): When NO turn in `recent_turns` carries
+    any tool_results, the block is NOT emitted at all — even the
+    "[SYSTEM: ...]" header line. Absence must look like absence
+    (MAX's correct prior refusal was driven by seeing a header line
+    with nothing under it; that is the empty-frame failure class).
     """
     if not recent_turns:
+        return ""
+    # First pass — does ANY turn have tool_results?
+    has_any_tool_results = any(
+        turn.get("tool_results") for turn in recent_turns
+    )
+    if not has_any_tool_results:
+        # No tool evidence in any prior turn — render nothing.
+        # The model has no claim to prior verification; fabricating
+        # a "here are your tool results" header with nothing under
+        # it would be a prompt-injection shape.
         return ""
     lines = [
         "[SYSTEM: Prior-turn tool results — you saw these in previous turns. "

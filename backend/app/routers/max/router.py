@@ -151,7 +151,12 @@ def _build_replay_messages(
             recent = load_recent_turns(conversation_id, max_turns=max_replay_turns)
             block = format_replay_block(recent)
             if block:
-                messages.append(AIMessage(role="user", content=block))
+                # H53 FIX (2026-08-19): the replay block carries
+                # `[SYSTEM: Prior-turn tool results — ...]` scaffolding.
+                # It MUST land in role="system" so MAX never sees
+                # system-prompt content in the user channel — that
+                # shape was what triggered MAX's correct prior refusal.
+                messages.append(AIMessage(role="system", content=block))
         except Exception as exc:
             logger.debug(f"[chat_session] replay load failed: {exc}")
     messages.append(AIMessage(role="user", content=current_message))
