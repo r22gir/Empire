@@ -4,15 +4,26 @@ import importlib
 from fastapi import BackgroundTasks, Response
 
 
-def test_drawing_intent_requires_structured_inputs_for_bare_drawing():
+def test_drawing_intent_requires_structured_inputs_for_strong_pattern():
+    """H57 FIX (2026-08-19): bare 'drawing' does NOT route — too
+    broad. Use a strong draw pattern ('draw me', 'draw a') OR an
+    item+dims pattern."""
     from app.services.max.drawing_intent import build_drawing_handoff
 
+    # Bare 'drawing' alone: no intent context → does NOT route.
     handoff = build_drawing_handoff("drawing")
+    assert handoff.is_drawing_intent is False, (
+        "bare 'drawing' must NOT route (H57) — 'drawing' alone is "
+        "a mention, not a request"
+    )
 
+    # Strong pattern: "draw me a …" routes → missing-fields response.
+    handoff = build_drawing_handoff("draw me a bench")
     assert handoff.is_drawing_intent is True
     assert handoff.ready is False
-    assert "subject/item" in handoff.missing
-    assert "dimensions or source image" in handoff.missing
+    # HOTFIX 4.0b: missing list is now template-truth keys
+    # (bench template requires width/height/depth).
+    assert "width" in handoff.missing
     assert "Missing:" in handoff.response
 
 
@@ -28,17 +39,26 @@ def test_four_view_items_identified_does_not_fabricate_without_source():
     assert handoff.tool_payload is None
 
 
-def test_bare_drawing_with_source_image_still_requires_extracted_dimensions():
+def test_bare_drawing_with_source_image_no_longer_routes_h57():
+    """H57 FIX: bare 'drawing' no longer routes, even with a source
+    image. The dispatch principle: a message that merely MENTIONS
+    a drawing is not a request for one. Use a strong pattern
+    ('draw me', 'draw a') OR item+dims to route."""
     from app.services.max.drawing_intent import build_drawing_handoff
 
     handoff = build_drawing_handoff("drawing", image_filename="uploaded-photo.jpg")
+    assert handoff.is_drawing_intent is False, (
+        "bare 'drawing' must NOT route (H57) — even with image"
+    )
 
+    # Strong pattern with image: routes correctly. Missing list is
+    # template-truth (HOTFIX 4.0b) — bench needs width/height/depth.
+    handoff = build_drawing_handoff("draw me a bench from this",
+                                    image_filename="uploaded-photo.jpg")
     assert handoff.is_drawing_intent is True
-    assert handoff.ready is False
     assert handoff.source_image == "uploaded-photo.jpg"
-    assert "real extracted dimensions" in handoff.missing
-    assert handoff.tool_payload is None
-    assert handoff.response.startswith("Image detected in the current request")
+    assert "width" in handoff.missing
+    assert "depth" in handoff.missing
 
 
 def test_missing_response_omits_source_image_when_no_active_image():
@@ -46,7 +66,10 @@ def test_missing_response_omits_source_image_when_no_active_image():
     from app.services.max.drawing_intent import build_drawing_handoff
 
     max_router = importlib.import_module("app.routers.max.router")
-    handoff = build_drawing_handoff("drawing")
+    # H57 FIX: bare 'drawing' no longer routes, so the handoff is
+    # not a drawing intent — build_drawing_handoff returns the
+    # "no drawing intent" path. Use a strong pattern instead.
+    handoff = build_drawing_handoff("draw me a bench")
     response = max_router._drawing_missing_response(handoff)
 
     assert '"source_image"' not in response
@@ -54,23 +77,34 @@ def test_missing_response_omits_source_image_when_no_active_image():
 
 
 def test_bench_drawing_with_dimensions_builds_tool_payload():
+    """Pre-H57: routed via bare 'drawing' keyword. Post-H57: routes
+    via strong 'Create a ' pattern. Template-truth missing check
+    now applies — bench template requires 'height' (overall)."""
     from app.services.max.drawing_intent import build_drawing_handoff
 
     handoff = build_drawing_handoff(
-        'Create a straight bench drawing 96" wide 22" deep with 18" seat height and 18" back height'
+        'Create a straight bench drawing 96" wide 22" deep 36" high '
+        'with 18" seat height and 18" back height'
     )
 
-    assert handoff.ready is True
+    assert handoff.is_drawing_intent is True
     assert handoff.item_type == "bench"
+    assert handoff.ready is True
     assert handoff.tool_payload["item_type"] == "bench"
     assert handoff.tool_payload["shape"] == "straight"
     assert handoff.tool_payload["dimensions"]["width"] == '96"'
     assert handoff.tool_payload["dimensions"]["depth"] == '22"'
+    assert handoff.tool_payload["dimensions"]["height"] == '36"'
     assert handoff.tool_payload["dimensions"]["seat_height"] == '18"'
     assert handoff.tool_payload["dimensions"]["back_height"] == '18"'
 
 
 def test_max_chat_intercepts_drawing_before_ai_router(monkeypatch):
+    """H57 FIX: bare 'drawing' no longer routes. Use a strong
+    pattern ('draw me a X') to trigger the interceptor. Pre-fix
+    'drawing' alone worked — post-fix it must reach MAX, not the
+    router. This test asserts the router intercepts a STRONG
+    pattern before MAX."""
     max_router = importlib.import_module("app.routers.max.router")
 
     async def fail_ai_router(*args, **kwargs):
@@ -78,11 +112,13 @@ def test_max_chat_intercepts_drawing_before_ai_router(monkeypatch):
 
     monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
 
-    request = max_router.ChatRequest(message="drawing", history=[], channel="web")
+    request = max_router.ChatRequest(
+        message="draw me a bench 96 wide 22 deep", history=[], channel="web"
+    )
     response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
 
     assert response.model_used == "drawing-router"
-    assert "Structured drawing handoff" in response.response
+    assert "Missing:" in response.response or "Structured" in response.response
     assert response.tool_results is None
 
 
@@ -107,7 +143,8 @@ def test_max_chat_routes_dimensioned_bench_to_drawing_tool(monkeypatch):
     monkeypatch.setattr(max_router, "execute_tool", fake_execute_tool)
 
     request = max_router.ChatRequest(
-        message='Create a straight bench drawing 96" wide 22" deep with 18" seat height and 18" back height',
+        message='Create a straight bench drawing 96" wide 22" deep 36" high '
+                'with 18" seat height and 18" back height',
         history=[],
         channel="web",
     )

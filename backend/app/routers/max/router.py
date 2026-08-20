@@ -2360,11 +2360,27 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                 is_continuation_reply, merge_founder_reply, set_pending,
             )
             msg_text = request.message or ""
-            if is_drawing_intent(msg_text) and is_cancel_message(msg_text):
+            # H57 FIX: explicit cancel keywords clear pending and
+            # RELEASE the turn back to MAX (no solicitation loop).
+            if is_cancel_message(msg_text):
                 clear_pending(request.conversation_id, request.channel)
+            # H57 FIX: if a pending exists but this turn is NOT a
+            # continuation reply, RELEASE the pending — do not keep
+            # it alive across turns. The user must never be trapped
+            # in a solicitation loop with no exit.
             pending = get_pending(request.conversation_id, request.channel)
-            if pending and is_continuation_reply(msg_text, pending.get("missing", [])):
-                merged_handoff = merge_founder_reply(pending, msg_text)
+            if pending and is_drawing_intent(msg_text):
+                if is_continuation_reply(msg_text, pending.get("missing", [])):
+                    merged_handoff = merge_founder_reply(pending, msg_text)
+                else:
+                    # Non-continuation with drawing intent — release
+                    # the pending; this turn gets a fresh handoff.
+                    clear_pending(request.conversation_id, request.channel)
+            # If pending exists but this turn is NOT drawing intent
+            # (e.g. founder said something unrelated), the pending is
+            # abandoned — release it so it can't fire next turn.
+            elif pending and not is_drawing_intent(msg_text):
+                clear_pending(request.conversation_id, request.channel)
         except Exception as exc:
             logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
 
@@ -3140,10 +3156,37 @@ async def chat_stream(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'done', 'model_used': 'image-availability-check', 'metadata': _response_metadata(request.channel, skill_used='image_availability_check')})}\n\n"
         return StreamingResponse(image_unavailable_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
+    # H57 FIX M-bM-^@M-^T stream door: also release pending on non-continuation
+    # turns. Same logic as /chat non-stream (router.py:2356-2380).
+    merged_handoff = None
+    if request.conversation_id and request.channel:
+        try:
+            from app.services.max.drawing_pending import (
+                is_cancel_message, clear_pending, get_pending,
+                is_continuation_reply, merge_founder_reply, set_pending,
+            )
+            msg_text = request.message or ""
+            if is_cancel_message(msg_text):
+                clear_pending(request.conversation_id, request.channel)
+            pending = get_pending(request.conversation_id, request.channel)
+            if pending and is_drawing_intent(msg_text):
+                if is_continuation_reply(msg_text, pending.get("missing", [])):
+                    merged_handoff = merge_founder_reply(pending, msg_text)
+                else:
+                    clear_pending(request.conversation_id, request.channel)
+            elif pending and not is_drawing_intent(msg_text):
+                clear_pending(request.conversation_id, request.channel)
+        except Exception as exc:
+            logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
+
     drawing_handoff = (
-        build_drawing_handoff(request.message, image_filename=request.image_filename)
-        if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
-        else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
+        merged_handoff
+        if merged_handoff is not None
+        else (
+            build_drawing_handoff(request.message, image_filename=request.image_filename)
+            if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
+            else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
+        )
     )
     if drawing_handoff.is_drawing_intent:
         # HOTFIX 4.0b2 — both /chat and /chat/stream funnel through

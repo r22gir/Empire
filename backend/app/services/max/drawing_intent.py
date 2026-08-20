@@ -22,7 +22,10 @@ from typing import Any
 
 
 DRAWING_KEYWORDS = (
-    "drawing",
+    # H57 FIX (2026-08-19): bare "drawing" removed — it matched
+    # too broadly (any mention of "drawing" routed, including
+    # "what is a drawing"). Multi-token phrases that contain the
+    # word still match (regex matches the full phrase).
     "render",
     "sketch",
     "elevation",
@@ -34,6 +37,13 @@ DRAWING_KEYWORDS = (
     "pdf drawing",
     "bench drawing",
     "cad",
+    # H57 FIX: "generate" + "make" verbs — cover positive fixture 5
+    # ("generate the B1 sheet for the Willard bench") and
+    # similar explicit generation requests.
+    "generate drawing",
+    "generate the",
+    "make a",
+    "make me",
     # Sprint 1d Phase A Fix #2: founder re-ask keywords — so "redraw the
     # Willard bench", "regenerate as 4-view", "redo with the new dims",
     # "new version", "same version" all route to drawing-router
@@ -335,19 +345,28 @@ class DrawingHandoff:
 def is_drawing_intent(text: str) -> bool:
     """Returns True if text requests a drawing/rendering action.
 
-    Negation patterns (not asking you to draw, etc.) suppress drawing intent.
+    H57 FIX (2026-08-19): route on INTENT TO GENERATE, never on
+    vocabulary. A message that merely MENTIONS a drawing is not a
+    request for one.
 
-    Note: "plan" is intentionally NOT a bare drawing keyword. The router
-    historically routed "plan mode, propose Telegram voice pipeline" to the
-    drawing handler because the word "plan" appeared anywhere in the message.
-    Now the router requires a strong draw pattern (draw a X, draw me X) OR
-    a drawing-specific multi-token phrase (floor plan, plan view, etc.).
+    Three suppress classes (any of these returns False):
+      1. Question forms ("what is", "explain", "how does", ...)
+      2. Long pastes (>500 chars containing the word — likely a paste,
+         not a request)
+      3. Explicit user rejections + plan-mode phrases (pre-existing)
+
+    Then a strong draw pattern OR a drawing-specific multi-token
+    phrase OR a known animation phrase returns True.
+
+    Finally a word-boundary substring match against DRAWING_KEYWORDS
+    (the bare "drawing", "render", etc. — but ONLY as a whole word,
+    never a substring of a longer word like "withdrawing").
     """
     if not text:
         return False
     lowered = text.lower()
 
-    # Suppress drawing intent when user explicitly rejects drawing
+    # Strip negation patterns (pre-existing). User explicitly rejects.
     negation_patterns = (
         "not asking you to draw",
         "not asking you to render",
@@ -369,8 +388,42 @@ def is_drawing_intent(text: str) -> bool:
     if any(neg in lowered for neg in negation_patterns):
         return False
 
-    # Suppress drawing intent when the user is in plan mode / proposal mode.
-    # These phrases describe a planning conversation, not a drawing request.
+    # H57: question forms NEVER route. A user asking "what is a
+    # drawing" or "explain the difference between a drawing and a
+    # sketch" is asking a question, not requesting a fabrication.
+    question_forms = (
+        "what is",
+        "what's",
+        "whats",
+        "what does",
+        "explain",
+        "tell me about",
+        "how does",
+        "how do",
+        "why ",
+        "why?",
+        "define ",
+        "meaning of",
+        "describe ",
+        "difference between",
+    )
+    # Only treat as a question when the question form is the LEADING
+    # intent — not when "what" appears mid-sentence in a fabrication
+    # request. We accept a trailing "?" as a strong question signal.
+    if lowered.endswith("?"):
+        if any(qf in lowered for qf in question_forms):
+            return False
+    if any(lowered.startswith(qf) for qf in question_forms):
+        return False
+
+    # H57: long pastes (body > 500 chars) NEVER route. A 200-line
+    # dispatch paste containing "drapery" or "drawing" is a
+    # document being submitted for review, not a generation prompt.
+    # Cap at 500 chars per the dispatch's threshold.
+    if len(text) > 500 and any(kw in lowered for kw in DRAWING_KEYWORDS):
+        return False
+
+    # Pre-existing: plan mode / proposal mode (separate intent)
     plan_mode_patterns = (
         "plan mode",
         "propose a plan",
@@ -401,6 +454,17 @@ def is_drawing_intent(text: str) -> bool:
     if any(pattern in lowered for pattern in strong_draw_patterns):
         return True
 
+    # H57 FIX: explicit drawing request with item-type + dims.
+    # A message that names an item (shade, bench, valance, etc.) AND
+    # specifies dimensions (width 38, drop 70, 68 high, etc.) is a
+    # fabrication request even without the verb "draw" — per
+    # dispatch fixture 6 ("Roman shade, width 68, drop 70").
+    if any(item in lowered for item in _ITEM_TYPE_KEYWORDS_LOWER):
+        # Look for dimension-like text — at least one digit followed
+        # by a unit, OR an explicit width/drop/high keyword.
+        if _DIM_LIKE.search(text):
+            return True
+
     # Drawing-specific multi-token "plan" phrases. Bare "plan" alone is NOT enough.
     if any(phrase in lowered for phrase in DRAWING_PLAN_PHRASES):
         return True
@@ -426,7 +490,40 @@ def is_drawing_intent(text: str) -> bool:
     if any(pattern in lowered for pattern in animation_patterns):
         return True
 
-    return any(keyword in lowered for keyword in DRAWING_KEYWORDS)
+    # H57 FIX: word-boundary substring match. Pre-fix used
+    # `keyword in lowered` which matched "drawing" inside
+    # "withdrawing", "redrawing", "drawings", etc. Post-fix uses a
+    # regex with word boundaries (\b). The pattern is case-insensitive
+    # and matches Unicode word characters on either side.
+    import re as _re
+    for keyword in DRAWING_KEYWORDS:
+        # \b in re treats _ as a word character; keywords with
+        # embedded spaces (e.g. "section view") match whole phrase.
+        # The match is whole-word (not substring of a longer word).
+        if _re.search(r"(?<![A-Za-z0-9])" + _re.escape(keyword) + r"(?![A-Za-z0-9])",
+                      lowered):
+            return True
+    return False
+
+
+# H57 FIX: helper constants for the "item + dims" intent check
+# (positive fixture 6: "Roman shade, width 68, drop 70").
+# Lower-cased once at module load for fast matching.
+_ITEM_TYPE_KEYWORDS_LOWER = tuple(
+    kw.lower() for kw in (
+        "bench", "banquette", "booth", "chair", "drapery", "curtain",
+        "shade", "roman", "cornice", "valance", "headboard",
+    )
+)
+# Matches dimension-like text: a number with a unit (e.g. "68\"", "70 in",
+# "38cm") or an explicit width/drop/high keyword with a number.
+import re as _re_module
+_DIM_LIKE = _re_module.compile(
+    r"(?:\b\d+\s*(?:[\"'\u2033]\b|in\b|cm\b|mm\b|ft\b|inch\b|"
+    r"inches\b|wide\b|tall\b|high\b|drop\b))"
+    r"|(?:width\s*\d|drop\s*\d|height\s*\d|high\s*\d|long\s*\d)",
+    _re_module.IGNORECASE,
+)
 
 
 def _extract_item_type(text: str) -> tuple[str, str]:
