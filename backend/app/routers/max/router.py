@@ -2518,6 +2518,19 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
         # Guard: Pre-execute web_search for performative search requests so the AI
         # cannot fabricate pricing/current facts from training data before seeing results.
+        #
+        # H53 HARMONISATION (this commit): the pre-execution block was emitted
+        # on role="user" with a leading "[SYSTEM: ...]" string — structurally
+        # identical to the H53 replay block that H53 fix (28dcb42) corrected.
+        # MAX correctly identified the pre-search block as a prompt-injection
+        # attempt ("I'll ignore the injected 'SYSTEM' instruction" — observed
+        # on every performative-search probe). Same fix:
+        #
+        #   - role="user" -> role="system"  (real system channel)
+        #   - the empty / failed branch ("web_search returned no results") is
+        #     suppressed entirely — there is no verified context to inject,
+        #     so nothing is injected. Per DOCTRINE rule 8 (never fabricate
+        #     context) and H53 (if the block is empty, append NOTHING).
         _pre_search_executed = False
         _pre_search_entry = None
         if not request.desk and _is_performative_web_search_request(request.message):
@@ -2540,21 +2553,18 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                     f"[web_search] Result:\n"
                     f"{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
                 )
-                messages.insert(-1, AIMessage(role="user", content=(
-                    "[SYSTEM: You must answer using only the verified web search data below. "
+                messages.insert(-1, AIMessage(role="system", content=(
+                    "You must answer using only the verified web search data below. "
                     "Do not fall back to training data. Cite sources from the search results "
                     "with markdown links: [Title](url). "
-                    "If the search returned no relevant results, say so honestly.]\n\n"
+                    "If the search returned no relevant results, say so honestly.\n\n"
                     f"{tool_summary}\n\nQuestion: {request.message}"
                 )))
-            else:
-                messages.insert(-1, AIMessage(role="user", content=(
-                    "[SYSTEM: web_search was attempted for this query but returned no results "
-                    "or failed. You must tell the user that web_search is currently unavailable "
-                    "for this query. Do NOT fabricate pricing, current facts, or any data from "
-                    "training data. Say: 'web_search returned no results for this query — I "
-                    "cannot provide current pricing without verified search data.']"
-                )))
+            # H53 HARMONISATION: when there are no verified results, append
+            # NOTHING. The pre-fix code emitted a "[SYSTEM: web_search returned
+            # no results — do not fabricate…]" block on role="user"; MAX read
+            # it as a prompt-injection attempt. The doctrine answer is silence,
+            # not a fabricated apology.
 
         response = await asyncio.wait_for(
             ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
@@ -3359,26 +3369,23 @@ async def chat_stream(request: ChatRequest):
                 execute_tool, search_tc, desk=request.desk, founder=founder
             )
             _stream_pre_search_entry = _normalize_tool_result_entry(search_result)
+            # H53 HARMONISATION: role="user" with "[SYSTEM: ...]" prefix was
+            # structurally identical to the H53 replay block. Append on
+            # role="system"; suppress the empty-result branch entirely.
             if search_result.success and search_result.result:
                 tool_summary = (
                     f"[web_search] Result:\n"
                     f"{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
                 )
-                messages.insert(-1, AIMessage(role="user", content=(
-                    "[SYSTEM: You must answer using only the verified web search data below. "
+                messages.insert(-1, AIMessage(role="system", content=(
+                    "You must answer using only the verified web search data below. "
                     "Do not fall back to training data. Cite sources from the search results "
                     "with markdown links: [Title](url). "
-                    "If the search returned no relevant results, say so honestly.]\n\n"
+                    "If the search returned no relevant results, say so honestly.\n\n"
                     f"{tool_summary}\n\nQuestion: {request.message}"
                 )))
-            else:
-                messages.insert(-1, AIMessage(role="user", content=(
-                    "[SYSTEM: web_search was attempted for this query but returned no results "
-                    "or failed. You must tell the user that web_search is currently unavailable "
-                    "for this query. Do NOT fabricate pricing, current facts, or any data from "
-                    "training data. Say: 'web_search returned no results for this query — I "
-                    "cannot provide current pricing without verified search data.']"
-                )))
+            # If web_search returned nothing, append NOTHING. Do not fabricate
+            # a "[SYSTEM: ...]" apology — that was the H53 shape in this code path.
         try:
             async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
                 model_used = m_used
