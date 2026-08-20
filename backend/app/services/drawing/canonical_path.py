@@ -30,6 +30,8 @@ FIX:
   any caller from accidentally re-introducing the bug.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 from pathlib import Path
@@ -169,13 +171,30 @@ def resolve_path_under_canonical_root(
     any other call site that previously used `~/empire-repo/`.
     """
     canonical = resolve_canonical_root(start)
+
+    # REFUSE paths containing `..` segments outright. Path.resolve()
+    # collapses `..` lexically without going above the path root
+    # (e.g. `canonical/backend/data/uploads/../../../etc/passwd`
+    # resolves to `canonical/etc/passwd` — still INSIDE canonical
+    # per `Path.resolve()` semantics, but the user clearly INTENDED
+    # an escape). Refuse the literal `..` even though `Path.resolve`
+    # would consider the path under canonical — the dispatch says
+    # "refusing anything that escapes it — via .., symlinks". An
+    # attempted escape via .. is the user's intent, and we must
+    # refuse regardless of where the lexically-collapsed path lands.
+    parts = Path(relative_or_absolute).expanduser().parts
+    if any(part == ".." for part in parts):
+        raise CanonicalRootError(
+            f"path {relative_or_absolute} contains '..' — refusing "
+            f"any path that attempts to escape the canonical root"
+        )
+
     candidate = Path(relative_or_absolute).expanduser()
     if not candidate.is_absolute():
         candidate = (canonical / candidate).resolve()
     else:
         candidate = candidate.resolve()
-    # Refuse escapes outside the canonical root (covers `..` and
-    # symlinks).
+    # Refuse escapes outside the canonical root (symlinks).
     try:
         candidate.relative_to(canonical.resolve())
     except ValueError:

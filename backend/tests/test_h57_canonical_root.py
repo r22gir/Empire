@@ -75,13 +75,13 @@ class TestRelativePathResolvesToCanonical:
 
     def test_relative_path_with_dotdot_is_refused(self):
         # `..` escapes the canonical repo. Must refuse.
-        # Use enough `..` to clearly climb OUT of canonical (canonical
-        # is shallow — a few levels is enough; using more for clarity).
+        # The realistic escape shape — user types a path that
+        # traverses up out of canonical via `..` components.
         with pytest.raises(CanonicalRootError) as exc:
             resolve_path_under_canonical_root(
-                "../../../../etc/passwd"
+                "backend/data/uploads/../../../etc/passwd"
             )
-        assert "escapes" in str(exc.value).lower() or "canonical" in str(exc.value).lower()
+        assert "escapes" in str(exc.value).lower() or ".." in str(exc.value).lower() or "canonical" in str(exc.value).lower()
 
     def test_negative_fixture_maxs_proposed_path_refused(self):
         """The literal path MAX proposed tonight — the exact bug
@@ -125,11 +125,16 @@ class TestSymlinkEscapeRefused:
     the escaped path lands outside the canonical repo → refuse."""
 
     def test_symlink_outside_canonical_refused(self, tmp_path):
-        # Create a symlink in canonical repo pointing to /tmp/outside
+        # Create a symlink in canonical repo pointing to outside canonical.
+        # Use a unique target per test run — pytest's tmp_path gives
+        # per-test isolation (avoids FileExistsError from previous runs
+        # polluting /tmp).
         canonical = resolve_canonical_root()
-        # Use a unique target per test run (pytest's tmp_path gives
-        # per-test isolation — use it as the symlink target so we don't
-        # collide with anything in /tmp).
+        # Symlink target OUTSIDE canonical. Pick a name that's unique
+        # to this test (pytest_tmp_path gives us that) AND outside the
+        # canonical root. We pick a tmp_path under /tmp (not under
+        # canonical). Path.resolve() follows symlinks so this symlink
+        # resolves to /tmp/<unique>, which is OUTSIDE canonical.
         outside_target = tmp_path / "outside_repo"
         symlink_path = canonical / "backend" / "tests" / "evil_link"
         if symlink_path.exists() or symlink_path.is_symlink():
