@@ -845,6 +845,7 @@ async def _execute_code_task(task: dict) -> ExecutionResult:
             success=False,
             executor="code_task_runner",
             error=code_task.error or "CodeTaskRunner failed",
+            result=result_text,
             tools_run=tools_run,
             metadata={"code_task_id": code_task.id},
         )

@@ -12,8 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from app.services.chat_backup_service import ChatBackupService
 from app.schemas.chat_backup import BackupRequest
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Note: do NOT call logging.basicConfig here. When this module is imported by the
+# FastAPI/uvicorn process the root logger already has handlers; basicConfig
+# silently does nothing and only misleads a reader into thinking logging is
+# configured. Logging for the backend is owned by the service unit and the
+# uvicorn LOGGING_CONFIG — see systemd/empire-backend.service.
 logger = logging.getLogger(__name__)
 
 

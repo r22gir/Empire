@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,6 +22,29 @@ from typing import Any, Optional
 from app.services.max.ai_router import AIMessage, AIModel, AIResponse, ai_router
 
 logger = logging.getLogger("max.code_task")
+
+# F3 — explicit handler at INFO+ that survives uvicorn's dictConfig.
+# WHY this exists: uvicorn 0.41's LOGGING_CONFIG does NOT configure the root
+# logger and uvicorn writes application logs to stderr. On the running unit
+# `empire-backend` (live at ~/.config/systemd/user/empire-backend.service)
+# `StandardError=inherit` (the unit file in this repo sets `journal` but the
+# installed unit never picked that up), so stderr is NOT journaled. The only
+# stream journalctl sees is stdout (StandardOutput=journal), which is where
+# uvicorn's "access" handler writes. Without an explicit handler, every
+# logger.error call here was silently discarded.
+# This handler writes to stdout, which IS journaled. It is attached at module
+# import and survives any subsequent dictConfig because we do not let uvicorn
+# touch the "max.code_task" logger.
+if not any(isinstance(h, logging.StreamHandler) and getattr(h, "_max_code_task", False) for h in logger.handlers):
+    _max_code_task_handler = logging.StreamHandler(stream=sys.stdout)
+    _max_code_task_handler.setLevel(logging.INFO)
+    _max_code_task_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s max.code_task %(message)s")
+    )
+    _max_code_task_handler._max_code_task = True  # marker so we don't double-attach
+    logger.addHandler(_max_code_task_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False  # do not double-log via root/stderr
 
 # Tools Atlas is allowed to use in Code Mode
 ALLOWED_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops", "test_runner", "shell_execute", "package_manager", "service_manager", "project_scaffold"}
@@ -503,6 +527,100 @@ def _compose_verified_summary(task: "CodeTask") -> str:
     return "\n".join(lines).strip()
 
 
+def _format_failure_evidence(task: "CodeTask", final_outcome: str) -> str:
+    """F2 — build a structured failure-result string that records what the
+    model actually returned. Every failure path calls this and assigns the
+    return value to task.result, so the row in openclaw_tasks can be read
+    without re-running the task. Without this, a failure path is a verdict
+    with no evidence.
+
+    Truncates the response text to 4000 chars but always records the
+    original length and the response.function_calls summary so the
+    diagnostic part is never thrown away.
+    """
+    lines = [f"Final outcome: {final_outcome}"]
+    lines.append(f"Provider used: {task.provider_used or 'unknown'}")
+    lines.append(f"Model used: {task.model_used or 'unknown'}")
+    supports = task.supports_tool_calls
+    lines.append(
+        f"Supports tool calls: {supports if supports is not None else 'unknown'}"
+    )
+    lines.append(f"Prompt attempts: {task.prompt_attempts}")
+    lines.append(f"Failure reason: {task.failure_reason or task.error or 'none'}")
+
+    if task.last_response_text is not None:
+        original_len = len(task.last_response_text)
+        text = task.last_response_text
+        if original_len > 4000:
+            text = text[:4000] + f"...(truncated; original_len={original_len})"
+        lines.append("")
+        lines.append("Last model response text:")
+        lines.append(text)
+
+    if task.last_function_calls_summary is not None:
+        lines.append("")
+        lines.append("Last response.function_calls:")
+        lines.append(task.last_function_calls_summary)
+
+    if task.last_parse_outcome is not None:
+        lines.append("")
+        lines.append("Last parse outcome:")
+        lines.append(task.last_parse_outcome)
+
+    return "\n".join(lines).strip()
+
+
+def _capture_response_evidence(task: "CodeTask", response, tool_calls: list[dict]) -> None:
+    """F2 — record the model's actual response on the task so any later
+    failure path can persist it. Called once per model response inside the
+    execute loop, immediately after the response is parsed.
+
+    `parse_tool_blocks` is imported lazily inside `_execute`, so this helper
+    does NOT call it directly. The parse outcome is derived from the
+    `tool_calls` argument (which the caller computed using the parser) and
+    from `response.function_calls`.
+    """
+    task.last_response_text = getattr(response, "content", None) or ""
+    fc = getattr(response, "function_calls", None)
+    if fc is None:
+        task.last_function_calls_summary = "absent (response.function_calls is None)"
+    elif len(fc) == 0:
+        task.last_function_calls_summary = "present but empty (response.function_calls == [])"
+    else:
+        summary_lines = [f"count={len(fc)}"]
+        for idx, call in enumerate(fc, start=1):
+            name = (
+                call.get("name")
+                or call.get("tool")
+                or call.get("function", {}).get("name")
+                or "unknown"
+            )
+            args = (
+                call.get("arguments")
+                or call.get("args")
+                or call.get("params")
+                or call.get("function", {}).get("arguments")
+            )
+            if isinstance(args, str) and len(args) > 200:
+                args = args[:200] + "...(truncated)"
+            summary_lines.append(f"  {idx}. {name} args={args}")
+        task.last_function_calls_summary = "\n".join(summary_lines)
+
+    native_normalized = [
+        n for n in (
+            _normalize_native_tool_call(call) for call in (fc or [])
+        ) if n
+    ]
+    parser_was_consulted = not native_normalized
+    parser_matched = parser_was_consulted and len(tool_calls) > 0
+    parse_outcome = (
+        f"native: matched={bool(native_normalized)} count={len(native_normalized)}; "
+        f"parse_tool_blocks: attempted={parser_was_consulted} matched={parser_matched}; "
+        f"effective_tool_calls_after_merge={len(tool_calls)}"
+    )
+    task.last_parse_outcome = parse_outcome
+
+
 @dataclass
 class CodeTask:
     """An async code task."""
@@ -529,6 +647,11 @@ class CodeTask:
     verified_commit_hash: Optional[str] = None
     verification_notes: list[str] = field(default_factory=list)
     log: list[CodeTaskLog] = field(default_factory=list)
+    # F2 evidence — captured after every model response so that any failure
+    # path can persist what the model actually returned.
+    last_response_text: Optional[str] = None
+    last_function_calls_summary: Optional[str] = None
+    last_parse_outcome: Optional[str] = None
 
     def add_log(self, action: str, detail: str):
         self.log.append(CodeTaskLog(
@@ -560,6 +683,9 @@ class CodeTask:
             "verified_test_runs": self.verified_test_runs,
             "verified_commit_hash": self.verified_commit_hash,
             "verification_notes": self.verification_notes,
+            "last_response_text": self.last_response_text,
+            "last_function_calls_summary": self.last_function_calls_summary,
+            "last_parse_outcome": self.last_parse_outcome,
             "log": [
                 {"timestamp": l.timestamp, "action": l.action, "detail": l.detail}
                 for l in self.log
@@ -661,6 +787,10 @@ class CodeTaskRunner:
                 if not tool_calls:
                     tool_calls = parse_tool_blocks(response_text)
                 clean_text = response_text.strip()
+
+                # F2 — capture what the model actually returned and what the
+                # parser saw, so any subsequent failure path can persist it.
+                _capture_response_evidence(task, response, tool_calls)
 
                 # No tool calls = Atlas is done
                 if not tool_calls:
@@ -804,6 +934,9 @@ class CodeTaskRunner:
                     "No deterministic fallback plan could be inferred from the prompt."
                 )
                 task.error = task.failure_reason
+                task.result = _format_failure_evidence(
+                    task, "selected code model did not emit executable tool calls"
+                )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
                 logger.error(f"Code task {task.id} did not provide executable tool calls after retries")
@@ -816,6 +949,9 @@ class CodeTaskRunner:
                     f"(provider={task.provider_used or 'unknown'}, model={task.model_used or 'unknown'}, attempts={task.prompt_attempts})"
                 )
                 task.error = task.failure_reason
+                task.result = _format_failure_evidence(
+                    task, "completed without actual tool execution"
+                )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
                 logger.error(f"Code task {task.id} had no executed tool calls")
@@ -826,6 +962,9 @@ class CodeTaskRunner:
                     task.state = CodeTaskState.ERROR
                     task.failure_reason = "Read-only code task executed a mutating tool call."
                     task.error = task.failure_reason
+                    task.result = _format_failure_evidence(
+                        task, "read-only code task executed a mutating tool call"
+                    )
                     task.completed_at = datetime.utcnow().isoformat()
                     task.add_log("error", task.error)
                     logger.error(f"Code task {task.id} violated read-only mode")
@@ -838,6 +977,9 @@ class CodeTaskRunner:
                         f"(provider={task.provider_used or 'unknown'}, model={task.model_used or 'unknown'}, attempts={task.prompt_attempts})"
                     )
                     task.error = task.failure_reason
+                    task.result = _format_failure_evidence(
+                        task, "completed without actual file changes"
+                    )
                     task.completed_at = datetime.utcnow().isoformat()
                     task.add_log("error", task.error)
                     logger.error(f"Code task {task.id} had no actual file changes")
@@ -853,6 +995,9 @@ class CodeTaskRunner:
                 task.state = CodeTaskState.ERROR
                 task.failure_reason = "git commit succeeded but could not be verified in repository history."
                 task.error = task.failure_reason
+                task.result = _format_failure_evidence(
+                    task, "git commit reported success but could not be verified"
+                )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
                 logger.error(f"Code task {task.id} could not verify commit")
@@ -862,6 +1007,9 @@ class CodeTaskRunner:
                 task.state = CodeTaskState.ERROR
                 task.failure_reason = f"Verified commit hash is not present in git history: {task.verified_commit_hash}"
                 task.error = task.failure_reason
+                task.result = _format_failure_evidence(
+                    task, "verified commit hash is not present in git history"
+                )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
                 logger.error(f"Code task {task.id} invalid commit hash")
@@ -877,6 +1025,8 @@ class CodeTaskRunner:
         except asyncio.TimeoutError:
             task.state = CodeTaskState.ERROR
             task.error = "Task timed out — Atlas was unresponsive for too long"
+            task.failure_reason = task.error
+            task.result = _format_failure_evidence(task, "task timed out")
             task.completed_at = datetime.utcnow().isoformat()
             task.add_log("error", "Timed out waiting for Atlas")
             logger.error(f"Code task {task.id} timed out")
@@ -884,6 +1034,8 @@ class CodeTaskRunner:
         except Exception as e:
             task.state = CodeTaskState.ERROR
             task.error = str(e)
+            task.failure_reason = task.error
+            task.result = _format_failure_evidence(task, f"exception: {e}")
             task.completed_at = datetime.utcnow().isoformat()
             task.add_log("error", f"Failed: {e}")
             logger.error(f"Code task {task.id} failed: {e}")
