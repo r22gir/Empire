@@ -263,3 +263,35 @@ blocked again from the other side. **Per the founder: this is a
 RESULT, not a failure of the fix; report it and do not work around
 the PIN gate.** Restoring the unlock surface is a separate
 dispatch.
+
+### **H63** · chat-router auto-reroute to CodeForge (CLOSED 2026-08-20, fifth interception layer)
+
+The chat router at `app/routers/max/router.py:2645` (non-streaming) and
+`:3434` (streaming) silently rewrote every `file_read` / `file_write`
+/ `file_edit` / `file_append` / `git_ops` tool call the model emitted
+on the chat lane to `{"tool": "run_desk_task", ...}` (CodeForge desk).
+The model never saw its own `file_read` result — it saw `run_desk_task`
+failures with `"operation did not report success"`, and fell back to
+`web_search`, which returned Maryland MVA pages for "STATE.md".
+
+The model said "I'll read STATE.md" — INTENDED file_read. The router
+rewrote it. Same shape as the previous four interceptions: silent
+redirection onto a worse path. The discriminator: the user explicitly
+named `file_read` in test 1; the router still rewrote it.
+
+**Closed 2026-08-20.** New helper `_should_reroute_to_codeforge(tool,
+has_desk)` extracted. Set scoped to writes only:
+`_CODEFORGE_WRITE_TOOLS = {"file_write", "file_edit", "file_append"}`.
+`file_read` and `git_ops` removed — reads reach the model directly.
+Both call sites (chat and chat/stream) updated. Doctrine comment
+added: **"A router must never silently rewrite a tool call the model
+made."**
+
+Tests (`tests/test_chat_router_no_read_rewrite.py`): 10/10 pass. The
+helper-set membership test (`file_read` not in `_CODEFORGE_WRITE_TOOLS`)
+is the negative fixture — pre-fix code would have failed it.
+
+Live verification: probe 3 with bare phrasing "read STATE.md and tell
+me the current standard pin" — `file_read` reached `file_read`
+directly (3× in some runs), the pin `1813c59043b7b05f87626dd4e66a3487`
+is in the tool result.

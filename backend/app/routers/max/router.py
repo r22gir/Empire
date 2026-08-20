@@ -661,6 +661,41 @@ def _is_action_tool(tool_call: dict[str, Any]) -> bool:
     return str(tool_call.get("tool") or "").strip() in ACTION_TOOLS
 
 
+# H52 Phase 2 follow-up — fifth interception layer.
+#
+# DOCTRINE: A router MUST NEVER silently rewrite a tool call the model made.
+# If a redirect is necessary, the model must be told it happened and what it
+# became. Silent rewriting means the model is debugging a system it cannot
+# see — which is what the previous five interception layers had in common
+# (H57 drawing router, H52 is_ordinary_text_request selector, H53 [SYSTEM]
+# replay block, H62 PIN substring gate, this layer). All removed or narrowed.
+#
+# The chat router previously auto-routed file_read/file_write/file_edit/
+# file_append/git_ops on the chat lane to run_desk_task (CodeForge). The
+# rationale comment was "Atlas (Opus) handles path expansion, validation,
+# and smart truncation" — these are real benefits for CODE-EDIT tasks.
+# Path validation now lives in the canonical resolver (H57 Phase 3); the
+# other benefits are real but apply only to writes.
+#
+# SCOPE: only writes go through the desk. Reads reach the model directly.
+# file_read and git_ops are REMOVED from the rewrite set. file_write,
+# file_edit, file_append are KEPT (legitimate write case).
+_CODEFORGE_WRITE_TOOLS = {"file_write", "file_edit", "file_append"}
+
+
+def _should_reroute_to_codeforge(tool_name: str, has_explicit_desk: bool) -> bool:
+    """Decide whether a tool call the model emitted should be rewritten as
+    a CodeForge desk task. Reads never. Writes only when the chat lane is
+    in use (no explicit desk already in play).
+
+    Returns True only if the tool is in _CODEFORGE_WRITE_TOOLS AND the
+    caller did not already specify a desk.
+    """
+    if has_explicit_desk:
+        return False  # user already routed to a desk; do not second-guess
+    return tool_name in _CODEFORGE_WRITE_TOOLS
+
+
 def _decision_only_response(request: ChatRequest) -> ChatResponse:
     return ChatResponse(
         response=(
@@ -2640,9 +2675,11 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             if _is_decision_only_request(request.message) and any(_is_action_tool(tc) for tc in tool_calls):
                 return _decision_only_response(request)
 
-            # File/git tool calls from main chat get re-routed to CodeForge desk
+            # File-WRITE tool calls from main chat get re-routed to CodeForge desk
             # because Atlas (Opus) handles path expansion, validation, and smart truncation
-            _CODEFORGE_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops"}
+            # for code-edit tasks. Reads (file_read, git_ops) are NEVER rewritten —
+            # see _should_reroute_to_codeforge and the H52-Phase-2-follow-up doctrine
+            # comment on _CODEFORGE_WRITE_TOOLS above.
 
             round_results = []
             for tc in tool_calls:
@@ -2650,8 +2687,8 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                 if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                     tc["image_filename"] = request.image_filename
 
-                # Auto-reroute file/git tools to CodeForge desk
-                if tc.get("tool") in _CODEFORGE_TOOLS and not request.desk:
+                # Auto-reroute write tools to CodeForge desk (reads NEVER)
+                if _should_reroute_to_codeforge(str(tc.get("tool") or ""), bool(request.desk)):
                     tool_name = tc["tool"]
                     path = tc.get("path", "")
                     desc_parts = [f"Tool: {tool_name}"]
@@ -3393,8 +3430,8 @@ async def chat_stream(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'text', 'content': full_response})}\n\n"
                     break
 
-                # File/git tool calls from main chat get re-routed to CodeForge desk
-                _CODEFORGE_TOOLS_STREAM = {"file_read", "file_write", "file_edit", "file_append", "git_ops"}
+                # File-WRITE tool calls from main chat get re-routed to CodeForge desk
+                # (reads NEVER — see _should_reroute_to_codeforge).
 
                 round_results = []
                 for tc in tool_calls:
@@ -3402,8 +3439,8 @@ async def chat_stream(request: ChatRequest):
                     if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                         tc["image_filename"] = request.image_filename
 
-                    # Auto-reroute file/git tools to CodeForge desk
-                    if tc.get("tool") in _CODEFORGE_TOOLS_STREAM and not request.desk:
+                    # Auto-reroute write tools to CodeForge desk (reads NEVER)
+                    if _should_reroute_to_codeforge(str(tc.get("tool") or ""), bool(request.desk)):
                         tool_name = tc["tool"]
                         path = tc.get("path", "")
                         desc_parts = [f"Tool: {tool_name}"]
