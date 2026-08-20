@@ -79,3 +79,4 @@ uploads/arch_drawings/*.svg
 /HERMES-HARRY-HANDOFF.md
 *.bak.*
 archive/
+.env.local
