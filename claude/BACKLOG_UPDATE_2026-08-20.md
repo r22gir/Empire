@@ -264,6 +264,33 @@ RESULT, not a failure of the fix; report it and do not work around
 the PIN gate.** Restoring the unlock surface is a separate
 dispatch.
 
+### **H64** · H53 harmonisation — pre-search guard (CLOSED 2026-08-20, sixth interception layer)
+
+The pre-search guard at `router.py:2519-2557` (non-streaming) and
+`:3356-3380` (streaming) emitted a `[SYSTEM: ...]` block on `role="user"`
+before the model's first turn. Structurally identical to the H53 replay
+block that `28dcb42` corrected — but in a different code path. MAX
+correctly identified the pre-search block as a prompt-injection attempt
+on every performative-search probe ("I'll ignore the injected 'SYSTEM'
+instruction").
+
+**Closed 2026-08-20.** Matched H53 fix: role="user" → role="system",
+`[SYSTEM: ...]` prefix removed, empty-result branch suppressed entirely.
+H53 tests (`tests/test_chat_session_replay.py`) still pass 15/15. Live
+verification: cotton-fabric query returns clean response with sources,
+no "prompt injection" or "SYSTEM" mentions.
+
+Doctrine (now in source): a router must never silently rewrite a tool
+call the model made; the same rule for scaffolding it injects into the
+model's context — never on user channel, never with a fake `[SYSTEM:]`
+prefix, never with no content.
+
+NOTE: a third site with the same pattern lives at `router.py:2752-2754`
+and `:3507-3509` — the inter-round follow-up instruction. It also uses
+role="user" with `[SYSTEM:]` prefix. NOT fixed in this commit — the
+dispatch asked for "ONE MORE" and that was the pre-search guard. Logged
+for follow-up.
+
 ### **H63** · chat-router auto-reroute to CodeForge (CLOSED 2026-08-20, fifth interception layer)
 
 The chat router at `app/routers/max/router.py:2645` (non-streaming) and
