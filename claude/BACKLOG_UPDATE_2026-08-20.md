@@ -173,3 +173,80 @@ end-to-end task clear, and which fail modes own the rest?**
   could have been written as "F1.5" or "PIN-gate issue in code tasks"
   but the cause is independent (no unlock surface) and folding it
   would lose the action owed.
+
+---
+
+## CLOSED — 2026-08-20 16:18 EDT
+
+### Code execution RESTORED.
+
+**Dead 2026-05-06 → restored 2026-08-20.** 106 days.
+
+**Single root cause:** the scorer and the parser disagreed about
+"did the model emit an executable action." `_request_code_response`
+at `code_task_runner.py:423` (was line 399 at dispatch time) scored
+`task.supports_tool_calls = bool(response.function_calls) if
+response.function_calls is not None else supports_native_tools`. The
+parser (`parse_tool_blocks` at `tool_executor.py:175`) honoured three
+advertised formats — native call, raw JSON `{tool:...}`, fenced JSON
+block. A model replying in formats 2 or 3 has
+`response.function_calls == None` but a non-empty `tool_calls` list
+from the parser. The buggy scorer recorded `False` and the dispatch's
+evidence-bearing six failure branches discarded the response. Two
+places decided the same fact; one was wrong; the disagreement was
+invisible because only one of them was consulted. Doctrine rule 12.
+
+**The open question is now ANSWERED.** From
+`BACKLOG_UPDATE_2026-08-19.md` "OPEN QUESTIONS" item 1:
+> 1. **What broke MAX's coding?** (blocks the restoration lane)
+
+**Answer:** neither a removed capability nor a deliberate gate.
+The Codex-Mode line was never deleted and was never disabled by
+policy — the GPT-5.5 rewrite (H52–H55 sweep) preserved it. It was
+broken by a single-source-of-truth violation in code_task_runner.py
+that surfaced as "without actual file changes" verdicts with
+`result=None` for 5,931 rows over a four-day burst in May. Three
+months to diagnose because every failure branch discarded the
+evidence (F2 fix), the nine `logger.error` calls landed on stderr
+that was inherited-not-journaled (F3 fix + H61 — SEVENTH instance of
+"config on disk correct, config in force wrong"), and the failure
+pattern looked provider-shaped when the parser was the silent third
+party. **The capability was always live. The verdict was always
+wrong.**
+
+**Proof on disk:** `reports/2026-08-20_stage3_liveproof.md`. Two
+real code tasks submitted through the actual API path. Task 7380
+appended `STAGE3-PROOF-CLEAN\n` to a canonical-repo scratch file —
+md5 mutated, exact-match content, file actually changed. Task 7379
+attempted the dispatch's `/tmp` example and was refused by H57
+Phase 3's canonical-root guard — proving that gate works as
+designed (a second proof, not a failure).
+
+**Commits in order:**
+| SHA | Stage | Subject |
+|---|---|---|
+| `e854621` | 1 | F2 evidence + F3 logging + F4 no-op basicConfig |
+| `91b3ca0` | pre-2 | patch installed unit StandardError=journal + log H61/H62 |
+| `ccfb576` | 2 | F1 scorer reads parsed result, not raw provider field |
+| `a663e43` | 3 | live proof — F1 end-to-end, /tmp blocked by H57 guard |
+
+### F5 + F6 — NOT STARTED. Stay logged.
+
+Per founder directive: "CLOSING THIS LANE HERE. Do NOT start Stage 4.
+F5 (badge counter) and F6 (retry budget) stay logged as open items."
+
+* **F5** — "7,372 queued" badge counts every row ever written. Actual
+  pending: zero. Source TBD. Filter, never delete.
+* **F6** — Retry budget spends 4 attempts on a structurally impossible
+  operation. Doctrine rule 26, applied to the machine rather than the
+  agent. Stop retries when the failure is deterministic; same failure
+  reason twice is not worth a third attempt.
+
+### H62 — NOT CLOSED. Action still owed.
+
+PIN-gate on `shell_execute` has no working unlock surface. The
+capability that code-task restoration opens back up is partially
+blocked again from the other side. **Per the founder: this is a
+RESULT, not a failure of the fix; report it and do not work around
+the PIN gate.** Restoring the unlock surface is a separate
+dispatch.
