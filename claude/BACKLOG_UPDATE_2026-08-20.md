@@ -300,31 +300,30 @@ tool_summary content (real tool result data) stays attached.
 
 Tests: H53 (15) + H63 (10) = 25/25 pass.
 
-### **H66** · H53 harmonisation — `factual_guard` at router.py:2829 (OPEN — fourth interception layer)
+### **H66** · H53 harmonisation — `factual_guard` at router.py:2829 (CLOSED 2026-08-20)
 
-The grep for `[SYSTEM:` on non-system role across `backend/app/` finds
-4 code sites matched the pattern; 3 are now closed (H53, H64, H65).
-**One remaining active site:**
+Same fix as the others: role="user" → role="system", drop the
+`[SYSTEM: ...]` prefix. Also added the empty-result check the
+pre-search guard got — if `web_search` returned empty/failed, suppress
+the entire grounded-re-query block. Per H53: "if the block is empty,
+append NOTHING." Per DOCTRINE rule 8: never fabricate context.
 
-```
-backend/app/routers/max/router.py:2829
-    grounded_messages.append(AIMessage(role="user", content=(
-        "[SYSTEM: You must answer using only the verified web search data below. "
-        "Do not fall back to training data. Cite sources from the search results.]\n\n"
-        f"{tool_summary}\n\nQuestion: {request.message}"
-    )))
-```
+**Regression guard added:** `tests/test_no_system_injection_on_user_role.py`.
+AST walks every `.py` file under `backend/app/` and fails if any
+`AIMessage(role="user", ...)` call carries `[SYSTEM:` content.
+Comments and docstrings are excluded by the AST walk (Python's `ast`
+module does not include comments; docstrings are `Expr` nodes that
+do not match the AIMessage call pattern). This is worth more than
+the four fixes combined: it turns a pattern nobody was looking for
+into one that fails CI if it ever returns.
 
-Triggered by the factual_guard at router.py:2809 — auto-invokes
-web_search for factual questions, then re-queries with verified data.
-Same shape as the other three sites. Same fix: role="user" → role="system",
-drop `[SYSTEM: ...]` prefix.
+H53 + H63 + H66 regression: 26/26 pass.
+Live verification: "what year was the Empire State Building constructed"
+— model uses web_search results correctly (1930-1931, Shreve Lamb &
+Harmon), cites sources, no "prompt injection" / "SYSTEM" / "I will
+ignore" mentions in response.
 
-**Not fixed in this lane.** Per founder directive: "If there is a
-fourth, we stop guessing and do a sweep." A coordinated sweep is the
-right next move — the four H53-shaped injections are all the same
-fix, all in one file, all on role="user", all with `[SYSTEM:` prefix.
-A sweep can update the sweep in a single commit, retest, and push.
+That closes the H53 family.
 
 ### **H63** · chat-router auto-reroute to CodeForge (CLOSED 2026-08-20, fifth interception layer)
 

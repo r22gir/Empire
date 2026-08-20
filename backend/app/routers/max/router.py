@@ -2823,19 +2823,28 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             search_entry = _normalize_tool_result_entry(search_result)
             tool_results_list.append(search_entry)
 
-            # Build grounding context and re-query AI with verified data
-            tool_summary = f"[web_search] Result:\n{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
-            grounded_messages = list(messages)
-            grounded_messages.append(AIMessage(role="user", content=(
-                "[SYSTEM: You must answer using only the verified web search data below. "
-                "Do not fall back to training data. Cite sources from the search results.]\n\n"
-                f"{tool_summary}\n\nQuestion: {request.message}"
-            )))
-            grounded_response = await ai_router.chat(
-                grounded_messages, model=model, desk=request.desk,
-                system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools
-            )
-            final_content = grounded_response.content
+            # H53 HARMONISATION (H66): only build the grounded re-query if
+            # web_search actually returned verified data. The pre-fix code
+            # emitted a "[SYSTEM: use the verified data" block even when the
+            # search returned empty / failed — that is the H53 fabrication
+            # bug. Suppress the entire block when there is nothing verified
+            # to inject. The original (potentially hallucinated) response
+            # stands; the guard's purpose was to catch the hallucination, but
+            # we cannot fix it with data we do not have.
+            if search_result.success and search_result.result:
+                # Build grounding context and re-query AI with verified data
+                tool_summary = f"[web_search] Result:\n{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
+                grounded_messages = list(messages)
+                grounded_messages.append(AIMessage(role="system", content=(
+                    "You must answer using only the verified web search data below. "
+                    "Do not fall back to training data. Cite sources from the search results.\n\n"
+                    f"{tool_summary}\n\nQuestion: {request.message}"
+                )))
+                grounded_response = await ai_router.chat(
+                    grounded_messages, model=model, desk=request.desk,
+                    system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools
+                )
+                final_content = grounded_response.content
 
         # Guard: Structured uncertainty fallback for low-confidence/hypothetical questions
         if should_defer_uncertain(request.message):
