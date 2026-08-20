@@ -2751,21 +2751,27 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                     tool_summary_parts.append(f"[{r['tool']}] Error: {r.get('error', 'Unknown')}")
             tool_summary = "\n\n".join(tool_summary_parts)
             if any(r.get("tool") in ACTION_TOOLS and r.get("success") for r in round_results):
+                # H53 HARMONISATION: dropped the leading "[SYSTEM: " prefix
+                # and rephrased as a plain instruction — the role="user"
+                # below moves the whole scaffolding onto the system channel.
                 tool_summary += (
-                    "\n\n[SYSTEM: Task identity rule — if you mention a task/delegation id, "
+                    "\n\nTask identity rule — if you mention a task/delegation id, "
                     "use only task_id/openclaw_task_id from the current tool result above. "
-                    "Never use IDs from session handoff, active task state, or prior history.]"
+                    "Never use IDs from session handoff, active task state, or prior history."
                 )
 
             is_last_round = _tool_round >= 2
             followup_instruction = (
-                "[SYSTEM: Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks.]"
+                "Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks."
                 if is_last_round else
-                "[SYSTEM: Tool results below. You may call additional tools if needed to complete the task, or give a final answer.]"
+                "Tool results below. You may call additional tools if needed to complete the task, or give a final answer."
             )
 
             loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_response.content)))
-            loop_messages.append(AIMessage(role="user", content=f"{followup_instruction}\n\n{tool_summary}"))
+            # H53 HARMONISATION: this combined message was role="user" with a
+            # "[SYSTEM: ...]" prefix. Same shape as the pre-search guard fixed in
+            # e9c18cc. Tool-result scaffolding goes on the system channel.
+            loop_messages.append(AIMessage(role="system", content=f"{followup_instruction}\n\n{tool_summary}"))
 
             current_response = await ai_router.chat(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools)
             # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
@@ -3503,21 +3509,28 @@ async def chat_stream(request: ChatRequest):
                 tool_summary = "\n\n".join(tool_summary_parts)
                 round_results_dicts = normalize_tool_results(round_results)
                 if any(r.get("tool") in ACTION_TOOLS and r.get("success") for r in round_results_dicts):
+                    # H53 HARMONISATION (e9c18cc + this commit): dropped the
+                    # leading "[SYSTEM: " prefix and rephrased as a plain
+                    # instruction. The role="user" below moves the whole
+                    # scaffolding onto the system channel.
                     tool_summary += (
-                        "\n\n[SYSTEM: Task identity rule — if you mention a task/delegation id, "
+                        "\n\nTask identity rule — if you mention a task/delegation id, "
                         "use only task_id/openclaw_task_id from the current tool result above. "
-                        "Never use IDs from session handoff, active task state, or prior history.]"
+                        "Never use IDs from session handoff, active task state, or prior history."
                     )
 
                 is_last_round = _tool_round >= 2
                 followup_instruction = (
-                    "[SYSTEM: Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks.]"
+                    "Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks."
                     if is_last_round else
-                    "[SYSTEM: Tool results below. You may call additional tools if needed to complete the task, or give a final answer.]"
+                    "Tool results below. You may call additional tools if needed to complete the task, or give a final answer."
                 )
 
                 loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_text)))
-                loop_messages.append(AIMessage(role="user", content=f"{followup_instruction}\n\n{tool_summary}"))
+                # H53 HARMONISATION: role="user" with "[SYSTEM: ...]" prefix was
+                # structurally identical to the H53 replay block and the
+                # pre-search guard. Scaffolding goes on the system channel.
+                loop_messages.append(AIMessage(role="system", content=f"{followup_instruction}\n\n{tool_summary}"))
 
                 yield f"data: {json.dumps({'type': 'text', 'content': chr(10) + chr(10)})}\n\n"
                 followup_text = ""
