@@ -37,6 +37,7 @@ installed unit patched and daemon-reloaded.
 | 6 | env vars from drop-in vs hardcoded defaults | MAX provider selection | env wins; re-audit owed |
 | **7** | **`systemd/empire-backend.service` has `StandardError=journal`** | **`~/.config/systemd/user/empire-backend.service` had no `StandardError=` line → stderr inherited → unjournaled** | **installed unit patched 2026-08-20; daemon-reload + restart confirmed** |
 | **8** | **`tool_executor.py:_git_ops` should resolve canonical root** | **H57 Phase 3 fix routed most paths through `resolve_canonical_root()`, but `_git_ops` was missed — `repo = os.path.expanduser("~/empire-repo")` (stale fork).** | **`tool_executor.py:_git_ops` rewritten to use the canonical resolver 2026-08-20; also added `empty` / `truncated` markers on success-with-empty-output per dispatch principle C.** |
+| **9** | **`system_prompt.py` identity section said `Code: ~/empire-repo/`** | **H57 Phase 3 made runtime paths canonical-root-aware, but the prompt BODY hardcoded the stale fork as MAX's identity.** | **`system_prompt.py:get_system_prompt()` now substitutes `Code: {canonical_repo_root}` where `canonical_repo_root` comes from `resolve_canonical_root()`.** |
 
 Doctrine rule 5 ("One source per fact") extends to: the SOURCE-OF-RECORD
 must be the source-of-force. A repo unit file that no reinstall ever
@@ -57,6 +58,17 @@ mismatch did not change the result; confirmed by re-running under
 Stage 3 onward, the canonical venv is the only one used for testing.**
 Not a new H61 instance — same interpreter, same config class
 (repo-or-installed drift), just at a different layer.
+
+**H61 historical correction (2026-08-20, post-H52-Phase-2):** On
+2026-08-19, MAX proposed reading from `~/empire-repo/` and, asked
+where the belief came from, honestly said he did not know. THIS
+STRING IS WHERE IT CAME FROM — `system_prompt.py:428`
+hardcoded `Code: ~/empire-repo/ | 18 desks | 39 tools | 22 products |
+536 commits | $50/mo AI budget.` in MAX's identity section. **He was
+reporting what he was told. The diagnosis that he was confabulating
+was wrong.** He inferred the belief from a system prompt that was
+itself wrong (H57 Phase 3 missed the prompt body). The fix at instance
+9 brings the prompt body into alignment with the runtime.
 
 ### **H62** · `shell_execute` PIN-gate has no working unlock surface — code tasks cannot run shell on this lane
 

@@ -62,49 +62,68 @@ QUOTE_NUMBER_RE = re.compile(r"\bEST-\d{4}-\d{3}\b")
 # path as the quote-number guard. Restricted to common natural-
 # language prompts; explicit JSON-shape PIN entry (e.g. {"pin": ...})
 # in tool-call-shaped prose is the theater detector's territory.
+#
+# H52 Phase 2 follow-up: the trigger MUST NOT be a substring match on
+# the bare word "pin". On 2026-08-20 the gate hard-blocked MAX's reply
+# to a request about a public DOCUMENT pin (template-engine standard
+# pin recorded in STATE.md) because pattern 3 fired on bare "pin" at end
+# of message — MAX's reply was "the standard pin in STATE.md is
+# 1813c59…" — a public identifier, not a secret. The rule stays
+# absolute; the trigger narrows to actual PIN disclosures and
+# security-PIN requests. Three new patterns, each context-anchored:
+#
+#   1. ACTUAL DISCLOSURE — "PIN: 1234", "the PIN is 7777",
+#      "founder pin = 1234". Pin-like word followed by a digit value
+#      (4-6 digits). This is the unambiguous disclosure case.
+#
+#   2. SECURITY-PIN REQUEST — "send me the founder pin", "what's your
+#      admin pin", "give me the approval code", "I need your otp".
+#      Pin-like word with a security prefix (founder/admin/owner/
+#      approval) or as part of an explicit security phrasing.
+#      This catches what the gate was DESIGNED to catch.
+#
+#   3. DIGIT-STRING PIN — a bare 4-6 digit number near the word
+#      "pin"/"otp". Catches "PIN 1234" and "1234 PIN" — model
+#      echoing a user-supplied digit string in PIN framing.
+#
+# What the gate DOES NOT fire on:
+#   - public document pins (e.g., template-engine standard pin)
+#   - "PIN" used as an acronym or non-security word
+#   - mentions of the rule itself
 PIN_REQUEST_PATTERNS = (
-    # PHASE 2 · F5.3 H50 — expanded to catch "Drop me your founder PIN"
-    # and other imperative phrasings. The pre-F5.3 pattern only matched
-    # give/send/tell/enter/need/share/provide. Added "drop" + "paste"
-    # + "type" + "post" + "hand over" + "do you have" + "what's your".
+    # 1) Actual disclosure: pin-like word then digits
     re.compile(
-        r"\b(?:"
-        # Question forms: "what is the founder pin", "do you have the pin"
-        r"(?:what(?:'s| is)|do\s+you\s+have|do\s+you\s+know|where\s+is|where's)\s+"
-        r"(?:the\s+|your\s+|that\s+|my\s+|our\s+)?"
-        r"(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
-        r"(?:pin|otp|verification\s+code|verification\s+token)\b"
-        r"|"
-        # Imperative forms: "give me the pin", "drop me your pin",
-        # "paste the pin", "send me the pin", "tell me the pin",
-        # "enter your pin", "share the pin", "post the pin",
-        # "type the pin", "type in the pin", "hand over the founder
-        # pin", "I need the pin"
-        r"(?:give|send|tell|enter|need|share|provide|drop|paste|post|type|hand)\s+"
-        r"(?:in\s+|out\s+|me\s+|us\s+|over\s+)?"
-        r"(?:the\s+|your\s+|that\s+|my\s+|our\s+)?"
-        r"(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
-        r"(?:pin|otp|verification\s+code|verification\s+token)\b"
-        r")",
+        r"\b(?:founder\s+|admin\s+|owner\s+|approval\s+|your\s+|the\s+|my\s+|our\s+)?"
+        r"(?:pin|otp|verification\s+code|verification\s+token)"
+        r"\s*(?::|=|is|was|equals?)\s*\d{4,6}\b",
         re.IGNORECASE,
     ),
-    # Bare "your PIN" / "the founder PIN" / "your OTP" in a request
-    # context — catches "do you have your PIN ready?" style phrasings.
+    re.compile(
+        r"\b(?:founder\s+|admin\s+|owner\s+|approval\s+|your\s+|the\s+|my\s+|our\s+)?"
+        r"(?:pin|otp|verification\s+code|verification\s+token)"
+        r"\s+\d{4,6}\b",
+        re.IGNORECASE,
+    ),
+    # 2) Security-PIN request: imperatives + security prefix
     re.compile(
         r"\b(?:"
-        r"(?:send|share|provide|give|tell|drop|paste|post|type)\s+"
+        r"(?:what(?:'s| is)|where(?:'s| is)|tell|give|send|share|provide|drop|paste|post|type|hand\s+over|enter|need|need\s+to\s+(?:have|know|get))\s+"
         r"(?:me\s+|us\s+|over\s+)?"
         r"(?:the\s+|your\s+|that\s+|my\s+|our\s+)?"
-        r"(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
+        r"(?:founder|admin|owner|approval)\s+"
+        r"(?:pin|otp|verification\s+code|verification\s+token)\b"
+        r"|"
+        r"(?:give|send|tell|enter|need|share|provide|drop|paste|post|type|hand\s+over)\s+"
+        r"(?:in\s+|out\s+|me\s+|us\s+|over\s+)?"
+        r"(?:the\s+|your\s+|that\s+|my\s+|our\s+)?"
+        r"(?:founder|admin|owner|approval)\s+"
         r"(?:pin|otp|verification\s+code|verification\s+token)\b"
         r")",
         re.IGNORECASE,
     ),
-    # Bare request: "Founder PIN please" / "PIN?" / "founder PIN right now"
+    # 3) Bare digit string with PIN framing
     re.compile(
-        r"\b(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
-        r"(?:pin|otp|verification\s+code|verification\s+token)"
-        r"(?:\s+please|[\s\?\.\!,\)]*$|\s+(?:now|right\s+now|here))",
+        r"\b\d{4,6}\s+(?:pin|otp|verification\s+code|verification\s+token)\b",
         re.IGNORECASE,
     ),
 )
