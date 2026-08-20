@@ -420,7 +420,10 @@ async def _request_code_response(
     )
     task.provider_used = _infer_provider_from_model(response.model_used) or provider_hint
     task.model_used = response.model_used
-    task.supports_tool_calls = bool(response.function_calls) if response.function_calls is not None else supports_native_tools
+    # F1 — supports_tool_calls is NOT set here. The scorer lives in _execute
+    # so it can read the parsed tool_calls (native + parse_tool_blocks merge),
+    # not the raw provider field. Two places deciding the same fact was the
+    # bug; one source of truth — the parser — replaces both.
     return response
 
 
@@ -754,7 +757,13 @@ class CodeTaskRunner:
                 selected_model, provider_hint, supports_native_tools = _select_code_model()
                 task.provider_used = provider_hint
                 task.model_used = selected_model.value if selected_model else None
-                task.supports_tool_calls = supports_native_tools
+                # F1 — supports_tool_calls is NOT set here from
+                # supports_native_tools. It is set after parsing (below), from
+                # the merged tool_calls list, so the scorer reads the parsed
+                # result. Pre-fix the same field was set twice — once from
+                # the raw provider field (line 423 / now removed) and once
+                # from supports_native_tools (this line, now removed) — and
+                # both disagreed with the parser for JSON-only responses.
                 response = await asyncio.wait_for(
                     _request_code_response(
                         prompt,
@@ -791,6 +800,13 @@ class CodeTaskRunner:
                 # F2 — capture what the model actually returned and what the
                 # parser saw, so any subsequent failure path can persist it.
                 _capture_response_evidence(task, response, tool_calls)
+
+                # F1 — single source of truth. The scorer reads the PARSED
+                # RESULT, not the raw provider field. A model that returns
+                # valid JSON in format 2 or 3 has response.function_calls == None
+                # but a non-empty tool_calls list from parse_tool_blocks; that
+                # is the answer, not a fallback to supports_native_tools.
+                task.supports_tool_calls = bool(tool_calls)
 
                 # No tool calls = Atlas is done
                 if not tool_calls:
