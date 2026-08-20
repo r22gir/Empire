@@ -15,6 +15,13 @@ Tests:
   - NEGATIVE FIXTURE: literal "~/empire-repo/claude/DISPATCH_2026-08-17_drapery_r3.md"
     (the exact path MAX proposed) must be refused.
   - Write through quotes.py lands in the canonical tree.
+
+# Stale-fixture register moved to claude/BACKLOG.md (H57 Phase 3 stub).
+# The 5 named files (test_canonical_pricing_engine.py,
+# test_dev_git_runtime_truth.py, test_drawing_flow_wiring_hotfix4_0.py,
+# test_openclaw_worker.py, test_payments_webhook_fail_closed.py)
+# plus "others in backend/tests/ that hardcode the path" are tracked
+# there, NOT here.
 """
 from __future__ import annotations
 
