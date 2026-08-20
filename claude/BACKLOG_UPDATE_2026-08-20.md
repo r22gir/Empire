@@ -44,6 +44,19 @@ the install / refresh procedure copies the repo unit file over the
 installed one, or symlinks. This is logged here so the regression
 class is visible.
 
+**H61 hygiene note (2026-08-20, post-Stage-2):** Same interpreter
+(`/usr/bin/python3`), two venvs. The stale fork at
+`~/empire-repo/backend/venv` lacks pdfplumber / pdfminer.six /
+pypdfium2 entirely and has older pillow / primp. Stage 1 + Stage 2
+verification ran via `/home/rg/empire-repo/backend/venv/bin/python3`
+against `~/empire-repo-main` sources — the interpreter is the same but
+the site-packages set is not. F1 fixtures are pure logic, so the
+mismatch did not change the result; confirmed by re-running under
+`~/empire-repo-main/backend/venv/bin/python3` — 5/5 still pass. **From
+Stage 3 onward, the canonical venv is the only one used for testing.**
+Not a new H61 instance — same interpreter, same config class
+(repo-or-installed drift), just at a different layer.
+
 ### **H62** · `shell_execute` PIN-gate has no working unlock surface — code tasks cannot run shell on this lane
 
 Found via task 7378 during Stage 1 live verification. The model
