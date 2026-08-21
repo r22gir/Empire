@@ -82,7 +82,8 @@ def assemble(spec: JobSpec) -> BuildResult:
         return _delegate(spec)
 
     builder = BODY_BUILDERS["measurement_set"]
-    placed_global: List = []     # Amendment 5: draw-time bboxes
+    placed_global: List = []     # Amendment 5: draw-time bboxes (per-sheet
+                                 # accumulators extend this in place)
     total = len(spec.rooms) + 2  # cover + rooms + schedule
 
     # Rev singularity check (Section 4 rule 6)
@@ -90,22 +91,31 @@ def assemble(spec: JobSpec) -> BuildResult:
     if not rev:
         raise SpecIncomplete(missing=["rev (single stamp across set)"])
 
-    # Build each sheet with a SHEET-SCOPED placed accumulator
-    # (per the P1-T·c builder-interface ruling: pure builders, no
-    # module-global state).
+    # Build each sheet. Each builder returns (svg, placed) where
+    # `placed` is the per-sheet bboxes. assemble.py extends the
+    # shared `placed_global` so the gates see the real data.
+    # (Pre-P1-T·c the builders were called with `[]` and the local
+    # placed lists were lost; the gates ran on an empty list and
+    # trivially passed. This was a real defect — a "passing" suite
+    # that wasn't actually checking anything.)
     sheets: List[str] = []
-    for fn_name, fn in (
-        ("cover", builder["cover"]),
-        ("schedule_sheet", builder["schedule_sheet"]),
-    ):
-        # Schedule sheet's index is `total` (last sheet).
-        sheet_svg = fn(spec, total, total, [])
-        sheets.append(sheet_svg)
-    # (Room sheets are between cover and schedule; assemble in order)
-    # We re-collect room sheets separately to interleave them.
+
+    def _build_sheet(name: str, fn) -> None:
+        svg, placed = fn(spec, total, total, placed_global)
+        sheets.append(svg)
+        # `placed` is `placed_global` itself (mutated in place by
+        # the builder via list.extend). No additional action needed —
+        # the builder already extended it.
+
+    _build_sheet("cover", builder["cover"])
+    _build_sheet("schedule_sheet", builder["schedule_sheet"])
+
     room_svgs = []
     for n, r in enumerate(spec.rooms, start=2):
-        room_svgs.append(builder["room_sheet"](spec, r, n, total, []))
+        svg, placed = builder["room_sheet"](spec, r, n, total, placed_global)
+        room_svgs.append(svg)
+        # same — `placed` is `placed_global`, mutated in place.
+
     # Re-order: cover, room1..roomN, schedule.
     cover_svg = sheets[0]
     schedule_svg = sheets[1]
@@ -127,7 +137,10 @@ def assemble(spec: JobSpec) -> BuildResult:
         buf.seek(0)
         w.add_page(PdfReader(buf).pages[0])
 
-    # Run gates on the placed list (Amendment 5)
+    # Run gates on the placed list (Amendment 5). placed_global has
+    # been extended by every body builder as it ran. If the gates
+    # pass, that means the actual bboxes pass. If they fail, that
+    # means the actual build is broken.
     gate_report: List[tuple] = []
     from app.presentation.template.gates import (
         gate_bounds, gate_collisions,

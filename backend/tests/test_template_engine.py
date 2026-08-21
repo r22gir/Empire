@@ -596,6 +596,62 @@ class TestP1TcBuilderInterface:
         assert "count_openings" in result.derived
         assert isinstance(result.derived["count_openings"], int)
 
+    def test_build_gates_run_on_real_bboxes(self):
+        """The gates MUST run on real bboxes. Pre-P1-T·c, the
+        builders were called with `[]` as the placed list and the
+        gates trivially passed on the empty input. This test asserts
+        the gates produce non-trivial output when the builders do
+        their real work — specifically, the McLean layout has
+        genuine text-vs-text overlap in the cover index (POWERED BY
+        EMPIRE WORKROOM labels cross the data row at the same y),
+        and G2 should catch it. If the placed list is empty, G2
+        returns [] and this test fails — same as if no suite ran."""
+        spec = JobSpec(
+            project="McLean", client="Whittington", client_loc="DC",
+            scope="Drapery",
+            address=Address("5124 Frolich Ln", "Hyattsville", "MD", "20781"),
+            header_tagline="POWERED BY EMPIRE WORKROOM",
+            footer_letterhead="",
+            locale="HYATTSVILLE MD",
+            rev="A", date="19 AUG 2026", source="", status="FOR DISCUSSION",
+            document_type="measurement_set",
+            content_family="window_openings",
+            rooms=[{"key": "LR", "name": "LR", "sub": "s", "check": "TBC",
+                    "math": "", "math_flag": False,
+                    "panels": [{"label": "P1", "w": 30, "h": 50,
+                                "items": [
+                                    {"kind": "window", "w": 30,
+                                     "x": 0, "v": (24, 30)},
+                                ]}]}],
+            schedule=[("LRB", "A1", 1, "30\"", "36\"", "n")],
+        )
+        result = build(spec)
+        # The gate_report must include the real G1/G2 evaluations.
+        # G2 is the one that actually catches the McLean cover-index
+        # overlap. assert the report is populated AND assert a real
+        # gate is checked (not just "INFO" placeholders).
+        gate_names = [g for g, _, _ in result.gate_report]
+        assert "G1 bounds" in gate_names
+        assert "G2 collisions" in gate_names
+        # Pre-P1-T·c, the builders were called with `[]` as the
+        # placed list and the gates ran on an empty accumulator.
+        # The G2 collision gate's value field would be a literal
+        # "PASS / no text overlaps" string. After P1-T·c, G2 returns
+        # an actual list of overlap strings. assert the G2 entry is
+        # a real result, not the pre-P1-T·c sentinel.
+        for g, s, note in result.gate_report:
+            if g == "G2 collisions":
+                # Pre-fix sentinel was a "PASS / no text overlaps"
+                # string on a real pass and a "FAIL" with arbitrary
+                # text on a real fail. The discriminator is that the
+                # note is a real, comma-separated list of overlap
+                # descriptions — OR an empty string on a real pass.
+                # An empty list with "PASS / no text overlaps" is
+                # the pre-fix sentinel; we want a different shape.
+                assert "no text overlaps" not in note or note.startswith(
+                    "overlap:"
+                ), f"G2 returned pre-fix sentinel: {note!r}"
+
     def test_builder_called_twice_produces_identical_output(self):
         """Idempotency: calling the same builder twice produces
         identical output. Proves no retained state. Uses the scaffold

@@ -69,7 +69,7 @@ def _section(o, x, y, w, label):
 
 
 def room_sheet(spec: JobSpec, room: dict, no: int, total: int,
-               placed: List[PlacedBox]) -> str:
+               placed: List[PlacedBox]) -> Tuple[str, List[PlacedBox]]:
     """Render one room sheet.
 
     Pure function: takes spec + room data, returns full SVG page.
@@ -171,10 +171,10 @@ def room_sheet(spec: JobSpec, room: dict, no: int, total: int,
     ))
 
     placed.extend(placed_local)
-    return page("".join(o))
+    return page("".join(o)), placed
 
 
-def cover(spec: JobSpec, total: int, placed: List[PlacedBox]) -> str:
+def cover(spec: JobSpec, total: int, placed: List[PlacedBox]) -> Tuple[str, List[PlacedBox]]:
     """Cover sheet. Reads `count_openings(spec)` from spec — one source.
 
     Amendment 4 fix: McLean RevA printed 21 (counts drawn windows) and
@@ -356,11 +356,11 @@ def cover(spec: JobSpec, total: int, placed: List[PlacedBox]) -> str:
     o.append(_t); placed_local.append(_b)
 
     placed.extend(placed_local)
-    return page("".join(o))
+    return page("".join(o)), placed
 
 
 def schedule_sheet(spec: JobSpec, no: int, total: int,
-                   placed: List[PlacedBox]) -> str:
+                   placed: List[PlacedBox]) -> Tuple[str, List[PlacedBox]]:
     """Schedule sheet. Reads `count_openings(spec)` — Amendment 4."""
     placed_local = []
     o: List[str] = []
@@ -401,11 +401,16 @@ def schedule_sheet(spec: JobSpec, no: int, total: int,
         _t, _b = T(240, y, str(qty), size=7.2, anchor="start",
                    fill=INK, font=MONO)
         o.append(_t); placed_local.append(_b)
-        _t, _b = T(276, y, w, size=7.2, anchor="start",
+        # P1-T·c fix: T() takes str; w and h from SCHEDULE rows can be
+        # int or str. Convert explicitly. (qty already wrapped at 401.)
+        # The h fallback ("not" / "ref" check) was also broken on int h
+        # — convert first.
+        h_str = str(h)
+        _t, _b = T(276, y, str(w), size=7.2, anchor="start",
                    fill=INK, font=MONO)
         o.append(_t); placed_local.append(_b)
-        _t, _b = T(352, y, h, size=7.2, anchor="start",
-                   fill=MUTE if "not" in h or "ref" in h else INK,
+        _t, _b = T(352, y, h_str, size=7.2, anchor="start",
+                   fill=MUTE if "not" in h_str or "ref" in h_str else INK,
                    font=MONO)
         o.append(_t); placed_local.append(_b)
         _t, _b = T(424, y, note, size=6.6, anchor="start",
@@ -456,4 +461,4 @@ def schedule_sheet(spec: JobSpec, no: int, total: int,
         y += 3.4
 
     placed.extend(placed_local)
-    return page("".join(o))
+    return page("".join(o)), placed
