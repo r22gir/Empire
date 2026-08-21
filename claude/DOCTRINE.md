@@ -1,6 +1,7 @@
 # DOCTRINE.md — how work is done at EmpireBox
 
-**Written 2026-08-19.** Every rule here was paid for. Where a rule has a
+**Written 2026-08-19. Revised 2026-08-20 (v2) — five rules added, all earned
+in one day.** Every rule here was paid for. Where a rule has a
 scar, the scar is named — a rule whose cost is forgotten gets discarded by
 the next person who finds it inconvenient.
 
@@ -38,6 +39,19 @@ Reporting that a file was checked is not checking it. A hash in a commit
 message is not discoverable — nobody greps git log to learn whether the file
 on disk is right. Record it where a reader will look.
 
+**5b. When a model behaves badly, check what it was given before concluding
+what it is.**
+On 2026-08-20, six separate layers were found sitting between the founder and
+MAX, each silently deciding what he could see, say or do: a prompt selector
+that stripped the entire tool roster, four sites injecting `[SYSTEM:]`
+scaffolding on the user channel, and a router that rewrote `file_read` into a
+desk task. **Every one first looked like the model being unreliable. None of
+them was.** He was reasoning correctly on inputs that were blinded, rewritten
+or forged upstream — and refusing to fabricate throughout.
+The corollary: a diagnosis of "the model is confused" is the *last* one to
+reach, not the first. On 8/19 MAX was judged to be confabulating a repo path;
+the path was a literal string in his system prompt.
+
 ---
 
 ## II · TESTS AND GATES
@@ -63,6 +77,22 @@ message carrying SEAT HEIGHT and BACK HEIGHT was rejected for lacking a plain
 input being refused; the template was wrong, not the fixture. **A fixture
 edited until it passes proves nothing.**
 
+**9b. A gate that measures by approximation will invent defects and hide real
+ones.**
+G2 reported 25 text collisions on a McLean-shaped spec. Three rounds went into
+triaging them, fixing a layout, and tuning a tolerance. One crop of the raster
+showed no text touching any other text: the chrome `T()` y-bbox
+over-estimates glyph height by ~7pt and was inventing overlaps across 300pt of
+page. Nine "real" defects were one measurement bug.
+Before trusting a gate, verify what it measures against the artifact itself.
+And a tolerance that exists to absorb a measurement error must say so in the
+source, or the next reader will treat it as a design value.
+
+**9c. A total is not a defect list.**
+Named items are closed by name, from one run, or they are not closed. Across
+three reports the count moved 25 → 39 → 16 while the actual defect picture
+stayed unknown. "The number went down" is not a fix.
+
 **10. Verify live, not only in tests.**
 Unit tests on a classifier do not prove the door behaves. Show the actual
 transcript through the real interface.
@@ -83,6 +113,22 @@ Every recurring failure in this repo is one path shadowing another: three
 quote stores, legacy JSON routers behind portal buttons, tool-layer lookups
 bypassing canonical, two `DRAWING_KEYWORDS` lists. When a new surface needs a
 capability, it calls the existing layer.
+
+**12b. Never let two places decide the same fact.**
+The parser honoured three response formats; the scorer read only
+`response.function_calls`. They disagreed, and the disagreement was invisible
+because only one was consulted — **106 days of dead code execution, 5,931
+failures.** The same shape appeared three more times in two days:
+`ALLOWED_ROOTS` versus the canonical resolver, the status banner versus the
+model's context, and `git_ops` versus `runtime_truth_check` on what HEAD is.
+When two paths compute one fact, they agree only by accident.
+
+**12c. Substring matching must never decide what a model may see or say.**
+Four instances in three days: the drawing router intercepting on "drawing"
+(and on *withdrawing*), a 40-keyword selector routing turns to a prompt with
+no tool roster, a PIN gate firing on the word "pin" in "standard pin", and a
+second keyword list in the background worker. Route on intent, and when
+uncertain, pass the question to the model rather than answering it for them.
 
 **13. Nothing typed twice — but agreement is not duplication.**
 Three rooms independently measuring 110¼" is data; collapsing them would be
@@ -124,6 +170,15 @@ document exists to surface exactly that.
 **20. Never present a screen image as a colour of record.**
 A fetched fabric swatch is labelled REFERENCE IMAGE — NOT A COLOUR MATCH.
 
+**20b. An interface must never render a model's claim in the same visual
+language as a verified fact.**
+The chat UI parses `{"tool": ...}` blocks out of the model's own response text
+and renders each as a tool card — identically whether it executed, failed, or
+was never dispatched. On 2026-08-20 MAX wrote five tool calls he never made;
+the footer showed all five as attempted, and both the founder and strategic
+Claude read it as evidence he had tried. The `Verified` badge has the same
+defect: it means "the tool call returned success", not "the data is current".
+
 **21. A failure must be visible as a failure.**
 A blank where a swatch belongs is worse than a label, because the reader
 cannot tell absence from failure. Print "NOT SUPPLIED".
@@ -133,6 +188,16 @@ cannot tell absence from failure. Print "NOT SUPPLIED".
 ## V · WORKING
 
 **22. Single lane. One dispatch per session.**
+
+**22b. A failure path that discards the evidence guarantees the failure
+survives.**
+`task.result` was set in exactly one place — the happy path. Every one of six
+failure branches recorded a verdict and threw away the model's actual
+response. 5,931 rows said *what* failed and none said *why*, and the bug lived
+three months in plain sight. Persist what you saw, not only what you
+concluded. The same rule applies to logs: nine `logger.error` calls emitted
+nothing for months because the installed unit was missing
+`StandardError=journal`.
 
 **23. Every 🛑 report lands in `reports/` and in git.**
 Sessions are disposable. The repo and the project are the memory.
