@@ -490,3 +490,59 @@ Live verification: probe 3 with bare phrasing "read STATE.md and tell
 me the current standard pin" — `file_read` reached `file_read`
 directly (3× in some runs), the pin `1813c59043b7b05f87626dd4e66a3487`
 is in the tool result.
+
+### **H69** · Tool-card footer overstates execution status (OPEN — display bug, clear correct answer)
+
+**Same class as the ✅ Verified badge on stale output:** a UI element
+the founder reads as system verification, which is actually reporting
+something weaker.
+
+`empire-command-center/app/components/screens/ChatScreen.tsx:12-26`
+defines `parseToolBlocks(content)` which extracts `{"tool": "X", ...}`
+JSON objects from the model's RESPONSE TEXT and returns them as
+`toolCalls`. The display loop at `ChatScreen.tsx:660-668` then renders
+each as `<div>Tool: {tc.tool}</div>` — **with no execution signal
+whatsoever**. A tool card rendered from this loop is identical
+whether the call was executed, whether it failed, or whether it was
+parsed-but-never-dispatched.
+
+This is what happened on the H68 turn at 19:11:02. The model emitted
+five tool blocks in its fabricated task brief — `git_ops`,
+`shell_execute`, `file_read`, `file_read`, `shell_execute`. The
+frontend parsed them and displayed them as five "Tool: X" cards. The
+backend crashed at `router.py:2677` (H67) before any of those calls
+reached `execute_tool`. **None of them executed.** The footer presented
+the model's hallucinated workflow as if it were real activity. The
+founder read that footer as evidence MAX had tried to read the file.
+So did I. Both of us were reading the model's own claim, rendered as
+if it were system truth.
+
+**Required fix shape** (not applied — log only):
+
+- A tool card must be distinguishable as `executed` / `failed` /
+  `parsed-but-never-dispatched`. The card's data source must be
+  `msg.tool_results` (executed list) cross-referenced with the parsed
+  `toolCalls` (attempted list), not the parsed `toolCalls` alone.
+- When a stream error aborts a round (e.g., H67's UnboundLocalError),
+  the assistant message must say so. Currently the partial text
+  renders as though the round completed.
+
+**Note together with the ✅ Verified badge** (noted earlier in
+this backlog). Two display elements that overstate their own
+certainty:
+- The `✅ Verified` badge means "tool ran successfully", not "data
+  is current". The founder reads it as the second.
+- The "Tool: X" card means "model emitted this in its response",
+  not "the call was executed". The founder reads it as the second.
+
+Both are reading amplification bugs. Both should be fixed. Neither is
+in this lane. **Per directive: log only, not patched tonight.**
+
+The fix is straightforward — a tool card that can render in three
+states (executed / failed / parsed-never-dispatched) is a small UI
+change, and an error banner on the assistant message when a stream
+error occurs is even smaller. Neither requires a founder decision;
+both have an obvious correct answer. **Not in this lane** per
+directive; logged for the next maintenance window.
+
+P1-T·c is next unless the founder says otherwise.
