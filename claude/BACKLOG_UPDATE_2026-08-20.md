@@ -553,8 +553,8 @@ cover. The pattern was the same: two text strings at adjacent y
 positions in the chrome (e.g. "01" badge at yy=152 next to "McLean"
 HOUSE row value at y=184), the gate flags them as overlapping by
 **1.2pt-7pt** because `chrome.T` computes bbox height as
-`size × (0.78 + 0.24) = size × 1.02`. The 0.78 descender factor +
-0.24 ascender factor is the *empirical* font-height multiplier; it
+`size × (0.78 + 0.24) = size × 1.02`. The 0.78 ascender factor +
+0.24 descender factor is the *empirical* font-height multiplier; it
 overestimates height by 0.3-1.0pt for sans-serif at small sizes,
 which is enough to bridge the 0.5-2pt gap between adjacent y rows.
 
@@ -564,7 +564,7 @@ case (y≈70 vs y≈380), the chrome T()'s bbox over-estimates by
 [y-20.28, y+6.24] at size 26, so y range is 26.52pt. The OPEN
 BEFORE-QUOTING header's bbox is ~7pt. The actual y positions are
 310pt apart, but the gate reports "4.3pt overlap" because the
-chrome T()'s 0.78 descender factor on a 7pt string gives a bbox
+chrome T()'s 0.78 ascender factor on a 7pt string gives a bbox
 that extends UP 5.5pt, reaching into the McLean title's bbox.
 
 The fix is per-class tolerance (option 2, ruled in the dispatch):

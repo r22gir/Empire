@@ -151,14 +151,22 @@ supervised; Hermes `:8787` never stopped. Kernel pinned 6.8.0-31. Disk 72%.
 browser lockout and both founder addresses together, and returned them together.
 **E1 two-way email is unblocked; `check_inbox` has still never been tested live.**
 
-## DOCUMENT TEMPLATE ENGINE (P1-T) — PAUSED AT ·c
+## DOCUMENT TEMPLATE ENGINE (P1-T) — IN MOTION, at ·d
 Standard pin **`1813c59043b7b05f87626dd4e66a3487`** (`e0035b4`), 8 amendments.
 Layers separated, G5 catches the McLean 21-vs-22 split with a committed fixture.
-**Untouched since 8/19 afternoon.**
-Two founder corrections stand: **MAX is one door among several** (the engine is
-a service layer), and **job media carries forward** intake → quote → invoice.
-Whether the camera writes to the same canonical store as LuxeForge intake is
-**still unverified** and outranks the rest if wrong.
+**H57 Phase 2 closed** (`62c4741`, 2026-08-20). **P1-T·c closed** (`bceaa12` and
+`1c56eb0`, 2026-08-20). At ·d: chrome T() y-bbox over-estimates by ~7pt;
+H71 logged with the fix path (measure real glyph extent, not 0.78 × size).
+Gates have been live since `1c56eb0` — pre-fix they were running on an
+empty `placed_global`, which is why four rounds of tuning on 8/20
+appeared to change the gate number without changing any defect.
+Per-class chrome tolerance (8pt) shipped as a workaround at `b10af10`,
+not a design value; P1-T·d will reduce it once the y-bbox is fixed.
+Two founder corrections stand: **MAX is one door among several** (the
+engine is a service layer), and **job media carries forward** intake →
+quote → invoice. Whether the camera writes to the same canonical
+store as LuxeForge intake is **still unverified** and outranks the
+rest if wrong.
 
 ## LIVE CLIENT WORK — founder handles all client communication
 - **Bozzuto EST-2026-111 $8,599.60 APPROVED — unsent since 7/31.**
@@ -173,8 +181,10 @@ Whether the camera writes to the same canonical store as LuxeForge intake is
 gate, (c) change model, or (d) accept. Every other line below is a task;
 this one is the decision that scopes the rest of the handoff.
 
-1. **H57 Phase 2** finish (bench fixtures belong to H58 — do not edit to pass)
-2. **P1-T·c** builder interface — the M-lane depends on it
+~~1. **H57 Phase 2** finish (bench fixtures belong to H58 — do not edit to pass)~~
+   ✅ **CLOSED** at `62c4741` (2026-08-20).
+~~2. **P1-T·c** builder interface — the M-lane depends on it~~
+   ✅ **CLOSED** at `bceaa12` / `1c56eb0` (2026-08-20). P1-T is now at ·d.
 3. **H62** — `shell_execute` PIN-gated with no working unlock surface, reported
    three times; it partially re-blocks what code restoration opened
 4. **H61 install-path audit** — nine instances found, nobody has swept
@@ -185,6 +195,18 @@ this one is the decision that scopes the rest of the handoff.
 8. **Four hand-maintained tool registries** — same class as the two
    `DRAWING_KEYWORDS` lists
 9. **Re-run the audit test** — MAX reads the R3 dispatch and `fc42fe3` himself.
+10. **H69 · Tool-card footer** (display bug, clear answer): make tool
+    cards reflect executed / failed / parsed-never-dispatched state.
+    Same class as the ✅ Verified badge on stale output. **Not in
+    this lane**; obvious fix.
+11. **H70 · Per-class tolerance** (CLOSED, `b10af10`, 2026-08-20).
+    The 8pt chrome tolerance is a workaround for chrome T()'s
+    y-bbox over-estimation (H71), not a design value. Once H71
+    fixes the y-bbox, this tolerance should reduce.
+12. **H71 · chrome T() y-bbox** (P1-T·d, NOT in this lane). Replace
+    `0.78 × size` ascender factor with actual font ascender (PIL
+    metrics or font config). Once the y-bbox is correct, the
+    chrome tolerance can drop back toward 1.2pt.
    Answer key published before the test existed. **This is the handoff proof.**
 
 ## GOTCHAS

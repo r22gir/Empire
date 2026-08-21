@@ -43,6 +43,62 @@ the canonical resolver.
 trailing doc block with this list — REMOVED here (the list moves
 to this register; the test file no longer carries the register).
 
+## Document Template Engine (P1-T) — master status, 2026-08-21
+
+### G2 collision gate (synthesized portrait)
+
+- **G2 status as of 2026-08-21:** **LIVE** since commit `1c56eb0`
+  (2026-08-20). The gate has been reading real bboxes since the
+  `placed_local` → `placed_global` wiring fix in `assemble.py`.
+  Pre-`1c56eb0`, the gate ran on an empty accumulator (every gate
+  trivially passed) — **four rounds of tuning on 8/20 fixed that**.
+- **9 "REAL" entries from `reports/2026-08-20_g2_triage.md`:** all
+  closed by 2026-08-21. The triage's classification was by bbox
+  arithmetic, not by looking. After rasterising the cover at 150 DPI
+  and cropping the sheet-index region, none of the 9 were real
+  text-on-text overprints — they were a single root cause
+  (chrome T()'s y-bbox over-estimates by ~7pt).
+- **8pt chrome tolerance** at `gates.py:61` is a **workaround for
+  the chrome T() y-bbox measurement bug**, not a typographic
+  decision. Tagged in the source comment so nobody later treats it
+  as a considered design value.
+
+### Open items from 2026-08-20
+
+- **H68 · Model-side fabrication from filename + STATE.md cues**
+  (OPEN — founder decision, NOT a patch). 2026-08-20 19:11.
+  MAX fabricated a 10-file renderer list under a non-existent
+  directory. The fabrication is real (no `file_read` was ever
+  called) but the underlying cause is the model treating contextual
+  cues as proof. Four mitigation options in `claude/BACKLOG_UPDATE_
+  2026-08-20.md` H68. Founder's decision. **Not in this lane.**
+
+- **H69 · Tool-card footer overstates execution status** (OPEN —
+  display bug, clear correct answer). 2026-08-20. The footer
+  `parseToolBlocks` at `empire-command-center/.../ChatScreen.tsx:12`
+  extracts tool-call names from the model's RESPONSE TEXT, not from
+  the actual executed list. Founder read the footer as proof MAX
+  had tried to read the file. **Same class as the ✅ Verified badge
+  on stale output** — UI element overstating its own certainty. Not
+  in this lane.
+
+- **H70 · Per-class collision tolerance (CLOSED, shipped
+  `b10af10`)** — chrome (letterspaced header/footer, label/value
+  pairs) gets 8pt; body text keeps 1.2pt. Tagged in the source as
+  a workaround. Negative fixture proves the chrome tolerance does
+  not hide real body-text overprints.
+
+- **H71 · chrome T() y-bbox over-estimates height by ~7pt**
+  (OPEN — P1-T·d, NOT in this lane). The chrome T() function
+  estimates height as `size × 0.78 ascender + size × 0.24
+  descender = 1.02 × size`, when the real glyph extent is closer to
+  `0.65 × size`. The 0.78 ascender factor claims the ascender
+  extends ~78% of the way to the next line. Three rounds of
+  tuning were spent on a phantom because nobody cropped the raster
+  until asked. **Doctrine:** a gate that measures by approximation
+  will invent defects and hide real ones. Fix is to measure the
+  real glyph extent (PIL metrics or a font config). P1-T·d.
+
 ## Other deferred items (H57 Phase 3 follow-up)
 
 - `backend/app/services/max/self_heal.py:9` —
