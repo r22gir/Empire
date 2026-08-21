@@ -850,3 +850,34 @@ class TestH70PerClassTolerance:
             f"Two chrome strings with 2pt y-overlap should pass under "
             f"chrome tolerance (8pt). Got: {result}"
         )
+
+
+    def test_chrome_class_still_flags_genuine_chrome_on_chrome_overprint(self):
+        """CHROME-ON-CHROME NEGATIVE FIXTURE: two chrome strings that
+        genuinely overprint at > 8pt on both axes must STILL fail
+        under the chrome tolerance of 8pt. This is the fixture that
+        matters — the chrome tolerance was widened from 1.2pt to 8pt
+        to filter chrome-on-chrome line-height brushing. If two
+        chrome strings with a real overprint at 8.1pt pass, the
+        chrome tolerance is too wide and "largest value that
+        doesn't let real overprints through" is unproven.
+
+        Fixture: two chrome strings (size 10, ls=1.4 → cls="chrome")
+        at the same y position. The chrome T() bbox height is
+        size × 1.02 = 10.2pt, so two chrome strings at the same y
+        overlap 10.2pt in y. ox=40pt. Both axes > 8pt → gate FAILS.
+        """
+        from app.presentation.template.gates import gate_collisions
+        placed = [
+            (10.0, 100.0, 60.0, 110.2, "A", "chrome"),
+            (10.0, 100.0, 50.0, 110.2, "B", "chrome"),
+        ]
+        result = gate_collisions(placed)
+        assert len(result) == 1, (
+            f"CHROME-ON-CHROME NEGATIVE FIXTURE FAILED: two chrome "
+            f"strings (size 10) at the same y with ox=40pt and "
+            f"oy=10.2pt must fail the 8pt chrome tolerance. "
+            f"Got: {result}"
+        )
+        assert "A" in result[0]
+        assert "B" in result[0]
