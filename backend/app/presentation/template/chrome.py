@@ -63,7 +63,11 @@ SERIF = "DejaVu Serif"
 # pure builders, no module-global mutable state).
 #
 # The format mirrors the reference: (x0, y0, x1, y1, payload_string).
-PlacedBox = Tuple[float, float, float, float, str]
+PlacedBox = Tuple[float, float, float, float, str, str]
+# (x0, y0, x1, y1, payload, cls)
+# cls is "chrome" for letterspaced chrome text (header, footer,
+# section labels, label/value pairs) and "body" for non-letterspaced
+# body text. Per-class collision tolerance is enforced in the gates.
 
 
 # ══════════════════════════ PRIMITIVES �═══════════════════════════════════
@@ -86,10 +90,18 @@ def T(x: float, y: float, s: str,
      italic: bool = False,
      ls: float = 0.0,
      op: float = 1.0,
-     rot: Optional[int] = None) -> Tuple[str, Optional[PlacedBox]]:
+     rot: Optional[int] = None,
+     cls: Optional[str] = None) -> Tuple[str, Optional[PlacedBox]]:
     """Emit `<text>` SVG. If `rot` is None, the box is appended to `placed`
     for the gate to use (Amendment 5). Rotated text is FORBIDDEN
     (Amendment 6); rot != None is a contract violation caught by G1.
+
+    `cls` is the placed-box class: "chrome" for letterspaced chrome
+    text (header, footer, section labels, label/value pairs) and
+    "body" for non-letterspaced body text. Per-class collision
+    tolerance is enforced in the gates. If `cls` is None, the class
+    is inferred from the letterspacing parameter (ls > 0 → "chrome",
+    ls == 0 → "body").
     """
     if rot is not None:
         # Amendment 6: rotated text transforms are forbidden.
@@ -106,7 +118,14 @@ def T(x: float, y: float, s: str,
     x0 = x
     if anchor == "end":     x0 = x - adv
     elif anchor == "middle": x0 = x - adv / 2
-    box: PlacedBox = (x0, y - size * 0.78, x0 + adv, y + size * 0.24, s)
+    # Tag the placed box with its class at draw time (per dispatch
+    # ruling — do not infer it later). Letterspaced text gets
+    # "chrome" (the looser-tolerance class). Non-letterspaced text
+    # is "body" (1.2pt tolerance, original). The auto-infer covers
+    # the existing chrome() and body builders that don't pass cls.
+    if cls is None:
+        cls = "chrome" if ls > 0 else "body"
+    box: PlacedBox = (x0, y - size * 0.78, x0 + adv, y + size * 0.24, s, cls)
     color = fill or INK
     return (
         f'<text x="{x:.2f}" y="{y:.2f}" font-family="{font}" font-size="{size}" '

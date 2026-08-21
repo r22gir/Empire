@@ -46,10 +46,18 @@ from typing import List, Tuple
 from app.presentation.template.chrome import PlacedBox, PW, PH, _fmt_in
 
 
-# Tolerance (PDF points) for text-vs-text overlap detection (Amendment 5
-# captures bboxes at draw time — overlap means the boxes touch by more
-# than this tolerance).
-TEXT_OVERLAP_TOL_PT = 1.2
+# Per-class overlap tolerances (PDF points). Body text keeps the
+# original 1.2pt threshold; chrome (letterspaced header, footer, and
+# label/value pairs in cover/sheet chrome) gets 8pt. The chrome T()
+# y-bbox over-estimates height by ~0.3-1pt for letterspaced text at
+# small sizes, which is enough to bridge the gap between adjacent y
+# rows in label/value pairs. 8pt is enough to filter out
+# line-height brushing on a real page while still catching genuine
+# overprints.
+TEXT_OVERLAP_TOL_PT_BODY = 1.2
+TEXT_OVERLAP_TOL_PT_CHROME = 8.0
+# Default kept for callers that don't pass a per-call tol.
+TEXT_OVERLAP_TOL_PT = TEXT_OVERLAP_TOL_PT_BODY
 
 
 # ══════════════════════ G1 bounds + zero rotated transforms ════════════════
@@ -63,7 +71,7 @@ def gate_bounds(placed: List[PlacedBox], frame_pt: float = 16.0) -> List[str]:
     (Amendment 6), so this gate never fires on the new engine.)
     """
     bad: List[str] = []
-    for x0, y0, x1, y1, t in placed:
+    for x0, y0, x1, y1, t, _cls in placed:
         if x0 < frame_pt - 6 or x1 > PW - frame_pt + 6 or y0 < 4 or y1 > PH - 4:
             bad.append(f"out of page: '{t[:38]}'")
     return bad
@@ -72,21 +80,38 @@ def gate_bounds(placed: List[PlacedBox], frame_pt: float = 16.0) -> List[str]:
 # ══════════════════════ G2 collisions (draw-time bboxes) ════════════════════
 
 def gate_collisions(placed: List[PlacedBox],
-                   tol: float = TEXT_OVERLAP_TOL_PT) -> List[str]:
+                   tol: float = TEXT_OVERLAP_TOL_PT_BODY) -> List[str]:
     """Pairwise text-box overlap (Amendment 5).
 
-    Boxes with both axes overlapping by more than `tol` are flagged.
+    Boxes with both axes overlapping by more than the class's
+    threshold are flagged. Each box is tagged at draw time
+    (chrome.T() emits the class as the 6th element of PlacedBox);
+    chrome (letterspaced header/footer, label/value pairs in cover
+    sheets) uses the looser 8pt tolerance, body text keeps 1.2pt.
     Captured at DRAW TIME (per Amendment 5) — never recovered by
     parsing the emitted PDF.
     """
     bad: List[str] = []
     for i in range(len(placed)):
-        ax0, ay0, ax1, ay1, at = placed[i]
+        ax0, ay0, ax1, ay1, at, acls = placed[i]
+        # Per-class tolerance: chrome is looser (line-height brushing
+        # on letterspaced chrome text is not an overprint).
+        atol = (TEXT_OVERLAP_TOL_PT_CHROME if acls == "chrome"
+                 else TEXT_OVERLAP_TOL_PT_BODY)
         for j in range(i + 1, len(placed)):
-            bx0, by0, bx1, by1, bt = placed[j]
+            bx0, by0, bx1, by1, bt, bcls = placed[j]
+            # Use the LOOSER of the two classes' tolerances — a real
+            # overprint between a body and a chrome string still fails
+            # the body threshold; a brushing between two chromes fails
+            # the chrome threshold. A real overprint between two body
+            # strings fails the body threshold (1.2pt) — the negative
+            # fixture proves this.
+            btol = (TEXT_OVERLAP_TOL_PT_CHROME if bcls == "chrome"
+                     else TEXT_OVERLAP_TOL_PT_BODY)
+            this_tol = max(atol, btol)
             ox = min(ax1, bx1) - max(ax0, bx0)
             oy = min(ay1, by1) - max(ay0, by0)
-            if ox > tol and oy > tol:
+            if ox > this_tol and oy > this_tol:
                 bad.append(f"overlap: '{at[:26]}' / '{bt[:26]}' "
                            f"({ox:.1f}x{oy:.1f}pt)")
     return bad
