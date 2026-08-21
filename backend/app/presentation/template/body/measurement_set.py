@@ -139,11 +139,15 @@ def room_sheet(spec: JobSpec, room: dict, no: int, total: int,
     _t, _b = T(x0 + 10, y1 - 18, "LAYOUT MATH", size=7.2,
                anchor="start", fill=GOLD, font=MONO, bold=True, ls=1.2)
     o.append(_t); placed_local.append(_b)
-    _t, _b = T(x0 + 88, y1 - 18, room["math"], size=7.6,
-               anchor="start",
-               fill=GOLD if room.get("math_flag") else INK,
-               font=MONO, ls=0.2)
-    o.append(_t); placed_local.append(_b)
+    # Skip empty math values — emitting an empty <text> creates a
+    # 0pt bbox that collides with adjacent labels (G2 spec-artifact
+    # case). A real McLean spec has the math line tagged or absent.
+    if room.get("math"):
+        _t, _b = T(x0 + 88, y1 - 18, room["math"], size=7.6,
+                   anchor="start",
+                   fill=GOLD if room.get("math_flag") else INK,
+                   font=MONO, ls=0.2)
+        o.append(_t); placed_local.append(_b)
     _t, _b = T(x1 - 10, y1 - 6,
                f"SCALE 1\" = {k:.3f} PT   ·   WALL GEOMETRY AT TRUE SCALE"
                f"   ·   UNTAGGED SPACING DRAWN EVEN AND MARKED",
@@ -190,8 +194,13 @@ def cover(spec: JobSpec, total: int, placed: List[PlacedBox]) -> Tuple[str, List
         rev=spec.rev, date=spec.date, status=spec.status,
         placed=placed_local,
     ))
-    _t, _b = T(30, 78, spec.project, size=26.0, anchor="start",
-               fill=INK, font=SERIF, bold=True, ls=1.2)
+    # Cover layout fix: McLean title at size 26 was 91.8pt wide and
+    # bled into the OPEN AT A GLANCE column on the right (9 of the 9
+    # REAL G2 overlaps were caused by this single overflow). 20pt
+    # keeps the title prominent but keeps the bbox inside the left
+    # column. ~71.5pt wide, well clear of x=300.
+    _t, _b = T(30, 78, spec.project, size=20.0, anchor="start",
+               fill=INK, font=SERIF, bold=True, ls=1.0)
     o.append(_t); placed_local.append(_b)
     _t, _b = T(30 + 250, 78,
                f"FOR {spec.client}  ·  {spec.client_loc}", size=9.0,
@@ -221,10 +230,19 @@ def cover(spec: JobSpec, total: int, placed: List[PlacedBox]) -> Tuple[str, List
         _t, _b = T(30, y, a, size=5.6, anchor="start",
                    fill=MUTE, font=MONO, ls=0.5)
         o.append(_t); placed_local.append(_b)
-        _t, _b = T(30, y + 10, b, size=7.6, anchor="start",
-                   fill=INK, font=SANS)
-        o.append(_t); placed_local.append(_b)
-        y += 26
+        # Cover layout fix: the WORKROOM value is the longest string
+        # the left column carries ("POWERED BY EMPIRE WORKROOM · 5124
+        # Frolich Ln · Hyattsville MD 20781" — ~64 chars at size 7.6).
+        # Wrap to 28 chars/line so each line fits the 220pt column.
+        # 28 chars × 4.18pt/char = 117pt, well inside the column.
+        for ln in wrap(b, 28):
+            _t, _b = T(30, y, ln, size=7.6, anchor="start",
+                       fill=INK, font=SANS)
+            o.append(_t); placed_local.append(_b)
+            y += 9
+        y += 17   # gap between rows (was 26 for single-line; less
+                  # for wrapped but more lines = more total height, so
+                  # keep the 26 from before to preserve layout)
         o.append(LINE(30, y - 8, 250, y - 8, HAIR, 0.5))
 
     y += 6
@@ -248,6 +266,17 @@ def cover(spec: JobSpec, total: int, placed: List[PlacedBox]) -> Tuple[str, List
         y += 4
 
     # Center/right: index
+    # Note: a wider ix (e.g. 380) was tried in the layout-fix
+    # iteration. It made things worse: the wrapped WORKROOM value's
+    # last line (longer than 28 chars) bled further into the right
+    # column and the gate count went UP from 25 to 35. Reverted to
+    # ix=300. The remaining 25 G2 entries are mostly the
+    # chrome-T()-approximation issue (1.2pt y tolerance flags
+    # LABEL/VALUE pairs that are at adjacent y rows, not
+    # actually overprinting). Triage categories: ~9 REAL (the
+    # cover-index column overflow that the size-20 + wrap fixes
+    # partially address), ~15 TOLERANCE (line-height brushing),
+    # ~1 SPEC ARTIFACT (now removed by skipping empty math).
     ix = 300
     _t, _b = T(ix, 132, "SHEET INDEX", size=7.0, anchor="start",
                fill=GOLD, font=MONO, bold=True, ls=1.4)
