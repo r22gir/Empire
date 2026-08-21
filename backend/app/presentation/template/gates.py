@@ -289,29 +289,41 @@ def gate_dim_h_matches_h(panels: List[dict],
     # (b) data row values that purport to be the same measurement
     # (typed, not a callable) must match _fmt_in(panel["h"]) for
     # the room's primary panel. Cross-room NOT checked.
+    #
+    # P1-T·c floor: callables are NOT skipped — they are CALLED with
+    # the primary panel as their argument and their resolved value is
+    # compared. A stale typed value wrapped in `lambda: "old value"`
+    # would otherwise pass the gate as a callable; calling it returns
+    # the stale string and the gate now catches it.
     if rooms is not None:
         for room in rooms:
             h_val = None
+            primary_panel = None
             for p in room.get("panels", []):
                 if "h" in p:
-                    h_val = p["h"]; break
+                    h_val = p["h"]
+                    primary_panel = p
+                    break
             if h_val is None:
                 continue
             expected = _fmt_in(h_val)
             for label, value in room.get("data", []):
-                # Skip callables (derived) — their resolved value
-                # IS _fmt_in by construction.
+                # Resolve the value — callables are CALLED with the
+                # primary panel as their argument, not skipped. Their
+                # result is what gets compared to expected.
                 if callable(value):
-                    continue
+                    resolved = value(primary_panel)
+                else:
+                    resolved = value
                 # Skip literal markers (not tagged, not recorded, etc.)
-                if "not" in value.lower() or "ref" in value.lower():
+                if "not" in str(resolved).lower() or "ref" in str(resolved).lower():
                     continue
-                if value == expected:
+                if resolved == expected:
                     continue
                 bad.append(
                     f"room '{room.get('key', '?')}' data row "
-                    f"'{label}'='{value}' but _fmt_in(panel_h="
-                    f"{h_val})='{expected}' — typed string stale"
+                    f"'{label}'={resolved!r} but _fmt_in(panel_h="
+                    f"{h_val})='{expected}' — typed value stale"
                 )
     return bad
 

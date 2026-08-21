@@ -35,6 +35,9 @@ from app.presentation.template.chrome import _fmt_in
 from app.presentation.template.content.window_openings import (
     draw_panel, resolve_items,
 )
+from app.presentation.template import build, BuildResult
+from app.presentation.template.assemble import assemble
+from app.presentation.template.gates import gate_dim_h_matches_h
 
 
 # ══════════════════════ ADDRESS — single source ══════════════════════════
@@ -501,3 +504,206 @@ class TestAmendment4DuplicationFix:
         }
         failures = gate_dim_h_matches_h(panels=[], rooms=[room])
         assert failures == []
+
+
+# ══════════════════════ P1-T·c — BUILDER INTERFACE ═══════════════════════
+
+def _pdf_deps_available() -> bool:
+    """True if cairosvg and pypdf are importable.
+
+    Module-level helper, defined here (before TestP1TcBuilderInterface)
+    so the `@skipif` decorator at class-definition time can resolve it.
+    """
+    try:
+        import cairosvg  # noqa: F401
+        from pypdf import PdfWriter  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+class TestP1TcBuilderInterface:
+    """P1-T·c: `build(spec) -> BuildResult` is the canonical entry
+    point callable by ANY door. Pure function, no module-global
+    state, no `sys.exit(1)`, SpecIncomplete is the only refusal.
+    """
+
+    def test_build_with_missing_fields_raises_SpecIncomplete(self):
+        """build() with a spec missing required fields raises
+        SpecIncomplete naming exactly those fields. Validated before
+        any other work — the refusal is the first thing the caller
+        sees."""
+        spec = JobSpec(
+            project="", client="C", client_loc="L", scope="S",
+            address=Address("S", "C", "S", "Z"),
+            header_tagline="T", footer_letterhead="", locale="L",
+            rev="", date="", source="", status="",
+            document_type="measurement_set",
+            content_family="window_openings",
+        )
+        with pytest.raises(SpecIncomplete) as exc:
+            build(spec)
+        # Same missing-list contract as spec.validate() — build() does
+        # NOT collapse the field list.
+        assert "project" in exc.value.missing
+        assert "rev" in exc.value.missing
+        assert "date" in exc.value.missing
+
+    def test_build_with_scaffold_type_raises_SpecIncomplete(self):
+        """The four non-measurement_set document types are SCAFFOLDS
+        that raise SpecIncomplete until their fixtures land. The
+        builder delegates and the scaffold refuses — no PDF is
+        rendered, no body is invented from imagination."""
+        spec = JobSpec(
+            project="P", client="C", client_loc="L", scope="S",
+            address=Address("S", "C", "S", "Z"),
+            header_tagline="T", footer_letterhead="", locale="L",
+            rev="A", date="D", source="", status="",
+            document_type="estimate", content_family="window_openings",
+        )
+        with pytest.raises(SpecIncomplete) as exc:
+            build(spec)
+        assert "estimate.body" in str(exc.value.missing[0])
+
+    @pytest.mark.skipif(
+        not _pdf_deps_available(),
+        reason="cairosvg + pypdf required for measurement_set build; skipped if not installed",
+    )
+    def test_build_with_complete_spec_returns_BuildResult(self):
+        """build() with a complete measurement_set spec returns a
+        BuildResult with all three fields populated — pdf_bytes (non-
+        empty), gate_report (list, may be empty), derived (dict, must
+        contain count_openings)."""
+        import io
+        spec = JobSpec(
+            project="McLean", client="Whittington", client_loc="DC",
+            scope="Drapery",
+            address=Address("5124 Frolich Ln", "Hyattsville", "MD", "20781"),
+            header_tagline="POWERED BY EMPIRE WORKROOM",
+            footer_letterhead="",
+            locale="HYATTSVILLE MD",
+            rev="A", date="19 AUG 2026", source="", status="FOR DISCUSSION",
+            document_type="measurement_set",
+            content_family="window_openings",
+        )
+        result = build(spec)
+        assert isinstance(result, BuildResult)
+        assert isinstance(result.pdf_bytes, bytes)
+        assert len(result.pdf_bytes) > 0
+        assert isinstance(result.gate_report, list)
+        assert isinstance(result.derived, dict)
+        # Amendment 4: count_openings IS the single derivation
+        assert "count_openings" in result.derived
+        assert isinstance(result.derived["count_openings"], int)
+
+    def test_builder_called_twice_produces_identical_output(self):
+        """Idempotency: calling the same builder twice produces
+        identical output. Proves no retained state. Uses the scaffold
+        path so the test does not depend on cairosvg — the Idempotency
+        claim is about the *builder* (a pure function), not the PDF
+        renderer."""
+        spec = JobSpec(
+            project="P", client="C", client_loc="L", scope="S",
+            address=Address("S", "C", "S", "Z"),
+            header_tagline="T", footer_letterhead="", locale="L",
+            rev="A", date="D", source="", status="",
+            document_type="estimate", content_family="window_openings",
+        )
+        # Both calls raise SpecIncomplete — that's the contract for
+        # scaffolds. The test is that the two MISSING-LIST CONTENTS
+        # are identical, proving the builder is stateless.
+        with pytest.raises(SpecIncomplete) as first:
+            build(spec)
+        with pytest.raises(SpecIncomplete) as second:
+            build(spec)
+        assert first.value.missing == second.value.missing
+
+
+class TestP1TcNoSysExitInTemplateLayer:
+    """P1-T·c requirement: `sys.exit(1)` is never an option. A
+    process exit cannot be orchestrated. AST-walk backend/app/
+    presentation/template/ and fail if any actual `sys.exit()` call
+    exists. Comments and docstrings are not `sys.exit` calls.
+    """
+
+    def test_no_sys_exit_in_template_layer(self):
+        import ast
+        import pathlib
+        root = (
+            pathlib.Path(__file__).resolve().parent.parent
+            / "app" / "presentation" / "template"
+        )
+        violations: list[tuple[str, int]] = []
+        for path in sorted(root.rglob("*.py")):
+            if "__pycache__" in str(path):
+                continue
+            source = path.read_text(encoding="utf-8")
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                # Only `sys.exit(...)` CALLS — not the literal string
+                # "sys.exit" in a docstring or comment (ast.parse
+                # strips comments; strings are constants, not calls).
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "sys"
+                    and node.func.attr == "exit"
+                ):
+                    violations.append((str(path.relative_to(path.parents[3])), node.lineno))
+        assert violations == [], (
+            f"`sys.exit` is not allowed in backend/app/presentation/template/. "
+            f"Found {len(violations)} call(s): "
+            + "\n  ".join(f"{p}:{ln}" for p, ln in violations)
+            + "\nPer P1-T·c, MAX must receive either a document or a "
+            "structured refusal (SpecIncomplete) — process exits cannot "
+            "be orchestrated."
+        )
+
+
+class TestP1TcCallableFloorGateDimH:
+    """P1-T·c requirement 5: callable DataValue exemption needs a
+    floor. The gate must NOT skip callables — it must call them and
+    compare the result. A stale typed value wrapped in `lambda: "old
+    value"` would otherwise pass the gate; calling it returns the
+    stale string and the gate now catches it.
+    """
+
+    def test_callable_returning_correct_h_passes(self):
+        """A data row that IS a callable returning the formatted h
+        must pass the gate. Floor: callables are evaluated, not
+        skipped."""
+        panels = [{"label": "P1", "h": 96.0, "dim_h": '96"'}]
+        rooms = [{
+            "key": "LR",
+            "panels": [{"h": 96.0}],
+            "data": [
+                # Callable that returns the correct value
+                ("WALL HEIGHT", lambda p: _fmt_in(p["h"])),
+            ],
+        }]
+        failures = gate_dim_h_matches_h(panels=panels, rooms=rooms)
+        assert failures == [], f"Expected no failures, got {failures}"
+
+    def test_callable_returning_stale_value_fails(self):
+        """A data row that IS a callable returning a STALE value
+        (e.g. wrapped `lambda: "old value"`) must FAIL the gate.
+        The floor catches what the previous skip-callable behaviour
+        missed."""
+        panels = [{"label": "P1", "h": 96.0, "dim_h": '96"'}]
+        rooms = [{
+            "key": "LR",
+            "panels": [{"h": 96.0}],
+            "data": [
+                # Callable that returns a STALE value — wrapping a
+                # typed string in a lambda would otherwise pass.
+                ("WALL HEIGHT", lambda p: '72"'),
+            ],
+        }]
+        failures = gate_dim_h_matches_h(panels=panels, rooms=rooms)
+        assert len(failures) == 1
+        assert "WALL HEIGHT" in failures[0]
+        assert "stale" in failures[0]
