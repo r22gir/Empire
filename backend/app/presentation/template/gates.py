@@ -48,12 +48,21 @@ from app.presentation.template.chrome import PlacedBox, PW, PH, _fmt_in
 
 # Per-class overlap tolerances (PDF points). Body text keeps the
 # original 1.2pt threshold; chrome (letterspaced header, footer, and
-# label/value pairs in cover/sheet chrome) gets 8pt. The chrome T()
-# y-bbox over-estimates height by ~0.3-1pt for letterspaced text at
-# small sizes, which is enough to bridge the gap between adjacent y
-# rows in label/value pairs. 8pt is enough to filter out
-# line-height brushing on a real page while still catching genuine
-# overprints.
+# label/value pairs in cover/sheet chrome) gets 8pt.
+#
+# ⚠️  TEXT_OVERLAP_TOL_PT_CHROME IS A WORKAROUND, NOT A DESIGN VALUE.
+# The chrome T() y-bbox calculation over-estimates height by ~7pt
+# (size × 0.78 ascender + size × 0.24 descender = 1.02 × size, when
+# the real glyph extent is closer to the font's x-height + descender
+# which is closer to 0.65 × size). The 8pt tolerance is set just barely
+# above the chrome T()'s own y-bbox over-estimation, so chrome-on-
+# chrome line-height brushing is filtered. **This is a measurement
+# bug fix, not a typographic decision.** When the chrome T() y-bbox is
+# fixed (P1-T·d) to measure real glyph extent, this tolerance should
+# be reduced toward the body value. Treat any future change to this
+# constant as a "I think the chrome y-bbox is wrong by N" change, not
+# as a "I think chrome needs N pixels of breathing room" change.
+# See H71 in claude/BACKLOG_UPDATE_2026-08-20.md.
 TEXT_OVERLAP_TOL_PT_BODY = 1.2
 TEXT_OVERLAP_TOL_PT_CHROME = 8.0
 # Default kept for callers that don't pass a per-call tol.

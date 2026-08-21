@@ -545,4 +545,96 @@ error occurs is even smaller. Neither requires a founder decision;
 both have an obvious correct answer. **Not in this lane** per
 directive; logged for the next maintenance window.
 
+### **H70** · chrome T() bbox over-estimates y-height — a third of the G2 entries are TOLERANCE, not REAL (logging only, fix in P1-T·d)
+
+The triage at `reports/2026-08-20_g2_triage.md` reclassified 15 of the
+25 G2 entries as TOLERANCE on visual inspection of the rasterised
+cover. The pattern was the same: two text strings at adjacent y
+positions in the chrome (e.g. "01" badge at yy=152 next to "McLean"
+HOUSE row value at y=184), the gate flags them as overlapping by
+**1.2pt-7pt** because `chrome.T` computes bbox height as
+`size × (0.78 + 0.24) = size × 1.02`. The 0.78 descender factor +
+0.24 ascender factor is the *empirical* font-height multiplier; it
+overestimates height by 0.3-1.0pt for sans-serif at small sizes,
+which is enough to bridge the 0.5-2pt gap between adjacent y rows.
+
+For the McLean-rail McLean-title vs OPEN-BEFORE-QUOTING-header
+case (y≈70 vs y≈380), the chrome T()'s bbox over-estimates by
+300pt of page. The McLean title's bbox is [y-20.28, y+6.24] =
+[y-20.28, y+6.24] at size 26, so y range is 26.52pt. The OPEN
+BEFORE-QUOTING header's bbox is ~7pt. The actual y positions are
+310pt apart, but the gate reports "4.3pt overlap" because the
+chrome T()'s 0.78 descender factor on a 7pt string gives a bbox
+that extends UP 5.5pt, reaching into the McLean title's bbox.
+
+The fix is per-class tolerance (option 2, ruled in the dispatch):
+chrome (letterspaced header / footer, label / value pairs) gets a
+looser threshold (proposed: 8pt), body text keeps 1.2pt. The
+TOLERANCE entries will then drop out. **Not patched in this
+commit** — per dispatch: "STOP after the layout fix, before the
+tolerance change." P1-T·d is the lane that implements it.
+
+### **H71** · chrome T() y-bbox over-estimates height by ~7pt (OPEN — P1-T·d, NOT in this lane)
+
+The triage at `reports/2026-08-20_g2_triage.md` classified 9 G2
+collisions as REAL based on the gate's bbox math. Visual inspection
+of the rasterised cover at 150 DPI on 2026-08-20 showed **none of the
+9 were real text-on-text overprints**. The McLean title at size 20
+fits in the left half. The "02 LR" and "03 OPENING SCHEDULE · ALL
+ROOMS" rows in the sheet index are visually separate rows with their
+own horizontal bands. The WORKROOM value wraps cleanly to 3 lines
+in the left column. **All 9 "REAL" failures were a single root
+cause: chrome T()'s y-bbox calculation.**
+
+The chrome T() function at `chrome.py:109`:
+```python
+box: PlacedBox = (x0, y - size * 0.78, x0 + adv, y + size * 0.24, s)
+```
+estimates height as `size × 1.02 = size × (0.78 ascender + 0.24 descender)`.
+For a 7pt string, that's a 7.14pt-tall bbox when the real glyph
+extent is closer to the font's x-height + descender ≈ 0.65 × size.
+**The 0.78 ascender factor is the worst part — it claims the
+ascender extends ~78% of the way to the next line, which is roughly
+the next line's top** when the line height is size × 1.0. So the
+chrome T()'s bbox extends up into the next row, producing phantom
+"overlaps" that don't exist visually.
+
+This is why the cover layout changes from 23e8ead (McLean title
+26pt → 20pt, WORKROOM wrap) appeared to help — the smaller title's
+bbox extended less far, and the wrap increased y spacing between
+lines. Both are workarounds for the chrome T()'s y-bbox
+over-estimation. They were good fixes (the cover LOOKS better with
+them — confirmed by rasterisation), but the gate number going DOWN
+was a phantom artifact, not a real defect closed.
+
+The 8pt chrome tolerance in `gates.py:61` is therefore a workaround
+for this measurement bug, not a considered design value. The
+source comment is now explicit:
+> ⚠️  TEXT_OVERLAP_TOL_PT_CHROME IS A WORKAROUND, NOT A DESIGN
+> VALUE. The chrome T() y-bbox calculation over-estimates height
+> by ~7pt... When the chrome T() y-bbox is fixed (P1-T·d) to
+> measure real glyph extent, this tolerance should be reduced toward
+> the body value.
+
+**Three rounds of tuning were spent on a phantom because nobody
+cropped the raster until asked.** A gate that measures by
+approximation will invent defects and hide real ones. This is
+DOCTRINE-level: do not tune a gate's threshold based on what it
+reports; verify against the rendered artifact (rasterise, crop, look)
+before treating any report as a defect.
+
+**The cover layout changes from 23e8ead (McLean title 26→20pt,
+WORKROOM wrap) are kept — but ON VISUAL MERIT ALONE.** The McLean
+title at 20pt is less dominant and reads more balanced; the wrapped
+WORKROOM value fits the left column without bleeding right. These
+visual improvements exist independent of the gate number. The
+report rasterisation confirms them.
+
+**The fix is to measure the real glyph extent, not the approximation
+factor.** P1-T·d is the lane: replace the `0.78 × size` ascender
+factor with the actual font ascender (from PIL metrics or a font
+config). Once the chrome T()'s y-bbox is correct, the chrome
+tolerance can drop back to 1.2pt (or close to it) and the gate
+output will be honest.
+
 P1-T·c is next unless the founder says otherwise.
