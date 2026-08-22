@@ -307,13 +307,10 @@ class MaxScheduler:
             if env_path:
                 memory_file = Path(env_path)
             else:
-                # backend/app/services/max/scheduler.py → repo root is 4 parents up
-                canonical_repo = Path(__file__).resolve().parents[3]
-                candidate = canonical_repo / "max" / "memory.md"
-                if candidate.exists():
-                    memory_file = candidate
-                else:
-                    memory_file = Path.home() / "empire-repo" / "max" / "memory.md"
+                # backend/app/services/max/scheduler.py → repo root is 4 parents up.
+                # No legacy fallback to ~/empire-repo; canonical only.
+                canonical_repo = Path(__file__).resolve().parents[4]
+                memory_file = canonical_repo / "max" / "memory.md"
             if not memory_file.exists():
                 logger.warning(f"Brain sync: memory.md not found at {memory_file}")
                 return
@@ -445,11 +442,6 @@ class MaxScheduler:
                 content = content.rstrip() + "\n" + sync_block
 
             memory_file.write_text(content, encoding="utf-8")
-
-            # Also copy to the backup location
-            backup = Path.home() / "empire-repo" / "backend" / "data" / "max" / "memory.md"
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            backup.write_text(content, encoding="utf-8")
 
             logger.info(f"Brain sync complete — {len(db_stats)} tables, {quote_count} quotes, {brain_memories} memories")
 

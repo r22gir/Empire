@@ -295,12 +295,12 @@ def _gmail_reader_status(paths: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unified_store_info() -> dict[str, Any]:
-    try:
-        from app.services.max.unified_message_store import unified_store
+    # unified_store.db_path is canonical via EMPIRE_BRAIN_DIR (see
+    # unified_message_store.py). Fail loud if the import breaks — no silent
+    # fallback to the old lane.
+    from app.services.max.unified_message_store import unified_store
 
-        db_path = Path(unified_store.db_path)
-    except Exception:
-        db_path = LEGACY_BACKEND / "data" / "brain" / "unified_messages.db"
+    db_path = Path(unified_store.db_path)
     exists = _exists(db_path)
     return {
         "db_path": str(db_path),

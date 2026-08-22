@@ -13,7 +13,11 @@ from typing import Any, Optional
 
 logger = logging.getLogger("max.unified_messages")
 
-DB_PATH = Path(os.path.expanduser("~/empire-repo/backend/data/brain/unified_messages.db"))
+DB_PATH = Path(
+    os.environ.get(
+        "EMPIRE_BRAIN_DIR", os.path.expanduser("~/empire-data/brain")
+    )
+) / "unified_messages.db"
 
 
 class UnifiedMessageStore:
