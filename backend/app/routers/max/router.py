@@ -5024,8 +5024,15 @@ async def submit_code_task(request: CodeTaskRequest):
     msg_ctx = {"channel": request.channel or "web_cc"}
     founder = is_founder_message(msg_ctx)
     if not founder:
-        founder_pin = os.getenv("FOUNDER_PIN", "7777")
-        if not request.pin or str(request.pin) != founder_pin:
+        # H62 FIX (2026-08-22): empty default — pre-fix this was "7777" (privilege-escalation literal). HOTFIX 4.2 only fixed tool_executor.py.
+        founder_pin = os.getenv("FOUNDER_PIN", "")
+        if not founder_pin:
+            logger.critical(
+                "FOUNDER_PIN env var is UNSET. /max/code-task refuses until "
+                "operator configures the systemd drop-in. Pre-fix this silently "
+                "defaulted to a privilege-escalation literal. (H62 FIX, 2026-08-22)"
+            )
+        if not founder_pin or not request.pin or str(request.pin) != founder_pin:
             raise HTTPException(status_code=403, detail="Invalid PIN. Code Mode requires founder authorization.")
 
     from app.services.max.code_task_runner import code_task_runner
@@ -5057,10 +5064,16 @@ class VerifyPinRequest(BaseModel):
 async def verify_pin(request: VerifyPinRequest):
     """Verify founder PIN without performing any action. Used by Code Mode toggle."""
     import os
-    founder_pin = os.getenv("FOUNDER_PIN", "7777")
-    if str(request.pin) == founder_pin:
-        return {"valid": True}
-    raise HTTPException(status_code=403, detail="Invalid PIN")
+    # H62 FIX (2026-08-22): empty default — pre-fix this was "7777" (privilege-escalation literal). HOTFIX 4.2 only fixed tool_executor.py.
+    founder_pin = os.getenv("FOUNDER_PIN", "")
+    if not founder_pin:
+        logger.critical(
+            "FOUNDER_PIN env var is UNSET. /max/verify-pin refuses until "
+            "operator configures the systemd drop-in. Pre-fix this silently "
+            "defaulted to a privilege-escalation literal. (H62 FIX, 2026-08-22)"
+        )
+    if not founder_pin or str(request.pin) != founder_pin:
+        raise HTTPException(status_code=403, detail="Invalid PIN")
 
 
 # ── TTS (Text-to-Speech) ─────────────────────────────────────────────
