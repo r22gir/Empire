@@ -190,3 +190,65 @@ class TestWrapperDelegatePresentInPricingTiers:
             f"openclaw_inner_model() must return None when env is absent "
             f"(explicitly unknown); got {result!r}."
         )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Guard 4 — drift: backend and openclaw service drop-ins must agree
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestBackendOpenclawDeepseekModelAgreement:
+    """Backend (`empire-backend.service`) and OpenClaw (`empire-openclaw.service`)
+    are separate systemd user units with separate `EnvironmentFile=` drop-ins.
+    They both carry `DEEPSEEK_MODEL`. They have already drifted once:
+    backend had `deepseek-chat`, openclaw had `deepseek-v4-flash`. The R9
+    resolver surfaces the BACKEND's value as `model_used`; the wrapper
+    actually delegates via the OPENCLAW service's value. When the two drop-ins
+    disagree, the surfaced model name is honest about the backend's view but
+    a lie about what answered the prompt.
+
+    This guard reads BOTH source-of-truth drop-in files and asserts the
+    DEEPSEEK_MODEL values agree. Catches the next drift in CI before it ships.
+    Skips (not fails) when a drop-in is absent — the test environment may not
+    have both unit drop-ins installed."""
+
+    BACKEND_DROPIN = Path("/home/rg/.config/empirebox/empire-backend.env")
+    OPENCLAW_DROPIN = Path("/home/rg/.config/empirebox/openclaw-deepseek.env")
+
+    @staticmethod
+    def _read_deepseek_model(path: Path) -> str | None:
+        if not path.exists():
+            return None
+        for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key.strip() == "DEEPSEEK_MODEL":
+                v = value.strip()
+                return v or None
+        return None
+
+    def test_backend_and_openclaw_dropins_agree_on_deepseek_model(self):
+        backend_value = self._read_deepseek_model(self.BACKEND_DROPIN)
+        openclaw_value = self._read_deepseek_model(self.OPENCLAW_DROPIN)
+
+        if backend_value is None or openclaw_value is None:
+            pytest.skip(
+                f"Cannot run drift guard: one or both drop-ins missing "
+                f"or DEEPSEEK_MODEL unset. backend_dropin={self.BACKEND_DROPIN} "
+                f"value={backend_value!r}, openclaw_dropin={self.OPENCLAW_DROPIN} "
+                f"value={openclaw_value!r}. The guard is environment-specific "
+                f"and skips on hosts without the full EmpireBox drop-ins."
+            )
+
+        assert backend_value == openclaw_value, (
+            f"DEEPSEEK_MODEL drift between backend and openclaw drop-ins: "
+            f"backend={backend_value!r} (from {self.BACKEND_DROPIN}), "
+            f"openclaw={openclaw_value!r} (from {self.OPENCLAW_DROPIN}). "
+            f"The R9 resolver returns the backend's value; the openclaw "
+            f"wrapper actually delegates via the openclaw service's value. "
+            f"When they disagree, model_used lies about what answered. "
+            f"Edit one drop-in to match the other and restart the backend "
+            f"to pick up the change."
+        )
