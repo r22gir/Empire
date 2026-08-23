@@ -80,3 +80,9 @@ uploads/arch_drawings/*.svg
 *.bak.*
 archive/
 .env.local
+
+# Reference documents — large binaries (PDFs etc.) stay on disk under
+# reference/ as real client reference assets, but should not be committed
+# to the repo. Add a file here only if it should be an exception.
+# Use ** to cover any depth (e.g. reference/mclean/foo.pdf).
+reference/**/*.pdf
