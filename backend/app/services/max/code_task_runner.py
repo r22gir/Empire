@@ -197,6 +197,10 @@ def _sanitize_value(value, limit: int = 1200):
 
 
 def _infer_provider_from_model(model_used: str | None) -> str:
+    """Infer the provider from a model string. Returns "unknown" for wrapper
+    models (e.g. anything that resolves to None or to a string we do not
+    recognise) — NEVER the wrapper's own provider id. The wrapper provider
+    is identified by where the call ROUTED, not by the model field."""
     model = (model_used or "").lower()
     if model.startswith("claude") or model.startswith("anthropic"):
         return "anthropic"
@@ -208,8 +212,13 @@ def _infer_provider_from_model(model_used: str | None) -> str:
         return "groq"
     if model.startswith("ollama"):
         return "ollama"
-    if model.startswith("openclaw"):
-        return "openclaw"
+    if model.startswith("deepseek"):
+        return "deepseek"
+    # NOTE: deliberately NO `"openclaw"` branch — wrapper providers never
+    # round-trip through the model field. The openclaw wrapper's model is
+    # resolved to its inner delegate (DEEPSEEK_MODEL) at the AIResponse
+    # boundary; if a model string contains "openclaw" here, that is stale
+    # legacy data and should classify as "unknown".
     return "unknown"
 
 

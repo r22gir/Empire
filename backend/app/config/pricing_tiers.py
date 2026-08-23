@@ -8,7 +8,11 @@ PRICING_TIERS = {
         "name": "Lite",
         "price_monthly": 29,
         "token_budget": 50_000,       # 50K tokens/mo
-        "allowed_models": ["groq", "ollama", "openclaw"],
+        # "openclaw" replaced with "deepseek" — openclaw is a wrapper that
+        # surfaces its inner delegate in the model field. The substring
+        # check at line 94 keys on whatever model string is actually
+        # returned, which is now the inner delegate (e.g. "deepseek-v4-flash").
+        "allowed_models": ["groq", "ollama", "deepseek"],
         "features": ["chat", "web_search"],
         "priority": "low",
         "relist": {
@@ -26,7 +30,7 @@ PRICING_TIERS = {
         "name": "Pro",
         "price_monthly": 79,
         "token_budget": 200_000,      # 200K tokens/mo
-        "allowed_models": ["grok", "claude-haiku", "groq", "ollama", "openclaw"],
+        "allowed_models": ["grok", "claude-haiku", "groq", "ollama", "deepseek"],
         "features": ["chat", "chat/stream", "vision", "tts", "web_search", "quote", "desk_task"],
         "priority": "normal",
         "relist": {
@@ -44,7 +48,7 @@ PRICING_TIERS = {
         "name": "Empire",
         "price_monthly": 199,
         "token_budget": 1_000_000,    # 1M tokens/mo
-        "allowed_models": ["grok", "claude-sonnet", "claude-haiku", "groq", "ollama", "openclaw"],
+        "allowed_models": ["grok", "claude-sonnet", "claude-haiku", "groq", "ollama", "deepseek"],
         "features": ["chat", "chat/stream", "vision", "tts", "stt", "web_search", "quote", "desk_task", "image_gen", "inpaint", "mockup", "email"],
         "priority": "high",
         "relist": {

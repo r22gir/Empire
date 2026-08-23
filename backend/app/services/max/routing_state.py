@@ -61,7 +61,9 @@ PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "gemini": "gemini-2.5-flash",
     "xai": "grok-4-fast-non-reasoning",
     "ollama": "llama3.1:8b",
-    "openclaw": "openclaw",
+    # NOTE: "openclaw" deliberately absent — it is a wrapper around another
+    # provider, resolved at call time via `openclaw_inner_model()`. See
+    # `test_openclaw_no_self_id_round_trip` for the structural guard.
 }
 
 PROVIDER_MODEL_ENV: dict[str, str] = {
@@ -129,7 +131,9 @@ KNOWN_MODELS: dict[str, list[str]] = {
     "gemini": ["gemini-2.5-flash"],
     "xai": ["grok-4-fast-non-reasoning"],
     "ollama": ["llama3.1:8b"],
-    "openclaw": ["openclaw"],
+    # "openclaw" deliberately empty — wrapper providers have no static model
+    # list; choices are resolved at call time via `provider_model_choices()`.
+    "openclaw": [],
 }
 
 
@@ -183,13 +187,42 @@ def provider_model_env(provider: str) -> str:
     return PROVIDER_MODEL_ENV.get(canonical, "")
 
 
-def provider_default_model(provider: str) -> str:
+def openclaw_inner_model() -> str | None:
+    """Resolve the inner model the openclaw wrapper delegates to, or None.
+
+    Reads `DEEPSEEK_MODEL` from the BACKEND process env (the openclaw wrapper
+    runs in a separate systemd unit; both units' drop-ins can drift, so we
+    read the backend's copy — if the backend is misconfigured, we surface
+    that as unknown rather than silently fall back).
+
+    Contract:
+    - Returns the trimmed env value when it is PRESENT and non-empty.
+    - Returns None when the env var is missing or empty (explicitly unknown).
+    - Never returns a fallback string (e.g. "unknown-model") — that is the
+      same bug with a nicer value.
+    - Never returns the wrapper provider id ("openclaw") — that is the leak.
+
+    The model field MUST be explicitly unknown when the env is absent.
+    """
+    raw = (os.getenv("DEEPSEEK_MODEL", "") or "").strip()
+    return raw or None
+
+
+def provider_default_model(provider: str) -> str | None:
     canonical = canonical_provider(provider)
+    if canonical == "openclaw":
+        # Wrapper provider: resolve dynamically. Returns None when DEEPSEEK_MODEL
+        # is missing/empty — callers must handle None (NOT a fallback string).
+        return openclaw_inner_model()
     return PROVIDER_DEFAULT_MODELS.get(canonical, "unknown-model")
 
 
 def provider_model_choices(provider: str) -> list[str]:
     canonical = canonical_provider(provider)
+    if canonical == "openclaw":
+        # Wrapper: resolved dynamically. May yield [] when env is absent.
+        inner = openclaw_inner_model()
+        return [inner] if inner else []
     choices = list(KNOWN_MODELS.get(canonical, []))
     env_model = (os.getenv(provider_model_env(canonical), "") or "").strip()
     if env_model and env_model not in choices:
@@ -200,7 +233,8 @@ def provider_model_choices(provider: str) -> list[str]:
             if model not in choices:
                 choices.append(model)
     if not choices:
-        choices = [provider_default_model(canonical)]
+        fallback = provider_default_model(canonical)
+        choices = [fallback] if fallback else []
     return choices
 
 
