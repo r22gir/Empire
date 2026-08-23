@@ -17,6 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Optional
 
 from app.services.max.ai_router import AIMessage, AIModel, AIResponse, ai_router
@@ -469,6 +470,47 @@ def _repo_head_commit() -> str | None:
     return None
 
 
+def _repo_changed_paths(working_dir: str) -> set[str] | None:
+    """Return the set of repo-relative paths currently changed in `working_dir`,
+    or None if the working tree is not a git repo (or git is unavailable).
+
+    R11 (2026-08-22): ground-truth capture for the validator. A whitelist of
+    tools is the same class of defect as a hardcoded model name — it asserts
+    something the runner does not actually know. The validator must answer
+    "did files change" by looking, not by remembering which tools ran.
+
+    `working_dir` is the tree the task actually ran in. Caller MUST supply it;
+    there is no default. A validator checking the wrong tree passes everything.
+
+    Returns None (not an empty set) on git failure so the caller can distinguish
+    "no changes" from "could not check" and fall back explicitly.
+    """
+    if not working_dir or not os.path.isdir(working_dir):
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=working_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    changed: set[str] = set()
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        if path and not Path(path).name.endswith(".bak") and ".bak-" not in path:
+            changed.add(path)
+    return changed
+
+
 def _tool_record(tool_call: dict, result, *, success: bool, error: str | None = None) -> dict:
     record = {
         "tool": tool_call.get("tool", "unknown"),
@@ -638,6 +680,11 @@ class CodeTask:
     """An async code task."""
     id: str
     prompt: str
+    # R11 (2026-08-22): the tree the task actually ran in. The validator uses
+    # this for ground-truth capture (git status --porcelain before vs after).
+    # REQUIRED at construction — no default. A validator checking the wrong
+    # tree passes everything; "absent" must fail loud, never silently default.
+    working_dir: str = ""
     execution_mode: str = "auto"
     provider_used: Optional[str] = None
     model_used: Optional[str] = None
@@ -664,6 +711,15 @@ class CodeTask:
     last_response_text: Optional[str] = None
     last_function_calls_summary: Optional[str] = None
     last_parse_outcome: Optional[str] = None
+    # R11 (2026-08-22): ground-truth baseline for the validator. Captured at
+    # _execute() entry via `git status --porcelain` in `working_dir`. The
+    # post-execute porcelain diff against this set is the source of
+    # `files_changed` (replaces the prior 3-tool whitelist).
+    files_snapshot_before: set[str] = field(default_factory=set)
+    # R11 (2026-08-22): True iff the baseline `git status --porcelain` call
+    # succeeded. False (or False because of git failure) means the validator
+    # falls back to the legacy 3-tool whitelist — explicitly logged.
+    files_snapshot_ground_truth: bool = False
 
     def add_log(self, action: str, detail: str):
         self.log.append(CodeTaskLog(
@@ -715,18 +771,38 @@ class CodeTaskRunner:
     def get_task(self, task_id: str) -> Optional[CodeTask]:
         return self._tasks.get(task_id)
 
-    def submit(self, prompt: str, founder: bool = False) -> CodeTask:
-        """Submit a new code task. Returns immediately with task ID."""
+    def submit(self, prompt: str, working_dir: str = "", founder: bool = False) -> CodeTask:
+        """Submit a new code task. Returns immediately with task ID.
+
+        R11 (2026-08-22): `working_dir` is the tree the task actually ran in.
+        The validator uses it for ground-truth capture (git status --porcelain).
+        REQUIRED — there is no default. A validator checking the wrong tree
+        passes everything; "absent" must fail loud, never silently default.
+        """
+        if not working_dir or not os.path.isdir(working_dir):
+            logger.critical(
+                "CodeTaskRunner.submit REFUSED: working_dir is required (the "
+                "validator must check the tree the task actually ran in). "
+                f"Got working_dir={working_dir!r}. Caller must supply the "
+                "absolute path of the directory the task should be evaluated "
+                "against. (R11, 2026-08-22)"
+            )
+            raise ValueError(
+                "working_dir is required: the validator must check the tree "
+                "the task actually ran in. Pass an absolute path to an existing "
+                "directory. (R11, 2026-08-22)"
+            )
         task = CodeTask(
             id=str(uuid.uuid4())[:12],
             prompt=prompt,
+            working_dir=os.path.abspath(working_dir),
             execution_mode=_infer_execution_mode(prompt),
             founder=founder,
         )
         self._tasks[task.id] = task
         # Start execution in background
         self._running[task.id] = asyncio.create_task(self._execute(task))
-        logger.info(f"Code task {task.id} submitted: {prompt[:80]}")
+        logger.info(f"Code task {task.id} submitted: working_dir={task.working_dir} prompt={prompt[:80]}")
         return task
 
     async def _execute(self, task: CodeTask):
@@ -734,7 +810,31 @@ class CodeTaskRunner:
 
         Loop: Atlas responds → parse tool blocks → execute tools → feed results
         back → Atlas continues until no more tool calls or it outputs a final summary.
+
+        R11 (2026-08-22): capture `git status --porcelain` at entry. The post-
+        execute diff against this baseline is the source of `files_changed` at
+        the validator terminal. Replaces the prior 3-tool whitelist.
         """
+        # R11: ground-truth baseline. If the working_dir is a git repo, capture
+        # the porcelain state. If git fails, mark ground_truth=False and fall
+        # back to the legacy whitelist at the validator terminal (logged).
+        baseline = _repo_changed_paths(task.working_dir)
+        if baseline is not None:
+            task.files_snapshot_before = baseline
+            task.files_snapshot_ground_truth = True
+            task.add_log(
+                "ground_truth",
+                f"Captured git status baseline: {len(baseline)} changed paths",
+            )
+        else:
+            task.files_snapshot_ground_truth = False
+            task.add_log(
+                "ground_truth_fallback",
+                f"git status --porcelain failed in {task.working_dir!r}; "
+                "validator will fall back to the legacy 3-tool whitelist. "
+                "(R11, 2026-08-22)",
+            )
+
         task.state = CodeTaskState.RUNNING
         task.started_at = datetime.utcnow().isoformat()
         task.add_log("started", "Atlas is analyzing the request...")
@@ -947,9 +1047,38 @@ class CodeTaskRunner:
                 task.add_log("warning", f"Reached {MAX_ITERATIONS} iteration limit")
 
             task.executed_tool_calls = executed_tool_calls
-            task.files_changed = sorted(actual_files_changed)[:20]
             task.files_inspected = sorted(actual_files_inspected)[:20]
             task.verified_test_runs = verified_test_runs
+
+            # R11 (2026-08-22): ground-truth file-change capture. The validator
+            # at line ~1098 must answer "did files change" by looking, not by
+            # remembering which tools ran. Diff `git status --porcelain` after
+            # the loop against the baseline captured at _execute() entry.
+            # Whitelist-derived `actual_files_changed` is kept as evidence
+            # (logged, surfaced) but is no longer the source of truth.
+            if task.files_snapshot_ground_truth:
+                after_paths = _repo_changed_paths(task.working_dir)
+                if after_paths is not None:
+                    diff = sorted(after_paths - task.files_snapshot_before)[:20]
+                    task.files_changed = diff
+                    task.add_log(
+                        "ground_truth_diff",
+                        f"git status diff: {len(diff)} new path(s) "
+                        f"({len(task.files_snapshot_before)} -> {len(after_paths)})",
+                    )
+                else:
+                    # Baseline succeeded but end-of-task porcelain failed. Fall
+                    # back to the legacy whitelist (explicitly logged) rather
+                    # than silently defaulting to "no changes".
+                    task.files_changed = sorted(actual_files_changed)[:20]
+                    task.add_log(
+                        "ground_truth_fallback_at_end",
+                        "git status --porcelain failed at end-of-task; "
+                        "validator using legacy 3-tool whitelist. (R11)",
+                    )
+            else:
+                # Baseline failed; the legacy whitelist is the only signal.
+                task.files_changed = sorted(actual_files_changed)[:20]
 
             if force_one_tool_call and no_tool_retries >= MAX_NO_TOOL_RETRIES and not executed_tool_calls:
                 task.state = CodeTaskState.ERROR

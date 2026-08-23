@@ -793,7 +793,13 @@ async def _execute_code_task(task: dict) -> ExecutionResult:
 
     prompt = _build_code_task_prompt(task)
     try:
-        code_task = code_task_runner.submit(prompt)
+        # R11 (2026-08-22): the openclaw bridge runs the task in REPO_DIR.
+        # The validator must check the same tree the task ran in — never
+        # default to a hardcoded path. The dispatch's path-doctrine debate
+        # (REPO_DIR vs canonical) is deferred; we pass whatever REPO_DIR
+        # this worker is configured for. The runner will not silently
+        # substitute a different tree.
+        code_task = code_task_runner.submit(prompt, working_dir=REPO_DIR)
     except Exception as exc:
         return ExecutionResult(
             success=False,

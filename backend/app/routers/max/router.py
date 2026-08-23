@@ -5011,6 +5011,11 @@ class CodeTaskRequest(BaseModel):
     prompt: str
     pin: str = ""
     channel: str = "web_cc"
+    # R11 (2026-08-22): the tree the task actually ran in. The validator
+    # uses this for ground-truth capture. Optional on the wire; if absent
+    # we default to the backend process cwd, which is the canonical repo
+    # root for the running unit. Never silently default to a stale path.
+    working_dir: str = ""
 
 
 @router.post("/code-task")
@@ -5037,10 +5042,20 @@ async def submit_code_task(request: CodeTaskRequest):
 
     from app.services.max.code_task_runner import code_task_runner
 
-    task = code_task_runner.submit(request.prompt, founder=founder)
+    # R11: working_dir is required. Caller may supply it; otherwise the
+    # backend process cwd is the authoritative tree. Never default to
+    # a hardcoded path — the validator must check the tree the task ran in.
+    working_dir = (request.working_dir or "").strip() or os.getcwd()
+
+    task = code_task_runner.submit(
+        request.prompt,
+        working_dir=working_dir,
+        founder=founder,
+    )
     return {
         "task_id": task.id,
         "state": task.state.value,
+        "working_dir": task.working_dir,
         "message": "Task submitted to Atlas (CodeForge). Poll /code-task/{id}/status for progress.",
     }
 
