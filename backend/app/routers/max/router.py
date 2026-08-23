@@ -551,14 +551,6 @@ def _drawing_render(handoff) -> dict:
     return result
 
 
-# PHASE 2 · R12 Option A — see app.services.max._merged_handoff_wrapper.
-try:
-    from app.services.max._merged_handoff_wrapper import wrap_merged_handoff as _wmh  # noqa: E402,F401
-except Exception:  # pragma: no cover
-    def _wmh(merged):  # type: ignore[no-redef]
-        return None
-
-
 # Brain instances (shared across requests)
 conversation_tracker = ConversationTracker()
 
@@ -2433,7 +2425,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
 
     drawing_handoff = (
-        _wmh(merged_handoff)
+        merged_handoff
         if merged_handoff is not None
         else (
             build_drawing_handoff(request.message, image_filename=request.image_filename)
@@ -3258,7 +3250,7 @@ async def chat_stream(request: ChatRequest):
             logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
 
     drawing_handoff = (
-        _wmh(merged_handoff)
+        merged_handoff
         if merged_handoff is not None
         else (
             build_drawing_handoff(request.message, image_filename=request.image_filename)
