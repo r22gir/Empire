@@ -551,7 +551,7 @@ def _render_header_band(c, spec, family_name, product_type, geo_w, geo_h):
         descriptor_part = ""
     c.drawRightString(_P(PAGE_W_IN - MARGIN_IN - 0.28),
                       _P(by + 0.19),
-                      f'{int(round(geo_w))}\" W × {int(round(geo_h))}\" H '
+                      f'{_fmt_in(geo_w)} W × {_fmt_in(geo_h)} H '
                       f'{descriptor_part}·  {mount_assumed}')
 
 
@@ -740,7 +740,7 @@ def _render_title_column(
         ("PROJECT:", "—"),
         ("CLIENT:", client_name),
         ("FAMILY:", f"{family_name} · {product_type.replace('_', ' ').title()}"),
-        ("DIMENSIONS:", f'{geo_w:.2f}\" W × {geo_h:.2f}\" H'),
+        ("DIMENSIONS:", f'{_fmt_in(geo_w)} W × {_fmt_in(geo_h)} H'),
     ]
     if family_name == "Roman Shades":
         rows += [
@@ -1394,7 +1394,7 @@ def _render_front_elevation(
         c.line(_P(x_), _P(yd - tick), _P(x_), _P(yd + tick))
     # Label centred below the dim line
     c.drawCentredString(_P(sx_in + shw_in / 2), _P(yd + 0.10),
-                        f'{int(round(geo_w))}\"')
+                        f'{_fmt_in(geo_w)}')
     # ── Witness 2: LEFT "9 @ 7-1/8\"" — fold/slat pattern.
     # Vertical bracket from shade TOP (head_y) to shade BOTTOM
     # (sy_in), labeled "9 @ 7-1/8\"". Witness lines extend from
@@ -1453,7 +1453,7 @@ def _render_front_elevation(
     c.translate(_P(xd_right + 0.18), _P((sy_in + sy_in + shh_in) / 2))
     c.rotate(90)
     c.setFont("Helvetica-Bold", 6.0)
-    c.drawCentredString(0, 0, f'{int(round(geo_h))}\" SHADE')
+    c.drawCentredString(0, 0, f'{_fmt_in(geo_h)} SHADE')
     c.restoreState()
     # The "32\"" and "12\"" room-context labels are POSITIONAL
     # indicators (per golden v10 — the room heights don't fit at
