@@ -120,23 +120,12 @@ def is_cancel_message(text: str) -> bool:
     return bool(CANCEL_PATTERNS.search(text or ""))
 
 
-def is_continuation_reply(text: str, missing_keys: list) -> bool:
-    """Scoped resume-match: only treat the next turn as continuation if
-    it plausibly answers the pending question. Contains a dim-keyword
-    OR mentions one of the missing keys explicitly.
-    """
-    if not text:
-        return False
-    if DIM_KEYWORDS.search(text):
-        return True
-    if missing_keys:
-        lower = text.lower()
-        for key in missing_keys:
-            syn = key.replace("_", " ")
-            if key in lower or syn in lower:
-                return True
-    return False
-
+# NOTE: an earlier, narrower definition of is_continuation_reply
+# lived above this line (used DIM_KEYWORDS only). The active
+# definition below uses the _SYNONYMS table and supersedes it. The
+# dead copy was removed in PHASE 2 · R12 corrected Option A so the
+# next reader is not misled by a redefinition that Python silently
+# overwrites at import time.
 
 # Synonym map — founder often says "wide" not "width", "tall" not
 # "height", "deep" not "depth". The merger and continuation-match
@@ -213,6 +202,76 @@ def is_continuation_reply(text: str, missing_keys: list) -> bool:
             if key in lower or syn in lower:
                 return True
     return False
+
+
+# PHASE 2 · R12 corrected Option A — pure continuation guard.
+# The pending-table path is dead architecture (set_pending requires
+# both `missing` and `tool_payload` to be truthy — mutually
+# exclusive in build_drawing_handoff). This helper reads the last
+# few assistant turns directly from chat history and detects
+# whether the current message is supplying values for a recently
+# missing drawing-router turn. Returns a context dict
+# {b1_product_type, missing_keys} when the guard fires; None
+# otherwise. Pure — no I/O, no state.
+def looks_like_continuation(text: str, history) -> "dict | None":
+    """Detect a continuation reply via chat-history context.
+
+    Pure function. Returns {"b1_product_type": str,
+    "missing_keys": list[str]} when the message plausibly answers a
+    recent drawing-router missing-keys turn; otherwise None.
+
+    The pattern matched in the assistant turn is the canonical
+    missing-template response emitted by _drawing_render at
+    router.py:393-407 ("I have the '<product_type>' product_type
+    but I'm still missing: <keys>"). Parsing this string recovers
+    both the B1 product_type and the template-required keys.
+    """
+    if not text or not history:
+        return None
+    try:
+        # Walk the last few assistant turns. We stop at the first
+        # matching turn so the most recent missing-keys context
+        # wins (a new drawing intent overrides an older one).
+        for turn in reversed(list(history)[-3:]):
+            if not isinstance(turn, dict):
+                continue
+            if (turn.get("role") or "").lower() != "assistant":
+                continue
+            content = (turn.get("content") or "").strip()
+            if not content:
+                continue
+            lower = content.lower()
+            # The drawing-router missing-keys response carries the
+            # exact phrase "I'm still missing: <key1>, <key2>, ..."
+            # — see _drawing_render's ready=False branch.
+            m = re.search(
+                r"i have the ['\"]?([a-z_]+)['\"]? product_type.*?"
+                r"still missing[:\s]+([^\n.]+)",
+                lower,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if not m:
+                # Not a missing-keys drawing-router turn. If the
+                # assistant turn is unrelated (no "missing" / no
+                # "product_type"), stop scanning — we don't want
+                # to pick up stale context from earlier turns.
+                if "missing" not in lower and "product_type" not in lower:
+                    return None
+                continue
+            product_type = m.group(1).strip()
+            missing_str = m.group(2).rstrip(",. ").strip()
+            missing_keys = [k.strip().rstrip(",") for k in missing_str.split(",") if k.strip()]
+            if not product_type or not missing_keys:
+                return None
+            if not is_continuation_reply(text, missing_keys):
+                return None
+            return {
+                "b1_product_type": product_type,
+                "missing_keys": missing_keys,
+            }
+    except Exception:
+        return None
+    return None
 
 
 ensure_table()  # always migrate + sweep on import

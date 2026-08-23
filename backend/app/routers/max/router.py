@@ -2433,6 +2433,69 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
         )
     )
+
+    # PHASE 2 · R12 corrected Option A — continuation guard. The
+    # pending-table path above is dead architecture (set_pending
+    # requires both missing AND tool_payload — mutually exclusive),
+    # so a pure-dim continuation reply like "38 wide 64 long" after
+    # a "draw me a flat roman shade" turn falls through to the LLM
+    # and triggers the 13-21s sketch_to_drawing retry loop. Scan
+    # the last few assistant turns in chat history; if the most
+    # recent drawing-router turn was a missing-keys response and
+    # the current message looks like a continuation reply, build
+    # a transient DrawingHandoff from the message and route to
+    # _drawing_render without invoking the LLM.
+    if (drawing_handoff.is_drawing_intent is False
+            and not request.desk and not request.image_filename):
+        try:
+            from app.services.max.drawing_pending import looks_like_continuation
+            continuation_ctx = looks_like_continuation(
+                request.message, request.history or []
+            )
+        except Exception:
+            continuation_ctx = None
+        if continuation_ctx:
+            from types import SimpleNamespace as _SN
+            from app.services.max.drawing_intent import (
+                _extract_dimensions, _translate_dims_for_b1_product,
+                _compute_missing_template_keys,
+            )
+            b1 = continuation_ctx["b1_product_type"]
+            dims = _extract_dimensions(request.message, item_type=b1)
+            translated = _translate_dims_for_b1_product(dims, b1)
+            still_missing = _compute_missing_template_keys(translated, b1)
+            handoff = _SN(
+                is_drawing_intent=True,
+                ready=not still_missing,
+                b1_product_type=b1,
+                translated_dims=translated,
+                missing_template_keys=list(still_missing or []),
+                missing=[],
+                dimensions=dims,
+                intent_mode="shop_drawing",
+                subject="",
+                item_type=b1,
+                views=[],
+                output_format="inline_svg_pdf",
+                source_image=None,
+                tool_payload=None,
+                response="",
+            )
+            render = _drawing_render(handoff)
+            return ChatResponse(
+                response=render["response_text"],
+                model_used=render["model_used"],
+                fallback_used=False,
+                tool_results=(
+                    [render["tool_result_dict"]]
+                    if render["tool_result_dict"] else None
+                ),
+                metadata=_response_metadata(
+                    request.channel,
+                    skill_used=render["metadata_skill_used"],
+                ),
+            )
+
     if drawing_handoff.is_drawing_intent:
         # HOTFIX 4.0b2 — both /chat and /chat/stream funnel through
         # the same _drawing_render(handoff) helper. Pre-fix, the
@@ -3258,6 +3321,75 @@ async def chat_stream(request: ChatRequest):
             else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
         )
     )
+
+    # PHASE 2 · R12 corrected Option A — continuation guard (mirror
+    # of the /chat handler above). See that block for the rationale.
+    # Stream variant emits SSE events instead of a ChatResponse.
+    if (drawing_handoff.is_drawing_intent is False
+            and not request.desk and not request.image_filename):
+        try:
+            from app.services.max.drawing_pending import looks_like_continuation
+            continuation_ctx = looks_like_continuation(
+                request.message, request.history or []
+            )
+        except Exception:
+            continuation_ctx = None
+        if continuation_ctx:
+            from types import SimpleNamespace as _SN
+            from app.services.max.drawing_intent import (
+                _extract_dimensions, _translate_dims_for_b1_product,
+                _compute_missing_template_keys,
+            )
+            b1 = continuation_ctx["b1_product_type"]
+            dims = _extract_dimensions(request.message, item_type=b1)
+            translated = _translate_dims_for_b1_product(dims, b1)
+            still_missing = _compute_missing_template_keys(translated, b1)
+            handoff = _SN(
+                is_drawing_intent=True,
+                ready=not still_missing,
+                b1_product_type=b1,
+                translated_dims=translated,
+                missing_template_keys=list(still_missing or []),
+                missing=[],
+                dimensions=dims,
+                intent_mode="shop_drawing",
+                subject="",
+                item_type=b1,
+                views=[],
+                output_format="inline_svg_pdf",
+                source_image=None,
+                tool_payload=None,
+                response="",
+            )
+            render = _drawing_render(handoff)
+            conv_id = request.conversation_id or str(uuid.uuid4())
+
+            async def continuation_gen():
+                if render["status_event"]:
+                    yield f"data: {json.dumps({'type': 'text', 'content': render['status_event']})}\n\n"
+                yield f"data: {json.dumps({'type': 'text', 'content': render['response_text']})}\n\n"
+                if render["tool_result_dict"]:
+                    yield f"data: {json.dumps({'type': 'tool_result', **render['tool_result_dict']})}\n\n"
+                yield (
+                    "data: "
+                    + json.dumps({
+                        "type": "done",
+                        "model_used": render["model_used"],
+                        "conversation_id": conv_id,
+                        "metadata": _response_metadata(
+                            request.channel,
+                            skill_used=render["metadata_skill_used"],
+                        ),
+                    })
+                    + "\n\n"
+                )
+
+            return StreamingResponse(
+                continuation_gen(),
+                media_type="text/event-stream",
+                headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+            )
+
     if drawing_handoff.is_drawing_intent:
         # HOTFIX 4.0b2 — both /chat and /chat/stream funnel through
         # the same _drawing_render(handoff) helper. See comment at
