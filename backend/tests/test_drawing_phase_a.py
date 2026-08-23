@@ -149,8 +149,12 @@ def test_pending_job_lifecycle(monkeypatch):
     merged = drawing_pending.merge_founder_reply(
         snap, "make the bench 87 wide, seat height 17"
     )
-    assert merged["dimensions"]["width"] == "87"
-    assert merged["dimensions"]["seat_height"] == "17"
+    # R12.1 — _match_dim now routes through _parse_dimension_value
+    # which produces a float, formatted with ":g" + inch suffix.
+    # Pre-fix this returned the raw matched token ("87"); the
+    # downstream float(str(v).rstrip('"')) consumer accepts both.
+    assert merged["dimensions"]["width"] == '87"'
+    assert merged["dimensions"]["seat_height"] == '17"'
     assert merged["missing"] == []  # both required now present
     # Clear the job (job resolved).
     drawing_pending.clear_pending("conv-1", "web")

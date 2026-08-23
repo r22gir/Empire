@@ -822,35 +822,171 @@ def _extract_dimensions(
     structured questions.
     """
     dimensions: dict[str, str] = {}
-    # HOTFIX 4.0 (c): 'drop' is now a recognized label for valance /
-    # cornice / roman. The 'seat h' / 'back h' shortforms are also
-    # recognized for furniture. HOTFIX 4.0 (c) did NOT add 'drop' to
-    # the value-first pattern's label alternation because some
-    # phrases ('no drop specified') would false-positive — we keep
-    # the label-first form as the canonical path.
+    # R12.1 — value pattern now accepts:
+    #   69, 69.5, 69-1/2, 69 1/2, 5/8                (bare / decimal / fraction)
+    #   5' 9, 5' 9-1/2, 5 feet 9, 5 feet 9-1/2         (feet + inches)
+    # The captured value token is parsed to float inches by
+    # _parse_dimension_value below. Unparseable tokens or
+    # out-of-bounds values are dropped (logged) so the dimension
+    # surfaces as "missing" rather than silently rendering as a
+    # bogus value (e.g. the live 69 1/2" wide bug that produced 2").
     value_first = re.compile(
-        r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?\s+"
+        r"(?P<value>"
+        r"\d+(?:\.\d+)?(?:[-\s]\d+/\d+)?"            # 69, 69.5, 69-1/2, 69 1/2
+        r"|\d+/\d+"                                    # 5/8 standalone
+        r"|\d+(?:\.\d+)?\s*(?:'|feet)\s+\d+(?:\.\d+)?(?:[-\s]\d+/\d+)?"  # 5' 9, 5' 9-1/2, 5 feet 9, 5 feet 9-1/2
+        r")\s*"
+        r"(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?"
+        r"\s+"
         r"(?P<label>overall height|seat height|seat h|back height|back h|wide|width|long|length|deep|depth|high|height|drop)\b",
         re.IGNORECASE,
     )
-    # HOTFIX 4.0 (c): label-first pattern grew 'drop' so the natural
-    # request "width: 60, drop: 48" parses correctly for roman/valance.
+    # Label-first pattern: same fraction / feet-inches support.
     label_first = re.compile(
-        r"(?P<label>overall height|seat height|seat h|back height|back h|width|length|drop|depth|height)\s*[:=]?\s*"
-        r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?",
+        r"(?P<label>overall height|seat height|seat h|back height|back h|width|length|drop|depth|height)"
+        r"\s*[:=]?\s*"
+        r"(?P<value>"
+        r"\d+(?:\.\d+)?(?:[-\s]\d+/\d+)?"
+        r"|\d+/\d+"
+        r"|\d+(?:\.\d+)?\s*(?:'|feet)\s+\d+(?:\.\d+)?(?:[-\s]\d+/\d+)?"
+        r")\s*"
+        r"(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?",
         re.IGNORECASE,
     )
 
     for pattern in (value_first, label_first):
         for match in pattern.finditer(text):
             label = _normalize_dimension(match.group("label"))
-            value = match.group("value")
+            value_str = match.group("value")
             unit = (match.group("unit") or '"').lower()
+
+            # Parse the captured value token to float inches.
+            inches = _parse_dimension_value(value_str)
+            if inches is None:
+                # Unparseable — fail loudly per R12.1 directive.
+                # Drop the dimension so it surfaces as missing in
+                # the handoff and the founder gets a structured
+                # question instead of a silent 2" shade.
+                import logging
+                logging.getLogger(__name__).warning(
+                    "R12.1: dropped unparseable token %r for label %r in %r",
+                    value_str, label, text,
+                )
+                continue
+
+            # Plausibility gate — refuse to emit values outside the
+            # sane range. Bounds come from the templates' own
+            # required dims: smallest Empire product is ~6" (a small
+            # valance topper) and the largest is <25' (oversized
+            # banquet). 3" lower bound catches the 2" bug; 600"
+            # upper bound (50 feet) catches foot-vs-inch typos
+            # (e.g. a width typed as 600 feet instead of 600").
+            if inches < _DIMENSION_BOUNDS[0] or inches > _DIMENSION_BOUNDS[1]:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "R12.1: dropped %r for label %r — value %.3f out of bounds %r",
+                    value_str, label, inches, _DIMENSION_BOUNDS,
+                )
+                continue
+
             suffix = "ft" if unit in ("ft", "feet", "'") else '"'
-            dimensions[label] = f"{value}{suffix}"
+            dimensions[label] = f"{inches:g}{suffix}"
 
     dimensions = _apply_item_type_overrides(dimensions, item_type)
     return dimensions
+
+
+# R12.1 — plausibility bounds for any single rendered dimension.
+# Picked from the templates' own required dims (templates/roman.py:61,
+# drapery.py:48, valance.py:43, cornice.py:40, bench_curved.py:42,
+# headboard_channel.py:35). No template accepts a dimension below
+# ~6" or above ~25 feet in real Empire work; the 3" floor catches
+# the 2" parse bug, the 600" (50') ceiling catches the foot/inch
+# typo. A value outside this range is dropped (logged) and the
+# dimension surfaces as missing in the handoff.
+_DIMENSION_BOUNDS = (3.0, 600.0)
+
+
+def _parse_dimension_value(token: str) -> float | None:
+    """R12.1 — parse a single dimension token to inches. Pure.
+
+    Reuses the proven feet/inches/fraction logic from
+    b2_qc.py:1868 (sheet-scale reverse parser) but extended for
+    user-input dimension values.
+
+    Accepts (the founder's required set, per R12.1 directive):
+      69                          bare integer → 69.0
+      69.5                        decimal → 69.5
+      69 1/2, 69-1/2              whole + fraction → 69.5
+      5/8                         standalone fraction → 0.625
+      5' 9"                       feet + inches → 69.0
+      5' 9-1/2"                   feet + inches + fraction → 69.5
+      5 feet 9 inches              word form → 69.0
+      5 feet 9-1/2 inches          word form + fraction → 69.5
+
+    Returns None on anything unparseable — never a partial
+    number. A dimension the parser cannot read fails loudly by
+    having _extract_dimensions drop it (so the dimension
+    surfaces as "missing" in the handoff and the founder gets a
+    structured question, not a silent bogus render).
+
+    The same fraction bug that produced width=2 from "69 1/2"
+    is fixed here: the regex is anchored, the captured token is
+    always one of the known forms, and a malformed token returns
+    None instead of silently consuming the digit after the `/`.
+    """
+    if not token:
+        return None
+    t = token.strip()
+    if not t:
+        return None
+
+    # Form A: feet-inches with optional fraction.
+    #   5' 9", 5' 9-1/2", 5 feet 9, 5 feet 9-1/2, 5 feet 9 inches
+    m = re.match(
+        r"^(\d+(?:\.\d+)?)\s*(?:'|feet)\s+(\d+(?:\.\d+)?)"
+        r"(?:[-\s](\d+)/(\d+))?\s*(?:inches|\"|in)?$",
+        t, re.IGNORECASE,
+    )
+    if m:
+        feet = float(m.group(1))
+        inches = float(m.group(2))
+        if m.group(3) is not None:
+            num = float(m.group(3))
+            den = float(m.group(4))
+            if den <= 0:
+                return None
+            inches += num / den
+        return feet * 12.0 + inches
+
+    # Form B: whole + fraction (hyphen or space).
+    #   69-1/2, 69 1/2
+    m = re.match(r"^(\d+(?:\.\d+)?)[-\s](\d+)/(\d+)$", t)
+    if m:
+        whole = float(m.group(1))
+        num = float(m.group(2))
+        den = float(m.group(3))
+        if den <= 0:
+            return None
+        return whole + num / den
+
+    # Form C: standalone fraction.
+    #   5/8, 7/16
+    m = re.match(r"^(\d+)/(\d+)$", t)
+    if m:
+        num = float(m.group(1))
+        den = float(m.group(2))
+        if den <= 0:
+            return None
+        return num / den
+
+    # Form D: bare number (integer or decimal).
+    #   69, 69.5
+    m = re.match(r"^(\d+(?:\.\d+)?)$", t)
+    if m:
+        return float(m.group(1))
+
+    return None
 
 
 def _has_enough_dimensions(item_type: str, dimensions: dict[str, str], source_image: str | None) -> tuple[bool, list[str]]:

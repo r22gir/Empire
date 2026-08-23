@@ -154,13 +154,29 @@ def _match_dim(text: str, key: str):
     pat = _DIM_PATTERN(key)
     sep = r"\s*[:=]?\s*"  # optional separator (=, :, or just whitespace)
     # dim → number
-    m = re.search(rf"\b({pat}){sep}([\d./]+)\b", t, re.IGNORECASE)
+    # R12.1 — the value token may include whitespace (e.g.
+    # "69 1/2") or hyphen (e.g. "69-1/2") or a feet-inches form.
+    # Capture the raw token then route through the central
+    # _parse_dimension_value (defined in drawing_intent).) Returns
+    # None on anything unparseable so the missing-key path
+    # surfaces instead of a silent bogus float.
+    # Pre-fix: this regex captured `[\d./]+` which matched "2"
+    # in "69 1/2" (the digit after the slash), silently
+    # producing width=2 from the founder's typed input.
+    m = re.search(rf"\b({pat}){sep}([\d\s./-]+)\b", t, re.IGNORECASE)
     if m:
-        return m.group(2)
+        from app.services.max.drawing_intent import _parse_dimension_value
+        inches = _parse_dimension_value(m.group(2))
+        if inches is not None:
+            # :g strips trailing zeros — 87.0 → "87", 69.5 stays.
+            return f'{inches:g}"'
     # number → dim
-    m2 = re.search(rf"\b([\d./]+){sep}({pat})\b", t, re.IGNORECASE)
+    m2 = re.search(rf"\b([\d\s./-]+){sep}({pat})\b", t, re.IGNORECASE)
     if m2:
-        return m2.group(1)
+        from app.services.max.drawing_intent import _parse_dimension_value
+        inches = _parse_dimension_value(m2.group(1))
+        if inches is not None:
+            return f'{inches:g}"'
     return None
 
 
