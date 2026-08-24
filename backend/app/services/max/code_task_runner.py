@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.services.max.ai_router import AIMessage, AIModel, AIResponse, ai_router
+from app.services.max.code_task_persistence import insert_task, update_task
 
 logger = logging.getLogger("max.code_task")
 
@@ -765,6 +766,21 @@ class CodeTaskRunner:
     """Manages async code tasks executed by CodeForge/Atlas."""
 
     def __init__(self):
+        # SINGLE-WORKER ASSUMPTION (D28 §1b, D27 §4):
+        # uvicorn is started with NO --workers flag (verified
+        # `ps -ef | grep uvicorn` — single PID), so this dict is the
+        # authoritative state for the lifetime of the process. The
+        # persistence layer (code_task_persistence.py) writes to
+        # ~/empire-data/empire.db on every state transition; reads on
+        # restart come from the DB, NOT from a rehydrated dict. If a
+        # second uvicorn worker is ever added:
+        #   - this dict will diverge across workers (each has its own)
+        #   - the persistence writers will race on the same row id
+        #   - the startup-reconcile (STEP 2) will mark 'running' rows
+        #     from the OTHER worker as 'error' on every boot
+        # Migration path if multi-worker: acquire a process-level
+        # UNIQUE-writer lock in code_task_persistence, or move the
+        # table to a backend that supports atomic upserts (Postgres).
         self._tasks: dict[str, CodeTask] = {}
         self._running: dict[str, asyncio.Task] = {}
 
@@ -800,6 +816,11 @@ class CodeTaskRunner:
             founder=founder,
         )
         self._tasks[task.id] = task
+        # Persist the row IMMEDIATELY (D28 §1b). Without this INSERT the
+        # task only exists in this process's dict; the moment the backend
+        # restarts before _execute() reaches :838, the task is gone. The
+        # insert_task() helper is best-effort (logs+continues on failure).
+        insert_task(task)
         # Start execution in background
         self._running[task.id] = asyncio.create_task(self._execute(task))
         logger.info(f"Code task {task.id} submitted: working_dir={task.working_dir} prompt={prompt[:80]}")
@@ -838,6 +859,10 @@ class CodeTaskRunner:
         task.state = CodeTaskState.RUNNING
         task.started_at = datetime.utcnow().isoformat()
         task.add_log("started", "Atlas is analyzing the request...")
+        # D28 §1b: persist the state='running' transition. A row that
+        # never sees this update reads as 'queued' (the default after
+        # insert_task) and may be wrongly swept on the next reconcile.
+        update_task(task)
 
         try:
             from app.services.max.desks.desk_manager import desk_manager
@@ -1093,6 +1118,7 @@ class CodeTaskRunner:
                 )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
+                update_task(task)  # D28 §1b terminal-hook (site :1084)
                 logger.error(f"Code task {task.id} did not provide executable tool calls after retries")
                 return
 
@@ -1108,6 +1134,7 @@ class CodeTaskRunner:
                 )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
+                update_task(task)  # D28 §1b terminal-hook (site :1100)
                 logger.error(f"Code task {task.id} had no executed tool calls")
                 return
 
@@ -1121,6 +1148,7 @@ class CodeTaskRunner:
                     )
                     task.completed_at = datetime.utcnow().isoformat()
                     task.add_log("error", task.error)
+                    update_task(task)  # D28 §1b terminal-hook (site :1116)
                     logger.error(f"Code task {task.id} violated read-only mode")
                     return
             else:
@@ -1136,6 +1164,7 @@ class CodeTaskRunner:
                     )
                     task.completed_at = datetime.utcnow().isoformat()
                     task.add_log("error", task.error)
+                    update_task(task)  # D28 §1b terminal-hook (site :1128)
                     logger.error(f"Code task {task.id} had no actual file changes")
                     return
 
@@ -1154,6 +1183,7 @@ class CodeTaskRunner:
                 )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
+                update_task(task)  # D28 §1b terminal-hook (site :1149)
                 logger.error(f"Code task {task.id} could not verify commit")
                 return
 
@@ -1166,12 +1196,14 @@ class CodeTaskRunner:
                 )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
+                update_task(task)  # D28 §1b terminal-hook (site :1161)
                 logger.error(f"Code task {task.id} invalid commit hash")
                 return
 
             task.result = _compose_verified_summary(task)
             task.state = CodeTaskState.COMPLETED
             task.completed_at = datetime.utcnow().isoformat()
+            update_task(task)  # D28 §1b terminal-hook (site :1173 — success)
             logger.info(
                 f"Code task {task.id} completed: {len(task.files_changed)} files changed, {len(task.executed_tool_calls)} tool calls"
             )
@@ -1183,7 +1215,26 @@ class CodeTaskRunner:
             task.result = _format_failure_evidence(task, "task timed out")
             task.completed_at = datetime.utcnow().isoformat()
             task.add_log("error", "Timed out waiting for Atlas")
+            update_task(task)  # D28 §1b terminal-hook (site :1180 — asyncio.TimeoutError)
             logger.error(f"Code task {task.id} timed out")
+
+        except asyncio.CancelledError:
+            # D28 §1c: explicit CancelledError handler. Py3.8+ has
+            # asyncio.CancelledError inheriting BaseException (NOT Exception),
+            # so the `except Exception` below does NOT catch it. Without this
+            # branch the `finally:` pops _running but leaves the row reading
+            # 'running' — and a startup-reconcile would later overwrite our
+            # choice. We persist a terminal 'error' so the row is consistent
+            # with what the founder sees in the runner's logs. STEP 2's
+            # reconcile covers the kill -9 case where NO handler runs.
+            task.state = CodeTaskState.ERROR
+            task.error = "Task cancelled before completion"
+            task.failure_reason = task.error
+            task.completed_at = datetime.utcnow().isoformat()
+            task.add_log("error", task.error)
+            update_task(task)  # D28 §1c CancelledError terminal-hook
+            logger.error(f"Code task {task.id} cancelled")
+            raise
 
         except Exception as e:
             task.state = CodeTaskState.ERROR
@@ -1192,6 +1243,7 @@ class CodeTaskRunner:
             task.result = _format_failure_evidence(task, f"exception: {e}")
             task.completed_at = datetime.utcnow().isoformat()
             task.add_log("error", f"Failed: {e}")
+            update_task(task)  # D28 §1b terminal-hook (site :1189 — generic Exception)
             logger.error(f"Code task {task.id} failed: {e}")
 
         finally:
