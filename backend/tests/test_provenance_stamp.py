@@ -223,43 +223,85 @@ def test_restamp_replaces_header_instead_of_stacking(tmp_path):
 
 
 def test_source_file_bytes_unchanged_after_run(tmp_path):
-    """Guard against silent in-place mutation. Original bytes preserved.
+    """Source-side invariants the dispatch required:
+      - the source file bytes are byte-identical after the run
+      - the SOURCE body reached the export
+      - exactly one SOURCE: header line is present
 
-    Also: pre-existing export survives unchanged except for the header line.
+    The pre-existing destination is irrelevant to the dispatch — the
+    stamper is a copy tool, so any stale destination body must be replaced
+    (covered by a separate test).
     """
     repo = _make_repo(tmp_path)
     doc = repo / "doc.md"
-    payload = "BYTE-IDENTITY-CANARY: do not touch me\n"
+    payload = (
+        "BYTE-IDENTITY-CANARY: do not touch me\n"
+        "extra line that the stamper must not see in the source\n"
+    )
     _write_and_commit(doc, payload, "init")
-    # also dirty the file
-    doc.write_text(payload + "extra line that the stamper must not see in the source\n", encoding="utf-8")
+    # also dirty the file so dirty-marker logic is exercised
+    doc.write_text(payload + "yet another line after the dirty\n", encoding="utf-8")
     out = tmp_path / "out"
     out.mkdir()
-    out_path = out / "doc.md"
-    out_path.write_bytes(b"PRE-EXISTING EXPORT\n")
+
     before_bytes = doc.read_bytes()
-    pre_export_bytes = out_path.read_bytes()
 
     result = _run_stamp(repo, "doc.md", "--out", str(out))
     assert result.returncode == 0, result.stderr
 
-    # Source file untouched.
+    # 1. Source file untouched, byte-for-byte.
     after_bytes = doc.read_bytes()
     assert after_bytes == before_bytes, "source file was mutated"
 
-    # Destination carries exactly one SOURCE: line.
+    # 2. The SOURCE body reached the export.
+    exported_path = out / "doc.md"
+    assert exported_path.exists()
+    exported = exported_path.read_text(encoding="utf-8")
+    assert payload in exported, (
+        "source body did not reach the export — stamper preserved a "
+        "different body instead"
+    )
+
+    # 3. Exactly one SOURCE: header line.
+    matches = _HEADER_LINE.findall(exported)
+    assert len(matches) == 1, (
+        f"expected exactly one SOURCE: line, got {len(matches)}: "
+        f"{matches!r}"
+    )
+
+
+def test_stale_destination_body_is_replaced_not_preserved(tmp_path):
+    """Regression: pre-existing destination body must NOT survive the stamp.
+
+    The bug this guards against: the stamper read the destination and
+    preserved its body, only refreshing the header. A user re-exporting an
+    updated document would silently get the OLD body exported under the
+    NEW header — a header that does not describe the bytes beneath it.
+
+    This is the original-probe canary scenario: source content "SOURCE-…"
+    pre-seeded destination "STALE-…". After stamping, STALE-… must be gone
+    and SOURCE-… must be present.
+    """
+    repo = _make_repo(tmp_path)
+    doc = repo / "doc.md"
+    source_payload = "SOURCE-CONTENT-CANARY\n"
+    _write_and_commit(doc, source_payload, "seed")
+    out = tmp_path / "out"
+    out.mkdir()
+    out_path = out / "doc.md"
+    out_path.write_bytes(b"STALE-DEST-CANARY\n")
+
+    result = _run_stamp(repo, "doc.md", "--out", str(out))
+    assert result.returncode == 0, result.stderr
+
     exported = out_path.read_text(encoding="utf-8")
-    assert len(_HEADER_LINE.findall(exported)) == 1
-    # Pre-existing export body preserved beneath the header.
-    assert "PRE-EXISTING EXPORT" in exported
-    # Only the first line of the export changed — the header.
-    lines = exported.splitlines(keepends=False)
-    # First line is the new SOURCE: header.
-    assert lines[0].startswith("SOURCE: ")
-    # All subsequent lines match what was there before.
-    body_lines = lines[1:]
-    pre_body_lines = pre_export_bytes.decode("utf-8").splitlines()
-    assert body_lines == pre_body_lines
+    assert "STALE-DEST-CANARY" not in exported, (
+        "stale destination body was preserved — stamper must overwrite, "
+        "not patch the header"
+    )
+    assert "SOURCE-CONTENT-CANARY" in exported, (
+        "source body did not reach the export"
+    )
 
 
 def test_outside_work_tree_refuses_nonzero(tmp_path):

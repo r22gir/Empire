@@ -39,16 +39,10 @@ Stdlib + git only. No new packages.
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 import sys
 from datetime import date
 from pathlib import Path
-
-# A SOURCE: header line at the start of the destination file. MULTILINE
-# so $ matches the end-of-line, not end-of-string, and count=1 in
-# re.sub still replaces only the first occurrence.
-_HEADER_PATTERN = re.compile(r"^SOURCE: .*$", re.MULTILINE)
 
 
 def _die(msg: str, code: int = 1) -> None:
@@ -110,15 +104,6 @@ def _build_header(branch: str, commit_field: str, today: str) -> str:
     return f"SOURCE: {branch} @ {commit_field} · exported {today}"
 
 
-def _replace_or_prepend_header(content: str, header: str) -> str:
-    """If `content` starts with a SOURCE: line, replace just that line.
-    Otherwise prepend `header` as the first line.
-    """
-    if _HEADER_PATTERN.match(content):
-        return _HEADER_PATTERN.sub(header, content, count=1)
-    return header + "\n" + content
-
-
 def _stamp_one(
     source: Path, out_dir: Path, cwd: Path,
     branch: str, commit: str, today: str,
@@ -143,12 +128,11 @@ def _stamp_one(
     except UnicodeDecodeError:
         _die(f"{source} is not valid UTF-8; refusing to stamp binary content")
 
-    if out_path.exists():
-        existing = out_path.read_text(encoding="utf-8")
-        new_content = _replace_or_prepend_header(existing, header)
-    else:
-        new_content = header + "\n" + source_text
-
+    # Always write the destination from the source bytes. Idempotency on
+    # the header is satisfied because the destination is overwritten whole
+    # (one SOURCE: line, not two). Refreshing the body each run is the
+    # tool's whole purpose — a stale destination body must not survive.
+    new_content = header + "\n" + source_text
     out_path.write_text(new_content, encoding="utf-8")
     return out_path
 
