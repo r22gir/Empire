@@ -281,3 +281,228 @@ class TestFmtInUsedEverywhere:
             f"formatting drift: 69.5 → {_fmt_in(69.5)!r}, "
             f"expected '69-1/2\"'"
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# R12.3.1 — fold-count and slat-pitch cross-site guard
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _extract_fold_count(pdf_text: str) -> list[int]:
+    """Pull every integer N that names a fold/slat count on the sheet.
+
+    Matches patterns like:
+      "9 folds @ ..."           (header band)
+      "9 @ 7-1/8\""            (FOLDS row + front-elevation witness)
+      "8 × 6-7/8\" = 55\"" (layout math segment count)
+      "8 total"                 (notes "ASSUMED 6-7/8" (8 total)")
+
+    Filters: the layout math has TWO `N ×` lines — one for the
+    width ("1 × 69-1/2\"" — single-panel roman) and one for the
+    slats ("8 × 6-7/8\""). Only the slat-side count is a fold
+    count. The width-panel count is 1 by convention and is
+    excluded.
+    """
+    found = []
+    # "N folds @" (header)
+    for m in re.finditer(r"\b(\d+)\s+folds\s+@", pdf_text):
+        found.append(int(m.group(1)))
+    # "N @ pitch" (FOLDS row + front-elevation witness)
+    for m in re.finditer(r"\b(\d+)\s+@\s+\d", pdf_text):
+        found.append(int(m.group(1)))
+    # "N × pitch" (layout math segment counts) — exclude the
+    # width-panel count (which is 1 by convention for roman).
+    for m in re.finditer(r"\b(\d+)\s+×\s+\d+(?:-\d+/\d+)?\"", pdf_text):
+        n = int(m.group(1))
+        if n >= 2:  # exclude the single-panel width entry
+            found.append(n)
+    # "(N total)" (notes assumption block)
+    for m in re.finditer(r"\((\d+)\s+total\)", pdf_text):
+        found.append(int(m.group(1)))
+    return found
+
+
+def _extract_slat_pitches(pdf_text: str) -> list[str]:
+    """Pull every slat-pitch string printed on the sheet.
+
+    Matches `N-X/Y"` (the format _fmt_in uses). Restricts to
+    pitches that appear adjacent to "× " (the layout math
+    segment) or "@ " (the descriptor / FOLDS row), excluding
+    other fractional measurements on the sheet like the mount
+    depth (2-1/2"), the cover depth (7-9/16"), and the W/H
+    dimensions themselves.
+
+    Specifically excludes the width-row "1 × 69-1/2\"" (single-
+    panel roman) — the operand there is the width, not a pitch.
+    """
+    pitches = set()
+    # From "N × pitch" segments (layout math). Exclude the
+    # single-panel width entry (count=1 by convention for roman).
+    for m in re.finditer(r"\b(\d+)\s+×\s+(\d+-\d+/\d+\")", pdf_text):
+        if int(m.group(1)) >= 2:
+            pitches.add(m.group(2))
+    # From "N folds @ pitch" and "N @ pitch" (header + FOLDS row).
+    for m in re.finditer(r"@\s+(\d+-\d+/\d+\")", pdf_text):
+        pitches.add(m.group(1))
+    # From the notes "Slat: ASSUMED X-Y/Z" (8 total)".
+    for m in re.finditer(r"Slat:\s+ASSUMED\s+(\d+-\d+/\d+\")", pdf_text):
+        pitches.add(m.group(1))
+    return sorted(pitches)
+
+
+class TestFoldCountSlatsConsistency:
+    """R12.3.1 — every fold-count and slat-pitch value printed on
+    one sheet must agree. The founder's live bug:
+    flat_fold_148b13ff.pdf printed `9 folds @ 7-1/8"` in the
+    header but `8 × 6-7/8"` in the layout math for a 55"-tall
+    shade. Wrong fold count is the same defect class as wrong
+    dimensions — half an inch decides fit, but so does "is this
+    a 9-fold or an 8-fold stack?".
+
+    The guard renders flat_fold at three heights and asserts
+    that the SET of distinct fold counts and slat pitches
+    printed on each sheet is exactly one each.
+    """
+
+    @pytest.fixture(scope="class")
+    def flat_fold_height_55_pdf(self):
+        """Founder's live case: 55" produces 8 folds @ 6-7/8\"
+        (round(55/7) = round(7.857) = 8)."""
+        spec = {
+            "product_type": "flat_fold",
+            "dims": {"width": 69.5, "height": 55.0},
+            "client_name": "", "site_address": "", "material": "",
+            "date": "",
+        }
+        return render_spec(spec)
+
+    @pytest.fixture(scope="class")
+    def flat_fold_height_64_pdf(self):
+        """The golden-reference case: 64" produces 9 folds @ 7-1/8"
+        (round(64/7) = round(9.143) = 9). This is what the
+        hard-coded '9 folds @ 7-1/8"' was originally written for."""
+        spec = {
+            "product_type": "flat_fold",
+            "dims": {"width": 38.0, "height": 64.0},
+            "client_name": "", "site_address": "", "material": "",
+            "date": "",
+        }
+        return render_spec(spec)
+
+    @pytest.fixture(scope="class")
+    def flat_fold_height_30_pdf(self):
+        """Short shade: 30" produces 4 folds @ 7-1/2"
+        (round(30/7) = round(4.286) = 4)."""
+        spec = {
+            "product_type": "flat_fold",
+            "dims": {"width": 36.0, "height": 30.0},
+            "client_name": "", "site_address": "", "material": "",
+            "date": "",
+        }
+        return render_spec(spec)
+
+    def test_fold_count_single_value_height_55(self, flat_fold_height_55_pdf):
+        text = _pdf_to_text(flat_fold_height_55_pdf)
+        counts = _extract_fold_count(text)
+        assert len(counts) >= 3, (
+            f"expected at least 3 fold-count sites on a flat-fold "
+            f"sheet, found {counts!r}"
+        )
+        assert len(set(counts)) == 1, (
+            f"fold count disagrees across sites on one sheet "
+            f"(height=55): {counts!r}. The live bug: header said "
+            f"'9 folds' while layout math said '8 ×'."
+        )
+        assert counts[0] == 8, (
+            f"round(55/7) should yield 8 folds; sheet says "
+            f"{counts[0]}"
+        )
+
+    def test_fold_count_single_value_height_64(self, flat_fold_height_64_pdf):
+        text = _pdf_to_text(flat_fold_height_64_pdf)
+        counts = _extract_fold_count(text)
+        assert len(set(counts)) == 1, (
+            f"fold count disagrees on golden-reference sheet "
+            f"(height=64): {counts!r}"
+        )
+        assert counts[0] == 9
+
+    def test_fold_count_single_value_height_30(self, flat_fold_height_30_pdf):
+        text = _pdf_to_text(flat_fold_height_30_pdf)
+        counts = _extract_fold_count(text)
+        assert len(set(counts)) == 1, (
+            f"fold count disagrees on short sheet (height=30): "
+            f"{counts!r}"
+        )
+        assert counts[0] == 4
+
+    def test_slat_pitch_single_value_height_55(self, flat_fold_height_55_pdf):
+        text = _pdf_to_text(flat_fold_height_55_pdf)
+        pitches = _extract_slat_pitches(text)
+        # The set is collapsed by dedup; a correct sheet has
+        # exactly one pitch value printed (layout math, header
+        # descriptor, notes all agree).
+        assert pitches, (
+            f"expected at least one slat pitch on a flat-fold "
+            f"sheet, found {pitches!r}"
+        )
+        assert len(set(pitches)) == 1, (
+            f"slat pitch disagrees across sites on one sheet "
+            f"(height=55): {pitches!r}. Layout math says '6-7/8\"'; "
+            f"the pre-fix header said '7-1/8\"' (rounded-up golden-"
+            f"reference pitch)."
+        )
+        assert pitches == ['6-7/8"'], (
+            f"expected exactly 6-7/8\" for height=55 (round(55/7)=8 "
+            f"slats @ 6.875\"), got {pitches!r}"
+        )
+
+    def test_slat_pitch_single_value_height_64(self, flat_fold_height_64_pdf):
+        text = _pdf_to_text(flat_fold_height_64_pdf)
+        pitches = _extract_slat_pitches(text)
+        assert len(set(pitches)) == 1, (
+            f"slat pitch disagrees on golden-reference sheet "
+            f"(height=64): {pitches!r}"
+        )
+        assert pitches == ['7-1/8"']
+
+    def test_slat_pitch_single_value_height_30(self, flat_fold_height_30_pdf):
+        text = _pdf_to_text(flat_fold_height_30_pdf)
+        pitches = _extract_slat_pitches(text)
+        assert len(set(pitches)) == 1, (
+            f"slat pitch disagrees on short sheet (height=30): "
+            f"{pitches!r}"
+        )
+        # round(30/7) = round(4.286) = 4; 30/4 = 7.5 → 7-1/2"
+        assert pitches == ['7-1/2"']
+
+
+class TestFoldDescriptorHelper:
+    """Unit tests for the fold_descriptor helper in roman.py.
+    Pins the single source of truth."""
+
+    def test_height_55_yields_8_folds(self):
+        from app.services.drawing.templates.roman import fold_descriptor
+        assert fold_descriptor("flat_fold", 55.0) == '8 folds @ 6-7/8"'
+
+    def test_height_64_yields_9_folds(self):
+        from app.services.drawing.templates.roman import fold_descriptor
+        assert fold_descriptor("flat_fold", 64.0) == '9 folds @ 7-1/8"'
+
+    def test_height_30_yields_4_folds(self):
+        from app.services.drawing.templates.roman import fold_descriptor
+        # round(30/7) = round(4.286) = 4; 30/4 = 7.5 → 7-1/2
+        assert fold_descriptor("flat_fold", 30.0) == '4 folds @ 7-1/2"'
+
+    def test_height_100_yields_14_folds(self):
+        from app.services.drawing.templates.roman import fold_descriptor
+        # round(100/7) = round(14.286) = 14; 100/14 ≈ 7.143 → 7-1/8
+        assert fold_descriptor("flat_fold", 100.0) == '14 folds @ 7-1/8"'
+
+    def test_unknown_product_type_returns_empty(self):
+        from app.services.drawing.templates.roman import fold_descriptor
+        assert fold_descriptor("nonexistent_style", 64.0) == ""
+
+    def test_zero_height_returns_empty(self):
+        from app.services.drawing.templates.roman import fold_descriptor
+        assert fold_descriptor("flat_fold", 0.0) == ""

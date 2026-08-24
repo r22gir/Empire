@@ -537,12 +537,14 @@ def _render_header_band(c, spec, family_name, product_type, geo_w, geo_h):
     c.setFont("Helvetica", 8.5)
     c.setFillColor(MUTED_GOLD)
     # Right smaller line — dims + (family-specific descriptor) +
-    # mount. Roman Shades has 9 folds @ 7-1/8"; Drapery has its
-    # own descriptor (panel count + max panel width).
+    # mount. R12.3.1: descriptor is computed from geo_h and the
+    # roman slat table via roman.fold_descriptor — never hard-coded.
+    # Caller may override via spec["dim_descriptor"].
     descriptor = spec.get("dim_descriptor")
     if descriptor is None:
         if family_name == "Roman Shades":
-            descriptor = "9 folds @ 7-1/8\""
+            from app.services.drawing.templates.roman import fold_descriptor
+            descriptor = fold_descriptor(product_type, geo_h)
         else:
             descriptor = ""  # family-specific; caller may override
     if descriptor:
@@ -743,8 +745,20 @@ def _render_title_column(
         ("DIMENSIONS:", f'{_fmt_in(geo_w)} W × {_fmt_in(geo_h)} H'),
     ]
     if family_name == "Roman Shades":
+        # R12.3.1 — FOLDS row reads the same source as the header
+        # band (roman.fold_descriptor). The previous hard-coded
+        # "9 @ 7-1/8\"" was correct for 64"-tall only; every
+        # other height (e.g. the live 55" case) was wrong.
+        from app.services.drawing.templates.roman import fold_descriptor
+        n_folds_descriptor = fold_descriptor(product_type, geo_h)
+        # fold_descriptor returns "N folds @ X-Y/Z\""; the title
+        # block drops the "folds " verb and uses "N @ X-Y/Z"".
+        if n_folds_descriptor:
+            n_part, _, pitch_part = n_folds_descriptor.partition(" folds @ ")
+        else:
+            n_part, pitch_part = "", ""
         rows += [
-            ("FOLDS:", "9 @ 7-1/8\""),
+            ("FOLDS:", f"{n_part} @ {pitch_part}"),
             ("MOUNTING:",
              f"{spec.get('mount', 'Inside').title()} — 2-1/2\" ASSUMED"),
         ]
@@ -1422,7 +1436,16 @@ def _render_front_elevation(
     c.translate(_P(xd_left - 0.08), _P(sy_in + shh_in / 2))
     c.rotate(90)
     c.setFont("Helvetica-Bold", 7.5)
-    c.drawCentredString(0, 0, "9 @ 7-1/8\"")
+    # R12.3.1 — fold-pitch witness reads from the same fold_descriptor
+    # source as the header band and FOLDS row (was hardcoded "9 @ 7-1/8\"").
+    from app.services.drawing.templates.roman import fold_descriptor
+    _fd = fold_descriptor(product_type, geo_h)
+    if _fd:
+        # Drop the "folds " verb for the vertical witness label.
+        _n_part, _, _pitch_part = _fd.partition(" folds @ ")
+        c.drawCentredString(0, 0, f"{_n_part} @ {_pitch_part}")
+    else:
+        c.drawCentredString(0, 0, "")
     c.restoreState()
     # ── Witness 3: RIGHT chain — "32\"" (floor→sill) /
     # "64\" SHADE" (sill→head) / "12\"" (head→ceiling).

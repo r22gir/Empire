@@ -56,6 +56,36 @@ _RINGED_STYLES = {
 }
 
 
+def fold_descriptor(product_type: str, geo_h: float) -> str:
+    """R12.3.1 — single source of truth for the fold-count string
+    printed in the header band and the title block FOLDS row.
+
+    Pre-fix: the header band (`b2_renderers.py:545`) and the title
+    block FOLDS row (`b2_renderers.py:747`) both hard-coded
+    `"9 folds @ 7-1/8\""`. That was correct for the original
+    golden reference (38" wide × 64" tall flat-fold, where
+    `round(64/7)=9` and `actual_slat=64/9≈7.111`) but wrong for any
+    other height. Live bug: the founder's `69.5" × 55"` sheet
+    rendered header "9 folds @ 7-1/8"" while the layout math
+    correctly read `8 × 6-7/8" = 55"`. Half an inch decides fit;
+    wrong fold count is the same defect class as wrong dimensions.
+
+    Returns the descriptor string (e.g. "8 folds @ 6-7/8\"") for
+    the given product_type and sheet height. Uses the same
+    `_DEFAULT_SLAT_HEIGHTS` table the geometry/layout_math/title
+    code uses, so every site on the sheet agrees.
+    """
+    slat = _DEFAULT_SLAT_HEIGHTS.get(product_type)
+    if slat is None or slat <= 0 or geo_h <= 0:
+        return ""
+    n_slats = max(1, round(geo_h / slat))
+    actual_slat = geo_h / n_slats
+    # Reuse _fmt_in for consistent 1/16" fraction formatting (R12.2).
+    # Local import to avoid a circular import at module load.
+    from app.services.drawing.templates.b2_renderers import _fmt_in
+    return f"{n_slats} folds @ {_fmt_in(actual_slat)}"
+
+
 ROMAN_PRODUCT_TYPES = list(_ROMAN_STYLES)
 
 ROMAN_REQUIRED = ["width", "height"]
