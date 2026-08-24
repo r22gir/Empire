@@ -45,7 +45,7 @@ Check /model first — confirm M3. Read CLAUDE.md fully. Repo ~/empire-repo-main
 branch feature/drawing-standard (HEAD b074daf or later).
 
 PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-the FROZEN main worktree holding the shared git object store at
+the MAIN WORKTREE — it owns the shared object store and still receives data writes under backend/data/ holding the shared git object store at
 ~/empire-repo/.git; ~/empire-repo-main is a LINKED worktree. Deleting
 ~/empire-repo destroys both. Never write to it. CLAUDE.md is also incomplete on
 Hermes: the hierarchy is founder → External Hermes ("Harry", opencode-remote on

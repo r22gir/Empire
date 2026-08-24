@@ -36,7 +36,7 @@ Check /model first — confirm M3. Read CLAUDE.md fully. Repo ~/empire-repo-main
 branch feature/drawing-standard (HEAD 0954016 or later).
 
 PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-the FROZEN main worktree holding the shared git object store; ~/empire-repo-main
+the MAIN WORKTREE — it owns the shared object store and still receives data writes under backend/data/ holding the shared git object store; ~/empire-repo-main
 is a LINKED worktree. Never write to it.
 
 INFRA: backend restart = `systemctl --user restart empire-backend` ONLY, and

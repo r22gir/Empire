@@ -210,8 +210,7 @@ this one is the decision that scopes the rest of the handoff.
    Answer key published before the test existed. **This is the handoff proof.**
 
 ## GOTCHAS
-Stale fork `~/empire-repo` — any reference is drift (90 instances, per
-`reports/2026-08-24_D23_stale_fork_census.md` COMMAND 3 live grep, 2026-08-24) · Cloudflare
+`~/empire-repo` is the MAIN WORKTREE — it owns the shared object store and still receives data writes under backend/data/ (any framing of it as a "stale fork" is wrong) · Cloudflare
 ingress is in the Zero Trust dashboard, not YAML · files born in chat reach the
 machine by DOWNLOAD, never paste · **`sqlite3` CLI is NOT installed** — use the
 venv's Python · use `~/empire-repo-main/backend/venv` only · a negative fixture

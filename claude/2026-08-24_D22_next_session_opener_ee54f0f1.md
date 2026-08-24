@@ -21,10 +21,12 @@ Branch feature/drawing-standard, HEAD c1b43ed, everything pushed.
 
 THE THREE THINGS THAT MATTER MOST, from the handoff:
 
-1. ~/empire-repo is NOT a stale fork. It is the FROZEN main worktree holding
+1. ~/empire-repo is NOT a stale fork. It is the MAIN WORKTREE — it owns the shared object store and still receives data writes under backend/data/ holding
    the shared git object store. Deleting it destroys every local branch and
-   stash. claude/HANDOFF.md still says "Eradication is a staged task" — that
-   instruction is dangerous and the doc sweep is not done.
+   stash. The D21 handoff no longer carries "Eradication is a staged task";
+   see CLAUDE.md's "OPEN HAZARD (H73)" note — the path-doctrine enforcement
+   is unsafe until H73 closes, its rationale is wrong even where it is right.
+   The doc sweep is still not done.
 
 2. My actual goal: dispatches that run unattended and email me when they hit a
    decision. Executor works, outbound works, inbound works as of yesterday,

@@ -36,7 +36,7 @@ this acts on. Verify its claims as you go; if one has moved or is wrong, stop
 and say so.
 
 PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-the FROZEN main worktree holding the shared git object store at
+the MAIN WORKTREE — it owns the shared object store and still receives data writes under backend/data/ holding the shared git object store at
 ~/empire-repo/.git; ~/empire-repo-main is a LINKED worktree. Deleting
 ~/empire-repo destroys both. Never write to it. CLAUDE.md also wrongly states
 that opencode-remote IS Hermes — R10 verified they are separate services. Do
