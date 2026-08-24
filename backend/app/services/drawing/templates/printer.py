@@ -329,8 +329,8 @@ def render_spec_to_bytes(result: GeometryFamilyResult, spec: dict) -> bytes:
       (4) Empty MATERIAL/SITE/DATE rows omitted
     """
     if result.family == "Roman Shades":
-        return _render_b2_vector(result, spec)
-    if result.family == "Drapery":
+        pdf_bytes = _render_b2_vector(result, spec)
+    elif result.family == "Drapery":
         # CORRECTION R3.2 generalization: each family gets a
         # vector renderer in the v11 sheet language. Drapery uses
         # its own panel/pleat anatomy (NOT the Roman-shades bar
@@ -338,12 +338,32 @@ def render_spec_to_bytes(result: GeometryFamilyResult, spec: dict) -> bytes:
         from app.services.drawing.templates.drapery_render import (
             render_drapery,
         )
-        return render_drapery(spec)
-    # Non-vector families: keep the B1 textual preview so existing
-    # tests + the live chat path keep producing a PDF for every
-    # family. The vector renderer for each family lands in B2
-    # follow-on commits.
-    return _render_b1_story(result, spec)
+        pdf_bytes = render_drapery(spec)
+    else:
+        # Non-vector families: keep the B1 textual preview so existing
+        # tests + the live chat path keep producing a PDF for every
+        # family. The vector renderer for each family lands in B2
+        # follow-on commits. The QC gate is vector-only (it measures
+        # bbox positions of vector text + lines), so it is NOT
+        # applied to the B1 story path here.
+        return _render_b1_story(result, spec)
+
+    # R12.3.3 — every vector-rendered sheet is run through the
+    # geometric QC gate (b2_qc.enforce_b2_qc) before returning
+    # bytes. The gate was defined during the B2 rollout and
+    # tested extensively via tests/test_drawing_vector_b2.py but
+    # was never wired into the production render path. The gate
+    # fails CLOSED: a collision, a same-baseline overlap, a
+    # column overflow, or a missing element-spread all raise
+    # B2QCFailure, which propagates out of render_spec. Per the
+    # founder's R12.3.3 ruling, any QC failure refuses the render.
+    from app.services.drawing.templates.b2_qc import enforce_b2_qc
+    # R12.3.4 — pass the spec so the scale-truth and title+witnesses
+    # gates can derive expected values from the renderer's own
+    # _fmt_in / fold_descriptor helpers (single source of truth)
+    # rather than parsing the rendered text with a hard-coded regex.
+    enforce_b2_qc(pdf_bytes, result.family, result.product_type, spec=spec)
+    return pdf_bytes
 
 
 def _render_b2_vector(result: GeometryFamilyResult, spec: dict) -> bytes:

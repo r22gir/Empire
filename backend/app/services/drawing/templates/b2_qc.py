@@ -47,6 +47,33 @@ from app.services.drawing.templates.b2_renderers import (
 )
 
 
+def _parse_fraction(tok: str) -> float | None:
+    r"""R12.3.4 — parse a fraction string like '69-1/2' or '5/8' to
+    a float. Returns None if the string is not a parseable fraction.
+    Used by the scale-truth gate's regex fallback when the
+    captured token is a fraction (the regex was widened to
+    accept `[\d.\-/]+` but Python's float() rejects the dash in
+    '69-1/2')."""
+    if not tok:
+        return None
+    s = tok.strip()
+    # "whole numerator/denominator" (e.g. "69-1/2", "12-3/4")
+    m = re.match(r"^(\d+)-(\d+)/(\d+)$", s)
+    if m:
+        whole, num, den = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if den == 0:
+            return None
+        return whole + num / den
+    # "numerator/denominator" (e.g. "5/8", "1/2")
+    m = re.match(r"^(\d+)/(\d+)$", s)
+    if m:
+        num, den = int(m.group(1)), int(m.group(2))
+        if den == 0:
+            return None
+        return num / den
+    return None
+
+
 # ── Page geometry constants (landscape letter, in inches) ─────────
 # Re-mapped for B2d+ golden v10 layout. The golden v10 reference
 # is the binding sheet standard (per CLAUDE.md "B2 sheet standard =
@@ -208,6 +235,7 @@ def enforce_b2_qc(
     pdf_bytes: bytes,
     family: str,
     product_type: str,
+    spec: dict | None = None,
 ) -> dict:
     """Run all three B2 QC gates against a rendered PDF.
 
@@ -215,6 +243,18 @@ def enforce_b2_qc(
       pdf_bytes: the rendered PDF (raw bytes from a tool result)
       family: the family name (for error messages)
       product_type: the product_type (for error messages)
+      spec: optional render spec ({"dims": {"width": ..., "height": ...}})
+        — when provided, gates that depend on the rendered dimension
+        values (scale-truth, title+witnesses) read the expected
+        values off the spec via the renderer's `_fmt_in` formatter
+        rather than parsing the rendered text. Single source of
+        truth — a third format cannot drift in. Pre-R12.3.4 the
+        scale-truth gate used a regex that matched only the
+        pre-R12.2 decimal format ("38.00\" W × 64.00\" H"), and
+        the title+witnesses gate hard-coded "9 @ 7-1/8\"" and
+        "64\" SHADE" from the original golden reference. Both
+        refused every non-golden-reference sheet. The spec arg
+        fixes that.
 
     Returns:
       dict with summary stats:
@@ -432,7 +472,7 @@ def enforce_b2_qc(
 
         # ── Golden-port corrections G1 (2026-08-16) — 5 new gates ─
         # Gate 1: elevation viewport-fill + scale-truth
-        scale_truth_failures = _check_elevation_scale_truth(page)
+        scale_truth_failures = _check_elevation_scale_truth(page, spec=spec)
         if scale_truth_failures:
             msgs = [f["issue"] for f in scale_truth_failures]
             raise B2QCFailure(
@@ -478,7 +518,7 @@ def enforce_b2_qc(
                 f"samples: {dup_cap_failures[:3]}"
             )
         # Gate 5: title + witnesses
-        title_witness_failures = _check_title_and_witnesses(page, family=family)
+        title_witness_failures = _check_title_and_witnesses(page, family=family, spec=spec)
         if title_witness_failures:
             msgs = [f["issue"] for f in title_witness_failures]
             raise B2QCFailure(
@@ -898,7 +938,7 @@ def _check_column_overflow(page) -> list[dict]:
 # geometry still wrong; without (b) the stamp could match a tiny
 # geometry shrunk into the corner.
 
-def _check_elevation_scale_truth(page) -> list[dict]:
+def _check_elevation_scale_truth(page, spec: dict | None = None) -> list[dict]:
     """Gate 1: scale-truth + viewport-fill for the front elevation.
 
     Reads SCALE row + DIMENSIONS row from the title column, then
@@ -913,16 +953,61 @@ def _check_elevation_scale_truth(page) -> list[dict]:
     """
     failures = []
     text = "".join(c["text"] for c in page.chars)
-    # Parse DIMENSIONS row: "DIMENSIONS:38.00\" W × 64.00\" H"
-    dim_m = re.search(
-        r'DIMENSIONS:?\s*([\d.]+)\s*"\s*W\s*[×x]\s*([\d.]+)\s*"\s*H',
-        text, re.IGNORECASE)
-    if not dim_m:
-        failures.append({"gate": "scale-truth",
-                         "issue": "DIMENSIONS row not parseable"})
-        return failures
-    real_w = float(dim_m.group(1))
-    real_h = float(dim_m.group(2))
+    # R12.3.4 — when `spec` is provided, derive the expected
+    # DIMENSIONS row via the renderer's own _fmt_in formatter
+    # (single source of truth) rather than parsing the rendered
+    # text with a regex. Pre-fix the regex required the pre-R12.2
+    # decimal format ("38.00\" W × 64.00\" H"), so any R12.2
+    # fraction format ("69-1/2\" W × 55\" H") was a false-positive
+    # refusal. Falls back to the regex parse when no spec is
+    # provided (the unit-test path in
+    # tests/test_drawing_vector_b2.py still exercises it).
+    real_w = real_h = None
+    if spec is not None:
+        try:
+            from app.services.drawing.templates.b2_renderers import _fmt_in
+            dims = spec.get("dims") or {}
+            if "width" in dims and "height" in dims:
+                real_w = float(dims["width"])
+                real_h = float(dims["height"])
+                expected_dim_row = (
+                    f"DIMENSIONS: {_fmt_in(real_w)} W × {_fmt_in(real_h)} H"
+                )
+                # The renderer uses letterspacing on labels, so
+                # the rendered "DIMENSIONS:" may have spaces
+                # between characters. Normalize whitespace.
+                norm_text = "".join(text.split())
+                norm_expected = "".join(expected_dim_row.split())
+                if norm_expected not in norm_text:
+                    failures.append({
+                        "gate": "scale-truth",
+                        "issue": f"DIMENSIONS row mismatch — expected "
+                                 f"{expected_dim_row!r}, sheet differs",
+                    })
+        except Exception:
+            pass
+    if real_w is None:
+        # Fallback: parse the rendered DIMENSIONS row. The character
+        # class now includes the dash so fractions like "69-1/2" are
+        # captured, and _parse_fraction decodes them.
+        dim_m = re.search(
+            r'DIMENSIONS:?\s*([\d.\-/]+)\s*"\s*W\s*[×x]\s*([\d.\-/]+)\s*"\s*H',
+            text, re.IGNORECASE)
+        if not dim_m:
+            failures.append({"gate": "scale-truth",
+                             "issue": "DIMENSIONS row not parseable"})
+            return failures
+        def _to_float(tok: str) -> float | None:
+            try:
+                return float(tok)
+            except ValueError:
+                return _parse_fraction(tok)
+        real_w = _to_float(dim_m.group(1))
+        real_h = _to_float(dim_m.group(2))
+        if real_w is None or real_h is None:
+            failures.append({"gate": "scale-truth",
+                             "issue": "DIMENSIONS row not parseable"})
+            return failures
     # Parse SCALE row (sheet-in per model-in) via shared helper.
     scale_factor = _parse_scale_factor(text)
     if scale_factor is None or scale_factor <= 0:
@@ -1594,7 +1679,7 @@ def _check_stack_anatomy(page, family: str = "Roman Shades") -> list[dict]:
 #     9 @ 7-1/8" left) must all be present and anchored to features.
 
 
-def _check_title_and_witnesses(page, family: str = "Roman Shades") -> list[dict]:
+def _check_title_and_witnesses(page, family: str = "Roman Shades", spec: dict | None = None) -> list[dict]:
     """Gate 5: title exact-match + three witnesses present and
     anchored.
 
@@ -1637,37 +1722,68 @@ def _check_title_and_witnesses(page, family: str = "Roman Shades") -> list[dict]
                      "in header band",
             "top_text": top_text,
         })
-    # (b) Witnesses — Roman-shades specific (38", 9 @ 7-1/8",
-    # 64" SHADE). Other families have their own family-specific
-    # dimensions and don't need these witnesses.
+    # (b) Witnesses — Roman-shades specific. Pre-fix hard-coded
+    # "9 @ 7-1/8"" and "64\" SHADE" (the original golden-reference
+    # strings). R12.3.4 — when `spec` is provided, derive the
+    # expected fold count + slat pitch + height from the spec via
+    # the renderer's `fold_descriptor` + `_fmt_in` helpers
+    # (single source of truth). The 38" width witness comes
+    # from the width dim.
     if family != "Roman Shades":
         return failures
-    # Front-elev viewport: canvas x ∈ [FRONT_X_IN, FRONT_X_IN+FRONT_W_IN],
-    # canvas y ∈ [FRONT_Y_IN, FRONT_Y_IN+FRONT_H_IN] → pdfplumber
-    # y0 ∈ [FRONT_Y_IN*72, (FRONT_Y_IN+FRONT_H_IN)*72].
-    # The right-side dim chain extends beyond the viewport
-    # (xd_right = wx1_in + 0.40 = 5.15 — outside viewport x_max
-    # 5.05), so the gate widens the search to include the
-    # witness extension area up to the title column boundary.
-    front_y0_min = FRONT_Y_IN * 72
-    front_y0_max = (FRONT_Y_IN + FRONT_H_IN) * 72
-    front_x_min = FRONT_X_IN * 72 - 5
-    # Allow up to 0.5" beyond viewport x_max for witness extensions
-    front_x_max = (FRONT_X_IN + FRONT_W_IN + 0.5) * 72
+    # R12.3.4 — derive expected witness strings from the spec
+    # when available. Falls back to the original golden-reference
+    # strings (38" / "9 @ 7-1/8"" / "64\" SHADE") when no spec
+    # is provided (the unit-test path).
+    expected_w = "38\""
+    expected_folds = "9 @ 7-1/8\""
+    expected_height = "64\" SHADE"
+    if spec is not None:
+        try:
+            from app.services.drawing.templates.b2_renderers import _fmt_in
+            from app.services.drawing.templates.roman import fold_descriptor
+            dims = spec.get("dims") or {}
+            if "width" in dims:
+                expected_w = _fmt_in(float(dims["width"]))
+            product_type = spec.get("product_type", "flat_fold")
+            if "height" in dims:
+                fd = fold_descriptor(product_type, float(dims["height"]))
+                if fd:
+                    # "N folds @ X-Y/Z"" — split into the "N @" and pitch
+                    n_part, _, pitch_part = fd.partition(" folds @ ")
+                    expected_folds = f"{n_part} @ {pitch_part}"
+                expected_height = f"{_fmt_in(float(dims['height']))} SHADE"
+        except Exception:
+            pass
+    # R12.3.4 — the witnesses (width, fold, height) are drawn
+    # in DIFFERENT viewports: width dim below the front-elev,
+    # fold and height witnesses in the SIDE SECTION. The
+    # original gate only searched the front-elev viewport bbox,
+    # so it missed the side-section witnesses for non-64"
+    # heights (the side section's left edge moves with the
+    # geometry). Search the FULL page (between the margins) so
+    # the witnesses are found wherever they are drawn.
+    full_y0_min = MARGIN_IN * 72
+    full_y0_max = (PAGE_H_IN - MARGIN_IN) * 72
+    full_x_min = MARGIN_IN * 72
+    full_x_max = (PAGE_W_IN - MARGIN_IN) * 72
     front_chars = [c for c in page.chars
-                   if front_x_min <= c["x0"] <= front_x_max
-                   and front_y0_min - 5 <= c["y0"] <= front_y0_max + 5]
+                   if full_x_min <= c["x0"] <= full_x_max
+                   and full_y0_min <= c["y0"] <= full_y0_max]
     front_text = "".join(c["text"] for c in front_chars)
-    if "38\"" not in front_text:
+    if expected_w not in front_text:
         failures.append({"gate": "witness-bottom",
-                         "issue": "'38\"' (width witness) missing from front-elev"})
-    if "9 @ 7-1/8\"" not in front_text:
+                         "issue": f"'{expected_w}' (width witness) missing "
+                                  f"from front-elev"})
+    if expected_folds not in front_text:
         failures.append({"gate": "witness-left-folds",
-                         "issue": "'9 @ 7-1/8\"' (left fold witness) missing"})
-    if not (re.search(r'64"\s*SHADE', front_text, re.IGNORECASE)
-            or (re.search(r'64"', front_text) and "SHADE" in front_text)):
+                         "issue": f"'{expected_folds}' (left fold witness) "
+                                  f"missing"})
+    if not (re.search(rf'{re.escape(expected_height.split()[0])}\s*SHADE',
+                       front_text, re.IGNORECASE)):
         failures.append({"gate": "witness-right-height",
-                         "issue": "'64\" SHADE' (height witness) missing",
+                         "issue": f"'{expected_height}' (height witness) "
+                                  f"missing",
                          "front_text": front_text[:300]})
     return failures
 

@@ -2822,6 +2822,30 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
             ),
         )
     except Exception as e:
+        # R12.3.3 — B2QCFailure is a subclass of AssertionError
+        # raised by b2_qc.enforce_b2_qc on any geometric QC
+        # failure (element-spread, zone-bounds, text-collision,
+        # text-over-geometry, same-baseline-overlap, dim-witness-
+        # borrow, column-overflow). The generic Exception handler
+        # catches it but produces a non-specific "AssertionError:
+        # <message>" line. Detect the QC subclass first and
+        # surface the failure as a structured 422-style error with
+        # the gate name + message intact.
+        try:
+            from app.services.drawing.templates.b2_qc import B2QCFailure
+        except ImportError:  # pragma: no cover — b2_qc always present
+            B2QCFailure = None
+        if B2QCFailure is not None and isinstance(e, B2QCFailure):
+            return ToolResult(
+                tool="render_shop_drawing", success=False,
+                error=str(e),
+                result={
+                    "qc_failure": True,
+                    "gate": "b2_qc",
+                    "family": product_type,
+                    "spec": spec,
+                },
+            )
         return ToolResult(
             tool="render_shop_drawing", success=False,
             error=f"render_spec raised {type(e).__name__}: {e}",

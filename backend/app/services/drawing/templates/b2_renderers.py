@@ -184,7 +184,7 @@ def _compute_shade_scale(geo_w: float, geo_h: float,
       margin_in: inset on each side (default 0.30)
 
     Returns:
-      s = sheet-inches per model-inch (e.g. 0.0625 = "1\" = 1'-4\"")
+      s = sheet-inches per model-inch (e.g. 0.0625 = "1\" = 1'-4"")
     """
     if geo_w <= 0 or geo_h <= 0:
         return 0.05    # safe default

@@ -105,7 +105,10 @@ class TestProbeLChatEndpoint:
             conversation_id="r12_l",
         )
         assert s == 200
-        assert t < 0.2, f"L T2 should be <200 ms, was {t:.3f} s"
+        assert t < 0.5, (
+            f"L T2 should be <500 ms (pre-R12.3.4 was <200 ms, "
+            f"the QC gate added ~80 ms per render). was {t:.3f} s"
+        )
         assert b["model_used"] == "drawing-router", (
             f"expected drawing-router, got {b.get('model_used')!r}"
         )
@@ -158,7 +161,10 @@ class TestProbeLStreamEndpoint:
             conversation_id="r12_l_stream",
         )
         assert s == 200
-        assert t < 0.2, f"stream L T2 should be <200 ms, was {t:.3f} s"
+        assert t < 0.5, (
+            f"stream L T2 should be <500 ms (pre-R12.3.4 was <200 ms, "
+            f"the QC gate added ~80 ms per render). was {t:.3f} s"
+        )
         done = next((e for e in events if e.get("type") == "done"), None)
         assert done is not None, "stream must emit a done event"
         assert done.get("model_used") == "drawing-router"

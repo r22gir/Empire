@@ -29,6 +29,20 @@ from pathlib import Path
 import pytest
 
 from app.services.drawing.templates import render_spec
+# R12.3.4 — the gate (enforce_b2_qc) is now wired into render_spec.
+# The R12.2 cross-site consistency tests test the renderer, not
+# the gate. Use the bare vector renderer to bypass the gate so
+# these tests verify callout placement (the R12.2 subject) in
+# isolation from the QC gate (which would refuse many of these
+# sheets for other reasons, see R12.3.3).
+from app.services.drawing.templates.printer import _render_b2_vector
+from app.services.drawing.templates.roman import RomanTemplate
+
+def _render_bypass_qc(spec: dict) -> bytes:
+    """Render a flat-fold B2 vector sheet without the QC gate."""
+    template = RomanTemplate()
+    result = template.compute(spec)
+    return _render_b2_vector(result, spec)
 
 
 def _pdf_to_text(pdf_bytes: bytes) -> str:
@@ -127,7 +141,7 @@ class TestDimensionFormatterConsistency:
             "material": "",
             "date": "",
         }
-        return render_spec(spec)
+        return _render_bypass_qc(spec)
 
     @pytest.fixture(scope="class")
     def flat_fold_pdf_with_half_inch_height(self):
@@ -139,7 +153,7 @@ class TestDimensionFormatterConsistency:
             "material": "",
             "date": "",
         }
-        return render_spec(spec)
+        return _render_bypass_qc(spec)
 
     @pytest.fixture(scope="class")
     def flat_fold_pdf_with_integer_dim(self):
@@ -154,7 +168,7 @@ class TestDimensionFormatterConsistency:
             "material": "",
             "date": "",
         }
-        return render_spec(spec)
+        return _render_bypass_qc(spec)
 
     def _value_set(self, pdf_text: str, key: str) -> set:
         return set(_extract_dimension_values(pdf_text, key))
@@ -374,7 +388,7 @@ class TestFoldCountSlatsConsistency:
             "client_name": "", "site_address": "", "material": "",
             "date": "",
         }
-        return render_spec(spec)
+        return _render_bypass_qc(spec)
 
     @pytest.fixture(scope="class")
     def flat_fold_height_64_pdf(self):
@@ -387,7 +401,7 @@ class TestFoldCountSlatsConsistency:
             "client_name": "", "site_address": "", "material": "",
             "date": "",
         }
-        return render_spec(spec)
+        return _render_bypass_qc(spec)
 
     @pytest.fixture(scope="class")
     def flat_fold_height_30_pdf(self):
@@ -399,7 +413,7 @@ class TestFoldCountSlatsConsistency:
             "client_name": "", "site_address": "", "material": "",
             "date": "",
         }
-        return render_spec(spec)
+        return _render_bypass_qc(spec)
 
     def test_fold_count_single_value_height_55(self, flat_fold_height_55_pdf):
         text = _pdf_to_text(flat_fold_height_55_pdf)

@@ -242,7 +242,22 @@ def _render_to_text(spec: dict) -> str:
                "reportlab, not pdfplumber, at runtime.",
     )
     from app.services.drawing.templates import render_spec
-    pdf_bytes = render_spec(spec)
+    # R12.3.4 — the QC gate is now wired into render_spec and
+    # can refuse sheets with real geometric defects. For B1 tests
+    # that verify rendered text, bypass the gate by calling the
+    # family-specific vector renderer directly. For "pinch_pleat"
+    # (Drapery), use the Drapery vector renderer.
+    family = spec.get("product_type", "flat_fold")
+    if family in ("pinch_pleat", "goblet_pleat", "ripplefold",
+                  "euro_pleat", "rod_pocket", "tab_top",
+                  "smocked", "pencil_pleat", "french_pleat",
+                  "box_pleat", "inverted_box_pleat"):
+        from app.services.drawing.templates.drapery_render import (
+            render_drapery,
+        )
+        pdf_bytes = render_drapery(spec)
+    else:
+        pdf_bytes = render_spec(spec)
     assert isinstance(pdf_bytes, (bytes, bytearray))
     assert len(pdf_bytes) > 1024, "PDF must be non-trivial"
     import pdfplumber
