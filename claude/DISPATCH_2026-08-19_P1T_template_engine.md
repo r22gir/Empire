@@ -34,7 +34,9 @@ Place at `~/empire-repo-main/reference/mclean/`. The nine site JPEGs are
 ```
 Check /model first — confirm M3, not a silent downgrade. Read CLAUDE.md fully.
 Repo: ~/empire-repo-main, branch feature/drawing-standard. Canonical paths
-only; ~/empire-repo is a STALE FORK.
+only; ~/empire-repo is the main worktree (shared git object store, live venv,
+live data — not a stale fork; see H72/H73 and
+`reports/2026-08-24_D23_stale_fork_census.md`).
 
 INFRA RULES: backend restart is `systemctl --user restart empire-backend` and
 NOTHING else. Never hand-start uvicorn or bind :8000. Never stop

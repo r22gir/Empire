@@ -65,9 +65,10 @@ Changing `label_station.py` does require the backend process to restart — see 
 
 - `/home/rg/empire-repo-main` and `/ssd/rg/empire-repo-main` are **the same
   filesystem** (bind mount, `/dev/sdb1`). Interchangeable.
-- `/home/rg/empire-repo` is a **separate legacy tree**. Not a symlink. Stale.
-  It is the path that has caused repeated confusion; treat any reference to it
-  as drift.
+- `/home/rg/empire-repo` is the **main worktree** — it owns the shared git
+  object store at `~/empire-repo/.git` and the live venv/data. Treating it
+  as drift (the pre-2026-08-24 read) destroys every local branch and stash
+  on the box. Correction: `reports/2026-08-24_D23_stale_fork_census.md`.
 - Active branch: `feature/drawing-standard`.
 
 ### Backend process

@@ -154,8 +154,10 @@ cd ~/empire-repo-main && git status --porcelain=v1 && git log --oneline -12 && g
 ```
 
 Report uncommitted work explicitly. Per HANDOFF_2026-08-20 doctrine:
-`~/empire-repo-main` is THE repo (branch `feature/drawing-standard`);
-`~/empire-repo` is a STALE FORK and any reference to it is drift. Do not touch
+`~/empire-repo-main` and `~/empire-repo` are LINKED worktrees on the same
+`feature/drawing-standard` branch sharing one object store (pre-2026-08-24
+framing called `~/empire-repo` a "stale fork"; that read was wrong — see
+H72/H73 and `reports/2026-08-24_D23_stale_fork_census.md`). Do not touch
 either beyond these read commands. Known false positive: `max/memory.md`
 always shows modified (nightly brain_sync) — report it but do not treat it as
 uncommitted work.

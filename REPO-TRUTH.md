@@ -2,6 +2,30 @@
 
 > **READ THIS FIRST** before doing any work on EmpireBox. Every agent (Hermes, OpenCode, MAX, OpenClaw, Claude Code, Codex) MUST consult this file before reading source, running code, or making changes.
 
+## ⚠ CORRECTION NOTICE (2026-08-24) — READ BEFORE THE LAYOUT BELOW
+
+The layout sections below describe `~/empire-repo` as a stale fork. That
+description is **wrong** as of 2026-08-24. The corrected picture:
+
+`~/empire-repo` is the main worktree (not a stale fork). It owns the shared
+git object store at `~/empire-repo/.git`, the live venv at
+`~/empire-repo/backend/venv/`, and the live OpenClaw service on port 7878 —
+all of which still receive data writes. The sibling checkout
+`~/empire-repo-main` is on the same `feature/drawing-standard` branch.
+
+Two open items make this unsafe to act on:
+- **H72** — data writes still land in `~/empire-repo/backend/data/` while the
+  backend runs from `~/empire-repo-main`. H57 Phase 3 claimed closure at
+  `59d356d`/`3b34a86`; D23 shows writes continuing. Cross-reference H57; do not
+  reopen.
+- **H73** — `backend/app/services/max/canonical_path.py:133-152` hardcodes
+  `home/"empire-repo"` as a `bad_roots` entry and refuses every sub-path of the
+  tree that owns the object store. Live hazard. Code lane, not this dispatch.
+
+The two-repo comparison table further down still encodes the wrong framing
+and needs its own correction lane. **Neutralised lines below are minimum
+safety edits, not the final state.**
+
 ## ⚠️ TL;DR — Canonical layout
 
 | Component | Canonical path | Notes |
@@ -33,7 +57,7 @@ pid: 1795744
 
 | Path | Status | Why |
 |---|---|---|
-| `/home/rg/empire-repo` | **STALE FORK** (kept for venv + DB only) | Different `app/main.py`, no live processes from here. Do NOT edit code in this repo. |
+| `/home/rg/empire-repo` | **MAIN WORKTREE** (was mislabelled "stale fork" pre-2026-08-24; correction is the notice at top of file) | Owns the shared git object store, the live venv, and the live OpenClaw service. Acting on it as if it were a stale tree destroys every local branch, lane and stash. See H72/H73. |
 | `/home/rg/empire-repo-v10` | **TEST LANE — DEPRECATED 2026-06-07** | Sandboxed test copy. Archived to `~/archive/empire-repo-v10-DEPRECATED-2026-06-07.tar.gz` (sha256: `8a3da8157f143439f0d6f6612a98eaccc10f42b5ccd37b5b3bf6ee00b761dda7`). See `DEPRECATED.md` in that directory. |
 | `/home/rg/empire-repo-stable` | **ARCHIVED — pre-production lane** | Last commit 2026-04-29 ("docs(ops): finalize stable and v10 lane separation"). No unique production work. Archived separately. |
 | `/home/rg/empire-repo-feature` | **ARCHIVED — feature branch fork** | Branched off the same line as `empire-repo`. No unique production work. Archived separately. |
@@ -43,7 +67,7 @@ pid: 1795744
 | Repo | HEAD | Last touched | Unique commits vs main | Untracked files |
 |---|---|---|---|---|
 | `empire-repo-main` | (see git log) | 2026-06-01 | — (this IS main) | 0 |
-| `empire-repo` | `b7dcb6b` | 2026-06-07 12:38 (heartbeat) | divergent stale fork | 0 |
+| `empire-repo` | `b7dcb6b` | 2026-06-07 12:38 (heartbeat) | shared git object store (the "main worktree" — pre-2026-08-24 misdiagnosis as "divergent stale fork" was wrong) | 0 |
 | `empire-repo-v10` | `da2cbd9` | 2026-05-31 | test-only, no production value | 0 |
 | `empire-repo-stable` | `d403372` | 2026-04-29 | none (no shared ancestor with main) | 0 |
 | `empire-repo-feature` | `a991a3c` | 2026-05-25 | none (branched from empire-repo lineage) | 0 |
@@ -60,21 +84,35 @@ pid: 1795744
 
 ### DO NOT
 
-1. ❌ Edit code in `/home/rg/empire-repo` — it is a stale fork, edits will be lost
+1. ❌ Edit code in `/home/rg/empire-repo` — it is the **main worktree**, and edits
+   there are NOT lost (it owns the shared git object store); however, the active
+   branch is `feature/drawing-standard` and the canonical checkout for new work
+   is `~/empire-repo-main` (sibling). Edits in `~/empire-repo` will be visible
+   to `~/empire-repo-main` because they share the object store — but they will
+   also be visible to every other linked worktree on the box, which is the
+   actual reason to prefer `empire-repo-main` for code edits. (Pre-2026-08-24
+   read of this rule said "edits will be lost" — wrong; the reason is shared-
+   visibility, not loss.)
 2. ❌ Touch `/home/rg/empire-repo-v10` — deprecated, archived
 3. ❌ Treat `empire-repo/backend/app/main.py` as production truth — it isn't
 4. ❌ Move or rename `empire-repo/backend/venv` or `empire-repo/backend/data` — live processes depend on those exact paths
 5. ❌ Start new uvicorn/next-server from `empire-repo` paths — collision with live processes
 6. ❌ Run `git pull` in `empire-repo` thinking it will update production — it won't
 
-## What "production-critical" runtime pieces are in the stale fork
+## What production-critical runtime pieces are in the main worktree
 
-The `empire-repo` directory still contains:
+The `empire-repo` directory (which IS the main worktree, not a stale fork — see
+correction notice at top of file) currently hosts:
 
 - `/home/rg/empire-repo/backend/venv/` — the Python venv used by the live uvicorn process
 - `/home/rg/empire-repo/backend/data/empire.db` — the live SQLite DB
+- `/home/rg/empire-repo/.git/` — the shared git object store that every
+  linked worktree on the box (including `empire-repo-main`) reads from
 
-**These two are production-critical** even though the rest of `empire-repo` is stale. They are kept in `empire-repo` purely as a side-effect of the original venv location. Consolidation (moving the venv + DB to `empire-repo-main`) is **on hold** until you approve it.
+These are production-critical **because they own the runtime**, not because
+they are leftovers. Migration of the venv + DB to `empire-repo-main` is the
+remedy for the data-writes-still-landing finding (H72); removal of the tree is
+**not** on the table and would destroy the object store.
 
 ## How to update this file
 

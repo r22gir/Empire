@@ -165,7 +165,7 @@ Delete it.
     layers
 17. Family rollout — Bench/Banquette
 
-**Housekeeping, ongoing:** stale-fork eradication (8G) · `.hermes/state.db`
+**Housekeeping, ongoing:** ~/empire-repo housekeeping — this checkout is the main worktree and still receives data writes (see H72). The 8.1G sits on /dev/sda1 (root disk); the remedy is migrating the data writes, not removing the tree · `.hermes/state.db`
 2.8G · I7 TranscriptForge · I9 FK enforcement (now visible as V6) · the ~90
 unproven test errors · H59.
 

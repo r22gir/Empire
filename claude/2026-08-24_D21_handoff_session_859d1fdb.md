@@ -26,13 +26,14 @@ offer to send.
 
 ## CORRECTIONS THAT SUPERSEDE CLAUDE.md — READ BEFORE ACTING
 
-**1. `~/empire-repo` is NOT a stale fork.** It is the FROZEN main worktree and
-holds the shared git object store at `~/empire-repo/.git`. `~/empire-repo-main`
-is a LINKED worktree pointing into it. **Deleting `~/empire-repo` destroys every
-local branch, lane and stash on the box.** `claude/HANDOFF.md` still says
-"Eradication is a staged task" — that instruction is dangerous. CLAUDE.md's
-canonical-path paragraph needs rewriting: the RuntimeError enforcement is right,
-its stated rationale is wrong. **The doc sweep is queued and not done.**
+**1. `~/empire-repo` is the main worktree and owns the shared object store.**
+It holds the shared git object store at `~/empire-repo/.git`;
+`~/empire-repo-main` is a linked worktree pointing into it. **Acting on
+`~/empire-repo` as if it were a stale tree destroys every local branch, lane and
+stash on the box.** CLAUDE.md's canonical-path paragraph needs rewriting: the
+RuntimeError enforcement is right, its stated rationale is wrong. **The doc
+sweep is queued and not done.** (See H72 for the writes-still-landing finding
+and H73 for the `canonical_path.py` hazard.)
 
 **2. Hermes is three services, not two.** Verified 2026-08-22 (R10):
 

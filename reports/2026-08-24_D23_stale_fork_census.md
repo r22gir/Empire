@@ -15,7 +15,7 @@ COMMAND 1 — empire-repo mentions in *.md, excluding empire-repo-main
 ================================================================
 
 cd ~/empire-repo-main
-grep -rn "empire-repo" --include=*.md . | grep -v "empire-repo-main"
+grep -rn "empire-repo" --include=*.md . | grep -v "empire-repo-main" | grep -v "reports/2026-08-24_D23_stale_fork_census.md"
 
 ./reference/recovered/CLAUDE_label_station.md:68:- `/home/rg/empire-repo` is a **separate legacy tree**. Not a symlink. Stale.
 ./reference/recovered/2026-07-31_SESSION_SUMMARY.md:175:  (bind mount). `/home/rg/empire-repo` is a **separate legacy tree** — treat any reference
@@ -868,209 +868,126 @@ grep -rn "empire-repo" --include=*.md . | grep -v "empire-repo-main"
 ./reports/2026-07-31_boot_truth_map.md:235:- Legacy tree `/home/rg/empire-repo/backend/app/modules/` **DOES NOT EXIST** — no label station module.
 ./reports/2026-07-31_boot_truth_map.md:367:5. **Legacy tree** (`/home/rg/empire-repo/backend`) — **HAS NO label station module**. `app/modules/` directory missing. If the system unit ever ran, label station would be 404. **This is the decisive test for the founder's worst-case worry.**
 
-
 ================================================================
 COMMAND 2 — eradication mentions in *.md
 ================================================================
 
 cd ~/empire-repo-main
-grep -rni "eradicat" --include=*.md .
+grep -rni "eradication" --include=*.md . | grep -v "reports/2026-08-24_D23_stale_fork_census.md"
 
-./reference/recovered/CLAUDE_label_station.md:68:- `/home/rg/empire-repo` is a **separate legacy tree**. Not a symlink. Stale.
-./reference/recovered/2026-07-31_SESSION_SUMMARY.md:175:  (bind mount). `/home/rg/empire-repo` is a **separate legacy tree** — treat any reference
-./REPORT-infrastructure-utilities-reorganization-audit.md:118:| 3 | "OpenClaw :7878 — live" | `curl :7878/health` → 200; PID 1626 from `/home/rg/empire-repo/backend/server.py` (**cross-repo** — runs from stale fork, not `empire-repo-main`) | Live | partial | **DATA** | flag as "served from cross-repo" in the UI |
-./REPORT-infrastructure-utilities-reorganization-audit.md:498:| **D1** | Brain DB cross-repo artifact | **MEDIUM** | `/home/rg/empire-repo/backend/data/brain/` (memories.db 11.9MB + token_usage.db 14MB + unified_messages.db 20.9MB) lives in the stale fork; no `brain/` in `empire-repo-main/backend/data/`; current UI already shows the warning |
-./REPORT-infrastructure-utilities-reorganization-audit.md:499:| **D2** | OpenClaw served from cross-repo | **MEDIUM** | `:7878` is `python3 server.py` from `/home/rg/empire-repo/backend/` (the stale fork's venv), not from `empire-repo-main`; code drift risk |
-./CLAUDE.md:13:  `~/empire-repo` is a STALE FORK — any reference to it is a bug. Canonical-path
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:258:3. **Brain Status → Offline** — Brain DB exists (12 MB, 21,181 memories) at stale fork path. `[VERIFIED_SOURCE]`
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:314:| `/home/rg/empire-repo` | STALE FORK (venv+DB only) | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:324:| `/home/rg/empire-repo` | (stale fork) | Venv + DB host only | Legacy | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:395:### Stale Fork Archives (Do Not Use)
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:399:| `/home/rg/empire-repo` | Stale fork (keep for venv+DB only) | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:478:- OpenClaw is served from `/home/rg/empire-repo/backend/` (stale fork)
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:221:3. **Brain Status → Offline** — The brain DB *exists* (12 MB, 21,181 memories) at the stale fork path; service init is missing.
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:269:| **Live Python venv** | `/home/rg/empire-repo/backend/venv` | Cross-repo (stale fork side effect) |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:277:| `/home/rg/empire-repo` | **STALE FORK** | Different `app/main.py`. Kept only for venv + DB. No live processes run from here. Do NOT edit code here. |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:287:| `/home/rg/empire-repo` | (stale fork) | Venv + DB host only | Legacy, do not edit |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:358:### Stale Fork Archives (Do Not Use)
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:362:| `/home/rg/empire-repo` | Stale fork (keep for venv+DB only) | 2026-06-07 |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:403:- This is the stale fork, NOT the canonical `empire-repo-main`
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:440:- OpenClaw is served from `/home/rg/empire-repo/backend/` (stale fork)
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:260:258|3. **Brain Status → Offline** — Brain DB exists (12 MB, 21,181 memories) at stale fork path. `[VERIFIED_SOURCE]`
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:316:314|| `[stale-fork-repo]` | STALE FORK (venv+DB only) | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:326:324|| `[stale-fork-repo]` | (stale fork) | Venv + DB host only | Legacy | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:397:395|### Stale Fork Archives (Do Not Use)
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:401:399|| `[stale-fork-repo]` | Stale fork (keep for venv+DB only) | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:480:478|- OpenClaw is served from `[stale-fork]` (stale fork)
-./docs/2026-08-22_D4_r8_launch_307be77a.md:24:~/empire-repo is NOT a stale fork. It was production until the lane moved and
-./docs/2026-08-16_f4_email_paths.md:11:`GMAIL_CREDENTIALS_PATH` to the stale fork:
-./docs/2026-08-16_f4_email_paths.md:19:STALE FORK. The active repo is `~/empire-repo-main`. The companion
-./docs/2026-08-22_D3_session_opener_7bfe13c0.md:20:~/empire-repo is NOT a stale fork. It was production until the lane moved and
-./REPO-TRUTH.md:36:| `/home/rg/empire-repo` | **STALE FORK** (kept for venv + DB only) | Different `app/main.py`, no live processes from here. Do NOT edit code in this repo. |
-./REPO-TRUTH.md:46:| `empire-repo` | `b7dcb6b` | 2026-06-07 12:38 (heartbeat) | divergent stale fork | 0 |
-./REPO-TRUTH.md:63:1. ❌ Edit code in `/home/rg/empire-repo` — it is a stale fork, edits will be lost
-./REPO-TRUTH.md:70:## What "production-critical" runtime pieces are in the stale fork
-./REPORT-platformforge-purpose-functionality-audit.md:36:| 6 | **Total Memories = 21181** | The number is **real** (SQLite direct count: `SELECT COUNT(*) FROM memories → 21181`). But the API returns it from `/home/rg/empire-repo/backend/data/brain/memories.db` while the running process is in `empire-repo-main` — the brain is in the **stale fork**, not the active worktree. Founder may wonder why a path under `empire-repo` is being shown. The page should label this as "stale-fork artifact, see REPO-TRUTH." | `brain.memories.total = 21181` from `/api/v1/max/brain/status` |
-./REPORT-platformforge-purpose-functionality-audit.md:300:| Is Brain Status real, stale, or from old memory system? | The brain **service** is genuinely not initialized in the live uvicorn (`brain_online: false`). The brain **data** is real and lives at `/home/rg/empire-repo/backend/data/brain/memories.db` (12 MB, 21,181 rows, last modified 17:01 today). The path points at the **stale fork** (`empire-repo`), not the active worktree (`empire-repo-main`) — see REPO-TRUTH for the canonical cross-link. | `brain.brain_online` + `sqlite3 .tables` + `stat -c '%y'` |
-./claude/2026-08-24_D22_next_session_opener_ee54f0f1.md:24:1. ~/empire-repo is NOT a stale fork. It is the FROZEN main worktree holding
-./claude/EMPIREBOX_ORIENTATION_BRIEF_2026-08-22.md:12:**`~/empire-repo` is not a "stale fork." It was production.**
-./claude/2026-08-22_D7_dispatch_r9_ebe7005e.md:24:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/2026-08-22_D8_dispatch_r10_hermes_e292b662.md:30:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/2026-08-23_D16_dispatch_r14_document_catalogue_d774d3c9.md:44:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/2026-08-23_D19_dispatch_r16_woodcraft_products_696f80bf.md:83:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:77:`~/empire-repo-main/backend/venv` (the stale fork's venv has been diverging
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:158:`~/empire-repo` is a STALE FORK and any reference to it is drift. Do not touch
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:223:stale fork whose venv has been diverging since March. Establish which checkout
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:294:## STEP 9 — STALE FORK SALVAGE INVENTORY (READ ONLY)
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:297:and drawings into the stale fork `~/empire-repo` until fix `88814b2`
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:323:## STEP 9 — STALE FORK SALVAGE
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:353:## STEP 9 — STALE FORK SALVAGE
-./claude/2026-08-23_D17_dispatch_r15_sourced_knowledge_37ac04a3.md:38:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/M_LANE_max_client_work.md:39:   tell a canonical tree from a stale fork
-./claude/2026-08-22_D9_dispatch_r10_1_lifeline_56ce976f.md:38:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/2026-08-23_D13_dispatch_r12_drawing_path_8b557122.md:47:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/BACKLOG_UPDATE_2026-08-20.md:39:| **8** | **`tool_executor.py:_git_ops` should resolve canonical root** | **H57 Phase 3 fix routed most paths through `resolve_canonical_root()`, but `_git_ops` was missed — `repo = os.path.expanduser("~/empire-repo")` (stale fork).** | **`tool_executor.py:_git_ops` rewritten to use the canonical resolver 2026-08-20; also added `empty` / `truncated` markers on success-with-empty-output per dispatch principle C.** |
-./claude/BACKLOG_UPDATE_2026-08-20.md:40:| **9** | **`system_prompt.py` identity section said `Code: ~/empire-repo/`** | **H57 Phase 3 made runtime paths canonical-root-aware, but the prompt BODY hardcoded the stale fork as MAX's identity.** | **`system_prompt.py:get_system_prompt()` now substitutes `Code: {canonical_repo_root}` where `canonical_repo_root` comes from `resolve_canonical_root()`.** |
-./claude/BACKLOG_UPDATE_2026-08-20.md:50:(`/usr/bin/python3`), two venvs. The stale fork at
-./claude/BACKLOG_UPDATE_2026-08-20.md:401:- git_ops stale fork — wrong `cwd` argument. Fixed in source. Same
-./claude/BACKLOG_UPDATE_2026-08-20.md:448:H64, H65, H66, H67, H63, git_ops stale fork, and the ✅ Verified
-./claude/BACKLOG.md:11:**Context:** H57 Phase 3 (commit `59d356d`) made the stale fork
-./claude/DISPATCH_2026-08-19_P1T_template_engine.md:37:only; ~/empire-repo is a STALE FORK.
-./claude/DISPATCH_2026-08-20_H52_tool_selection.md:79:the stale fork's venv lacks pdfplumber/pdfminer.six/pypdfium2.
-./claude/2026-08-23_D15_dispatch_r13_woodwork_port_213bac7a.md:26:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:190:/home/rg/empire-repo/backend/data/empire.db        (stale fork)
-./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:191:/home/rg/empire-repo/backend/data/intake.db        (stale fork)
-./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:1127:## STEP 9 — STALE FORK SALVAGE
-./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:1269:**Plain verdict:** A REBOOT RESTARTS OPENCLAW FROM THE STALE FORK'S VENV. Backend (`empire-backend.service`) is masked, so a reboot does NOT restart it — meaning whoever restarts the backend (currently pid 652663) has to do so manually after a reboot.
-./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:1312:- **Stale fork (Step 9):**
-./claude/reports/2026-08-22/R2_INFRA_2026-08-22.md:425:-# Phase 5: run service under CANONICAL venv (empire-repo-main), not stale fork.
-./claude/2026-08-22_D10_dispatch_r11_validator_99985353.md:37:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/2026-08-24_D21_handoff_session_859d1fdb.md:29:**1. `~/empire-repo` is NOT a stale fork.** It is the FROZEN main worktree and
-./STATE.md:97:**The 8/19 finding restated: MAX's tools were pointed at the stale fork.**
-./STATE.md:116:prompt body · the stale fork's venv, diverging since March and missing
-./STATE.md:213:Stale fork `~/empire-repo` — any reference is drift (nine instances) · Cloudflare
-./reports/2026-08-23_122153_R12_drawing_path_901a523c.md:9:    worktree. Never write to `~/empire-repo`. CLAUDE.md's "stale fork"
-./reports/2026-08-20_h52_tool_selection_map.md:447:**`~/empire-repo` is the stale fork.** H57 Phase 3 (commit `59d356d`)
-./reports/2026-08-20_h52_tool_selection_map.md:468:1. Runs in the stale fork (`~/empire-repo`)
-./reports/2026-08-05_gp1_gp2_breakmap.md:177:**Canonical-path doctrine violation:** per `CLAUDE.md` (the universal doctrine), `~/empire-repo` is a STALE FORK and any reference to it is a bug. The intake router hard-codes the stale-fork path. The submissions DO land — but in the wrong DB.
-./reports/2026-08-05_gp1_gp2_breakmap.md:188:c=sqlite3.connect('/home/rg/empire-repo/backend/data/intake.db')   # stale fork
-./reports/2026-08-05_gp1_gp2_breakmap.md:201:| `/home/rg/empire-repo/backend/data/intake.db` | `intake_fabrics`, `intake_projects`, `intake_users` | 2026-08-16 11:21 | **WRITES LAND HERE** (stale fork); 11 users, 505 projects |
-./reports/2026-08-05_gp1_gp2_breakmap.md:310:The catalog says `tables: 2` but the live DB has 3 tables. The catalog's path is relative (`backend/data/intake.db`), which resolves to `~/empire-repo-main/backend/data/intake.db` (canonical repo) — but the actual file does not exist there (`ls: cannot access`). The router writes to `~/empire-repo/backend/data/intake.db` (stale fork) — which the catalog does not mention at all.
-./reports/2026-08-16_r1_fix.md:138:canonical_empire_db_path()  # → RuntimeError: "stale fork root"
-./reports/2026-08-22_214238_R11_validator_blindspot_8a34569d.md:427:checking the stale fork, not the canonical repo. So the openclaw_tasks
-./reports/2026-08-22_214238_R11_validator_blindspot_8a34569d.md:535:  path-doctrine debate (`REPO_DIR = "~/empire-repo"` is the stale fork
-./reports/2026-08-16_h4x_truthmap.md:293:**The Gmail OAuth paths point to `~/empire-repo/...` — the STALE FORK**
-./reports/2026-08-16_h4x_truthmap.md:299:will be looking for `token.json` at the stale fork. This is a
-./reports/2026-08-16_h4x_truthmap.md:439:3. **The Gmail OAuth paths are misrouted** to the stale fork
-./reports/2026-08-16_h4x_truthmap.md:496:   to `~/empire-repo/...` (stale fork). Should be `~/empire-data/...`
-./reports/2026-07-31_boot_truth_map.md:132:- **WorkingDirectory: `/home/rg/empire-repo/backend`** ← **LEGACY TREE** (the stale fork)
-./reports/2026-07-31_boot_truth_map.md:135:- Even if it WERE enabled, it points to the legacy tree — UNCONDITIONALLY WRONG per CLAUDE.md "CANONICAL PATHS — NEVER DEVIATE" (`~/empire-repo` is a STALE FORK).
-./reports/2026-07-31_boot_truth_map.md:239:- **Per CLAUDE.md "CANONICAL PATHS — NEVER DEVIATE":** the legacy tree is a STALE FORK; any reference to it is a bug. The system unit pointing to it is the bug.
-./reference/recovered/CLAUDE_label_station.md:68:- `/home/rg/empire-repo` is a **separate legacy tree**. Not a symlink. Stale.
-./reference/recovered/2026-07-31_SESSION_SUMMARY.md:175:  (bind mount). `/home/rg/empire-repo` is a **separate legacy tree** — treat any reference
-./REPORT-infrastructure-utilities-reorganization-audit.md:118:| 3 | "OpenClaw :7878 — live" | `curl :7878/health` → 200; PID 1626 from `/home/rg/empire-repo/backend/server.py` (**cross-repo** — runs from stale fork, not `empire-repo-main`) | Live | partial | **DATA** | flag as "served from cross-repo" in the UI |
-./REPORT-infrastructure-utilities-reorganization-audit.md:498:| **D1** | Brain DB cross-repo artifact | **MEDIUM** | `/home/rg/empire-repo/backend/data/brain/` (memories.db 11.9MB + token_usage.db 14MB + unified_messages.db 20.9MB) lives in the stale fork; no `brain/` in `empire-repo-main/backend/data/`; current UI already shows the warning |
-./REPORT-infrastructure-utilities-reorganization-audit.md:499:| **D2** | OpenClaw served from cross-repo | **MEDIUM** | `:7878` is `python3 server.py` from `/home/rg/empire-repo/backend/` (the stale fork's venv), not from `empire-repo-main`; code drift risk |
-./CLAUDE.md:13:  `~/empire-repo` is a STALE FORK — any reference to it is a bug. Canonical-path
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:258:3. **Brain Status → Offline** — Brain DB exists (12 MB, 21,181 memories) at stale fork path. `[VERIFIED_SOURCE]`
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:314:| `/home/rg/empire-repo` | STALE FORK (venv+DB only) | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:324:| `/home/rg/empire-repo` | (stale fork) | Venv + DB host only | Legacy | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:395:### Stale Fork Archives (Do Not Use)
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:399:| `/home/rg/empire-repo` | Stale fork (keep for venv+DB only) | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:478:- OpenClaw is served from `/home/rg/empire-repo/backend/` (stale fork)
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:221:3. **Brain Status → Offline** — The brain DB *exists* (12 MB, 21,181 memories) at the stale fork path; service init is missing.
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:269:| **Live Python venv** | `/home/rg/empire-repo/backend/venv` | Cross-repo (stale fork side effect) |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:277:| `/home/rg/empire-repo` | **STALE FORK** | Different `app/main.py`. Kept only for venv + DB. No live processes run from here. Do NOT edit code here. |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:287:| `/home/rg/empire-repo` | (stale fork) | Venv + DB host only | Legacy, do not edit |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:358:### Stale Fork Archives (Do Not Use)
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:362:| `/home/rg/empire-repo` | Stale fork (keep for venv+DB only) | 2026-06-07 |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:403:- This is the stale fork, NOT the canonical `empire-repo-main`
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:440:- OpenClaw is served from `/home/rg/empire-repo/backend/` (stale fork)
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:260:258|3. **Brain Status → Offline** — Brain DB exists (12 MB, 21,181 memories) at stale fork path. `[VERIFIED_SOURCE]`
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:316:314|| `[stale-fork-repo]` | STALE FORK (venv+DB only) | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:326:324|| `[stale-fork-repo]` | (stale fork) | Venv + DB host only | Legacy | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:397:395|### Stale Fork Archives (Do Not Use)
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:401:399|| `[stale-fork-repo]` | Stale fork (keep for venv+DB only) | `[VERIFIED_SOURCE]` |
-./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:480:478|- OpenClaw is served from `[stale-fork]` (stale fork)
-./docs/2026-08-22_D4_r8_launch_307be77a.md:24:~/empire-repo is NOT a stale fork. It was production until the lane moved and
-./docs/2026-08-16_f4_email_paths.md:11:`GMAIL_CREDENTIALS_PATH` to the stale fork:
-./docs/2026-08-16_f4_email_paths.md:19:STALE FORK. The active repo is `~/empire-repo-main`. The companion
-./docs/2026-08-22_D3_session_opener_7bfe13c0.md:20:~/empire-repo is NOT a stale fork. It was production until the lane moved and
-./REPO-TRUTH.md:36:| `/home/rg/empire-repo` | **STALE FORK** (kept for venv + DB only) | Different `app/main.py`, no live processes from here. Do NOT edit code in this repo. |
-./REPO-TRUTH.md:46:| `empire-repo` | `b7dcb6b` | 2026-06-07 12:38 (heartbeat) | divergent stale fork | 0 |
-./REPO-TRUTH.md:63:1. ❌ Edit code in `/home/rg/empire-repo` — it is a stale fork, edits will be lost
-./REPO-TRUTH.md:70:## What "production-critical" runtime pieces are in the stale fork
-./REPORT-platformforge-purpose-functionality-audit.md:36:| 6 | **Total Memories = 21181** | The number is **real** (SQLite direct count: `SELECT COUNT(*) FROM memories → 21181`). But the API returns it from `/home/rg/empire-repo/backend/data/brain/memories.db` while the running process is in `empire-repo-main` — the brain is in the **stale fork**, not the active worktree. Founder may wonder why a path under `empire-repo` is being shown. The page should label this as "stale-fork artifact, see REPO-TRUTH." | `brain.memories.total = 21181` from `/api/v1/max/brain/status` |
-./REPORT-platformforge-purpose-functionality-audit.md:300:| Is Brain Status real, stale, or from old memory system? | The brain **service** is genuinely not initialized in the live uvicorn (`brain_online: false`). The brain **data** is real and lives at `/home/rg/empire-repo/backend/data/brain/memories.db` (12 MB, 21,181 rows, last modified 17:01 today). The path points at the **stale fork** (`empire-repo`), not the active worktree (`empire-repo-main`) — see REPO-TRUTH for the canonical cross-link. | `brain.brain_online` + `sqlite3 .tables` + `stat -c '%y'` |
-./claude/2026-08-24_D22_next_session_opener_ee54f0f1.md:24:1. ~/empire-repo is NOT a stale fork. It is the FROZEN main worktree holding
-./claude/EMPIREBOX_ORIENTATION_BRIEF_2026-08-22.md:12:**`~/empire-repo` is not a "stale fork." It was production.**
-./claude/2026-08-22_D7_dispatch_r9_ebe7005e.md:24:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/2026-08-22_D8_dispatch_r10_hermes_e292b662.md:30:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/2026-08-23_D16_dispatch_r14_document_catalogue_d774d3c9.md:44:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/2026-08-23_D19_dispatch_r16_woodcraft_products_696f80bf.md:83:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:77:`~/empire-repo-main/backend/venv` (the stale fork's venv has been diverging
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:158:`~/empire-repo` is a STALE FORK and any reference to it is drift. Do not touch
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:223:stale fork whose venv has been diverging since March. Establish which checkout
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:294:## STEP 9 — STALE FORK SALVAGE INVENTORY (READ ONLY)
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:297:and drawings into the stale fork `~/empire-repo` until fix `88814b2`
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:323:## STEP 9 — STALE FORK SALVAGE
-./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:353:## STEP 9 — STALE FORK SALVAGE
-./claude/2026-08-23_D17_dispatch_r15_sourced_knowledge_37ac04a3.md:38:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/M_LANE_max_client_work.md:39:   tell a canonical tree from a stale fork
-./claude/2026-08-22_D9_dispatch_r10_1_lifeline_56ce976f.md:38:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/2026-08-23_D13_dispatch_r12_drawing_path_8b557122.md:47:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/BACKLOG_UPDATE_2026-08-20.md:39:| **8** | **`tool_executor.py:_git_ops` should resolve canonical root** | **H57 Phase 3 fix routed most paths through `resolve_canonical_root()`, but `_git_ops` was missed — `repo = os.path.expanduser("~/empire-repo")` (stale fork).** | **`tool_executor.py:_git_ops` rewritten to use the canonical resolver 2026-08-20; also added `empty` / `truncated` markers on success-with-empty-output per dispatch principle C.** |
-./claude/BACKLOG_UPDATE_2026-08-20.md:40:| **9** | **`system_prompt.py` identity section said `Code: ~/empire-repo/`** | **H57 Phase 3 made runtime paths canonical-root-aware, but the prompt BODY hardcoded the stale fork as MAX's identity.** | **`system_prompt.py:get_system_prompt()` now substitutes `Code: {canonical_repo_root}` where `canonical_repo_root` comes from `resolve_canonical_root()`.** |
-./claude/BACKLOG_UPDATE_2026-08-20.md:50:(`/usr/bin/python3`), two venvs. The stale fork at
-./claude/BACKLOG_UPDATE_2026-08-20.md:401:- git_ops stale fork — wrong `cwd` argument. Fixed in source. Same
-./claude/BACKLOG_UPDATE_2026-08-20.md:448:H64, H65, H66, H67, H63, git_ops stale fork, and the ✅ Verified
-./claude/BACKLOG.md:11:**Context:** H57 Phase 3 (commit `59d356d`) made the stale fork
-./claude/DISPATCH_2026-08-19_P1T_template_engine.md:37:only; ~/empire-repo is a STALE FORK.
-./claude/DISPATCH_2026-08-20_H52_tool_selection.md:79:the stale fork's venv lacks pdfplumber/pdfminer.six/pypdfium2.
-./claude/2026-08-23_D15_dispatch_r13_woodwork_port_213bac7a.md:26:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:190:/home/rg/empire-repo/backend/data/empire.db        (stale fork)
-./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:191:/home/rg/empire-repo/backend/data/intake.db        (stale fork)
-./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:1127:## STEP 9 — STALE FORK SALVAGE
-./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:1269:**Plain verdict:** A REBOOT RESTARTS OPENCLAW FROM THE STALE FORK'S VENV. Backend (`empire-backend.service`) is masked, so a reboot does NOT restart it — meaning whoever restarts the backend (currently pid 652663) has to do so manually after a reboot.
-./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:1312:- **Stale fork (Step 9):**
-./claude/reports/2026-08-22/R2_INFRA_2026-08-22.md:425:-# Phase 5: run service under CANONICAL venv (empire-repo-main), not stale fork.
-./claude/2026-08-22_D10_dispatch_r11_validator_99985353.md:37:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
-./claude/2026-08-24_D21_handoff_session_859d1fdb.md:29:**1. `~/empire-repo` is NOT a stale fork.** It is the FROZEN main worktree and
-./STATE.md:97:**The 8/19 finding restated: MAX's tools were pointed at the stale fork.**
-./STATE.md:116:prompt body · the stale fork's venv, diverging since March and missing
-./STATE.md:213:Stale fork `~/empire-repo` — any reference is drift (nine instances) · Cloudflare
-./reports/2026-08-23_122153_R12_drawing_path_901a523c.md:9:    worktree. Never write to `~/empire-repo`. CLAUDE.md's "stale fork"
-./reports/2026-08-20_h52_tool_selection_map.md:447:**`~/empire-repo` is the stale fork.** H57 Phase 3 (commit `59d356d`)
-./reports/2026-08-20_h52_tool_selection_map.md:468:1. Runs in the stale fork (`~/empire-repo`)
-./reports/2026-08-05_gp1_gp2_breakmap.md:177:**Canonical-path doctrine violation:** per `CLAUDE.md` (the universal doctrine), `~/empire-repo` is a STALE FORK and any reference to it is a bug. The intake router hard-codes the stale-fork path. The submissions DO land — but in the wrong DB.
-./reports/2026-08-05_gp1_gp2_breakmap.md:188:c=sqlite3.connect('/home/rg/empire-repo/backend/data/intake.db')   # stale fork
-./reports/2026-08-05_gp1_gp2_breakmap.md:201:| `/home/rg/empire-repo/backend/data/intake.db` | `intake_fabrics`, `intake_projects`, `intake_users` | 2026-08-16 11:21 | **WRITES LAND HERE** (stale fork); 11 users, 505 projects |
-./reports/2026-08-05_gp1_gp2_breakmap.md:310:The catalog says `tables: 2` but the live DB has 3 tables. The catalog's path is relative (`backend/data/intake.db`), which resolves to `~/empire-repo-main/backend/data/intake.db` (canonical repo) — but the actual file does not exist there (`ls: cannot access`). The router writes to `~/empire-repo/backend/data/intake.db` (stale fork) — which the catalog does not mention at all.
-./reports/2026-08-16_r1_fix.md:138:canonical_empire_db_path()  # → RuntimeError: "stale fork root"
-./reports/2026-08-22_214238_R11_validator_blindspot_8a34569d.md:427:checking the stale fork, not the canonical repo. So the openclaw_tasks
-./reports/2026-08-22_214238_R11_validator_blindspot_8a34569d.md:535:  path-doctrine debate (`REPO_DIR = "~/empire-repo"` is the stale fork
-./reports/2026-08-16_h4x_truthmap.md:293:**The Gmail OAuth paths point to `~/empire-repo/...` — the STALE FORK**
-./reports/2026-08-16_h4x_truthmap.md:299:will be looking for `token.json` at the stale fork. This is a
-./reports/2026-08-16_h4x_truthmap.md:439:3. **The Gmail OAuth paths are misrouted** to the stale fork
-./reports/2026-08-16_h4x_truthmap.md:496:   to `~/empire-repo/...` (stale fork). Should be `~/empire-data/...`
-./reports/2026-07-31_boot_truth_map.md:132:- **WorkingDirectory: `/home/rg/empire-repo/backend`** ← **LEGACY TREE** (the stale fork)
-./reports/2026-07-31_boot_truth_map.md:135:- Even if it WERE enabled, it points to the legacy tree — UNCONDITIONALLY WRONG per CLAUDE.md "CANONICAL PATHS — NEVER DEVIATE" (`~/empire-repo` is a STALE FORK).
-./reports/2026-07-31_boot_truth_map.md:239:- **Per CLAUDE.md "CANONICAL PATHS — NEVER DEVIATE":** the legacy tree is a STALE FORK; any reference to it is a bug. The system unit pointing to it is the bug.
-
+./docs/2026-08-22_D3_session_opener_7bfe13c0.md:24:"Eradication is a staged task" — that instruction is now dangerous. CLAUDE.md's
+./docs/2026-08-22_D3_session_opener_7bfe13c0.md:80:4. Doc sweep — the eradication language, sequenced behind the census because
+./claude/2026-08-24_D22_next_session_opener_ee54f0f1.md:26:   stash. claude/HANDOFF.md still says "Eradication is a staged task" — that
+./claude/BACKLOG_UPDATE_2026-08-19.md:168:**Housekeeping, ongoing:** stale-fork eradication (8G) · `.hermes/state.db`
+./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:298:(2026-08-19/20). Before eradication of the fork ever runs, inventory what of
+./claude/2026-08-24_D21_handoff_session_859d1fdb.md:33:"Eradication is a staged task" — that instruction is dangerous. CLAUDE.md's
+./claude/2026-08-24_D21_handoff_session_859d1fdb.md:330:- **Doc sweep** — the eradication language and the Hermes conflation.
+./reports/2026-08-22_D2_decisions_bacc35ae.md:114:4. **Doc sweep** — `~/empire-repo` eradication language in `claude/HANDOFF.md`
 
 ================================================================
 COMMAND 3 — stale-fork / legacy-tree mentions in *.md
 ================================================================
 
 cd ~/empire-repo-main
-grep -rni "stale fork\|stale legacy tree\|separate legacy tree" --include=*.md .
+grep -rni "stale fork|stale legacy tree|separate legacy tree" --include=*.md . | grep -v "reports/2026-08-24_D23_stale_fork_census.md"
+
+./reference/recovered/CLAUDE_label_station.md:68:- `/home/rg/empire-repo` is a **separate legacy tree**. Not a symlink. Stale.
+./reference/recovered/2026-07-31_SESSION_SUMMARY.md:175:  (bind mount). `/home/rg/empire-repo` is a **separate legacy tree** — treat any reference
+./REPORT-infrastructure-utilities-reorganization-audit.md:118:| 3 | "OpenClaw :7878 — live" | `curl :7878/health` → 200; PID 1626 from `/home/rg/empire-repo/backend/server.py` (**cross-repo** — runs from stale fork, not `empire-repo-main`) | Live | partial | **DATA** | flag as "served from cross-repo" in the UI |
+./REPORT-infrastructure-utilities-reorganization-audit.md:498:| **D1** | Brain DB cross-repo artifact | **MEDIUM** | `/home/rg/empire-repo/backend/data/brain/` (memories.db 11.9MB + token_usage.db 14MB + unified_messages.db 20.9MB) lives in the stale fork; no `brain/` in `empire-repo-main/backend/data/`; current UI already shows the warning |
+./REPORT-infrastructure-utilities-reorganization-audit.md:499:| **D2** | OpenClaw served from cross-repo | **MEDIUM** | `:7878` is `python3 server.py` from `/home/rg/empire-repo/backend/` (the stale fork's venv), not from `empire-repo-main`; code drift risk |
+./CLAUDE.md:13:  `~/empire-repo` is a STALE FORK — any reference to it is a bug. Canonical-path
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:258:3. **Brain Status → Offline** — Brain DB exists (12 MB, 21,181 memories) at stale fork path. `[VERIFIED_SOURCE]`
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:314:| `/home/rg/empire-repo` | STALE FORK (venv+DB only) | `[VERIFIED_SOURCE]` |
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:324:| `/home/rg/empire-repo` | (stale fork) | Venv + DB host only | Legacy | `[VERIFIED_SOURCE]` |
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:395:### Stale Fork Archives (Do Not Use)
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:399:| `/home/rg/empire-repo` | Stale fork (keep for venv+DB only) | `[VERIFIED_SOURCE]` |
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_VALIDATED.md:478:- OpenClaw is served from `/home/rg/empire-repo/backend/` (stale fork)
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:221:3. **Brain Status → Offline** — The brain DB *exists* (12 MB, 21,181 memories) at the stale fork path; service init is missing.
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:269:| **Live Python venv** | `/home/rg/empire-repo/backend/venv` | Cross-repo (stale fork side effect) |
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:277:| `/home/rg/empire-repo` | **STALE FORK** | Different `app/main.py`. Kept only for venv + DB. No live processes run from here. Do NOT edit code here. |
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:287:| `/home/rg/empire-repo` | (stale fork) | Venv + DB host only | Legacy, do not edit |
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:358:### Stale Fork Archives (Do Not Use)
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:362:| `/home/rg/empire-repo` | Stale fork (keep for venv+DB only) | 2026-06-07 |
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:403:- This is the stale fork, NOT the canonical `empire-repo-main`
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20.md:440:- OpenClaw is served from `/home/rg/empire-repo/backend/` (stale fork)
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:260:258|3. **Brain Status → Offline** — Brain DB exists (12 MB, 21,181 memories) at stale fork path. `[VERIFIED_SOURCE]`
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:316:314|| `[stale-fork-repo]` | STALE FORK (venv+DB only) | `[VERIFIED_SOURCE]` |
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:326:324|| `[stale-fork-repo]` | (stale fork) | Venv + DB host only | Legacy | `[VERIFIED_SOURCE]` |
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:397:395|### Stale Fork Archives (Do Not Use)
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:401:399|| `[stale-fork-repo]` | Stale fork (keep for venv+DB only) | `[VERIFIED_SOURCE]` |
+./archive/truth-docs/EMPIREBOX_CURRENT_TRUTH_2026-06-20_SHAREABLE.md:480:478|- OpenClaw is served from `[stale-fork]` (stale fork)
+./docs/2026-08-22_D4_r8_launch_307be77a.md:24:~/empire-repo is NOT a stale fork. It was production until the lane moved and
+./docs/2026-08-16_f4_email_paths.md:11:`GMAIL_CREDENTIALS_PATH` to the stale fork:
+./docs/2026-08-16_f4_email_paths.md:19:STALE FORK. The active repo is `~/empire-repo-main`. The companion
+./docs/2026-08-22_D3_session_opener_7bfe13c0.md:20:~/empire-repo is NOT a stale fork. It was production until the lane moved and
+./REPO-TRUTH.md:36:| `/home/rg/empire-repo` | **STALE FORK** (kept for venv + DB only) | Different `app/main.py`, no live processes from here. Do NOT edit code in this repo. |
+./REPO-TRUTH.md:46:| `empire-repo` | `b7dcb6b` | 2026-06-07 12:38 (heartbeat) | divergent stale fork | 0 |
+./REPO-TRUTH.md:63:1. ❌ Edit code in `/home/rg/empire-repo` — it is a stale fork, edits will be lost
+./REPO-TRUTH.md:70:## What "production-critical" runtime pieces are in the stale fork
+./REPORT-platformforge-purpose-functionality-audit.md:36:| 6 | **Total Memories = 21181** | The number is **real** (SQLite direct count: `SELECT COUNT(*) FROM memories → 21181`). But the API returns it from `/home/rg/empire-repo/backend/data/brain/memories.db` while the running process is in `empire-repo-main` — the brain is in the **stale fork**, not the active worktree. Founder may wonder why a path under `empire-repo` is being shown. The page should label this as "stale-fork artifact, see REPO-TRUTH." | `brain.memories.total = 21181` from `/api/v1/max/brain/status` |
+./REPORT-platformforge-purpose-functionality-audit.md:300:| Is Brain Status real, stale, or from old memory system? | The brain **service** is genuinely not initialized in the live uvicorn (`brain_online: false`). The brain **data** is real and lives at `/home/rg/empire-repo/backend/data/brain/memories.db` (12 MB, 21,181 rows, last modified 17:01 today). The path points at the **stale fork** (`empire-repo`), not the active worktree (`empire-repo-main`) — see REPO-TRUTH for the canonical cross-link. | `brain.brain_online` + `sqlite3 .tables` + `stat -c '%y'` |
+./claude/2026-08-24_D22_next_session_opener_ee54f0f1.md:24:1. ~/empire-repo is NOT a stale fork. It is the FROZEN main worktree holding
+./claude/EMPIREBOX_ORIENTATION_BRIEF_2026-08-22.md:12:**`~/empire-repo` is not a "stale fork." It was production.**
+./claude/2026-08-22_D7_dispatch_r9_ebe7005e.md:24:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
+./claude/2026-08-22_D8_dispatch_r10_hermes_e292b662.md:30:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
+./claude/2026-08-23_D16_dispatch_r14_document_catalogue_d774d3c9.md:44:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
+./claude/2026-08-23_D19_dispatch_r16_woodcraft_products_696f80bf.md:83:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
+./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:77:`~/empire-repo-main/backend/venv` (the stale fork's venv has been diverging
+./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:158:`~/empire-repo` is a STALE FORK and any reference to it is drift. Do not touch
+./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:223:stale fork whose venv has been diverging since March. Establish which checkout
+./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:294:## STEP 9 — STALE FORK SALVAGE INVENTORY (READ ONLY)
+./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:297:and drawings into the stale fork `~/empire-repo` until fix `88814b2`
+./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:323:## STEP 9 — STALE FORK SALVAGE
+./claude/dispatches/2026-08-22/claude_DISPATCH_2026-08-22_restore_probe.md:353:## STEP 9 — STALE FORK SALVAGE
+./claude/2026-08-23_D17_dispatch_r15_sourced_knowledge_37ac04a3.md:38:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
+./claude/M_LANE_max_client_work.md:39:   tell a canonical tree from a stale fork
+./claude/2026-08-22_D9_dispatch_r10_1_lifeline_56ce976f.md:38:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
+./claude/2026-08-23_D13_dispatch_r12_drawing_path_8b557122.md:47:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
+./claude/BACKLOG_UPDATE_2026-08-20.md:39:| **8** | **`tool_executor.py:_git_ops` should resolve canonical root** | **H57 Phase 3 fix routed most paths through `resolve_canonical_root()`, but `_git_ops` was missed — `repo = os.path.expanduser("~/empire-repo")` (stale fork).** | **`tool_executor.py:_git_ops` rewritten to use the canonical resolver 2026-08-20; also added `empty` / `truncated` markers on success-with-empty-output per dispatch principle C.** |
+./claude/BACKLOG_UPDATE_2026-08-20.md:40:| **9** | **`system_prompt.py` identity section said `Code: ~/empire-repo/`** | **H57 Phase 3 made runtime paths canonical-root-aware, but the prompt BODY hardcoded the stale fork as MAX's identity.** | **`system_prompt.py:get_system_prompt()` now substitutes `Code: {canonical_repo_root}` where `canonical_repo_root` comes from `resolve_canonical_root()`.** |
+./claude/BACKLOG_UPDATE_2026-08-20.md:50:(`/usr/bin/python3`), two venvs. The stale fork at
+./claude/BACKLOG_UPDATE_2026-08-20.md:401:- git_ops stale fork — wrong `cwd` argument. Fixed in source. Same
+./claude/BACKLOG_UPDATE_2026-08-20.md:448:H64, H65, H66, H67, H63, git_ops stale fork, and the ✅ Verified
+./claude/BACKLOG.md:11:**Context:** H57 Phase 3 (commit `59d356d`) made the stale fork
+./claude/DISPATCH_2026-08-19_P1T_template_engine.md:37:only; ~/empire-repo is a STALE FORK.
+./claude/DISPATCH_2026-08-20_H52_tool_selection.md:79:the stale fork's venv lacks pdfplumber/pdfminer.six/pypdfium2.
+./claude/2026-08-23_D15_dispatch_r13_woodwork_port_213bac7a.md:26:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
+./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:190:/home/rg/empire-repo/backend/data/empire.db        (stale fork)
+./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:191:/home/rg/empire-repo/backend/data/intake.db        (stale fork)
+./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:1127:## STEP 9 — STALE FORK SALVAGE
+./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:1269:**Plain verdict:** A REBOOT RESTARTS OPENCLAW FROM THE STALE FORK'S VENV. Backend (`empire-backend.service`) is masked, so a reboot does NOT restart it — meaning whoever restarts the backend (currently pid 652663) has to do so manually after a reboot.
+./claude/reports/2026-08-22/RESTORE_PROBE_2026-08-22.md:1312:- **Stale fork (Step 9):**
+./claude/reports/2026-08-22/R2_INFRA_2026-08-22.md:425:-# Phase 5: run service under CANONICAL venv (empire-repo-main), not stale fork.
+./claude/2026-08-22_D10_dispatch_r11_validator_99985353.md:37:PATH DOCTRINE — SUPERSEDES CLAUDE.md: ~/empire-repo is NOT a stale fork. It is
+./claude/2026-08-24_D21_handoff_session_859d1fdb.md:29:**1. `~/empire-repo` is NOT a stale fork.** It is the FROZEN main worktree and
+./STATE.md:97:**The 8/19 finding restated: MAX's tools were pointed at the stale fork.**
+./STATE.md:116:prompt body · the stale fork's venv, diverging since March and missing
+./STATE.md:213:Stale fork `~/empire-repo` — any reference is drift (nine instances) · Cloudflare
+./reports/2026-08-23_122153_R12_drawing_path_901a523c.md:9:    worktree. Never write to `~/empire-repo`. CLAUDE.md's "stale fork"
+./reports/2026-08-20_h52_tool_selection_map.md:447:**`~/empire-repo` is the stale fork.** H57 Phase 3 (commit `59d356d`)
+./reports/2026-08-20_h52_tool_selection_map.md:468:1. Runs in the stale fork (`~/empire-repo`)
+./reports/2026-08-05_gp1_gp2_breakmap.md:177:**Canonical-path doctrine violation:** per `CLAUDE.md` (the universal doctrine), `~/empire-repo` is a STALE FORK and any reference to it is a bug. The intake router hard-codes the stale-fork path. The submissions DO land — but in the wrong DB.
+./reports/2026-08-05_gp1_gp2_breakmap.md:188:c=sqlite3.connect('/home/rg/empire-repo/backend/data/intake.db')   # stale fork
+./reports/2026-08-05_gp1_gp2_breakmap.md:201:| `/home/rg/empire-repo/backend/data/intake.db` | `intake_fabrics`, `intake_projects`, `intake_users` | 2026-08-16 11:21 | **WRITES LAND HERE** (stale fork); 11 users, 505 projects |
+./reports/2026-08-05_gp1_gp2_breakmap.md:310:The catalog says `tables: 2` but the live DB has 3 tables. The catalog's path is relative (`backend/data/intake.db`), which resolves to `~/empire-repo-main/backend/data/intake.db` (canonical repo) — but the actual file does not exist there (`ls: cannot access`). The router writes to `~/empire-repo/backend/data/intake.db` (stale fork) — which the catalog does not mention at all.
+./reports/2026-08-16_r1_fix.md:138:canonical_empire_db_path()  # → RuntimeError: "stale fork root"
+./reports/2026-08-22_214238_R11_validator_blindspot_8a34569d.md:427:checking the stale fork, not the canonical repo. So the openclaw_tasks
+./reports/2026-08-22_214238_R11_validator_blindspot_8a34569d.md:535:  path-doctrine debate (`REPO_DIR = "~/empire-repo"` is the stale fork
+./reports/2026-08-16_h4x_truthmap.md:293:**The Gmail OAuth paths point to `~/empire-repo/...` — the STALE FORK**
+./reports/2026-08-16_h4x_truthmap.md:299:will be looking for `token.json` at the stale fork. This is a
+./reports/2026-08-16_h4x_truthmap.md:439:3. **The Gmail OAuth paths are misrouted** to the stale fork
+./reports/2026-08-16_h4x_truthmap.md:496:   to `~/empire-repo/...` (stale fork). Should be `~/empire-data/...`
+./reports/2026-07-31_boot_truth_map.md:132:- **WorkingDirectory: `/home/rg/empire-repo/backend`** ← **LEGACY TREE** (the stale fork)
+./reports/2026-07-31_boot_truth_map.md:135:- Even if it WERE enabled, it points to the legacy tree — UNCONDITIONALLY WRONG per CLAUDE.md "CANONICAL PATHS — NEVER DEVIATE" (`~/empire-repo` is a STALE FORK).
+./reports/2026-07-31_boot_truth_map.md:239:- **Per CLAUDE.md "CANONICAL PATHS — NEVER DEVIATE":** the legacy tree is a STALE FORK; any reference to it is a bug. The system unit pointing to it is the bug.
 
 ================================================================
 COMMAND 4 — empire-repo in code/config files, excluding empire-repo-main
 ================================================================
 
 cd ~/empire-repo-main
-grep -rn "empire-repo" --include=*.py --include=*.json --include=*.service --include=*.sh --include=*.toml --include=*.yml . | grep -v "empire-repo-main"
+grep -rn "empire-repo" --include=*.py --include=*.json --include=*.service --include=*.sh --include=*.toml --include=*.yml . | grep -v "empire-repo-main" | grep -v "reports/2026-08-24_D23_stale_fork_census.md"
 
 ./launch-empire.sh:26:cd ~/empire-repo/backend
 ./launch-empire.sh:27:source ~/empire-repo/backend/venv/bin/activate

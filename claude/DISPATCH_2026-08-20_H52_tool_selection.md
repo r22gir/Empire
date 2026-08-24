@@ -76,7 +76,9 @@ eb44b90). Repo ~/empire-repo-main, branch feature/drawing-standard.
 INFRA: backend restart is `systemctl --user restart empire-backend` and
 NOTHING else. Never hand-start uvicorn or bind :8000. Never stop
 opencode-remote.service (HERMES). Use ~/empire-repo-main/backend/venv ONLY —
-the stale fork's venv lacks pdfplumber/pdfminer.six/pypdfium2.
+the live venv at `~/empire-repo/backend/venv/` lacks pdfplumber/pdfminer.six/
+pypdfium2 (note: that venv is in the main worktree, not a "stale fork" — the
+pre-2026-08-24 framing was wrong; see `reports/2026-08-24_D23_stale_fork_census.md`).
 
 TASK: H52 — MAX cannot SELECT his tools. They are present and functional:
 told "run empire_runtime_truth_check" he ran it instantly and returned a

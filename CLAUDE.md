@@ -8,15 +8,30 @@ upholstery, Hyattsville MD) and **WoodCraft by Empire** (CNC custom woodwork).
 MAX is the in-house AI assistant (portal at localhost:3005, backend FastAPI at
 localhost:8000). The founder ("rg") is the only human operator.
 
-## CANONICAL PATHS — NEVER DEVIATE
-- Repo: `~/empire-repo-main` (branch `feature/drawing-standard`). The path
-  `~/empire-repo` is a STALE FORK — any reference to it is a bug. Canonical-path
-  enforcement raises RuntimeError on stale paths; do not weaken it.
-- Database: `/home/rg/empire-data/empire.db` (SQLite, table quotes_v2 is the quote
-  source of truth; `financial_audit_log` records all quote mutations).
+## CANONICAL PATHS
+- `~/empire-repo-main` and `~/empire-repo-data` are both bind mounts off the
+  SSD (`/dev/sdb1`); the active repo branch is `feature/drawing-standard`.
+- `~/empire-repo` is the main worktree (not a stale fork). It owns the shared
+  git object store at `~/empire-repo/.git`, the live venv at
+  `~/empire-repo/backend/venv/`, and the live OpenClaw service on port 7878 —
+  all of which still receive data writes. The sibling checkout
+  `~/empire-repo-main` is on the same branch. **Acting on `~/empire-repo` as
+  if it were a stale tree destroys every local branch, lane and stash on the
+  box.**
+- Database: `/home/rg/empire-data/empire.db` (SQLite, table quotes_v2 is the
+  quote source of truth; `financial_audit_log` records all quote mutations).
 - Drawings output: `~/empire-repo-main/backend/data/drawings/`
-- Repo + data live on SSD (`/dev/sdb1` → `/ssd`, bind-mounted to the home paths).
-  Never write to `/media/*` or absolute `/home/romeo/*` (a past copied-code bug).
+- `~/empire-repo` sits on the **root disk** (`/dev/sda1`), not the SSD. The
+  correct remedy for any data-leak finding is migrating the data writes off
+  `/dev/sda1`, not removing the tree.
+- **OPEN HAZARD (H73) — canonical-path enforcement is currently UNSAFE.**
+  `backend/app/services/max/canonical_path.py:133-152` hardcodes
+  `home/"empire-repo"` as a "bad_roots" entry and refuses every sub-path of
+  the tree that owns the object store. Live hazard, code lane, NOT this
+  dispatch. Until H73 closes, do not lean on RuntimeError-on-stale-path
+  behaviour as a correctness check — its stated rationale is wrong even
+  where its enforcement is right.
+- Never write to `/media/*` or absolute `/home/romeo/*` (a past copied-code bug).
 
 ## SERVICES
 - Backend: `systemctl --user restart empire-backend` (FastAPI :8000; env incl.

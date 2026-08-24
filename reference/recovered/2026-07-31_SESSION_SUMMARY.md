@@ -172,8 +172,10 @@ re-learned. See also `CLAUDE_label_station.md` and `DEPLOY_LABEL_STATION.md`.
   looks local; the tell is `version=N` in the cloudflared log. **Add hostnames via Zero
   Trust → Networks → Tunnels → Routes.** This cost about an hour.
 - `/home/rg/empire-repo-main` and `/ssd/rg/empire-repo-main` are the **same filesystem**
-  (bind mount). `/home/rg/empire-repo` is a **separate legacy tree** — treat any reference
-  to it as drift.
+  (bind mount). `/home/rg/empire-repo` is the **main worktree** — it owns the shared
+  git object store and the live venv/data. Treating it as drift (the pre-2026-08-24
+  read) destroys every local branch and stash on the box. Correction:
+  `reports/2026-08-24_D23_stale_fork_census.md`.
 - Real FastAPI entry is **`backend/app/main.py`**. `backend/main.py` is a 26-line stub;
   adding routers there is dead code.
 - The live backend is a **hand-started process, not systemd**. `empire-backend.service`
