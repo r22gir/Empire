@@ -121,10 +121,8 @@ class TestRenderShopDrawingTool:
             # success OR structured QC failure (gate refused the
             # render because of a real geometric defect). Either is
             # the path being correctly attempted.
-            assert r.success or r.result.get("qc_failure") is True, (
-                f"product_type={pt!r} did not produce success or "
-                f"qc_failure: success={r.success} error={r.error!r} "
-                f"result={r.result!r}"
+            assert r.success, (
+                f"product_type={pt!r} render failed: {r.error!r}"
             )
 
     def test_unknown_product_type_returns_keyerror(self):
