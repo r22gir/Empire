@@ -25,7 +25,7 @@ localhost:8000). The founder ("rg") is the only human operator.
   correct remedy for any data-leak finding is migrating the data writes off
   `/dev/sda1`, not removing the tree.
 - **OPEN HAZARD (H73) — canonical-path enforcement is currently UNSAFE.**
-  `backend/app/services/max/canonical_path.py:133-152` hardcodes
+  `backend/app/services/drawing/canonical_path.py:133-152` hardcodes
   `home/"empire-repo"` as a "bad_roots" entry and refuses every sub-path of
   the tree that owns the object store. Live hazard, code lane, NOT this
   dispatch. Until H73 closes, do not lean on RuntimeError-on-stale-path

@@ -18,7 +18,7 @@ Two open items make this unsafe to act on:
   backend runs from `~/empire-repo-main`. H57 Phase 3 claimed closure at
   `59d356d`/`3b34a86`; D23 shows writes continuing. Cross-reference H57; do not
   reopen.
-- **H73** — `backend/app/services/max/canonical_path.py:133-152` hardcodes
+- **H73** — `backend/app/services/drawing/canonical_path.py:133-152` hardcodes
   `home/"empire-repo"` as a `bad_roots` entry and refuses every sub-path of the
   tree that owns the object store. Live hazard. Code lane, not this dispatch.
 
