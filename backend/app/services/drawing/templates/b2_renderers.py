@@ -1303,7 +1303,15 @@ def _render_front_elevation(
         else f"CEILING {int(ceil_in)}\" (FROM SITE PHOTO)"
     )
     c.drawString(_P(wx0_in - 0.06), _P(ceil_y_in + 0.10), ceiling_label)
-    c.drawString(_P(wx0_in - 0.06), _P(wall_y_in - 0.10), "FIN. FLOOR")
+    # R12.3.2 — FIN. FLOOR was drawn at wall_y_in - 0.10, the SAME
+    # y as the front-elevation width dim line (which is also at
+    # wall_y_in - 0.10). The two collided visually: the dim line
+    # passed through the top of the "FIN. FLOOR" glyphs. Move
+    # FIN. FLOOR 0.15" lower (below the dim line) so the line
+    # and the text have a visible separation. The 6.3pt text
+    # height is ~0.087", and the dim line stroke is ~0.6pt — the
+    # 0.15" gap gives 4-5pt of breathing room.
+    c.drawString(_P(wx0_in - 0.06), _P(wall_y_in - 0.25), "FIN. FLOOR")
     # ── Correction 1: shade geometry at TRUE scale `s`.
     # Position shade CENTERED in the viewport (between the floor
     # and ceiling indicators). If shh_in exceeds the inner
@@ -1730,8 +1738,14 @@ def _render_side_section(
         c.drawRightString(_P(wallx - 0.08),
                           _P((hy - 0.07 - flat) - (stack_h - flat) * 0.55),
                           'STACK 7"')
+        # R12.3.2 — the original `- 0.11" gap between STACK 7" and
+        # (FLAT TOP, FOLDS BELOW) put the two labels in pixel
+        # collision (label height ~0.087" + descender > 0.11" gap
+        # at heights ≤ 60). Use a deterministic 0.18" gap
+        # (≈12.9pt) which is label height + 0.09" margin — fits any
+        # sheet height without overlap.
         c.drawRightString(_P(wallx - 0.08),
-                          _P((hy - 0.07 - flat) - (stack_h - flat) * 0.55 - 0.11),
+                          _P((hy - 0.07 - flat) - (stack_h - flat) * 0.55 - 0.18),
                           '(FLAT TOP, FOLDS BELOW)')
         # FOLD STACK label (golden — leader on the right of the stack)
         c.setFillColor(INK)
