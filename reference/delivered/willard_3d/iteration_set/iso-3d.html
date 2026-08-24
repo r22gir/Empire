@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+    "three/addons/controls/OrbitControls.js": "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js",
+    "three/addons/exporters/OBJExporter.js": "https://unpkg.com/three@0.184.0/examples/jsm/exporters/OBJExporter.js",
+    "three/addons/exporters/GLTFExporter.js": "https://unpkg.com/three@0.184.0/examples/jsm/exporters/GLTFExporter.js"
+  },
+  "integrity": {
+    "https://unpkg.com/three@0.184.0/build/three.module.js": "sha384-8FCZ1eVO6it4+pbec2aDtnTrwjWXZLJRC+MAGCIPDgsYnUrl/E0A2YlF8ioMKI/J",
+    "https://unpkg.com/three@0.184.0/build/three.core.js": "sha384-dw2ooPewaEIrAgl6oFDBmmBWCE9oW9LxRGcfwZ0hLvEprzo202wXl7vCYHRlSnOT",
+    "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js": "sha384-4rziNxOBZKQ69i+w+f89KJ55TCYquwchVbByQwmaOeIOXdOU2PLDn3kOfXHwIJC9",
+    "https://unpkg.com/three@0.184.0/examples/jsm/exporters/OBJExporter.js": "sha384-nbwtoZENJD3Vq+ACK0CuGQdPMuDWHkamC2KJD70EV5nfg6jQjfppKOea07YJN+N3",
+    "https://unpkg.com/three@0.184.0/examples/jsm/exporters/GLTFExporter.js": "sha384-VofkvpG6HERhFCYbsUOHeNXBCqID2nfqkQqnVzE1jc/oPcz+qJ13ADdXH08hE+cQ"
+  }
+}
+</script>
+<script>window.addEventListener('error',e=>console.log('PAGEERR',e.message,e.filename,e.lineno));window.addEventListener('unhandledrejection',e=>console.log('REJ',e.reason&&e.reason.message||String(e.reason)));</script>
+<style>html,body{margin:0;height:100%}three-d-stage{width:100%;height:100%;display:block}three-d-stage:not(:defined){visibility:hidden}</style>
+</head>
+<body>
+<three-d-stage name="willard-style-b" background="#efece3" autorotate></three-d-stage>
+<script src="three-d-stage.js"></script>
+<script type="module">
+const stage = document.querySelector('three-d-stage');
+const { THREE } = await stage.ready;
+const IN = 0.0254;
+// Nympheus-style motif texture for the velvet channels
+const tc = document.createElement('canvas'); tc.width = tc.height = 512;
+const g2 = tc.getContext('2d');
+g2.fillStyle = '#0b5238'; g2.fillRect(0,0,512,512);
+function lily(x,y,s,rot){ g2.save(); g2.translate(x,y); g2.rotate(rot); g2.scale(s,s);
+  g2.fillStyle = '#2f8f63'; g2.beginPath(); g2.moveTo(0,0);
+  g2.arc(0,0,52,0.35,2*Math.PI-0.35); g2.closePath(); g2.fill();
+  g2.strokeStyle = 'rgba(7,58,40,.7)'; g2.lineWidth = 3;
+  for(let i=0;i<7;i++){ const a2=0.5+i*(2*Math.PI-1)/6; g2.beginPath(); g2.moveTo(0,0); g2.lineTo(46*Math.cos(a2),46*Math.sin(a2)); g2.stroke(); }
+  g2.strokeStyle = '#79c49a'; g2.lineWidth = 4; g2.beginPath();
+  g2.arc(0,0,52,0.35,2*Math.PI-0.35); g2.stroke();
+  g2.restore(); }
+lily(120,110,1.0,-0.5); lily(380,300,1.25,0.7); lily(150,400,0.8,2.4); lily(430,80,0.7,1.6);
+function bud(x,y,s){ g2.save(); g2.translate(x,y); g2.scale(s,s); g2.fillStyle = '#c9a15a';
+  for(const r of [-0.5,0,0.5]){ g2.save(); g2.rotate(r); g2.beginPath(); g2.moveTo(0,14); g2.quadraticCurveTo(-11,-2,0,-16); g2.quadraticCurveTo(11,-2,0,14); g2.fill(); g2.restore(); }
+  g2.restore(); }
+bud(300,150,1.1); bud(70,270,0.9); bud(260,440,1.0);
+const motif = new THREE.CanvasTexture(tc);
+motif.wrapS = motif.wrapT = THREE.RepeatWrapping; motif.repeat.set(2.5,2.5);
+motif.colorSpace = THREE.SRGBColorSpace;
+// fringe strand texture — transparent gaps so it reads as hanging strings, not tape
+const fc = document.createElement('canvas'); fc.width = 128; fc.height = 64;
+const g3 = fc.getContext('2d');
+for(let x=0;x<128;x+=3){ g3.strokeStyle = (x%6)? '#8a6428' : '#e2b76d';
+  const len = 50 + (x*7)%14; // ragged bottoms
+  g3.lineWidth = 2.1; g3.beginPath(); g3.moveTo(x+0.5,4); g3.lineTo(x+0.5+(x%5-2),len); g3.stroke(); }
+// solid header band along the top
+g3.fillStyle = '#8a6428'; g3.fillRect(0,0,128,7);
+g3.fillStyle = '#c9a15a'; g3.fillRect(0,7,128,2);
+const strands = new THREE.CanvasTexture(fc);
+strands.wrapS = strands.wrapT = THREE.RepeatWrapping; strands.repeat.set(60,1);
+strands.colorSpace = THREE.SRGBColorSpace;
+
+const velvetDk = new THREE.MeshStandardMaterial({name:'velvet_reveal', color:0x05231a, roughness:1.0});
+const velvet  = new THREE.MeshStandardMaterial({name:'velvet_emerald', map:motif, roughness:0.92});
+// real Nympheus Emerald scan — swaps in over the placeholder motif when loaded
+const texLoader = new THREE.TextureLoader(); texLoader.setCrossOrigin('anonymous');
+// client-provided Nympheus scan — true scale: one 35.46" repeat ≈ 0.9 m
+texLoader.load('uploads/pasted-1784678710392-0.png', t=>{
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(1.11,1.11);
+  t.offset.x = 0.5; // repeat centered on CL, seams fall mid-panel
+  t.offset.y = 0.15; // drop the motif so flowers sit clear of the rail
+  velvet.map = t; velvet.needsUpdate = true;
+});
+const vinyl   = new THREE.MeshStandardMaterial({name:'vinyl_ale',      color:0x96683a, roughness:0.45, metalness:0.05});
+const vinylL  = new THREE.MeshStandardMaterial({name:'vinyl_ale_lt',   color:0xa97a45, roughness:0.5});
+const fringe  = new THREE.MeshStandardMaterial({name:'fringe_rupi',    map:strands, roughness:1.0, transparent:true, alphaTest:0.4, side:THREE.DoubleSide});
+const muslin  = new THREE.MeshStandardMaterial({name:'muslin_unfinished', color:0xded2b8, roughness:1.0});
+// annular sector, y-up, optional soft bevel on top/bottom edges
+function sector(r0,r1,t0,t1,y0,y1,mat,name,bev=0,segs=48){
+  const sh = new THREE.Shape();
+  sh.absarc(0,0,r1,Math.PI/2-t1,Math.PI/2-t0,false);
+  sh.absarc(0,0,r0,Math.PI/2-t0,Math.PI/2-t1,true);
+  const opt = {depth:(y1-y0),bevelEnabled:bev>0,curveSegments:segs};
+  if(bev>0){opt.bevelThickness=bev;opt.bevelSize=bev*0.8;opt.bevelSegments=3;}
+  const geo = new THREE.ExtrudeGeometry(sh,opt);
+  geo.rotateX(-Math.PI/2);
+  const m = new THREE.Mesh(geo,mat); m.position.y=y0+(bev>0?bev:0); m.name=name;
+  return m;
+}
+// revolve a side profile (r,h pts) around Y over sector [a,b], with end caps
+function revolve(pts,a,b,mat,name,segs=48){
+  const m2 = mat.clone(); m2.side = THREE.DoubleSide;
+  const g = new THREE.Group(); g.name = name;
+  const v2 = pts.map(p=>new THREE.Vector2(p[0],p[1]));
+  const lat = new THREE.LatheGeometry(v2.concat([v2[0].clone()]), segs, Math.PI-b, b-a);
+  g.add(new THREE.Mesh(lat,m2));
+  const sh = new THREE.Shape(v2);
+  for(const t of [a,b]){
+    const cap = new THREE.Mesh(new THREE.ShapeGeometry(sh), m2);
+    const u = new THREE.Vector3(Math.sin(t),0,-Math.cos(t));
+    cap.matrix.makeBasis(u,new THREE.Vector3(0,1,0),new THREE.Vector3().crossVectors(u,new THREE.Vector3(0,1,0)));
+    cap.matrix.decompose(cap.position,cap.quaternion,cap.scale);
+    g.add(cap);
+  }
+  return g;
+}
+const G = new THREE.Group(); G.name='willard_style_b';
+const thL=-0.348, thR=0.348;
+const R=r=>r*IN, H=z=>z*IN, B=x=>x*IN;
+// Depth: front face R94 · 24" clear seat · channels 36" (one repeat) at 102° · 1" top rail · rear plumb at R128.7 → crown 55"
+const LEAN = 7.7/36; // channel lean slope dR/dH
+const innerAt = h => 121 + LEAN*(h-18); // channel back face radius
+const REAR = 128.7; // plumb rear face, flush with back of top rail
+let ci=0;
+// one-piece banquette: soft parts inset slightly so the flat side walls read as a single plane
+for (const [a,b,tag] of [[thL+0.012,thR-0.012,'u1']]){
+  const U = new THREE.Group(); U.name='banquette'; G.add(U);
+  const add = m=>U.add(m);
+  // vinyl base: stops at back slab inner face
+  add(sector(R(94),R(117.5),a,b,H(1),H(12.4),vinyl,'base_'+tag,B(0.9)));
+  // seat cushion: 5" thick, top 18" AFF, 24" clear depth, bullnosed
+  add(sector(R(94.3),R(117.5),a,b,H(13.8),H(16.4),vinylL,'cushion_'+tag,B(1.3)));
+  // vinyl back: plumb rear face, inner face follows the channel lean (no top cap)
+  add(revolve([[innerAt(1)*IN,H(1)],[R(128.2),H(54)],[R(REAR),H(54)],[R(REAR),H(1)]], a,b,vinyl,'back_slab_'+tag));
+  const ca=a+0.016, cb=b-0.016, d4=(cb-ca)/8;
+  // (channel boundaries darkened by leaned reveal strips below)
+  // flat velvet channel panels at 102° (12° lean), soft crowns, motif
+  for(let k=0;k<8;k++){
+    const t1=ca+d4*k+0.007, t2=ca+d4*(k+1)-0.007, tc=(t1+t2)/2;
+    const w=(t2-t1)*R(117);
+    const prof=new THREE.Shape();
+    prof.moveTo(R(117.6),H(16.2)); prof.lineTo(R(120.6),H(16.2));
+    prof.lineTo(R(126.9),H(52.6)); prof.lineTo(R(125.4),H(52.6));
+    prof.lineTo(R(117.6),H(16.2));
+    const geo=new THREE.ExtrudeGeometry(prof,{depth:w,bevelEnabled:true,bevelThickness:B(0.8),bevelSize:B(0.7),bevelSegments:3});
+    const u=new THREE.Vector3(Math.sin(tc),0,-Math.cos(tc));
+    const tg=new THREE.Vector3(Math.cos(tc),0,Math.sin(tc));
+    const m=new THREE.Mesh(geo,velvet); m.name='channel_'+(++ci);
+    m.matrix.makeBasis(u,new THREE.Vector3(0,1,0),tg);
+    m.matrix.setPosition(tg.clone().multiplyScalar(-w/2));
+    // cylindrical world-space UVs — the motif runs unbroken across all 8 channels
+    {const pos=geo.attributes.position, uvA=geo.attributes.uv, p3=new THREE.Vector3();
+     for(let i2=0;i2<pos.count;i2++){ p3.fromBufferAttribute(pos,i2).applyMatrix4(m.matrix);
+       uvA.setXY(i2, Math.atan2(p3.x,-p3.z)*3.05, p3.y); } uvA.needsUpdate=true;}
+    m.matrix.decompose(m.position,m.quaternion,m.scale);
+    U.add(m);
+  }
+  // leaned dark reveal strips at channel boundaries
+  for(let k=1;k<8;k++){
+    const tb=ca+d4*k, w2=0.016*R(117);
+    const prof2=new THREE.Shape();
+    prof2.moveTo(R(118.4),H(16.2)); prof2.lineTo(R(120.8),H(16.2));
+    prof2.lineTo(R(127.0),H(52.6)); prof2.lineTo(R(126.2),H(52.6));
+    prof2.lineTo(R(118.4),H(16.2));
+    const geo2=new THREE.ExtrudeGeometry(prof2,{depth:w2,bevelEnabled:false});
+    const u2=new THREE.Vector3(Math.sin(tb),0,-Math.cos(tb));
+    const tg2=new THREE.Vector3(Math.cos(tb),0,Math.sin(tb));
+    const m2=new THREE.Mesh(geo2,velvetDk); m2.name='reveal_'+tag+'_'+k;
+    m2.matrix.makeBasis(u2,new THREE.Vector3(0,1,0),tg2);
+    m2.matrix.setPosition(tg2.clone().multiplyScalar(-w2/2));
+    m2.matrix.decompose(m2.position,m2.quaternion,m2.scale);
+    U.add(m2);
+  }
+  // top rail: cross-section identical to the arm crown curve — connects clean and flush, arm to arm
+  add(revolve([[R(124.9),H(53.4)],[R(125.2),H(54)],[R(125.5),H(54.41)],[R(125.95),H(54.81)],[R(126.2),H(54.95)],[R(126.6),H(55)],[R(128.7),H(55)],[R(128.7),H(53.4)]], a,b,vinylL,'top_rail_'+tag));
+  // fringe skirt — front face only, hanging strands between the arms
+  U.add(sector(R(92.7),R(92.95),thL+0.033,thR-0.033,H(0.6),H(7),fringe,'fringe_front',B(0.05)));
+}
+// end panels: arm + side as ONE element per end — single flat plane, all vinyl, floor to crown
+for(const [t,dir,nm] of [[thL,1,'end_left'],[thR,-1,'end_right']]){
+  const p=new THREE.Shape();
+  p.moveTo(R(93),H(1)); p.lineTo(R(93),H(22.8));
+  p.quadraticCurveTo(R(93),H(24),R(95),H(24));
+  p.lineTo(R(116),H(24));
+  p.quadraticCurveTo(R(119.5),H(24),R(120.6),H(31.5));
+  p.lineTo(R(123.9),H(50.2));
+  p.quadraticCurveTo(R(124.9),H(55),R(126.6),H(55));
+  p.lineTo(R(128.7),H(55));
+  p.lineTo(R(128.7),H(1));
+  p.lineTo(R(93),H(1));
+  const geo=new THREE.ExtrudeGeometry(p,{depth:B(3),bevelEnabled:false});
+  const u=new THREE.Vector3(Math.sin(t),0,-Math.cos(t));
+  const tg=new THREE.Vector3(Math.cos(t),0,Math.sin(t)).multiplyScalar(dir);
+  const m=new THREE.Mesh(geo,vinylL); m.name=nm;
+  m.matrix.makeBasis(u,new THREE.Vector3(0,1,0),tg);
+  m.matrix.decompose(m.position,m.quaternion,m.scale);
+  G.add(m);
+}
+// (side walls folded into the one-piece end panels above)
+const box = new THREE.Box3().setFromObject(G);
+const c = box.getCenter(new THREE.Vector3());
+G.position.set(-c.x, -box.min.y, -c.z);
+const root = new THREE.Group(); root.name='root'; root.add(G);
+stage.setObject(root);
+root.traverse(o=>{ if(o.material===fringe){ o.castShadow=false; o.receiveShadow=false; } if(/^(cushion|base)/.test(o.name)){ o.receiveShadow=false; } });
+// deterministic capture hook
+window.__setView = (deg) => { root.rotation.y = deg*Math.PI/180; };
+</script>
+</body>
+</html>

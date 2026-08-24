@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<template id="__bundler_thumbnail" data-bg-color="#f6f3ec">
+<svg viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg">
+  <rect x="6" y="6" width="108" height="68" fill="#f6f3ec" stroke="#1a2a24" stroke-width="2"></rect>
+  <path d="M34,50 Q60,42 86,50 L86,58 Q60,50 34,58 Z" fill="#0e5c3f"></path>
+  <path d="M34,58 Q60,50 86,58 L86,64 Q60,56 34,64 Z" fill="#8a5a2b"></path>
+  <text x="60" y="32" text-anchor="middle" font-family="Georgia, serif" font-size="14" fill="#1a2a24" font-weight="bold">B</text>
+</svg>
+</template>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<script src="./doc-page.js"></script>
+<script src="./image-slot.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Archivo:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#e8e5de}
+a{color:#0e5c3f;text-decoration:none}
+a:hover{color:#8a5a2b;text-decoration:underline}
+@keyframes asm{0%{transform:translateY(var(--dy));opacity:0}10%{transform:none;opacity:1}86%{transform:none;opacity:1}95%{transform:translateY(var(--dy));opacity:0}100%{transform:translateY(var(--dy));opacity:0}}
+@media print{[data-anim]{animation:none !important;opacity:1 !important;transform:none !important}}
+[data-asm="assembled"] [data-anim]{animation:none !important;opacity:1;transform:none}
+[data-asm="exploded"] [data-anim]{animation:none !important;opacity:1;transform:translateY(var(--dy))}
+
+</style>
+</helmet>
+<x-import component-from-global-scope="doc-page" width="17in" height="11in" margin="0" hint-size="100%,100%">
+
+<div data-screen-label="B0 Cover" style="width:17in;height:11in;box-sizing:border-box;background:#f6f3ec;color:#1a2a24;font-family:Archivo,sans-serif;display:flex;flex-direction:column;border:2.5px solid #1a2a24;position:relative;overflow:hidden;break-after:page">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;padding:24px 40px 0 40px">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:19px;letter-spacing:.22em">EMPIRE WORKROOM</div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f">CST-23 · REV TO EST-2026-110 · 07/16/2026</div>
+  </div>
+  <div style="padding:22px 40px 0 40px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.3em;color:#8a5a2b;margin-bottom:10px">MAGGIE O'NEIL — THE WILLARD · SCOTCH BAR</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:76px;line-height:.95">STYLE B — CURVED CHANNEL BANQUETTE</div>
+    <div style="font-size:15px;color:#3c4a44;margin-top:10px;max-width:900px;text-wrap:pretty">Presentation &amp; fabrication set · True R120&Prime; back arc, two units joined at centerline · 8 channels @ 9-5/32&Prime; · ALL COM</div>
+  </div>
+  <div style="display:flex;gap:36px;padding:30px 40px 0 40px;flex:1;min-height:0">
+    <div style="flex:1.6;display:flex;flex-direction:column;gap:14px;min-width:0">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:16px;letter-spacing:.2em;border-bottom:1.5px solid #1a2a24;padding-bottom:6px">MATERIAL STORY — ALL COM</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:22px;flex:1;min-height:0">
+        <div style="display:flex;flex-direction:column;gap:10px;min-height:0">
+          <div style="flex:1;min-height:0;position:relative;border:1.5px solid #1a2a24;background:#0e5c3f"><image-slot id="mat-velvet" shape="rect" placeholder="Nympheus velvet swatch"></image-slot></div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:19px;letter-spacing:.04em">NYMPHEUS VELVET — EMERALD</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.6;color:#3c4a44">GP&amp;J Baker BP10814-2 · inside back, 8 channels<br>54&Prime;W · 35.46&Prime; V-repeat · pattern stylized on channels<br>Not Cal TB 117 tested — client confirms FF&amp;E</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;min-height:0">
+          <div style="flex:1;min-height:0;position:relative;border:1.5px solid #1a2a24;background:#96683a"><image-slot id="mat-vinyl" shape="rect" placeholder="Vintage Ale vinyl swatch"></image-slot></div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:19px;letter-spacing:.04em">VINTAGE ALE VINYL</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.6;color:#3c4a44">Keyston Bros SVI001 · seat + exposed face + arms<br>54&Prime;W · no repeat · wipeable, high-traffic rated<br>Cal TB 117-2013 compliant</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;min-height:0">
+          <div style="flex:1;min-height:0;position:relative;border:1.5px solid #1a2a24;background:#8a5a2b"><image-slot id="mat-fringe" shape="rect" placeholder="Rupi fringe swatch"></image-slot></div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:19px;letter-spacing:.04em">RUPI FRINGE — 158</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.6;color:#3c4a44">Fabricut 9179602 · 6&Prime; brush fringe<br>Header set 7&Prime; AFF along exposed face<br>Run ≈117&Prime; — see yardage sheet B5</div>
+        </div>
+      </div>
+    </div>
+    <div style="flex:.75;display:flex;flex-direction:column;gap:22px">
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:16px;letter-spacing:.2em;border-bottom:1.5px solid #1a2a24;padding-bottom:6px;margin-bottom:12px">SHEET INDEX</div>
+        <div style="display:flex;flex-direction:column;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:11.5px">
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:24px">B0</span><span>Cover · Material Story</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:24px">B1</span><span>Elevation &amp; Section</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:24px">B2</span><span>Floor Plan — True R120&Prime;</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:24px">B3</span><span>Assembly Build-Up · Exploded</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:24px">B4</span><span>Foam &amp; Frame Construction</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:24px">B5</span><span>Yardage / COM Calculation</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:24px">B6</span><span>Flammability · Cal TB 117</span></div>
+        </div>
+      </div>
+      <div style="border:1.5px solid #0e5c3f;background:#eef2ea;padding:16px 18px">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:16px;letter-spacing:.14em;color:#0e5c3f;margin-bottom:8px">REV — CAP RESOLVED</div>
+        <div style="font-size:12.5px;line-height:1.55;text-wrap:pretty">Wall cap increased to <strong>87&Prime;</strong> per client, 07/16/2026. Assembly total 83-1/2&Prime; (incl. 1-1/2&Prime; separation) now fits with ≈1-3/4&Prime; clearance each end. Prior 82&Prime; cap conflict closed; field verify R120&Prime; curvature at install.</div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.7;color:#3c4a44">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:16px;letter-spacing:.2em;color:#1a2a24;border-bottom:1.5px solid #1a2a24;padding-bottom:6px;margin-bottom:10px">KEY DIMENSIONS</div>
+        53&Prime; overall · 36&Prime; back · 17&Prime; seat<br>26&Prime; radial depth · 1&Prime; floor clearance<br>Fringe header 7&Prime; AFF · 10&Prime; exposed face<br>Arm top 24&Prime; AFF · wedge back 9&Prime;→3&Prime;
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #1a2a24;margin-top:26px;padding:12px 40px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#3c4a44">
+    <div>EMPIRE WORKROOM · Custom Upholstery &amp; Fabrication · 5124 Frolich Ln, Hyattsville, MD 20781 · (703) 213-6484</div>
+    <div style="color:#8a5a2b;font-weight:600">FOR DISCUSSION — NOT FOR CONSTRUCTION</div>
+    <div>SHEET B0</div>
+  </div>
+</div>
+
+<div data-screen-label="B1 Elevation" style="width:17in;height:11in;box-sizing:border-box;background:#f6f3ec;color:#1a2a24;font-family:Archivo,sans-serif;display:flex;flex-direction:column;border:2.5px solid #1a2a24;position:relative;overflow:hidden;break-after:page">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;padding:24px 40px 0 40px">
+    <div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:40px;line-height:1">STYLE B — ELEVATION &amp; SECTION</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f;margin-top:6px">Base to floor (1&Prime; clearance) · fringe header 7&Prime; AFF · 10&Prime; exposed face · rear plumb, inside face raked</div>
+    </div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f">MAGGIE O'NEIL — THE WILLARD · CST-23 · 07/16/2026</div>
+  </div>
+  <div style="display:flex;gap:24px;padding:16px 40px 0 40px;flex:1;min-height:0">
+    <div style="flex:2.2;border:1.5px solid #1a2a24;background:#fbf9f4;position:relative;min-width:0">
+      <div style="position:absolute;top:10px;left:14px;font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:15px;letter-spacing:.18em">FRONT ELEVATION — DEVELOPED · 1/2&Prime; = 1&#8242;-0&Prime;</div>
+      <svg viewBox="0 0 980 600" style="width:100%;height:100%;font-family:'IBM Plex Mono',monospace" preserveAspectRatio="xMidYMid meet">
+        <line x1="60" y1="520" x2="880" y2="520" stroke="#1a2a24" stroke-width="2.5"></line>
+        <line x1="150" y1="46" x2="672" y2="46" stroke="#1a2a24" stroke-width="5"></line>
+        <text x="411" y="36" font-size="13" text-anchor="middle" fill="#0e5c3f" font-weight="600">WALL CAP 87&#8243; — REV 07/16/2026</text>
+        <rect x="120" y="88" width="668" height="424" fill="#f1ece0" stroke="#1a2a24" stroke-width="1.5"></rect>
+        <rect x="152" y="88" width="296" height="296" fill="#0e5c3f"></rect>
+        <rect x="460" y="88" width="296" height="296" fill="#0e5c3f"></rect>
+        <g stroke="#093d2c" stroke-width="3">
+          <line x1="226" y1="88" x2="226" y2="384"></line><line x1="300" y1="88" x2="300" y2="384"></line><line x1="374" y1="88" x2="374" y2="384"></line>
+          <line x1="534" y1="88" x2="534" y2="384"></line><line x1="608" y1="88" x2="608" y2="384"></line><line x1="682" y1="88" x2="682" y2="384"></line>
+        </g>
+        <rect x="448" y="88" width="12" height="296" fill="#e8e2d2" stroke="#8f8266" stroke-width="1"></rect>
+        <rect x="120" y="328" width="32" height="184" fill="#b98a55" stroke="#6e4a24" stroke-width="1.5"></rect>
+        <rect x="756" y="328" width="32" height="184" fill="#b98a55" stroke="#6e4a24" stroke-width="1.5"></rect>
+        <rect x="152" y="384" width="604" height="40" fill="#96683a" stroke="#6e4a24" stroke-width="1"></rect>
+        <rect x="152" y="424" width="604" height="88" fill="#a97a45" stroke="#6e4a24" stroke-width="1"></rect>
+        <rect x="152" y="464" width="604" height="48" fill="#8a5a2b" opacity=".9"></rect>
+        <g stroke="#6e4224" stroke-width="1.2" opacity=".7">
+          <line x1="170" y1="466" x2="170" y2="510"></line><line x1="230" y1="466" x2="230" y2="510"></line><line x1="290" y1="466" x2="290" y2="510"></line><line x1="350" y1="466" x2="350" y2="510"></line><line x1="410" y1="466" x2="410" y2="510"></line><line x1="470" y1="466" x2="470" y2="510"></line><line x1="530" y1="466" x2="530" y2="510"></line><line x1="590" y1="466" x2="590" y2="510"></line><line x1="650" y1="466" x2="650" y2="510"></line><line x1="710" y1="466" x2="710" y2="510"></line>
+        </g>
+        <g stroke="#3c4a44" stroke-width="1" fill="#3c4a44" font-size="12.5">
+          <line x1="120" y1="548" x2="788" y2="548"></line><line x1="120" y1="542" x2="120" y2="554"></line><line x1="788" y1="542" x2="788" y2="554"></line>
+          <text x="454" y="568" text-anchor="middle">83-1/2&#8243; OVERALL ASSEMBLY (4 + 37 + 1-1/2 + 37 + 4)</text>
+          <line x1="88" y1="88" x2="88" y2="512"></line><line x1="82" y1="88" x2="94" y2="88"></line><line x1="82" y1="512" x2="94" y2="512"></line>
+          <text x="78" y="300" text-anchor="middle" transform="rotate(-90 78 300)">53&#8243; OVERALL</text>
+          <line x1="826" y1="88" x2="826" y2="384"></line><line x1="820" y1="88" x2="832" y2="88"></line><line x1="820" y1="384" x2="832" y2="384"></line>
+          <text x="842" y="240" text-anchor="middle" transform="rotate(-90 842 240)">36&#8243; BACK</text>
+          <line x1="826" y1="384" x2="826" y2="520"></line><line x1="820" y1="520" x2="832" y2="520"></line>
+          <text x="842" y="452" text-anchor="middle" transform="rotate(-90 842 452)">17&#8243; SEAT</text>
+          <text x="454" y="112" text-anchor="middle" fill="#eef2ea">8 CHANNELS @ 9-5/32&#8243; — NYMPHEUS VELVET, PATTERN CENTERED PER CHANNEL</text>
+          <line x1="454" y1="384" x2="454" y2="360" stroke-dasharray="3 3"></line>
+          <text x="500" y="356" text-anchor="middle" style="paint-order:stroke" stroke="#f6f3ec" stroke-width="4" stroke-linejoin="round">1-1/2&#8243; GAP AT CL</text>
+          <text x="454" y="410" text-anchor="middle" fill="#f6f3ec">SEAT — VINTAGE ALE VINYL</text>
+          <text x="454" y="448" text-anchor="middle" fill="#f6f3ec">10&#8243; EXPOSED FACE — VINYL</text>
+          <text x="454" y="496" text-anchor="middle" fill="#2a1a0c">RUPI FRINGE 6&#8243; — HEADER 7&#8243; AFF</text>
+          <text x="136" y="320" text-anchor="middle" font-size="11" style="paint-order:stroke" stroke="#f6f3ec" stroke-width="4" stroke-linejoin="round">ARM 4&#8243;</text>
+          <text x="772" y="320" text-anchor="middle" font-size="11" style="paint-order:stroke" stroke="#f6f3ec" stroke-width="4" stroke-linejoin="round">ARM 4&#8243;</text>
+          <line x1="788" y1="512" x2="806" y2="512"></line><text x="866" y="518" font-size="11" text-anchor="middle">1&#8243; FLOOR CLR</text>
+        </g>
+      </svg>
+    </div>
+    <div style="flex:1;border:1.5px solid #1a2a24;background:#fbf9f4;position:relative;min-width:0">
+      <div style="position:absolute;top:10px;left:14px;font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:15px;letter-spacing:.18em">SECTION AT CHANNEL · 1&Prime; = 1&#8242;-0&Prime;</div>
+      <svg viewBox="0 0 440 600" style="width:100%;height:100%;font-family:'IBM Plex Mono',monospace" preserveAspectRatio="xMidYMid meet">
+        <line x1="20" y1="520" x2="420" y2="520" stroke="#1a2a24" stroke-width="2.5"></line>
+        <line x1="330" y1="40" x2="330" y2="520" stroke="#1a2a24" stroke-width="2.5"></line>
+        <g stroke="#1a2a24" stroke-width="1"><line x1="330" y1="60" x2="342" y2="48"></line><line x1="330" y1="120" x2="342" y2="108"></line><line x1="330" y1="180" x2="342" y2="168"></line><line x1="330" y1="240" x2="342" y2="228"></line><line x1="330" y1="300" x2="342" y2="288"></line><line x1="330" y1="360" x2="342" y2="348"></line><line x1="330" y1="420" x2="342" y2="408"></line><line x1="330" y1="480" x2="342" y2="468"></line></g>
+        <path d="M330,88 L306,88 L258,384 L330,384 Z" fill="#0e5c3f"></path>
+        <path d="M306,88 Q296,90 296,102 L250,378 Q252,388 258,384 L306,88" fill="#0e5c3f" opacity=".85"></path>
+        <rect x="122" y="384" width="208" height="40" fill="#96683a" stroke="#6e4a24" stroke-width="1"></rect>
+        <path d="M122,384 Q110,384 110,404 Q110,424 122,424 Z" fill="#96683a"></path>
+        <rect x="110" y="424" width="220" height="88" fill="#a97a45" stroke="#6e4a24" stroke-width="1"></rect>
+        <rect x="110" y="464" width="14" height="48" fill="#8a5a2b"></rect>
+        <g stroke="#3c4a44" stroke-width="1" fill="#3c4a44" font-size="12.5">
+          <line x1="110" y1="548" x2="330" y2="548"></line><line x1="110" y1="542" x2="110" y2="554"></line><line x1="330" y1="542" x2="330" y2="554"></line>
+          <text x="220" y="568" text-anchor="middle">26&#8243; RADIAL DEPTH</text>
+          <path d="M258,240 L180,200" fill="none"></path><text x="40" y="194">INSIDE FACE</text><text x="40" y="210">RAKED ~10&#176;</text>
+          <path d="M318,88 L318,70" fill="none" stroke-dasharray="3 3"></path><text x="180" y="62">WEDGE 3&#8243; AT TOP</text>
+          <path d="M294,384 L294,404" fill="none" stroke-dasharray="3 3"></path><text x="152" y="376">9&#8243; AT SEAT</text>
+          <text x="352" y="300" transform="rotate(-90 352 300)" text-anchor="middle">REAR PLUMB — SCRIBE TO WALL</text>
+          <path d="M110,444 L60,444" fill="none"></path><text x="24" y="438">FRINGE</text><text x="24" y="452">7&#8243; AFF</text>
+          <text x="220" y="410" text-anchor="middle" fill="#f6f3ec">3&#8243; HR FOAM SEAT</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #1a2a24;margin-top:16px;padding:12px 40px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#3c4a44">
+    <div>EMPIRE WORKROOM · Custom Upholstery &amp; Fabrication · 5124 Frolich Ln, Hyattsville, MD 20781 · (703) 213-6484</div>
+    <div style="color:#8a5a2b;font-weight:600">FOR DISCUSSION — NOT FOR CONSTRUCTION</div>
+    <div>SHEET B1</div>
+  </div>
+</div>
+
+<div data-screen-label="B2 Floor Plan" style="width:17in;height:11in;box-sizing:border-box;background:#f6f3ec;color:#1a2a24;font-family:Archivo,sans-serif;display:flex;flex-direction:column;border:2.5px solid #1a2a24;position:relative;overflow:hidden;break-after:page">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;padding:24px 40px 0 40px">
+    <div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:40px;line-height:1">STYLE B — FLOOR PLAN · TRUE R120&Prime;</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f;margin-top:6px">Back arc 83-1/2&Prime; along R120&Prime; · chord 81-15/16&Prime; · sagitta 7-3/16&Prime; · front face R94&Prime; · 87&Prime; wall cap — resolved</div>
+    </div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f">MAGGIE O'NEIL — THE WILLARD · CST-23 · 07/16/2026</div>
+  </div>
+  <div style="display:flex;gap:30px;padding:16px 40px 0 40px;flex:1;min-height:0">
+    <div style="flex:2;border:1.5px solid #1a2a24;background:#fbf9f4;position:relative;min-width:0">
+      <div style="position:absolute;top:10px;left:14px;font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:15px;letter-spacing:.18em">PLAN · 3/4&Prime; = 1&#8242;-0&Prime;</div>
+      <svg viewBox="0 0 900 560" style="width:100%;height:100%;font-family:'IBM Plex Mono',monospace" preserveAspectRatio="xMidYMid meet">
+        <line x1="189" y1="252" x2="711" y2="252" stroke="#1a2a24" stroke-width="5"></line>
+        <text x="450" y="240" font-size="13" text-anchor="middle" fill="#0e5c3f" font-weight="600">WALL CAP 87&#8243; — REV 07/16/2026</text>
+        <path d="M204.3,299.9 A720,720 0 0 1 695.7,299.9 L642.4,446.5 A564,564 0 0 0 257.6,446.5 Z" fill="#f1ece0" stroke="#1a2a24" stroke-width="1.5"></path>
+        <path d="M212.3,297.7 A720,720 0 0 1 687.7,297.7 L676,330 A688,688 0 0 0 224,330 Z" fill="#0e5c3f" opacity=".18"></path>
+        <path d="M204.3,299.9 A720,720 0 0 1 695.7,299.9" fill="none" stroke="#0e5c3f" stroke-width="3"></path>
+        <g stroke="#1a2a24" stroke-width="1">
+          <line x1="227.5" y1="293.6" x2="238.9" y2="437.4"></line>
+          <line x1="672.5" y1="293.6" x2="661.1" y2="437.4"></line>
+          <line x1="444" y1="278.4" x2="444" y2="422.6"></line>
+          <line x1="456" y1="278.4" x2="456" y2="422.6"></line>
+        </g>
+        <g stroke="#093d2c" stroke-width="1.2" stroke-dasharray="4 3">
+          <line x1="281" y1="286.9" x2="288" y2="431"></line><line x1="335" y1="282.2" x2="338" y2="426.6"></line><line x1="389" y1="279.4" x2="390" y2="423.9"></line>
+          <line x1="511" y1="279.4" x2="510" y2="423.9"></line><line x1="565" y1="282.2" x2="562" y2="426.6"></line><line x1="619" y1="286.9" x2="612" y2="431"></line>
+        </g>
+        <path d="M257.6,446.5 A564,564 0 0 1 642.4,446.5" fill="none" stroke="#8a5a2b" stroke-width="7" stroke-dasharray="1.5 3"></path>
+        <g stroke="#3c4a44" stroke-width="1" fill="#3c4a44" font-size="12.5">
+          <line x1="204.3" y1="299.9" x2="695.7" y2="299.9" stroke-dasharray="5 4"></line>
+          <text x="450" y="316" text-anchor="middle">CHORD 81-15/16&#8243;</text>
+          <line x1="450" y1="256.7" x2="450" y2="299.9"></line>
+          <text x="540" y="272">SAGITTA 7-3/16&#8243;</text>
+          <line x1="450" y1="446.5" x2="450" y2="530" stroke-dasharray="8 4" stroke-width="1.2"></line>
+          <path d="M450,530 L444,514 L456,514 Z" fill="#3c4a44" stroke="none"></path>
+          <text x="462" y="500">R120&#8243; TO CL OF LAYOUT — STRIKE ON SITE</text>
+          <text x="462" y="518">R94&#8243; FRONT FACE</text>
+          <path d="M240,368 L150,400" fill="none"></path><text x="42" y="414">ARM 4&#8243; ALONG ARC</text>
+          <path d="M450,352 L556,368" fill="none"></path><text x="562" y="372">1-1/2&#8243; GAP AT CL — TWO UNITS</text>
+          <text x="330" y="356" text-anchor="middle" transform="rotate(6 330 356)">UNIT 1 — 37&#8243;</text>
+          <text x="570" y="356" text-anchor="middle" transform="rotate(-6 570 356)">UNIT 2 — 37&#8243;</text>
+          <path d="M560,462 L620,486" fill="none"></path><text x="626" y="490">RUPI FRINGE ON EXPOSED FACE</text>
+          <line x1="180" y1="252" x2="180" y2="299.9" stroke-dasharray="3 3"></line><text x="172" y="282" text-anchor="end">&#8776;1-3/4&#8243; CLR</text>
+          <line x1="720" y1="252" x2="720" y2="299.9" stroke-dasharray="3 3"></line><text x="728" y="282">&#8776;1-3/4&#8243; CLR</text>
+          <line x1="748" y1="299.9" x2="748" y2="446.5"></line><line x1="742" y1="299.9" x2="754" y2="299.9"></line><line x1="742" y1="446.5" x2="754" y2="446.5"></line>
+          <text x="764" y="378" transform="rotate(-90 764 378)" text-anchor="middle">26&#8243; RADIAL</text>
+        </g>
+      </svg>
+    </div>
+    <div style="flex:.62;display:flex;flex-direction:column;gap:20px">
+      <div style="border:1.5px solid #0e5c3f;background:#eef2ea;padding:16px 18px">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:16px;letter-spacing:.14em;color:#0e5c3f;margin-bottom:8px">87&Prime; CAP — RESOLVED</div>
+        <div style="font-size:12.5px;line-height:1.55;text-wrap:pretty">Client increased wall cap to 87&Prime; (07/16/2026). Assembly chord 81-15/16&Prime; fits with ≈1-3/4&Prime; clearance each end at the cap line. Prior options (a) butt-joint, (b) shrink halves, (c) cap-as-chord are superseded — build as drawn.</div>
+      </div>
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:16px;letter-spacing:.2em;border-bottom:1.5px solid #1a2a24;padding-bottom:6px;margin-bottom:10px">SETTING-OUT</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.8;color:#3c4a44">Arc angle 0.696 rad (39.88&#176;)<br>Back arc length 83-1/2&Prime; @ R120&Prime;<br>Segments: 4 | 37 | 1-1/2 | 37 | 4<br>Front face arc &#8776;65-3/8&Prime; @ R94&Prime;<br>8 channels @ 9-5/32&Prime; on arc<br>Strike R120&Prime; center on site from CL<br>Field verify curvature before build</div>
+      </div>
+      <div style="border:1.5px solid #1a2a24;padding:14px 16px;font-size:12px;line-height:1.55;text-wrap:pretty">Maintain 18&Prime; min table clearance at front face. Units join at CL; conceal joint in channel reveal.</div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #1a2a24;margin-top:16px;padding:12px 40px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#3c4a44">
+    <div>EMPIRE WORKROOM · Custom Upholstery &amp; Fabrication · 5124 Frolich Ln, Hyattsville, MD 20781 · (703) 213-6484</div>
+    <div style="color:#8a5a2b;font-weight:600">FOR DISCUSSION — NOT FOR CONSTRUCTION</div>
+    <div>SHEET B2</div>
+  </div>
+</div>
+
+<div data-screen-label="B3 Assembly" data-asm="{{ assemblyView }}" style="width:17in;height:11in;box-sizing:border-box;background:#f6f3ec;color:#1a2a24;font-family:Archivo,sans-serif;display:flex;flex-direction:column;border:2.5px solid #1a2a24;position:relative;overflow:hidden;break-after:page">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;padding:24px 40px 0 40px">
+    <div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:40px;line-height:1">STYLE B — ASSEMBLY BUILD-UP</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f;margin-top:6px">Animated exploded sequence · curvature exaggerated for legibility — true R120&Prime; per plan · prints assembled</div>
+    </div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f">MAGGIE O'NEIL — THE WILLARD · CST-23 · 07/16/2026</div>
+  </div>
+  <div style="display:flex;gap:30px;padding:18px 40px 0 40px;flex:1;min-height:0">
+    <div style="flex:1.9;position:relative;border:1.5px solid #1a2a24;background:#fbf9f4;min-width:0">
+      <div data-anim style="--dy:120px;position:absolute;inset:0;animation:asm 13s ease-in-out infinite;animation-delay:0s">
+        <svg viewBox="0 0 900 620" style="width:100%;height:100%"><path d="M148,478 Q450,532 752,478 L752,506 Q450,560 148,506 Z" fill="#2a3530"></path></svg>
+      </div>
+      <div data-anim style="--dy:-70px;position:absolute;inset:0;animation:asm 13s ease-in-out infinite;animation-delay:1.1s">
+        <svg viewBox="0 0 900 620" style="width:100%;height:100%"><path d="M150,384 Q450,428 750,384 L780,412 Q450,464 120,412 Z" fill="#b98a55"></path><path d="M120,412 Q450,464 780,412 L780,478 Q450,530 120,478 Z" fill="#96683a"></path><path d="M120,412 Q450,464 780,412" fill="none" stroke="#6e4a24" stroke-width="1.5"></path></svg>
+      </div>
+      <div data-anim style="--dy:-140px;position:absolute;inset:0;animation:asm 13s ease-in-out infinite;animation-delay:2.2s">
+        <svg viewBox="0 0 900 620" style="width:100%;height:100%"><path d="M158,178 Q450,132 742,178 L742,378 Q450,422 158,378 Z" fill="#ddd2bd" stroke="#8f8266" stroke-width="1.5"></path><path d="M175,192 Q450,148 725,192" fill="none" stroke="#8f8266" stroke-width="1" stroke-dasharray="5 4"></path></svg>
+      </div>
+      <div data-anim style="--dy:-180px;position:absolute;inset:0;animation:asm 13s ease-in-out infinite;animation-delay:3.3s">
+        <svg viewBox="0 0 900 620" style="width:100%;height:100%">
+          <path d="M150,170 Q450,124 750,170 L750,386 Q450,430 150,386 Z" fill="#0e5c3f"></path>
+          <path d="M225,159 L225,398 M300,150 L300,406 M375,145 L375,412 M450,143 L450,414 M525,145 L525,412 M600,150 L600,406 M675,159 L675,398" stroke="#093d2c" stroke-width="3" fill="none"></path>
+          <path d="M446,143 L446,414 M454,143 L454,414" stroke="#062e21" stroke-width="1.5" fill="none"></path>
+          <path d="M150,170 Q450,124 750,170" fill="none" stroke="#125536" stroke-width="6"></path>
+        </svg>
+      </div>
+      <div data-anim style="--dy:-110px;position:absolute;inset:0;animation:asm 13s ease-in-out infinite;animation-delay:4.4s">
+        <svg viewBox="0 0 900 620" style="width:100%;height:100%"><path d="M96,326 Q122,318 150,326 L150,470 Q122,478 96,470 Z" fill="#96683a" stroke="#6e4a24" stroke-width="1.5"></path><path d="M750,326 Q778,318 804,326 L804,470 Q778,478 750,470 Z" fill="#96683a" stroke="#6e4a24" stroke-width="1.5"></path></svg>
+      </div>
+      <div data-anim style="--dy:-60px;position:absolute;inset:0;animation:asm 13s ease-in-out infinite;animation-delay:5.5s">
+        <svg viewBox="0 0 900 620" style="width:100%;height:100%"><path d="M120,494 Q450,546 780,494" fill="none" stroke="#a06c33" stroke-width="30" stroke-dasharray="2 3"></path><path d="M120,479 Q450,531 780,479" fill="none" stroke="#7a4d22" stroke-width="5"></path></svg>
+      </div>
+      <svg viewBox="0 0 900 620" style="position:absolute;inset:0;width:100%;height:100%;font-family:'IBM Plex Mono',monospace">
+        <g fill="#3c4a44" font-size="13" style="paint-order:stroke" stroke="#f6f3ec" stroke-width="4" stroke-linejoin="round">
+          <path d="M620,132 L680,76" stroke="#3c4a44" stroke-width="1" fill="none"></path><text x="560" y="64">CHANNEL BACK — 2&#8243; FOAM, REAR PLUMB</text>
+          <path d="M452,300 L560,264" stroke="#3c4a44" stroke-width="1" fill="none"></path><text x="568" y="268">GAP AT CL — TWO UNITS</text>
+          <path d="M796,392 L830,368" stroke="#3c4a44" stroke-width="1" fill="none"></path><text x="628" y="360">ARM — TOP 24&#8243; AFF</text>
+          <path d="M700,516 L760,556" stroke="#3c4a44" stroke-width="1" fill="none"></path><text x="560" y="574">RUPI FRINGE — HEADER 7&#8243; AFF</text>
+          <path d="M240,446 L170,530" stroke="#3c4a44" stroke-width="1" fill="none"></path><text x="60" y="548">10&#8243; EXPOSED FACE — VINYL</text>
+        </g>
+      </svg>
+    </div>
+    <div style="flex:.7;display:flex;flex-direction:column;gap:20px">
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:16px;letter-spacing:.2em;border-bottom:1.5px solid #1a2a24;padding-bottom:6px;margin-bottom:12px">ASSEMBLY ORDER</div>
+        <div style="display:flex;flex-direction:column;gap:9px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;line-height:1.5">
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:18px">1</span><span>Plinth base — concealed glides, 1&Prime; floor clearance</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:18px">2</span><span>Seat platform — 3&Prime; HR foam, Vintage Ale vinyl</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:18px">3</span><span>Back board — 3/4&Prime; ply, rear plumb, scribe to wall</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:18px">4</span><span>Channel back — 8 ch @ 9-5/32&Prime;, 2&Prime; foam, Nympheus velvet, inside face raked ~10°</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:18px">5</span><span>Armrests — 4&Prime; wide, top 24&Prime; AFF, vinyl</span></div>
+          <div style="display:flex;gap:12px"><span style="color:#8a5a2b;width:18px">6</span><span>Rupi fringe — header 7&Prime; AFF along exposed face</span></div>
+        </div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.7;color:#3c4a44">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:16px;letter-spacing:.2em;color:#1a2a24;border-bottom:1.5px solid #1a2a24;padding-bottom:6px;margin-bottom:10px">KEY DIMENSIONS</div>
+        87&Prime; cap: 4 + 37 + 1-1/2 + 37 + 4 = 83-1/2&Prime;<br>≈1-3/4&Prime; clearance each end — resolved<br>17&Prime; seat · 36&Prime; back · 53&Prime; overall<br>26&Prime; radial depth · 8 channels @ 9-5/32&Prime;<br>ALL COM · flammability — see sheet B6
+      </div>
+      <div style="border:1.5px solid #1a2a24;background:#eef2ea;padding:14px 16px;font-size:12px;line-height:1.55;text-wrap:pretty">Units delivered separately; join at CL on site. Maintain 18&Prime; min clearance to tables. Sequence animates on screen; prints fully assembled.</div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #1a2a24;margin-top:18px;padding:12px 40px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#3c4a44">
+    <div>EMPIRE WORKROOM · Custom Upholstery &amp; Fabrication · 5124 Frolich Ln, Hyattsville, MD 20781 · (703) 213-6484</div>
+    <div style="color:#8a5a2b;font-weight:600">FOR DISCUSSION — NOT FOR CONSTRUCTION</div>
+    <div>SHEET B3</div>
+  </div>
+</div>
+
+<div data-screen-label="B4 Foam &amp; Frame" style="width:17in;height:11in;box-sizing:border-box;background:#f6f3ec;color:#1a2a24;font-family:Archivo,sans-serif;display:flex;flex-direction:column;border:2.5px solid #1a2a24;position:relative;overflow:hidden;break-after:page">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;padding:24px 40px 0 40px">
+    <div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:40px;line-height:1">STYLE B — FOAM &amp; FRAME CONSTRUCTION</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f;margin-top:6px">Kiln-dried frame, R120&Prime; ribs · HR foam build-up · section detail at typical channel</div>
+    </div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f">MAGGIE O'NEIL — THE WILLARD · CST-23 · 07/16/2026</div>
+  </div>
+  <div style="display:flex;gap:30px;padding:16px 40px 0 40px;flex:1;min-height:0">
+    <div style="flex:1.4;border:1.5px solid #1a2a24;background:#fbf9f4;position:relative;min-width:0">
+      <div style="position:absolute;top:10px;left:14px;font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:15px;letter-spacing:.18em">SECTION DETAIL · 1-1/2&Prime; = 1&#8242;-0&Prime;</div>
+      <svg viewBox="0 0 640 600" style="width:100%;height:100%;font-family:'IBM Plex Mono',monospace" preserveAspectRatio="xMidYMid meet">
+        <line x1="30" y1="540" x2="610" y2="540" stroke="#1a2a24" stroke-width="2.5"></line>
+        <line x1="500" y1="50" x2="500" y2="540" stroke="#1a2a24" stroke-width="2.5"></line>
+        <rect x="488" y="90" width="12" height="380" fill="#d8c49a" stroke="#8f8266" stroke-width="1"></rect>
+        <path d="M488,96 L452,96 L388,400 L488,400 Z" fill="#e6ddc8" stroke="#8f8266" stroke-width="1"></path>
+        <path d="M452,96 Q430,98 428,116 L366,388 Q370,402 388,400 L452,96" fill="#0e5c3f"></path>
+        <path d="M440,120 Q436,140 442,160 M428,190 Q424,210 430,230 M416,260 Q412,280 418,300 M404,330 Q400,350 406,368" stroke="#093d2c" stroke-width="2" fill="none"></path>
+        <rect x="150" y="400" width="338" height="16" fill="#d8c49a" stroke="#8f8266" stroke-width="1"></rect>
+        <g stroke="#8f8266" stroke-width="1"><line x1="170" y1="400" x2="170" y2="416"></line><line x1="230" y1="400" x2="230" y2="416"></line><line x1="290" y1="400" x2="290" y2="416"></line><line x1="350" y1="400" x2="350" y2="416"></line><line x1="410" y1="400" x2="410" y2="416"></line><line x1="470" y1="400" x2="470" y2="416"></line></g>
+        <path d="M150,376 L488,376 L488,400 L150,400 Q138,400 138,388 Q138,376 150,376" fill="#96683a" stroke="#6e4a24" stroke-width="1"></path>
+        <path d="M150,352 L488,352 L488,376 L150,376 Q138,376 138,364 Q138,352 150,352" fill="#e6ddc8" stroke="#8f8266" stroke-width="1"></path>
+        <rect x="138" y="416" width="350" height="100" fill="#efe8d8" stroke="#8f8266" stroke-width="1"></rect>
+        <g stroke="#8f8266" stroke-width="1"><line x1="200" y1="416" x2="200" y2="516"></line><line x1="280" y1="416" x2="280" y2="516"></line><line x1="360" y1="416" x2="360" y2="516"></line><line x1="440" y1="416" x2="440" y2="516"></line></g>
+        <rect x="128" y="416" width="10" height="100" fill="#a97a45" stroke="#6e4a24" stroke-width="1"></rect>
+        <rect x="128" y="452" width="10" height="52" fill="#8a5a2b"></rect>
+        <rect x="150" y="516" width="60" height="16" fill="#2a3530"></rect><rect x="420" y="516" width="60" height="16" fill="#2a3530"></rect>
+        <g stroke="#3c4a44" stroke-width="1" fill="#3c4a44" font-size="12">
+          <path d="M366,240 L280,200" fill="none"></path><text x="60" y="182">2&#8243; MED FOAM CHANNELS</text><text x="60" y="198">+ DACRON WRAP — VELVET</text>
+          <path d="M452,200 L560,180" fill="none"></path><text x="524" y="170">WEDGE CORE</text>
+          <text x="560" y="300" transform="rotate(-90 560 300)" text-anchor="middle">3/4&#8243; PLY BACK BOARD — REAR PLUMB</text>
+          <path d="M300,362 L220,320" fill="none"></path><text x="60" y="312">3&#8243; HR FOAM 2.5-LB SEAT</text>
+          <path d="M300,388 L360,330" fill="none"></path><text x="366" y="326">DACRON + VINYL, BULLNOSE</text>
+          <path d="M300,408 L410,446" fill="none"></path><text x="416" y="452">3/4&#8243; PLY DECK ON</text><text x="416" y="466">RIBS @ 12&#8243; OC</text>
+          <path d="M128,470 L80,470" fill="none"></path><text x="34" y="462">VINYL FACE</text><text x="34" y="476">+ FRINGE</text>
+          <text x="315" y="500" text-anchor="middle">R120&#8243; RIB FRAME — GLUED + STAPLED + CORNER BLOCKED</text>
+          <path d="M180,532 L150,556" fill="none"></path><text x="60" y="568">CONCEALED GLIDES — 1&#8243; CLR</text>
+        </g>
+      </svg>
+    </div>
+    <div style="flex:.8;display:flex;flex-direction:column;gap:20px">
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:16px;letter-spacing:.2em;border-bottom:1.5px solid #1a2a24;padding-bottom:6px;margin-bottom:12px">FRAME</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.8;color:#3c4a44">Kiln-dried hardwood + 3/4&Prime; ply ribs @ 12&Prime; OC, cut to R120&Prime;/R94&Prime;<br>1/4&Prime; bendable ply skins, glued + stapled<br>Corner blocked at all joints; screwed, no nails alone<br>Two units — join plates at CL, site-bolted<br>Concealed adjustable glides, 1&Prime; floor clearance</div>
+      </div>
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:16px;letter-spacing:.2em;border-bottom:1.5px solid #1a2a24;padding-bottom:6px;margin-bottom:12px">FOAM BUILD-UP</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.8;color:#3c4a44">Seat: 3&Prime; HR foam, 2.5-lb / 35 ILD + dacron<br>Back: 2&Prime; medium foam per channel + dacron, over wedge core 9&Prime;&#8594;3&Prime;<br>Channels padded to crown; seams stapled in reveal<br>All foam Cal TB 117-2013 compliant — see B6</div>
+      </div>
+      <div style="border:1.5px solid #1a2a24;background:#eef2ea;padding:14px 16px;font-size:12px;line-height:1.55;text-wrap:pretty">Inside back face raked ~10&#176;; rear face plumb for wall scribe. Velvet railroaded NO — nap runs up; pattern centered per channel.</div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #1a2a24;margin-top:16px;padding:12px 40px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#3c4a44">
+    <div>EMPIRE WORKROOM · Custom Upholstery &amp; Fabrication · 5124 Frolich Ln, Hyattsville, MD 20781 · (703) 213-6484</div>
+    <div style="color:#8a5a2b;font-weight:600">FOR DISCUSSION — NOT FOR CONSTRUCTION</div>
+    <div>SHEET B4</div>
+  </div>
+</div>
+
+<div data-screen-label="B5 Yardage" style="width:17in;height:11in;box-sizing:border-box;background:#f6f3ec;color:#1a2a24;font-family:Archivo,sans-serif;display:flex;flex-direction:column;border:2.5px solid #1a2a24;position:relative;overflow:hidden;break-after:page">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;padding:24px 40px 0 40px">
+    <div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:40px;line-height:1">STYLE B — YARDAGE / COM CALCULATION</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f;margin-top:6px">All COM — client supplies · quantities include cutting + pattern-match allowance · no overage for future recover</div>
+    </div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f">MAGGIE O'NEIL — THE WILLARD · CST-23 · 07/16/2026</div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:18px;padding:20px 40px 0 40px;flex:1;min-height:0">
+    <div style="display:grid;grid-template-columns:2.2fr 2.6fr 1.1fr 1.5fr 1fr;border:1.5px solid #1a2a24;font-size:12.5px">
+      <div style="display:contents;font-family:'Barlow Condensed',sans-serif;font-weight:600;letter-spacing:.12em;font-size:14px">
+        <div style="background:#1a2a24;color:#f6f3ec;padding:10px 14px">MATERIAL</div>
+        <div style="background:#1a2a24;color:#f6f3ec;padding:10px 14px">APPLICATION &amp; CUTS</div>
+        <div style="background:#1a2a24;color:#f6f3ec;padding:10px 14px">WIDTH / RPT</div>
+        <div style="background:#1a2a24;color:#f6f3ec;padding:10px 14px">CALC</div>
+        <div style="background:#1a2a24;color:#f6f3ec;padding:10px 14px">ORDER</div>
+      </div>
+      <div style="display:contents">
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24"><strong>Nympheus Velvet — Emerald</strong><br><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#5a655f">GP&amp;J Baker BP10814-2</span></div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24">Inside back — 8 channel cuts @ 13&Prime; &#215; 43&Prime;, pattern centered per channel, nap up</div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace">54&Prime; / 35.46&Prime; VR</div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace">4 cuts per width &#215; 2 lengths; 2 repeats per length for match</div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace;font-weight:600;color:#0e5c3f">3.0 YD</div>
+      </div>
+      <div style="display:contents">
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4"><strong>Vintage Ale Vinyl</strong><br><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#5a655f">Keyston Bros SVI001</span></div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4">Seats 2 @ 40&Prime; &#215; 30&Prime; · exposed face 2 @ 12&Prime; &#215; 70&Prime; (seamed at channel lines) · arms 2 pr · boxing + bullnose strips</div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4;font-family:'IBM Plex Mono',monospace">54&Prime; / none</div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4;font-family:'IBM Plex Mono',monospace">Cut map both units + 10% curve waste</div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4;font-family:'IBM Plex Mono',monospace;font-weight:600;color:#0e5c3f">6.0 YD</div>
+      </div>
+      <div style="display:contents">
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24"><strong>Rupi Brush Fringe — 158</strong><br><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#5a655f">Fabricut 9179602 · 6&Prime; drop</span></div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24">Exposed face run, header 7&Prime; AFF, continuous around arms</div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace">by the yard</div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace">Front arc 65-3/8&Prime; + arms 2 &#215; 26&Prime; = 117&Prime; + 10%</div>
+        <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace;font-weight:600;color:#0e5c3f">4.0 YD</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:24px;flex:1;min-height:0">
+      <div style="flex:1.5;border:1.5px solid #1a2a24;background:#fbf9f4;position:relative">
+        <div style="position:absolute;top:10px;left:14px;font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:15px;letter-spacing:.18em">VELVET CUT MAP — 54&Prime; &#215; 108&Prime; (3 YD)</div>
+        <svg viewBox="0 0 760 250" style="width:100%;height:100%" preserveAspectRatio="xMidYMid meet">
+          <rect x="60" y="60" width="648" height="162" fill="#eef2ea" stroke="#0e5c3f" stroke-width="1.5"></rect>
+          <g font-family="IBM Plex Mono,monospace" font-size="11" fill="#0e5c3f">
+            <rect x="72" y="72" width="129" height="66" fill="#0e5c3f" opacity=".25" stroke="#0e5c3f"></rect><text x="136" y="110" text-anchor="middle">CH 1</text>
+            <rect x="213" y="72" width="129" height="66" fill="#0e5c3f" opacity=".25" stroke="#0e5c3f"></rect><text x="277" y="110" text-anchor="middle">CH 2</text>
+            <rect x="354" y="72" width="129" height="66" fill="#0e5c3f" opacity=".25" stroke="#0e5c3f"></rect><text x="418" y="110" text-anchor="middle">CH 3</text>
+            <rect x="495" y="72" width="129" height="66" fill="#0e5c3f" opacity=".25" stroke="#0e5c3f"></rect><text x="559" y="110" text-anchor="middle">CH 4</text>
+            <rect x="72" y="146" width="129" height="66" fill="#0e5c3f" opacity=".25" stroke="#0e5c3f"></rect><text x="136" y="184" text-anchor="middle">CH 5</text>
+            <rect x="213" y="146" width="129" height="66" fill="#0e5c3f" opacity=".25" stroke="#0e5c3f"></rect><text x="277" y="184" text-anchor="middle">CH 6</text>
+            <rect x="354" y="146" width="129" height="66" fill="#0e5c3f" opacity=".25" stroke="#0e5c3f"></rect><text x="418" y="184" text-anchor="middle">CH 7</text>
+            <rect x="495" y="146" width="129" height="66" fill="#0e5c3f" opacity=".25" stroke="#0e5c3f"></rect><text x="559" y="184" text-anchor="middle">CH 8</text>
+            <text x="384" y="46" text-anchor="middle" fill="#3c4a44">CUTS 43&#8243; LONG &#8212; SHOWN ROTATED; NAP &#8593; · ALIGN VR 35.46&#8243; PER COLUMN</text>
+            <text x="666" y="184" fill="#3c4a44">MATCH</text><text x="666" y="198" fill="#3c4a44">WASTE</text>
+            <text x="384" y="240" text-anchor="middle" fill="#3c4a44">108&#8243; (3 YD)</text>
+            <text x="40" y="146" text-anchor="middle" transform="rotate(-90 40 146)" fill="#3c4a44">54&#8243; WIDTH</text>
+          </g>
+        </svg>
+      </div>
+      <div style="flex:.8;display:flex;flex-direction:column;gap:14px">
+        <div style="border:1.5px solid #8a5a2b;background:#f5ead9;padding:14px 16px">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:16px;letter-spacing:.14em;color:#8a5a2b;margin-bottom:8px">COM SHIP-TO</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.8;color:#3c4a44">Empire Workroom<br>5124 Frolich Ln<br>Hyattsville, MD 20781<br>Mark: WILLARD / CST-23</div>
+        </div>
+        <div style="font-size:12px;line-height:1.6;text-wrap:pretty;color:#3c4a44">Workroom to confirm final quantities against received goods before cutting. Velvet dye lots: single lot required across all 8 channels. Fringe supplied uncut — trim on site after fitting.</div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #1a2a24;margin-top:16px;padding:12px 40px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#3c4a44">
+    <div>EMPIRE WORKROOM · Custom Upholstery &amp; Fabrication · 5124 Frolich Ln, Hyattsville, MD 20781 · (703) 213-6484</div>
+    <div style="color:#8a5a2b;font-weight:600">FOR DISCUSSION — NOT FOR CONSTRUCTION</div>
+    <div>SHEET B5</div>
+  </div>
+</div>
+
+<div data-screen-label="B6 Flammability" style="width:17in;height:11in;box-sizing:border-box;background:#f6f3ec;color:#1a2a24;font-family:Archivo,sans-serif;display:flex;flex-direction:column;border:2.5px solid #1a2a24;position:relative;overflow:hidden">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;padding:24px 40px 0 40px">
+    <div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:40px;line-height:1">STYLE B — FLAMMABILITY · CAL TB 117-2013</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f;margin-top:6px">Component compliance summary · hospitality installation — designer of record to confirm code path</div>
+    </div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;color:#5a655f">MAGGIE O'NEIL — THE WILLARD · CST-23 · 07/16/2026</div>
+  </div>
+  <div style="display:flex;gap:32px;padding:22px 40px 0 40px;flex:1;min-height:0">
+    <div style="flex:1.5;display:flex;flex-direction:column;gap:18px">
+      <div style="display:grid;grid-template-columns:1.6fr 1.4fr 1fr 1.8fr;border:1.5px solid #1a2a24;font-size:12.5px">
+        <div style="display:contents;font-family:'Barlow Condensed',sans-serif;font-weight:600;letter-spacing:.12em;font-size:14px">
+          <div style="background:#1a2a24;color:#f6f3ec;padding:10px 14px">COMPONENT</div>
+          <div style="background:#1a2a24;color:#f6f3ec;padding:10px 14px">STANDARD</div>
+          <div style="background:#1a2a24;color:#f6f3ec;padding:10px 14px">STATUS</div>
+          <div style="background:#1a2a24;color:#f6f3ec;padding:10px 14px">NOTES</div>
+        </div>
+        <div style="display:contents">
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24">Vintage Ale vinyl — SVI001</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace;font-size:11px">Cal TB 117-2013</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace;font-weight:600;color:#0e5c3f">PASS</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24">Per mill spec sheet on file</div>
+        </div>
+        <div style="display:contents">
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4">Nympheus velvet — BP10814-2</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4;font-family:'IBM Plex Mono',monospace;font-size:11px">Cal TB 117-2013</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4;font-family:'IBM Plex Mono',monospace;font-weight:600;color:#8a5a2b">NOT TESTED</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4">COM — client confirms FF&amp;E use; FR barrier available on request</div>
+        </div>
+        <div style="display:contents">
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24">Rupi fringe — 9179602</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace;font-size:11px">NFPA 260 cig. resist</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace;font-weight:600;color:#8a5a2b">CONFIRM</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24">Trim below seat plane — low exposure; verify with Fabricut</div>
+        </div>
+        <div style="display:contents">
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4">Seat + back foam, HR 2.5-lb</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4;font-family:'IBM Plex Mono',monospace;font-size:11px">Cal TB 117-2013</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4;font-family:'IBM Plex Mono',monospace;font-weight:600;color:#0e5c3f">PASS</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;background:#fbf9f4">CertiPUR-US foam, cert on file at workroom</div>
+        </div>
+        <div style="display:contents">
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24">Dacron wrap + liner</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace;font-size:11px">Cal TB 117-2013</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24;font-family:'IBM Plex Mono',monospace;font-weight:600;color:#0e5c3f">PASS</div>
+          <div style="padding:12px 14px;border-top:1px solid #1a2a24">FR polyester batting</div>
+        </div>
+      </div>
+      <div style="border:1.5px solid #8a5a2b;background:#f5ead9;padding:18px 20px">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:17px;letter-spacing:.14em;color:#8a5a2b;margin-bottom:8px">HOSPITALITY CODE NOTE</div>
+        <div style="font-size:13px;line-height:1.6;text-wrap:pretty">The Willard is a place of public accommodation. Some jurisdictions and hotel operators require Cal TB 133 / ASTM E1537 full-seat testing or an approved sprinkler exception for built-in seating. Classification as FF&amp;E under the operator's sprinklered-building exception confirmed by client 07/16/2026 — designer of record to file documentation. Empire Workroom fabricates to spec and does not certify code compliance of COM goods.</div>
+      </div>
+    </div>
+    <div style="flex:.6;display:flex;flex-direction:column;gap:18px">
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:16px;letter-spacing:.2em;border-bottom:1.5px solid #1a2a24;padding-bottom:6px;margin-bottom:12px">DOCUMENTS ON FILE</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:2;color:#3c4a44">SVI001 mill spec sheet<br>Foam CertiPUR-US certificate<br>Batting FR declaration<br>Client FF&amp;E confirmation — 07/16/2026<br>Pending: Fabricut trim statement</div>
+      </div>
+      <div style="border:1.5px solid #1a2a24;padding:16px 18px;font-size:12.5px;line-height:1.6;text-wrap:pretty">Optional: FR interliner (e.g. polyester FR barrier) beneath velvet channels adds smolder resistance without hand change — quote available on request.</div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #1a2a24;margin-top:20px;padding:12px 40px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#3c4a44">
+    <div>EMPIRE WORKROOM · Custom Upholstery &amp; Fabrication · 5124 Frolich Ln, Hyattsville, MD 20781 · (703) 213-6484</div>
+    <div style="color:#8a5a2b;font-weight:600">FOR DISCUSSION — NOT FOR CONSTRUCTION</div>
+    <div>SHEET B6</div>
+  </div>
+</div>
+
+</x-import>
+<x-import component-from-global-scope="image-slot" style="display:none" hint-size="0,0"></x-import>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;assemblyView&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;animate&quot;,&quot;assembled&quot;,&quot;exploded&quot;],&quot;default&quot;:&quot;animate&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Sheet B3 — Assembly&quot;}}"></script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+STYLE B — ELEVATION & SECTION
+Base to floor (1" clearance) · fringe header 7" AFF · 10" exposed face · rear plumb, inside face raked
+MAGGIE O'NEIL — THE WILLARD · SCOTCH BAR CST-23
+Rev to EST-2026-110 · Style B: 4 channels/half · 07/16/2026
+ALL COM · R120" field verify · units separated — confirm vs 82" cap · pattern stylized
+FIN. FLOOR
+SEPARATED ~1-1/2" — CONFIRM VS 82" CAP
+FRONT ELEVATION (DEVELOPED)
+17" SEAT
+53" OVERALL
+36" BACK
+10" EXPOSED
+9-5/32" CH (×8)
+82" MAX + SEPARATION — CONFIRM
+SIDE SECTION
+rear plumb · inside face raked ~10°
+2" FOAM +
+BOARD, REAR
+PLUMB
+1"
+26"
+3"
+MATERIALS (ALL COM)
+NYMPHEUS VELVET EMERALD
+GP&J Baker BP10814-2 · inside back
+Not Cal TB 117 tested — client confirms FF&E
+VINTAGE ALE SVI001
+Keyston Bros · seat + face + arms
+RUPI 158 FRINGE
+Fabricut 6" · header 7" AFF · recalc yardage
+EMPIRE WORKROOM
+Custom Upholstery & Fabrication · 5124 Frolich Ln, Hyattsville, MD 20781 · (703) 213-6484 FOR DISCUSSION — NOT FOR CONSTRUCTION SHEET B1 OF 3
+Style B — Elevation & Section
+
+-- 1 of 3 --
+
+STYLE B — FLOOR PLAN (TRUE R120")
+Full-page dimensioned plan · arc lengths, chord, sagitta, radii · install reference
+MAGGIE O'NEIL — THE WILLARD · SCOTCH BAR CST-23
+Rev to EST-2026-110 · Style B: 4 channels/half · 07/16/2026
+ALL COM · R120" field verify · units separated — confirm vs 82" cap · pattern stylized
+FACE OF WALL
+FIELD VERIFY CURVATURE
+CL
+4" 37" — 4 CH @ 9-5/32"
+1-1/2"
+37" — 4 CH @ 9-5/32" 4"
+SEGMENT LENGTHS ALONG BACK ARC — TOTAL 83-1/2" INCL. SEPARATION
+CHORD 81-15/16" · 82" CAP — CONFIRM ARC VS CHORD
+ARC RISE 7-3/16" (SAGITTA)
+FIELD CHECK: STRING ACROSS CHORD,
+MEASURE TO WALL AT CL = 7-3/16"
+" BACK ARC — VERIFY
+R94" SEAT FRONT ARC
+26" RADIAL
+SEAT DEPTH
+SEGMENT SCHEDULE
+A1 Armrest 4"
+U1 Bench half — 4 ch 37"
+G Separation 1-1/2"
+U2 Bench half — 4 ch 37"
+A2 Armrest 4"
+TOTAL (arc) 83-1/2"
+83-1/2" > 82" CAP — RESOLVE:
+a) butt-joint units (no gap) = 82" exact, or
+b) shrink halves to 36-1/4" each w/ gap, or
+c) confirm cap is chord (81-15/16" OK as drawn)
+INSTALL NOTES
+· Units delivered separately; join at CL
+· Maintain 18" min clearance to tables
+· Rear plumb to wall — scribe to field curve
+· Concealed glides · 1" floor clearance
+SCALE ≈ 1-1/4" = 1'-0" at full-size print
+EMPIRE WORKROOM
+Custom Upholstery & Fabrication · 5124 Frolich Ln, Hyattsville, MD 20781 · (703) 213-6484 FOR DISCUSSION — NOT FOR CONSTRUCTION SHEET B2 OF 3
+Style B — Floor Plan (True R120)
+
+-- 2 of 3 --
+
+STYLE B — ISOMETRIC (3D MODEL RENDER)
+Depth-sorted parametric model — Empire Presentation 3D Pipeline v1
+MAGGIE O'NEIL — THE WILLARD · SCOTCH BAR CST-23
+Rev to EST-2026-110 · Style B: 4 channels/half · 07/16/2026
+ALL COM · R120" field verify · units separated — confirm vs 82" cap · pattern stylized
+CHANNEL BACK — REAR PLUMB, INSIDE RAKED (2" FOAM)
+GAP — TWO UNITS
+ARMREST — TOP 24" AFF
+RUPI FRINGE — HEADER 7" AFF
+10" EXPOSED FACE
+KEY DIMENSIONS
+82" cap: 4 + 37 + 37 + 4 (+ gap — see plan)
+17" seat · 36" back · 53" overall
+26" radial depth · base to floor, 1" clr
+Wedge back: 9" seat → 3" top · rear plumb
+Fringe header 7" AFF · 10" exposed face
+8 channels @ 9-5/32"
+ALL COM · flammability confirm pending
+Curvature exaggerated for legibility —
+true R120" per plan sheet.
+EMPIRE WORKROOM
+Custom Upholstery & Fabrication · 5124 Frolich Ln, Hyattsville, MD 20781 · (703) 213-6484 FOR DISCUSSION — NOT FOR CONSTRUCTION SHEET B3 OF 3
+Style B — Isometric (3D Model)
+
+-- 3 of 3 --
+
