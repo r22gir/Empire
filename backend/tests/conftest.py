@@ -181,6 +181,91 @@ def _assert_not_writing_to_prod(isolated_empire_db, request):
     yield
 
 
+# D28 2b-2 — guard that makes the wrong thing unreachable.
+#
+# Bug history (D28 STEP 2b probe, 2026-08-24):
+#   - `code_task_persistence.DB_PATH` was a module-level constant
+#     bound to `os.getenv("EMPIRE_TASK_DB") or ~/empire-data/empire.db`.
+#   - pytest collection imports test files BEFORE session-scope
+#     fixtures run. Any test file that did `from app.services.max
+#     import code_task_runner` at module level pulled in
+#     `code_task_persistence` at collection time, captured DB_PATH
+#     to prod (EMPIRE_TASK_DB was unset), and bound it for the rest
+#     of the session. Result: 10 fixture-shaped rows in prod.
+#   - The fix (2b-1) made _connect() read the env var per call, but
+#     an instruction in a dispatch is not a mechanism. We need a
+#     HARD GUARD that fails any test whose _connect() would resolve
+#     to a prod path.
+#
+# Mechanism:
+#   - Wrap `code_task_persistence._connect` to inspect
+#     `code_task_persistence._resolved_db_path()` BEFORE opening
+#     the connection. If the resolved path matches any of
+#     `_PROD_PATHS`, raise a RuntimeError naming the test.
+#   - The guard honours `live_db` opt-out — a test that LEGITIMATELY
+#     needs the live prod DB passes through.
+#   - Autouse: every test gets wrapped, every test is checked at
+#     every _connect() call.
+@pytest.fixture(autouse=True)
+def _guard_code_task_persistence_against_prod_db(request):
+    """D28 2b-2: hard-stop any test whose code_task_persistence
+    operations would land on a production DB. Not a warning — a
+    hard failure that names the offending test.
+
+    `_assert_not_writing_to_prod` above checks the env var. THIS
+    fixture checks what the persistence module ACTUALLY resolves
+    to at call time, which is what matters after the env-var/
+    module-level-defect class of bugs.
+    """
+    if "live_db" in request.keywords:
+        yield
+        return
+
+    # Lazy import so the guard only triggers if the module is in use.
+    try:
+        from app.services.max import code_task_persistence as ctp
+    except Exception:
+        # Module failed to import; nothing to guard. The test will
+        # surface its own import error.
+        yield
+        return
+
+    original_connect = ctp._connect
+
+    def _guarded_connect():
+        # Resolve the path the way _connect() would. If the module
+        # exposes a per-call resolver (post 2b-1 fix), use it — it
+        # reads the env var fresh on every call. Otherwise fall
+        # back to the legacy DB_PATH, which the OLD (pre-fix) code
+        # captured at import time and which is the source of the
+        # bug class this guard exists to catch.
+        resolver = getattr(ctp, "_resolved_db_path", None)
+        if callable(resolver):
+            resolved = resolver()
+        else:
+            # Legacy path: the module-level capture has already
+            # happened, so DB_PATH is whatever it was bound to at
+            # import. If THAT was a prod path, the guard fires —
+            # which is the bug we are catching.
+            resolved = ctp.DB_PATH
+        for prod_path in _PROD_PATHS:
+            if prod_path in resolved:
+                raise RuntimeError(
+                    f"TEST_VIOLATION [{request.node.nodeid}]: "
+                    f"code_task_persistence._connect() would resolve to "
+                    f"prod DB at {resolved!r}. Tests must run against the "
+                    f"isolated_empire_db fixture; add @pytest.mark.live_db "
+                    f"to opt in to the live prod DB explicitly."
+                )
+        return original_connect()
+
+    ctp._connect = _guarded_connect
+    try:
+        yield
+    finally:
+        ctp._connect = original_connect
+
+
 def pytest_configure(config):
     """Register the live_db marker so its absence doesn't error."""
     config.addinivalue_line(

@@ -51,14 +51,42 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("max.code_task_persistence")
 
-DB_PATH = (
-    os.getenv("EMPIRE_TASK_DB")
-    or os.path.expanduser("~/empire-data/empire.db")
-)
+# D28 2b-1 — per-call resolution of the DB path.
+#
+# Bug history (D28 STEP 2b probe, 2026-08-24):
+#   - This module captured DB_PATH at import time as a module-level
+#     constant bound to `os.getenv("EMPIRE_TASK_DB") or prod`.
+#   - Module-level capture defeats the test fixture (conftest's
+#     `isolated_empire_db`) because pytest collection imports test
+#     files BEFORE session-scope fixtures run. Any test file with a
+#     module-level `from app.services.max import code_task_runner`
+#     pulled this module in at collection time, captured DB_PATH to
+#     prod (EMPIRE_TASK_DB was unset), and bound it for the rest of
+#     the session. Result: persistence tests wrote to the production
+#     empire.db. 10 fixture-shaped rows were recovered from prod.
+#
+# Fix:
+#   - _resolved_db_path() reads EMPIRE_TASK_DB at CALL TIME, every
+#     call. The fixture's env-var flip is honoured the moment it
+#     lands, regardless of import order.
+#   - DB_PATH is retained as a read-only fallback constant for
+#     monkeypatchability (tests patch `ctp.DB_PATH` to simulate
+#     unreachable paths). It is no longer the resolver.
+#   - _connect() routes through _resolved_db_path(). No reader in
+#     this module touches DB_PATH directly any more.
+DEFAULT_DB_PATH = os.path.expanduser("~/empire-data/empire.db")
+# Backwards-compat alias — older code/tests reference DB_PATH.
+# New code should use _resolved_db_path() or _DEFAULT_DB_PATH.
+DB_PATH = DEFAULT_DB_PATH
+
+
+def _resolved_db_path() -> str:
+    """Read EMPIRE_TASK_DB at call time. Per-call, never captured."""
+    return os.getenv("EMPIRE_TASK_DB") or DB_PATH
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_resolved_db_path())
     conn.row_factory = sqlite3.Row
     return conn
 
