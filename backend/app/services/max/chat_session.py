@@ -25,16 +25,45 @@ from typing import Any, Optional
 
 logger = logging.getLogger("max.chat_session")
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB") or os.path.expanduser("~/empire-data/empire.db")
+# D28 2c-1 — per-call resolution of the DB path.
+#
+# Same defect class as code_task_persistence.py:54 had pre-fix.
+# Module-level capture of DB_PATH defeats the test fixture (pytest
+# collection imports test files BEFORE session-scope fixtures run).
+# During collection, EMPIRE_TASK_DB is unset, so DB_PATH binds to
+# the prod fallback. The chat_session_turns table then tries to
+# open prod from the test process — fails with
+# sqlite3.OperationalError: unable to open database file, which
+# surfaced in the STEP 2b probe as 16 cascading failures in
+# test_code_task_persistence.py.
+#
+# Fix mirrors 2b-1 exactly:
+#   - _resolved_db_path() reads EMPIRE_TASK_DB at CALL TIME, every
+#     call. The fixture's env-var flip is honoured the moment it
+#     lands, regardless of import order.
+#   - DB_PATH retained as a read-only fallback constant for
+#     monkeypatchability (a second pattern for the same defect is
+#     worse than either pattern alone).
+#   - _connect() routes through _resolved_db_path(). No reader in
+#     this module touches DB_PATH directly any more.
+DEFAULT_DB_PATH = os.path.expanduser("~/empire-data/empire.db")
+# Backwards-compat alias.
+DB_PATH = DEFAULT_DB_PATH
 
-RETAIN_TURNS = 10   # how many recent turns to keep before TTL sweep
-REPLAY_TURNS = 3    # how many recent turns get full replay in the next request
+
+def _resolved_db_path() -> str:
+    """Read EMPIRE_TASK_DB at call time. Per-call, never captured."""
+    return os.getenv("EMPIRE_TASK_DB") or DB_PATH
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_resolved_db_path())
     conn.row_factory = sqlite3.Row
     return conn
+
+
+RETAIN_TURNS = 10   # how many recent turns to keep before TTL sweep
+REPLAY_TURNS = 3    # how many recent turns get full replay in the next request
 
 
 def ensure_table() -> None:

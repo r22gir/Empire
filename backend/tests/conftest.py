@@ -206,40 +206,18 @@ def _assert_not_writing_to_prod(isolated_empire_db, request):
 #     needs the live prod DB passes through.
 #   - Autouse: every test gets wrapped, every test is checked at
 #     every _connect() call.
-@pytest.fixture(autouse=True)
-def _guard_code_task_persistence_against_prod_db(request):
-    """D28 2b-2: hard-stop any test whose code_task_persistence
-    operations would land on a production DB. Not a warning — a
-    hard failure that names the offending test.
+def _wrap_module_connect_guard(module, module_label: str, node_id: str):
+    """Wrap a module's `_connect` to fail-hard on prod-path resolution.
 
-    `_assert_not_writing_to_prod` above checks the env var. THIS
-    fixture checks what the persistence module ACTUALLY resolves
-    to at call time, which is what matters after the env-var/
-    module-level-defect class of bugs.
+    Used by both the code_task_persistence and chat_session guards
+    (D28 2c-2). Falls back to `module.DB_PATH` when `_resolved_db_path`
+    is not present (pre-2b-1 / pre-2c-1 module-level capture defect
+    class). Returns the original `_connect` so callers can restore it.
     """
-    if "live_db" in request.keywords:
-        yield
-        return
-
-    # Lazy import so the guard only triggers if the module is in use.
-    try:
-        from app.services.max import code_task_persistence as ctp
-    except Exception:
-        # Module failed to import; nothing to guard. The test will
-        # surface its own import error.
-        yield
-        return
-
-    original_connect = ctp._connect
+    original_connect = module._connect
 
     def _guarded_connect():
-        # Resolve the path the way _connect() would. If the module
-        # exposes a per-call resolver (post 2b-1 fix), use it — it
-        # reads the env var fresh on every call. Otherwise fall
-        # back to the legacy DB_PATH, which the OLD (pre-fix) code
-        # captured at import time and which is the source of the
-        # bug class this guard exists to catch.
-        resolver = getattr(ctp, "_resolved_db_path", None)
+        resolver = getattr(module, "_resolved_db_path", None)
         if callable(resolver):
             resolved = resolver()
         else:
@@ -247,23 +225,71 @@ def _guard_code_task_persistence_against_prod_db(request):
             # happened, so DB_PATH is whatever it was bound to at
             # import. If THAT was a prod path, the guard fires —
             # which is the bug we are catching.
-            resolved = ctp.DB_PATH
+            resolved = module.DB_PATH
         for prod_path in _PROD_PATHS:
             if prod_path in resolved:
                 raise RuntimeError(
-                    f"TEST_VIOLATION [{request.node.nodeid}]: "
-                    f"code_task_persistence._connect() would resolve to "
+                    f"TEST_VIOLATION [{node_id}]: "
+                    f"{module_label}._connect() would resolve to "
                     f"prod DB at {resolved!r}. Tests must run against the "
                     f"isolated_empire_db fixture; add @pytest.mark.live_db "
                     f"to opt in to the live prod DB explicitly."
                 )
         return original_connect()
 
-    ctp._connect = _guarded_connect
+    module._connect = _guarded_connect
+    return original_connect
+
+
+@pytest.fixture(autouse=True)
+def _guard_db_modules_against_prod_db(request):
+    """D28 2b-2 + 2c-2: hard-stop any test whose DB module operations
+    would land on a production DB. Not a warning — a hard failure that
+    names the offending test.
+
+    `_assert_not_writing_to_prod` above checks the env var. THIS
+    fixture checks what the DB modules ACTUALLY resolve to at call
+    time, which is what matters after the env-var/module-level-defect
+    class of bugs.
+
+    Coverage (extend as more modules get the 2b-1 fix applied):
+      - code_task_persistence (D28 2b-1)
+      - chat_session           (D28 2c-1)
+      - other 9 modules from §2b-3 audit: still pre-fix, NOT guarded
+        here. They get their own dispatches.
+    """
+    if "live_db" in request.keywords:
+        yield
+        return
+
+    # Lazy imports so the guard only triggers if the modules are in
+    # use. A test that imports none of them gets no overhead.
+    targets = []
+    try:
+        from app.services.max import code_task_persistence as ctp
+        targets.append((ctp, "code_task_persistence", ctp._connect))
+    except Exception:
+        pass
+    try:
+        from app.services.max import chat_session as cs
+        targets.append((cs, "chat_session", cs._connect))
+    except Exception:
+        pass
+
+    if not targets:
+        # Neither module in use; nothing to guard.
+        yield
+        return
+
+    originals = []
+    for module, label, _ in targets:
+        original = _wrap_module_connect_guard(module, label, request.node.nodeid)
+        originals.append((module, original))
     try:
         yield
     finally:
-        ctp._connect = original_connect
+        for module, original in originals:
+            module._connect = original
 
 
 def pytest_configure(config):
