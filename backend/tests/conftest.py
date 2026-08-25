@@ -33,9 +33,28 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+# D33 — set EMPIRE_TASK_DB at conftest LOAD TIME, before pytest
+# collects test modules. Module-level DB_PATH captures in
+# backend/app/ (21 modules per §1b) bind to whatever EMPIRE_TASK_DB
+# is at import time. If we wait until the session fixture runs,
+# collection has already imported app modules with EMPIRE_TASK_DB
+# unset, so DB_PATH captures ~/empire-data/empire.db. Fix: pre-set
+# a tmp path here so every module-level capture resolves to the
+# test DB.
+#
+# The path is keyed on os.getpid() so parallel pytest invocations
+# don't collide. The session-scoped isolated_empire_db fixture
+# builds the schema on this same path.
+_PRE_COLLECTION_DB_PATH = os.path.join(
+    tempfile.gettempdir(),
+    f"empire_test_d33_pid{os.getpid()}.db",
+)
+os.environ.setdefault("EMPIRE_TASK_DB", _PRE_COLLECTION_DB_PATH)
 
 # Default safety knob: tests should never write to the prod DB unless
 # they explicitly opt out. We block write-path calls that point at the
@@ -97,40 +116,27 @@ def _build_empty_empire_db(path: str) -> None:
 
 
 @pytest.fixture(scope="session")
-def isolated_empire_db(tmp_path_factory):
-    """Session-scope: create one isolated SQLite DB per pytest run and
-    force EMPIRE_TASK_DB to point at it before any test code touches
-    `app.db.database`.
+def isolated_empire_db():
+    """Session-scope: build schema on the pre-collected tmp DB path.
 
-    The env-var flip happens BEFORE the test module's top-level imports
-    run their `from app.db.database import ...`, so DB_PATH resolves
-    to the tmp path even when the producer code captures it at import
-    time.
+    D33: the path is set at conftest load time (see top of file) so
+    that module-level DB_PATH captures in backend/app/ resolve to
+    this test DB even when the producing module is imported at
+    collection time, before any fixture runs. The fixture's job is
+    reduced to building the schema (no data) on the pre-set path.
     """
-    tmp_dir = tmp_path_factory.mktemp("empire_test_db")
-    db_path = str(tmp_dir / "test_empire.db")
+    db_path = _PRE_COLLECTION_DB_PATH
 
-    # 1. Save any pre-existing EMPIRE_TASK_DB so teardown can restore.
-    _saved = os.environ.get("EMPIRE_TASK_DB")
-
-    # 2. Point the env var at the tmp DB BEFORE app.db.database imports.
-    os.environ["EMPIRE_TASK_DB"] = db_path
-
-    # 3. Build schema (no data) on the tmp DB.
+    # Build schema (no data) on the tmp DB.
     _build_empty_empire_db(db_path)
 
     yield db_path
 
-    # 4. Cleanup (best-effort).
+    # Cleanup (best-effort).
     try:
         os.remove(db_path)
     except OSError:
         pass
-    # Restore prior env var if any.
-    if _saved is not None:
-        os.environ["EMPIRE_TASK_DB"] = _saved
-    else:
-        os.environ.pop("EMPIRE_TASK_DB", None)
 
 
 @pytest.fixture(autouse=True)
@@ -290,6 +296,73 @@ def _guard_db_modules_against_prod_db(request):
     finally:
         for module, original in originals:
             module._connect = original
+
+
+# D33 — process-wide sqlite3.connect hard guard.
+#
+# The §1b audit found 21 modules under backend/app/ with module-level
+# `DB_PATH = os.getenv("EMPIRE_TASK_DB", ~/empire-data/empire.db)` captures.
+# The pre-D33 guard (`_guard_db_modules_against_prod_db`) wraps
+# `module._connect` for code_task_persistence and chat_session only —
+# it does not catch the other 19 modules, and it does not catch direct
+# `sqlite3.connect("~/empire-data/empire.db")` calls from a test.
+#
+# This guard closes both gaps by wrapping `sqlite3.connect` itself
+# in the test process. ANY code path that calls `sqlite3.connect()`
+# with a path that resolves to a prod DB will fail this test loudly,
+# naming the offending test and the path. It cannot be satisfied by
+# a test that simply avoids the DB — the check runs at the lowest
+# possible layer, so a test that reaches sqlite3.connect at all must
+# target the test DB.
+#
+# Skipped for tests with @pytest.mark.live_db (explicit opt-in).
+# The schema-build call inside `isolated_empire_db` runs in the
+# session fixture's setup, BEFORE this autouse function fixture
+# starts, so the guard does not interfere with test-DB construction.
+def _sqlite3_connect_prod_guard_enabled(request) -> bool:
+    return "live_db" not in request.keywords
+
+
+@pytest.fixture(autouse=True)
+def _sqlite3_connect_prod_guard(request):
+    """D33: process-wide hard guard on sqlite3.connect. Any connect()
+    call in the test process whose target path matches a prod DB path
+    raises a RuntimeError naming the offending test and the path.
+
+    Catches:
+      - module-level DB_PATH captures (21 modules per §1b) — the
+        captured DB_PATH flows into sqlite3.connect() at call time.
+      - direct `sqlite3.connect("~/empire-data/empire.db")` from a
+        test or fixture.
+      - any future regression where a test or module bypasses the
+        isolated_empire_db fixture.
+    """
+    if not _sqlite3_connect_prod_guard_enabled(request):
+        yield
+        return
+
+    import sqlite3 as _sqlite3
+    real_connect = _sqlite3.connect
+    node_id = request.node.nodeid
+
+    def _guarded_connect(database, *args, **kwargs):
+        path_str = str(database) if database else ""
+        for prod_path in _PROD_PATHS:
+            if prod_path in path_str:
+                raise RuntimeError(
+                    f"TEST_VIOLATION [{node_id}]: "
+                    f"sqlite3.connect({database!r}) targets a prod DB. "
+                    f"Tests must use the isolated_empire_db fixture; "
+                    f"add @pytest.mark.live_db to opt in to the live "
+                    f"prod DB explicitly."
+                )
+        return real_connect(database, *args, **kwargs)
+
+    _sqlite3.connect = _guarded_connect
+    try:
+        yield
+    finally:
+        _sqlite3.connect = real_connect
 
 
 def pytest_configure(config):
