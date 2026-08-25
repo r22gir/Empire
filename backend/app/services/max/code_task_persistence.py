@@ -85,15 +85,32 @@ def _resolved_db_path() -> str:
     return os.getenv("EMPIRE_TASK_DB") or DB_PATH
 
 
-def _connect() -> sqlite3.Connection:
-    # Lazy schema bootstrap (D28 STEP 2d): import-time is no-write. The
-    # first connection in this process pays the cost of
-    # ``ensure_table()``; every subsequent connection is a single
-    # ``_table_ready`` flag check. See comment on ``ensure_table()``.
-    ensure_table()
+def _connect_raw() -> sqlite3.Connection:
+    """Bare sqlite3 connection with no schema bootstrap.
+
+    Internal use only. _connect() and ensure_table() both route through
+    this helper so the cycle ``_connect() -> ensure_table() -> _connect()``
+    cannot form. Do NOT call ensure_table() from here.
+
+    D28 STEP 2e: previous draft had ensure_table() at module scope, then
+    moved the call into _connect() — which turned _connect() and
+    ensure_table() into a mutual-recursion pair. The lazy ``_table_ready``
+    flag tried to break it; both the module-global flag and the per-path
+    set broke the multi-DB / drop-then-recreate tests. A raw helper that
+    does nothing but open the connection breaks the cycle at the source.
+    """
     conn = sqlite3.connect(_resolved_db_path())
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _connect() -> sqlite3.Connection:
+    # Lazy schema bootstrap (D28 STEP 2d): import-time is no-write. The
+    # first connection in this process pays the cost of
+    # ``ensure_table()``; every subsequent connection re-runs the cheap
+    # ``CREATE TABLE IF NOT EXISTS`` no-op. See comment on ``ensure_table()``.
+    ensure_table()
+    return _connect_raw()
 
 
 SCHEMA_DDL = """
@@ -158,15 +175,32 @@ def ensure_table() -> None:
     re-create it). Both removed; the SQL is already idempotent and
     cheap. Repeat calls are a single ``CREATE TABLE IF NOT EXISTS``
     no-op plus three ``CREATE INDEX IF NOT EXISTS`` no-ops.
+
+    D28 STEP 2e: the previous draft routed through ``_connect()``
+    here — which itself called ``ensure_table()`` first, producing
+    a ``_connect() -> ensure_table() -> _connect() -> ...`` mutual
+    recursion. The bare ``except Exception`` swallowed the resulting
+    ``RecursionError`` as a WARNING for two dispatches and a
+    production deploy. The fix is structural (``_connect_raw()`` is
+    the non-recursing entry point both this and ``_connect()`` use),
+    and the handler below is narrowed to ``sqlite3.Error`` so any
+    programmer error in this module surfaces immediately.
     """
     try:
-        with _connect() as conn:
+        with _connect_raw() as conn:
             conn.executescript(SCHEMA_DDL)
             conn.commit()
     except sqlite3.Error as exc:
+        # Only genuine DB conditions are tolerated here. A missing
+        # file, locked DB, corrupt page, or permission error all
+        # bubble up as ``sqlite3.Error`` subclasses — the runtime
+        # process should keep working and the next call retries.
+        # Programming errors (``RecursionError``, ``AttributeError``,
+        # ``KeyError``, etc.) must NOT be swallowed: they are bugs in
+        # this module and need to crash loud so the test suite
+        # catches them. Step 4b of the D28 STEP 2e directive proves
+        # the guard catches.
         logger.warning(f"code_task_persistence.ensure_table failed: {exc}")
-    except Exception as exc:  # noqa: BLE001 — must not crash callers
-        logger.warning(f"code_task_persistence.ensure_table unexpected error: {exc}")
 
 
 def _task_row(task: "CodeTask") -> dict[str, Any]:
