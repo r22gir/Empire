@@ -86,6 +86,11 @@ def _resolved_db_path() -> str:
 
 
 def _connect() -> sqlite3.Connection:
+    # Lazy schema bootstrap (D28 STEP 2d): import-time is no-write. The
+    # first connection in this process pays the cost of
+    # ``ensure_table()``; every subsequent connection is a single
+    # ``_table_ready`` flag check. See comment on ``ensure_table()``.
+    ensure_table()
     conn = sqlite3.connect(_resolved_db_path())
     conn.row_factory = sqlite3.Row
     return conn
@@ -132,7 +137,28 @@ CREATE INDEX IF NOT EXISTS idx_code_mode_completed  ON code_mode_tasks(completed
 
 
 def ensure_table() -> None:
-    """Create code_mode_tasks + indexes if absent. Idempotent."""
+    """Create code_mode_tasks + indexes if absent. Idempotent at the
+    SQL level — every call issues ``CREATE TABLE IF NOT EXISTS`` plus
+    the index DDL, which is a no-op when the table is already there.
+
+    MUST be invoked via the lazy hook in ``_connect()`` below. The
+    historical pattern of calling ``ensure_table()`` at module scope
+    is what made test collection leak rows to prod: any test file
+    with a module-level ``from app.services.max import code_task_runner``
+    pulled this module in at collection time, when ``EMPIRE_TASK_DB``
+    was unset and ``_resolved_db_path()`` returned the prod fallback.
+    Importing the module must do NOTHING — no connection, no path
+    resolution, no write — so the production DB cannot be touched
+    by anything that merely imports the persistence layer.
+
+    Earlier drafts tried to memo-ise: a module-global ``_table_ready``
+    flag (broke multi-DB tests where ``EMPIRE_TASK_DB`` legitimately
+    flips between two files mid-test), then a per-path set (broke
+    the test that drops the table and expects the next call to
+    re-create it). Both removed; the SQL is already idempotent and
+    cheap. Repeat calls are a single ``CREATE TABLE IF NOT EXISTS``
+    no-op plus three ``CREATE INDEX IF NOT EXISTS`` no-ops.
+    """
     try:
         with _connect() as conn:
             conn.executescript(SCHEMA_DDL)
@@ -502,7 +528,25 @@ def fetch_all_tasks() -> list[Any]:
         return []
 
 
-# Run idempotent CREATE at import time. Mirrors the pending_drawing_jobs
-# pattern (drawing_pending.py:293). If the table is already there this is a
-# no-op; if it isn't, we create it before the first submit() lands.
-ensure_table()
+# Import-time is intentionally a no-op (D28 STEP 2d, founder-ruled
+# option (a) from the import-time-side-effects probe). Historical
+# design had a bare ``ensure_table()`` here that ran on every module
+# import — including during pytest collection, before the
+# ``isolated_empire_db`` fixture had a chance to set
+# ``EMPIRE_TASK_DB``. That made the per-call resolver return the prod
+# fallback, ``sqlite3.connect(prod)`` opened the production DB from
+# the test process, and every full-suite run leaked test-shaped
+# rows to ``~/empire-data/empire.db`` (10 confirmed by the D28 STEP
+# 2b probe; 56 more after 2c despite the guard).
+#
+# Lazy bootstrap now lives inside ``_connect()``. Importing this
+# module does NOTHING — no connection, no path resolution, no
+# write. The conftest guard remains as a backstop, not as the
+# mechanism: if anything ever imports the module and calls
+# ``_connect()`` under a prod path, it is caught; but the import
+# itself cannot touch prod.
+#
+# Cited precedent for the OLD design — ``drawing_pending.py:293`` —
+# was never a working model. Per D28 §0a, the pending_drawing_jobs
+# table has never held a row, and its writer's preconditions are
+# unsatisfiable. Removed from this comment.
