@@ -367,6 +367,25 @@ async def start_background_services():
     except Exception as e:
         print(f"✗ MAX startup health record: {e}")
 
+    # D28 2a/2b — code-task sweep + rehydrate. Order is load-bearing:
+    # sweep MUST run first so every persisted row has a terminal state
+    # before rehydrate populates the in-memory dict (a rehydrated task
+    # has no asyncio.Task behind it; D27 4). Both calls are
+    # best-effort: a missing table or unreachable DB must not block
+    # startup. The backend starting matters more than rehydration
+    # succeeding (D28 2b).
+    try:
+        from app.services.max.code_task_persistence import sweep_stranded_tasks
+        from app.services.max.code_task_runner import code_task_runner
+        swept = sweep_stranded_tasks()
+        rehydrated = code_task_runner.rehydrate()
+        if swept or rehydrated:
+            print(f"✓ Code-task startup: swept={swept} rehydrated={rehydrated}")
+        else:
+            print("✓ Code-task startup: clean (no stranded rows, nothing to rehydrate)")
+    except Exception as e:
+        print(f"✗ Code-task startup failed (continuing without rehydration): {e}")
+
     if not is_primary:
         print("⏭ Secondary worker — skipping singleton background services")
         return

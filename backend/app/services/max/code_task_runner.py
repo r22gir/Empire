@@ -787,6 +787,50 @@ class CodeTaskRunner:
     def get_task(self, task_id: str) -> Optional[CodeTask]:
         return self._tasks.get(task_id)
 
+    def rehydrate(self) -> int:
+        """Load every code_mode_tasks row back into the in-memory dict.
+
+        D28 2a / D27 4: a rehydrated task has NO asyncio.Task behind it.
+        It is history-only, queryable via get_task() and to_dict(), but
+        it MUST NOT read as actively running. We enforce this two ways:
+
+          1. Caller runs sweep_stranded_tasks() BEFORE rehydrate(), so
+             every persisted row already has a terminal state
+             (completed/error). The persisted state column on a
+             rehydrated task is therefore never 'running'.
+
+          2. rehydrate() writes ONLY to self._tasks, never to
+             self._running. There is no asyncio.Task to cancel, no
+             thread to interrupt, no live state to mutate. Code that
+             inspects runner._running (the authoritative "is this
+             task alive" map per D27 4) gets None for every rehydrated
+             id, which is the truthful answer.
+
+        Combined, the two guarantees make "actively running" a strict
+        function of runner._running: a rehydrated task cannot be there,
+        so it cannot read as running.
+
+        Returns the number of tasks loaded. Never raises - on DB error
+        the persistence layer returns [] and rehydrate() returns 0.
+        """
+        from app.services.max.code_task_persistence import fetch_all_tasks
+
+        tasks = fetch_all_tasks()
+        loaded = 0
+        for task in tasks:
+            # Overwrite is intentional: a re-run on a hot boot must end
+            # with the latest row per id. The PK guarantees uniqueness,
+            # so this only matters if a test re-inserts under the same
+            # id, in which case "newest created_at wins" is sane.
+            self._tasks[task.id] = task
+            loaded += 1
+        if loaded:
+            logger.info(
+                f"code_task_runner.rehydrate: loaded {loaded} task(s) "
+                f"into _tasks (no asyncio.Task created; sweep ran first)"
+            )
+        return loaded
+
     def submit(self, prompt: str, working_dir: str = "", founder: bool = False) -> CodeTask:
         """Submit a new code task. Returns immediately with task ID.
 

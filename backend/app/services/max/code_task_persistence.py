@@ -19,8 +19,19 @@ Failure mode (D28 §1b):
     is wrapped in try/except; failures log at WARNING and continue. The
     in-memory dict remains authoritative for the lifetime of THIS process.
   - This is asymmetric to the dataclass: a write that fails leaves the
-    in-memory state ahead of the DB. On the next state transition we
-    upsert the full row, so a transient failure self-heals.
+    in-memory state ahead of the DB. Transient failures of NON-TERMINAL
+    transitions (queued->running, and queued->queued self-write)
+    self-heal on the next update_task() because that call upserts the
+    full row and carries the latest in-memory state forward.
+  - TERMINAL transitions have NO next update. A failed write at the
+    COMPLETED hook (site :1173 in code_task_runner.py) or at any
+    error hook leaves the row reading 'running' (or 'queued')
+    permanently in the DB until the next boot. Recovery for those is
+    sweep_stranded_tasks() at startup (D28 0b founder ruling):
+    reconcile to state='error' with
+    failure_reason="Backend restart interrupted this task". There is no
+    auto-resume - model context, tool state, and partial outputs are
+    gone with the dead asyncio.Task.
 
 D27 §0a lesson applied:
   - The dead `pending_drawing_jobs` precedent failed because nothing on
@@ -321,6 +332,146 @@ def count_tasks(state: str | None = None) -> int:
         return int(row[0])
     except sqlite3.Error:
         return 0
+
+
+def sweep_stranded_tasks() -> int:
+    """Reconcile rows stranded in 'queued'/'running' by a backend restart.
+
+    D28 0b founder ruling: a task whose asyncio.Task died with the
+    process can never resume - model context, tool state, and partial
+    outputs are gone with it. Mark such rows as state='error' /
+    failure_reason="Backend restart interrupted this task" so the user
+    sees them as failed rather than stuck 'running' or 'queued' forever.
+
+    Mirrors the shape of openclaw_worker.py:473-489 (sweep
+    _cleanup_zombies) but does NOT carve out an active-task filter
+    because Path B has no live writer to protect - the previous
+    process is dead by definition.
+
+    Returns the number of rows swept. Never raises - the backend
+    starting matters more than reconciliation succeeding (D28 2b).
+    """
+    try:
+        with _connect() as conn:
+            result = conn.execute(
+                """UPDATE code_mode_tasks
+                   SET state = 'error',
+                       failure_reason = 'Backend restart interrupted this task',
+                       completed_at = COALESCE(completed_at, datetime('now')),
+                       updated_at = datetime('now')
+                   WHERE state IN ('queued', 'running')"""
+            )
+            swept = result.rowcount or 0
+            if swept > 0:
+                logger.warning(
+                    f"code_task_persistence.sweep_stranded_tasks: "
+                    f"reconciled {swept} stranded row(s) to state='error' "
+                    f"(Backend restart interrupted this task)"
+                )
+            conn.commit()
+            return int(swept)
+    except sqlite3.Error as exc:
+        logger.warning(
+            f"code_task_persistence.sweep_stranded_tasks failed: {exc} "
+            "- stranded rows will be visible to next sweep."
+        )
+        return 0
+    except Exception as exc:  # noqa: BLE001 - must not crash startup
+        logger.warning(
+            f"code_task_persistence.sweep_stranded_tasks unexpected error: {exc}"
+        )
+        return 0
+
+
+def _row_to_task(row: dict[str, Any]) -> "CodeTask":
+    """Deserialize a code_mode_tasks row into a CodeTask dataclass.
+
+    The returned CodeTask has NO asyncio.Task behind it (D27 4). It is
+    history-only: read via runner.get_task(), inspect to_dict(), and
+    never submitted to _execute. Caller is responsible for NOT adding
+    it to CodeTaskRunner._running (see code_task_runner.rehydrate()).
+    """
+    from app.services.max.code_task_runner import (
+        CodeTask, CodeTaskLog, CodeTaskState,
+    )
+
+    supports = row["supports_tool_calls"]
+    if supports == 1:
+        supports_decoded: bool | None = True
+    elif supports == 0:
+        supports_decoded = False
+    else:
+        supports_decoded = None
+
+    return CodeTask(
+        id=row["id"],
+        prompt=row["prompt"],
+        working_dir=row["working_dir"],
+        execution_mode=row["execution_mode"],
+        founder=bool(row["founder"]),
+        state=CodeTaskState(row["state"]),
+        provider_used=row["provider_used"],
+        model_used=row["model_used"],
+        supports_tool_calls=supports_decoded,
+        prompt_attempts=row["prompt_attempts"],
+        failure_reason=row["failure_reason"],
+        execution_protocol=row["execution_protocol"],
+        created_at=row["created_at"],
+        started_at=row["started_at"],
+        completed_at=row["completed_at"],
+        result=row["result"],
+        error=row["error"],
+        files_changed=json.loads(row["files_changed_json"]),
+        files_inspected=json.loads(row["files_inspected_json"]),
+        executed_tool_calls=json.loads(row["executed_tool_calls_json"]),
+        verified_test_runs=json.loads(row["verified_test_runs_json"]),
+        verified_commit_hash=row["verified_commit_hash"],
+        verification_notes=json.loads(row["verification_notes_json"]),
+        log=[
+            CodeTaskLog(
+                timestamp=entry["timestamp"],
+                action=entry["action"],
+                detail=entry["detail"],
+            )
+            for entry in json.loads(row["log_json"])
+        ],
+        last_response_text=row["last_response_text"],
+        last_function_calls_summary=row["last_function_calls_summary"],
+        last_parse_outcome=row["last_parse_outcome"],
+        files_snapshot_before=set(json.loads(row["files_snapshot_before_json"])),
+        files_snapshot_ground_truth=bool(row["files_snapshot_ground_truth"]),
+    )
+
+
+def fetch_all_tasks() -> list[Any]:
+    """Read every row from code_mode_tasks into CodeTask instances.
+
+    Used by code_task_runner.rehydrate() at startup (D28 2a) to restore
+    the in-memory dict from a previous process's writes. Order is
+    created_at ASC so newer rows overwrite older ones if duplicates
+    somehow accumulate (PK is the natural key so this should never
+    happen, but the upsert is harmless).
+
+    Best-effort: returns [] on any error (logged). The backend
+    starting matters more than rehydration succeeding.
+    """
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM code_mode_tasks ORDER BY created_at ASC, id ASC"
+            ).fetchall()
+        return [_row_to_task(dict(r)) for r in rows]
+    except sqlite3.Error as exc:
+        logger.warning(
+            f"code_task_persistence.fetch_all_tasks failed: {exc} - "
+            "in-memory _tasks will be empty for this process."
+        )
+        return []
+    except Exception as exc:  # noqa: BLE001 - must not crash startup
+        logger.warning(
+            f"code_task_persistence.fetch_all_tasks unexpected error: {exc}"
+        )
+        return []
 
 
 # Run idempotent CREATE at import time. Mirrors the pending_drawing_jobs
