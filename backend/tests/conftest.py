@@ -63,6 +63,13 @@ _PROD_PATHS = (
     "empire-data/empire.db",
     "empire-data\\empire.db",
     "/empire-data/empire.db",
+    # D34: also match the legacy 2026-07-08 mirror at
+    # ~/empire-repo/backend/data/empire.db. No current code writes
+    # to it (verified D34 STEP 2), but the guard should fail loud
+    # on any future regression that does.
+    "empire-repo/backend/data/empire.db",
+    "empire-repo\\backend\\data\\empire.db",
+    "/empire-repo/backend/data/empire.db",
 )
 
 # Tables to truncate between tests so each gets a clean schema-only DB.
@@ -144,7 +151,7 @@ def _truncate_test_db_between_tests(isolated_empire_db, request):
     """Function-scope autouse: wipe data tables between tests so each
     starts clean. Honors @pytest.mark.live_db as an explicit override."""
     # Honor the opt-out for tests that genuinely need the live DB.
-    if "live_db" in request.keywords:
+    if "live_db" in request.keywords or "e2e_live" in request.keywords:
         yield
         return
 
@@ -169,7 +176,7 @@ def _assert_not_writing_to_prod(isolated_empire_db, request):
     Catches future regressions where a test imports the DB module
     without going through the fixture chain."""
     # Skip check if test is opting in to live DB.
-    if "live_db" in request.keywords:
+    if "live_db" in request.keywords or "e2e_live" in request.keywords:
         yield
         return
 
@@ -264,7 +271,7 @@ def _guard_db_modules_against_prod_db(request):
       - other 9 modules from §2b-3 audit: still pre-fix, NOT guarded
         here. They get their own dispatches.
     """
-    if "live_db" in request.keywords:
+    if "live_db" in request.keywords or "e2e_live" in request.keywords:
         yield
         return
 
@@ -320,7 +327,12 @@ def _guard_db_modules_against_prod_db(request):
 # session fixture's setup, BEFORE this autouse function fixture
 # starts, so the guard does not interfere with test-DB construction.
 def _sqlite3_connect_prod_guard_enabled(request) -> bool:
-    return "live_db" not in request.keywords
+    # Exempt `live_db` (legacy opt-in) AND `e2e_live` (D34 opt-in via
+    # EMPIRE_E2E_BASE_URL). The e2e_live path is gated by the
+    # `_skip_e2e_unless_opted_in` fixture above, which refuses to run
+    # the test unless the env var is set — so any e2e_live test that
+    # reaches this guard is one the founder explicitly opted in to.
+    return "live_db" not in request.keywords and "e2e_live" not in request.keywords
 
 
 @pytest.fixture(autouse=True)
@@ -373,3 +385,60 @@ def pytest_configure(config):
         "empire.db (use sparingly; most tests should use the "
         "isolated_empire_db session fixture).",
     )
+    # D34: register the e2e_live marker — the gate that pairs with
+    # the EMPIRE_E2E_BASE_URL opt-in (see _skip_e2e_unless_opted_in).
+    config.addinivalue_line(
+        "markers",
+        "e2e_live: this test makes HTTP calls to a live backend. "
+        "It is skipped unless the runner exports EMPIRE_E2E_BASE_URL "
+        "to the backend URL it intends to drive.",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _skip_e2e_unless_opted_in(request):
+    """D34: gate the 17 E2E tests (the dangerous case) behind an
+    explicit opt-in. The marker `e2e_live` flags tests that make
+    HTTP calls to a live backend at the default API_BASE/BACKEND
+    (:8000). Default suite runs MUST skip these — the live backend
+    is the production process and any HTTP call mutates prod.
+
+    Opt-in: set EMPIRE_E2E_BASE_URL to the backend URL the runner
+    intends to drive (e.g. http://127.0.0.1:8000 for the prod
+    backend; http://127.0.0.1:9999 for a separate test backend).
+    When set, the 17 tests run. When unset, they skip.
+
+    Note: the marker does not change test logic — it changes only
+    whether the test is eligible to run. The full body of every
+    test is unchanged.
+    """
+    if "e2e_live" not in request.keywords:
+        yield
+        return
+    if os.environ.get("EMPIRE_E2E_BASE_URL"):
+        yield
+        return
+    pytest.skip(
+        f"E2E test gated by EMPIRE_E2E_BASE_URL env var. "
+        f"Default suite runs skip these tests to avoid writes to "
+        f"the live backend. Set EMPIRE_E2E_BASE_URL to a backend "
+        f"URL (e.g. http://127.0.0.1:8000) to opt in."
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """D34: auto-mark journey tests as live_db so the legacy-mirror
+    substring added to _PROD_PATHS doesn't break their read-only
+    assertions. These tests deliberately read
+    ~/empire-repo/backend/data/empire.db (a 2026-07-08 frozen
+    snapshot, NOT a live DB) — verified D34 STEP 2. They don't
+    write, but the guard fires on sqlite3.connect itself, so the
+    existing live_db exemption is the correct knob."""
+    for item in items:
+        # `item.module.__name__` resolves to "tests.test_journey_linkage"
+        # under the `backend/tests/` collection root — match the suffix.
+        if item.module.__name__.endswith((
+            ".test_journey_linkage",
+            ".test_journey_review_queue",
+        )):
+            item.add_marker(pytest.mark.live_db)

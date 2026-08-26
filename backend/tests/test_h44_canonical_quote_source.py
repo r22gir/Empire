@@ -33,6 +33,7 @@ def _canonical_quote_id() -> str:
     return str(row[0])
 
 
+@pytest.mark.e2e_live
 def test_h44_legacy_get_returns_canonical_data():
     """GET /api/v1/quotes/{id} must return canonical quotes_v2 data."""
     quote_id = _canonical_quote_id()
@@ -46,6 +47,7 @@ def test_h44_legacy_get_returns_canonical_data():
     assert "line_items" in data, "no line_items — canonical path not used"
 
 
+@pytest.mark.e2e_live
 def test_h44_legacy_post_accept_uses_canonical():
     """POST /api/v1/quotes/{id}/accept must find the canonical quote."""
     quote_id = _canonical_quote_id()
@@ -56,6 +58,7 @@ def test_h44_legacy_post_accept_uses_canonical():
     )
 
 
+@pytest.mark.e2e_live
 def test_h44_search_quotes_tagged_canonical():
     """The search_quotes tool tags each result with source='canonical'."""
     # The model is non-deterministic — retry once if it doesn't call the tool.
@@ -83,6 +86,7 @@ def test_h44_search_quotes_tagged_canonical():
     assert found_canonical, "search_quotes returned no canonical-tagged results (after 2 attempts)"
 
 
+@pytest.mark.e2e_live
 def test_h44_get_quote_tool_returns_canonical():
     """The get_quote tool returns canonical data."""
     quote_id = _canonical_quote_id()
@@ -107,6 +111,7 @@ def test_h44_get_quote_tool_returns_canonical():
     pytest.fail("get_quote tool did not run")
 
 
+@pytest.mark.e2e_live
 def test_h44_dual_source_audit_report():
     """Document the dual source: where the legacy JSON files live.
 

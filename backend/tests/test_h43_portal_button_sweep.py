@@ -91,6 +91,7 @@ def _track_created_invoice(body: dict):
         _created_invoice_ids.append(invoice_id)
 
 
+@pytest.mark.e2e_live
 def test_h43_quote_accept_not_404():
     """POST /quotes/{quote_id}/accept — QuoteActions Accept button."""
     quote_id = _canonical_quote_id()
@@ -99,6 +100,7 @@ def test_h43_quote_accept_not_404():
     assert r.status_code < 500, f"Accept button 5xx: {r.text}"
 
 
+@pytest.mark.e2e_live
 def test_h43_quote_send_email_not_404():
     """POST /quotes/{quote_id}/send — QuoteActions Send Email button."""
     quote_id = _canonical_quote_id()
@@ -110,6 +112,7 @@ def test_h43_quote_send_email_not_404():
     assert r.status_code != 404, f"Send Email button 404: {r.text}"
 
 
+@pytest.mark.e2e_live
 def test_h43_quote_pdf_post_not_404():
     """POST /quotes/{quote_id}/pdf?skip_verification=true — QuoteActions PDF button."""
     quote_id = _canonical_quote_id()
@@ -125,6 +128,7 @@ def test_h43_quote_pdf_post_not_404():
         )
 
 
+@pytest.mark.e2e_live
 def test_h43_quote_delete_not_via_404():
     """DELETE /quotes/{quote_id} — does NOT crash with 404 on a real quote."""
     quote_id = _canonical_quote_id()
@@ -135,6 +139,7 @@ def test_h43_quote_delete_not_via_404():
     )
 
 
+@pytest.mark.e2e_live
 def test_h43_create_job_from_quote_not_404():
     """POST /jobs/from-quote/{quote_id} — QuoteActions Create Job button."""
     quote_id = _canonical_quote_id()
@@ -147,6 +152,7 @@ def test_h43_create_job_from_quote_not_404():
             pass
 
 
+@pytest.mark.e2e_live
 def test_h43_create_invoice_from_quote_not_404():
     """POST /finance/invoices/from-quote/{quote_id} — QuoteActions Create Invoice button."""
     quote_id = _canonical_quote_id()
@@ -163,6 +169,7 @@ def test_h43_create_invoice_from_quote_not_404():
             pass
 
 
+@pytest.mark.e2e_live
 def test_h43_full_sweep_log():
     """Walk ALL six endpoints in one test and report non-404 count."""
     quote_id = _canonical_quote_id()

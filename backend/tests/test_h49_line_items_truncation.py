@@ -85,6 +85,7 @@ def test_item_aware_truncation_short_returns_unchanged():
         assert out == short
 
 
+@pytest.mark.e2e_live
 def test_live_get_quote_52_returns_6_items():
     """Live: get_quote(52) via the chat door returns 6 line items
     whose subtotals sum to $8,599.60."""
@@ -123,6 +124,7 @@ def test_live_get_quote_52_returns_6_items():
     conn.commit()
 
 
+@pytest.mark.e2e_live
 def test_replay_block_preserves_all_6_items():
     """Live: turn 2 after get_quote — model can reference items 5 & 6
     because the replay block includes all 6 items (not truncated at 4)."""

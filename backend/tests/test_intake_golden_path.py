@@ -176,6 +176,7 @@ def test_golden_path_command_center_routes_blocked():
         assert resp.status_code in (307, 308), f"Expected {path} to redirect, got {resp.status_code}"
 
 
+@pytest.mark.e2e_live
 def test_golden_path_quick_signup_lands_in_canonical_db():
     """Step 2: quick signup writes to canonical empire.db with business set."""
     suffix = uuid.uuid4().hex[:10]
@@ -202,6 +203,7 @@ def test_golden_path_quick_signup_lands_in_canonical_db():
     assert row[3] == "workroom", f"business column empty/wrong: {row[3]}"
 
 
+@pytest.mark.e2e_live
 def test_golden_path_full_submission_with_image():
     """Step 3+4: full client journey — create a project, upload an image,
     submit, verify the row lands in empire.db with business set."""
@@ -280,6 +282,7 @@ def test_golden_path_full_submission_with_image():
     assert not stale_path.exists(), f"file wrongly landed at stale-fork: {stale_path}"
 
 
+@pytest.mark.e2e_live
 def test_golden_path_founder_admin_sees_project():
     """Step 5: founder's LuxeForge admin surface lists the new project.
 
