@@ -3933,11 +3933,23 @@ async def _run_atlas_background(task_id: str, title: str, params: dict):
             priority=params.get("priority", "normal"),
             source="atlas_async",
         )
+        # H76 STEP 3a: deliverable gate runs AFTER the desk returns and BEFORE
+        # the atlas_tasks row is written. A task that completed without a real
+        # artifact is downgraded to FAILED with a reason.
+        # The desk_manager already enforced the gate for the `tasks` table
+        # write; we re-run here on the in-process DeskTask to keep the
+        # atlas_tasks row consistent.
+        _enforce_deliverable_gate(task, getattr(task, "desk_id", None))
         state = task.state.value if hasattr(task.state, "value") else str(task.state)
         _log_async_task(task_id, title, state, result=task.result)
 
-        # Notify founder on completion/failure
-        _notify = f"Atlas task #{task_id} {state}: {title}"
+        # H76 STEP 3b: notifier reads the deliverable-gate verdict, NOT just
+        # task.state. A "completed" message must be backed by an artifact; a
+        # "failed" message carries the gate's reason.
+        if state == "completed":
+            _notify = f"Atlas task #{task_id} COMPLETED: {title}"
+        else:
+            _notify = f"Atlas task #{task_id} FAILED: {title}"
         if task.result:
             _notify += f"\n{str(task.result)[:200]}"
         try:
@@ -3957,6 +3969,89 @@ async def _run_atlas_background(task_id: str, title: str, params: dict):
                 await telegram_bot.send_message(f"Atlas task #{task_id} FAILED: {str(e)[:150]}")
         except Exception:
             pass
+
+
+def _enforce_deliverable_gate(task: "DeskTask", desk_id: str | None) -> None:
+    """H76 deliverable gate — mutates `task` in place.
+
+    A task that reached state=COMPLETED without producing an artifact is
+    downgraded to state=FAILED with a reason that names the gate that fired.
+    The gate is read by `_log_async_task` (writes the atlas_tasks row) and by
+    the Telegram notifier (so the founder sees the truthful state).
+
+    Rules (per founder ruling 2026-08-26, 🛑 1):
+
+    C2 (chat desks — clients, sales, support, finance, market, contractors,
+        innovation, marketing): non-empty result AND result does not start
+        with "No available provider could satisfy".
+
+    G2 (codeforge): in addition to C2, when task.result contains a
+        "Created {N} file(s): {paths}" or "Edited {path}" marker, every
+        named path must exist on disk. When no marker is present, a
+        codeforge task is FAILED unless `task.actions` records at least
+        one successful tool action (file_read, scaffold, file_edit, test,
+        git_ops). This catches the D35 §7 fabricated-completion pattern
+        where `ai_execute_task` returned text without any tool call.
+    """
+    if task.state.value != "completed":
+        return
+    result = (task.result or "").strip()
+    # ── C2 ────────────────────────────────────────────────────────────
+    if not result:
+        task.state = type(task.state)("failed")
+        task.result = "FAILED: task produced no result (deliverable gate C2: empty)"
+        return
+    if result.startswith("No available provider could satisfy"):
+        task.state = type(task.state)("failed")
+        task.result = (
+            "FAILED: no AI provider could satisfy this request "
+            "(deliverable gate C2: provider unavailable)"
+        )
+        return
+    # ── G2 (codeforge only) ────────────────────────────────────────────
+    if desk_id == "codeforge":
+        import os
+        import re
+        edited_match = re.search(r"^Edited\s+(.+)$", result, re.MULTILINE)
+        created_match = re.search(
+            r"^Created\s+\d+\s+file\(s\):\s*(.+)$", result, re.MULTILINE
+        )
+        if edited_match:
+            target = edited_match.group(1).strip()
+            if not os.path.exists(target):
+                task.state = type(task.state)("failed")
+                task.result = (
+                    f"FAILED: codeforge claimed 'Edited {target}' "
+                    f"but the file does not exist on disk "
+                    f"(deliverable gate G2: file existence)"
+                )
+                return
+        elif created_match:
+            paths = [p.strip() for p in created_match.group(1).split(",")]
+            missing = [p for p in paths if not os.path.exists(p)]
+            if missing:
+                task.state = type(task.state)("failed")
+                task.result = (
+                    f"FAILED: codeforge claimed to create {len(paths)} file(s) "
+                    f"but {len(missing)} do not exist on disk: {missing} "
+                    f"(deliverable gate G2: file existence)"
+                )
+                return
+        else:
+            tool_actions = [
+                a for a in task.actions
+                if a.success and a.action in (
+                    "file_read", "scaffold", "file_edit", "test", "git_ops",
+                )
+            ]
+            if not tool_actions:
+                task.state = type(task.state)("failed")
+                task.result = (
+                    "FAILED: codeforge task produced no 'Created/Edited' marker "
+                    "and no successful tool action "
+                    "(deliverable gate G2: no tool action)"
+                )
+                return
 
 
 def _log_async_task(task_id: str, title: str, status: str, result=None, error=None):

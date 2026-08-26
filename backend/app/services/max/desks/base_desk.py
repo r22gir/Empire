@@ -32,6 +32,30 @@ class TaskState(str, Enum):
     ESCALATED = "escalated"
 
 
+class AllProvidersFailedError(RuntimeError):
+    """Raised by BaseDesk.ai_call / ai_execute_task when every configured AI
+    provider has failed and the router returned a success-shaped AIResponse
+    with provider_unavailable=True.
+
+    This is part of the H76 fix: the previous behavior returned an empty string
+    (or a "no provider" text string), which the desk treated as a successful
+    result. The desk now observes the failure and the caller's outer
+    try/except records status='failed' on the DeskTask.
+
+    Attributes:
+        desk: human-readable desk name (e.g. "CodeForge") for log context
+        content: the honest "no provider" text returned by the router, useful
+            for surfacing to the founder in the failure reason
+    """
+
+    def __init__(self, desk: str, content: str):
+        self.desk = desk
+        self.content = content
+        super().__init__(
+            f"[{desk}] All configured AI providers failed; cannot complete task."
+        )
+
+
 @dataclass
 class DeskAction:
     """A single action taken by a desk."""
@@ -190,6 +214,11 @@ class BaseDesk(ABC):
 
         Returns the AI-generated result text. Desks can call this from handle_task()
         or it can be used by the standalone task worker script.
+
+        Raises: AllProvidersFailedError when every configured provider fails
+        (the AI router returns a success-shaped AIResponse with
+        provider_unavailable=True). Callers MUST treat this as a task failure,
+        NOT as a successful text response.
         """
         from app.services.max.ai_router import ai_router, AIMessage
 
@@ -219,6 +248,13 @@ class BaseDesk(ABC):
             desk=self.desk_id,
             system_prompt=system_prompt,
         )
+        # H76: a success-shaped AIResponse with provider_unavailable=True is a
+        # failure, NOT success. Caller MUST observe this as a failed task.
+        if getattr(response, "provider_unavailable", False):
+            raise AllProvidersFailedError(
+                desk=self.desk_id,
+                content=response.content,
+            )
         return response.content
 
     # ── v6.0: AI Call with Cost Tracking ───────────────────────────
@@ -226,8 +262,7 @@ class BaseDesk(ABC):
     async def ai_call(self, prompt: str, model_preference: Optional[str] = None) -> str:
         """Call AI router with automatic cost tracking per desk.
 
-        Use this instead of raw ai_router.chat() — it logs costs to the desk
-        and falls back gracefully if all providers are down.
+        Use this instead of raw ai_router.chat() — it logs costs to the desk.
 
         Uses desk's preferred_model if no explicit model_preference is given.
 
@@ -236,7 +271,15 @@ class BaseDesk(ABC):
             model_preference: Optional model ID ("grok", "claude", "ollama-llama").
                              Falls back to self.preferred_model if not specified.
 
-        Returns: AI response text, or empty string on failure.
+        Returns: AI response text.
+
+        Raises: AllProvidersFailedError when every configured provider fails
+        (the AI router returns a success-shaped AIResponse with
+        provider_unavailable=True). Any underlying router exception also
+        propagates. Callers MUST treat this as a task failure, NOT as a
+        successful empty/text response. The previous silent-fall-through
+        to "" was the H76 defect that produced success-shaped completions
+        from misrouted and unreachable-model paths.
         """
         from app.services.max.ai_router import ai_router, AIMessage, AIModel
 
@@ -258,17 +301,20 @@ class BaseDesk(ABC):
                 f"for Empire, a custom drapery and upholstery business in Washington DC."
             )
 
-        try:
-            response = await ai_router.chat(
-                messages=[AIMessage(role="user", content=prompt)],
-                model=model,
-                desk=self.desk_id,
-                system_prompt=system_prompt,
+        response = await ai_router.chat(
+            messages=[AIMessage(role="user", content=prompt)],
+            model=model,
+            desk=self.desk_id,
+            system_prompt=system_prompt,
+        )
+        # H76: a success-shaped AIResponse with provider_unavailable=True is a
+        # failure, NOT success. Caller MUST observe this as a failed task.
+        if getattr(response, "provider_unavailable", False):
+            raise AllProvidersFailedError(
+                desk=self.desk_name,
+                content=response.content,
             )
-            return response.content
-        except Exception as e:
-            logger.warning(f"[{self.desk_name}] ai_call failed: {e}")
-            return ""
+        return response.content
 
     # ── v6.0: Scoped File Operations ────────────────────────────
 

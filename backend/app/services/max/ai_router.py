@@ -173,6 +173,7 @@ class AIResponse:
     model_used: str
     fallback_used: bool = False
     function_calls: Optional[list] = None  # xAI /v1/responses function calls
+    provider_unavailable: bool = False  # True iff every configured provider failed; callers MUST treat as failure (not success)
 
 
 PROVIDER_LABELS: dict[str, str] = {
@@ -1091,6 +1092,7 @@ class AIRouter:
             ),
             model_used="none",
             fallback_used=bool(state.fallback_enabled and len(attempted) > 1),
+            provider_unavailable=True,
         )
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
@@ -1293,7 +1295,12 @@ class AIRouter:
                     logger.warning(f"Ollama failed: {e}")
                     self._record_provider_error("ollama", e)
 
-        return AIResponse(content=self._provider_unavailable_message(), model_used="none", fallback_used=True)
+        return AIResponse(
+            content=self._provider_unavailable_message(),
+            model_used="none",
+            fallback_used=True,
+            provider_unavailable=True,
+        )
 
     # ── Streaming chat ──────────────────────────────────────────────────
 
