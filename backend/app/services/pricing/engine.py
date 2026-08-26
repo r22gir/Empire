@@ -1303,10 +1303,94 @@ def price_workroom_line(category: str, inputs: dict, *,
 
     Returns a dict with proposed_price, final_price (=proposed), price_overridden
     (=False), business_unit, computed breakdown, pricing_engine_version.
-    1b will add PATCH endpoints that mutate final_price + price_overridden
-    on quote_line_items rows.
+
+    D39 / H77 — two founder-ruled carve-outs sit on top of every category:
+
+      1. no_charge=True + no_charge_reason (non-empty)  → proposed_price=0.00
+         with the reason recorded in `computed`. Without the reason it raises.
+         This is the SECOND permitted zero (alongside com_fabric +
+         customer_supplied=true from D38). Both are explicit flags; a missing
+         key resolving to 0 is still the defect H77 closed.
+
+      2. override_price supplied (>0) → proposed_price becomes the override.
+         The engine first runs the pricer to compute what it WOULD have said,
+         then records both numbers in `computed` (computed_price,
+         override_price, override_used=True). The override is general: any
+         category, any width, always available — not only when out of range.
+         override_price=0 raises (that is a missing input, not an override).
+         override_price<0 raises. Non-numeric raises.
+
+    Both carve-outs are gated by the SAME dispatch — neither is reachable
+    without the explicit flag. The two-key discipline is preserved at the
+    service layer (quote_service._price_line_item) by mirroring the gate.
     """
     key = (category or "").lower()
     if key not in WORKROOM_LINE_PRICERS:
         raise PricingClassificationError(f"unknown workroom category '{category}'")
-    return WORKROOM_LINE_PRICERS[key](inputs, business_unit=business_unit)
+
+    # ---- no_charge path (D39 / H77, second permitted zero) ---------------
+    if inputs.get("no_charge") is True:
+        reason = inputs.get("no_charge_reason")
+        if reason is None or not str(reason).strip():
+            raise PricingInputError(
+                f"{key}: no_charge=true requires 'no_charge_reason' "
+                "(non-empty string) — refusing to emit an empty $0.00 line"
+            )
+        reason_str = str(reason).strip()
+        # Compute the would-be price for audit (best-effort; rescue if raise).
+        engine_inputs = {
+            k: v for k, v in (inputs or {}).items()
+            if k not in ("no_charge", "no_charge_reason")
+        }
+        try:
+            engine_result = WORKROOM_LINE_PRICERS[key](
+                engine_inputs, business_unit=business_unit,
+            )
+            computed_price = engine_result["proposed_price"]
+            computed_breakdown = dict(engine_result["computed"])
+            result_unit = engine_result["unit"]
+        except PricingInputError:
+            computed_price = None
+            computed_breakdown = {"no_charge_rescued_raise": True}
+            result_unit = "no_charge"
+        computed_breakdown["computed_price"] = computed_price
+        computed_breakdown["no_charge"] = True
+        computed_breakdown["no_charge_reason"] = reason_str
+        return {
+            "category": key,
+            "unit": result_unit,
+            "business_unit": business_unit,
+            "computed": computed_breakdown,
+            "proposed_price": 0.0,
+            "final_price": 0.0,
+            "price_overridden": False,
+            "pricing_engine_version": PRICING_ENGINE_VERSION,
+        }
+
+    # ---- normal path: pricer runs, then override_price wraps if present --
+    result = WORKROOM_LINE_PRICERS[key](inputs, business_unit=business_unit)
+
+    raw_override = inputs.get("override_price")
+    if raw_override is not None:
+        # If the pricer already used override_price (e.g. hardware_rod_set
+        # out-of-range rescue), do not double-wrap.
+        if not result["computed"].get("override_used"):
+            try:
+                override_val = float(raw_override)
+            except (TypeError, ValueError):
+                raise PricingInputError(
+                    f"{key}: override_price must be numeric (got {raw_override!r})"
+                )
+            if override_val <= 0:
+                raise PricingInputError(
+                    f"{key}: override_price must be > 0 when supplied "
+                    f"(got {override_val}) — refusing to price to 0.00"
+                )
+            override_rounded = round(override_val, 2)
+            result["computed"]["computed_price"] = result["proposed_price"]
+            result["computed"]["override_price"] = override_rounded
+            result["computed"]["override_used"] = True
+            result["proposed_price"] = override_rounded
+            result["final_price"] = override_rounded
+
+    return result

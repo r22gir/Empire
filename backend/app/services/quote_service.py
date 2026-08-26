@@ -82,17 +82,26 @@ def _price_line_item(category, inputs, business_unit, legacy):
         # inputs (e.g. all-zero measurements), refuse to persist it.
         # D38 / H77 — the ONE carve-out: com_fabric + customer_supplied=true
         # is permitted to emit $0.00. The carve-out is keyed on BOTH
-        # conditions; either alone is rejected. Tests at
-        # tests/test_d38_pricing_categories_proof.py lock this carve-out to
-        # the single path. quote_service.py:83-87 stays the catch-net for any
-        # other engine output, including a future pricer that silently 0's.
+        # conditions; either alone is rejected.
+        # D39 / H77 — the SECOND carve-out: no_charge=true WITH a non-empty
+        # no_charge_reason. Both flags required; either alone is rejected.
+        # Tests at tests/test_d38_pricing_categories_proof.py lock the COM
+        # path; tests/test_d39_*.py lock the no_charge path. Adding a third
+        # permitted zero requires changing this check — the dispatch's
+        # "third cannot appear silently" argument rides on this gate being
+        # the single point of permission.
         if result["proposed_price"] <= 0:
             computed = result.get("computed") or {}
             is_com_zero = (
                 str(category).lower() == "com_fabric"
                 and computed.get("customer_supplied") is True
             )
-            if not is_com_zero:
+            no_charge_reason = (computed.get("no_charge_reason") or "").strip()
+            is_no_charge_zero = (
+                computed.get("no_charge") is True
+                and bool(no_charge_reason)
+            )
+            if not (is_com_zero or is_no_charge_zero):
                 raise PricingInputError(
                     f"catalog category '{category}' produced proposed_price=0 "
                     f"with inputs={inputs}"
@@ -419,6 +428,18 @@ def create_quote(data: dict) -> dict:
         dep = data.get('deposit', {})
         deposit_percent = dep.get('deposit_percent', 50) if isinstance(dep, dict) else 50
 
+        # D39 / H77 — Issued-document provenance (STEP 1d).
+        # issued_document is the identifier of an issued (already-billed)
+        # document that governs this quote's rates — e.g. "NELMA-814" for a
+        # paper invoice. NULL means "no issued document — rates come from
+        # the catalog." Each line carries its own rate_source (default
+        # 'catalog'; "issued:<doc>" when an issued document governs). The
+        # engine does not enforce this; the service records it.
+        issued_document = (data.get('issued_document') or '').strip() or None
+        default_rate_source = (
+            f"issued:{issued_document}" if issued_document else "catalog"
+        )
+
         conn.execute("""
             INSERT INTO quotes_v2 (
                 id, quote_number, customer_name, customer_email, customer_phone,
@@ -426,8 +447,8 @@ def create_quote(data: dict) -> dict:
                 status, tax_rate, discount_amount, discount_type, deposit_percent,
                 valid_days, terms, notes, pricing_mode, location, lining_preference,
                 rooms_json, ai_mockups_json, ai_outlines_json, measurements_json,
-                expires_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                issued_document, expires_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             quote_id, quote_number,
             data.get('customer_name', ''),
@@ -452,12 +473,16 @@ def create_quote(data: dict) -> dict:
             json.dumps(data.get('ai_mockups', []), default=str) if data.get('ai_mockups') else None,
             json.dumps(data.get('ai_outlines', []), default=str) if data.get('ai_outlines') else None,
             json.dumps(data.get('measurements', {}), default=str) if data.get('measurements') else None,
+            issued_document,
             (datetime.now() + timedelta(days=data.get('valid_days', 30))).isoformat(),
             now, now,
         ))
 
         # Insert line items — sprint 1b routes through _price_line_item
-        # (catalog categories → engine; non-catalog → manual qty × rate)
+        # (catalog categories → engine; non-catalog → manual qty × rate).
+        # D39: each line carries its own rate_source (default to
+        # quotes_v2.issued_document's source if set; caller may override
+        # per-line via li['rate_source']).
         for idx, li in enumerate(data.get('line_items', data.get('items', []))):
             if not isinstance(li, dict):
                 continue
@@ -468,12 +493,17 @@ def create_quote(data: dict) -> dict:
                 legacy=li,
             )
             qty = float(li.get('quantity', pricing["unit_price"] and 1) or 1)
+            # Per-line rate_source: caller override > issued_document default
+            line_rate_source = (
+                (li.get('rate_source') or '').strip()
+                or default_rate_source
+            )
             conn.execute("""
                 INSERT INTO quote_line_items (
                     quote_id, line_number, description, quantity, unit, unit_price, subtotal,
-                    category, pricing_snapshot_json,
+                    category, rate_source, pricing_snapshot_json,
                     proposed_price, final_price, price_overridden, business_unit, computed_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 quote_id, idx + 1,
                 li.get('description', ''),
@@ -482,6 +512,7 @@ def create_quote(data: dict) -> dict:
                 pricing["unit_price"],
                 pricing["subtotal"],
                 li.get('category', 'labor'),
+                line_rate_source,
                 json.dumps(li.get('pricing_snapshot_json') or li.get('pricing_snapshot'), default=str)
                 if (li.get('pricing_snapshot_json') or li.get('pricing_snapshot')) else None,
                 pricing["proposed_price"],
@@ -580,6 +611,20 @@ def add_line_item(quote_id: str, data: dict) -> dict:
         )
         qty = float(data.get('quantity', 1) or 1)
 
+        # D39 / H77 — per-line rate_source (STEP 1d). Caller may override
+        # via data['rate_source']; otherwise we fall back to the parent
+        # quote's issued_document bearing (or 'catalog' if there is none).
+        line_rate_source = (data.get('rate_source') or '').strip()
+        if not line_rate_source:
+            qdoc = conn.execute(
+                "SELECT issued_document FROM quotes_v2 WHERE id = ?",
+                (quote_id,),
+            ).fetchone()
+            parent_issued = (qdoc["issued_document"] if qdoc else None) or None
+            line_rate_source = (
+                f"issued:{parent_issued}" if parent_issued else "catalog"
+            )
+
         conn.execute("""
             INSERT INTO quote_line_items (
                 quote_id, line_number, item_type, item_style, description, room,
@@ -588,9 +633,9 @@ def add_line_item(quote_id: str, data: dict) -> dict:
                 lining_type, lining_cost,
                 labor_description, labor_hours, labor_rate, labor_total,
                 hardware_description, hardware_cost,
-                quantity, unit, unit_price, subtotal, category, pricing_snapshot_json,
+                quantity, unit, unit_price, subtotal, category, rate_source, pricing_snapshot_json,
                 proposed_price, final_price, price_overridden, business_unit, computed_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             quote_id, max_ln + 1,
             data.get('item_type', ''),
@@ -616,6 +661,7 @@ def add_line_item(quote_id: str, data: dict) -> dict:
             pricing["unit_price"],
             pricing["subtotal"],
             data.get('category', 'labor'),
+            line_rate_source,
             json.dumps(data.get('pricing_snapshot_json') or data.get('pricing_snapshot'), default=str)
             if (data.get('pricing_snapshot_json') or data.get('pricing_snapshot')) else None,
             pricing["proposed_price"],

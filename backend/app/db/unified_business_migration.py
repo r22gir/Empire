@@ -111,6 +111,7 @@ def create_all_tables(conn: sqlite3.Connection):
         pdf_path TEXT,
         sent_at TEXT,
         accepted_at TEXT,
+        issued_document TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -161,6 +162,7 @@ def create_all_tables(conn: sqlite3.Connection):
         manual_price_override REAL,
         price_is_manual INTEGER DEFAULT 0,
         category TEXT DEFAULT 'labor',
+        rate_source TEXT DEFAULT 'catalog',
         drawing_id TEXT,
         drawing_svg TEXT,
         photo_ids_json TEXT,
@@ -285,6 +287,31 @@ def create_all_tables(conn: sqlite3.Connection):
     )
     conn.commit()
 
+    # ---------------------------------------------------------------------
+    # D39 / H77 — Issued-document provenance (continued H77).
+    # quotes_v2.issued_document is a TEXT column on the quote holding the
+    # identifier of an issued (already-billed) document that governs this
+    # quote's rates — e.g. "NELMA-814" for a paper invoice whose numbers
+    # the founder is reusing here. Nullable; NULL means "no issued
+    # document — rates come from the catalog." Per-line rate_source lives
+    # on quote_line_items (added below with the rest of the D38 columns).
+    # The engine does not enforce this — it records it. A future session
+    # reading the quote must see the rates are historical by intent, not
+    # by drift, and not silently "correct" them.
+    # ---------------------------------------------------------------------
+    for _alter_sql in (
+        "ALTER TABLE quotes_v2 ADD COLUMN issued_document TEXT",
+    ):
+        try:
+            conn.execute(_alter_sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists (idempotent re-run)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_quotes_v2_issued_document "
+        "ON quotes_v2(issued_document)"
+    )
+    conn.commit()
+
     # Chart of Accounts
     conn.execute("""
     CREATE TABLE IF NOT EXISTS chart_of_accounts (
@@ -313,12 +340,21 @@ def create_all_tables(conn: sqlite3.Connection):
         "ALTER TABLE quote_line_items ADD COLUMN price_overridden INTEGER DEFAULT 0",
         "ALTER TABLE quote_line_items ADD COLUMN business_unit TEXT DEFAULT 'workroom'",
         "ALTER TABLE quote_line_items ADD COLUMN computed_json TEXT",
+        # D39 / H77 — Issued-document provenance. See STEP 1d of the
+        # dispatch. Per-line rate_source: "catalog" (the engine's catalog
+        # rate governed the line) or "issued:<doc-id>" (the line is governed
+        # by a founder-supplied historical document such as a paper
+        # invoice). The engine does NOT enforce this — it records it.
+        # A future session reading the row can see the rates are historical
+        # by intent, not by drift, and must not "correct" them.
+        "ALTER TABLE quote_line_items ADD COLUMN rate_source TEXT DEFAULT 'catalog'",
     ):
         try:
             conn.execute(_alter_sql)
         except sqlite3.OperationalError:
             pass  # column already exists (idempotent re-run)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_qli_business ON quote_line_items(business_unit)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_qli_rate_source ON quote_line_items(rate_source)")
     conn.commit()
 
     # ---------------------------------------------------------------------
