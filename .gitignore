@@ -86,3 +86,8 @@ archive/
 # to the repo. Add a file here only if it should be an exception.
 # Use ** to cover any depth (e.g. reference/mclean/foo.pdf).
 reference/**/*.pdf
+
+# D38: backend/app/data holds the pricing catalog — the bare "data/" rule above
+# was hiding it, so rate changes needed a force-add to land at all.
+!backend/app/data/
+backend/app/data/generated/
