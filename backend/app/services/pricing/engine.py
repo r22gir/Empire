@@ -114,6 +114,44 @@ def _positive(inputs: dict[str, Any], key: str, default: float = 0.0) -> float:
     return value
 
 
+# D37 / H77 — Zero-guard for line pricers.
+#
+# A workroom line pricer that silently returns $0.00 is a defect: the number
+# flows downstream to a customer-facing quote and the business may be held
+# to a price it never agreed to. The legacy _positive() helper above only
+# raised on negative values, which let required inputs default to 0.0 and
+# produced $0.00 outputs (see H76 — same defect class).
+#
+# _require_positive() is the engine-level fix: a category that depends on a
+# given input refuses to price if the input is missing, None, non-numeric,
+# zero, or negative. The error names the category AND the offending input so
+# the founder can fix the upstream caller without a guess.
+#
+# This is the PRIMARY defense. quote_service.py:83-87 is a secondary
+# belt-and-suspenders that catches any path the engine does not — both must
+# stay in place. But the engine MUST make silent 0.00 unreachable regardless
+# of caller, per founder directive (D37 STEP 2 ruling).
+def _require_positive(inputs: dict[str, Any], key: str, *, category: str) -> float:
+    """Required input for a line pricer. Raises PricingInputError if missing,
+    None, non-numeric, zero, or negative — naming the category and key."""
+    raw = inputs.get(key)
+    if raw is None or raw == "":
+        raise PricingInputError(
+            f"{category}: required input '{key}' is missing — refusing to price to 0.00"
+        )
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise PricingInputError(
+            f"{category}: required input '{key}' must be numeric (got {raw!r})"
+        )
+    if value <= 0:
+        raise PricingInputError(
+            f"{category}: required input '{key}' must be > 0 (got {value}) — refusing to price to 0.00"
+        )
+    return value
+
+
 def _require_reason(override_amount: float | None, override_reason: str | None):
     if override_amount is not None and not (override_reason or "").strip():
         raise PricingInputError("manual override requires override_reason")
@@ -705,8 +743,10 @@ def propose_roman_shade_fabric(width_in: float, height_in: float,
 
 def price_roman_shade(inputs: dict, *, business_unit: str = "workroom") -> dict:
     spec = PRICING_SPECS["roman_shade"]
-    width_in  = _positive(inputs, "width_in")
-    height_in = _positive(inputs, "height_in")
+    # D37 / H77 — width_in and height_in are REQUIRED. Zero dims silently
+    # priced at $0.00; the engine refuses instead.
+    width_in  = _require_positive(inputs, "width_in",  category="roman_shade")
+    height_in = _require_positive(inputs, "height_in", category="roman_shade")
     rate      = _positive(inputs, "rate_per_sqft", spec["base_rate"])
     sqft      = (width_in * height_in) / 144.0
     proposed  = round(sqft * rate, 2)
@@ -736,7 +776,8 @@ def price_roman_shade(inputs: dict, *, business_unit: str = "workroom") -> dict:
 # ---------------------------------------------------------------------------
 def price_valance(inputs: dict, *, business_unit: str = "workroom") -> dict:
     spec = PRICING_SPECS["valance"]
-    width_in  = _positive(inputs, "width_in")
+    # D37 / H77 — width_in REQUIRED. Zero width silently priced at $0.00.
+    width_in  = _require_positive(inputs, "width_in", category="valance")
     rate      = _positive(inputs, "rate_per_lineal_ft", spec["base_rate"])
     lineal_ft = width_in / 12.0
     proposed  = round(lineal_ft * rate, 2)
@@ -753,7 +794,8 @@ def price_valance(inputs: dict, *, business_unit: str = "workroom") -> dict:
 # ---------------------------------------------------------------------------
 def price_cornice(inputs: dict, *, business_unit: str = "workroom") -> dict:
     spec = PRICING_SPECS["cornice"]
-    width_in  = _positive(inputs, "width_in")
+    # D37 / H77 — width_in REQUIRED. Zero width silently priced at $0.00.
+    width_in  = _require_positive(inputs, "width_in", category="cornice")
     rate      = _positive(inputs, "rate_per_lineal_ft", spec["base_rate"])
     lineal_ft = width_in / 12.0
     proposed  = round(lineal_ft * rate, 2)
@@ -771,9 +813,13 @@ def price_cornice(inputs: dict, *, business_unit: str = "workroom") -> dict:
 # Fabric-only (founder-editable)
 # ---------------------------------------------------------------------------
 def price_fabric(inputs: dict, *, business_unit: str = "workroom") -> dict:
-    """Both price_per_yard and yards_needed are founder-editable."""
-    price_per_yard  = _positive(inputs, "price_per_yard", 0)
-    yards_needed    = _positive(inputs, "yards_needed",   0)
+    """Both price_per_yard and yards_needed are founder-editable.
+
+    D37 / H77 — both are REQUIRED. Missing or zero silently produced $0.00;
+    the engine refuses instead.
+    """
+    price_per_yard  = _require_positive(inputs, "price_per_yard", category="fabric_only")
+    yards_needed    = _require_positive(inputs, "yards_needed",   category="fabric_only")
     yards_override  = bool(inputs.get("yards_override", False))
     spec_url        = inputs.get("fabric_spec_url")  # future auto-lookup
     proposed        = round(price_per_yard * yards_needed, 2)
@@ -794,7 +840,8 @@ def price_fabric(inputs: dict, *, business_unit: str = "workroom") -> dict:
 # ---------------------------------------------------------------------------
 def price_hardware_rod(inputs: dict, *, business_unit: str = "workroom") -> dict:
     spec = PRICING_SPECS["hardware_rod_1_1_8"]
-    width_in = _positive(inputs, "width_in")
+    # D37 / H77 — width_in REQUIRED.
+    width_in = _require_positive(inputs, "width_in", category="hardware_rod_1_1_8")
     width_ft = width_in / 12.0
     units    = int(math.ceil(width_ft / 6))
     rate     = _positive(inputs, "rate_per_run", spec["base_rate"])
@@ -809,7 +856,8 @@ def price_hardware_rod(inputs: dict, *, business_unit: str = "workroom") -> dict
 
 def price_hardware_ripplefold_track(inputs: dict, *, business_unit: str = "workroom") -> dict:
     spec = PRICING_SPECS["hardware_ripplefold_track"]
-    width_in = _positive(inputs, "width_in")
+    # D37 / H77 — width_in REQUIRED.
+    width_in = _require_positive(inputs, "width_in", category="hardware_ripplefold_track")
     width_ft = width_in / 12.0
     units    = int(math.ceil(width_ft / 6))
     rate     = _positive(inputs, "rate_per_run", spec["base_rate"])
@@ -824,8 +872,11 @@ def price_hardware_ripplefold_track(inputs: dict, *, business_unit: str = "workr
 
 def price_hardware_rings(inputs: dict, *, business_unit: str = "workroom") -> dict:
     spec = PRICING_SPECS["hardware_rings"]
+    # D37 / H77 — packs REQUIRED (used as the unit count). widths is optional
+    # context (used only for the suggested default). packs=0 silently priced
+    # at $0.00; refuse instead.
     widths = int(_positive(inputs, "widths", 1))
-    packs  = int(_positive(inputs, "packs", widths))  # default 1/width
+    packs  = int(_require_positive(inputs, "packs", category="hardware_rings"))
     rate   = _positive(inputs, "rate_per_pack", spec["base_rate"])
     proposed = round(packs * rate, 2)
     return _line_result(
@@ -838,15 +889,25 @@ def price_hardware_rings(inputs: dict, *, business_unit: str = "workroom") -> di
 
 def price_hardware_brackets(inputs: dict, *, business_unit: str = "workroom") -> dict:
     spec = PRICING_SPECS["hardware_brackets"]
-    width_in = _positive(inputs, "width_in")
-    width_ft = width_in / 12.0
-    if width_ft <= 6:
-        default_count = spec["default_count_by_width_ft"]["<=6"]
-    elif width_ft <= 12:
-        default_count = spec["default_count_by_width_ft"]["6-12"]
+    # D37 / H77 — count REQUIRED (default derives from width_in lookup).
+    # Either width_in OR an explicit count must be supplied; without either,
+    # we'd default to 2 brackets ($58) and silently price something that
+    # the founder never asked for.
+    if "count" in inputs and inputs["count"] is not None:
+        count = int(_require_positive(inputs, "count", category="hardware_brackets"))
+        width_in = _positive(inputs, "width_in")  # for the computed breakdown
+        width_ft = width_in / 12.0 if width_in else 0.0
+        default_count = count
     else:
-        default_count = spec["default_count_by_width_ft"][">12"]
-    count   = int(_positive(inputs, "count", default_count))
+        width_in = _require_positive(inputs, "width_in", category="hardware_brackets")
+        width_ft = width_in / 12.0
+        if width_ft <= 6:
+            default_count = spec["default_count_by_width_ft"]["<=6"]
+        elif width_ft <= 12:
+            default_count = spec["default_count_by_width_ft"]["6-12"]
+        else:
+            default_count = spec["default_count_by_width_ft"][">12"]
+        count = default_count
     rate    = _positive(inputs, "rate_per_bracket", spec["base_rate"])
     proposed = round(count * rate, 2)
     return _line_result(
@@ -864,7 +925,8 @@ def price_hardware_brackets(inputs: dict, *, business_unit: str = "workroom") ->
 # ---------------------------------------------------------------------------
 def price_labor(inputs: dict, *, business_unit: str = "workroom") -> dict:
     spec = PRICING_SPECS["labor"]
-    hours    = _positive(inputs, "hours", 0)
+    # D37 / H77 — hours REQUIRED. Zero hours silently priced at $0.00.
+    hours    = _require_positive(inputs, "hours", category="labor")
     rate     = _positive(inputs, "rate_per_hour", spec["base_rate"])
     proposed = round(hours * rate, 2)
     return _line_result(
@@ -880,7 +942,8 @@ def price_labor(inputs: dict, *, business_unit: str = "workroom") -> dict:
 def price_pillow(inputs: dict, *, business_unit: str = "workroom") -> dict:
     spec = PRICING_SPECS["pillow"]
     qty          = int(_positive(inputs, "quantity", 1))
-    unit_price   = _positive(inputs, "unit_price", 0)   # founder-editable
+    # D37 / H77 — unit_price REQUIRED. Zero price silently priced at $0.00.
+    unit_price   = _require_positive(inputs, "unit_price", category="pillow")
     has_welting  = bool(inputs.get("welting", False))
     has_flange   = bool(inputs.get("flange", False))
     welting_add  = spec["welting_add"] if has_welting else 0
@@ -907,8 +970,11 @@ def price_pillow(inputs: dict, *, business_unit: str = "workroom") -> dict:
 # Cover — fully editable
 # ---------------------------------------------------------------------------
 def price_cover(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    # D37 / H77 — unit_price is REQUIRED. Quantity defaults to 1; the
+    # $0.00 placeholder in PRICING_SPECS["cover"] is NOT reachable as a
+    # price from the engine.
     qty        = int(_positive(inputs, "quantity", 1))
-    unit_price = _positive(inputs, "unit_price", 0)
+    unit_price = _require_positive(inputs, "unit_price", category="cover")
     proposed   = round(qty * unit_price, 2)
     return _line_result(
         "cover", "each", business_unit,
