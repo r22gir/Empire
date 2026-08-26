@@ -1123,8 +1123,10 @@ PRICING_SPECS = {
         },
         "banding_per_leading_edge": 30.00,
         "linings": {                                 # per-yard, follows widths
-            "blackout": 12.95,
-            "premiere_satin": 9.95,
+            "regular": 10.50,                        # D38 / H77 — NEW
+            "batiste_118": 10.50,                    # D38 / H77 — NEW
+            "blackout": 12.95,                       # unchanged
+            "premiere_satin": 9.95,                  # unchanged
         },
     },
     "roman_shade": {
@@ -1241,5 +1243,75 @@ PRICING_SPECS = {
         "rate_field": "qty * unit_price (no formula; founder prices manually)",
         "base_unit": 0.00,
         "note": "Covers fully editable; no auto-formula yet.",
+    },
+    # D38 / H77 — NEW categories (continues H77). range_ft_* are the
+    # inclusive bounds; in-range proposals use flat_rate_in_range, out-of-range
+    # requires inputs["override_price"] or the pricer raises. See
+    # engine.py for the carve-out in com_fabric (the one permitted $0.00 path).
+    "com_fabric": {
+        "business_unit": "workroom",
+        "unit": "customer_supplied",
+        "rate_field": "qty (no rate — material is customer-supplied)",
+        "editable_fields": ["fabric_name", "quantity", "customer_supplied"],
+        "note": (
+            "D38 / H77 — the ONE permitted $0.00 path. customer_supplied=true "
+            "carves a fabric line out to $0 with fabric_name + quantity named. "
+            "Without the flag, this is treated as fabric_only — unit_price "
+            "required, _require_positive raises on missing. Excluded from margin."
+        ),
+    },
+    "hardware_rod_set": {
+        "business_unit": "workroom",
+        "unit": "set",
+        "rate_field": "width_ft within [4.0, 8.0] flat, override beyond",
+        "flat_rate_in_range": 325.00,
+        "range_ft_min": 4.0,
+        "range_ft_max": 8.0,
+        "note": (
+            "D38 / H77 — rod + rings + brackets, 2.5\" projection. Covers 4-8 ft. "
+            "Out of range: founder supplies inputs['override_price']; engine "
+            "never extrapolates."
+        ),
+    },
+    "hardware_ripplefold_set": {
+        "business_unit": "workroom",
+        "unit": "set",
+        "rate_field": "width_ft within [4.0, 8.0] flat, override beyond",
+        "flat_rate_in_range": 250.00,
+        "range_ft_min": 4.0,
+        "range_ft_max": 8.0,
+        "note": (
+            "D38 / H77 — track + carriers + brackets. Covers 4-8 ft. "
+            "Out of range: founder supplies inputs['override_price']; engine "
+            "never extrapolates."
+        ),
+    },
+    "installation": {
+        "business_unit": "workroom",
+        "unit": "each_or_first_8ft",
+        "rate_field": "treatment-specific (see sub-rates)",
+        "sub_rates": {
+            "roman_shade": {"rate": 95.00, "unit": "each"},
+            "drapery":     {"rate": 145.00, "unit": "first_8ft"},
+        },
+        "note": (
+            "D38 / H77 — per-treatment install rate. roman_shade is $95 "
+            "per shade. Drapery is $145 for the first 8 ft; beyond 8 ft "
+            "founder supplies inputs['override_price'] for the whole job."
+        ),
+    },
+    "manual_line": {
+        "business_unit": "workroom",
+        "unit": "each",
+        "rate_field": "qty * unit_price (no formula; founder prices manually)",
+        "editable_fields": ["description", "unit_price", "quantity"],
+        "note": (
+            "D38 / H77 — pure pass-through. Founder supplies description + "
+            "unit_price + quantity; engine records, does not compute. Use for "
+            "an arbitrary lining type with a founder-supplied name and rate, "
+            "bespoke items (e.g. custom benches) priced manually, and any "
+            "line without an engine formula. unit_price is REQUIRED — engine "
+            "raises without it. A 'bench' is NOT a category on its own."
+        ),
     },
 }

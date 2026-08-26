@@ -107,15 +107,18 @@ def test_pricer_raises_when_supplied_input_is_zero(category, key):
 # DRAPERY — unknown lining still raises (existing behaviour preserved)
 # ---------------------------------------------------------------------------
 def test_drapery_unknown_lining_type_raises():
-    """batiste_118 is absent from the catalog; passing it as lining_type raises
-    rather than pricing at 0.00. Same behaviour as any unknown lining key."""
+    """Any lining_type NOT in the catalog raises rather than silently
+    pricing at 0.00. Same behaviour as any unknown lining key. (D38 added
+    `batiste_118` to the catalog at the founder-ruled $10.50/yd; this
+    test exercises a different unknown key.)
+    """
     with pytest.raises(PricingInputError) as exc:
         price_workroom_line("drapery", {
             "window_width_in": 60,
             "length_in": 80,
-            "lining_type": "batiste_118",
+            "lining_type": "unbacked_thermalloy",
         })
-    assert "batiste_118" in str(exc.value)
+    assert "unbacked_thermalloy" in str(exc.value)
 
 
 def test_drapery_known_lining_premiere_satin_prices():

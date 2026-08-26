@@ -985,6 +985,294 @@ def price_cover(inputs: dict, *, business_unit: str = "workroom") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# D38 / H77 — NEW line pricers
+#
+# Five categories land in this dispatch:
+#   - com_fabric         : the ONE permitted $0.00 path (customer_supplied=true)
+#   - hardware_rod_set   : flat rate 4-8 ft, founder override beyond
+#   - hardware_ripplefold_set : flat rate 4-8 ft, founder override beyond
+#   - installation       : per-treatment install (roman_shade $95/each,
+#                          drapery $145/first 8 ft; beyond 8 ft founder override)
+#   - manual_line        : pure pass-through; engine records, does not compute
+#
+# All five coexist with the existing component pricers (price_hardware_rod /
+# price_hardware_ripplefold_track / etc.) — those stay; the new SET categories
+# are founder-shaped bundles. Roman shade lining remains included in the shade
+# price; price_roman_shade still does NOT emit a separate lining line.
+# ---------------------------------------------------------------------------
+def _price_in_range_or_override(
+    *,
+    category: str,
+    width_in: float,
+    spec: dict,
+) -> tuple[float, dict]:
+    """Helper for the flat-rate-in-range categories.
+    Returns (proposed_price, computed_overrides). Always raises if out of range
+    with no override. Never extrapolates.
+    """
+    width_ft = round(width_in / 12.0, 4)
+    lo = float(spec["range_ft_min"])
+    hi = float(spec["range_ft_max"])
+    flat = float(spec["flat_rate_in_range"])
+    if lo <= width_ft <= hi:
+        return round(flat, 2), {
+            "width_ft": width_ft,
+            "in_range": True,
+            "flat_rate_in_range": flat,
+            "range_ft_min": lo,
+            "range_ft_max": hi,
+        }
+    # Out of range — founder must supply override_price.
+    raise PricingInputError(
+        f"{category}: width_ft={width_ft} is outside allowed range "
+        f"[{lo}, {hi}] ft — provide inputs['override_price']; "
+        f"engine never extrapolates"
+    )
+
+
+def price_hardware_rod_set(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["hardware_rod_set"]
+    width_in = _require_positive(inputs, "width_in", category="hardware_rod_set")
+    override = inputs.get("override_price")
+    if 4.0 <= (width_in / 12.0) <= 8.0:
+        proposed, computed = _price_in_range_or_override(
+            category="hardware_rod_set", width_in=width_in, spec=spec,
+        )
+    elif override is not None:
+        try:
+            override_val = float(override)
+        except (TypeError, ValueError):
+            raise PricingInputError(
+                f"hardware_rod_set: override_price must be numeric (got {override!r})"
+            )
+        if override_val < 0:
+            raise PricingInputError(
+                f"hardware_rod_set: override_price must be >= 0 "
+                f"(got {override_val})"
+            )
+        proposed = round(override_val, 2)
+        computed = {
+            "width_ft": round(width_in / 12.0, 4),
+            "in_range": False,
+            "override_used": True,
+            "override_price": proposed,
+            "range_ft_min": spec["range_ft_min"],
+            "range_ft_max": spec["range_ft_max"],
+        }
+    else:
+        raise PricingInputError(
+            f"hardware_rod_set: width_ft={round(width_in / 12.0, 4)} "
+            f"is outside allowed range [{spec['range_ft_min']}, "
+            f"{spec['range_ft_max']}] ft — provide "
+            f"inputs['override_price']; engine never extrapolates"
+        )
+    return _line_result("hardware_rod_set", "set", business_unit, computed, proposed)
+
+
+def price_hardware_ripplefold_set(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["hardware_ripplefold_set"]
+    width_in = _require_positive(inputs, "width_in", category="hardware_ripplefold_set")
+    override = inputs.get("override_price")
+    if 4.0 <= (width_in / 12.0) <= 8.0:
+        proposed, computed = _price_in_range_or_override(
+            category="hardware_ripplefold_set", width_in=width_in, spec=spec,
+        )
+    elif override is not None:
+        try:
+            override_val = float(override)
+        except (TypeError, ValueError):
+            raise PricingInputError(
+                f"hardware_ripplefold_set: override_price must be numeric "
+                f"(got {override!r})"
+            )
+        if override_val < 0:
+            raise PricingInputError(
+                f"hardware_ripplefold_set: override_price must be >= 0 "
+                f"(got {override_val})"
+            )
+        proposed = round(override_val, 2)
+        computed = {
+            "width_ft": round(width_in / 12.0, 4),
+            "in_range": False,
+            "override_used": True,
+            "override_price": proposed,
+            "range_ft_min": spec["range_ft_min"],
+            "range_ft_max": spec["range_ft_max"],
+        }
+    else:
+        raise PricingInputError(
+            f"hardware_ripplefold_set: width_ft={round(width_in / 12.0, 4)} "
+            f"is outside allowed range [{spec['range_ft_min']}, "
+            f"{spec['range_ft_max']}] ft — provide "
+            f"inputs['override_price']; engine never extrapolates"
+        )
+    return _line_result(
+        "hardware_ripplefold_set", "set", business_unit, computed, proposed,
+    )
+
+
+def price_installation(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    """D38 / H77 — installation line pricer.
+    drapery:     $145 first 8 ft; beyond 8 ft founder supplies override_price.
+    roman_shade: $95 each (quantity * $95); stays within founder-shaped bounds.
+    """
+    spec = PRICING_SPECS["installation"]
+    treatment = (inputs.get("treatment") or "").lower()
+    if treatment not in spec["sub_rates"]:
+        raise PricingInputError(
+            f"installation: treatment must be one of "
+            f"{list(spec['sub_rates'].keys())} (got {treatment!r})"
+        )
+    sub = spec["sub_rates"][treatment]
+
+    if treatment == "roman_shade":
+        quantity = _require_positive(inputs, "quantity", category="installation")
+        proposed = round(float(sub["rate"]) * quantity, 2)
+        computed = {
+            "treatment": "roman_shade",
+            "rate": sub["rate"],
+            "unit": "each",
+            "quantity": quantity,
+        }
+    elif treatment == "drapery":
+        # Either width_in/width_ft supplied, or override_price for out-of-first-8ft jobs.
+        width_ft_raw = inputs.get("width_ft")
+        width_in_raw = inputs.get("width_in")
+        if width_ft_raw is None and width_in_raw is None:
+            raise PricingInputError(
+                "installation: drapery requires 'width_ft' or 'width_in' "
+                "(or 'override_price' for jobs beyond 8 ft)"
+            )
+        if width_ft_raw is None:
+            width_in = _require_positive(inputs, "width_in", category="installation")
+            width_ft = round(width_in / 12.0, 4)
+        else:
+            try:
+                width_ft = float(width_ft_raw)
+            except (TypeError, ValueError):
+                raise PricingInputError(
+                    f"installation: width_ft must be numeric (got {width_ft_raw!r})"
+                )
+            if width_ft <= 0:
+                raise PricingInputError(
+                    f"installation: width_ft must be > 0 (got {width_ft})"
+                )
+
+        if width_ft <= 8.0:
+            proposed = round(float(sub["rate"]), 2)
+            computed = {
+                "treatment": "drapery",
+                "rate": sub["rate"],
+                "unit": "first_8ft",
+                "width_ft": width_ft,
+            }
+        else:
+            override = inputs.get("override_price")
+            if override is None:
+                raise PricingInputError(
+                    f"installation: drapery width_ft={width_ft} is beyond "
+                    f"the first 8 ft — provide inputs['override_price'] for "
+                    f"the whole job; engine never extrapolates"
+                )
+            try:
+                override_val = float(override)
+            except (TypeError, ValueError):
+                raise PricingInputError(
+                    f"installation: override_price must be numeric "
+                    f"(got {override!r})"
+                )
+            if override_val < 0:
+                raise PricingInputError(
+                    f"installation: override_price must be >= 0 "
+                    f"(got {override_val})"
+                )
+            proposed = round(override_val, 2)
+            computed = {
+                "treatment": "drapery",
+                "width_ft": width_ft,
+                "override_used": True,
+                "override_price": proposed,
+            }
+    else:
+        # Should be unreachable given the membership check above.
+        raise PricingInputError(f"installation: unhandled treatment {treatment!r}")
+
+    return _line_result("installation", "each_or_first_8ft", business_unit, computed, proposed)
+
+
+def price_com_fabric(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    """D38 / H77 — the ONE permitted $0.00 path.
+
+    Two modes:
+      customer_supplied=False → behaves like fabric_only; unit_price REQUIRED
+        via _require_positive, raises PricingInputError without it. This
+        matches R10/R11 and the existing H77 zero-guard.
+      customer_supplied=True  → proposed_price = 0.00, with fabric_name AND
+        quantity required and present in `computed`. Margin computations
+        must exclude customer_supplied lines (callers check computed).
+
+    Anti-bypass: this is one path, provable. _require_positive is unchanged.
+    """
+    customer_supplied = bool(inputs.get("customer_supplied", False))
+    fabric_name = inputs.get("fabric_name")
+
+    if not customer_supplied:
+        # Re-use fabric_only semantics: unit_price + (optional) yards_needed
+        # both required via _require_positive. The factory function
+        # `price_fabric` enforces this — call through for consistency.
+        return price_fabric(inputs, business_unit=business_unit)
+
+    # customer_supplied=True path
+    if fabric_name is None or str(fabric_name).strip() == "":
+        raise PricingInputError(
+            "com_fabric: customer_supplied=true requires 'fabric_name' "
+            "(non-empty string) — refusing to emit an empty $0.00 line"
+        )
+    quantity = _require_positive(inputs, "quantity", category="com_fabric")
+
+    return _line_result(
+        "com_fabric", "customer_supplied", business_unit,
+        {
+            "customer_supplied": True,
+            "fabric_name": str(fabric_name).strip(),
+            "quantity": quantity,
+            "label": "COM",
+            "note": (
+                "Customer-supplied material. $0.00 — the ONE permitted zero. "
+                "Excluded from margin."
+            ),
+        },
+        0.0,
+    )
+
+
+def price_manual_line(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    """D38 / H77 — pure pass-through. founder supplies description, unit_price,
+    quantity. Engine records, does not compute. unit_price required via
+    _require_positive — engine raises without it.
+    """
+    description = inputs.get("description")
+    if description is None or str(description).strip() == "":
+        raise PricingInputError(
+            "manual_line: 'description' is required and must be non-empty"
+        )
+    unit_price = _require_positive(inputs, "unit_price", category="manual_line")
+    quantity = _positive(inputs, "quantity", 1)
+    if quantity <= 0:
+        raise PricingInputError("manual_line: quantity must be > 0")
+    proposed = round(quantity * unit_price, 2)
+    return _line_result(
+        "manual_line", "each", business_unit,
+        {"description": str(description).strip(),
+         "quantity": quantity,
+         "unit_price_used": unit_price,
+         "editable_fields": ["description", "unit_price", "quantity"],
+         "note": "Manual pass-through — engine records, does not compute."},
+        proposed,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Dispatch table + new entry point (1b will call this from routers)
 # ---------------------------------------------------------------------------
 WORKROOM_LINE_PRICERS = {
@@ -1000,6 +1288,12 @@ WORKROOM_LINE_PRICERS = {
     "labor":                     price_labor,
     "pillow":                    price_pillow,
     "cover":                     price_cover,
+    # D38 / H77 — NEW entries below (continues H77).
+    "com_fabric":                price_com_fabric,
+    "hardware_rod_set":          price_hardware_rod_set,
+    "hardware_ripplefold_set":   price_hardware_ripplefold_set,
+    "installation":              price_installation,
+    "manual_line":               price_manual_line,
 }
 
 

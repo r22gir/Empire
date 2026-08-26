@@ -80,11 +80,23 @@ def _price_line_item(category, inputs, business_unit, legacy):
         result = price_workroom_line(category, inputs, business_unit=bu)
         # Belt-and-suspenders: if the engine still produced 0 with non-empty
         # inputs (e.g. all-zero measurements), refuse to persist it.
+        # D38 / H77 — the ONE carve-out: com_fabric + customer_supplied=true
+        # is permitted to emit $0.00. The carve-out is keyed on BOTH
+        # conditions; either alone is rejected. Tests at
+        # tests/test_d38_pricing_categories_proof.py lock this carve-out to
+        # the single path. quote_service.py:83-87 stays the catch-net for any
+        # other engine output, including a future pricer that silently 0's.
         if result["proposed_price"] <= 0:
-            raise PricingInputError(
-                f"catalog category '{category}' produced proposed_price=0 "
-                f"with inputs={inputs}"
+            computed = result.get("computed") or {}
+            is_com_zero = (
+                str(category).lower() == "com_fabric"
+                and computed.get("customer_supplied") is True
             )
+            if not is_com_zero:
+                raise PricingInputError(
+                    f"catalog category '{category}' produced proposed_price=0 "
+                    f"with inputs={inputs}"
+                )
         proposed = result["proposed_price"]
         return {
             "subtotal":         proposed,
