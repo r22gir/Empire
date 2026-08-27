@@ -5237,7 +5237,32 @@ async def text_to_speech(request: TTSRequest):
     from app.services.max.tts_service import tts_service
 
     if not tts_service.is_configured:
-        raise HTTPException(status_code=503, detail="TTS not configured — XAI_API_KEY missing")
+        # H68 D40: the pre-fix 503 hard-coded "XAI_API_KEY missing"
+        # even when the configured provider is MiniMax. That message
+        # is the same class of defect this dispatch exists to close:
+        # a system reporting a state that is not true. The TTS service
+        # has two providers (MiniMax primary, xAI fallback per
+        # tts_service.py:62-72); is_configured returns True if EITHER
+        # is set. When neither is set, the message names both.
+        missing: list[str] = []
+        if not tts_service.is_minimax_configured:
+            missing.append("MINIMAX_API_KEY")
+        if not tts_service.is_xai_configured:
+            missing.append("XAI_API_KEY")
+        if not missing:
+            # is_configured was False but neither provider reported
+            # itself as unconfigured — should be unreachable, but
+            # surface it honestly rather than naming a phantom key.
+            missing.append("(unknown — see tts_service.last_error)")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"TTS not configured — missing: {', '.join(missing)}. "
+                f"TTS service has two providers: MiniMax (primary) and "
+                f"xAI Grok (fallback); is_configured requires at least "
+                f"one provider key."
+            ),
+        )
 
     audio_bytes = await tts_service.synthesize_for_web(request.text)
     if not audio_bytes:

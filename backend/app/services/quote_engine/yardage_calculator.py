@@ -80,6 +80,22 @@ def calculate_yardage(
     depth_in = dims.get("depth", 0)
     linear_ft = width_in / 12 if width_in else 0
 
+    # ── H68 D40: initialize dimension provenance at top so every
+    # branch (and the default branch) carries consistent fields in
+    # the OUTPUT. fabric_width defaults to the historical 54" with
+    # provenance='pending' when no caller override is supplied.
+    # PENDING never blocks — calculation continues with the default.
+    fabric_width_in = opts.get("fabric_width_in")
+    if fabric_width_in is not None:
+        fabric_width = float(fabric_width_in)
+        fabric_width_provenance = (
+            opts.get("fabric_width_provenance") or "explicit"
+        )
+    else:
+        fabric_width = FABRIC_WIDTH_INCHES
+        fabric_width_provenance = "pending"
+    pattern_repeat = opts.get("pattern_repeat", 0)
+
     # ----- Ottoman sizing -----
     if item_type == "ottoman":
         if width_in and width_in <= 24:
@@ -120,8 +136,8 @@ def calculate_yardage(
     # ----- Drapery -----
     elif item_type == "drapery_panel":
         fullness = opts.get("fullness", 2.5)
-        total_width_in = width_in * fullness if width_in else FABRIC_WIDTH_INCHES * fullness
-        num_widths = math.ceil(total_width_in / FABRIC_WIDTH_INCHES)
+        total_width_in = width_in * fullness if width_in else fabric_width * fullness
+        num_widths = math.ceil(total_width_in / fabric_width)
         # Height in yards + 18" top/bottom allowances
         cut_length_yd = ((height_in or 96) + 18) / 36
         yards = num_widths * cut_length_yd * YARDAGE_TABLE["drapery_per_width"] / YARDAGE_TABLE["drapery_per_width"]
@@ -186,7 +202,6 @@ def calculate_yardage(
         explanation_parts.append(f"+15% tufting: {before:.1f} → {yards:.1f} yd")
 
     # ----- Pattern repeat adjustment (+25%) -----
-    pattern_repeat = opts.get("pattern_repeat", 0)
     if pattern_repeat:
         before = yards
         yards *= 1.25
@@ -203,4 +218,19 @@ def calculate_yardage(
     calculation = "; ".join(explanation_parts)
     logger.info("Yardage for %s: %.1f yd — %s", item_type, yards, calculation)
 
-    return {"yards": yards, "calculation": calculation}
+    return {
+        "yards": yards,
+        "calculation": calculation,
+        # ── H68 D40: dimension provenance ──
+        # fabric_width is the value used in the calc (either the
+        # caller-supplied override or the historical 54" default).
+        # fabric_width_provenance marks it as 'pending' when no
+        # caller-supplied value was provided — a PENDING label that
+        # never blocks the document.
+        "fabric_width": fabric_width,
+        "fabric_width_provenance": fabric_width_provenance,
+        "pattern_repeat_in": pattern_repeat,
+        "pattern_repeat_provenance": (
+            "explicit" if pattern_repeat else "pending"
+        ),
+    }

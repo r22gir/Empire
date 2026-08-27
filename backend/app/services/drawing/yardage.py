@@ -38,6 +38,29 @@ FABRIC_WIDTH_54 = 54
 FABRIC_WIDTH_60 = 60
 
 
+def _fabric_width_with_provenance(dimensions: dict | None) -> tuple[float, str]:
+    """Resolve fabric width for a drawing-yardage estimator.
+
+    H68 D40: the pre-H68 hardcoded FABRIC_WIDTH_54 was an unsourced
+    default. Per the ruling, a value entering yardage_calculator.py
+    or a drawing carries its source OR is marked PENDING. Callers may
+    pass `fabric_width_in` (override) and `fabric_width_provenance`
+    ('catalog' / 'issued:<doc>' / 'search_results_url:<url>' /
+    'pending'). When fabric_width_in is absent we fall back to the
+    historical 54" default but the OUTPUT carries provenance='pending'
+    so downstream rendering can label it. PENDING never blocks — a
+    drawing with three PENDING fields is a working drawing.
+    """
+    d = dimensions or {}
+    fw = d.get("fabric_width_in")
+    if fw is not None:
+        try:
+            return float(fw), (d.get("fabric_width_provenance") or "explicit")
+        except (TypeError, ValueError):
+            return FABRIC_WIDTH_54, "pending"
+    return FABRIC_WIDTH_54, "pending"
+
+
 def _safe_num(v: Any, default: float = 0.0) -> float:
     try:
         return float(v)
@@ -80,6 +103,7 @@ def estimate_drapery(dimensions: dict) -> dict:
         "linear_feet": round(total_yards * 3, 2),
         "panels": panels,
         "fabric_width": FABRIC_WIDTH_54,
+        "fabric_width_provenance": "pending",  # H68 D40: 54" default is unsourced
         "waste_factor": WASTE_DRAPERY,
         "notes": "First-pass estimate; verify with pattern repeat before ordering.",
     }
@@ -106,6 +130,7 @@ def estimate_roman_shade(dimensions: dict) -> dict:
         "fabric_yards": round(yards, 2),
         "linear_feet": round(yards * 3, 2),
         "fabric_width": FABRIC_WIDTH_54,
+        "fabric_width_provenance": "pending",  # H68 D40: 54" default is unsourced
         "waste_factor": WASTE_DRAPERY,
         "notes": "First-pass estimate; add lining yardage separately.",
     }
@@ -129,6 +154,7 @@ def estimate_cornice(dimensions: dict) -> dict:
         "fabric_yards": round(yards, 2),
         "linear_feet": round(yards * 3, 2),
         "fabric_width": FABRIC_WIDTH_54,
+        "fabric_width_provenance": "pending",  # H68 D40: 54" default is unsourced
         "waste_factor": WASTE_DRAPERY,
         "notes": "Cornice yardage is approximate; add 0.5 yd for welt if used.",
     }
@@ -165,6 +191,7 @@ def estimate_upholstery(dimensions: dict) -> dict:
         "linear_feet": round(raw_yards * 3, 2),
         "square_feet": round(total_sq_ft, 2),
         "fabric_width": FABRIC_WIDTH_54,
+        "fabric_width_provenance": "pending",  # H68 D40: 54" default is unsourced
         "waste_factor": WASTE_UPHOLSTERY,
         "notes": "First-pass upholstery estimate; add 0.5-1.0 yd for welts/piping.",
     }
@@ -186,6 +213,7 @@ def estimate_cushion(dimensions: dict) -> dict:
         "fabric_yards": round(yards, 2),
         "linear_feet": round(yards * 3, 2),
         "fabric_width": FABRIC_WIDTH_54,
+        "fabric_width_provenance": "pending",  # H68 D40: 54" default is unsourced
         "waste_factor": WASTE_CUSHION,
         "notes": "First-pass estimate for single cushion; add zipper allowance if used.",
     }
@@ -208,6 +236,7 @@ def estimate_headboard(dimensions: dict) -> dict:
         "fabric_yards": round(raw_yards, 2),
         "linear_feet": round(raw_yards * 3, 2),
         "fabric_width": FABRIC_WIDTH_54,
+        "fabric_width_provenance": "pending",  # H68 D40: 54" default is unsourced
         "waste_factor": WASTE_UPHOLSTERY,
         "notes": "First-pass estimate; tufting adds 10-20% depending on density.",
     }
@@ -227,6 +256,7 @@ def estimate_bedding(dimensions: dict) -> dict:
         "fabric_yards": round(yards, 2),
         "linear_feet": round(yards * 3, 2),
         "fabric_width": FABRIC_WIDTH_54,
+        "fabric_width_provenance": "pending",  # H68 D40: 54" default is unsourced
         "waste_factor": WASTE_BEDDING,
         "notes": "First-pass estimate; add shams and pillows separately.",
     }
@@ -251,6 +281,7 @@ def estimate_banquette(dimensions: dict) -> dict:
         "fabric_yards": round(yards, 2),
         "linear_feet": round(yards * 3, 2),
         "fabric_width": FABRIC_WIDTH_54,
+        "fabric_width_provenance": "pending",  # H68 D40: 54" default is unsourced
         "waste_factor": WASTE_UPHOLSTERY,
         "notes": "First-pass estimate for full-upholstered banquette; cushions separate.",
     }

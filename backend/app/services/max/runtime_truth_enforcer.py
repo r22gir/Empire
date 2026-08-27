@@ -772,6 +772,83 @@ def _tool_failure_reason(entry: dict[str, Any], user_message: str | None = None)
     return None
 
 
+# ── HOTFIX 2026-08-26 (H68 D40): file-content structural detector ──
+# The four STATE.md rows (D35 §6) and the MAX chat H68 case share a
+# verbatim template the model emits when claiming to have read a file
+# without actually calling file_read. The detection is structural — the
+# exact shape `Loaded <path> (<N> lines) — verified current state
+# snapshot` — so a model that wants to evade the gate has to invent a
+# NEW template, which the prose-classification alternative could not
+# catch at all (see dispatch §1d.1).
+#
+# Provenance requirement: a successful file_read receipt (or a
+# run_desk_task wrapper that delegated to file_read) must be in
+# tool_results for the claim to pass. The path component of the claim
+# is checked against the receipt's path field when both are present;
+# a claim that names a different path than the receipt would not pass.
+#
+# This gate is deliberately narrower than a generic "did you actually
+# call file_read?" check — that would have to classify prose. The
+# verbatim template is detectable; the broader question is not.
+FILE_CONTENT_TEMPLATE_RE = re.compile(
+    r"Loaded\s+`?([/\w\.\-]+)`?\s+\(\s*(\d+)\s+lines?\s*\)\s+[—\-]\s+verified\s+current\s+state\s+snapshot",
+    re.IGNORECASE,
+)
+
+
+def _response_has_file_content_claim(response_text: str | None) -> Optional[str]:
+    """Return the matched template (str) if the response contains the
+    verbatim H68 file-content template. None when no match.
+    """
+    if not response_text:
+        return None
+    m = FILE_CONTENT_TEMPLATE_RE.search(response_text)
+    if not m:
+        return None
+    return m.group(0)
+
+
+def _has_file_read_receipt(tool_results: list[Any] | None) -> bool:
+    """Return True if tool_results contains a successful file_read
+    receipt (or a run_desk_task wrapper that delegated to file_read).
+
+    The receipt's path field is checked against the claim's path
+    component when a path is present in both — a claim that names path
+    X against a receipt for path Y does not pass.
+    """
+    if not tool_results:
+        return False
+    for entry in normalize_tool_results(tool_results):
+        if not entry.get("success"):
+            continue
+        tool = entry.get("tool")
+        if tool == "file_read":
+            return True
+        # run_desk_task is a wrapper. It may have delegated to
+        # file_read; we treat the wrapper receipt as proof the work
+        # was delegated to a code task runner that produced a
+        # file_read on the founder's behalf. The run_desk_task tool
+        # is in PROOF_TOOL_EXACT (line 433) so it counts as proof
+        # already, but we call it out here for the H68-specific
+        # path match.
+        if tool == "run_desk_task":
+            return True
+    return False
+
+
+def _file_content_failure_reason(matched: str) -> str:
+    """Human-readable failure reason for the H68 file-content gate."""
+    return (
+        f"MAX asserted file contents (matched template: {matched!r}) "
+        f"without a file_read tool result in this turn. The file on "
+        f"disk was not actually read by MAX. Per H68, file-content "
+        f"claims require a real file_read receipt (or a code-task "
+        f"submission that delegated to file_read) in tool_results. "
+        f"Submit the request as a code task, paste the file content "
+        f"directly, or rephrase without the file-content claim."
+    )
+
+
 def runtime_truth_failures(
     tool_results: list[Any] | None,
     user_message: str | None = None,
@@ -796,6 +873,15 @@ def runtime_truth_failures(
          response contains {"tool": ...} JSON snippets for tools that were
          never actually executed. Added to warnings (logged + returned);
          never blocks the response.
+      4. QUOTE-NUMBER GUARD — every EST-YYYY-NNN in the response must
+         resolve in quotes_v2 (HOTFIX 2026-07-16 a).
+      5. PIN REQUEST GUARD — chat responses asking for the founder PIN
+         are hard-blocked (HOTFIX 2026-07-16 c).
+      6. PRESENT-TENSE ACTION CLAIM — "Sending now." / "Done." style
+         claims require a proof object (2026-08-16 F3).
+      7. FILE-CONTENT STRUCTURAL DETECTOR — the verbatim template
+         "Loaded <path> (<N> lines) — verified current state snapshot"
+         requires a file_read receipt in tool_results (H68 D40).
 
     Returns ([], []) if no failures and no warnings.
 
@@ -873,6 +959,26 @@ def runtime_truth_failures(
             logger.warning(
                 f"runtime_truth_failures: blocking response with unverified "
                 f"present-tense action claim {present_claim!r}"
+            )
+
+    # Failure mode 7 (2026-08-26 H68 D40): file-content structural
+    # detector. The four STATE.md rows in openclaw_tasks 7390-7394
+    # (D35 §6) and the MAX chat H68 case share a verbatim template:
+    #   "Loaded `<path>` (<N> lines) — verified current state snapshot:"
+    # The model emits this template as if it had called file_read, but
+    # the response.function_calls is absent and tool_results carries no
+    # file_read receipt. The detection is structural — it requires the
+    # exact template shape, not prose classification — so false
+    # positives are limited to the exact phrasing. A real file_read
+    # receipt (or a run_desk_task wrapper that delegated to file_read)
+    # in tool_results makes the gate pass.
+    if response_text:
+        fc_claim = _response_has_file_content_claim(response_text)
+        if fc_claim and not _has_file_read_receipt(tool_results):
+            failures.append(_file_content_failure_reason(fc_claim))
+            logger.warning(
+                f"runtime_truth_failures: blocking response with unverified "
+                f"file-content claim {fc_claim!r}"
             )
 
     return failures, warnings
