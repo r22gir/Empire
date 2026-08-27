@@ -154,24 +154,36 @@ VDIM_STEP = 48.0        # lateral pitch when right-hand dims stack
 # ══════════════════════════ THE SPEC ═════════════════════════════════════
 # Every number below came off the 1 July 2026 field sheets. Nothing here is
 # derived; derived values are computed in DERIVED and printed as such.
+#
+# SPEC_MCLEAN is the McLean default. Pass a different dict to build(spec=...)
+# to render a different job. Nothing job-specific lives outside this dict.
+# Data rows may be (label, value) or (label, value, {"pending": True}) to
+# mark a field as PENDING - the field then renders its label with a PENDING
+# marker in the FIELD CHECK column. A PENDING row never blanks or invents.
 
-JOB = {
-    "project":  "McLEAN",
-    "client":   "WHITTINGTON DESIGN",
-    "client_loc": "McLEAN, VA",
-    "scope":    "Window & Drapery Field Measurements",
-    "letterhead": "NELMA'S WORKROOM",
-    "poweredby":  "POWERED BY EMPIRE WORKROOM",
-    "locale":   "HYATTSVILLE MD",
-    "rev":      "A",
-    "date":     "19 AUG 2026",
-    "source":   "Field sketch set, 1 July 2026",
-    "status":   "FOR DISCUSSION - NOT FOR CONSTRUCTION",
+SPEC_MCLEAN = {
+    "job": {
+        "project":    "McLEAN",
+        "client":     "WHITTINGTON DESIGN",
+        "client_loc": "McLEAN, VA",
+        "scope":      "Window & Drapery Field Measurements",
+        "letterhead": "NELMA'S WORKROOM",
+        "poweredby":  "POWERED BY EMPIRE WORKROOM",
+        "locale":     "HYATTSVILLE MD",
+        "rev":        "A",
+        "date":       "19 AUG 2026",
+        "source":     "Field sketch set, 1 July 2026",
+        "status":     "FOR DISCUSSION - NOT FOR CONSTRUCTION",
+        "pdf_title":     "McLean - Window & Drapery Field Measurements - Whittington Design",
+        "pdf_author":    "Nelma's Workroom - Powered by Empire Workroom",
+        "pdf_creator":   "Nelma's Workroom",
+        "pdf_subject":   "Whittington Design, McLean VA - {rev} - {date} - {status}",
+    },
 }
 
 # item kinds: window / door / fireplace / ghost
 # v: (head_aff, height) in inches when field-tagged; None = schematic placement
-ROOMS = [
+SPEC_MCLEAN["rooms"] = [
  {
   "key": "FD", "name": "FORMAL DINING",
   "sub": "One opening - 99\" wide - 105\u00be\" floor to ceiling - 6\u00bd\" header",
@@ -480,7 +492,7 @@ ROOMS = [
 ]
 
 # schedule rows: room, mark, qty, width, height, overhead / head note
-SCHEDULE = [
+SPEC_MCLEAN["schedule"] = [
   ("FORMAL DINING",              "FD-1",  1, "99\"",     "not tagged",  "6\u00bd\" header - 105\u00be\" ceiling"),
   ("FORMAL LIVING - BAY",        "FLB-1", 4, "27\" ea",  "101\u00bc\"",  "106\" to bottom of moulding"),
   ("FORMAL LIVING - R/FPL",      "FLR-1", 1, "43\"",     "reference",   "106\" to bottom of moulding"),
@@ -495,10 +507,10 @@ SCHEDULE = [
 ]
 
 
-# ══════════════════════════ SITE PHOTOS ══════════════════════════════════
+# ══════════════════════════ SITE spec["photos"] ══════════════════════════════════
 # Field photos, McLean, keyed to the room sheet they belong on.
-PHOTO_DIR = "/home/claude/ph/"
-PHOTOS = {
+SPEC_MCLEAN["photo_dir"] = "/home/claude/ph/"
+SPEC_MCLEAN["photos"] = {
   "FD":  [("IMG_0726.jpg", "Window wall from the room - wainscot below")],
   "FLB": [("IMG_0724.jpg", "Bay from the room - four sashes, curved return")],
   "FLR": [("IMG_0725.jpg", "Mantel wall - reference window right of fireplace")],
@@ -512,34 +524,38 @@ PHOTOS = {
   "PR":  [("IMG_0730.jpg", "Existing balloon shade over cafe shutters")],
 }
 
+# Default spec. build(out_path) uses SPEC_MCLEAN when no spec passed.
+SPEC = SPEC_MCLEAN
+
+
 _B64 = {}
 
 
-def photo(fn, x, y, w, h):
+def photo(fn, x, y, w, h, photo_dir):
     """Embed a fitted JPEG. w/h are the already-fitted box in points."""
     import base64
     if fn not in _B64:
-        with open(PHOTO_DIR + fn, "rb") as f:
+        with open(photo_dir + fn, "rb") as f:
             _B64[fn] = base64.b64encode(f.read()).decode()
     return (f'<image x="{x:.2f}" y="{y:.2f}" width="{w:.2f}" height="{h:.2f}" '
             f'preserveAspectRatio="none" '
             f'xlink:href="data:image/jpeg;base64,{_B64[fn]}"/>')
 
 
-def photo_size(fn):
+def photo_size(fn, photo_dir):
     from PIL import Image
-    with Image.open(PHOTO_DIR + fn) as im:
+    with Image.open(photo_dir + fn) as im:
         return im.size
 
 
 # ══════════════════════════ DERIVED / GATES ══════════════════════════════
-def gates():
+def gates(spec):
     """Run before emit. Returns (ok, lines). Closure failures are reported,
     never patched with an invented number."""
     out, ok = [], True
 
     # 1 - item fit: no panel may carry more opening than it has wall
-    for r in ROOMS:
+    for r in spec["rooms"]:
         for p in r["panels"]:
             tot = sum(i["w"] for i in p.get("items", []))
             if tot > p["w"] + 0.01:
@@ -548,7 +564,7 @@ def gates():
     out.append("PASS fit   every panel's openings fit inside its tagged wall width")
 
     # 2 - explicit x placement must not overlap or overrun
-    for r in ROOMS:
+    for r in spec["rooms"]:
         for p in r["panels"]:
             xs = [(i["x"], i["x"] + i["w"]) for i in p.get("items", []) if "x" in i]
             xs.sort()
@@ -562,7 +578,7 @@ def gates():
     out.append("PASS lap   no placed opening overlaps another or runs past the wall")
 
     # 3 - dim runs referencing panel coordinates stay inside the panel
-    for r in ROOMS:
+    for r in spec["rooms"]:
         for p in r["panels"]:
             for key in ("dims_top", "dims_bot"):
                 for d in p.get(key, []):
@@ -586,16 +602,16 @@ def gates():
 
     # 5 - schedule agrees with the drawn openings
     drawn = 0
-    for r in ROOMS:
+    for r in spec["rooms"]:
         for p in r["panels"]:
             drawn += sum(1 for i in p.get("items", []) if i["kind"] == "window")
-    sched = sum(q for (_, _, q, _, _, _) in SCHEDULE if "222" not in _ if True)
-    sched = sum(q for row in SCHEDULE for q in [row[2]])
+    sched = sum(q for (_, _, q, _, _, _) in spec["schedule"] if "222" not in _ if True)
+    sched = sum(q for row in spec["schedule"] for q in [row[2]])
     out.append(f"INFO sched schedule totals {sched} treatable openings; "
                f"{drawn} window elevations drawn")
 
     # 6 - one rev across the set
-    out.append(f"PASS rev   single rev stamp '{JOB['rev']}' dated {JOB['date']}")
+    out.append(f"PASS rev   single rev stamp '{spec["job"]['rev']}' dated {spec["job"]['date']}")
     return ok, out
 
 
@@ -745,26 +761,26 @@ def draw_panel(p, ox, oy_floor, k):
 
 
 # ══════════════════════════ PAGE CHROME ══════════════════════════════════
-def chrome(sheet_no, total, right_title):
+def chrome(sheet_no, total, right_title, spec):
     o = [RECT(0, 0, PW, PH, PAPER)]
     # header band
     o.append(RECT(0, 0, PW, HDR_H, BAND))
-    o.append(T(30, 27, JOB["letterhead"], 14.0, "start", "#f4efe2", SERIF, bold=True, ls=1.6))
-    dv = 30 + tw(JOB["letterhead"], 14.0, SERIF, True, ls=1.6) + 14
+    o.append(T(30, 27, spec["job"]["letterhead"], 14.0, "start", "#f4efe2", SERIF, bold=True, ls=1.6))
+    dv = 30 + tw(spec["job"]["letterhead"], 14.0, SERIF, True, ls=1.6) + 14
     o.append(LINE(dv, 11, dv, 33, GOLD, 1.2))
-    o.append(T(dv + 12, 20.5, JOB["poweredby"], 6.2, "start", GOLD, MONO, bold=True, ls=1.5))
-    o.append(T(dv + 12, 31.5, JOB["client"] + "  \u00b7  " + JOB["project"].upper(),
+    o.append(T(dv + 12, 20.5, spec["job"]["poweredby"], 6.2, "start", GOLD, MONO, bold=True, ls=1.5))
+    o.append(T(dv + 12, 31.5, spec["job"]["client"] + "  \u00b7  " + spec["job"]["project"].upper(),
                6.0, "start", "#a49b88", MONO, ls=0.8))
     o.append(T(PW - 30, 20.5, right_title.upper(), 8.4, "end", "#f4efe2", MONO, bold=True, ls=1.2))
-    o.append(T(PW - 30, 32.5, f"SHEET {sheet_no:02d} OF {total:02d}   \u00b7   REV {JOB['rev']}"
-               f"   \u00b7   {JOB['date']}", 6.2, "end", "#a49b88", MONO, ls=0.9))
+    o.append(T(PW - 30, 32.5, f"SHEET {sheet_no:02d} OF {total:02d}   \u00b7   REV {spec["job"]['rev']}"
+               f"   \u00b7   {spec["job"]['date']}", 6.2, "end", "#a49b88", MONO, ls=0.9))
     o.append(RECT(0, HDR_H, PW, 2.2, GOLD))
     # footer band
     fy = PH - FTR_H
     o.append(RECT(0, fy, PW, FTR_H, BAND))
-    o.append(T(30, fy + 16.5, f"{JOB['letterhead']}  \u00b7  {JOB['poweredby']}  \u00b7  {JOB['locale']}",
+    o.append(T(30, fy + 16.5, f"{spec["job"]['letterhead']}  \u00b7  {spec["job"]['poweredby']}  \u00b7  {spec["job"]['locale']}",
                5.2, "start", "#a49b88", MONO, ls=0.35))
-    o.append(T(PW / 2, fy + 16.5, JOB["status"], 6.4, "middle", GOLD, MONO, bold=True, ls=1.4))
+    o.append(T(PW / 2, fy + 16.5, spec["job"]["status"], 6.4, "middle", GOLD, MONO, bold=True, ls=1.4))
     o.append(T(PW - 30, fy + 16.5, f"SHEET {sheet_no} / {total}", 6.4, "end", "#f4efe2",
                MONO, bold=True, ls=1.0))
     o.append(RECT(0, fy - 1.6, PW, 1.6, GOLD))
@@ -806,8 +822,8 @@ def section(o, x, y, w, label):
     return y + 19
 
 
-def room_sheet(r, no, total):
-    o = chrome(no, total, r["name"])
+def room_sheet(r, no, total, spec):
+    o = chrome(no, total, r["name"], spec)
     o.append(T(30, 66, r["name"], 15.0, "start", INK, SERIF, bold=True, ls=0.8))
     o.append(T(30, 84, r["sub"], 8.2, "start", MUTE, SANS, italic=True))
 
@@ -860,7 +876,7 @@ def room_sheet(r, no, total):
 
     # ── reference band ───────────────────────────────────────────────────
     bx0, by0, bx1, by1 = BAND
-    shots = PHOTOS.get(r["key"], [])
+    shots = spec["photos"].get(r["key"], [])
     body_t = by0 + 19
     ph_h = (by1 - body_t) - 24          # room for a caption line under each
     GAPZ = 18.0
@@ -869,7 +885,7 @@ def room_sheet(r, no, total):
     # photo zone width: fit each shot to ph_h, cap the zone
     fitted = []
     for fn, cap in shots:
-        iw, ih = photo_size(fn)
+        iw, ih = photo_size(fn, spec["photo_dir"])
         h = ph_h
         w = iw / ih * h
         fitted.append([fn, cap, w, h])
@@ -894,7 +910,7 @@ def room_sheet(r, no, total):
             "SITE PHOTO" + ("S" if len(fitted) > 1 else ""))
     px = bx0
     for fn, cap, w, h in fitted:
-        o.append(photo(fn, px, body_t, w, h))
+        o.append(photo(fn, px, body_t, w, h, spec["photo_dir"]))
         o.append(RECT(px, body_t, w, h, "none", INK, 0.9))
         for j, ln in enumerate(wrap(cap, max(int((w - 6) / 3.5), 12))[:3]):
             o.append(T(px, body_t + h + 9 + j * 7.4, ln, 6.0, "start", MUTE,
@@ -912,19 +928,39 @@ def room_sheet(r, no, total):
                                            (6.1, 8.2, 29, 10.2, 3.2),
                                            (5.8, 7.6, 32, 9.4, 2.6),
                                            (5.5, 7.0, 35, 8.6, 2.0)):
-        need = sum(11.0 + len(wrap(b, wrapn)[:2]) * (val_s + 1.2) + pad
-                   for _, b in r["data"])
+        def _b(tup):
+            # PENDING-aware: pending rows count as "PENDING" for sizing.
+            if len(tup) >= 3 and isinstance(tup[2], dict) and tup[2].get("pending"):
+                return "PENDING"
+            return tup[1]
+        need = sum(11.0 + len(wrap(_b(tup), wrapn)[:2]) * (val_s + 1.2) + pad
+                   for tup in r["data"])
         if need <= avail:
             break
-    for a, b in r["data"]:
+    # field data - PENDING-aware: a row of (label, value, {"pending": True})
+    # renders the value as "PENDING" and queues a PENDING bullet for the
+    # FIELD CHECK column. Plain (label, value) rows render as before.
+    pending_labels = []
+    for tup in r["data"]:
+        if len(tup) >= 3 and isinstance(tup[2], dict) and tup[2].get("pending"):
+            a, b = tup[0], "PENDING"
+            pending_labels.append(a)
+        else:
+            a, b = tup[0], tup[1]
         o.append(T(dx, y, a, lab_s, "start", MUTE, MONO, ls=0.5))
         vy = y + lead
         for ln in wrap(b, wrapn)[:2]:
             o.append(T(dx, vy, ln, val_s, "start", INK, SANS,
-                       bold=("not tagged" not in b and "not recorded" not in b)))
+                       bold=(b != "PENDING" and "not tagged" not in b and "not recorded" not in b)))
             vy += val_s + 1.2
         y = vy + pad
         o.append(LINE(dx, y - 5, dx + DATA_W, y - 5, HAIR, 0.5))
+
+    # field check - augments the room's check list with PENDING bullets for
+    # any data row that was marked pending. Plain rooms get no augmentation.
+    room_check = list(r.get("check", []))
+    for lab in pending_labels:
+        room_check.append(f"{lab}: PENDING - confirm on site")
 
     # field check
     y = section(o, cx, by0 + 10, cw, "FIELD CHECK \u00b7 BEFORE FABRICATION")
@@ -932,10 +968,10 @@ def room_sheet(r, no, total):
     for size, cols, lh in ((8.2, 42, 9.6), (7.8, 45, 9.1), (7.4, 47, 8.7),
                            (7.0, 50, 8.2), (6.6, 54, 7.8), (6.2, 58, 7.4),
                            (5.9, 62, 7.0), (5.6, 66, 6.7)):
-        need = sum(len(wrap(c, cols)) * lh + 5.0 for c in r["check"])
+        need = sum(len(wrap(c, cols)) * lh + 5.0 for c in room_check)
         if need <= room_left:
             break
-    for c in r["check"]:
+    for c in room_check:
         o.append(T(cx, y, "\u25aa", size - 1.0, "start", GOLD, SANS))
         for ln in wrap(c, cols):
             o.append(T(cx + 10, y, ln, size, "start", INK, SANS))
@@ -951,11 +987,11 @@ def room_sheet(r, no, total):
 
 
 # ══════════════════════════ COVER SHEET ══════════════════════════════════
-def cover(total):
-    o = chrome(1, total, "COVER \u00b7 INDEX")
-    o.append(T(30, 78, JOB["project"], 26.0, "start", INK, SERIF, bold=True, ls=1.2))
-    o.append(T(30 + tw(JOB["project"], 26.0, SERIF, True, ls=1.2) + 16, 78,
-               "FOR " + JOB["client"] + "  \u00b7  " + JOB["client_loc"], 9.0,
+def cover(total, spec):
+    o = chrome(1, total, "COVER \u00b7 INDEX", spec)
+    o.append(T(30, 78, spec["job"]["project"], 26.0, "start", INK, SERIF, bold=True, ls=1.2))
+    o.append(T(30 + tw(spec["job"]["project"], 26.0, SERIF, True, ls=1.2) + 16, 78,
+               "FOR " + spec["job"]["client"] + "  \u00b7  " + spec["job"]["client_loc"], 9.0,
                "start", MUTE, MONO, bold=True, ls=1.4))
     o.append(T(30, 98, "WINDOW & DRAPERY FIELD MEASUREMENTS", 9.0, "start", GOLD,
                MONO, bold=True, ls=2.2))
@@ -966,14 +1002,14 @@ def cover(total):
     o.append(T(30, y, "JOB", 7.0, "start", GOLD, MONO, bold=True, ls=1.4))
     o.append(LINE(30, y + 4, 250, y + 4, GOLD, 0.8))
     y += 16
-    for a, b in [("CLIENT", JOB["client"] + "  \u00b7  " + JOB["client_loc"]),
-                 ("HOUSE", JOB["project"]),
-                 ("WORKROOM", JOB["letterhead"] + "  \u00b7  " + JOB["locale"]),
+    for a, b in [("CLIENT", spec["job"]["client"] + "  \u00b7  " + spec["job"]["client_loc"]),
+                 ("HOUSE", spec["job"]["project"]),
+                 ("WORKROOM", spec["job"]["letterhead"] + "  \u00b7  " + spec["job"]["locale"]),
                  ("PRODUCTION", "EMPIRE WORKROOM"),
-                 ("SOURCE", JOB["source"]),
-                 ("REVISION", f"REV {JOB['rev']}  \u00b7  {JOB['date']}"),
-                 ("SHEETS", f"{total} \u2014 cover, 9 room elevations, schedule"),
-                 ("STATUS", JOB["status"])]:
+                 ("SOURCE", spec["job"]["source"]),
+                 ("REVISION", f"REV {spec["job"]['rev']}  \u00b7  {spec["job"]['date']}"),
+                 ("SHEETS", f"{total} \u2014 cover, {len(spec['rooms'])} room elevations, schedule"),
+                 ("STATUS", spec["job"]["status"])]:
         o.append(T(30, y, a, 5.6, "start", MUTE, MONO, ls=0.5))
         o.append(T(30, y + 10, b, 7.6, "start", INK, SANS))
         y += 26
@@ -1008,13 +1044,14 @@ def cover(total):
     o.append(LINE(ix, yy, 762, yy, HAIR, 0.6))
     yy += 14
     rows = [("01", "COVER \u00b7 INDEX \u00b7 HOW TO READ", "\u2014", "\u2014")]
-    for n, r in enumerate(ROOMS, start=2):
+    n_rooms = len(spec["rooms"])
+    for n, r in enumerate(spec["rooms"], start=2):
         wins = sum(1 for p in r["panels"] for i in p.get("items", [])
                    if i["kind"] == "window")
         rows.append((f"{n:02d}", r["name"], str(wins) if wins else "wall",
                      str(len(r["check"]))))
-    rows.append((f"{len(ROOMS)+2:02d}", "OPENING SCHEDULE \u00b7 ALL ROOMS",
-                 str(sum(r[2] for r in SCHEDULE)), "\u2014"))
+    rows.append((f"{n_rooms+2:02d}", "OPENING SCHEDULE \u00b7 ALL ROOMS",
+                 str(sum(r[2] for r in spec["schedule"])), "\u2014"))
     for a, b, c, d in rows:
         o.append(T(ix, yy, a, 7.2, "start", GOLD, MONO, bold=True, ls=0.6))
         o.append(T(ix + 38, yy, b, 7.4, "start", INK, SANS))
@@ -1068,8 +1105,8 @@ def cover(total):
 
 
 # ══════════════════════════ SCHEDULE SHEET ═══════════════════════════════
-def schedule_sheet(no, total):
-    o = chrome(no, total, "OPENING SCHEDULE")
+def schedule_sheet(no, total, spec):
+    o = chrome(no, total, "OPENING SCHEDULE", spec)
     o.append(T(30, 66, "OPENING SCHEDULE", 15.0, "start", INK, SERIF, bold=True, ls=0.8))
     o.append(T(30, 82, "All rooms - one line per opening type - as field-recorded "
                "1 July 2026", 7.6, "start", MUTE, SANS, italic=True))
@@ -1081,7 +1118,7 @@ def schedule_sheet(no, total):
         o.append(T(x, y, lab, 5.8, "start", GOLD, MONO, bold=True, ls=1.2))
     o.append(LINE(30, y + 5, 762, y + 5, GOLD, 1.0))
     y += 19
-    for i, (room, mark, qty, w, h, note) in enumerate(SCHEDULE):
+    for i, (room, mark, qty, w, h, note) in enumerate(spec["schedule"]):
         if i % 2 == 0:
             o.append(RECT(26, y - 9, 740, 18, "#efe9db"))
         o.append(T(30, y, room, 7.4, "start", INK, SANS, bold=True))
@@ -1093,7 +1130,7 @@ def schedule_sheet(no, total):
         o.append(T(424, y, note, 6.6, "start", MUTE, SANS))
         y += 22
     o.append(LINE(30, y - 12, 762, y - 12, HAIR, 0.8))
-    tot = sum(r[2] for r in SCHEDULE)
+    tot = sum(r[2] for r in spec["schedule"])
     o.append(T(240, y + 2, str(tot), 8.0, "start", GOLD, MONO, bold=True))
     o.append(T(30, y + 2, "TOTAL OPENINGS RECORDED", 7.0, "start", INK, MONO, bold=True, ls=0.8))
 
@@ -1149,8 +1186,74 @@ def gate_collisions(placed, tol=1.2):
     return bad
 
 
-def build(out_path):
-    ok, lines = gates()
+# ══════════════════════════ CLIENT-SAFE EMIT GATE ═════════════════════════
+# Hardened against the H74 incident: a client-facing PDF went out carrying
+# MARKUP / BILLING / INVOICED tokens that no prompt rule would have stopped.
+# A rule in a dispatch is not a mechanism. This gate is the mechanism.
+#
+# Audience defaults to "client". The permissive default was the H74 cause -
+# it is not repeated here. Pass audience="shop" for shop-facing documents
+# (which may carry these tokens); do not omit the argument when in doubt.
+
+FORBIDDEN_CLIENT_TOKENS = (
+    "MARKUP", "BASE RATE", "BASE $", "COST", "MARGIN",
+    "INVOICED", "BALANCE DUE", "INTERNAL", "NOT FOR CLIENT",
+)
+
+
+def _spec_text(spec):
+    """Gather every user-visible string in a spec that the renderer would
+    emit. Internal numeric fields are skipped; only strings flow."""
+    bits = []
+    bits.append(" ".join(str(v) for v in spec["job"].values()))
+    for r in spec["rooms"]:
+        bits.append(r.get("name", ""))
+        bits.append(r.get("sub", ""))
+        bits.append(r.get("math", ""))
+        for entry in r.get("data", []):
+            for elt in entry:
+                bits.append(str(elt))
+        for c in r.get("check", []):
+            bits.append(c)
+        for p in r.get("panels", []):
+            bits.append(p.get("label", ""))
+            for tup in p.get("dims_top", []) + p.get("dims_bot", []) + p.get("dims_right", []):
+                for elt in tup:
+                    bits.append(str(elt))
+    for row in spec["schedule"]:
+        for elt in row:
+            bits.append(str(elt))
+    return "\n".join(bits)
+
+
+def gate_emit_client_safe(spec, audience="client"):
+    """Raises ValueError if a client-facing spec carries forbidden cost /
+    internal tokens. Shop audience skips the check entirely.
+
+    On any hit: raise, naming the token and the sheet-equivalent location.
+    Do not warn. Do not strip and continue. Do not log and proceed.
+    """
+    if audience != "client":
+        return
+    upper = _spec_text(spec).upper()
+    for tok in FORBIDDEN_CLIENT_TOKENS:
+        if tok in upper:
+            raise ValueError(
+                f"gate_emit_client_safe: forbidden token {tok!r} present in "
+                f"client-facing spec for job {spec['job'].get('project', '<unknown>')!r}. "
+                f"Remove the token or pass audience='shop' for an internal doc."
+            )
+
+
+def build(out_path, spec=None, audience="client"):
+    if spec is None:
+        spec = SPEC_MCLEAN
+
+    # CLIENT-SAFE GATE. Runs BEFORE any PDF write. H74 lesson: this gate is
+    # the deliverable. An instruction in a prompt is not a mechanism.
+    gate_emit_client_safe(spec, audience=audience)
+
+    ok, lines = gates(spec)
     print("─ GATES " + "─" * 60)
     for l in lines:
         print("  " + l)
@@ -1158,12 +1261,12 @@ def build(out_path):
         print("\nREFUSING TO EMIT - a closed gate failed.")
         sys.exit(1)
 
-    total = len(ROOMS) + 2
+    total = len(spec["rooms"]) + 2
     sheets, faults = [], []
-    builders = [lambda t=total: cover(t)]
-    builders += [(lambda r=r, n=n, t=total: room_sheet(r, n, t))
-                 for n, r in enumerate(ROOMS, start=2)]
-    builders.append(lambda t=total: schedule_sheet(t, t))
+    builders = [lambda t=total, s=spec: cover(t, s)]
+    builders += [(lambda r=r, n=n, t=total, s=spec: room_sheet(r, n, t, s))
+                 for n, r in enumerate(spec["rooms"], start=2)]
+    builders.append(lambda t=total, s=spec: schedule_sheet(t, t, s))
     for n, mk in enumerate(builders, 1):
         PLACED.clear()
         sheets.append(mk())
@@ -1178,6 +1281,7 @@ def build(out_path):
     print("  PASS bounds      every string inside the page frame")
     print("  PASS collisions  no two strings overlap")
 
+    job = spec["job"]
     w = PdfWriter()
     for i, svg in enumerate(sheets, 1):
         buf = io.BytesIO()
@@ -1185,13 +1289,13 @@ def build(out_path):
         buf.seek(0)
         w.add_page(PdfReader(buf).pages[0])
         print(f"  sheet {i:02d}/{total} ok")
-    w.add_metadata({"/Title": "McLean - Window & Drapery Field Measurements - "
-                              "Whittington Design",
-                    "/Author": "Nelma's Workroom - Powered by Empire Workroom",
-                    "/Creator": "Nelma's Workroom",
-                    "/Subject": f"Whittington Design, McLean VA - "
-                                f"REV {JOB['rev']} - {JOB['date']} - "
-                                f"{JOB['status']}"})
+    subject = job["pdf_subject"].format(rev=job["rev"],
+                                        date=job["date"],
+                                        status=job["status"])
+    w.add_metadata({"/Title":   job["pdf_title"],
+                    "/Author":  job["pdf_author"],
+                    "/Creator": job["pdf_creator"],
+                    "/Subject": subject})
     with open(out_path, "wb") as f:
         w.write(f)
     print("written:", out_path)
