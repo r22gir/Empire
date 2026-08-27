@@ -978,11 +978,14 @@ def room_sheet(r, no, total, spec):
             y += lh
         y += 5.0
 
-    # fabric registry strip, along the foot of the band
-    o.append(T(bx0, by1 + 16, "NOT YET ELECTED   \u00b7   FABRIC: TBC - CONFIRM "
-               "BEFORE CUT   \u00b7   LINING: TBC   \u00b7   HEADING: TBC   \u00b7   "
-               "HARDWARE: TBC   \u00b7   MOUNT: NOT RECORDED ON FIELD SHEET",
-               6.6, "start", GOLD, MONO, bold=True, ls=0.5))
+    # fabric registry strip, along the foot of the band. Per-room override
+    # via r["fabric_strip"]; falls back to the McLean default when absent.
+    fabric_strip = r.get("fabric_strip",
+        "NOT YET ELECTED   \u00b7   FABRIC: TBC - CONFIRM "
+        "BEFORE CUT   \u00b7   LINING: TBC   \u00b7   HEADING: TBC   \u00b7   "
+        "HARDWARE: TBC   \u00b7   MOUNT: NOT RECORDED ON FIELD SHEET")
+    o.append(T(bx0, by1 + 16, fabric_strip, 6.6, "start", GOLD, MONO,
+               bold=True, ls=0.5))
     return page("".join(o))
 
 
@@ -1061,18 +1064,24 @@ def cover(total, spec):
         o.append(LINE(ix, yy - 3, 762, yy - 3, HAIR, 0.4))
         yy += 8
 
-    # open items at a glance
+    # open items at a glance. Per-spec override via spec["cover"]["open_at_glance"];
+    # falls back to the McLean closure-notes list when absent.
+    cover_glance = spec.get("cover", {}).get("open_at_glance")
+    if cover_glance is None:
+        cover_glance = [
+            "Living Room center wall does not close - 225\" tagged against "
+            "222\" overall.",
+            "Living Room left wall leaves 54\u00bc\" untagged at the door bank.",
+            "Formal Living bay moulding band scales 4\u00bd\" against 2\u00bd\" tagged.",
+            "Head and sill heights are untagged in five rooms - no finished "
+            "lengths can be set.",
+            "Mount condition is not recorded anywhere in the set.",
+        ]
     oy = yy + 16
     o.append(T(ix, oy, "OPEN AT A GLANCE", 7.0, "start", GOLD, MONO, bold=True, ls=1.4))
     o.append(LINE(ix, oy + 4, 762, oy + 4, GOLD, 0.8))
     oy += 16
-    for c in ["Living Room center wall does not close - 225\" tagged against "
-              "222\" overall.",
-              "Living Room left wall leaves 54\u00bc\" untagged at the door bank.",
-              "Formal Living bay moulding band scales 4\u00bd\" against 2\u00bd\" tagged.",
-              "Head and sill heights are untagged in five rooms - no finished "
-              "lengths can be set.",
-              "Mount condition is not recorded anywhere in the set."]:
+    for c in cover_glance:
         for j, ln in enumerate(wrap(c, 74)):
             if j == 0:
                 o.append(T(ix, oy, "\u25aa", 5.4, "start", GOLD, SANS))
@@ -1108,8 +1117,10 @@ def cover(total, spec):
 def schedule_sheet(no, total, spec):
     o = chrome(no, total, "OPENING SCHEDULE", spec)
     o.append(T(30, 66, "OPENING SCHEDULE", 15.0, "start", INK, SERIF, bold=True, ls=0.8))
-    o.append(T(30, 82, "All rooms - one line per opening type - as field-recorded "
-               "1 July 2026", 7.6, "start", MUTE, SANS, italic=True))
+    subtitle = spec.get("schedule_subtitle",
+                        "All rooms - one line per opening type - as field-recorded "
+                        "1 July 2026")
+    o.append(T(30, 82, subtitle, 7.6, "start", MUTE, SANS, italic=True))
 
     cols = [(30, "ROOM"), (196, "MARK"), (240, "QTY"), (276, "WIDTH"),
             (352, "HEIGHT"), (424, "HEAD / OVERHEAD CONDITION")]
@@ -1134,25 +1145,28 @@ def schedule_sheet(no, total, spec):
     o.append(T(240, y + 2, str(tot), 8.0, "start", GOLD, MONO, bold=True))
     o.append(T(30, y + 2, "TOTAL OPENINGS RECORDED", 7.0, "start", INK, MONO, bold=True, ls=0.8))
 
-    # open items
+    # open items. Per-spec override via spec["schedule_open_notes"];
+    # falls back to the McLean closure-notes list when absent.
+    opens = spec.get("schedule_open_notes")
+    if opens is None:
+        opens = [
+          "Living Room center wall: tagged segments total 225\" against a 222\" "
+          "overall. 3\" unresolved.",
+          "Living Room left wall: 54\u00bc\" at the door bank is untagged. Door bank "
+          "width governs the panel count.",
+          "Formal Living bay: moulding band scales 4\u00bd\" but is tagged 2\u00bd\". "
+          "Remeasure before hardware.",
+          "Head and sill heights are untagged in Formal Dining, Living Room, Family "
+          "Room and Kitchen / Dining - no finished lengths can be set for those rooms.",
+          "Mount condition (inside, outside, ceiling) is not recorded anywhere in the "
+          "set. It changes every width.",
+          "Fabric, lining, heading and hardware are not yet elected - this set is "
+          "measurement only.",
+        ]
     y += 34
     o.append(T(30, y, "OPEN BEFORE QUOTING", 7.0, "start", GOLD, MONO, bold=True, ls=1.4))
     o.append(LINE(30, y + 4, 762, y + 4, GOLD, 0.8))
     y += 16
-    opens = [
-      "Living Room center wall: tagged segments total 225\" against a 222\" "
-      "overall. 3\" unresolved.",
-      "Living Room left wall: 54\u00bc\" at the door bank is untagged. Door bank "
-      "width governs the panel count.",
-      "Formal Living bay: moulding band scales 4\u00bd\" but is tagged 2\u00bd\". "
-      "Remeasure before hardware.",
-      "Head and sill heights are untagged in Formal Dining, Living Room, Family "
-      "Room and Kitchen / Dining - no finished lengths can be set for those rooms.",
-      "Mount condition (inside, outside, ceiling) is not recorded anywhere in the "
-      "set. It changes every width.",
-      "Fabric, lining, heading and hardware are not yet elected - this set is "
-      "measurement only.",
-    ]
     for c in opens:
         lines = wrap(c, 118)
         o.append(T(30, y, "\u25aa", 5.4, "start", GOLD, SANS))
@@ -1210,6 +1224,8 @@ def _spec_text(spec):
         bits.append(r.get("name", ""))
         bits.append(r.get("sub", ""))
         bits.append(r.get("math", ""))
+        if r.get("fabric_strip"):
+            bits.append(r["fabric_strip"])
         for entry in r.get("data", []):
             for elt in entry:
                 bits.append(str(elt))
@@ -1223,6 +1239,10 @@ def _spec_text(spec):
     for row in spec["schedule"]:
         for elt in row:
             bits.append(str(elt))
+    for c in spec.get("cover", {}).get("open_at_glance", []):
+        bits.append(c)
+    for c in spec.get("schedule_open_notes", []):
+        bits.append(c)
     return "\n".join(bits)
 
 
