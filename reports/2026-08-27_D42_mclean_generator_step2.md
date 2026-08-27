@@ -73,14 +73,35 @@ $110.
 
 ### 2b.3 — Emitted total vs stored subtotal (side by side)
 
+**Scope statement (added at founder request).** This pack is a
+field-measurement set, **not** a quote. The McLean/Whittington format
+emits elevations and a schedule only — no line-item amounts, no per-row
+totals, no job total. The only dollar figures anywhere in the PDF are
+**rate annotations** in the LAYOUT MATH strip on each drapery sheet:
+
+- W1: `PLEATING 6 WIDTHS · NELMA-814 RATE $95 PER WIDTH`
+- W2: `PLEATING 4 WIDTHS · NELMA-814 RATE $95 PER WIDTH`
+- W3: `PLEATING PENDING · NELMA-814 RATE $95 PER WIDTH`
+
+These three `$95` mentions are the per-width pleating rate cited from
+the issued invoice, not line totals. There is no AMOUNT column on the
+schedule sheet (its columns are ROOM / MARK / QTY / WIDTH / HEIGHT /
+HEAD-OVERHEAD CONDITION). The pack is a different document from the
+quote. The dispatch's "read prices from the stored row" is satisfied
+because the rate citations are built from the stored row's line items
+(NELMA-814 governs $95/width for this job, not the catalog $110) — but
+those prices do not appear as line totals on the PDF. The DB row
+carries the $4,084.05 subtotal; the PDF does not.
+
 ```
 stored subtotal:    $4,084.05  (empire.db / quotes_v2 row id 739556e1)
 stored tax:         $0.00
 stored total:       $4,084.05
 project:            Becky — 4600 Fieldstone (via Lauren Bassett, LB Design)
 
-dollar figures in PDF:  ['$95', '$95', '$95']
-emitted subtotal:   $0.00  (field-measurement pack has no monetary totals)
+dollar figures in PDF:  ['$95', '$95', '$95']   ← all three are rate annotations, see scope statement above
+emitted line totals:    0
+emitted job total:      0
 ```
 
 The McLean/Whittington format is field-measurement, not pricing. The PDF
