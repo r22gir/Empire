@@ -1026,6 +1026,25 @@ class TelegramBot:
             import shutil
             shutil.move(str(photo_path), str(dest))
 
+            # D44 — copy the just-landed Telegram photo into the canonical
+            # job-images tree so MAX can list/describe it later. Per STOP 1
+            # ruling #5 the Telegram writer (this hardcoded path above) is
+            # not modified; we add a downstream copy at landing time. No
+            # quote context is known yet, so the row lands in the unassigned
+            # bucket keyed by telegram chat id. If the quote-creation path
+            # below succeeds, a second row with quote_id is inserted then.
+            try:
+                from app.services.job_image_store import store_job_image
+                _photo_chat_id = str(update.effective_chat.id) if update.effective_chat else None
+                store_job_image(
+                    dest.read_bytes(),
+                    source_channel="telegram",
+                    item_key=f"telegram_chat:{_photo_chat_id}" if _photo_chat_id else None,
+                    original_filename=dest.name,
+                )
+            except ValueError as _d44e:
+                logger.warning(f"D44 telegram image rejected: {_d44e}")
+
             vision_context = ""
             try:
                 import base64 as _b64_mod
@@ -1133,6 +1152,24 @@ class TelegramBot:
                                 import json as _json_mod
                                 with open(str(_q_photo_dir / f"telegram_{dest.name}.meta.json"), "w") as _mf:
                                     _json_mod.dump({"source": "telegram", "entity_type": "quote", "entity_id": _qid, "uploaded_at": datetime.now().isoformat()}, _mf)
+
+                                # D44 — now that we have the new quote id,
+                                # insert a job_documents row keyed to it.
+                                # The earlier store_job_image() call (line
+                                # ~1027) already created an unassigned row;
+                                # we don't try to "promote" that — instead
+                                # this row records the quote link that
+                                # existed only after the quote was created.
+                                from app.services.job_image_store import (
+                                    store_job_image as _d44_store,
+                                )
+                                _d44_store(
+                                    dest.read_bytes(),
+                                    source_channel="telegram",
+                                    quote_id=_qid,
+                                    item_key=f"telegram_quote:{_qid}",
+                                    original_filename=dest.name,
+                                )
                             except Exception as _pe:
                                 logger.warning(f"Failed to save photo to unified storage: {_pe}")
 

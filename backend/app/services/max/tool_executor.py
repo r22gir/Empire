@@ -3471,6 +3471,148 @@ def _understand_image(params: dict, desk: Optional[str] = None) -> ToolResult:
     )
 
 
+# ── D44 · JOB IMAGE TOOLS ──────────────────────────────────────────────
+# MAX can list and describe images that landed in job_documents via any of
+# the five channels. The list tool queries the DB (not the filesystem) so it
+# surfaces metadata — source_channel, route_to, item_key — that the existing
+# photo list endpoint doesn't know about. The describe tool re-validates the
+# file via the D43 decode-verify guard before handing bytes to vision, so
+# an image that fails validation isn't returned as if it were fine.
+
+@tool("list_job_images")
+def _list_job_images(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """List images stored for a job, a quote, or the unassigned bucket.
+
+    Exactly one of job_id, quote_id, or unassigned must be set.
+    Returns up to 50 rows ordered by created_at DESC.
+    """
+    from app.services.job_image_store import list_job_documents
+    job_id = (params.get("job_id") or "").strip() or None
+    quote_id = (params.get("quote_id") or "").strip() or None
+    unassigned = bool(params.get("unassigned", False))
+    limit = int(params.get("limit", 50) or 50)
+    if limit < 1 or limit > 200:
+        limit = 50
+
+    chosen = sum(1 for x in (job_id, quote_id, unassigned) if x)
+    if chosen != 1:
+        return ToolResult(
+            tool="list_job_images",
+            success=False,
+            error="Pass exactly one of job_id, quote_id, or unassigned=true.",
+        )
+
+    try:
+        rows = list_job_documents(
+            job_id=job_id, quote_id=quote_id, unassigned=unassigned, limit=limit,
+        )
+    except ValueError as exc:
+        return ToolResult(tool="list_job_images", success=False, error=str(exc))
+
+    return ToolResult(
+        tool="list_job_images",
+        success=True,
+        result={
+            "count": len(rows),
+            "filter": {
+                "job_id": job_id, "quote_id": quote_id, "unassigned": unassigned,
+            },
+            "images": [
+                {
+                    "id": r["id"],
+                    "filename": r["filename"],
+                    "url": r["url"],
+                    "job_id": r["job_id"],
+                    "quote_id": r["quote_id"],
+                    "document_type": r["document_type"],
+                    "item_key": r["item_key"],
+                    "route_to": r["route_to"],
+                    "source_channel": r["source_channel"],
+                    "revision": r["revision"],
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ],
+        },
+    )
+
+
+@tool("describe_job_image")
+def _describe_job_image(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Read a stored job image, re-validate it, and describe it via vision.
+
+    document_id is the job_documents.id from list_job_images. The file is
+    re-validated through the D43 decode-verify guard; an image that fails
+    validation is returned as an error rather than a description.
+    """
+    from app.services.job_image_store import (
+        get_job_document,
+        read_and_validate_job_image,
+        resolve_document_path,
+    )
+    document_id = (params.get("document_id") or "").strip()
+    if not document_id:
+        return ToolResult(
+            tool="describe_job_image",
+            success=False,
+            error="document_id is required (the job_documents.id from list_job_images).",
+        )
+
+    row = get_job_document(document_id)
+    if not row:
+        return ToolResult(
+            tool="describe_job_image",
+            success=False,
+            error=f"document_id {document_id!r} not found in job_documents",
+        )
+
+    path = resolve_document_path(row)
+    try:
+        _ = read_and_validate_job_image(row)
+    except FileNotFoundError as exc:
+        return ToolResult(
+            tool="describe_job_image",
+            success=False,
+            error=f"file missing on disk: {exc}",
+        )
+    except ValueError as exc:
+        return ToolResult(
+            tool="describe_job_image",
+            success=False,
+            error=f"image failed re-validation: {exc}",
+        )
+
+    # Reuse the existing understand_image tool so xAI Grok → OpenAI fallback
+    # routing stays consistent with the rest of MAX vision calls.
+    inner = _understand_image({"image": str(path)}, desk=desk)
+    if not inner.success:
+        return ToolResult(
+            tool="describe_job_image",
+            success=False,
+            error=f"vision failed: {inner.error}",
+            result={"document_id": document_id, "path": str(path)},
+        )
+
+    inner_data = inner.result if isinstance(inner.result, dict) else {}
+    return ToolResult(
+        tool="describe_job_image",
+        success=True,
+        result={
+            "document_id": document_id,
+            "filename": row.get("filename"),
+            "source_channel": row.get("source_channel"),
+            "job_id": row.get("job_id"),
+            "quote_id": row.get("quote_id"),
+            "path": str(path),
+            "summary": inner_data.get("summary"),
+            "notable_details": inner_data.get("notable_details"),
+            "confidence": inner_data.get("confidence"),
+            "provider": inner_data.get("provider"),
+            "latency_ms": inner_data.get("latency_ms"),
+        },
+    )
+
+
 # ── WEB SEARCH TOOL ───────────────────────────────────────────────
 
 def _parse_ddg_results(html: str, max_results: int) -> list:

@@ -56,6 +56,17 @@ _PRE_COLLECTION_DB_PATH = os.path.join(
 )
 os.environ.setdefault("EMPIRE_TASK_DB", _PRE_COLLECTION_DB_PATH)
 
+# D44 — the single-writer reads EMPIRE_DB_PATH / EMPIRE_PHOTOS_DIR via
+# canonical_path.py at call time, but app-level imports (e.g. label_station)
+# capture DB_PATH at module load. Pre-set these to the same tmp paths so
+# collection-time imports do not lock onto prod paths.
+_PRE_COLLECTION_PHOTOS_DIR = os.path.join(
+    tempfile.gettempdir(),
+    f"empire_test_d33_pid{os.getpid()}_photos",
+)
+os.environ.setdefault("EMPIRE_DB_PATH", _PRE_COLLECTION_DB_PATH)
+os.environ.setdefault("EMPIRE_PHOTOS_DIR", _PRE_COLLECTION_PHOTOS_DIR)
+
 # Default safety knob: tests should never write to the prod DB unless
 # they explicitly opt out. We block write-path calls that point at the
 # real prod path.
@@ -84,6 +95,7 @@ _DATA_TABLES = [
     "production_log",
     "invoices",
     "jobs",
+    "job_documents",   # D44 — job images landing table
     "payments_v2",
     "financial_audit_log",
     "chart_of_accounts",

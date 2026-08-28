@@ -12,7 +12,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Optional, List
 import json
+import logging
 import sqlite3
+
+logger = logging.getLogger(__name__)
 import os
 import uuid
 from pathlib import Path
@@ -451,10 +454,42 @@ def init_schema():
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
+        # D44 — job_documents v2: nullable job_id (key off quote_id instead), add
+        # quote_id + source_channel columns. The old v1 schema had job_id NOT NULL
+        # which forced every uploader to invent a job row. Per STOP 1 ruling #1 we
+        # key documents off quote_id (PENDING never blocks); job_id stays for the
+        # jobs_unified paths that already use it. Migration: drop the v1 table iff
+        # the schema is detected as v1 AND the table is empty (safe in production
+        # today — confirmed 0 rows at STOP 1). Non-empty v1 tables are left
+        # untouched so a future row-ful environment does not silently lose data.
+        try:
+            cur = conn.execute("PRAGMA table_info(job_documents)")
+            v1_cols = {row[1]: row for row in cur.fetchall()}
+            v1_job_id = v1_cols.get("job_id")
+            if v1_job_id is not None and v1_job_id[3] == 1 and "source_channel" not in v1_cols:
+                row_count = conn.execute(
+                    "SELECT COUNT(*) FROM job_documents"
+                ).fetchone()[0]
+                if row_count == 0:
+                    conn.execute("DROP TABLE job_documents")
+                    logger.info(
+                        "D44 migration: dropped v1 job_documents (0 rows) "
+                        "before recreating as v2"
+                    )
+                else:
+                    logger.warning(
+                        "D44 migration: job_documents has %d rows in v1 "
+                        "schema; manual migration required before v2 columns "
+                        "are available", row_count,
+                    )
+        except sqlite3.OperationalError as e:
+            logger.warning("D44 migration pre-check failed: %s", e)
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS job_documents (
                 id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
-                job_id TEXT NOT NULL REFERENCES jobs(id),
+                job_id TEXT REFERENCES jobs(id),
+                quote_id TEXT,
                 document_type TEXT,
                 item_key TEXT,
                 route_to TEXT,
@@ -462,6 +497,7 @@ def init_schema():
                 filename TEXT,
                 revision INTEGER DEFAULT 1,
                 visible_to_client INTEGER DEFAULT 0,
+                source_channel TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
@@ -519,6 +555,8 @@ def init_schema():
         for idx in [
             "CREATE INDEX IF NOT EXISTS idx_job_items_job ON job_items(job_id)",
             "CREATE INDEX IF NOT EXISTS idx_job_docs_job ON job_documents(job_id)",
+            "CREATE INDEX IF NOT EXISTS idx_job_docs_quote ON job_documents(quote_id)",
+            "CREATE INDEX IF NOT EXISTS idx_job_docs_source ON job_documents(source_channel)",
             "CREATE INDEX IF NOT EXISTS idx_job_sel_job ON job_selections(job_id)",
             "CREATE INDEX IF NOT EXISTS idx_job_rev_job ON job_revisions(job_id)",
             "CREATE INDEX IF NOT EXISTS idx_job_events_job ON job_events(job_id)",

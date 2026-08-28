@@ -220,6 +220,35 @@ async def upload_photos(
         })
         logger.info(f"Photo saved: {entity_type}/{entity_id}/{filename} ({len(content)} bytes, source={source})")
 
+        # D44 — also land the file in the canonical job-images tree so MAX
+        # can list/describe it. Only fire for actual image payloads (the
+        # caller may upload .glb / .pdf for scans and 3D models); route_to
+        # is inferred from entity_type for the workroom/woodcraft split.
+        if suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".heic"}:
+            try:
+                from app.services.job_image_store import store_job_image
+                _d44_quote_id = entity_id if entity_type == "quote" else None
+                _d44_item_key = (
+                    f"{entity_type}:{entity_id}" if entity_type != "quote" else None
+                )
+                _d44_route_to = (
+                    "woodcraft" if entity_type == "craftforge"
+                    else "workroom"
+                )
+                store_job_image(
+                    content,
+                    source_channel="quote_ui",
+                    quote_id=_d44_quote_id,
+                    item_key=_d44_item_key,
+                    route_to=_d44_route_to,
+                    document_type="photo",
+                    original_filename=f.filename,
+                )
+            except ValueError as _d44e:
+                logger.warning(
+                    f"D44 /photos/upload image rejected for {entity_type}/{entity_id}: {_d44e}"
+                )
+
     return {
         "entity_type": entity_type,
         "entity_id": entity_id,

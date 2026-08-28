@@ -566,8 +566,26 @@ async def upload_photo(
     ext = os.path.splitext(file.filename or "photo.jpg")[1] or ".jpg"
     filename = f"{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(project_dir, filename)
+    content = file.file.read()
     with open(filepath, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        f.write(content)
+
+    # D44 — land the LuxeForge upload in the canonical job-images tree so MAX
+    # can find it via list_job_images. Per STOP 1 ruling #1, no quote/job is
+    # inferred at upload time; the row is keyed to the intake project via
+    # item_key. PENDING never blocks.
+    if ext.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".heic"}:
+        try:
+            from app.services.job_image_store import store_job_image
+            store_job_image(
+                content,
+                source_channel="luxeforge_intake",
+                item_key=f"intake_project:{project_id}",
+                document_type="photo",
+                original_filename=file.filename or filename,
+            )
+        except ValueError as _d44e:
+            logger.warning(f"D44 luxeforge image rejected for {project_id}: {_d44e}")
 
     # Update DB
     photos = json.loads(row["photos"] or "[]")

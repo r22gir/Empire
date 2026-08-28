@@ -49,9 +49,28 @@ async def upload_file(file: UploadFile = File(...)):
     if save_path.exists():
         stem, suffix = save_path.stem, save_path.suffix
         save_path = UPLOAD_DIR / category / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
+    raw_bytes = file.file.read()
     with open(save_path, 'wb') as f:
-        shutil.copyfileobj(file.file, f)
+        f.write(raw_bytes)
     log_access("upload", file.filename, "founder", f"category={category}")
+
+    # D44 — copy image-category uploads into the canonical job-images tree
+    # so MAX can find them later via list_job_images / describe_job_image.
+    # Email channel is intentionally NOT wired here (SendGrid retired 2026-08-27,
+    # see D44 STEP 0 finding 3). Reuses decode_image_input from vision.py so
+    # non-image payloads are rejected without writing a row.
+    if category == "images":
+        try:
+            from app.services.job_image_store import store_job_image
+            store_job_image(
+                raw_bytes,
+                source_channel="max_chat",
+                original_filename=file.filename,
+            )
+        except ValueError as _ve:
+            log_access("d44_reject", file.filename, "founder",
+                       f"channel=max_chat reason={_ve}")
+
     return {"status": "success", "filename": save_path.name, "category": category, "size": save_path.stat().st_size}
 
 @router.post("/upload-from-path")
