@@ -1,21 +1,58 @@
 """Regression tests for /api/v1/vision MiniMax image-understanding transport."""
 import asyncio
 import base64
+import os
 import sys
 import types
+from io import BytesIO
 
 import pytest
 from fastapi import HTTPException
+from PIL import Image
+
+# D43 1d — opt-in env var controls access to the bad-payload fixture.
+# Without opt-in, only real PNGs are produced by the default helpers, and
+# the bad-payload helper skips its test. This prevents the 136-byte
+# "PNG-magic + 128 'x'" fixture from being a vector for accidental
+# production writes via test code. See reports/2026-08-27_d43_step0.md §0b.
+_BAD_PAYLOAD_ENV = "EMPIRE_VISION_TEST_BAD_PAYLOAD_ALLOWED"
 
 
-def _png_data_uri() -> str:
-    payload = b"\x89PNG\r\n\x1a\n" + (b"x" * 128)
-    return "data:image/png;base64," + base64.b64encode(payload).decode("ascii")
+def _png_data_uri(width: int = 4, height: int = 3, color=(200, 100, 50)) -> str:
+    """Default fixture: a real, valid PNG that PIL.Image.verify() accepts.
+
+    D43 1a adds a decode-verify guard that rejects bare-byte padding.
+    The default helpers construct a real PNG so routing tests can run
+    unconditionally.
+    """
+    img = Image.new("RGB", (width, height), color)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def _raw_png_base64() -> str:
-    payload = b"\x89PNG\r\n\x1a\n" + (b"x" * 128)
-    return base64.b64encode(payload).decode("ascii")
+def _raw_png_base64(width: int = 4, height: int = 3, color=(200, 100, 50)) -> str:
+    """Default fixture: bare base64 of a real PNG."""
+    img = Image.new("RGB", (width, height), color)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _bad_png_payload() -> bytes:
+    """Gated 136-byte "PNG-magic + 128 'x'" fixture.
+
+    Returns the bytes only when EMPIRE_VISION_TEST_BAD_PAYLOAD_ALLOWED is
+    set. Otherwise skips the calling test. The guard exists so this
+    fixture cannot be invoked from production by accident — even via
+    `from tests.test_vision_mmx_cli import _bad_png_payload`.
+    """
+    if not os.environ.get(_BAD_PAYLOAD_ENV):
+        pytest.skip(
+            f"Bad-payload fixture gated by {_BAD_PAYLOAD_ENV}=1 "
+            f"(D43 1d — see reports/2026-08-27_d43_step0.md §0b)"
+        )
+    return b"\x89PNG\r\n\x1a\n" + (b"x" * 128)
 
 
 def test_call_vision_uses_mmx_cli_wrapper_for_data_uri(monkeypatch, tmp_path):
@@ -194,3 +231,25 @@ def test_measurements_pdf_uses_canonical_measurements_dir(monkeypatch, tmp_path)
     saved = list(tmp_path.glob("sample_scan_*.pdf"))
     assert saved
     assert b"%PDF" in saved[0].read_bytes()
+
+
+def test_decode_image_input_rejects_lookalike_png_payload():
+    """D43 1a — the 136-byte fixture (PNG-magic + 128 'x' padding) must raise.
+
+    This is the bug that put 143 fake files in vision_inputs/. Without
+    PIL.Image.verify() at the boundary, the magic-byte check accepted the
+    payload. With 1a, the bytewise decoder rejects it as not decodable.
+
+    The bad payload is gated by EMPIRE_VISION_TEST_BAD_PAYLOAD_ALLOWED;
+    this test skips when the env var is unset.
+    """
+    from app.routers import vision
+
+    payload = _bad_png_payload()  # gated — skips if env var unset
+    uri = "data:image/png;base64," + base64.b64encode(payload).decode("ascii")
+
+    with pytest.raises(HTTPException) as exc:
+        vision._decode_image_input(uri)
+
+    assert exc.value.status_code == 400
+    assert "not a decodable image" in str(exc.value.detail).lower()

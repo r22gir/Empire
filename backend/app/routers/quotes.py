@@ -21,6 +21,7 @@ from app.services.business_routing import route_to_for_item_type
 from app.services.data_paths import quote_pdf_dir, quotes_data_dir
 from app.services.drawing.canonical_path import canonical_empire_db_path
 from app.db.database import get_db, dict_row
+from app.routers.vision import decode_image_input
 
 logger = logging.getLogger(__name__)
 
@@ -741,6 +742,14 @@ async def analyze_photo_for_quote(body: dict):
 
     if not image:
         raise HTTPException(400, "Image data required")
+
+    # D43 0e — vision path that bypasses _materialize_image_input (sends raw
+    # base64 to analyze_photo_items → ollama/xAI). Verify the image is
+    # decodable so a fake PNG header cannot reach the model.
+    try:
+        decode_image_input(image)
+    except HTTPException:
+        raise
 
     analysis = await analyze_photo_items(image, customer_notes)
 

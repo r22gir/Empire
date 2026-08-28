@@ -5,10 +5,13 @@ Image understanding uses MiniMax Token Plan through the working mmx CLI transpor
 Image generation remains explicit and separate from image-understanding quota.
 """
 import os, json, re, httpx, asyncio, logging, base64, uuid, time
+from io import BytesIO
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Any, Optional
+
+from PIL import Image, UnidentifiedImageError
 
 from app.services.data_paths import data_root
 from app.services.max.minimax_tools import minimax_tools_status, minimax_understand_image
@@ -164,7 +167,41 @@ def _decode_image_input(image: str) -> tuple[bytes, str]:
             ext = ".bmp"
         else:
             raise HTTPException(400, "Unsupported image payload")
+
+    # D43 1a — decode-verify at the boundary. Magic bytes can pass while the
+    # payload itself is not a decodable image (e.g. a 136-byte PNG header
+    # followed by 128 bytes of `x` padding). PIL's verify() opens the file and
+    # confirms the decoder accepts the structure.
+    #
+    # Note: verify() invalidates the Image object for pixel access; downstream
+    # uses the file path (write_bytes + mmx CLI subprocess), so we don't need
+    # to re-open — we only re-open to read dimensions for the log line.
+    try:
+        Image.open(BytesIO(data)).verify()
+    except (UnidentifiedImageError, Exception) as exc:  # PIL raises a variety
+        raise HTTPException(
+            status_code=400,
+            detail="Image payload is not a decodable image",
+        ) from exc
+
+    # Re-open for dimensions (verify() above closes the image).
+    try:
+        with Image.open(BytesIO(data)) as dim_img:
+            log.info(
+                "vision_decode_verified ext=%s size=%dx%d bytes=%d",
+                ext, dim_img.size[0], dim_img.size[1], len(data),
+            )
+    except Exception:
+        # Already verified once; ignore secondary failures.
+        pass
+
     return data, ext
+
+
+# Public alias for cross-module use (drawings.py, quote_requests.py).
+# Same body, same guarantees — the unprefixed name signals it is part of the
+# public API of this module.
+decode_image_input = _decode_image_input
 
 
 def _looks_like_base64_payload(text: str) -> bool:

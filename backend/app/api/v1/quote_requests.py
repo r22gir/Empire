@@ -74,6 +74,7 @@ import base64
 import re
 
 from app.services.ollama_vision_router import generate_vision_response
+from app.routers.vision import decode_image_input
 
 @router.post("/analyze-photo")
 async def analyze_photo(data: dict):
@@ -83,7 +84,15 @@ async def analyze_photo(data: dict):
     """
     image_data = data.get("image", "")
     reference_width = data.get("reference_width")  # Optional: known reference object width in inches
-    
+
+    # D43 0e — vision path that bypasses _materialize_image_input (sends raw
+    # base64 to Ollama). Verify the image is decodable so a fake PNG header
+    # cannot reach the model.
+    try:
+        decode_image_input(image_data)
+    except HTTPException:
+        raise
+
     # Extract base64 image data
     if "base64," in image_data:
         image_data = image_data.split("base64,")[1]

@@ -13,7 +13,29 @@ the Sprint 1 changes:
 Each test follows the same pattern used in test_drawing_studio_trust.py:
 direct function calls, asyncio.run for async functions, monkeypatch for
 env/path overrides.
+
+D43 — tests use a real PNG (`_real_png_data_uri`) as input. After D43 STEP 1a,
+the Drawing Studio endpoints verify payloads at the boundary. A 12-byte stub
+triggers a 400 from the verify guard before reaching the 503-on-no-key
+branch; the 503-on-no-key path requires a real image.
 """
+import base64
+from io import BytesIO
+
+import pytest
+from PIL import Image
+
+
+def _real_png_data_uri(width: int = 4, height: int = 3, color=(200, 100, 50)) -> str:
+    """A real, valid PNG that PIL.Image.verify() accepts. Replaces the 12-byte
+    stub used before D43 1a — that stub now triggers a 400 from
+    decode_image_input and never reaches the 503-on-no-key branch.
+    """
+    img = Image.new("RGB", (width, height), color)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
 
 import asyncio
 import os
@@ -110,7 +132,7 @@ def test_analyze_sketch_503_when_xai_missing(monkeypatch):
         asyncio.run(
             drawings.analyze_sketch(
                 drawings.SketchAnalyzeRequest(
-                    image="data:image/png;base64,iVBORw0KGgo=",
+                    image=_real_png_data_uri(),
                 )
             )
         )
@@ -125,7 +147,7 @@ def test_analyze_sketch_503_when_xai_empty_string(monkeypatch):
         asyncio.run(
             drawings.analyze_sketch(
                 drawings.SketchAnalyzeRequest(
-                    image="data:image/png;base64,iVBORw0KGgo=",
+                    image=_real_png_data_uri(),
                 )
             )
         )
@@ -144,7 +166,7 @@ def test_analyze_furniture_503_when_no_vision_providers(monkeypatch):
         asyncio.run(
             drawings.analyze_furniture(
                 drawings.FurnitureAnalyzeRequest(
-                    image="data:image/png;base64,iVBORw0KGgo=",
+                    image=_real_png_data_uri(),
                     provider="grok",
                 )
             )
@@ -160,7 +182,7 @@ def test_analyze_furniture_503_when_requested_provider_missing(monkeypatch):
         asyncio.run(
             drawings.analyze_furniture(
                 drawings.FurnitureAnalyzeRequest(
-                    image="data:image/png;base64,iVBORw0KGgo=",
+                    image=_real_png_data_uri(),
                     provider="claude",
                 )
             )
@@ -178,7 +200,7 @@ def test_analyze_furniture_pdf_503_when_no_vision_providers(monkeypatch):
         asyncio.run(
             drawings.analyze_furniture_pdf(
                 drawings.FurnitureAnalyzeRequest(
-                    image="data:image/png;base64,iVBORw0KGgo=",
+                    image=_real_png_data_uri(),
                     provider="grok",
                 )
             )
@@ -766,7 +788,7 @@ def test_all_ai_routes_return_503_not_500_when_no_keys(monkeypatch):
         asyncio.run(
             drawings.analyze_sketch(
                 drawings.SketchAnalyzeRequest(
-                    image="data:image/png;base64,iVBORw0KGgo=",
+                    image=_real_png_data_uri(),
                 )
             )
         )
@@ -777,7 +799,7 @@ def test_all_ai_routes_return_503_not_500_when_no_keys(monkeypatch):
         asyncio.run(
             drawings.analyze_furniture(
                 drawings.FurnitureAnalyzeRequest(
-                    image="data:image/png;base64,iVBORw0KGgo=",
+                    image=_real_png_data_uri(),
                 )
             )
         )
@@ -788,7 +810,7 @@ def test_all_ai_routes_return_503_not_500_when_no_keys(monkeypatch):
         asyncio.run(
             drawings.analyze_furniture_pdf(
                 drawings.FurnitureAnalyzeRequest(
-                    image="data:image/png;base64,iVBORw0KGgo=",
+                    image=_real_png_data_uri(),
                 )
             )
         )

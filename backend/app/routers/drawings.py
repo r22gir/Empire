@@ -16,6 +16,7 @@ import uuid
 from app.services.business_routing import route_to_for_item_type
 from app.services.drawing import provider_status
 from app.services.drawing import yardage
+from app.routers.vision import decode_image_input
 
 router = APIRouter()
 log = logging.getLogger("drawings")
@@ -382,6 +383,14 @@ class SketchAnalyzeRequest(BaseModel):
 @router.post("/drawings/analyze-sketch")
 async def analyze_sketch(req: SketchAnalyzeRequest):
     """Analyze a hand-drawn sketch photo and extract bench dimensions via AI vision."""
+    # D43 0e — Drawing Studio is the priority. The base64 image goes
+    # straight to xAI Grok without going through _materialize_image_input,
+    # so verify it as a real image here. See reports/2026-08-27_d43_step0.md §0b.
+    try:
+        decode_image_input(req.image)
+    except HTTPException:
+        raise
+
     if not provider_status.xai_configured():
         raise HTTPException(
             status_code=503,
@@ -467,6 +476,14 @@ async def analyze_furniture(req: FurnitureAnalyzeRequest):
     Returns items with classifications, dimensions, per-item drawings, and
     optional fabrication data. Upgrades analyze-sketch from single to multi-item.
     """
+    # D43 0e — Drawing Studio is the priority. Same guard as analyze_sketch:
+    # decode-verify the base64 image before sending to the model, so a fake
+    # PNG header cannot reach the LLM and produce fabricated dimensions.
+    try:
+        decode_image_input(req.image)
+    except HTTPException:
+        raise
+
     # Truthful 503 if the requested provider is unconfigured, OR if every
     # possible provider is unconfigured (so the analyzer has no fallback).
     if not provider_status._provider_configured(req.provider):
@@ -545,6 +562,12 @@ async def analyze_furniture(req: FurnitureAnalyzeRequest):
 @router.post("/drawings/analyze-furniture/pdf")
 async def analyze_furniture_pdf(req: FurnitureAnalyzeRequest):
     """Multi-object furniture analysis with PDF output."""
+    # D43 0e — same guard as analyze_furniture above.
+    try:
+        decode_image_input(req.image)
+    except HTTPException:
+        raise
+
     if not provider_status._provider_configured(req.provider):
         raise HTTPException(
             status_code=503,

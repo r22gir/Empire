@@ -53,3 +53,9 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# D43 evidence archive — 162 stale-tree vision_inputs files moved here on
+# 2026-08-28 (founder ruling). Preserved untouched on disk, git-ignored
+# because the contents are large binary evidence, not source.
+# See reports/2026-08-27_d43_step2.md and the NOTES.md inside.
+backend/data/vision_inputs.stale-2026-08-28/
