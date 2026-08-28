@@ -3582,18 +3582,43 @@ def _describe_job_image(params: dict, desk: Optional[str] = None) -> ToolResult:
             error=f"image failed re-validation: {exc}",
         )
 
-    # Reuse the existing understand_image tool so xAI Grok → OpenAI fallback
-    # routing stays consistent with the rest of MAX vision calls.
-    inner = _understand_image({"image": str(path)}, desk=desk)
-    if not inner.success:
+    # D44 routing fix — describe_job_image routes through MiniMax mmx_vision
+    # (same path D43 proved end-to-end on /api/v1/vision/measure, real PNG
+    # in → structured description out) rather than xAI Grok → OpenAI. MAX
+    # already has MAX_DISABLE_XAI=true in the systemd unit, so the xAI
+    # branch is dead in production. _understand_image calls xAI first and
+    # then OpenAI (unconfigured), so it 403s. mmx vision describe runs as
+    # a subprocess and is the live working path.
+    #
+    # Call minimax_understand_image directly (not via the @tool wrapper)
+    # so we can surface the full runtime envelope — provider, model,
+    # transport, tool — instead of the inner `data` slice that the tool
+    # wrapper forwards. The wrapper's async helper does the same dance.
+    from app.services.max.minimax_tools import (
+        minimax_understand_image as _mmx_understand,
+    )
+    import asyncio as _asyncio
+    _loop = _asyncio.new_event_loop()
+    try:
+        mmx_result = _loop.run_until_complete(
+            _mmx_understand(image=str(path), prompt=(
+                "Describe this image in detail. Focus on what the image "
+                "shows: objects, materials, dimensions visible in the frame, "
+                "and any text or measurements. Be precise and observant."
+            ))
+        )
+    finally:
+        _loop.close()
+
+    if not mmx_result.get("success"):
         return ToolResult(
             tool="describe_job_image",
             success=False,
-            error=f"vision failed: {inner.error}",
+            error=mmx_result.get("error", "mmx vision failed"),
             result={"document_id": document_id, "path": str(path)},
         )
 
-    inner_data = inner.result if isinstance(inner.result, dict) else {}
+    mmx_data = mmx_result.get("data") or {}
     return ToolResult(
         tool="describe_job_image",
         success=True,
@@ -3604,11 +3629,14 @@ def _describe_job_image(params: dict, desk: Optional[str] = None) -> ToolResult:
             "job_id": row.get("job_id"),
             "quote_id": row.get("quote_id"),
             "path": str(path),
-            "summary": inner_data.get("summary"),
-            "notable_details": inner_data.get("notable_details"),
-            "confidence": inner_data.get("confidence"),
-            "provider": inner_data.get("provider"),
-            "latency_ms": inner_data.get("latency_ms"),
+            "summary": mmx_data.get("summary"),
+            "notable_details": mmx_data.get("notable_details"),
+            "confidence": mmx_data.get("confidence"),
+            "provider": mmx_result.get("provider"),
+            "model": mmx_result.get("model"),
+            "transport": mmx_data.get("transport"),
+            "tool": mmx_data.get("tool"),
+            "full_response": mmx_data.get("full_response"),
         },
     )
 
