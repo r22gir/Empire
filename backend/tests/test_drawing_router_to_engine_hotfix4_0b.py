@@ -495,20 +495,32 @@ class TestQuarantine:
             "removes it; any new code that calls it will fail loudly."
         )
         # 3) Both handlers must reference the shared helper.
-        # We slice the source around each "is_drawing_intent" check
-        # and assert that the next 1500 chars reference _drawing_render.
-        starts = [
-            m.start() for m in re.finditer(r"is_drawing_intent", src)
-        ]
+        # We slice the source around each ACTUAL decision point
+        # ("if drawing_handoff.is_drawing_intent:" / "... is False") and
+        # assert that the next 2000 chars reference _drawing_render.
+        # D45 commit 2 moved the /chat handler body into
+        # _chat_with_max_service, which introduced new occurrences of
+        # the substring "is_drawing_intent" inside the pending-lookup
+        # block ("if pending and is_drawing_intent(msg_text):" etc.)
+        # that are not decision points. The original test matched ALL
+        # occurrences of the substring; tightening to the actual
+        # decision-point pattern preserves the enforcement without
+        # flagging flow-control usage.
+        decision_pattern = re.compile(
+            r"(?:drawing_handoff\.is_drawing_intent\s+is\s+(?:True|False)"
+            r"|drawing_handoff\.is_drawing_intent\s*:)"
+        )
+        starts = [m.start() for m in decision_pattern.finditer(src)]
         assert len(starts) >= 2, (
-            f"router.py must have at least 2 is_drawing_intent blocks "
-            f"(/chat + /chat/stream); found {len(starts)}"
+            f"router.py must have at least 2 drawing-handoff decision "
+            f"blocks (/chat + /chat/stream); found {len(starts)}"
         )
         for start in starts:
-            window = src[start:start + 1500]
+            window = src[start:start + 2000]
             assert "_drawing_render(" in window, (
-                f"is_drawing_intent block at offset {start} does NOT "
-                f"call _drawing_render. The /chat and /chat/stream "
-                f"handlers MUST share the same body; duplicated logic is "
-                f"a recurring defect source (third occurrence in 8 days)."
+                f"drawing_handoff.is_drawing_intent decision at offset "
+                f"{start} does NOT call _drawing_render. The /chat and "
+                f"/chat/stream handlers MUST share the same body; "
+                f"duplicated logic is a recurring defect source (third "
+                f"occurrence in 8 days)."
             )

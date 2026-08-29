@@ -2161,14 +2161,74 @@ def _explicit_no_drawing_router(message: str | None) -> bool:
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks, http_response: Response):
+    """POST /api/v1/max/chat — non-streaming chat with MAX.
+
+    D45 commit 2: this handler is now a thin wrapper around
+    _chat_with_max_service. The body lives in the service function so
+    the Telegram bot can call the same code in-process under commit 3
+    (Option A). Behaviour is preserved — channel/chat_id are read
+    from the request body here, the founder check runs here, and the
+    cache-control headers are set here on the response.
+    """
     import time as _time_mod
     _chat_start = _time_mod.time()
-    _response_id = str(uuid.uuid4())[:12]  # unique per request for feedback linkage
+    _response_id = str(uuid.uuid4())[:12]
 
     msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
     founder = is_founder_message(msg_ctx)
     if founder:
         logger.info(f"Founder message detected via chat_id={request.chat_id}")
+
+    resp = await _chat_with_max_service(
+        request,
+        canonical_channel=request.channel or "",
+        canonical_chat_id=request.chat_id,
+        canonical_founder=founder,
+        background_tasks=background_tasks,
+        _chat_start=_chat_start,
+        _response_id=_response_id,
+    )
+    http_response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    http_response.headers["Pragma"] = "no-cache"
+    return resp
+
+
+async def _chat_with_max_service(
+    request: ChatRequest,
+    *,
+    canonical_channel: str,
+    canonical_chat_id: Optional[str],
+    canonical_founder: bool,
+    background_tasks: Optional[BackgroundTasks] = None,
+    _chat_start: Optional[float] = None,
+    _response_id: str = "",
+) -> ChatResponse:
+    """D45 commit 2 — shared chat core for /chat (HTTP) and the Telegram
+    in-process path.
+
+    The body that used to live inline in chat_with_max is here. The
+    caller declares canonical_channel / canonical_chat_id /
+    canonical_founder; this function overrides request.channel and
+    request.chat_id accordingly so the rest of the body reads them
+    uniformly via request.channel. Background-task scheduling is
+    optional — when background_tasks is None (Telegram in-process
+    path), the post-response bookkeeping is skipped because the bot
+    has its own history persistence.
+    """
+    # Apply canonical values to the request object so the rest of
+    # this body — which reads request.channel / request.chat_id
+    # extensively — sees the declared channel, not the body field.
+    import time as _time_mod
+    request.channel = canonical_channel or request.channel
+    if canonical_chat_id is not None:
+        request.chat_id = canonical_chat_id
+    founder = canonical_founder
+    msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
+
+    def _add_task(coro, *args, **kwargs):
+        if background_tasks is not None:
+            background_tasks.add_task(coro, *args, **kwargs)
+
 
     is_safe, reason = check_input(request.message, message_context=msg_ctx)
     if not is_safe:
@@ -2970,7 +3030,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         conv_id = request.conversation_id or str(uuid.uuid4())
         conversation_tracker.add_message(conv_id, "user", request.message)
         conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(final_content))
-        background_tasks.add_task(conversation_tracker.check_and_summarize, conv_id)
+        _add_task(conversation_tracker.check_and_summarize, conv_id)
 
         # Save to unified cross-channel store
         try:
@@ -3039,14 +3099,14 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
         # Learning: real-time (every exchange) or batch (every N messages)
         if REALTIME_LEARNING_ENABLED:
-            background_tasks.add_task(
+            _add_task(
                 conversation_tracker.learn_from_exchange,
                 conv_id, request.message, response.content
             )
         elif BATCH_LEARNING_ENABLED:
             msg_count = conversation_tracker.get_message_count(conv_id)
             if msg_count > 0 and msg_count % BATCH_LEARNING_INTERVAL == 0:
-                background_tasks.add_task(
+                _add_task(
                     conversation_tracker.learn_from_exchange,
                     conv_id, request.message, response.content
                 )
@@ -3056,7 +3116,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # Auto-save valuable exchanges to shared memory store (web/CC conversations)
         _channel_source = request.channel or "web"
         if _channel_source != "telegram":  # Telegram auto-save handled in telegram_bot.py
-            background_tasks.add_task(
+            _add_task(
                 _auto_save_exchange_to_memory,
                 request.message, final_content, _channel_source, conv_id,
             )
@@ -3149,7 +3209,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
         # Log response for evaluation loop (non-blocking)
         _final_latency_ms = int((_time_mod.time() - _chat_start) * 1000)
-        background_tasks.add_task(
+        _add_task(
             evaluation_service.log_response,
             response_id=_response_id,
             channel=request.channel or "web",
@@ -3163,9 +3223,8 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             fallback_used=response.fallback_used,
             metadata_envelope=resp.metadata,
         )
-        # Prevent phone/browser caching stale responses
-        http_response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-        http_response.headers["Pragma"] = "no-cache"
+        # Cache-control headers are set on http_response by the /chat
+        # handler wrapper, not here (D45 commit 2).
 
         # PHASE 2 · F1 — persist this turn so the next request can replay
         # the tool_results. Best-effort: a DB failure here MUST NOT break
