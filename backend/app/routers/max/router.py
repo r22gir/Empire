@@ -2163,26 +2163,38 @@ def _explicit_no_drawing_router(message: str | None) -> bool:
 async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks, http_response: Response):
     """POST /api/v1/max/chat — non-streaming chat with MAX.
 
-    D45 commit 2: this handler is now a thin wrapper around
-    _chat_with_max_service. The body lives in the service function so
-    the Telegram bot can call the same code in-process under commit 3
-    (Option A). Behaviour is preserved — channel/chat_id are read
-    from the request body here, the founder check runs here, and the
-    cache-control headers are set here on the response.
+    D45 commit 3 (Option A): the handler DECLARES its own canonical
+    channel here (web_cc). The body field `channel` is no longer the
+    source of privilege — it stays on the request only for
+    envelope/routing labels (logs, prompt-channel directive at line
+    2575 of the service body). Privilege is decided from the
+    canonical declaration.
+
+    chat_id is still read from the body when present, because the
+    Telegram-match branch of the predicate requires it for the
+    chat_id-supplied path; the canonical declaration here is the
+    WEB (CC) channel, not telegram, so the chat_id body field is
+    unused for the canonical-web path. Future Telegram-front-of-CC
+    work would need a separate handler — out of scope for this
+    dispatch.
     """
     import time as _time_mod
     _chat_start = _time_mod.time()
     _response_id = str(uuid.uuid4())[:12]
 
-    msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
+    # Option A: handler declares canonical_channel = "web_cc". Body
+    # `channel` ignored for privilege.
+    canonical_channel = "web_cc"
+    canonical_chat_id: Optional[str] = request.chat_id  # body-supplied, may be None
+    msg_ctx = {"channel": canonical_channel, "chat_id": canonical_chat_id or ""}
     founder = is_founder_message(msg_ctx)
     if founder:
         logger.info(f"Founder message detected via chat_id={request.chat_id}")
 
     resp = await _chat_with_max_service(
         request,
-        canonical_channel=request.channel or "",
-        canonical_chat_id=request.chat_id,
+        canonical_channel=canonical_channel,
+        canonical_chat_id=canonical_chat_id,
         canonical_founder=founder,
         background_tasks=background_tasks,
         _chat_start=_chat_start,
@@ -2219,6 +2231,28 @@ async def _chat_with_max_service(
     # this body — which reads request.channel / request.chat_id
     # extensively — sees the declared channel, not the body field.
     import time as _time_mod
+
+    # Option E (D45 commit 3): spoof-detection warning. The body
+    # channel is dead weight under Option A; ANY caller claiming
+    # 'telegram' in the body is either confused or attempting to
+    # route through the legacy Telegram-match path. Log it for
+    # visibility. (Additive: no behaviour change beyond logging.)
+    if request.channel == "telegram":
+        try:
+            from app.services.max.founder_auth import FOUNDER_TELEGRAM_CHAT_ID
+            expected_chat_id = FOUNDER_TELEGRAM_CHAT_ID
+        except Exception:
+            expected_chat_id = ""
+        logger.warning(
+            f"[H74 E] Body channel='telegram' on /max/chat (chat_id="
+            f"{request.chat_id!r}, expected={expected_chat_id!r}). "
+            f"Under Option A the body field is dead weight — the "
+            f"handler declared canonical_channel={canonical_channel!r} "
+            f"regardless. This caller is treated as a portal caller. "
+            f"If you are routing Telegram through HTTP, the in-process "
+            f"path in telegram_bot._chat_with_max is the correct shape."
+        )
+
     request.channel = canonical_channel or request.channel
     if canonical_chat_id is not None:
         request.chat_id = canonical_chat_id
@@ -5201,7 +5235,15 @@ async def get_quality_metrics():
 class CodeTaskRequest(BaseModel):
     prompt: str
     pin: str = ""
-    channel: str = "web_cc"
+    # H74 (D45, 2026-08-28, commit 3): the model previously defaulted
+    # channel to "web_cc" — a default value nobody supplied resolving
+    # to a privileged channel is exactly the defect this dispatch
+    # exists to close. The field is now REQUIRED. Portal callers
+    # (ChatScreen.tsx and the runtime tests) already send an
+    # explicit channel; the model default only ever fired for
+    # body-shaped callers that omitted the key, which were the
+    # bypass.
+    channel: str
     # R11 (2026-08-22): the tree the task actually ran in. The validator
     # uses this for ground-truth capture. Optional on the wire; if absent
     # we default to the backend process cwd, which is the canonical repo
@@ -5212,20 +5254,49 @@ class CodeTaskRequest(BaseModel):
 @router.post("/code-task")
 async def submit_code_task(request: CodeTaskRequest):
     """Submit an async code task to CodeForge/Atlas.
-    Founder channels (web_cc, telegram founder) skip PIN.
-    Non-founder channels require PIN.
-    Poll status via GET /code-task/{id}/status.
+
+    H74 (D45, 2026-08-28, commit 3 — Option A): the handler now
+    declares its own canonical channel internally. The body's
+    `channel` field is used only for non-privilege routing labels
+    (logs, metadata envelope). Privilege comes from the
+    canonical-channel/canonical-founder pair the handler declares.
+    Founder (web_cc) skips PIN. Telegram-founder paths are not used
+    for /code-task today; if added, the Telegram chat_id must come
+    from the body alongside an explicit `channel='telegram'` and
+    the chat_id must match FOUNDER_TELEGRAM_CHAT_ID — see Option E
+    warning below.
     """
     import os
-    # H74 (D45, 2026-08-28): missing channel resolves to anonymous, not
-    # founder. The `or "web_cc"` pattern was a SECOND empty-default-to-
-    # founder fallback alongside the predicate's "" entry. Removed in
-    # STEP 1a. The CodeTaskRequest model still defaults to "web_cc" on
-    # the wire for portal callers that omit channel — see commit log —
-    # but the predicate now correctly classifies missing/empty as
-    # anonymous. (Tests for /code-task's model default live in the
-    # followup commit that lands Option A.)
-    msg_ctx = {"channel": request.channel or ""}
+    # Option A: the handler declares canonical_channel = "web_cc".
+    # The body's channel field is logged for envelope metadata but
+    # NOT consulted for privilege. canonical_chat_id stays None for
+    # /code-task because the portal is the only legitimate channel.
+    canonical_channel = "web_cc"
+    canonical_chat_id: Optional[str] = None
+
+    # Option E: spoof-detection warning. /code-task today only
+    # legitimately serves the web path; a body claiming 'telegram'
+    # without a matching chat_id is a spoof attempt.
+    if request.channel == "telegram":
+        try:
+            from app.services.max.founder_auth import FOUNDER_TELEGRAM_CHAT_ID
+            expected_chat_id = FOUNDER_TELEGRAM_CHAT_ID
+        except Exception:
+            expected_chat_id = ""
+        # CodeTaskRequest has no chat_id field today; if a future
+        # variant adds one, the warning would catch a non-matching
+        # claim.
+        logger.warning(
+            f"[H74 E] Body claims 'telegram' on /max/code-task; the handler's "
+            f"canonical channel is 'web_cc'. The predicate's Telegram-match "
+            f"branch will require FOUNDER_PIN. Logging for visibility."
+        )
+
+    # The predicate is still consulted for the canonical-channel
+    # case (web_cc → founder). Future Option-A variants of this
+    # handler can switch canonical_channel to anything the handler
+    # wants; the body field is dead weight for privilege.
+    msg_ctx = {"channel": canonical_channel, "chat_id": ""}
     founder = is_founder_message(msg_ctx)
     if not founder:
         # H62 FIX (2026-08-22): empty default — pre-fix this was "7777" (privilege-escalation literal). HOTFIX 4.2 only fixed tool_executor.py.

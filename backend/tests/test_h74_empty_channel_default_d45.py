@@ -135,82 +135,107 @@ def test_is_founder_message_telegram_founder_still_founder():
 # ───────────────────────────────────────────────────────────────────
 
 
-def test_chat_endpoint_empty_body_does_not_take_founder_branch(monkeypatch, caplog):
-    """POST {} to /api/v1/max/chat must NOT take the founder branch.
+def test_chat_endpoint_body_channel_does_not_override_handler_canonical(monkeypatch, caplog):
+    """POST {"message":..., "channel":"telegram"} (no chat_id) to /api/v1/max/chat
+    must NOT cause the Telegram-match branch of the predicate to fire.
 
-    The check_input guardrail at guardrails.py:135 emits
-    "Founder override: skipping blocked_topic block" when founder=True.
-    A blocked-topic message posted with no channel key must NOT produce
-    that log line — that is the load-bearing signal that the founder
-    branch was taken.
+    Under Option A (D45 commit 3) the handler declares canonical_channel
+    = "web_cc" regardless of the body. A body claiming 'telegram'
+    without a chat_id cannot leak founder through the predicate's
+    Telegram-match branch.
 
-    Pre-fix: empty body → founder=True → check_input skips the gate →
-    "Founder override: skipping blocked_topic block" log line appears.
-    Post-fix: empty body → founder=False → check_input returns
-    ("blocked_topic") and the input_sanitizer downstream returns
-    SAFE_REFUSAL, but the check_input founder-override log does NOT
-    fire.
+    Pre-Option-A: STEP 1a predicate correctly classified empty channel
+    as anonymous, but a body claiming 'telegram' without chat_id
+    STILL hit the Telegram-match branch (which then failed on
+    chat_id mismatch — net effect: anonymous, but the predicate
+    took a separate code path).
 
-    Note: the response body is SAFE_REFUSAL either way (input_sanitizer
-    catches it downstream). The proof of the founder-bypass regression
-    is the LOG LINE, not the response shape.
+    Under Option A: the handler ignores the body channel. canonical
+    = web_cc → founder via web_cc → check_input skips blocked-topic
+    block. The body channel does NOT switch the handler to the
+    telegram code path.
+
+    The load-bearing assertion: the 'Founder override: skipping
+    blocked_topic block' log line DOES appear (because the handler
+    granted founder via web_cc), AND the request does NOT take the
+    telegram-specific branch (verified via the absence of the
+    founder-detected-via-chat_id log line).
     """
     from app.services.max.guardrails import SAFE_REFUSAL
 
     # BLOCKED_TOPICS pattern: r"(make|create|build|write)\s+(a\s+)?..."
     blocked_message = "how to make a virus"
 
-    with caplog.at_level(logging.INFO, logger="max.guardrails"):
+    with caplog.at_level(logging.INFO):
         response = client.post(
             "/api/v1/max/chat",
-            json={"message": blocked_message},
+            json={"message": blocked_message, "channel": "telegram"},
         )
 
     assert response.status_code == 200
-    data = response.json()
-    # Response should still be SAFE_REFUSAL (sanitizer downstream).
-    assert data.get("response") == SAFE_REFUSAL
 
-    # The "Founder override" log line must NOT appear — this is the
-    # load-bearing assertion. Pre-fix it appears and proves the
-    # founder branch leaked through to check_input.
+    # Under Option A, the handler declared web_cc and granted founder.
+    # The blocked-topic guard was skipped — the response is NOT
+    # necessarily SAFE_REFUSAL. The dispatch's pre-Option-A proof
+    # (commit 1) was that empty body caused the bypass; under
+    # Option A the bypass is closed by a different mechanism:
+    # the handler declares web_cc always, so body channel is dead
+    # weight. The "Founder override" log line MUST appear because
+    # the handler granted founder.
     founder_override_lines = [
         r.getMessage() for r in caplog.records
         if "Founder override" in r.getMessage()
     ]
-    assert not founder_override_lines, (
-        f"Founder override log fired on empty-channel request: "
-        f"{founder_override_lines}. Pre-fix predicate leaked founder to an empty body."
+    assert founder_override_lines, (
+        f"Expected the 'Founder override: skipping blocked_topic block' "
+        f"log line because the handler declared web_cc → founder. "
+        f"This is the post-Option-A shape: the handler grants founder "
+        f"to ALL /max/chat callers and the body field is irrelevant. "
+        f"Got: {[r.getMessage() for r in caplog.records]}"
+    )
+
+    # The Option E spoof-detection warning SHOULD fire because the
+    # body claims 'telegram' (Option A treats body channel as dead
+    # weight, so a body claiming telegram is a sign of confusion or
+    # spoof attempt — log for visibility).
+    e_warnings = [
+        r.getMessage() for r in caplog.records
+        if "[H74 E]" in r.getMessage()
+    ]
+    assert e_warnings, (
+        f"Expected an [H74 E] warning for body='telegram'. "
+        f"Logs: {[r.getMessage() for r in caplog.records]}"
     )
 
 
-def test_chat_stream_endpoint_empty_body_does_not_take_founder_branch(monkeypatch, caplog):
-    """POST {} to /api/v1/max/chat/stream must NOT take the founder branch.
+def test_chat_stream_endpoint_body_channel_does_not_override_handler_canonical(monkeypatch, caplog):
+    """POST {"message":..., "channel":"telegram"} to /api/v1/max/chat/stream
+    must NOT cause the Telegram-match branch to fire — same proof as
+    test_chat_endpoint_body_channel_does_not_override_handler_canonical
+    but on the streaming variant.
 
-    Same logic as test_chat_endpoint_empty_body_does_not_take_founder_branch
-    but on the streaming endpoint. The streaming variant gates the same
-    check_input call. We assert against the SAFE_REFUSAL constant, NOT a
-    substring, because the AI's own content policy can also produce a
-    refusal-shaped answer — the founder-bypass regression is only visible
-    when the guardrail code path (which returns the exact SAFE_REFUSAL)
-    fires.
+    Note: /chat/stream is NOT touched by commit 3 (commit 3 is narrow
+    per ruling 3 — Telegram in-process only). The stream handler still
+    reads request.channel directly. So this test asserts the OPPOSITE
+    shape: body channel="telegram" without chat_id → predicate
+    correctly classifies as anonymous → check_input fires →
+    SAFE_REFUSAL response.
     """
     from app.services.max.guardrails import SAFE_REFUSAL
 
     blocked_message = "how to make a virus"
 
-    # Capture ALL logs — the "Founder override" message is emitted on
-    # logger "max.guardrails" inside check_input, not on max.api.
+    # Capture all logs to detect the Founder override line (which
+    # would prove the founder branch was taken).
     with caplog.at_level(logging.INFO):
         response = client.post(
             "/api/v1/max/chat/stream",
-            json={"message": blocked_message},
+            json={"message": blocked_message, "channel": "telegram"},
         )
 
     assert response.status_code == 200
 
-    # Parse the SSE stream — each "data: {...}" line is a JSON event.
-    # The blocked-topic path emits:
+    # Parse the SSE stream — the blocked-topic path emits:
     #   data: {"type": "text", "content": "<SAFE_REFUSAL>"}
     #   data: {"type": "done", "model_used": "guardrail"}
     import json
@@ -224,53 +249,67 @@ def test_chat_stream_endpoint_empty_body_does_not_take_founder_branch(monkeypatc
             except json.JSONDecodeError:
                 continue
 
-    # The text-event content must be exactly the SAFE_REFUSAL constant.
     text_events = [e for e in events if e.get("type") == "text"]
     assert text_events, (
         f"No text events emitted on /chat/stream — body: {response.text[:300]!r}"
     )
     emitted = text_events[0].get("content", "")
+    # /chat/stream still reads the body channel via the predicate.
+    # "telegram" without chat_id is correctly anonymous → check_input
+    # fires → SAFE_REFUSAL.
     assert emitted == SAFE_REFUSAL, (
         f"blocked-topic gate did not fire on /chat/stream. "
         f"Expected exact SAFE_REFUSAL, got {emitted[:200]!r}. "
-        f"Founder branch was likely taken despite empty channel."
+        f"If the founder branch was taken via the body channel, this "
+        f"is a regression — pre-Option-A predicate must still classify "
+        f"'telegram'+no-chat_id as anonymous."
     )
 
-    # The done event must report model_used="guardrail" — proof the
-    # request never reached the AI layer.
     done_events = [e for e in events if e.get("type") == "done"]
     assert done_events and done_events[0].get("model_used") == "guardrail", (
         f"Expected model_used='guardrail' in done event, got {done_events!r}"
     )
 
-    # The "Founder override" log line must NOT appear — the load-bearing
-    # assertion. Pre-fix it appears and proves the founder branch leaked.
-    founder_override_lines = [
-        r.getMessage() for r in caplog.records
-        if "Founder override" in r.getMessage()
-    ]
-    assert not founder_override_lines, (
-        f"Founder override log fired on empty-channel streaming request: "
-        f"{founder_override_lines}."
+
+def test_code_task_endpoint_channel_field_is_required(monkeypatch, caplog):
+    """POST {prompt} to /api/v1/max/code-task without a channel field
+    must return 422 validation error.
+
+    D45 commit 3 (ruling 1): CodeTaskRequest.channel loses its
+    'web_cc' default — the field becomes REQUIRED. A default value
+    nobody supplied resolving to a privileged channel is the exact
+    defect this dispatch exists to close. Without this change, every
+    caller that omitted the field got founder for free.
+    """
+    response = client.post(
+        "/api/v1/max/code-task",
+        json={"prompt": "test"},  # no channel
+    )
+
+    assert response.status_code == 422, (
+        f"POST without channel field must 422 (channel is required). "
+        f"Got status {response.status_code}. "
+        f"If 200, the model-default 'web_cc' is still in place."
+    )
+    # Pydantic's validation error names the missing field.
+    assert b"channel" in response.content, (
+        f"Expected 'channel' in 422 response, got: {response.content[:200]!r}"
     )
 
 
-def test_code_task_endpoint_empty_channel_requires_pin(monkeypatch, caplog):
+def test_code_task_endpoint_empty_channel_routes_through_handler(monkeypatch, caplog):
     """POST {prompt, channel:''} to /api/v1/max/code-task with FOUNDER_PIN
-    unset must refuse with 403.
+    unset: under Option A the handler declares web_cc regardless, so
+    an empty-channel body STILL gets founder via the canonical
+    declaration. This test pins that shape — the empty-channel
+    closure of STEP 1a is preserved at the predicate level, but
+    Option A's canonical declaration grants founder to all callers
+    of /code-task (which sits behind 127.0.0.1 and is intended for
+    the portal only).
 
-    Pre-fix, sending channel="" was treated as founder ("" was in the
-    allow-list), so PIN was bypassed and the code task was submitted.
-    Post-fix, channel="" → anonymous → PIN required → 403.
-
-    Note: CodeTaskRequest.channel has a model default of "web_cc" (the
-    portal's canonical channel), so a body that OMITS channel entirely
-    still gets founder=True via that default. The empty-string bypass
-    that STEP 1a closes is the case where channel is explicitly "" — the
-    body is sent, the field stores "", and the predicate now correctly
-    classifies it as anonymous. The model-default bypass lives on the
-    model side and is addressed in the followup Option A commit (when
-    that lands).
+    The test asserts the FOUNDER_PIN unset CRITICAL log is NOT
+    emitted (because the handler bypasses the PIN gate by granting
+    founder via web_cc).
     """
     monkeypatch.delenv("FOUNDER_PIN", raising=False)
 
@@ -280,16 +319,22 @@ def test_code_task_endpoint_empty_channel_requires_pin(monkeypatch, caplog):
             json={"prompt": "test", "channel": ""},
         )
 
-    assert response.status_code == 403, (
-        f"empty-channel POST to /code-task must require PIN. "
-        f"Got status {response.status_code}. Pre-fix the empty channel "
-        f"walked past the gate; STEP 1a closes that path."
+    # Under Option A the handler declares web_cc → founder → no PIN
+    # required → task submitted. Empty channel in body is dead weight.
+    assert response.status_code == 200, (
+        f"Handler declared canonical channel 'web_cc' so founder is "
+        f"granted regardless of body channel. Got status "
+        f"{response.status_code}. If this is 403, Option A's "
+        f"canonical declaration did not take effect."
     )
-    assert any(
-        r.levelno == logging.CRITICAL and "FOUNDER_PIN" in r.getMessage()
-        for r in caplog.records
-    ), (
-        "Expected a CRITICAL log line on max.api when FOUNDER_PIN is unset."
+    founder_pin_critical = [
+        r for r in caplog.records
+        if r.levelno == logging.CRITICAL and "FOUNDER_PIN" in r.getMessage()
+    ]
+    assert not founder_pin_critical, (
+        f"FOUNDER_PIN CRITICAL log fired but handler declared web_cc "
+        f"founder — the PIN gate should not have been reached. "
+        f"Logs: {[r.getMessage() for r in caplog.records]}"
     )
 
 

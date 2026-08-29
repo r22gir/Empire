@@ -1010,13 +1010,23 @@ async def _execute_task(task: dict) -> ExecutionResult:
 
 
 async def _notify_telegram(message: str):
-    """Send a notification via the MAX chat/Telegram pipeline."""
+    """Send a notification via the Telegram bot directly.
+
+    D45 commit 3 (OpenClaw exclusion): pre-fix this posted to
+    `/api/v1/max/chat` with `channel="telegram"` and no `chat_id`.
+    Under the STEP 1a predicate change that was correctly anonymous
+    (Telegram-match branch fails on missing chat_id). Under commit 3's
+    Option A — where the handler declares channel="web_cc" regardless
+    of body — that path would silently grant founder to an autonomous
+    worker, which is exactly the defect the dispatch exists to prevent.
+
+    Fix per ruling 2(b): direct `telegram_bot.send_message(...)` call,
+    bypassing the chat pipeline entirely. This is the only acceptable
+    shape — a worker must not route through the founder chat core.
+    """
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            await client.post(
-                "http://localhost:8000/api/v1/max/chat",
-                json={"message": message, "channel": "telegram"},
-            )
+        from app.services.max.telegram_bot import telegram_bot
+        await telegram_bot.send_message(message)
     except Exception as e:
         log.warning(f"Telegram notification failed: {e}")
 
