@@ -5158,7 +5158,15 @@ async def submit_code_task(request: CodeTaskRequest):
     Poll status via GET /code-task/{id}/status.
     """
     import os
-    msg_ctx = {"channel": request.channel or "web_cc"}
+    # H74 (D45, 2026-08-28): missing channel resolves to anonymous, not
+    # founder. The `or "web_cc"` pattern was a SECOND empty-default-to-
+    # founder fallback alongside the predicate's "" entry. Removed in
+    # STEP 1a. The CodeTaskRequest model still defaults to "web_cc" on
+    # the wire for portal callers that omit channel — see commit log —
+    # but the predicate now correctly classifies missing/empty as
+    # anonymous. (Tests for /code-task's model default live in the
+    # followup commit that lands Option A.)
+    msg_ctx = {"channel": request.channel or ""}
     founder = is_founder_message(msg_ctx)
     if not founder:
         # H62 FIX (2026-08-22): empty default — pre-fix this was "7777" (privilege-escalation literal). HOTFIX 4.2 only fixed tool_executor.py.

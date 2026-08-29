@@ -98,10 +98,16 @@ def is_founder_message(message_context: dict) -> bool:
     CC / web = always founder (Command Center is the owner's tool).
     Telegram = match by chat_id.
     Unknown channel = not founder (require PIN fallback).
+    H74 (D45, 2026-08-28): missing or unrecognized channel resolves to
+    anonymous, NEVER founder. Pre-fix the allow-list tuple contained ""
+    and `request.channel or ""` defaulted to "", so any caller omitting
+    the `channel` body field walked past every privilege gate. The empty
+    string is intentionally absent from the tuple below.
     """
     channel = message_context.get("channel", "")
-    # Command Center (any variant) = always founder
-    if channel in ("web", "web_cc", "cc", "command_center", "command-center", ""):
+    # Command Center (any variant) = always founder.
+    # NO empty string in this tuple: see H74 docstring above.
+    if channel in ("web", "web_cc", "cc", "command_center", "command-center"):
         return True
     # Telegram: match by chat_id
     if not _FOUNDER_CHAT_ID:
