@@ -1,0 +1,1438 @@
+NELMA'S WORKROOM
+
+McLEAN
+WINDOW
+
+&
+
+DRAPERY
+
+POWERED
+
+BY
+
+EMPIRE
+
+FIELD
+
+MEASUREMENTS
+
+SHEET
+
+CLIENT
+
+WHITTINGTON DESIGN · McLEAN, VA
+HOUSE
+
+McLEAN
+WORKROOM
+
+NELMA'S WORKROOM · HYATTSVILLE MD
+PRODUCTION
+
+EMPIRE WORKROOM
+SOURCE
+
+Field sketch set, 1 July 2026
+REVISION
+
+REV A · 19 AUG 2026
+SHEETS
+
+11 — cover, 9 room elevations, schedule
+STATUS
+
+FOR DISCUSSION - NOT FOR CONSTRUCTION
+THIS
+
+SET
+
+SHEET 01 OF 11 · REV A · 19 AUG 2026
+
+FOR WHITTINGTON DESIGN · McLEAN, VA
+
+JOB
+
+READ
+
+COVER · INDEX
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+INDEX
+
+SHT
+
+ROOM
+
+OPENINGS
+
+OPEN ITEMS
+
+01
+
+COVER · INDEX · HOW TO READ
+
+—
+
+—
+
+02
+
+FORMAL DINING
+
+1
+
+4
+
+03
+
+FORMAL LIVING - BAY WINDOW
+
+4
+
+3
+
+04
+
+FORMAL LIVING - RIGHT OF FIREPLACE
+
+1
+
+3
+
+05
+
+LIVING ROOM WITH BALCONY
+
+3
+
+5
+
+06
+
+FAMILY ROOM
+
+4
+
+5
+
+07
+
+KITCHEN / DINING
+
+2
+
+4
+
+08
+
+OFFICE
+
+3
+
+5
+
+09
+
+LAUNDRY
+
+2
+
+3
+
+10
+
+POWDER ROOM
+
+1
+
+3
+
+11
+
+OPENING SCHEDULE · ALL ROOMS
+
+22
+
+—
+
+AS
+OPEN
+
+Wall widths and heights are drawn at true
+scale where the field sheet tagged them.
+Openings are drawn at their tagged width.
+Where head, sill or spacing was not
+tagged, geometry is schematic and is
+marked on the sheet with a dashed gold
+edge.
+Nothing on these sheets is a fabrication
+dimension. Every sheet carries its own
+FIELD CHECK list.
+
+AT
+
+A
+
+GLANCE
+
+▪
+
+Living Room center wall does not close - 225" tagged against 222" overall.
+
+▪
+
+Living Room left wall leaves 54¼" untagged at the door bank.
+
+▪
+
+Formal Living bay moulding band scales 4½" against 2½" tagged.
+
+▪
+
+Head and sill heights are untagged in five rooms - no finished lengths can
+be set.
+
+▪
+
+Mount condition is not recorded anywhere in the set.
+
+LEGEND
+GLAZED OPENING - WIDTH TAGGED
+
+DOOR / DOOR BANK
+
+MOULDING, HEADER OR OVERHEAD BAND
+
+DASHED GOLD EDGE = HEAD OR SILL NOT FIELD-TAGGED, PLACEMENT SCHEMATIC
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+WALL AT TRUE SCALE
+
+GHOST - WIDTH NOT TAGGED
+
+GOLD DIMENSION = CLOSURE OPEN, SEE LAYOUT MATH
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 1 / 11
+
+NELMA'S WORKROOM
+
+POWERED
+
+BY
+
+EMPIRE
+
+FORMAL DINING
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+SHEET 02 OF 11 · REV A · 19 AUG 2026
+
+FORMAL DINING
+One opening - 99" wide - 105¾" floor to ceiling - 6½" header
+
+FORMAL DINING
+
+99"
+6½"
+
+6½" HEADER
+
+105¾"
+
+LAYOUT MATH
+
+HEAD AT 99¼" AFF = 105¾" CEILING less 6½" HEADER - DERIVED, CONFIRM
+SCALE 1" = 1.456 PT · WALL GEOMETRY AT TRUE SCALE · UNTAGGED SPACING DRAWN EVEN AND MARKED
+
+SITE PHOTO
+
+FIELD DATA
+
+FIELD CHECK · BEFORE FABRICATION
+
+OPENING WIDTH
+
+▪ Window height and sill height are not on
+
+the field sheet - the opening is drawn
+schematically between head and sill.
+
+99"
+FLOOR TO CEILING
+
+105¾"
+NO SITE PHOTO ON FILE
+
+▪ 6½" header is the only stacking space
+
+above the opening. Confirm rod / board can
+land in it before specifying a heading.
+
+HEADER ABOVE OPENING
+
+6½"
+WINDOW HEIGHT
+
+▪ Confirm whether 99" is glass, frame or
+
+not tagged
+
+trim to trim.
+
+SILL TO FLOOR
+
+▪ Wall width either side of the opening is
+
+not tagged
+
+not tagged - the wall is drawn ghosted and
+must not be scaled.
+
+MOUNT CONDITION
+
+not tagged
+
+NOT YET ELECTED · FABRIC: TBC - CONFIRM BEFORE CUT · LINING: TBC · HEADING: TBC · HARDWARE: TBC · MOUNT: NOT RECORDED ON FIELD SHEET
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 2 / 11
+
+NELMA'S WORKROOM
+
+POWERED
+
+BY
+
+EMPIRE
+
+FORMAL LIVING - BAY WINDOW
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+SHEET 03 OF 11 · REV A · 19 AUG 2026
+
+FORMAL LIVING - BAY WINDOW
+Bay, four windows - 27" each - flat moulding 2½" tall
+
+BAY - 4 WINDOWS
+
+27"
+
+27"
+
+27"
+
+27"
+
+FLAT MOULDING
+
+110½"
+
+LAYOUT MATH
+
+106"
+
+101¼"
+
+110½ less 106 = 4½" BAND vs 2½" MOULDING TAGGED - Δ 2" CONFIRM
+SCALE 1" = 1.394 PT · WALL GEOMETRY AT TRUE SCALE · UNTAGGED SPACING DRAWN EVEN AND MARKED
+
+SITE PHOTO
+
+FIELD DATA
+
+FIELD CHECK · BEFORE FABRICATION
+
+WINDOWS
+
+▪ The moulding band scales 4½" between the
+
+two floor dimensions but is tagged 2½"
+tall. 2" is unaccounted - remeasure the
+band before ordering hardware.
+
+4 @ 27" = 108"
+FLOOR TO TOP OF MOULDING
+
+110½"
+NO SITE PHOTO ON FILE
+
+▪ Sill derives at 4¾" AFF (106 head less
+
+FLOOR TO BOT. OF MOULDING
+
+106"
+
+101¼ window). Derived, not measured.
+
+MOULDING FACE
+
+▪ Bay return angles and mullion widths are
+
+2½" tall
+
+not tagged. Four 27" sashes are drawn
+abutting; treat overall 108" as a floor,
+not a finished width.
+
+WINDOW HEIGHT
+
+101¼"
+MULLION / JAMB WIDTHS
+
+not tagged
+
+NOT YET ELECTED · FABRIC: TBC - CONFIRM BEFORE CUT · LINING: TBC · HEADING: TBC · HARDWARE: TBC · MOUNT: NOT RECORDED ON FIELD SHEET
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 3 / 11
+
+NELMA'S WORKROOM
+
+POWERED
+
+BY
+
+EMPIRE
+
+FORMAL LIVING - RIGHT OF FIREPLACE
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+SHEET 04 OF 11 · REV A · 19 AUG 2026
+
+FORMAL LIVING - RIGHT OF FIREPLACE
+Reference window 43" wide - height shown for reference only
+
+RIGHT OF FIREPLACE
+
+43"
+MOULDING
+
+110½"
+
+LAYOUT MATH
+
+106"
+
+SAME MOULDING HEIGHTS AS THE BAY - 110½ / 106 - CROSS-CHECKED, AGREE
+SCALE 1" = 1.394 PT · WALL GEOMETRY AT TRUE SCALE · UNTAGGED SPACING DRAWN EVEN AND MARKED
+
+SITE PHOTO
+
+FIELD DATA
+
+FIELD CHECK · BEFORE FABRICATION
+
+WINDOW WIDTH
+
+▪ Field note states plainly that 43" is the
+
+width and the height is reference only.
+The window is drawn schematically in
+elevation.
+
+43"
+FLOOR TO TOP OF MOULDING
+
+110½"
+NO SITE PHOTO ON FILE
+
+▪ Wall width either side of this window is
+
+FLOOR TO BOT. OF MOULDING
+
+106"
+
+not tagged, so return and stack space
+cannot be checked from this sheet.
+
+WINDOW HEIGHT
+
+reference only - not tagged
+
+▪ Confirm this window matches the Family
+
+WALL WIDTH
+
+Room 43" units before treating them as one
+type.
+
+not tagged
+FIREPLACE OFFSET
+
+not tagged
+
+NOT YET ELECTED · FABRIC: TBC - CONFIRM BEFORE CUT · LINING: TBC · HEADING: TBC · HARDWARE: TBC · MOUNT: NOT RECORDED ON FIELD SHEET
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 4 / 11
+
+NELMA'S WORKROOM
+
+POWERED
+
+BY
+
+EMPIRE
+
+LIVING ROOM WITH BALCONY
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+SHEET 05 OF 11 · REV A · 19 AUG 2026
+
+LIVING ROOM WITH BALCONY
+Three walls - left 187" - center 222" - right 99"
+
+LEFT WALL
+
+33"
+
+CENTER WALL
+
+36" UNTAGGED 36" 27¾"
+
+77½"
+
+69¼"
+
+RIGHT WALL
+
+78¼" TAGGED
+OVERHEAD
+
+114¼"
+
+114¼"
+
+DOORS
+
+27"
+
+110¼"
+
+27"
+
+222" OVERALL
+
+99"
+
+187" OVERALL
+
+LAYOUT MATH
+
+LEFT 33+36+36+27¾ = 132¾ TAGGED vs 187 OVERALL - 54¼ UNTAGGED AT DOORS | CENTER 77½+69¼+78¼ = 225 vs 222 OVERALL - Δ 3" CONFIRM
+SCALE 1" = 0.910 PT · WALL GEOMETRY AT TRUE SCALE · UNTAGGED SPACING DRAWN EVEN AND MARKED
+
+SITE PHOTO
+
+FIELD DATA
+
+FIELD CHECK · BEFORE FABRICATION
+
+LEFT WALL
+
+▪
+
+Left wall: the tagged run leaves 54¼" untagged, drawn at
+the door bank on the reading that the string runs left to
+right with the doors unmeasured. Confirm on site.
+
+▪
+
+Center wall: segments total 225" against a 222" overall.
+Divisions drawn at 77½" and 146¾", scaling the third bay
+75¼" not 78¼". 3" must be found.
+
+▪
+
+Right wall: 99" is the window, not the wall. The wall is
+drawn at roughly 15 ft for scale only and is deliberately
+not dimensioned - tape it before quoting stack space.
+
+▪
+
+Right wall overhead depth and height are not tagged - the
+band is schematic. It governs ceiling versus wall mount.
+
+▪
+
+Ceiling differs wall to wall (114¼" vs 110¼"). Verify
+before any continuous rod is specified across the room.
+
+187" wide - 114¼" high
+LEFT WALL OPENINGS
+
+2 windows @ 27" + door bank
+CENTER WALL
+
+NO SITE PHOTO ON FILE
+
+222" wide - 114¼" high
+RIGHT WALL WINDOW
+
+99" wide
+RIGHT WALL HEIGHT
+
+110¼"
+RIGHT WALL OVERHEAD
+
+present, height not tagged
+DOOR BANK WIDTH
+
+not tagged
+
+NOT YET ELECTED · FABRIC: TBC - CONFIRM BEFORE CUT · LINING: TBC · HEADING: TBC · HARDWARE: TBC · MOUNT: NOT RECORDED ON FIELD SHEET
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 5 / 11
+
+NELMA'S WORKROOM
+
+POWERED
+
+BY
+
+EMPIRE
+
+FAMILY ROOM
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+SHEET 06 OF 11 · REV A · 19 AUG 2026
+
+FAMILY ROOM
+Fireplace wall - four windows @ 43" - wall height 110¼"
+
+LEFT RUN
+
+43"
+
+FIREPLACE
+
+RIGHT RUN
+
+43"
+
+43"
+
+43"
+
+FIREPLACE
+
+110¼"
+
+110¼"
+
+WIDTH NOT TAGGED
+LAYOUT MATH
+
+PER RUN 2 × 43 = 86" GLASS - RUN LENGTH IS NOMINAL 12 FT, SHOWN FOR SCALE, NOT DIMENSIONED
+SCALE 1" = 1.397 PT · WALL GEOMETRY AT TRUE SCALE · UNTAGGED SPACING DRAWN EVEN AND MARKED
+
+SITE PHOTO
+
+FIELD DATA
+
+FIELD CHECK · BEFORE FABRICATION
+
+WALL EACH SIDE
+
+▪
+
+The 12 ft run is nominal - it carries the scale only
+and is deliberately not dimensioned. Tape each run
+before quoting.
+
+▪
+
+Window spacing is not on the field sheet. The two
+windows per run are drawn evenly distributed - do not
+scale returns off this.
+
+▪
+
+Window heights are not tagged. Only the 110¼" wall
+height is.
+
+▪
+
+Fireplace width and breast projection are not tagged;
+it is shown as a ghost so the two 12 ft runs read at
+true scale.
+
+▪
+
+43" here matches the Formal Living, Laundry and Powder
+Room windows - confirm they are one type before
+batching.
+
+12 ft nominal - scale only
+WINDOWS
+
+4 @ 43" wide
+NO SITE PHOTO ON FILE
+
+WALL HEIGHT
+
+110¼"
+WINDOW HEIGHT
+
+not tagged
+WINDOW SPACING
+
+not tagged - drawn even
+FIREPLACE WIDTH
+
+not tagged
+
+NOT YET ELECTED · FABRIC: TBC - CONFIRM BEFORE CUT · LINING: TBC · HEADING: TBC · HARDWARE: TBC · MOUNT: NOT RECORDED ON FIELD SHEET
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 6 / 11
+
+NELMA'S WORKROOM
+
+POWERED
+
+BY
+
+EMPIRE
+
+KITCHEN / DINING
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+SHEET 07 OF 11 · REV A · 19 AUG 2026
+
+KITCHEN / DINING
+Two matching window units and a door - wall 110¼"
+
+KITCHEN / DINING WALL
+
+77"
+
+77"
+
+110¼"
+
+DOOR
+
+66"
+LAYOUT MATH
+
+92¾"
+
+66"
+
+110¼ CEILING less 92¾ WINDOW = 17½" TO SPLIT HEAD / SILL - SPLIT NOT TAGGED
+SCALE 1" = 1.397 PT · WALL GEOMETRY AT TRUE SCALE · UNTAGGED SPACING DRAWN EVEN AND MARKED
+
+SITE PHOTO
+
+FIELD DATA
+
+FIELD CHECK · BEFORE FABRICATION
+
+WINDOW UNITS
+
+▪ Confirm whether 77" is trim to trim and
+
+2 matching
+
+66" is the glass or the frame - the
+treatment width depends on which.
+
+UNIT WIDTH
+
+77"
+
+▪ 17½" is all the space there is above and
+
+WINDOW WIDTH
+
+NO SITE PHOTO ON FILE
+
+below the window together. Head clearance
+may be tight for a board mount.
+
+66"
+WINDOW HEIGHT
+
+92¾"
+
+▪ Wall length, door width and the gap
+
+between units are not tagged. Units are
+drawn at true 77" width, spacing
+schematic.
+
+WALL HEIGHT
+
+110¼"
+DOOR WIDTH
+
+not tagged
+
+▪ Door swing and handing not recorded -
+
+WALL LENGTH
+
+matters for panel stacking.
+
+not tagged
+
+NOT YET ELECTED · FABRIC: TBC - CONFIRM BEFORE CUT · LINING: TBC · HEADING: TBC · HARDWARE: TBC · MOUNT: NOT RECORDED ON FIELD SHEET
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 7 / 11
+
+NELMA'S WORKROOM
+
+POWERED
+
+BY
+
+EMPIRE
+
+OFFICE
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+SHEET 08 OF 11 · REV A · 19 AUG 2026
+
+OFFICE
+Three windows - all 93" tall - floor to ceiling 112"
+
+WINDOW 1
+
+WINDOW 2
+
+WINDOW 3
+
+41½"
+
+41¾"
+
+41¾"
+
+112"
+
+93"
+
+31½"
+LAYOUT MATH
+
+31½"
+
+31½"
+
+112 CEILING less 93 WINDOW = 19" TOTAL HEAD + SILL - SPLIT NOT TAGGED, 5" SILL SHOWN SCHEMATIC
+SCALE 1" = 1.375 PT · WALL GEOMETRY AT TRUE SCALE · UNTAGGED SPACING DRAWN EVEN AND MARKED
+
+SITE PHOTO
+
+FIELD DATA
+
+FIELD CHECK · BEFORE FABRICATION
+
+WINDOWS
+
+▪ The three outer widths differ by ¼". Treat them as
+
+three separate takeoffs, not one repeated unit.
+
+3
+
+▪ Head height above the window is not tagged. 19" is
+
+OUTER WIDTHS
+
+the whole budget for head plus sill together.
+
+41½" - 41¾" - 41¾"
+NO SITE PHOTO ON FILE
+
+GLASS / SASH WIDTH
+
+▪ Spacing between the three windows is not tagged -
+
+31½" each
+
+they are drawn as three separate elevations rather
+than one wall run.
+
+WINDOW HEIGHT
+
+93" all three
+
+▪ Confirm whether they share a wall or turn a
+
+corner.
+
+FLOOR TO CEILING
+
+112"
+
+▪ Room is full-height wood panelling. Confirm
+
+whether hardware lands on the panel, the stile or
+above the frieze - it changes the fixing and the
+finished length.
+
+SPACING BETWEEN
+
+not tagged
+
+NOT YET ELECTED · FABRIC: TBC - CONFIRM BEFORE CUT · LINING: TBC · HEADING: TBC · HARDWARE: TBC · MOUNT: NOT RECORDED ON FIELD SHEET
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 8 / 11
+
+NELMA'S WORKROOM
+
+POWERED
+
+BY
+
+EMPIRE
+
+LAUNDRY
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+SHEET 09 OF 11 · REV A · 19 AUG 2026
+
+LAUNDRY
+Both windows 43" × 79" - 15" overhead
+
+WINDOW 1
+
+WINDOW 2
+
+15" OVERHEAD
+
+15"
+
+15" OVERHEAD
+
+79"
+
+LAYOUT MATH
+
+SILL TO FLOOR NOT TAGGED
+
+SILL TO FLOOR NOT TAGGED
+
+43"
+
+43"
+
+79 WINDOW + 15 OVERHEAD = 94" ESTABLISHED FROM SILL UP - SILL HEIGHT NOT TAGGED
+SCALE 1" = 1.426 PT · WALL GEOMETRY AT TRUE SCALE · UNTAGGED SPACING DRAWN EVEN AND MARKED
+
+SITE PHOTO
+
+FIELD DATA
+
+FIELD CHECK · BEFORE FABRICATION
+
+WINDOWS
+
+▪ Sill height is not tagged, so floor to
+
+ceiling cannot be derived. The zone below
+the sill is hatched, not drawn. Heights
+are dimensioned once, on Window 2 - both
+windows are alike.
+
+2 matching
+WINDOW WIDTH
+
+43"
+NO SITE PHOTO ON FILE
+
+WINDOW HEIGHT
+
+79"
+
+▪ 15" overhead is generous - a board or rod
+
+will land, but confirm whether the 15"
+runs to ceiling or to a soffit.
+
+OVERHEAD ABOVE WINDOW
+
+15"
+SILL TO FLOOR
+
+▪ 43" × 79" matches the Powder Room window
+
+not tagged
+
+exactly. Confirm one type across all
+three.
+
+FLOOR TO CEILING
+
+not tagged
+
+NOT YET ELECTED · FABRIC: TBC - CONFIRM BEFORE CUT · LINING: TBC · HEADING: TBC · HARDWARE: TBC · MOUNT: NOT RECORDED ON FIELD SHEET
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 9 / 11
+
+NELMA'S WORKROOM
+
+POWERED
+
+BY
+
+EMPIRE
+
+POWDER ROOM
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+SHEET 10 OF 11 · REV A · 19 AUG 2026
+
+POWDER ROOM
+One window - 43" wide × 79" high - 15" overhead
+
+POWDER ROOM WINDOW
+
+15"
+
+15" OVERHEAD
+
+79"
+
+SILL TO FLOOR NOT TAGGED
+
+43"
+LAYOUT MATH
+
+IDENTICAL TAKEOFF TO LAUNDRY - 43 × 79 WITH 15" OVERHEAD - CROSS-CHECKED
+SCALE 1" = 1.426 PT · WALL GEOMETRY AT TRUE SCALE · UNTAGGED SPACING DRAWN EVEN AND MARKED
+
+SITE PHOTO
+
+FIELD DATA
+
+FIELD CHECK · BEFORE FABRICATION
+
+WINDOWS
+
+▪ Same takeoff as both Laundry windows. If
+
+confirmed, this is a three-of-a-kind and
+should be batched.
+
+1
+WINDOW WIDTH
+
+43"
+NO SITE PHOTO ON FILE
+
+▪ Sill height not tagged - zone below the
+
+sill is hatched.
+
+WINDOW HEIGHT
+
+79"
+
+▪ Privacy requirement not recorded. Ask
+
+OVERHEAD ABOVE WINDOW
+
+before specifying a sheer.
+
+15"
+SILL TO FLOOR
+
+not tagged
+FLOOR TO CEILING
+
+not tagged
+
+NOT YET ELECTED · FABRIC: TBC - CONFIRM BEFORE CUT · LINING: TBC · HEADING: TBC · HARDWARE: TBC · MOUNT: NOT RECORDED ON FIELD SHEET
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 10 / 11
+
+NELMA'S WORKROOM
+
+POWERED
+
+BY
+
+EMPIRE
+
+OPENING SCHEDULE
+
+WORKROOM
+
+WHITTINGTON DESIGN · MCLEAN
+
+SHEET 11 OF 11 · REV A · 19 AUG 2026
+
+OPENING SCHEDULE
+All rooms - one line per opening type - as field-recorded 1 July 2026
+
+ROOM
+
+MARK
+
+QTY
+
+WIDTH
+
+HEIGHT
+
+HEAD
+
+FORMAL DINING
+
+FD-1
+
+1
+
+99"
+
+not tagged
+
+6½" header - 105¾" ceiling
+
+FORMAL LIVING - BAY
+
+FLB-1
+
+4
+
+27" ea
+
+101¼"
+
+106" to bottom of moulding
+
+FORMAL LIVING - R/FPL
+
+FLR-1
+
+1
+
+43"
+
+reference
+
+106" to bottom of moulding
+
+LIVING RM - LEFT WALL
+
+LRB-1
+
+2
+
+27" ea
+
+not tagged
+
+114¼" ceiling - door bank between
+
+LIVING RM - CENTER WALL
+
+LRB-2
+
+1
+
+222"
+
+not tagged
+
+114¼" ceiling - 3" closure open
+
+LIVING RM - RIGHT WALL
+
+LRB-3
+
+1
+
+99" window
+
+not tagged
+
+110¼" ceiling - overhead present
+
+FAMILY ROOM
+
+FR-1
+
+4
+
+43" ea
+
+not tagged
+
+110¼" ceiling - 12 ft runs
+
+KITCHEN / DINING
+
+KD-1
+
+2
+
+66" glass
+
+92¾"
+
+77" unit - 17½" head+sill total
+
+OFFICE
+
+OF-1
+
+3
+
+31½" ea
+
+93"
+
+112" ceiling - outers 41½ / 41¾ / 41¾
+
+LAUNDRY
+
+LA-1
+
+2
+
+43" ea
+
+79"
+
+15" overhead
+
+POWDER ROOM
+
+PR-1
+
+1
+
+43"
+
+79"
+
+15" overhead
+
+TOTAL OPENINGS RECORDED
+
+OPEN
+
+BEFORE
+
+/
+
+OVERHEAD
+
+CONDITION
+
+22
+
+QUOTING
+
+▪
+
+Living Room center wall: tagged segments total 225" against a 222" overall. 3" unresolved.
+
+▪
+
+Living Room left wall: 54¼" at the door bank is untagged. Door bank width governs the panel count.
+
+▪
+
+Formal Living bay: moulding band scales 4½" but is tagged 2½". Remeasure before hardware.
+
+▪
+
+Head and sill heights are untagged in Formal Dining, Living Room, Family Room and Kitchen / Dining - no finished
+lengths can be set for those rooms.
+
+▪
+
+Mount condition (inside, outside, ceiling) is not recorded anywhere in the set. It changes every width.
+
+▪
+
+Fabric, lining, heading and hardware are not yet elected - this set is measurement only.
+
+NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD
+
+FOR
+
+DISCUSSION
+
+-
+
+NOT
+
+FOR
+
+CONSTRUCTION
+
+SHEET 11 / 11
+
+
