@@ -45,7 +45,7 @@ MARKUP_SCOPE = "legacy_all_goods"
 # ── PAYMENT ─────────────────────────────────────────────────────────────
 # Replace PAY_URL with the live Stripe payment link. The QR is generated
 # from this string — change it here and nowhere else.
-PAY_URL = "https://buy.stripe.com/REPLACE-WITH-LIVE-LINK"
+PAY_URL = "https://buy.stripe.com/14A14gdGWgaBgMzeWlg7e01"
 PAY_LIVE = "REPLACE" not in PAY_URL          # gates the sheet
 
 def qr_svg(data, x, y, size):
@@ -67,9 +67,17 @@ def qr_svg(data, x, y, size):
                 c += 1
     return "".join(out), n
 
-INV = dict(no="\u2588\u2588\u2588\u2588", date="\u2588\u2588 \u2588\u2588\u2588 2026",
-           approved="\u2588\u2588 \u2588\u2588\u2588 2026", terms="\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588",
-           remit="\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588")
+INV = dict(no="INV-2026-119", date="30 Aug 2026",
+           approved="27 Aug 2026", terms="Due on receipt")
+# -- COMPLETENESS GATE --------------------------------------------------
+# The red COMPLETE BEFORE SENDING strip was removed once the fields were
+# filled. This replaces it. A block character anywhere in INV means a
+# founder field was never supplied.
+for _k, _v in INV.items():
+    if "\u2588" in _v or not _v.strip():
+        sys.exit(f"REFUSED - INV['{_k}'] is unfilled: {_v!r}")
+if "REPLACE" in PAY_URL or not PAY_URL.startswith("https://buy.stripe.com/"):
+    sys.exit(f"REFUSED - PAY_URL is not a live Stripe payment link: {PAY_URL!r}")
 PW,PH=612,792
 INK,HAIR,MUTED,GOLD,RED,PAPER="#4E5257","#DEDAD3","#96907F","#B8912F","#B4553C","#FBFAF7"
 def txt(x,y,s,size=8,anchor="start",fill=None,mono=False,bold=False):
@@ -141,7 +149,7 @@ for i,t in enumerate(["Walnut plywood - already on hand.",
 y+=68
 o.append(line(48,y,PW-48,y,HAIR))
 y+=20
-o.append(txt(48,y,"THREE WAYS TO PAY",9.2,bold=True))
+o.append(txt(48,y,"TWO WAYS TO PAY",9.2,bold=True))
 QS=82
 if PAY_LIVE:
     qsvg,_=qr_svg(PAY_URL, 48, y+14, QS)
@@ -161,14 +169,7 @@ o.append(txt(bx,y+40,"Card or bank transfer through Stripe. Opens on your phone.
 o.append(txt(bx,y+58,"2  Or use the link",8.0,bold=True))
 o.append(txt(bx,y+70,PAY_URL,6.8,fill="#2B5AA0",mono=True))
 LINK_BOX=(bx,y+62,bx+len(PAY_URL)*3.6,y+74)
-o.append(txt(bx,y+86,"3  Or by check",8.0,bold=True))
-o.append(txt(bx,y+98,INV["remit"],7.0,fill=MUTED))
 y+=QS+34
-# fill-before-sending strip
-o.append(r_(48,PH-124,PW-96,50,"#FFF4F0",RED,1.4))
-o.append(txt(64,PH-105,"COMPLETE BEFORE SENDING",7.8,bold=True,fill=RED))
-o.append(txt(64,PH-92,"Stripe payment link \u00b7 invoice number \u00b7 date \u00b7 approval date \u00b7 terms \u00b7 remit-to",7.0))
-o.append(txt(64,PH-80,"Shown as blocks above. Nothing else on this invoice needs changing.",7.0,fill=MUTED))
 o.append(line(48,PH-52,PW-48,PH-52,HAIR))
 o.append(txt(48,PH-36,"R6 Walnut Sofa Surround \u00b7 Woodcraft \u2014 Philipp &amp; Naomi",6.8,fill=MUTED))
 o.append(txt(PW-48,PH-36,"REV G",6.8,"end",MUTED))
