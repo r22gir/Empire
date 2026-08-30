@@ -4723,7 +4723,8 @@ def _reset_max_state(params: dict, desk: Optional[str] = None) -> ToolResult:
     # 1. Reload .env
     try:
         from dotenv import load_dotenv
-        load_dotenv(os.path.expanduser("~/empire-repo/backend/.env"), override=True)
+        # DISABLED 2026-08-30 — pulled sk_live from stale tree, overrode systemd env
+        # load_dotenv(os.path.expanduser("~/empire-repo/backend/.env"), override=True)
         founder_email = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
         results.append(f"Environment reloaded — FOUNDER_EMAIL: {founder_email}")
     except Exception as e:
