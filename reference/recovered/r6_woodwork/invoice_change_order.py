@@ -93,13 +93,15 @@ def line(x1,y1,x2,y2,st=INK,sw=1):
     return f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{st}" stroke-width="{sw}"/>'
 
 o=[f'<rect width="{PW}" height="{PH}" fill="#ffffff"/>']
+o.append(f'<rect x="28" y="26" width="{PW-56}" height="{PH-52}" fill="none" stroke="{HAIR}"/>')
 # header
-o.append(txt(48,64,"INVOICE",22,bold=True))
-o.append(txt(48,84,"WOODCRAFT BY EMPIRE WORKROOM",8,fill=MUTED))
-o.append(txt(PW-48,58,f'No. {INV["no"]}',10,"end",bold=True))
-o.append(txt(PW-48,74,f'Date  {INV["date"]}',8,"end",fill=MUTED))
-o.append(txt(PW-48,88,f'Terms {INV["terms"]}',8,"end",fill=MUTED))
-o.append(line(48,102,PW-48,102,INK,1.4))
+o.append(txt(40,52,"INVOICE",13.5,bold=True))
+o.append(txt(40,68,"Change order, REV G \u00b7 additional work",8.0,fill=MUTED))
+o.append(txt(PW-40,52,INV["no"],13.5,"end"))
+o.append(txt(PW-40,68,"WOODCRAFT BY EMPIRE WORKROOM \u00b7 WASHINGTON DC",7.2,"end",MUTED))
+o.append(line(28,80,PW-28,80,HAIR))
+o.append(txt(PW-40,96,f'Date  {INV["date"]}',7.4,"end",fill=MUTED))
+o.append(txt(PW-40,108,f'Terms {INV["terms"]}',7.4,"end",fill=MUTED))
 # parties
 o.append(txt(48,126,"BILL TO",6.6,fill=MUTED,mono=True))
 for i,t in enumerate(["Woodcraft","Philipp &amp; Naomi"]):
@@ -170,9 +172,10 @@ o.append(txt(bx,y+58,"2  Or use the link",8.0,bold=True))
 o.append(txt(bx,y+70,PAY_URL,6.8,fill="#2B5AA0",mono=True))
 LINK_BOX=(bx,y+62,bx+len(PAY_URL)*3.6,y+74)
 y+=QS+34
-o.append(line(48,PH-52,PW-48,PH-52,HAIR))
-o.append(txt(48,PH-36,"R6 Walnut Sofa Surround \u00b7 Woodcraft \u2014 Philipp &amp; Naomi",6.8,fill=MUTED))
-o.append(txt(PW-48,PH-36,"REV G",6.8,"end",MUTED))
+o.append(line(28,PH-46,PW-28,PH-46,HAIR))
+o.append(txt(40,PH-32,"R6 Walnut Sofa Surround \u00b7 Woodcraft \u2014 Philipp &amp; Naomi",6.8,fill=MUTED))
+o.append(txt(PW/2,PH-32,"INVOICE \u00b7 DUE ON RECEIPT",6.8,"middle",RED,bold=True))
+o.append(txt(PW-40,PH-32,f'REV G \u00b7 {INV["date"]}',6.8,"end",MUTED))
 svg=(f'<svg xmlns="http://www.w3.org/2000/svg" width="{PW}" height="{PH}" viewBox="0 0 {PW} {PH}">'
      +"".join(o)+'</svg>')
 b=io.BytesIO(); cairosvg.svg2pdf(bytestring=svg.encode(),write_to=b,dpi=72); b.seek(0)
