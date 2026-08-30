@@ -992,9 +992,12 @@ def room_sheet(r, no, total, spec):
 # ══════════════════════════ COVER SHEET ══════════════════════════════════
 def cover(total, spec):
     o = chrome(1, total, "COVER \u00b7 INDEX", spec)
+    client_str = spec["job"]["client"]
+    if spec["job"].get("client_loc"):
+        client_str += "  \u00b7  " + spec["job"]["client_loc"]
     o.append(T(30, 78, spec["job"]["project"], 26.0, "start", INK, SERIF, bold=True, ls=1.2))
     o.append(T(30 + tw(spec["job"]["project"], 26.0, SERIF, True, ls=1.2) + 16, 78,
-               "FOR " + spec["job"]["client"] + "  \u00b7  " + spec["job"]["client_loc"], 9.0,
+               "FOR " + client_str, 9.0,
                "start", MUTE, MONO, bold=True, ls=1.4))
     o.append(T(30, 98, "WINDOW & DRAPERY FIELD MEASUREMENTS", 9.0, "start", GOLD,
                MONO, bold=True, ls=2.2))
@@ -1005,7 +1008,7 @@ def cover(total, spec):
     o.append(T(30, y, "JOB", 7.0, "start", GOLD, MONO, bold=True, ls=1.4))
     o.append(LINE(30, y + 4, 250, y + 4, GOLD, 0.8))
     y += 16
-    for a, b in [("CLIENT", spec["job"]["client"] + "  \u00b7  " + spec["job"]["client_loc"]),
+    for a, b in [("CLIENT", client_str),
                  ("HOUSE", spec["job"]["project"]),
                  ("WORKROOM", spec["job"]["letterhead"] + "  \u00b7  " + spec["job"]["locale"]),
                  ("PRODUCTION", "EMPIRE WORKROOM"),
@@ -1051,8 +1054,12 @@ def cover(total, spec):
     for n, r in enumerate(spec["rooms"], start=2):
         wins = sum(1 for p in r["panels"] for i in p.get("items", [])
                    if i["kind"] == "window")
+        pending_n = sum(1 for tup in r.get("data", [])
+                        if len(tup) >= 3 and isinstance(tup[2], dict)
+                        and tup[2].get("pending"))
+        open_items = pending_n + len(r.get("check", []))
         rows.append((f"{n:02d}", r["name"], str(wins) if wins else "wall",
-                     str(len(r["check"]))))
+                     str(open_items)))
     rows.append((f"{n_rooms+2:02d}", "OPENING SCHEDULE \u00b7 ALL ROOMS",
                  str(sum(r[2] for r in spec["schedule"])), "\u2014"))
     for a, b, c, d in rows:
