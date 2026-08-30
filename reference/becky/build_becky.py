@@ -9,13 +9,12 @@ only: W1, W2, W3 + cover + schedule.
 The spec carries job metadata from the stored row. No pricer call. No
 fabrication. Per 2026-08-29 handoff §4: LENGTH=105", HEADING=pinch
 pleat on ripplefold track (all rooms), OPENING WIDTH W1=6 widths and
-W2=4 widths (settled). The remaining 7 dimension slots stay PENDING —
-DEDUCTION and MOUNT on all three rooms, OPENING WIDTH on W3.
+W2=4 widths (settled). 7 dimension slots stay PENDING — DEDUCTION
+and MOUNT on all three rooms, OPENING WIDTH on W3.
 
-PACK NOT DELIVERABLE: cover OPEN ITEMS reads 0 over 7 PENDING. McLean
-generator cover() line 1055 hardcodes len(r["check"]) and never the
-auto-augmented pending_labels. Tracked under D-COVER (separate
-generator dispatch).
+Cover OPEN ITEMS reads 8 (3/2/3 across W1/W2/W3): 7 are pending slots
+and 1 is the bench block counted as an open item. The bench inflates
+W1 because check is the sole multi-line field; tracked under D-COVER-2.
 """
 import importlib.util, sys, subprocess
 
