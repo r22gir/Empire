@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime, date, timedelta
 
 from app.db.database import get_db, dict_row, dict_rows
+from app.services.chain_guard import require_customer, MissingCustomerLink
 from app.middleware.rate_limiter import limiter
 from app.services.pricing import (
     PRICING_ENGINE_VERSION,
@@ -1406,6 +1407,21 @@ def create_invoice(request: Request, invoice: InvoiceCreate):
                 business_unit,
             )
 
+        # D48 (narrow): the find-or-create above is left exactly as it was.
+        # This only closes the fall-through where neither customer_id nor a
+        # usable customer_name was supplied — including a whitespace-only
+        # name, which passes the check above but makes the helper return None
+        # (see _find_or_create_customer_for_invoice). invoices.customer_id is
+        # NOT NULL, so that path used to surface as a 500.
+        try:
+            customer_id = require_customer(
+                customer_id,
+                writer="create_invoice",
+                source="request body field 'customer_id' or 'customer_name'",
+            )
+        except MissingCustomerLink as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
         inv_number = _next_invoice_number(conn)
         tax_amount = round(invoice.subtotal * invoice.tax_rate, 2)
         total = round(invoice.subtotal + tax_amount, 2)
@@ -1904,6 +1920,18 @@ def create_invoice_from_job(request: Request, job_id: str):
         if not job:
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
+        # D48: inherited from the job; jobs.customer_id is NOT NULL today, so
+        # this is defence-in-depth. Refuse rather than emit an invoice whose
+        # customer link is absent.
+        try:
+            customer_id = require_customer(
+                job.get("customer_id"),
+                writer="create_invoice_from_job",
+                source=f"job {job_id}",
+            )
+        except MissingCustomerLink as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
         # Get line items from linked quote if available
         line_items = []
         quote_id = job.get("quote_id")
@@ -1965,7 +1993,7 @@ def create_invoice_from_job(request: Request, job_id: str):
                VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?)""",
             (
                 inv_number,
-                job.get("customer_id"),
+                customer_id,
                 quote_id,
                 subtotal,
                 tax_rate,

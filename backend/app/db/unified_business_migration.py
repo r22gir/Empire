@@ -48,6 +48,17 @@ def get_conn():
 def create_all_tables(conn: sqlite3.Connection):
     """Create all unified business tables. Idempotent."""
 
+    # D48 STEP 2: the chain tables (customers, invoices, jobs, payments) are
+    # defined in init_db.SCHEMA_SQL, not here. Execute that first so any DB
+    # built by this function — notably the test DB in tests/conftest.py —
+    # carries the same NOT NULL / FK constraints as production. Without this
+    # the test schema lacked invoices and jobs entirely, so no test could
+    # reach the chain constraints. The two schemas define disjoint table
+    # sets, so this is additive; init_db stays the single source of truth
+    # for the chain DDL rather than it being copied into a second place.
+    from app.db.init_db import SCHEMA_SQL
+    conn.executescript(SCHEMA_SQL)
+
     conn.executescript("""
     -- Financial Audit Log (created FIRST — everything else logs to it)
     CREATE TABLE IF NOT EXISTS financial_audit_log (

@@ -23,6 +23,7 @@ from datetime import datetime, date, timedelta
 
 from app.db.database import get_db, dict_row, dict_rows
 from app.services.business_routing import route_to_for_item_type
+from app.services.chain_guard import require_customer, MissingCustomerLink
 
 router = APIRouter(tags=["jobs-unified"])
 
@@ -1099,6 +1100,17 @@ def list_jobs(
 @router.post("/jobs")
 def create_job(job: JobCreateSchema):
     """Create a new job with auto-generated job_number."""
+    # D48: reject before opening a connection — jobs.customer_id is NOT NULL,
+    # and refusing here means no job_number is consumed by a doomed request.
+    try:
+        customer_id = require_customer(
+            job.customer_id,
+            writer="create_job",
+            source="request body field 'customer_id'",
+        )
+    except MissingCustomerLink as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     with get_db() as conn:
         job_number = _next_job_number(conn)
         job_id = None
@@ -1116,7 +1128,7 @@ def create_job(job: JobCreateSchema):
             (
                 job_number,
                 job.title,
-                job.customer_id,
+                customer_id,
                 job.quote_id,
                 job.pipeline_stage if job.pipeline_stage != "intake" else "pending",
                 job.job_type,
@@ -2012,6 +2024,18 @@ def invoice_from_job(job_id: str):
 
         job = _enrich_job(dict_row(job_row))
 
+        # D48: the customer link is inherited from the job. jobs.customer_id is
+        # NOT NULL today, so this is defence-in-depth rather than an active bug
+        # — but the invoice must not inherit an absent link if that changes.
+        try:
+            customer_id = require_customer(
+                job.get("customer_id"),
+                writer="invoice_from_job",
+                source=f"job {job_id}",
+            )
+        except MissingCustomerLink as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
         # Build line items from job items
         line_items = []
         item_rows = conn.execute("SELECT * FROM job_items WHERE job_id = ?", (job_id,)).fetchall()
@@ -2057,7 +2081,7 @@ def invoice_from_job(job_id: str):
                        ?, ?, ?, ?,
                        ?, ?, 'unpaid')""",
             (
-                inv_number, job.get("customer_id"), job.get("quote_id"), job_id,
+                inv_number, customer_id, job.get("quote_id"), job_id,
                 subtotal, tax_rate, tax_amount, total, total,
                 json.dumps(line_items),
                 f"Invoice for job {job.get('job_number', job_id)}",

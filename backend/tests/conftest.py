@@ -93,6 +93,11 @@ _DATA_TABLES = [
     "saved_patterns", "drawing_versions",
     "work_order_items", "work_orders",
     "production_log",
+    # D48: `payments` and `customers` only became part of the test schema when
+    # create_all_tables started building the chain tables. Ordered
+    # children-before-parents so the deletes hold with FKs enforced —
+    # payments -> invoices -> customers.
+    "payments",
     "invoices",
     "jobs",
     "job_documents",   # D44 — job images landing table
@@ -100,6 +105,7 @@ _DATA_TABLES = [
     "financial_audit_log",
     "chart_of_accounts",
     "quotes_v2",
+    "customers",
 ]
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -132,6 +138,21 @@ def _build_empty_empire_db(path: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+    # D48: bring `jobs`/`invoices` up to production shape. jobs_unified runs
+    # init_schema() at import time, which under pytest happens *before* this
+    # function creates the tables — so its ALTERs silently no-op and the test
+    # tables stay narrower than production (no job_number, client_name,
+    # business_unit, pipeline_stage, ...). Re-running it here, once, after the
+    # tables exist, makes that deterministic for every test rather than a
+    # side effect of whichever test module happens to trigger it first.
+    try:
+        from app.routers.jobs_unified import init_schema as _jobs_unified_init_schema
+        _jobs_unified_init_schema()
+    except Exception:
+        # Never let schema top-up break collection; tests that need the wider
+        # columns will fail loudly on their own.
+        pass
 
 
 @pytest.fixture(scope="session")

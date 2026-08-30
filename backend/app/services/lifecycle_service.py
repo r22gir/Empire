@@ -9,6 +9,7 @@ import uuid
 import logging
 from datetime import datetime
 from app.db.database import get_db
+from app.services.chain_guard import require_customer, MissingCustomerLink  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,14 @@ def create_job_from_quote(quote_id: str, changed_by: str = "system") -> dict:
         job_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()
 
+        # D48: reject before writing. jobs.customer_id is NOT NULL; without
+        # this the INSERT raises a bare IntegrityError the caller sees as 500.
+        customer_id = require_customer(
+            q.get('customer_id'),
+            writer="create_job_from_quote",
+            source=f"quote {quote_id}",
+        )
+
         conn.execute("""
             INSERT INTO jobs (
                 id, job_number, title, customer_id, quote_id, status, job_type,
@@ -121,7 +130,7 @@ def create_job_from_quote(quote_id: str, changed_by: str = "system") -> dict:
         """, (
             job_id, job_number,
             q.get('project_name', f"Job for {q.get('customer_name', 'Customer')}"),
-            q.get('customer_id'),
+            customer_id,
             quote_id,
             'quoted',
             q.get('business_unit', 'workroom'),
@@ -206,6 +215,13 @@ def create_invoice_from_quote(quote_id: str, changed_by: str = "system") -> dict
         deposit_paid = q.get('deposit_paid', 0) or 0
         balance = round((q.get('total', 0) or 0) - deposit_paid, 2)
 
+        # D48: reject before writing. invoices.customer_id is NOT NULL.
+        customer_id = require_customer(
+            q.get('customer_id'),
+            writer="create_invoice_from_quote",
+            source=f"quote {quote_id}",
+        )
+
         conn.execute("""
             INSERT INTO invoices (
                 id, invoice_number, customer_id, quote_id, job_id, status,
@@ -216,7 +232,7 @@ def create_invoice_from_quote(quote_id: str, changed_by: str = "system") -> dict
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             inv_id, inv_number,
-            q.get('customer_id'), quote_id, q.get('job_id'),
+            customer_id, quote_id, q.get('job_id'),
             'draft',
             q.get('subtotal', 0), q.get('tax_rate', 0), q.get('tax_amount', 0),
             q.get('total', 0), deposit_paid, balance,
