@@ -1,18 +1,20 @@
 """R6 REV G - material list + client proposal. One RATES/SPEC block drives both."""
-import io, math, cairosvg
+import io, math, pathlib, cairosvg
 from pypdf import PdfWriter, PdfReader
 import re as _re
+OUT = pathlib.Path(__file__).resolve().parent / "out"
+OUT.mkdir(exist_ok=True)
 S=dict(rev="G",date="2026-08-18",job="R6 Walnut Sofa Surround",
  client="Woodcraft \u2014 Philipp &amp; Naomi",brand="WOODCRAFT BY EMPIRE WORKROOM",
  MARKUP=0.30, LABOR_HRS=7.5, LABOR_RATE=95.0)
 RATES=dict(wal44=16.00, wal84=20.00, panel=82.00, birch=68.00,
            glue=18.00, spline=12.00, pin=9.00, abras=22.00, finish=34.00)
 MAT=[
- ("Walnut 4/4 S2S","solid edging, cove fascia, leveler pads \u00b7 0.94 BF net, 2 with waste","board ft",2,RATES["wal44"]),
- ("Walnut 8/4","plinth frames \u00b7 8 rails + 8 leg blocks \u00b7 3.8 BF net","board ft",6,RATES["wal84"]),
- ("Birch ply 3/4","french cleat pair, hidden behind the overhead","part sheet",1,RATES["birch"]),
- ("Leg mounting hardware","8 sets \u00b7 threaded insert + hanger bolt","lot",1,28.00),
- ("Shop supplies and finish","adhesive, splines, fasteners, abrasives, matched finish","lot",1,95.00),
+ ("Walnut 4/4 S2S","solid edging, cove fascia, leveler pads \u00b7 0.94 BF net, 2 with waste","board ft",2,RATES["wal44"],False),
+ ("Walnut 8/4","plinth frames \u00b7 8 rails + 8 leg blocks \u00b7 3.8 BF net","board ft",5,RATES["wal84"],False),
+ ("Birch ply 3/4","french cleats \u2014 cut from 0.72 walnut already on hand","part sheet",1,RATES["birch"],True),
+ ("Leg mounting hardware","8 sets \u00b7 threaded insert + hanger bolt","lot",1,28.00,False),
+ ("Shop supplies and finish","adhesive, splines, fasteners, abrasives, matched finish","lot",1,95.00,False),
 ]
 LED=[
  ("Hue Lightstrip Plus base kit 2 m","controller + PSU \u00b7 one per side","https://www.amazon.com/dp/B08CKJWSFS",2,100.00),
@@ -27,14 +29,14 @@ LED=[
 ]
 
 
-SCOPE=[  # extra-scope work, the 5.5 h
+SCOPE=[  # extra-scope work, the 7.5 h
  ("Overhead rebuilt to four bays","dividers, dados, back panels",2.0),
  ("Solid walnut edging","94 lin ft, applied and flush-trimmed",1.5),
  ("Concealed cove lighting, 16 runs","fit, wire and test before close",1.5),
  ("Plinth frames \u2014 mill and assemble","8 rails, 8 leg blocks, 2 frames squared",2.0),
  ("Leg mounts + fit frames","bore 8, hang the cabinets on them",0.5),
 ]
-MATSUB=sum(q*p for _,_,_,q,p in MAT)
+MATSUB=sum(0.0 if nc else q*p for _,_,_,q,p,nc in MAT)
 LEDSUB=sum(q*p for _,_,_,q,p in LED)
 LEDSELL=LEDSUB*(1+S["MARKUP"])
 GOODS=MATSUB+LEDSUB
@@ -200,12 +202,14 @@ def c3():
     o.append(txt(40,138,"ITEM",6.2,fill=MUTED,mono=True)); o.append(txt(430,138,"QTY",6.2,"end",MUTED,mono=True))
     o.append(txt(520,138,"UNIT",6.2,"end",MUTED,mono=True)); o.append(txt(600,138,"AMOUNT",6.2,"end",MUTED,mono=True))
     o.append(line(40,142,600,142,HAIR))
-    for i,(nm,d_,u,q,p) in enumerate(MAT):
+    for i,(nm,d_,u,q,p,nc) in enumerate(MAT):
         yy=156+i*18.6
-        o.append(txt(40,yy,nm,7.3,bold=True)); o.append(txt(40,yy+9,d_,6.3,fill=MUTED))
+        nm_disp = (nm + "  ·  NOT BILLED") if nc else nm
+        amt = "$0.00" if nc else f'${q*p:,.2f}'
+        o.append(txt(40,yy,nm_disp,7.3,bold=True)); o.append(txt(40,yy+9,d_,6.3,fill=MUTED))
         o.append(txt(430,yy+3,f'{q} {u}',7.0,"end",mono=True))
         o.append(txt(520,yy+3,f'${p:,.2f}',7.0,"end",mono=True))
-        o.append(txt(600,yy+3,f'${q*p:,.2f}',7.2,"end",mono=True))
+        o.append(txt(600,yy+3,amt,7.2,"end",mono=True,fill=(MUTED if nc else None)))
         o.append(line(40,yy+12,600,yy+12,HAIR,.4))
     y=156+len(MAT)*18.6+4
     o.append(txt(40,y,"Cabinetry",7.6,bold=True)); o.append(txt(600,y,f'${MATSUB:,.2f}',8.0,"end",bold=True))
@@ -297,26 +301,27 @@ def c4():
     return page("".join(o),5,5,"Breakdown \u2014 Labour & Total",
         f'{S["LABOR_HRS"]} h at ${S["LABOR_RATE"]:,.2f} \u00b7 materials + {S["MARKUP"]*100:.0f}%',"FOR YOUR APPROVAL")
 
-LINKS=[]
-sheets=[c1(),c2(),c2b(),c3(),c4()]
-w=PdfWriter()
-for sv in sheets:
-    b=io.BytesIO(); cairosvg.svg2pdf(bytestring=sv.encode(),write_to=b,dpi=72); b.seek(0)
-    w.add_page(PdfReader(b).pages[0])
-from pypdf.generic import DictionaryObject,NameObject,ArrayObject,NumberObject,TextStringObject
-for pi,x0,y0,x1,y1,url in LINKS:
-    pg=w.pages[pi]; ph=float(pg.mediabox.height)
-    ann=DictionaryObject({NameObject("/Type"):NameObject("/Annot"),
-        NameObject("/Subtype"):NameObject("/Link"),
-        NameObject("/Rect"):ArrayObject([NumberObject(x0),NumberObject(ph-y1),NumberObject(x1),NumberObject(ph-y0)]),
-        NameObject("/Border"):ArrayObject([NumberObject(0),NumberObject(0),NumberObject(0)]),
-        NameObject("/A"):DictionaryObject({NameObject("/S"):NameObject("/URI"),
-            NameObject("/URI"):TextStringObject(url)})})
-    ref=w._add_object(ann)
-    if "/Annots" in pg: pg["/Annots"].append(ref)
-    else: pg[NameObject("/Annots")]=ArrayObject([ref])
-w.add_metadata({"/Title":"R6 REV G Change Order - Client"})
-with open("/mnt/user-data/outputs/R6-CLIENT-change-order-rev-G.pdf","wb") as f: w.write(f)
-for i,sv in enumerate(sheets,1):
-    cairosvg.svg2png(bytestring=sv.encode(),write_to=f"/home/claude/C{i}.png",scale=1.7)
-print(f"4 sheets \u00b7 total ${TOTAL:,.2f}")
+if __name__ == "__main__":
+    LINKS=[]
+    sheets=[c1(),c2(),c2b(),c3(),c4()]
+    w=PdfWriter()
+    for sv in sheets:
+        b=io.BytesIO(); cairosvg.svg2pdf(bytestring=sv.encode(),write_to=b,dpi=72); b.seek(0)
+        w.add_page(PdfReader(b).pages[0])
+    from pypdf.generic import DictionaryObject,NameObject,ArrayObject,NumberObject,TextStringObject
+    for pi,x0,y0,x1,y1,url in LINKS:
+        pg=w.pages[pi]; ph=float(pg.mediabox.height)
+        ann=DictionaryObject({NameObject("/Type"):NameObject("/Annot"),
+            NameObject("/Subtype"):NameObject("/Link"),
+            NameObject("/Rect"):ArrayObject([NumberObject(x0),NumberObject(ph-y1),NumberObject(x1),NumberObject(ph-y0)]),
+            NameObject("/Border"):ArrayObject([NumberObject(0),NumberObject(0),NumberObject(0)]),
+            NameObject("/A"):DictionaryObject({NameObject("/S"):NameObject("/URI"),
+                NameObject("/URI"):TextStringObject(url)})})
+        ref=w._add_object(ann)
+        if "/Annots" in pg: pg["/Annots"].append(ref)
+        else: pg[NameObject("/Annots")]=ArrayObject([ref])
+    w.add_metadata({"/Title":"R6 REV G Change Order - Client"})
+    with open(str(OUT / "R6-CLIENT-change-order-rev-G.pdf"),"wb") as f: w.write(f)
+    for i,sv in enumerate(sheets,1):
+        cairosvg.svg2png(bytestring=sv.encode(),write_to=str(OUT / f"C{i}.png"),scale=1.7)
+    print(f"4 sheets \u00b7 total ${TOTAL:,.2f}")
