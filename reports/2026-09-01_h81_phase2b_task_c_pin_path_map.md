@@ -164,8 +164,24 @@ C1 is the identity credential wearing a PIN-path hat. Shipping it as a quick unl
 
 - H50 enforcement — unchanged. PIN travels in body of `/auth/founder-token` POST ONCE at session start; never in chat body, never in conversation store, never in SSE stream. The H50 enforcer is undisturbed because MAX never asks for the PIN in chat.
 - The dangerous-tools PIN gate semantics — unchanged. The gate still matches `access_context["pin"]` against `FOUNDER_PIN`. The path that fills `access_context["pin"]` changes (JWT verification instead of body regex); the gate itself does not.
-- `is_founder_message` predicate — unchanged. The chat handlers' `canonical_channel = "web_cc"` declaration stands; founder is still granted by the channel predicate. The JWT adds a second layer on top, not a replacement.
+
+### What MUST change in Phase 3 from this map (founder ruling 2026-09-01)
+
+**The channel-alone-grants-founder path is the load-bearing thing Phase 3 reverses.** The previous version of this section said "`is_founder_message` predicate — unchanged ... The JWT adds a second layer on top, not a replacement." That contradicted the standing ruling: web/CC must prove identity; channel name alone must stop granting founder. Corrected here.
+
+Phase 3 must decide:
+
+1. **The five-name allow-list** in `is_founder_message` (`guardrails.py:110`): `("web", "web_cc", "cc", "command_center", "command-center")` returns True unconditionally today. The web entries must be removed (or the predicate inverted) so that no channel name alone grants founder. Telegram's chat_id match (the existing `_FOUNDER_CHAT_ID` path) is the template — web/CC needs the equivalent: identity proven by something other than a string in the body.
+2. **`canonical_channel = "web_cc"` in the chat handlers** (`router.py:2187`, `:5293`): today the handlers hard-code web_cc and feed it into the predicate, so founder is granted before the JWT is even read. If the predicate stops returning True for web/web_cc, this declaration becomes a misdirection — the handler must instead build the predicate input from the verified JWT (user_id, role, etc.), not from a string literal. The shape of the chat handler changes from "declare the channel; ask the predicate" to "verify the credential; ask the predicate."
+
+Phase 3 has not done the thing that was ruled if either of those two is left untouched. The C1 path (Bearer-token credential) is what replaces the channel grant, not what supplements it.
+
+### H84 coupling — must land together, not in sequence
+
+Once channel alone stops granting founder, **unidentified callers become normal rather than impossible.** Today every chat-handler caller reaches `founder=True` via the canonical-channel declaration, so the access-controller flow's "unresolvable user" path (`if user:` gate at `tool_executor.py:470`) is silently bypassed for everyone — and the dangerous-tools PIN gate catches the consequence for non-founder-callable tools only because `founder=True` actually means "founder" today, not "whoever the controller couldn't classify." With the credential change, an unidentified caller (one without a valid JWT) lands in `is_founder_message`'s deny path AND in the access-controller flow's "unresolvable user" path simultaneously. H84 (`memory/project_h84_access_control_skip.md`) stops being theoretical.
+
+**H84 and the credential change must land together, not in sequence.** Sequencing them — credential change first, H84 fix later — leaves a window where unidentified callers reach the executor and the `if user:` skip lets them through to the PIN gate alone. That window is exactly the H81 body-channel vector widened by the new vector of "no credential at all." H84 closes the second vector; the credential change closes the first. Both must be in the same Phase 3 dispatch.
 
 ---
 
-*Map only, no implementation. Saved to `reports/2026-09-01_h81_phase2b_task_c_pin_path_map.md`. Document joined Task D's documentation commit.*
+*Map only, no implementation. Saved to `reports/2026-09-01_h81_phase2b_task_c_pin_path_map.md`. Document joined Task D's documentation commit; Phase 2B founder correction committed separately.*
