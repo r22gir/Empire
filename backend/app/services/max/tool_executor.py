@@ -461,9 +461,20 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
     """
     tool_name = tool_call.get("tool", "")
     try:
-        # ── FOUNDER BYPASS: CC / Telegram founder = full access, no PIN ──
+        # ── FOUNDER access_controller BYPASS only ──
+        # H81 Phase 2 (2026-09-01): founder still bypasses the
+        # access_controller permission flow (deny/locked/confirm/pin
+        # actions) but NO LONGER bypasses the dangerous-tools PIN
+        # gate below. Pre-H81 the founder branch silently skipped
+        # the PIN gate for shell_execute and env_set; that was the
+        # unverified bypass. The PIN gate now runs uniformly for
+        # every caller. The previous "founder = full access" prose
+        # in this comment was misleading; see git history.
         if founder:
-            logger.info(f"Founder auto-auth — executing '{tool_name}' without PIN/access check")
+            logger.info(
+                f"Founder context — bypassing access_controller "
+                f"permission check for '{tool_name}'"
+            )
             tool_call["_founder"] = True  # pass founder flag to tool handlers
         else:
             # Access control check (non-founder users)
@@ -494,45 +505,42 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                         access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_pin", channel=user.get("channel", ""))
                         return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__pin__{session_id}__{summary}")
 
-            # Dangerous tool PIN gate (HOTFIX 4.2 fail-closed)
-            if tool_name in DANGEROUS_TOOLS:
-                # Fail-closed gate (HOTFIX 4.2): when FOUNDER_PIN env
-                # var is unset, refuse with a structured error and a
-                # CRITICAL log. Pre-fix this branch silently accepted
-                # the empty-string "PIN" as a match against the
-                # default "7777" — see the audit log at the top of
-                # the module for the full context.
-                if not FOUNDER_PIN:
-                    logger.critical(
-                        "BLOCKED dangerous tool '%s' invocation: "
-                        "FOUNDER_PIN env var is unset. The dangerous-"
-                        "tools gate is fail-closed (HOTFIX 4.2).",
-                        tool_name,
-                    )
-                    return ToolResult(
-                        tool=tool_name, success=False,
-                        error=(
-                            f"Tool '{tool_name}' is disabled: FOUNDER_PIN "
-                            f"env var is unset on the server. The "
-                            f"dangerous-tools gate fails closed until "
-                            f"FOUNDER_PIN is configured in the systemd "
-                            f"unit's Environment=. Set FOUNDER_PIN=<your-PIN> "
-                            f"to enable. (HOTFIX 4.2)"
-                        ),
-                    )
-                pin = (access_context or {}).get("pin")
-                if not pin:
-                    return ToolResult(
-                        tool=tool_name, success=False,
-                        error=f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed."
-                    )
-                if str(pin) != FOUNDER_PIN:
-                    logger.warning(f"Invalid PIN attempt for dangerous tool '{tool_name}'")
-                    return ToolResult(
-                        tool=tool_name, success=False,
-                        error="❌ Invalid PIN. Access denied."
-                    )
-                logger.info(f"PIN verified — executing dangerous tool '{tool_name}'")
+        # Dangerous tool PIN gate — RUNS FOR EVERY CALLER, founder
+        # and non-founder alike (H81 Phase 2). HOTFIX 4.2 fail-closed
+        # semantics preserved: empty FOUNDER_PIN refuses with
+        # CRITICAL log; missing PIN refuses; mismatched PIN refuses.
+        if tool_name in DANGEROUS_TOOLS:
+            if not FOUNDER_PIN:
+                logger.critical(
+                    "BLOCKED dangerous tool '%s' invocation: "
+                    "FOUNDER_PIN env var is unset. The dangerous-"
+                    "tools gate is fail-closed (HOTFIX 4.2).",
+                    tool_name,
+                )
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error=(
+                        f"Tool '{tool_name}' is disabled: FOUNDER_PIN "
+                        f"env var is unset on the server. The "
+                        f"dangerous-tools gate fails closed until "
+                        f"FOUNDER_PIN is configured in the systemd "
+                        f"unit's Environment=. Set FOUNDER_PIN=<your-PIN> "
+                        f"to enable. (HOTFIX 4.2)"
+                    ),
+                )
+            pin = (access_context or {}).get("pin")
+            if not pin:
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error=f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed."
+                )
+            if str(pin) != FOUNDER_PIN:
+                logger.warning(f"Invalid PIN attempt for dangerous tool '{tool_name}'")
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error="❌ Invalid PIN. Access denied."
+                )
+            logger.info(f"PIN verified — executing dangerous tool '{tool_name}'")
 
         # Tier check
         from app.middleware.tier_middleware import require_tool
