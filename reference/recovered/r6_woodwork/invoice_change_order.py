@@ -104,13 +104,13 @@ o.append(txt(PW-40,96,f'Date  {INV["date"]}',7.4,"end",fill=MUTED))
 o.append(txt(PW-40,108,f'Terms {INV["terms"]}',7.4,"end",fill=MUTED))
 # parties
 o.append(txt(48,126,"BILL TO",6.6,fill=MUTED,mono=True))
-for i,t in enumerate(["Woodcraft","Philipp &amp; Naomi"]):
+for i,t in enumerate(["Lauren Bassett","LB Design"]):
     o.append(txt(48,142+i*13,t,8.6,bold=(i==0)))
 o.append(txt(320,126,"PROJECT",6.6,fill=MUTED,mono=True))
-for i,t in enumerate(["R6 Walnut Sofa Surround","Change order, REV G"]):
+for i,t in enumerate(["R6 Walnut Sofa Surround","Philipp &amp; Naomi","Change order, REV G"]):
     o.append(txt(320,142+i*13,t,8.6,bold=(i==0)))
-o.append(txt(320,172,f'approved {INV["approved"]}',7.4,fill=MUTED))
-o.append(line(48,190,PW-48,190,HAIR))
+o.append(txt(320,185,f'approved {INV["approved"]}',7.4,fill=MUTED))
+o.append(line(48,198,PW-48,198,HAIR))
 # what this covers
 o.append(txt(48,212,"ADDITIONAL WORK \u2014 APPROVED CHANGE ORDER",9.6,bold=True))
 o.append(txt(48,228,"Work added after design approval. The original contract is unchanged and is not re-billed.",7.2,fill=MUTED))
@@ -173,7 +173,7 @@ o.append(txt(bx,y+70,PAY_URL,6.8,fill="#2B5AA0",mono=True))
 LINK_BOX=(bx,y+62,bx+len(PAY_URL)*3.6,y+74)
 y+=QS+34
 o.append(line(28,PH-46,PW-28,PH-46,HAIR))
-o.append(txt(40,PH-32,"R6 Walnut Sofa Surround \u00b7 Woodcraft \u2014 Philipp &amp; Naomi",6.8,fill=MUTED))
+o.append(txt(40,PH-32,"R6 Walnut Sofa Surround \u00b7 Philipp &amp; Naomi \u00b7 LB Design",6.8,fill=MUTED))
 o.append(txt(PW/2,PH-32,"INVOICE \u00b7 DUE ON RECEIPT",6.8,"middle",RED,bold=True))
 o.append(txt(PW-40,PH-32,f'REV G \u00b7 {INV["date"]}',6.8,"end",MUTED))
 svg=(f'<svg xmlns="http://www.w3.org/2000/svg" width="{PW}" height="{PH}" viewBox="0 0 {PW} {PH}">'
