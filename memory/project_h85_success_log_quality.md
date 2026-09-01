@@ -4,7 +4,7 @@ description: H81 Phase 2B Task A2 step 6 found that _shell_execute logs success=
 type: project
 ---
 
-> **Mirror copy.** A copy of this file exists in the agent home at `~/.claude/projects/-home-rg/memory/project_h85_success_log_quality.md`. Both copies are the same content as of 2026-09-01; the agent-home copy is the auto-memory system's record, the repo copy is the source of truth for any in-repo tooling. D51 consolidation: H83 / H84 / H85 each have an agent-home mirror; pick one of the three locations as authoritative when D51 lands.
+> **Mirror copy.** A copy of this file exists in the agent home at `~/.claude/projects/-home-rg/memory/project_h85_success_log_quality.md`. Both copies are the same content as of 2026-09-01; the agent-home copy is the auto-memory system's record, the repo copy is the source of truth for any in-repo tooling. D51 consolidation: H81 / H82 / H83 / H84 / H85 each have an agent-home mirror; pick one of the three locations as authoritative when D51 lands.
 
 # H85 — success=1 does not mean the command succeeded
 

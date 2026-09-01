@@ -4,7 +4,7 @@ description: check_input is called on the current message and on chat history, b
 type: project
 ---
 
-> **Mirror copy.** A copy of this file exists in the agent home at `~/.claude/projects/-home-rg/memory/hazard_h83_retrieved_content_unscanned.md`. Both copies are the same content as of 2026-09-01; the agent-home copy is the auto-memory system's record, the repo copy is the source of truth for any in-repo tooling. D51 consolidation: H83 / H84 / H85 each have an agent-home mirror; pick one of the three locations as authoritative when D51 lands.
+> **Mirror copy.** A copy of this file exists in the agent home at `~/.claude/projects/-home-rg/memory/hazard_h83_retrieved_content_unscanned.md`. Both copies are the same content as of 2026-09-01; the agent-home copy is the auto-memory system's record, the repo copy is the source of truth for any in-repo tooling. D51 consolidation: H81 / H82 / H83 / H84 / H85 each have an agent-home mirror; pick one of the three locations as authoritative when D51 lands.
 
 # H83 — retrieved content never scanned by check_input
 
