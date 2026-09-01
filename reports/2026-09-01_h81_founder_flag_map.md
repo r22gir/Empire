@@ -334,12 +334,31 @@ The dispatch directive is: 🛑 STOP AFTER THE MAP. No code edits. No commits to
 
 ---
 
+## 11. Phase 2 backlog correction — H81 Phase 2B Task D1
+
+Phase 2 chat-output listed in its handed-forward backlog:
+
+> `router.py:5322` PIN fallback on `/code-task` is unreachable while founder is unconditional (Task 1 made it reachable — should now work).
+
+**This is wrong.** Task 1 (commit `df7ac67`) changed only the executor's gate at `tool_executor.py:455-535` — pulling the dangerous-tools PIN gate out of the `else:` branch so it runs uniformly for founder and non-founder. Task 1 did not change how founder is granted by the chat handlers. Verified against the file on 2026-09-01:
+
+- `backend/app/routers/max/router.py:5293` — `/code-task` handler still declares `canonical_channel = "web_cc"` server-side.
+- `backend/app/routers/max/router.py:5318-5319` — `msg_ctx = {"channel": canonical_channel, "chat_id": ""}` and `founder = is_founder_message(msg_ctx)` — `canonical_channel="web_cc"` returns True from the predicate.
+- `backend/app/routers/max/router.py:5320` — `if not founder:` is therefore always False on the canonical /code-task path.
+- `backend/app/routers/max/router.py:5322-5330` — the FOUNDER_PIN fallback at the cited line is therefore **still unreachable** as of HEAD `dd72de8`.
+
+The correct state: `/code-task`'s FOUNDER_PIN fallback becomes reachable when Phase 3 introduces a path that grants `founder=False` to a `/code-task` caller. Today every caller reaches `founder=True` and the gate at line 5320 is skipped.
+
+This section exists because the wrong claim did not land in any committed file — it lived in the Phase 2 chat-output. A future reader who runs `git log --all -p` on the repo will not find it; this section is the durable record of the correction.
+
+---
+
 ## Report envelope
 
 - **found:** the live H81 exposure is the `/api/v1/max/chat/stream` handler at `router.py:3308-3312`, which reads `request.channel` from the JSON body without applying D45 Option A. Any local-process or proxy-reachable client can POST `{"channel": "web_cc", "chat_id": ""}` to that route and get `founder=True` from `is_founder_message`, which `execute_tool` honours by skipping the entire PIN gate for `shell_execute` and `env_set`. /chat and /code-task are hardened; telegram bot is server-derived from chat_id; webhooks do not reach the executor. The audit DB cannot detect this — schema lacks channel/founder columns, and `shell_execute` never calls `log_execution`. In 7928 audit rows since 2026-03-17, zero `shell_execute` and zero `env_set` rows exist.
 - **changed:** none — map only. No source files were modified.
 - **tests:** none — no code changed.
-- **commit hash:** _to be filled by git after this file is committed._
+- **commit hash:** 581d78d (Phase 1 map), with section 11 added in Phase 2B Task D1 (commit pending).
 
 ---
 
