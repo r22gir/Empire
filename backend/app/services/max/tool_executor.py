@@ -59,13 +59,19 @@ DEFAULT_EMAIL_CC = ("rafa22giraldo@gmail.com",)
 DEFAULT_REPLY_TO = "max@empirebox.store"
 
 # ── Dangerous Tool PIN Gate ───────────────────────────────────────
-DANGEROUS_TOOLS = {"shell_execute", "env_set", "db_query"}
+# db_query removed 2026-08-31 (D52, founder ruling). It is read-only at the
+# connection level (mode=ro URI) and cannot write regardless of the SQL.
+# Gating it beside shell_execute and env_set meant MAX could not read the
+# founder's own invoice table, and the resulting refusals were narrated over
+# rather than reported. Founder ruling: full read access; gate later if wanted.
+# shell_execute and env_set REMAIN GATED.
+DANGEROUS_TOOLS = {"shell_execute", "env_set"}
 # HOTFIX 4.2 (2026-07-24) — FOUNDER_PIN fails CLOSED.
 #
 # Pre-fix: os.getenv("FOUNDER_PIN", "7777") meant that an unset env
 # var silently fell back to "7777" — meaning any chat caller (or a
 # prompt-injection attack on the chat layer) could invoke
-# shell_execute / env_set / db_query by typing the literal "7777"
+# shell_execute / env_set by typing the literal "7777"
 # PIN, even when the operator never configured one. That's a
 # privilege-escalation default.
 #
@@ -92,7 +98,7 @@ if not FOUNDER_PIN:
     if not _already_warned_PIN_unset:
         logger.critical(
             "FOUNDER_PIN env var is UNSET. The dangerous-tools gate "
-            "(shell_execute, env_set, db_query) will REFUSE every "
+            "(shell_execute, env_set) will REFUSE every "
             "invocation until FOUNDER_PIN is configured. Pre-fix this "
             "silently defaulted to '7777' (a privilege-escalation "
             "default). Set FOUNDER_PIN=<your-PIN> in the systemd "
@@ -5405,16 +5411,23 @@ def _db_query(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not query.upper().startswith("SELECT"):
         return ToolResult(tool="db_query", success=False, error="Only SELECT queries are allowed")
 
-    # Block dangerous patterns
-    dangerous = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE", "ATTACH", "DETACH"]
-    query_upper = query.upper()
+    # Block dangerous patterns. Word-boundary match. The old substring scan
+    # blocked "created_at" on CREATE and "updated_at" on UPDATE, making the
+    # two most common columns in the schema unqueryable.
+    import re as _re
+    dangerous = ["DROP","DELETE","INSERT","UPDATE","ALTER","CREATE","ATTACH","DETACH",
+                 "PRAGMA","VACUUM","REINDEX","REPLACE"]
     for d in dangerous:
-        if d in query_upper:
-            return ToolResult(tool="db_query", success=False, error=f"Query contains blocked keyword: {d}")
+        if _re.search(rf"\b{d}\b", query, flags=_re.IGNORECASE):
+            return ToolResult(tool="db_query", success=False,
+                              error=f"Query contains blocked keyword: {d}")
 
     db_path = str(dp.db_path())
     try:
-        conn = sqlite3.connect(db_path, timeout=10)
+        # Read-only at the connection level. SQLite refuses any write on a
+        # mode=ro URI regardless of what the SQL says — a mechanism, not a
+        # string check. The keyword scan above is now belt-and-braces.
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
         conn.row_factory = sqlite3.Row
         cursor = conn.execute(query)
         rows = cursor.fetchall()

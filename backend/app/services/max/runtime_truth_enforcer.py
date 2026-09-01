@@ -142,6 +142,7 @@ PIN_REQUEST_PATTERNS = (
 
 # Tools that require specific proof fields in their result.
 VERIFICATION_REQUIRED_TOOLS = {
+    "db_query",  # D52 2026-08-31 — any db_query failure gates the final response.
     "send_email",
     "send_quote_email",
     "send_quote_telegram",

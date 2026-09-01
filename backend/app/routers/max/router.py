@@ -2899,7 +2899,15 @@ async def _chat_with_max_service(
                 round_results.append(entry)
                 tool_results_list.append(entry)
 
-            if should_halt_after_tool_failure(round_results, user_message=request.message):
+            # D52 H80: round-aware halt. Round 0 is free — the model sees the
+            # tool error and may self-correct (e.g., a typo'd column name).
+            # Rounds 1 and 2 halt on any verification failure, so a db_query
+            # that failed on round 0 and again on round 1 still gates the
+            # turn. The post-gen backstop at _apply_truth_guardrails
+            # (router.py:2969) sees the FULL tool_results_list across all
+            # rounds and replaces the final response if any db_query
+            # failure made it through, so round 0 is genuinely free.
+            if _tool_round >= 1 and should_halt_after_tool_failure(round_results, user_message=request.message):
                 _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
                 final_content = runtime_truth_failure_message(_failures)
                 break
@@ -2969,7 +2977,11 @@ async def _chat_with_max_service(
         final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
 
         # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
-        tools_used_names = [r.get("tool") if isinstance(r, dict) else r.tool for r in tool_results_list]
+        # D52 H80: receipt suppression. tools_used_names feeds the
+        # web-search guard AND the user-facing tools_used metadata.
+        # Failed calls are not tools that "were used" — count only successes.
+        _succeeded_results = [r for r in tool_results_list if r.get("success")]
+        tools_used_names = [r.get("tool") if isinstance(r, dict) else r.tool for r in _succeeded_results]
         if is_factual_question(request.message) and "web_search" not in tools_used_names:
             from app.services.max.search_context import build_search_query
             _fg_built = build_search_query(request.message, history=request.history)
@@ -3250,7 +3262,7 @@ async def _chat_with_max_service(
             conversation_id=conv_id,
             message=request.message,
             model_used=response.model_used,
-            tools_used=[r.get("tool") for r in tool_results_list] if tool_results_list else [],
+            tools_used=[r.get("tool") for r in _succeeded_results] if _succeeded_results else [],
             tool_results=tool_results_list if tool_results_list else [],
             latency_ms=_final_latency_ms,
             response_length=len(final_content),
@@ -3733,9 +3745,16 @@ async def chat_stream(request: ChatRequest):
                     entry = _normalize_tool_result_entry(result)
                     round_results.append(entry)
                     tool_results_list.append(entry)
-                    yield f"data: {json.dumps({'type': 'tool_result', **entry})}\n\n"
+                    # D52 H80: receipt suppression. Only emit the
+                    # `tool_result` SSE event for successes. Failed calls
+                    # stay in tool_results_list for the post-gen backstop
+                    # at line 3794 but do not produce a UI badge that
+                    # could be read as a successful invocation.
+                    if entry.get("success"):
+                        yield f"data: {json.dumps({'type': 'tool_result', **entry})}\n\n"
 
-                if should_halt_after_tool_failure(round_results, user_message=request.message):
+                # D52 H80: same round-aware halt as the chat path above.
+                if _tool_round >= 1 and should_halt_after_tool_failure(round_results, user_message=request.message):
                     _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
                     full_response = runtime_truth_failure_message(_failures)
                     yield f"data: {json.dumps({'type': 'text', 'content': full_response})}\n\n"
