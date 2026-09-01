@@ -16,9 +16,16 @@ privilege-granting endpoint in 0a (SITES 1, 2, 3), a request with
 no/empty channel must NOT take the founder branch:
 
   - /api/v1/max/chat           — check_input() must NOT log the
-                                 "Founder override" line on a blocked-
-                                 topic message; the blocked-topic gate
-                                 must fire and return SAFE_REFUSAL.
+                                 "Guardrail detection ... founder=True"
+                                 line for a blocked-topic message
+                                 arriving from an anonymous caller;
+                                 the blocked-topic gate must fire
+                                 and return SAFE_REFUSAL. (H81
+                                 Phase 2 changed the log message
+                                 but the gate semantics are the
+                                 same: scan always runs, founder
+                                 is logged-and-skipped, non-founder
+                                 is refused.)
   - /api/v1/max/chat/stream    — same, via the streaming variant.
   - /api/v1/max/code-task      — PIN must be required; an empty PIN
                                  with no FOUNDER_PIN env must 403.
@@ -155,11 +162,14 @@ def test_chat_endpoint_body_channel_does_not_override_handler_canonical(monkeypa
     block. The body channel does NOT switch the handler to the
     telegram code path.
 
-    The load-bearing assertion: the 'Founder override: skipping
-    blocked_topic block' log line DOES appear (because the handler
-    granted founder via web_cc), AND the request does NOT take the
-    telegram-specific branch (verified via the absence of the
-    founder-detected-via-chat_id log line).
+    The load-bearing assertion: a 'Guardrail detection' WARNING
+    log line DOES appear with kind=blocked_topic founder=True
+    (because the handler granted founder via web_cc), AND the
+    request does NOT take the telegram-specific branch (verified
+    via the absence of the founder-detected-via-chat_id log line).
+    The 'Founder override' prose from earlier commits has been
+    superseded by H81 Phase 2 — the scan always runs, founder
+    is logged-and-skipped, non-founder is refused.
     """
     from app.services.max.guardrails import SAFE_REFUSAL
 
@@ -175,23 +185,26 @@ def test_chat_endpoint_body_channel_does_not_override_handler_canonical(monkeypa
     assert response.status_code == 200
 
     # Under Option A, the handler declared web_cc and granted founder.
-    # The blocked-topic guard was skipped — the response is NOT
-    # necessarily SAFE_REFUSAL. The dispatch's pre-Option-A proof
-    # (commit 1) was that empty body caused the bypass; under
-    # Option A the bypass is closed by a different mechanism:
-    # the handler declares web_cc always, so body channel is dead
-    # weight. The "Founder override" log line MUST appear because
-    # the handler granted founder.
-    founder_override_lines = [
-        r.getMessage() for r in caplog.records
-        if "Founder override" in r.getMessage()
+    # The blocked-topic guard was scanned but not refused (H81 Phase 2:
+    # scan and log, never block, for founder). The response is NOT
+    # SAFE_REFUSAL. The dispatch's pre-Option-A proof (commit 1) was
+    # that empty body caused the bypass; under Option A the bypass is
+    # closed by a different mechanism: the handler declares web_cc
+    # always, so body channel is dead weight. The Guardrail detection
+    # log line at WARNING MUST appear with founder=True because the
+    # handler granted founder.
+    detection_lines = [
+        r for r in caplog.records
+        if "Guardrail detection" in r.getMessage()
+        and "blocked_topic" in r.getMessage()
+        and "founder=True" in r.getMessage()
     ]
-    assert founder_override_lines, (
-        f"Expected the 'Founder override: skipping blocked_topic block' "
-        f"log line because the handler declared web_cc → founder. "
-        f"This is the post-Option-A shape: the handler grants founder "
-        f"to ALL /max/chat callers and the body field is irrelevant. "
-        f"Got: {[r.getMessage() for r in caplog.records]}"
+    assert detection_lines, (
+        f"Expected a 'Guardrail detection' WARNING log line with "
+        f"kind=blocked_topic founder=True because the handler "
+        f"declared web_cc → founder (H81 Phase 2: scan and log, "
+        f"never block). Got: "
+        f"{[(r.levelname, r.getMessage()) for r in caplog.records]}"
     )
 
     # The Option E spoof-detection warning SHOULD fire because the
