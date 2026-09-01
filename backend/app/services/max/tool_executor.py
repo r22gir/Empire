@@ -452,12 +452,19 @@ def tool(name: str):
     return decorator
 
 
-def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None, founder: bool = False) -> ToolResult:
+def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None, founder: bool = False, channel: Optional[str] = None) -> ToolResult:
     """Dispatch and execute a tool call (with tier gating and access control).
 
     Args:
-        founder: If True, skip all PIN/access checks. The caller (router) has
-                 already verified this is the founder via is_founder_message().
+        founder: If True, bypass the access_controller permission flow
+                 (deny/locked/confirm/pin actions). Does NOT bypass the
+                 dangerous-tools PIN gate (H81 Phase 2, 2026-09-01).
+        channel: Optional channel label propagated to the audit log
+                 (H81 Phase 2 task 2). Stored on tool_call['_channel']
+                 so tool handlers can read it for log_execution. The
+                 chat router does not pass this today; the audit
+                 column will be NULL until the router plumbing is
+                 updated (Phase 3 backlog).
     """
     tool_name = tool_call.get("tool", "")
     try:
@@ -476,6 +483,13 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                 f"permission check for '{tool_name}'"
             )
             tool_call["_founder"] = True  # pass founder flag to tool handlers
+        # H81 Phase 2 — propagate channel label to tool handlers so
+        # the audit log can record which channel the call came from.
+        # Currently the router does not pass `channel` (Phase 3
+        # backlog), so _channel will be unset for the live chat
+        # handlers and the audit column will be NULL.
+        if channel is not None:
+            tool_call["_channel"] = channel
         else:
             # Access control check (non-founder users)
             if access_context and access_controller:
@@ -4545,6 +4559,12 @@ BLOCKED_PATTERNS = [
 def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Execute a shell command. Founder channels bypass allowlist.
     Blocked patterns (rm -rf, sensors-detect, etc.) always enforced for safety.
+
+    H81 Phase 2 — every invocation is now logged to the audit DB
+    (success AND failure) with channel and founder columns populated
+    when available. Pre-H81 shell_execute never called log_execution,
+    so a 7928-row audit DB contained zero shell_execute rows. After
+    this change every invocation writes one row.
     """
     import subprocess
 
@@ -4552,23 +4572,47 @@ def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not command:
         return ToolResult(tool="shell_execute", success=False, error="No command provided")
 
+    founder = params.get("_founder", False)
+    channel = params.get("_channel")
+
     # Safety checks — block dangerous patterns (always enforced, even for founder)
     for blocked in BLOCKED_PATTERNS:
         if blocked in command:
-            return ToolResult(
+            tr = ToolResult(
                 tool="shell_execute", success=False,
                 error=f"Blocked command pattern: {blocked}",
             )
+            log_execution(
+                "shell_execute",
+                {"command": command},
+                f"blocked:{blocked}",
+                access_level=2,
+                desk=desk,
+                success=False,
+                channel=channel,
+                founder=founder,
+            )
+            return tr
 
     # Founder bypasses allowlist; non-founder must match allowed prefixes
-    founder = params.get("_founder", False)
     if not founder:
         allowed = any(command.startswith(cmd) for cmd in ALLOWED_COMMANDS)
         if not allowed:
-            return ToolResult(
+            tr = ToolResult(
                 tool="shell_execute", success=False,
                 error=f"Command not in allowlist. Allowed: {', '.join(ALLOWED_COMMANDS[:10])}...",
             )
+            log_execution(
+                "shell_execute",
+                {"command": command},
+                "not_in_allowlist",
+                access_level=2,
+                desk=desk,
+                success=False,
+                channel=channel,
+                founder=founder,
+            )
+            return tr
 
     # Execute with timeout. cwd resolves to canonical repo
     # (H57 Phase 3) — NOT to the stale fork ~/empire-repo/.
@@ -4584,7 +4628,7 @@ def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
             command, shell=True, capture_output=True, text=True,
             timeout=30, cwd=canonical_cwd,
         )
-        return ToolResult(
+        tr = ToolResult(
             tool="shell_execute", success=True,
             result={
                 "stdout": result.stdout[:2000],
@@ -4592,10 +4636,43 @@ def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "returncode": result.returncode,
             },
         )
+        log_execution(
+            "shell_execute",
+            {"command": command},
+            {"returncode": result.returncode, "stdout_len": len(result.stdout), "stderr_len": len(result.stderr)},
+            access_level=2,
+            desk=desk,
+            success=True,
+            channel=params.get("_channel"),
+            founder=founder,
+        )
+        return tr
     except subprocess.TimeoutExpired:
-        return ToolResult(tool="shell_execute", success=False, error="Command timed out (30s limit)")
+        tr = ToolResult(tool="shell_execute", success=False, error="Command timed out (30s limit)")
+        log_execution(
+            "shell_execute",
+            {"command": command},
+            "timeout",
+            access_level=2,
+            desk=desk,
+            success=False,
+            channel=params.get("_channel"),
+            founder=founder,
+        )
+        return tr
     except Exception as e:
-        return ToolResult(tool="shell_execute", success=False, error=str(e))
+        tr = ToolResult(tool="shell_execute", success=False, error=str(e))
+        log_execution(
+            "shell_execute",
+            {"command": command},
+            str(e),
+            access_level=2,
+            desk=desk,
+            success=False,
+            channel=params.get("_channel"),
+            founder=founder,
+        )
+        return tr
 
 
 # ── OPENCLAW DISPATCH ──────────────────────────────────────────────
@@ -5369,15 +5446,28 @@ def _env_get(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("env_set")
 def _env_set(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Add or update an env variable in .env file. Level 2 — logged."""
+    """Add or update an env variable in .env file. Level 2 — logged.
+
+    H81 Phase 2 — failures now log too. Pre-H81 only the success
+    branch wrote a row; the except at the end returned the error
+    silently with no audit footprint. After this change every
+    invocation writes one row, success or failure, with channel
+    and founder columns populated when available.
+    """
     env_path = os.path.expanduser("~/empire-repo/backend/.env")
     var_name = params.get("name", "").strip()
     var_value = params.get("value", "").strip()
+    channel = params.get("_channel")
+    founder = params.get("_founder", False)
 
     if not var_name:
-        return ToolResult(tool="env_set", success=False, error="Variable name is required")
+        tr = ToolResult(tool="env_set", success=False, error="Variable name is required")
+        log_execution("env_set", {"name": var_name}, "missing_name", access_level=2, desk=desk, success=False, channel=channel, founder=founder)
+        return tr
     if not var_value:
-        return ToolResult(tool="env_set", success=False, error="Variable value is required")
+        tr = ToolResult(tool="env_set", success=False, error="Variable value is required")
+        log_execution("env_set", {"name": var_name}, "missing_value", access_level=2, desk=desk, success=False, channel=channel, founder=founder)
+        return tr
 
     try:
         lines = []
@@ -5399,11 +5489,12 @@ def _env_set(params: dict, desk: Optional[str] = None) -> ToolResult:
             f.writelines(lines)
 
         os.chmod(env_path, 0o600)
-        log_execution("env_set", {"name": var_name}, "set", access_level=2, desk=desk, success=True)
+        log_execution("env_set", {"name": var_name}, "set", access_level=2, desk=desk, success=True, channel=channel, founder=founder)
         return ToolResult(tool="env_set", success=True, result={
             "name": var_name, "action": "replaced" if replaced else "added",
         })
     except Exception as e:
+        log_execution("env_set", {"name": var_name}, str(e), access_level=2, desk=desk, success=False, channel=channel, founder=founder)
         return ToolResult(tool="env_set", success=False, error=str(e))
 
 
