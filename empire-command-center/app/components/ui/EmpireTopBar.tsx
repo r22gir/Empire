@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, User, GitCommit, Wifi, WifiOff, Activity, Cpu, HardDrive } from 'lucide-react';
 import { EmpireStatusPill } from './EmpireStatusPill';
+import { API } from '../../lib/api';
 
 interface ProviderStatus {
   id: string;
@@ -24,13 +25,13 @@ export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: E
     // Health polling
     const checkHealth = async () => {
       try {
-        const r = await fetch('http://localhost:8000/health');
+        const r = await fetch(API + '/system/health');
         setBackendOk(r.ok);
       } catch {
         setBackendOk(false);
       }
       try {
-        const r2 = await fetch('http://localhost:3005');
+        const r2 = await fetch(typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3005');
         setFrontendOk(r2.ok);
       } catch {
         setFrontendOk(false);
