@@ -48,12 +48,30 @@ MODULE_QUESTION_HINTS = (
     "going on",
     "done",
     "working",
-    "work",
+    # NOTE: bare "work" removed — it matched inside "workroom" and hijacked
+    # every Workroom action/create-quote ask into static module docs.
     "features",
     "publish",
     "complete",
     "finished",
     "update",
+)
+
+# Action / creation intents must reach AI/tools (create_engine_quote, etc.).
+_MODULE_ACTION_MARKERS = (
+    "create",
+    "draft",
+    "produce",
+    "generate",
+    "make a quote",
+    "make an estimate",
+    "new quote",
+    "new estimate",
+    "quote workflow",
+    "estimate with",
+    "photo_to_quote",
+    "quick quote",
+    "quick-quote",
 )
 
 
@@ -94,7 +112,27 @@ def _best_module_alias_match(text: str) -> Optional[str]:
     return best_module
 
 
+def _is_module_action_request(text: str) -> bool:
+    """True when the user wants an action (create quote / draft / generate),
+    not a static 'what is this module' answer."""
+    if any(marker in text for marker in _MODULE_ACTION_MARKERS):
+        # Prefer action routing when quote/estimate/workflow language is present
+        # OR when create/draft/generate/produce appears with a module alias.
+        action_verbs = ("create", "draft", "produce", "generate")
+        has_verb = any(v in text for v in action_verbs) or any(
+            m in text for m in _MODULE_ACTION_MARKERS if m not in action_verbs
+        )
+        has_artifact = any(
+            token in text
+            for token in ("quote", "estimate", "workflow", "pdf", "pack", "document", "drawing")
+        )
+        return has_verb and (has_artifact or "workroom" in text or "woodcraft" in text)
+    return False
+
+
 def _looks_like_module_question(text: str) -> bool:
+    if _is_module_action_request(text):
+        return False
     if any(hint in text for hint in MODULE_QUESTION_HINTS):
         return True
     # Allow concise asks like "archiveforge?" or "workroom status"
@@ -103,6 +141,8 @@ def _looks_like_module_question(text: str) -> bool:
 
 def is_empire_module_question(message: str | None) -> bool:
     text = _normalize(message)
+    if _is_module_action_request(text):
+        return False
     module_name = _best_module_alias_match(text)
     if not module_name:
         return False
@@ -184,6 +224,8 @@ def _generic_module_response(module_name: str) -> dict:
 
 def resolve_empire_module_question(message: str | None) -> Optional[dict]:
     text = _normalize(message)
+    if _is_module_action_request(text):
+        return None
     module_name = _best_module_alias_match(text)
     if not module_name:
         return None
