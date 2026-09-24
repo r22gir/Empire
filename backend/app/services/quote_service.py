@@ -571,6 +571,63 @@ def update_quote(quote_id: str, data: dict) -> dict:
 
         params.append(quote_id)
         conn.execute(f"UPDATE quotes_v2 SET {', '.join(sets)} WHERE id = ?", params)
+
+        # Workroom QuoteBuilder autosave: replace line items when provided.
+        # Keeps UI create/update on quotes_v2 without dual-writing JSON.
+        if "line_items" in data or "items" in data:
+            items = data.get("line_items", data.get("items")) or []
+            conn.execute("DELETE FROM quote_line_items WHERE quote_id = ?", (quote_id,))
+            issued_document = (data.get("issued_document") or "").strip() or None
+            if not issued_document:
+                row = conn.execute(
+                    "SELECT issued_document FROM quotes_v2 WHERE id = ?", (quote_id,)
+                ).fetchone()
+                issued_document = (row["issued_document"] if row else None) or None
+            default_rate_source = (
+                f"issued:{issued_document}" if issued_document else "catalog"
+            )
+            bu = data.get("business_unit") or (
+                existing["business_unit"] if "business_unit" in existing.keys() else "workroom"
+            )
+            for idx, li in enumerate(items):
+                if not isinstance(li, dict):
+                    continue
+                pricing = _price_line_item(
+                    category=li.get("category"),
+                    inputs=li.get("inputs") or li,
+                    business_unit=bu,
+                    legacy=li,
+                )
+                qty = float(li.get("quantity", pricing["unit_price"] and 1) or 1)
+                line_rate_source = (
+                    (li.get("rate_source") or "").strip() or default_rate_source
+                )
+                conn.execute("""
+                    INSERT INTO quote_line_items (
+                        quote_id, line_number, description, quantity, unit, unit_price, subtotal,
+                        category, rate_source, pricing_snapshot_json,
+                        proposed_price, final_price, price_overridden, business_unit, computed_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    quote_id, idx + 1,
+                    li.get("description", ""),
+                    qty,
+                    li.get("unit", "ea"),
+                    pricing["unit_price"],
+                    pricing["subtotal"],
+                    li.get("category", "labor"),
+                    line_rate_source,
+                    json.dumps(li.get("pricing_snapshot_json") or li.get("pricing_snapshot"), default=str)
+                    if (li.get("pricing_snapshot_json") or li.get("pricing_snapshot")) else None,
+                    pricing["proposed_price"],
+                    pricing["final_price"],
+                    pricing["price_overridden"],
+                    pricing["business_unit"],
+                    pricing["computed_json"],
+                ))
+            _audit_log(conn, "quote", quote_id, "updated", "line_items", None,
+                       f"{len(items)} items", "api")
+
         _recalculate_totals(conn, quote_id, 'api')
 
     return get_quote(quote_id)
