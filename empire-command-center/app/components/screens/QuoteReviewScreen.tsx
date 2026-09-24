@@ -337,7 +337,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     if (action === 'pdf') {
       showFeedback('Generating PDF...');
       try {
-        const res = await fetch(`${API}/quotes/${quote.id}/pdf?skip_verification=true`, { method: 'POST' });
+        const res = await fetch(`${API}/quotes-v2/${quote.id}/pdf`);
         if (!res.ok) {
           const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
           showFeedback(err.error || 'PDF generation failed');

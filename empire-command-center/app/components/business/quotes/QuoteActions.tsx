@@ -151,7 +151,7 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
           label="Download PDF"
           icon={<FileDown size={14} />}
           color="#b8960c"
-          onClick={() => handleAction('pdf', `/quotes/${quoteId}/pdf?skip_verification=true`)}
+          onClick={() => handleAction('pdf', `/quotes-v2/${quoteId}/pdf`, 'GET')}
         />
         <ActionBtn
           id="invoice"
@@ -182,7 +182,7 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
           onClose={() => setShowEmailModal(false)}
           onSend={(email) => {
             setShowEmailModal(false);
-            handleAction('send', `/quotes/${quoteId}/send`, 'POST', { email });
+            handleAction('send', `/quotes-v2/${quoteId}/submit-for-review`, 'POST', { changed_by: 'workroom-ui', reason: `review requested for ${email || 'no-email'}` });
           }}
         />
       )}
@@ -205,7 +205,7 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
                 Cancel
               </button>
               <button
-                onClick={() => { setShowDeleteConfirm(false); handleAction('delete', `/quotes/${quoteId}`, 'DELETE'); }}
+                onClick={() => { setShowDeleteConfirm(false); handleAction('delete', `/quotes-v2/${quoteId}`, 'DELETE'); }}
                 className="px-4 py-2.5 text-xs font-bold text-white bg-red-600 rounded-xl hover:bg-red-700 transition-colors cursor-pointer"
               >
                 Delete

@@ -64,7 +64,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
   }, [initialSection]);
 
   useEffect(() => {
-    fetch(API + '/quotes-v2?limit=20&business=workroom').then(r => r.json()).then(data => {
+    fetch(API + '/quotes-v2?limit=100&business_unit=workroom').then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       const q = Array.isArray(raw) ? raw : [];
       setQuotes(q);
@@ -450,7 +450,7 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }
   });
 
   const refetchQuotes = () => {
-    fetch(API + '/quotes-v2?limit=50&business=workroom').then(r => r.json()).then(data => {
+    fetch(API + '/quotes-v2?limit=100&business_unit=workroom').then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       setQuotes(Array.isArray(raw) ? raw : []);
     }).catch(() => {});

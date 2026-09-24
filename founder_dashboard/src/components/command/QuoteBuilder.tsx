@@ -229,6 +229,20 @@ function buildInitialRooms(incoming?: any[]): Room[] {
   }));
 }
 
+
+/** Fetch quote PDF from canonical quotes-v2 (GET); fall back to legacy POST /quotes/:id/pdf. */
+async function fetchQuotePdfBlob(quoteId: string): Promise<Blob | null> {
+  try {
+    const v2 = await fetch(API_URL + `/quotes-v2/${quoteId}/pdf`).then(async r => r.ok ? r : fetch(API_URL + `/quotes/${quoteId}/pdf`, { method: 'POST' }));
+    if (v2.ok) return await v2.blob();
+  } catch { /* try legacy */ }
+  try {
+    const legacy = await fetch(API_URL + `/quotes/${quoteId}/pdf`, { method: 'POST' });
+    if (legacy.ok) return await legacy.blob();
+  } catch { /* */ }
+  return null;
+}
+
 export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, initialMaxAnalysis }: Props) {
   // Customer
   const [customer, setCustomer] = useState({
@@ -965,7 +979,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
     if (!savedQuote) { await saveQuote(); return; }
     setGeneratingPdf(true);
     try {
-      const res = await fetch(API_URL + `/quotes/${savedQuote.id}/pdf`, { method: 'POST' });
+      const res = await fetch(API_URL + `/quotes-v2/${savedQuote.id}/pdf`).then(async r => r.ok ? r : fetch(API_URL + `/quotes/${savedQuote.id}/pdf`, { method: 'POST' }));
       if (!res.ok) throw new Error('PDF failed');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -978,7 +992,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
   const printQuote = async () => {
     if (!savedQuote) { await saveQuote(); return; }
     try {
-      const res = await fetch(API_URL + `/quotes/${savedQuote.id}/pdf`, { method: 'POST' });
+      const res = await fetch(API_URL + `/quotes-v2/${savedQuote.id}/pdf`).then(async r => r.ok ? r : fetch(API_URL + `/quotes/${savedQuote.id}/pdf`, { method: 'POST' }));
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const win = window.open(url, '_blank');
@@ -996,7 +1010,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
   const loadPdfPreview = async (quoteId: string) => {
     setLoadingPreview(true);
     try {
-      const res = await fetch(API_URL + `/quotes/${quoteId}/pdf`, { method: 'POST' });
+      const res = await fetch(API_URL + `/quotes-v2/${quoteId}/pdf`).then(async r => r.ok ? r : fetch(API_URL + `/quotes/${quoteId}/pdf`, { method: 'POST' }));
       if (!res.ok) throw new Error('PDF generation failed');
       const blob = await res.blob();
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
@@ -1097,7 +1111,8 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
   const loadQuoteHistory = async () => {
     setLoadingHistory(true);
     try {
-      const res = await fetch(API_URL + '/quotes');
+      // Canonical quotes_v2 — same store MAX writes to
+      const res = await fetch(API_URL + '/quotes-v2?limit=100&business_unit=workroom');
       const data = await res.json();
       setQuoteHistory(Array.isArray(data) ? data : data.quotes || []);
     } catch { setQuoteHistory([]); }
@@ -1106,9 +1121,9 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
 
   const loadQuoteById = async (id: string) => {
     try {
-      const res = await fetch(API_URL + `/quotes/${id}`);
+      const res = await fetch(API_URL + `/quotes-v2/${id}`);
       const q = await res.json();
-      // Populate customer fields
+      // Populate customer fields (quotes_v2 shape)
       setCustomer({ name: q.customer_name || '', email: q.customer_email || '', phone: q.customer_phone || '', address: q.customer_address || '' });
       setProjectName(q.project_name || '');
       // Populate rooms from structured room data
