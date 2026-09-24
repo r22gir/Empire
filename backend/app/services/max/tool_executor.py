@@ -1666,6 +1666,37 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── CANONICAL ENGINE-PRICED QUOTE TOOL ─────────────────────────────
 
+def _normalize_manual_line_inputs(li: dict) -> dict:
+    """For manual_line only: copy top-level Becky-shape fields into inputs.
+
+    Models often emit description / unit_price / quantity at the line-item
+    top level (matching create_becky_quote shape) while leaving inputs empty
+    or missing those keys. price_manual_line reads only from inputs, so map
+    them in when missing/empty. Other categories are untouched.
+    """
+    inputs = dict(li.get("inputs") or {})
+    category = str(li.get("category") or "").strip().lower()
+    if category != "manual_line":
+        return inputs
+
+    def _missing(key: str) -> bool:
+        val = inputs.get(key)
+        return val is None or (isinstance(val, str) and str(val).strip() == "")
+
+    for key in ("description", "unit_price", "quantity"):
+        if _missing(key) and li.get(key) is not None and li.get(key) != "":
+            inputs[key] = li.get(key)
+
+    # Also accept common aliases the model sometimes uses at top level.
+    if _missing("unit_price"):
+        for alias in ("price", "rate", "amount"):
+            if li.get(alias) is not None and li.get(alias) != "":
+                inputs["unit_price"] = li.get(alias)
+                break
+
+    return inputs
+
+
 @tool("create_engine_quote")
 def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Create a quote via the pricing engine (canonical quotes_v2 store).
@@ -1688,6 +1719,25 @@ def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult
             error="line_items required (use category + inputs from PRICING_SPECS)",
         )
 
+    normalized_items = []
+    for li in line_items:
+        if not isinstance(li, dict):
+            continue
+        inputs = _normalize_manual_line_inputs(li)
+        description = li.get("description", "")
+        # Prefer nested description when top-level was empty (manual_line).
+        if (not description or str(description).strip() == "") and inputs.get("description"):
+            description = inputs.get("description")
+        qty = li.get("quantity", 1)
+        if (qty is None or qty == "") and inputs.get("quantity") is not None:
+            qty = inputs.get("quantity")
+        normalized_items.append({
+            "category":    li.get("category"),
+            "description": description,
+            "inputs":      inputs,
+            "quantity":    qty if qty is not None else 1,
+        })
+
     body = {
         "customer_name":       customer_name,
         "business_unit":       business_unit,
@@ -1697,16 +1747,7 @@ def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult
         "project_name":        params.get("project_name", ""),
         "project_description": params.get("project_description", ""),
         "tax_rate":            params.get("tax_rate", 0.0),
-        "line_items": [
-            {
-                "category":    li.get("category"),
-                "description": li.get("description", ""),
-                "inputs":      li.get("inputs") or {},
-                "quantity":    li.get("quantity", 1),
-            }
-            for li in line_items
-            if isinstance(li, dict)
-        ],
+        "line_items":          normalized_items,
     }
 
     try:
