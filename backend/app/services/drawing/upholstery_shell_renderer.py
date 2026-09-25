@@ -50,6 +50,24 @@ PLAIN_SEAT_DK = HexColor("#0e0e0e")
 LT_GRAY = HexColor("#edf2f7")
 MED_GRAY = HexColor("#cbd5e0")
 
+# Presentation type scale — H-ORTHO-2 (shop-readable at arm's length)
+TITLE_FONT = 17
+SUBTITLE_FONT = 9
+DIM_FONT = 10
+DIM_FONT_PRIMARY = 11
+NOTE_FONT = 9
+LEGEND_TITLE_FONT = 9
+LEGEND_FONT = 9
+TB_COMPANY_FONT = 12
+TB_SHEET_TITLE_FONT = 11
+TB_BODY_FONT = 8.5
+TB_QUOTE_FONT = 12
+TB_WARN_FONT = 8
+CALLOUT_FONT = 9
+PANEL_TITLE_FONT = 10
+PANEL_BODY_FONT = 9
+DRAFT_STAMP_FONT = 11
+
 # Empire yardage defaults (drawing/yardage.py)
 FABRIC_WIDTH_DEFAULT = 54.0
 WASTE_FABRIC = 1.15          # 15%
@@ -177,11 +195,10 @@ class SheetMeta:
     quote_num: str = "EST-2026-272"
     job: str = "Marley's Hyattsville — U+L Banquette Upholstery"
     note: str = (
-        "Existing shells on site. Cushion footprint + shell outline only — not wood frame. "
-        "DRAFT. BACK = basketweave bar 6.5×13 / tile 13×13 (2 bars H/V) + lean/pitch PROV; SEAT = plain. Height leftover 0.75\" OPEN."
+        "Upholstery on existing shell · basketweave back / plain seat · iso PARKED"
     )
     client: str = "Dave Romero / Marley's Hyattsville"
-    rev: str = "H-ORTHO"
+    rev: str = "H-ORTHO-2"
     drawn_by: str = "MAX AI / Empire Workroom"
     date_str: str = ""
 
@@ -693,112 +710,127 @@ def _basketweave_poly(c, pts, tile=10.0):
 
 
 def _title_block(c, w, h, sheet, sheet_title, meta: SheetMeta, total_sheets: int):
-    """McLean-ish dense title block: company, job, client, rev, date, sheet X of N."""
-    tb_h = 1.05 * inch
-    tb_y = 0.28 * inch
+    """McLean title block — larger type, readable at arm's length (H-ORTHO-2)."""
+    tb_h = 1.12 * inch
+    tb_y = 0.22 * inch
     c.setStrokeColor(NAVY)
     c.setLineWidth(1.4)
     c.setFillColor(white)
     c.rect(0.35 * inch, tb_y, w - 0.7 * inch, tb_h, fill=1, stroke=1)
-    # Gold accent bar
     c.setFillColor(GOLD)
     c.rect(0.35 * inch, tb_y, 0.14 * inch, tb_h, fill=1, stroke=0)
-    # Divider columns
     c.setStrokeColor(MED_GRAY)
     c.setLineWidth(0.5)
-    col1 = 3.6 * inch
-    col2 = 7.0 * inch
+    col1 = 3.55 * inch
+    col2 = 7.05 * inch
     c.line(col1, tb_y, col1, tb_y + tb_h)
     c.line(col2, tb_y, col2, tb_y + tb_h)
 
     c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(0.6 * inch, tb_y + 0.78 * inch, "EMPIRE WORKROOM")
-    c.setFont("Helvetica", 7)
+    c.setFont("Helvetica-Bold", TB_COMPANY_FONT)
+    c.drawString(0.6 * inch, tb_y + 0.82 * inch, "EMPIRE WORKROOM")
+    c.setFont("Helvetica", TB_BODY_FONT)
     c.setFillColor(GRAY)
-    c.drawString(0.6 * inch, tb_y + 0.58 * inch, meta.job[:62])
-    c.drawString(0.6 * inch, tb_y + 0.40 * inch, f"Client: {meta.client[:48]}")
+    c.drawString(0.6 * inch, tb_y + 0.58 * inch, meta.job[:58])
+    c.drawString(0.6 * inch, tb_y + 0.38 * inch, f"Client: {meta.client[:46]}")
     c.setFillColor(GOLD)
-    c.setFont("Helvetica-Bold", 6.5)
-    c.drawString(0.6 * inch, tb_y + 0.18 * inch, "FOR DISCUSSION — NOT FOR CONSTRUCTION")
+    c.setFont("Helvetica-Bold", TB_WARN_FONT)
+    c.drawString(0.6 * inch, tb_y + 0.14 * inch, "FOR DISCUSSION — NOT FOR CONSTRUCTION")
 
     c.setFillColor(NAVY)
+    c.setFont("Helvetica-Bold", TB_SHEET_TITLE_FONT)
+    c.drawString(col1 + 0.12 * inch, tb_y + 0.82 * inch, sheet_title)
+    c.setFont("Helvetica", TB_BODY_FONT)
+    c.setFillColor(GRAY)
+    c.drawString(col1 + 0.12 * inch, tb_y + 0.58 * inch, meta.note[:54])
+    c.drawString(col1 + 0.12 * inch, tb_y + 0.36 * inch, f"Drawn: {meta.drawn_by}")
+    c.setFont("Helvetica-Bold", TB_BODY_FONT)
+    c.setFillColor(NAVY)
+    c.drawString(col1 + 0.12 * inch, tb_y + 0.14 * inch, f"Rev {meta.rev}  ·  {meta.date_str}")
+
+    c.setFillColor(NAVY)
+    c.setFont("Helvetica-Bold", TB_QUOTE_FONT)
+    c.drawRightString(w - 0.5 * inch, tb_y + 0.78 * inch, meta.quote_num)
+    c.setFont("Helvetica", TB_BODY_FONT)
+    c.setFillColor(GRAY)
+    c.drawRightString(w - 0.5 * inch, tb_y + 0.50 * inch, f"Sheet {sheet} of {total_sheets}")
     c.setFont("Helvetica-Bold", 8)
-    c.drawString(col1 + 0.12 * inch, tb_y + 0.78 * inch, sheet_title)
-    c.setFont("Helvetica", 7)
-    c.setFillColor(GRAY)
-    c.drawString(col1 + 0.12 * inch, tb_y + 0.55 * inch, meta.note[:58])
-    c.drawString(col1 + 0.12 * inch, tb_y + 0.35 * inch, f"Drawn: {meta.drawn_by}")
-    c.drawString(col1 + 0.12 * inch, tb_y + 0.18 * inch, f"Rev {meta.rev}  ·  {meta.date_str}")
-
-    c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawRightString(w - 0.5 * inch, tb_y + 0.72 * inch, meta.quote_num)
-    c.setFont("Helvetica", 8)
-    c.setFillColor(GRAY)
-    c.drawRightString(w - 0.5 * inch, tb_y + 0.48 * inch, f"Sheet {sheet} of {total_sheets}")
-    c.setFont("Helvetica-Bold", 7)
     c.setFillColor(CUSH)
     c.drawRightString(w - 0.5 * inch, tb_y + 0.22 * inch, "BASKETWEAVE BACK / PLAIN SEAT")
 
 
+def _draft_stamp(c, w, h):
+    """Single clear DRAFT stamp (top-right) — avoid repeating DRAFT in every banner."""
+    c.saveState()
+    c.setFillColor(PROV)
+    c.setFont("Helvetica-Bold", DRAFT_STAMP_FONT)
+    c.drawRightString(w - 0.45 * inch, h - 0.36 * inch, "DRAFT")
+    c.setFont("Helvetica", 7.5)
+    c.setFillColor(GRAY)
+    c.drawRightString(w - 0.45 * inch, h - 0.52 * inch, "iso PARKED")
+    c.restoreState()
+
+
 def _page_header(c, w, h, title, subtitle: str = ""):
     c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", 13)
-    c.drawString(0.45 * inch, h - 0.38 * inch, title)
+    c.setFont("Helvetica-Bold", TITLE_FONT)
+    c.drawString(0.45 * inch, h - 0.40 * inch, title)
+    _draft_stamp(c, w, h)
     if subtitle:
-        c.setFont("Helvetica", 8)
+        c.setFont("Helvetica", SUBTITLE_FONT)
         c.setFillColor(GRAY)
-        c.drawString(0.45 * inch, h - 0.55 * inch, subtitle)
-        line_y = h - 0.62 * inch
+        c.drawString(0.45 * inch, h - 0.60 * inch, subtitle[:110])
+        line_y = h - 0.70 * inch
     else:
-        line_y = h - 0.48 * inch
+        line_y = h - 0.52 * inch
     c.setStrokeColor(GOLD)
     c.setLineWidth(2)
     c.line(0.45 * inch, line_y, w - 0.45 * inch, line_y)
-    return line_y - 0.15 * inch
+    return line_y - 0.18 * inch
 
 
 def _legend(c, x, y, items):
-    """Compact color legend. items = [(color, label), ...]"""
-    c.setFont("Helvetica-Bold", 7)
+    """Color legend — larger type (H-ORTHO-2)."""
+    c.setFont("Helvetica-Bold", LEGEND_TITLE_FONT)
     c.setFillColor(NAVY)
-    c.drawString(x, y + 12, "LEGEND")
+    c.drawString(x, y + 14, "LEGEND")
     yy = y
     for col, lab in items:
         c.setFillColor(col)
-        c.rect(x, yy, 10, 8, fill=1, stroke=0)
+        c.rect(x, yy, 12, 10, fill=1, stroke=0)
         c.setStrokeColor(GRAY)
         c.setLineWidth(0.4)
-        c.rect(x, yy, 10, 8, fill=0, stroke=1)
+        c.rect(x, yy, 12, 10, fill=0, stroke=1)
         c.setFillColor(GRAY)
-        c.setFont("Helvetica", 6.5)
-        c.drawString(x + 14, yy + 1, lab)
-        yy -= 12
+        c.setFont("Helvetica", LEGEND_FONT)
+        c.drawString(x + 16, yy + 1.5, lab)
+        yy -= 15
 
 
-def _dim_h(c, x1, x2, y, label, color=GRAY):
+def _dim_h(c, x1, x2, y, label, color=GRAY, bold=False, font_size=None):
     c.setStrokeColor(color)
     c.setFillColor(color)
-    c.setLineWidth(0.6)
+    c.setLineWidth(0.75)
     c.line(x1, y, x2, y)
-    c.line(x1, y - 4, x1, y + 4)
-    c.line(x2, y - 4, x2, y + 4)
-    c.setFont("Helvetica", 7)
-    c.drawCentredString((x1 + x2) / 2, y + 5, label)
+    c.line(x1, y - 5, x1, y + 5)
+    c.line(x2, y - 5, x2, y + 5)
+    fs = font_size if font_size is not None else (DIM_FONT_PRIMARY if bold else DIM_FONT)
+    c.setFont("Helvetica-Bold" if bold else "Helvetica", fs)
+    c.drawCentredString((x1 + x2) / 2, y + 6, label)
 
 
-def _dim_v(c, x, y1, y2, label, color=GRAY):
+def _dim_v(c, x, y1, y2, label, color=GRAY, bold=False, font_size=None):
     c.setStrokeColor(color)
     c.setFillColor(color)
-    c.setLineWidth(0.6)
+    c.setLineWidth(0.75)
     c.line(x, y1, x, y2)
-    c.line(x - 4, y1, x + 4, y1)
-    c.line(x - 4, y2, x + 4, y2)
+    c.line(x - 5, y1, x + 5, y1)
+    c.line(x - 5, y2, x + 5, y2)
+    fs = font_size if font_size is not None else (DIM_FONT_PRIMARY if bold else DIM_FONT)
     c.saveState()
-    c.translate(x - 6, (y1 + y2) / 2)
+    c.translate(x - 8, (y1 + y2) / 2)
     c.rotate(90)
-    c.setFont("Helvetica", 7)
+    c.setFont("Helvetica-Bold" if bold else "Helvetica", fs)
     c.drawCentredString(0, 0, label)
     c.restoreState()
 
@@ -869,42 +901,37 @@ def _draw_u_plan(c, ox, oy, scale, u: UShellSpec, colored: bool = False):
     c.line(sx(W - D), sy(AR), sx(W), sy(AR))
     c.setDash()
 
-    _dim_h(c, sx(0), sx(W), sy(0) + 14, f'{W:.2f}" back outer')
-    _dim_v(c, sx(0) - 14, sy(0), sy(AL), f'{AL:.2f}" L arm')
-    _dim_v(c, sx(W) + 14, sy(0), sy(AR), f'{AR:.2f}" R arm')
-    _dim_h(c, sx(0), sx(D), sy(D) - 12, f'{D:.2f}" seat', CUSH)
+    _dim_h(c, sx(0), sx(W), sy(0) + 16, f'{W:.2f}" back outer', bold=True)
+    _dim_v(c, sx(0) - 18, sy(0), sy(AL), f'{AL:.2f}" L arm', bold=True)
+    _dim_v(c, sx(W) + 18, sy(0), sy(AR), f'{AR:.2f}" R arm', bold=True)
+    _dim_h(c, sx(0), sx(D), sy(D) - 14, f'{D:.2f}" seat', CUSH, bold=True)
 
     c.setFillColor(SHELL)
-    c.setFont("Helvetica-Bold", 8)
+    c.setFont("Helvetica-Bold", CALLOUT_FONT)
     c.drawCentredString(sx(W / 2), sy(D / 2) - 4, "SHELL / WALL")
     if colored:
         c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 7.5)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT)
         c.drawCentredString(sx(W / 2), sy(4), "BASKETWEAVE BACK")
-        c.setFont("Helvetica", 6)
+        c.setFont("Helvetica", NOTE_FONT - 1)
         c.drawCentredString(sx(W / 2), sy(8), "to match Sep 2022 / bar tile")
         c.setFillColor(HexColor("#aaaaaa"))
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT)
         c.drawCentredString(sx(W / 2), sy(min(AL, AR) * 0.55 + D), "PLAIN SEAT")
     else:
         c.setFillColor(CUSH)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT)
         c.drawCentredString(sx(W / 2), sy(min(AL, AR) * 0.55 + D), "SEAT CUSHION FOOTPRINT")
     c.setFillColor(GRAY)
-    c.setFont("Helvetica", 7)
-    c.drawString(sx(D) + 4, sy(AL) - 10, "miter @ corners")
+    c.setFont("Helvetica", NOTE_FONT)
+    c.drawString(sx(D) + 4, sy(AL) - 12, "miter @ corners")
 
+    # Developed-run callout kept compact under plan (panel on sheet carries detail)
     c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont("Helvetica-Bold", NOTE_FONT)
     c.drawString(
-        sx(0), sy(max(AL, AR)) - 28,
-        f'Developed outer run (upholstery): {u.developed_outer_in:.2f}" = '
-        f'{u.developed_outer_lf:.2f} lf   (back {W:.2f} + L {AL:.2f} + R {AR:.2f})',
-    )
-    c.setFont("Helvetica", 7)
-    c.setFillColor(GRAY)
-    c.drawString(
-        sx(0), sy(max(AL, AR)) - 40,
-        f'Booth footprint width (plan): {u.footprint_width:.2f}" = back + 2×seat_depth — NOT the lf takeoff.',
+        sx(0), sy(max(AL, AR)) - 26,
+        f'Developed outer: {u.developed_outer_in:.2f}" = {u.developed_outer_lf:.2f} lf',
     )
 
 
@@ -1002,57 +1029,47 @@ def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = F
     c.line(bf_x, z1 + 3, bf_x, z1 + 9)
     c.line(tf_x, z1 + 3, tf_x, z1 + 9)
     c.setFillColor(PROV)
-    c.setFont("Helvetica-Bold", 7.5)
+    c.setFont("Helvetica-Bold", NOTE_FONT)
     c.drawCentredString((bf_x + tf_x) / 2, z1 + 12, f'lean {lean:.1f}" PROV')
-    c.setFont("Helvetica", 6.5)
-    c.drawCentredString((bf_x + tf_x) / 2, z1 + 22, f'≈ {ang:.1f}° from vertical')
+    c.setFont("Helvetica", NOTE_FONT - 1)
+    # Keep lean ° as currently computed (visible shell-seat height); founder call pending
+    c.drawCentredString((bf_x + tf_x) / 2 + 36, z1 + 24, f'≈ {ang:.1f}°')
 
     # ── Video dim chain (SIDE) ─────────────────────────────────────
-    # overall H
-    _dim_v(c, front_x - 22, floor_y, floor_y + Hs, f'{H:.2f}" overall H')
-    # seat H AFF (PROV) — NOT foam
-    _dim_v(c, front_x - 8, floor_y, floor_y + seatHs, f'{seat_h:.1f}" seat H AFF PROV', PROV)
-    # seat depth
-    _dim_h(c, front_x, front_x + Ds, floor_y - 12, f'{depth:.2f}" seat depth')
-    # overall D
-    _dim_h(c, front_x, wall_x, floor_y - 26, f'{overall_d:.1f}" overall D')
-    # foam mat'l callout (distinct)
+    _dim_v(c, front_x - 28, floor_y, floor_y + Hs, f'{H:.2f}" overall H', bold=True)
+    _dim_v(c, front_x - 12, floor_y, floor_y + seatHs, f'{seat_h:.1f}" seat H AFF PROV', PROV, bold=True)
+    _dim_h(c, front_x, front_x + Ds, floor_y - 14, f'{depth:.2f}" seat depth', bold=True)
+    _dim_h(c, front_x, wall_x, floor_y - 30, f'{overall_d:.1f}" overall D', bold=True)
     c.setFillColor(CUSH)
-    c.setFont("Helvetica", 6.5)
+    c.setFont("Helvetica", NOTE_FONT)
     c.drawString(front_x + 3, foam_y0 + foams / 2 - 2, f'foam {foam:.1f}" mat\'l (≠ seat H)')
 
-    # Labels
     if colored:
         c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 7.5)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT)
         mid_x = (bf_x + tf_x + bb_x + tb_x) / 4
         mid_y = (z0 + z1) / 2
         c.drawCentredString(mid_x, mid_y + 4, "BASKETWEAVE")
-        c.setFont("Helvetica", 6)
-        c.drawCentredString(mid_x, mid_y - 6, "angled BACK")
+        c.setFont("Helvetica", NOTE_FONT - 1)
+        c.drawCentredString(mid_x, mid_y - 8, "angled BACK")
         c.setFillColor(HexColor("#bbbbbb"))
-        c.setFont("Helvetica-Bold", 7)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT)
         c.drawCentredString(front_x + Ds / 2, floor_y + seatHs * 0.45, "PLAIN SEAT")
     else:
         c.setFillColor(GRAY)
-        c.setFont("Helvetica", 7)
+        c.setFont("Helvetica", NOTE_FONT)
         c.drawString(front_x + 4, floor_y + seatHs * 0.4, "seat (plain)")
         c.drawString(bf_x + 4, z0 + (z1 - z0) * 0.55, "back (leans)")
 
+    # Compact side header — detail lives in SITE DIM panel
     c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(ox, floor_y + Hs + 28, "SIDE — VIDEO DIM CHAIN")
-    c.setFont("Helvetica", 6.5)
-    c.setFillColor(PROV)
-    c.drawString(
-        ox, floor_y + Hs + 16,
-        f'H {H:.2f}" · D {overall_d:.1f}" · seat H {seat_h:.1f}" AFF PROV · seat depth {depth:.2f}" · lean {lean:.1f}" PROV · foam {foam:.1f}" mat\'l',
-    )
+    c.setFont("Helvetica-Bold", PANEL_TITLE_FONT)
+    c.drawString(ox, floor_y + Hs + 40, "SIDE — VIDEO DIM CHAIN")
     c.setFillColor(GRAY)
-    c.setFont("Helvetica", 6)
+    c.setFont("Helvetica", NOTE_FONT)
     c.drawString(
-        ox, floor_y + Hs + 6,
-        f'Net back cushion order H {u.net_back_height:.2f}" (materials). Visible face above seat ≈ {H - seat_h:.2f}". Confirm lean on site.',
+        ox, floor_y + Hs + 24,
+        f'Net back order H {u.net_back_height:.2f}" · visible above seat ≈ {H - seat_h:.2f}" · confirm lean on site',
     )
 
 
@@ -1115,34 +1132,33 @@ def _draw_u_front(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = 
     c.setDash()
 
     # Dims
-    _dim_h(c, x0, x0 + Ws, floor_y + Hs + 18, f'{W:.2f}" back outer (FRONT)')
-    _dim_v(c, x0 - 16, floor_y, floor_y + Hs, f'{H:.2f}" overall H')
-    _dim_v(c, x0 + Ws + 12, floor_y, floor_y + seatHs, f'{seat_h:.1f}" seat H AFF PROV', PROV)
+    _dim_h(c, x0, x0 + Ws, floor_y + Hs + 18, f'{W:.2f}" back outer (FRONT)', bold=True)
+    _dim_v(c, x0 - 20, floor_y, floor_y + Hs, f'{H:.2f}" overall H', bold=True)
+    _dim_v(c, x0 + Ws + 16, floor_y, floor_y + seatHs, f'{seat_h:.1f}" seat H AFF PROV', PROV, bold=True)
 
-    # Labels
     if colored:
         c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 9)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT + 1)
         c.drawCentredString(x0 + Ws / 2, floor_y + seatHs + back_h * 0.55, "BASKETWEAVE BACK")
-        c.setFont("Helvetica", 7)
-        c.drawCentredString(x0 + Ws / 2, floor_y + seatHs + back_h * 0.40, "bar 6.5×13 / tile 13×13 · Sep 2022 match")
+        c.setFont("Helvetica", NOTE_FONT)
+        c.drawCentredString(x0 + Ws / 2, floor_y + seatHs + back_h * 0.38, "bar 6.5×13 / tile 13×13 · Sep 2022 match")
         c.setFillColor(HexColor("#bbbbbb"))
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT)
         c.drawCentredString(x0 + Ws / 2, floor_y + seatHs * 0.42, "PLAIN SEAT")
     else:
         c.setFillColor(GRAY)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT)
         c.drawCentredString(x0 + Ws / 2, floor_y + seatHs + back_h * 0.5, "PATTERN BACK")
         c.drawCentredString(x0 + Ws / 2, floor_y + seatHs * 0.4, "PLAIN SEAT")
 
     c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(x0, floor_y + Hs + 36, "FRONT — FACE VIEW (pattern on back / plain seat)")
+    c.setFont("Helvetica-Bold", PANEL_TITLE_FONT)
+    c.drawString(x0, floor_y + Hs + 48, "FRONT — FACE VIEW")
     c.setFillColor(GRAY)
-    c.setFont("Helvetica", 6.5)
+    c.setFont("Helvetica", NOTE_FONT)
     c.drawString(
-        x0, floor_y + Hs + 26,
-        f'Arms asymmetric L {u.arm_left:.2f}" / R {u.arm_right:.2f}" (shown in TOP). Foam {foam:.1f}" mat\'l ≠ seat H. Lean shown in SIDE.',
+        x0, floor_y + Hs + 34,
+        f'Arms L {u.arm_left:.2f}" / R {u.arm_right:.2f}" (TOP) · foam {foam:.1f}" mat\'l ≠ seat H · lean on SIDE',
     )
 
 
@@ -1162,8 +1178,8 @@ def _draw_l_side(c, ox, oy, scale_h, width_pts, L: LShellSpec, colored: bool = F
     )
     _draw_u_elev(c, ox, oy, scale_h, width_pts, u_like, colored=colored)
     c.setFillColor(PROV)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(ox, oy - 42, f'L PROVISIONAL — depth {L.seat_depth:.1f}" / H {L.shell_height:.1f}" / seat H {L.seat_height:.1f}" AFF — lock to U before fab')
+    c.setFont("Helvetica-Bold", NOTE_FONT)
+    c.drawString(ox, oy - 44, f'L PROVISIONAL — depth {L.seat_depth:.1f}" / H {L.shell_height:.1f}" / seat H {L.seat_height:.1f}" AFF — lock to U')
 
 
 def _draw_l_front(c, ox, oy, scale_h, width_pts, L: LShellSpec, colored: bool = False):
@@ -1181,8 +1197,8 @@ def _draw_l_front(c, ox, oy, scale_h, width_pts, L: LShellSpec, colored: bool = 
     )
     _draw_u_front(c, ox, oy, scale_h, width_pts, u_like, colored=colored)
     c.setFillColor(PROV)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(ox, oy - 42, f'L FRONT along long leg {L.leg_long:.3f}" — PROVISIONAL; short leg {L.leg_short:.3f}" in TOP')
+    c.setFont("Helvetica-Bold", NOTE_FONT)
+    c.drawString(ox, oy - 44, f'L FRONT along long leg {L.leg_long:.3f}" — PROVISIONAL; short leg {L.leg_short:.3f}" in TOP')
 
 
 def _draw_l_plan(c, ox, oy, scale, L: LShellSpec, colored: bool = False):
@@ -1239,31 +1255,31 @@ def _draw_l_plan(c, ox, oy, scale, L: LShellSpec, colored: bool = False):
     c.line(sx(D), sy(D), sx(D), sy(A - D))
     c.setDash()
 
-    _dim_h(c, sx(0), sx(B), sy(0) + 14, f'{B:.3f}" long leg')
-    _dim_v(c, sx(0) - 14, sy(0), sy(A), f'{A:.3f}" short leg')
-    _dim_h(c, sx(B - D), sx(B), sy(D / 2), f'{D:.1f}"', PROV)
+    _dim_h(c, sx(0), sx(B), sy(0) + 16, f'{B:.3f}" long leg', bold=True)
+    _dim_v(c, sx(0) - 18, sy(0), sy(A), f'{A:.3f}" short leg', bold=True)
+    _dim_h(c, sx(B - D), sx(B), sy(D / 2), f'{D:.1f}"', PROV, bold=True)
 
     c.setFillColor(PROV)
-    c.setFont("Helvetica-Bold", 8)
+    c.setFont("Helvetica-Bold", CALLOUT_FONT)
     c.drawString(sx(B / 3), sy(A / 2), "L DEPTH / HEIGHT PROVISIONAL")
     if colored:
         c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 7.5)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT)
         c.drawCentredString(sx(B / 2), sy(D / 2) + 4, "BASKETWEAVE BACK")
-        c.setFont("Helvetica", 6)
+        c.setFont("Helvetica", NOTE_FONT - 1)
         c.drawCentredString(sx(B / 2), sy(D / 2) - 6, "to match Sep 2022 / bar tile")
         c.setFillColor(HexColor("#bbbbbb"))
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT)
         c.drawString(sx(D) + 6, sy(D) + 8, "PLAIN SEAT")
     else:
         c.setFillColor(SHELL)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont("Helvetica-Bold", CALLOUT_FONT)
         c.drawCentredString(sx(B / 2), sy(D / 2) - 2, "SHELL")
         c.setFillColor(CUSH)
         c.drawString(sx(D) + 6, sy(D) + 8, "seat footprint")
 
     c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont("Helvetica-Bold", NOTE_FONT)
     c.drawString(
         sx(0), sy(A) - 22,
         f'Developed outer run: {L.developed_outer_in:.3f}" = {L.developed_outer_lf:.2f} lf',
@@ -1742,64 +1758,88 @@ def _draw_l_iso(c, origin_x, origin_y, area_w, area_h, L: LShellSpec, colored: b
 
 
 def _key_dims_panel(c, x, y, u: UShellSpec, L: LShellSpec):
+    """KEY DIMS — labeled rows, larger type, more padding (H-ORTHO-2)."""
+    box_h = 2.20 * inch
+    box_w = 3.55 * inch
     c.setFillColor(LT_GRAY)
     c.setStrokeColor(NAVY)
-    c.setLineWidth(0.8)
-    c.roundRect(x, y - 1.55 * inch, 3.4 * inch, 1.65 * inch, 4, fill=1, stroke=1)
+    c.setLineWidth(1.0)
+    c.roundRect(x, y - box_h, box_w, box_h, 5, fill=1, stroke=1)
     c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(x + 8, y, "KEY DIMENSIONS (LOCKED)")
-    c.setFont("Helvetica", 7)
-    c.setFillColor(GRAY)
-    lines = [
-        f'U back outer {u.back_outer:.2f}"  |  L arm {u.arm_left:.2f}"  |  R arm {u.arm_right:.2f}"',
-        f'U seat depth {u.seat_depth:.2f}"  |  shell H {u.shell_height:.2f}"  |  net back {u.net_back_height:.2f}"',
-        f'U seat H {u.seat_height:.1f}" AFF PROV  |  foam {u.seat_foam:.1f}" mat\'l  |  developed {u.developed_outer_lf:.2f} lf',
-        f'L legs {L.leg_short:.3f}" + {L.leg_long:.3f}"  |  depth {L.seat_depth:.1f}" PROV',
-        f'L shell {L.shell_height:.1f}" PROV  |  seat H {L.seat_height:.1f}" AFF PROV  |  foam {L.seat_foam:.1f}"',
-        "BACK = basketweave (Sep 2022 / bar tile) · SEAT = plain",
+    c.setFont("Helvetica-Bold", PANEL_TITLE_FONT)
+    c.drawString(x + 10, y - 16, "KEY DIMENSIONS (LOCKED)")
+    rows = [
+        ("U back outer", f'{u.back_outer:.2f}"'),
+        ("U L / R arms", f'{u.arm_left:.2f}" / {u.arm_right:.2f}"'),
+        ("U seat depth", f'{u.seat_depth:.2f}"'),
+        ("Shell H / net back", f'{u.shell_height:.2f}" / {u.net_back_height:.2f}"'),
+        ("Seat H AFF (PROV)", f'{u.seat_height:.1f}"  ·  foam {u.seat_foam:.1f}" mat\'l'),
+        ("Developed outer", f'{u.developed_outer_in:.2f}" = {u.developed_outer_lf:.2f} lf'),
+        ("L legs (PROV)", f'{L.leg_short:.3f}" + {L.leg_long:.3f}"'),
+        ("L depth / H / seat", f'{L.seat_depth:.1f}" / {L.shell_height:.1f}" / {L.seat_height:.1f}" AFF'),
     ]
-    yy = y - 14
+    yy = y - 32
+    for lab, val in rows:
+        c.setFillColor(GRAY)
+        c.setFont("Helvetica", PANEL_BODY_FONT)
+        c.drawString(x + 10, yy, lab)
+        c.setFillColor(NAVY)
+        c.setFont("Helvetica-Bold", PANEL_BODY_FONT)
+        c.drawRightString(x + box_w - 10, yy, val)
+        yy -= 13
+    c.setFillColor(CUSH)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(x + 10, y - box_h + 10, "BACK = basketweave  ·  SEAT = plain")
+
+
+def _notes_panel(c, x, y, title: str, lines: list, box_w=3.55 * inch, box_h=1.15 * inch):
+    """Secondary notes as a clear panel (not a paragraph under the drawing)."""
+    c.setFillColor(white)
+    c.setStrokeColor(MED_GRAY)
+    c.setLineWidth(0.9)
+    c.roundRect(x, y - box_h, box_w, box_h, 4, fill=1, stroke=1)
+    c.setFillColor(NAVY)
+    c.setFont("Helvetica-Bold", PANEL_TITLE_FONT)
+    c.drawString(x + 10, y - 16, title)
+    yy = y - 32
+    c.setFont("Helvetica", NOTE_FONT)
+    c.setFillColor(GRAY)
     for ln in lines:
-        c.drawString(x + 8, yy, ln)
-        yy -= 11
+        c.drawString(x + 10, yy, ln[:62])
+        yy -= 13
 
 
 # ── Sheet builders ────────────────────────────────────────────────
 
 
 def _video_dim_checklist(c, x, y, u: UShellSpec, L: LShellSpec):
-    """Site-measure checklist from Rafael help-video sketch (lean + L dims)."""
-    box_h = 1.85 * inch
-    box_w = 3.55 * inch
+    """Site dim checklist — video-chain items only, larger type (H-ORTHO-2)."""
+    box_h = 2.15 * inch
+    box_w = 3.40 * inch
     c.setFillColor(HexColor("#1a202c"))
     c.setStrokeColor(PROV)
     c.setLineWidth(1.5)
-    c.roundRect(x, y - box_h, box_w, box_h, 4, fill=1, stroke=1)
+    c.roundRect(x, y - box_h, box_w, box_h, 5, fill=1, stroke=1)
     c.setFillColor(PROV)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(x + 8, y - 14, "SITE DIM CHECKLIST (Rafael video)")
+    c.setFont("Helvetica-Bold", PANEL_TITLE_FONT)
+    c.drawString(x + 10, y - 18, "SITE DIM CHECKLIST")
     c.setFillColor(white)
-    c.setFont("Helvetica", 6.5)
+    c.setFont("Helvetica", PANEL_BODY_FONT)
     lines = [
-        "Capture on site before fab / COM order:",
-        f'☐ Full height (shell) — U now {u.shell_height:.2f}"',
-        f'☐ Full depth (overall) — U seat {u.seat_depth:.2f}" + back thick',
-        f'☐ Seat height AFF — U {u.seat_height:.1f}" / L {L.seat_height:.1f}" PROV (NOT foam)',
-        f'☐ Seat foam thickness — {u.seat_foam:.1f}" mat\'l (distinct from seat H AFF)',
-        f'☐ Seat depth — U {u.seat_depth:.2f}" / L {L.seat_depth:.1f}" PROV',
-        f'☐ Outside L runs — long {L.leg_long:.3f}" / short {L.leg_short:.3f}"',
-        "☐ Inside L runs (clear opening) — TBD measure",
-        f'☐ Back LEAN/PITCH — top setback (now {u.back_lean_in:.1f}" PROV)',
-        "☐ Confirm basketweave on angled BACK only; seat PLAIN",
+        f'☐ Overall H (shell) — {u.shell_height:.2f}"',
+        f'☐ Overall D — seat {u.seat_depth:.2f}" + back thick',
+        f'☐ Seat H AFF — {u.seat_height:.1f}" PROV (NOT foam)',
+        f'☐ Seat depth — {u.seat_depth:.2f}"',
+        f'☐ Lean / pitch — {u.back_lean_in:.1f}" PROV setback',
+        f'☐ Foam (mat\'l only) — {u.seat_foam:.1f}" ≠ seat H AFF',
     ]
-    yy = y - 28
+    yy = y - 38
     for ln in lines:
-        c.drawString(x + 8, yy, ln)
-        yy -= 11
+        c.drawString(x + 10, yy, ln)
+        yy -= 16
     c.setFillColor(HexColor("#fbd38d"))
-    c.setFont("Helvetica", 6)
-    c.drawString(x + 8, y - box_h + 6, "Do not fab lean or L depth/height until checked.")
+    c.setFont("Helvetica", 8)
+    c.drawString(x + 10, y - box_h + 10, "Confirm on site before fab / COM.")
 
 
 def render_upholstery_shell_pdf(
@@ -1852,21 +1892,27 @@ def render_upholstery_shell_pdf(
         _page_header(
             c, w, h,
             "U BANQUETTE — TOP (PLAN)",
-            "Upholstery on existing shell · asymmetric arms · outer / inner / seat depth · developed outer run = lf takeoff",
+            "Asymmetric arms · outer / inner / seat depth · developed outer = lf takeoff",
         )
-        scale = (8.6 * inch) / u.back_outer
-        _draw_u_plan(c, 0.85 * inch, h - 1.25 * inch, scale, u)
-        _legend(c, w - 2.4 * inch, h - 1.3 * inch, [
+        # Enlarge plan into page real estate (H-ORTHO-2)
+        scale = (9.4 * inch) / u.back_outer
+        _draw_u_plan(c, 0.55 * inch, h - 1.15 * inch, scale, u)
+        _legend(c, w - 2.55 * inch, h - 1.35 * inch, [
             (LT_BLUE, "Shell / wall outline"),
             (CUSH, "Seat cushion footprint"),
-            (NAVY, "Developed run callout"),
+            (NAVY, "Developed run"),
         ])
-        _key_dims_panel(c, w - 3.9 * inch, 2.7 * inch, u, L)
-        c.setFillColor(GRAY)
-        c.setFont("Helvetica", 7.5)
-        c.drawString(
-            0.45 * inch, 1.50 * inch,
-            "TOP/PLAN: Blue = shell/wall. Orange dashed = seat footprint. Opening toward bottom. BOTH arms drawn (never max). Units: inches.",
+        _key_dims_panel(c, w - 4.05 * inch, 3.75 * inch, u, L)
+        _notes_panel(
+            c, 0.45 * inch, 3.75 * inch,
+            "NOTES",
+            [
+                "Blue = shell/wall · orange dashed = seat footprint",
+                "Opening toward bottom · BOTH arms drawn (never max)",
+                f'Booth footprint width {u.footprint_width:.2f}" ≠ lf takeoff',
+                "Units: inches · upholstery on existing shell",
+            ],
+            box_w=4.8 * inch, box_h=1.05 * inch,
         )
         finish("U Top (Plan)")
 
@@ -1874,19 +1920,23 @@ def render_upholstery_shell_pdf(
         _page_header(
             c, w, h,
             "U BANQUETTE — FRONT (FACE VIEW)",
-            f'Pattern on back / plain seat · shell H {u.shell_height}" · seat H {u.seat_height:.1f}" AFF PROV · foam {u.seat_foam:.1f}" mat\'l (≠ seat H)',
+            f'Pattern back / plain seat · H {u.shell_height}" · seat H {u.seat_height:.1f}" AFF PROV · foam {u.seat_foam:.1f}" mat\'l',
         )
-        _draw_u_front(c, 0.55 * inch, 1.85 * inch, 8.4, 9.5 * inch, u, colored=True)
-        _legend(c, w - 2.55 * inch, h - 1.15 * inch, [
+        _draw_u_front(c, 0.45 * inch, 1.70 * inch, 9.4, 7.3 * inch, u, colored=True)
+        _legend(c, 8.15 * inch, h - 1.30 * inch, [
             (PATTERN_BACK_BAR, "Basketweave BACK"),
             (PLAIN_SEAT, "Plain SEAT"),
             (PROV, "Seat H AFF provisional"),
         ])
-        c.setFillColor(GRAY)
-        c.setFont("Helvetica", 7.5)
-        c.drawString(
-            0.45 * inch, 1.48 * inch,
-            "FRONT = face of back run. Lean / pitch shown on SIDE sheet. Arms asymmetric — see TOP. Not a wood-frame section.",
+        _notes_panel(
+            c, 8.00 * inch, 5.55 * inch,
+            "NOTES",
+            [
+                "Face of back run · lean on SIDE",
+                "Arms asymmetric — see TOP",
+                "Not a wood-frame section",
+            ],
+            box_w=2.55 * inch, box_h=1.05 * inch,
         )
         finish("U Front")
 
@@ -1894,53 +1944,51 @@ def render_upholstery_shell_pdf(
         _page_header(
             c, w, h,
             "U BANQUETTE — SIDE (ELEVATION)",
-            f'Video dim chain: overall H · overall D · seat H AFF · seat depth · lean  |  lean {u.back_lean_in:.1f}" PROV',
+            f'Video dim chain · lean {u.back_lean_in:.1f}" PROV · foam ≠ seat H AFF',
         )
-        _draw_u_elev(c, 0.55 * inch, 2.05 * inch, 8.0, 6.6 * inch, u, colored=True)
-        _legend(c, 7.7 * inch, 6.6 * inch, [
+        _draw_u_elev(c, 0.45 * inch, 1.70 * inch, 10.0, 6.5 * inch, u, colored=True)
+        _legend(c, 7.35 * inch, 6.95 * inch, [
             (PATTERN_BACK_BAR, "Basketweave BACK (leaned)"),
             (PLAIN_SEAT, "Plain SEAT"),
             (PROV, "Lean / seat H provisional"),
         ])
-        _video_dim_checklist(c, 7.55 * inch, 4.55 * inch, u, L)
-        c.setFillColor(GRAY)
-        c.setFont("Helvetica", 7.5)
-        c.drawString(
-            0.45 * inch, 1.50 * inch,
-            "SIDE dim chain from Rafael help-video: overall H, overall D, seat H AFF, seat depth, lean. Foam is mat'l only — never labeled as seat H. Confirm lean on site.",
-        )
+        _video_dim_checklist(c, 7.15 * inch, 5.20 * inch, u, L)
         finish("U Side")
 
     if include_l:
         # ── L TOP (Plan) ──
         _page_header(
             c, w, h,
-            "L BANQUETTE — TOP (PLAN) (provisional depth/height)",
-            "Lock L depth/height to U before fabrication · developed run labeled",
+            "L BANQUETTE — TOP (PLAN)",
+            "Provisional depth/height — lock to U before fab · developed run labeled",
         )
-        scale_l = (7.2 * inch) / L.leg_long
-        _draw_l_plan(c, 1.1 * inch, h - 1.3 * inch, scale_l, L)
-        _legend(c, w - 2.5 * inch, h - 1.3 * inch, [
+        scale_l = (8.0 * inch) / L.leg_long
+        _draw_l_plan(c, 0.85 * inch, h - 1.20 * inch, scale_l, L)
+        _legend(c, w - 2.55 * inch, h - 1.35 * inch, [
             (LT_BLUE, "Shell outline"),
             (CUSH, "Seat footprint"),
             (PROV, "Provisional flag"),
         ])
-        c.setFillColor(PROV)
-        c.setFont("Helvetica-Bold", 9)
-        c.drawString(
-            0.45 * inch, 1.50 * inch,
-            f'PROVISIONAL: L depth {L.seat_depth}" / height {L.shell_height}" / seat {L.seat_height}" AFF — lock to U before fab.',
+        _notes_panel(
+            c, 0.45 * inch, 3.20 * inch,
+            "PROVISIONAL",
+            [
+                f'L depth {L.seat_depth}" / H {L.shell_height}" / seat {L.seat_height}" AFF',
+                "Lock L depth & height to U before fabrication",
+                "L TBD / inside clear — de-emphasized; measure on site",
+            ],
+            box_w=5.0 * inch, box_h=0.95 * inch,
         )
         finish("L Top (Plan)")
 
         # ── L FRONT ──
         _page_header(
             c, w, h,
-            "L BANQUETTE — FRONT (FACE VIEW) (provisional)",
-            f'Long-leg face · pattern on back / plain seat · lock depth/height to U before fab',
+            "L BANQUETTE — FRONT (FACE VIEW)",
+            "Long-leg face · pattern back / plain seat · provisional — lock to U",
         )
-        _draw_l_front(c, 0.55 * inch, 1.95 * inch, 8.0, 9.5 * inch, L, colored=True)
-        _legend(c, w - 2.55 * inch, h - 1.15 * inch, [
+        _draw_l_front(c, 0.45 * inch, 1.75 * inch, 9.2, 7.3 * inch, L, colored=True)
+        _legend(c, 8.15 * inch, h - 1.30 * inch, [
             (PATTERN_BACK_BAR, "Basketweave BACK"),
             (PLAIN_SEAT, "Plain SEAT"),
             (PROV, "Provisional geometry"),
@@ -1950,16 +1998,16 @@ def render_upholstery_shell_pdf(
         # ── L SIDE ──
         _page_header(
             c, w, h,
-            "L BANQUETTE — SIDE (ELEVATION) (provisional)",
-            f'Video dim chain (same as U) · lean {L.back_lean_in:.1f}" PROV · lock to U before fab',
+            "L BANQUETTE — SIDE (ELEVATION)",
+            f'Video dim chain (same as U) · lean {L.back_lean_in:.1f}" PROV · lock to U',
         )
-        _draw_l_side(c, 0.55 * inch, 2.15 * inch, 8.0, 6.6 * inch, L, colored=True)
-        _legend(c, 7.7 * inch, 6.6 * inch, [
+        _draw_l_side(c, 0.45 * inch, 1.75 * inch, 10.0, 6.5 * inch, L, colored=True)
+        _legend(c, 7.35 * inch, 6.95 * inch, [
             (PATTERN_BACK_BAR, "Basketweave BACK (leaned)"),
             (PLAIN_SEAT, "Plain SEAT"),
             (PROV, "Provisional"),
         ])
-        _video_dim_checklist(c, 7.55 * inch, 4.55 * inch, u, L)
+        _video_dim_checklist(c, 7.15 * inch, 5.20 * inch, u, L)
         finish("L Side")
 
     # ── Client Mockup ──
