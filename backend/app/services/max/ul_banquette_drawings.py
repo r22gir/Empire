@@ -208,9 +208,13 @@ def render_ul_banquette_pdf(
         l_height = _f(dims, "height", "shell_height", default=30.0) if shape == "l_shape" else 30.0
     l_seat_h = _f(dims, "seat_height", "seat_h", default=18.0)
 
+    l_net = _f(dims, "l_net_back", "l_back_height", "net_back_l", default=None)
+    if l_net is None:
+        l_net = net_back  # inherit U net back (quote L-B basis)
     l_spec = LShellSpec(
         leg_short=short_in, leg_long=long_in, seat_depth=l_depth,
-        shell_height=l_height, seat_height=l_seat_h, provisional=True,
+        shell_height=l_height, seat_height=l_seat_h, net_back_height=l_net,
+        provisional=True,
     )
     meta = SheetMeta(
         quote_num=quote_num,
@@ -234,6 +238,7 @@ def render_ul_banquette_pdf(
         include_u=True, include_l=True,
     )
 
+    mats = summary.get("materials") or {}
     flags = [
         "Product: UPHOLSTERY ON EXISTING SHELL (no wood frame / ribs / CNC).",
         f"U asymmetric arms drawn: L {u_spec.arm_left}\" / R {u_spec.arm_right}\" (NOT max'd).",
@@ -241,6 +246,11 @@ def render_ul_banquette_pdf(
         f"(not footprint width {u_spec.footprint_width:.2f}\").",
         f"U elev: shell {u_spec.shell_height}\"; net back {u_spec.net_back_height}\" sits ON "
         f"{u_spec.seat_foam}\" foam (not seat_h+back_h wood stack).",
+        "Sheets: plan / elev / iso U+L / client mockup / schedule / materials.",
+        "PATTERN fabric = BACKS only; PLAIN fabric = SEATS.",
+        f"Fabric order: PATTERN {mats.get('pattern_yards_order')} yd + PLAIN {mats.get('plain_yards_order')} yd "
+        f"@ {mats.get('fabric_width_in')}\" (15% waste).",
+        f"1/2\" ply: {mats.get('ply_sheets_4x8')} sheets 4x8 ({mats.get('ply_with_waste_sf')} sf w/ waste).",
         "Cushion schedule by run + SF — no 24\" auto-slice hero.",
         "L depth/height provisional — lock to U before fab.",
     ]
@@ -284,4 +294,11 @@ def render_ul_banquette_pdf(
         "flags": flags,
         "warnings": flags,
         "sheets": summary["sheets"],
+        "sheet_count": summary.get("sheet_count"),
+        "materials": summary.get("materials"),
+        "has_isometric": True,
+        "has_client_mockup": True,
+        "has_materials": True,
+        "pattern_backs_only": True,
+        "plain_seats_only": True,
     }
