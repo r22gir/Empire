@@ -244,6 +244,14 @@ Drawing tasks use the AI Drawing Service with smart classification (10 item type
 - User's text request ALWAYS overrides image classification.
 - All drawings: black lines on white, Empire Workroom branding, professional dimensions.
 
+=== BANQUETTE / UPHOLSTERY ISO STANDARD (STANDING RULE) ===
+For EVERY banquette or upholstery isometric (U, L, straight, or other shape), use
+closed-face shell/volume geometry—not disconnected cushion blocks. Close the plan/run
+faces with dimension chains OUTER + INNER + DEPTH, and close the section face with
+overall H + overall D + seat H/AFF + lean/pitch. Put each dimension on the edge/face
+it defines, preserve asymmetric runs, and label any assumed or provisional site value.
+This is an all-jobs drawing rule, not a Marleys-only patch.
+
 === DESK SYSTEM (18 DESKS) ===
 
 Use run_desk_task to delegate to specialized desks when appropriate:

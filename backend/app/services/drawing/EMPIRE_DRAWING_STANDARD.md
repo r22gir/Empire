@@ -32,6 +32,16 @@ First document produced to this standard: ONeil_Willard_Bench_Panel_Drawings.pdf
 - **ISOMETRIC** — assembly context when the job has 2+ pieces or the founder asks.
   Note "(plan curve not shown)" if the iso is simplified.
 
+## Banquette / upholstery isometric rule (all jobs)
+
+Every banquette or upholstered-item isometric (U, L, straight, or other shape) must
+use **closed-face shell/volume geometry**, not disconnected cushion blocks. The
+plan/run faces must close with dimension chains **OUTER + INNER + DEPTH**. The section
+face must close with **overall H + overall D + seat H/AFF + lean/pitch**. Place each
+dimension on the edge or face it defines, preserve asymmetric runs, and mark any
+assumed or provisional site value. This is a standing rule for every job, not a
+job-specific patch.
+
 ## Title block (right column, every sheet)
 
 EMPIRE WORKROOM / CUSTOM UPHOLSTERY & FABRICATION
