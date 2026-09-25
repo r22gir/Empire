@@ -8,6 +8,9 @@ purposes only.
 
 ## The Standard (source of truth)
 
+- **Field / client sheet golden:** `reference/max-golden/` (McLean Whittington REV A). See `GOLDEN.md`.
+- **Defaults module:** `max_sheet_chrome.py`
+
 - **`EMPIRE_DRAWING_STANDARD.md`** — v1.0. Every hard rule, every
   required view, every drafting convention. Read this first.
 - **`_legacy_willard_reference.py`** — the original reportlab

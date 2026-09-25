@@ -68,9 +68,10 @@ class JobSpec:
 
     Per EMPIRE_CLIENT_DOC_STANDARD.md Rule 1 (THE ONE RULE).
 
-    `header_tagline` and `footer_letterhead` are TWO DISTINCT fields
-    (per P1-T·b ruling). `POWERED BY EMPIRE WORKROOM` belongs in
-    `header_tagline`; the address belongs in `footer_letterhead`.
+    McLean golden chrome: `letterhead` (NELMA'S WORKROOM) +
+    `header_tagline` (POWERED BY EMPIRE WORKROOM) + brand footer
+    (`letterhead · tagline · locale`). Street address stays on
+    `address` for gates/estimates; drawing sheets print brand_footer().
 
     `document_type` is one of five: measurement_set, estimate,
     invoice, presentation_sheet, board.
@@ -90,9 +91,9 @@ class JobSpec:
     address:       Address
 
     # ── Chrome fields (TWO distinct — P1-T·b ruling) ──
-    header_tagline:    str  # e.g. "POWERED BY EMPIRE WORKROOM"
-    footer_letterhead: str  # computed from address (override-able)
-    locale:            str  # e.g. "HYATTSVILLE MD" (legacy)
+    header_tagline:    str  # POWERED BY EMPIRE WORKROOM
+    footer_letterhead: str  # street override / gate source; drawings use brand footer
+    locale:            str  # HYATTSVILLE MD
 
     # ── Rev / status (Amendment 6: single stamp across set) ──
     rev:     str
@@ -113,6 +114,17 @@ class JobSpec:
     # ── Body data (rooms, panels, schedule, etc.) ──
     rooms:     List[dict] = field(default_factory=list)
     schedule:  List[tuple] = field(default_factory=list)
+
+    # McLean golden brand (default Max drawing chrome)
+    letterhead: str = "NELMA'S WORKROOM"
+
+    def project_line(self) -> str:
+        """Header project line: CLIENT · PROJECT (McLean)."""
+        return f"{self.client}  ·  {self.project}".upper()
+
+    def brand_footer(self) -> str:
+        """Footer left zone — McLean brand language (not street address)."""
+        return f"{self.letterhead}  ·  {self.header_tagline}  ·  {self.locale}"
 
     def missing_required_fields(self) -> List[str]:
         """What the spec is missing — drives SpecIncomplete."""

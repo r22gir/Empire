@@ -42,3 +42,12 @@ mkdir -p /data/reference/mclean
 md5sum /data/reference/mclean/McLean_Whittington_Drapery_Elevations_RevA.pdf
 # Must print: f882144aefc03745533fdaae95ea86b4
 ```
+
+## Max golden lock (2026-09-25)
+
+Max's durable drawing/client sheet golden path is now:
+
+`reference/max-golden/` — same PDF bytes (md5 `f882144aefc03745533fdaae95ea86b4`),
+documented in `GOLDEN.md`. This folder remains the generator provenance;
+`max-golden` is the Max format lock pointer.
+

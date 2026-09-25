@@ -1,19 +1,25 @@
 """chrome.py — Page chrome (header band, footer band, palette, type scale,
 letterspacing, dimension primitives, section / wrap helpers).
 
-Per EMPIRE_CLIENT_DOC_STANDARD.md:
-- Amendment 1: chrome() takes TWO distinct fields — `header_tagline`
-  (the POWERED BY ... line in the header) and `footer_letterhead`
-  (the address line in the footer). The string appearing in both
-  was the ambiguity; the split resolves it.
-- Amendment 6: vertical dimensions break line at mid-height, number
-  horizontal. NO rotated text transforms in the set (gate).
-- Amendment 7: site photos are per-job upload; chrome does NOT
-  embed them — chrome receives a `(paths, captions)` list and band.py
-  handles rendering.
+Locked to Max golden McLean Whittington REV A
+(`reference/max-golden/GOLDEN.md`, md5 f882144aefc03745533fdaae95ea86b4).
 
-Reference port from `reference/mclean/mclean_drapery_set_generator.py`
-lines 24-152 (palette/typography), 748-789 (chrome/section/wrap).
+Chrome fields (McLean exact):
+- `letterhead` — e.g. NELMA'S WORKROOM (serif, header left)
+- `header_tagline` — POWERED BY EMPIRE WORKROOM (gold mono)
+- `project_line` — CLIENT · PROJECT under powered-by
+- Footer left brand line: letterhead · powered-by · locale
+  (street address stays on JobSpec.address for gates / estimates;
+   McLean drawing sheets print the brand footer, not the street).
+- Center: FOR DISCUSSION - NOT FOR CONSTRUCTION
+- Right: SHEET n / N
+
+Amendment 6: vertical dimensions break line at mid-height, number
+horizontal. NO rotated text transforms in the set (gate).
+Amendment 7: site photos are per-job upload; chrome does NOT embed them.
+
+Reference: `reference/mclean/mclean_drapery_set_generator.py`
+lines 24-152 (palette/typography), 763-787 (chrome).
 """
 from __future__ import annotations
 
@@ -233,70 +239,101 @@ def _fmt_in(v: float) -> str:
 
 # ══════════════════════════ CHROME — header + footer (P1-T·b ruling) ══════
 
+def _approx_tw(s: str, size: float, ls: float = 0.0) -> float:
+    """Advance-width approximation when PIL metrics are unavailable."""
+    return size * 0.55 * max(len(s), 1) + ls * max(len(s) - 1, 0)
+
+
 def chrome(sheet_no: int, total: int, right_title: str,
           header_tagline: str,
           footer_letterhead: str,
           rev: str, date: str, status: str,
-          placed: List[PlacedBox]) -> List[str]:
-    """Render header band + footer band. Returns SVG fragments.
+          placed: List[PlacedBox],
+          letterhead: str = "NELMA'S WORKROOM",
+          project_line: str = "",
+          locale: str = "HYATTSVILLE MD") -> List[str]:
+    """Render McLean-golden header + footer bands. Returns SVG fragments.
 
-    Per P1-T·b founder ruling: chrome takes TWO distinct fields
-    — `header_tagline` (e.g. "POWERED BY EMPIRE WORKROOM") goes in
-    the header band; `footer_letterhead` (the full business address)
-    goes in the footer band. The split resolves the
-    POWERED-BY-in-both-places ambiguity from Amendment 1.
+    McLean layout (reference/max-golden):
+      header left  : letterhead (serif) | gold rule | POWERED BY… + project
+      header right : room title + SHEET nn OF nn · REV · date
+      footer left  : letterhead · POWERED BY… · locale  (brand line)
+      footer center: FOR DISCUSSION - NOT FOR CONSTRUCTION
+      footer right : SHEET n / N
 
-    Per Amendment 5: every emitted text string is appended to
-    `placed` for the gates to consume. No parse-back.
+    `footer_letterhead` is accepted for back-compat with older callers /
+    street-address gates; when empty, the brand footer is used. Pass
+    an explicit brand string (preferred) or leave blank to compose from
+    letterhead + header_tagline + locale.
+
+    Per Amendment 5: every emitted text string is appended to `placed`.
     """
     out: List[str] = []
-    # Page background
+    brand_foot = footer_letterhead.strip() if (footer_letterhead or "").strip() else (
+        f"{letterhead}  ·  {header_tagline}  ·  {locale}"
+    )
+    # Prefer McLean brand footer when caller passed a street address
+    # (Address.footer_letterhead). Drawing sheets lock to brand language.
+    if "Frolich" in brand_foot or brand_foot[:1].isdigit():
+        brand_foot = f"{letterhead}  ·  {header_tagline}  ·  {locale}"
+
     out.append(RECT(0, 0, PW, PH, PAPER))
-    # Header band
     out.append(RECT(0, 0, PW, HDR_H, BAND))
-    text, box = T(30, 27, "", size=14.0, anchor="start",
-                  fill="#f4efe2", font=SERIF, bold=True, ls=1.6)
-    # (Above is a placeholder for the letterhead; chrome is parameterized
-    #  by `header_tagline` — caller supplies the rendered letterhead text
-    #  and chrome places it. Same pattern as the reference.)
-    out.append(T(30, 27, header_tagline, 14.0, "start", "#f4efe2",
-                 SERIF, bold=True, ls=1.6)[0])
-    out.append(LINE(30 + 250, 11, 30 + 250, 33, GOLD, 1.2))
-    # Tagline (header_tagline or "POWERED BY EMPIRE WORKROOM")
-    out.append(T(30 + 262, 20.5, header_tagline, 6.2, "start", GOLD,
-                 MONO, bold=True, ls=1.5)[0])
-    # Right side: client + sheet number
-    out.append(T(PW - 30, 32.5, right_title.upper(), 8.4, "end", "#f4efe2",
-                 MONO, bold=True, ls=1.2)[0])
-    out.append(T(PW - 30, 20.5,
-                 f"SHEET {sheet_no:02d} OF {total:02d}   ·   REV {rev}   ·   {date}",
-                 6.2, "end", "#a49b88", MONO, ls=0.9)[0])
+
+    t_lh, b_lh = T(30, 27, letterhead, 14.0, "start", "#f4efe2",
+                   SERIF, bold=True, ls=1.6)
+    out.append(t_lh)
+    if b_lh is not None:
+        placed.append(b_lh)
+
+    dv = 30 + _approx_tw(letterhead, 14.0, 1.6) + 14
+    out.append(LINE(dv, 11, dv, 33, GOLD, 1.2))
+
+    t_pb, b_pb = T(dv + 12, 20.5, header_tagline, 6.2, "start", GOLD,
+                   MONO, bold=True, ls=1.5)
+    out.append(t_pb)
+    if b_pb is not None:
+        placed.append(b_pb)
+
+    if project_line:
+        t_pl, b_pl = T(dv + 12, 31.5, project_line, 6.0, "start", "#a49b88",
+                       MONO, ls=0.8)
+        out.append(t_pl)
+        if b_pl is not None:
+            placed.append(b_pl)
+
+    # Right: room title (lower) + sheet stamp (upper) — McLean order
+    t_rt, b_rt = T(PW - 30, 20.5, right_title.upper(), 8.4, "end", "#f4efe2",
+                   MONO, bold=True, ls=1.2)
+    out.append(t_rt)
+    if b_rt is not None:
+        placed.append(b_rt)
+    stamp = f"SHEET {sheet_no:02d} OF {total:02d}   ·   REV {rev}   ·   {date}"
+    t_st, b_st = T(PW - 30, 32.5, stamp, 6.2, "end", "#a49b88", MONO, ls=0.9)
+    out.append(t_st)
+    if b_st is not None:
+        placed.append(b_st)
     out.append(RECT(0, HDR_H, PW, 2.2, GOLD))
-    # Footer band
+
     fy = PH - FTR_H
     out.append(RECT(0, fy, PW, FTR_H, BAND))
-    out.append(T(30, fy + 16.5, footer_letterhead, 5.2, "start", "#a49b88",
-                 MONO, ls=0.35)[0])
-    out.append(T(PW / 2, fy + 16.5, status, 6.4, "middle", GOLD, MONO,
-                 bold=True, ls=1.4)[0])
-    out.append(T(PW - 30, fy + 16.5, f"SHEET {sheet_no} / {total}", 6.4,
-                 "end", "#f4efe2", MONO, bold=True, ls=1.0)[0])
+    t_fl, b_fl = T(30, fy + 16.5, brand_foot, 5.2, "start", "#a49b88",
+                   MONO, ls=0.35)
+    out.append(t_fl)
+    if b_fl is not None:
+        placed.append(b_fl)
+    t_st2, b_st2 = T(PW / 2, fy + 16.5, status, 6.4, "middle", GOLD, MONO,
+                     bold=True, ls=1.4)
+    out.append(t_st2)
+    if b_st2 is not None:
+        placed.append(b_st2)
+    right = f"SHEET {sheet_no} / {total}"
+    t_fr, b_fr = T(PW - 30, fy + 16.5, right, 6.4, "end", "#f4efe2",
+                   MONO, bold=True, ls=1.0)
+    out.append(t_fr)
+    if b_fr is not None:
+        placed.append(b_fr)
     out.append(RECT(0, fy - 1.6, PW, 1.6, GOLD))
-    # Track header + footer text in `placed` for the gate (Amendment 5)
-    # (caller pre-allocated the list; we append here).
-    for txt, bx in [
-        (header_tagline, box),  # may be None if T() was replaced
-        (right_title.upper(), None),
-        (f"SHEET {sheet_no:02d} OF {total:02d}   ·   REV {rev}   ·   {date}",
-         None),
-        (footer_letterhead, None),
-        (status, None),
-        (f"SHEET {sheet_no} / {total}", None),
-    ]:
-        # We re-emit to capture boxes; but T() already returned (text, box)
-        # pairs at emission time. For the chrome call, we recompute the
-        # boxes below for the placed list.
-        pass
     return out
 
 

@@ -1,4 +1,15 @@
-# EMPIRE WORKROOM DRAWING STANDARD v1.0
+# EMPIRE WORKROOM DRAWING STANDARD v1.1
+
+**Max drawing / field-measurement golden (locked 2026-09-25):**
+`reference/max-golden/` — McLean Whittington REV A
+(md5 `f882144aefc03745533fdaae95ea86b4`). See `GOLDEN.md` there.
+
+**NOT golden:** `reference/empire-house-format/` Marleys WIP pack
+(EST-2026-272 content only). Do not treat B2 flat-fold samples there as
+format lock.
+
+---
+
 
 Standard for every shop drawing produced by Drawing Studio / drawing-router.
 Reference implementation: `willard_drawing.py` (reportlab, vector PDF).
@@ -42,14 +53,27 @@ dimension on the edge or face it defines, preserve asymmetric runs, and mark any
 assumed or provisional site value. This is a standing rule for every job, not a
 job-specific patch.
 
-## Title block (right column, every sheet)
+## Sheet chrome (field measurement / client drawing — McLean golden)
 
-EMPIRE WORKROOM / CUSTOM UPHOLSTERY & FABRICATION
+Header band: `NELMA'S WORKROOM` | `POWERED BY EMPIRE WORKROOM` +
+`CLIENT · PROJECT` | `SHEET nn OF nn · REV X · date`.
+Footer band: `NELMA'S WORKROOM · POWERED BY EMPIRE WORKROOM · HYATTSVILLE MD`
+| `FOR DISCUSSION - NOT FOR CONSTRUCTION` | `SHEET n / N`.
+Cream paper `#f7f3ea`, ink `#20241f`, gold `#b8912f`, band `#16191c`.
+DejaVu Serif titles, DejaVu Sans Mono chrome/labels, LAYOUT MATH callouts,
+gold dashed edges for untagged head/sill.
+
+## Title block (shop / upholstery right column — still evolving)
+
+Brand toward Nelma / Empire house chrome above. Legacy Willard shop sheets
+may still show EMPIRE WORKROOM address block:
+
 5124 Frolich Ln, Hyattsville, MD 20781 / (703) 213-6484 / workroom@empirebox.store
 
 Rows, in order: CLIENT, SITE, SHEET n of N, ITEM, DIMENSIONS, item-specific rows
 (LEGS / CHANNELS / REVEALS / etc.), MATERIAL, DATE, DRAWN BY, STATUS.
-STATUS is `FOR FOUNDER REVIEW` until PIN approval, then `APPROVED`.
+Client/discussion sheets use `FOR DISCUSSION - NOT FOR CONSTRUCTION` until
+PIN approval, then `APPROVED`.
 
 Below the rows: **NOTES / ASSUMPTIONS — CONFIRM:** every assumption the drawing
 makes, one per line. An empty assumptions block on a job with any unspecified
@@ -57,7 +81,8 @@ detail is itself a violation of rule 1.
 
 ## Drafting conventions
 
-- Landscape letter, 18pt border, black linework on white.
+- Landscape letter (792×612). Field sets: cream paper + dark header/footer bands (McLean).
+  Shop geometry sheets may still use white with ink border.
 - Upholstered areas: caramel-family fill tints (or job material tint); exposed
   wood: brown fill; walls/ghosts: gray dashed.
 - Dimension lines: thin (0.6pt) with end ticks; extension lines gray 0.4pt.

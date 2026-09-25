@@ -7,10 +7,10 @@ McLean reference `room_sheet()` (lines 809-950), `cover()`
 Sheet set: cover + 9 room elevations + schedule = 11 sheets.
 
 KEY AMENDMENTS APPLIED HERE:
-  - Amendment 1: chrome() takes TWO distinct fields (header_tagline,
-    footer_letterhead). POWERED BY ... appears ONCE in header; full
-    business address appears ONCE in footer letterhead. The split is
-    enforced by `chrome()` parameter list.
+  - McLean golden chrome: letterhead (NELMA'S WORKROOM) + POWERED BY
+    EMPIRE WORKROOM + project line in header; brand footer
+    (letterhead · powered-by · locale); FOR DISCUSSION stamp center.
+    Street address remains on JobSpec.address for gates/estimates.
   - Amendment 4: cover() and schedule_sheet() both read
     `count_openings(spec)` from spec.py — ONE derivation, consumed
     by both. The 21/22 split in McLean RevA cannot reappear.
@@ -83,11 +83,14 @@ def room_sheet(spec: JobSpec, room: dict, no: int, total: int,
         total=total,
         right_title=room["name"],
         header_tagline=spec.header_tagline,
-        footer_letterhead=spec.address.footer_letterhead(),
+        footer_letterhead=spec.brand_footer(),
         rev=spec.rev,
         date=spec.date,
         status=spec.status,
         placed=placed_local,
+        letterhead=spec.letterhead,
+        project_line=spec.project_line(),
+        locale=spec.locale,
     ))
     _t, _b = T(30, 66, room["name"], size=15.0, anchor="start",
                fill=INK, font=SERIF, bold=True, ls=0.8)
@@ -190,9 +193,12 @@ def cover(spec: JobSpec, total: int, placed: List[PlacedBox]) -> Tuple[str, List
     o.extend(chrome(
         sheet_no=1, total=total, right_title="COVER · INDEX",
         header_tagline=spec.header_tagline,
-        footer_letterhead=spec.address.footer_letterhead(),
+        footer_letterhead=spec.brand_footer(),
         rev=spec.rev, date=spec.date, status=spec.status,
         placed=placed_local,
+        letterhead=spec.letterhead,
+        project_line=spec.project_line(),
+        locale=spec.locale,
     ))
     # Cover layout fix: McLean title at size 26 was 91.8pt wide and
     # bled into the OPEN AT A GLANCE column on the right (9 of the 9
@@ -396,9 +402,12 @@ def schedule_sheet(spec: JobSpec, no: int, total: int,
     o.extend(chrome(
         sheet_no=no, total=total, right_title="OPENING SCHEDULE",
         header_tagline=spec.header_tagline,
-        footer_letterhead=spec.address.footer_letterhead(),
+        footer_letterhead=spec.brand_footer(),
         rev=spec.rev, date=spec.date, status=spec.status,
         placed=placed_local,
+        letterhead=spec.letterhead,
+        project_line=spec.project_line(),
+        locale=spec.locale,
     ))
     _t, _b = T(30, 66, "OPENING SCHEDULE", size=15.0, anchor="start",
                fill=INK, font=SERIF, bold=True, ls=0.8)
