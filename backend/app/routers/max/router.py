@@ -42,7 +42,7 @@ from app.services.max.guardrails import uncertainty_fallback, should_defer_uncer
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.runtime_truth_check import (
     format_runtime_truth_check,
-    should_run_runtime_truth_check,
+    should_run_runtime_truth_check, should_force_runtime_truth_check,
     should_run_whats_new_summary,
     run_whats_new_summary,
     format_whats_new_summary,
@@ -422,10 +422,23 @@ def _drawing_render(handoff) -> dict:
         for k, v in handoff.translated_dims.items()
         if v is not None
     }
+    # Pass U/L shape through so render_shop_drawing routes to
+    # bench_renderer true polylines instead of B1 rectangle stub.
+    try:
+        from app.services.max.drawing_intent import _shape_for_text
+        _shape = _shape_for_text(getattr(handoff, "subject", "") or "")
+        if not _shape or _shape == "straight":
+            # Fall back to full message if subject lacked shape tokens.
+            _shape = _shape_for_text(str(getattr(handoff, "raw_message", "") or ""))
+        if _shape and _shape != "straight":
+            translated_dims["shape"] = _shape
+    except Exception:
+        pass
     result = execute_tool({
         "tool":         "render_shop_drawing",
         "product_type": handoff.b1_product_type,
         "dims":         translated_dims,
+        "shape":        translated_dims.get("shape", ""),
         # HOTFIX B2 (2) — client_name MUST be empty when the founder
         # didn't name a real client. handoff.subject is the parsed
         # ITEM TYPE ("shade", "headboard", etc.), not a real client
@@ -1352,7 +1365,7 @@ def _is_current_events_request(message: str | None) -> bool:
     if not text.strip():
         return False
     # Keep service/runtime and explicit module questions on their own routes.
-    if should_run_runtime_truth_check(text):
+    if should_force_runtime_truth_check(text):
         return False
     if resolve_empire_module_question(text):
         return False
@@ -1973,7 +1986,7 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
         # truth check (async handler at line ~2030), not to module knowledge
         # which returns a static doc definition.  Check BEFORE
         # _empire_module_response so runtime truth beats module aliases.
-        if should_run_runtime_truth_check(request.message):
+        if should_force_runtime_truth_check(request.message):
             return None
 
         # Skip module knowledge for analysis/priority/opinion questions.
@@ -2425,7 +2438,7 @@ async def _chat_with_max_service(
             metadata=metadata,
         )
 
-    if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
+    if not request.desk and not request.image_filename and should_force_runtime_truth_check(request.message):
         result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
         response_text = (
             format_runtime_truth_check(result.result or {}, request.message)
@@ -3365,7 +3378,7 @@ async def chat_stream(request: ChatRequest):
 
         return StreamingResponse(whats_new_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
+    if not request.desk and not request.image_filename and should_force_runtime_truth_check(request.message):
         async def runtime_truth_gen():
             conv_id = request.conversation_id or str(uuid.uuid4())
             result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
@@ -4641,7 +4654,18 @@ async def max_status():
         "routing_state": routing_state_payload,
         "providers": {"models": routing_state_payload.get("provider_registry", [])},
         "minimax_tools": minimax_tools_status(),
+        "desks_online": _status_desks_online(),
     }
+
+
+def _status_desks_online():
+    """Count/ids of freeze-honoring desks registered on AIDeskManager."""
+    try:
+        ai_desk_manager.initialize()
+        ids = sorted(getattr(ai_desk_manager.router, "desk_ids", []) or [])
+        return {"count": len(ids), "ids": ids}
+    except Exception as e:
+        return {"count": 0, "ids": [], "error": str(e)}
 
 
 @router.get("/evaluation/scores")

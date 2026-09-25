@@ -581,48 +581,71 @@ def _plan_l_shape(parts, ox, oy, scale, long, short, depth, seat_h, back_h,
 
 
 def _plan_u_shape(parts, ox, oy, scale, back, side, depth, side_depth, seat_h, back_h,
-                  cushion_width=24, panel_style="vertical_channels", channel_count=6):
-    """Plan view — U-shaped booth."""
+                  cushion_width=24, panel_style="vertical_channels", channel_count=6,
+                  side_left=None, side_right=None):
+    """Plan view — U-shaped booth.
+
+    side_left / side_right: optional asymmetric wing projections (inches).
+    When omitted, both wings use `side` (legacy symmetric behavior).
+    Cushion labels are counted per run: ceil(run/cushion_width) each.
+    """
     bt = BACK_T
+    sl = float(side_left) if side_left not in (None, 0, "") else float(side)
+    sr = float(side_right) if side_right not in (None, 0, "") else float(side)
+    side_max = max(sl, sr)
     d_s = depth * scale
     sd_s = side_depth * scale
     bt_s = bt * scale
     back_s = back * scale
-    side_s = side * scale
+    sl_s = sl * scale
+    sr_s = sr * scale
+    side_max_s = side_max * scale
     total_w = (back + side_depth * 2) * scale
 
-    # Left wing
-    parts.append(_rect(ox, oy, sd_s - bt_s, side_s, SW_HEAVY))
-    parts.append(_rect(ox - bt_s, oy, bt_s, side_s, SW_HEAVY, fill="#F0F0F0"))
+    # Left wing — bottom-aligned so longer wing defines oy baseline
+    left_y = oy + (side_max_s - sl_s)
+    parts.append(_rect(ox, left_y, sd_s - bt_s, sl_s, SW_HEAVY))
+    parts.append(_rect(ox - bt_s, left_y, bt_s, sl_s, SW_HEAVY, fill="#F0F0F0"))
 
-    # Center back
+    # Center back — at far end of longer wing
     cx = ox + sd_s
-    cy = oy + side_s - d_s
+    cy = oy + side_max_s - d_s
     parts.append(_rect(cx, cy, back_s, d_s - bt_s, SW_HEAVY))
     parts.append(_rect(cx, cy + d_s - bt_s, back_s, bt_s, SW_HEAVY, fill="#F0F0F0"))
     _draw_back_style_2d(parts, cx, cy + d_s - bt_s, back_s, bt_s, panel_style, channel_count)
 
     # Right wing
     rx = ox + sd_s + back_s
-    parts.append(_rect(rx + bt_s, oy, sd_s - bt_s, side_s, SW_HEAVY))
-    parts.append(_rect(rx + sd_s, oy, bt_s, side_s, SW_HEAVY, fill="#F0F0F0"))
+    right_y = oy + (side_max_s - sr_s)
+    parts.append(_rect(rx + bt_s, right_y, sd_s - bt_s, sr_s, SW_HEAVY))
+    parts.append(_rect(rx + sd_s, right_y, bt_s, sr_s, SW_HEAVY, fill="#F0F0F0"))
 
     _miter_callout(parts, cx, cy + d_s - bt_s)
     _miter_callout(parts, rx, cy + d_s - bt_s)
 
-    # Cushion labels
-    _cushion_label(parts, ox + (sd_s - bt_s) / 2, oy + side_s / 2, 1)
-
+    # Cushion labels per run
+    idx = 1
+    c_left = max(1, math.ceil(sl / cushion_width)) if cushion_width > 0 else 1
+    for i in range(c_left):
+        _cushion_label(parts, ox + (sd_s - bt_s) / 2,
+                       left_y + sl_s * (i + 0.5) / c_left, idx)
+        idx += 1
     c_back = max(1, math.ceil(back / cushion_width)) if cushion_width > 0 else 1
     for i in range(c_back):
-        lx = cx + back_s * (i + 0.5) / c_back
-        _cushion_label(parts, lx, cy + (d_s - bt_s) / 2, 2 + i)
-
-    _cushion_label(parts, rx + bt_s + (sd_s - bt_s) / 2, oy + side_s / 2, 2 + c_back)
+        _cushion_label(parts, cx + back_s * (i + 0.5) / c_back,
+                       cy + (d_s - bt_s) / 2, idx)
+        idx += 1
+    c_right = max(1, math.ceil(sr / cushion_width)) if cushion_width > 0 else 1
+    for i in range(c_right):
+        _cushion_label(parts, rx + bt_s + (sd_s - bt_s) / 2,
+                       right_y + sr_s * (i + 0.5) / c_right, idx)
+        idx += 1
 
     # Dimensions
-    _dim_2d_h(parts, ox, ox + total_w, oy + side_s + 4, f'{back + side_depth * 2:.0f}"', 18)
-    _dim_2d_v(parts, ox - bt_s - 4, oy, oy + side_s, f'{side:.0f}"', -18)
+    _dim_2d_h(parts, ox, ox + total_w, oy + side_max_s + 4,
+              f'{back + side_depth * 2:.0f}"', 18)
+    _dim_2d_v(parts, ox - bt_s - 4, left_y, left_y + sl_s, f'{sl:.0f}"', -18)
+    _dim_2d_v(parts, rx + sd_s + bt_s + 4, right_y, right_y + sr_s, f'{sr:.0f}"', 18)
     _dim_2d_h(parts, cx, cx + back_s, oy - 4, f'{back:.0f}"', -18)
 
 
@@ -873,7 +896,8 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
                        dims_text, cushion_count, cushion_width=24,
                        panel_style="vertical_channels", channel_count=6,
                        quote_num="", client="", project="", date="",
-                       plan_args=(), elev_args=(), iso_args=()):
+                       plan_args=(), elev_args=(), iso_args=(),
+                       plan_kwargs=None):
     """Compose a 4-quadrant multi-view drawing."""
     parts = [_defs()]
     parts.append(f'<rect width="{LAYOUT_W}" height="{LAYOUT_H}" fill="white"/>')
@@ -885,8 +909,9 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
     # ── Q1: PLAN VIEW (top-left) ──
     _view_frame(parts, Q1_X, Q1_Y, Q1_W, Q1_H, "PLAN VIEW")
     plan_group = []
+    _pk = dict(plan_kwargs or {})
     plan_fn(plan_group, *plan_args, cushion_width=cushion_width,
-            panel_style=panel_style, channel_count=channel_count)
+            panel_style=panel_style, channel_count=channel_count, **_pk)
     parts.append(f'<g transform="translate({Q1_X:.0f},{Q1_Y + 20:.0f})">')
     parts.extend(plan_group)
     parts.append('</g>')
@@ -927,7 +952,7 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
                     cushion_width=24, panel_style="vertical_channels", channel_count=6,
                     client="", project="", **kw):
     """Render a straight bench — 4-quadrant professional drawing."""
-    if width_in < 50 and 'rate' not in kw:
+    if 0 < width_in < 40 and 'rate' not in kw:
         width_in = width_in * 12
 
     # Cushion count from actual math
@@ -957,7 +982,7 @@ def render_l_shape(name, long_in, short_in=0, depth_in=20, seat_h_in=18, back_h_
                    cushion_width=24, panel_style="vertical_channels", channel_count=6,
                    client="", project="", **kw):
     """Render an L-shaped bench — 4-quadrant professional drawing."""
-    if long_in < 50:
+    if 0 < long_in < 40:  # inches if >=40; feet-lf only below
         lf = long_in
         long_in = lf * 0.6 * 12
         if short_in == 0 or short_in < 10:
@@ -990,9 +1015,15 @@ def render_u_shape(name, back_in, side_in=0, depth_in=20, side_depth_in=0,
                    seat_h_in=18, back_h_in=18, multiplier=1,
                    quote_num="", svg_w=600, svg_h=400,
                    cushion_width=24, panel_style="vertical_channels", channel_count=6,
-                   client="", project="", **kw):
-    """Render a U-shaped booth — 4-quadrant professional drawing."""
-    if back_in < 50:
+                   client="", project="",
+                   side_left_in=None, side_right_in=None, **kw):
+    """Render a U-shaped booth — 4-quadrant professional drawing.
+
+    All length args are INCHES. Auto feet→inches only when back_in < 40
+    (legacy lf-style callers). Pass side_left_in / side_right_in for
+    asymmetric arms (Marleys: 41.25 / 52); otherwise both use side_in.
+    """
+    if 0 < back_in < 40:
         lf = back_in
         per = lf / multiplier if multiplier > 1 else lf
         back_in = per * 0.45 * 12
@@ -1005,27 +1036,42 @@ def render_u_shape(name, back_in, side_in=0, depth_in=20, side_depth_in=0,
     if side_depth_in == 0:
         side_depth_in = depth_in
 
-    total_w = back_in + side_depth_in * 2
-    c_back = max(1, math.ceil(back_in / cushion_width)) if cushion_width > 0 else 1
-    c_count = c_back + 2  # left wing + back cushions + right wing
+    sl = float(side_left_in) if side_left_in not in (None, 0, "") else float(side_in)
+    sr = float(side_right_in) if side_right_in not in (None, 0, "") else float(side_in)
+    side_max = max(sl, sr)
 
-    dims_text = (f'{back_in:.0f}" B × {side_in:.0f}" S × {depth_in:.0f}" D × '
+    total_w = back_in + side_depth_in * 2
+    c_left = max(1, math.ceil(sl / cushion_width)) if cushion_width > 0 else 1
+    c_back = max(1, math.ceil(back_in / cushion_width)) if cushion_width > 0 else 1
+    c_right = max(1, math.ceil(sr / cushion_width)) if cushion_width > 0 else 1
+    c_count = c_left + c_back + c_right
+
+    if abs(sl - sr) > 0.05:
+        side_txt = f'{sl:.0f}"/{sr:.0f}" S(L/R)'
+    else:
+        side_txt = f'{side_max:.0f}" S'
+    dims_text = (f'{back_in:.0f}" B × {side_txt} × {depth_in:.0f}" D × '
                  f'{side_depth_in:.0f}" SD × {seat_h_in:.0f}" SH × {back_h_in:.0f}" BH')
 
-    plan_scale, plan_ox, plan_oy = _auto_scale_2d(total_w, side_in, Q1_W - 20, Q1_H - 60)
-    plan_args = (plan_ox + 10, plan_oy + 10, plan_scale, back_in, side_in, depth_in, side_depth_in, seat_h_in, back_h_in)
+    plan_scale, plan_ox, plan_oy = _auto_scale_2d(total_w, side_max, Q1_W - 20, Q1_H - 60)
+    plan_args = (plan_ox + 10, plan_oy + 10, plan_scale, back_in, side_max,
+                 depth_in, side_depth_in, seat_h_in, back_h_in)
+    plan_kwargs = dict(side_left=sl, side_right=sr)
 
     elev_scale, elev_ox, elev_oy = _auto_scale_2d(total_w, seat_h_in + back_h_in, Q3_W - 20, Q3_H - 60)
     elev_ground_y = elev_oy + (seat_h_in + back_h_in) * elev_scale + 10
-    elev_args = (elev_ox + 10, elev_ground_y, elev_scale, back_in, side_in, depth_in, side_depth_in, seat_h_in, back_h_in)
+    elev_args = (elev_ox + 10, elev_ground_y, elev_scale, back_in, side_max,
+                 depth_in, side_depth_in, seat_h_in, back_h_in)
 
-    iso_args = (name, back_in, side_in, depth_in, side_depth_in, seat_h_in, back_h_in, quote_num)
+    # Iso still uses max side (symmetric box approx) — flagged in dims_text when asymmetric
+    iso_args = (name, back_in, side_max, depth_in, side_depth_in, seat_h_in, back_h_in, quote_num)
 
     return _compose_multiview(
         name, "u_shape", _build_u_shape, _plan_u_shape, _elev_u_shape,
         dims_text, c_count, cushion_width, panel_style, channel_count,
         quote_num, client, project,
         plan_args=plan_args, elev_args=elev_args, iso_args=iso_args,
+        plan_kwargs=plan_kwargs,
     )
 
 

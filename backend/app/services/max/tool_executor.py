@@ -2860,6 +2860,55 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
             ),
         )
 
+    # ── U/L banquette true-polyline route (2026-09-24) ──────────────
+    # B1 BenchCurvedTemplate is a W×(D+bump) rectangle. True U/L plan
+    # polylines live in vision.bench_renderer (also POST /drawings/bench).
+    # When shape is u_shape/l_shape, route there and persist attach.
+    # Drapery/roman/valance/cornice/headboard paths unchanged.
+    try:
+        from app.services.max.ul_banquette_drawings import (
+            resolve_ul_shape,
+            render_ul_banquette_pdf,
+        )
+        _ul_shape = resolve_ul_shape(params, dims, product_type)
+    except Exception as _ul_imp_err:
+        logger.warning("ul_banquette_drawings import failed: %s", _ul_imp_err)
+        _ul_shape = None
+    if _ul_shape and product_type.lower() in {
+        "bench", "banquette", "u_shape", "l_shape",
+        "banquette_u", "banquette_l", "booth",
+    }:
+        pt = "banquette" if product_type.lower() in {
+            "u_shape", "l_shape", "banquette_u", "banquette_l", "booth",
+        } else product_type.lower()
+        try:
+            ul_result = render_ul_banquette_pdf(
+                params=params, dims=dims, product_type=pt, shape=_ul_shape,
+            )
+        except ValueError as e:
+            return ToolResult(
+                tool="render_shop_drawing", success=False, error=str(e),
+            )
+        except Exception as e:
+            logger.exception("U/L banquette render failed")
+            return ToolResult(
+                tool="render_shop_drawing", success=False,
+                error=f"U/L banquette render failed: {type(e).__name__}: {e}",
+            )
+        # Optional email (Marleys mandate: omit email_to — never send).
+        email_to = str(params.get("email_to", "")).strip()
+        email_status = None
+        if email_to:
+            if email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
+                email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+            email_status = _auto_email_pdf(
+                ul_result["pdf_path"], email_to, ul_result.get("product_type", pt),
+            )
+            ul_result["email"] = email_status
+        return ToolResult(
+            tool="render_shop_drawing", success=True, result=ul_result,
+        )
+
     spec = {
         "product_type": product_type,
         "dims": {str(k): float(v) for k, v in dims.items() if v is not None},

@@ -86,22 +86,39 @@ async def serve_drawing_file(filename: str):
 
 
 class BenchRequest(BaseModel):
+    """Bench / banquette drawing request.
+
+    Units: prefer INCHES for all length fields. `_as_inches` auto-detects
+    (>40 → inches as-is; ≤40 → legacy feet ×12).
+
+    U-shape field semantics (CRITICAL — do not swap):
+      back_length  = outer BACK run (inches)
+      left_depth   = LEFT WING LENGTH along the room (inches) — NOT thickness
+      right_depth  = historically seat-depth of return; for upholstery_on_shell
+                     Max bridge uses side_right / arm_right for RIGHT WING LENGTH
+                     and seat_depth for wing THICKNESS. Prefer Max dims
+                     {side_left, side_right, depth} over these legacy names.
+      seat_depth   = seat cushion depth = wing THICKNESS (inches)
+
+    For upholstery-on-existing-shell sheets (Marleys), Max routes through
+    `ul_banquette_drawings` → `upholstery_shell_renderer` (not millwork).
+    """
     bench_type: str = "straight"  # straight, l_shape, u_shape
     name: str = "Bench"
-    lf: float = 10  # linear feet
+    lf: float = 10  # linear feet (or inches if >40 — auto-detected)
     rate: float = 0  # $/LF — owner sets pricing
-    seat_depth: float = 20
-    seat_height: float = 18
-    back_height: float = 18
+    seat_depth: float = 20  # inches (always) — wing THICKNESS / seat depth
+    seat_height: float = 18  # inches (always)
+    back_height: float = 18  # inches (always) — millwork; upholstery uses net_back
     panel_style: str = "flat"  # flat, vertical_channels, horizontal_channels, tufted
     quote_num: str = ""
-    # L-shape specific
+    # L-shape specific — inches if >40, else feet (auto). Prefer inches.
     leg1_length: float = 0
     leg2_length: float = 0
-    # U-shape specific
-    back_length: float = 0
-    left_depth: float = 0
-    right_depth: float = 0
+    # U-shape specific — inches if >40, else feet (auto). Prefer inches.
+    back_length: float = 0          # outer BACK run
+    left_depth: float = 0           # LEFT WING LENGTH (along room), NOT thickness
+    right_depth: float = 0          # legacy return seat-depth; prefer side_right for wing LENGTH
 
 
 @router.post("/drawings/bench")
@@ -141,6 +158,27 @@ async def generate_bench_pdf(req: BenchRequest):
     )
 
 
+def _as_inches(value: float, *, already_inches_hint: bool = False) -> float:
+    """Convert a BenchRequest length to inches.
+
+    Historical API treated lf / back_length / leg*_length / left_depth as
+    FEET and multiplied by 12. Callers (and Max) often pass INCHES for
+    banquette shop dims (e.g. back_length=249.75). Blind *12 produced
+    12× scale bugs (~2997" backs, 127 cushions).
+
+    Rule (2026-09-24):
+      - value <= 0 → 0
+      - value > 40 → already inches (no *12). 40" is past any sane
+        linear-feet figure for a single leg/back segment.
+      - value <= 40 → treat as feet → *12 (legacy lf-style callers).
+    """
+    if value is None or value <= 0:
+        return 0.0
+    if already_inches_hint or value > 40:
+        return float(value)
+    return float(value) * 12.0
+
+
 @router.post("/drawings/bench/dxf")
 async def generate_bench_dxf(req: BenchRequest):
     """Generate a DXF (CNC) file for a bench or banquette.
@@ -158,7 +196,7 @@ async def generate_bench_dxf(req: BenchRequest):
         render_u_shape,
     )
 
-    width_in = req.lf * 12
+    width_in = _as_inches(req.lf)
     panel_style = req.panel_style if req.panel_style != "flat" else "vertical_channels"
 
     # Build a BenchModel that matches the SVG renderer output
@@ -186,7 +224,7 @@ async def generate_bench_dxf(req: BenchRequest):
     # Also render the matching SVG so the operator can compare CNC parts to
     # the 4-quadrant drawing. We use the same helper as /drawings/bench.
     if req.bench_type == "l_shape":
-        long_in = req.leg1_length * 12 if req.leg1_length > 0 else width_in * 0.6
+        long_in = _as_inches(req.leg1_length) if req.leg1_length > 0 else width_in * 0.6
         _ = render_l_shape(
             req.name,
             long_in,
@@ -198,8 +236,8 @@ async def generate_bench_dxf(req: BenchRequest):
             panel_style=panel_style,
         )
     elif req.bench_type == "u_shape":
-        back_in = req.back_length * 12 if req.back_length > 0 else width_in * 0.45
-        side_in = req.left_depth * 12 if req.left_depth > 0 else width_in * 0.275
+        back_in = _as_inches(req.back_length) if req.back_length > 0 else width_in * 0.45
+        side_in = _as_inches(req.left_depth) if req.left_depth > 0 else width_in * 0.275
         _ = render_u_shape(
             req.name,
             back_in,
@@ -295,16 +333,25 @@ def _render(req: BenchRequest) -> str:
         render_u_shape,
     )
 
-    width_in = req.lf * 12
-    d = req.seat_depth
+    # lf stays feet-oriented for straight benches (legacy), but if the
+    # caller passed a huge lf (>40) it was clearly inches-as-lf — don't
+    # *12 again.
+    width_in = _as_inches(req.lf) if req.lf else 0.0
+    d = req.seat_depth  # seat_depth always documented as inches
     sh = req.seat_height
     bh = req.back_height
 
     ps = req.panel_style if req.panel_style != "flat" else "vertical_channels"
 
     if req.bench_type == "l_shape":
-        long_in = req.leg1_length * 12 if req.leg1_length > 0 else width_in * 0.6
-        short_in = req.leg2_length * 12 if req.leg2_length > 0 else width_in * 0.4
+        long_in = (
+            _as_inches(req.leg1_length) if req.leg1_length > 0
+            else (width_in * 0.6 if width_in else 0)
+        )
+        short_in = (
+            _as_inches(req.leg2_length) if req.leg2_length > 0
+            else (width_in * 0.4 if width_in else 0)
+        )
         return render_l_shape(
             req.name,
             long_in,
@@ -316,8 +363,15 @@ def _render(req: BenchRequest) -> str:
             panel_style=ps,
         )
     elif req.bench_type == "u_shape":
-        back_in = req.back_length * 12 if req.back_length > 0 else width_in * 0.45
-        side_in = req.left_depth * 12 if req.left_depth > 0 else width_in * 0.275
+        back_in = (
+            _as_inches(req.back_length) if req.back_length > 0
+            else (width_in * 0.45 if width_in else 0)
+        )
+        side_in = (
+            _as_inches(req.left_depth) if req.left_depth > 0
+            else (width_in * 0.275 if width_in else 0)
+        )
+        # right_depth / seat_depth already inches
         side_d = req.right_depth if req.right_depth > 0 else d
         return render_u_shape(
             req.name,
