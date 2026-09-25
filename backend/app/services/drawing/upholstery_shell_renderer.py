@@ -6,7 +6,8 @@ with PATTERN BACK vs PLAIN SEAT called out (McLean / gold-standard vibe).
 This is NOT the millwork/CNC bench_renderer. No wood frame, ribs,
 dados, or 24" auto-slice cushion heroes. Plan = shell outline + seat
 cushion footprint; elevation = shell height vs net back on 2" foam;
-iso = CLOSED-FACE shell with dim chains (OUTER+INNER+DEPTH / H+D+seatH+lean); mockup = client color; materials = fabric + ply.
+iso = CLOSED-FACE shell with dim chains (OUTER+INNER+DEPTH / H+D+seatH_AFF+lean+foam_matl); mockup = client color; materials = fabric + ply.
+Seat H = AFF plane (~18" PROV), NEVER foam thickness (foam is distinct mat'l dim).
 """
 from __future__ import annotations
 
@@ -65,7 +66,8 @@ class UShellSpec:
     seat_depth: float = 16.25     # cushion depth / wing THICKNESS
     shell_height: float = 30.25
     net_back_height: float = 26.75  # sits ON seat foam; = shell - 3.5 board/foam/Dacron
-    seat_foam: float = 2.0
+    seat_height: float = 18.0  # AFF seat plane (PROV) — NOT foam thickness
+    seat_foam: float = 2.0     # material thickness only (distinct from seat_height AFF)
     board_stack: float = 3.5
     # Provisional lean/pitch from Rafael help-video sketch (Sep 2026):
     # top of back set back toward wall vs seat-back line. Confirm on site.
@@ -1268,7 +1270,7 @@ def _draw_lean_box_iso(
 
 
 def _iso_dim(c, p1, p2, label, color=GRAY, tick=4.5, offset=10.0, font_size=6.5, bold=False):
-    """Dimension arrow ON an iso edge. label should name the face it closes."""
+    """Dimension arrow ON an iso edge. Short shop label; white halo so text stays readable."""
     x1, y1 = p1
     x2, y2 = p2
     dx, dy = x2 - x1, y2 - y1
@@ -1293,7 +1295,13 @@ def _iso_dim(c, p1, p2, label, color=GRAY, tick=4.5, offset=10.0, font_size=6.5,
         c.line(ax, ay, ax + sgn * ux * ah + px * 2, ay + sgn * uy * ah + py * 2)
         c.line(ax, ay, ax + sgn * ux * ah - px * 2, ay + sgn * uy * ah - py * 2)
     mx, my = (a1[0] + a2[0]) / 2 + px * 3, (a1[1] + a2[1]) / 2 + py * 3
+    # white halo behind label — kills overlap-on-geometry clutter
     c.setFont("Helvetica-Bold" if bold else "Helvetica", font_size)
+    tw = c.stringWidth(label, "Helvetica-Bold" if bold else "Helvetica", font_size)
+    c.setFillColor(white)
+    c.setStrokeColor(white)
+    c.rect(mx - tw / 2 - 1.5, my - 1.5, tw + 3, font_size + 2, fill=1, stroke=0)
+    c.setFillColor(color)
     c.drawCentredString(mx, my, label)
 
 
@@ -1335,24 +1343,27 @@ def _draw_u_iso(c, origin_x, origin_y, area_w, area_h, u: UShellSpec, colored: b
     """Closed-face U isometric — constructive dim chains (Rafael book standard).
 
     Plan/run chain: OUTER + INNER + seat DEPTH → closes seat plane & back widths.
-    Side profile chain: overall H + overall D + seat H + lean → closes section face.
-    Dim arrows sit ON the edges they define; labels name the face each dim closes.
+    Section chain: shell H + overall D + seat H AFF + lean + foam(mat'l) as DISTINCT dims.
+    Seat H is AFF plane height (PROV ~18"), NEVER foam thickness.
+    Dim arrows sit ON the edges they define; shop labels stay short (no overlap).
     """
     AL, AR, D = u.arm_left, u.arm_right, u.seat_depth
     W = u.back_outer
     lean = u.back_lean_in
-    seat_h = u.seat_foam
-    back_h = u.net_back_height
+    seat_h = u.seat_height          # AFF — closes seat plane from floor
+    foam = u.seat_foam              # material only — NOT seat H
     shell_h = u.shell_height
     side_max = max(AL, AR)
     total_w = W + 2 * D
-    total_h = seat_h + back_h
     left_y0 = side_max - AL
     right_y0 = side_max - AR
     # visual back board thickness (kept thin — geometry is closed faces, not fake fat cushions)
     bt = min(2.0, D * 0.12)
+    # back top = shell top; visible back above seat = shell_h - seat_h (AFF geometry)
+    z_seat = seat_h
+    z_top = shell_h
 
-    scale, ox, oy = _auto_iso_scale((total_w, side_max, max(total_h, shell_h)), area_w, area_h, margin=48)
+    scale, ox, oy = _auto_iso_scale((total_w, side_max, shell_h), area_w, area_h, margin=56)
     ox += origin_x
     oy += origin_y
 
@@ -1365,7 +1376,6 @@ def _draw_u_iso(c, origin_x, origin_y, area_w, area_h, u: UShellSpec, colored: b
         return _iso(x, y, z, ox, oy, scale)
 
     # ── SEAT TOP (closes seat plane): outer U then reverse along inner front ──
-    z_seat = seat_h
     seat_outer = [
         (0, left_y0, z_seat),
         (0, side_max, z_seat),
@@ -1378,67 +1388,61 @@ def _draw_u_iso(c, origin_x, origin_y, area_w, area_h, u: UShellSpec, colored: b
     ]
     _iso_poly(c, seat_outer, ox, oy, scale, seat_fill, stroke, lw=1.1)
 
-    # ── SEAT FRONT APRONS (vertical faces under inner run — close seat front) ──
+    # ── SEAT FRONT APRONS (vertical faces under seat plane — close seat front) ──
     z0 = 0.0
-    # left arm inner apron
     _iso_poly(c, [
         (D, left_y0, z0), (D, side_max - D, z0),
         (D, side_max - D, z_seat), (D, left_y0, z_seat),
     ], ox, oy, scale, apron_fill, stroke, lw=0.8)
-    # center front apron
     _iso_poly(c, [
         (D, side_max - D, z0), (total_w - D, side_max - D, z0),
         (total_w - D, side_max - D, z_seat), (D, side_max - D, z_seat),
     ], ox, oy, scale, apron_fill, stroke, lw=0.8)
-    # right arm inner apron
     _iso_poly(c, [
         (total_w - D, right_y0, z0), (total_w - D, side_max - D, z0),
         (total_w - D, side_max - D, z_seat), (total_w - D, right_y0, z_seat),
     ], ox, oy, scale, apron_fill, stroke, lw=0.8)
 
     # ── BACK FACES (leaned) — outer run closes each back plane width ──
-    z_top = seat_h + back_h
     # LEFT back (wall at x=0; lean toward -x / wall)
     _iso_poly(c, [
-        (bt, left_y0, seat_h),
-        (bt, side_max, seat_h),
+        (bt, left_y0, z_seat),
+        (bt, side_max, z_seat),
         (bt - lean, side_max, z_top),
         (bt - lean, left_y0, z_top),
     ], ox, oy, scale, back_fill, stroke, lw=1.0, hatch=colored)
     # CENTER back (wall at y=side_max; lean toward +y / wall)
     _iso_poly(c, [
-        (D, side_max - bt, seat_h),
-        (D + W, side_max - bt, seat_h),
+        (D, side_max - bt, z_seat),
+        (D + W, side_max - bt, z_seat),
         (D + W, side_max - bt + lean, z_top),
         (D, side_max - bt + lean, z_top),
     ], ox, oy, scale, back_fill, stroke, lw=1.0, hatch=colored)
     # RIGHT back (wall at x=total_w; lean toward +x / wall)
     _iso_poly(c, [
-        (total_w - bt, right_y0, seat_h),
-        (total_w - bt, side_max, seat_h),
+        (total_w - bt, right_y0, z_seat),
+        (total_w - bt, side_max, z_seat),
         (total_w - bt + lean, side_max, z_top),
         (total_w - bt + lean, right_y0, z_top),
     ], ox, oy, scale, back_fill, stroke, lw=1.0, hatch=colored)
 
-    # ── ARM END FACES (section silhouettes) — side profile chain closes section ──
-    # Left tip at y=left_y0: depth along +x from wall (x=0) to seat front (x=D)
+    # ── ARM END FACES (section silhouettes) ──
     left_section = [
         (0, left_y0, 0),
         (D, left_y0, 0),
-        (D, left_y0, seat_h),
-        (bt, left_y0, seat_h),
+        (D, left_y0, z_seat),
+        (bt, left_y0, z_seat),
         (bt - lean, left_y0, z_top),
         (0, left_y0, shell_h),
     ]
     _iso_poly(c, left_section, ox, oy, scale,
               Color(0.75, 0.80, 0.88) if not colored else Color(0.55, 0.58, 0.62),
               stroke, lw=1.15)
-    # Right tip at y=right_y0: depth along -x from wall (x=total_w) to seat front
     right_section = [
         (total_w, right_y0, 0),
         (total_w - D, right_y0, 0),
-        (total_w - D, right_y0, seat_h),
-        (total_w - bt, right_y0, seat_h),
+        (total_w - D, right_y0, z_seat),
+        (total_w - bt, right_y0, z_seat),
         (total_w - bt + lean, right_y0, z_top),
         (total_w, right_y0, shell_h),
     ]
@@ -1446,42 +1450,45 @@ def _draw_u_iso(c, origin_x, origin_y, area_w, area_h, u: UShellSpec, colored: b
               Color(0.75, 0.80, 0.88) if not colored else Color(0.55, 0.58, 0.62),
               stroke, lw=1.15)
 
-    # ── DIM CHAINS on the edges they define ──
-    # OUTER run (top of back) — closes each back face width
+    # ── PLAN / RUN DIMS — short shop labels on edges (no "closes …" clutter) ──
     _iso_dim(c, P(bt - lean, left_y0, z_top), P(bt - lean, side_max, z_top),
-             f'OUTER L {AL:.2f}" · closes L back face', NAVY, offset=12, bold=True)
+             f'OUTER L {AL:.2f}"', NAVY, offset=14, bold=True, font_size=6.5)
     _iso_dim(c, P(D, side_max - bt + lean, z_top), P(D + W, side_max - bt + lean, z_top),
-             f'OUTER back {W:.2f}" · closes back face', NAVY, offset=14, bold=True)
-    _iso_dim(c, P(total_w - bt + lean, right_y0, z_top), P(total_w - bt + lean, side_max, z_top),
-             f'OUTER R {AR:.2f}" · closes R back face', NAVY, offset=-14, bold=True)
+             f'OUTER {W:.2f}"', NAVY, offset=16, bold=True, font_size=6.5)
+    # OUTER R / INNER R: dim the BACK half of the arm so labels stay clear of tip section stack
+    _iso_dim(c, P(total_w - bt + lean, right_y0 + AR * 0.45, z_top), P(total_w - bt + lean, side_max, z_top),
+             f'OUTER R {AR:.2f}"', NAVY, offset=-18, bold=True, font_size=6.5)
 
-    # INNER run (seat front) — closes seat plane widths
     _iso_dim(c, P(D, left_y0, z_seat), P(D, side_max - D, z_seat),
-             f'INNER L {u.inner_arm_left:.2f}" · closes seat plane', GRAY, offset=-11)
+             f'INNER L {u.inner_arm_left:.2f}"', GRAY, offset=-13, font_size=6)
     _iso_dim(c, P(D, side_max - D, z_seat), P(total_w - D, side_max - D, z_seat),
-             f'INNER back {u.inner_back:.2f}" · closes seat plane', GRAY, offset=-12)
-    _iso_dim(c, P(total_w - D, right_y0, z_seat), P(total_w - D, side_max - D, z_seat),
-             f'INNER R {u.inner_arm_right:.2f}" · closes seat plane', GRAY, offset=11)
+             f'INNER {u.inner_back:.2f}"', GRAY, offset=-14, font_size=6)
+    _iso_dim(c, P(total_w - D, right_y0 + u.inner_arm_right * 0.45, z_seat),
+             P(total_w - D, side_max - D, z_seat),
+             f'INNER R {u.inner_arm_right:.2f}"', GRAY, offset=15, font_size=6)
 
-    # SEAT DEPTH — closes seat depth (outer wall ↔ inner front)
+    # DEPTH once on center left corner (avoid right-tip clash with section D)
     _iso_dim(c, P(0, side_max, z_seat), P(D, side_max - D, z_seat),
-             f'DEPTH {D:.2f}" · closes seat depth', CUSH, offset=16, font_size=6.5, bold=True)
-    # also on right tip for asymmetric read
-    _iso_dim(c, P(total_w, right_y0, z_seat), P(total_w - D, right_y0, z_seat),
-             f'DEPTH {D:.2f}" · sets arm width', CUSH, offset=10, font_size=6)
+             f'DEPTH {D:.2f}"', CUSH, offset=18, font_size=6.5, bold=True)
 
-    # SIDE PROFILE chain on RIGHT end face — closes section
+    # ── SECTION CHAIN on RIGHT end — five DISTINCT dims, fanned offsets ──
+    # shell H (wall edge, outward)
     _iso_dim(c, P(total_w, right_y0, 0), P(total_w, right_y0, shell_h),
-             f'H {shell_h:.2f}" · closes section height', PROV, offset=18, bold=True)
+             f'H {shell_h:.2f}"', PROV, offset=22, bold=True, font_size=7)
+    # overall depth (floor edge)
     _iso_dim(c, P(total_w, right_y0, 0), P(total_w - D, right_y0, 0),
-             f'D {D:.2f}" · closes section depth', PROV, offset=-10)
-    _iso_dim(c, P(total_w - D, right_y0, 0), P(total_w - D, right_y0, seat_h),
-             f'seat H {seat_h:.1f}" · closes seat face', PROV, offset=-12)
+             f'D {D:.2f}"', PROV, offset=-16, font_size=6.5)
+    # seat H AFF (front vertical) — NOT foam
+    _iso_dim(c, P(total_w - D, right_y0, 0), P(total_w - D, right_y0, z_seat),
+             f'seat H {seat_h:.1f}" AFF PROV', PROV, offset=-20, bold=True, font_size=7)
+    # lean (top setback)
     _iso_dim(c, P(total_w - bt, right_y0, z_top), P(total_w - bt + lean, right_y0, z_top),
-             f'lean {lean:.1f}" PROV · closes pitch (~{lean_angle_deg(lean, back_h):.0f}°)',
-             PROV, offset=12, bold=True)
-    _iso_dim(c, P(total_w - bt, right_y0, seat_h), P(total_w - bt + lean, right_y0, z_top),
-             f'net back {back_h:.2f}" · closes back face H', PATTERN_BACK_DK, offset=10)
+             f'lean {lean:.1f}" PROV', PROV, offset=14, bold=True, font_size=6.5)
+    # foam material callout — separate from seat H, parked off the section stack
+    fx, fy = P(total_w - D * 0.35, right_y0, z_seat * 0.55)
+    c.setFillColor(PROV)
+    c.setFont("Helvetica-Bold", 6.5)
+    c.drawString(fx + 10, fy - 2, f'foam {foam:.1f}" mat\'l')
 
     # Title / chain legend
     c.setFillColor(NAVY)
@@ -1491,24 +1498,29 @@ def _draw_u_iso(c, origin_x, origin_y, area_w, area_h, u: UShellSpec, colored: b
     c.setFont("Helvetica", 6.5)
     c.setFillColor(GRAY)
     c.drawString(origin_x + 8, origin_y + area_h - 24,
-                 "Dim chains: OUTER+INNER+DEPTH close seat & back planes · H+D+seat H+lean close section face")
+                 "Plan: OUTER+INNER+DEPTH · Section: H + D + seat H AFF + lean + foam(mat'l) — distinct")
     c.setFillColor(PROV)
     c.setFont("Helvetica-Bold", 6.5)
     c.drawString(origin_x + 8, origin_y + 6,
-                 f'Lean {lean:.1f}" PROV (~{lean_angle_deg(lean, back_h):.0f}°) — confirm on site before fab')
+                 f'seat H {seat_h:.1f}" AFF PROV · foam {foam:.1f}" mat\'l · lean {lean:.1f}" PROV (~{lean_angle_deg(lean, max(shell_h - seat_h, 1)):.0f}°) — confirm on site')
 
 
 def _draw_l_iso(c, origin_x, origin_y, area_w, area_h, L: LShellSpec, colored: bool = True):
-    """Closed-face L isometric — same constructive dim-chain rules as U."""
+    """Closed-face L isometric — same constructive dim-chain rules as U.
+
+    Section chain: shell H + overall D + seat H AFF + lean + foam(mat'l) as DISTINCT dims.
+    Seat H is AFF (PROV), never foam thickness.
+    """
     A, B, D = L.leg_short, L.leg_long, L.seat_depth
     lean = L.back_lean_in
-    seat_h = L.seat_foam
-    back_h = L.net_back
+    seat_h = L.seat_height          # AFF PROV
+    foam = L.seat_foam              # material only
     shell_h = L.shell_height
-    total_h = seat_h + back_h
     bt = min(2.0, D * 0.12)
+    z_seat = seat_h
+    z_top = shell_h
 
-    scale, ox, oy = _auto_iso_scale((B, A, max(total_h, shell_h)), area_w, area_h, margin=48)
+    scale, ox, oy = _auto_iso_scale((B, A, shell_h), area_w, area_h, margin=56)
     ox += origin_x
     oy += origin_y
 
@@ -1520,11 +1532,7 @@ def _draw_l_iso(c, origin_x, origin_y, area_w, area_h, L: LShellSpec, colored: b
     def P(x, y, z):
         return _iso(x, y, z, ox, oy, scale)
 
-    z_seat = seat_h
-    z_top = seat_h + back_h
-
-    # Seat top L-ring: outer L then reverse along inner
-    # Long leg along +x at y=A-D..A; short leg along +y at x=0..D
+    # Seat top L-ring
     seat_pts = [
         (0, 0, z_seat),
         (0, A, z_seat),
@@ -1536,60 +1544,66 @@ def _draw_l_iso(c, origin_x, origin_y, area_w, area_h, L: LShellSpec, colored: b
     _iso_poly(c, seat_pts, ox, oy, scale, seat_fill, stroke, lw=1.1)
 
     # Aprons on inner fronts
-    _iso_poly(c, [  # long-leg front
+    _iso_poly(c, [
         (D, A - D, 0), (B, A - D, 0), (B, A - D, z_seat), (D, A - D, z_seat),
     ], ox, oy, scale, apron_fill, stroke, lw=0.8)
-    _iso_poly(c, [  # short-leg front
+    _iso_poly(c, [
         (D, 0, 0), (D, A - D, 0), (D, A - D, z_seat), (D, 0, z_seat),
     ], ox, oy, scale, apron_fill, stroke, lw=0.8)
 
     # Back faces
-    _iso_poly(c, [  # long leg back (wall y=A)
-        (0, A - bt, seat_h), (B, A - bt, seat_h),
+    _iso_poly(c, [
+        (0, A - bt, z_seat), (B, A - bt, z_seat),
         (B, A - bt + lean, z_top), (0, A - bt + lean, z_top),
     ], ox, oy, scale, back_fill, stroke, lw=1.0, hatch=colored)
-    _iso_poly(c, [  # short leg back (wall x=0)
-        (bt, 0, seat_h), (bt, A - D, seat_h),
+    _iso_poly(c, [
+        (bt, 0, z_seat), (bt, A - D, z_seat),
         (bt - lean, A - D, z_top), (bt - lean, 0, z_top),
     ], ox, oy, scale, back_fill, stroke, lw=1.0, hatch=colored)
 
     # End section faces
-    # Short-leg tip at y=0
     _iso_poly(c, [
-        (0, 0, 0), (D, 0, 0), (D, 0, seat_h), (bt, 0, seat_h),
+        (0, 0, 0), (D, 0, 0), (D, 0, z_seat), (bt, 0, z_seat),
         (bt - lean, 0, z_top), (0, 0, shell_h),
     ], ox, oy, scale, Color(0.55, 0.58, 0.62), stroke, lw=1.15)
-    # Long-leg tip at x=B
     _iso_poly(c, [
-        (B, A, 0), (B, A - D, 0), (B, A - D, seat_h), (B, A - bt, seat_h),
+        (B, A, 0), (B, A - D, 0), (B, A - D, z_seat), (B, A - bt, z_seat),
         (B, A - bt + lean, z_top), (B, A, shell_h),
     ], ox, oy, scale, Color(0.55, 0.58, 0.62), stroke, lw=1.15)
 
-    # OUTER dims
+    # OUTER / INNER — short shop labels
     _iso_dim(c, P(0, A - bt + lean, z_top), P(B, A - bt + lean, z_top),
-             f'OUTER long {B:.3f}" · closes long back face', NAVY, offset=14, bold=True)
-    _iso_dim(c, P(bt - lean, 0, z_top), P(bt - lean, A - D, z_top),
-             f'OUTER short {A:.3f}" · closes short back face', NAVY, offset=-12, bold=True)
-    # INNER dims
+             f'OUTER long {B:.3f}"', NAVY, offset=16, bold=True, font_size=6.5)
+    # OUTER/INNER short: dim away from y=0 tip so section chain on long tip stays clean
+    _iso_dim(c, P(bt - lean, A * 0.35, z_top), P(bt - lean, A - D, z_top),
+             f'OUTER short {A:.3f}"', NAVY, offset=-16, bold=True, font_size=6.5)
     _iso_dim(c, P(D, A - D, z_seat), P(B, A - D, z_seat),
-             f'INNER long {L.inner_leg_long:.3f}" · closes seat plane', GRAY, offset=-12)
-    _iso_dim(c, P(D, 0, z_seat), P(D, A - D, z_seat),
-             f'INNER short {L.inner_leg_short:.3f}" · closes seat plane', GRAY, offset=11)
-    # DEPTH
+             f'INNER long {L.inner_leg_long:.3f}"', GRAY, offset=-14, font_size=6)
+    _iso_dim(c, P(D, L.inner_leg_short * 0.35, z_seat), P(D, A - D, z_seat),
+             f'INNER short {L.inner_leg_short:.3f}"', GRAY, offset=15, font_size=6)
+
+    # DEPTH on long tip floor — also feeds section D
     _iso_dim(c, P(B, A, z_seat), P(B, A - D, z_seat),
-             f'DEPTH {D:.1f}" · closes seat depth / sets leg width', CUSH, offset=12, bold=True)
-    # Section on long tip
+             f'DEPTH {D:.1f}"', CUSH, offset=14, bold=True, font_size=6.5)
+
+    # Section chain on long tip — five DISTINCT dims, fanned
     _iso_dim(c, P(B, A, 0), P(B, A, shell_h),
-             f'H {shell_h:.1f}" PROV · closes section height', PROV, offset=16, bold=True)
-    _iso_dim(c, P(B, A - D, 0), P(B, A - D, seat_h),
-             f'seat H {seat_h:.1f}" · closes seat face', PROV, offset=-11)
+             f'H {shell_h:.1f}" PROV', PROV, offset=20, bold=True, font_size=7)
+    _iso_dim(c, P(B, A, 0), P(B, A - D, 0),
+             f'D {D:.1f}"', PROV, offset=-14, font_size=6.5)
+    _iso_dim(c, P(B, A - D, 0), P(B, A - D, z_seat),
+             f'seat H {seat_h:.1f}" AFF PROV', PROV, offset=-18, bold=True, font_size=7)
     _iso_dim(c, P(B, A - bt, z_top), P(B, A - bt + lean, z_top),
-             f'lean {lean:.1f}" PROV · closes pitch', PROV, offset=10, bold=True)
+             f'lean {lean:.1f}" PROV', PROV, offset=12, bold=True, font_size=6.5)
+    fx, fy = P(B, A - D * 0.35, z_seat * 0.55)
+    c.setFillColor(PROV)
+    c.setFont("Helvetica-Bold", 6.5)
+    c.drawString(fx + 12, fy - 2, f'foam {foam:.1f}" mat\'l')
 
     c.setFillColor(PROV)
-    c.setFont("Helvetica-Bold", 8)
+    c.setFont("Helvetica-Bold", 7.5)
     c.drawString(origin_x + 8, origin_y + 8,
-                 f"L ISO CLOSED-FACE — DEPTH/HEIGHT PROV · lean {lean:.1f}\" PROV")
+                 f'seat H {seat_h:.1f}" AFF PROV · foam {foam:.1f}" mat\'l · lean {lean:.1f}" PROV')
     c.setFillColor(NAVY)
     c.setFont("Helvetica-Bold", 9)
     c.drawString(
@@ -1600,7 +1614,7 @@ def _draw_l_iso(c, origin_x, origin_y, area_w, area_h, L: LShellSpec, colored: b
     c.setFillColor(GRAY)
     c.drawString(
         origin_x + 8, origin_y + area_h - 24,
-        "Dim chains: OUTER+INNER+DEPTH close planes · H+seat H+lean close section · lock depth/height to U before fab",
+        "Plan: OUTER+INNER+DEPTH · Section: H + D + seat H AFF + lean + foam(mat'l) — lock to U before fab",
     )
 
 
@@ -1617,9 +1631,9 @@ def _key_dims_panel(c, x, y, u: UShellSpec, L: LShellSpec):
     lines = [
         f'U back outer {u.back_outer:.2f}"  |  L arm {u.arm_left:.2f}"  |  R arm {u.arm_right:.2f}"',
         f'U seat depth {u.seat_depth:.2f}"  |  shell H {u.shell_height:.2f}"  |  net back {u.net_back_height:.2f}"',
-        f'U developed {u.developed_outer_in:.2f}" = {u.developed_outer_lf:.2f} lf  |  foam {u.seat_foam:.1f}"',
+        f'U seat H {u.seat_height:.1f}" AFF PROV  |  foam {u.seat_foam:.1f}" mat\'l  |  developed {u.developed_outer_lf:.2f} lf',
         f'L legs {L.leg_short:.3f}" + {L.leg_long:.3f}"  |  depth {L.seat_depth:.1f}" PROV',
-        f'L shell {L.shell_height:.1f}" PROV  |  seat H {L.seat_height:.1f}" AFF PROV',
+        f'L shell {L.shell_height:.1f}" PROV  |  seat H {L.seat_height:.1f}" AFF PROV  |  foam {L.seat_foam:.1f}"',
         "BACK = basketweave (Sep 2022 / bar tile) · SEAT = plain",
     ]
     yy = y - 14
@@ -1648,7 +1662,8 @@ def _video_dim_checklist(c, x, y, u: UShellSpec, L: LShellSpec):
         "Capture on site before fab / COM order:",
         f'☐ Full height (shell) — U now {u.shell_height:.2f}"',
         f'☐ Full depth (overall) — U seat {u.seat_depth:.2f}" + back thick',
-        f'☐ Seat height AFF — L now {L.seat_height:.1f}" PROV',
+        f'☐ Seat height AFF — U {u.seat_height:.1f}" / L {L.seat_height:.1f}" PROV (NOT foam)',
+        f'☐ Seat foam thickness — {u.seat_foam:.1f}" mat\'l (distinct from seat H AFF)',
         f'☐ Seat depth — U {u.seat_depth:.2f}" / L {L.seat_depth:.1f}" PROV',
         f'☐ Outside L runs — long {L.leg_long:.3f}" / short {L.leg_short:.3f}"',
         "☐ Inside L runs (clear opening) — TBD measure",
@@ -1762,7 +1777,8 @@ def render_upholstery_shell_pdf(
         c.setFont("Helvetica", 7.5)
         c.drawString(
             0.45 * inch, 1.48 * inch,
-            f'CLOSED-FACE iso: OUTER+INNER+DEPTH close seat/back planes; H+D+seat H+lean close section. Lean {u.back_lean_in:.1f}" PROV (~{lean_angle_deg(u.back_lean_in, u.net_back_height):.0f}°). Arms asymmetric (41.25 / 52).',
+            f'CLOSED-FACE iso: plan OUTER+INNER+DEPTH; section H + D + seat H AFF + lean + foam(mat\'l) distinct. '
+            f'seat H {u.seat_height:.1f}" AFF PROV ≠ foam {u.seat_foam:.1f}". Lean {u.back_lean_in:.1f}" PROV. Arms asymmetric ({u.arm_left} / {u.arm_right}).',
         )
         finish("U Isometric")
 
@@ -2153,6 +2169,7 @@ def render_upholstery_shell_pdf(
             "seat_depth": u.seat_depth,
             "shell_height": u.shell_height,
             "net_back_height": u.net_back_height,
+            "seat_height": u.seat_height,
             "seat_foam": u.seat_foam,
             "developed_outer_in": u.developed_outer_in,
             "developed_outer_lf": round(u.developed_outer_lf, 2),
@@ -2165,6 +2182,8 @@ def render_upholstery_shell_pdf(
             "leg_long": L.leg_long,
             "seat_depth": L.seat_depth,
             "shell_height": L.shell_height,
+            "seat_height": L.seat_height,
+            "seat_foam": L.seat_foam,
             "developed_outer_in": L.developed_outer_in,
             "developed_outer_lf": round(L.developed_outer_lf, 2),
             "back_sf": round(L.back_sf, 2),

@@ -184,10 +184,13 @@ def render_ul_banquette_pdf(
     net_back = _f(dims, "back_height", "net_back", "net_back_cushion_height",
                   "net_back_height", default=26.75)
     seat_foam = _f(dims, "seat_foam", "foam", "seat_foam_in", default=2.0)
+    # U seat H AFF is distinct from foam thickness (Rafael: never label foam as seat H)
+    u_seat_h = _f(dims, "seat_height", "seat_h", "seat_height_aff", default=18.0)
 
     u_spec = UShellSpec(
         back_outer=back, arm_left=arm_l, arm_right=arm_r, seat_depth=seat_d,
-        shell_height=shell_h, net_back_height=net_back, seat_foam=seat_foam,
+        shell_height=shell_h, net_back_height=net_back,
+        seat_height=u_seat_h, seat_foam=seat_foam,
     )
 
     long_in = _f(dims, "long_leg", "long", "leg_long", "leg1_length", default=None)
@@ -245,7 +248,7 @@ def render_ul_banquette_pdf(
         f"U developed outer run {u_spec.developed_outer_in:.2f}\" = {u_spec.developed_outer_lf:.2f} lf "
         f"(not footprint width {u_spec.footprint_width:.2f}\").",
         f"U elev: shell {u_spec.shell_height}\"; net back {u_spec.net_back_height}\" sits ON "
-        f"{u_spec.seat_foam}\" foam (not seat_h+back_h wood stack).",
+        f"{u_spec.seat_foam}\" foam; seat H {u_spec.seat_height}\" AFF PROV (foam ≠ seat H).",
         "Sheets: plan / elev / iso U+L / client mockup / schedule / materials.",
         "PATTERN fabric = BACKS only; PLAIN fabric = SEATS.",
         f"Fabric order: PATTERN {mats.get('pattern_yards_order')} yd + PLAIN {mats.get('plain_yards_order')} yd "
