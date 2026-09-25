@@ -31,10 +31,14 @@ LT_BLUE = HexColor("#ebf4ff")
 LT_PEACH = HexColor("#feebc8")
 LT_FOAM = HexColor("#fbd38d")
 # Client mockup — match Sep 2022 ref (black basketweave back / plain black seat)
-PATTERN_BACK = HexColor("#2a2a2a")      # black padded basketweave base
-PATTERN_BACK_DK = HexColor("#111111")
-PATTERN_BACK_BAR = HexColor("#454545")  # raised bar highlight
-PATTERN_BACK_GAP = HexColor("#181818")  # groove between bars
+# Founder lock: every basketweave bar uses this one fabric fill.  The pattern
+# is carried by the stronger seam/grid lines below, never by alternating bar
+# colors (which creates a false light/dark illusion in the client mockup).
+PATTERN_BACK = HexColor("#2a2a2a")      # one charcoal/black fabric fill
+PATTERN_BACK_DK = HexColor("#111111")   # outline / seam ink
+PATTERN_BACK_BAR = PATTERN_BACK          # compatibility alias; never a second fill
+PATTERN_BACK_GAP = PATTERN_BACK_DK       # compatibility alias; no gap fill
+PATTERN_BACK_SEAM = HexColor("#080808")  # visible seams between the 2 bars
 PLAIN_SEAT = HexColor("#1c1c1c")        # plain smooth black seat
 PLAIN_SEAT_DK = HexColor("#0e0e0e")
 LT_GRAY = HexColor("#edf2f7")
@@ -577,72 +581,52 @@ def _poly_fill(c, pts, fill, stroke, lw=1.0):
 
 
 
-def _basketweave_in_clip(c, tile=10.0, bar_gap=1.0):
-    """Draw alternating H/V groups-of-2 bar tiles inside current clip.
-    Visual match to founder lock: 13" tiles / 6.5×13 bars, 2 full rows + leftover band.
-    Pass tile ≈ screen_net_h * (13/26.75) so mockup/elev show 2 tile rows.
+def _basketweave_grid(c, x0, y0, x1, y1, tile=10.0):
+    """Paint a uniform fabric field with the locked 2-bar H/V seam pattern.
+
+    A tile is always two equal bars (6.5×13 at the locked face scale).  All
+    bars share ``PATTERN_BACK``; tile boundaries and the one center seam are
+    drawn darker/thicker so the texture reads without a two-tone illusion.
     """
-    # Use a generous screen-space bounds; clip restricts paint
-    x0, y0, x1, y1 = -20, -20, 1200, 900
+    if x1 <= x0 or y1 <= y0:
+        return
     c.setFillColor(PATTERN_BACK)
     c.rect(x0, y0, x1 - x0, y1 - y0, fill=1, stroke=0)
     cols = int((x1 - x0) / tile) + 2
     rows = int((y1 - y0) / tile) + 2
-    step = (tile - bar_gap) / 2.0
+    seam_width = max(1.15, min(2.0, tile * 0.075))
+    c.setStrokeColor(PATTERN_BACK_SEAM)
+    c.setLineWidth(seam_width)
+    c.setLineCap(1)
     for i in range(cols):
         for j in range(rows):
             tx = x0 + i * tile
             ty = y0 + j * tile
-            c.setFillColor(PATTERN_BACK_GAP)
-            c.rect(tx, ty, tile + 0.3, tile + 0.3, fill=1, stroke=0)
-            c.setFillColor(PATTERN_BACK_BAR)
             horizontal = ((i + j) % 2 == 0)
+            # Tile boundary + the single center seam: exactly two bars/tile.
+            c.line(tx, ty, tx + tile, ty)
+            c.line(tx, ty, tx, ty + tile)
             if horizontal:
-                for k in range(2):
-                    by = ty + bar_gap * 0.35 + k * (step + bar_gap * 0.3)
-                    c.roundRect(tx + bar_gap * 0.3, by, tile - bar_gap * 0.6, step, 1.2, fill=1, stroke=0)
+                c.line(tx, ty + tile / 2.0, tx + tile, ty + tile / 2.0)
             else:
-                for k in range(2):
-                    bx = tx + bar_gap * 0.35 + k * (step + bar_gap * 0.3)
-                    c.roundRect(bx, ty + bar_gap * 0.3, step, tile - bar_gap * 0.6, 1.2, fill=1, stroke=0)
+                c.line(tx + tile / 2.0, ty, tx + tile / 2.0, ty + tile)
 
 
 def _basketweave_rect(c, x, y, w, h, tile=10.0):
-    """Fill axis-aligned rect with visible basketweave hatch (backs)."""
+    """Fill axis-aligned rect with visible basketweave seams (backs)."""
     if w <= 1 or h <= 1:
         return
     c.saveState()
     p = c.beginPath()
     p.rect(x, y, w, h)
     c.clipPath(p, stroke=0, fill=0)
-    # Local tile grid from rect origin so pattern aligns on elev/plan
-    c.setFillColor(PATTERN_BACK)
-    c.rect(x, y, w, h, fill=1, stroke=0)
-    cols = int(w / tile) + 2
-    rows = int(h / tile) + 2
-    bar_gap = 1.0
-    step = (tile - bar_gap) / 2.0
-    for i in range(cols):
-        for j in range(rows):
-            tx = x + i * tile
-            ty = y + j * tile
-            c.setFillColor(PATTERN_BACK_GAP)
-            c.rect(tx, ty, tile + 0.2, tile + 0.2, fill=1, stroke=0)
-            c.setFillColor(PATTERN_BACK_BAR)
-            horizontal = ((i + j) % 2 == 0)
-            if horizontal:
-                for k in range(2):
-                    by = ty + bar_gap * 0.35 + k * (step + bar_gap * 0.3)
-                    c.roundRect(tx + bar_gap * 0.3, by, tile - bar_gap * 0.6, step, 1.2, fill=1, stroke=0)
-            else:
-                for k in range(2):
-                    bx = tx + bar_gap * 0.35 + k * (step + bar_gap * 0.3)
-                    c.roundRect(bx, ty + bar_gap * 0.3, step, tile - bar_gap * 0.6, 1.2, fill=1, stroke=0)
+    # Local tile grid from rect origin so pattern aligns on elev/plan.
+    _basketweave_grid(c, x, y, x + w, y + h, tile=tile)
     c.restoreState()
 
 
 def _basketweave_poly(c, pts, tile=10.0):
-    """Clip to polygon and paint basketweave (for plan back bands / iso faces)."""
+    """Clip to polygon and paint uniform fabric with 2-bar H/V seams."""
     if len(pts) < 3:
         return
     c.saveState()
@@ -655,31 +639,8 @@ def _basketweave_poly(c, pts, tile=10.0):
     xs = [pt[0] for pt in pts]
     ys = [pt[1] for pt in pts]
     x0, y0, x1, y1 = min(xs) - 2, min(ys) - 2, max(xs) + 2, max(ys) + 2
-    # Local grid
-    c.setFillColor(PATTERN_BACK)
-    c.rect(x0, y0, x1 - x0, y1 - y0, fill=1, stroke=0)
-    cols = int((x1 - x0) / tile) + 2
-    rows = int((y1 - y0) / tile) + 2
-    bar_gap = 1.1
-    step = (tile - bar_gap) / 2.0
-    for i in range(cols):
-        for j in range(rows):
-            tx = x0 + i * tile
-            ty = y0 + j * tile
-            c.setFillColor(PATTERN_BACK_GAP)
-            c.rect(tx, ty, tile + 0.2, tile + 0.2, fill=1, stroke=0)
-            c.setFillColor(PATTERN_BACK_BAR)
-            horizontal = ((i + j) % 2 == 0)
-            if horizontal:
-                for k in range(2):
-                    by = ty + bar_gap * 0.4 + k * (step + bar_gap * 0.35)
-                    c.roundRect(tx + bar_gap * 0.35, by, tile - bar_gap * 0.7, step, 1.0, fill=1, stroke=0)
-            else:
-                for k in range(2):
-                    bx = tx + bar_gap * 0.4 + k * (step + bar_gap * 0.35)
-                    c.roundRect(bx, ty + bar_gap * 0.35, step, tile - bar_gap * 0.7, 1.0, fill=1, stroke=0)
+    _basketweave_grid(c, x0, y0, x1, y1, tile=tile)
     c.restoreState()
-
 
 
 def _title_block(c, w, h, sheet, sheet_title, meta: SheetMeta, total_sheets: int):
@@ -1194,8 +1155,9 @@ def _draw_box_iso(c, ox, oy, s, sx, sy, w, d, z0, z1, fill, stroke, lw=1.0, hatc
             p.lineTo(pt[0], pt[1])
         p.close()
         c.drawPath(p, fill=0, stroke=1)
-        # right face stays flat dark (edge-on weave not critical)
-        _poly_fill(c, right, PATTERN_BACK_DK, stroke, lw)
+        # Keep every basketweave face on the same fabric fill; seams provide
+        # the texture and the outline provides the edge definition.
+        _poly_fill(c, right, PATTERN_BACK, stroke, lw)
     else:
         _poly_fill(c, front, fill, stroke, lw)
         _poly_fill(c, top, top_fill, stroke, lw)
@@ -1242,7 +1204,7 @@ def _draw_lean_box_iso(
 
     right_fill = Color(fill.red * 0.85, fill.green * 0.85, fill.blue * 0.85)
     top_fill = Color(min(1, fill.red * 1.12), min(1, fill.green * 1.12), min(1, fill.blue * 1.12))
-    _poly_fill(c, right, right_fill if not hatch else PATTERN_BACK_DK, stroke, lw)
+    _poly_fill(c, right, right_fill if not hatch else PATTERN_BACK, stroke, lw)
     if hatch:
         _basketweave_poly(c, front, tile=11.0)
         c.setStrokeColor(stroke)
