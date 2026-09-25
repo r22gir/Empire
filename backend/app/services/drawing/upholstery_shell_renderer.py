@@ -132,7 +132,7 @@ class SheetMeta:
         "BACK = basketweave (Sep 2022 / bar tile) + lean/pitch PROV; SEAT = plain."
     )
     client: str = "Dave Romero / Marley's Hyattsville"
-    rev: str = "E"
+    rev: str = "F"
     drawn_by: str = "MAX AI / Empire Workroom"
     date_str: str = ""
 
@@ -141,29 +141,39 @@ class SheetMeta:
             self.date_str = datetime.now().strftime("%m/%d/%Y")
 
 
-# ── Modular basketweave construction (Rafael Sep 2026 clarification) ──
-# PATTERN backs = constructed modules (1/2" ply + foam + fabric), NOT printed COM face-SF.
-# Each module ≈ one Sep-2022 padded block (groups of 3 bars). Seat = PLAIN large pieces.
-MODULE_FACE_IN = 7.5          # ASSUMED face: 3 bars × ~2.5" — confirm vs Sep 2022 ref / site
-MODULE_FOAM_THK_IN = 1.5      # ASSUMED foam on back modules
-MODULE_STAPLE_IN = 2.5        # fabric staple-back allowance (mid of Rafael's 2–3")
-SEAT_FOAM_THK_IN = 2.0        # seat foam (matches UShellSpec.seat_foam default)
-SEAT_STAPLE_IN = 2.5          # plain seat fabric staple-back allowance
+# ── Modular basketweave construction (Rafael Sep 2026 — LOCKED TO SEP 2022 PHOTO) ──
+# PATTERN backs = constructed BAR boards (1/2" ply + foam + fabric), NOT printed COM face-SF.
+# Photo: FOUR rows of padded weave tiles on the back — NOT 3-row / 8.917" tile.
+# Close-up (Rafael): each square tile = TWO bars only (H or V), alternating checkerboard — NOT 3-bar.
+# Net back 26.75" ÷ 4 rows = tile 6.6875" square. Std bar FACE = 3.34375" × 6.6875".
+# Walk developed runs → full tiles + end closers; U gets inside-corner specials.
+# Seat = PLAIN large pieces.
+NET_BACK_ROWS = 4
+BARS_PER_TILE = 2                             # Rafael close-up: 2 bars per square tile
+TILE_FACE_IN = 26.75 / NET_BACK_ROWS          # 6.6875" square tile (LOCKED to photo)
+BAR_FACE_W_IN = TILE_FACE_IN / BARS_PER_TILE  # 3.34375"
+BAR_FACE_H_IN = TILE_FACE_IN                  # bar length = tile edge
+MODULE_FACE_IN = TILE_FACE_IN                 # alias: square tile face (NOT 7.5 / NOT 8.917)
+MODULE_FOAM_THK_IN = 1.5                      # foam wrap each side of bar
+MODULE_STAPLE_IN = 2.5                        # staple-back allowance (mid of Rafael's 2–3")
+U_INSIDE_CORNERS = 2                          # U-shape inside-corner specials
+SEAT_FOAM_THK_IN = 2.0                        # seat foam (matches UShellSpec.seat_foam default)
+SEAT_STAPLE_IN = 2.5                          # plain seat fabric staple-back allowance
 SEAT_WRAP_EDGE_IN = SEAT_FOAM_THK_IN + SEAT_STAPLE_IN  # per edge
-NEST_WASTE_FABRIC = 1.10      # 10% nesting/cutting waste on top of blank sizes
+NEST_WASTE_FABRIC = 1.10                      # 10% nesting/cutting waste on top of blank sizes
 # (staple/wrap already inside blanks — do NOT also apply old face-SF 15% as pattern match)
 
 
 @dataclass
 class ModuleSchedule:
-    """Per-piece modular back takeoff."""
+    """Per-board / per-piece modular back takeoff (bars, closers, corner specials)."""
     mark: str
     location: str
-    module_face_in: float
-    cols: int
-    rows: int
-    count: int
-    ply_blank_in: tuple   # (w, h)
+    module_face_in: float       # primary face dim (bar W or closer W or tile)
+    cols: int                   # full tile cols along run (0 for non-grid lines)
+    rows: int                   # net-back rows (4) or 0
+    count: int                  # board / blank count
+    ply_blank_in: tuple         # (w, h)
     foam_blank_in: tuple
     fabric_blank_in: tuple
     ply_sf: float
@@ -180,14 +190,29 @@ class MaterialsTakeoff:
     # Face areas (info / comparison only — NOT order basis for pattern)
     pattern_back_sf: float
     plain_seat_sf: float
-    # Modular PATTERN (backs)
-    module_face_in: float
+    # Photo-locked tile / bar geometry
+    module_face_in: float        # tile square (= TILE_FACE_IN)
+    bar_face_in: tuple           # (w, h) std bar
+    tile_rows: int               # 4
     module_foam_thk_in: float
     module_staple_in: float
+    # Walk counts
+    u_full_tiles: int
+    u_end_closer_w_in: float
+    u_end_closers: int
+    u_inside_corner_specials: int
+    l_full_tiles: int
+    l_end_closer_w_in: float
+    l_end_closers: int
+    u_std_bars: int
+    l_std_bars: int
+    std_bar_count_total: int
+    board_count_total: int       # std bars + closers + IC specials
+    # Compat aliases (std bars as primary "module" count)
     u_module_count: int
     l_module_count: int
     module_count_total: int
-    module_ply_blank_in: tuple
+    module_ply_blank_in: tuple   # std bar ply
     module_foam_blank_in: tuple
     module_fabric_blank_in: tuple
     pattern_fabric_sf_blanks: float
@@ -199,7 +224,7 @@ class MaterialsTakeoff:
     plain_yards_raw: float
     plain_yards_order: float
     # 1/2" ply
-    ply_back_sf: float           # sum of module ply faces
+    ply_back_sf: float           # sum of bar/closer/IC ply faces
     ply_seat_sf: float           # seat decks (face)
     ply_total_sf: float
     ply_with_waste_sf: float
@@ -213,10 +238,13 @@ def _ceil_quarter(y: float) -> float:
     return math.ceil(y * 4.0) / 4.0
 
 
-def _module_grid(developed_in: float, net_back_h: float, face: float) -> tuple[int, int, int]:
-    cols = max(1, int(math.ceil(developed_in / face)))
-    rows = max(1, int(math.ceil(net_back_h / face)))
-    return cols, rows, cols * rows
+def _walk_tiles(developed_in: float, tile: float) -> tuple[int, float]:
+    """Full tiles that fit along developed run + leftover width for end closer."""
+    full = max(0, int(math.floor((developed_in / tile) + 1e-9)))
+    rem = round(developed_in - full * tile, 4)
+    if rem < 0.05:
+        rem = 0.0
+    return full, rem
 
 
 def _fabric_blank_in(face_w: float, face_h: float, foam_thk: float, staple: float) -> tuple[float, float]:
@@ -235,68 +263,163 @@ def compute_materials(
     module_foam_thk: float = MODULE_FOAM_THK_IN,
     module_staple: float = MODULE_STAPLE_IN,
 ) -> MaterialsTakeoff:
-    """Modular basketweave back takeoff + plain seat wrap. Explicit assumptions.
+    """4-row photo-locked 2-bar basketweave takeoff + plain seat wrap.
 
-    PATTERN ≠ printed COM face SF. Each back module = 1/2\" ply + foam + fabric blank
-    (face + foam-edge wrap + staple allowance). Seats = plain large pieces with wrap.
+    TILE = net_back/4 = 6.6875". Std bar = (TILE/2) × TILE (Rafael: TWO bars per tile).
+    Walk U/L developed runs → full tiles + end closers; U adds inside-corner specials.
+    PATTERN fabric ordered from BAR blanks (face + foam wrap + staple), not face-SF.
     """
-    face = module_face_in
+    tile = float(module_face_in)
+    rows = NET_BACK_ROWS
+    bars_n = BARS_PER_TILE
+    bar_w = tile / bars_n
+    bar_h = tile
     foam_t = module_foam_thk
     staple = module_staple
 
-    # --- Back modules (U + L) ---
-    u_cols, u_rows, u_count = _module_grid(u.developed_outer_in, u.net_back_height, face)
-    l_cols, l_rows, l_count = _module_grid(L.developed_outer_in, L.net_back, face)
-    total_mods = u_count + l_count
+    u_full, u_rem = _walk_tiles(u.developed_outer_in, tile)
+    l_full, l_rem = _walk_tiles(L.developed_outer_in, tile)
 
-    ply_blank = (face, face)
-    foam_blank = (face, face)  # foam cut to ply face (shop may oversize slightly)
-    fab_blank = _fabric_blank_in(face, face, foam_t, staple)
+    u_std = u_full * rows * bars_n
+    l_std = l_full * rows * bars_n
+    u_ec = rows if u_rem > 0 else 0
+    l_ec = rows if l_rem > 0 else 0
+    u_ic = U_INSIDE_CORNERS * rows  # one special board per row at each inside corner
+
+    # Std bar blanks (all standard boards the same)
+    ply_blank = (round(bar_w, 5), round(bar_h, 5))
+    foam_blank = ply_blank
+    fab_blank = _fabric_blank_in(bar_w, bar_h, foam_t, staple)
     fab_blank_sf = (fab_blank[0] * fab_blank[1]) / 144.0
-    ply_blank_sf = (face * face) / 144.0
+    ply_blank_sf = (bar_w * bar_h) / 144.0
 
-    pattern_fab_sf = total_mods * fab_blank_sf
+    # End closer blanks — single bar strip of leftover width × tile height per row
+    def closer_pack(rem: float, count: int):
+        if count <= 0 or rem <= 0:
+            return (0.0, 0.0), (0.0, 0.0), (0.0, 0.0), 0.0, 0.0
+        ply_c = (round(rem, 4), round(bar_h, 4))
+        fab_c = _fabric_blank_in(rem, bar_h, foam_t, staple)
+        ply_sf = count * (ply_c[0] * ply_c[1]) / 144.0
+        fab_sf = count * (fab_c[0] * fab_c[1]) / 144.0
+        return ply_c, ply_c, fab_c, ply_sf, fab_sf
+
+    u_ec_ply, u_ec_foam, u_ec_fab, u_ec_ply_sf, u_ec_fab_sf = closer_pack(u_rem, u_ec)
+    l_ec_ply, l_ec_foam, l_ec_fab, l_ec_ply_sf, l_ec_fab_sf = closer_pack(l_rem, l_ec)
+
+    # Inside-corner specials: same face blank as std bar (shop miters/wraps at corner)
+    ic_ply_sf = u_ic * ply_blank_sf
+    ic_fab_sf = u_ic * fab_blank_sf
+
+    pattern_fab_sf = (
+        (u_std + l_std) * fab_blank_sf
+        + u_ec_fab_sf + l_ec_fab_sf
+        + ic_fab_sf
+    )
     pat_raw = (pattern_fab_sf * 4.0 * waste_fabric) / fabric_width_in
-    # yards from blank SF: same (sf * 4 * waste / width)
 
-    ply_back = total_mods * ply_blank_sf
+    ply_back = (
+        (u_std + l_std) * ply_blank_sf
+        + u_ec_ply_sf + l_ec_ply_sf
+        + ic_ply_sf
+    )
+
+    board_total = u_std + l_std + u_ec + l_ec + u_ic
 
     modules = [
         ModuleSchedule(
-            mark="U-BM",
-            location="U backs (modular basketweave)",
-            module_face_in=face,
-            cols=u_cols,
-            rows=u_rows,
-            count=u_count,
+            mark="U-STD",
+            location="U std bars (2-bar tiles)",
+            module_face_in=round(bar_w, 5),
+            cols=u_full,
+            rows=rows,
+            count=u_std,
             ply_blank_in=ply_blank,
             foam_blank_in=foam_blank,
             fabric_blank_in=fab_blank,
-            ply_sf=round(u_count * ply_blank_sf, 2),
-            foam_sf=round(u_count * ply_blank_sf, 2),
-            fabric_sf=round(u_count * fab_blank_sf, 2),
-            notes=f'{u_cols} cols × {u_rows} rows along {u.developed_outer_in:.2f}" run × {u.net_back_height:.2f}" net',
+            ply_sf=round(u_std * ply_blank_sf, 2),
+            foam_sf=round(u_std * ply_blank_sf, 2),
+            fabric_sf=round(u_std * fab_blank_sf, 2),
+            notes=(
+                f'{u_full} full tiles × {rows} rows × {bars_n} bars; '
+                f'bar {bar_w:.4f}"×{bar_h:.4f}"; run {u.developed_outer_in:.2f}"'
+            ),
         ),
         ModuleSchedule(
-            mark="L-BM",
-            location="L backs (modular basketweave) [prov.]",
-            module_face_in=face,
-            cols=l_cols,
-            rows=l_rows,
-            count=l_count,
+            mark="U-EC",
+            location="U end closers",
+            module_face_in=round(u_rem, 4) if u_rem else 0.0,
+            cols=1 if u_ec else 0,
+            rows=rows if u_ec else 0,
+            count=u_ec,
+            ply_blank_in=u_ec_ply if u_ec else (0.0, 0.0),
+            foam_blank_in=u_ec_foam if u_ec else (0.0, 0.0),
+            fabric_blank_in=u_ec_fab if u_ec else (0.0, 0.0),
+            ply_sf=round(u_ec_ply_sf, 2),
+            foam_sf=round(u_ec_ply_sf, 2),
+            fabric_sf=round(u_ec_fab_sf, 2),
+            notes=(
+                f'leftover {u_rem:.4f}" after {u_full}×{tile:.4f}"; '
+                f'{u_ec} boards ({rows} rows × 1 closer col)'
+                if u_ec else "no leftover — run divides evenly"
+            ),
+        ),
+        ModuleSchedule(
+            mark="U-IC",
+            location="U inside-corner specials",
+            module_face_in=round(bar_w, 5),
+            cols=U_INSIDE_CORNERS,
+            rows=rows,
+            count=u_ic,
             ply_blank_in=ply_blank,
             foam_blank_in=foam_blank,
             fabric_blank_in=fab_blank,
-            ply_sf=round(l_count * ply_blank_sf, 2),
-            foam_sf=round(l_count * ply_blank_sf, 2),
-            fabric_sf=round(l_count * fab_blank_sf, 2),
-            notes=f'{l_cols} cols × {l_rows} rows along {L.developed_outer_in:.3f}" run × {L.net_back:.2f}" net PROV',
+            ply_sf=round(ic_ply_sf, 2),
+            foam_sf=round(ic_ply_sf, 2),
+            fabric_sf=round(ic_fab_sf, 2),
+            notes=f'{U_INSIDE_CORNERS} inside corners × {rows} rows; shop-miter/wrap specials',
+        ),
+        ModuleSchedule(
+            mark="L-STD",
+            location="L std bars (2-bar tiles) [prov.]",
+            module_face_in=round(bar_w, 5),
+            cols=l_full,
+            rows=rows,
+            count=l_std,
+            ply_blank_in=ply_blank,
+            foam_blank_in=foam_blank,
+            fabric_blank_in=fab_blank,
+            ply_sf=round(l_std * ply_blank_sf, 2),
+            foam_sf=round(l_std * ply_blank_sf, 2),
+            fabric_sf=round(l_std * fab_blank_sf, 2),
+            notes=(
+                f'{l_full} full tiles × {rows} rows × {bars_n} bars; '
+                f'run {L.developed_outer_in:.3f}" PROV'
+            ),
+        ),
+        ModuleSchedule(
+            mark="L-EC",
+            location="L end closers [prov.]",
+            module_face_in=round(l_rem, 4) if l_rem else 0.0,
+            cols=1 if l_ec else 0,
+            rows=rows if l_ec else 0,
+            count=l_ec,
+            ply_blank_in=l_ec_ply if l_ec else (0.0, 0.0),
+            foam_blank_in=l_ec_foam if l_ec else (0.0, 0.0),
+            fabric_blank_in=l_ec_fab if l_ec else (0.0, 0.0),
+            ply_sf=round(l_ec_ply_sf, 2),
+            foam_sf=round(l_ec_ply_sf, 2),
+            fabric_sf=round(l_ec_fab_sf, 2),
+            notes=(
+                f'leftover {l_rem:.4f}" after {l_full}×{tile:.4f}"; '
+                f'{l_ec} boards PROV'
+                if l_ec else "no leftover — run divides evenly"
+            ),
         ),
     ]
 
     # --- Plain seats (NON-modular large pieces) ---
-    # One blank per banquette: (depth + 2*wrap) × (developed + 2*wrap)
     wrap = SEAT_WRAP_EDGE_IN
+
     def seat_blank_sf(depth: float, developed: float) -> float:
         return ((depth + 2 * wrap) * (developed + 2 * wrap)) / 144.0
 
@@ -305,7 +428,6 @@ def compute_materials(
     plain_fab_sf = u_seat_fab + l_seat_fab
     pln_raw = (plain_fab_sf * 4.0 * waste_fabric) / fabric_width_in
 
-    # Seat decks = face SF (full panels, not modules)
     plain_face = u.seat_sf + L.seat_sf
     pattern_face = u.back_sf + L.back_sf  # info only
     ply_seat = plain_face
@@ -313,35 +435,40 @@ def compute_materials(
     ply_w = ply_tot * waste_ply
     sheets = int(math.ceil(ply_w / PLY_SHEET_SF))
 
+    bar_w_r = round(bar_w, 5)
+    bar_h_r = round(bar_h, 5)
     assumptions = [
-        "CONSTRUCTION (Rafael): PATTERN backs = built basketweave MODULES (like Sep 2022 black padded block weave) — NOT printed COM face-SF yardage.",
-        f'Module face ASSUMED {face:.1f}" × {face:.1f}" (groups of 3 bars × ~2.5"/bar from Sep 2022 visual). CONFIRM module size on site / against ref photo before cut list.',
-        f"Each back module = 1/2\" ply blank {face:.1f}\"×{face:.1f}\" + foam {foam_t:.1f}\" + fabric blank.",
-        f'Fabric EXTRA ALLOWANCE (Rafael — for FABRIC): foam-edge wrap {foam_t:.1f}" each side + staple-on-back {staple:.1f}" (mid of his 2–3") each side → blank {fab_blank[0]:.1f}"×{fab_blank[1]:.1f}".',
-        f"Nesting/cutting waste on blanks {round((waste_fabric - 1) * 100)}% (separate from staple/wrap already in blank).",
-        "SEAT = PLAIN large pieces (NOT modular basketweave). Shop may split for handling.",
-        f'Plain seat fabric wrap ASSUMED {wrap:.1f}" per edge (= {SEAT_FOAM_THK_IN:.1f}" foam + {SEAT_STAPLE_IN:.1f}" staple). Blank = (depth+2w) × (developed+2w).',
+        "CONSTRUCTION (Rafael): PATTERN backs = built basketweave BAR boards (Sep 2022 photo — FOUR rows) — NOT printed COM face-SF; NOT 3-row/8.917; NOT 3-bar weave; NOT prior 7.5 assumption.",
+        f'TILE LOCKED: net back {u.net_back_height:.2f}" / {rows} rows = {tile:.4f}" square. Classic 2-bar tile: each STD bar {bar_w_r:.5f}" x {bar_h_r:.5f}" (all standard boards the same).',
+        f'Walk developed runs -> full tiles + end closers. U also gets {U_INSIDE_CORNERS} inside-corner specials x {rows} rows = {u_ic} boards.',
+        f'Each STD bar = 1/2" ply {bar_w_r:.5f}"x{bar_h_r:.5f}" + foam {foam_t:.1f}" + fabric blank.',
+        f'Fabric EXTRA (Rafael): foam-edge wrap {foam_t:.1f}" each side + staple-on-back {staple:.1f}" (mid of 2-3") each side -> STD blank {fab_blank[0]:.4f}"x{fab_blank[1]:.4f}".',
+        f'Nesting/cutting waste on blanks {round((waste_fabric - 1) * 100)}% (separate from staple/wrap already in blank).',
+        'SEAT = PLAIN large pieces (NOT modular basketweave). Shop may split for handling.',
+        f'Plain seat fabric wrap ASSUMED {wrap:.1f}" per edge (= {SEAT_FOAM_THK_IN:.1f}" foam + {SEAT_STAPLE_IN:.1f}" staple). Blank = (depth+2w) x (developed+2w).',
         f'Fabric width ASSUMED {fabric_width_in:.0f}" (Empire default; provenance=pending until COM confirmed).',
-        f'1/2" plywood: SUM of small back module blanks + seat deck face SF. Waste {round((waste_ply - 1) * 100)}% for kerf/nesting. Sheet 4×8 = {PLY_SHEET_SF:.0f} sf.',
-        "Do NOT order pattern yardage from face-SF × waste — that understates modular wrap/staple. Order from MODULE SCHEDULE blanks.",
-        "L depth/height still PROVISIONAL — module counts & seat blanks for L will change when locked to U.",
-        f"Back lean/pitch provisional {u.back_lean_in:.1f}\" top setback — modules follow angled back face; confirm lean on site.",
-        "COM / Nelma TBD — mockup colors placeholder only. No mill/SKU on this rev.",
-        "Face-SF figures kept on sheet for audit/comparison only; modular blanks are the order basis for PATTERN.",
+        f'1/2" plywood: SUM of bar + closer + IC ply faces + seat deck face SF. Waste {round((waste_ply - 1) * 100)}%. Sheet 4x8 = {PLY_SHEET_SF:.0f} sf.',
+        'Do NOT order pattern yardage from face-SF x waste — order from BAR / closer / IC blanks.',
+        'L depth/height still PROVISIONAL — L board counts & seat blanks change when locked to U.',
+        f'Back lean/pitch provisional {u.back_lean_in:.1f}" top setback — boards follow angled back face; confirm lean on site.',
+        'COM / Nelma TBD — mockup colors placeholder only. No mill/SKU on this rev.',
+        'Face-SF figures kept on sheet for audit/comparison only; bar blanks are the order basis for PATTERN.',
     ]
     formulas = [
-        f"U developed = {u.back_outer:.2f}+{u.arm_left:.2f}+{u.arm_right:.2f} = {u.developed_outer_in:.2f}\" = {u.developed_outer_lf:.2f} lf",
-        f"U modules = ceil({u.developed_outer_in:.2f}/{face}) × ceil({u.net_back_height:.2f}/{face}) = {u_cols}×{u_rows} = {u_count}",
-        f"L modules = ceil({L.developed_outer_in:.3f}/{face}) × ceil({L.net_back:.2f}/{face}) = {l_cols}×{l_rows} = {l_count} [prov.]",
-        f"Total modules = {u_count}+{l_count} = {total_mods}",
-        f'Fabric blank/module = ({face}+2×({foam_t}+{staple}))² = {fab_blank[0]:.1f}"×{fab_blank[1]:.1f}" = {fab_blank_sf:.3f} sf',
-        f"PATTERN fabric SF (blanks) = {total_mods} × {fab_blank_sf:.3f} = {pattern_fab_sf:.2f} sf",
-        f"PATTERN yards = ({pattern_fab_sf:.2f} × 4 × {waste_fabric:.2f}) / {fabric_width_in:.0f}\" = {pat_raw:.2f} → order {_ceil_quarter(pat_raw):.2f} yd",
-        f'U seat blank = ({u.seat_depth:.2f}+2×{wrap:.1f}) × ({u.developed_outer_in:.2f}+2×{wrap:.1f}) / 144 = {u_seat_fab:.2f} sf',
-        f'L seat blank = ({L.seat_depth:.1f}+2×{wrap:.1f}) × ({L.developed_outer_in:.3f}+2×{wrap:.1f}) / 144 = {l_seat_fab:.2f} sf [prov.]',
-        f"PLAIN yards = ({plain_fab_sf:.2f} × 4 × {waste_fabric:.2f}) / {fabric_width_in:.0f}\" = {pln_raw:.2f} → order {_ceil_quarter(pln_raw):.2f} yd",
-        f"Ply = modules {ply_back:.2f} sf + seat decks {ply_seat:.2f} sf = {ply_tot:.2f}; ×{waste_ply:.2f} = {ply_w:.2f} sf → {sheets} sheet(s) 4×8 1/2\"",
-        f"(Info) face-SF backs {pattern_face:.2f} / seats {plain_face:.2f} — NOT pattern order basis",
+        f'U developed = {u.back_outer:.2f}+{u.arm_left:.2f}+{u.arm_right:.2f} = {u.developed_outer_in:.2f}" = {u.developed_outer_lf:.2f} lf',
+        f'TILE = {u.net_back_height:.2f}/{rows} = {tile:.4f}"; BAR = {tile:.4f}/{bars_n} x {tile:.4f} = {bar_w_r:.5f}"x{bar_h_r:.5f}"',
+        f'U walk: floor({u.developed_outer_in:.2f}/{tile:.4f}) = {u_full} full tiles + end closer {u_rem:.4f}" -> {u_ec} closer boards; IC {u_ic}',
+        f'L walk: floor({L.developed_outer_in:.3f}/{tile:.4f}) = {l_full} full tiles + end closer {l_rem:.4f}" -> {l_ec} closer boards [prov.]',
+        f'U STD bars = {u_full}x{rows}x{bars_n} = {u_std}; L STD bars = {l_full}x{rows}x{bars_n} = {l_std}',
+        f'Board total = STD {u_std}+{l_std} + EC {u_ec}+{l_ec} + IC {u_ic} = {board_total}',
+        f'STD fabric blank/bar = ({bar_w_r:.4f}+2x({foam_t}+{staple})) x ({bar_h_r:.4f}+2x({foam_t}+{staple})) = {fab_blank[0]:.4f}"x{fab_blank[1]:.4f}" = {fab_blank_sf:.4f} sf',
+        f'PATTERN fabric SF (blanks) = {pattern_fab_sf:.2f} sf',
+        f'PATTERN yards = ({pattern_fab_sf:.2f} x 4 x {waste_fabric:.2f}) / {fabric_width_in:.0f}" = {pat_raw:.2f} -> order {_ceil_quarter(pat_raw):.2f} yd',
+        f'U seat blank = ({u.seat_depth:.2f}+2x{wrap:.1f}) x ({u.developed_outer_in:.2f}+2x{wrap:.1f}) / 144 = {u_seat_fab:.2f} sf',
+        f'L seat blank = ({L.seat_depth:.1f}+2x{wrap:.1f}) x ({L.developed_outer_in:.3f}+2x{wrap:.1f}) / 144 = {l_seat_fab:.2f} sf [prov.]',
+        f'PLAIN yards = ({plain_fab_sf:.2f} x 4 x {waste_fabric:.2f}) / {fabric_width_in:.0f}" = {pln_raw:.2f} -> order {_ceil_quarter(pln_raw):.2f} yd',
+        f'Ply = boards {ply_back:.2f} sf + seat decks {ply_seat:.2f} sf = {ply_tot:.2f}; x{waste_ply:.2f} = {ply_w:.2f} sf -> {sheets} sheet(s) 4x8 1/2"',
+        f'(Info) face-SF backs {pattern_face:.2f} / seats {plain_face:.2f} — NOT pattern order basis',
     ]
 
     return MaterialsTakeoff(
@@ -350,12 +477,25 @@ def compute_materials(
         waste_ply=waste_ply,
         pattern_back_sf=round(pattern_face, 2),
         plain_seat_sf=round(plain_face, 2),
-        module_face_in=face,
+        module_face_in=tile,
+        bar_face_in=(bar_w_r, bar_h_r),
+        tile_rows=rows,
         module_foam_thk_in=foam_t,
         module_staple_in=staple,
-        u_module_count=u_count,
-        l_module_count=l_count,
-        module_count_total=total_mods,
+        u_full_tiles=u_full,
+        u_end_closer_w_in=u_rem,
+        u_end_closers=u_ec,
+        u_inside_corner_specials=u_ic,
+        l_full_tiles=l_full,
+        l_end_closer_w_in=l_rem,
+        l_end_closers=l_ec,
+        u_std_bars=u_std,
+        l_std_bars=l_std,
+        std_bar_count_total=u_std + l_std,
+        board_count_total=board_total,
+        u_module_count=u_std + u_ec + u_ic,
+        l_module_count=l_std + l_ec,
+        module_count_total=board_total,
         module_ply_blank_in=ply_blank,
         module_foam_blank_in=foam_blank,
         module_fabric_blank_in=fab_blank,
@@ -375,6 +515,7 @@ def compute_materials(
         assumptions=assumptions,
         formulas=formulas,
     )
+
 
 
 def _iso(x, y, z, ox, oy, s):
@@ -408,9 +549,10 @@ def _poly_fill(c, pts, fill, stroke, lw=1.0):
 
 
 
-def _basketweave_in_clip(c, tile=13.0, bar_gap=1.15):
-    """Draw alternating H/V groups-of-3 bar tiles inside current clip.
-    Visual match to Sep 2022 padded rectangular basketweave (backs only).
+def _basketweave_in_clip(c, tile=10.0, bar_gap=1.0):
+    """Draw alternating H/V groups-of-2 bar tiles inside current clip.
+    Visual match to Sep 2022 padded rectangular basketweave (FOUR rows on net back).
+    Pass tile ≈ screen_net_h/4 so mockup/elev show 4 tile rows.
     """
     # Use a generous screen-space bounds; clip restricts paint
     x0, y0, x1, y1 = -20, -20, 1200, 900
@@ -418,7 +560,7 @@ def _basketweave_in_clip(c, tile=13.0, bar_gap=1.15):
     c.rect(x0, y0, x1 - x0, y1 - y0, fill=1, stroke=0)
     cols = int((x1 - x0) / tile) + 2
     rows = int((y1 - y0) / tile) + 2
-    step = (tile - bar_gap) / 3.0
+    step = (tile - bar_gap) / 2.0
     for i in range(cols):
         for j in range(rows):
             tx = x0 + i * tile
@@ -428,16 +570,16 @@ def _basketweave_in_clip(c, tile=13.0, bar_gap=1.15):
             c.setFillColor(PATTERN_BACK_BAR)
             horizontal = ((i + j) % 2 == 0)
             if horizontal:
-                for k in range(3):
-                    by = ty + bar_gap * 0.4 + k * (step + bar_gap * 0.35)
-                    c.roundRect(tx + bar_gap * 0.35, by, tile - bar_gap * 0.7, step, 1.2, fill=1, stroke=0)
+                for k in range(2):
+                    by = ty + bar_gap * 0.35 + k * (step + bar_gap * 0.3)
+                    c.roundRect(tx + bar_gap * 0.3, by, tile - bar_gap * 0.6, step, 1.2, fill=1, stroke=0)
             else:
-                for k in range(3):
-                    bx = tx + bar_gap * 0.4 + k * (step + bar_gap * 0.35)
-                    c.roundRect(bx, ty + bar_gap * 0.35, step, tile - bar_gap * 0.7, 1.2, fill=1, stroke=0)
+                for k in range(2):
+                    bx = tx + bar_gap * 0.35 + k * (step + bar_gap * 0.3)
+                    c.roundRect(bx, ty + bar_gap * 0.3, step, tile - bar_gap * 0.6, 1.2, fill=1, stroke=0)
 
 
-def _basketweave_rect(c, x, y, w, h, tile=13.0):
+def _basketweave_rect(c, x, y, w, h, tile=10.0):
     """Fill axis-aligned rect with visible basketweave hatch (backs)."""
     if w <= 1 or h <= 1:
         return
@@ -450,8 +592,8 @@ def _basketweave_rect(c, x, y, w, h, tile=13.0):
     c.rect(x, y, w, h, fill=1, stroke=0)
     cols = int(w / tile) + 2
     rows = int(h / tile) + 2
-    step = (tile - 1.15) / 3.0
-    bar_gap = 1.15
+    bar_gap = 1.0
+    step = (tile - bar_gap) / 2.0
     for i in range(cols):
         for j in range(rows):
             tx = x + i * tile
@@ -461,17 +603,17 @@ def _basketweave_rect(c, x, y, w, h, tile=13.0):
             c.setFillColor(PATTERN_BACK_BAR)
             horizontal = ((i + j) % 2 == 0)
             if horizontal:
-                for k in range(3):
-                    by = ty + bar_gap * 0.4 + k * (step + bar_gap * 0.35)
-                    c.roundRect(tx + bar_gap * 0.35, by, tile - bar_gap * 0.7, step, 1.2, fill=1, stroke=0)
+                for k in range(2):
+                    by = ty + bar_gap * 0.35 + k * (step + bar_gap * 0.3)
+                    c.roundRect(tx + bar_gap * 0.3, by, tile - bar_gap * 0.6, step, 1.2, fill=1, stroke=0)
             else:
-                for k in range(3):
-                    bx = tx + bar_gap * 0.4 + k * (step + bar_gap * 0.35)
-                    c.roundRect(bx, ty + bar_gap * 0.35, step, tile - bar_gap * 0.7, 1.2, fill=1, stroke=0)
+                for k in range(2):
+                    bx = tx + bar_gap * 0.35 + k * (step + bar_gap * 0.3)
+                    c.roundRect(bx, ty + bar_gap * 0.3, step, tile - bar_gap * 0.6, 1.2, fill=1, stroke=0)
     c.restoreState()
 
 
-def _basketweave_poly(c, pts, tile=12.0):
+def _basketweave_poly(c, pts, tile=10.0):
     """Clip to polygon and paint basketweave (for plan back bands / iso faces)."""
     if len(pts) < 3:
         return
@@ -491,7 +633,7 @@ def _basketweave_poly(c, pts, tile=12.0):
     cols = int((x1 - x0) / tile) + 2
     rows = int((y1 - y0) / tile) + 2
     bar_gap = 1.1
-    step = (tile - bar_gap) / 3.0
+    step = (tile - bar_gap) / 2.0
     for i in range(cols):
         for j in range(rows):
             tx = x0 + i * tile
@@ -501,11 +643,11 @@ def _basketweave_poly(c, pts, tile=12.0):
             c.setFillColor(PATTERN_BACK_BAR)
             horizontal = ((i + j) % 2 == 0)
             if horizontal:
-                for k in range(3):
+                for k in range(2):
                     by = ty + bar_gap * 0.4 + k * (step + bar_gap * 0.35)
                     c.roundRect(tx + bar_gap * 0.35, by, tile - bar_gap * 0.7, step, 1.0, fill=1, stroke=0)
             else:
-                for k in range(3):
+                for k in range(2):
                     bx = tx + bar_gap * 0.4 + k * (step + bar_gap * 0.35)
                     c.roundRect(bx, ty + bar_gap * 0.35, step, tile - bar_gap * 0.7, 1.0, fill=1, stroke=0)
     c.restoreState()
@@ -654,7 +796,7 @@ def _draw_u_plan(c, ox, oy, scale, u: UShellSpec, colored: bool = False):
             (sx(0), sy(AL)), (sx(0), sy(0)), (sx(W), sy(0)), (sx(W), sy(AR)),
             (sx(W - 2), sy(AR)), (sx(W - 2), sy(2)), (sx(2), sy(2)), (sx(2), sy(AL)),
         ]
-        _basketweave_poly(c, back_pts, tile=11.0)
+        _basketweave_poly(c, back_pts, tile=8.5)
         # Plain seat footprint (flat / solid — no weave)
         c.setFillColor(PLAIN_SEAT)
         sp = c.beginPath()
@@ -786,7 +928,7 @@ def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = F
     back_pts = [(bf_x, z0), (bb_x, z0), (tb_x, z1), (tf_x, z1)]
 
     if colored:
-        _basketweave_poly(c, back_pts, tile=11.0)
+        _basketweave_poly(c, back_pts, tile=8.5)
         c.setStrokeColor(PATTERN_BACK_DK)
     else:
         c.setFillColor(LT_PEACH)
@@ -870,7 +1012,7 @@ def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = F
     c.setLineWidth(1.2)
     c.rect(face_x, floor_y, face_w, Hs, fill=1, stroke=1)
     if colored:
-        _basketweave_rect(c, face_x + 2, floor_y + FOAMs, face_w - 4, NETs, tile=11.0)
+        _basketweave_rect(c, face_x + 2, floor_y + FOAMs, face_w - 4, NETs, tile=max(4.0, NETs / 4.0))
         c.setStrokeColor(PATTERN_BACK_DK)
         c.rect(face_x + 2, floor_y + FOAMs, face_w - 4, NETs, fill=0, stroke=1)
     else:
@@ -908,7 +1050,7 @@ def _draw_l_plan(c, ox, oy, scale, L: LShellSpec, colored: bool = False):
     c.setStrokeColor(SHELL)
     c.setLineWidth(1.8)
     if colored:
-        _basketweave_poly(c, outer_pts, tile=11.0)
+        _basketweave_poly(c, outer_pts, tile=8.5)
         path = c.beginPath()
         path.moveTo(outer_pts[0][0], outer_pts[0][1])
         for p in outer_pts[1:]:
@@ -1008,7 +1150,7 @@ def _draw_box_iso(c, ox, oy, s, sx, sy, w, d, z0, z1, fill, stroke, lw=1.0, hatc
     top_fill = Color(min(1, fill.red * 1.12), min(1, fill.green * 1.12), min(1, fill.blue * 1.12))
     _poly_fill(c, right, right_fill, stroke, lw)
     if hatch:
-        _basketweave_poly(c, front, tile=9.0)
+        _basketweave_poly(c, front, tile=7.5)
         c.setStrokeColor(stroke)
         c.setLineWidth(lw)
         p = c.beginPath()
@@ -1017,7 +1159,7 @@ def _draw_box_iso(c, ox, oy, s, sx, sy, w, d, z0, z1, fill, stroke, lw=1.0, hatc
             p.lineTo(pt[0], pt[1])
         p.close()
         c.drawPath(p, fill=0, stroke=1)
-        _basketweave_poly(c, top, tile=9.0)
+        _basketweave_poly(c, top, tile=7.5)
         p = c.beginPath()
         p.moveTo(top[0][0], top[0][1])
         for pt in top[1:]:
@@ -1074,7 +1216,7 @@ def _draw_lean_box_iso(
     top_fill = Color(min(1, fill.red * 1.12), min(1, fill.green * 1.12), min(1, fill.blue * 1.12))
     _poly_fill(c, right, right_fill if not hatch else PATTERN_BACK_DK, stroke, lw)
     if hatch:
-        _basketweave_poly(c, front, tile=9.0)
+        _basketweave_poly(c, front, tile=7.5)
         c.setStrokeColor(stroke)
         c.setLineWidth(lw)
         p = c.beginPath()
@@ -1083,7 +1225,7 @@ def _draw_lean_box_iso(
             p.lineTo(pt[0], pt[1])
         p.close()
         c.drawPath(p, fill=0, stroke=1)
-        _basketweave_poly(c, top, tile=9.0)
+        _basketweave_poly(c, top, tile=7.5)
         p = c.beginPath()
         p.moveTo(top[0][0], top[0][1])
         for pt in top[1:]:
@@ -1449,7 +1591,7 @@ def render_upholstery_shell_pdf(
     c.drawString(7.3 * inch, 3.1 * inch, "COLOR / PATTERN KEY")
     c.setFont("Helvetica", 7)
     c.setFillColor(PATTERN_BACK_BAR)
-    c.drawString(7.3 * inch, 2.88 * inch, "■ BASKETWEAVE BACK — groups of 3")
+    c.drawString(7.3 * inch, 2.88 * inch, "■ BASKETWEAVE BACK — groups of 2")
     c.drawString(7.3 * inch, 2.74 * inch, "  bars alternating H/V (pads)")
     c.setFillColor(HexColor("#aaaaaa"))
     c.drawString(7.3 * inch, 2.56 * inch, "■ PLAIN SEAT — smooth solid black")
@@ -1458,7 +1600,7 @@ def render_upholstery_shell_pdf(
     c.drawString(7.3 * inch, 2.36 * inch, "basketweave to match Sep 2022 /")
     c.drawString(7.3 * inch, 2.22 * inch, "bar tile. COM TBD — not mill match.")
     # Mini weave swatch
-    _basketweave_rect(c, 7.3 * inch, 1.55 * inch, 1.35 * inch, 0.55 * inch, tile=10.0)
+    _basketweave_rect(c, 7.3 * inch, 1.55 * inch, 1.35 * inch, 0.55 * inch, tile=max(4.0, 0.55 * inch / 4.0))
     c.setFillColor(PLAIN_SEAT)
     c.rect(8.8 * inch, 1.55 * inch, 0.85 * inch, 0.55 * inch, fill=1, stroke=0)
     c.setStrokeColor(GRAY)
@@ -1550,7 +1692,7 @@ def render_upholstery_shell_pdf(
     _page_header(
         c, w, h,
         "MATERIALS TAKEOFF — MODULAR BASKETWEAVE + PLAIN SEAT",
-        f'Module face {mats.module_face_in:.1f}" ASSUMED · fabric blank includes foam wrap + {mats.module_staple_in:.1f}" staple · nest waste {round((mats.waste_fabric-1)*100)}%',
+        f'TILE {mats.module_face_in:.4f}" (4-row photo lock) · STD bar {mats.bar_face_in[0]:.5f}"×{mats.bar_face_in[1]:.5f}" · foam+{mats.module_staple_in:.1f}" staple · nest {round((mats.waste_fabric-1)*100)}%',
     )
 
     def card(x, y, title, lines, accent):
@@ -1573,12 +1715,12 @@ def render_upholstery_shell_pdf(
     fb = mats.module_fabric_blank_in
     pb = mats.module_ply_blank_in
     card(
-        0.45 * inch, h - 2.95 * inch, "PATTERN MODULES (BACKS)",
+        0.45 * inch, h - 2.95 * inch, "PATTERN BARS (BACKS — 4-ROW)",
         [
-            f"Modules: U {mats.u_module_count} + L {mats.l_module_count} = {mats.module_count_total}",
-            f'Ply/foam blank: {pb[0]:.1f}" × {pb[1]:.1f}" each',
-            f'Fabric blank: {fb[0]:.1f}" × {fb[1]:.1f}" (foam+{mats.module_staple_in:.1f}" staple)',
-            f"Blank SF total: {mats.pattern_fabric_sf_blanks:.2f} sf",
+            f"STD bars: U {mats.u_std_bars} + L {mats.l_std_bars} = {mats.std_bar_count_total}",
+            f'STD ply/foam: {pb[0]:.5f}" × {pb[1]:.5f}"  |  fab {fb[0]:.2f}"×{fb[1]:.2f}"',
+            f"U: {mats.u_full_tiles} full + {mats.u_end_closers} EC + {mats.u_inside_corner_specials} IC",
+            f"L: {mats.l_full_tiles} full + {mats.l_end_closers} EC  |  boards {mats.board_count_total}",
             f"ORDER: {mats.pattern_yards_order:.2f} yd  @ {mats.fabric_width_in:.0f}\"  (nest {round((mats.waste_fabric-1)*100)}%)",
         ],
         PATTERN_BACK_DK,
@@ -1597,7 +1739,7 @@ def render_upholstery_shell_pdf(
     card(
         7.45 * inch, h - 2.95 * inch, '1/2" PLYWOOD',
         [
-            f"Back MODULES: {mats.ply_back_sf:.2f} sf ({mats.module_count_total} × {pb[0]:.1f}\"²)",
+            f"Back BOARDS: {mats.ply_back_sf:.2f} sf ({mats.board_count_total} bars/EC/IC)",
             f"Seat DECKS: {mats.ply_seat_sf:.2f} sf (face)",
             f"Total: {mats.ply_total_sf:.2f} sf",
             f"With {round((mats.waste_ply-1)*100)}% waste: {mats.ply_with_waste_sf:.2f} sf",
@@ -1618,19 +1760,19 @@ def render_upholstery_shell_pdf(
     c.setFont("Helvetica", 7)
     c.drawString(
         1.95 * inch, h - 3.22 * inch,
-        "PATTERN = built basketweave MODULES (Sep 2022 black padded blocks) — ply + foam + fabric.  SEAT = PLAIN large pieces.",
+        "PATTERN = built 4-row basketweave BAR boards (Sep 2022 photo) — ply + foam + fabric.  SEAT = PLAIN large pieces.",
     )
     c.setFillColor(HexColor("#fbd38d"))
     c.setFont("Helvetica-Bold", 6.5)
     c.drawString(
         0.55 * inch, h - 3.42 * inch,
-        f'Fabric EXTRA = foam wrap {mats.module_foam_thk_in:.1f}"/side + staple-on-back {mats.module_staple_in:.1f}"/side (mid of Rafael\'s 2–3"). Order PATTERN from module blanks — NOT face-SF.',
+        f'Fabric EXTRA = foam wrap {mats.module_foam_thk_in:.1f}"/side + staple-on-back {mats.module_staple_in:.1f}"/side (mid of Rafael\'s 2–3"). Order PATTERN from BAR blanks — NOT face-SF.',
     )
     c.setFillColor(HexColor("#cbd5e0"))
     c.setFont("Helvetica", 6.5)
     c.drawString(
         0.55 * inch, h - 3.58 * inch,
-        f'Module face ASSUMED {mats.module_face_in:.1f}" (3 bars × ~2.5"). Confirm vs Sep 2022 ref / site before cutting. See MODULE SCHEDULE sheet.',
+        f'TILE LOCKED {mats.module_face_in:.4f}" (26.75/4). STD bar {mats.bar_face_in[0]:.5f}"×{mats.bar_face_in[1]:.5f}". Full tiles + end closers; U IC specials. See MODULE SCHEDULE.',
     )
 
     # Formulas (compact)
@@ -1666,8 +1808,8 @@ def render_upholstery_shell_pdf(
     # ── Module Schedule ──
     _page_header(
         c, w, h,
-        "MODULE SCHEDULE — BASKETWEAVE BACKS (BUILT MODULES)",
-        f'Each module = 1/2" ply {pb[0]:.1f}"×{pb[1]:.1f}" + foam {mats.module_foam_thk_in:.1f}" + fabric {fb[0]:.1f}"×{fb[1]:.1f}" (wrap+staple)',
+        "MODULE SCHEDULE — 4-ROW BASKETWEAVE BARS + CLOSERS + U CORNERS",
+        f'STD bar = 1/2" ply {pb[0]:.5f}"×{pb[1]:.5f}" + foam {mats.module_foam_thk_in:.1f}" + fabric {fb[0]:.2f}"×{fb[1]:.2f}" (wrap+staple)',
     )
 
     # Table header
@@ -1724,15 +1866,15 @@ def render_upholstery_shell_pdf(
     # Per-module build note
     c.setFillColor(NAVY)
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(0.45 * inch, y, "PER-MODULE BUILD (shop)")
+    c.drawString(0.45 * inch, y, "PER-BAR BUILD (shop)")
     y -= 0.18 * inch
     c.setFont("Helvetica", 7.5)
     c.setFillColor(GRAY)
     for ln in [
-        f'1. Cut 1/2" ply {pb[0]:.1f}" × {pb[1]:.1f}" (module face — ASSUMED from Sep 2022 3-bar groups; confirm before cut).',
-        f'2. Cut foam {mats.module_foam_thk_in:.1f}" thick to same {pb[0]:.1f}" × {pb[1]:.1f}" (or slight oversize per shop practice).',
-        f'3. Cut fabric {fb[0]:.1f}" × {fb[1]:.1f}" = face + 2×(foam {mats.module_foam_thk_in:.1f}" + staple {mats.module_staple_in:.1f}"). Staple to BACK of ply.',
-        "4. Assemble module; install on angled back (lean PROV). Alternate H/V 3-bar orientation to match Sep 2022 / bar tile.",
+        f'1. Cut 1/2" ply STD bar {pb[0]:.5f}" × {pb[1]:.5f}" (LOCKED: 26.75/4 tile / 2 bars — Sep 2022 photo 4 rows; Rafael close-up).',
+        f'2. Cut foam {mats.module_foam_thk_in:.1f}" thick to same bar face (or slight oversize per shop practice).',
+        f'3. Cut fabric {fb[0]:.2f}" × {fb[1]:.2f}" = face + 2×(foam {mats.module_foam_thk_in:.1f}" + staple {mats.module_staple_in:.1f}"). Staple to BACK of ply.',
+        f'4. Walk runs: U {mats.u_full_tiles} full + {mats.u_end_closers} EC ({mats.u_end_closer_w_in:.4f}") + {mats.u_inside_corner_specials} IC; L {mats.l_full_tiles} full + {mats.l_end_closers} EC. Alternate H/V.',
         "5. SEATS: plain fabric large blanks only — see Materials sheet. No modular basketweave on seats.",
     ]:
         c.drawString(0.5 * inch, y, "• " + ln)
@@ -1746,10 +1888,10 @@ def render_upholstery_shell_pdf(
     c.setFillColor(NAVY)
     c.setFont("Helvetica", 8)
     for ln in [
-        f'PATTERN (module fabric): {mats.pattern_yards_order:.2f} yd @ {mats.fabric_width_in:.0f}"  — from {mats.module_count_total} blanks × {fb[0]:.1f}"×{fb[1]:.1f}" + {round((mats.waste_fabric-1)*100)}% nest',
-        f'PLAIN (seat fabric): {mats.plain_yards_order:.2f} yd @ {mats.fabric_width_in:.0f}"  — large wraps, not modules',
-        f'1/2" ply: {mats.ply_sheets} sheets 4×8  — modules {mats.ply_back_sf:.1f} sf + seat decks {mats.ply_seat_sf:.1f} sf + {round((mats.waste_ply-1)*100)}% waste',
-        f'Foam (backs): ~{mats.ply_back_sf:.1f} sf @ {mats.module_foam_thk_in:.1f}" (module faces); seat foam separate @ seat thickness',
+        f'PATTERN (bar fabric): {mats.pattern_yards_order:.2f} yd @ {mats.fabric_width_in:.0f}"  — from {mats.board_count_total} boards (STD+EC+IC) + {round((mats.waste_fabric-1)*100)}% nest',
+        f'PLAIN (seat fabric): {mats.plain_yards_order:.2f} yd @ {mats.fabric_width_in:.0f}"  — large wraps, not bars',
+        f'1/2" ply: {mats.ply_sheets} sheets 4×8  — boards {mats.ply_back_sf:.1f} sf + seat decks {mats.ply_seat_sf:.1f} sf + {round((mats.waste_ply-1)*100)}% waste',
+        f'Foam (backs): ~{mats.ply_back_sf:.1f} sf @ {mats.module_foam_thk_in:.1f}" (bar faces); seat foam separate @ seat thickness',
     ]:
         c.drawString(0.5 * inch, y, "• " + ln)
         y -= 0.16 * inch
@@ -1759,7 +1901,7 @@ def render_upholstery_shell_pdf(
     c.setFont("Helvetica", 7)
     c.drawString(
         0.45 * inch, y,
-        "Face-SF pattern yardage is NOT the order basis. Modular blanks (ply+foam+fabric with wrap/staple) are. Confirm module size before fab.",
+        "Face-SF pattern yardage is NOT the order basis. Bar blanks (ply+foam+fabric with wrap/staple) are. Tile locked to Sep 2022 photo (4 rows / 6.6875\").",
     )
     finish("Module Schedule")
 
@@ -1801,10 +1943,24 @@ def render_upholstery_shell_pdf(
         "materials": {
             "fabric_width_in": mats.fabric_width_in,
             "waste_fabric_pct": round((mats.waste_fabric - 1) * 100),
-            "construction": "modular_basketweave_backs",
+            "construction": "modular_basketweave_bars_4row",
             "module_face_in": mats.module_face_in,
+            "tile_face_in": mats.module_face_in,
+            "tile_rows": mats.tile_rows,
+            "bar_face_in": list(mats.bar_face_in),
             "module_foam_thk_in": mats.module_foam_thk_in,
             "module_staple_in": mats.module_staple_in,
+            "u_full_tiles": mats.u_full_tiles,
+            "u_end_closer_w_in": mats.u_end_closer_w_in,
+            "u_end_closers": mats.u_end_closers,
+            "u_inside_corner_specials": mats.u_inside_corner_specials,
+            "l_full_tiles": mats.l_full_tiles,
+            "l_end_closer_w_in": mats.l_end_closer_w_in,
+            "l_end_closers": mats.l_end_closers,
+            "u_std_bars": mats.u_std_bars,
+            "l_std_bars": mats.l_std_bars,
+            "std_bar_count_total": mats.std_bar_count_total,
+            "board_count_total": mats.board_count_total,
             "u_module_count": mats.u_module_count,
             "l_module_count": mats.l_module_count,
             "module_count_total": mats.module_count_total,
@@ -1848,6 +2004,8 @@ def render_upholstery_shell_pdf(
         "has_materials": True,
         "has_module_schedule": True,
         "modular_basketweave": True,
+        "photo_locked_4row": True,
+        "std_bar_face_in": list(mats.bar_face_in),
         "pattern_backs_only": True,
         "plain_seats_only": True,
     }
