@@ -601,7 +601,11 @@ def _iso(x, y, z, ox, oy, s):
 
 
 def lean_angle_deg(lean_in: float, net_back_h: float) -> float:
-    """Approx back pitch in degrees from vertical."""
+    """Back pitch in degrees from vertical: atan(lean / net_back_height).
+
+    Always pass net back height (e.g. U 26.75"), never shell_h − seat_h AFF
+    (that understates the hypotenuse and inflates the angle ~14° vs ~6.4°).
+    """
     if net_back_h <= 0:
         return 0.0
     return math.degrees(math.atan(lean_in / net_back_h))
@@ -1453,16 +1457,19 @@ def _draw_u_iso(c, origin_x, origin_y, area_w, area_h, u: UShellSpec, colored: b
     # ── PLAN / RUN DIMS — short shop labels on edges (no "closes …" clutter) ──
     _iso_dim(c, P(bt - lean, left_y0, z_top), P(bt - lean, side_max, z_top),
              f'OUTER L {AL:.2f}"', NAVY, offset=14, bold=True, font_size=6.5)
+    # OUTER back on top edge. Offset NEGATIVE: +offset collided with INNER (higher-z
+    # edge sits lower on screen; +perp pulled OUTER up into INNER).
     _iso_dim(c, P(D, side_max - bt + lean, z_top), P(D + W, side_max - bt + lean, z_top),
-             f'OUTER {W:.2f}"', NAVY, offset=16, bold=True, font_size=6.5)
+             f'OUTER {W:.2f}"', NAVY, offset=-22, bold=True, font_size=6.5)
     # OUTER R / INNER R: dim the BACK half of the arm so labels stay clear of tip section stack
     _iso_dim(c, P(total_w - bt + lean, right_y0 + AR * 0.45, z_top), P(total_w - bt + lean, side_max, z_top),
              f'OUTER R {AR:.2f}"', NAVY, offset=-18, bold=True, font_size=6.5)
 
     _iso_dim(c, P(D, left_y0, z_seat), P(D, side_max - D, z_seat),
              f'INNER L {u.inner_arm_left:.2f}"', GRAY, offset=-13, font_size=6)
-    _iso_dim(c, P(D, side_max - D, z_seat), P(total_w - D, side_max - D, z_seat),
-             f'INNER {u.inner_back:.2f}"', GRAY, offset=-14, font_size=6)
+    # INNER back = outer − 2×seat_depth (clear span). Offset POSITIVE away from OUTER.
+    _iso_dim(c, P(D + D, side_max - D, z_seat), P(total_w - 2 * D, side_max - D, z_seat),
+             f'INNER {u.inner_back:.2f}"', GRAY, offset=18, font_size=6)
     _iso_dim(c, P(total_w - D, right_y0 + u.inner_arm_right * 0.45, z_seat),
              P(total_w - D, side_max - D, z_seat),
              f'INNER R {u.inner_arm_right:.2f}"', GRAY, offset=15, font_size=6)
@@ -1502,7 +1509,7 @@ def _draw_u_iso(c, origin_x, origin_y, area_w, area_h, u: UShellSpec, colored: b
     c.setFillColor(PROV)
     c.setFont("Helvetica-Bold", 6.5)
     c.drawString(origin_x + 8, origin_y + 6,
-                 f'seat H {seat_h:.1f}" AFF PROV · foam {foam:.1f}" mat\'l · lean {lean:.1f}" PROV (~{lean_angle_deg(lean, max(shell_h - seat_h, 1)):.0f}°) — confirm on site')
+                 f'seat H {seat_h:.1f}" AFF PROV · foam {foam:.1f}" mat\'l · lean {lean:.1f}" PROV (~{lean_angle_deg(lean, u.net_back_height):.1f}°) — confirm on site')
 
 
 def _draw_l_iso(c, origin_x, origin_y, area_w, area_h, L: LShellSpec, colored: bool = True):
