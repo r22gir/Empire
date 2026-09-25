@@ -1,6 +1,6 @@
 """Max bridge: banquette U/L → upholstery-on-shell sheets.
 
-Acceptance: Marleys_EST-2026-272_UPHOLSTERY_CORRECT.pdf
+Acceptance: Marleys_EST-2026-272_UPHOLSTERY_CORRECT.pdf (ortho TOP/FRONT/SIDE; iso parked)
 
 Field semantics (INCHES):
   back_length / back_outer / width → outer back run
@@ -239,6 +239,7 @@ def render_ul_banquette_pdf(
     summary = render_upholstery_shell_pdf(
         out_path=out_path, u=u_spec, L=l_spec, meta=meta,
         include_u=True, include_l=True,
+        include_iso=False,  # PARKED — Rafael 2026-09-24: ortho TOP/FRONT/SIDE first
     )
 
     mats = summary.get("materials") or {}
@@ -249,7 +250,7 @@ def render_ul_banquette_pdf(
         f"(not footprint width {u_spec.footprint_width:.2f}\").",
         f"U elev: shell {u_spec.shell_height}\"; net back {u_spec.net_back_height}\" sits ON "
         f"{u_spec.seat_foam}\" foam; seat H {u_spec.seat_height}\" AFF PROV (foam ≠ seat H).",
-        "Sheets: plan / elev / iso U+L / client mockup / schedule / materials.",
+        "Sheets: TOP/FRONT/SIDE U+L (iso PARKED) / client mockup / schedule / materials.",
         "PATTERN fabric = BACKS only; PLAIN fabric = SEATS.",
         f"Fabric order: PATTERN {mats.get('pattern_yards_order')} yd + PLAIN {mats.get('plain_yards_order')} yd "
         f"@ {mats.get('fabric_width_in')}\" (15% waste).",
@@ -299,7 +300,7 @@ def render_ul_banquette_pdf(
         "sheets": summary["sheets"],
         "sheet_count": summary.get("sheet_count"),
         "materials": summary.get("materials"),
-        "has_isometric": True,
+        "has_isometric": False,  # parked for discussion pack
         "has_client_mockup": True,
         "has_materials": True,
         "pattern_backs_only": True,

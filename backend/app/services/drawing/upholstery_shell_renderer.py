@@ -1,13 +1,17 @@
 """Upholstery-on-existing-shell banquette sheets (U / L).
 
-Acceptance: Marleys EST-2026-272 — plan / elev / iso / mockup / materials
-with PATTERN BACK vs PLAIN SEAT called out (McLean / gold-standard vibe).
+Acceptance: Marleys EST-2026-272 — orthographic pack first:
+  TOP (plan) / FRONT / SIDE for U and L, then mockup / schedule / materials.
+Isometric is PARKED for discussion packs (omit by default; closed-face iso
+rule remains in EMPIRE_DRAWING_STANDARD / system_prompt for later).
 
 This is NOT the millwork/CNC bench_renderer. No wood frame, ribs,
-dados, or 24" auto-slice cushion heroes. Plan = shell outline + seat
-cushion footprint; elevation = shell height vs net back on 2" foam;
-iso = CLOSED-FACE shell with dim chains (OUTER+INNER+DEPTH / H+D+seatH_AFF+lean+foam_matl); mockup = client color; materials = fabric + ply.
-Seat H = AFF plane (~18" PROV), NEVER foam thickness (foam is distinct mat'l dim).
+dados, or 24" auto-slice cushion heroes.
+  TOP  = shell outline + seat cushion footprint (outer/inner/depth)
+  SIDE = elevation with video dim chain: overall H, overall D, seat H AFF,
+         seat depth, lean (foam = distinct mat'l, NEVER labeled as seat H)
+  FRONT = face view (pattern on back / plain seat)
+Seat H = AFF plane (~18" PROV), NEVER foam thickness.
 """
 from __future__ import annotations
 
@@ -177,7 +181,7 @@ class SheetMeta:
         "DRAFT. BACK = basketweave bar 6.5×13 / tile 13×13 (2 bars H/V) + lean/pitch PROV; SEAT = plain. Height leftover 0.75\" OPEN."
     )
     client: str = "Dave Romero / Marley's Hyattsville"
-    rev: str = "G"
+    rev: str = "H-ORTHO"
     drawn_by: str = "MAX AI / Empire Workroom"
     date_str: str = ""
 
@@ -905,62 +909,67 @@ def _draw_u_plan(c, ox, oy, scale, u: UShellSpec, colored: bool = False):
 
 
 def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = False):
-    """SIDE PROFILE elevation — shows back LEAN/PITCH (not a flat vertical shell only).
+    """SIDE elevation — Rafael video dim chain.
 
-    Layout inside width_pts:
-      [ side profile with lean ] ........ [ optional face strip if room ]
+    Dims (required): overall H, overall D, seat H AFF, seat depth, lean.
+    Foam is a distinct material callout — NEVER drawn/labeled as seat H.
+    Seat plane at seat_height AFF; back rises from seat plane to shell top with lean.
     """
     s = scale_h
-    H = u.shell_height * s
-    NET = u.net_back_height * s
-    FOAM = u.seat_foam * s
-    LEAN = u.back_lean_in * s
-    DEPTH = u.seat_depth * s
-    BT = min(3.0, u.seat_depth * 0.2) * s  # visual back thickness
-    ang = lean_angle_deg(u.back_lean_in, u.net_back_height)
+    H = u.shell_height
+    seat_h = u.seat_height
+    foam = u.seat_foam
+    lean = u.back_lean_in
+    depth = u.seat_depth
+    bt = min(3.0, depth * 0.18)  # schematic back thickness
+    overall_d = depth + bt
+    ang = lean_angle_deg(lean, max(0.1, H - seat_h))
 
-    # Scale depth so profile fits left ~45% of width_pts
-    profile_w = min(width_pts * 0.48, (DEPTH + LEAN + BT + 40))
-    # Re-derive scale for depth axis to fit profile_w
-    depth_need = DEPTH + LEAN + BT + 8
-    ds = profile_w / depth_need
-    # Prefer height scale s; depth uses ds (may differ — schematic)
-    Ds = u.seat_depth * ds
-    Ls = u.back_lean_in * ds
-    BTs = min(3.0, u.seat_depth * 0.2) * ds
-    Hs, NETs, FOAMs = H, NET, FOAM
-
-    # Wall / shell back plane at right of profile
-    wall_x = ox + Ds + Ls + BTs + 4
+    # Fit depth+lean into ~92% of width_pts; height uses scale_h
+    ds = (width_pts * 0.92) / (overall_d + lean + 4)
+    # Prefer shared visual scale: use min so both axes fit
+    Hs = H * s
+    # If height scale makes depth too wide, shrink both
+    if overall_d * s + lean * s + 20 > width_pts:
+        s = (width_pts * 0.90) / (overall_d + lean + 2)
+        Hs = H * s
+    ds = s
+    Ds = depth * ds
+    BTs = bt * ds
+    Ls = lean * ds
+    seatHs = seat_h * s
+    foams = foam * s
+    wall_x = ox + Ds + BTs + Ls + 6
     floor_y = oy
+    front_x = wall_x - BTs - Ds
 
-    # Existing shell outline (vertical box against wall)
-    shell_left = wall_x - (Ds + BTs + 6)
+    # Shell / wall band (against wall, full H)
     c.setFillColor(LT_BLUE)
     c.setStrokeColor(SHELL)
     c.setLineWidth(1.4)
-    c.rect(shell_left, floor_y, wall_x - shell_left, Hs, fill=1, stroke=1)
+    c.rect(front_x - 4, floor_y, (wall_x + 4) - (front_x - 4), Hs, fill=1, stroke=1)
 
-    # Seat cushion — plain, horizontal
-    seat_x0 = wall_x - BTs - Ds
+    # Seat volume — closed face from floor to seat H AFF (plain)
     seat_fill = PLAIN_SEAT if colored else LT_FOAM
     c.setFillColor(seat_fill)
     c.setStrokeColor(PLAIN_SEAT_DK if colored else CUSH)
-    c.setLineWidth(1.0)
-    c.rect(seat_x0, floor_y, Ds, FOAMs, fill=1, stroke=1)
+    c.setLineWidth(1.1)
+    c.rect(front_x, floor_y, Ds, seatHs, fill=1, stroke=1)
+    # Foam band at top of seat (mat'l thickness only — not the AFF dim)
+    foam_y0 = floor_y + max(0.0, seatHs - foams)
+    c.setFillColor(LT_FOAM if not colored else HexColor("#3a3a3a"))
+    c.setStrokeColor(CUSH)
+    c.setLineWidth(0.7)
+    c.rect(front_x, foam_y0, Ds, foams, fill=1, stroke=1)
 
-    # Leaning back cushion — parallelogram:
-    # bottom front at seat rear (wall_x - BTs), bottom back at wall_x
-    # top front set back by lean toward wall: (wall_x - BTs + Ls)
-    # top back at wall_x + (small) — keep against wall
-    bf_x = wall_x - BTs          # bottom front (inner face at seat)
-    bb_x = wall_x                # bottom back (against wall)
+    # Leaning back — from seat plane to shell top
+    bf_x = wall_x - BTs          # bottom front (at seat rear)
+    bb_x = wall_x                # bottom back (wall)
     tf_x = wall_x - BTs + Ls     # top front (leaned toward wall)
-    tb_x = wall_x + Ls * 0.15    # top back slightly past (reads as lean)
-    z0 = floor_y + FOAMs
-    z1 = floor_y + FOAMs + NETs
+    tb_x = wall_x + Ls * 0.12
+    z0 = floor_y + seatHs
+    z1 = floor_y + Hs
     back_pts = [(bf_x, z0), (bb_x, z0), (tb_x, z1), (tf_x, z1)]
-
     if colored:
         _basketweave_poly(c, back_pts, tile=8.5)
         c.setStrokeColor(PATTERN_BACK_DK)
@@ -972,7 +981,6 @@ def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = F
             p.lineTo(*pt)
         p.close()
         c.setStrokeColor(CUSH)
-        c.setLineWidth(1.0)
         c.drawPath(p, fill=1, stroke=1)
         c.setStrokeColor(CUSH)
     c.setLineWidth(1.2)
@@ -983,29 +991,35 @@ def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = F
     p.close()
     c.drawPath(p, fill=0, stroke=1)
 
-    # Lean guide line + dimension
+    # Lean guide
     c.setStrokeColor(PROV)
     c.setDash(3, 2)
     c.setLineWidth(0.8)
-    c.line(bf_x, z0, bf_x, z1)  # vertical reference at seat-back
+    c.line(bf_x, z0, bf_x, z1)
     c.setDash()
-    c.setStrokeColor(PROV)
     c.setLineWidth(1.0)
     c.line(bf_x, z1 + 6, tf_x, z1 + 6)
     c.line(bf_x, z1 + 3, bf_x, z1 + 9)
     c.line(tf_x, z1 + 3, tf_x, z1 + 9)
     c.setFillColor(PROV)
-    c.setFont("Helvetica-Bold", 7)
-    c.drawCentredString((bf_x + tf_x) / 2, z1 + 10, f'lean {u.back_lean_in:.1f}" PROV')
+    c.setFont("Helvetica-Bold", 7.5)
+    c.drawCentredString((bf_x + tf_x) / 2, z1 + 12, f'lean {lean:.1f}" PROV')
     c.setFont("Helvetica", 6.5)
-    c.drawCentredString((bf_x + tf_x) / 2, z1 + 20, f'≈ {ang:.1f}° from vertical')
+    c.drawCentredString((bf_x + tf_x) / 2, z1 + 22, f'≈ {ang:.1f}° from vertical')
 
-    # Dims: full height, seat foam, net back, seat depth, overall depth
-    _dim_v(c, shell_left - 14, floor_y, floor_y + Hs, f'{u.shell_height:.2f}" full H')
-    _dim_v(c, wall_x + 16, floor_y + FOAMs, floor_y + FOAMs + NETs, f'{u.net_back_height:.2f}" net back')
-    _dim_v(c, seat_x0 - 10, floor_y, floor_y + FOAMs, f'{u.seat_foam:.1f}"')
-    _dim_h(c, seat_x0, seat_x0 + Ds, floor_y - 12, f'{u.seat_depth:.2f}" seat depth')
-    _dim_h(c, seat_x0, wall_x, floor_y - 26, f'{u.seat_depth + min(3.0, u.seat_depth * 0.2):.1f}" overall depth (schematic)')
+    # ── Video dim chain (SIDE) ─────────────────────────────────────
+    # overall H
+    _dim_v(c, front_x - 22, floor_y, floor_y + Hs, f'{H:.2f}" overall H')
+    # seat H AFF (PROV) — NOT foam
+    _dim_v(c, front_x - 8, floor_y, floor_y + seatHs, f'{seat_h:.1f}" seat H AFF PROV', PROV)
+    # seat depth
+    _dim_h(c, front_x, front_x + Ds, floor_y - 12, f'{depth:.2f}" seat depth')
+    # overall D
+    _dim_h(c, front_x, wall_x, floor_y - 26, f'{overall_d:.1f}" overall D')
+    # foam mat'l callout (distinct)
+    c.setFillColor(CUSH)
+    c.setFont("Helvetica", 6.5)
+    c.drawString(front_x + 3, foam_y0 + foams / 2 - 2, f'foam {foam:.1f}" mat\'l (≠ seat H)')
 
     # Labels
     if colored:
@@ -1015,58 +1029,160 @@ def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = F
         mid_y = (z0 + z1) / 2
         c.drawCentredString(mid_x, mid_y + 4, "BASKETWEAVE")
         c.setFont("Helvetica", 6)
-        c.drawCentredString(mid_x, mid_y - 6, "angled BACK only")
+        c.drawCentredString(mid_x, mid_y - 6, "angled BACK")
         c.setFillColor(HexColor("#bbbbbb"))
         c.setFont("Helvetica-Bold", 7)
-        c.drawCentredString(seat_x0 + Ds / 2, floor_y + FOAMs / 2 - 2, "PLAIN SEAT")
+        c.drawCentredString(front_x + Ds / 2, floor_y + seatHs * 0.45, "PLAIN SEAT")
     else:
         c.setFillColor(GRAY)
         c.setFont("Helvetica", 7)
-        c.drawString(seat_x0 + 4, floor_y + FOAMs / 2 - 3, f'{u.seat_foam:.1f}" foam + Dacron')
-        c.drawString(bf_x + 4, z0 + NETs * 0.55, "net back (leans)")
+        c.drawString(front_x + 4, floor_y + seatHs * 0.4, "seat (plain)")
+        c.drawString(bf_x + 4, z0 + (z1 - z0) * 0.55, "back (leans)")
 
     c.setFillColor(NAVY)
     c.setFont("Helvetica-Bold", 8)
-    c.drawString(ox, floor_y + Hs + 14, "SIDE PROFILE — BACK LEAN / PITCH (from Rafael help-video sketch)")
+    c.drawString(ox, floor_y + Hs + 28, "SIDE — VIDEO DIM CHAIN")
     c.setFont("Helvetica", 6.5)
     c.setFillColor(PROV)
     c.drawString(
-        ox, floor_y + Hs + 4,
-        f'Lean {u.back_lean_in:.1f}" over {u.net_back_height:.2f}" net ≈ {ang:.1f}° — PROVISIONAL until site measure. Pattern on angled back only; seat plain.',
+        ox, floor_y + Hs + 16,
+        f'H {H:.2f}" · D {overall_d:.1f}" · seat H {seat_h:.1f}" AFF PROV · seat depth {depth:.2f}" · lean {lean:.1f}" PROV · foam {foam:.1f}" mat\'l',
+    )
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 6)
+    c.drawString(
+        ox, floor_y + Hs + 6,
+        f'Net back cushion order H {u.net_back_height:.2f}" (materials). Visible face above seat ≈ {H - seat_h:.2f}". Confirm lean on site.',
     )
 
-    # Right side: small FRONT elev strip for pattern readability (vertical face of back)
-    face_x = ox + width_pts * 0.58
-    face_w = width_pts * 0.38
-    c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", 7.5)
-    c.drawString(face_x, floor_y + Hs + 14, "FRONT FACE (pattern view)")
+
+def _draw_u_front(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = False):
+    """FRONT face view — pattern on back / plain seat. Readable across back run."""
+    s = scale_h
+    H = u.shell_height
+    seat_h = u.seat_height
+    foam = u.seat_foam
+    W = u.back_outer
+    # Fit width into width_pts
+    ws = width_pts / W
+    # Height scale independent; clamp so Hs fits reasonably
+    Hs = H * s
+    if Hs > 5.2 * inch:
+        s = (5.2 * inch) / H
+        Hs = H * s
+    seatHs = seat_h * s
+    foams = foam * s
+    Ws = W * ws
+    floor_y = oy
+    x0 = ox
+
+    # Shell outline
     c.setFillColor(LT_BLUE)
     c.setStrokeColor(SHELL)
-    c.setLineWidth(1.2)
-    c.rect(face_x, floor_y, face_w, Hs, fill=1, stroke=1)
-    if colored:
-        _basketweave_rect(c, face_x + 2, floor_y + FOAMs, face_w - 4, NETs, tile=max(4.0, NETs * (TILE_FACE_IN / 26.75)))
-        c.setStrokeColor(PATTERN_BACK_DK)
-        c.rect(face_x + 2, floor_y + FOAMs, face_w - 4, NETs, fill=0, stroke=1)
-    else:
-        c.setFillColor(LT_PEACH)
-        c.setStrokeColor(CUSH)
-        c.rect(face_x + 2, floor_y + FOAMs, face_w - 4, NETs, fill=1, stroke=1)
+    c.setLineWidth(1.3)
+    c.rect(x0, floor_y, Ws, Hs, fill=1, stroke=1)
+
+    # Plain seat band (floor to seat H)
     seat_fill = PLAIN_SEAT if colored else LT_FOAM
     c.setFillColor(seat_fill)
     c.setStrokeColor(PLAIN_SEAT_DK if colored else CUSH)
-    c.rect(face_x + 6, floor_y, face_w - 12, FOAMs, fill=1, stroke=1)
+    c.rect(x0 + 2, floor_y, Ws - 4, seatHs, fill=1, stroke=1)
+    # Foam mat'l band at seat top
+    c.setFillColor(LT_FOAM if not colored else HexColor("#3a3a3a"))
+    c.setStrokeColor(CUSH)
+    c.setLineWidth(0.6)
+    c.rect(x0 + 2, floor_y + seatHs - foams, Ws - 4, foams, fill=1, stroke=1)
+
+    # Pattern back face (seat plane to shell top)
+    back_h = Hs - seatHs
+    if colored:
+        _basketweave_rect(c, x0 + 2, floor_y + seatHs, Ws - 4, back_h, tile=max(5.0, back_h * (13.0 / 26.75)))
+        c.setStrokeColor(PATTERN_BACK_DK)
+        c.setLineWidth(1.0)
+        c.rect(x0 + 2, floor_y + seatHs, Ws - 4, back_h, fill=0, stroke=1)
+    else:
+        c.setFillColor(LT_PEACH)
+        c.setStrokeColor(CUSH)
+        c.rect(x0 + 2, floor_y + seatHs, Ws - 4, back_h, fill=1, stroke=1)
+
+    # Arm end marks (asymmetric callouts)
+    c.setStrokeColor(SHELL)
+    c.setDash(2, 2)
+    c.setLineWidth(0.7)
+    # indicate wings as tick marks at ends
+    c.line(x0, floor_y + Hs + 4, x0, floor_y + Hs + 14)
+    c.line(x0 + Ws, floor_y + Hs + 4, x0 + Ws, floor_y + Hs + 14)
+    c.setDash()
+
+    # Dims
+    _dim_h(c, x0, x0 + Ws, floor_y + Hs + 18, f'{W:.2f}" back outer (FRONT)')
+    _dim_v(c, x0 - 16, floor_y, floor_y + Hs, f'{H:.2f}" overall H')
+    _dim_v(c, x0 + Ws + 12, floor_y, floor_y + seatHs, f'{seat_h:.1f}" seat H AFF PROV', PROV)
+
+    # Labels
     if colored:
         c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 7)
-        c.drawCentredString(face_x + face_w / 2, floor_y + FOAMs + NETs / 2, "BASKETWEAVE")
+        c.setFont("Helvetica-Bold", 9)
+        c.drawCentredString(x0 + Ws / 2, floor_y + seatHs + back_h * 0.55, "BASKETWEAVE BACK")
+        c.setFont("Helvetica", 7)
+        c.drawCentredString(x0 + Ws / 2, floor_y + seatHs + back_h * 0.40, "bar 6.5×13 / tile 13×13 · Sep 2022 match")
         c.setFillColor(HexColor("#bbbbbb"))
-        c.drawCentredString(face_x + face_w / 2, floor_y + FOAMs / 2 - 2, "PLAIN")
-    c.setFillColor(GRAY)
-    c.setFont("Helvetica", 6)
-    c.drawString(face_x, floor_y - 12, "Front face is schematic — lean shown in SIDE PROFILE at left.")
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(x0 + Ws / 2, floor_y + seatHs * 0.42, "PLAIN SEAT")
+    else:
+        c.setFillColor(GRAY)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(x0 + Ws / 2, floor_y + seatHs + back_h * 0.5, "PATTERN BACK")
+        c.drawCentredString(x0 + Ws / 2, floor_y + seatHs * 0.4, "PLAIN SEAT")
 
+    c.setFillColor(NAVY)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(x0, floor_y + Hs + 36, "FRONT — FACE VIEW (pattern on back / plain seat)")
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 6.5)
+    c.drawString(
+        x0, floor_y + Hs + 26,
+        f'Arms asymmetric L {u.arm_left:.2f}" / R {u.arm_right:.2f}" (shown in TOP). Foam {foam:.1f}" mat\'l ≠ seat H. Lean shown in SIDE.',
+    )
+
+
+def _draw_l_side(c, ox, oy, scale_h, width_pts, L: LShellSpec, colored: bool = False):
+    """L SIDE elevation — same video dim chain as U (provisional)."""
+    # Reuse U side geometry via a thin adapter
+    u_like = UShellSpec(
+        back_outer=L.leg_long,
+        arm_left=L.leg_short,
+        arm_right=L.leg_short,
+        seat_depth=L.seat_depth,
+        shell_height=L.shell_height,
+        net_back_height=L.net_back,
+        seat_height=L.seat_height,
+        seat_foam=L.seat_foam,
+        back_lean_in=L.back_lean_in,
+    )
+    _draw_u_elev(c, ox, oy, scale_h, width_pts, u_like, colored=colored)
+    c.setFillColor(PROV)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(ox, oy - 42, f'L PROVISIONAL — depth {L.seat_depth:.1f}" / H {L.shell_height:.1f}" / seat H {L.seat_height:.1f}" AFF — lock to U before fab')
+
+
+def _draw_l_front(c, ox, oy, scale_h, width_pts, L: LShellSpec, colored: bool = False):
+    """L FRONT — long-leg face (pattern back / plain seat), provisional."""
+    u_like = UShellSpec(
+        back_outer=L.leg_long,
+        arm_left=L.leg_short,
+        arm_right=L.leg_short,
+        seat_depth=L.seat_depth,
+        shell_height=L.shell_height,
+        net_back_height=L.net_back,
+        seat_height=L.seat_height,
+        seat_foam=L.seat_foam,
+        back_lean_in=L.back_lean_in,
+    )
+    _draw_u_front(c, ox, oy, scale_h, width_pts, u_like, colored=colored)
+    c.setFillColor(PROV)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(ox, oy - 42, f'L FRONT along long leg {L.leg_long:.3f}" — PROVISIONAL; short leg {L.leg_short:.3f}" in TOP')
 
 
 def _draw_l_plan(c, ox, oy, scale, L: LShellSpec, colored: bool = False):
@@ -1694,9 +1810,10 @@ def render_upholstery_shell_pdf(
     meta: Optional[SheetMeta] = None,
     include_u: bool = True,
     include_l: bool = True,
+    include_iso: bool = False,
     fabric_width_in: float = FABRIC_WIDTH_DEFAULT,
 ) -> dict:
-    """Write expanded upholstery-on-shell PDF (plan/elev/iso/mockup/materials)."""
+    """Write upholstery-on-shell PDF — TOP/FRONT/SIDE ortho first; iso omitted by default."""
     u = u or UShellSpec()
     L = L or LShellSpec()
     meta = meta or SheetMeta()
@@ -1704,13 +1821,18 @@ def render_upholstery_shell_pdf(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     mats = compute_materials(u, L, fabric_width_in=fabric_width_in)
 
-    # Sheet roster
+    # Sheet roster — TOP / FRONT / SIDE ortho lead; iso PARKED (omit by default)
     roster = []
     if include_u:
-        roster += ["U Plan", "U Elevation", "U Isometric"]
+        roster += ["U Top (Plan)", "U Front", "U Side"]
     if include_l:
-        roster += ["L Plan", "L Isometric"]
+        roster += ["L Top (Plan)", "L Front", "L Side"]
     roster += ["Client Mockup", "Cushion Schedule", "Materials", "Module Schedule"]
+    if include_iso:
+        if include_u:
+            roster.append("U Isometric (DEFERRED)")
+        if include_l:
+            roster.append("L Isometric (DEFERRED)")
     total = len(roster)
     sheets_done = []
 
@@ -1725,12 +1847,12 @@ def render_upholstery_shell_pdf(
         c.showPage()
         sheets_done.append(title_short)
 
-    # ── U Plan ──
+    # ── U TOP (Plan) ──
     if include_u:
         _page_header(
             c, w, h,
-            "U BANQUETTE — PLAN",
-            "Upholstery on existing shell · asymmetric arms · developed outer run is the lf takeoff",
+            "U BANQUETTE — TOP (PLAN)",
+            "Upholstery on existing shell · asymmetric arms · outer / inner / seat depth · developed outer run = lf takeoff",
         )
         scale = (8.6 * inch) / u.back_outer
         _draw_u_plan(c, 0.85 * inch, h - 1.25 * inch, scale, u)
@@ -1744,56 +1866,56 @@ def render_upholstery_shell_pdf(
         c.setFont("Helvetica", 7.5)
         c.drawString(
             0.45 * inch, 1.50 * inch,
-            "Blue = shell/wall. Orange dashed = seat footprint. Opening toward bottom. BOTH arms drawn (never max). Units: inches.",
+            "TOP/PLAN: Blue = shell/wall. Orange dashed = seat footprint. Opening toward bottom. BOTH arms drawn (never max). Units: inches.",
         )
-        finish("U Plan")
+        finish("U Top (Plan)")
 
-        # ── U Elevation (side profile w/ lean + front face) ──
+        # ── U FRONT ──
         _page_header(
             c, w, h,
-            "U BANQUETTE — ELEVATION (SIDE PROFILE + LEAN)",
-            f'Net back {u.net_back_height}" on {u.seat_foam}" foam · lean {u.back_lean_in:.1f}" PROV (~{lean_angle_deg(u.back_lean_in, u.net_back_height):.1f}°) · pattern on angled back only',
+            "U BANQUETTE — FRONT (FACE VIEW)",
+            f'Pattern on back / plain seat · shell H {u.shell_height}" · seat H {u.seat_height:.1f}" AFF PROV · foam {u.seat_foam:.1f}" mat\'l (≠ seat H)',
         )
-        _draw_u_elev(c, 0.55 * inch, 2.05 * inch, 7.6, 7.0 * inch, u, colored=True)
+        _draw_u_front(c, 0.55 * inch, 1.85 * inch, 8.4, 9.5 * inch, u, colored=True)
+        _legend(c, w - 2.55 * inch, h - 1.15 * inch, [
+            (PATTERN_BACK_BAR, "Basketweave BACK"),
+            (PLAIN_SEAT, "Plain SEAT"),
+            (PROV, "Seat H AFF provisional"),
+        ])
+        c.setFillColor(GRAY)
+        c.setFont("Helvetica", 7.5)
+        c.drawString(
+            0.45 * inch, 1.48 * inch,
+            "FRONT = face of back run. Lean / pitch shown on SIDE sheet. Arms asymmetric — see TOP. Not a wood-frame section.",
+        )
+        finish("U Front")
+
+        # ── U SIDE ──
+        _page_header(
+            c, w, h,
+            "U BANQUETTE — SIDE (ELEVATION)",
+            f'Video dim chain: overall H · overall D · seat H AFF · seat depth · lean  |  lean {u.back_lean_in:.1f}" PROV',
+        )
+        _draw_u_elev(c, 0.55 * inch, 2.05 * inch, 8.0, 6.6 * inch, u, colored=True)
         _legend(c, 7.7 * inch, 6.6 * inch, [
             (PATTERN_BACK_BAR, "Basketweave BACK (leaned)"),
-            (PLAIN_SEAT, "Plain SEAT (no lean)"),
-            (PROV, "Lean / provisional"),
+            (PLAIN_SEAT, "Plain SEAT"),
+            (PROV, "Lean / seat H provisional"),
         ])
         _video_dim_checklist(c, 7.55 * inch, 4.55 * inch, u, L)
         c.setFillColor(GRAY)
         c.setFont("Helvetica", 7.5)
         c.drawString(
             0.45 * inch, 1.50 * inch,
-            "SIDE PROFILE shows back lean/pitch (Rafael help-video). FRONT FACE strip shows basketweave. Not a wood-frame section. Confirm lean on site.",
+            "SIDE dim chain from Rafael help-video: overall H, overall D, seat H AFF, seat depth, lean. Foam is mat'l only — never labeled as seat H. Confirm lean on site.",
         )
-        finish("U Elevation")
-
-        # ── U Isometric ──
-        _page_header(
-            c, w, h,
-            "U BANQUETTE — ISOMETRIC",
-            "30° CLOSED-FACE iso · dim chains on edges · BASKETWEAVE BACK / PLAIN SEAT · lean PROV",
-        )
-        _draw_u_iso(c, 0.6 * inch, 1.55 * inch, w - 1.2 * inch, h - 3.2 * inch, u, colored=True)
-        _legend(c, 0.5 * inch, h - 1.1 * inch, [
-            (PATTERN_BACK_BAR, "BASKETWEAVE BACK (Sep 2022)"),
-            (PLAIN_SEAT, "PLAIN SEAT (solid)"),
-        ])
-        c.setFillColor(GRAY)
-        c.setFont("Helvetica", 7.5)
-        c.drawString(
-            0.45 * inch, 1.48 * inch,
-            f'CLOSED-FACE iso: plan OUTER+INNER+DEPTH; section H + D + seat H AFF + lean + foam(mat\'l) distinct. '
-            f'seat H {u.seat_height:.1f}" AFF PROV ≠ foam {u.seat_foam:.1f}". Lean {u.back_lean_in:.1f}" PROV. Arms asymmetric ({u.arm_left} / {u.arm_right}).',
-        )
-        finish("U Isometric")
+        finish("U Side")
 
     if include_l:
-        # ── L Plan ──
+        # ── L TOP (Plan) ──
         _page_header(
             c, w, h,
-            "L BANQUETTE — PLAN (provisional depth/height)",
+            "L BANQUETTE — TOP (PLAN) (provisional depth/height)",
             "Lock L depth/height to U before fabrication · developed run labeled",
         )
         scale_l = (7.2 * inch) / L.leg_long
@@ -1809,21 +1931,36 @@ def render_upholstery_shell_pdf(
             0.45 * inch, 1.50 * inch,
             f'PROVISIONAL: L depth {L.seat_depth}" / height {L.shell_height}" / seat {L.seat_height}" AFF — lock to U before fab.',
         )
-        finish("L Plan")
+        finish("L Top (Plan)")
 
-        # ── L Isometric ──
+        # ── L FRONT ──
         _page_header(
             c, w, h,
-            "L BANQUETTE — ISOMETRIC (provisional)",
-            "30° CLOSED-FACE iso · dim chains on edges · PATTERN BACK / PLAIN SEAT · depth/height PROV",
+            "L BANQUETTE — FRONT (FACE VIEW) (provisional)",
+            f'Long-leg face · pattern on back / plain seat · lock depth/height to U before fab',
         )
-        _draw_l_iso(c, 0.6 * inch, 1.55 * inch, w - 1.2 * inch, h - 3.2 * inch, L, colored=True)
-        _legend(c, 0.5 * inch, h - 1.1 * inch, [
-            (PATTERN_BACK_BAR, "BASKETWEAVE BACK (Sep 2022)"),
-            (PLAIN_SEAT, "PLAIN SEAT (solid)"),
+        _draw_l_front(c, 0.55 * inch, 1.95 * inch, 8.0, 9.5 * inch, L, colored=True)
+        _legend(c, w - 2.55 * inch, h - 1.15 * inch, [
+            (PATTERN_BACK_BAR, "Basketweave BACK"),
+            (PLAIN_SEAT, "Plain SEAT"),
             (PROV, "Provisional geometry"),
         ])
-        finish("L Isometric")
+        finish("L Front")
+
+        # ── L SIDE ──
+        _page_header(
+            c, w, h,
+            "L BANQUETTE — SIDE (ELEVATION) (provisional)",
+            f'Video dim chain (same as U) · lean {L.back_lean_in:.1f}" PROV · lock to U before fab',
+        )
+        _draw_l_side(c, 0.55 * inch, 2.15 * inch, 8.0, 6.6 * inch, L, colored=True)
+        _legend(c, 7.7 * inch, 6.6 * inch, [
+            (PATTERN_BACK_BAR, "Basketweave BACK (leaned)"),
+            (PLAIN_SEAT, "Plain SEAT"),
+            (PROV, "Provisional"),
+        ])
+        _video_dim_checklist(c, 7.55 * inch, 4.55 * inch, u, L)
+        finish("L Side")
 
     # ── Client Mockup ──
     _page_header(
@@ -2159,6 +2296,30 @@ def render_upholstery_shell_pdf(
     )
     finish("Module Schedule")
 
+    # ── ISO (DEFERRED) — parked per Rafael 2026-09-24; not the discussion deliverable ──
+    if include_iso and include_u:
+        _page_header(
+            c, w, h,
+            "U BANQUETTE — ISOMETRIC (DEFERRED)",
+            "PARKED — closed-face iso rule remains in EMPIRE_DRAWING_STANDARD; ortho TOP/FRONT/SIDE is the deliverable for this pack",
+        )
+        # Deferred banner
+        c.setFillColor(PROV)
+        c.setFont("Helvetica-Bold", 14)
+        c.drawCentredString(w / 2, h - 0.85 * inch, "DEFERRED — ISOMETRIC PARKED (work on later)")
+        _draw_u_iso(c, 0.6 * inch, 1.55 * inch, w - 1.2 * inch, h - 3.4 * inch, u, colored=True)
+        finish("U Isometric (DEFERRED)")
+    if include_iso and include_l:
+        _page_header(
+            c, w, h,
+            "L BANQUETTE — ISOMETRIC (DEFERRED)",
+            "PARKED — provisional L · ortho TOP/FRONT/SIDE is the deliverable for this pack",
+        )
+        c.setFillColor(PROV)
+        c.setFont("Helvetica-Bold", 14)
+        c.drawCentredString(w / 2, h - 0.85 * inch, "DEFERRED — ISOMETRIC PARKED (work on later)")
+        _draw_l_iso(c, 0.6 * inch, 1.55 * inch, w - 1.2 * inch, h - 3.4 * inch, L, colored=True)
+        finish("L Isometric (DEFERRED)")
 
     c.save()
     return {
@@ -2258,7 +2419,7 @@ def render_upholstery_shell_pdf(
         "drawing_engine": "drawing.upholstery_shell_renderer",
         "no_24in_autoslice": True,
         "asymmetric_arms": True,
-        "has_isometric": True,
+        "has_isometric": bool(include_iso),
         "has_client_mockup": True,
         "has_materials": True,
         "has_module_schedule": True,
