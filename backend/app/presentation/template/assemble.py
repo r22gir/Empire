@@ -20,7 +20,7 @@ import io
 from dataclasses import dataclass, field
 from typing import List
 
-from app.presentation.template.spec import JobSpec, SpecIncomplete
+from app.presentation.template.spec import JobSpec, SpecIncomplete, in_scope_spec
 from app.presentation.template.body.measurement_set import (
     cover, room_sheet, schedule_sheet,
 )
@@ -75,6 +75,10 @@ def assemble(spec: JobSpec) -> BuildResult:
     """
     # Validate spec
     spec.validate()  # raises SpecIncomplete
+
+    # Founder rule: drop EXCLUDED / omitted / out-of-scope openings
+    # before any sheet is built (no cover bullet, schedule row, or body).
+    spec = in_scope_spec(spec)
 
     if spec.document_type != "measurement_set":
         # Delegate to the scaffolded body builder, which raises

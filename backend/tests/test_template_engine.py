@@ -884,3 +884,115 @@ class TestH70PerClassTolerance:
         )
         assert "A" in result[0]
         assert "B" in result[0]
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# IN-SCOPE FILTER — excluded / omitted openings must not appear
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestInScopeFilter:
+    """Founder rule 2026-09-26: EXCLUDED openings are skipped entirely."""
+
+    def _addr(self):
+        return Address("5124 Frolich Ln", "Hyattsville", "MD", "20781")
+
+    def _base(self, **kw):
+        defaults = dict(
+            project="Lindsey", client="Maura McCool", client_loc="Hyattsville MD",
+            scope="test", address=self._addr(),
+            header_tagline="POWERED BY EMPIRE WORKROOM",
+            footer_letterhead="5124 Frolich Ln  ·  Hyattsville MD 20781",
+            locale="HYATTSVILLE MD",
+            rev="DRAFT", date="26 SEP 2026", source="test",
+            status="DRAFT",
+            document_type="measurement_set", content_family="window_openings",
+        )
+        defaults.update(kw)
+        return JobSpec(**defaults)
+
+    def test_panel_status_excluded(self):
+        from app.presentation.template.spec import is_panel_in_scope
+        assert is_panel_in_scope({"label": "OK", "status": "excluded"}) is False
+        assert is_panel_in_scope({"label": "OK", "scope": "omit"}) is False
+        assert is_panel_in_scope({"label": "STAT PAIR", "w": 16}) is True
+
+    def test_panel_label_excluded_heuristic(self):
+        from app.presentation.template.spec import is_panel_in_scope
+        assert is_panel_in_scope({
+            "label": "DR BLIND IB (EXCLUDED)", "w": 93.875, "note": "EXCLUDED from $395",
+        }) is False
+        assert is_panel_in_scope({
+            "label": "DR STAT 1½W PAIR", "w": 16, "note": "in $395 package",
+        }) is True
+
+    def test_filter_rooms_drops_excluded_panels_and_empty_rooms(self):
+        from app.presentation.template.spec import filter_in_scope_rooms
+        rooms = [
+            {
+                "key": "DR", "name": "DR — LINDSEY", "sub": "STAT",
+                "panels": [
+                    {"label": "DR STAT", "w": 16, "h": 108.5,
+                     "items": [{"kind": "window", "w": 16}]},
+                    {"label": "DR BLIND IB (EXCLUDED)", "w": 93.875, "h": 69,
+                     "note": "EXCLUDED from $395",
+                     "items": [{"kind": "window", "w": 93.875}]},
+                ],
+                "data": [
+                    ("STAT", "in package"),
+                    ("BLIND", "IB — EXCLUDED from $395"),
+                ],
+                "check": ["Keep STAT", "Blinds TBD / excluded unless founder quotes."],
+                "math": "$395 package = DR+LR STAT · blinds excluded",
+            },
+            {
+                "key": "ONLY-X", "name": "BLIND ONLY (EXCLUDED)",
+                "panels": [
+                    {"label": "BLIND", "status": "excluded", "w": 10, "h": 10,
+                     "items": [{"kind": "window", "w": 10}]},
+                ],
+            },
+        ]
+        out = filter_in_scope_rooms(rooms)
+        assert len(out) == 1
+        assert out[0]["key"] == "DR"
+        assert len(out[0]["panels"]) == 1
+        assert out[0]["panels"][0]["label"] == "DR STAT"
+        assert all("BLIND" not in str(r[0]).upper() for r in out[0]["data"])
+        assert all("excluded" not in c.lower() for c in out[0]["check"])
+        assert "excluded" not in (out[0].get("math") or "").lower()
+
+    def test_schedule_and_count_skip_excluded(self):
+        from app.presentation.template.spec import (
+            filter_in_scope_schedule, count_openings, in_scope_spec,
+        )
+        sched = [
+            ("DR", "L-DR-S", 1, '16"', '108½"', "STAT · in $395 pkg"),
+            ("DR", "L-DR-B", 1, '93⅞"', '69"', "Blind IB · EXCLUDED from $395"),
+            ("LR", "L-LR-S", 1, '16"', '108½"', "STAT · in $395 pkg"),
+        ]
+        assert len(filter_in_scope_schedule(sched)) == 2
+        spec = self._base(
+            schedule=sched,
+            rooms=[{
+                "key": "DR", "name": "DR",
+                "panels": [
+                    {"label": "STAT", "w": 16, "h": 100,
+                     "items": [{"kind": "window", "w": 16}]},
+                    {"label": "BLIND (EXCLUDED)", "w": 90, "h": 60,
+                     "items": [{"kind": "window", "w": 90}]},
+                ],
+            }],
+            open_at_glance=[
+                "$395 = BOTH DR+LR STAT",
+                "Blinds IB excluded from $395 unless founder quotes.",
+            ],
+        )
+        assert count_openings(spec) == 2  # schedule path, excluded row dropped
+        scoped = in_scope_spec(spec)
+        assert len(scoped.schedule) == 2
+        assert len(scoped.rooms) == 1
+        assert len(scoped.rooms[0]["panels"]) == 1
+        assert len(scoped.open_at_glance) == 1
+        assert "Blind" not in " ".join(scoped.open_at_glance)
+        assert count_openings(scoped) == 2

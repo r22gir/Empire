@@ -37,6 +37,8 @@ SpecIncomplete is the only refusal path.
 """
 from app.presentation.template.spec import (
     JobSpec, Address, SpecIncomplete, count_openings,
+    in_scope_spec, is_panel_in_scope, filter_in_scope_rooms,
+    filter_in_scope_schedule,
 )
 from app.presentation.template.assemble import (
     BuildResult, assemble, BODY_BUILDERS,
@@ -85,6 +87,8 @@ def _delegate(spec: JobSpec) -> BuildResult:
 
 __all__ = [
     "JobSpec", "Address", "SpecIncomplete", "count_openings",
+    "in_scope_spec", "is_panel_in_scope", "filter_in_scope_rooms",
+    "filter_in_scope_schedule",
     "BuildResult", "assemble", "BODY_BUILDERS",
     "build",
 ]

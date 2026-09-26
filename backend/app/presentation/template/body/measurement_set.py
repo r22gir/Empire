@@ -35,7 +35,8 @@ from __future__ import annotations
 from typing import List, Tuple
 
 from app.presentation.template.spec import (
-    JobSpec, count_openings, normalize_check_lines, derive_open_items,
+    JobSpec, SpecIncomplete, count_openings, normalize_check_lines,
+    derive_open_items, is_panel_in_scope,
 )
 from app.presentation.template.chrome import (
     GOLD, HAIR, INK, MUTE, SANS, MONO, SERIF,
@@ -108,7 +109,14 @@ def room_sheet(spec: JobSpec, room: dict, no: int, total: int,
         o.append(LINE(ax, ay, ax + sx, ay, GOLD, 1.6))
         o.append(LINE(ax, ay, ax, ay + sy, GOLD, 1.6))
 
-    panels = room["panels"]
+    # Defense in depth: never draw EXCLUDED / omitted panels even if a
+    # caller bypassed assemble()'s in_scope_spec filter.
+    panels = [p for p in room.get("panels", []) if is_panel_in_scope(p)]
+    if not panels:
+        raise SpecIncomplete(missing=[
+            f"room {room.get('key', '?')}: no in-scope panels "
+            f"(all openings excluded/omitted)"
+        ])
     nright = max((len(p.get("dims_right", [])) for p in panels), default=0)
     has_h = any(p.get("dim_h") for p in panels)
     from app.presentation.template.chrome import VDIM_GUTTER, VDIM_STEP
@@ -165,7 +173,7 @@ def room_sheet(spec: JobSpec, room: dict, no: int, total: int,
     # is used as the "primary" (rooms with one panel — typical;
     # rooms with multiple panels share a common height).
     photos = spec.photos.get(room["key"], [])
-    primary_panel = room["panels"][0] if room.get("panels") else None
+    primary_panel = panels[0] if panels else None
     o.extend(render_band(
         photos=photos,
         data_rows=room.get("data", []),

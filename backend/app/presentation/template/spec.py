@@ -185,6 +185,182 @@ def normalize_check_lines(check) -> List[str]:
     return out
 
 
+# ══════════════════════ IN-SCOPE FILTER ══════════════════════════════════════
+# Founder rule (2026-09-26): EXCLUDED / omitted / not-in-scope openings must
+# NOT appear as sheets, schedule rows, cover bullets, or drawn panels labeled
+# "(EXCLUDED)". Skip them entirely — never draw with an exclusion stamp.
+
+_OUT_OF_SCOPE_STATUS = frozenset({
+    "excluded", "exclude", "omitted", "omit", "out_of_scope", "oos",
+    "not_in_scope", "not-in-scope", "out-of-scope", "noscope",
+})
+
+_IN_SCOPE_STATUS = frozenset({
+    "included", "include", "in_scope", "in-scope", "active", "scope",
+})
+
+
+def _status_token(value) -> str:
+    return str(value or "").strip().lower().replace(" ", "_")
+
+
+def _blob_flags_out_of_scope(*parts) -> bool:
+    """True when free text marks an opening as excluded / omitted / OOS."""
+    blob = " ".join(str(p) for p in parts if p is not None and str(p).strip())
+    if not blob:
+        return False
+    low = blob.lower()
+    # Parenthetical or bare status markers commonly used in JobSpecs.
+    markers = (
+        "(excluded)", "excluded", "(omit)", "(omitted)", " omitted",
+        "omit —", "omit -", "omit:", "out of scope", "out-of-scope",
+        "not in scope", "not-in-scope", "oos)",
+    )
+    return any(m in low for m in markers)
+
+
+def is_panel_in_scope(panel: dict) -> bool:
+    """False when a panel is explicitly or textually out of job scope."""
+    if not isinstance(panel, dict):
+        return False
+    status = _status_token(panel.get("status") or panel.get("scope"))
+    if status in _OUT_OF_SCOPE_STATUS:
+        return False
+    if status in _IN_SCOPE_STATUS:
+        return True
+    if _blob_flags_out_of_scope(
+        panel.get("label"), panel.get("title"), panel.get("note"),
+        panel.get("name"),
+    ):
+        return False
+    return True
+
+
+def is_schedule_row_in_scope(row) -> bool:
+    """False when a schedule tuple marks an excluded / omitted opening."""
+    if not row:
+        return False
+    # Optional trailing status on long rows; canonical is 6-tuple.
+    note = row[5] if len(row) > 5 else ""
+    mark = row[1] if len(row) > 1 else ""
+    status = _status_token(row[6]) if len(row) > 6 else ""
+    if status in _OUT_OF_SCOPE_STATUS:
+        return False
+    if status in _IN_SCOPE_STATUS:
+        return True
+    if _blob_flags_out_of_scope(mark, note):
+        return False
+    return True
+
+
+def is_room_in_scope(room: dict) -> bool:
+    """False when the room itself is out of scope (before panel filter)."""
+    if not isinstance(room, dict):
+        return False
+    status = _status_token(room.get("status") or room.get("scope"))
+    if status in _OUT_OF_SCOPE_STATUS:
+        return False
+    if _blob_flags_out_of_scope(room.get("name"), room.get("sub"), room.get("key")):
+        # Room titled "... (EXCLUDED)" — skip whole room.
+        return False
+    return True
+
+
+def _filter_data_rows(rows) -> list:
+    out = []
+    for row in rows or []:
+        if isinstance(row, (list, tuple)) and len(row) >= 2:
+            if _blob_flags_out_of_scope(row[0], row[1]):
+                continue
+            out.append(row)
+        elif isinstance(row, dict):
+            if _blob_flags_out_of_scope(
+                row.get("label"), row.get("key"), row.get("value"),
+                row.get("text"),
+            ):
+                continue
+            out.append(row)
+        else:
+            out.append(row)
+    return out
+
+
+def _filter_text_lines(lines) -> list:
+    return [
+        ln for ln in (lines or [])
+        if not _blob_flags_out_of_scope(ln)
+    ]
+
+
+def filter_in_scope_rooms(rooms: List[dict]) -> List[dict]:
+    """Drop out-of-scope rooms and strip excluded panels / data / checks.
+
+    Rooms that retain zero in-scope panels are omitted entirely (no empty
+    elevation sheet).
+    """
+    filtered: List[dict] = []
+    for room in rooms or []:
+        if not is_room_in_scope(room):
+            continue
+        panels = [p for p in room.get("panels", []) if is_panel_in_scope(p)]
+        if not panels:
+            continue
+        new_room = dict(room)
+        new_room["panels"] = panels
+        if "data" in new_room:
+            new_room["data"] = _filter_data_rows(new_room.get("data"))
+        if "check" in new_room:
+            checks = normalize_check_lines(new_room.get("check"))
+            scrubbed = _filter_text_lines(checks)
+            new_room["check"] = scrubbed
+        # Scrub math that only exists to note an exclusion.
+        if _blob_flags_out_of_scope(new_room.get("math")):
+            # Keep useful package math; strip trailing exclusion clauses
+            # when the whole string is an exclusion bullet. Prefer empty
+            # over emitting "blinds excluded" as layout math.
+            math = str(new_room.get("math") or "")
+            # Drop segments separated by · that flag out of scope.
+            parts = [p.strip() for p in math.replace("·", "|").split("|")]
+            keep = [p for p in parts if p and not _blob_flags_out_of_scope(p)]
+            new_room["math"] = " · ".join(keep)
+        filtered.append(new_room)
+    return filtered
+
+
+def filter_in_scope_schedule(schedule: List[tuple]) -> List[tuple]:
+    return [row for row in (schedule or []) if is_schedule_row_in_scope(row)]
+
+
+def in_scope_spec(spec: "JobSpec") -> "JobSpec":
+    """Return a JobSpec copy with out-of-scope openings removed.
+
+    Applied once at assemble() so cover index, room elevations, schedule,
+    count_openings, and open-at-glance all agree — no EXCLUDED sheets.
+    """
+    from dataclasses import replace
+    rooms = filter_in_scope_rooms(list(spec.rooms))
+    schedule = filter_in_scope_schedule(list(spec.schedule))
+    glance = _filter_text_lines(list(spec.open_at_glance))
+    notes = _filter_text_lines(list(spec.schedule_open_notes))
+    # Drop photos keyed to rooms that were removed.
+    keep_keys = {r.get("key") for r in rooms if r.get("key")}
+    photos = {
+        k: v for k, v in (spec.photos or {}).items()
+        if k in keep_keys or not keep_keys
+    }
+    # If some rooms remain, restrict photos to surviving keys only.
+    if rooms:
+        photos = {k: v for k, v in (spec.photos or {}).items() if k in keep_keys}
+    return replace(
+        spec,
+        rooms=rooms,
+        schedule=schedule,
+        open_at_glance=glance,
+        schedule_open_notes=notes,
+        photos=photos,
+    )
+
+
 def derive_open_items(spec: "JobSpec", limit: int = 6) -> List[str]:
     """Honest per-job open items from room check lists.
 
@@ -212,15 +388,17 @@ def count_openings(spec: JobSpec) -> int:
     qtys) disagree in McLean RevA (21 vs 22). This function is the
     ONE source — both sheets consume it.
 
-    Counts window-kind items across all panels/rooms.
+    Counts in-scope window-kind items only (excluded/omitted openings
+    are skipped — founder rule 2026-09-26).
     """
-    if spec.schedule:
+    schedule = filter_in_scope_schedule(list(spec.schedule)) if spec.schedule else []
+    if schedule:
         # SCHEDULE rows are (room, mark, qty, width, height, note).
         # Total = sum of qty (col index 2).
-        return sum(row[2] for row in spec.schedule)
-    # Fallback: count window-kind items in rooms/panels.
+        return sum(row[2] for row in schedule)
+    # Fallback: count window-kind items in in-scope rooms/panels.
     n = 0
-    for r in spec.rooms:
+    for r in filter_in_scope_rooms(list(spec.rooms)):
         for p in r.get("panels", []):
             for i in p.get("items", []):
                 if i.get("kind") == "window":
