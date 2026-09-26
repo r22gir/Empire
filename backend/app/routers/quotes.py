@@ -3350,41 +3350,28 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 
 @router.get("/{quote_id}/pdf")
 async def download_pdf(quote_id: str):
-    """Download a previously generated PDF. Auto-generates if not yet created.
-    Falls back to quotes_v2 (SQL) if JSON quote not found."""
+    """Download quote PDF — Max default is McLean gold landscape.
+
+    Always routes through generate_quote_pdf (mclean_estimate_pdf).
+    Do not serve stale WeasyPrint portrait stubs from disk cache.
+    """
+    from app.services.quote_pdf_service import generate_quote_pdf
+    from app.services.quote_service import get_quote
+
     try:
-        quote = _load_quote(quote_id)
-    except HTTPException:
-        # Not a JSON quote — try SQL quotes_v2
+        pdf_bytes = generate_quote_pdf(quote_id)
+    except FileNotFoundError:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+
+    q = get_quote(quote_id)
+    if not q:
         try:
-            from app.services.quote_pdf_service import generate_quote_pdf
-            pdf_bytes = generate_quote_pdf(quote_id)
-            from app.services.quote_service import get_quote
-            q = get_quote(quote_id)
-            filename = f"{q.get('quote_number', quote_id)}.pdf"
-            return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-            )
-        except FileNotFoundError:
+            q = _load_quote(quote_id)
+        except HTTPException:
             raise HTTPException(404, f"Quote {quote_id} not found")
-
-    pdf_path = os.path.join(
-        str(quote_pdf_dir()),
-        f"{quote['quote_number']}.pdf",
-    )
-    if not os.path.exists(pdf_path):
-        # Auto-generate on first GET request (skip verification for convenience)
-        return await generate_pdf(quote_id, skip_verification=True)
-
-    with open(pdf_path, "rb") as f:
-        pdf_bytes = f.read()
-
+    filename = f"{(q or {}).get('quote_number', quote_id)}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{quote["quote_number"]}.pdf"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
