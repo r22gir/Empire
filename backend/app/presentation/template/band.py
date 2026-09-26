@@ -17,11 +17,15 @@ Per Amendment 1: the band reads spec.header_tagline / spec.address
 from __future__ import annotations
 
 from typing import Callable, List, Tuple, Union
+import base64
+import mimetypes
+import os
 
 from app.presentation.template.chrome import (
     GOLD, HAIR, INK, MUTE, SANS, MONO,
     RECT, LINE, T, wrap, section,
 )
+from app.presentation.template.spec import normalize_check_lines
 
 
 # A data row value is either a typed string ("99\"") OR a callable
@@ -69,22 +73,64 @@ def render_band(photos: List[Tuple[str, str]],
     """
     out: List[str] = []
     bx0, by0, bx1, by1 = BAND
-    shots = photos  # caller pre-processed (paths resolved)
+    # Normalize check_lines so a plain str is ONE bullet, never
+    # character-iterated (Field Check letter-stack defect).
+    check_lines = normalize_check_lines(check_lines)
+    shots = list(photos or [])
     body_t = by0 + 19
     ph_h = (by1 - body_t) - 24
     GAPZ = 18.0
     DATA_W = 188.0
 
-    # Photo zone width: fit each shot to ph_h, cap the zone
+    def _photo_size(fn: str):
+        if not fn or not os.path.isfile(fn):
+            return None
+        try:
+            from PIL import Image
+            with Image.open(fn) as im:
+                return im.size
+        except Exception:
+            return None
+
+    def _embed_image(fn: str, x: float, y: float, w: float, h: float) -> str:
+        """Embed JPEG/PNG as data-URI <image> (McLean reference pattern)."""
+        if not fn or not os.path.isfile(fn):
+            return ""
+        try:
+            with open(fn, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+        except OSError:
+            return ""
+        mime, _ = mimetypes.guess_type(fn)
+        if mime not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
+            mime = "image/jpeg"
+        return (
+            f'<image x="{x:.2f}" y="{y:.2f}" width="{w:.2f}" height="{h:.2f}" '
+            f'preserveAspectRatio="xMidYMid slice" '
+            f'xlink:href="data:{mime};base64,{b64}"/>'
+        )
+
+    # Photo zone width: fit each readable shot to ph_h, cap the zone.
+    # Missing / unreadable paths are skipped (band still shows caption-
+    # only only when path resolves — otherwise empty → NO SITE PHOTO).
     fitted: List[List] = []  # [fn, cap, w, h]
     for fn, cap in shots:
-        # Caller has resolved the image; we trust width/height.
-        # In a future dispatch this becomes photo_size(fn) on a loaded
-        # asset; here we use a placeholder fit.
-        iw, ih = 100, 100  # placeholder — caller pre-fits
+        size = _photo_size(fn)
+        if size is None:
+            # Keep a caption-only slot so the job still names the fabric
+            # even when the thumb path is wrong — but use a placeholder
+            # box (no fake image bytes).
+            iw, ih = 100, 100
+            use_fn = ""
+        else:
+            iw, ih = size
+            use_fn = fn
         h = ph_h
-        w = iw / ih * h if ih else h
-        fitted.append([fn, cap, w, h])
+        w = (iw / ih * h) if ih else h
+        fitted.append([use_fn, cap, w, h, fn])  # keep original fn for debug
+    # trim trailing bookkeeping — store as [fn_or_empty, cap, w, h]
+    fitted = [[f[0], f[1], f[2], f[3]] for f in fitted]
+
     if fitted:
         cap_w = 330.0
         raw = sum(f[2] for f in fitted) + 8 * (len(fitted) - 1)
@@ -105,11 +151,16 @@ def render_band(photos: List[Tuple[str, str]],
     sec_y = section(out, bx0, by0 + 10, photo_w,
                     "SITE PHOTO" + ("S" if len(fitted) > 1 else ""))
     px = bx0
+    any_embedded = False
     for fn, cap, w, h in fitted:
-        # Caller emits the actual <image> tag (intake-path output).
-        # We just draw the frame and caption here.
+        img = _embed_image(fn, px, body_t, w, h) if fn else ""
+        if img:
+            out.append(img)
+            any_embedded = True
+        else:
+            # Empty frame — path missing or unreadable
+            out.append(RECT(px, body_t, w, h, "#f3efe4", HAIR, 1.0, dash="4 4"))
         out.append(RECT(px, body_t, w, h, "none", INK, 0.9))
-        # Caption wrap
         for j, ln in enumerate(wrap(cap, max(int((w - 6) / 3.5), 12))[:3]):
             _t, _b = T(px, body_t + h + 9 + j * 7.4, ln, size=6.0,
                        anchor="start", fill=MUTE, font=MONO, ls=0.2)

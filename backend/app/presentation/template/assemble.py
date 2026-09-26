@@ -82,8 +82,7 @@ def assemble(spec: JobSpec) -> BuildResult:
         return _delegate(spec)
 
     builder = BODY_BUILDERS["measurement_set"]
-    placed_global: List = []     # Amendment 5: draw-time bboxes (per-sheet
-                                 # accumulators extend this in place)
+    placed_global: List = []     # optional union for debugging / G6
     total = len(spec.rooms) + 2  # cover + rooms + schedule
 
     # Rev singularity check (Section 4 rule 6)
@@ -91,30 +90,39 @@ def assemble(spec: JobSpec) -> BuildResult:
     if not rev:
         raise SpecIncomplete(missing=["rev (single stamp across set)"])
 
-    # Build each sheet. Each builder returns (svg, placed) where
-    # `placed` is the per-sheet bboxes. assemble.py extends the
-    # shared `placed_global` so the gates see the real data.
-    # (Pre-P1-T·c the builders were called with `[]` and the local
-    # placed lists were lost; the gates ran on an empty list and
-    # trivially passed. This was a real defect — a "passing" suite
-    # that wasn't actually checking anything.)
+    # Build each sheet with a FRESH placed list. Gates run PER SHEET.
+    # Pre-fix: one shared placed_global across all sheets made G2
+    # false-FAIL on identical chrome (NELMA'S WORKROOM on every page
+    # at the same xy — multi-sheet letterhead "collision").
+    from app.presentation.template.gates import (
+        gate_bounds, gate_collisions,
+    )
     sheets: List[str] = []
+    bounds_failures: List[str] = []
+    collision_failures: List[str] = []
+
+    def _gate_sheet(sheet_name: str, placed_sheet: List) -> None:
+        for msg in gate_bounds(placed_sheet):
+            bounds_failures.append(f"{sheet_name}: {msg}")
+        for msg in gate_collisions(placed_sheet):
+            collision_failures.append(f"{sheet_name}: {msg}")
+        placed_global.extend(placed_sheet)
 
     def _build_sheet(name: str, fn) -> None:
-        svg, placed = fn(spec, total, total, placed_global)
+        placed_sheet: List = []
+        svg, _placed = fn(spec, total, total, placed_sheet)
         sheets.append(svg)
-        # `placed` is `placed_global` itself (mutated in place by
-        # the builder via list.extend). No additional action needed —
-        # the builder already extended it.
+        _gate_sheet(name, placed_sheet)
 
     _build_sheet("cover", builder["cover"])
     _build_sheet("schedule_sheet", builder["schedule_sheet"])
 
     room_svgs = []
     for n, r in enumerate(spec.rooms, start=2):
-        svg, placed = builder["room_sheet"](spec, r, n, total, placed_global)
+        placed_sheet: List = []
+        svg, _placed = builder["room_sheet"](spec, r, n, total, placed_sheet)
         room_svgs.append(svg)
-        # same — `placed` is `placed_global`, mutated in place.
+        _gate_sheet(f"room:{r.get('key', n)}", placed_sheet)
 
     # Re-order: cover, room1..roomN, schedule.
     cover_svg = sheets[0]
@@ -137,23 +145,14 @@ def assemble(spec: JobSpec) -> BuildResult:
         buf.seek(0)
         w.add_page(PdfReader(buf).pages[0])
 
-    # Run gates on the placed list (Amendment 5). placed_global has
-    # been extended by every body builder as it ran. If the gates
-    # pass, that means the actual bboxes pass. If they fail, that
-    # means the actual build is broken.
     gate_report: List[tuple] = []
-    from app.presentation.template.gates import (
-        gate_bounds, gate_collisions,
-    )
-    bounds_failures = gate_bounds(placed_global)
     if bounds_failures:
         gate_report.append(("G1 bounds", "FAIL", "; ".join(bounds_failures)))
     else:
         gate_report.append(("G1 bounds", "PASS", "all text inside page"))
-    collision_failures = gate_collisions(placed_global)
     if collision_failures:
         gate_report.append(("G2 collisions", "FAIL",
-                            "; ".join(collision_failures)))
+                            "; ".join(collision_failures[:40])))
     else:
         gate_report.append(("G2 collisions", "PASS", "no text overlaps"))
 

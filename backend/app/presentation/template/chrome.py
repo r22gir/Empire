@@ -296,7 +296,16 @@ def chrome(sheet_no: int, total: int, right_title: str,
         placed.append(b_pb)
 
     if project_line:
-        t_pl, b_pl = T(dv + 12, 31.5, project_line, 6.0, "start", "#a49b88",
+        # Truncate so header project line does not collide with the
+        # right-side room title / SHEET stamp (G2 multi-sheet WARN).
+        right_budget = _approx_tw(right_title.upper(), 8.4, 1.2)
+        avail = (PW - 30) - (dv + 12) - right_budget - 28.0
+        pl = project_line
+        while pl and _approx_tw(pl, 6.0, 0.8) > avail and len(pl) > 4:
+            pl = pl[:-1]
+        if pl != project_line:
+            pl = (pl[:-1] + "…") if len(pl) > 1 else pl
+        t_pl, b_pl = T(dv + 12, 31.5, pl, 6.0, "start", "#a49b88",
                        MONO, ls=0.8)
         out.append(t_pl)
         if b_pl is not None:

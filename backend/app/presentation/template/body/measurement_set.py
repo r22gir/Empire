@@ -32,9 +32,11 @@ no side effects. State (the `placed` list) is sheet-scoped.
 """
 from __future__ import annotations
 
-from typing import List
+from typing import List, Tuple
 
-from app.presentation.template.spec import JobSpec, count_openings
+from app.presentation.template.spec import (
+    JobSpec, count_openings, normalize_check_lines, derive_open_items,
+)
 from app.presentation.template.chrome import (
     GOLD, HAIR, INK, MUTE, SANS, MONO, SERIF,
     RECT, LINE, T, wrap, chrome, page, PlacedBox,
@@ -167,7 +169,7 @@ def room_sheet(spec: JobSpec, room: dict, no: int, total: int,
     o.extend(render_band(
         photos=photos,
         data_rows=room.get("data", []),
-        check_lines=room.get("check", []),
+        check_lines=normalize_check_lines(room.get("check")),
         fabric_strip=(
             "NOT YET ELECTED   ·   FABRIC: TBC - CONFIRM BEFORE CUT   ·   "
             "LINING: TBC   ·   HEADING: TBC   ·   HARDWARE: TBC   ·   "
@@ -200,22 +202,35 @@ def cover(spec: JobSpec, total: int, placed: List[PlacedBox]) -> Tuple[str, List
         project_line=spec.project_line(),
         locale=spec.locale,
     ))
-    # Cover layout fix: McLean title at size 26 was 91.8pt wide and
-    # bled into the OPEN AT A GLANCE column on the right (9 of the 9
-    # REAL G2 overlaps were caused by this single overflow). 20pt
-    # keeps the title prominent but keeps the bbox inside the left
-    # column. ~71.5pt wide, well clear of x=300.
-    _t, _b = T(30, 78, spec.project, size=20.0, anchor="start",
-               fill=INK, font=SERIF, bold=True, ls=1.0)
-    o.append(_t); placed_local.append(_b)
-    _t, _b = T(30 + 250, 78,
-               f"FOR {spec.client}  ·  {spec.client_loc}", size=9.0,
-               anchor="start", fill=MUTE, font=MONO, bold=True, ls=1.4)
-    o.append(_t); placed_local.append(_b)
-    _t, _b = T(30, 98, "WINDOW & DRAPERY FIELD MEASUREMENTS", size=9.0,
+    # Cover title + FOR client. Long project names (e.g. Maura Hillary
+    # "Hillary — Window & Drapery Field Measurements") bleed into the
+    # FOR column at x=280 and G2-collide. Stack FOR under the title
+    # when the title advance exceeds the left column budget.
+    for_line = f"FOR {spec.client}  ·  {spec.client_loc}"
+    title_size = 20.0
+    title_adv = title_size * 0.55 * max(len(spec.project), 1) + 1.0 * max(
+        len(spec.project) - 1, 0)
+    if title_adv > 220:
+        title_size = 16.0
+        _t, _b = T(30, 78, spec.project, size=title_size, anchor="start",
+                   fill=INK, font=SERIF, bold=True, ls=0.6)
+        o.append(_t); placed_local.append(_b)
+        _t, _b = T(30, 94, for_line, size=9.0, anchor="start",
+                   fill=MUTE, font=MONO, bold=True, ls=1.4)
+        o.append(_t); placed_local.append(_b)
+        sub_y = 112
+    else:
+        _t, _b = T(30, 78, spec.project, size=title_size, anchor="start",
+                   fill=INK, font=SERIF, bold=True, ls=1.0)
+        o.append(_t); placed_local.append(_b)
+        _t, _b = T(30 + 250, 78, for_line, size=9.0, anchor="start",
+                   fill=MUTE, font=MONO, bold=True, ls=1.4)
+        o.append(_t); placed_local.append(_b)
+        sub_y = 98
+    _t, _b = T(30, sub_y, "WINDOW & DRAPERY FIELD MEASUREMENTS", size=9.0,
                anchor="start", fill=GOLD, font=MONO, bold=True, ls=2.2)
     o.append(_t); placed_local.append(_b)
-    o.append(LINE(30, 108, 762, 108, HAIR, 1.0))
+    o.append(LINE(30, sub_y + 10, 762, sub_y + 10, HAIR, 1.0))
 
     # Left: job block
     y = 132
@@ -310,7 +325,7 @@ def cover(spec: JobSpec, total: int, placed: List[PlacedBox]) -> Tuple[str, List
                    for i in p.get("items", [])
                    if i["kind"] == "window")
         rows.append((f"{n:02d}", r["name"], str(wins) if wins else "wall",
-                     str(len(r["check"]))))
+                     str(len(normalize_check_lines(r.get("check"))))))
     # Amendment 4: total from spec.count_openings(spec) — ONE source.
     total_openings = count_openings(spec)
     rows.append((f"{len(spec.rooms)+2:02d}", "OPENING SCHEDULE · ALL ROOMS",
@@ -332,20 +347,17 @@ def cover(spec: JobSpec, total: int, placed: List[PlacedBox]) -> Tuple[str, List
         o.append(LINE(ix, yy - 3, 762, yy - 3, HAIR, 0.4))
         yy += 8
 
-    # Open items at a glance
+    # Open items at a glance — THIS job only.
+    # Prefer spec.open_at_glance; else derive from room check lists.
+    # NEVER fall back to McLean Whittington closure notes (wrong-job leak).
     oy = yy + 16
     _t, _b = T(ix, oy, "OPEN AT A GLANCE", size=7.0, anchor="start",
                fill=GOLD, font=MONO, bold=True, ls=1.4)
     o.append(_t); placed_local.append(_b)
     o.append(LINE(ix, oy + 4, 762, oy + 4, GOLD, 0.8))
     oy += 16
-    for c in ["Living Room center wall does not close - 225\" tagged against "
-              "222\" overall.",
-              "Living Room left wall leaves 54¼\" untagged at the door bank.",
-              "Formal Living bay moulding band scales 4½\" against 2½\" tagged.",
-              "Head and sill heights are untagged in five rooms - no finished "
-              "lengths can be set.",
-              "Mount condition is not recorded anywhere in the set."]:
+    glance = list(spec.open_at_glance) if spec.open_at_glance else derive_open_items(spec)
+    for c in glance:
         for j, ln in enumerate(wrap(c, 74)):
             if j == 0:
                 _t, _b = T(ix, oy, "▪", size=5.4, anchor="start",
@@ -472,20 +484,10 @@ def schedule_sheet(spec: JobSpec, no: int, total: int,
     o.append(_t); placed_local.append(_b)
     o.append(LINE(30, y + 4, 762, y + 4, GOLD, 0.8))
     y += 16
-    opens = [
-      "Living Room center wall: tagged segments total 225\" against a 222\" "
-      "overall. 3\" unresolved.",
-      "Living Room left wall: 54¼\" at the door bank is untagged. Door bank "
-      "width governs the panel count.",
-      "Formal Living bay: moulding band scales 4½\" but is tagged 2½\". "
-      "Remeasure before hardware.",
-      "Head and sill heights are untagged in Formal Dining, Living Room, Family "
-      "Room and Kitchen / Dining - no finished lengths can be set for those rooms.",
-      "Mount condition (inside, outside, ceiling) is not recorded anywhere in the "
-      "set. It changes every width.",
-      "Fabric, lining, heading and hardware are not yet elected - this set is "
-      "measurement only.",
-    ]
+    # Prefer spec.schedule_open_notes; else same honest derive as cover.
+    # Never emit another job's McLean Living Room closure notes.
+    opens = (list(spec.schedule_open_notes) if spec.schedule_open_notes
+             else derive_open_items(spec, limit=8))
     for c in opens:
         lines = wrap(c, 118)
         _t, _b = T(30, y, "▪", size=5.4, anchor="start",

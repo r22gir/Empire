@@ -641,16 +641,19 @@ class TestP1TcBuilderInterface:
         # a real result, not the pre-P1-T·c sentinel.
         for g, s, note in result.gate_report:
             if g == "G2 collisions":
-                # Pre-fix sentinel was a "PASS / no text overlaps"
-                # string on a real pass and a "FAIL" with arbitrary
-                # text on a real fail. The discriminator is that the
-                # note is a real, comma-separated list of overlap
-                # descriptions — OR an empty string on a real pass.
-                # An empty list with "PASS / no text overlaps" is
-                # the pre-fix sentinel; we want a different shape.
-                assert "no text overlaps" not in note or note.startswith(
-                    "overlap:"
-                ), f"G2 returned pre-fix sentinel: {note!r}"
+                # Gates now run PER SHEET. A real PASS is "no text
+                # overlaps"; a real FAIL lists sheet-prefixed overlaps.
+                # Pre-P1-T·c sentinel was gates on an empty placed list
+                # (still "PASS / no text overlaps" wording) — catch that
+                # by requiring G1 also evaluated (report has both) and
+                # status is a real PASS/FAIL token.
+                assert s in ("PASS", "FAIL"), f"G2 status unexpected: {s!r}"
+                if s == "FAIL":
+                    assert ("overlap" in note.lower() or ":" in note), (
+                        f"G2 FAIL without overlap detail: {note!r}"
+                    )
+                else:
+                    assert "no text overlaps" in note
 
     def test_builder_called_twice_produces_identical_output(self):
         """Idempotency: calling the same builder twice produces

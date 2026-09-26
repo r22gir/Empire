@@ -111,6 +111,12 @@ class JobSpec:
     # "NO SITE PHOTO ON FILE" (handled by chrome/band layer).
     photos: dict[str, List[Tuple[str, str]]] = field(default_factory=dict)
 
+    # ── Cover / schedule open-item lists (job-specific; never inherit
+    # another job's McLean closure notes). Empty → body derives from
+    # this JobSpec's room check lists.
+    open_at_glance:      List[str] = field(default_factory=list)
+    schedule_open_notes: List[str] = field(default_factory=list)
+
     # ── Body data (rooms, panels, schedule, etc.) ──
     rooms:     List[dict] = field(default_factory=list)
     schedule:  List[tuple] = field(default_factory=list)
@@ -153,6 +159,48 @@ class JobSpec:
         if missing:
             raise SpecIncomplete(missing=missing)
 
+
+
+
+def normalize_check_lines(check) -> List[str]:
+    """Normalize room['check'] to a list of bullet strings.
+
+    A plain str is ONE bullet (or newline-split bullets) — never iterated
+    character-by-character (that produced Field Check letter-stacks).
+    Dict items with text/line keys are supported (settled-marker form).
+    """
+    if check is None:
+        return []
+    if isinstance(check, str):
+        parts = [p.strip() for p in check.replace("\r\n", "\n").split("\n") if p.strip()]
+        return parts if parts else ([check.strip()] if check.strip() else [])
+    out: List[str] = []
+    for item in check:
+        if isinstance(item, dict):
+            text = item.get("text") or item.get("line") or ""
+            if text:
+                out.append(str(text))
+        elif item is not None and str(item).strip():
+            out.append(str(item))
+    return out
+
+
+def derive_open_items(spec: "JobSpec", limit: int = 6) -> List[str]:
+    """Honest per-job open items from room check lists.
+
+    Used when open_at_glance / schedule_open_notes are empty. Never
+    falls back to another job's (McLean Whittington) closure notes.
+    """
+    items: List[str] = []
+    for r in spec.rooms:
+        name = r.get("name") or r.get("key") or "ROOM"
+        for line in normalize_check_lines(r.get("check")):
+            if line.upper().startswith("DRAFT"):
+                continue
+            items.append(f"{name}: {line}")
+            if len(items) >= limit:
+                return items
+    return items or ["No open items recorded on this JobSpec."]
 
 # ══════════════════════ DERIVED — single source for repeated quantities ══════
 
