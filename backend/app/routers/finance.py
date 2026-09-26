@@ -1556,7 +1556,15 @@ def compose_invoice(request: Request, payload: InvoiceComposeRequest):
         invoice = _enrich_invoice(dict_row(row))
 
         if source.get("job_id"):
-            conn.execute("UPDATE jobs SET invoice_id = ? WHERE id = ?", (invoice["id"], source["job_id"]))
+            # Link invoice and backfill customer_id when the job row was
+            # created without one (jobs.customer_id is NOT NULL going forward).
+            conn.execute(
+                """UPDATE jobs
+                   SET invoice_id = ?,
+                       customer_id = COALESCE(NULLIF(customer_id, ''), ?)
+                   WHERE id = ?""",
+                (invoice["id"], customer_id, source["job_id"]),
+            )
 
         return {
             "invoice": invoice,

@@ -191,12 +191,22 @@ def _load_quote(quote_id: str) -> dict:
     of the canonical-first logic). The resolver tries canonical
     `quotes_v2` SQL first; falls back to legacy JSON only if the
     canonical lookup fails.
+
+    After resolve_quote, also check this module's QUOTES_DIR. Tests
+    (and alternate mounts) monkeypatch quotes.QUOTES_DIR while
+    resolve_quote still reads quotes_data_dir(); without this
+    fallback, create_quote_from_rooms/_save_quote writes a file
+    that update_quote cannot load (404).
     """
     from app.services.quote_service import resolve_quote
     q = resolve_quote(quote_id)
-    if not q:
-        raise HTTPException(404, f"Quote {quote_id} not found")
-    return q
+    if q:
+        return q
+    path = _quote_path(quote_id)
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    raise HTTPException(404, f"Quote {quote_id} not found")
 
 
 def _save_quote(quote: dict):

@@ -1,5 +1,6 @@
 import importlib
 import json
+from datetime import date, timedelta
 from itertools import count
 from pathlib import Path
 
@@ -67,8 +68,9 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
     finance.record_payment(
         _request(),
         invoice["id"],
-        finance.PaymentCreate(amount=70, method="check", reference="CHK-70", payment_date="2026-04-12"),
+        finance.PaymentCreate(amount=70, method="check", reference="CHK-70", payment_date=date.today().isoformat()),
     )
+    today = date.today().isoformat()
     finance.create_expense(
         _request(),
         finance.ExpenseCreate(
@@ -76,7 +78,7 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
             vendor="Tool Vendor",
             description="Clamp set",
             amount=30,
-            date="2026-04-12",
+            date=today,
         ),
     )
     finance.create_expense(
@@ -86,7 +88,7 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
             vendor="Wood Vendor",
             description="Woodcraft material",
             amount=45,
-            expense_date="2026-04-12",
+            expense_date=today,
             business="woodcraft",
         ),
     )
@@ -119,8 +121,8 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
     assert listed_expenses["items"] == listed_expenses["expenses"]
     assert {exp["business_unit"] for exp in listed_expenses["items"]} == {"workroom", "woodcraft"}
     assert workroom_expenses["items"][0]["vendor"] == "Tool Vendor"
-    assert workroom_expenses["items"][0]["expense_date"] == "2026-04-12"
-    assert workroom_expenses["items"][0]["date"] == "2026-04-12"
+    assert workroom_expenses["items"][0]["expense_date"] == today
+    assert workroom_expenses["items"][0]["date"] == today
     assert woodcraft_expenses["items"][0]["vendor"] == "Wood Vendor"
     assert woodcraft_expenses["items"][0]["category"] == "hardware"
 
@@ -154,6 +156,11 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
 def test_customer_finance_ledger_statement_and_business_filter(monkeypatch, tmp_path):
     finance, database = _load_finance(monkeypatch, tmp_path)
 
+    # Relative dates keep overdue vs open semantics stable across calendar months.
+    overdue_due = (date.today() - timedelta(days=45)).isoformat()
+    open_not_overdue_due = (date.today() + timedelta(days=20)).isoformat()
+    pay_day = date.today().isoformat()
+
     workroom_invoice = finance.create_invoice(
         _request(),
         finance.InvoiceCreate(
@@ -163,7 +170,7 @@ def test_customer_finance_ledger_statement_and_business_filter(monkeypatch, tmp_
             subtotal=1000,
             tax_rate=0,
             line_items=[{"description": "Workroom statement invoice", "quantity": 1, "rate": 1000, "amount": 1000}],
-            due_date="2026-04-01",
+            due_date=overdue_due,
         ),
     )["invoice"]
     finance.mark_invoice_sent(_request(), workroom_invoice["id"])
@@ -171,7 +178,7 @@ def test_customer_finance_ledger_statement_and_business_filter(monkeypatch, tmp_
     finance.record_payment(
         _request(),
         workroom_invoice["id"],
-        finance.PaymentCreate(amount=400, method="check", reference="LEDGER-400", payment_date="2026-04-12"),
+        finance.PaymentCreate(amount=400, method="check", reference="LEDGER-400", payment_date=pay_day),
     )
 
     woodcraft_invoice = finance.create_invoice(
@@ -184,7 +191,7 @@ def test_customer_finance_ledger_statement_and_business_filter(monkeypatch, tmp_
             subtotal=700,
             tax_rate=0,
             line_items=[{"description": "Woodcraft statement invoice", "quantity": 1, "rate": 700, "amount": 700}],
-            due_date="2026-04-01",
+            due_date=overdue_due,
         ),
     )["invoice"]
     finance.mark_invoice_sent(_request(), woodcraft_invoice["id"])
@@ -244,7 +251,7 @@ def test_customer_finance_ledger_statement_and_business_filter(monkeypatch, tmp_
             business_unit="workroom",
             subtotal=300,
             tax_rate=0,
-            due_date="2026-04-20",
+            due_date=open_not_overdue_due,
         ),
     )["invoice"]
     finance.mark_invoice_sent(_request(), second_workroom_invoice["id"])
@@ -314,11 +321,20 @@ def test_smart_invoice_composer_milestones_payments_and_sources(monkeypatch, tmp
     (quotes_dir / "composer-quote.json").write_text(json.dumps(quote))
 
     with database.get_db() as conn:
+        # jobs.customer_id is NOT NULL (init_db + unified schema). Seed a
+        # matching customer so the composer job fixture is valid; deposit
+        # compose will find_or_create the same email.
+        conn.execute(
+            """INSERT INTO customers
+               (id, name, email, phone, address, business)
+               VALUES ('composer-cust', 'Composer Client', 'composer@example.com',
+                       '555-0999', '99 Ledger Way', 'workroom')"""
+        )
         conn.execute(
             """INSERT INTO jobs
-               (id, title, quote_id, status, business_unit, description, quoted_amount)
+               (id, title, quote_id, status, business_unit, description, quoted_amount, customer_id)
                VALUES ('composer-job', 'Composer Job', 'composer-quote', 'pending', 'workroom',
-                       'Install milestone drapery', 1000)"""
+                       'Install milestone drapery', 1000, 'composer-cust')"""
         )
 
     deposit = finance.compose_invoice(
@@ -368,12 +384,12 @@ def test_smart_invoice_composer_milestones_payments_and_sources(monkeypatch, tmp
     paid_deposit = finance.record_payment(
         _request(),
         deposit["id"],
-        finance.PaymentCreate(amount=500, method="check", reference="DEP-500", payment_date="2026-04-12"),
+        finance.PaymentCreate(amount=500, method="check", reference="DEP-500", payment_date=date.today().isoformat()),
     )["invoice"]
     paid_final = finance.record_payment(
         _request(),
         final["id"],
-        finance.PaymentCreate(amount=250, method="zelle", reference="FINAL-250", payment_date="2026-04-12"),
+        finance.PaymentCreate(amount=250, method="zelle", reference="FINAL-250", payment_date=date.today().isoformat()),
     )["invoice"]
 
     assert paid_deposit["status"] == "paid"
