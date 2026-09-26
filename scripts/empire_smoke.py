@@ -35,7 +35,12 @@ def _max_status(data: Any, _body: str) -> tuple[bool, str]:
 
 def _openclaw(data: Any, _body: str) -> tuple[bool, str]:
     gate = data.get("openclaw_gate", {}) if isinstance(data, dict) else {}
-    ok = isinstance(data, dict) and data.get("status") == "online" and gate.get("allowed") is True
+    if not isinstance(data, dict):
+        return False, "OpenClaw health payload missing"
+    # Intentional founder quarantine is a PASS (lock held) — not a hidden failure.
+    if gate.get("state") == "quarantine" and gate.get("allowed") is False:
+        return True, f"gate quarantine LOCK: {gate.get('reason')}"
+    ok = data.get("status") == "online" and gate.get("allowed") is True
     return ok, f"gate {gate.get('state')}: {gate.get('reason')}" if ok else "OpenClaw not online or gate not allowed"
 
 

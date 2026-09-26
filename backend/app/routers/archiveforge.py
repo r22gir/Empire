@@ -6827,9 +6827,101 @@ async def export_item_pdf(archive_id: int, include_images: bool = Query(False)):
     )
 
 
+def _inventory_counters_sql(db) -> dict:
+    """Fast inventory counters via SQL aggregates (no per-row normalize).
+
+    Replaces the old get_stats path that SELECT * + _normalized_inventory_row
+    for every archive (N+1 issue_info/photo queries → ~14s / smoke timeout).
+    Matches prior counter semantics within rounding of test-marker heuristics.
+    """
+    row = db.execute(
+        """
+        WITH latest AS (
+          SELECT archive_id, status, is_life_magazine, ad_opportunity_ready,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY archive_id
+                   ORDER BY datetime(created_at) DESC, id DESC
+                 ) AS rn
+          FROM archive_issue_info_runs
+          WHERE status <> 'stale'
+        ),
+        blob AS (
+          SELECT
+            a.id,
+            a.ai_identified,
+            a.listing_status,
+            a.final_price,
+            a.rough_comp_max,
+            lower(
+              COALESCE(a.listing_title,'') || ' ' ||
+              COALESCE(a.issue_title,'') || ' ' ||
+              COALESCE(a.cover_subject,'') || ' ' ||
+              COALESCE(a.notes,'') || ' ' ||
+              COALESCE(a.batch_tag,'')
+            ) AS text_blob,
+            l.status AS issue_status,
+            l.is_life_magazine AS life_flag,
+            l.ad_opportunity_ready AS ad_ready
+          FROM ag_archives a
+          LEFT JOIN latest l ON l.archive_id = a.id AND l.rn = 1
+        )
+        SELECT
+          (SELECT COUNT(*) FROM ag_archives) AS total_records,
+          (SELECT COUNT(*) FROM blob
+             WHERE COALESCE(life_flag, ai_identified, 0) = 1
+               AND text_blob NOT LIKE '%test%'
+               AND text_blob NOT LIKE '%delete%'
+               AND text_blob NOT LIKE '%synthetic%'
+               AND text_blob NOT LIKE '%no front photo%'
+          ) AS real_life_identified,
+          (SELECT COUNT(*) FROM blob WHERE issue_status = 'completed') AS issue_info_completed,
+          (SELECT COUNT(*) FROM blob WHERE COALESCE(ad_ready, 0) = 1) AS ad_opportunities_ready,
+          (SELECT COUNT(*) FROM ag_archives WHERE listing_status = 'draft') AS listing_draft_saved,
+          (SELECT COUNT(*) FROM ag_archives WHERE
+              (final_price IS NOT NULL
+               AND TRIM(CAST(final_price AS TEXT)) != ''
+               AND CAST(final_price AS REAL) != 0)
+              OR (rough_comp_max IS NOT NULL AND rough_comp_max > 0)
+          ) AS valued_priced,
+          (SELECT COUNT(*) FROM blob b
+             WHERE (b.issue_status IS NULL OR b.issue_status IN ('failed', 'not_run'))
+                OR NOT EXISTS (
+                  SELECT 1 FROM ag_archive_photos p
+                  WHERE p.archive_id = b.id AND COALESCE(p.active, 1) != 0
+                    AND lower(COALESCE(p.role, '')) IN ('front', 'front_cover', 'cover')
+                )
+          ) AS needs_review,
+          (SELECT COUNT(*) FROM blob
+             WHERE text_blob LIKE '%test%'
+                OR text_blob LIKE '%delete%'
+                OR text_blob LIKE '%synthetic%'
+                OR text_blob LIKE '%no front photo%'
+          ) AS test_records,
+          (SELECT COUNT(*) FROM blob
+             WHERE issue_status = 'completed' AND COALESCE(life_flag, 0) = 0
+          ) AS non_life
+        """
+    ).fetchone()
+    return {
+        "total_records": int(row[0] or 0),
+        "real_life_identified": int(row[1] or 0),
+        "issue_info_completed": int(row[2] or 0),
+        "ad_opportunities_ready": int(row[3] or 0),
+        "listing_draft_saved": int(row[4] or 0),
+        "valued_priced": int(row[5] or 0),
+        "needs_review": int(row[6] or 0),
+        "test_records": int(row[7] or 0),
+        "non_life": int(row[8] or 0),
+    }
+
+
 @router.get("/stats")
 async def get_stats():
-    """Dashboard stats: counts by status, tier, total value range."""
+    """Dashboard stats: counts by status, tier, total value range.
+
+    Inventory counters use SQL aggregates (fast). Previously this endpoint
+    normalized every archive row and timed out empire_smoke (10s budget).
+    """
     with get_db() as db:
         by_status = dict_rows(db.execute(
             "SELECT processed_status, COUNT(*) as count FROM ag_archives GROUP BY processed_status"
@@ -6841,9 +6933,7 @@ async def get_stats():
         valued = db.execute("SELECT COUNT(*) FROM ag_archives WHERE rough_comp_max > 0").fetchone()[0]
         total_comp_min = db.execute("SELECT COALESCE(SUM(rough_comp_min), 0) FROM ag_archives").fetchone()[0]
         total_comp_max = db.execute("SELECT COALESCE(SUM(rough_comp_max), 0) FROM ag_archives").fetchone()[0]
-        archives = dict_rows(db.execute("SELECT * FROM ag_archives ORDER BY created_at DESC").fetchall())
-    normalized = [_normalized_inventory_row(row) for row in archives]
-    counters = _inventory_counters(normalized)
+        counters = _inventory_counters_sql(db)
     return {
         "total_items": total,
         "valued_items": valued,
