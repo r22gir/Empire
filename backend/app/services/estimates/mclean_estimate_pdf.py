@@ -6,8 +6,10 @@ field set). Client **estimates** share that same landscape letter geometry
 via max_sheet_chrome.render_chrome_bands.
 
 Body content stays estimate-shaped (line items, totals, notes) — this is
-NOT a field-measurement sheet. Prior Willard EST-2026-110 portrait layout
-is retired for Max client estimates.
+NOT a field-measurement sheet. Body chrome borrows field-sheet vocabulary
+(cream panels, gold corner ticks, mono section labels, three-zone NOTES
+band) without inventing measurement geometry. Prior Willard EST-2026-110
+portrait layout is retired for Max client estimates.
 
 Canonical chrome: backend/app/services/drawing/max_sheet_chrome.py
 Golden doc: reference/max-golden/GOLDEN.md
@@ -168,11 +170,28 @@ def _title_detail(it: Dict[str, Any]) -> Tuple[str, List[str]]:
 
 
 def _amount_label(it: Dict[str, Any], title: str) -> str:
-    amount = it.get("subtotal")
-    if amount is None:
-        amount = it.get("amount")
-    if amount is None:
-        amount = it.get("final_price")
+    # HOTFIX 5 parity: founder override lives in final_price when
+    # price_overridden is set — customer-facing PDF must match canonical total.
+    is_override = bool(it.get("price_overridden"))
+    final_price = it.get("final_price")
+    if is_override and final_price is not None:
+        amount = final_price
+    else:
+        amount = it.get("subtotal")
+        if amount is None:
+            amount = it.get("amount")
+        if amount is None:
+            amount = final_price
+        if amount is None or float(amount or 0) == 0:
+            qty = float(it.get("quantity") or 1)
+            unit_price = it.get("unit_price")
+            if unit_price is None:
+                unit_price = it.get("rate")
+            if unit_price is not None:
+                try:
+                    amount = round(qty * float(unit_price), 2)
+                except (TypeError, ValueError):
+                    pass
     try:
         amt_f = float(amount or 0)
     except (TypeError, ValueError):
@@ -246,19 +265,47 @@ def _paint_page_chrome(c: canvas.Canvas, quote: Dict[str, Any], page: int, pages
     _hr(c, y - 10, weight=1.0, col=GOLD)
 
 
+def _section_label(c: canvas.Canvas, x: float, y: float, text: str, mono: str) -> None:
+    """Gold mono section label — same language as field-sheet LAYOUT MATH."""
+    c.setFont(mono, 7)
+    c.setFillColor(GOLD)
+    c.drawString(x, y, text.upper())
+
+
+def _panel(c: canvas.Canvas, x: float, y_bottom: float, w: float, h: float) -> None:
+    """Cream panel with gold hairline — field-sheet callout vocabulary."""
+    c.setFillColor(PANEL)
+    c.rect(x, y_bottom, w, h, fill=1, stroke=0)
+    c.setStrokeColor(GOLD)
+    c.setLineWidth(0.7)
+    c.rect(x, y_bottom, w, h, fill=0, stroke=1)
+    # corner ticks (field-sheet viewport cue)
+    tick = 6.0
+    c.setLineWidth(1.0)
+    for tx, ty, dx, dy in (
+        (x, y_bottom + h, tick, -tick),
+        (x + w, y_bottom + h, -tick, -tick),
+        (x, y_bottom, tick, tick),
+        (x + w, y_bottom, -tick, tick),
+    ):
+        c.line(tx, ty, tx + dx, ty)
+        c.line(tx, ty, tx, ty + dy)
+
+
 def _draw_client_block(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> float:
     _, sans, sans_b, mono = _ensure_body_fonts()
-    c.setFont(sans_b, 7.5)
-    c.setFillColor(GOLD)
-    c.drawString(MARGIN_L, y, "PREPARED FOR")
-    c.drawString(MARGIN_L + CONTENT_W * 0.52, y, "PROJECT SITE")
+    panel_h = 58.0
+    _panel(c, MARGIN_L, y - panel_h, CONTENT_W, panel_h)
+
+    _section_label(c, MARGIN_L + 8, y - 12, "PREPARED FOR", mono)
+    _section_label(c, MARGIN_L + CONTENT_W * 0.52, y - 12, "PROJECT SITE", mono)
 
     c.setFont(sans, 10)
     c.setFillColor(DK)
     client = quote.get("customer_name") or "Client"
     site = quote.get("customer_address") or ""
-    c.drawString(MARGIN_L, y - 14, str(client)[:56])
-    c.drawString(MARGIN_L + CONTENT_W * 0.52, y - 14, str(site)[:56])
+    c.drawString(MARGIN_L + 8, y - 26, str(client)[:56])
+    c.drawString(MARGIN_L + CONTENT_W * 0.52, y - 26, str(site)[:56])
 
     c.setFont(sans, 8.5)
     c.setFillColor(MUTE)
@@ -280,18 +327,14 @@ def _draw_client_block(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> flo
         if "apex" in desc:
             material = "Material: Apex Softside Vinyl"
             break
-    yy = y - 28
     if left2:
-        c.drawString(MARGIN_L, yy, left2[:56])
-        yy -= 12
+        c.drawString(MARGIN_L + 8, y - 40, left2[:56])
     if material:
-        c.drawString(MARGIN_L, yy, material[:56])
+        c.drawString(MARGIN_L + 8, y - 52, material[:56])
     if project:
-        c.drawString(MARGIN_L + CONTENT_W * 0.52, y - 28, str(project)[:56])
+        c.drawString(MARGIN_L + CONTENT_W * 0.52, y - 40, str(project)[:56])
 
-    y_rule = y - (52 if material else 40)
-    _hr(c, y_rule)
-    return y_rule - 14
+    return y - panel_h - 14
 
 
 def _draw_totals(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> float:
@@ -349,7 +392,7 @@ def _draw_totals(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> float:
 
 
 def _draw_notes(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> float:
-    _, sans, sans_b, _ = _ensure_body_fonts()
+    _, sans, sans_b, mono = _ensure_body_fonts()
     notes = (quote.get("notes") or "").strip()
     terms = (quote.get("terms") or quote.get("payment_terms") or "").strip()
     lines: List[str] = []
@@ -362,29 +405,59 @@ def _draw_notes(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> float:
                 break
             if raw.upper().startswith("OPEN QUESTIONS"):
                 break
-            lines.extend(_wrap(raw, 120))
+            lines.extend(_wrap(raw, 110))
     if terms:
-        lines.extend(_wrap(terms, 120))
+        lines.extend(_wrap(terms, 110))
     if not lines:
         lines = [
             "50% deposit required before work begins. Balance due upon completion.",
             "Estimate covers fabrication and materials as listed.",
         ]
 
-    _hr(c, y)
-    y -= 14
-    c.setFont(sans_b, 7.5)
-    c.setFillColor(GOLD)
-    c.drawString(MARGIN_L, y, "NOTES")
-    y -= 12
-    c.setFont(sans, 8)
+    # Three-zone field-sheet band: NOTES | TERMS | STATUS (estimate analogue)
+    band_h = 18.0 + 10.0 * min(len(lines), 6)
+    band_h = min(band_h, max(y - CONTENT_BOTTOM - 4, 36))
+    if y - band_h < CONTENT_BOTTOM:
+        band_h = max(y - CONTENT_BOTTOM, 28)
+    _panel(c, MARGIN_L, y - band_h, CONTENT_W, band_h)
+
+    zone_w = CONTENT_W / 3.0
+    c.setStrokeColor(HAIR)
+    c.setLineWidth(0.5)
+    c.line(MARGIN_L + zone_w, y - 2, MARGIN_L + zone_w, y - band_h + 2)
+    c.line(MARGIN_L + 2 * zone_w, y - 2, MARGIN_L + 2 * zone_w, y - band_h + 2)
+
+    _section_label(c, MARGIN_L + 6, y - 12, "NOTES", mono)
+    _section_label(c, MARGIN_L + zone_w + 6, y - 12, "TERMS / SCOPE", mono)
+    _section_label(c, MARGIN_L + 2 * zone_w + 6, y - 12, "FIELD CHECK", mono)
+
+    c.setFont(sans, 7.5)
     c.setFillColor(DETAIL)
-    for ln in lines[:10]:
-        if y < CONTENT_BOTTOM + 8:
-            break
-        c.drawString(MARGIN_L, y, ln[:130])
-        y -= 10
-    return y
+    note_lines = lines[:4]
+    term_lines = lines[4:8] if len(lines) > 4 else [
+        "Deposit before fabrication.",
+        "Balance on completion.",
+    ]
+    status = (quote.get("status") or "draft").upper()
+    check_lines = [
+        f"Status: {status}",
+        "Do not invent missing dims.",
+        "Confirm fabric before cut.",
+    ]
+    yy = y - 24
+    for ln in note_lines:
+        c.drawString(MARGIN_L + 6, yy, ln[:42])
+        yy -= 9
+    yy = y - 24
+    for ln in term_lines:
+        c.drawString(MARGIN_L + zone_w + 6, yy, ln[:42])
+        yy -= 9
+    yy = y - 24
+    c.setFillColor(MUTE)
+    for ln in check_lines:
+        c.drawString(MARGIN_L + 2 * zone_w + 6, yy, ln[:42])
+        yy -= 9
+    return y - band_h - 8
 
 
 def _open_questions(quote: Dict[str, Any]) -> List[str]:
@@ -450,14 +523,16 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     y = CONTENT_TOP - 22
     y = _draw_client_block(c, quote, y)
 
+    _section_label(c, MARGIN_L, y, "LINE ITEMS", mono)
+    y -= 12
     c.setFont(sans_b, 7.5)
     c.setFillColor(GOLD)
     c.drawString(MARGIN_L, y, "#")
     c.drawString(MARGIN_L + 22, y, "DESCRIPTION")
     c.drawRightString(PW - MARGIN_R, y, "AMOUNT")
-    y -= 6
-    _hr(c, y)
-    y -= 14
+    y -= 5
+    _hr(c, y, weight=1.0, col=GOLD)
+    y -= 12
 
     for it in kept:
         title, details = _title_detail(it)
