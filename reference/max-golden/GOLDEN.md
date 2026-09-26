@@ -68,11 +68,14 @@ content numbers for Marleys stay separate.
 
 ## Scope vs estimates
 
-This golden is the **drawing / field-measurement** standard.
+This golden is the **drawing / field-measurement** standard (11-sheet set).
 
-Portrait **estimate** PDFs are a different path (`mclean_estimate_pdf` /
-Willard EST-2026-110). Align Nelma / Empire header language toward the same
-house chrome; do **not** invent an estimate layout from this field set.
+Client **estimate** PDFs (`backend/app/services/estimates/mclean_estimate_pdf.py`)
+must use the **same landscape letter geometry + chrome bands** (cream paper,
+44/26 dark bands, Nelma/Empire language) via `max_sheet_chrome.render_chrome_bands`.
+Body content stays estimate-shaped (line items / totals / notes) — do **not**
+invent a field-measurement sheet as an estimate. Prior Willard portrait
+EST-2026-110 geometry is retired for Max client estimates (2026-09-26).
 
 ## Code hooks
 

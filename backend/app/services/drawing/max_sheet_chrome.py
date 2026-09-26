@@ -44,8 +44,8 @@ STATUS_DISCUSSION = "FOR DISCUSSION - NOT FOR CONSTRUCTION"
 PDF_AUTHOR = "Nelma's Workroom - Powered by Empire Workroom"
 PDF_CREATOR = "Nelma's Workroom"
 
-# Estimate path: same brand words, different layout (portrait). Do not
-# invent a field-measurement layout for estimates.
+# Estimate path: same landscape chrome bands + brand words (founder lock).
+# Body stays estimate-shaped — do not invent a field-measurement layout.
 ESTIMATE_COMPANY = "NELMA'S WORKROOM"
 ESTIMATE_TAGLINE = "POWERED BY EMPIRE WORKROOM · CUSTOM UPHOLSTERY & FABRICATION"
 ESTIMATE_ADDRESS = "5124 Frolich Ln, Hyattsville, MD 20781"
