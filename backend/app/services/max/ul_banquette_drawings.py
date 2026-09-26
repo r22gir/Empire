@@ -219,11 +219,27 @@ def render_ul_banquette_pdf(
         shell_height=l_height, seat_height=l_seat_h, net_back_height=l_net,
         provisional=True,
     )
+    # construction: basketweave (default) | plain / budget / budget_plain
+    construction_raw = (
+        params.get("construction") or params.get("fabric_mode")
+        or params.get("upholstery_option") or dims.get("construction")
+        or dims.get("fabric_mode") or "basketweave"
+    )
+    cnorm = str(construction_raw).strip().lower().replace("-", "_").replace(" ", "_")
+    construction = (
+        "plain" if cnorm in (
+            "plain", "budget", "budget_plain", "basic", "basic_plain",
+            "plain_backs", "plain_back", "all_plain",
+        ) else "basketweave"
+    )
+    rev = str(params.get("rev") or dims.get("rev") or ("B-PLAIN" if construction == "plain" else "H-ORTHO-2")).strip()
     meta = SheetMeta(
         quote_num=quote_num,
         job=(f"{site} — U+L Banquette Upholstery" if site
              else "Marleys Hyattsville — U+L Banquette Upholstery"),
         client=client or "Dave Romero / Marleys Hyattsville",
+        construction=construction,
+        rev=rev,
     )
 
     out_path = new_drawing_path(prefix="banquette_upholstery", suffix=".pdf")
@@ -240,6 +256,7 @@ def render_ul_banquette_pdf(
         out_path=out_path, u=u_spec, L=l_spec, meta=meta,
         include_u=True, include_l=True,
         include_iso=False,  # PARKED — Rafael 2026-09-24: ortho TOP/FRONT/SIDE first
+        construction=construction,
     )
 
     mats = summary.get("materials") or {}
@@ -251,7 +268,11 @@ def render_ul_banquette_pdf(
         f"U elev: shell {u_spec.shell_height}\"; net back {u_spec.net_back_height}\" sits ON "
         f"{u_spec.seat_foam}\" foam; seat H {u_spec.seat_height}\" AFF PROV (foam ≠ seat H).",
         "Sheets: TOP/FRONT/SIDE U+L (iso PARKED) / client mockup / schedule / materials.",
-        "PATTERN fabric = BACKS only; PLAIN fabric = SEATS.",
+        (
+            "BUDGET PLAIN: backs + seats both PLAIN — NO constructed basketweave / no pattern modules."
+            if construction == "plain" else
+            "PATTERN fabric = BACKS only; PLAIN fabric = SEATS."
+        ),
         f"Fabric order: PATTERN {mats.get('pattern_yards_order')} yd + PLAIN {mats.get('plain_yards_order')} yd "
         f"@ {mats.get('fabric_width_in')}\" (15% waste).",
         f"1/2\" ply: {mats.get('ply_sheets_4x8')} sheets 4x8 ({mats.get('ply_with_waste_sf')} sf w/ waste).",
@@ -303,6 +324,9 @@ def render_ul_banquette_pdf(
         "has_isometric": False,  # parked for discussion pack
         "has_client_mockup": True,
         "has_materials": True,
-        "pattern_backs_only": True,
+        "pattern_backs_only": construction != "plain",
         "plain_seats_only": True,
+        "plain_backs": construction == "plain",
+        "construction": construction,
+        "budget_plain": construction == "plain",
     }
