@@ -301,6 +301,80 @@ WHATS_NEW_SIGNALS = [
 ]
 
 
+
+# Explicit allowlist for HARD chat intercept (router). Broader INTENT_SIGNALS
+# remain for voluntary tool use / advice only — do not force-steal ordinary chat.
+# Health "is <service> online" MUST beat empire_module_knowledge aliases so
+# runtime truth answers, not static module blurbs (router contract).
+EXPLICIT_RUNTIME_TRUTH_SIGNALS = [
+    "runtime truth",
+    "runtime status",
+    "runtime truth check",
+    "empire_runtime_truth_check",
+    "run empire_runtime_truth_check",
+    "live commit",
+    "local commit",
+    "public commit",
+    "is this live",
+    "is the latest code running",
+    "what commit",
+    "current commit",
+    "did the update go live",
+    "why don't i see the fix",
+    "why dont i see the fix",
+    "website not loading",
+    "truth check",
+    "runtime_truth",
+    # Fleet/service health asks (INTENT_SIGNALS) — force so they beat AI/module paths
+    "what services are online",
+    "services are online",
+    "which services are online",
+    "service health",
+    "services online",
+    "what is online",
+]
+
+
+def _desks_online_truth_intent(text: str) -> bool:
+    """True only when desks_online is asked with explicit truth/runtime intent."""
+    if "desks_online" not in text and "desks online" not in text:
+        return False
+    truth_markers = (
+        "truth",
+        "runtime",
+        "empire_runtime_truth_check",
+        "report desks_online",
+        "report desks online",
+        "live",
+        "freeze",
+        "keep-12",
+        "keep 12",
+    )
+    return any(m in text for m in truth_markers)
+
+
+def should_force_runtime_truth_check(message: str, *, code_mode: bool = False) -> bool:
+    """Hard-intercept gate for /chat and /chat/stream.
+
+    Force runtime truth on explicit deploy/truth asks, desks_online+truth,
+    or runtime health questions (so "Is OpenClaw online?" beats module
+    knowledge). Ordinary prompts must reach the normal LLM path.
+    """
+    if code_mode:
+        return should_run_runtime_truth_check(message)
+    text = _normalize_intent_text(message)
+    if not text:
+        return False
+    if any(s in text for s in EXPLICIT_RUNTIME_TRUTH_SIGNALS):
+        return True
+    if _desks_online_truth_intent(text):
+        return True
+    # Health questions must beat module aliases (router contract).
+    if is_runtime_health_question(message):
+        return True
+    return False
+
+
 def should_run_whats_new_summary(message: str | None) -> bool:
     text = _normalize_intent_text(message)
     if should_run_runtime_truth_check(text):
