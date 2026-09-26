@@ -1002,14 +1002,24 @@ def _draw_u_plan(c, ox, oy, scale, u: UShellSpec, colored: bool = False, constru
     )
 
 
-def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = False, construction: str = "basketweave"):
+def _draw_u_elev(
+    c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = False,
+    construction: str = "basketweave", *,
+    fill_spare_width: bool = False, max_height_pts: float | None = None,
+    depth_boost_cap: float = 2.25, show_side_banner: bool = True,
+):
     """SIDE elevation — Rafael video dim chain.
 
     Dims (required): overall H, overall D, seat H AFF, seat depth, lean.
     Foam is a distinct material callout — NEVER drawn/labeled as seat H.
     Seat plane at seat_height AFF; back rises from seat plane to shell top with lean.
+
+    Presentation (full SIDE sheets):
+      fill_spare_width — grow depth scale into width_pts when shell is tall/skinny
+        so the elev fills spare white beside the checklist (labels stay true inches).
+      max_height_pts — hard cap on shell drawn height (keeps lean + dims on-page).
+    Returns dict with layout extents for checklist placement.
     """
-    s = scale_h
     H = u.shell_height
     seat_h = u.seat_height
     foam = u.seat_foam
@@ -1021,29 +1031,45 @@ def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = F
     # (that understates the rise and inflates ~13.8° vs ~6.4° on short-shell packs).
     ang = lean_angle_deg(lean, max(0.1, u.net_back_height))
 
-    # Fit depth+lean into ~92% of width_pts; height uses scale_h
-    ds = (width_pts * 0.92) / (overall_d + lean + 4)
-    # Prefer shared visual scale: use min so both axes fit
+    left_dim_pad = 32  # overall-H dim column left of front_x
+    # Lean-label pad: compact when filling spare width (label lives in elev→checklist gap)
+    lean_pad_in = 0.35 if fill_spare_width else 2.0
+    geom_w = overall_d + lean + lean_pad_in  # inches of depth+lean+pad
+    # Height scale: honor caller scale_h, then clamp to max_height_pts (no clip)
+    s = float(scale_h)
+    if max_height_pts is not None and H > 0:
+        s = min(s, float(max_height_pts) / H)
+    # Width-fit scale for depth axis
+    usable_w = max(40.0, float(width_pts) - left_dim_pad)
+    fit_frac = 0.98 if fill_spare_width else 0.96
+    s_w = (usable_w * fit_frac) / geom_w
+    # If uniform height scale overflows width, shrink both
+    if overall_d * s + lean * s + left_dim_pad > width_pts:
+        s = (usable_w * fit_frac) / geom_w
     Hs = H * s
-    # If height scale makes depth too wide, shrink both
-    if overall_d * s + lean * s + 20 > width_pts:
-        s = (width_pts * 0.90) / (overall_d + lean + 2)
-        Hs = H * s
+    # Depth scale: uniform by default; full SIDE sheets may boost into spare width
     ds = s
+    if fill_spare_width:
+        boost = min(float(depth_boost_cap), max(1.0, s_w / max(s, 0.01)))
+        ds = s * boost
+        # Final clamp so boosted depth (+ lean) still fits width_pts
+        need = overall_d * ds + lean * ds + left_dim_pad
+        if need > width_pts:
+            ds = (usable_w * fit_frac) / max(overall_d + lean + lean_pad_in, 0.1)
     Ds = depth * ds
     BTs = bt * ds
     Ls = lean * ds
     seatHs = seat_h * s
     foams = foam * s
-    wall_x = ox + Ds + BTs + Ls + 6
     floor_y = oy
-    front_x = wall_x - BTs - Ds
+    front_x = ox + left_dim_pad
+    wall_x = front_x + Ds + BTs
 
     # Shell / wall band (against wall, full H)
     c.setFillColor(LT_BLUE)
     c.setStrokeColor(SHELL)
     c.setLineWidth(1.4)
-    c.rect(front_x - 4, floor_y, (wall_x + 4) - (front_x - 4), Hs, fill=1, stroke=1)
+    c.rect(front_x - 4, floor_y, (wall_x + Ls * 0.12 + 4) - (front_x - 4), Hs, fill=1, stroke=1)
 
     # Seat volume — closed face from floor to seat H AFF (plain)
     seat_fill = PLAIN_SEAT if colored else LT_FOAM
@@ -1099,10 +1125,16 @@ def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = F
     c.line(tf_x, z1 + 3, tf_x, z1 + 9)
     c.setFillColor(PROV)
     c.setFont("Helvetica-Bold", NOTE_FONT)
-    # Single lean callout (setback + one ° from net_back). Place to the RIGHT of the
-    # lean guide so it stays on-page on full SIDE sheets (top-of-back +12 was clipped).
+    # Single lean callout (setback + one ° from net_back). Right of lean guide;
+    # keep inside elev width so full-SIDE checklist never covers it.
     lean_lab = f'lean {lean:.1f}" PROV setback (≈{ang:.1f}°)'
-    c.drawString(max(tf_x, bf_x) + 8, z1 - 10, lean_lab)
+    lean_x = max(tf_x, bf_x) + 6
+    lean_x_max = ox + width_pts - 6
+    lean_w = c.stringWidth(lean_lab, "Helvetica-Bold", NOTE_FONT)
+    if lean_x + lean_w > lean_x_max:
+        # Prefer keeping callout on-page over extending past elev budget
+        lean_x = max(front_x, lean_x_max - lean_w)
+    c.drawString(lean_x, z1 - 10, lean_lab)
 
     # ── Video dim chain (SIDE) ─────────────────────────────────────
     _dim_v(c, front_x - 28, floor_y, floor_y + Hs, f'{H:.2f}" overall H', bold=True)
@@ -1130,16 +1162,33 @@ def _draw_u_elev(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = F
         c.drawString(front_x + 4, floor_y + seatHs * 0.4, "seat (plain)")
         c.drawString(bf_x + 4, z0 + (z1 - z0) * 0.55, "back (leans)")
 
-    # Compact side header — detail lives in SITE DIM panel
-    c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", PANEL_TITLE_FONT)
-    c.drawString(ox, floor_y + Hs + 40, "SIDE — VIDEO DIM CHAIN")
-    c.setFillColor(GRAY)
-    c.setFont("Helvetica", NOTE_FONT)
-    c.drawString(
-        ox, floor_y + Hs + 24,
-        f'Net back order H {u.net_back_height:.2f}" · visible above seat ≈ {H - seat_h:.2f}" · confirm lean on site',
-    )
+    # Compact net-back note under elev (tall banner above ate vertical scale)
+    if show_side_banner:
+        c.setFillColor(NAVY)
+        c.setFont("Helvetica-Bold", PANEL_TITLE_FONT)
+        c.drawString(ox, floor_y + Hs + 16, "SIDE — VIDEO DIM CHAIN")
+        c.setFillColor(GRAY)
+        c.setFont("Helvetica", NOTE_FONT - 1)
+        c.drawString(
+            ox, floor_y + Hs + 4,
+            f'Net back order H {u.net_back_height:.2f}" · visible above seat ≈ {H - seat_h:.2f}" · confirm lean on site',
+        )
+
+    # Geometry right edge for checklist packing — do NOT include lean label
+    # string width (that artificially ate spare white beside the elev).
+    content_right = max(wall_x + Ls * 0.12, front_x + Ds, tb_x) + 10
+    return {
+        "front_x": front_x,
+        "wall_x": wall_x,
+        "floor_y": floor_y,
+        "top_y": z1,
+        "scale_h": s,
+        "scale_d": ds,
+        "content_right": content_right,
+        "Hs": Hs,
+        "depth_boost": (ds / s) if s else 1.0,
+        "lean_x": lean_x,
+    }
 
 
 def _draw_u_front(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = False, construction: str = "basketweave", run_note: str | None = None):
@@ -1242,7 +1291,10 @@ def _draw_u_front(c, ox, oy, scale_h, width_pts, u: UShellSpec, colored: bool = 
     c.drawString(x0, floor_y + Hs + 34, run_note)
 
 
-def _draw_l_side(c, ox, oy, scale_h, width_pts, L: LShellSpec, colored: bool = False, construction: str = "basketweave"):
+def _draw_l_side(
+    c, ox, oy, scale_h, width_pts, L: LShellSpec, colored: bool = False,
+    construction: str = "basketweave", **elev_kw,
+):
     """L SIDE elevation — same video dim chain as U (provisional)."""
     # Reuse U side geometry via a thin adapter
     u_like = UShellSpec(
@@ -1256,10 +1308,21 @@ def _draw_l_side(c, ox, oy, scale_h, width_pts, L: LShellSpec, colored: bool = F
         seat_foam=L.seat_foam,
         back_lean_in=L.back_lean_in,
     )
-    _draw_u_elev(c, ox, oy, scale_h, width_pts, u_like, colored=colored, construction=construction)
-    c.setFillColor(PROV)
-    c.setFont("Helvetica-Bold", NOTE_FONT)
-    c.drawString(ox, oy - 44, f'L PROVISIONAL — depth {L.seat_depth:.1f}" / H {L.shell_height:.1f}" / seat H {L.seat_height:.1f}" AFF — lock to U')
+    layout = _draw_u_elev(
+        c, ox, oy, scale_h, width_pts, u_like, colored=colored,
+        construction=construction, **elev_kw,
+    )
+    # Skip low provisional stamp on full SIDE sheets (checklist carries lock-to-U);
+    # keep it for compact/mockup calls that still use the banner.
+    if elev_kw.get("show_side_banner", True):
+        c.setFillColor(PROV)
+        c.setFont("Helvetica-Bold", NOTE_FONT)
+        c.drawString(
+            ox, oy - 44,
+            f'L PROVISIONAL — depth {L.seat_depth:.1f}" / H {L.shell_height:.1f}" / '
+            f'seat H {L.seat_height:.1f}" AFF — lock to U',
+        )
+    return layout
 
 
 def _draw_l_front(c, ox, oy, scale_h, width_pts, L: LShellSpec, colored: bool = False, construction: str = "basketweave"):
@@ -2065,18 +2128,46 @@ def render_upholstery_shell_pdf(
         finish("U Front")
 
         # ── U SIDE ──
+        # Grow elev into spare white beside checklist (tall shell is height-limited;
+        # depth scale boost fills horizontal remainder). Lean + dims stay on-page.
         _page_header(
             c, w, h,
             "U BANQUETTE — SIDE (ELEVATION)",
             f'Video dim chain · lean {u.back_lean_in:.1f}" PROV · foam ≠ seat H AFF',
         )
-        _draw_u_elev(c, 0.45 * inch, 1.70 * inch, 10.0, 6.5 * inch, u, colored=True, construction=constr)
-        _legend(c, 7.35 * inch, 6.95 * inch, [
+        side_ox = 0.40 * inch
+        side_oy = 1.78 * inch
+        checklist_w = 3.40 * inch
+        page_right = w - 0.40 * inch
+        elev_width = page_right - checklist_w - 0.20 * inch - side_ox
+        # Header gold line ~ h-0.70"; lean tick needs ~12pt above shell
+        max_Hs = (h - 0.78 * inch) - side_oy - 12
+        layout = _draw_u_elev(
+            c, side_ox, side_oy, 12.0, elev_width, u, colored=True,
+            construction=constr, fill_spare_width=True, max_height_pts=max_Hs,
+            depth_boost_cap=2.25, show_side_banner=False,
+        )
+        c.setFillColor(GRAY)
+        c.setFont("Helvetica", NOTE_FONT - 1)
+        c.drawString(
+            side_ox,
+            layout["top_y"] + 8,
+            f'Net back order H {u.net_back_height:.2f}" · visible above seat ≈ '
+            f'{u.shell_height - u.seat_height:.2f}" · confirm lean on site',
+        )
+        check_x = page_right - checklist_w
+        # Elev width already reserves checklist column; only nudge if geometry
+        # somehow overruns (should not with fill clamp).
+        if layout["content_right"] + 0.10 * inch > check_x:
+            check_x = min(page_right - checklist_w, layout["content_right"] + 0.10 * inch)
+            if check_x + checklist_w > page_right:
+                check_x = page_right - checklist_w
+        _legend(c, check_x, min(6.95 * inch, layout["top_y"] - 8), [
             (PATTERN_BACK_BAR, "Plain BACK (leaned)" if is_plain else "Basketweave BACK (leaned)"),
             (PLAIN_SEAT, "Plain SEAT"),
             (PROV, "Lean / seat H provisional"),
         ])
-        _video_dim_checklist(c, 7.15 * inch, 5.20 * inch, u, L)
+        _video_dim_checklist(c, check_x, 5.20 * inch, u, L)
         finish("U Side")
 
     if include_l:
@@ -2125,13 +2216,38 @@ def render_upholstery_shell_pdf(
             "L BANQUETTE — SIDE (ELEVATION)",
             f'Video dim chain (same as U) · lean {L.back_lean_in:.1f}" PROV · lock to U',
         )
-        _draw_l_side(c, 0.45 * inch, 1.75 * inch, 10.0, 6.5 * inch, L, colored=True, construction=constr)
-        _legend(c, 7.35 * inch, 6.95 * inch, [
+        side_ox = 0.40 * inch
+        side_oy = 1.78 * inch
+        checklist_w = 3.40 * inch
+        page_right = w - 0.40 * inch
+        elev_width = page_right - checklist_w - 0.20 * inch - side_ox
+        max_Hs = (h - 0.78 * inch) - side_oy - 12
+        layout = _draw_l_side(
+            c, side_ox, side_oy, 12.0, elev_width, L, colored=True,
+            construction=constr, fill_spare_width=True, max_height_pts=max_Hs,
+            depth_boost_cap=2.25, show_side_banner=False,
+        )
+        c.setFillColor(GRAY)
+        c.setFont("Helvetica", NOTE_FONT - 1)
+        c.drawString(
+            side_ox,
+            layout["top_y"] + 8,
+            f'Net back order H {L.net_back:.2f}" · visible above seat ≈ '
+            f'{L.shell_height - L.seat_height:.2f}" · lock L to U · confirm lean',
+        )
+        check_x = page_right - checklist_w
+        # Elev width already reserves checklist column; only nudge if geometry
+        # somehow overruns (should not with fill clamp).
+        if layout["content_right"] + 0.10 * inch > check_x:
+            check_x = min(page_right - checklist_w, layout["content_right"] + 0.10 * inch)
+            if check_x + checklist_w > page_right:
+                check_x = page_right - checklist_w
+        _legend(c, check_x, min(6.95 * inch, layout["top_y"] - 8), [
             (PATTERN_BACK_BAR, "Plain BACK (leaned)" if is_plain else "Basketweave BACK (leaned)"),
             (PLAIN_SEAT, "Plain SEAT"),
             (PROV, "Provisional"),
         ])
-        _video_dim_checklist(c, 7.15 * inch, 5.20 * inch, u, L, shell="l")
+        _video_dim_checklist(c, check_x, 5.20 * inch, u, L, shell="l")
         finish("L Side")
 
     # ── Client Mockup ──
