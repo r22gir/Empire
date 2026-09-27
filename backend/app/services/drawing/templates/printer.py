@@ -418,20 +418,230 @@ def _render_b2_vector(result: GeometryFamilyResult, spec: dict) -> bytes:
 
 
 def _render_b1_story(result: GeometryFamilyResult, spec: dict) -> bytes:
-    """Non-Roman families: B1 textual preview path (preserved until
-    B2 follow-on commits land each family's vector renderer)."""
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=LETTER,
-        leftMargin=0.6 * inch, rightMargin=0.6 * inch,
-        topMargin=0.5 * inch, bottomMargin=0.5 * inch,
-        title=f"Empire Drawing — {result.product_type}",
-        author="Empire Drafting Studio (B1)",
+    """Idea sheet for families that are not on the golden vector path.
+
+    Same title-block model as the bench SVG sheet (quote_sheet_layout):
+    letterhead, one contact line per row, framed views of the existing
+    geometry, dims in the gutter, layout math and assumptions below.
+    One landscape page. No interleaved address/phone row.
+    """
+    from app.services.drawing.bench_quote_bridge import sheet_chrome
+    from app.services.drawing.quote_sheet_layout import (
+        PDF_TYPE,
+        b1_page_regions,
+        layout_title_block,
+        project_view,
     )
-    story = _render_to_story_b1(result, spec)
-    doc.build(story)
+
+    page_w, page_h = landscape(LETTER)
+    buf = io.BytesIO()
+    c = Canvas(
+        buf, pagesize=(page_w, page_h),
+        title=f"Empire Drawing — {result.product_type}",
+        author="Empire Drafting Studio",
+    )
+    ink = colors.HexColor("#20241f")
+    mute = colors.HexColor("#5c574c")
+    hair = colors.HexColor("#c8c2b4")
+    chip_fill = colors.HexColor("#f4efe2")
+    paper = colors.HexColor("#fbfaf6")
+    c.setFillColor(paper)
+    c.rect(0, 0, page_w, page_h, fill=1, stroke=0)
+
+    product = (result.product_type or "").replace("_", " ").title()
+    family = result.family or ""
+    chrome = sheet_chrome(spec.get("business_unit"))
+    rows = [("FAMILY:", family), ("PRODUCT:", product)]
+    for key, value in (result.title_block or {}).items():
+        if value is None or str(value).strip() == "":
+            continue
+        rows.append((f"{str(key).upper()}:", str(value)))
+    regions = b1_page_regions(page_w, page_h, title_rows=len(rows) + 2)
+    header = regions["header"]
+    # Header is top-down in the helper; PDF y grows up.
+    header_top = page_h - header.y
+    header_bot = header_top - header.h
+    c.setFillColor(colors.HexColor("#f6f3ec"))
+    c.rect(header.x, header_bot, header.w, header.h, fill=1, stroke=0)
+    c.setStrokeColor(colors.HexColor("#b8912f"))
+    c.setLineWidth(1.4)
+    c.line(header.x, header_bot, header.right, header_bot)
+    c.setFillColor(ink)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(header.x + 10, header_top - 16, chrome.get("company") or "EMPIRE WORKROOM")
+    c.setFont("Helvetica", 8)
+    c.setFillColor(mute)
+    c.drawString(header.x + 10, header_top - 30, chrome.get("tagline") or "")
+    c.setFillColor(ink)
+    c.setFont("Helvetica-Bold", 14)
+    title = f"{family} — {product}".strip(" —")
+    c.drawRightString(header.right - 10, header_top - 20, title)
+    c.setFillColor(mute)
+    c.setFont("Helvetica", 8)
+    c.drawRightString(header.right - 10, header_top - 34, "IDEA SHEET  ·  NOT FOR CONSTRUCTION")
+
+    title_rect = regions["title"]
+    title_top = page_h - title_rect.y
+    c.setStrokeColor(ink)
+    c.setLineWidth(1.0)
+    c.rect(title_rect.x, title_top - title_rect.h, title_rect.w, title_rect.h, fill=0, stroke=1)
+    ops = layout_title_block(
+        title_rect.w, title_rect.h, chrome, rows, chip="", sizes=PDF_TYPE,
+    )
+    _paint_block_ops(c, title_rect.x, title_top, ops, ink, mute, hair, chip_fill)
+
+    views = list(result.geometry.views or ["elevation"])
+    view_rect = regions["views"]
+    view_top = page_h - view_rect.y
+    n = max(1, len(views))
+    gap = 8.0
+    panel_h = (view_rect.h - gap * (n - 1)) / n
+    for i, view in enumerate(views):
+        panel_top = view_top - i * (panel_h + gap)
+        panel_bot = panel_top - panel_h
+        c.setStrokeColor(ink)
+        c.setLineWidth(0.8)
+        c.rect(view_rect.x, panel_bot, view_rect.w, panel_h, fill=0, stroke=1)
+        c.setFillColor(colors.HexColor("#f6f3ec"))
+        c.rect(view_rect.x, panel_top - 16, view_rect.w, 16, fill=1, stroke=0)
+        c.setFillColor(ink)
+        c.setFont("Helvetica-Bold", PDF_TYPE["caption"])
+        c.drawString(view_rect.x + 8, panel_top - 12, f"{view.upper()} VIEW")
+        inner_top = panel_top - 16
+        inner_h = panel_h - 16
+        width_label, height_label = _spec_dim_labels(spec, view)
+        projected = project_view(
+            result.geometry.points, result.geometry.edges, view,
+            view_rect.w, inner_h, gutter=40,
+            width_label=width_label, height_label=height_label,
+        )
+        for line in projected["lines"]:
+            weight = line.get("weight") or "outline"
+            c.setStrokeColor(ink if weight == "outline" else mute)
+            c.setLineWidth(1.15 if weight == "outline" else 0.45)
+            y1 = inner_top - line["y1"]
+            y2 = inner_top - line["y2"]
+            c.line(view_rect.x + line["x1"], y1, view_rect.x + line["x2"], y2)
+        c.setFillColor(ink)
+        c.setFont("Helvetica", PDF_TYPE["dim"])
+        for label in projected["labels"]:
+            lx = view_rect.x + label["x"]
+            ly = inner_top - label["y"]
+            if label.get("anchor") == "end":
+                c.drawRightString(lx, ly, label["text"])
+            elif label.get("anchor") == "middle":
+                c.drawCentredString(lx, ly, label["text"])
+            else:
+                c.drawString(lx, ly, label["text"])
+
+    notes = regions["notes"]
+    notes_top = page_h - notes.y
+    y = notes_top - 4
+    bottom = page_h - notes.bottom + 4
+    c.setFillColor(ink)
+    c.setFont("Helvetica-Bold", PDF_TYPE["section"])
+    c.drawString(notes.x, y, "LAYOUT MATH — segments + gaps = overall")
+    y -= 14
+    c.setFont("Helvetica", PDF_TYPE["body"])
+    for ml in result.layout_math or []:
+        seg = " + ".join(f"{n} × {_fmt_in(v)}" for n, v in ml.segments) or "—"
+        gap_s = " + ".join(f"{n} × {_fmt_in(v)}" for n, v in ml.gaps) or ""
+        equation = seg + (f" + {gap_s}" if ml.gaps else "")
+        equation = f"{equation}  =  {_fmt_in(ml.total)}  (target {_fmt_in(ml.target_in)})"
+        note = f"  ·  {ml.note}" if ml.note else ""
+        y = _pdf_flow(c, notes.x, y, bottom, ml.label, "Helvetica-Bold",
+                      PDF_TYPE["body"], notes.w, ink)
+        y = _pdf_flow(c, notes.x + 8, y, bottom, equation + note, "Helvetica",
+                      PDF_TYPE["note"], notes.w - 8, ink)
+        y -= 2
+    y -= 6
+    if y > bottom + 12:
+        c.setFont("Helvetica-Bold", PDF_TYPE["section"])
+        c.setFillColor(ink)
+        c.drawString(notes.x, y, "NOTES / ASSUMPTIONS — CONFIRM")
+        y -= 13
+        assumptions = list(result.assumptions or [])
+        if not assumptions:
+            assumptions = ["No assumptions — all dims sourced from spec."]
+        for assumption in assumptions:
+            y = _pdf_flow(c, notes.x, y, bottom, "* " + assumption,
+                          "Helvetica-Oblique", PDF_TYPE["note"], notes.w,
+                          colors.HexColor("#7c5a00"))
+
+    c.setStrokeColor(ink)
+    c.setLineWidth(1.1)
+    c.rect(16, 16, page_w - 32, page_h - 32, fill=0, stroke=1)
+    c.showPage()
+    c.save()
     buf.seek(0)
     return buf.getvalue()
+
+
+def _spec_dim_labels(spec: dict, view: str):
+    """Quote dims for a view gutter. Not the padded geometry bbox."""
+    dims = (spec or {}).get("dims") or {}
+    width = dims.get("width")
+    if view == "plan":
+        other = dims.get("depth")
+    else:
+        other = dims.get("drop")
+        if other is None:
+            other = dims.get("height")
+
+    def _one(value):
+        if value is None or value == "":
+            return None
+        try:
+            return _fmt_in(float(value))
+        except (TypeError, ValueError):
+            return None
+
+    return _one(width), _one(other)
+
+
+def _paint_block_ops(c, origin_x, top_y, ops, ink, mute, hair, chip_fill):
+    """Paint quote_sheet_layout ops. ``top_y`` is the PDF y of the block top."""
+    for op in ops:
+        kind = op["kind"]
+        if kind == "rect":
+            c.setFillColor(chip_fill)
+            c.rect(
+                origin_x + op["x"],
+                top_y - op["y"] - op["h"],
+                op["w"], op["h"], fill=1, stroke=0,
+            )
+        elif kind == "rule":
+            c.setStrokeColor(hair)
+            c.setLineWidth(0.5)
+            y = top_y - op["y"]
+            c.line(origin_x + op["x1"], y, origin_x + op["x2"], y)
+        elif kind == "text":
+            size = op["size"]
+            bold = op.get("weight") == "bold"
+            c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+            c.setFillColor(mute if op.get("fill") == "mute" else ink)
+            x = origin_x + op["x"]
+            y = top_y - op["y"]
+            anchor = op.get("anchor") or "start"
+            if anchor == "middle":
+                c.drawCentredString(x, y, op["text"])
+            elif anchor == "end":
+                c.drawRightString(x, y, op["text"])
+            else:
+                c.drawString(x, y, op["text"])
+
+
+def _pdf_flow(c, x, y, bottom, text, font, size, width, color):
+    """Draw wrapped lines downward. Returns the next baseline."""
+    from app.services.drawing.quote_sheet_layout import wrap_text
+    c.setFillColor(color)
+    c.setFont(font, size)
+    for line in wrap_text(text, width, size, factor=0.50):
+        if y < bottom:
+            return y
+        c.drawString(x, y, line)
+        y -= size + 3
+    return y
 
 
 def _render_to_story_b1(result: GeometryFamilyResult, spec: dict) -> list:
