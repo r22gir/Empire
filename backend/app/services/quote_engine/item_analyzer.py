@@ -93,7 +93,7 @@ async def analyze_photo_items(
 
     # Try the dedicated vision/analyze-items endpoint first
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             res = await client.post(
                 f"{api_base}/vision/analyze-items",
                 json={"image": image_data, "prompt": prompt},
