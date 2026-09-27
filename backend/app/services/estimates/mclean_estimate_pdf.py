@@ -172,14 +172,16 @@ def _title_detail(it: Dict[str, Any]) -> Tuple[str, List[str]]:
 def _amount_label(it: Dict[str, Any], title: str) -> str:
     # HOTFIX 5 parity: founder override lives in final_price when
     # price_overridden is set — customer-facing PDF must match canonical total.
+    # Quote Review's `amount` alias is qty × rate (see _line_rate_and_amount).
+    # Prefer it so a qty>1 line is not printed as the unit rate.
     is_override = bool(it.get("price_overridden"))
     final_price = it.get("final_price")
     if is_override and final_price is not None:
         amount = final_price
+    elif it.get("amount") is not None:
+        amount = it.get("amount")
     else:
         amount = it.get("subtotal")
-        if amount is None:
-            amount = it.get("amount")
         if amount is None:
             amount = final_price
         if amount is None or float(amount or 0) == 0:
