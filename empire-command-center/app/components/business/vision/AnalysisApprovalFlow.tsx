@@ -6,6 +6,7 @@ import {
   RefreshCw, ArrowLeft, Loader2, Check, X
 } from 'lucide-react';
 import MeasurementDiagram from '../quotes/MeasurementDiagram';
+import { normalizeMeasureResult } from '../../../lib/visionMeasure';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -95,18 +96,19 @@ export default function AnalysisApprovalFlow({ result, imageData, onRedetect, on
     if (!result) return;
     const detected: DetectedItem[] = [];
 
-    // Parse various result formats
-    if (result.width_inches || result.height_inches) {
-      // Single measure result
+    // Parse various result formats. Measure often nests inches under
+    // window_info.estimated_width/height; Save-to-Quote reads the flats.
+    const measured = normalizeMeasureResult(result);
+    if (measured.width_inches || measured.height_inches) {
       detected.push({
         id: '1',
-        type: result.window_type || 'window',
-        description: result.notes || 'Detected window',
+        type: measured.window_type || 'window',
+        description: measured.notes || 'Detected window',
         checked: true,
-        width_inches: result.width_inches || 0,
-        height_inches: result.height_inches || 0,
+        width_inches: measured.width_inches || 0,
+        height_inches: measured.height_inches || 0,
         depth_inches: 0,
-        confidence: result.confidence || 0.8,
+        confidence: measured.confidence || 0.8,
       });
     }
     if (result.items) {

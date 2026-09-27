@@ -3,6 +3,8 @@
 import React, { useState, useRef } from 'react';
 import { Zap, Upload, Loader2, CheckCircle, FileText, X, ImageIcon, Camera } from 'lucide-react';
 import { API } from '../../../lib/api';
+import { compressImageDataUrl } from '../../../lib/visionImage';
+import { normalizeMeasureResult } from '../../../lib/visionMeasure';
 
 interface QuickQuoteBuilderProps {
   onClose?: () => void;
@@ -53,13 +55,14 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
         reader.onload = () => resolve(reader.result as string);
         reader.readAsDataURL(imageFile);
       });
+      const image = await compressImageDataUrl(base64);
       const res = await fetch(`${API}/vision/measure`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64 }),
+        body: JSON.stringify({ image }),
       });
       if (!res.ok) throw new Error('Analysis failed');
-      const data = await res.json();
+      const data = normalizeMeasureResult(await res.json());
       setAnalysisResult(data);
       // Auto-fill description if empty
       if (!description.trim()) {

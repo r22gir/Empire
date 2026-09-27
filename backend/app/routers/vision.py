@@ -298,6 +298,74 @@ _F4_PING_COOLDOWN_SECONDS = 600
 _last_f4_ping_at: float = 0.0
 
 
+def _positive_inches(value: Any) -> Optional[float]:
+    """Inches worth copying onto a quote line. Zero and junk stay unset."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        text = re.sub(r"[^\d.+-]", "", value.strip())
+        if not text:
+            return None
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if number <= 0:
+        return None
+    return number
+
+
+def normalize_measure_result(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Lift window_info.estimated_width/height onto width_inches/height_inches.
+
+    Save-to-Quote and the approval flow read the flat fields. MiniMax often
+    returns the mockup formatter shape instead, which saved lines as None
+    dimensions and $0.
+    """
+    if not isinstance(parsed, dict):
+        return parsed
+    window = parsed.get("window_info") if isinstance(parsed.get("window_info"), dict) else {}
+    width = _positive_inches(parsed.get("width_inches"))
+    height = _positive_inches(parsed.get("height_inches"))
+    if width is None:
+        width = (
+            _positive_inches(window.get("estimated_width"))
+            or _positive_inches(window.get("width"))
+            or _positive_inches(window.get("width_inches"))
+        )
+    if height is None:
+        height = (
+            _positive_inches(window.get("estimated_height"))
+            or _positive_inches(window.get("height"))
+            or _positive_inches(window.get("height_inches"))
+        )
+    if width is not None:
+        parsed["width_inches"] = width
+    if height is not None:
+        parsed["height_inches"] = height
+    if not str(parsed.get("window_type") or "").strip():
+        window_type = window.get("type") or window.get("window_type")
+        if window_type:
+            parsed["window_type"] = window_type
+    return parsed
+
+
+def _measure_json_ready(parsed: dict[str, Any]) -> bool:
+    if any(key in parsed for key in ("width_inches", "height_inches", "window_type")):
+        return True
+    window = parsed.get("window_info")
+    if not isinstance(window, dict):
+        return False
+    return any(
+        key in window
+        for key in ("estimated_width", "estimated_height", "width", "height", "type")
+    )
+
+
 def _direct_json_matches(parsed: dict[str, Any], result_schema: str) -> bool:
     """Stage-1 accept rule.
 
@@ -307,9 +375,15 @@ def _direct_json_matches(parsed: dict[str, Any], result_schema: str) -> bool:
     QIS analyze-items accepts an object that already has ``items[]``. That
     JSON must not be rewritten into the mockup proposal schema — Quote Review
     reads ``analysis.items`` and toasts ``Found ${items.length}``.
+
+    Measure accepts flat inches or nested window_info so a valid measurement
+    is not rewritten into design proposals (that second LLM call also pushes
+    the Next rewrite proxy past its 30s socket timeout).
     """
     if result_schema == "items":
         return isinstance(parsed.get("items"), list)
+    if result_schema == "measure":
+        return _measure_json_ready(parsed)
     return "proposals" in parsed or "room_assessment" in parsed
 
 
@@ -391,6 +465,11 @@ async def _parsed_json_from_minimax_result(
          formatter.
       2. Items formatter — M3 converts prose into the QIS items schema.
       3. Empty items[] (no proposals, no founder mockup ping).
+
+    ``result_schema="measure"`` (used by /vision/measure):
+      1. Direct JSON when it already has flat inches or window_info dims.
+         Nested estimated_width/height are copied onto width_inches/height.
+      2. Otherwise the mockup formatter, then the same dim lift.
     """
     source_model = result.get("model") or "mmx_vision"
 
@@ -419,6 +498,23 @@ async def _parsed_json_from_minimax_result(
                     len(prepared.get("items") or []),
                 )
                 return prepared
+            if result_schema == "measure":
+                prepared = normalize_measure_result(parsed)
+                prepared["_vision_runtime"] = {
+                    "provider": "minimax",
+                    "transport": "mmx_cli",
+                    "format_status": "direct_parse",
+                    "model": source_model,
+                    "image_generation_used": False,
+                    "quota_bucket": "mcp_understand_image",
+                    "result_schema": "measure",
+                }
+                log.info(
+                    "vision_parse schema=measure format_status=direct_parse width=%s height=%s",
+                    prepared.get("width_inches"),
+                    prepared.get("height_inches"),
+                )
+                return prepared
             parsed["_vision_runtime"] = {
                 "provider": "minimax",
                 "transport": "mmx_cli",
@@ -433,6 +529,11 @@ async def _parsed_json_from_minimax_result(
     if result_schema == "items":
         log.info("vision_parse schema=items format_status=items_formatter_pending")
         return await _format_mmx_prose_to_items_schema(text, source_model)
+
+    if result_schema == "measure":
+        log.info("vision_parse schema=measure format_status=formatter_pending")
+        formatted = await _format_mmx_prose_to_schema(text, source_model)
+        return normalize_measure_result(formatted)
 
     # Stage 2 (mockup only): format mmx's prose through chat LLM.
     return await _format_mmx_prose_to_schema(text, source_model)
@@ -730,6 +831,7 @@ async def call_vision(
 
     result_schema="mockup" keeps the design-proposal formatter.
     result_schema="items" returns QIS items[] for Quote Review analyze.
+    result_schema="measure" keeps flat inches (and lifts window_info dims).
     """
     try:
         return await call_minimax_image_understanding(
@@ -991,7 +1093,8 @@ Return JSON only:
 
 @router.post("/measure")
 async def measure(req: ImageRequest):
-    return await call_vision(MEASURE_PROMPT, req.image)
+    data = await call_vision(MEASURE_PROMPT, req.image, result_schema="measure")
+    return normalize_measure_result(data)
 
 
 # ── /outline — Dimensional installation plan ───────────────

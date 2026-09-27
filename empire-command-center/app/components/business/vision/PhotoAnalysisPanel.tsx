@@ -2,6 +2,8 @@
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { API_BASE } from '../../../lib/api';
+import { compressImageDataUrl } from '../../../lib/visionImage';
+import { measureQuoteLineItems, normalizeMeasureResult } from '../../../lib/visionMeasure';
 import {
   Camera, Upload, Loader2, Ruler, Armchair, Paintbrush, ClipboardList,
   X, CheckCircle, AlertTriangle, Sparkles, TriangleAlert, Info, Box, Video,
@@ -852,9 +854,9 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (!file.type.startsWith('image/') || file.size > 20 * 1024 * 1024) continue;
-      try {
-        const b64 = await fileToBase64(file);
-        const id = `photo-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
+    try {
+      const b64 = await compressImageDataUrl(await fileToBase64(file));
+      const id = `photo-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
         const entry: PhotoEntry = {
           id,
           imageData: b64,
@@ -893,7 +895,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     }
     setError('');
     try {
-      const b64 = await fileToBase64(file);
+      const b64 = await compressImageDataUrl(await fileToBase64(file));
       setImageData(b64);
       setResult(null);
       // Add to gallery
@@ -931,7 +933,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     }
   };
 
-  const capturePhoto = () => {
+  const capturePhoto = async () => {
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -940,7 +942,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    const dataUrl = await compressImageDataUrl(canvas.toDataURL('image/jpeg', 0.85));
     setImageData(dataUrl);
     setResult(null);
     addPhotoEntry(dataUrl, `Camera ${new Date().toLocaleTimeString()}`);
@@ -994,13 +996,16 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     };
 
     // If 3D model is loaded but no imageData, capture the canvas first
-    const analysisImage = imageData || '';
-    if (!analysisImage && model3D) {
+    const analysisImageRaw = imageData || '';
+    if (!analysisImageRaw && model3D) {
       setError('Use the Capture button in the 3D viewer first, then Analyze.');
       setLoading(false);
       return;
     }
 
+    // Resize before POST. Restored sessions and initialImage can still be a
+    // full phone JPEG; the Next rewrite proxy hangs up on that body.
+    const analysisImage = await compressImageDataUrl(analysisImageRaw);
     const body: any = { image: analysisImage };
     if ((mode === 'measure' || mode === 'mockup') && preferences.trim()) {
       body.preferences = preferences.trim();
@@ -1019,7 +1024,8 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(`Analysis failed (${res.status})`);
-      const data = await res.json();
+      const raw = await res.json();
+      const data = mode === 'measure' ? normalizeMeasureResult(raw) : raw;
       setResult(data);
       setAllResults(prev => ({ ...prev, [mode]: data }));
       // Save result to active photo entry
@@ -1043,7 +1049,9 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   /* ── Create Quote in Backend ── */
 
   const createQuoteFromAnalysis = async () => {
-    const measureData = currentResults['measure'] as MeasureResult | undefined;
+    const measureData = currentResults['measure']
+      ? normalizeMeasureResult(currentResults['measure'] as MeasureResult)
+      : undefined;
     const upholsteryData = currentResults['upholstery'] as UpholsteryResult | undefined;
     const mockupData = currentResults['mockup'] as MockupResult | undefined;
     const outlineData = currentResults['outline'] as OutlineResult | undefined;
@@ -1090,10 +1098,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     const lineItems: any[] = [];
 
     if (measureData) {
-      lineItems.push({
-        description: `Window Measurement — ${measureData.window_type || 'Standard'} (${measureData.width_inches}" W x ${measureData.height_inches}" H)`,
-        quantity: 1, unit: 'ea', rate: 0, amount: 0, category: 'labor',
-      });
+      lineItems.push(...measureQuoteLineItems(measureData));
     }
 
     if (upholsteryData) {
@@ -1175,7 +1180,9 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
 
   /* ── Result renderers ── */
 
-  const renderMeasureResults = (data: MeasureResult) => (
+  const renderMeasureResults = (raw: MeasureResult) => {
+    const data = normalizeMeasureResult(raw);
+    return (
     <div>
       {/* Dimension Drawing on Photo */}
       {imageData && data.width_inches > 0 && data.height_inches > 0 && (
@@ -1238,6 +1245,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
       )}
     </div>
   );
+  };
 
   const renderUpholsteryResults = (data: UpholsteryResult) => (
     <div>
