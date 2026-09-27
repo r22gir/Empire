@@ -3152,45 +3152,40 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
 
         # ── Bench items → professional 4-quadrant renderer (bench_renderer.py) ──
         if item_type == "bench":
-            shape = params.get("shape", "straight").lower()
-            lf = float(params.get("lf", params.get("length_ft", 10)))
-            if not name or name == "Drawing":
-                name = f"{shape.title()} Bench"
-
-            width_in = lf * 12
-            # Parse optional dimensions
-            seat_depth = float(params.get("seat_depth", params.get("depth", 18)))
-            seat_height = float(params.get("seat_height", 18))
-            back_height = float(params.get("back_height", 34))
-            if params.get("dimensions"):
-                for k, v in params["dimensions"].items():
-                    try:
-                        val = float(str(v).replace('"', '').replace("'", '').strip())
-                        if "depth" in k.lower() or "seat_d" in k.lower():
-                            seat_depth = val
-                        elif "seat_h" in k.lower():
-                            seat_height = val
-                        elif "back" in k.lower():
-                            back_height = val
-                        elif "width" in k.lower() or "length" in k.lower():
-                            width_in = val
-                    except (ValueError, TypeError):
-                        pass
-
-            # Always use bench_renderer.py — produces 4-quadrant professional layout
-            # (Plan View + Isometric + Front Elevation + Title Block, 1200x850)
+            from app.services.drawing.bench_quote_bridge import resolve_sketch_bench
             from app.services.vision.bench_renderer import (
                 render_straight, render_l_shape, render_u_shape,
             )
-            quote_num = params.get("quote_num", "")
-            cushion_width = float(params.get("cushion_width", 24))
-            panel_style = params.get("panel_style", "vertical_channels")
-            channel_count = int(params.get("channel_count", 6))
-            client = params.get("client", "")
-            project = params.get("project", "")
 
-            style_kw = dict(cushion_width=cushion_width, panel_style=panel_style,
-                            channel_count=channel_count, client=client, project=project)
+            # One policy with POST /drawings/bench: inches-first widths,
+            # quote BH wins, omitted BH is 18" (not the retired 34"),
+            # explicit flat is not rewritten to channels.
+            resolved = resolve_sketch_bench(params)
+            shape = resolved["shape"]
+            lf = float(params.get("lf", params.get("length_ft", resolved["width_in"] / 12.0)))
+            if not name or name == "Drawing":
+                name = f"{shape.title()} Bench"
+
+            style_kw = dict(
+                cushion_width=resolved["cushion_width"],
+                panel_style=resolved["panel_style"],
+                channel_count=resolved["channel_count"],
+                has_back=resolved["has_back"],
+                business_unit=resolved["business_unit"],
+                product_type=resolved["product_type"],
+                category_chip=resolved["category_chip"],
+                chrome=resolved["chrome"],
+                assumptions=resolved["assumptions"],
+                back_height_assumed=resolved["back_height_assumed"],
+                length_unit="in",
+                client=resolved["client"],
+                project=resolved["project"],
+            )
+            quote_num = resolved["quote_num"]
+            width_in = resolved["width_in"]
+            seat_depth = resolved["seat_depth"]
+            seat_height = resolved["seat_height"]
+            back_height = resolved["back_height"]
 
             if "u" in shape:
                 mult = int(params.get("multiplier", 1))
@@ -5040,11 +5035,12 @@ State machine: `draft → founder_review → sent → accepted → in_production
   Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`
   IMPORTANT: Always use this tool to convert SVG drawings to PDF. Do NOT write conversion scripts.
 - **sketch_to_drawing** — Generate professional architectural drawings for ANY item type. Auto-classifies input and routes to the correct renderer. Returns a PDF file path.
-  **Bench drawings** produce a 4-QUADRANT layout: Plan View + Isometric View + Front Elevation + Empire Workroom Title Block.
+  **Bench drawings** produce a 4-QUADRANT layout: Plan View + Isometric View + Front Elevation + title block. Workroom letterhead is the default; pass `"business_unit": "woodcraft"` for WoodCraft chrome and a `WC · …` category chip.
+  `lf` is linear feet. `width` / `width_in` are inches (a 36" width stays 36"). Omitted `back_height` is 18" and the sheet marks it assumed — a number you pass wins (the old silent 34" default is retired). `panel_style: "flat"` stays flat; `has_back: false` draws no back.
   Bench (straight): `{"tool": "sketch_to_drawing", "shape": "straight", "lf": 10, "name": "Main Dining Bench", "seat_depth": 18, "seat_height": 18, "back_height": 34}`
   Bench (L-shape): `{"tool": "sketch_to_drawing", "shape": "l_shape", "lf": 12, "name": "Corner Booth"}`
   Bench (U-shape): `{"tool": "sketch_to_drawing", "shape": "u_shape", "lf": 15, "name": "U Booth", "multiplier": 2}`
-  **Style params** (optional, owner decides): `"cushion_width": 24` (default 24"), `"panel_style": "vertical_channels"` (or horizontal_channels/tufted/button_tufted/flat), `"channel_count": 6`
+  **Style params** (optional, owner decides): `"cushion_width": 24` (default 24"), `"panel_style": "vertical_channels"` (or horizontal_channels/tufted/button_tufted/flat), `"channel_count": 6`, `"has_back": true`
   **Client/Project**: `"client": "John Smith", "project": "Restaurant Renovation"`
   From quote: `{"tool": "sketch_to_drawing", "quote_id": "30ad17d4"}`
   Window: `{"tool": "sketch_to_drawing", "name": "Office Windows", "item_type": "window", "dimensions": {"Width": "72\"", "Height": "48\"", "Drop": "84\""}}`

@@ -128,6 +128,16 @@ class DesignCreate(BaseModel):
     height: Optional[float] = None
     depth: Optional[float] = None
     unit: str = "in"
+    # Optional bench-diagram params. When set, the quote and the sheet
+    # share one record instead of a second freeform drawing POST.
+    seat_height: Optional[float] = None
+    back_height: Optional[float] = None
+    panel_style: Optional[str] = None
+    has_back: Optional[bool] = None
+    cushion_width: Optional[float] = None
+    channel_count: Optional[int] = None
+    bench_type: Optional[str] = None
+    product_type: Optional[str] = None
 
     # Materials
     primary_material: str = "MDF"  # MDF, plywood, hardwood, acrylic, foam
@@ -182,6 +192,14 @@ class DesignUpdate(BaseModel):
     width: Optional[float] = None
     height: Optional[float] = None
     depth: Optional[float] = None
+    seat_height: Optional[float] = None
+    back_height: Optional[float] = None
+    panel_style: Optional[str] = None
+    has_back: Optional[bool] = None
+    cushion_width: Optional[float] = None
+    channel_count: Optional[int] = None
+    bench_type: Optional[str] = None
+    product_type: Optional[str] = None
     primary_material: Optional[str] = None
     materials: Optional[list[MaterialItem]] = None
     cnc_jobs: Optional[list[CNCJob]] = None
@@ -369,6 +387,31 @@ async def list_designs(
 @router.get("/designs/{design_id}")
 async def get_design(design_id: str):
     return _load(DESIGNS_DIR, design_id)
+
+
+@router.post("/designs/{design_id}/diagram")
+async def design_bench_diagram(design_id: str):
+    """Map a CraftForge design onto the bench quote-diagram sheet.
+
+    Furniture/bench lines become the same BenchRequest POST /drawings/bench
+    renders (category chip + parametric dims). Other categories are not
+    drawn as a bench.
+    """
+    from app.routers.drawings import BenchRequest, _render
+    from app.services.drawing.bench_quote_bridge import map_craftforge_design
+
+    data = _load(DESIGNS_DIR, design_id)
+    mapped = map_craftforge_design(data)
+    if not mapped.connected:
+        raise HTTPException(status_code=422, detail=mapped.as_dict())
+    req = BenchRequest(**mapped.params)
+    svg = _render(req)
+    return {
+        "svg": svg,
+        "design_id": design_id,
+        "design_number": data.get("design_number"),
+        "diagram": mapped.as_dict(),
+    }
 
 
 @router.patch("/designs/{design_id}")

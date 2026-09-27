@@ -8,8 +8,8 @@ Layout (landscape 1200×850 viewBox):
   │ dividers C1..Cn, dims    │ channel/tufted back, dims│
   ├──────────────────────────┼──────────────────────────┤
   │ Q3: FRONT ELEVATION      │ Q4: TITLE BLOCK          │
-  │ Side view, floor line,   │ Empire Workroom branding, │
-  │ seat + back dims         │ item specs, scale bar     │
+  │ Side view, floor line,   │ Workroom or WoodCraft    │
+  │ seat + back dims         │ chrome, category chip    │
   └──────────────────────────┴──────────────────────────┘
 
 Rules enforced:
@@ -26,6 +26,15 @@ import logging
 from datetime import datetime
 
 logger = logging.getLogger("bench_renderer")
+
+# Quote-diagram policy (inches, BH, category chip, WC chrome) lives in
+# one module so the API, Max, and CraftForge cannot drift.
+from app.services.drawing.bench_quote_bridge import (  # noqa: E402
+    back_style_label as _bridge_back_label,
+    category_chip as _bridge_category_chip,
+    normalize_length_unit as _normalize_length_unit,
+    sheet_chrome as _bridge_chrome,
+)
 
 # ── CONSTANTS ──────────────────────────────────────────────────────
 ISO_A = 30
@@ -76,9 +85,9 @@ class BenchModel:
     """Encapsulates bench parameters for rendering and CNC."""
 
     def __init__(self, name="Straight Bench", width=120, depth=18,
-                 seat_h=18, back_h=34, cushion_width=24,
+                 seat_h=18, back_h=18, cushion_width=24,
                  panel_style="vertical_channels", channel_count=6,
-                 client="", project="", quote_num=""):
+                 client="", project="", quote_num="", has_back=True):
         self.name = name
         self.width = width
         self.depth = depth
@@ -90,6 +99,7 @@ class BenchModel:
         self.client = client
         self.project = project
         self.quote_num = quote_num
+        self.has_back = has_back
         self.date = datetime.now().strftime("%m/%d/%Y")
 
     @property
@@ -129,12 +139,14 @@ class Part:
 
 def model_to_parts(model):
     """Break bench model into fabrication parts."""
-    return [
+    parts = [
         Part("Seat Panel", model.width, model.depth, 0.75).classify(),
-        Part("Back Panel", model.width, model.back_h, 0.75).classify(),
         Part("Side Panel L", model.depth, model.seat_h, 0.75).classify(),
         Part("Side Panel R", model.depth, model.seat_h, 0.75).classify(),
     ]
+    if getattr(model, "has_back", True) and model.back_h and model.back_h > 0:
+        parts.insert(1, Part("Back Panel", model.width, model.back_h, 0.75).classify())
+    return parts
 
 
 def generate_tiles(length):
@@ -266,6 +278,14 @@ def _auto_scale_2d(w, h, area_w, area_h, margin=40, fill=0.78):
 
 
 # ── SVG PRIMITIVES ────────────────────────────────────────────────
+
+def _fmt_in(value) -> str:
+    """Whole-inch values print as 20, not 20.0."""
+    number = float(value)
+    if number == int(number):
+        return str(int(number))
+    return f"{number:g}"
+
 
 def _esc(txt):
     """Escape XML special chars."""
@@ -412,7 +432,7 @@ def _miter_callout(parts, x, y, angle=45):
 
 def _draw_back_style_2d(parts, x, y, w, h, panel_style, channel_count, scale=1.0):
     """Draw back panel pattern in a 2D rectangle (plan or elevation view)."""
-    if panel_style == "flat":
+    if panel_style in ("flat", "none", "", None):
         return
     elif panel_style == "horizontal_channels":
         count = max(2, channel_count)
@@ -446,8 +466,7 @@ def _draw_back_style_2d(parts, x, y, w, h, panel_style, channel_count, scale=1.0
                         cx2 += w / cols / 2
                     if cx2 <= x + w and cy2 <= y + h:
                         parts.append(_line(cx1, cy1, cx2, cy2, SW_CHANNEL, LIGHT_GRAY))
-    else:
-        # vertical_channels (default)
+    elif panel_style == "vertical_channels":
         count = max(2, channel_count)
         for i in range(1, count):
             cx = x + w * i / count
@@ -457,7 +476,7 @@ def _draw_back_style_2d(parts, x, y, w, h, panel_style, channel_count, scale=1.0
 def _draw_back_style_iso(parts, ox, oy, scale, sx, sy_back, width, sh, bh, bt,
                          panel_style, channel_count):
     """Draw back panel pattern on isometric back face."""
-    if panel_style == "flat":
+    if panel_style in ("flat", "none", "", None):
         return
     elif panel_style == "horizontal_channels":
         count = max(2, channel_count)
@@ -479,8 +498,7 @@ def _draw_back_style_iso(parts, ox, oy, scale, sx, sy_back, width, sh, bh, bt,
                         continue
                 pt = _iso(fx, sy_back, fz, ox, oy, scale)
                 parts.append(f'<circle cx="{pt[0]:.1f}" cy="{pt[1]:.1f}" r="1.2" fill="{BLACK}" stroke="none"/>')
-    else:
-        # vertical_channels (default)
+    elif panel_style == "vertical_channels":
         count = max(2, channel_count)
         for i in range(1, count):
             cx = sx + width * i / count
@@ -489,16 +507,9 @@ def _draw_back_style_iso(parts, ox, oy, scale, sx, sy_back, width, sh, bh, bt,
             parts.append(_line(p1[0], p1[1], p2[0], p2[1], SW_CHANNEL))
 
 
-def _back_style_label(panel_style):
-    """Human-readable label for the back style."""
-    labels = {
-        "vertical_channels": "CHANNELED BACK",
-        "horizontal_channels": "H-CHANNELED BACK",
-        "tufted": "TUFTED BACK",
-        "button_tufted": "BUTTON TUFTED BACK",
-        "flat": "FLAT BACK",
-    }
-    return labels.get(panel_style, "CHANNELED BACK")
+def _back_style_label(panel_style, has_back=True):
+    """Human-readable label for the back style. Flat stays flat."""
+    return _bridge_back_label(panel_style or "flat", has_back=has_back)
 
 
 # ── PLAN VIEW ──────────────────────────────────────────────────────
@@ -506,33 +517,38 @@ def _back_style_label(panel_style):
 def _plan_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
                    cushion_width=24, panel_style="vertical_channels", channel_count=6):
     """Plan view — top-down rectangle with cushion dividers and numbering."""
-    bt = BACK_T
+    has_back = back_h is not None and back_h > 0 and panel_style != "none"
+    bt = BACK_T if has_back else 0
     w = width * scale
     d = depth * scale
     bt_s = bt * scale
 
     # Seat area
     parts.append(_rect(ox, oy, w, d - bt_s, SW_HEAVY))
-    # Back panel
-    parts.append(_rect(ox, oy + d - bt_s, w, bt_s, SW_HEAVY, fill="#F0F0F0"))
-
-    # Back style pattern on back strip
-    _draw_back_style_2d(parts, ox, oy + d - bt_s, w, bt_s, panel_style, channel_count)
+    if has_back:
+        # Back panel
+        parts.append(_rect(ox, oy + d - bt_s, w, bt_s, SW_HEAVY, fill="#F0F0F0"))
+        _draw_back_style_2d(parts, ox, oy + d - bt_s, w, bt_s, panel_style, channel_count)
 
     # Cushion dividers + numbering
     c_count = max(1, math.ceil(width / cushion_width)) if cushion_width > 0 else 1
+    seat_span = d - bt_s
     if c_count > 1:
         for i in range(1, c_count):
             cx = ox + w * i / c_count
-            parts.append(_line(cx, oy + 2, cx, oy + d - bt_s - 2, SW_LIGHT, GRAY))
+            parts.append(_line(cx, oy + 2, cx, oy + seat_span - 2, SW_LIGHT, GRAY))
     # Cushion labels
     for i in range(c_count):
         label_x = ox + w * (i + 0.5) / c_count
-        label_y = oy + (d - bt_s) / 2
+        label_y = oy + seat_span / 2
         _cushion_label(parts, label_x, label_y, i + 1)
 
     # Back style label
-    parts.append(_text(ox + w / 2, oy + d + 14, _back_style_label(panel_style), 7, fill=GRAY, weight="600"))
+    parts.append(_text(
+        ox + w / 2, oy + d + 14,
+        _back_style_label(panel_style, has_back=has_back),
+        7, fill=GRAY, weight="600",
+    ))
 
     # Dimensions
     _dim_2d_h(parts, ox, ox + w, oy + d + 20, f'{width:.0f}"', 18)
@@ -542,7 +558,8 @@ def _plan_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
 def _plan_l_shape(parts, ox, oy, scale, long, short, depth, seat_h, back_h,
                   cushion_width=24, panel_style="vertical_channels", channel_count=6):
     """Plan view — L-shaped bench."""
-    bt = BACK_T
+    has_back = back_h is not None and back_h > 0 and panel_style != "none"
+    bt = BACK_T if has_back else 0
     d_s = depth * scale
     bt_s = bt * scale
     long_s = long * scale
@@ -550,8 +567,9 @@ def _plan_l_shape(parts, ox, oy, scale, long, short, depth, seat_h, back_h,
 
     # Long section seat
     parts.append(_rect(ox, oy, long_s, d_s - bt_s, SW_HEAVY))
-    parts.append(_rect(ox, oy + d_s - bt_s, long_s, bt_s, SW_HEAVY, fill="#F0F0F0"))
-    _draw_back_style_2d(parts, ox, oy + d_s - bt_s, long_s, bt_s, panel_style, channel_count)
+    if has_back:
+        parts.append(_rect(ox, oy + d_s - bt_s, long_s, bt_s, SW_HEAVY, fill="#F0F0F0"))
+        _draw_back_style_2d(parts, ox, oy + d_s - bt_s, long_s, bt_s, panel_style, channel_count)
 
     # Short wing
     wing_x = ox + long_s - d_s + bt_s
@@ -560,7 +578,8 @@ def _plan_l_shape(parts, ox, oy, scale, long, short, depth, seat_h, back_h,
     wing_h = short_s - d_s
     if wing_h > 0:
         parts.append(_rect(wing_x, wing_y, wing_w, wing_h, SW_HEAVY))
-        parts.append(_rect(wing_x + wing_w, wing_y, bt_s, wing_h, SW_HEAVY, fill="#F0F0F0"))
+        if has_back:
+            parts.append(_rect(wing_x + wing_w, wing_y, bt_s, wing_h, SW_HEAVY, fill="#F0F0F0"))
 
     _miter_callout(parts, ox + long_s - d_s + bt_s, oy + d_s)
 
@@ -589,7 +608,8 @@ def _plan_u_shape(parts, ox, oy, scale, back, side, depth, side_depth, seat_h, b
     When omitted, both wings use `side` (legacy symmetric behavior).
     Cushion labels are counted per run: ceil(run/cushion_width) each.
     """
-    bt = BACK_T
+    has_back = back_h is not None and back_h > 0 and panel_style != "none"
+    bt = BACK_T if has_back else 0
     sl = float(side_left) if side_left not in (None, 0, "") else float(side)
     sr = float(side_right) if side_right not in (None, 0, "") else float(side)
     side_max = max(sl, sr)
@@ -605,20 +625,23 @@ def _plan_u_shape(parts, ox, oy, scale, back, side, depth, side_depth, seat_h, b
     # Left wing — bottom-aligned so longer wing defines oy baseline
     left_y = oy + (side_max_s - sl_s)
     parts.append(_rect(ox, left_y, sd_s - bt_s, sl_s, SW_HEAVY))
-    parts.append(_rect(ox - bt_s, left_y, bt_s, sl_s, SW_HEAVY, fill="#F0F0F0"))
+    if has_back:
+        parts.append(_rect(ox - bt_s, left_y, bt_s, sl_s, SW_HEAVY, fill="#F0F0F0"))
 
     # Center back — at far end of longer wing
     cx = ox + sd_s
     cy = oy + side_max_s - d_s
     parts.append(_rect(cx, cy, back_s, d_s - bt_s, SW_HEAVY))
-    parts.append(_rect(cx, cy + d_s - bt_s, back_s, bt_s, SW_HEAVY, fill="#F0F0F0"))
-    _draw_back_style_2d(parts, cx, cy + d_s - bt_s, back_s, bt_s, panel_style, channel_count)
+    if has_back:
+        parts.append(_rect(cx, cy + d_s - bt_s, back_s, bt_s, SW_HEAVY, fill="#F0F0F0"))
+        _draw_back_style_2d(parts, cx, cy + d_s - bt_s, back_s, bt_s, panel_style, channel_count)
 
     # Right wing
     rx = ox + sd_s + back_s
     right_y = oy + (side_max_s - sr_s)
     parts.append(_rect(rx + bt_s, right_y, sd_s - bt_s, sr_s, SW_HEAVY))
-    parts.append(_rect(rx + sd_s, right_y, bt_s, sr_s, SW_HEAVY, fill="#F0F0F0"))
+    if has_back:
+        parts.append(_rect(rx + sd_s, right_y, bt_s, sr_s, SW_HEAVY, fill="#F0F0F0"))
 
     _miter_callout(parts, cx, cy + d_s - bt_s)
     _miter_callout(parts, rx, cy + d_s - bt_s)
@@ -654,9 +677,10 @@ def _plan_u_shape(parts, ox, oy, scale, back, side, depth, side_depth, seat_h, b
 def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
                    panel_style="vertical_channels", channel_count=6):
     """Front elevation with floor line, seat, back, and dimensions."""
+    has_back = back_h is not None and back_h > 0 and panel_style != "none"
     w = width * scale
     sh = seat_h * scale
-    bh = back_h * scale
+    bh = (back_h if has_back else 0) * scale
 
     # Floor line (dashed)
     parts.append(_line(ox - 15, oy, ox + w + 15, oy, SW_FLOOR, GRAY, "6,3"))
@@ -664,20 +688,19 @@ def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
 
     # Seat box
     parts.append(_rect(ox, oy - sh, w, sh, SW_HEAVY))
-    # Back panel
-    parts.append(_rect(ox, oy - sh - bh, w, bh, SW_MED))
-
-    # Back style pattern
-    _draw_back_style_2d(parts, ox, oy - sh - bh, w, bh, panel_style, channel_count)
-
-    # Seat/back separation line
-    parts.append(_line(ox, oy - sh, ox + w, oy - sh, SW_MED))
+    if has_back:
+        parts.append(_rect(ox, oy - sh - bh, w, bh, SW_MED))
+        _draw_back_style_2d(parts, ox, oy - sh - bh, w, bh, panel_style, channel_count)
+        parts.append(_line(ox, oy - sh, ox + w, oy - sh, SW_MED))
 
     # Dimensions — all horizontal text
     _dim_2d_h(parts, ox, ox + w, oy, f'{width:.0f}"', 18)
     _dim_2d_v(parts, ox + w, oy, oy - sh, f'{seat_h:.0f}" SH', 22)
-    _dim_2d_v(parts, ox + w + 40, oy - sh, oy - sh - bh, f'{back_h:.0f}" BH', 22)
-    _dim_2d_v(parts, ox - 4, oy, oy - sh - bh, f'{seat_h + back_h:.0f}"', -24)
+    if has_back:
+        _dim_2d_v(parts, ox + w + 40, oy - sh, oy - sh - bh, f'{back_h:.0f}" BH', 22)
+        _dim_2d_v(parts, ox - 4, oy, oy - sh - bh, f'{seat_h + back_h:.0f}"', -24)
+    else:
+        parts.append(_text(ox + w / 2, oy - sh - 12, "NO BACK", 8, fill=GRAY, weight="600"))
 
 
 def _elev_l_shape(parts, ox, oy, scale, long, short, depth, seat_h, back_h,
@@ -702,7 +725,8 @@ def _draw_bench_box(parts, ox, oy, scale, sx, sy, width, depth, seat_h, back_h,
                     panel_style="vertical_channels", channel_count=6):
     """Draw one bench section in isometric: seat box + back panel + style pattern."""
     w, d, sh, bh = width, depth, seat_h, back_h
-    bt = BACK_T
+    has_back = bh is not None and bh > 0 and panel_style != "none"
+    bt = BACK_T if has_back else 0
 
     # Seat box — front face
     parts.append(_poly([
@@ -725,6 +749,9 @@ def _draw_bench_box(parts, ox, oy, scale, sx, sy, width, depth, seat_h, back_h,
         _iso(sx + w, sy + d - bt, sh, ox, oy, scale),
         _iso(sx + w, sy, sh, ox, oy, scale),
     ], SW_MED))
+
+    if not has_back:
+        return
 
     # Back panel — front face
     parts.append(_poly([
@@ -762,32 +789,41 @@ def _draw_bench_box(parts, ox, oy, scale, sx, sy, width, depth, seat_h, back_h,
 
 def _title_block(parts, x, y, w, h, name="", quote_num="", dims_text="",
                  bench_type="STRAIGHT", cushion_count=1, cushion_width=24,
-                 panel_style="vertical_channels", client="", project="", date=""):
-    """Professional title block with Empire Workroom branding and specs."""
+                 panel_style="vertical_channels", client="", project="", date="",
+                 category_chip="", chrome=None, assumptions=None, has_back=True):
+    """Title block. WoodCraft sheets use WC chrome, not Workroom letterhead."""
+    brand = chrome or _bridge_chrome("workroom")
     # Outer + inner border
     parts.append(_rect(x, y, w, h, SW_BORDER))
     parts.append(_rect(x + 3, y + 3, w - 6, h - 6, 0.5))
 
-    # Company name
-    parts.append(_text(x + w / 2, y + 28, "EMPIRE WORKROOM", 20, weight="bold"))
-    parts.append(_text(x + w / 2, y + 44, "CUSTOM UPHOLSTERY & FABRICATION", 8, fill=GRAY))
-    parts.append(_text(x + w / 2, y + 56, "5124 Frolich Ln, Hyattsville, MD 20781", 7, fill=GRAY))
-    parts.append(_text(x + w / 2, y + 66, "(703) 213-6484 | workroom@empirebox.store", 7, fill=GRAY))
+    # Company name — size steps down slightly so the WC name fits the column
+    company = brand.get("company") or "EMPIRE WORKROOM"
+    company_size = 16 if len(company) > 16 else 20
+    parts.append(_text(x + w / 2, y + 26, company, company_size, weight="bold"))
+    parts.append(_text(x + w / 2, y + 42, brand.get("tagline") or "", 8, fill=GRAY))
+    parts.append(_text(x + w / 2, y + 54, brand.get("address") or "", 7, fill=GRAY))
+    parts.append(_text(x + w / 2, y + 66, brand.get("contact") or "", 7, fill=GRAY))
 
-    # Divider
-    parts.append(_line(x + 15, y + 74, x + w - 15, y + 74, 0.5))
-
-    # Info rows
-    row_y = y + 90
-    row_h = 18
+    # Category chip — business + product + back idea
+    chip = (category_chip or "").strip()
+    if chip:
+        parts.append(_rect(x + 12, y + 74, w - 24, 18, 0.6, fill="#f4efe2"))
+        parts.append(_text(x + w / 2, y + 87, chip, 8, weight="bold"))
+        parts.append(_line(x + 15, y + 98, x + w - 15, y + 98, 0.5))
+        row_y = y + 114
+    else:
+        parts.append(_line(x + 15, y + 74, x + w - 15, y + 74, 0.5))
+        row_y = y + 90
+    row_h = 16
     col1_x = x + 15
 
     rows = [
         ("ITEM:", (name or "BENCH").upper()),
         ("TYPE:", bench_type.upper().replace("_", " ")),
         ("DIMENSIONS:", dims_text or "SEE VIEWS"),
-        ("CUSHIONS:", f"{cushion_count} @ {cushion_width}\" each"),
-        ("BACK STYLE:", _back_style_label(panel_style)),
+        ("CUSHIONS:", f"{cushion_count} @ {_fmt_in(cushion_width)}\" each"),
+        ("BACK STYLE:", _back_style_label(panel_style, has_back=has_back)),
     ]
     if client:
         rows.append(("CLIENT:", client.upper()))
@@ -796,7 +832,10 @@ def _title_block(parts, x, y, w, h, name="", quote_num="", dims_text="",
     if quote_num:
         rows.append(("QUOTE:", quote_num))
     rows.append(("DATE:", date or datetime.now().strftime("%m/%d/%Y")))
-    rows.append(("DRAWN BY:", "MAX AI / Empire Workroom"))
+    rows.append(("DRAWN BY:", brand.get("drawn_by") or "MAX AI"))
+    for note in assumptions or []:
+        if note:
+            rows.append(("NOTE:", note))
 
     for label, value in rows:
         parts.append(_text(col1_x, row_y, label, 8, anchor="start", weight="bold"))
@@ -836,7 +875,8 @@ def _build_straight(name, width_in, depth_in, seat_h_in, back_h_in, quote_num=""
                     panel_style, channel_count)
 
     _dim_iso_width(parts, ox, oy, scale, 0, width_in, -3, -6, f'{width_in:.0f}"', below=True)
-    _dim_iso_height(parts, ox, oy, scale, width_in + 6, depth_in, seat_h_in, total_h, f'{back_h_in:.0f}" BH')
+    if back_h_in and back_h_in > 0:
+        _dim_iso_height(parts, ox, oy, scale, width_in + 6, depth_in, seat_h_in, total_h, f'{back_h_in:.0f}" BH')
     _dim_iso_height(parts, ox, oy, scale, width_in + 20, -3, 0, seat_h_in, f'{seat_h_in:.0f}" SH')
     _dim_iso_depth(parts, ox, oy, scale, width_in + 4, 0, depth_in, -3, f'{depth_in:.0f}"')
 
@@ -857,7 +897,8 @@ def _build_l_shape(name, long_in, short_in, depth_in, seat_h_in, back_h_in, quot
     _dim_iso_width(parts, ox, oy, scale, 0, long_in, short_in - depth_in - 3, total_h + 6, f'{long_in:.0f}"', below=False)
     _dim_iso_depth(parts, ox, oy, scale, long_in + 4, 0, short_in, -3, f'{short_in:.0f}"')
     _dim_iso_depth(parts, ox, oy, scale, long_in + 20, short_in - depth_in, short_in, -3, f'{depth_in:.0f}"')
-    _dim_iso_height(parts, ox, oy, scale, long_in + 6, -3, seat_h_in, total_h, f'{back_h_in:.0f}" BH')
+    if back_h_in and back_h_in > 0:
+        _dim_iso_height(parts, ox, oy, scale, long_in + 6, -3, seat_h_in, total_h, f'{back_h_in:.0f}" BH')
     _dim_iso_height(parts, ox, oy, scale, long_in + 6, short_in - 3, 0, seat_h_in, f'{seat_h_in:.0f}" SH')
 
     return parts, scale, ox, oy
@@ -880,7 +921,8 @@ def _build_u_shape(name, back_in, side_in, depth_in, side_depth_in, seat_h_in, b
 
     _dim_iso_width(parts, ox, oy, scale, side_depth_in, side_depth_in + back_in, side_in - depth_in - 3, total_h + 6, f'{back_in:.0f}"', below=False)
     _dim_iso_depth(parts, ox, oy, scale, -6, 0, side_in, -3, f'{side_in:.0f}"')
-    _dim_iso_height(parts, ox, oy, scale, -6, -3, seat_h_in, total_h, f'{back_h_in:.0f}" BH', right=False)
+    if back_h_in and back_h_in > 0:
+        _dim_iso_height(parts, ox, oy, scale, -6, -3, seat_h_in, total_h, f'{back_h_in:.0f}" BH', right=False)
     _dim_iso_height(parts, ox, oy, scale, total_w + 6, -3, 0, seat_h_in, f'{seat_h_in:.0f}" SH')
     _dim_iso_depth(parts, ox, oy, scale, total_w + 4, 0, side_in, -3, f'{side_in:.0f}"')
     _dim_iso_depth(parts, ox, oy, scale, side_depth_in - 6, side_in - depth_in, side_in, -3, f'{depth_in:.0f}"')
@@ -897,7 +939,8 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
                        panel_style="vertical_channels", channel_count=6,
                        quote_num="", client="", project="", date="",
                        plan_args=(), elev_args=(), iso_args=(),
-                       plan_kwargs=None):
+                       plan_kwargs=None, category_chip="", chrome=None,
+                       assumptions=None, has_back=True, title_panel_style=None):
     """Compose a 4-quadrant multi-view drawing."""
     parts = [_defs()]
     parts.append(f'<rect width="{LAYOUT_W}" height="{LAYOUT_H}" fill="white"/>')
@@ -938,8 +981,11 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
     _title_block(parts, Q4_X, Q4_Y, Q4_W, Q4_H,
                  name=name, quote_num=quote_num, dims_text=dims_text,
                  bench_type=bench_type, cushion_count=cushion_count,
-                 cushion_width=cushion_width, panel_style=panel_style,
-                 client=client, project=project, date=date)
+                 cushion_width=cushion_width,
+                 panel_style=title_panel_style or panel_style,
+                 client=client, project=project, date=date,
+                 category_chip=category_chip, chrome=chrome,
+                 assumptions=assumptions, has_back=has_back)
 
     return _wrap_svg_raw(parts, LAYOUT_W, LAYOUT_H)
 
@@ -947,33 +993,80 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
 # ── PUBLIC RENDER FUNCTIONS ──────────────────────────────────────
 # Signatures preserved for compatibility with tool_executor.py and drawings.py
 
+def _inches_if_feet(value, length_unit):
+    """Inches-first. Multiply only when the caller says the number is feet."""
+    if value is None:
+        return 0.0
+    number = float(value)
+    if number <= 0:
+        return 0.0
+    if _normalize_length_unit(length_unit) == "ft":
+        return number * 12.0
+    return number
+
+
+def _sheet_extras(name, bench_type, panel_style, has_back, back_h_in, kw):
+    business = kw.get("business_unit") or ""
+    product = kw.get("product_type") or ""
+    chip = kw.get("category_chip") or _bridge_category_chip(
+        business_unit=business,
+        bench_type=bench_type,
+        product_type=product,
+        name=name or "",
+        panel_style=panel_style if has_back else "none",
+        has_back=has_back,
+    )
+    assumptions = list(kw.get("assumptions") or [])
+    mark = "ASSUMED — CONFIRM BEFORE FABRICATION"
+    if kw.get("back_height_assumed") and has_back and not any(mark in a for a in assumptions):
+        assumptions.append(f'back height {float(back_h_in):.0f}" {mark}')
+    return dict(
+        category_chip=chip,
+        chrome=kw.get("chrome") or _bridge_chrome(business),
+        assumptions=assumptions,
+        has_back=has_back,
+        title_panel_style=panel_style if has_back else "none",
+    )
+
+
 def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
                     quote_num="", svg_w=600, svg_h=400,
                     cushion_width=24, panel_style="vertical_channels", channel_count=6,
                     client="", project="", **kw):
-    """Render a straight bench — 4-quadrant professional drawing."""
-    if 0 < width_in < 40 and 'rate' not in kw:
-        width_in = width_in * 12
+    """Render a straight bench — 4-quadrant professional drawing.
+
+    width_in is inches unless length_unit='ft'. Values ≤40 are not
+    guessed as feet.
+    """
+    width_in = _inches_if_feet(width_in, kw.get("length_unit") or "in")
+    has_back = bool(kw["has_back"]) if kw.get("has_back") is not None and "has_back" in kw else panel_style != "none"
+    geo_back = float(back_h_in or 0) if has_back else 0.0
+    draw_panel = panel_style if has_back else "none"
 
     # Cushion count from actual math
     c_count = max(1, math.ceil(width_in / cushion_width)) if cushion_width > 0 else 1
 
-    dims_text = f'{width_in:.0f}" W × {depth_in:.0f}" D × {seat_h_in:.0f}" SH × {back_h_in:.0f}" BH'
+    if has_back:
+        dims_text = f'{width_in:.0f}" W × {depth_in:.0f}" D × {seat_h_in:.0f}" SH × {geo_back:.0f}" BH'
+    else:
+        dims_text = f'{width_in:.0f}" W × {depth_in:.0f}" D × {seat_h_in:.0f}" SH × NO BACK'
 
     plan_scale, plan_ox, plan_oy = _auto_scale_2d(width_in, depth_in, Q1_W - 20, Q1_H - 60)
-    plan_args = (plan_ox + 10, plan_oy + 10, plan_scale, width_in, depth_in, seat_h_in, back_h_in)
+    plan_args = (plan_ox + 10, plan_oy + 10, plan_scale, width_in, depth_in, seat_h_in, geo_back)
 
-    elev_scale, elev_ox, elev_oy = _auto_scale_2d(width_in, seat_h_in + back_h_in, Q3_W - 20, Q3_H - 60)
-    elev_ground_y = elev_oy + (seat_h_in + back_h_in) * elev_scale + 10
-    elev_args = (elev_ox + 10, elev_ground_y, elev_scale, width_in, depth_in, seat_h_in, back_h_in)
+    elev_scale, elev_ox, elev_oy = _auto_scale_2d(width_in, seat_h_in + geo_back, Q3_W - 20, Q3_H - 60)
+    elev_ground_y = elev_oy + (seat_h_in + geo_back) * elev_scale + 10
+    elev_args = (elev_ox + 10, elev_ground_y, elev_scale, width_in, depth_in, seat_h_in, geo_back)
 
-    iso_args = (name, width_in, depth_in, seat_h_in, back_h_in, quote_num)
+    iso_args = (name, width_in, depth_in, seat_h_in, geo_back, quote_num)
+    extras = _sheet_extras(name, "straight", panel_style, has_back, geo_back, kw)
 
     return _compose_multiview(
         name, "straight", _build_straight, _plan_straight, _elev_straight,
-        dims_text, c_count, cushion_width, panel_style, channel_count,
+        dims_text, c_count, cushion_width, draw_panel, channel_count,
         quote_num, client, project,
         plan_args=plan_args, elev_args=elev_args, iso_args=iso_args,
+        **extras,
     )
 
 
@@ -981,33 +1074,49 @@ def render_l_shape(name, long_in, short_in=0, depth_in=20, seat_h_in=18, back_h_
                    quote_num="", svg_w=600, svg_h=400,
                    cushion_width=24, panel_style="vertical_channels", channel_count=6,
                    client="", project="", **kw):
-    """Render an L-shaped bench — 4-quadrant professional drawing."""
-    if 0 < long_in < 40:  # inches if >=40; feet-lf only below
-        lf = long_in
-        long_in = lf * 0.6 * 12
-        if short_in == 0 or short_in < 10:
+    """Render an L-shaped bench — 4-quadrant professional drawing.
+
+    Lengths are inches unless length_unit='ft'. A single foot-length
+    with no short leg still splits 60/40 — that is the legacy quote
+    batch entry, and only runs for an explicit feet unit.
+    """
+    if _normalize_length_unit(kw.get("length_unit") or "in") == "ft" and long_in and long_in > 0:
+        if not short_in or short_in < 10:
+            lf = float(long_in)
+            long_in = lf * 0.6 * 12
             short_in = lf * 0.4 * 12
+        else:
+            long_in = _inches_if_feet(long_in, "ft")
+            short_in = _inches_if_feet(short_in, "ft")
     if short_in == 0:
         short_in = long_in * 0.5
+    has_back = bool(kw["has_back"]) if "has_back" in kw and kw.get("has_back") is not None else panel_style != "none"
+    geo_back = float(back_h_in or 0) if has_back else 0.0
+    draw_panel = panel_style if has_back else "none"
 
     c_count = max(1, math.ceil(long_in / cushion_width)) if cushion_width > 0 else 1
 
-    dims_text = f'{long_in:.0f}" L × {short_in:.0f}" S × {depth_in:.0f}" D × {seat_h_in:.0f}" SH × {back_h_in:.0f}" BH'
+    if has_back:
+        dims_text = f'{long_in:.0f}" L × {short_in:.0f}" S × {depth_in:.0f}" D × {seat_h_in:.0f}" SH × {geo_back:.0f}" BH'
+    else:
+        dims_text = f'{long_in:.0f}" L × {short_in:.0f}" S × {depth_in:.0f}" D × {seat_h_in:.0f}" SH × NO BACK'
 
     plan_scale, plan_ox, plan_oy = _auto_scale_2d(long_in, short_in, Q1_W - 20, Q1_H - 60)
-    plan_args = (plan_ox + 10, plan_oy + 10, plan_scale, long_in, short_in, depth_in, seat_h_in, back_h_in)
+    plan_args = (plan_ox + 10, plan_oy + 10, plan_scale, long_in, short_in, depth_in, seat_h_in, geo_back)
 
-    elev_scale, elev_ox, elev_oy = _auto_scale_2d(long_in, seat_h_in + back_h_in, Q3_W - 20, Q3_H - 60)
-    elev_ground_y = elev_oy + (seat_h_in + back_h_in) * elev_scale + 10
-    elev_args = (elev_ox + 10, elev_ground_y, elev_scale, long_in, short_in, depth_in, seat_h_in, back_h_in)
+    elev_scale, elev_ox, elev_oy = _auto_scale_2d(long_in, seat_h_in + geo_back, Q3_W - 20, Q3_H - 60)
+    elev_ground_y = elev_oy + (seat_h_in + geo_back) * elev_scale + 10
+    elev_args = (elev_ox + 10, elev_ground_y, elev_scale, long_in, short_in, depth_in, seat_h_in, geo_back)
 
-    iso_args = (name, long_in, short_in, depth_in, seat_h_in, back_h_in, quote_num)
+    iso_args = (name, long_in, short_in, depth_in, seat_h_in, geo_back, quote_num)
+    extras = _sheet_extras(name, "l_shape", panel_style, has_back, geo_back, kw)
 
     return _compose_multiview(
         name, "l_shape", _build_l_shape, _plan_l_shape, _elev_l_shape,
-        dims_text, c_count, cushion_width, panel_style, channel_count,
+        dims_text, c_count, cushion_width, draw_panel, channel_count,
         quote_num, client, project,
         plan_args=plan_args, elev_args=elev_args, iso_args=iso_args,
+        **extras,
     )
 
 
@@ -1019,18 +1128,24 @@ def render_u_shape(name, back_in, side_in=0, depth_in=20, side_depth_in=0,
                    side_left_in=None, side_right_in=None, **kw):
     """Render a U-shaped booth — 4-quadrant professional drawing.
 
-    All length args are INCHES. Auto feet→inches only when back_in < 40
-    (legacy lf-style callers). Pass side_left_in / side_right_in for
-    asymmetric arms (Marleys: 41.25 / 52); otherwise both use side_in.
+    Length args are INCHES unless length_unit='ft'. A single foot-length
+    with no wing still uses the legacy 45/27.5 split. Pass side_left_in /
+    side_right_in for asymmetric arms (Marleys: 41.25 / 52); otherwise
+    both use side_in.
     """
-    if 0 < back_in < 40:
-        lf = back_in
-        per = lf / multiplier if multiplier > 1 else lf
-        back_in = per * 0.45 * 12
-        if side_in == 0:
+    if _normalize_length_unit(kw.get("length_unit") or "in") == "ft" and back_in and back_in > 0:
+        if not side_in:
+            lf = float(back_in)
+            per = lf / multiplier if multiplier > 1 else lf
+            back_in = per * 0.45 * 12
             side_in = per * 0.275 * 12
-        if side_depth_in == 0:
-            side_depth_in = depth_in
+            if side_depth_in == 0:
+                side_depth_in = depth_in
+        else:
+            back_in = _inches_if_feet(back_in, "ft")
+            side_in = _inches_if_feet(side_in, "ft")
+            if side_depth_in:
+                side_depth_in = _inches_if_feet(side_depth_in, "ft")
     if side_in == 0:
         side_in = back_in * 0.6
     if side_depth_in == 0:
@@ -1046,32 +1161,42 @@ def render_u_shape(name, back_in, side_in=0, depth_in=20, side_depth_in=0,
     c_right = max(1, math.ceil(sr / cushion_width)) if cushion_width > 0 else 1
     c_count = c_left + c_back + c_right
 
+    has_back = bool(kw["has_back"]) if "has_back" in kw and kw.get("has_back") is not None else panel_style != "none"
+    geo_back = float(back_h_in or 0) if has_back else 0.0
+    draw_panel = panel_style if has_back else "none"
+
     if abs(sl - sr) > 0.05:
         side_txt = f'{sl:.0f}"/{sr:.0f}" S(L/R)'
     else:
         side_txt = f'{side_max:.0f}" S'
-    dims_text = (f'{back_in:.0f}" B × {side_txt} × {depth_in:.0f}" D × '
-                 f'{side_depth_in:.0f}" SD × {seat_h_in:.0f}" SH × {back_h_in:.0f}" BH')
+    if has_back:
+        dims_text = (f'{back_in:.0f}" B × {side_txt} × {depth_in:.0f}" D × '
+                     f'{side_depth_in:.0f}" SD × {seat_h_in:.0f}" SH × {geo_back:.0f}" BH')
+    else:
+        dims_text = (f'{back_in:.0f}" B × {side_txt} × {depth_in:.0f}" D × '
+                     f'{side_depth_in:.0f}" SD × {seat_h_in:.0f}" SH × NO BACK')
 
     plan_scale, plan_ox, plan_oy = _auto_scale_2d(total_w, side_max, Q1_W - 20, Q1_H - 60)
     plan_args = (plan_ox + 10, plan_oy + 10, plan_scale, back_in, side_max,
-                 depth_in, side_depth_in, seat_h_in, back_h_in)
+                 depth_in, side_depth_in, seat_h_in, geo_back)
     plan_kwargs = dict(side_left=sl, side_right=sr)
 
-    elev_scale, elev_ox, elev_oy = _auto_scale_2d(total_w, seat_h_in + back_h_in, Q3_W - 20, Q3_H - 60)
-    elev_ground_y = elev_oy + (seat_h_in + back_h_in) * elev_scale + 10
+    elev_scale, elev_ox, elev_oy = _auto_scale_2d(total_w, seat_h_in + geo_back, Q3_W - 20, Q3_H - 60)
+    elev_ground_y = elev_oy + (seat_h_in + geo_back) * elev_scale + 10
     elev_args = (elev_ox + 10, elev_ground_y, elev_scale, back_in, side_max,
-                 depth_in, side_depth_in, seat_h_in, back_h_in)
+                 depth_in, side_depth_in, seat_h_in, geo_back)
 
     # Iso still uses max side (symmetric box approx) — flagged in dims_text when asymmetric
-    iso_args = (name, back_in, side_max, depth_in, side_depth_in, seat_h_in, back_h_in, quote_num)
+    iso_args = (name, back_in, side_max, depth_in, side_depth_in, seat_h_in, geo_back, quote_num)
+    extras = _sheet_extras(name, "u_shape", panel_style, has_back, geo_back, kw)
 
     return _compose_multiview(
         name, "u_shape", _build_u_shape, _plan_u_shape, _elev_u_shape,
-        dims_text, c_count, cushion_width, panel_style, channel_count,
+        dims_text, c_count, cushion_width, draw_panel, channel_count,
         quote_num, client, project,
         plan_args=plan_args, elev_args=elev_args, iso_args=iso_args,
         plan_kwargs=plan_kwargs,
+        **extras,
     )
 
 
@@ -1200,11 +1325,11 @@ def render_quote_drawings(line_items, quote_num=""):
         desc_lower = desc.lower()
         if "u-shape" in desc_lower or "u shape" in desc_lower:
             mult = 2 if "\u00d72" in desc or "x2" in desc_lower else 1
-            svg = render_u_shape(name, lf, multiplier=mult, quote_num=quote_num)
+            svg = render_u_shape(name, lf, multiplier=mult, quote_num=quote_num, length_unit="ft")
         elif "l-shape" in desc_lower or "l shape" in desc_lower:
-            svg = render_l_shape(name, lf, quote_num=quote_num)
+            svg = render_l_shape(name, lf, quote_num=quote_num, length_unit="ft")
         else:
-            svg = render_straight(name, lf, quote_num=quote_num)
+            svg = render_straight(name, lf, quote_num=quote_num, length_unit="ft")
         results.append({"name": name, "svg": svg, "lf": lf})
     return results
 

@@ -263,6 +263,7 @@ def test_bench_svg_straight_happy_path():
     req = drawings.BenchRequest(
         name="Sprint Bench",
         lf=8,
+        length_unit="ft",
         seat_depth=20,
         seat_height=18,
         back_height=34,
