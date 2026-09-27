@@ -1,6 +1,9 @@
-"""templates/cornice.py — Cornice family (5 styles).
+"""templates/cornice.py — Cornice family.
 
-Phase B1 — straight, double_serpentine, pagoda, stepped, custom_profile.
+Phase B1 — straight, double_serpentine, pagoda, stepped, custom_profile,
+plus catalog profiles that share a slug with valance (arched, scalloped,
+serpentine). Those three reuse this family's plan + straight elevation.
+They are reached by (family, style); the bare slug stays on valance.
 
 Required: (width, depth, drop). Optional: (returns).
 
@@ -31,9 +34,15 @@ from app.services.drawing.templates.base import (
 )
 
 
+# Catalog profiles that share a slug with valance. Accepted so
+# (cornice, style) draws the cornice category template (plan +
+# elevation). No new face-profile art — the elevation stays the
+# straight category frame and the assumption says so.
+_CATALOG_PROFILE_STYLES = {"arched", "scalloped", "serpentine"}
+
 _CORNICE_STYLES = {
     "straight", "double_serpentine", "pagoda", "stepped", "custom_profile",
-}
+} | _CATALOG_PROFILE_STYLES
 
 _CORNICE_PRODUCT_TYPES = list(_CORNICE_STYLES)
 
@@ -83,6 +92,12 @@ class CorniceTemplate(FamilyTemplate):
             n = max(2, round(float(dims.get("width", 24)) / 24))
             out.append(
                 f"Serpentine lobe count: ASSUMED {n} full lobes across width."
+            )
+        if product_type in _CATALOG_PROFILE_STYLES:
+            out.append(
+                f"Profile {product_type}: cornice category template "
+                f"(plan + straight elevation). Face profile ASSUMED — "
+                f"CONFIRM BEFORE FABRICATION."
             )
         out.append(
             "Material: ASSUMED furniture-grade plywood + fabric wrap; "

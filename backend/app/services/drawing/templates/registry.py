@@ -73,22 +73,50 @@ _REGISTRY: dict[str, FamilyTemplate] = {
 }
 
 
-def get_template(product_type: str) -> FamilyTemplate:
-    """Look up the FamilyTemplate for a product_type. Raises KeyError
-    if the type is not yet implemented — the caller (router/printer)
-    should catch and surface a 'not implemented' answer to the user."""
-    if product_type not in _REGISTRY:
-        raise KeyError(
-            f"product_type {product_type!r} has no Phase B1 template. "
-            f"Implemented types: {sorted(_REGISTRY)}"
+def get_template(product_type: str, family: str | None = None) -> FamilyTemplate:
+    """Look up the FamilyTemplate for a product_type.
+
+    A bare slug uses the flat B1 registry (historical winner when the
+    slug is shared). Pass `family`, or a `family/style` catalog id, to
+    hit the catalog family — that is how valance `box_pleat` and cornice
+    `arched` stay off the drapery and valance sheets.
+
+    Vision aliases (`flat_roman`, `arched_cornice`, `pinch-pleat`,
+    `headboard`) resolve through the same catalog namespace.
+
+    Raises KeyError if the type is not yet implemented — the caller
+    (router/printer) should catch and surface a 'not implemented' answer.
+    """
+    namespaced = bool(family and str(family).strip()) or (
+        isinstance(product_type, str) and "/" in product_type
+    )
+    if namespaced or product_type not in _REGISTRY:
+        from app.services.drawing.templates.catalog_namespace import (
+            resolve_catalog_style,
+            template_instance,
         )
+        try:
+            resolved = resolve_catalog_style(product_type, family=family)
+        except KeyError:
+            if namespaced:
+                raise
+            raise KeyError(
+                f"product_type {product_type!r} has no Phase B1 template. "
+                f"Implemented types: {sorted(_REGISTRY)}"
+            ) from None
+        return template_instance(resolved)
     return _REGISTRY[product_type]
 
 
-def try_get_template(product_type: str) -> Optional[FamilyTemplate]:
+def try_get_template(
+    product_type: str, family: str | None = None,
+) -> Optional[FamilyTemplate]:
     """Convenience wrapper: returns None instead of raising. The router
     can use this to ask 'do you have a template for this style?'"""
-    return _REGISTRY.get(product_type)
+    try:
+        return get_template(product_type, family=family)
+    except KeyError:
+        return None
 
 
 def implemented_product_types() -> list[str]:
@@ -96,9 +124,29 @@ def implemented_product_types() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def family_for(product_type: str) -> str:
+def family_for(product_type: str, family: str | None = None) -> str:
     """Return the human-readable family name without instantiating the
     class. Useful for the printer's title-block and for the intake
-    route's pre-flight check."""
+    route's pre-flight check.
+
+    Bare slugs use the flat registry. `family` or a `family/style` id
+    uses the catalog namespace so a shared slug reports the family the
+    caller named.
+    """
+    namespaced = bool(family and str(family).strip()) or (
+        isinstance(product_type, str) and "/" in product_type
+    )
+    if namespaced or product_type not in _REGISTRY:
+        from app.services.drawing.templates.catalog_namespace import (
+            resolve_catalog_style,
+        )
+        try:
+            return resolve_catalog_style(
+                product_type, family=family,
+            ).template_family
+        except KeyError:
+            if not namespaced and product_type in _REGISTRY:
+                return _REGISTRY[product_type].family
+            return "(unknown)"
     tpl = _REGISTRY.get(product_type)
     return tpl.family if tpl else "(unknown)"
