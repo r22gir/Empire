@@ -138,20 +138,26 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
     const isLoading = loadingAction === id;
 
     if (compact) {
+      const showLabel = id === 'pdf';
       return (
         <button
           onClick={(e) => { e.stopPropagation(); onClick(); }}
           disabled={isLoading || loadingAction !== null}
           title={label}
-          className="inline-flex items-center justify-center transition-all disabled:opacity-50 cursor-pointer"
+          className="inline-flex items-center justify-center gap-1 transition-all disabled:opacity-50 cursor-pointer"
           style={{
-            width: 32, height: 32, borderRadius: 10,
+            width: showLabel ? 'auto' : 32,
+            height: 32,
+            padding: showLabel ? '0 10px' : 0,
+            borderRadius: 10,
             backgroundColor: '#fff', color, border: '1px solid #ece8e0',
+            fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
           }}
           onMouseEnter={e => { e.currentTarget.style.backgroundColor = color; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = color; }}
           onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#fff'; e.currentTarget.style.color = color; e.currentTarget.style.borderColor = '#ece8e0'; }}
         >
           {isLoading ? <Loader2 size={13} className="animate-spin" /> : icon}
+          {showLabel ? label : null}
         </button>
       );
     }

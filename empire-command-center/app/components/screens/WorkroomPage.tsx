@@ -50,7 +50,8 @@ interface WorkroomPageProps {
 }
 
 export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
-  const [section, setSection] = useState<Section>((initialSection as Section) || 'overview');
+  const openQuickQuote = initialSection === 'quick-quote';
+  const [section, setSection] = useState<Section>(openQuickQuote ? 'quotes' : ((initialSection as Section) || 'overview'));
   const [quotes, setQuotes] = useState<any[]>([]);
   const [stats, setStats] = useState({ pipeline: 0, openQuotes: 0, accepted: 0 });
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
@@ -58,9 +59,8 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
 
   // Sync section when initialSection prop changes (e.g. from module click)
   useEffect(() => {
-    if (initialSection) {
-      setSection(initialSection as Section);
-    }
+    if (initialSection === 'quick-quote') setSection('quotes');
+    else if (initialSection) setSection(initialSection as Section);
   }, [initialSection]);
 
   useEffect(() => {
@@ -106,7 +106,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
           </Suspense>
         );
       case 'quotes':
-        return <QuotesSection quotes={quotes} initialQuoteId={initialQuoteId} onClearInitial={() => setInitialQuoteId(null)} />;
+        return <QuotesSection quotes={quotes} initialQuoteId={initialQuoteId} onClearInitial={() => setInitialQuoteId(null)} startQuickQuote={openQuickQuote} />;
       case 'inventory':
         return <Suspense fallback={<Loading />}><InventorySection /></Suspense>;
       case 'jobs':
@@ -424,11 +424,11 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
 
 // -- Quotes Section --
 
-function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }: { quotes: any[]; initialQuoteId?: string | null; onClearInitial?: () => void }) {
+function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, startQuickQuote }: { quotes: any[]; initialQuoteId?: string | null; onClearInitial?: () => void; startQuickQuote?: boolean }) {
   const [quotes, setQuotes] = useState(initialQuotes);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
-  const [showQuickQuote, setShowQuickQuote] = useState(false);
+  const [showQuickQuote, setShowQuickQuote] = useState(!!startQuickQuote);
   const [showQuickCalc, setShowQuickCalc] = useState(false);
   const [pipelineQuoteId, setPipelineQuoteId] = useState<string | null>(null);
   const [analyzingQuoteId, setAnalyzingQuoteId] = useState<string | null>(null);
@@ -440,6 +440,7 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }
 
   // Sync with parent quotes prop
   useEffect(() => { setQuotes(initialQuotes); }, [initialQuotes]);
+  useEffect(() => { if (startQuickQuote) setShowQuickQuote(true); }, [startQuickQuote]);
 
   const filtered = quotes.filter(q => {
     if (filter !== 'all' && q.status !== filter) return false;

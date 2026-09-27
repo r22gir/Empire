@@ -462,7 +462,7 @@ export default function FinanceModule() {
         <div className="flex items-center gap-1.5 flex-wrap">
           <ActionBtn onClick={() => openPaymentModal(row)} icon={<CreditCard size={12} />} label="Record Payment" loadingKey={`pay-${row.id}`} color="#22c55e" />
           <ActionBtn onClick={() => handleSendInvoice(row)} icon={<Send size={12} />} label="Send" loadingKey={`send-${row.id}`} />
-          <ActionBtn onClick={() => handleDownloadInvoicePDF(row)} icon={<Download size={12} />} label="PDF" loadingKey={`ipdf-${row.id}`} color="#2563eb" />
+          <ActionBtn onClick={() => handleDownloadInvoicePDF(row)} icon={<Download size={12} />} label="Download PDF" loadingKey={`ipdf-${row.id}`} color="#2563eb" />
         </div>
       ),
     },

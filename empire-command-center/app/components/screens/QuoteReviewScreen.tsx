@@ -959,7 +959,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         <ActionBtn icon={<ExternalLink size={16} />} label="QuoteBuilder" onClick={() => {
           if (onOpenBuilder) { onOpenBuilder(); }
         }} />
-        <ActionBtn icon={<FileText size={16} />} label="PDF" onClick={() => handleAction('pdf')} />
+        <ActionBtn icon={<FileText size={16} />} label="Download PDF" onClick={() => handleAction('pdf')} />
         <ActionBtn icon={<Send size={16} />} label="Telegram" onClick={() => handleAction('telegram')} />
         <ActionBtn icon={<Mail size={16} />} label="Email" onClick={() => handleAction('email')} />
         <ActionBtn icon={<Video size={16} />} label="Call" onClick={() => handleAction('video')} />

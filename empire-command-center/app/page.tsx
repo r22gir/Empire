@@ -512,9 +512,10 @@ export default function CommandCenter() {
           onSend={handleSendMessage}
           onStop={chat.stopStreaming}
           onScreenChange={handleScreenChange}
-          onProductNavigate={(product, screen = 'dashboard') => {
+          onProductNavigate={(product, screen = 'dashboard', section) => {
             setActiveProduct(product as EcosystemProduct);
             setActiveScreen(screen as ScreenMode);
+            if (section !== undefined) setActiveSection(section);
           }}
           setOnMessageComplete={chat.setOnMessageComplete}
           onLoadChat={handleLoadChat}

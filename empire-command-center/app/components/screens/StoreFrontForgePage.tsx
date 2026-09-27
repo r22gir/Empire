@@ -9,6 +9,7 @@ import {
   Hash, Layers, Archive, Star
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
+import ViewPdfControl from '../ViewPdfControl';
 
 const SF_API = `${API}/storefront`;
 
@@ -79,6 +80,9 @@ export default function StoreFrontForgePage({ initialSection }: StoreFrontForgeP
         ))}
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <ViewPdfControl mode="print" title="StoreFront has no sales-report PDF on this screen. This prints the current view." />
+        </div>
         {renderContent()}
       </div>
     </div>
