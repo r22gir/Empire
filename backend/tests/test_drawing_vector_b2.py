@@ -288,10 +288,10 @@ class TestOptionalRowsOmitted:
             "fabric_sku": "BP10814-2",
         })
         text = _pdf_text(pdf)
-        # GOLDEN v10 column: short repeat string ("35.46\" VR" not
-        # "35.46\" V-repeat") to fit the narrow title column.
+        # Repeat prints as a shop fraction (35.46\" → 35-7/16\"),
+        # same formatter as every other inch on the sheet.
         for needle in ("FABRIC", "Nympheus Velvet", "BP10814-2",
-                       "GP&J Baker", "54\" W", "35.46\" VR"):
+                       "GP&J Baker", "54\" W", "35-7/16\" VR"):
             assert needle in text, f"fabric row missing {needle!r}"
 
 

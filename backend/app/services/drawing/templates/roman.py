@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from app.services.drawing.inches import format_inches
 from app.services.drawing.templates.base import (
     FamilyTemplate, MissingFieldsResult, GeometryResult,
     GeometryPoint, GeometryEdge, MathLine,
@@ -118,7 +119,7 @@ class RomanTemplate(FamilyTemplate):
         dims = spec.get("dims", {}) or {}
         product_type = spec.get("product_type", "flat_fold")
         out: List[str] = [
-            f"Slat height: ASSUMED {_DEFAULT_SLAT_HEIGHTS.get(product_type, 7):.1f}\" "
+            f"Slat height: ASSUMED {format_inches(_DEFAULT_SLAT_HEIGHTS.get(product_type, 7))} "
             f"per slat for style {product_type}.",
         ]
         if "mounting_depth" not in dims:
@@ -219,10 +220,15 @@ class RomanTemplate(FamilyTemplate):
         n_slats = max(1, round(float(dims["height"]) / slat))
         return {
             "ITEM": product_type.replace("_", " ").title(),
-            "DIMENSIONS": f'{dims["width"]:.2f}" W × {dims["height"]:.2f}" H',
-            "SLATS": f'{n_slats} @ {dims["height"] / n_slats:.2f}\" each',
+            "DIMENSIONS": (
+                f'{format_inches(dims["width"])} W × '
+                f'{format_inches(dims["height"])} H'
+            ),
+            "SLATS": (
+                f'{n_slats} @ {format_inches(float(dims["height"]) / n_slats)} each'
+            ),
             "MOUNTING": (
-                f'{dims.get("mounting_depth"):.2f}"' if "mounting_depth" in dims
+                format_inches(dims.get("mounting_depth")) if "mounting_depth" in dims
                 else "ASSUMED 2-1/2\" inside mount"
             ),
         }

@@ -35,6 +35,7 @@ from app.services.drawing.bench_quote_bridge import (  # noqa: E402
     normalize_length_unit as _normalize_length_unit,
     sheet_chrome as _bridge_chrome,
 )
+from app.services.drawing.inches import format_inches as _in
 from app.services.drawing.quote_sheet_layout import (  # noqa: E402
     CAPTION_H,
     SHEET_H,
@@ -183,14 +184,14 @@ def generate_shop_sheet(model):
         "-" * 50,
     ]
     for p in parts:
-        size_str = f'{p.width:.0f}" × {p.length:.0f}"'
+        size_str = f'{_in(p.width)} × {_in(p.length)}'
         lines.append(f"{p.name:<20} {size_str:>15} {p.process:>12}")
         if p.process == "CNC_TILE":
             tiles = generate_tiles(p.length)
             for i, (s, e) in enumerate(tiles, 1):
-                lines.append(f"  Tile {i}: {s:.1f}\" – {e:.1f}\"")
+                lines.append(f"  Tile {i}: {_in(s)} – {_in(e)}")
     lines.append("")
-    lines.append(f"Cushions: {model.cushion_count} @ {model.cushion_width}\" each")
+    lines.append(f"Cushions: {model.cushion_count} @ {_in(model.cushion_width)} each")
     return "\n".join(lines)
 
 
@@ -289,11 +290,8 @@ def _auto_scale_2d(w, h, area_w, area_h, margin=40, fill=0.78):
 # ── SVG PRIMITIVES ────────────────────────────────────────────────
 
 def _fmt_in(value) -> str:
-    """Whole-inch values print as 20, not 20.0."""
-    number = float(value)
-    if number == int(number):
-        return str(int(number))
-    return f"{number:g}"
+    """Shop inches with the mark. 20 → 20\", 14.5 → 14-1/2\"."""
+    return _in(value)
 
 
 def _esc(txt):
@@ -775,7 +773,7 @@ def _title_rows(name="", quote_num="", dims_text="", bench_type="STRAIGHT",
         ("ITEM:", (name or "BENCH").upper()),
         ("TYPE:", bench_type.upper().replace("_", " ")),
         ("DIMENSIONS:", dims_text or "SEE VIEWS"),
-        ("CUSHIONS:", f"{cushion_count} @ {_fmt_in(cushion_width)}\" each"),
+        ("CUSHIONS:", f"{cushion_count} @ {_fmt_in(cushion_width)} each"),
         ("BACK STYLE:", _back_style_label(panel_style, has_back=has_back)),
     ]
     if client:
@@ -973,13 +971,13 @@ def _build_straight(name, width_in, depth_in, seat_h_in, back_h_in, quote_num=""
     stack = []
     if has_back:
         stack.append((
-            f'{back_h_in:.0f}" BH',
+            f'{_in(back_h_in)} BH',
             _iso(width_in, depth_in, seat_h_in + back_h_in, ox, oy, scale),
         ))
-    stack.append((f'{seat_h_in:.0f}" SH', _iso(width_in, 0, seat_h_in, ox, oy, scale)))
-    stack.append((f'{depth_in:.0f}" D', _iso(width_in, depth_in, 0, ox, oy, scale)))
+    stack.append((f'{_in(seat_h_in)} SH', _iso(width_in, 0, seat_h_in, ox, oy, scale)))
+    stack.append((f'{_in(depth_in)} D', _iso(width_in, depth_in, 0, ox, oy, scale)))
     _iso_callouts(
-        parts, svg_w, svg_h, f'{width_in:.0f}"',
+        parts, svg_w, svg_h, f'{_in(width_in)}',
         (_iso(0, 0, 0, ox, oy, scale), _iso(width_in, 0, 0, ox, oy, scale)),
         stack,
     )
@@ -998,16 +996,16 @@ def _build_l_shape(name, long_in, short_in, depth_in, seat_h_in, back_h_in, quot
     _draw_bench_box(parts, ox, oy, scale, long_in - depth_in, 0, depth_in, short_in, seat_h_in, back_h_in,
                     panel_style, channel_count)
 
-    stack = [(f'{short_in:.0f}"', _iso(long_in, short_in, 0, ox, oy, scale))]
-    stack.append((f'{depth_in:.0f}" D', _iso(long_in, short_in - depth_in, 0, ox, oy, scale)))
+    stack = [(f'{_in(short_in)}', _iso(long_in, short_in, 0, ox, oy, scale))]
+    stack.append((f'{_in(depth_in)} D', _iso(long_in, short_in - depth_in, 0, ox, oy, scale)))
     if has_back:
         stack.append((
-            f'{back_h_in:.0f}" BH',
+            f'{_in(back_h_in)} BH',
             _iso(long_in, short_in, total_h, ox, oy, scale),
         ))
-    stack.append((f'{seat_h_in:.0f}" SH', _iso(long_in, 0, seat_h_in, ox, oy, scale)))
+    stack.append((f'{_in(seat_h_in)} SH', _iso(long_in, 0, seat_h_in, ox, oy, scale)))
     _iso_callouts(
-        parts, svg_w, svg_h, f'{long_in:.0f}"',
+        parts, svg_w, svg_h, f'{_in(long_in)}',
         (_iso(0, 0, 0, ox, oy, scale), _iso(long_in, 0, 0, ox, oy, scale)),
         stack,
     )
@@ -1031,17 +1029,17 @@ def _build_u_shape(name, back_in, side_in, depth_in, side_depth_in, seat_h_in, b
                     panel_style, channel_count)
 
     stack = [
-        (f'{side_in:.0f}"', _iso(0, side_in, 0, ox, oy, scale)),
-        (f'{depth_in:.0f}" D', _iso(side_depth_in, side_in, 0, ox, oy, scale)),
+        (f'{_in(side_in)}', _iso(0, side_in, 0, ox, oy, scale)),
+        (f'{_in(depth_in)} D', _iso(side_depth_in, side_in, 0, ox, oy, scale)),
     ]
     if has_back:
         stack.append((
-            f'{back_h_in:.0f}" BH',
+            f'{_in(back_h_in)} BH',
             _iso(total_w, side_in, total_h, ox, oy, scale),
         ))
-    stack.append((f'{seat_h_in:.0f}" SH', _iso(total_w, 0, seat_h_in, ox, oy, scale)))
+    stack.append((f'{_in(seat_h_in)} SH', _iso(total_w, 0, seat_h_in, ox, oy, scale)))
     _iso_callouts(
-        parts, svg_w, svg_h, f'{total_w:.0f}"',
+        parts, svg_w, svg_h, f'{_in(total_w)}',
         (_iso(0, 0, 0, ox, oy, scale), _iso(total_w, 0, 0, ox, oy, scale)),
         stack,
     )
@@ -1200,7 +1198,7 @@ def _sheet_extras(name, bench_type, panel_style, has_back, back_h_in, kw):
     assumptions = list(kw.get("assumptions") or [])
     mark = "ASSUMED — CONFIRM BEFORE FABRICATION"
     if kw.get("back_height_assumed") and has_back and not any(mark in a for a in assumptions):
-        assumptions.append(f'back height {float(back_h_in):.0f}" {mark}')
+        assumptions.append(f'back height {_in(float(back_h_in))} {mark}')
     return dict(
         category_chip=chip,
         chrome=kw.get("chrome") or _bridge_chrome(business),
@@ -1228,9 +1226,9 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
     c_count = max(1, math.ceil(width_in / cushion_width)) if cushion_width > 0 else 1
 
     if has_back:
-        dims_text = f'{width_in:.0f}" W × {depth_in:.0f}" D × {seat_h_in:.0f}" SH × {geo_back:.0f}" BH'
+        dims_text = f'{_in(width_in)} W × {_in(depth_in)} D × {_in(seat_h_in)} SH × {_in(geo_back)} BH'
     else:
-        dims_text = f'{width_in:.0f}" W × {depth_in:.0f}" D × {seat_h_in:.0f}" SH × NO BACK'
+        dims_text = f'{_in(width_in)} W × {_in(depth_in)} D × {_in(seat_h_in)} SH × NO BACK'
 
     extras = _sheet_extras(name, "straight", panel_style, has_back, geo_back, kw)
     layout = _regions_for(
@@ -1251,13 +1249,13 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
     safe_e = layout["elev_safe"]
     ortho = {
         "plan_box": (safe_p.x + plan_ox, safe_p.y + plan_oy, width_in * plan_scale, depth_in * plan_scale),
-        "plan_width": f'{width_in:.0f}"',
-        "plan_depth": f'{depth_in:.0f}"',
+        "plan_width": f'{_in(width_in)}',
+        "plan_depth": f'{_in(depth_in)}',
         "elev_box": (safe_e.x + elev_ox, safe_e.y + elev_ground_y, width_in * elev_scale, elev_h * elev_scale),
-        "elev_width": f'{width_in:.0f}"',
-        "elev_overall": f'{elev_h:.0f}"',
-        "elev_sh": f'{seat_h_in:.0f}" SH',
-        "elev_bh": f'{geo_back:.0f}" BH',
+        "elev_width": f'{_in(width_in)}',
+        "elev_overall": f'{_in(elev_h)}',
+        "elev_sh": f'{_in(seat_h_in)} SH',
+        "elev_bh": f'{_in(geo_back)} BH',
         "sh_px": seat_h_in * elev_scale,
         "bh_px": geo_back * elev_scale,
     }
@@ -1301,9 +1299,9 @@ def render_l_shape(name, long_in, short_in=0, depth_in=20, seat_h_in=18, back_h_
     c_count = max(1, math.ceil(long_in / cushion_width)) if cushion_width > 0 else 1
 
     if has_back:
-        dims_text = f'{long_in:.0f}" L × {short_in:.0f}" S × {depth_in:.0f}" D × {seat_h_in:.0f}" SH × {geo_back:.0f}" BH'
+        dims_text = f'{_in(long_in)} L × {_in(short_in)} S × {_in(depth_in)} D × {_in(seat_h_in)} SH × {_in(geo_back)} BH'
     else:
-        dims_text = f'{long_in:.0f}" L × {short_in:.0f}" S × {depth_in:.0f}" D × {seat_h_in:.0f}" SH × NO BACK'
+        dims_text = f'{_in(long_in)} L × {_in(short_in)} S × {_in(depth_in)} D × {_in(seat_h_in)} SH × NO BACK'
 
     extras = _sheet_extras(name, "l_shape", panel_style, has_back, geo_back, kw)
     layout = _regions_for(
@@ -1324,13 +1322,13 @@ def render_l_shape(name, long_in, short_in=0, depth_in=20, seat_h_in=18, back_h_
     safe_e = layout["elev_safe"]
     ortho = {
         "plan_box": (safe_p.x + plan_ox, safe_p.y + plan_oy, long_in * plan_scale, short_in * plan_scale),
-        "plan_width": f'{long_in:.0f}"',
-        "plan_depth": f'{short_in:.0f}"',
+        "plan_width": f'{_in(long_in)}',
+        "plan_depth": f'{_in(short_in)}',
         "elev_box": (safe_e.x + elev_ox, safe_e.y + elev_ground_y, long_in * elev_scale, elev_h * elev_scale),
-        "elev_width": f'{long_in:.0f}"',
-        "elev_overall": f'{elev_h:.0f}"',
-        "elev_sh": f'{seat_h_in:.0f}" SH',
-        "elev_bh": f'{geo_back:.0f}" BH',
+        "elev_width": f'{_in(long_in)}',
+        "elev_overall": f'{_in(elev_h)}',
+        "elev_sh": f'{_in(seat_h_in)} SH',
+        "elev_bh": f'{_in(geo_back)} BH',
         "sh_px": seat_h_in * elev_scale,
         "bh_px": geo_back * elev_scale,
     }
@@ -1393,15 +1391,15 @@ def render_u_shape(name, back_in, side_in=0, depth_in=20, side_depth_in=0,
     draw_panel = panel_style if has_back else "none"
 
     if abs(sl - sr) > 0.05:
-        side_txt = f'{sl:.0f}"/{sr:.0f}" S(L/R)'
+        side_txt = f'{_in(sl)}/{_in(sr)} S(L/R)'
     else:
-        side_txt = f'{side_max:.0f}" S'
+        side_txt = f'{_in(side_max)} S'
     if has_back:
-        dims_text = (f'{back_in:.0f}" B × {side_txt} × {depth_in:.0f}" D × '
-                     f'{side_depth_in:.0f}" SD × {seat_h_in:.0f}" SH × {geo_back:.0f}" BH')
+        dims_text = (f'{_in(back_in)} B × {side_txt} × {_in(depth_in)} D × '
+                     f'{_in(side_depth_in)} SD × {_in(seat_h_in)} SH × {_in(geo_back)} BH')
     else:
-        dims_text = (f'{back_in:.0f}" B × {side_txt} × {depth_in:.0f}" D × '
-                     f'{side_depth_in:.0f}" SD × {seat_h_in:.0f}" SH × NO BACK')
+        dims_text = (f'{_in(back_in)} B × {side_txt} × {_in(depth_in)} D × '
+                     f'{_in(side_depth_in)} SD × {_in(seat_h_in)} SH × NO BACK')
 
     extras = _sheet_extras(name, "u_shape", panel_style, has_back, geo_back, kw)
     layout = _regions_for(
@@ -1425,13 +1423,13 @@ def render_u_shape(name, back_in, side_in=0, depth_in=20, side_depth_in=0,
     safe_e = layout["elev_safe"]
     ortho = {
         "plan_box": (safe_p.x + plan_ox, safe_p.y + plan_oy, total_w * plan_scale, side_max * plan_scale),
-        "plan_width": f'{total_w:.0f}"',
-        "plan_depth": f'{side_max:.0f}"',
+        "plan_width": f'{_in(total_w)}',
+        "plan_depth": f'{_in(side_max)}',
         "elev_box": (safe_e.x + elev_ox, safe_e.y + elev_ground_y, total_w * elev_scale, elev_h * elev_scale),
-        "elev_width": f'{total_w:.0f}"',
-        "elev_overall": f'{elev_h:.0f}"',
-        "elev_sh": f'{seat_h_in:.0f}" SH',
-        "elev_bh": f'{geo_back:.0f}" BH',
+        "elev_width": f'{_in(total_w)}',
+        "elev_overall": f'{_in(elev_h)}',
+        "elev_sh": f'{_in(seat_h_in)} SH',
+        "elev_bh": f'{_in(geo_back)} BH',
         "sh_px": seat_h_in * elev_scale,
         "bh_px": geo_back * elev_scale,
     }

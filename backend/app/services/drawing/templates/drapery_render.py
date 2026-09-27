@@ -36,6 +36,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.pdfgen.canvas import Canvas
 
+from app.services.drawing.inches import format_inches
 from app.services.drawing.templates import fabric_registry as _fabric_reg
 from app.services.drawing.templates.b2_renderers import (
     PAGE_W_IN, PAGE_H_IN, MARGIN_IN,
@@ -617,13 +618,13 @@ def _render_drapery_side(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
         # Position dim text BELOW the dim line, in the empty band
         c.drawString(_P(first_gap_x + gap_sheet / 2 - 0.10),
                      _P(dim_y - 0.10),
-                     f"{gap_sheet:.2f}\"")
+                     f"{format_inches(gap_sheet)}")
         # ── Detail header label (top of box) ──
         c.setFillColor(colors.HexColor("#20241f"))
         c.setFont("Helvetica-Bold", 6.0)
         c.drawString(_P(box_x + 0.06), _P(label_y),
                      f"DETAIL A — PLAN VIEW ({mag:.1f}× · "
-                     f"pleat {pleat_real_w:.1f}\" real)")
+                     f"pleat {format_inches(pleat_real_w)} real)")
 
     # Fullness + drape-depth annotations placed in the title column
     # area (outside the side-section viewport bbox, inside the page

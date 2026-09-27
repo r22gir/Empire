@@ -31,6 +31,7 @@ from __future__ import annotations
 import math
 from typing import Dict, List
 
+from app.services.drawing.inches import format_inches
 from app.services.drawing.templates.base import (
     FamilyTemplate, MissingFieldsResult, GeometryResult,
     GeometryPoint, GeometryEdge, MathLine,
@@ -299,7 +300,7 @@ class BenchCurvedTemplate(FamilyTemplate):
                     gaps=[],
                     total=chord,
                     note=(
-                        f"WARN: radius {radius:.2f}\" < chord/2 {chord / 2:.2f}\". "
+                        f"WARN: radius {format_inches(radius)} < chord/2 {format_inches(chord / 2)}. "
                         "Degraded to straight chord; field-verify."
                     ),
                 ))
@@ -315,7 +316,7 @@ class BenchCurvedTemplate(FamilyTemplate):
                 gaps=[],
                 total=arc_length,
                 note=(
-                    f"radius={radius:.2f}\", chord={chord:.2f}\", theta="
+                    f"radius={format_inches(radius)}, chord={format_inches(chord)}, theta="
                     f"{theta:.3f} rad — Field-verify radius unless founder "
                     "supplied it. Plan view exaggerated for clarity."
                 ),
@@ -329,20 +330,21 @@ class BenchCurvedTemplate(FamilyTemplate):
         return {
             "ITEM": product_type.title(),
             "DIMENSIONS": (
-                f'{dims["width"]:.2f}" W × {dims["depth"]:.2f}" D × '
-                f'{dims["height"]:.2f}" H'
+                f'{format_inches(dims["width"])} W × '
+                f'{format_inches(dims["depth"])} D × '
+                f'{format_inches(dims["height"])} H'
             ),
             "SEAT HEIGHT": (
-                f'{dims["seat_height"]:.2f}"' if "seat_height" in dims
+                format_inches(dims["seat_height"]) if "seat_height" in dims
                 else "ASSUMED 18\""
             ),
             "ARMS": (
                 "YES" if arms else "NO (ASSUMED none)"
             ) + (
-                f' — {dims.get("arm_height", 26.0):.2f}" AFF' if arms else ""
+                f' — {format_inches(dims.get("arm_height", 26.0))} AFF' if arms else ""
             ),
             "BACK": (
-                f"curved, r={dims['curve_radius']:.2f}\""
+                f"curved, r={format_inches(dims['curve_radius'])}"
                 if "curve_radius" in dims
                 else "straight (ASSUMED — founder must confirm)"
             ),

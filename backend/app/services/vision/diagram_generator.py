@@ -2,6 +2,7 @@
 Generate architectural-style measurement diagrams as SVG.
 Used by Notes Extraction, Quote Builder, and Quote PDFs.
 """
+from app.services.drawing.inches import format_inches as _in
 
 
 class DiagramGenerator:
@@ -129,28 +130,28 @@ class DiagramGenerator:
 
         # Width dimension (top, outside window)
         dim_y = win_y - 22
-        self._add_h_dimension(parts, win_x, win_x + win_w, dim_y, f'{width}"')
+        self._add_h_dimension(parts, win_x, win_x + win_w, dim_y, _in(width))
 
         # Height dimension (right side, outside window)
         dim_x = win_x + win_w + 22
-        self._add_v_dimension(parts, win_y, win_y + win_h, dim_x, f'{height}"')
+        self._add_v_dimension(parts, win_y, win_y + win_h, dim_x, _in(height))
 
         # Stack space dimensions (if applicable)
         if stack:
             stack_y = win_y + win_h + 35
             # Left stack
-            self._add_h_dimension(parts, win_x - stack_px, win_x, stack_y, f'{stack}"', small=True)
+            self._add_h_dimension(parts, win_x - stack_px, win_x, stack_y, _in(stack), small=True)
             # Window width
-            self._add_h_dimension(parts, win_x, win_x + win_w, stack_y, f'{width}"', small=True)
+            self._add_h_dimension(parts, win_x, win_x + win_w, stack_y, _in(width), small=True)
             # Right stack
-            self._add_h_dimension(parts, win_x + win_w, win_x + win_w + stack_px, stack_y, f'{stack}"', small=True)
+            self._add_h_dimension(parts, win_x + win_w, win_x + win_w + stack_px, stack_y, _in(stack), small=True)
 
             # Total rod width
             total_y = stack_y + 22
             self._add_h_dimension(
                 parts,
                 win_x - stack_px, win_x + win_w + stack_px,
-                total_y, f'{total_width}" total rod'
+                total_y, f'{_in(total_width)} total rod'
             )
 
         # Sill depth label
@@ -159,7 +160,7 @@ class DiagramGenerator:
             sill_label_y = win_y + win_h + 10
             parts.append(
                 f'<text x="{sill_label_x:.1f}" y="{sill_label_y:.1f}" '
-                f'font-family="{self.FONT}" font-size="11" fill="{self.DARK_GRAY}">sill: {sill_depth}"</text>'
+                f'font-family="{self.FONT}" font-size="11" fill="{self.DARK_GRAY}">sill: {_in(sill_depth)}</text>'
             )
 
         # Labels at bottom
@@ -245,15 +246,15 @@ class DiagramGenerator:
             )
 
         # Dimensions
-        self._add_h_dimension(parts, fx, fx + fw, fy - 18, f'{width}"')
-        self._add_v_dimension(parts, fy, fy + fh, fx + fw + 22, f'{height}"')
+        self._add_h_dimension(parts, fx, fx + fw, fy - 18, _in(width))
+        self._add_v_dimension(parts, fy, fy + fh, fx + fw + 22, _in(height))
 
         # Depth label
         label_y = svg_h - 60
         parts.append(
             f'<text x="{svg_w/2:.1f}" y="{label_y}" text-anchor="middle" '
             f'font-family="{self.FONT}" font-size="13" fill="{self.BLACK}" font-weight="600">'
-            f'Depth: {depth}" · {cushion_count} cushions</text>'
+            f'Depth: {_in(depth)} · {cushion_count} cushions</text>'
         )
 
         desc = item.get("description") or item.get("type", "Furniture")
@@ -304,12 +305,12 @@ class DiagramGenerator:
             )
             parts.append(
                 f'<text x="{bx + bw/2:.1f}" y="{by + bh + 14:.1f}" text-anchor="middle" '
-                f'font-family="{self.FONT}" font-size="10" fill="{self.DARK_GRAY}">{depth}"</text>'
+                f'font-family="{self.FONT}" font-size="10" fill="{self.DARK_GRAY}">{_in(depth)}</text>'
             )
 
         # Dimensions
-        self._add_h_dimension(parts, cx, cx + cw, cy - 16, f'{width}"')
-        self._add_v_dimension(parts, cy, cy + ch, cx - 22, f'{height}"')
+        self._add_h_dimension(parts, cx, cx + cw, cy - 16, _in(width))
+        self._add_v_dimension(parts, cy, cy + ch, cx - 22, _in(height))
 
         desc = item.get("description") or "Cushion"
         label_y = svg_h - 40

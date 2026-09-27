@@ -37,6 +37,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from app.services.drawing.inches import format_inches
+
 # Single omitted-BH fallback. Quote value always wins over this.
 BENCH_BACK_HEIGHT_DEFAULT_IN = 18.0
 
@@ -349,7 +351,7 @@ def resolve_bench_request(req: Any) -> ResolvedBench:
         assumptions.append(note)
     if assumed and has_back:
         assumptions.append(
-            f'back height {back_height:.0f}" {ASSUMED_MARK}'
+            f'back height {format_inches(back_height)} {ASSUMED_MARK}'
         )
 
     cushion = getattr(req, "cushion_width", None)
@@ -464,7 +466,7 @@ def resolve_sketch_bench(params: Optional[dict], *, default_panel: str = "vertic
     )
     assumptions = []
     if assumed and has_back:
-        assumptions.append(f'back height {back_height:.0f}" {ASSUMED_MARK}')
+        assumptions.append(f'back height {format_inches(back_height)} {ASSUMED_MARK}')
 
     cushion = params.get("cushion_width", 24)
     channels = params.get("channel_count", 6)
