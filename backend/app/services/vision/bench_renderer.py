@@ -1583,18 +1583,14 @@ def render_quote_drawings(line_items, quote_num=""):
 
 
 def drawings_to_pdf(drawings, output_path):
-    """Convert list of drawing dicts to a multi-page PDF."""
+    """Convert list of drawing dicts to a multi-page PDF.
+
+    The sheet is scaled to the letter-landscape content box. Intrinsic
+    SVG pixel sizes are stripped so headers are not clipped.
+    """
     from weasyprint import HTML as WeasyHTML
+    from app.services.drawing.empire_sheet_chrome import drawings_pdf_html
+
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    html = (
-        '<!DOCTYPE html><html><head><meta charset="utf-8">'
-        '<style>@page{size:letter landscape;margin:0.18in}'
-        'body{margin:0}.pg{page-break-after:always;display:flex;'
-        'align-items:center;justify-content:center;min-height:92vh}'
-        '.pg:last-child{page-break-after:auto}</style></head><body>'
-    )
-    for d in drawings:
-        html += f'<div class="pg">{d["svg"]}</div>'
-    html += '</body></html>'
-    WeasyHTML(string=html).write_pdf(output_path)
+    WeasyHTML(string=drawings_pdf_html(drawings)).write_pdf(output_path)
     return output_path

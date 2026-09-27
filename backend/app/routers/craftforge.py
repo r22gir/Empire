@@ -14,6 +14,13 @@ import os
 import logging
 
 from app.services.data_paths import craftforge_data_dir
+from app.services.drawing.empire_sheet_chrome import (
+    LETTERHEAD_WC,
+    POWERED_BY,
+    SheetMeta,
+    client_document_html,
+    format_length_for_sheet,
+)
 from app.services.pricing import (
     PRICING_ENGINE_VERSION,
     build_design_invoice_source,
@@ -749,8 +756,7 @@ async def generate_design_pdf(design_id: str):
     biz_email = cfg.get("business_email", "")
     biz_address = cfg.get("business_address", "")
     biz_website = cfg.get("business_website", "")
-    biz_contact_lines = [l for l in [biz_phone, biz_email, biz_address, biz_website] if l]
-    biz_contact_html = "<br>".join(f'<span style="font-size:0.82em;color:#555">{l}</span>' for l in biz_contact_lines)
+    biz_contact_lines = [l for l in [biz_tagline, biz_phone, biz_email, biz_address, biz_website] if l]
 
     design_number = design.get("design_number", "CF-000")
     created_date = design.get("created_at", "")[:10]
@@ -819,9 +825,12 @@ async def generate_design_pdf(design_id: str):
     if design.get("width") or design.get("height") or design.get("depth"):
         dim_unit = design.get("unit", "in")
         parts = []
-        if design.get("width"): parts.append(f'{design["width"]}{dim_unit} W')
-        if design.get("height"): parts.append(f'{design["height"]}{dim_unit} H')
-        if design.get("depth"): parts.append(f'{design["depth"]}{dim_unit} D')
+        if design.get("width"):
+            parts.append(f'{format_length_for_sheet(design["width"], dim_unit)} W')
+        if design.get("height"):
+            parts.append(f'{format_length_for_sheet(design["height"], dim_unit)} H')
+        if design.get("depth"):
+            parts.append(f'{format_length_for_sheet(design["depth"], dim_unit)} D')
         dims = f'<p style="margin:4px 0;font-size:0.88em;color:#555"><strong>Dimensions:</strong> {" × ".join(parts)}</p>'
 
     # Photos for PDF — read files as base64
@@ -885,33 +894,7 @@ async def generate_design_pdf(design_id: str):
     grand_total = total
     deposit_amount = grand_total * (deposit_pct / 100) if deposit_pct > 0 else 0
 
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>{design_number}</title>
-<style>
-  @page {{ size: letter; margin: 0.5in 0.6in; }}
-  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #222; max-width: 800px; margin: 0 auto; padding: 0; font-size: 12px; line-height: 1.45; }}
-  h1 {{ color: #1a1a2e; margin: 0; font-size: 28px; letter-spacing: -0.5px; }}
-  table {{ width: 100%; border-collapse: collapse; margin-bottom: 8px; }}
-  th {{ background: #3d2e1a; color: #d4a636; padding: 8px 6px; text-align: left; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.5px; }}
-</style></head><body>
-
-<!-- HEADER -->
-<div style="border-bottom:3px solid #d4a636;padding-bottom:14px;margin-bottom:16px">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start">
-    <div>
-      <h1>{biz_name}</h1>
-      <p style="margin:4px 0 0;color:#888;font-size:0.85em">{biz_tagline}</p>
-      <p style="margin:6px 0 0;line-height:1.6">{biz_contact_html}</p>
-    </div>
-    <div style="text-align:right;padding-top:4px">
-      <div style="background:#3d2e1a;color:#d4a636;padding:8px 16px;border-radius:6px;font-weight:700;font-size:1.1em;letter-spacing:1px;display:inline-block;margin-bottom:8px">ESTIMATE</div>
-      <p style="margin:3px 0;color:#333;font-size:0.9em;font-weight:600">{design_number}</p>
-      <p style="margin:3px 0;color:#666;font-size:0.82em">Date: {created_date}</p>
-      <p style="margin:3px 0;color:#666;font-size:0.82em">Valid until: {expires}</p>
-    </div>
-  </div>
-</div>
-
+    body = f"""
 <!-- CLIENT -->
 <div style="display:flex;gap:16px;margin-bottom:16px">
   <div style="flex:1;padding:14px 18px;background:#f8f8f8;border-radius:8px;border:1px solid #eee">
@@ -970,12 +953,18 @@ async def generate_design_pdf(design_id: str):
   </div>
 </div>
 
-<!-- FOOTER -->
-<div style="margin-top:28px;padding-top:12px;border-top:1px solid #eee;text-align:center">
-  <p style="margin:0;color:#aaa;font-size:0.72em">{biz_name} &middot; {biz_tagline}</p>
-  <p style="margin:2px 0 0;color:#ccc;font-size:0.65em">Estimate {design_number} &middot; Generated {created_date}</p>
-</div>
-</body></html>"""
+"""
+
+    html = client_document_html(body, SheetMeta(
+        company=(biz_name or LETTERHEAD_WC).upper(),
+        powered_by=POWERED_BY,
+        doc_kind="ESTIMATE",
+        doc_id=design_number,
+        date_label=created_date,
+        valid_label=expires,
+        contact_lines=tuple(biz_contact_lines),
+        orientation="landscape",
+    ))
 
     try:
         from weasyprint import HTML as WeasyHTML

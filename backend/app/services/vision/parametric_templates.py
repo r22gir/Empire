@@ -6,6 +6,7 @@ import html
 import re
 from typing import Any
 
+from app.services.drawing.empire_sheet_chrome import svg_sheet_chrome
 from app.services.drawing.inches import format_inches as _in
 
 
@@ -340,6 +341,20 @@ def _ellipse(cx: float, cy: float, rx: float, ry: float, sw: float = 1, fill: st
 
 def _text(x: float, y: float, value: Any, size: int = 10, anchor: str = "middle", weight: str = "400", fill: str = "#1f2933") -> str:
     return f'<text x="{x:.1f}" y="{y:.1f}" text-anchor="{anchor}" font-size="{size}" font-weight="{weight}" fill="{fill}">{_esc(value)}</text>'
+
+
+def _open_presentation_sheet(w: float, h: float, company: str, title: str, name: str, family: str) -> list[str]:
+    """SVG root plus the shared Empire letterhead. Views start below the band."""
+    return [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" style="font-family: Arial, Helvetica, sans-serif;">',
+        *svg_sheet_chrome(
+            w, h,
+            company=company,
+            subtitle=title.upper(),
+            right_title=str(name or "").upper(),
+            right_sub=family,
+        ),
+    ]
 
 
 def _dim_h(parts: list[str], x1: float, x2: float, y: float, label: str, offset: float = 16) -> None:
@@ -1008,15 +1023,7 @@ def _render_product_family_sheet(template: TemplateDef, style: str, name: str, d
     dims["_style"] = style
     title = template.shop_rules["title"] if mode == "shop" else template.presentation_rules["title"]
     company = "EMPIRE WOODCRAFT" if template.key in {"banquette", "shelving"} or template.key in WOODCRAFT_CASEWORK_KEYS else "EMPIRE WORKROOM"
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" style="font-family: Arial, Helvetica, sans-serif;">',
-        '<rect width="1320" height="900" fill="#ffffff"/>',
-        _rect(12, 12, w - 24, h - 24, 1.4, "none", "#111827"),
-        _text(margin, 44, company, 16, "start", "800"),
-        _text(margin, 65, title.upper(), 12, "start", "700", "#8a5a00"),
-        _text(w - margin, 44, _esc(name).upper(), 15, "end", "800"),
-        _text(w - margin, 65, template.family, 10, "end", "600", "#667085"),
-    ]
+    parts = _open_presentation_sheet(w, h, company, title, name, template.family)
     top_y = 86
     bottom_y = 568
     left_w = 620
@@ -1106,16 +1113,7 @@ def _render_window_treatment_sheet(template: TemplateDef, style: str, name: str,
     dims = dict(dims)
     dims["_style"] = style
     title = template.shop_rules["title"] if mode == "shop" else template.presentation_rules["title"]
-    stroke = "#111827"
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" style="font-family: Arial, Helvetica, sans-serif;">',
-        '<rect width="1320" height="900" fill="#ffffff"/>',
-        _rect(12, 12, w - 24, h - 24, 1.4, "none", stroke),
-        _text(margin, 44, "EMPIRE WORKROOM", 16, "start", "800"),
-        _text(margin, 65, title.upper(), 12, "start", "700", "#8a5a00"),
-        _text(w - margin, 44, _esc(name).upper(), 15, "end", "800"),
-        _text(w - margin, 65, template.family, 10, "end", "600", "#667085"),
-    ]
+    parts = _open_presentation_sheet(w, h, "EMPIRE WORKROOM", title, name, template.family)
 
     top_y = 86
     bottom_y = 568
