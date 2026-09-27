@@ -279,19 +279,9 @@ def ls_text(c, x, y, s, size, color=INK, tracking=1.6, bold=True,
 
 
 def _fmt_in(value: float) -> str:
-    """Format inches as text. 1/16" granularity per B1 contract."""
-    sixteenths = round(value * 16)
-    whole = sixteenths // 16
-    rem = sixteenths - whole * 16
-    if rem == 0:
-        return f'{whole}"' if whole else '0"'
-    from math import gcd
-    g = gcd(rem, 16)
-    n = rem // g
-    d = 16 // g
-    if whole:
-        return f'{whole}-{n}/{d}"'
-    return f'{n}/{d}"'
+    """Shop inches: whole numbers or 1/16\" fractions. Never ``72.00\"``."""
+    from app.services.drawing.inches import format_inches
+    return format_inches(value)
 
 
 def _draw_witness_dimension(
@@ -724,10 +714,10 @@ def _render_title_column(
     # shorter "54\" W · 35.46\" VR" (still machine-readable for
     # fabrication).
     fabric_repeat = (
-        f'{fabric_obj.width_in:.0f}\" W  ·  '
-        f'{fabric_obj.repeat_in:.2f}\" VR'
+        f'{_fmt_in(fabric_obj.width_in)} W  ·  '
+        f'{_fmt_in(fabric_obj.repeat_in)} VR'
         if fabric_obj and fabric_obj.repeat_in else
-        f'{fabric_obj.width_in:.0f}\" W' if fabric_obj else "—"
+        f'{_fmt_in(fabric_obj.width_in)} W' if fabric_obj else "—"
     )
     # Client name — golden v10 uses spec["client_name"] (NOT
     # family_name) for the CLIENT row.
@@ -765,7 +755,7 @@ def _render_title_column(
     elif family_name == "Drapery":
         # Family-appropriate descriptor row (panel count + max width)
         n_body = max(2, round(geo_w / 24.0))
-        rows.append(("PANELS:", f"{n_body} × {24.0:.1f}\" max"))
+        rows.append(("PANELS:", f"{n_body} × {_fmt_in(24.0)} max"))
     rows += [
         # D-R2-2 (2026-08-17): doctrine strings are NEVER truncated.
         # The title column may grow rows as needed (handled below
@@ -2012,7 +2002,7 @@ def _get_assumptions(geometry, product_type: str, spec: dict = None) -> list[str
     dims = (spec or {}).get("dims", {}) or {}
     if "mounting_depth" in dims:
         out.append(
-            f"Mount: {dims['mounting_depth']:.2f}\" — verify"
+            f"Mount: {_fmt_in(dims['mounting_depth'])} — verify"
         )
     else:
         out.append(

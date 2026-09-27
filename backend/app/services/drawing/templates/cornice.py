@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from app.services.drawing.inches import format_inches
 from app.services.drawing.templates.base import (
     FamilyTemplate, MissingFieldsResult, GeometryResult,
     GeometryPoint, GeometryEdge, MathLine,
@@ -269,11 +270,12 @@ class CorniceTemplate(FamilyTemplate):
         return {
             "ITEM": product_type.replace("_", " ").title(),
             "DIMENSIONS": (
-                f'{dims["width"]:.2f}" W × {dims["depth"]:.2f}" D × '
-                f'{dims["drop"]:.2f}" drop'
+                f'{format_inches(dims["width"])} W × '
+                f'{format_inches(dims["depth"])} D × '
+                f'{format_inches(dims["drop"])} drop'
             ),
             "RETURNS": (
-                f'{dims.get("returns"):.1f}"' if "returns" in dims
+                format_inches(dims.get("returns")) if "returns" in dims
                 else "ASSUMED 3\" each side"
             ),
             "MATERIAL": "ASSUMED furniture-grade plywood + fabric wrap",

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from app.services.drawing.inches import format_inches
 from app.services.drawing.templates.base import (
     FamilyTemplate, MissingFieldsResult, GeometryResult,
     GeometryPoint, GeometryEdge, MathLine,
@@ -78,7 +79,7 @@ class DraperyTemplate(FamilyTemplate):
         product_type = spec.get("product_type", "—")
         # Rule 1: every inferred value must surface here.
         out: List[str] = [
-            f"Panel width: ASSUMED {_DEFAULT_PANEL_WIDTHS.get(product_type, 24):.0f}\" "
+            f"Panel width: ASSUMED {format_inches(_DEFAULT_PANEL_WIDTHS.get(product_type, 24))} "
             f"max per style {product_type}.",
         ]
         if "returns" not in dims:
@@ -181,8 +182,15 @@ class DraperyTemplate(FamilyTemplate):
         product_type = spec.get("product_type", "—")
         return {
             "ITEM": product_type.replace("_", " ").title(),
-            "DIMENSIONS": f'{dims["width"]:.2f}" W × {dims["height"]:.2f}" H',
-            "RETURNS": f'{dims.get("returns", 3.0):.1f}" (assumed)' if "returns" not in dims else f'{dims["returns"]:.1f}"',
+            "DIMENSIONS": (
+                f'{format_inches(dims["width"])} W × '
+                f'{format_inches(dims["height"])} H'
+            ),
+            "RETURNS": (
+                f'{format_inches(dims.get("returns", 3.0))} (assumed)'
+                if "returns" not in dims
+                else format_inches(dims["returns"])
+            ),
             "FULLNESS": self._fullness_label(spec),
             "PLEATS": f'{self._pleat_count(spec)} panels',
         }

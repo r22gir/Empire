@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from app.services.drawing.inches import format_inches
 from app.services.drawing.templates.base import (
     FamilyTemplate, MissingFieldsResult, GeometryResult,
     GeometryPoint, GeometryEdge, MathLine,
@@ -185,11 +186,16 @@ class HeadboardChannelTemplate(FamilyTemplate):
             )
         return {
             "ITEM": item,
-            "DIMENSIONS": f'{dims["width"]:.2f}" W × {dims["height"]:.2f}" H',
+            "DIMENSIONS": (
+                f'{format_inches(dims["width"])} W × '
+                f'{format_inches(dims["height"])} H'
+            ),
             "THICKNESS": (
-                f'{dims["thickness"]:.2f}"' if "thickness" in dims
+                format_inches(dims["thickness"]) if "thickness" in dims
                 else "ASSUMED 4\""
             ),
-            "CHANNELS": f"{n_channels} @ {float(dims['width']) / n_channels:.2f}\" pitch",
+            "CHANNELS": (
+                f"{n_channels} @ {format_inches(float(dims['width']) / n_channels)} pitch"
+            ),
             "MOUNT": "Wall-mounted (mounting hardware NOT in spec)",
         }

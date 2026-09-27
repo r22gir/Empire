@@ -157,10 +157,15 @@ class FamilyTemplate(ABC):
         """Optional. Default: {'ITEM': product_type, 'DIMENSIONS': ...}.
         Subclasses override for family-specific rows (LEGS, CHANNELS,
         PLEATS, etc.)."""
+        from app.services.drawing.inches import format_inches
         dims = spec.get("dims", {})
-        dim_str = " x ".join(
-            f'{v:.2f}"' for v in dims.values()
-        ) if dims else "(unspecified)"
+
+        def _one(v) -> str:
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                return str(v)
+            return format_inches(v)
+
+        dim_str = " x ".join(_one(v) for v in dims.values()) if dims else "(unspecified)"
         return {
             "ITEM": spec.get("product_type", "—"),
             "DIMENSIONS": dim_str,

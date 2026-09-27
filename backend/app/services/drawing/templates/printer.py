@@ -94,27 +94,9 @@ _ASSUMED = ParagraphStyle(
 
 
 def _fmt_in(value: float) -> str:
-    """Format inches as text per Standard: '10-49/64"' exact fractions
-    where reasonable. For B1 we use 1/16" granularity; B2 can move to
-    1/64" once the spec format admits it.
-
-    Strategy: render as float with 2 decimals PLUS a fractional
-    suffix if the float is close to a rational multiple of 1/16.
-    """
-    # Round to nearest 1/16 and emit as fraction
-    sixteenths = round(value * 16)
-    whole = sixteenths // 16
-    rem = sixteenths - whole * 16
-    if rem == 0:
-        return f'{whole}"' if whole else '0"'
-    # Reduce fraction
-    from math import gcd
-    g = gcd(rem, 16)
-    n = rem // g
-    d = 16 // g
-    if whole:
-        return f'{whole}-{n}/{d}"'
-    return f'{n}/{d}"'
+    """Shop inches: whole numbers or 1/16\" fractions. Never ``72.00\"``."""
+    from app.services.drawing.inches import format_inches
+    return format_inches(value)
 
 
 def _dim_label(text: str) -> Paragraph:

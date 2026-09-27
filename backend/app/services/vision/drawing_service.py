@@ -16,6 +16,8 @@ Item types route to appropriate view counts:
 import re
 import math
 
+from app.services.drawing.inches import format_inches as _in
+
 # ── Shared constants (match bench_renderer.py style) ─────────────
 FONT = "Arial, Helvetica, sans-serif"
 BLACK = "#000000"
@@ -370,13 +372,13 @@ def render_window(params: dict) -> str:
     parts.append(_rect(x0 - 16, sill_y, w_s + 32, 6, SW_MED, fill="#e8e4dc"))
 
     # Dimensions
-    _dim_h(parts, x0, x0 + w_s, sill_y + 6, f'{width:.0f}"', 22)
-    _dim_v(parts, x0 + w_s + frame_pad, y0, y0 + h_s, f'{eff_h:.0f}"', 30)
+    _dim_h(parts, x0, x0 + w_s, sill_y + 6, f'{_in(width)}', 22)
+    _dim_v(parts, x0 + w_s + frame_pad, y0, y0 + h_s, f'{_in(eff_h)}', 30)
     if drop > 0 and drop != height:
-        _dim_v(parts, x0 + w_s + frame_pad + 50, y0, y0 + h_s, f'{drop:.0f}" DROP', 30)
+        _dim_v(parts, x0 + w_s + frame_pad + 50, y0, y0 + h_s, f'{_in(drop)} DROP', 30)
     if mount == "outside":
         _dim_v(parts, x0 - frame_pad - 20, y0 - frame_pad, y0 + h_s + frame_pad,
-               f'{eff_h + frame_pad * 2 / scale:.0f}" O.M.', -30)
+               f'{_in(eff_h + frame_pad * 2 / scale)} O.M.', -30)
 
     # Spec callouts (right side, below dimensions)
     spec_y = sill_y + 50
@@ -445,13 +447,13 @@ def render_cushion(params: dict) -> str:
                  f'stroke-width="{SW_LIGHT}" stroke-dasharray="4,3" rx="{max(radius - 2, 0):.1f}"/>')
 
     # Center label
-    parts.append(_text(cx, cy, f'{width:.0f}" x {depth:.0f}"', 12, weight="600"))
+    parts.append(_text(cx, cy, f'{_in(width)} x {_in(depth)}', 12, weight="600"))
     if height > 0:
-        parts.append(_text(cx, cy + 16, f'{height:.0f}" thick', 9, fill=GRAY))
+        parts.append(_text(cx, cy + 16, f'{_in(height)} thick', 9, fill=GRAY))
 
     # Dimensions
-    _dim_h(parts, x0, x0 + w_s, y0 + d_s, f'{width:.0f}"', 22)
-    _dim_v(parts, x0 + w_s, y0, y0 + d_s, f'{depth:.0f}"', 22)
+    _dim_h(parts, x0, x0 + w_s, y0 + d_s, f'{_in(width)}', 22)
+    _dim_v(parts, x0 + w_s, y0, y0 + d_s, f'{_in(depth)}', 22)
 
     if notes:
         parts.append(_text(cx, svg_h - 200, _esc(notes[:100]), 10, fill=GRAY))
@@ -505,8 +507,8 @@ def render_headboard(params: dict) -> str:
     parts.append(_text(cx, ground_y + 14, "MATTRESS LINE", 7, fill=GRAY))
 
     # Dimensions
-    _dim_h(parts, x0, x0 + w_s, ground_y, f'{width:.0f}"', 28)
-    _dim_v(parts, x0 + w_s, y0, ground_y, f'{height:.0f}"', 28)
+    _dim_h(parts, x0, x0 + w_s, ground_y, f'{_in(width)}', 28)
+    _dim_v(parts, x0 + w_s, y0, ground_y, f'{_in(height)}', 28)
 
     if notes:
         parts.append(_text(cx, svg_h - 200, _esc(notes[:100]), 10, fill=GRAY))
@@ -588,8 +590,8 @@ def render_furniture_2view(item_type: str, params: dict) -> str:
             parts.append(_line(lx, fy0 + top_h, lx, f_ground, SW_MED))
 
     # Front dims
-    _dim_h(parts, fx0, fx0 + fw, f_ground, f'{width:.0f}"', 22)
-    _dim_v(parts, fx0 + fw, fy0, f_ground, f'{height:.0f}"', 22)
+    _dim_h(parts, fx0, fx0 + fw, f_ground, f'{_in(width)}', 22)
+    _dim_v(parts, fx0 + fw, fy0, f_ground, f'{_in(height)}', 22)
 
     # ── VIEW 2: Side Elevation or Plan View (right half) ──
     v2_x = 30 + half_w + 30
@@ -615,8 +617,8 @@ def render_furniture_2view(item_type: str, params: dict) -> str:
         for lx in [sx0 + 6, sx0 + sd - 6]:
             parts.append(_line(lx, f_ground - seat_hs * 0.7, lx, f_ground, SW_MED))
 
-        _dim_h(parts, sx0, sx0 + sd, f_ground, f'{depth:.0f}"', 22)
-        _dim_v(parts, sx0 + sd, sy0, f_ground, f'{height:.0f}"', 22)
+        _dim_h(parts, sx0, sx0 + sd, f_ground, f'{_in(depth)}', 22)
+        _dim_v(parts, sx0 + sd, sy0, f_ground, f'{_in(height)}', 22)
     else:
         # Plan view (top-down)
         _view_label(parts, v2_x, v1_y, half_w, "PLAN VIEW")
@@ -629,10 +631,10 @@ def render_furniture_2view(item_type: str, params: dict) -> str:
         py0 = p_cy - pd / 2
 
         parts.append(_rect(px0, py0, pw, pd, SW_HEAVY))
-        parts.append(_text(p_cx, p_cy + 4, f'{width:.0f}" x {depth:.0f}"', 11, weight="600"))
+        parts.append(_text(p_cx, p_cy + 4, f'{_in(width)} x {_in(depth)}', 11, weight="600"))
 
-        _dim_h(parts, px0, px0 + pw, py0 + pd, f'{width:.0f}"', 22)
-        _dim_v(parts, px0 + pw, py0, py0 + pd, f'{depth:.0f}"', 22)
+        _dim_h(parts, px0, px0 + pw, py0 + pd, f'{_in(width)}', 22)
+        _dim_v(parts, px0 + pw, py0, py0 + pd, f'{_in(depth)}', 22)
 
     # Title block
     _title_block_small(parts, svg_w / 2 - 160, svg_h - 140, 320, 110, name, item_type)
@@ -690,8 +692,8 @@ def render_millwork(params: dict) -> str:
     parts.append(_line(fx0 + dw - 12, handle_y, fx0 + dw - 12, handle_y + 16, SW_MED))
     parts.append(_line(fx0 + dw + door_gap + 2, handle_y, fx0 + dw + door_gap + 2, handle_y + 16, SW_MED))
 
-    _dim_h(parts, fx0, fx0 + fw, f_ground, f'{width:.0f}"', 18)
-    _dim_v(parts, fx0 + fw, fy0, f_ground, f'{height:.0f}"', 18)
+    _dim_h(parts, fx0, fx0 + fw, f_ground, f'{_in(width)}', 18)
+    _dim_v(parts, fx0 + fw, fy0, f_ground, f'{_in(height)}', 18)
 
     # ── SIDE ELEVATION ──
     v2_x = v1_x + third_w + 10
@@ -712,8 +714,8 @@ def render_millwork(params: dict) -> str:
         sy = sy0 + sh * i / shelf_count
         parts.append(_line(sx0 + 2, sy, sx0 + sd - 2, sy, SW_LIGHT, GRAY))
 
-    _dim_h(parts, sx0, sx0 + sd, f_ground, f'{depth:.0f}"', 18)
-    _dim_v(parts, sx0 + sd, sy0, f_ground, f'{height:.0f}"', 18)
+    _dim_h(parts, sx0, sx0 + sd, f_ground, f'{_in(depth)}', 18)
+    _dim_v(parts, sx0 + sd, sy0, f_ground, f'{_in(height)}', 18)
 
     # ── PLAN VIEW ──
     v3_x = v2_x + third_w + 10
@@ -729,10 +731,10 @@ def render_millwork(params: dict) -> str:
     py0 = p_cy - pd / 2
 
     parts.append(_rect(px0, py0, pw, pd, SW_HEAVY))
-    parts.append(_text(p_cx, p_cy + 4, f'{width:.0f}" x {depth:.0f}"', 10, weight="600"))
+    parts.append(_text(p_cx, p_cy + 4, f'{_in(width)} x {_in(depth)}', 10, weight="600"))
 
-    _dim_h(parts, px0, px0 + pw, py0 + pd, f'{width:.0f}"', 18)
-    _dim_v(parts, px0 + pw, py0, py0 + pd, f'{depth:.0f}"', 18)
+    _dim_h(parts, px0, px0 + pw, py0 + pd, f'{_in(width)}', 18)
+    _dim_v(parts, px0 + pw, py0, py0 + pd, f'{_in(depth)}', 18)
 
     # Title block
     _title_block_small(parts, svg_w / 2 - 160, svg_h - 160, 320, 120, name, "Millwork")

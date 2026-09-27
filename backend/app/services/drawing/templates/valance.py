@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from app.services.drawing.inches import format_inches
 from app.services.drawing.templates.base import (
     FamilyTemplate, MissingFieldsResult, GeometryResult,
     GeometryPoint, GeometryEdge, MathLine,
@@ -87,7 +88,7 @@ class ValanceTemplate(FamilyTemplate):
             out.append("Returns: ASSUMED 3\" each side.")
         if product_type in _SCALLOW_STYLES:
             out.append(
-                f"Scallop depth: ASSUMED 0.35 × drop ({0.35 * float(dims.get('drop', 12)):.2f}\") "
+                f"Scallop depth: ASSUMED 0.35 × drop ({format_inches(0.35 * float(dims.get('drop', 12)))}) "
                 f"for {product_type} style — founder must confirm."
             )
             out.append(
@@ -262,9 +263,12 @@ class ValanceTemplate(FamilyTemplate):
         product_type = spec.get("product_type", "—")
         return {
             "ITEM": product_type.replace("_", " ").title(),
-            "DIMENSIONS": f'{dims["width"]:.2f}" W × {dims["drop"]:.2f}" drop',
+            "DIMENSIONS": (
+                f'{format_inches(dims["width"])} W × '
+                f'{format_inches(dims["drop"])} drop'
+            ),
             "RETURNS": (
-                f'{dims.get("returns"):.1f}"' if "returns" in dims
+                format_inches(dims.get("returns")) if "returns" in dims
                 else "ASSUMED 3\" each side"
             ),
             "STYLE": self._style_label(product_type),
