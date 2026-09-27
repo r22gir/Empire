@@ -33,6 +33,15 @@ MINIMAX_VIDEO_ENABLED = os.getenv("MINIMAX_VIDEO_ENABLED", "0") == "1"
 
 MMX_CLI_PATH = os.getenv("MINIMAX_CLI_PATH", "/home/rg/.local/bin/mmx")
 MMX_VISION_TIMEOUT = 60  # seconds
+# QIS analyze-items prompts are ~2.4k chars and put the items[] schema after
+# the old 2000-character cut. Mockup + measure prompts are ~2–4k. Keep the
+# schema the model is asked to return.
+MMX_VISION_PROMPT_LIMIT = 8000
+
+
+def vision_cli_prompt(prompt: str) -> str:
+    """Return the prompt string passed to `mmx vision describe --prompt`."""
+    return (prompt or "")[:MMX_VISION_PROMPT_LIMIT]
 
 # Live MCP error tracking — updated after each actual vision call
 # Do not run live probes on status calls
@@ -513,7 +522,7 @@ async def minimax_understand_image(
     cmd = [
         cli_path_or_reason, "vision", "describe",
         "--image", str(p.resolve()),
-        "--prompt", prompt[:2000],
+        "--prompt", vision_cli_prompt(prompt),
         "--output", "json",
     ]
 
