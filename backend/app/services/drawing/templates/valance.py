@@ -1,9 +1,13 @@
-"""templates/valance.py — Valance family (14 styles).
+"""templates/valance.py — Valance family.
 
 Phase B1 — valance styles:
   kingston, cambridge, scalloped, arched, serpentine,
   flat_board_mounted, shaped, pleated, gathered, swag_and_jabot,
-  cascades, empire, tab, cornice_with_fabric.
+  cascades, empire, tab, cornice_with_fabric,
+  plus catalog styles that share a slug with drapery/roman
+  (box_pleat, inverted_box_pleat, balloon, austrian, london, rod_pocket).
+  Those six reuse this family's frame. They are reached by (family, style),
+  not by the bare slug (the bare slug stays on drapery or roman).
 
 Required: (width, drop). Optional: (returns).
 
@@ -29,11 +33,20 @@ from app.services.drawing.templates.base import (
 )
 
 
+# Catalog styles that share a slug with drapery or roman (box_pleat,
+# balloon, …) are accepted here so a (valance, style) resolution draws
+# the valance category template. Geometry stays the existing frame —
+# quote diagrams transmit the category, not a new shop profile.
+_CATALOG_FRAME_STYLES = {
+    "box_pleat", "inverted_box_pleat", "rod_pocket",
+    "balloon", "austrian", "london",
+}
+
 _VALANCE_STYLES = {
     "kingston", "cambridge", "scalloped", "arched", "serpentine",
     "flat_board_mounted", "shaped", "pleated", "gathered",
     "swag_and_jabot", "cascades", "empire", "tab", "cornice_with_fabric",
-}
+} | _CATALOG_FRAME_STYLES
 
 _FLAT_STYLES = {"flat_board_mounted", "pleated", "tab", "pleated", "gathered"}
 _SCALLOW_STYLES = {"scalloped", "arched", "serpentine", "shaped", "empire"}
@@ -83,6 +96,12 @@ class ValanceTemplate(FamilyTemplate):
         if product_type == "swag_and_jabot":
             out.append(
                 "Swag drop: ASSUMED 0.7 × drop. Jabot drop: ASSUMED 1.2 × drop."
+            )
+        if product_type in _CATALOG_FRAME_STYLES:
+            out.append(
+                f"Style {product_type.replace('_', ' ')}: valance category "
+                f"template (frame geometry). Profile detail ASSUMED — "
+                f"CONFIRM BEFORE FABRICATION."
             )
         return out
 
@@ -257,4 +276,9 @@ class ValanceTemplate(FamilyTemplate):
             return "Scalloped bottom (ASSUMED 0.35× drop depth, 14\" pitch)"
         if product_type == "swag_and_jabot":
             return "Swag + jabot (ASSUMED 0.7×/1.2× drop)"
+        if product_type in _CATALOG_FRAME_STYLES:
+            return (
+                f"{product_type.replace('_', ' ').title()} "
+                f"(valance category template)"
+            )
         return "Flat bottom"

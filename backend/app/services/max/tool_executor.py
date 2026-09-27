@@ -2811,9 +2811,15 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
     Required params:
       product_type — one of the B1-registered product_types
                      (pinch_pleat, flat_fold, scalloped, straight,
-                     bench, banquette, headboard_channel, ...).
+                     bench, banquette, headboard_channel, ...),
+                     a catalog id `family/style` (valances/box_pleat,
+                     cornices/arched), or a vision alias (flat_roman,
+                     arched_cornice, pinch-pleat).
                      See templates.registry.implemented_product_types()
-                     for the full list.
+                     for the flat list. Shared slugs need family.
+      family, style — catalog pair. Use these when the style slug is
+                     shared (valance box_pleat, cornice arched).
+                     `family` + `style` may replace product_type.
       dims         — dict of width/height/drop/thickness/etc. The
                      required keys depend on product_type and are
                      surfaced via validate_spec() (a missing-dim list).
@@ -2838,17 +2844,27 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
         )
 
     product_type = str(params.get("product_type", "")).strip()
-    if not product_type:
+    catalog_family = str(
+        params.get("family") or params.get("catalog_family") or ""
+    ).strip()
+    catalog_style = str(
+        params.get("style") or params.get("catalog_style") or ""
+    ).strip()
+    if not product_type and not (catalog_family and catalog_style):
         return ToolResult(
             tool="render_shop_drawing", success=False,
             error=(
                 "render_shop_drawing requires explicit product_type "
                 "(e.g. 'flat_fold', 'pinch_pleat', 'bench', "
-                "'headboard_channel'). Caller-side natural-language "
-                "intent parsing should fill this in via drawing_intent. "
+                "'headboard_channel') or family+style "
+                "(e.g. family='valance', style='box_pleat'). "
+                "Caller-side natural-language intent parsing should "
+                "fill this in via drawing_intent. "
                 "Defaults are NEVER invented."
             ),
         )
+    if not product_type:
+        product_type = catalog_style
 
     dims = params.get("dims")
     if not isinstance(dims, dict) or not dims:
@@ -2911,6 +2927,8 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
 
     spec = {
         "product_type": product_type,
+        "family": catalog_family,
+        "style": catalog_style,
         "dims": {str(k): float(v) for k, v in dims.items() if v is not None},
         "client_name":  params.get("client_name", ""),
         "site_address": params.get("site_address", ""),

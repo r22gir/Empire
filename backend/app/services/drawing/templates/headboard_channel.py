@@ -71,6 +71,15 @@ class HeadboardChannelTemplate(FamilyTemplate):
                 f"Channel pitch: ASSUMED 5\" pitch → {n} channels across "
                 f"width. Founder must confirm or supply exact count."
             )
+        catalog_style = str(spec.get("catalog_style") or "")
+        if catalog_style and catalog_style not in {
+            "headboard_channel", "channel",
+        }:
+            out.append(
+                f"Catalog style {catalog_style.replace('_', ' ')}: drawn on "
+                f"the channel-headboard category template. Style profile "
+                f"ASSUMED — CONFIRM BEFORE FABRICATION."
+            )
         return out
 
     def geometry(self, spec: Dict) -> GeometryResult:
@@ -167,8 +176,15 @@ class HeadboardChannelTemplate(FamilyTemplate):
     def title_block(self, spec: Dict) -> Dict[str, str]:
         dims = spec["dims"]
         n_channels = int(dims.get("channels", max(4, round(float(dims["width"]) / 5.0))))
+        catalog_style = str(spec.get("catalog_style") or "")
+        item = "Headboard (Vertical Channels)"
+        if catalog_style and catalog_style not in {"headboard_channel", "channel"}:
+            item = (
+                f"Headboard — {catalog_style.replace('_', ' ').title()} "
+                f"(channel category template)"
+            )
         return {
-            "ITEM": "Headboard (Vertical Channels)",
+            "ITEM": item,
             "DIMENSIONS": f'{dims["width"]:.2f}" W × {dims["height"]:.2f}" H',
             "THICKNESS": (
                 f'{dims["thickness"]:.2f}"' if "thickness" in dims
