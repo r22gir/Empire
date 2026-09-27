@@ -33,6 +33,17 @@ interface Props {
   onOpenBuilder?: () => void;
 }
 
+/** Amount shown on Quote Review. Server rate is the unit price; amount is qty × rate. */
+function lineItemAmount(item: { quantity?: number; rate?: number; amount?: number }) {
+  const qty = Number(item?.quantity ?? 0);
+  const rate = Number(item?.rate ?? 0);
+  const extended = Math.round(qty * rate * 100) / 100;
+  const stored = Number(item?.amount ?? 0);
+  if (!Number.isFinite(extended)) return stored;
+  if (Math.abs(extended - stored) > 0.02) return extended;
+  return Number.isFinite(stored) ? stored : extended;
+}
+
 export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [selected, setSelected] = useState<number>(1);
@@ -98,7 +109,11 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   useEffect(() => {
     if (!quote) return;
     const q = quote as any;
-    setEditItems(JSON.parse(JSON.stringify(q.line_items || [])));
+    const loaded = JSON.parse(JSON.stringify(q.line_items || [])).map((item: any) => ({
+      ...item,
+      amount: lineItemAmount(item),
+    }));
+    setEditItems(loaded);
     setEditNotes(q.notes || '');
     setEditTerms(q.terms || '');
     setEditTaxRate((q.tax_rate || 0) * 100);
@@ -109,7 +124,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   }, [quote]);
 
   // Recalculate totals from editable items
-  const computedSubtotal = editItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const computedSubtotal = editItems.reduce((sum, item) => sum + lineItemAmount(item), 0);
   const computedDiscount = editDiscountType === 'percent'
     ? Math.round(computedSubtotal * (editDiscountAmt / 100) * 100) / 100
     : editDiscountAmt;
@@ -709,7 +724,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                       </div>
                     </td>
                     <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 600, color: '#1a1a1a', fontSize: 12 }}>
-                      ${(item.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      ${lineItemAmount(item).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </td>
                     <td style={{ padding: '4px 4px', textAlign: 'center' }}>
                       <button onClick={() => removeItem(i)} className="cursor-pointer"

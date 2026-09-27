@@ -199,10 +199,17 @@ def generate_quote_pdf_legacy_portrait(quote_id: str) -> bytes:
                 unit_price = float(final_price)
                 subtotal = float(final_price)
             else:
-                unit_price = float(item.get('unit_price', 0) or 0)
-                subtotal = float(item.get('subtotal', 0) or 0)
-                if subtotal == 0:
-                    subtotal = round(qty * unit_price, 2)
+                # rate/amount aliases are qty × rate (per-unit rate, extended amount).
+                if item.get('rate') is not None:
+                    unit_price = float(item.get('rate') or 0)
+                else:
+                    unit_price = float(item.get('unit_price', 0) or 0)
+                if item.get('amount') is not None:
+                    subtotal = float(item.get('amount') or 0)
+                else:
+                    subtotal = float(item.get('subtotal', 0) or 0)
+                    if subtotal == 0 and unit_price:
+                        subtotal = round(qty * unit_price, 2)
 
             item_data.append([
                 str(idx),
