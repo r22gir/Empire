@@ -2,6 +2,16 @@
 
 **Status:** CANONICAL Max drawing / client sheet format (locked 2026-09-25).
 
+**Chrome only — not job content.** McLean Whittington supplies shared
+format/chrome. Every live job (Maura Hillary, Lindsey, …) supplies its own
+rooms/openings/Open-at-Glance/photos/checks. Never copy McLean rooms into
+another JobSpec as fallback.
+
+**FOUNDER HARD RULE — excluded openings:** skip entirely via
+`in_scope_spec` / `is_panel_in_scope` (no sheet, no schedule row, no
+Open-at-Glance EXCLUDED stamp). SITE PHOTO embeds when path exists; F3
+NOT RECEIVED stays empty.
+
 **Not golden:** `reference/empire-house-format/` (Marleys EST-2026-272 WIP pack,
 including any file named `GOLDEN_Empire_B2_Sheet_Flat_Fold.pdf`). Demoted;
 content numbers for Marleys stay separate.

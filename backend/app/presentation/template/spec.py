@@ -331,11 +331,17 @@ def filter_in_scope_schedule(schedule: List[tuple]) -> List[tuple]:
     return [row for row in (schedule or []) if is_schedule_row_in_scope(row)]
 
 
+# FOUNDER HARD RULE (2026-09-26): excluded / omit / out_of_scope / "(EXCLUDED)"
+# openings are SKIPPED ENTIRELY — no elevation sheet, no schedule row, no
+# Open-at-Glance bullet with an EXCLUDED stamp. Callers: assemble() +
+# measurement_set defense-in-depth via is_panel_in_scope.
 def in_scope_spec(spec: "JobSpec") -> "JobSpec":
     """Return a JobSpec copy with out-of-scope openings removed.
 
-    Applied once at assemble() so cover index, room elevations, schedule,
-    count_openings, and open-at-glance all agree — no EXCLUDED sheets.
+    FOUNDER HARD RULE: excluded / omit / out_of_scope / (EXCLUDED) openings
+    are skipped entirely (no sheet, no schedule row, no Open-at-Glance
+    EXCLUDED stamp). Applied once at assemble() so cover index, room
+    elevations, schedule, count_openings, and open-at-glance all agree.
     """
     from dataclasses import replace
     rooms = filter_in_scope_rooms(list(spec.rooms))

@@ -4,6 +4,11 @@ letterspacing, dimension primitives, section / wrap helpers).
 Locked to Max golden McLean Whittington REV A
 (`reference/max-golden/GOLDEN.md`, md5 f882144aefc03745533fdaae95ea86b4).
 
+FOUNDER OPS: McLean Whittington is SHARED FORMAT/CHROME ONLY (palette,
+bands, type, letterhead language). Rooms, openings, open-at-glance,
+photos, and checks ALWAYS come from THIS job's JobSpec — never hard-code
+another job's rooms as fallback (wrong-job leak).
+
 Chrome fields (McLean exact):
 - `letterhead` — e.g. NELMA'S WORKROOM (serif, header left)
 - `header_tagline` — POWERED BY EMPIRE WORKROOM (gold mono)

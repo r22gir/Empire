@@ -17,6 +17,19 @@ First document produced to this standard: ONeil_Willard_Bench_Panel_Drawings.pdf
 
 ## Hard rules (violations = automatic rejection)
 
+0. **McLean = chrome only.** `reference/max-golden/` (McLean Whittington
+   REV A) locks shared format/chrome (palette, bands, type, letterhead).
+   Rooms, openings, Open-at-Glance, SITE PHOTO, and Field Check always
+   come from **this job's JobSpec** — never hard-code another job's rooms
+   as fallback.
+0b. **Excluded openings skipped entirely (FOUNDER HARD RULE).** Status
+   / text markers `excluded` / `omit` / `out_of_scope` / `(EXCLUDED)` mean
+   no elevation sheet, no schedule row, no Open-at-Glance bullet with an
+   EXCLUDED stamp. Enforced by `in_scope_spec` / `is_panel_in_scope`
+   (`backend/app/presentation/template/spec.py`). Tonight's Maura/Lindsey
+   smoke: excluded blinds must not appear; Open-at-Glance job-specific;
+   SITE PHOTO embeds when path exists; F3 NOT RECEIVED stays empty
+   (no invented photo).
 1. **Spec fidelity.** Every dimension on the sheet comes from the founder's spec
    or is explicitly labeled `ASSUMED` and repeated in the NOTES/ASSUMPTIONS block.
    NEVER invent dimensions, cushions, features, or quantities. If an input is
