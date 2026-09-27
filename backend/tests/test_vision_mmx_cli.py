@@ -472,3 +472,119 @@ def test_analyze_items_does_not_return_proposals_only_formatter_output(monkeypat
     assert "room_assessment" not in result
     assert result["_vision_runtime"]["format_status"] == "items_formatter_fallback"
     assert _quote_review_items({"analysis": result}) == []
+
+
+def test_measure_schema_keeps_flat_inches_without_mockup_formatter(monkeypatch):
+    """A measure JSON object must not be rewritten into design proposals."""
+    from app.routers import vision
+
+    async def forbidden_formatter(*args, **kwargs):
+        raise AssertionError("measure JSON with width_inches must not use the mockup formatter")
+
+    monkeypatch.setattr(vision, "_format_mmx_prose_to_schema", forbidden_formatter)
+
+    result = asyncio.run(vision._parsed_json_from_minimax_result({
+        "success": True,
+        "model": "mmx_vision",
+        "data": {"full_response": json.dumps({
+            "width_inches": 36,
+            "height_inches": 60,
+            "confidence": 80,
+            "window_type": "double-hung",
+        })},
+    }, result_schema="measure"))
+
+    assert result["width_inches"] == 36
+    assert result["height_inches"] == 60
+    assert result["window_type"] == "double-hung"
+    assert result["_vision_runtime"]["format_status"] == "direct_parse"
+    assert result["_vision_runtime"]["result_schema"] == "measure"
+
+
+def test_measure_schema_lifts_nested_window_info_dims():
+    """window_info.estimated_width/height become the flats Save-to-Quote reads."""
+    from app.routers import vision
+
+    result = asyncio.run(vision._parsed_json_from_minimax_result({
+        "success": True,
+        "model": "mmx_vision",
+        "data": {"full_response": json.dumps({
+            "window_info": {
+                "type": "casement",
+                "estimated_width": 48,
+                "estimated_height": 72,
+                "current_treatment": None,
+            },
+            "confidence": 70,
+            "notes": "Scaled from a door.",
+        })},
+    }, result_schema="measure"))
+
+    assert result["width_inches"] == 48
+    assert result["height_inches"] == 72
+    assert result["window_type"] == "casement"
+    assert result["_vision_runtime"]["format_status"] == "direct_parse"
+
+
+def test_measure_endpoint_lifts_nested_dims_and_skips_formatter(monkeypatch, tmp_path):
+    from app.routers import vision
+
+    async def fake_understand(image, prompt="Describe what you see in this image in detail.", model=""):
+        return {
+            "success": True,
+            "model": "mmx_vision",
+            "data": {"full_response": json.dumps({
+                "window_info": {"type": "double-hung", "estimated_width": 32, "estimated_height": 54},
+            })},
+        }
+
+    async def forbidden_formatter(*args, **kwargs):
+        raise AssertionError("direct measure JSON must not call the mockup formatter")
+
+    monkeypatch.setattr(vision, "VISION_INPUT_DIR", tmp_path)
+    monkeypatch.setattr(vision, "minimax_understand_image", fake_understand)
+    monkeypatch.setattr(vision, "_format_mmx_prose_to_schema", forbidden_formatter)
+
+    result = asyncio.run(vision.measure(vision.ImageRequest(image=_png_data_uri())))
+
+    assert result["width_inches"] == 32
+    assert result["height_inches"] == 54
+    assert result["window_type"] == "double-hung"
+
+
+def test_normalize_measure_result_does_not_overwrite_positive_flats():
+    from app.routers.vision import normalize_measure_result
+
+    result = normalize_measure_result({
+        "width_inches": 30,
+        "height_inches": 40,
+        "window_type": "picture",
+        "window_info": {"type": "casement", "estimated_width": 99, "estimated_height": 99},
+    })
+    assert result["width_inches"] == 30
+    assert result["height_inches"] == 40
+    assert result["window_type"] == "picture"
+
+
+def test_measure_prose_formatter_output_is_lifted(monkeypatch):
+    """When mmx returns prose, the formatter's window_info still fills the flats."""
+    from app.routers import vision
+
+    async def fake_format(prose, source_model):
+        return {
+            "window_info": {"type": "awning", "estimated_width": 28, "estimated_height": 36},
+            "proposals": [],
+            "_vision_runtime": {"format_status": "two_stage_formatter", "model": source_model},
+        }
+
+    monkeypatch.setattr(vision, "_format_mmx_prose_to_schema", fake_format)
+
+    result = asyncio.run(vision._parsed_json_from_minimax_result({
+        "success": True,
+        "model": "mmx_vision",
+        "data": {"full_response": "A small awning window beside the door."},
+    }, result_schema="measure"))
+
+    assert result["width_inches"] == 28
+    assert result["height_inches"] == 36
+    assert result["window_type"] == "awning"

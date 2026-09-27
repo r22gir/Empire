@@ -7,7 +7,21 @@ const BUILD_TIMESTAMP = Date.now();
 
 const BACKEND_UPSTREAM = process.env.NEXT_PUBLIC_BACKEND_UPSTREAM || "http://127.0.0.1:8000";
 
+// Photo Analyzer POSTs go through this rewrite. Next's http-proxy default
+// proxyTimeout is 30s; MiniMax measure is ~20s and often longer once the
+// body is in flight, and the proxy then logs
+// "Failed to proxy ... Error: socket hang up" (UI: Analysis failed (500)).
+// Every request body is also cloned with a 10MB cap (body-streams.js). A
+// phone JPEG base64 blows past that, the clone ends early, and the upstream
+// socket resets. Self-hosted CC is not on Vercel's proxy cap.
+const VISION_PROXY_TIMEOUT_MS = 180_000;
+const VISION_PROXY_BODY_LIMIT = "32mb";
+
 const nextConfig: NextConfig = {
+  experimental: {
+    proxyTimeout: VISION_PROXY_TIMEOUT_MS,
+    proxyClientMaxBodySize: VISION_PROXY_BODY_LIMIT,
+  },
   async headers() {
     return [
       {

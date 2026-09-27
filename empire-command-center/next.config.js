@@ -3,8 +3,18 @@ const BUILD_TIMESTAMP = Date.now();
 
 const BACKEND_UPSTREAM = process.env.NEXT_PUBLIC_BACKEND_UPSTREAM || 'http://127.0.0.1:8000';
 
+// Mirrors next.config.ts. Default rewrite proxyTimeout is 30s and the
+// cloned request body is capped at 10MB — both turn a phone Photo Analyzer
+// measure into "Failed to proxy ... socket hang up" / Analysis failed (500).
+const VISION_PROXY_TIMEOUT_MS = 180_000;
+const VISION_PROXY_BODY_LIMIT = '32mb';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: {
+    proxyTimeout: VISION_PROXY_TIMEOUT_MS,
+    proxyClientMaxBodySize: VISION_PROXY_BODY_LIMIT,
+  },
   async headers() {
     return [
       {
