@@ -587,6 +587,7 @@ def _normalize_dimension(label: str) -> str:
 # (style-hint-substring, B1 product_type). First match wins.
 _B1_TYPE_BY_STYLE_HINT = (
     # ── Drapery (15 styles) — natural-language aliases ────────────
+    ("pinch-pleat",       "pinch_pleat"),
     ("pinch pleat",       "pinch_pleat"),
     ("french pleat",      "french_pleat"),
     ("euro pleat",        "euro_pleat"),
@@ -596,6 +597,7 @@ _B1_TYPE_BY_STYLE_HINT = (
     ("goblet pleat",      "goblet_pleat"),
     ("butterfly pleat",   "butterfly_pleat"),
     ("ripplefold",        "ripplefold"),
+    ("rod-pocket",        "rod_pocket"),
     ("rod pocket",        "rod_pocket"),
     ("tab top",           "tab_top"),
     ("grommet",           "grommet"),
@@ -603,6 +605,7 @@ _B1_TYPE_BY_STYLE_HINT = (
     ("smocked",           "smocked"),
     ("fan pleat",         "fan_pleat"),
     # ── Roman shades (9 styles) ─────────────────────────────────
+    ("flat_roman",        "flat_fold"),
     ("flat roman",        "flat_fold"),
     ("hobbled",           "hobbled_teardrop"),
     ("hobbled teardrop",  "hobbled_teardrop"),
@@ -616,6 +619,19 @@ _B1_TYPE_BY_STYLE_HINT = (
     # generic "roman shade" without "flat" → flat_fold (the most common)
     ("roman shade",       "flat_fold"),
     ("roman",             "flat_fold"),
+    # ── Valance collisions — longer hints beat the bare drapery/roman slug
+    ("box pleat valance", "valance/box_pleat"),
+    ("valance box pleat", "valance/box_pleat"),
+    ("inverted box pleat valance", "valance/inverted_box_pleat"),
+    ("inverted box valance", "valance/inverted_box_pleat"),
+    ("balloon valance",   "valance/balloon"),
+    ("valance balloon",   "valance/balloon"),
+    ("austrian valance",  "valance/austrian"),
+    ("valance austrian",  "valance/austrian"),
+    ("london valance",    "valance/london"),
+    ("valance london",    "valance/london"),
+    ("rod pocket valance","valance/rod_pocket"),
+    ("valance rod pocket","valance/rod_pocket"),
     # ── Valance (14 styles) ────────────────────────────────────
     ("kingston",          "kingston"),
     ("cambridge",         "cambridge"),
@@ -638,6 +654,14 @@ _B1_TYPE_BY_STYLE_HINT = (
     ("cornice with fabric","cornice_with_fabric"),
     ("cornice_with_fabric","cornice_with_fabric"),
     ("valance",           "kingston"),   # generic fallback
+    # ── Cornice collisions — longer than the bare valance slug
+    ("arched cornice",    "cornice/arched"),
+    ("cornice arched",    "cornice/arched"),
+    ("scalloped cornice", "cornice/scalloped"),
+    ("cornice scalloped", "cornice/scalloped"),
+    ("double serpentine cornice", "double_serpentine"),
+    ("serpentine cornice","cornice/serpentine"),
+    ("cornice serpentine","cornice/serpentine"),
     # ── Cornice (5 styles) ─────────────────────────────────────
     ("straight cornice",  "straight"),
     ("cornice straight",  "straight"),
@@ -1039,7 +1063,16 @@ def _compute_missing_template_keys(
         return ["b1_product_type"]
     try:
         from app.services.drawing.templates import get_template
-        template = get_template(b1_product_type)
+        from app.services.drawing.templates.catalog_namespace import (
+            prepare_drawing_spec,
+        )
+        spec, resolved = prepare_drawing_spec({
+            "product_type": b1_product_type,
+            "dims": translated_dims,
+        })
+        template = get_template(
+            spec["product_type"], family=resolved.catalog_family,
+        )
     except KeyError:
         # B1 product_type not in the B1 registry — surface it as the
         # missing key so the founder can pick a real one.
@@ -1047,10 +1080,7 @@ def _compute_missing_template_keys(
     except Exception:
         return ["b1_product_type"]
 
-    missing = template.validate_spec({
-        "product_type": b1_product_type,
-        "dims": translated_dims,
-    }).missing_required
+    missing = template.validate_spec(spec).missing_required
     return list(missing)
 
 

@@ -294,9 +294,32 @@ def render_spec(spec: dict) -> bytes:
     unknown product_type. Callers MUST catch both and surface as
     HTTP 400-style answers; never return a PDF for an invalid spec.
     """
-    if "product_type" not in spec:
+    if (
+        "product_type" not in spec
+        and not spec.get("family")
+        and not spec.get("style")
+    ):
         raise ValueError("spec must include 'product_type'")
-    template = get_template(spec["product_type"])
+    from app.services.drawing.templates.catalog_namespace import (
+        prepare_drawing_spec,
+    )
+    try:
+        spec, resolved = prepare_drawing_spec(spec)
+    except KeyError:
+        # Bare unknown slugs keep the flat-registry error (Phase B1
+        # list). A named family or catalog id keeps the resolver error.
+        bare = spec.get("product_type")
+        qualified = bool(
+            spec.get("family") or spec.get("catalog_family")
+            or spec.get("style") or spec.get("catalog_style")
+            or (isinstance(bare, str) and "/" in bare)
+        )
+        if bare and not qualified:
+            get_template(str(bare))
+        raise
+    template = get_template(
+        spec["product_type"], family=resolved.catalog_family,
+    )
     missing = template.validate_spec(spec)
     if not missing.is_complete:
         raise ValueError(

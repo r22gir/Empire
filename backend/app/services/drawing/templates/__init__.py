@@ -28,6 +28,11 @@ from app.services.drawing.templates.registry import (
     get_template, try_get_template,
     implemented_product_types, family_for,
 )
+from app.services.drawing.templates.catalog_namespace import (
+    ResolvedStyle,
+    prepare_drawing_spec,
+    resolve_catalog_style,
+)
 from app.services.drawing.templates.printer import (
     render_spec, render_spec_to_bytes,
 )
@@ -45,6 +50,9 @@ __all__ = [
     "try_get_template",
     "implemented_product_types",
     "family_for",
+    "ResolvedStyle",
+    "prepare_drawing_spec",
+    "resolve_catalog_style",
     "render_spec",
     "render_spec_to_bytes",
 ]
