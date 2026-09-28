@@ -1,11 +1,16 @@
 """
 Empire CRM — Customer management, import from quotes, sales pipeline.
+
+Workroom leads from LeadForge, LuxeForge, and manual capture share this
+customer table. Email identity is case-insensitive: a second submit updates
+the same row instead of inserting another contact.
 """
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional, List
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 from app.db.database import get_db, dict_row, dict_rows
@@ -15,11 +20,35 @@ router = APIRouter(prefix="/crm", tags=["crm"])
 
 QUOTES_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "quotes"
 
+_CUSTOMER_TYPES = {"residential", "commercial", "designer", "contractor"}
+_WORKROOM_CAPTURES = {"leadforge", "luxeforge", "manual"}
+_UTM_FIELDS = ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
+_ATTRIBUTION_COLUMNS = (
+    ("source_url", "TEXT"),
+    ("utm_source", "TEXT"),
+    ("utm_medium", "TEXT"),
+    ("utm_campaign", "TEXT"),
+    ("utm_content", "TEXT"),
+    ("utm_term", "TEXT"),
+)
+_BUSINESS_ALIASES = {
+    "empire workroom": "workroom",
+    "workroom": "workroom",
+    "woodcraft": "woodcraft",
+    "wood craft": "woodcraft",
+    "craftforge": "woodcraft",
+    "empire": "empire",
+}
+_FILL_IF_BLANK = ("name", "email", "phone", "address", "company", "notes", "source", "source_url", *_UTM_FIELDS)
+
 
 # ── Schemas ──────────────────────────────────────────────────────────
 
 class CustomerCreate(BaseModel):
-    name: str
+    """ForgeCRM create. Accepts LeadForge intake names (first_name, business_unit, source_url, utm_*)."""
+    name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
@@ -27,7 +56,16 @@ class CustomerCreate(BaseModel):
     type: str = "residential"
     tags: Optional[List[str]] = None
     notes: Optional[str] = None
-    source: str = "direct"
+    source: Optional[str] = None
+    source_url: Optional[str] = None
+    business: Optional[str] = None
+    business_unit: Optional[str] = None
+    capture: Optional[str] = None  # leadforge | luxeforge | manual
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    utm_term: Optional[str] = None
 
 
 class CustomerUpdate(BaseModel):
@@ -47,8 +85,274 @@ class CustomerUpdate(BaseModel):
 def _enrich_customer(cust: dict) -> dict:
     """Parse JSON fields in a customer row."""
     if cust:
-        cust["tags"] = json.loads(cust["tags"]) if cust.get("tags") else []
+        cust["tags"] = _tag_list(cust.get("tags"))
     return cust
+
+
+def _clean(value) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _tag_list(value) -> list:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = [part.strip() for part in raw.split(",")]
+        value = parsed
+    if not isinstance(value, list):
+        return []
+    tags = []
+    seen = set()
+    for tag in value:
+        text = _clean(tag)
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        tags.append(text)
+    return tags
+
+
+def _normalise_business(raw: Optional[str]) -> Optional[str]:
+    text = _clean(raw)
+    if not text:
+        return None
+    return _BUSINESS_ALIASES.get(text.lower(), text.lower())
+
+
+def _resolve_business(data: dict) -> str:
+    explicit = _normalise_business(data.get("business") or data.get("business_unit"))
+    if explicit:
+        return explicit
+    capture = (_clean(data.get("capture")) or "").lower()
+    if capture in _WORKROOM_CAPTURES:
+        return "workroom"
+    return "empire"
+
+
+def _resolve_name(data: dict, email: Optional[str]) -> Optional[str]:
+    name = _clean(data.get("name"))
+    if name:
+        return name
+    joined = " ".join(
+        part for part in (_clean(data.get("first_name")), _clean(data.get("last_name"))) if part
+    ).strip()
+    if joined:
+        return joined
+    if email and "@" in email:
+        return email.split("@", 1)[0]
+    return None
+
+
+def _resolve_source(data: dict) -> Optional[str]:
+    source = _clean(data.get("source"))
+    if source:
+        return source
+    capture = (_clean(data.get("capture")) or "").lower()
+    if capture in _WORKROOM_CAPTURES:
+        return capture
+    return None
+
+
+def _merge_tags(existing, incoming, business: str, capture: Optional[str]) -> list:
+    tags = _tag_list(existing) + _tag_list(incoming)
+    merged = []
+    seen = set()
+    for tag in tags:
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(tag)
+    if business == "workroom" and "workroom" not in seen:
+        merged.append("workroom")
+        seen.add("workroom")
+    if capture in _WORKROOM_CAPTURES and business == "workroom" and capture not in seen:
+        merged.append(capture)
+    return merged
+
+
+def _merge_business(existing: Optional[str], incoming: str) -> str:
+    current = _normalise_business(existing) or ""
+    if incoming == "workroom" and current in ("", "empire", "workroom"):
+        return "workroom"
+    if current in ("", "empire") and incoming:
+        return incoming
+    return current or incoming or "empire"
+
+
+def ensure_customer_attribution_columns(conn) -> None:
+    """Add source_url / utm columns and the case-insensitive email index."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(customers)")}
+    for name, coltype in _ATTRIBUTION_COLUMNS:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE customers ADD COLUMN {name} {coltype}")
+    try:
+        conn.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email_ci
+               ON customers(lower(email))
+               WHERE email IS NOT NULL AND email != ''"""
+        )
+    except sqlite3.OperationalError:
+        # Legacy databases can already contain duplicate emails. Keep
+        # application-level upsert working even if the index cannot be built.
+        pass
+
+
+def _find_customer_by_email(conn, email: str):
+    return conn.execute(
+        """SELECT * FROM customers
+           WHERE email IS NOT NULL AND trim(email) != ''
+             AND lower(email) = lower(?)
+           ORDER BY updated_at DESC
+           LIMIT 1""",
+        (email,),
+    ).fetchone()
+
+
+def upsert_forgecrm_customer(data: dict, conn=None) -> dict:
+    """Insert or update one ForgeCRM customer.
+
+    Email is the identity key (case-insensitive). A second submit with the
+    same email returns the existing row. Source and UTM already stored on
+    that row are left in place. Phone may be omitted.
+    """
+    if conn is not None:
+        return _upsert_forgecrm_customer(conn, data)
+    with get_db() as owned:
+        return _upsert_forgecrm_customer(owned, data)
+
+
+def _upsert_forgecrm_customer(conn, data: dict) -> dict:
+    ensure_customer_attribution_columns(conn)
+
+    email = _clean(data.get("email"))
+    phone = _clean(data.get("phone"))
+    business = _resolve_business(data)
+    capture = (_clean(data.get("capture")) or "").lower() or None
+    if capture not in _WORKROOM_CAPTURES:
+        capture = None
+    name = _resolve_name(data, email)
+    incoming_source = _resolve_source(data)
+    customer_type = (_clean(data.get("type")) or "residential").lower()
+    if customer_type not in _CUSTOMER_TYPES:
+        customer_type = "residential"
+
+    existing = None
+    hinted_id = _clean(data.get("customer_id"))
+    if hinted_id:
+        existing = conn.execute(
+            "SELECT * FROM customers WHERE id = ?",
+            (hinted_id,),
+        ).fetchone()
+    if email:
+        by_email = _find_customer_by_email(conn, email)
+        if by_email is not None:
+            existing = by_email
+
+    if existing:
+        current = dict(existing)
+        stored_business = _merge_business(current.get("business"), business)
+        tag_business = business if business == "workroom" else stored_business
+        updates = {
+            "tags": json.dumps(_merge_tags(current.get("tags"), data.get("tags"), tag_business, capture)),
+            "business": stored_business,
+            "type": current.get("type") or customer_type,
+        }
+        incoming = {
+            "name": name,
+            "email": email,
+            "phone": phone,
+            "address": _clean(data.get("address")),
+            "company": _clean(data.get("company")),
+            "notes": _clean(data.get("notes")),
+            "source": incoming_source,
+            "source_url": _clean(data.get("source_url")),
+        }
+        for field in _UTM_FIELDS:
+            incoming[field] = _clean(data.get(field))
+        for field in _FILL_IF_BLANK:
+            if _clean(current.get(field)):
+                continue
+            if incoming.get(field):
+                updates[field] = incoming[field]
+        assignments = ", ".join(f"{key} = ?" for key in updates)
+        conn.execute(
+            f"UPDATE customers SET {assignments}, updated_at = datetime('now') WHERE id = ?",
+            [*updates.values(), current["id"]],
+        )
+        row = conn.execute("SELECT * FROM customers WHERE id = ?", (current["id"],)).fetchone()
+        customer = _enrich_customer(dict_row(row))
+        return {
+            "customer": customer,
+            "upsert_outcome": "matched",
+            "customer_id": customer["id"],
+            "business": customer.get("business"),
+            "source": customer.get("source"),
+        }
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    stored_source = incoming_source or "direct"
+    tags = _merge_tags([], data.get("tags"), business, capture)
+    values = {
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "address": _clean(data.get("address")),
+        "company": _clean(data.get("company")),
+        "type": customer_type,
+        "tags": json.dumps(tags),
+        "notes": _clean(data.get("notes")),
+        "source": stored_source,
+        "source_url": _clean(data.get("source_url")),
+        "business": business,
+        "utm_source": _clean(data.get("utm_source")),
+        "utm_medium": _clean(data.get("utm_medium")),
+        "utm_campaign": _clean(data.get("utm_campaign")),
+        "utm_content": _clean(data.get("utm_content")),
+        "utm_term": _clean(data.get("utm_term")),
+    }
+    columns = ", ".join(values.keys())
+    placeholders = ", ".join("?" for _ in values)
+    try:
+        conn.execute(
+            f"""INSERT INTO customers (id, {columns})
+                VALUES (lower(hex(randomblob(8))), {placeholders})""",
+            tuple(values.values()),
+        )
+    except sqlite3.IntegrityError:
+        if not email:
+            raise
+        raced = _find_customer_by_email(conn, email)
+        if raced is None:
+            raise
+        return _upsert_forgecrm_customer(conn, {**data, "customer_id": dict(raced)["id"]})
+
+    row = _find_customer_by_email(conn, email) if email else conn.execute(
+        "SELECT * FROM customers WHERE name = ? ORDER BY created_at DESC LIMIT 1",
+        (name,),
+    ).fetchone()
+    customer = _enrich_customer(dict_row(row))
+    return {
+        "customer": customer,
+        "upsert_outcome": "created",
+        "customer_id": customer["id"],
+        "business": customer.get("business"),
+        "source": customer.get("source"),
+    }
 
 
 # ── Routes ───────────────────────────────────────────────────────────
@@ -112,29 +416,13 @@ def list_customers(
 @limiter.limit("30/minute")
 @router.post("/customers")
 def create_customer(request: Request, customer: CustomerCreate):
-    """Create a new customer."""
-    with get_db() as conn:
-        conn.execute(
-            """INSERT INTO customers
-               (id, name, email, phone, address, company, type, tags, notes, source)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                customer.name,
-                customer.email,
-                customer.phone,
-                customer.address,
-                customer.company,
-                customer.type,
-                json.dumps(customer.tags) if customer.tags else None,
-                customer.notes,
-                customer.source,
-            )
-        )
-
-        row = conn.execute(
-            "SELECT * FROM customers ORDER BY created_at DESC LIMIT 1"
-        ).fetchone()
-        return {"customer": _enrich_customer(dict_row(row))}
+    """Create or update a customer. Same email (any case) is one contact."""
+    result = upsert_forgecrm_customer(customer.model_dump())
+    return {
+        "customer": result["customer"],
+        "upsert_outcome": result["upsert_outcome"],
+        "customer_id": result["customer_id"],
+    }
 
 
 @limiter.limit("30/minute")

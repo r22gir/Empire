@@ -5,6 +5,7 @@ Tables auto-created on import. All tables prefixed lf_.
 """
 
 import json
+import logging
 import sqlite3
 import os
 from datetime import datetime, timedelta
@@ -16,6 +17,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.services.workroom_lead_intake import WorkroomIntake
+
+logger = logging.getLogger(__name__)
 
 # ── DB Setup ──────────────────────────────────────────────────────────
 
@@ -84,6 +87,12 @@ CREATE TABLE IF NOT EXISTS lf_leads (
     zip TEXT,
     source TEXT,
     source_url TEXT,
+    utm_source TEXT,
+    utm_medium TEXT,
+    utm_campaign TEXT,
+    utm_content TEXT,
+    utm_term TEXT,
+    customer_id TEXT,
     score INTEGER DEFAULT 0 CHECK(score BETWEEN 0 AND 100),
     score_factors TEXT DEFAULT '{}',
     status TEXT DEFAULT 'new'
@@ -107,7 +116,8 @@ CREATE TABLE IF NOT EXISTS lf_activities (
     lead_id INTEGER NOT NULL REFERENCES lf_leads(id) ON DELETE CASCADE,
     type TEXT NOT NULL
         CHECK(type IN ('email_sent','email_received','call_made','call_received',
-              'sms_sent','social_dm','site_visit','proposal_sent','meeting','note')),
+              'sms_sent','social_dm','site_visit','proposal_sent','meeting','note',
+              'forge_crm_promoted')),
     channel TEXT,
     subject TEXT,
     content TEXT,
@@ -172,7 +182,11 @@ CREATE TABLE IF NOT EXISTS lf_followup_queue (
 
 _LEAD_INTAKE_COLUMNS = {
     "customer_id": "TEXT",
+    "utm_source": "TEXT",
+    "utm_medium": "TEXT",
     "utm_campaign": "TEXT",
+    "utm_content": "TEXT",
+    "utm_term": "TEXT",
     "job_type": "TEXT",
     "city_region": "TEXT",
     "photo_urls": "TEXT",
@@ -185,17 +199,63 @@ _LEAD_INTAKE_COLUMNS = {
 
 
 def _migrate_lf_lead_columns(conn):
-    """Add Workroom intake columns. Safe to re-run."""
+    """Add Workroom intake + ForgeCRM/UTM columns. Safe to re-run."""
     existing = {row[1] for row in conn.execute("PRAGMA table_info(lf_leads)").fetchall()}
     for name, decl in _LEAD_INTAKE_COLUMNS.items():
         if name not in existing:
             conn.execute(f"ALTER TABLE lf_leads ADD COLUMN {name} {decl}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lf_leads_customer ON lf_leads(customer_id)"
+    )
+
+
+def _ensure_leadforge_crm_columns(conn):
+    """Add ForgeCRM link + UTM columns and allow the promote activity type."""
+    _migrate_lf_lead_columns(conn)
+
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'lf_activities'"
+    ).fetchone()
+    ddl = (row["sql"] if row else "") or ""
+    if "forge_crm_promoted" in ddl:
+        return
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS lf_activities_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER NOT NULL REFERENCES lf_leads(id) ON DELETE CASCADE,
+            type TEXT NOT NULL
+                CHECK(type IN ('email_sent','email_received','call_made','call_received',
+                      'sms_sent','social_dm','site_visit','proposal_sent','meeting','note',
+                      'forge_crm_promoted')),
+            channel TEXT,
+            subject TEXT,
+            content TEXT,
+            ai_generated INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'completed',
+            scheduled_at TEXT,
+            completed_at TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        INSERT INTO lf_activities_new (
+            id, lead_id, type, channel, subject, content, ai_generated, status,
+            scheduled_at, completed_at, created_at
+        )
+        SELECT id, lead_id, type, channel, subject, content, ai_generated, status,
+               scheduled_at, completed_at, created_at
+        FROM lf_activities;
+        DROP TABLE lf_activities;
+        ALTER TABLE lf_activities_new RENAME TO lf_activities;
+        """
+    )
+    conn.execute("PRAGMA foreign_keys=ON")
 
 
 def _init_tables():
     with _db() as conn:
         conn.executescript(_SCHEMA)
-        _migrate_lf_lead_columns(conn)
+        _ensure_leadforge_crm_columns(conn)
 
 
 _init_tables()
@@ -220,6 +280,11 @@ class LeadCreate(BaseModel):
     zip: Optional[str] = None
     source: Optional[str] = None
     source_url: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    utm_term: Optional[str] = None
     score: int = 0
     score_factors: Optional[dict] = None
     status: str = "new"
@@ -245,6 +310,11 @@ class LeadUpdate(BaseModel):
     zip: Optional[str] = None
     source: Optional[str] = None
     source_url: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    utm_term: Optional[str] = None
     estimated_value: Optional[float] = None
     assigned_to: Optional[str] = None
     tags: Optional[list] = None
@@ -375,21 +445,65 @@ def list_leads(
     return {"leads": _dicts(rows), "total": total}
 
 
+def _workroom_crm_payload_from_lead(lead_d: dict, notes: Optional[str] = None) -> dict:
+    """Map LeadForge intake fields onto the ForgeCRM customer upsert."""
+    business = (lead_d.get("business_unit") or "").strip().lower()
+    return {
+        "first_name": lead_d.get("first_name"),
+        "last_name": lead_d.get("last_name"),
+        "email": lead_d.get("email"),
+        "phone": lead_d.get("phone"),
+        "address": lead_d.get("address"),
+        "company": lead_d.get("company"),
+        "source": lead_d.get("source"),
+        "source_url": lead_d.get("source_url"),
+        "tags": lead_d.get("tags") or [],
+        "notes": notes,
+        "business_unit": lead_d.get("business_unit"),
+        "capture": "leadforge" if business in ("workroom", "empire workroom") else None,
+        "utm_source": lead_d.get("utm_source"),
+        "utm_medium": lead_d.get("utm_medium"),
+        "utm_campaign": lead_d.get("utm_campaign"),
+        "utm_content": lead_d.get("utm_content"),
+        "utm_term": lead_d.get("utm_term"),
+    }
+
+
+def _attach_workroom_lead_to_crm(lead_d: dict) -> Optional[dict]:
+    """Upsert a Workroom lead into ForgeCRM. Failures stay off the lead write."""
+    business = (lead_d.get("business_unit") or "").strip().lower()
+    email = (lead_d.get("email") or "").strip()
+    if business not in ("workroom", "empire workroom") or not email:
+        return None
+    try:
+        from app.routers.customer_mgmt import upsert_forgecrm_customer
+        return upsert_forgecrm_customer(_workroom_crm_payload_from_lead(lead_d))
+    except Exception:
+        logger.exception("Workroom lead ForgeCRM upsert failed")
+        return None
+
+
 @router.post("/")
 def create_lead(lead: LeadCreate):
-    """Create a new lead."""
+    """Create a new lead. Workroom emails upsert one ForgeCRM contact."""
+    crm = _attach_workroom_lead_to_crm(lead.model_dump())
     with _db() as conn:
         cur = conn.execute(
             """INSERT INTO lf_leads
                (business_unit, first_name, last_name, company, email, phone,
-                address, city, state, zip, source, source_url, score,
+                address, city, state, zip, source, source_url,
+                utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+                customer_id, score,
                 score_factors, status, temperature, estimated_value,
                 assigned_to, tags, notes, next_action, next_action_date)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 lead.business_unit, lead.first_name, lead.last_name,
                 lead.company, lead.email, lead.phone, lead.address,
                 lead.city, lead.state, lead.zip, lead.source, lead.source_url,
+                lead.utm_source, lead.utm_medium, lead.utm_campaign,
+                lead.utm_content, lead.utm_term,
+                crm["customer_id"] if crm else None,
                 lead.score, json.dumps(lead.score_factors or {}),
                 lead.status, lead.temperature, lead.estimated_value,
                 lead.assigned_to, json.dumps(lead.tags or []),
@@ -399,7 +513,12 @@ def create_lead(lead: LeadCreate):
         row = conn.execute(
             "SELECT * FROM lf_leads WHERE id = ?", (cur.lastrowid,)
         ).fetchone()
-    return {"lead": _dict(row)}
+    body = {"lead": _dict(row)}
+    if crm:
+        body["customer_id"] = crm["customer_id"]
+        body["upsert_outcome"] = crm["upsert_outcome"]
+        body["customer"] = crm["customer"]
+    return body
 
 
 @router.get("/pipeline")
@@ -638,51 +757,31 @@ def promote_lead_to_forgecrm(lead_id: int):
         phone_raw = (lead_d.get("phone") or "").strip() or None
         # FIX 3: phone normalization — digits only, used for dedupe (not stored)
         phone_digits = "".join(c for c in phone_raw if c.isdigit()) if phone_raw else ""
-        address = lead_d.get("address")
-        company = lead_d.get("company")
         business = lead_d.get("business_unit") or "empire"
-        source = lead_d.get("source") or "leadforge"
 
-        # ── FIX 4: email dedupe case-insensitive (LOWER(email) = LOWER(?)) ──
-        existing = None
-        if email:
-            existing = conn.execute(
-                "SELECT * FROM customers WHERE LOWER(email) = LOWER(?) LIMIT 1",
-                (email,),
-            ).fetchone()
-
-        # ── FIX 3: phone dedupe — digits-only normalization on BOTH sides ──
-        # Skip when <7 digits (too short to be a real phone number).
-        if not existing and phone_digits and len(phone_digits) >= 7:
-            existing = conn.execute(
-                """SELECT * FROM customers
+        # Phone dedupe only when the lead has no email. Email identity is
+        # handled inside the shared ForgeCRM upsert (case-insensitive).
+        customer_id_hint = None
+        if not email and phone_digits and len(phone_digits) >= 7:
+            phone_match = conn.execute(
+                """SELECT id FROM customers
                    WHERE REPLACE(REPLACE(REPLACE(REPLACE(phone, '(', ''), ')', ''), ' ', ''), '-', '') = ?
                    LIMIT 1""",
                 (phone_digits,),
             ).fetchone()
+            if phone_match:
+                customer_id_hint = phone_match["id"]
 
-        if existing:
-            customer_id = existing["id"]
-            dedupe_outcome = "matched"
-            customer = _dict(existing)
-        else:
-            cur = conn.execute(
-                """INSERT INTO customers
-                   (name, email, phone, address, company, type, source, business, notes)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
-                (name, email, phone_raw, address, company, "residential", source, business,
-                 f"Promoted from LeadForge lead #{lead_id}"),
-            )
-            # NOTE: customers.id is a TEXT hex (default = lower(hex(randomblob(8))))
-            # not the SQLite rowid. lastrowid returns the rowid, so we
-            # SELECT by rowid to get the actual stored id column value.
-            customer_id = cur.lastrowid
-            inserted = conn.execute(
-                "SELECT * FROM customers WHERE rowid = ?", (customer_id,)
-            ).fetchone()
-            customer_id = inserted["id"]  # now the real TEXT id
-            dedupe_outcome = "created"
-            customer = _dict(inserted)
+        from app.routers.customer_mgmt import upsert_forgecrm_customer
+        payload = _workroom_crm_payload_from_lead(lead_d, notes=f"Promoted from LeadForge lead #{lead_id}")
+        payload["name"] = name
+        payload["customer_id"] = customer_id_hint
+        if (business or "").strip().lower() not in ("workroom", "empire workroom"):
+            payload["capture"] = None
+        crm = upsert_forgecrm_customer(payload, conn=conn)
+        customer_id = crm["customer_id"]
+        dedupe_outcome = "matched" if crm["upsert_outcome"] == "matched" else "created"
+        customer = crm["customer"]
 
         # ── Link lead to customer ──
         conn.execute(
