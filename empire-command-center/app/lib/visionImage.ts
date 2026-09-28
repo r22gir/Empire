@@ -2,6 +2,30 @@
 export const VISION_IMAGE_MAX_EDGE = 1600;
 export const VISION_IMAGE_JPEG_QUALITY = 0.8;
 
+/**
+ * Client cap for vision POSTs that travel through the Next rewrite proxy.
+ * The proxy itself waits 180s. Past that, abort so a 500 or a hung socket
+ * cannot leave Photo Analyzer / Quote Review spinning.
+ */
+export const VISION_REQUEST_TIMEOUT_MS = 185_000;
+
+export function visionAbortSignal(ms: number = VISION_REQUEST_TIMEOUT_MS): AbortSignal {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(ms);
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
+export function visionTimeoutMessage(err: unknown): string | null {
+  const name = err && typeof err === 'object' && 'name' in err ? String((err as { name?: string }).name) : '';
+  if (name === 'TimeoutError' || name === 'AbortError') {
+    return 'Analysis timed out. The vision service did not respond, so the spinner was stopped.';
+  }
+  return null;
+}
+
 export function fitWithinMaxEdge(
   width: number,
   height: number,
@@ -26,8 +50,15 @@ export function fitWithinMaxEdge(
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Could not decode image'));
+    const timer = setTimeout(() => reject(new Error('Image decode timed out')), 15_000);
+    img.onload = () => {
+      clearTimeout(timer);
+      resolve(img);
+    };
+    img.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error('Could not decode image'));
+    };
     img.src = src;
   });
 }

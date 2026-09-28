@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API, API_BASE } from '../../lib/api';
 import { Quote } from '../../lib/types';
+import { compressImageDataUrl, visionAbortSignal, visionTimeoutMessage } from '../../lib/visionImage';
+import { linesFromAnalyzedItems, quoteLineDescriptions } from '../../lib/photoQuote';
 import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2, ShieldCheck, X } from 'lucide-react';
 import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
 
@@ -16,15 +18,20 @@ interface UploadedPhoto {
 
 interface AnalyzedItem {
   type: string;
+  name?: string;
   description: string;
   width?: number;
   height?: number;
+  quantity?: number;
+  dimensions?: { width?: number; height?: number; depth?: number };
   confidence?: number;
   selected?: boolean;
+  line_items?: any[];
 }
 
 interface AnalysisResult {
   items: AnalyzedItem[];
+  quote?: any;
   error?: string;
 }
 
@@ -51,6 +58,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [uploadedPhotos, setUploadedPhotos] = useState<UploadedPhoto[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [addingLines, setAddingLines] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
@@ -259,28 +267,97 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   }, [handlePhotoUpload]);
 
   const handleAnalyze = async (photo: UploadedPhoto, index: number) => {
-    setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: true } : p));
+    setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: true, analysis: null } : p));
     try {
-      const imgRes = await fetch(`${API_BASE}${photo.path}`);
+      const imgRes = await fetch(`${API_BASE}${photo.path}`, { signal: visionAbortSignal() });
+      if (!imgRes.ok) throw new Error(`Could not load photo (${imgRes.status})`);
       const blob = await imgRes.blob();
       const reader = new FileReader();
-      const b64 = await new Promise<string>((resolve) => {
-        reader.onload = () => resolve(reader.result as string);
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Could not read photo')), 20_000);
+        reader.onload = () => {
+          clearTimeout(timer);
+          resolve(reader.result as string);
+        };
+        reader.onerror = () => {
+          clearTimeout(timer);
+          reject(new Error('Could not read photo'));
+        };
         reader.readAsDataURL(blob);
       });
+      const image = await compressImageDataUrl(b64);
       const res = await fetch(`${API}/quotes/analyze-photo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: b64, customer_notes: quote?.customer_name || '' }),
+        body: JSON.stringify({
+          image,
+          notes: quote?.customer_name || '',
+          customer_notes: quote?.customer_name || '',
+          customer_name: quote?.customer_name || 'Customer',
+        }),
+        signal: visionAbortSignal(),
       });
       if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
       const data = await res.json();
       const items = (data.items || data.analysis?.items || data.analyzed_items || []).map((it: AnalyzedItem) => ({ ...it, selected: true }));
-      setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: false, analysis: { items } } : p));
-      showFeedback(`Found ${items.length} item(s)`);
-    } catch {
-      setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: false, analysis: { items: [], error: 'Analysis failed' } } : p));
-      showFeedback('Analysis failed');
+      setUploadedPhotos(prev => prev.map((p, i) => i === index ? {
+        ...p,
+        analyzing: false,
+        analysis: { items, quote: data.quote },
+      } : p));
+      showFeedback(items.length
+        ? `Found ${items.length} item(s). Check the ones you want, then add them to the quote.`
+        : 'Found 0 item(s)');
+    } catch (err) {
+      const timedOut = visionTimeoutMessage(err);
+      setUploadedPhotos(prev => prev.map((p, i) => i === index ? {
+        ...p,
+        analyzing: false,
+        analysis: { items: [], error: timedOut || 'Analysis failed' },
+      } : p));
+      showFeedback(timedOut || 'Analysis failed');
+    }
+  };
+
+  const addSelectedToQuoteLines = async () => {
+    if (!quote?.id || addingLines) return;
+    const incoming = uploadedPhotos.flatMap((photo) => linesFromAnalyzedItems(photo.analysis?.items || [], photo.analysis?.quote));
+    if (!incoming.length) {
+      showFeedback('Select at least one analyzed item');
+      return;
+    }
+    const have = quoteLineDescriptions(editItems);
+    const fresh = incoming.filter((line) => !have.has(line.description));
+    if (!fresh.length) {
+      showFeedback('Selected items are already on this quote');
+      return;
+    }
+    setAddingLines(true);
+    try {
+      let last: any = null;
+      for (const line of fresh) {
+        const res = await fetch(`${API}/quotes-v2/${quote.id}/items`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...line, business_unit: 'workroom' }),
+          signal: visionAbortSignal(),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          const detail = err.detail || err.error || `HTTP ${res.status}`;
+          throw new Error(typeof detail === 'string' ? detail : 'Could not add line');
+        }
+        last = await res.json();
+      }
+      const updated = last?.quote || last;
+      if (updated?.id) setQuote(updated);
+      else await loadFull(quote.id);
+      const notes = fresh.filter((line) => line.category === 'note').length;
+      showFeedback(`Added ${fresh.length} line(s) to ${quote.quote_number || 'this quote'}${notes ? ` (${notes} unpriced)` : ''}`);
+    } catch (err: any) {
+      showFeedback(visionTimeoutMessage(err) || err.message || 'Could not add line items');
+    } finally {
+      setAddingLines(false);
     }
   };
 
@@ -575,7 +652,22 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
               style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 13, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Camera size={14} /> Take Photo
             </button>
+            <button
+              onClick={() => { void addSelectedToQuoteLines(); }}
+              disabled={addingLines || !uploadedPhotos.some(p => (p.analysis?.items || []).some(it => it.selected !== false))}
+              style={{
+                padding: '8px 16px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff',
+                cursor: 'pointer', fontSize: 13, fontWeight: 700, minHeight: 44,
+                display: 'flex', alignItems: 'center', gap: 6,
+                opacity: addingLines || !uploadedPhotos.some(p => (p.analysis?.items || []).some(it => it.selected !== false)) ? 0.55 : 1,
+              }}
+            >
+              <Plus size={14} /> {addingLines ? 'Adding...' : 'Add selected to line items'}
+            </button>
           </div>
+          <p style={{ margin: '8px 0 0', fontSize: 11, color: '#777' }}>
+            Checkmarks only select items. They are written onto this Workroom quote when you add them.
+          </p>
         </div>
       ) : (
         <div
