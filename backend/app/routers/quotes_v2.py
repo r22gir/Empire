@@ -335,6 +335,23 @@ async def quote_to_invoice(quote_id: str):
 
 # ── PDF Generation (Block 6) ──────────────────────────────────
 
+@router.get("/{quote_id}/shop-pdf")
+async def get_shop_pdf(quote_id: str):
+    """Shop copy of a SQL quote, same house format as the estimate."""
+    try:
+        from app.services.quote_pdf_service import generate_shop_pdf
+        from fastapi.responses import Response
+        pdf_bytes = generate_shop_pdf(quote_id)
+        q = quote_service.get_quote(quote_id) or {}
+        filename = f"{q.get('quote_number', quote_id)}-shop.pdf"
+        return Response(content=pdf_bytes, media_type="application/pdf",
+                       headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    except FileNotFoundError:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @router.get("/{quote_id}/pdf")
 async def get_quote_pdf(quote_id: str):
     """Generate and return quote PDF."""

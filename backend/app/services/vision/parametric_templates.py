@@ -233,6 +233,14 @@ def _esc(value: Any) -> str:
     return html.escape(str(value), quote=True)
 
 
+def _inch_label(value: Any, suffix: str = "") -> str:
+    """Shop fraction for a dimension callout. Fullness ratios stay numeric."""
+    from app.services.house_pdf import format_inches
+
+    label = format_inches(value)
+    return f"{label} {suffix}".strip() if suffix else label
+
+
 def _num(value: Any, default: float) -> float:
     if value is None or value == "":
         return default
@@ -456,8 +464,8 @@ def _draw_front(parts: list[str], template: TemplateDef, style: str, x: float, y
                 parts.append(f'<path d="M {cx - dw / scallops / 2:.1f} {y0 + profile_h - 5:.1f} Q {cx:.1f} {y0 + profile_h + 18:.1f} {cx + dw / scallops / 2:.1f} {y0 + profile_h - 5:.1f}" fill="none" stroke="#111" stroke-width="1.1"/>')
         parts.append(_text(x0 + dw / 2, y0 + profile_h / 2 + 4, _title(style), 9, fill="#667085"))
 
-    _dim_h(parts, x0, x0 + dw, y0 + dh + 8, f'{_in(width)} W')
-    _dim_v(parts, x0 + dw + 10, y0, y0 + dh, f'{_in(drop)} DROP')
+    _dim_h(parts, x0, x0 + dw, y0 + dh + 8, _inch_label(width, "W"))
+    _dim_v(parts, x0 + dw + 10, y0, y0 + dh, _inch_label(drop, "DROP"))
     if mode == "shop":
         parts.append(_text(x0, y0 + dh + 58, "VERIFY FINISHED WIDTH, DROP, RETURNS, HEMS, HARDWARE, AND MOUNT HEIGHT", 8, "start", "700", "#8a5a00"))
 
@@ -472,9 +480,9 @@ def _draw_side(parts: list[str], x: float, y: float, w: float, h: float, dims: d
     ret = max(10, min(46, dims["return"] * scale))
     parts.append(_rect(sx, sy, 22, sh, 1.2, "#ffffff", "#111"))
     parts.append(_rect(sx - ret, sy + 15, ret, 28, 1.1, "#f3efe8", "#111"))
-    _dim_v(parts, sx + 30, sy, sy + sh, f'{_in(dims["drop"])}', 16)
+    _dim_v(parts, sx + 30, sy, sy + sh, _inch_label(dims["drop"]), 16)
     if mode == "shop":
-        _dim_h(parts, sx - ret, sx, sy + 52, f'{_in(dims["return"])} RETURN', 12)
+        _dim_h(parts, sx - ret, sx, sy + 52, _inch_label(dims["return"], "RETURN"), 12)
         parts.append(_text(x + 14, y + h - 20, "SIDE VIEW CONFIRMS RETURN / PROJECTION", 8, "start", fill="#667085"))
 
 
@@ -502,9 +510,9 @@ def _draw_top(parts: list[str], x: float, y: float, w: float, h: float, dims: di
         parts.append(_line(x0 + 8, y0 + depth * 0.68, x0 + ww - 8, y0 + depth * 0.68, 0.8, "#98a2b3"))
     else:
         parts.append(_line(x0 + 12, y0 + depth / 2, x0 + ww - 12, y0 + depth / 2, 0.8, "#98a2b3"))
-    _dim_h(parts, x0, x0 + ww, y0 + depth + 6, f'{_in(dims["width"])}')
+    _dim_h(parts, x0, x0 + ww, y0 + depth + 6, _inch_label(dims["width"]))
     if mode == "shop":
-        _dim_v(parts, x0 + ww + 8, y0, y0 + depth, f'{_in(dims["return"])}')
+        _dim_v(parts, x0 + ww + 8, y0, y0 + depth, _inch_label(dims["return"]))
 
 
 def _draw_perspective(parts: list[str], x: float, y: float, w: float, h: float, template: TemplateDef, style: str) -> None:
@@ -596,8 +604,8 @@ def _draw_family_front(parts: list[str], template: TemplateDef, style: str, x: f
             if leg_type in {"tapered", "legs"}:
                 for leg_x, direction in ((x0 + dw * 0.3, -1), (x0 + dw * 0.66, 1)):
                     parts.append(f'<path d="M {leg_x:.1f} {seat_bottom_y:.1f} L {leg_x + 8:.1f} {seat_bottom_y:.1f} L {leg_x + 8 + direction * 3:.1f} {floor_y:.1f} L {leg_x + direction * 3:.1f} {floor_y:.1f} Z" fill="#fff" stroke="#111" stroke-width="1"/>')
-            _dim_h(parts, x0, x0 + dw, y0 + dh + 8, f'{_in(width)} W')
-            _dim_v(parts, x0 + dw + 12, y0, y0 + dh, f'{_in(height)} H')
+            _dim_h(parts, x0, x0 + dw, y0 + dh + 8, _inch_label(width, "W"))
+            _dim_v(parts, x0 + dw + 12, y0, y0 + dh, _inch_label(height, "H"))
             if mode == "shop":
                 parts.append(_text(x0, y0 + dh + 58, _shop_family_note(template), 8, "start", "700", "#8a5a00"))
             return
@@ -615,8 +623,8 @@ def _draw_family_front(parts: list[str], template: TemplateDef, style: str, x: f
                     parts.append(f'<path d="M {leg_x:.1f} {seat_bottom_y:.1f} L {leg_x + 8:.1f} {seat_bottom_y:.1f} L {leg_x + 8 + direction * taper:.1f} {floor_y:.1f} L {leg_x + direction * taper:.1f} {floor_y:.1f} Z" fill="#fff" stroke="#111" stroke-width="1"/>')
                 else:
                     parts.append(_rect(leg_x, seat_bottom_y, 8, floor_y - seat_bottom_y, 0.8, "#fff", "#111"))
-            _dim_h(parts, x0, x0 + dw, y0 + dh + 8, f'{_in(width)} W')
-            _dim_v(parts, x0 + dw + 12, y0, y0 + dh, f'{_in(height)} H')
+            _dim_h(parts, x0, x0 + dw, y0 + dh + 8, _inch_label(width, "W"))
+            _dim_v(parts, x0 + dw + 12, y0, y0 + dh, _inch_label(height, "H"))
             if mode == "shop":
                 parts.append(_text(x0, y0 + dh + 58, _shop_family_note(template), 8, "start", "700", "#8a5a00"))
             return
@@ -665,8 +673,8 @@ def _draw_family_front(parts: list[str], template: TemplateDef, style: str, x: f
             inset = 0 if base_style == "plinth" else max(8, dw * 0.06)
             parts.append(_rect(x0 + inset, y0 + dh - base_h, dw - inset * 2, base_h, 1.0, "#fff", "#111"))
 
-    _dim_h(parts, x0, x0 + dw, y0 + dh + 8, f'{_in(width)} W')
-    _dim_v(parts, x0 + dw + 12, y0, y0 + dh, f'{_in(height)} H')
+    _dim_h(parts, x0, x0 + dw, y0 + dh + 8, _inch_label(width, "W"))
+    _dim_v(parts, x0 + dw + 12, y0, y0 + dh, _inch_label(height, "H"))
     if mode == "shop":
         parts.append(_text(x0, y0 + dh + 58, _shop_family_note(template), 8, "start", "700", "#8a5a00"))
 
@@ -692,18 +700,18 @@ def _draw_family_side(parts: list[str], template: TemplateDef, x: float, y: floa
             parts.append(_rect(x0 + dd * 0.18, seat_top_y, dd * 0.62, cushion_h, 1.2, "#f7f4ef", "#111", 4))
             parts.append(_line(x0 + dd * 0.28, seat_bottom_y, x0 + dd * 0.23, floor_y, 1.0))
             parts.append(_line(x0 + dd * 0.72, seat_bottom_y, x0 + dd * 0.78, floor_y, 1.0))
-            _dim_h(parts, x0, x0 + dd, y0 + dh + 8, f'{_in(depth)} D')
+            _dim_h(parts, x0, x0 + dd, y0 + dh + 8, _inch_label(depth, "D"))
             if mode == "shop":
-                _dim_v(parts, x0 + dd + 10, y0, y0 + dh, f'{_in(height)} H')
+                _dim_v(parts, x0 + dd + 10, y0, y0 + dh, _inch_label(height, "H"))
             return
         if chair_family == "side_chair":
             parts.append(_rect(x0 + dd * 0.12, seat_top_y, dd * 0.62, cushion_h, 1.1, "#f7f4ef", "#111", 3))
             parts.append(f'<path d="M {x0 + dd * 0.62:.1f} {y0 + dh * 0.06:.1f} L {x0 + dd * 0.9:.1f} {seat_top_y:.1f} L {x0 + dd * 0.74:.1f} {seat_top_y + 8:.1f} L {x0 + dd * 0.5:.1f} {y0 + dh * 0.12:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.3"/>')
             parts.append(_line(x0 + dd * 0.22, seat_bottom_y, x0 + dd * 0.14, floor_y, 1.0))
             parts.append(_line(x0 + dd * 0.66, seat_bottom_y, x0 + dd * 0.78, floor_y, 1.0))
-            _dim_h(parts, x0, x0 + dd, y0 + dh + 8, f'{_in(depth)} D')
+            _dim_h(parts, x0, x0 + dd, y0 + dh + 8, _inch_label(depth, "D"))
             if mode == "shop":
-                _dim_v(parts, x0 + dd + 10, y0, y0 + dh, f'{_in(height)} H')
+                _dim_v(parts, x0 + dd + 10, y0, y0 + dh, _inch_label(height, "H"))
             return
         parts.append(_rect(x0, seat_top_y, dd, cushion_h, 1.3, "#f7f4ef", "#111", 4))
         if dims.get("back_profile") in {"curved", "wingback"}:
@@ -750,9 +758,9 @@ def _draw_family_side(parts: list[str], template: TemplateDef, x: float, y: floa
             if dims.get("base_style") in {"toe_kick", "plinth"}:
                 base_h = max(7, thickness * 2.5)
                 parts.append(_rect(x0, y0 + dh - base_h, dd, base_h, 0.8, "#fff", "#111"))
-    _dim_h(parts, x0, x0 + dd, y0 + dh + 8, f'{_in(depth)} D')
+    _dim_h(parts, x0, x0 + dd, y0 + dh + 8, _inch_label(depth, "D"))
     if mode == "shop":
-        _dim_v(parts, x0 + dd + 10, y0, y0 + dh, f'{_in(height)} H')
+        _dim_v(parts, x0 + dd + 10, y0, y0 + dh, _inch_label(height, "H"))
 
 
 def _draw_family_plan(parts: list[str], template: TemplateDef, x: float, y: float, w: float, h: float, dims: dict[str, Any], mode: str) -> None:
@@ -772,16 +780,16 @@ def _draw_family_plan(parts: list[str], template: TemplateDef, x: float, y: floa
             parts.append(_ellipse(x0 + dw / 2, y0 + dd * 0.5, dw * 0.43, dd * 0.42, 1.2, "#fff", "#667085"))
             parts.append(_ellipse(x0 + dw / 2, y0 + dd * 0.58, dw * 0.28, dd * 0.25, 1.0, "#f7f4ef", "#667085"))
             parts.append(f'<path d="M {x0 + dw * 0.16:.1f} {y0 + dd * 0.36:.1f} Q {x0 + dw / 2:.1f} {y0 + dd * 0.08:.1f} {x0 + dw * 0.84:.1f} {y0 + dd * 0.36:.1f}" fill="none" stroke="#111" stroke-width="1.0"/>')
-            _dim_h(parts, x0, x0 + dw, y0 + dd + 6, f'{_in(width)}')
+            _dim_h(parts, x0, x0 + dw, y0 + dd + 6, _inch_label(width))
             if mode == "shop":
-                _dim_v(parts, x0 + dw + 10, y0, y0 + dd, f'{_in(depth)}')
+                _dim_v(parts, x0 + dw + 10, y0, y0 + dd, _inch_label(depth))
             return
         if chair_family == "side_chair":
             parts.append(_rect(x0 + dw * 0.18, y0 + dd * 0.28, dw * 0.64, dd * 0.5, 0.9, "#f7f4ef", "#667085", 4))
             parts.append(_rect(x0 + dw * 0.2, y0 + dd * 0.08, dw * 0.6, dd * 0.18, 0.8, "none", "#667085", 3))
-            _dim_h(parts, x0, x0 + dw, y0 + dd + 6, f'{_in(width)}')
+            _dim_h(parts, x0, x0 + dw, y0 + dd + 6, _inch_label(width))
             if mode == "shop":
-                _dim_v(parts, x0 + dw + 10, y0, y0 + dd, f'{_in(depth)}')
+                _dim_v(parts, x0 + dw + 10, y0, y0 + dd, _inch_label(depth))
             return
         back_depth = dd * (0.26 if dims.get("back_profile") in {"curved", "wingback"} else 0.18)
         parts.append(_rect(x0 + dw * 0.16, y0 + dd * 0.2, dw * 0.68, dd * 0.58, 0.9, "#f7f4ef", "#667085", 5))
@@ -810,9 +818,9 @@ def _draw_family_plan(parts: list[str], template: TemplateDef, x: float, y: floa
             px = x0 + dw * i / bay_count
             parts.append(_line(px, y0, px, y0 + dd, 0.8, "#98a2b3"))
         parts.append(_text(x0 + dw / 2, y0 + dd / 2 + 4, f'{bay_count} BAY PLAN', 8, fill="#667085"))
-    _dim_h(parts, x0, x0 + dw, y0 + dd + 6, f'{_in(width)}')
+    _dim_h(parts, x0, x0 + dw, y0 + dd + 6, _inch_label(width))
     if mode == "shop":
-        _dim_v(parts, x0 + dw + 10, y0, y0 + dd, f'{_in(depth)}')
+        _dim_v(parts, x0 + dw + 10, y0, y0 + dd, _inch_label(depth))
 
 
 def _draw_family_perspective(parts: list[str], template: TemplateDef, style: str, x: float, y: float, w: float, h: float, dims: dict[str, Any]) -> None:
@@ -1023,7 +1031,20 @@ def _render_product_family_sheet(template: TemplateDef, style: str, name: str, d
     dims["_style"] = style
     title = template.shop_rules["title"] if mode == "shop" else template.presentation_rules["title"]
     company = "EMPIRE WOODCRAFT" if template.key in {"banquette", "shelving"} or template.key in WOODCRAFT_CASEWORK_KEYS else "EMPIRE WORKROOM"
-    parts = _open_presentation_sheet(w, h, company, title, name, template.family)
+    workroom = "WORKROOM" in company
+    paper = "#f5f3ef" if workroom else "#ffffff"
+    rule = "#2c2416" if workroom else "#111827"
+    gold = "#b8960c" if workroom else "#8a5a00"
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" style="font-family: Arial, Helvetica, sans-serif;">',
+        f'<rect width="1320" height="900" fill="{paper}"/>',
+        _rect(12, 12, w - 24, h - 24, 1.4, "none", rule),
+        _rect(12, 12, w - 24, 5, 0, gold, "none") if workroom else "",
+        _text(margin, 44, company, 16, "start", "800", rule),
+        _text(margin, 65, title.upper(), 12, "start", "700", gold),
+        _text(w - margin, 44, _esc(name).upper(), 15, "end", "800"),
+        _text(w - margin, 65, template.family, 10, "end", "600", "#667085"),
+    ]
     top_y = 86
     bottom_y = 568
     left_w = 620
@@ -1053,40 +1074,43 @@ def _render_product_family_sheet(template: TemplateDef, style: str, name: str, d
     parts.append(_text(spec_x, spec_y, "PARAMETERS", 12, "start", "800"))
     spec_lines = [
         f'Style: {_title(style)}',
-        f'Width: {_in(dims["width"])}',
-        f'Depth: {_in(dims["depth"])}',
-        f'Height: {_in(dims["height"])}',
+        f'Width: {_inch_label(dims["width"])}',
+        f'Depth: {_inch_label(dims["depth"])}',
+        f'Height: {_inch_label(dims["height"])}',
     ]
     if template.key in {"banquette", "chair"}:
-        spec_lines.extend([f'Seat height: {_in(dims["seat_height"])}', f'Back height: {_in(dims["back_height"])}'])
+        spec_lines.extend([
+            f'Seat height: {_inch_label(dims["seat_height"])}',
+            f'Back height: {_inch_label(dims["back_height"])}',
+        ])
     if template.key == "banquette":
         spec_lines.extend([f'Arms: {str(dims["arm_configuration"]).replace("_", " ").title()}', f'Base: {str(dims["base_type"]).replace("_", " ").title()}', f'Cushion breaks: {dims["cushion_segments"]:.0f}'])
     if template.key == "chair":
         spec_lines.extend([
-            f'Arm height: {_in(dims["arm_height"])}',
-            f'Seat thickness: {_in(dims["seat_thickness"])}',
+            f'Arm height: {_inch_label(dims["arm_height"])}',
+            f'Seat thickness: {_inch_label(dims["seat_thickness"])}',
             f'Back profile: {str(dims["back_profile"]).replace("_", " ").title()}',
             f'Arm profile: {str(dims["arm_profile"]).replace("_", " ").title()}',
             f'Leg type: {str(dims["leg_type"]).replace("_", " ").title()}',
-            f'Leg taper: {_in(dims["leg_taper"])}',
+            f'Leg taper: {_inch_label(dims["leg_taper"])}',
         ])
     if template.key == "shelving":
         spec_lines.extend([
             f'Shelves: {dims["shelves"]:.0f}',
-            f'Shelf spacing: {_in(dims["shelf_spacing"])}',
-            f'Material: {_in(dims["material_thickness"])}',
-            f'Bay spacing: {_in(dims["bay_spacing"])}',
+            f'Shelf spacing: {_inch_label(dims["shelf_spacing"])}',
+            f'Material: {_inch_label(dims["material_thickness"])}',
+            f'Bay spacing: {_inch_label(dims["bay_spacing"])}',
             f'Doors: {str(dims["door_style"]).replace("_", " ").title()}',
             f'Base: {str(dims["base_style"]).replace("_", " ").title()}',
         ])
     if template.key in WOODCRAFT_CASEWORK_KEYS:
         spec_lines.extend([
-            f'Material: {_in(dims["material_thickness"])}',
+            f'Material: {_inch_label(dims["material_thickness"])}',
             f'Shelves: {dims["shelves"]:.0f}',
             f'Drawers: {dims["drawer_count"]:.0f}',
             f'Doors: {str(dims["door_layout"]).replace("_", " ").title()}',
             f'Base: {str(dims["base_style"]).replace("_", " ").title()}',
-            f'Bay spacing: {_in(dims["bay_spacing"])}',
+            f'Bay spacing: {_inch_label(dims["bay_spacing"])}',
         ])
     spec_lines.append(_shop_family_note(template) if mode == "shop" else "Client-facing scale sheet for design review.")
     for i, line in enumerate(spec_lines):
@@ -1096,15 +1120,15 @@ def _render_product_family_sheet(template: TemplateDef, style: str, name: str, d
         parts.append(_text(line_x, spec_y + 26 + row * 20, line, 10, "start", "600" if i == 0 else "400", "#344054"))
 
     tb_x, tb_y, tb_w, tb_h = w - 382, h - 98, 348, 62
-    parts.append(_rect(tb_x, tb_y, tb_w, tb_h, 1.1, "#fff", "#111827"))
-    parts.append(_line(tb_x, tb_y + 22, tb_x + tb_w, tb_y + 22, 0.8))
-    parts.append(_line(tb_x + 112, tb_y, tb_x + 112, tb_y + tb_h, 0.8))
+    parts.append(_rect(tb_x, tb_y, tb_w, tb_h, 1.1, paper, rule))
+    parts.append(_line(tb_x, tb_y + 22, tb_x + tb_w, tb_y + 22, 0.8, rule))
+    parts.append(_line(tb_x + 112, tb_y, tb_x + 112, tb_y + tb_h, 0.8, rule))
     parts.append(_text(tb_x + 10, tb_y + 15, "PROJECT", 8, "start", "700", "#667085"))
     parts.append(_text(tb_x + 122, tb_y + 15, _esc(name).upper(), 8, "start", "700"))
     parts.append(_text(tb_x + 10, tb_y + 42, "SHEET", 8, "start", "700", "#667085"))
     parts.append(_text(tb_x + 122, tb_y + 42, f'{title} / NTS', 8, "start", "600"))
     parts.append("</svg>")
-    return "\n".join(parts)
+    return "\n".join(part for part in parts if part)
 
 
 def _render_window_treatment_sheet(template: TemplateDef, style: str, name: str, dims: dict[str, float], params: dict[str, Any], mode: str) -> str:
@@ -1113,7 +1137,19 @@ def _render_window_treatment_sheet(template: TemplateDef, style: str, name: str,
     dims = dict(dims)
     dims["_style"] = style
     title = template.shop_rules["title"] if mode == "shop" else template.presentation_rules["title"]
-    parts = _open_presentation_sheet(w, h, "EMPIRE WORKROOM", title, name, template.family)
+    paper = "#f5f3ef"
+    rule = "#2c2416"
+    gold = "#b8960c"
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" style="font-family: Arial, Helvetica, sans-serif;">',
+        f'<rect width="1320" height="900" fill="{paper}"/>',
+        _rect(12, 12, w - 24, h - 24, 1.4, "none", rule),
+        _rect(12, 12, w - 24, 5, 0, gold, "none"),
+        _text(margin, 44, "EMPIRE WORKROOM", 16, "start", "800", rule),
+        _text(margin, 65, title.upper(), 12, "start", "700", gold),
+        _text(w - margin, 44, _esc(name).upper(), 15, "end", "800"),
+        _text(w - margin, 65, template.family, 10, "end", "600", "#667085"),
+    ]
 
     top_y = 86
     bottom_y = 568
@@ -1142,15 +1178,15 @@ def _render_window_treatment_sheet(template: TemplateDef, style: str, name: str,
     parts.append(_text(spec_x, spec_y, "PARAMETERS", 12, "start", "800"))
     spec_lines = [
         f'Style: {_title(style)}',
-        f'Width: {_in(dims["width"])}',
-        f'Drop: {_in(dims["drop"])}',
-        f'Return: {_in(dims["return"])}',
+        f'Width: {_inch_label(dims["width"])}',
+        f'Drop: {_inch_label(dims["drop"])}',
+        f'Return: {_inch_label(dims["return"])}',
     ]
     if template.key == "drapery":
         spec_lines.extend([
             f'Panels: {dims["panels"]:.0f}',
             f'Fullness: {dims["fullness"]:.1f}x',
-            f'Hem: {_in(dims["hem"])}',
+            f'Hem: {_inch_label(dims["hem"])}',
             f'Mount: {str(dims["mount_type"]).replace("_", " ").title()}',
             f'Stack: {str(dims["stack_direction"]).replace("_", " ").title()}',
         ])
@@ -1162,9 +1198,9 @@ def _render_window_treatment_sheet(template: TemplateDef, style: str, name: str,
         parts.append(_text(spec_x, spec_y + 26 + i * 20, line, 10, "start", "600" if i == 0 else "400", "#344054"))
 
     tb_x, tb_y, tb_w, tb_h = w - 382, h - 98, 348, 62
-    parts.append(_rect(tb_x, tb_y, tb_w, tb_h, 1.1, "#fff", "#111827"))
-    parts.append(_line(tb_x, tb_y + 22, tb_x + tb_w, tb_y + 22, 0.8))
-    parts.append(_line(tb_x + 112, tb_y, tb_x + 112, tb_y + tb_h, 0.8))
+    parts.append(_rect(tb_x, tb_y, tb_w, tb_h, 1.1, paper, rule))
+    parts.append(_line(tb_x, tb_y + 22, tb_x + tb_w, tb_y + 22, 0.8, rule))
+    parts.append(_line(tb_x + 112, tb_y, tb_x + 112, tb_y + tb_h, 0.8, rule))
     parts.append(_text(tb_x + 10, tb_y + 15, "PROJECT", 8, "start", "700", "#667085"))
     parts.append(_text(tb_x + 122, tb_y + 15, _esc(name).upper(), 8, "start", "700"))
     parts.append(_text(tb_x + 10, tb_y + 42, "SHEET", 8, "start", "700", "#667085"))

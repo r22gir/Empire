@@ -55,8 +55,17 @@ export default function DocumentScreen() {
               <ActionBtn icon={<Send size={15} />} label="Send via Telegram" color="var(--blue)" />
               <ActionBtn icon={<Mail size={15} />} label="Email to Client" color="var(--gold)" />
               <ActionBtn icon={<Video size={15} />} label="Share on Video Call" color="var(--green)" />
-              <ActionBtn icon={<Printer size={15} />} label="Print" color="var(--purple)" />
-              <ActionBtn icon={<Download size={15} />} label="Download" color="var(--text-secondary)" />
+              <ActionBtn icon={<Printer size={15} />} label="Print" color="var(--gold)" onClick={() => window.print()} />
+              <ActionBtn icon={<Download size={15} />} label="Download" color="var(--text-secondary)" onClick={() => {
+                const href = API.replace('/api/v1', '') + '/api/v1/files/view/' + encodeURIComponent(selected.name || selected.filename);
+                const a = document.createElement('a');
+                a.href = href;
+                a.download = selected.name || selected.filename || 'document';
+                a.target = '_blank';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+              }} />
             </div>
           </>
         )}
@@ -65,10 +74,10 @@ export default function DocumentScreen() {
   );
 }
 
-function ActionBtn({ icon, label, color }: { icon: React.ReactNode; label: string; color: string }) {
+function ActionBtn({ icon, label, color, onClick }: { icon: React.ReactNode; label: string; color: string; onClick?: () => void }) {
   return (
-    <button className="empire-card"
-      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', fontSize: 13, fontWeight: 600, color, minHeight: 46, width: '100%', textAlign: 'left' }}>
+    <button className="empire-card" onClick={onClick}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', fontSize: 13, fontWeight: 600, color, minHeight: 46, width: '100%', textAlign: 'left', cursor: onClick ? 'pointer' : 'default' }}>
       {icon}
       <span>{label}</span>
     </button>

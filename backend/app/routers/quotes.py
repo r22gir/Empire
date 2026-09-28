@@ -20,6 +20,17 @@ from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.business_routing import route_to_for_item_type
 from app.services.data_paths import quote_pdf_dir, quotes_data_dir
 from app.services.drawing.canonical_path import canonical_empire_db_path
+from app.services.house_pdf import (
+    acceptance_block,
+    format_inches,
+    house_css,
+    render_estimate,
+    render_idea_sheet,
+    render_pdf,
+    render_shop_ticket,
+    sheet_footer,
+    sheet_header,
+)
 from app.db.database import get_db, dict_row
 from app.routers.vision import decode_image_input
 
@@ -1644,7 +1655,7 @@ def _build_window_drawing(w: dict) -> str:
     cy = wy + win_h / 2
 
     svg = f"""<div style="display:inline-block;vertical-align:top;margin:6px 8px 6px 0;page-break-inside:avoid">
-    <svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;background:#fafbfd;border:1px solid #e0e0e0;border-radius:6px">
+    <svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;background:#f5f3ef;border:1px solid #e0e0e0;border-radius:6px">
       <!-- Title -->
       <text x="{svg_w/2}" y="16" text-anchor="middle" font-size="10" fill="#1a1a2e" font-weight="700">{name}{f' (×{qty})' if qty > 1 else ''}</text>
       <!-- Window frame -->
@@ -1743,14 +1754,14 @@ def _build_window_drawing(w: dict) -> str:
       <line x1="{wx}" y1="{wy-12}" x2="{wx+win_w}" y2="{wy-12}" stroke="#D4AF37" stroke-width="1.2"/>
       <line x1="{wx}" y1="{wy-18}" x2="{wx}" y2="{wy-6}" stroke="#D4AF37" stroke-width="0.8"/>
       <line x1="{wx+win_w}" y1="{wy-18}" x2="{wx+win_w}" y2="{wy-6}" stroke="#D4AF37" stroke-width="0.8"/>
-      <text x="{cx}" y="{wy-17}" text-anchor="middle" font-size="11" fill="#D4AF37" font-weight="bold">{w_in}"</text>"""
+      <text x="{cx}" y="{wy-17}" text-anchor="middle" font-size="11" fill="#D4AF37" font-weight="bold">{format_inches(w_in)}</text>"""
 
     # Height dimension (right)
     svg += f"""
       <line x1="{wx+win_w+12}" y1="{wy}" x2="{wx+win_w+12}" y2="{wy+win_h}" stroke="#D4AF37" stroke-width="1.2"/>
       <line x1="{wx+win_w+6}" y1="{wy}" x2="{wx+win_w+18}" y2="{wy}" stroke="#D4AF37" stroke-width="0.8"/>
       <line x1="{wx+win_w+6}" y1="{wy+win_h}" x2="{wx+win_w+18}" y2="{wy+win_h}" stroke="#D4AF37" stroke-width="0.8"/>
-      <text x="{wx+win_w+26}" y="{cy+4}" text-anchor="start" font-size="11" fill="#D4AF37" font-weight="bold">{h_in}"</text>"""
+      <text x="{wx+win_w+26}" y="{cy+4}" text-anchor="start" font-size="11" fill="#D4AF37" font-weight="bold">{format_inches(h_in)}</text>"""
 
     # Mount indicator
     if mount.lower() == 'ceiling':
@@ -1776,7 +1787,7 @@ def _build_window_drawing(w: dict) -> str:
     yardage = w.get("yardage", {})
     total_yardage = yardage.get("total", 0)
 
-    svg += f'<div style="margin-top:4px;padding:8px 10px;background:#f8f9fb;border:1px solid #e0e0e0;border-radius:5px;font-size:0.72em;max-width:{int(svg_w)}px;line-height:1.6">'
+    svg += f'<div style="margin-top:4px;padding:8px 10px;background:#f5f3ef;border:1px solid #e8e4dd;border-radius:5px;font-size:0.72em;max-width:{int(svg_w)}px;line-height:1.6">'
     svg += f'<div style="display:flex;justify-content:space-between;margin-bottom:3px"><strong style="color:#1a1a2e">{ttype}</strong><span style="color:#D4AF37;font-weight:700">{mount} Mount</span></div>'
     svg += f'<div style="color:#555">'
     svg += f'<strong>Lining:</strong> {lining}'
@@ -2062,7 +2073,7 @@ def _build_upholstery_drawing(u: dict) -> str:
 
     # ── Assemble SVG ──
     svg = photo_html + f"""<div style="display:inline-block;vertical-align:top;margin:6px 8px 6px 0;page-break-inside:avoid">
-    <svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;background:#fafbfd;border:1px solid #e0e0e0;border-radius:6px">
+    <svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;background:#f5f3ef;border:1px solid #e0e0e0;border-radius:6px">
       <text x="{svg_w/2}" y="14" text-anchor="middle" font-size="9.5" fill="#1a1a2e" font-weight="700">{name}</text>
       <text x="{svg_w/2}" y="26" text-anchor="middle" font-size="7.5" fill="#888">{ftype} · {dims}{welting_label}</text>
       {svg_body}
@@ -2180,7 +2191,7 @@ def _build_proposal_drawing(w: dict) -> str:
     cx = wx + win_w / 2
 
     svg = f"""<div style="display:inline-block;vertical-align:top;margin:6px 8px 6px 0;page-break-inside:avoid">
-    <svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;background:#fafbfd;border:2px solid {color};border-radius:8px">
+    <svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;background:#f5f3ef;border:2px solid {color};border-radius:8px">
       <!-- Title -->
       <text x="{svg_w/2}" y="16" text-anchor="middle" font-size="10" fill="{color}" font-weight="700">{name}</text>
       <!-- Window frame -->
@@ -2263,14 +2274,14 @@ def _build_proposal_drawing(w: dict) -> str:
       <line x1="{wx}" y1="{wy-15}" x2="{wx+win_w}" y2="{wy-15}" stroke="#D4AF37" stroke-width="1.2"/>
       <line x1="{wx}" y1="{wy-20}" x2="{wx}" y2="{wy-9}" stroke="#D4AF37" stroke-width="0.8"/>
       <line x1="{wx+win_w}" y1="{wy-20}" x2="{wx+win_w}" y2="{wy-9}" stroke="#D4AF37" stroke-width="0.8"/>
-      <text x="{cx}" y="{wy-19}" text-anchor="middle" font-size="11" fill="#D4AF37" font-weight="bold">{w_in}"</text>"""
+      <text x="{cx}" y="{wy-19}" text-anchor="middle" font-size="11" fill="#D4AF37" font-weight="bold">{format_inches(w_in)}</text>"""
 
     # Height dimension (right)
     svg += f"""
       <line x1="{wx+win_w+15}" y1="{wy}" x2="{wx+win_w+15}" y2="{wy+win_h}" stroke="#D4AF37" stroke-width="1.2"/>
       <line x1="{wx+win_w+8}" y1="{wy}" x2="{wx+win_w+22}" y2="{wy}" stroke="#D4AF37" stroke-width="0.8"/>
       <line x1="{wx+win_w+8}" y1="{wy+win_h}" x2="{wx+win_w+22}" y2="{wy+win_h}" stroke="#D4AF37" stroke-width="0.8"/>
-      <text x="{wx+win_w+28}" y="{wy+win_h/2+4}" text-anchor="start" font-size="11" fill="#D4AF37" font-weight="bold">{h_in}"</text>"""
+      <text x="{wx+win_w+28}" y="{wy+win_h/2+4}" text-anchor="start" font-size="11" fill="#D4AF37" font-weight="bold">{format_inches(h_in)}</text>"""
 
     # Spec text below
     spec_y = wy + win_h + 18
@@ -2355,7 +2366,7 @@ def _build_rooms_html(rooms: list, has_design_proposals: bool = False) -> str:
                 ttype = treatment_labels.get(w.get("treatmentType", ""), w.get("treatmentType", "").replace("-", " ").title())
                 html += f"""<tr>
                     <td style="padding:6px 8px;border-bottom:1px solid #eee">{w.get('name', '')}</td>
-                    <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{w.get('width', 0)}" × {w.get('height', 0)}"</td>
+                    <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{format_inches(w.get('width', 0))} × {format_inches(w.get('height', 0))}</td>
                     <td style="padding:6px 8px;border-bottom:1px solid #eee">{ttype}</td>
                     <td style="padding:6px 8px;border-bottom:1px solid #eee">{w.get('liningType', 'standard').replace('-', ' ').title()}</td>
                     <td style="padding:6px 8px;border-bottom:1px solid #eee">{w.get('hardwareType', 'none').replace('-', ' ').title()}</td>
@@ -2474,13 +2485,12 @@ def _build_rooms_html(rooms: list, has_design_proposals: bool = False) -> str:
                     <th>Item</th><th>Size</th><th>Fabric</th><th>Yardage</th><th>Qty</th>
                 </tr></thead><tbody>"""
                 for it in items:
-                    dims = it.get("dimensions", {})
-                    size_parts = [f'{dims.get("width", "")}' if dims.get("width") else '',
-                                  f'{dims.get("height", "")}' if dims.get("height") else '',
-                                  f'{dims.get("depth", "")}' if dims.get("depth") else '']
-                    size_str = ' x '.join(p for p in size_parts if p)
-                    if size_str:
-                        size_str += '"'
+                    dims = it.get("dimensions", {}) or {}
+                    size_str = " × ".join(
+                        format_inches(dims.get(key))
+                        for key in ("width", "height", "depth")
+                        if dims.get(key) not in (None, "", 0, "0")
+                    )
 
                     fabric_name = it.get("fabric_name", "")
                     backing_name = it.get("backing_fabric_name", "")
@@ -2702,7 +2712,7 @@ def _build_design_proposals_html(proposals: list, original_photo: str = "") -> s
 
         # AI commentary
         if comment:
-            html += f"""<div style="padding:8px 14px;border-bottom:1px solid #f0f0f0;background:#fafbfd">
+            html += f"""<div style="padding:8px 14px;border-bottom:1px solid #f0f0f0;background:#f5f3ef">
               <p style="margin:0;font-size:0.8em;color:#444;line-height:1.4;font-style:italic">{comment}</p>
             </div>"""
 
@@ -2969,6 +2979,64 @@ def _discount_html(quote: dict) -> str:
     )
 
 
+@router.post("/preview-pdf")
+async def preview_pdf(body: dict):
+    """House-format PDF for an in-progress quote, shop copy, or idea note.
+
+    Does not save a quote. Available from the builder before Generate.
+    """
+    sheet = str(body.get("sheet") or "estimate").lower()
+    if sheet == "shop":
+        html_doc = render_shop_ticket(body)
+        filename = "shop-draft.pdf"
+    elif sheet == "idea":
+        html_doc = render_idea_sheet(body)
+        filename = "idea.pdf"
+    else:
+        html_doc = render_estimate(body)
+        filename = f"{body.get('quote_number') or 'estimate-draft'}.pdf"
+    try:
+        pdf_bytes = render_pdf(html_doc)
+    except Exception as exc:
+        logger.error("Preview PDF failed: %s", exc)
+        raise HTTPException(500, f"PDF generation failed: {exc}")
+    safe_name = str(filename).replace('"', "")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
+
+
+@router.post("/{quote_id}/shop-pdf")
+async def shop_pdf(quote_id: str):
+    """Shop copy of a saved quote. Same house format as the client estimate."""
+    try:
+        quote = _load_quote(quote_id)
+    except HTTPException:
+        try:
+            from app.services.quote_pdf_service import generate_shop_pdf
+            pdf_bytes = generate_shop_pdf(quote_id)
+        except FileNotFoundError:
+            raise HTTPException(404, f"Quote {quote_id} not found")
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{quote_id}-shop.pdf"'},
+        )
+    try:
+        pdf_bytes = render_pdf(render_shop_ticket(quote))
+    except Exception as exc:
+        logger.error("Shop PDF failed: %s", exc)
+        raise HTTPException(500, f"PDF generation failed: {exc}")
+    number = quote.get("quote_number") or quote_id
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{number}-shop.pdf"'},
+    )
+
+
 @router.post("/{quote_id}/pdf")
 async def generate_pdf(quote_id: str, skip_verification: bool = False):
     """Generate PDF for a quote with room-level detail, drawings, and mockups.
@@ -3214,32 +3282,19 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{quote_number}</title>
 <style>
-  @page {{ size: letter; margin: 0.5in 0.6in; }}
-  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #222; max-width: 800px; margin: 0 auto; padding: 0; font-size: 12px; line-height: 1.45; background: #f5f3ef; }}
-  h1 {{ color: #1a1a2e; margin: 0; font-size: 28px; letter-spacing: -0.5px; }}
-  h3 {{ page-break-after: avoid; }}
-  table {{ width: 100%; border-collapse: collapse; margin-bottom: 8px; }}
-  th {{ background: #2c2416; color: #b8960c; padding: 8px 6px; text-align: left; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.5px; }}
-  td {{ font-size: 0.85em; }}
+{house_css()}
 </style></head><body>
 
 <!-- ═══ HEADER / LETTERHEAD ═══ -->
-<div style="border-bottom:3px solid #b8960c;padding-bottom:14px;margin-bottom:16px">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start">
-    <div>
-      {logo_html}
-      <h1>{biz_name}</h1>
-      <p style="margin:4px 0 0;color:#888;font-size:0.85em">Custom Window Treatments &amp; Upholstery</p>
-      <p style="margin:6px 0 0;line-height:1.6">{biz_contact_html}</p>
-    </div>
-    <div style="text-align:right;padding-top:4px">
-      <div style="background:#2c2416;color:#b8960c;padding:8px 16px;border-radius:6px;font-weight:700;font-size:1.1em;letter-spacing:1px;display:inline-block;margin-bottom:8px">ESTIMATE</div>
-      <p style="margin:3px 0;color:#333;font-size:0.9em;font-weight:600">{quote_number}</p>
-      <p style="margin:3px 0;color:#666;font-size:0.82em">Date: {created_date}</p>
-      <p style="margin:3px 0;color:#666;font-size:0.82em">Valid until: {expires_date}</p>
-    </div>
-  </div>
-</div>
+{sheet_header(
+    badge="ESTIMATE",
+    number=quote_number,
+    meta_lines=[("Date", created_date), ("Valid until", expires_date)],
+    biz_name=biz_name,
+    tagline="Custom Window Treatments & Upholstery",
+    contact_html=biz_contact_html,
+    logo_html=logo_html,
+)}
 
 <!-- ═══ CLIENT INFO ═══ -->
 <div style="display:flex;gap:16px;margin-bottom:16px">
@@ -3300,26 +3355,10 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 {f"<div style='margin-top:10px;padding:12px 16px;background:#f8f8f8;border-radius:8px;font-size:0.88em;color:#666'><strong>Notes:</strong> {quote['notes']}</div>" if quote.get('notes') else ""}
 
 <!-- ═══ ACCEPTANCE / SIGNATURE ═══ -->
-<div style="margin-top:36px;padding:24px 20px;border:2px solid #b8960c;border-radius:10px;page-break-inside:avoid">
-  <p style="margin:0 0 12px;font-size:0.78em;text-transform:uppercase;letter-spacing:0.5px;color:#b8960c;font-weight:700">Acceptance</p>
-  <p style="margin:0 0 20px;font-size:0.85em;color:#555">By signing below, I accept this estimate and authorize {biz_name} to proceed with the work described above.</p>
-  <div style="display:flex;gap:40px;margin-top:16px">
-    <div style="flex:1">
-      <div style="border-bottom:1px solid #333;height:40px"></div>
-      <p style="margin:6px 0 0;font-size:0.78em;color:#888">Client Signature</p>
-    </div>
-    <div style="width:160px">
-      <div style="border-bottom:1px solid #333;height:40px"></div>
-      <p style="margin:6px 0 0;font-size:0.78em;color:#888">Date</p>
-    </div>
-  </div>
-</div>
+{acceptance_block(biz_name)}
 
 <!-- ═══ FOOTER ═══ -->
-<div style="margin-top:28px;padding-top:12px;border-top:1px solid #eee;text-align:center">
-  <p style="margin:0;color:#aaa;font-size:0.72em">{biz_name} &middot; Custom Window Treatments &amp; Upholstery</p>
-  <p style="margin:2px 0 0;color:#ccc;font-size:0.65em">Estimate {quote_number} &middot; Generated {created_date}</p>
-</div>
+{sheet_footer(biz_name, "Custom Window Treatments & Upholstery", f"Estimate {quote_number}", created_date)}
 </body></html>"""
 
     # Convert HTML to PDF using weasyprint

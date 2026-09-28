@@ -1400,58 +1400,15 @@ class MeasurementsPdfRequest(BaseModel):
 
 @router.post("/measurements-pdf")
 async def measurements_pdf(req: MeasurementsPdfRequest):
-    """Generate PDF with 3D screenshot and measurement table via WeasyPrint."""
-    from weasyprint import HTML as WeasyHTML
+    """Generate a house-format PDF with the 3D screenshot and measurement table."""
+    from app.services.house_pdf import render_measurements, render_pdf
 
-    # Extract base64 image
-    screenshot_data = req.screenshot
+    screenshot_data = req.screenshot or ""
     if screenshot_data.startswith("data:"):
         screenshot_data = screenshot_data.split(",", 1)[1]
 
-    # Build measurement rows
-    rows = ""
-    for i, m in enumerate(req.measurements):
-        rows += f"""<tr>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#8B5CF6">#{m.get('id', i+1)}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:monospace">{m.get('distance_ft', 0):.2f} ft</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:monospace">{m.get('distance_m', 0):.4f} m</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:monospace">{m.get('distance_in', 0):.1f} in</td>
-        </tr>"""
-
-    created_date = datetime.now().strftime("%B %d, %Y")
-    file_label = req.fileName or "3D Scan"
-
-    html = f"""<!DOCTYPE html>
-<html><head><style>
-    @page {{ size: letter; margin: 0.75in; }}
-    body {{ font-family: 'Segoe UI', system-ui, sans-serif; color: #1a1a2e; margin: 0; padding: 0; }}
-    .header {{ border-bottom: 3px solid #D4AF37; padding-bottom: 12px; margin-bottom: 20px; }}
-    .header h1 {{ margin: 0; color: #D4AF37; font-size: 22px; }}
-    .header p {{ margin: 4px 0 0; color: #888; font-size: 12px; }}
-    .screenshot {{ width: 100%; border-radius: 8px; margin: 16px 0; border: 1px solid #eee; }}
-    table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
-    th {{ background: #f5f0e1; color: #8B5CF6; padding: 10px 8px; border: 1px solid #ddd; text-align: left; font-size: 12px; }}
-    .footer {{ margin-top: 28px; border-top: 1px solid #eee; padding-top: 12px; text-align: center; }}
-    .footer p {{ margin: 0; color: #aaa; font-size: 10px; }}
-</style></head><body>
-<div class="header">
-    <h1>3D Measurement Report</h1>
-    <p>{file_label} &middot; {created_date}</p>
-</div>
-{"<img class='screenshot' src='data:image/png;base64," + screenshot_data + "' alt='3D View' />" if screenshot_data else ""}
-{f'''<table>
-    <thead><tr>
-        <th>#</th><th>Feet</th><th>Meters</th><th>Inches</th>
-    </tr></thead>
-    <tbody>{rows}</tbody>
-</table>''' if req.measurements else "<p style='color:#888;font-size:11px;margin-top:12px'>No measurements taken.</p>"}
-<div class="footer">
-    <p>Empire &middot; 3D Measurement Report</p>
-    <p>Generated {created_date}</p>
-</div>
-</body></html>"""
-
-    pdf_bytes = WeasyHTML(string=html).write_pdf()
+    html = render_measurements(req.fileName or "3D Scan", req.measurements or [], screenshot_data)
+    pdf_bytes = render_pdf(html)
 
     # Save a copy
     pdf_dir = MEASUREMENTS_DIR

@@ -1,6 +1,7 @@
 'use client';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { API } from '../../lib/api';
+import { downloadPdf } from '../../lib/pdf';
 import {
   ArrowLeft, ArrowRight, User, Camera, Layers, Settings, FileText,
   Plus, Trash2, Upload, X, Check, Loader2, ChevronDown, ChevronUp, GripVertical, Search,
@@ -570,6 +571,7 @@ interface Props {
 export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
 
@@ -1311,6 +1313,53 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
 
   const totalItems = rooms.reduce((s, r) => s + r.items.reduce((s2, it) => s2 + it.quantity, 0), 0);
 
+  const downloadSheet = async (sheet: 'estimate' | 'shop') => {
+    setPdfBusy(sheet);
+    setError('');
+    try {
+      const savedId = result?.id || editQuoteId;
+      if (savedId) {
+        const path = sheet === 'shop'
+          ? `/quotes/${savedId}/shop-pdf`
+          : `/quotes/${savedId}/pdf?skip_verification=true`;
+        const name = `${result?.quote_number || 'quote'}${sheet === 'shop' ? '-shop' : ''}.pdf`;
+        await downloadPdf(`${API}${path}`, name, { method: 'POST' });
+        return;
+      }
+      await downloadPdf(`${API}/quotes/preview-pdf`, `draft-${sheet}.pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sheet,
+          customer_name: customer.name || 'Customer',
+          customer_email: customer.email,
+          customer_phone: customer.phone,
+          customer_address: customer.address,
+          quote_number: 'DRAFT',
+          rooms: rooms.map(r => ({
+            name: r.name,
+            items: r.items.map(it => ({
+              type: it.type,
+              quantity: it.quantity,
+              notes: it.notes,
+              fabric_name: it.fabric
+                ? `${it.fabric.name}${it.fabric.color_pattern ? ' — ' + it.fabric.color_pattern : ''}`
+                : '',
+              width: it.width,
+              height: it.height,
+              depth: it.depth,
+              dimensions: { width: it.width, height: it.height, depth: it.depth },
+            })),
+          })),
+        }),
+      });
+    } catch {
+      setError('PDF generation failed. Check that the backend is running.');
+    } finally {
+      setPdfBusy(null);
+    }
+  };
+
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px 36px' }}>
       {/* Header */}
@@ -1625,7 +1674,21 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
           style={{ height: 40, padding: '0 18px', borderRadius: 10, border: '1.5px solid #ece8e0', background: '#faf9f7', fontSize: 13, fontWeight: 600, color: '#555' }}>
           <ArrowLeft size={16} /> Previous
         </button>
-        <div style={{ fontSize: 12, color: '#aaa' }}>Step {step} of 5</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: 12, color: '#aaa' }}>Step {step} of 5</div>
+          <button onClick={() => downloadSheet('estimate')} disabled={pdfBusy !== null}
+            title="Estimate PDF — available before the quote is saved"
+            className="flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            style={{ height: 36, padding: '0 12px', borderRadius: 10, border: '1.5px solid #b8960c', background: '#fffdf7', color: '#b8960c', fontSize: 12, fontWeight: 700 }}>
+            {pdfBusy === 'estimate' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} PDF
+          </button>
+          <button onClick={() => downloadSheet('shop')} disabled={pdfBusy !== null}
+            title="Shop PDF with inch fractions"
+            className="flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            style={{ height: 36, padding: '0 12px', borderRadius: 10, border: '1.5px solid #2c2416', background: '#f5f3ef', color: '#2c2416', fontSize: 12, fontWeight: 700 }}>
+            {pdfBusy === 'shop' ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} Shop
+          </button>
+        </div>
         {step < 5 ? (
           <button onClick={() => setStep(s => Math.min(5, s + 1))} disabled={!canAdvance()}
             className="flex items-center gap-1.5 cursor-pointer disabled:opacity-40 transition-all hover:bg-[#a08509]"

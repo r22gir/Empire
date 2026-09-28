@@ -5,6 +5,7 @@ import { Zap, Upload, Loader2, CheckCircle, FileText, X, ImageIcon, Camera } fro
 import { API } from '../../../lib/api';
 import { compressImageDataUrl, visionAbortSignal, visionTimeoutMessage } from '../../../lib/visionImage';
 import { normalizeMeasureResult } from '../../../lib/visionMeasure';
+import { downloadPdf } from '../../../lib/pdf';
 
 interface QuickQuoteBuilderProps {
   onClose?: () => void;
@@ -18,6 +19,7 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
   const [imageFilename, setImageFilename] = useState('');
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
   const [analysisResult, setAnalysisResult] = useState<any>(null);
@@ -129,7 +131,25 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
               <div style={{ fontSize: 16, fontWeight: 700, color: '#b8960c', marginTop: 8 }}>${Number(result.total).toLocaleString()}</div>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            {result.id && (
+              <>
+                <button
+                  onClick={() => downloadPdf(`${API}/quotes/${result.id}/pdf?skip_verification=true`, `${result.quote_number || 'quote'}.pdf`, { method: 'POST' }).catch(() => setError('PDF failed'))}
+                  className="flex items-center justify-center gap-1.5 cursor-pointer font-bold"
+                  style={{ height: 40, padding: '0 14px', fontSize: 12, borderRadius: 12, border: '1.5px solid #b8960c', background: '#fffdf7', color: '#b8960c' }}
+                >
+                  <FileText size={14} /> PDF
+                </button>
+                <button
+                  onClick={() => downloadPdf(`${API}/quotes/${result.id}/shop-pdf`, `${result.quote_number || 'quote'}-shop.pdf`, { method: 'POST' }).catch(() => setError('Shop PDF failed'))}
+                  className="flex items-center justify-center gap-1.5 cursor-pointer font-bold"
+                  style={{ height: 40, padding: '0 14px', fontSize: 12, borderRadius: 12, border: '1.5px solid #2c2416', background: '#f5f3ef', color: '#2c2416' }}
+                >
+                  Shop
+                </button>
+              </>
+            )}
             <button
               onClick={() => { setResult(null); setCustomerName(''); setDescription(''); setImageFile(null); setImageFilename(''); setAnalysisResult(null); }}
               className="flex-1 flex items-center justify-center gap-1.5 cursor-pointer font-bold transition-all hover:bg-[#f0ede8]"
@@ -275,16 +295,55 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
           </div>
         )}
 
-        {/* Submit */}
-        <button
-          onClick={handleSubmit}
-          disabled={submitting || uploading || !customerName.trim() || !description.trim()}
-          className="w-full flex items-center justify-center gap-2 cursor-pointer font-bold transition-all hover:bg-[#a08509] disabled:opacity-50 active:scale-[0.98]"
-          style={{ height: 44, fontSize: 13, borderRadius: 12, background: '#b8960c', color: '#fff', border: 'none', boxShadow: '0 2px 8px rgba(184,150,12,0.25)' }}
-        >
-          {submitting ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
-          Generate Quote
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={async () => {
+              setPdfBusy('draft');
+              setError('');
+              try {
+                await downloadPdf(`${API}/quotes/preview-pdf`, 'quick-quote-draft.pdf', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    sheet: 'estimate',
+                    customer_name: customerName || 'Customer',
+                    project_description: description,
+                    notes: description,
+                    quote_number: 'DRAFT',
+                    rooms: analysisResult ? [{
+                      name: analysisResult.window_type || 'Window',
+                      windows: [{
+                        name: analysisResult.window_type || 'Window',
+                        width: analysisResult.width_inches,
+                        height: analysisResult.height_inches,
+                        quantity: 1,
+                      }],
+                    }] : [],
+                  }),
+                });
+              } catch {
+                setError('PDF failed. Check that the backend is running.');
+              } finally {
+                setPdfBusy(null);
+              }
+            }}
+            disabled={pdfBusy !== null}
+            className="flex items-center justify-center gap-1.5 cursor-pointer font-bold disabled:opacity-50"
+            style={{ height: 44, padding: '0 16px', fontSize: 13, borderRadius: 12, border: '1.5px solid #b8960c', background: '#fffdf7', color: '#b8960c' }}
+          >
+            {pdfBusy === 'draft' ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+            PDF
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || uploading || !customerName.trim() || !description.trim()}
+            className="flex-1 flex items-center justify-center gap-2 cursor-pointer font-bold transition-all hover:bg-[#a08509] disabled:opacity-50 active:scale-[0.98]"
+            style={{ height: 44, fontSize: 13, borderRadius: 12, background: '#b8960c', color: '#fff', border: 'none', boxShadow: '0 2px 8px rgba(184,150,12,0.25)' }}
+          >
+            {submitting ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+            Generate Quote
+          </button>
+        </div>
       </div>
     </div>
   );
