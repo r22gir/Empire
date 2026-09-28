@@ -119,6 +119,9 @@ export default function OpsPage() {
             {getGreeting()}, RG
           </h1>
           <p className="text-white/60 mt-1 text-sm">{formatDate()}</p>
+          <a href="/workroom/capture" className="inline-block mt-4 text-sm font-semibold" style={{ color: "#d4af37" }}>
+            Inbox capture
+          </a>
         </div>
       </header>
 

@@ -225,6 +225,9 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // EMPIRE WORKROOM
   // ═══════════════════════════════════════════════
   workroom: [
+    { title: "Workroom Inbox Runbook", path: "docs/workroom/INBOX_RUNBOOK.md", type: "guide", description: "Triage workroom@empirebox.store in the founder Gmail. No auto-send." },
+    { title: "Workroom Manual Capture Bridge", path: "docs/workroom/MANUAL_CAPTURE_BRIDGE.md", type: "playbook", description: "Stage 0 click path: /workroom/capture into LeadForge, ForgeCRM, and a quote draft" },
+    { title: "LeadForge Workroom Intake Spec", path: "docs/workroom/LEADFORGE_WORKROOM_INTAKE_SPEC.md", type: "spec", description: "Shared Workroom intake fields. Stage 0 is manual; public form is not live." },
     MODULE_DOCS_STANDARD,
     ...QUOTE_PDFS,
     ...DESIGN_IMAGES,

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { API } from '../../lib/api';
 import {
-  Scissors, DollarSign, ClipboardList, TrendingUp, Calendar, Users,
+  Scissors, DollarSign, ClipboardList, TrendingUp, Calendar, Users, Inbox,
   Package, FileText, Receipt, BarChart3, Truck, Headphones, Loader2, Zap, Camera, Lightbulb, Eye, ArrowLeft, Plus,
   CheckCircle2, Circle, Clock, Flag, Filter, Search, Sparkles, Send, X, Check, CreditCard, Ruler, Trash2
 } from 'lucide-react';
@@ -156,6 +156,13 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
         </div>
         <div className="flex-1 overflow-x-auto sm:overflow-x-hidden overflow-y-auto" style={{ padding: '10px 10px' }}>
           <div className="flex sm:flex-col flex-row gap-1.5 sm:flex-nowrap flex-nowrap sm:w-auto w-max">
+            <a href="/workroom/capture"
+              className="w-full flex items-center gap-3 text-left"
+              style={{ padding: '10px 14px', borderRadius: 12, fontSize: 13, fontWeight: 700, color: '#16a34a', textDecoration: 'none' }}
+            >
+              <Inbox size={17} />
+              Inbox capture
+            </a>
             {NAV_SECTIONS.map(nav => {
               const Icon = nav.icon;
               const isActive = section === nav.id && !selectedCustomer;
