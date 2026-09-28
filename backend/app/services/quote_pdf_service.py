@@ -16,7 +16,7 @@ from reportlab.lib.units import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
-    HRFlowable, PageBreak,
+    HRFlowable, PageBreak, Image,
 )
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
@@ -68,6 +68,67 @@ def _get_styles():
         fontSize=8, textColor=BRAND_MUTED, alignment=TA_CENTER,
     ))
     return styles
+
+
+def _append_idea_diagrams(story, styles, items) -> None:
+    """Show attached idea diagrams. A bad sheet becomes a note, not a failed PDF."""
+    diagrams = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        meta = item.get("idea_diagram") if isinstance(item.get("idea_diagram"), dict) else {}
+        status = meta.get("status")
+        svg = item.get("drawing_svg") or ""
+        if status == "not_applicable":
+            continue
+        if not status and not svg:
+            continue
+        diagrams.append((item, meta, svg))
+    if not diagrams:
+        return
+
+    try:
+        story.append(Paragraph("Idea diagrams", styles['SectionHeader']))
+        story.append(Paragraph(
+            "These sheets transmit the idea from the quoted category and dimensions. "
+            "They are not the final design.",
+            styles['SmallMuted'],
+        ))
+        story.append(Spacer(1, 8))
+    except Exception as exc:
+        logger.warning("Idea diagram header failed: %s", exc)
+        return
+
+    for item, meta, svg in diagrams:
+        label = item.get("description") or item.get("item_type") or meta.get("category") or "Item"
+        note = meta.get("note") or ""
+        try:
+            story.append(Paragraph(f"<b>{label}</b>", styles['ItemDesc']))
+            png = None
+            if meta or (svg and "<svg" in svg):
+                from app.services.drawing.idea_drawing import idea_png_bytes
+                png = idea_png_bytes({**meta, "svg": svg})
+            if png:
+                from io import BytesIO
+                image = Image(BytesIO(png), width=6.5 * inch, height=6.5 * inch * (480 / 720))
+                image.hAlign = "LEFT"
+                story.append(image)
+            elif note:
+                story.append(Paragraph(note, styles['SmallMuted']))
+            else:
+                story.append(Paragraph(
+                    "Idea diagram unavailable for this line. The quote totals are unchanged.",
+                    styles['SmallMuted'],
+                ))
+            if note and png:
+                story.append(Paragraph(note, styles['SmallMuted']))
+            story.append(Spacer(1, 8))
+        except Exception as exc:
+            logger.warning("Idea diagram skipped for %s: %s", label, exc)
+            story.append(Paragraph(
+                f"Idea diagram unavailable for {label}: {exc}. The quote totals are unchanged.",
+                styles['SmallMuted'],
+            ))
 
 
 def generate_quote_pdf(quote_id: str) -> bytes:
@@ -248,7 +309,9 @@ def generate_quote_pdf_legacy_portrait(quote_id: str) -> bytes:
     else:
         story.append(Paragraph("<i>No line items</i>", styles['ItemDesc']))
 
-    story.append(Spacer(1, 16))
+    story.append(Spacer(1, 12))
+    _append_idea_diagrams(story, styles, items)
+    story.append(Spacer(1, 8))
 
     # ── Totals ─────────────────────────────────────────────────
     subtotal = float(quote.get('subtotal', 0) or 0)

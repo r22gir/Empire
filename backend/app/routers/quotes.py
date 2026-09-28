@@ -663,6 +663,13 @@ async def create_quote(payload: QuoteCreate):
         except Exception:
             pass
 
+    try:
+        from app.services.drawing.idea_drawing import annotate_quote
+        annotate_quote(quote)
+    except Exception as idea_err:
+        logger.warning(f"Idea diagrams not attached to new quote: {idea_err}")
+        quote["idea_diagram_error"] = f"Idea diagrams could not be attached: {idea_err}"
+
     _save_quote(quote)
     _sync_quote_customer_to_crm(quote)
     return {"status": "created", "quote": quote}
@@ -932,6 +939,12 @@ async def create_quote_from_rooms(body: dict):
     quote["fabric_grade"] = fabric_grade
     quote["photos"] = photos
     quote["rooms"] = _quote_rooms_with_route_to(rooms)
+    try:
+        from app.services.drawing.idea_drawing import annotate_quote
+        annotate_quote(quote)
+    except Exception as idea_err:
+        logger.warning(f"Idea diagrams not attached to quote {quote.get('id')}: {idea_err}")
+        quote["idea_diagram_error"] = f"Idea diagrams could not be attached: {idea_err}"
     quote["drawings"] = body.get("drawings") or _quote_item_drawings(rooms)
     quote["options"] = options
 
@@ -3083,6 +3096,16 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
             <th>Description</th><th>Qty</th><th>Rate</th><th style="text-align:right">Amount</th>
         </tr></thead><tbody>{items_html}</tbody></table>"""
 
+    try:
+        from app.services.drawing.idea_drawing import quote_idea_html
+        idea_diagrams_html = quote_idea_html(quote)
+    except Exception as idea_err:
+        logger.warning(f"Idea diagrams skipped for quote PDF: {idea_err}")
+        idea_diagrams_html = (
+            f'<p style="color:#8a5a00;font-size:0.85em">Idea diagrams unavailable: {idea_err}. '
+            "The quote totals are unchanged.</p>"
+        )
+
     # AI Outline drawings
     outlines_html = ""
     for outline in ai_outlines:
@@ -3260,6 +3283,9 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 
 <!-- ═══ QUOTE DETAILS ═══ -->
 {body_html}
+
+<!-- ═══ IDEA DIAGRAMS ═══ -->
+{idea_diagrams_html}
 
 <!-- ═══ DESIGN OPTIONS (3-TIER) ═══ -->
 {proposals_html}

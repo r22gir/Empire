@@ -13,8 +13,6 @@ from difflib import SequenceMatcher
 import httpx
 
 from app.db.database import get_db, dict_row, dict_rows
-from app.services.vision.diagram_generator import diagram_generator
-
 log = logging.getLogger("notes_extractor")
 
 XAI_API_KEY = os.getenv("XAI_API_KEY", "")
@@ -122,18 +120,32 @@ class NotesExtractor:
                     item["fabric_match"] = match
                     merged["inventory_matches"].append(match)
 
-        # Generate diagrams for each item with measurements
+        # Idea diagrams for items that carry measurements. Failure is noted
+        # on the item and does not fail extraction.
         diagrams_generated = 0
         for item in merged.get("items", []):
             m = item.get("measurements") or {}
-            if m.get("width_inches") or m.get("height_inches"):
-                try:
-                    diagram = diagram_generator.generate(item)
+            if not (m.get("width_inches") or m.get("height_inches") or m.get("depth_inches")):
+                continue
+            try:
+                from app.services.drawing.idea_drawing import build_idea_diagram
+                diagram = build_idea_diagram(item)
+                item["idea_diagram"] = {
+                    "status": diagram.get("status"),
+                    "category": diagram.get("category"),
+                    "note": diagram.get("note"),
+                    "fidelity": diagram.get("fidelity"),
+                    "final_design": diagram.get("final_design"),
+                }
+                if diagram.get("status") == "attached" and diagram.get("svg"):
                     item["diagram_svg"] = diagram["svg"]
-                    item["diagram_summary"] = diagram["summary"]
+                    item["diagram_summary"] = diagram.get("note") or "Idea diagram"
                     diagrams_generated += 1
-                except Exception as e:
-                    log.warning(f"Diagram generation failed for item: {e}")
+                else:
+                    item["diagram_summary"] = diagram.get("note") or "Idea diagram unavailable"
+            except Exception as e:
+                log.warning(f"Idea diagram failed for item: {e}")
+                item["diagram_summary"] = f"Idea diagram unavailable: {e}"
 
         merged["pages_analyzed"] = len(photo_paths)
         merged["diagrams_generated"] = diagrams_generated
