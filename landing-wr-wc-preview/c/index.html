@@ -117,8 +117,9 @@
   .fine{color:var(--muted);font-size:14px}
   footer{padding:20px 5vw 40px;color:var(--muted);font-size:13px}
   figure.is-missing .hero-frame::after{
-    content:"Photograph not in this checkout. Copy the hero JPEG into assets/portfolio/.";
-    position:absolute;inset:auto 12px 12px 12px;color:var(--muted);font-size:13px;
+    content:"Install photo not in this checkout";
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;padding:16px;color:var(--muted);font-size:14px;letter-spacing:.03em;
   }
   figure.is-missing img{opacity:0}
   @media (min-width:720px){
