@@ -51,7 +51,6 @@ import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
 import RelistAppPage from './components/screens/RelistAppPage';
 import ArchiveForgePage from './components/screens/ArchiveForgePage';
 import VendorOpsPage from './components/screens/VendorOpsPage';
-import LeadForgePageNew from './components/screens/LeadForgePageNew';
 import DevPanel from './components/screens/DevPanel';
 import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
 import MaxContinuityScreen from './components/screens/MaxContinuityScreen';
@@ -429,7 +428,7 @@ export default function CommandCenter() {
         case 'assist': return <EmpireAssistPage />;
         case 'support': return <SupportForgePage />;
         case 'contractor': return <ContractorForgePage />;
-        case 'lead': return <LeadForgePageNew initialSection={activeSection || undefined} />;
+        case 'lead': return <LeadForgePage initialSection={activeSection || undefined} />;
         case 'market': return <MarketForgePage />;
         case 'pay': return <EmpirePayPage />;
         case 'ship': return <ShipForgePage />;

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import WorkroomLeadForm from '../components/workroom/WorkroomLeadForm';
 
 export const metadata: Metadata = {
   title: 'Empire Workroom — Custom Drapery & Upholstery',
@@ -70,7 +71,7 @@ export default function WorkroomLanding() {
             Handcrafted window treatments and upholstery for homes and businesses in the DC metro area.
           </p>
           <a
-            href="/intake/signup"
+            href="#workroom-lead"
             style={{
               display: 'inline-block',
               background: 'linear-gradient(135deg, #b8960c, #d4af37)',
@@ -84,7 +85,7 @@ export default function WorkroomLanding() {
               transition: 'transform 0.15s',
             }}
           >
-            Get a Free Quote
+            Tell us about the room
           </a>
         </div>
       </header>
@@ -179,10 +180,10 @@ export default function WorkroomLanding() {
           marginLeft: 'auto',
           marginRight: 'auto',
         }}>
-          AI-assisted quote prep is available for photos, measurements, fabric notes, and project intake.
+          Send the room notes below. Photos can follow by email.
         </p>
         <a
-          href="/intake/signup"
+          href="#workroom-lead"
           style={{
             display: 'inline-block',
             background: '#1a1a2e',
@@ -197,6 +198,18 @@ export default function WorkroomLanding() {
         >
           Request a Quote
         </a>
+      </section>
+
+      <section id="workroom-lead" style={{ maxWidth: 640, margin: '0 auto', padding: '8px 24px 24px' }}>
+        <div style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 14, padding: 24 }}>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e', margin: '0 0 8px' }}>
+            Project inquiry
+          </h2>
+          <p style={{ color: '#555', fontSize: 15, margin: '0 0 16px', lineHeight: 1.5 }}>
+            Drapery, Romans, banquettes, and soft goods. Photos can follow by email.
+          </p>
+          <WorkroomLeadForm captureSurface="workroom_form" />
+        </div>
       </section>
 
       {/* Contact */}
