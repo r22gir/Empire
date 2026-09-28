@@ -16,7 +16,17 @@ const LUXE_PUBLIC_POST_EXACT = new Set([
   "/api/v1/intake/signup",
   "/api/v1/intake/login",
   "/api/v1/photos/upload",
+  // Workroom designer brief (capture_channel luxeforge or leadforge). One
+  // customer + one lead. Not the prospect/quote list.
+  "/api/v1/leadforge/intake",
 ]);
+
+function isWorkroomQuotePost(path: string): boolean {
+  const prefix = "/api/v1/leadforge/intake/";
+  if (!path.startsWith(prefix) || !path.endsWith("/quote")) return false;
+  const leadId = path.slice(prefix.length, -"/quote".length);
+  return leadId.length > 0 && /^[0-9]+$/.test(leadId);
+}
 const LUXE_PUBLIC_ANY_EXACT = new Set([
   "/intake",
   "/favicon.ico",
@@ -53,11 +63,11 @@ function isLuxePathAllowed(method: string, pathname: string): boolean {
     return false;
   }
   if (verb === "OPTIONS") {
-    if (LUXE_PUBLIC_POST_EXACT.has(path) || LUXE_PUBLIC_ANY_EXACT.has(path)) return true;
+    if (LUXE_PUBLIC_POST_EXACT.has(path) || isWorkroomQuotePost(path) || LUXE_PUBLIC_ANY_EXACT.has(path)) return true;
     return LUXE_PUBLIC_ANY_PREFIXES.some((prefix) => path.startsWith(prefix));
   }
   if (verb === "HEAD") verb = "GET";
-  if (verb === "POST" && LUXE_PUBLIC_POST_EXACT.has(path)) return true;
+  if (verb === "POST" && (LUXE_PUBLIC_POST_EXACT.has(path) || isWorkroomQuotePost(path))) return true;
   if (LUXE_PUBLIC_ANY_EXACT.has(path)) return true;
   return LUXE_PUBLIC_ANY_PREFIXES.some((prefix) => path.startsWith(prefix));
 }

@@ -40,6 +40,7 @@ SENSITIVE_PATHS = (
     "/api/v1/payments/overdue",
     "/api/v1/jobs/dashboard",
     "/api/v1/leads/leadforge/prospects/stats",
+    "/api/v1/leadforge/intake/1",
     "/api/v1/pricing/canonical/status",
     "/api/v1/max/health",
     "/api/v1/crm/customers",
@@ -49,7 +50,10 @@ SENSITIVE_PATHS = (
     "/health",
 )
 
-PUBLIC_CAPTURE = "/api/v1/intake/login"
+PUBLIC_CAPTURE = (
+    "/api/v1/intake/login",
+    "/api/v1/leadforge/intake",
+)
 DENIAL_ERROR = "luxe_public_edge_denied"
 
 
@@ -113,16 +117,28 @@ def main() -> int:
             failed = True
 
     if not args.expect_open:
+        for path in PUBLIC_CAPTURE:
+            status, _ctype, payload = _fetch(
+                f"{base}{path}",
+                host,
+                method="POST",
+                body=b"{}",
+            )
+            error = _error_field(payload)
+            print(f"{status} error={error or '-'} POST {path}")
+            if status == 401 and error == DENIAL_ERROR:
+                print(f"FAIL public capture was closed by the edge gate: POST {path}", file=sys.stderr)
+                failed = True
         status, _ctype, payload = _fetch(
-            f"{base}{PUBLIC_CAPTURE}",
+            f"{base}/api/v1/leadforge/intake/1/quote",
             host,
             method="POST",
             body=b"{}",
         )
         error = _error_field(payload)
-        print(f"{status} error={error or '-'} POST {PUBLIC_CAPTURE}")
+        print(f"{status} error={error or '-'} POST /api/v1/leadforge/intake/1/quote")
         if status == 401 and error == DENIAL_ERROR:
-            print("FAIL public intake login was closed by the edge gate", file=sys.stderr)
+            print("FAIL Workroom quote-from-brief was closed by the edge gate", file=sys.stderr)
             failed = True
 
     if failed:

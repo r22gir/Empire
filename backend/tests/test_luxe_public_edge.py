@@ -174,6 +174,30 @@ def test_allowlist_rejects_traversal_and_quote_reads():
     assert not is_public_luxe_path_allowed("GET", "/api/v1/photos/serve/quote/abc/file.jpg")
 
 
+def test_workroom_brief_post_stays_open_and_lead_reads_stay_closed():
+    """PR 67 capture door: capture_channel luxeforge|leadforge. Not a CRM list."""
+    assert is_public_luxe_path_allowed("POST", "/api/v1/leadforge/intake")
+    assert is_public_luxe_path_allowed("POST", "/api/v1/leadforge/intake/12/quote")
+    assert not is_public_luxe_path_allowed("GET", "/api/v1/leadforge/intake")
+    assert not is_public_luxe_path_allowed("GET", "/api/v1/leadforge/intake/12")
+    assert not is_public_luxe_path_allowed("GET", "/api/v1/leads/leadforge/prospects/stats")
+    assert not is_public_luxe_path_allowed("POST", "/api/v1/leadforge/intake/12")
+    assert not is_public_luxe_path_allowed("POST", "/api/v1/leadforge/intake/abc/quote")
+
+
+def test_public_host_lets_workroom_brief_through_the_gate():
+    brief = LUXE.post(
+        "/api/v1/leadforge/intake",
+        json={"capture_channel": "luxeforge", "business": "workroom"},
+    )
+    quote = LUXE.post("/api/v1/leadforge/intake/12/quote")
+    listed = LUXE.get("/api/v1/leadforge/intake/12")
+    assert _error(brief) != DENIAL_ERROR
+    assert _error(quote) != DENIAL_ERROR
+    assert listed.status_code == 401
+    assert _error(listed) == DENIAL_ERROR
+
+
 def test_next_middleware_mentions_the_same_gate():
     text = MIDDLEWARE_TS.read_text()
     for snippet in (
@@ -186,5 +210,6 @@ def test_next_middleware_mentions_the_same_gate():
         "/api/v1/fabrics/intake-project/",
         "/api/v1/photos/upload",
         "/api/v1/photos/serve/intake/",
+        "/api/v1/leadforge/intake",
     ):
         assert snippet in text, snippet

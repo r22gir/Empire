@@ -46,13 +46,19 @@ _BLOCKED_PREFIXES = (
 )
 
 # Anonymous capture posts. Route handlers add their own slowapi limits.
+# /api/v1/leadforge/intake is the Workroom brief shared by LuxeForge
+# (capture_channel=luxeforge) and LeadForge (capture_channel=leadforge).
+# It writes one customer, one prospect, and one lead. It does not list them.
 _PUBLIC_POST_EXACT = frozenset(
     {
         "/api/v1/intake/signup",
         "/api/v1/intake/login",
         "/api/v1/photos/upload",
+        "/api/v1/leadforge/intake",
     }
 )
+
+_WORKROOM_INTAKE_PREFIX = "/api/v1/leadforge/intake/"
 
 # Client portal paths. Intake JWT (or, for fabric rows and swatch bytes, the
 # project id the portal just created) is enforced by the handler or is the
@@ -95,6 +101,7 @@ SENSITIVE_ANONYMOUS_PATHS = (
     ("GET", "/api/v1/leads/leadforge/prospects/stats"),
     ("GET", "/api/v1/leads/pipeline"),
     ("GET", "/api/v1/leads/leadforge/providers"),
+    ("GET", "/api/v1/leadforge/intake/1"),
     ("GET", "/api/v1/pricing/canonical/status"),
     ("GET", "/api/v1/pricing/labor-rates"),
     ("GET", "/api/v1/quotes/pricing-tables"),
@@ -195,7 +202,7 @@ def is_public_luxe_path_allowed(method: str, path: str) -> bool:
     if method == "HEAD":
         method = "GET"
 
-    if method == "POST" and path in _PUBLIC_POST_EXACT:
+    if method == "POST" and (path in _PUBLIC_POST_EXACT or _is_workroom_quote_post(path)):
         return True
     if path in _PUBLIC_ANY_METHOD_EXACT:
         return True
@@ -205,8 +212,20 @@ def is_public_luxe_path_allowed(method: str, path: str) -> bool:
     return False
 
 
+def _is_workroom_quote_post(path: str) -> bool:
+    """POST /api/v1/leadforge/intake/{lead_id}/quote — one brief, one quote.
+
+    GET of that lead stays closed. Integer ids are guessable, so a read
+    would be a CRM dump. The quote post does not list quotes.
+    """
+    if not path.startswith(_WORKROOM_INTAKE_PREFIX) or not path.endswith("/quote"):
+        return False
+    lead_id = path[len(_WORKROOM_INTAKE_PREFIX) : -len("/quote")]
+    return bool(lead_id) and lead_id.isdigit()
+
+
 def _path_has_any_public_method(path: str) -> bool:
-    if path in _PUBLIC_POST_EXACT:
+    if path in _PUBLIC_POST_EXACT or _is_workroom_quote_post(path):
         return True
     if path in _PUBLIC_ANY_METHOD_EXACT:
         return True
@@ -252,6 +271,13 @@ def consume_public_edge_rate_limit(client_ip: str, method: str, path: str, now: 
     if method.upper() == "POST" and normalize_path(path) == "/api/v1/photos/upload":
         upload_cap = _positive_int_env("LUXE_PUBLIC_EDGE_UPLOAD_PER_MINUTE", 10)
         if not _consume(f"{ip}|upload", upload_cap, moment):
+            return False
+    normalized = normalize_path(path)
+    if method.upper() == "POST" and (
+        normalized == "/api/v1/leadforge/intake" or _is_workroom_quote_post(normalized)
+    ):
+        intake_cap = _positive_int_env("LUXE_PUBLIC_EDGE_INTAKE_PER_MINUTE", 10)
+        if not _consume(f"{ip}|workroom-intake", intake_cap, moment):
             return False
     return True
 

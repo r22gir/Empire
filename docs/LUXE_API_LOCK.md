@@ -43,7 +43,25 @@ Customer names, quote numbers, and amounts from that probe are intentionally not
 
 Header: `X-Empire-Edge: luxe-public-denied`.
 
-Allowed on those hosts (everything else, including `/health`, `/docs`, quotes, invoices, payments, jobs, leads, pricing, CRM, MAX, portal link lists, fabric catalog, and quote photo bytes, is denied):
+Two different doors. Only the first one stays open.
+
+### Stays open: Workroom designer capture
+
+PR 67 (`capture_channel=luxeforge` on the LuxeForge brief, `capture_channel=leadforge` on the thin LeadForge ad) posts one brief into the shared CRM and quote path. This lock does not remove that screen and does not reject those posts. On localhost, Tailscale, and `studio` the gate does not run at all, so Command Center is unchanged.
+
+On the public luxe host the same posts are allowed and rate-limited (10/minute per IP, `LUXE_PUBLIC_EDGE_INTAKE_PER_MINUTE`). They are not a list.
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| POST | `/api/v1/leadforge/intake` | One ForgeCRM customer, one LeadForge prospect, one `lf_leads` row. Body field `capture_channel` is `luxeforge` or `leadforge`. |
+| POST | `/api/v1/leadforge/intake/{lead_id}/quote` | Opens one Workroom quote for that brief (the form’s “Create Workroom quote” button). Does not list quotes. |
+| POST | `/api/v1/photos/upload` | Optional brief photos. 10/minute. |
+
+`GET /api/v1/leadforge/intake/{lead_id}` is **denied**. Lead ids are small integers, so a read would enumerate briefs. `GET /api/v1/leads/leadforge/prospects/stats`, `GET /api/v1/quotes`, and `GET /api/v1/crm/customers` stay denied.
+
+The public page shell is still `/intake` (signup, project, photos). `/luxe` and `/luxeforge` on that hostname still redirect there, which is how the host already behaved. The Workroom brief screen itself is the Command Center page and keeps working on the private cash path.
+
+### Stays open: older intake portal
 
 | Method | Path | Why it stays |
 | --- | --- | --- |
@@ -53,6 +71,10 @@ Allowed on those hosts (everything else, including `/health`, `/docs`, quotes, i
 | POST | `/api/v1/photos/upload` | Swatch upload from the intake form. Extra cap: 10/minute per IP. |
 | GET | `/api/v1/photos/serve/intake/...` | Bytes for that swatch. Quote/telegram/craftforge photo URLs are denied. |
 | GET | `/intake`, `/intake/*`, `/intake_uploads/*`, `/_next/*`, favicon, robots | The public page shell. |
+
+### Locked: anonymous dumps
+
+Everything else on those hosts is **401**, including `/health`, `/docs`, quote lists, invoice lists, payments, jobs, lead stats, pricing tables, CRM customer lists, MAX, portal link lists, the fabric catalog, and quote photo bytes.
 
 Not allowed on the public edge, even though they sit under `/api/v1/intake`:
 
@@ -78,6 +100,7 @@ No new secret is required. The gate is on by default.
    LUXE_PUBLIC_EDGE_HOSTS=preview-luxe.empirebox.store
    LUXE_PUBLIC_EDGE_RATE_PER_MINUTE=60
    LUXE_PUBLIC_EDGE_UPLOAD_PER_MINUTE=10
+   LUXE_PUBLIC_EDGE_INTAKE_PER_MINUTE=10
    ```
 
    Do not put `studio`, `api`, `forge`, or a Tailscale IP in that list. Those are operator paths.
