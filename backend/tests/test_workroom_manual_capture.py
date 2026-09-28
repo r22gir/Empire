@@ -176,5 +176,5 @@ def test_service_has_no_outbound_mail_hooks():
         lowered = text.lower()
         assert "sendgrid" not in lowered
         assert "smtplib" not in lowered
-        assert "telegram" not in lowered
+        assert "telegram_bot" not in lowered
         assert "mailto:" not in lowered

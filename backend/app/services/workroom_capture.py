@@ -724,7 +724,7 @@ def open_workroom_quote(intake_id: int) -> dict:
             "discount_amount": 0,
             "discount_type": "dollar",
             "total": 0,
-            "deposit": {"deposit_percent": 50, "deposit_amount": 0},
+            "deposit": 0,
             "terms": (
                 "Draft from Workroom manual capture. "
                 "Price after measures, fabric, and install date are confirmed."
