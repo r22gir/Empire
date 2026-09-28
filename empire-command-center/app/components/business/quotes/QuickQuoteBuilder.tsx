@@ -3,7 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { Zap, Upload, Loader2, CheckCircle, FileText, X, ImageIcon, Camera } from 'lucide-react';
 import { API } from '../../../lib/api';
-import { compressImageDataUrl } from '../../../lib/visionImage';
+import { compressImageDataUrl, visionAbortSignal, visionTimeoutMessage } from '../../../lib/visionImage';
 import { normalizeMeasureResult } from '../../../lib/visionMeasure';
 
 interface QuickQuoteBuilderProps {
@@ -60,6 +60,7 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image }),
+        signal: visionAbortSignal(),
       });
       if (!res.ok) throw new Error('Analysis failed');
       const data = normalizeMeasureResult(await res.json());
@@ -69,8 +70,8 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
         const desc = `${data.window_type || 'Window'} — ${data.width_inches}"W × ${data.height_inches}"H. ${(data.treatment_suggestions || []).join(', ')}`;
         setDescription(desc);
       }
-    } catch {
-      setError('Photo analysis failed. You can still generate the quote manually.');
+    } catch (err) {
+      setError(visionTimeoutMessage(err) || 'Photo analysis failed. You can still generate the quote manually.');
     } finally {
       setAnalyzing(false);
     }
