@@ -1,8 +1,66 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const LUXE_PUBLIC_HOST = "luxe.empirebox.store";
-const LUXE_PUBLIC_REDIRECT_PATHS = new Set(["/", "/luxe", "/luxe/", "/luxeforge", "/luxeforge/"]);
+// Public Luxe hostnames. Keep this allowlist in sync with
+// backend/app/security/luxe_public_edge.py. Cloudflare currently tunnels
+// /api/v1/* straight to the backend, so the Python gate is the one that
+// closes the hole. This middleware is the second lock for requests that
+// do hit Next (pages, and /api/v1 if the tunnel rule is removed).
+const LUXE_PUBLIC_HOSTS = new Set([
+  "luxe.empirebox.store",
+  "test-luxe.empirebox.store",
+]);
+const LUXE_BLOCKED_EXACT = new Set(["/api/v1/intake/reset-password"]);
+const LUXE_BLOCKED_PREFIXES = ["/api/v1/intake/admin"];
+const LUXE_PUBLIC_POST_EXACT = new Set([
+  "/api/v1/intake/signup",
+  "/api/v1/intake/login",
+  "/api/v1/photos/upload",
+]);
+const LUXE_PUBLIC_ANY_EXACT = new Set([
+  "/intake",
+  "/favicon.ico",
+  "/robots.txt",
+  "/api/v1/intake/me",
+  "/api/v1/intake/projects",
+]);
+const LUXE_PUBLIC_ANY_PREFIXES = [
+  "/intake/",
+  "/_next/",
+  "/intake_uploads/",
+  "/api/v1/intake/projects/",
+  "/api/v1/fabrics/intake-project/",
+  "/api/v1/photos/serve/intake/",
+];
+
+function normalizeLuxePath(pathname: string): string {
+  let path = pathname.split("?")[0].split("#")[0] || "/";
+  if (!path.startsWith("/")) path = `/${path}`;
+  while (path.includes("//")) path = path.split("//").join("/");
+  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+  return path;
+}
+
+function isLuxePathAllowed(method: string, pathname: string): boolean {
+  const path = normalizeLuxePath(pathname);
+  let verb = method.toUpperCase();
+  if (path.includes("..") || path.includes("\\")) return false;
+  if (LUXE_BLOCKED_EXACT.has(path)) return false;
+  for (const prefix of LUXE_BLOCKED_PREFIXES) {
+    if (path === prefix || path.startsWith(`${prefix}/`)) return false;
+  }
+  if (path.startsWith("/api/v1/fabrics/intake-project/") && path.endsWith("/match")) {
+    return false;
+  }
+  if (verb === "OPTIONS") {
+    if (LUXE_PUBLIC_POST_EXACT.has(path) || LUXE_PUBLIC_ANY_EXACT.has(path)) return true;
+    return LUXE_PUBLIC_ANY_PREFIXES.some((prefix) => path.startsWith(prefix));
+  }
+  if (verb === "HEAD") verb = "GET";
+  if (verb === "POST" && LUXE_PUBLIC_POST_EXACT.has(path)) return true;
+  if (LUXE_PUBLIC_ANY_EXACT.has(path)) return true;
+  return LUXE_PUBLIC_ANY_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
 
 // R1X-PUB-EMPIREBOX: Public apex landing hosts.
 // The apex (and www) is a public, scrollable, SEO-renderable surface that
@@ -54,15 +112,36 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // --- Existing LUXE block (untouched) ---
-  if (host !== LUXE_PUBLIC_HOST) {
-    // fall through to FORGE block
-  } else if (!LUXE_PUBLIC_REDIRECT_PATHS.has(pathname)) {
+  // --- LUXE bucket: HARD-SCOPED to intake ---
+  // Anonymous clients may open the intake pages and the narrow capture API.
+  // Quotes, invoices, CRM, payments, jobs, leads, and MAX are 401 here.
+  // Page URLs outside the allowlist redirect to /intake.
+  if (LUXE_PUBLIC_HOSTS.has(host)) {
+    if (!isLuxePathAllowed(request.method, pathname)) {
+      const isApi =
+        pathname.startsWith("/api/") ||
+        pathname === "/docs" ||
+        pathname === "/redoc" ||
+        pathname === "/openapi.json" ||
+        pathname === "/health";
+      if (isApi) {
+        return NextResponse.json(
+          { detail: "Authentication required", error: "luxe_public_edge_denied" },
+          {
+            status: 401,
+            headers: {
+              "Cache-Control": "no-store",
+              "X-Empire-Edge": "luxe-public-denied",
+            },
+          },
+        );
+      }
+      const url = request.nextUrl.clone();
+      url.pathname = "/intake";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
     return NextResponse.next();
-  } else {
-    const url = request.nextUrl.clone();
-    url.pathname = "/intake";
-    return NextResponse.redirect(url);
   }
 
   // --- FORGE block: operator platform infrastructure surface ---
