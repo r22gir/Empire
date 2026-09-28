@@ -32,7 +32,7 @@ If a frame is empty, the page is telling the truth: that file is not next to the
 
 ## What is real vs mock
 
-- Real: the Workroom sentences from the current landing, the hero filenames from the creative pack, and `mailto:workroom@empirebox.store`.
+- Real: the Workroom offer (beauty, your designs come true, idea drawings on the quote), the hero filenames from the creative pack, and `mailto:workroom@empirebox.store`.
 - Mock: everything else. No LeadForge form, no inbox check, no Instagram URL, no production deploy.
 
 The short recommendation is `STYLE_REPORT.md`.
