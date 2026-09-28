@@ -11,6 +11,7 @@ from typing import Optional
 from app.db.database import get_db, dict_row, dict_rows
 from app.data.product_catalog import PRICING_SPECS
 from app.services.pricing.engine import price_workroom_line, PricingInputError
+from app.services.pricing.quote_sync import normalize_quote_inputs, woodcraft_line_amount
 from app.services.max.access_control import FOUNDER_APPROVAL_PIN, verify_founder_approval
 
 logger = logging.getLogger(__name__)
@@ -255,7 +256,8 @@ def _price_line_item(category, inputs, business_unit, legacy):
 
     Returns a dict ready to merge into the INSERT/UPDATE column list.
     """
-    bu = business_unit or "workroom"
+    bu = (business_unit or "workroom").strip().lower()
+    inputs = normalize_quote_inputs(inputs or {})
     inputs = _coerce_unit_qty_inputs(category, inputs, legacy)
     if category and str(category).lower() in PRICING_SPECS:
         # Fail loud — never silently fall back to qty × rate for catalog items.
@@ -313,6 +315,25 @@ def _price_line_item(category, inputs, business_unit, legacy):
             "business_unit":    result["business_unit"],
             "computed_json":    json.dumps(computed, default=str),
         }
+
+    if bu == "woodcraft":
+        snap = woodcraft_line_amount(category, inputs)
+        if snap is not None:
+            amount = float(snap["calculated_subtotal"])
+            return {
+                "subtotal":         amount,
+                "unit_price":       amount,
+                "proposed_price":   amount,
+                "final_price":      amount,
+                "price_overridden": 0,
+                "business_unit":    snap["business_unit"],
+                "computed_json":    json.dumps({
+                    "rate_table_version": snap.get("rate_table_version"),
+                    "pricing_method": snap.get("pricing_method"),
+                    "calculation_steps": snap.get("calculation_steps"),
+                    "rates_used": snap.get("pricing_inputs"),
+                }, default=str),
+            }
 
     # Legacy manual path — only for non-catalog items
     qty  = float(legacy.get("quantity", 1) or 1)

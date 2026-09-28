@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API, API_BASE } from '../../lib/api';
+import { formatInches } from '../../lib/formatInches';
 import { Quote } from '../../lib/types';
 import { compressImageDataUrl, visionAbortSignal, visionTimeoutMessage } from '../../lib/visionImage';
 import { linesFromAnalyzedItems, quoteLineDescriptions } from '../../lib/photoQuote';
@@ -621,7 +622,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                             return { ...p, analysis: { ...p.analysis, items } };
                           }));
                         }} />
-                        <span>{it.description || it.type} {it.width && it.height ? `${it.width}×${it.height}"` : ''}</span>
+                        <span>{it.description || it.type} {it.width && it.height ? `${formatInches(it.width)} × ${formatInches(it.height)}` : ''}</span>
                       </label>
                     ))}
                   </div>

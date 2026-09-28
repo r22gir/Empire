@@ -1,6 +1,7 @@
 'use client';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { API } from '../../lib/api';
+import { formatInches, formatInchList } from '../../lib/formatInches';
 import {
   ArrowLeft, ArrowRight, User, Camera, Layers, Settings, FileText,
   Plus, Trash2, Upload, X, Check, Loader2, ChevronDown, ChevronUp, GripVertical, Search,
@@ -2626,7 +2627,7 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
                         <div key={idx} style={{ padding: '12px 14px', borderRadius: 10, border: '1.5px solid #ece8e0', background: '#faf9f7' }}>
                           <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 8 }}>
                             {item.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                            {item.width && <span style={{ fontWeight: 400, color: '#888' }}> ({item.width} x {item.height} x {item.depth})</span>}
+                            {item.width && <span style={{ fontWeight: 400, color: '#888' }}> ({formatInchList([item.width, item.height, item.depth])})</span>}
                           </div>
                           <div style={{ fontSize: 10, fontWeight: 600, color: '#888', marginBottom: 4 }}>Work Type</div>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-3">
@@ -2837,16 +2838,16 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
         const pw = pc.equalDivide
           ? ((bw - pc.gap * (pc.panelCount - 1)) / pc.panelCount).toFixed(1)
           : (pc.panelWidth || 0).toFixed(1);
-        panelSize = `Each panel: ${pw}" W × ${bh}" H`;
+        panelSize = `Each panel: ${formatInches(pw)} W × ${formatInches(bh)} H`;
       } else if (pc.style === 'horizontal_channels' && pc.panelCount > 0 && bh > 0) {
         const ph = pc.equalDivide
           ? ((bh - pc.gap * (pc.panelCount - 1)) / pc.panelCount).toFixed(1)
           : (pc.panelHeight || 0).toFixed(1);
-        panelSize = `Each panel: ${bw}" W × ${ph}" H`;
+        panelSize = `Each panel: ${formatInches(bw)} W × ${formatInches(ph)} H`;
       } else if (pc.style === 'tufted' && pc.rows && pc.columns) {
         const dw = pc.diamondW || (bw / pc.columns);
         const dh = pc.diamondH || (bh / pc.rows);
-        panelSize = `Diamond: ${dw.toFixed(1)}" W × ${dh.toFixed(1)}" H`;
+        panelSize = `Diamond: ${formatInches(dw)} W × ${formatInches(dh)} H`;
       }
 
       // Fabric estimate
@@ -2862,9 +2863,9 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
           <table style="font-size:11px;color:#555;border-collapse:collapse;width:100%;">
             <tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Style</td><td>${styleName}</td></tr>
             ${pc.panelCount ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;"># Panels</td><td>${pc.panelCount}</td></tr>` : ''}
-            ${pc.panelWidth ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Panel Width</td><td>${pc.panelWidth}"</td></tr>` : ''}
-            ${pc.panelHeight ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Panel Height</td><td>${pc.panelHeight}"</td></tr>` : ''}
-            ${pc.gap ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Gap</td><td>${pc.gap}"</td></tr>` : ''}
+            ${pc.panelWidth ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Panel Width</td><td>${formatInches(pc.panelWidth)}</td></tr>` : ''}
+            ${pc.panelHeight ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Panel Height</td><td>${formatInches(pc.panelHeight)}</td></tr>` : ''}
+            ${pc.gap ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Gap</td><td>${formatInches(pc.gap)}</td></tr>` : ''}
             ${pc.rows ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Grid</td><td>${pc.rows} rows × ${pc.columns} columns</td></tr>` : ''}
             ${pc.tuftType && pc.style === 'tufted' ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Tuft Type</td><td>${pc.tuftType}</td></tr>` : ''}
             ${pc.equalDivide ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Divide</td><td>Equal</td></tr>` : ''}
@@ -2893,9 +2894,9 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
         <div style="padding:12px;border:1px solid #ece8e0;border-radius:8px;margin-bottom:12px;background:#faf9f7;">
           <div style="font-size:13px;font-weight:700;color:#1a1a1a;margin-bottom:4px;">${formatItemType(item.type)}</div>
           <div style="display:flex;gap:16px;font-size:11px;color:#666;">
-            ${item.width ? `<span>W: <strong>${item.width}"</strong></span>` : ''}
-            ${item.height ? `<span>H: <strong>${item.height}"</strong></span>` : ''}
-            ${item.depth ? `<span>D: <strong>${item.depth}"</strong></span>` : ''}
+            ${item.width ? `<span>W: <strong>${formatInches(item.width)}</strong></span>` : ''}
+            ${item.height ? `<span>H: <strong>${formatInches(item.height)}</strong></span>` : ''}
+            ${item.depth ? `<span>D: <strong>${formatInches(item.depth)}</strong></span>` : ''}
             <span>Qty: <strong>${item.quantity}</strong></span>
           </div>
           ${item.notes ? `<div style="font-size:11px;color:#888;margin-top:4px;">${item.notes}</div>` : ''}
@@ -2912,7 +2913,7 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
             return `
               <div style="padding:10px;border:1px solid #ece8e0;border-radius:8px;margin-bottom:8px;background:#faf9f7;">
                 <div style="font-size:12px;font-weight:700;color:#1a1a1a;">${formatItemType(item.type)}</div>
-                <div style="font-size:11px;color:#666;">${[item.width && `W:${item.width}"`, item.height && `H:${item.height}"`, item.depth && `D:${item.depth}"`, `Qty:${item.quantity}`].filter(Boolean).join(' &bull; ')}</div>
+                <div style="font-size:11px;color:#666;">${[item.width && `W:${formatInches(item.width)}`, item.height && `H:${formatInches(item.height)}`, item.depth && `D:${formatInches(item.depth)}`, `Qty:${item.quantity}`].filter(Boolean).join(' &bull; ')}</div>
                 ${item.notes ? `<div style="font-size:10px;color:#888;margin-top:2px;">${item.notes}</div>` : ''}
                 ${panelInfo}
               </div>`;
@@ -3920,7 +3921,7 @@ function StepReview({ customer, photos, rooms, options, totalItems }: {
               <div key={item.id} style={{ padding: '4px 0', fontSize: 12, color: '#555' }}>
                 <div className="flex items-center justify-between">
                   <span>{formatItemType(item.type)}
-                    {item.width || item.height ? ` (${[item.width, item.height, item.depth].filter(Boolean).join(' x ')})` : ''}
+                    {item.width || item.height ? ` (${formatInchList([item.width, item.height, item.depth])})` : ''}
                   </span>
                   <span style={{ fontWeight: 600 }}>x{item.quantity}</span>
                 </div>

@@ -5,6 +5,8 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
+from app.services.pricing.rate_cards import lookup_rate
+
 
 PRICING_ENGINE_VERSION = "empire-pricing-engine-v1"
 FORMULA_VERSION = "pricing-formulas-2026.05"
@@ -293,11 +295,14 @@ def _category(raw: str | None, aliases: dict[str, str], business_unit: str) -> s
     key = (raw or "").strip().lower().replace(" ", "_").replace("-", "_")
     if not key:
         raise PricingClassificationError(f"{business_unit} product_category is required")
-    if key not in aliases:
-        raise PricingClassificationError(
-            f"Unknown {business_unit} product_category '{raw}'. Select an explicit pricing category."
-        )
-    return aliases[key]
+    if key in aliases:
+        return aliases[key]
+    # Pricing Studio dropdowns send the canonical name (the alias value).
+    if key in set(aliases.values()):
+        return key
+    raise PricingClassificationError(
+        f"Unknown {business_unit} product_category '{raw}'. Select an explicit pricing category."
+    )
 
 
 def _step(label: str, formula: str, quantity: float, rate: float, amount: float, **extra) -> dict[str, Any]:
@@ -331,7 +336,7 @@ def _sum_component_steps(inputs: dict[str, Any], category: str, business: str) -
         method = "quantity_unit_rate" if method == "composite" else method
 
     labor_hours = _positive(inputs, "labor_hours")
-    labor_rate = _positive(inputs, "labor_rate", 85 if business == "woodcraft" else 65)
+    labor_rate = _positive(inputs, "labor_rate", lookup_rate(business, "labor_rate"))
     if labor_hours:
         amount = labor_hours * labor_rate
         steps.append(_step("labor", "labor_hours * labor_rate", labor_hours, labor_rate, amount))
@@ -466,25 +471,25 @@ def _woodcraft_component_steps(inputs: dict[str, Any], category: str) -> tuple[s
         steps.append(_step("board-foot material", "board_feet * cost_per_board_foot * (1 + waste_factor) * (1 + markup)", board_feet, cost_per_board_foot, amount, waste_factor=waste_factor, markup_percent=markup_percent))
 
     machine_minutes = _positive(inputs, "machine_minutes", _positive(inputs, "cnc_minutes", 0))
-    machine_rate = _positive(inputs, "machine_rate_per_hour", 95)
+    machine_rate = _positive(inputs, "machine_rate_per_hour", lookup_rate("woodcraft", "machine_rate_per_hour"))
     if machine_minutes:
         amount = (machine_minutes / 60) * machine_rate
         steps.append(_step("CNC/router machine time", "(machine_minutes / 60) * machine_rate_per_hour", machine_minutes, machine_rate, amount))
 
     design_hours = _positive(inputs, "design_hours", _positive(inputs, "drawing_hours", 0))
-    design_rate = _positive(inputs, "design_rate", 85)
+    design_rate = _positive(inputs, "design_rate", lookup_rate("woodcraft", "design_rate"))
     if design_hours:
         amount = design_hours * design_rate
         steps.append(_step("design/drawing time", "design_hours * design_rate", design_hours, design_rate, amount))
 
     assembly_hours = _positive(inputs, "assembly_hours", _positive(inputs, "labor_hours", 0))
-    assembly_rate = _positive(inputs, "assembly_rate", _positive(inputs, "labor_rate", 75))
+    assembly_rate = _positive(inputs, "assembly_rate", _positive(inputs, "labor_rate", lookup_rate("woodcraft", "assembly_rate")))
     if assembly_hours:
         amount = assembly_hours * assembly_rate
         steps.append(_step("assembly labor", "assembly_hours * assembly_rate", assembly_hours, assembly_rate, amount))
 
     finishing_hours = _positive(inputs, "finishing_hours")
-    finishing_rate = _positive(inputs, "finishing_rate", 70)
+    finishing_rate = _positive(inputs, "finishing_rate", lookup_rate("woodcraft", "finishing_rate"))
     finishing_sqft = _positive(inputs, "finishing_square_feet", _positive(inputs, "finish_square_feet", 0))
     finishing_sqft_rate = _positive(inputs, "finishing_square_foot_rate")
     if finishing_hours:

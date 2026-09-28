@@ -45,7 +45,7 @@ const OPERATIONS = ['profile', 'pocket', 'vcarve', 'engrave', '3d-relief', '3d-p
 const UNITS = ['in', 'mm', 'cm', 'ft'] as const;
 const MATERIAL_UNITS = ['ea', 'sqft', 'bdft', 'lnft', 'ml', 'kg'] as const;
 
-const CNC_RATE = 1.50;
+const CANONICAL_CNC_RATE_PER_HOUR = 95;
 
 const emptyMaterial = (): MaterialRow => ({ name: '', quantity: 1, unit: 'ea', cost_per_unit: 0 });
 const emptyCNC = (): CNCJobRow => ({ machine: 'x-carve', operation: 'profile', tool: '', estimated_time_min: 0 });
@@ -143,6 +143,7 @@ export default function QuoteBuilderSection() {
 
   // Photo upload state
   const [photos, setPhotos] = useState<{ file?: File; url?: string; name: string; serverUrl?: string; includeInPdf?: boolean }[]>([]);
+  const [cncRatePerHour, setCncRatePerHour] = useState(CANONICAL_CNC_RATE_PER_HOUR);
   const [uploading, setUploading] = useState(false);
   const [aiResults, setAiResults] = useState<any[]>([]);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -160,6 +161,16 @@ export default function QuoteBuilderSection() {
 
   useEffect(() => { fetchDesigns(); }, [fetchDesigns]);
 
+  useEffect(() => {
+    fetch(`${API}/pricing/canonical/status`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const rate = data?.rate_cards?.woodcraft?.rates?.machine_rate_per_hour;
+        if (typeof rate === 'number' && rate > 0) setCncRatePerHour(rate);
+      })
+      .catch(() => {});
+  }, []);
+
   // Determine visibility flags
   const showCNC = jobType === 'cnc' || jobType === 'mixed';
   const showLineItems = jobType === 'general' || jobType === 'mixed';
@@ -168,7 +179,7 @@ export default function QuoteBuilderSection() {
   // Auto-calculate costs — fixed to avoid double-counting
   const lineItemTotal = lineItems.reduce((sum, li) => sum + (li.quantity * li.unit_price), 0);
   const materialCost = materials.reduce((sum, m) => sum + (m.quantity * m.cost_per_unit), 0);
-  const cncTimeCost = cncJobs.reduce((sum, j) => sum + (j.estimated_time_min * CNC_RATE), 0);
+  const cncTimeCost = cncJobs.reduce((sum, j) => sum + ((j.estimated_time_min / 60) * cncRatePerHour), 0);
 
   // Only count what's visible based on job type
   const itemsCost = showLineItems ? lineItemTotal : 0;
@@ -1096,7 +1107,7 @@ export default function QuoteBuilderSection() {
                     ))}
                   </div>
                   <div className="text-right mt-2">
-                    <span style={{ fontSize: 12, color: '#777' }}>@ ${CNC_RATE.toFixed(2)}/min</span>
+                    <span style={{ fontSize: 12, color: '#777' }}>@ ${cncRatePerHour.toFixed(2)}/hr</span>
                     <span style={{ fontSize: 12, fontWeight: 700, color: '#b8960c', marginLeft: 8 }}>CNC Total: ${cncTimeCost.toFixed(2)}</span>
                   </div>
                 </div>
