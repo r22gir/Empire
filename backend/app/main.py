@@ -656,6 +656,9 @@ load_router("app.routers.contacts", "/api/v1", ["contacts"])
 # LeadForge — Lead generation & sales machine
 load_router("app.routers.leadforge", "/api/v1", ["leadforge"])
 
+# Workroom intake — shared LeadForge + LuxeForge door (CRM → quote)
+load_router("app.routers.workroom_intake", "/api/v1", ["workroom-intake"])
+
 # Onboarding & Tier
 load_router("app.routers.onboarding", "/api/v1", ["onboarding"])
 

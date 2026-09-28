@@ -8,6 +8,7 @@ import {
   Pencil, Trash2, X, Save, BookOpen, Download, Archive, RotateCcw,
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
+import WorkroomBriefForm from './WorkroomBriefForm';
 
 interface IntakeUser {
   id: string;
@@ -82,7 +83,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
   const [sendingToWorkroom, setSendingToWorkroom] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [editUserData, setEditUserData] = useState<Partial<IntakeUser>>({});
-  const [activeTab, setActiveTab] = useState<'projects' | 'docs' | 'archived'>('projects');
+  const [activeTab, setActiveTab] = useState<'brief' | 'projects' | 'docs' | 'archived'>('brief');
   const [viewingPhoto, setViewingPhoto] = useState<{ url: string; name: string; projectName: string } | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [archivedUsers, setArchivedUsers] = useState<IntakeUser[]>([]);
@@ -233,8 +234,9 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
 
   return (
     <div className="flex-1 overflow-y-auto" style={{ padding: '20px 24px' }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 5, background: '#fff', paddingBottom: 8, marginBottom: 8 }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12 }}>
         <div style={{
           width: 44, height: 44, borderRadius: 12, background: '#7c3aed18',
           border: '2px solid #7c3aed40', display: 'flex', alignItems: 'center',
@@ -244,10 +246,10 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
         </div>
         <div style={{ flex: 1 }}>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>
-            LuxeForge — Intake Dashboard
+            LuxeForge — Workroom designer intake
           </h1>
           <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
-            Designer & installer project submissions
+            Rich Workroom briefs share the LeadForge lead, customer, and quote path
           </div>
         </div>
         <button
@@ -279,8 +281,9 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
       </div>
 
       {/* Tab Switcher */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {[
+          { id: 'brief' as const, label: 'Workroom brief', icon: <Send size={14} /> },
           { id: 'projects' as const, label: 'Projects', icon: <FolderOpen size={14} /> },
           { id: 'archived' as const, label: `Archived${archivedUsers.length > 0 ? ` (${archivedUsers.length})` : ''}`, icon: <Archive size={14} /> },
           { id: 'docs' as const, label: 'Documentation', icon: <BookOpen size={14} /> },
@@ -302,8 +305,11 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
           </button>
         ))}
       </div>
+      </div>
 
-      {activeTab === 'docs' ? (
+      {activeTab === 'brief' ? (
+        <WorkroomBriefForm onNavigate={onNavigate} />
+      ) : activeTab === 'docs' ? (
         <ProductDocs product="luxe" />
       ) : activeTab === 'archived' ? (
         /* ── Archived Tab ─────────────────────────────── */
