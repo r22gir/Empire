@@ -601,6 +601,9 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "edit_file": "file_edit",
             "append_file": "file_append",
             "create_quote": "create_engine_quote",
+            "deposit_link": "deposit_pay_link",
+            "pay_link": "deposit_pay_link",
+            "payment_link": "deposit_pay_link",
             "make_quote": "create_engine_quote",
             "new_quote": "create_engine_quote",
             # NOTE: do NOT map bare "quote" → create_engine_quote;
@@ -4953,9 +4956,54 @@ def _reset_max_state(params: dict, desk: Optional[str] = None) -> ToolResult:
     return ToolResult(tool="reset_max_state", success=True, result={"actions": results})
 
 
+@tool("deposit_pay_link")
+def _deposit_pay_link(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Workroom/WoodCraft quote → deposit invoice → Stripe Checkout link.
+
+    Copies the client from the quote. A second call reuses the open link.
+    Does not mark the invoice paid.
+    """
+    quote_id = (params.get("quote_id") or "").strip()
+    if not quote_id:
+        return ToolResult(tool="deposit_pay_link", success=False, error="quote_id is required")
+    try:
+        from fastapi import HTTPException
+        from app.routers.finance import create_quote_deposit_pay_link
+        result = create_quote_deposit_pay_link(quote_id, percent=params.get("percent"))
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return ToolResult(tool="deposit_pay_link", success=False, error=detail)
+    except Exception as exc:
+        return ToolResult(tool="deposit_pay_link", success=False, error=str(exc))
+
+    pay = result.get("pay_link") or {}
+    customer = result.get("customer") or {}
+    invoice = result.get("invoice") or {}
+    return ToolResult(tool="deposit_pay_link", success=True, result={
+        "quote_id": quote_id,
+        "business": result.get("business"),
+        "invoice_id": invoice.get("id"),
+        "invoice_number": invoice.get("invoice_number"),
+        "invoice_created": result.get("invoice_created"),
+        "amount": pay.get("amount"),
+        "checkout_url": pay.get("checkout_url"),
+        "payment_status": result.get("payment_status"),
+        "reused": pay.get("reused"),
+        "stripe_configured": pay.get("stripe_configured"),
+        "error": pay.get("error"),
+        "customer_name": customer.get("name"),
+        "customer_email": customer.get("email"),
+        "customer_phone": customer.get("phone"),
+        "customer_address": customer.get("address"),
+        "copied_from_quote": True,
+        "paid": result.get("payment_status") == "paid",
+        "return_host_note": result.get("return_host_note"),
+    })
+
+
 # ── TOOL DOCUMENTATION (for system prompt) ─────────────────────────
 
-TOOLS_DOC = """## Available Tools (42 total)
+TOOLS_DOC = """## Available Tools (43 total)
 You have access to real tools that query live data. Use them instead of making up information.
 To call a tool, include a tool block in your response:
 
@@ -4985,6 +5033,8 @@ If a tool call fails with "Unknown tool", check the name against this list.
   `{"tool": "search_conversations", "query": "keyword or phrase", "channel": "telegram|web|cc"}`
 
 ### Action Tools
+- **deposit_pay_link** — Workroom or WoodCraft quote only. Creates (or reuses) a deposit invoice on the finance router and a Stripe Checkout link on the payments router. Client name/email/phone/address are copied from the quote. A second call returns the same invoice and the same open link. payment_status stays `link_ready` until Stripe reports paid — do not tell the founder the deposit is collected when status is not `paid`.
+  `{"tool": "deposit_pay_link", "quote_id": "abc123"}`
 - **create_quick_quote** — DEPRECATED. Legacy JSON store (`/home/rg/empire-data/quotes/*.json`). Does NOT use the pricing engine. Returns `store: "json_legacy"`, `engine: "qis"`, `deprecation_notice`. Will be retired in sprint 1d. **Do NOT pick this tool for new quotes — use `create_engine_quote` instead.**
 - **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.**
   `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4, "packs": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`

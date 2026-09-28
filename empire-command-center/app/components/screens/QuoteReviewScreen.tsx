@@ -6,6 +6,7 @@ import { compressImageDataUrl, visionAbortSignal, visionTimeoutMessage } from '.
 import { linesFromAnalyzedItems, quoteLineDescriptions } from '../../lib/photoQuote';
 import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2, ShieldCheck, X } from 'lucide-react';
 import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
+import DepositPayLinkButton from '../business/finance/DepositPayLink';
 
 interface UploadedPhoto {
   filename: string;
@@ -1018,6 +1019,19 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
           {actionFeedback}
         </div>
       )}
+
+      <div style={{ marginBottom: 12 }}>
+        <DepositPayLinkButton
+          quoteId={quote.id}
+          customer={{
+            name: quote.customer_name,
+            email: (quote as any).customer_email,
+            phone: (quote as any).customer_phone,
+            address: (quote as any).customer_address,
+          }}
+        />
+        <p className="text-[11px] text-[#888] mt-2">Sends a deposit Checkout link using this quote’s client. A second click reuses the same link.</p>
+      </div>
 
       {/* Create Invoice button — shown when quote is accepted */}
       {quote.status === 'accepted' && (

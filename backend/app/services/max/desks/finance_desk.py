@@ -116,8 +116,44 @@ class FinanceDesk(BaseDesk):
 
         return await self.complete_task(task, result)
 
+    def _extract_quote_id(self, text: str) -> str | None:
+        match = re.search(r"quote[_\s-]?id[=:\s]+([A-Za-z0-9_-]{4,})", text or "", re.I)
+        return match.group(1) if match else None
+
     async def _handle_payment(self, task: DeskTask) -> DeskTask:
-        """Record a payment received."""
+        """Record a payment, or issue a deposit pay link when a quote id is present."""
+        text = f"{task.title} {task.description}"
+        lowered = text.lower()
+        quote_id = self._extract_quote_id(text)
+        wants_link = quote_id and any(
+            word in lowered for word in ("deposit", "pay link", "payment link", "checkout", "stripe")
+        )
+        if wants_link and quote_id:
+            from fastapi import HTTPException
+            from app.routers.finance import create_quote_deposit_pay_link
+
+            task.actions.append(DeskAction(
+                action="deposit_pay_link",
+                detail=f"Issuing deposit pay link for quote {quote_id}",
+            ))
+            try:
+                issued = create_quote_deposit_pay_link(quote_id)
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+                return await self.fail_task(task, detail)
+            pay = issued.get("pay_link") or {}
+            customer = (issued.get("customer") or {}).get("name") or task.customer_name or "customer"
+            status = issued.get("payment_status") or "unpaid"
+            url = pay.get("checkout_url")
+            result = (
+                f"Deposit invoice {issued.get('invoice', {}).get('invoice_number')} for {customer}. "
+                f"Payment status: {status}. "
+                + (f"Pay link: {url}. " if url else "No pay link was created. ")
+                + (pay.get("error") or "")
+                + " This is not marked paid unless payment_status is paid."
+            )
+            return await self.complete_task(task, result.strip())
+
         task.actions.append(DeskAction(
             action="payment_received",
             detail=f"Recording payment from {task.customer_name or 'customer'}",

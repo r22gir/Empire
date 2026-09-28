@@ -342,7 +342,7 @@ You power:
 /socialforge/*, /intake/*, /craftforge/*, /crypto-checkout/*, /webhooks/*
 
 == Finance System (QB Replacement) ==
-/finance/dashboard (P&L), /finance/invoices (CRUD + from-quote), /finance/payments, /finance/expenses, /finance/revenue
+/finance/dashboard (P&L), /finance/invoices (CRUD + from-quote), /finance/quotes/{id}/deposit-pay-link (Workroom/WoodCraft deposit invoice + Stripe Checkout link; idempotent; not paid until Stripe says so), /finance/payments, /finance/expenses, /finance/revenue
 /crm/customers (full CRM + import-from-quotes), /inventory/items, /inventory/low-stock, /inventory/vendors
 
 == SaaS Pricing Tiers ==
