@@ -1,35 +1,75 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const LUXE_PUBLIC_HOST = "luxe.empirebox.store";
-// LUXE bucket is HARD-SCOPED — only intake-related routes are allowed on the
-// client-facing hostname. The allowlist is iX-day I1-R1X-INT-VHOST: without
-// this, a request to luxe.empirebox.store/dashboard or /platform would render
-// the founder's Command Center to anonymous clients. The first arg of every
-// OR is the exact path; the second is the prefix form (path + "/" delimiter).
-// Don't add /api/v1/* wholesale — admin endpoints MUST stay auth-gated and
-// out of the public surface even if they live under a permitted prefix.
-const LUXE_ALLOWED_EXACT = new Set([
+// Public Luxe hostnames. Keep this allowlist in sync with
+// backend/app/security/luxe_public_edge.py. Cloudflare currently tunnels
+// /api/v1/* straight to the backend, so the Python gate is the one that
+// closes the hole. This middleware is the second lock for requests that
+// do hit Next (pages, and /api/v1 if the tunnel rule is removed).
+const LUXE_PUBLIC_HOSTS = new Set([
+  "luxe.empirebox.store",
+  "test-luxe.empirebox.store",
+]);
+const LUXE_BLOCKED_EXACT = new Set(["/api/v1/intake/reset-password"]);
+const LUXE_BLOCKED_PREFIXES = ["/api/v1/intake/admin"];
+const LUXE_PUBLIC_POST_EXACT = new Set([
+  "/api/v1/intake/signup",
+  "/api/v1/intake/login",
+  "/api/v1/photos/upload",
+  // Workroom designer brief (capture_channel luxeforge or leadforge). One
+  // customer + one lead. Not the prospect/quote list.
+  "/api/v1/leadforge/intake",
+]);
+
+function isWorkroomQuotePost(path: string): boolean {
+  const prefix = "/api/v1/leadforge/intake/";
+  if (!path.startsWith(prefix) || !path.endsWith("/quote")) return false;
+  const leadId = path.slice(prefix.length, -"/quote".length);
+  return leadId.length > 0 && /^[0-9]+$/.test(leadId);
+}
+const LUXE_PUBLIC_ANY_EXACT = new Set([
   "/intake",
-  "/api/v1/intake",
-  "/api/v1/fabrics/intake-project",
   "/favicon.ico",
   "/robots.txt",
+  "/api/v1/intake/me",
+  "/api/v1/intake/projects",
 ]);
-const LUXE_ALLOWED_PREFIXES = [
+const LUXE_PUBLIC_ANY_PREFIXES = [
   "/intake/",
-  "/api/v1/intake/",
-  "/api/v1/fabrics/intake-project/",
   "/_next/",
   "/intake_uploads/",
+  "/api/v1/intake/projects/",
+  "/api/v1/fabrics/intake-project/",
+  "/api/v1/photos/serve/intake/",
 ];
 
-function isLuxeAllowed(pathname: string): boolean {
-  if (LUXE_ALLOWED_EXACT.has(pathname)) return true;
-  for (const prefix of LUXE_ALLOWED_PREFIXES) {
-    if (pathname.startsWith(prefix)) return true;
+function normalizeLuxePath(pathname: string): string {
+  let path = pathname.split("?")[0].split("#")[0] || "/";
+  if (!path.startsWith("/")) path = `/${path}`;
+  while (path.includes("//")) path = path.split("//").join("/");
+  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+  return path;
+}
+
+function isLuxePathAllowed(method: string, pathname: string): boolean {
+  const path = normalizeLuxePath(pathname);
+  let verb = method.toUpperCase();
+  if (path.includes("..") || path.includes("\\")) return false;
+  if (LUXE_BLOCKED_EXACT.has(path)) return false;
+  for (const prefix of LUXE_BLOCKED_PREFIXES) {
+    if (path === prefix || path.startsWith(`${prefix}/`)) return false;
   }
-  return false;
+  if (path.startsWith("/api/v1/fabrics/intake-project/") && path.endsWith("/match")) {
+    return false;
+  }
+  if (verb === "OPTIONS") {
+    if (LUXE_PUBLIC_POST_EXACT.has(path) || isWorkroomQuotePost(path) || LUXE_PUBLIC_ANY_EXACT.has(path)) return true;
+    return LUXE_PUBLIC_ANY_PREFIXES.some((prefix) => path.startsWith(prefix));
+  }
+  if (verb === "HEAD") verb = "GET";
+  if (verb === "POST" && (LUXE_PUBLIC_POST_EXACT.has(path) || isWorkroomQuotePost(path))) return true;
+  if (LUXE_PUBLIC_ANY_EXACT.has(path)) return true;
+  return LUXE_PUBLIC_ANY_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
 // R1X-PUB-EMPIREBOX: Public apex landing hosts.
@@ -83,17 +123,32 @@ export function middleware(request: NextRequest) {
   }
 
   // --- LUXE bucket: HARD-SCOPED to intake ---
-  // Founder's CF Access bypass (iX-day dispatch) opens luxe.empirebox.store
-  // to anonymous clients. This block is the safety gate: anonymous traffic
-  // can ONLY reach intake pages, the intake API, the fabrics-intake-project
-  // API, the photos mount, and Next.js assets. Anything else (the Command
-  // Center, /platform, /max, /quote, /api/v1/admin/*, /api/v1/quotes/*, etc.)
-  // is 307-redirected to /intake so a wrong URL never renders the founder
-  // surface.
-  if (host === LUXE_PUBLIC_HOST) {
-    if (!isLuxeAllowed(pathname)) {
+  // Anonymous clients may open the intake pages and the narrow capture API.
+  // Quotes, invoices, CRM, payments, jobs, leads, and MAX are 401 here.
+  // Page URLs outside the allowlist redirect to /intake.
+  if (LUXE_PUBLIC_HOSTS.has(host)) {
+    if (!isLuxePathAllowed(request.method, pathname)) {
+      const isApi =
+        pathname.startsWith("/api/") ||
+        pathname === "/docs" ||
+        pathname === "/redoc" ||
+        pathname === "/openapi.json" ||
+        pathname === "/health";
+      if (isApi) {
+        return NextResponse.json(
+          { detail: "Authentication required", error: "luxe_public_edge_denied" },
+          {
+            status: 401,
+            headers: {
+              "Cache-Control": "no-store",
+              "X-Empire-Edge": "luxe-public-denied",
+            },
+          },
+        );
+      }
       const url = request.nextUrl.clone();
       url.pathname = "/intake";
+      url.search = "";
       return NextResponse.redirect(url);
     }
     return NextResponse.next();
