@@ -37,13 +37,14 @@ The active public connector is system service `cloudflared.service` using tunnel
   - `/api/v1/*` -> `http://localhost:8000`
   - `/*` -> `http://localhost:3005`
 - `luxe.empirebox.store`:
-  - `/api/v1/*` -> `http://localhost:8000`
+  - `/api/v1/*` -> `http://localhost:8000` (bypasses Next.js; the backend public-edge gate must deny this host — see `docs/LUXE_API_LOCK.md`)
   - `/*` -> `http://localhost:3005`
+- Do not set cloudflared `httpHostHeader` to `localhost` on the luxe ingress. The gate reads `Host` / `X-Forwarded-Host`. Rewriting those to a private name re-opens the API.
 - `test-studio.empirebox.store`:
   - `/api/v1/*` -> `http://localhost:8010`
   - `/*` -> `http://localhost:3010`
 - `test-luxe.empirebox.store`:
-  - `/api/v1/*` -> `http://localhost:8010`
+  - `/api/v1/*` -> `http://localhost:8010` (same public-edge gate as `luxe`; deploy this commit on the v10 backend before that origin is up)
   - `/*` -> `http://localhost:3010`
 
 Feature lane (`3020/8020`) is local-only and intentionally not exposed publicly.
