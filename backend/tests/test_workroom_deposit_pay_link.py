@@ -55,6 +55,30 @@ def _load(monkeypatch, tmp_path):
     importlib.reload(init_db)
     init_db.init_database()
 
+    # Ensure payments_v2 (canonical Sprint-1d table) exists alongside payments.
+    from app.db.database import get_db
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS payments_v2 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payment_number TEXT,
+                invoice_id TEXT,
+                customer_id TEXT,
+                amount REAL,
+                payment_method TEXT,
+                payment_reference TEXT,
+                payment_type TEXT,
+                status TEXT,
+                account_code TEXT,
+                notes TEXT,
+                business_unit TEXT,
+                stripe_session_id TEXT,
+                payment_date TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """)
+
     from app.routers import payments, finance
     importlib.reload(payments)
     importlib.reload(finance)
@@ -183,7 +207,7 @@ def test_stripe_paid_event_records_once_and_unpaid_event_does_not(monkeypatch, t
     from app.db.database import get_db, dict_row
     with get_db() as conn:
         row = dict_row(conn.execute("SELECT status, payment_status FROM invoices WHERE id = ?", (invoice_id,)).fetchone())
-        pay_count = conn.execute("SELECT COUNT(*) FROM payments WHERE invoice_id = ?", (invoice_id,)).fetchone()[0]
+        pay_count = conn.execute("SELECT COUNT(*) FROM payments_v2 WHERE invoice_id = ?", (invoice_id,)).fetchone()[0]
     assert row["status"] != "paid"
     assert row["payment_status"] == "awaiting_confirmation"
     assert pay_count == 0
@@ -210,7 +234,7 @@ def test_stripe_paid_event_records_once_and_unpaid_event_does_not(monkeypatch, t
 
     with get_db() as conn:
         row = dict_row(conn.execute("SELECT status, payment_status, balance_due FROM invoices WHERE id = ?", (invoice_id,)).fetchone())
-        pay_count = conn.execute("SELECT COUNT(*) FROM payments WHERE invoice_id = ?", (invoice_id,)).fetchone()[0]
+        pay_count = conn.execute("SELECT COUNT(*) FROM payments_v2 WHERE invoice_id = ?", (invoice_id,)).fetchone()[0]
     assert row["status"] == "paid"
     assert row["payment_status"] == "paid"
     assert row["balance_due"] == 0

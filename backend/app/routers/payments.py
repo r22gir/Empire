@@ -386,10 +386,10 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
 
                 new_status = "paid" if balance_due <= 0.005 else "partial"
                 conn.execute(
-                    """UPDATE invoices SET status = ?, amount_paid = ?, balance_due = ?,
+                    """UPDATE invoices SET status = ?, payment_status = ?, amount_paid = ?, balance_due = ?,
                        paid_at = CASE WHEN ? = 'paid' THEN datetime('now') ELSE paid_at END,
                        updated_at = datetime('now') WHERE id = ?""",
-                    (new_status, amount_paid, max(balance_due, 0), new_status, invoice_id),
+                    (new_status, new_status, amount_paid, max(balance_due, 0), new_status, invoice_id),
                 )
 
                 # Update customer total_revenue from canonical payments_v2
