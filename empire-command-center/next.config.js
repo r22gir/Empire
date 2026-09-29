@@ -6,8 +6,15 @@ const BACKEND_UPSTREAM = process.env.NEXT_PUBLIC_BACKEND_UPSTREAM || 'http://127
 // Mirrors next.config.ts. Default rewrite proxyTimeout is 30s and the
 // cloned request body is capped at 10MB — both turn a phone Photo Analyzer
 // measure into "Failed to proxy ... socket hang up" / Analysis failed (500).
+//
+// This is also the body-size ceiling for /api/v1/intake/projects/*/photos
+// and /scans (LuxeForge intake uploads — PDFs, CAD, 3D scans, video, ...
+// go through the same same-origin proxy below). Keep it in sync with
+// backend/app/services/uploads/safe_file_serve.py:MAX_UPLOAD_BYTES
+// (~200MB) — raising one without the other just moves the 413/timeout
+// from the backend to this proxy or vice versa.
 const VISION_PROXY_TIMEOUT_MS = 180_000;
-const VISION_PROXY_BODY_LIMIT = '32mb';
+const VISION_PROXY_BODY_LIMIT = '200mb';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

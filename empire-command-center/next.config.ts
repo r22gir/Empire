@@ -11,11 +11,18 @@ const BACKEND_UPSTREAM = process.env.NEXT_PUBLIC_BACKEND_UPSTREAM || "http://127
 // proxyTimeout is 30s; MiniMax measure is ~20s and often longer once the
 // body is in flight, and the proxy then logs
 // "Failed to proxy ... Error: socket hang up" (UI: Analysis failed (500)).
-// Every request body is also cloned with a 10MB cap (body-streams.js). A
-// phone JPEG base64 blows past that, the clone ends early, and the upstream
-// socket resets. Self-hosted CC is not on Vercel's proxy cap.
+// Every request body is also cloned with a size cap (body-streams.js). A
+// phone JPEG base64 blows past a small cap, the clone ends early, and the
+// upstream socket resets. Self-hosted CC is not on Vercel's proxy cap.
+//
+// This is also the body-size ceiling for /api/v1/intake/projects/*/photos
+// and /scans (LuxeForge intake uploads — PDFs, CAD, 3D scans, video, ...
+// go through the same same-origin proxy below). Keep it in sync with
+// backend/app/services/uploads/safe_file_serve.py:MAX_UPLOAD_BYTES
+// (~200MB) — raising one without the other just moves the 413/timeout
+// from the backend to this proxy or vice versa.
 const VISION_PROXY_TIMEOUT_MS = 180_000;
-const VISION_PROXY_BODY_LIMIT = "32mb";
+const VISION_PROXY_BODY_LIMIT = "200mb";
 
 const nextConfig: NextConfig = {
   experimental: {

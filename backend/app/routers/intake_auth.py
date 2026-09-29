@@ -23,6 +23,10 @@ from app.services.drawing.canonical_path import (
     canonical_intake_uploads_dir,
     canonical_photos_dir,
 )
+from app.services.uploads.safe_file_serve import (
+    enforce_upload_size_limit,
+    safe_extension,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -593,20 +597,31 @@ async def upload_photo(
         conn.close()
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Save file
+    # Read + size-gate BEFORE writing anything to disk. Designers upload
+    # any file type here (PDFs, CAD, 3D scans, docs, video, ...) — the
+    # image-only client restriction was removed, so this endpoint must
+    # not assume the bytes are a small JPEG.
+    content = file.file.read()
+    enforce_upload_size_limit(content)
+
+    # Save file. Only a sanitized EXTENSION is ever derived from the
+    # client-supplied filename — the on-disk stem is always a fresh UUID,
+    # so path traversal / null-byte tricks in `file.filename` can't reach
+    # the filesystem. See app.services.uploads.safe_file_serve.
     project_dir = os.path.join(UPLOADS_DIR, project_id)
     os.makedirs(project_dir, exist_ok=True)
-    ext = os.path.splitext(file.filename or "photo.jpg")[1] or ".jpg"
+    ext = safe_extension(file.filename, default=".jpg")
     filename = f"{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(project_dir, filename)
-    content = file.file.read()
     with open(filepath, "wb") as f:
         f.write(content)
 
     # D44 — land the LuxeForge upload in the canonical job-images tree so MAX
     # can find it via list_job_images. Per STOP 1 ruling #1, no quote/job is
     # inferred at upload time; the row is keyed to the intake project via
-    # item_key. PENDING never blocks.
+    # item_key. PENDING never blocks. Only fires for actual raster images —
+    # non-image uploads (CAD, PDFs, docs, ...) skip this and stay in
+    # intake_projects.photos as a plain file record.
     if ext.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".heic"}:
         try:
             from app.services.job_image_store import store_job_image
@@ -626,6 +641,8 @@ async def upload_photo(
         "filename": filename,
         "original_name": file.filename,
         "path": f"/intake_uploads/{project_id}/{filename}",
+        "size": len(content),
+        "content_type": file.content_type,
         "uploaded_at": datetime.utcnow().isoformat(),
     })
     conn.execute(
@@ -664,19 +681,28 @@ async def upload_scan(
         conn.close()
         raise HTTPException(status_code=404, detail="Project not found")
 
+    # Designers upload any file type here: CAD (dwg/dxf/skp/rvt/3dm), 3D
+    # scans (usdz/obj/ply/glb/gltf/fbx/stl/e57), PDFs, spreadsheets/docs,
+    # zip, video. Read fully so the size cap can be enforced before the
+    # bytes hit disk.
+    content = file.file.read()
+    enforce_upload_size_limit(content)
+
     project_dir = os.path.join(UPLOADS_DIR, project_id)
     os.makedirs(project_dir, exist_ok=True)
-    ext = os.path.splitext(file.filename or "scan.glb")[1] or ".glb"
+    ext = safe_extension(file.filename, default=".glb")
     filename = f"scan_{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(project_dir, filename)
     with open(filepath, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        f.write(content)
 
     scans = json.loads(row["scans"] or "[]")
     scans.append({
         "filename": filename,
         "original_name": file.filename,
         "path": f"/intake_uploads/{project_id}/{filename}",
+        "size": len(content),
+        "content_type": file.content_type,
         "uploaded_at": datetime.utcnow().isoformat(),
     })
     conn.execute(

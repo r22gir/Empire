@@ -435,6 +435,57 @@ def _next_quote_number(conn) -> str:
     return f"EST-{year}-{last_seq + 1:03d}"
 
 
+def max_quote_number_seq(year: int) -> int:
+    """Highest EST-<year>-NNN sequence number in quotes_v2 (canonical, SQL).
+
+    quotes_v2 and the legacy JSON quote store (backend/app/routers/quotes.py,
+    quote_engine/quote_assembler.py) share the same EST-YYYY-NNN number
+    space but used to compute "next number" independently — each only
+    scanned its own store, so a freshly-created JSON quote could reuse a
+    number quotes_v2 had already issued (or vice versa). Callers combine
+    this with their own store's max to pick a number neither store has
+    used. Returns 0 if quotes_v2 has no quote for `year`.
+    """
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT quote_number FROM quotes_v2 WHERE quote_number LIKE ? "
+            "ORDER BY quote_number DESC LIMIT 1",
+            (f"EST-{year}-%",),
+        ).fetchone()
+    if not row or not row[0]:
+        return 0
+    try:
+        return int(row[0].split('-')[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
+def set_quote_test_flag(quote_id: str, is_test: bool = True, changed_by: str = "admin") -> Optional[dict]:
+    """Flag (or unflag) a quotes_v2 row as a test/smoke/QA fixture.
+
+    Used by the admin flag-test endpoint and scripts/flag_test_quotes.py.
+    Does not affect get_quote / get_quote_by_number — a flagged quote is
+    still fetchable directly by id/number; it's only excluded from
+    list_quotes() by default. Logs to financial_audit_log like other
+    quote-field edits.
+    """
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT is_test FROM quotes_v2 WHERE id = ?", (quote_id,)
+        ).fetchone()
+        if not existing:
+            return None
+        old_val = existing["is_test"] if "is_test" in existing.keys() else None
+        new_val = 1 if is_test else 0
+        if int(old_val or 0) != new_val:
+            _audit_log(conn, 'quote', quote_id, 'updated', 'is_test', old_val, new_val, changed_by)
+        conn.execute(
+            "UPDATE quotes_v2 SET is_test = ?, updated_at = ? WHERE id = ?",
+            (new_val, datetime.now().isoformat(), quote_id),
+        )
+    return get_quote(quote_id)
+
+
 def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
     """Recalculate quote totals from line items. Log changes to audit.
 
@@ -596,8 +647,29 @@ def _item_to_dict(row) -> dict:
 
 # ── CRUD ───────────────────────────────────────────────────────
 
+
+# Hard ceiling on list_quotes' limit — 156+ test quotes plus years of
+# real ones outgrew the old 50/100 default (EST-2026-007 and EST-2026-291
+# fell off the end of a limit=100 call). Callers that need more page
+# through offset instead of raising this further.
+MAX_LIST_QUOTES_LIMIT = 500
+
+
 def list_quotes(status: str = None, business_unit: str = None,
-                search: str = None, limit: int = 50, offset: int = 0) -> dict:
+                search: str = None, limit: int = 50, offset: int = 0,
+                include_test: bool = False) -> dict:
+    """List quotes_v2 rows.
+
+    include_test=False (default) hides rows flagged `is_test=1` — the
+    smoke/E2E/manual-QA quotes that accumulated in the canonical store
+    (see scripts/flag_test_quotes.py). Pass include_test=True to see them
+    (e.g. an internal QA view). get_quote / get_quote_by_number are NOT
+    filtered by this flag — fetching a specific quote by id/number always
+    works regardless of is_test, so Max smoke routines pinned to a known
+    id (e.g. EST-2026-273) keep working.
+    """
+    limit = max(1, min(int(limit or 50), MAX_LIST_QUOTES_LIMIT))
+    offset = max(0, int(offset or 0))
     with get_db() as conn:
         where, params = [], []
         if status:
@@ -610,6 +682,8 @@ def list_quotes(status: str = None, business_unit: str = None,
             where.append("(customer_name LIKE ? OR project_name LIKE ? OR quote_number LIKE ? OR id LIKE ?)")
             s = f"%{search}%"
             params.extend([s, s, s, s])
+        if not include_test:
+            where.append("(is_test IS NULL OR is_test = 0)")
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 

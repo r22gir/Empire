@@ -324,6 +324,31 @@ def create_all_tables(conn: sqlite3.Connection):
     )
     conn.commit()
 
+    # ---------------------------------------------------------------------
+    # Hide-test-quotes fix — quotes_v2 accumulated ~156 smoke/E2E/manual
+    # test rows (customers like "TrustTest", "SMOKE", "diag-probe", ...)
+    # that show up in the Workroom quotes list next to real customer
+    # quotes. `is_test` defaults to 0 (false) for every existing and new
+    # row, so this migration changes nothing about what's currently
+    # visible until a row is explicitly flagged (see
+    # quote_service.set_quote_test_flag / scripts/flag_test_quotes.py).
+    # list_quotes() excludes is_test=1 rows unless include_test=True is
+    # passed; get_quote / get_quote_by_number are UNAFFECTED by this flag
+    # so a flagged quote (e.g. a Max smoke fixture) can still be opened
+    # directly by id/number.
+    # ---------------------------------------------------------------------
+    for _alter_sql in (
+        "ALTER TABLE quotes_v2 ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
+    ):
+        try:
+            conn.execute(_alter_sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists (idempotent re-run)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_quotes_v2_is_test ON quotes_v2(is_test)"
+    )
+    conn.commit()
+
     # Chart of Accounts
     conn.execute("""
     CREATE TABLE IF NOT EXISTS chart_of_accounts (

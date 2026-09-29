@@ -434,6 +434,8 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
 
 // -- Quotes Section --
 
+const QUOTES_PAGE_SIZE = 100;
+
 function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, startQuickQuote }: { quotes: any[]; initialQuoteId?: string | null; onClearInitial?: () => void; startQuickQuote?: boolean }) {
   const [business, setBusiness] = useState<'workroom' | 'woodcraft'>(() => {
     if (typeof window === 'undefined') return 'workroom';
@@ -444,6 +446,11 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, 
       ? []
       : initialQuotes
   ));
+  // Backend caps limit at quote_service.MAX_LIST_QUOTES_LIMIT (500); older
+  // quotes past the first page (e.g. EST-2026-007, EST-2026-291) are
+  // reached via "Load more" using `total` from the list response.
+  const [totalQuotes, setTotalQuotes] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [showQuickQuote, setShowQuickQuote] = useState(!!startQuickQuote);
@@ -457,12 +464,26 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, 
   const [builderQuoteId, setBuilderQuoteId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(API + `/quotes-v2?limit=100&business_unit=${business}`).then(r => r.json()).then(data => {
+    fetch(API + `/quotes-v2?limit=${QUOTES_PAGE_SIZE}&offset=0&business_unit=${business}`).then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       setQuotes(Array.isArray(raw) ? raw : []);
+      setTotalQuotes(typeof data.total === 'number' ? data.total : null);
     }).catch(() => {});
   }, [business]);
   useEffect(() => { if (startQuickQuote) setShowQuickQuote(true); }, [startQuickQuote]);
+
+  const loadMoreQuotes = () => {
+    setLoadingMore(true);
+    fetch(API + `/quotes-v2?limit=${QUOTES_PAGE_SIZE}&offset=${quotes.length}&business_unit=${business}`)
+      .then(r => r.json())
+      .then(data => {
+        const raw = data.quotes || data || [];
+        setQuotes(prev => [...prev, ...(Array.isArray(raw) ? raw : [])]);
+        setTotalQuotes(typeof data.total === 'number' ? data.total : null);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMore(false));
+  };
 
   const filtered = quotes.filter(q => {
     if (filter !== 'all' && q.status !== filter) return false;
@@ -473,9 +494,10 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, 
   });
 
   const refetchQuotes = () => {
-    fetch(API + `/quotes-v2?limit=100&business_unit=${business}`).then(r => r.json()).then(data => {
+    fetch(API + `/quotes-v2?limit=${QUOTES_PAGE_SIZE}&offset=0&business_unit=${business}`).then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       setQuotes(Array.isArray(raw) ? raw : []);
+      setTotalQuotes(typeof data.total === 'number' ? data.total : null);
     }).catch(() => {});
   };
 
@@ -749,6 +771,18 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, 
       </div>
       {filtered.length === 0 && (
         <div style={{ textAlign: 'center', padding: '40px 0', fontSize: 13, color: '#aaa' }}>No quotes found</div>
+      )}
+      {totalQuotes !== null && quotes.length < totalQuotes && (
+        <div style={{ textAlign: 'center', padding: '16px 0' }}>
+          <button
+            onClick={loadMoreQuotes}
+            disabled={loadingMore}
+            className="cursor-pointer font-bold transition-all hover:border-[#b8960c] hover:text-[#b8960c]"
+            style={{ minHeight: 40, padding: '0 16px', fontSize: 12, borderRadius: 10, background: '#faf9f7', color: '#777', border: '1.5px solid #ece8e0' }}
+          >
+            {loadingMore ? 'Loading...' : `Load More (${quotes.length} of ${totalQuotes})`}
+          </button>
+        </div>
       )}
     </div>
   );

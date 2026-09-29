@@ -10,7 +10,7 @@ import { intakeFetch, getToken } from '../../../lib/intake-auth';
 
 import { API, API_BASE } from '../../../lib/api';
 
-const steps = ['Project Info', 'Photos & Scans', 'Measurements', 'Notes & Submit'];
+const steps = ['Project Info', 'Photos, Drawings & Scans', 'Measurements', 'Notes & Submit'];
 
 interface LineItem {
   id: string;
@@ -55,6 +55,7 @@ export default function NewProject() {
   const [step, setStep] = useState(0);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [photos, setPhotos] = useState<any[]>([]);
+  const [scans, setScans] = useState<any[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const [name, setName] = useState('');
@@ -195,6 +196,7 @@ export default function NewProject() {
     if (!projectId) return;
     const proj = await intakeFetch(`/projects/${projectId}`);
     setPhotos(proj.photos || []);
+    setScans(proj.scans || []);
   };
 
   return (
@@ -358,14 +360,16 @@ export default function NewProject() {
             </div>
           )}
 
-          {/* Step 2: Photos & Scans */}
+          {/* Step 2: Photos, Drawings & Scans */}
           {step === 1 && projectId && (
             <div>
-              <h2 className="text-base font-bold text-[#1a1a1a] mb-2">Upload Photos</h2>
+              <h2 className="text-base font-bold text-[#1a1a1a] mb-2">Upload Photos, Drawings &amp; Scans</h2>
               <p className="text-[11px] text-[#888] mb-4">
-                Take photos of your windows, rooms, or any inspiration images. We&apos;ll use AI to help analyze them.
+                Take photos of your windows, rooms, or any inspiration images. You can also attach drawings,
+                CAD files, 3D scans, PDFs, spreadsheets, and other project documents. We&apos;ll use AI to help
+                analyze the photos.
               </p>
-              <PhotoUploader projectId={projectId} photos={photos} onUpload={refreshPhotos} />
+              <PhotoUploader projectId={projectId} photos={photos} scans={scans} onUpload={refreshPhotos} />
             </div>
           )}
 

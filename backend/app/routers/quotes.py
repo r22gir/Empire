@@ -160,7 +160,16 @@ class QuoteUpdate(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────
 
 def _next_quote_number() -> str:
-    """Generate sequential quote number: EST-YYYY-001."""
+    """Generate sequential quote number: EST-YYYY-001.
+
+    Stray-JSON-quotes fix: this used to only scan the legacy JSON store
+    (QUOTES_DIR), so a freshly-created JSON quote could reuse a number
+    the canonical quotes_v2 SQL store had already issued (they share the
+    same EST-YYYY-NNN space) — e.g. quotes_v2 at EST-2026-291 while this
+    scan only saw JSON files up to EST-2026-050. Now also takes the max
+    sequence already used in quotes_v2 into account so neither store can
+    collide with the other.
+    """
     year = datetime.utcnow().year
     counter = {"year": year, "seq": 0}
     if os.path.exists(COUNTER_FILE):
@@ -183,6 +192,12 @@ def _next_quote_number() -> str:
                     max_existing_seq = max(max_existing_seq, int(quote_number.split("-")[-1]))
             except Exception:
                 continue
+
+    try:
+        from app.services.quote_service import max_quote_number_seq
+        max_existing_seq = max(max_existing_seq, max_quote_number_seq(year))
+    except Exception:
+        pass
 
     counter["seq"] = max(counter.get("seq", 0), max_existing_seq) + 1
     with open(COUNTER_FILE, "w") as f:
@@ -749,17 +764,63 @@ async def list_quotes(
 # ── QIS (Quote Intelligence System) endpoints ──────────────────
 # These MUST be above /{quote_id} catch-all route
 
+def _attach_photo_analysis_to_quote(quote_id: str, analysis: dict) -> bool:
+    """Best-effort: attach analyzed items to an EXISTING quote (quotes-v2
+    SQL or legacy JSON) as `ai_outlines`, instead of creating a new one.
+
+    Tries the canonical quotes_v2 store first, then falls back to the
+    legacy JSON store. Returns False (never raises) if `quote_id` isn't
+    found in either — the caller still returns the analysis either way.
+    """
+    items = analysis.get("items", [])
+    try:
+        from app.services.quote_service import get_quote as _get_quote_v2, update_quote as _update_quote_v2
+        if _get_quote_v2(quote_id):
+            _update_quote_v2(quote_id, {"ai_outlines": items})
+            return True
+    except Exception:
+        pass
+    try:
+        existing = _load_quote(quote_id)
+    except HTTPException:
+        return False
+    existing["ai_outlines"] = items
+    existing["updated_at"] = datetime.utcnow().isoformat()
+    try:
+        _save_quote(existing)
+        return True
+    except Exception:
+        return False
+
+
 @router.post("/analyze-photo")
 async def analyze_photo_for_quote(body: dict):
-    """Run full QIS pipeline on a photo. Returns analyzed items with pricing for all 3 tiers."""
+    """Run full QIS pipeline on a photo. Returns analyzed items with pricing
+    preview for all 3 tiers.
+
+    Stray-JSON-quotes fix: this endpoint used to unconditionally create
+    AND PERSIST a brand-new JSON-store quote (burning the next EST number)
+    on every call — even when the caller (Quote Review's "Analyze" button)
+    already has a real quotes-v2 quote open and only wants an analysis.
+    It no longer writes anything to the JSON store by default. The
+    assembled `quote` in the response is an EPHEMERAL pricing preview
+    (tiers/yardage), used by the frontend to price selected items — it is
+    never saved to disk and never consumes a quote number.
+
+    Pass `quote_id` to also attach the analyzed items to that EXISTING
+    quote (quotes-v2 or legacy JSON) as `ai_outlines`; omit it to just get
+    the preview back.
+    """
     from app.services.quote_engine.item_analyzer import analyze_photo_items
     from app.services.quote_engine.quote_assembler import assemble_quote
+    from app.services.quote_engine.verification import verify_quote
 
     image = body.get("image", "")
     customer_name = body.get("customer_name", "Customer")
     customer_notes = body.get("notes", "")
     location = body.get("location", "DC")
     lining = body.get("lining", "standard")
+    quote_id = (body.get("quote_id") or "").strip() or None
 
     if not image:
         raise HTTPException(400, "Image data required")
@@ -774,28 +835,23 @@ async def analyze_photo_for_quote(body: dict):
 
     analysis = await analyze_photo_items(image, customer_notes)
 
+    # Ephemeral pricing preview only — see docstring. NOT saved to disk,
+    # NOT written to the JSON quote store, does not burn a quote number.
     quote = assemble_quote(
         analyzed_items=analysis.get("items", []),
         customer_name=customer_name,
         location=location,
         lining=lining,
     )
-
-    # Save to disk (assemble_quote no longer saves)
-    os.makedirs(QUOTES_DIR, exist_ok=True)
-    with open(os.path.join(QUOTES_DIR, f"{quote['id']}.json"), "w") as f:
-        json.dump(quote, f, indent=2, default=str)
-
-    # ── GATE 1: Post-analysis verification ──
-    from app.services.quote_engine.verification import verify_quote, save_verification
-
     verification = verify_quote(quote)
-    save_verification(quote.get("id", ""), verification)
+
+    attached = bool(quote_id) and _attach_photo_analysis_to_quote(quote_id, analysis)
 
     return {
         "analysis": analysis,
         "quote": quote,
         "verification": verification,
+        "attached_to_quote_id": quote_id if attached else None,
     }
 
 
