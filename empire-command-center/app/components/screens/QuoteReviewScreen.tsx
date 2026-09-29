@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API, API_BASE } from '../../lib/api';
+import { downloadPdf } from '../../lib/pdf';
 import { Quote } from '../../lib/types';
 import { compressImageDataUrl, visionAbortSignal, visionTimeoutMessage } from '../../lib/visionImage';
 import { linesFromAnalyzedItems, quoteLineDescriptions } from '../../lib/photoQuote';
@@ -427,25 +428,18 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   };
 
   const handleAction = async (action: string) => {
-    if (action === 'pdf') {
-      showFeedback('Generating PDF...');
+    if (action === 'pdf' || action === 'shop') {
+      showFeedback(action === 'shop' ? 'Generating shop PDF...' : 'Generating PDF...');
       try {
-        const res = await fetch(`${API}/quotes-v2/${quote.id}/pdf`);
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-          showFeedback(err.error || 'PDF generation failed');
-          return;
-        }
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = `${quote.quote_number || quote.id}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-        showFeedback('PDF downloaded!');
+        const path = action === 'shop'
+          ? `/quotes/${quote.id}/shop-pdf`
+          : `/quotes/${quote.id}/pdf?skip_verification=true`;
+        await downloadPdf(
+          `${API}${path}`,
+          `${quote.quote_number || quote.id}${action === 'shop' ? '-shop' : ''}.pdf`,
+          { method: 'POST' },
+        );
+        showFeedback(action === 'shop' ? 'Shop PDF downloaded!' : 'PDF downloaded!');
       } catch {
         showFeedback('PDF generation failed');
       }
@@ -1080,7 +1074,8 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         <ActionBtn icon={<ExternalLink size={16} />} label="QuoteBuilder" onClick={() => {
           if (onOpenBuilder) { onOpenBuilder(); }
         }} />
-        <ActionBtn icon={<FileText size={16} />} label="Download PDF" onClick={() => handleAction('pdf')} />
+        <ActionBtn icon={<FileText size={16} />} label="PDF" onClick={() => handleAction('pdf')} />
+        <ActionBtn icon={<Printer size={16} />} label="Shop" onClick={() => handleAction('shop')} />
         <ActionBtn icon={<Send size={16} />} label="Telegram" onClick={() => handleAction('telegram')} />
         <ActionBtn icon={<Mail size={16} />} label="Email" onClick={() => handleAction('email')} />
         <ActionBtn icon={<Video size={16} />} label="Call" onClick={() => handleAction('video')} />

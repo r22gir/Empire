@@ -37,25 +37,25 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
       });
       if (!res.ok) throw new Error(`Failed: ${res.status}`);
 
-      if (action === 'pdf') {
-        // Backend returns binary PDF — download as blob
+      if (action === 'pdf' || action === 'shop') {
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = blobUrl;
-        a.download = `quote-${quoteId}.pdf`;
+        a.download = action === 'shop' ? `quote-${quoteId}-shop.pdf` : `quote-${quoteId}.pdf`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(blobUrl);
       }
 
-      const result = action === 'pdf' ? {} : await res.json();
+      const result = action === 'pdf' || action === 'shop' ? {} : await res.json();
 
       showToast(
         action === 'accept' ? 'Quote approved' :
         action === 'send' ? 'Quote sent via email' :
-        action === 'pdf' ? 'PDF downloaded' :
+        action === 'pdf' ? 'Estimate PDF downloaded' :
+        action === 'shop' ? 'Shop PDF downloaded' :
         action === 'invoice' ? 'Invoice created from quote' :
         action === 'job' ? 'Job created from quote' :
         action === 'delete' ? 'Quote deleted' : 'Done',
@@ -226,12 +226,19 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
         />
         <ActionBtn
           id="pdf"
-          label="Download PDF"
+          label="Estimate PDF"
           icon={<FileDown size={14} />}
           color="#b8960c"
           onClick={() => handleAction('pdf', `/quotes-v2/${quoteId}/pdf`, 'GET')}
         />
         <DepositPayLinkButton quoteId={quoteId} compact={compact} />
+        <ActionBtn
+          id="shop"
+          label="Shop PDF"
+          icon={<FileText size={14} />}
+          color="#2c2416"
+          onClick={() => handleAction('shop', `/quotes/${quoteId}/shop-pdf`)}
+        />
         <ActionBtn
           id="invoice"
           label="Create Invoice"

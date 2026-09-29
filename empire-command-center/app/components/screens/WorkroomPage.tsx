@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { API } from '../../lib/api';
+import { downloadPdf } from '../../lib/pdf';
 import {
   Scissors, DollarSign, ClipboardList, TrendingUp, Calendar, Users,
   Package, FileText, Receipt, BarChart3, Truck, Headphones, Loader2, Zap, Camera, Lightbulb, Eye, ArrowLeft, Plus,
@@ -1252,6 +1253,9 @@ function StatusBadge({ status }: { status: string }) {
 function CreationsSection() {
   const [ideas, setIdeas] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [ideaTitle, setIdeaTitle] = useState('');
+  const [ideaNotes, setIdeaNotes] = useState('');
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
     setLoading(false);
@@ -1291,13 +1295,56 @@ function CreationsSection() {
         </button>
       </div>
 
+      <div className="empire-card" style={{ marginBottom: 16, background: '#fffdf7', border: '1px solid #f0e6c0' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#b8960c', letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8 }}>Idea sheet</div>
+        <input
+          value={ideaTitle}
+          onChange={e => setIdeaTitle(e.target.value)}
+          placeholder="Idea title"
+          style={{ width: '100%', marginBottom: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#fff', fontSize: 13 }}
+        />
+        <textarea
+          value={ideaNotes}
+          onChange={e => setIdeaNotes(e.target.value)}
+          placeholder="Notes, sizes, fabric thoughts…"
+          rows={3}
+          style={{ width: '100%', marginBottom: 10, padding: '8px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#fff', fontSize: 13, resize: 'vertical' }}
+        />
+        <button
+          disabled={pdfBusy || (!ideaTitle.trim() && !ideaNotes.trim())}
+          onClick={async () => {
+            setPdfBusy(true);
+            try {
+              await downloadPdf(`${API}/quotes/preview-pdf`, 'idea.pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sheet: 'idea',
+                  title: ideaTitle || 'Idea',
+                  notes: ideaNotes,
+                }),
+              });
+            } catch {
+              alert('Idea PDF failed. Check that the backend is running.');
+            } finally {
+              setPdfBusy(false);
+            }
+          }}
+          className="flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          style={{ padding: '8px 14px', fontSize: 12, fontWeight: 700, color: '#2c2416', borderRadius: 10, border: '1.5px solid #b8960c', background: '#f5f3ef' }}
+        >
+          <FileText size={14} /> {pdfBusy ? 'Making PDF…' : 'PDF this idea'}
+        </button>
+        <div style={{ fontSize: 11, color: '#999', marginTop: 8 }}>Prints on the Empire Workroom sheet. This does not store the idea.</div>
+      </div>
+
       {/* Ideas list */}
       {!loading && ideas.length > 0 && (
         <div className="flex flex-col gap-3">
           {ideas.map((idea: any, i: number) => {
             const cat = catColors[idea.category] || catColors.product;
             return (
-              <div key={idea.id || i} className="empire-card" style={{ cursor: 'pointer' }}>
+              <div key={idea.id || i} className="empire-card" style={{ background: '#fffdf7', border: '1px solid #f0e6c0' }}>
                 <div className="flex items-center gap-2 mb-2">
                   <span className="status-pill" style={{ background: cat.bg, color: cat.text, fontSize: 9 }}>{idea.category || 'product'}</span>
                   {idea.created_at && <span style={{ fontSize: 10, color: '#bbb' }}>{new Date(idea.created_at).toLocaleDateString()}</span>}

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Check, FileDown, Star, Crown, Gem, Loader2, ExternalLink } from 'lucide-react';
 import { API } from '../../../lib/api';
+import { downloadPdf } from '../../../lib/pdf';
 
 const TIERS = [
   { key: 'A', label: 'Essential', color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0', icon: Star },
@@ -19,8 +20,9 @@ interface QuoteCardProps {
 export default function QuoteCard({ result, onScreenChange, onSend }: QuoteCardProps) {
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
   const [selecting, setSelecting] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
 
-  const { quote_id, quote_number, customer_name, proposal_totals, items_count, pdf_url } = result;
+  const { quote_id, quote_number, customer_name, proposal_totals, items_count } = result;
 
   const handleSelectProposal = async (option: string) => {
     setSelecting(true);
@@ -30,23 +32,22 @@ export default function QuoteCard({ result, onScreenChange, onSend }: QuoteCardP
     setSelecting(false);
   };
 
-  const handleDownloadPDF = async () => {
-    if (!pdf_url) return;
+  const handleDownloadPDF = async (sheet: 'estimate' | 'shop') => {
+    if (!quote_id) return;
+    setPdfBusy(sheet);
     try {
-      const res = await fetch(`${API}${pdf_url}`);
-      if (!res.ok) throw new Error('Failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${quote_number}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const path = sheet === 'shop'
+        ? `/quotes/${quote_id}/shop-pdf`
+        : `/quotes/${quote_id}/pdf?skip_verification=true`;
+      await downloadPdf(
+        `${API}${path}`,
+        `${quote_number || 'quote'}${sheet === 'shop' ? '-shop' : ''}.pdf`,
+        { method: 'POST' },
+      );
     } catch {
-      // Fallback: open in new tab
-      window.open(`${API}${pdf_url}`, '_blank');
+      window.open(`${API}/quotes/${quote_id}/pdf?skip_verification=true`, '_blank');
+    } finally {
+      setPdfBusy(null);
     }
   };
 
@@ -76,19 +77,37 @@ export default function QuoteCard({ result, onScreenChange, onSend }: QuoteCardP
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          {pdf_url && (
-            <button
-              onClick={handleDownloadPDF}
-              title="Download PDF"
-              style={{
-                width: 34, height: 34, borderRadius: 10,
-                background: '#fff', border: '1px solid #ece8e0',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', color: '#b8960c',
-              }}
-            >
-              <FileDown size={15} />
-            </button>
+          {quote_id && (
+            <>
+              <button
+                onClick={() => handleDownloadPDF('estimate')}
+                title="Download estimate PDF"
+                disabled={pdfBusy !== null}
+                style={{
+                  height: 34, padding: '0 10px', borderRadius: 10,
+                  background: '#fff', border: '1px solid #ece8e0',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                  cursor: 'pointer', color: '#b8960c', fontSize: 11, fontWeight: 700,
+                }}
+              >
+                <FileDown size={14} /> {pdfBusy === 'estimate' ? '…' : 'PDF'}
+              </button>
+              {quote_id && (
+                <button
+                  onClick={() => handleDownloadPDF('shop')}
+                  title="Download shop PDF"
+                  disabled={pdfBusy !== null}
+                  style={{
+                    height: 34, padding: '0 10px', borderRadius: 10,
+                    background: '#fffdf7', border: '1px solid #f0e6c0',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', color: '#2c2416', fontSize: 11, fontWeight: 700,
+                  }}
+                >
+                  {pdfBusy === 'shop' ? '…' : 'Shop'}
+                </button>
+              )}
+            </>
           )}
           <button
             onClick={() => onScreenChange?.('quote')}

@@ -4,6 +4,7 @@ import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, S
 import ChatHistoryPanel from '../ChatHistoryPanel';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
+import { downloadPdf } from '../../lib/pdf';
 import QuoteCard from '../business/quotes/QuoteCard';
 import InlineDrawing from '../InlineDrawing';
 import ContinuityPanel from '../ContinuityPanel';
@@ -777,9 +778,21 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                 const designBrief = tr.result.design_brief;
                 if (designBrief) {
                   return (
-                    <div key={j} style={{ marginTop: 8, padding: '10px 14px', background: '#f8f5ff', borderRadius: 8, fontSize: 12, borderLeft: '3px solid #8B5CF6', maxWidth: 480 }}>
-                      <div style={{ fontWeight: 600, color: '#8B5CF6', marginBottom: 4 }}>Design Brief</div>
-                      <div style={{ whiteSpace: 'pre-wrap', color: '#333' }}>{designBrief}</div>
+                    <div key={j} style={{ marginTop: 8, padding: '10px 14px', background: '#fffdf7', borderRadius: 8, fontSize: 12, border: '1px solid #f0e6c0', maxWidth: 480 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <div style={{ fontWeight: 700, color: '#b8960c' }}>Design Brief</div>
+                        <button
+                          onClick={() => downloadPdf(`${API}/quotes/preview-pdf`, 'design-brief.pdf', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ sheet: 'idea', title: 'Design Brief', notes: String(designBrief) }),
+                          }).catch(() => alert('PDF failed'))}
+                          style={{ border: '1px solid #b8960c', background: '#f5f3ef', color: '#2c2416', borderRadius: 8, fontSize: 10, fontWeight: 700, padding: '3px 8px', cursor: 'pointer' }}
+                        >
+                          PDF
+                        </button>
+                      </div>
+                      <div style={{ whiteSpace: 'pre-wrap', color: '#2c2416' }}>{designBrief}</div>
                     </div>
                   );
                 }
