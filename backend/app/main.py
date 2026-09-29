@@ -50,6 +50,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Public Luxe edge — registered before no-cache so denial responses still
+# receive the cache headers. See app.security.luxe_public_edge.
+from app.security.luxe_public_edge import luxe_public_edge_response
+
+
+@app.middleware("http")
+async def luxe_public_edge_middleware(request: Request, call_next):
+    denied = luxe_public_edge_response(request)
+    if denied is not None:
+        return denied
+    return await call_next(request)
+
 
 # No-cache middleware — EVERY response gets anti-cache headers
 # This prevents phones/browsers/CDNs from serving stale data
