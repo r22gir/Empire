@@ -26,10 +26,20 @@ async def list_quotes(
     search: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
+    include_test: bool = False,
 ):
-    """List all SQL-backed quotes with pagination and filtering."""
+    """List all SQL-backed quotes with pagination and filtering.
+
+    `limit` is capped server-side at quote_service.MAX_LIST_QUOTES_LIMIT;
+    callers that need to page through more than that use `offset` (the
+    Workroom UI does a "Load more" using the response's `total`).
+
+    Test/smoke/QA quotes (`is_test=1`) are excluded unless
+    `include_test=true` is passed.
+    """
     return quote_service.list_quotes(status=status, business_unit=business_unit,
-                                     search=search, limit=limit, offset=offset)
+                                     search=search, limit=limit, offset=offset,
+                                     include_test=include_test)
 
 
 @router.get("/search")
@@ -113,6 +123,30 @@ async def delete_quote(quote_id: str):
     if not quote_service.delete_quote(quote_id):
         raise HTTPException(404, f"Quote {quote_id} not found")
     return {"status": "deleted", "id": quote_id}
+
+
+class FlagTestRequest(BaseModel):
+    is_test: bool = True
+    changed_by: str = "admin"
+
+
+@router.post("/{quote_id}/flag-test")
+async def flag_quote_test(quote_id: str, body: FlagTestRequest):
+    """Admin: mark (or unmark) a quote as a test/smoke/QA fixture.
+
+    Hides it from the default Workroom quotes list (list_quotes excludes
+    is_test=1 unless include_test=true is passed). Does NOT affect
+    fetching this quote by id/number — GET /{quote_id} and
+    GET /by-number/{quote_number} are unaffected, so pinned smoke
+    routines keep working. See also scripts/flag_test_quotes.py for
+    bulk flagging by heuristic (dry-run by default).
+    """
+    result = quote_service.set_quote_test_flag(
+        quote_id, is_test=body.is_test, changed_by=body.changed_by,
+    )
+    if not result:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    return {"status": "updated", "quote": result}
 
 
 # ── Line Item CRUD ─────────────────────────────────────────────
