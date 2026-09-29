@@ -296,6 +296,11 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
           notes: quote?.customer_name || '',
           customer_notes: quote?.customer_name || '',
           customer_name: quote?.customer_name || 'Customer',
+          // Attach the analysis to THIS quote instead of creating a new
+          // JSON-store quote (the endpoint no longer persists a new one
+          // regardless, but passing quote_id lets it record ai_outlines
+          // on the quote already open here).
+          quote_id: quote?.id,
         }),
         signal: visionAbortSignal(),
       });

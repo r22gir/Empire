@@ -23,7 +23,12 @@ QUOTES_DIR = str(quotes_data_dir())
 
 
 def _next_quote_number() -> str:
-    """Generate sequential quote number like EST-2026-042."""
+    """Generate sequential quote number like EST-2026-042.
+
+    Stray-JSON-quotes fix: also considers the max sequence already used
+    in the canonical quotes_v2 SQL store (same EST-YYYY-NNN number space)
+    so a freshly-assembled JSON quote can't collide with a v2 quote.
+    """
     year = datetime.now(timezone.utc).year
     existing = []
     if os.path.isdir(QUOTES_DIR):
@@ -38,6 +43,11 @@ def _next_quote_number() -> str:
                         existing.append(num)
                 except Exception:
                     continue
+    try:
+        from app.services.quote_service import max_quote_number_seq
+        existing.append(max_quote_number_seq(year))
+    except Exception:
+        pass
     next_num = max(existing, default=0) + 1
     return f"EST-{year}-{next_num:03d}"
 
