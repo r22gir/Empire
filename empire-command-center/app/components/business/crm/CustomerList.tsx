@@ -127,10 +127,12 @@ function AddCustomerPanel({
   open,
   onClose,
   onCreated,
+  business,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
+  business?: string;
 }) {
   const [form, setForm] = useState({
     name: '',
@@ -203,6 +205,8 @@ function AddCustomerPanel({
           .split(',')
           .map((t) => t.trim())
           .filter(Boolean),
+        ...(business ? { business, business_unit: business } : {}),
+        ...(business === 'workroom' ? { capture: 'manual', source: 'manual' } : {}),
       };
       const res = await fetch(`${API}/crm/customers`, {
         method: 'POST',
@@ -1099,6 +1103,7 @@ export default function CustomerList({ onSelectCustomer, business }: CustomerLis
         open={showAddPanel}
         onClose={() => setShowAddPanel(false)}
         onCreated={fetchCustomers}
+        business={business}
       />
     </div>
   );

@@ -33,7 +33,13 @@ interface CustomerInfo {
   last_activity: string;
   notes: string;
   source: string;
+  source_url?: string;
   business: string;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_content?: string;
+  utm_term?: string;
   created_at: string;
   updated_at: string;
   quotes: any[];
@@ -550,6 +556,15 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
                 <DetailRow label="Address" value={customer.address || '—'} />
                 <DetailRow label="Company" value={showCompany ? company : '—'} />
                 <DetailRow label="Source" value={customer.source || '—'} />
+                {(customer.source_url || customer.utm_source || customer.utm_medium || customer.utm_campaign) && (
+                  <>
+                    <DetailRow label="Source URL" value={customer.source_url || '—'} />
+                    <DetailRow
+                      label="UTM"
+                      value={[customer.utm_source, customer.utm_medium, customer.utm_campaign].filter(Boolean).join(' / ') || '—'}
+                    />
+                  </>
+                )}
                 <DetailRow label="Created" value={customer.created_at ? new Date(customer.created_at).toLocaleDateString() : '—'} />
               </div>
               {customer.notes && (

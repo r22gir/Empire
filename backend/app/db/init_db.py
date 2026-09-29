@@ -94,8 +94,14 @@ CREATE TABLE IF NOT EXISTS customers (
     notes TEXT,
     total_revenue REAL DEFAULT 0,
     lifetime_quotes INTEGER DEFAULT 0,
-    source TEXT DEFAULT 'direct', -- direct, referral, website, marketplace
+    source TEXT DEFAULT 'direct', -- direct, referral, website, marketplace, leadforge, luxeforge, manual
+    source_url TEXT,
     business TEXT DEFAULT 'empire', -- empire, workroom, woodcraft
+    utm_source TEXT,
+    utm_medium TEXT,
+    utm_campaign TEXT,
+    utm_content TEXT,
+    utm_term TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -471,6 +477,9 @@ def init_database():
         # Intake soft-delete migration (adds deleted_at to intake tables)
         _migrate_intake_soft_delete(conn)
 
+        # ForgeCRM attribution columns + case-insensitive email index
+        _migrate_customer_attribution(conn)
+
         # Seed desk configs from desks.json if table is empty
         count = conn.execute("SELECT COUNT(*) FROM desk_configs").fetchone()[0]
         if count == 0 and DESKS_JSON_PATH.exists():
@@ -533,6 +542,34 @@ def _migrate_access_control(conn):
                 ("Founder", founder_chat_id, pin_hash)
             )
             print(f"✓ Seeded founder access user (chat_id={founder_chat_id})")
+
+
+def _migrate_customer_attribution(conn):
+    """Add Workroom lead attribution columns. Safe to re-run."""
+    columns = (
+        ("source_url", "TEXT"),
+        ("utm_source", "TEXT"),
+        ("utm_medium", "TEXT"),
+        ("utm_campaign", "TEXT"),
+        ("utm_content", "TEXT"),
+        ("utm_term", "TEXT"),
+    )
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(customers)")}
+    added = 0
+    for name, coltype in columns:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE customers ADD COLUMN {name} {coltype}")
+            added += 1
+    try:
+        conn.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email_ci
+               ON customers(lower(email))
+               WHERE email IS NOT NULL AND email != ''"""
+        )
+    except Exception:
+        pass
+    if added:
+        print(f"✓ Customer attribution migration: added {added} column(s)")
 
 
 def _migrate_intake_soft_delete(conn):

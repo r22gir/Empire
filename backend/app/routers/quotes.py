@@ -104,6 +104,16 @@ class QuoteCreate(BaseModel):
     business_name: Optional[str] = None
     business_logo_url: Optional[str] = None
     business_unit: Optional[str] = "workroom"
+    customer_id: Optional[str] = None
+    source: Optional[str] = None
+    source_url: Optional[str] = None
+    tags: Optional[list] = None
+    capture: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    utm_term: Optional[str] = None
     rooms: Optional[list] = None           # Full room/window/upholstery hierarchy
     pricing_mode: Optional[str] = None     # "flat" = skip tier engine, use line_items as-is
     ai_outlines: Optional[list] = None     # AI outline analysis results
@@ -456,67 +466,60 @@ def _sync_quote_customer_to_crm(quote: dict) -> Optional[str]:
     customer_address = (quote.get("customer_address") or "").strip()
     business = _quote_business_key(quote)
 
-    with get_db() as conn:
-        customer_id = None
-        if customer_email:
+    hinted_id = (quote.get("customer_id") or "").strip() or None
+    if not customer_email and not hinted_id:
+        with get_db() as conn:
             row = conn.execute(
-                "SELECT id FROM customers WHERE lower(email) = lower(?) ORDER BY updated_at DESC LIMIT 1",
-                (customer_email,),
-            ).fetchone()
-            if row:
-                customer_id = dict_row(row)["id"]
-        if not customer_id:
-            row = conn.execute(
-                "SELECT id FROM customers WHERE lower(name) = lower(?) ORDER BY updated_at DESC LIMIT 1",
+                """SELECT id FROM customers
+                   WHERE lower(name) = lower(?)
+                   ORDER BY updated_at DESC LIMIT 1""",
                 (customer_name,),
             ).fetchone()
             if row:
-                customer_id = dict_row(row)["id"]
+                hinted_id = dict_row(row)["id"]
 
-        if customer_id:
-            conn.execute(
-                """UPDATE customers
-                   SET email = CASE WHEN COALESCE(email, '') = '' THEN ? ELSE email END,
-                       phone = CASE WHEN COALESCE(phone, '') = '' THEN ? ELSE phone END,
-                       address = CASE WHEN COALESCE(address, '') = '' THEN ? ELSE address END,
-                       business = CASE
-                           WHEN COALESCE(business, '') IN ('', 'workroom') THEN ?
-                           ELSE business
-                       END,
-                       updated_at = datetime('now')
-                   WHERE id = ?""",
-                (
-                    customer_email or None,
-                    customer_phone or None,
-                    customer_address or None,
-                    business,
-                    customer_id,
-                ),
-            )
-        else:
-            conn.execute(
-                """INSERT INTO customers
-                   (id, name, email, phone, address, type, total_revenue,
-                    lifetime_quotes, source, business)
-                   VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'residential', 0, 0, 'quote', ?)""",
-                (
-                    customer_name,
-                    customer_email or None,
-                    customer_phone or None,
-                    customer_address or None,
-                    business,
-                ),
-            )
-            row = conn.execute(
-                """SELECT id FROM customers
-                   WHERE lower(name) = lower(?) AND COALESCE(lower(email), '') = COALESCE(lower(?), '')
-                   ORDER BY created_at DESC LIMIT 1""",
-                (customer_name, customer_email or None),
-            ).fetchone()
-            customer_id = dict_row(row)["id"] if row else None
+    from app.routers.customer_mgmt import upsert_forgecrm_customer
 
-    if customer_id:
-        _reconcile_quote_customer_stats(customer_id, customer_name, customer_email)
+    result = upsert_forgecrm_customer({
+        "customer_id": hinted_id,
+        "name": customer_name,
+        "email": customer_email or None,
+        "phone": customer_phone or None,
+        "address": customer_address or None,
+        "business": business,
+        "business_unit": quote.get("business_unit") or business,
+        "source": quote.get("source") or "quote",
+        "source_url": quote.get("source_url"),
+        "tags": quote.get("tags") or [],
+        "capture": quote.get("capture"),
+        "utm_source": quote.get("utm_source"),
+        "utm_medium": quote.get("utm_medium"),
+        "utm_campaign": quote.get("utm_campaign"),
+        "utm_content": quote.get("utm_content"),
+        "utm_term": quote.get("utm_term"),
+    })
+    customer = result["customer"]
+    customer_id = customer["id"]
+    quote["customer_id"] = customer_id
+    quote["crm_handoff"] = {
+        "customer_id": customer_id,
+        "name": customer.get("name"),
+        "email": customer.get("email"),
+        "phone": customer.get("phone"),
+        "business": customer.get("business"),
+        "source": customer.get("source"),
+        "source_url": customer.get("source_url"),
+        "tags": customer.get("tags") or [],
+        "utm_source": customer.get("utm_source"),
+        "utm_medium": customer.get("utm_medium"),
+        "utm_campaign": customer.get("utm_campaign"),
+        "utm_content": customer.get("utm_content"),
+        "utm_term": customer.get("utm_term"),
+    }
+    if business == "workroom":
+        quote["business_unit"] = "workroom"
+    _reconcile_quote_customer_stats(customer_id, customer_name, customer_email)
+    _save_quote(quote)
     return customer_id
 
 

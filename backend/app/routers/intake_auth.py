@@ -197,6 +197,37 @@ class SignupRequest(BaseModel):
     # canonical business for the public surface (e.g. 'workroom' for the
     # luxe.empirebox.store intake).
     business: str
+    source: Optional[str] = None
+    source_url: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    utm_term: Optional[str] = None
+
+
+def _capture_luxeforge_contact(req: SignupRequest) -> None:
+    """Attach a LuxeForge signup to the shared ForgeCRM customer table."""
+    try:
+        from app.routers.customer_mgmt import upsert_forgecrm_customer
+        upsert_forgecrm_customer({
+            "name": req.name,
+            "email": req.email,
+            "phone": req.phone,
+            "company": req.company,
+            "business": req.business,
+            "business_unit": req.business or "workroom",
+            "capture": "luxeforge",
+            "source": req.source,
+            "source_url": req.source_url,
+            "utm_source": req.utm_source,
+            "utm_medium": req.utm_medium,
+            "utm_campaign": req.utm_campaign,
+            "utm_content": req.utm_content,
+            "utm_term": req.utm_term,
+        })
+    except Exception:
+        logger.exception("LuxeForge signup ForgeCRM upsert failed")
 
 
 class LoginRequest(BaseModel):
@@ -280,6 +311,8 @@ async def signup(request: Request, req: SignupRequest):
     )
     conn.commit()
     conn.close()
+
+    _capture_luxeforge_contact(req)
 
     token = create_token(user_id, req.email.lower().strip())
     return {"token": token, "user": {"id": user_id, "name": req.name, "email": req.email, "role": role, "business": req.business}}
@@ -886,6 +919,9 @@ async def convert_to_quote(request: Request, project_id: str, admin=Depends(requ
         ],
         "valid_days": 30,
         "business_unit": business_unit,
+        "source": "luxeforge",
+        "capture": "luxeforge",
+        "tags": ["luxeforge", "workroom"],
     }
 
     # Create the quote via the quotes router
