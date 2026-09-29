@@ -9,6 +9,7 @@ import IntakeNav from '../../../components/intake/IntakeNav';
 import PhotoUploader from '../../../components/intake/PhotoUploader';
 import FabricInfoSection, { FabricInfo } from '../../../components/intake/FabricInfoSection';
 import { intakeFetch, getToken } from '../../../lib/intake-auth';
+import { isImageFile, fileKindLabel, formatFileSize } from '../../../lib/fileKind';
 
 import { API, API_BASE } from '../../../lib/api';
 
@@ -171,8 +172,10 @@ export default function ProjectDetail() {
   const status = statusConfig[project.status] || statusConfig.draft;
   const StatusIcon = status.icon;
   const photos = project.photos || [];
+  const scans = project.scans || [];
   const measurements = project.measurements || [];
   const messages = project.messages || [];
+  const allFiles = [...photos, ...scans];
 
   return (
     <div data-intake-page className="min-h-screen bg-[#f5f2ed]">
@@ -228,8 +231,8 @@ export default function ProjectDetail() {
             </div>
           )}
           <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[10px] p-3">
-            <div className="text-[9px] text-[#c5c0b8] font-semibold uppercase tracking-[0.5px] mb-0.5">Photos</div>
-            <div className="text-[12px] font-semibold text-[#1a1a1a]">{photos.length}</div>
+            <div className="text-[9px] text-[#c5c0b8] font-semibold uppercase tracking-[0.5px] mb-0.5">Files</div>
+            <div className="text-[12px] font-semibold text-[#1a1a1a]">{allFiles.length}</div>
           </div>
         </div>
 
@@ -256,28 +259,45 @@ export default function ProjectDetail() {
           </div>
         )}
 
-        {/* Photos section */}
+        {/* Photos, drawings & scans section */}
         <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5 mb-4">
           <div className="flex items-center gap-2 mb-4">
             <Camera size={14} className="text-[#b8960c]" />
-            <h2 className="text-[13px] font-bold text-[#1a1a1a]">Photos</h2>
+            <h2 className="text-[13px] font-bold text-[#1a1a1a]">Photos, Drawings &amp; Scans</h2>
           </div>
           {canEdit ? (
-            <PhotoUploader projectId={projectId} photos={photos} onUpload={loadProject} />
-          ) : photos.length > 0 ? (
+            <PhotoUploader projectId={projectId} photos={photos} scans={scans} onUpload={loadProject} />
+          ) : allFiles.length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-              {photos.map((p: any, i: number) => (
-                <div key={i} className="relative aspect-square rounded-[10px] overflow-hidden bg-[#f5f2ed] border border-[#ece8e0]">
-                  <img
-                    src={`${API_BASE}${p.path}`}
-                    alt={p.original_name}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              ))}
+              {allFiles.map((p: any, i: number) => {
+                const name = p.original_name || p.filename || `File ${i + 1}`;
+                if (isImageFile(name)) {
+                  return (
+                    <div key={i} className="relative aspect-square rounded-[10px] overflow-hidden bg-[#f5f2ed] border border-[#ece8e0]">
+                      <img src={`${API_BASE}${p.path}`} alt={name} className="w-full h-full object-cover" />
+                    </div>
+                  );
+                }
+                return (
+                  <a
+                    key={i}
+                    href={`${API_BASE}${p.path}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="relative aspect-square rounded-[10px] overflow-hidden bg-[#f5f2ed] border border-[#ece8e0] flex flex-col items-center justify-center gap-1.5 p-2 text-center hover:border-[#b8960c] transition-colors"
+                    title={name}
+                  >
+                    <FileText size={20} className="text-[#b8960c]" />
+                    <span className="text-[9px] font-semibold text-[#555] truncate w-full">{name}</span>
+                    <span className="text-[8px] text-[#aaa]">
+                      {fileKindLabel(name)}{p.size ? ` · ${formatFileSize(p.size)}` : ''}
+                    </span>
+                  </a>
+                );
+              })}
             </div>
           ) : (
-            <p className="text-[11px] text-[#c5c0b8]">No photos uploaded.</p>
+            <p className="text-[11px] text-[#c5c0b8]">No files uploaded.</p>
           )}
         </div>
 

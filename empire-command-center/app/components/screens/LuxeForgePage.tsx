@@ -1060,22 +1060,36 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
                     </div>
                   )}
 
-                  {/* 3D Scans */}
+                  {/* Drawings, CAD, 3D Scans & other files */}
                   {scans.length > 0 && (
                     <div style={{ marginBottom: 16 }}>
                       <div style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8, fontWeight: 600 }}>
-                        3D Scans ({scans.length})
+                        Drawings, CAD &amp; Scans ({scans.length})
                       </div>
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {scans.map((scan: any, i: number) => (
-                          <div key={i} style={{
-                            padding: '8px 14px', background: '#dcfce7', borderRadius: 8,
-                            fontSize: 12, color: '#16a34a', fontWeight: 600,
-                            display: 'flex', alignItems: 'center', gap: 6,
-                          }}>
+                          <a
+                            key={i}
+                            href={`${API.replace('/api/v1', '')}${scan.path}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Download ${scan.original_name || `File ${i + 1}`}`}
+                            style={{
+                              padding: '8px 14px', background: '#dcfce7', borderRadius: 8,
+                              fontSize: 12, color: '#16a34a', fontWeight: 600,
+                              display: 'flex', alignItems: 'center', gap: 6,
+                              textDecoration: 'none', cursor: 'pointer',
+                            }}
+                          >
                             <Maximize2 size={12} />
-                            {scan.original_name || `Scan ${i + 1}`}
-                          </div>
+                            {scan.original_name || `File ${i + 1}`}
+                            {scan.size ? (
+                              <span style={{ fontWeight: 400, color: '#4d8a5f', fontSize: 10 }}>
+                                ({(scan.size / (1024 * 1024)).toFixed(1)} MB)
+                              </span>
+                            ) : null}
+                            <Download size={11} />
+                          </a>
                         ))}
                       </div>
                     </div>

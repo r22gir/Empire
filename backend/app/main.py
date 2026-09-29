@@ -269,13 +269,27 @@ load_router("app.routers.system_monitor", "/api/v1", ["system"])
 load_router("app.routers.ollama_manager", "/api/v1", ["ollama"])
 load_router("app.routers.recovery_control", "/api/v1", ["recovery"])
 
-# Serve intake uploads as static files
-from fastapi.staticfiles import StaticFiles
+# Serve intake uploads with safe Content-Disposition / Content-Type
+# handling instead of a plain StaticFiles mount. Designers can upload any
+# file type (PDFs, CAD, 3D scans, docs, video, ...); this makes sure an
+# uploaded HTML or SVG file is never executed/rendered inline when the
+# public /intake_uploads/... URL is hit directly — see
+# app.services.uploads.safe_file_serve for the allowlist + headers.
+from pathlib import Path as _Path
 from app.services.drawing.canonical_path import canonical_intake_uploads_dir
+from app.services.uploads.safe_file_serve import safe_download_response
 
-_intake_uploads = str(canonical_intake_uploads_dir())
-os.makedirs(_intake_uploads, exist_ok=True)
-app.mount("/intake_uploads", StaticFiles(directory=_intake_uploads), name="intake_uploads")
+_Path(canonical_intake_uploads_dir()).mkdir(parents=True, exist_ok=True)
+
+
+@app.get("/intake_uploads/{full_path:path}")
+async def serve_intake_upload(full_path: str):
+    from fastapi import HTTPException as _HTTPException404
+    from app.routers.intake_auth import UPLOADS_DIR as _current_intake_uploads_dir
+    parts = [p for p in full_path.split("/") if p]
+    if not parts:
+        raise _HTTPException404(status_code=404, detail="Not found")
+    return safe_download_response(_Path(_current_intake_uploads_dir), *parts)
 
 @app.get("/")
 async def root():
