@@ -31,7 +31,9 @@ export default function WorkroomForgeWorkspace({ onBack }: Props) {
 
   const fetchQuotes = useCallback(async () => {
     try {
-      const res = await fetch(API_URL + '/quotes');
+      // Canonical store: quotes_v2 (MAX create_engine_quote writes here).
+      // Legacy GET /quotes only lists JSON under QUOTES_DIR (~4 files).
+      const res = await fetch(API_URL + '/quotes-v2?limit=100&business_unit=workroom');
       const data = await res.json();
       setQuotes(data.quotes || []);
     } catch { /* */ }
@@ -199,7 +201,8 @@ function QuotesTab({ quotes, onRefresh, onNewQuote }: { quotes: any[]; onRefresh
 
   const viewPdf = async (id: string) => {
     try {
-      const res = await fetch(API_URL + `/quotes/${id}/pdf`, { method: 'POST' });
+      // quotes-v2 PDF is GET (POST returns 405)
+      const res = await fetch(API_URL + `/quotes-v2/${id}/pdf`);
       if (!res.ok) return;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -210,14 +213,19 @@ function QuotesTab({ quotes, onRefresh, onNewQuote }: { quotes: any[]; onRefresh
   const deleteQuote = async (id: string) => {
     if (!confirm('Delete this quote?')) return;
     try {
-      await fetch(API_URL + `/quotes/${id}`, { method: 'DELETE' });
+      await fetch(API_URL + `/quotes-v2/${id}`, { method: 'DELETE' });
       onRefresh();
     } catch { /* */ }
   };
 
   const sendQuote = async (id: string) => {
+    // No email — advance draft → founder_review on the canonical store.
     try {
-      await fetch(API_URL + `/quotes/${id}/send`, { method: 'POST' });
+      await fetch(API_URL + `/quotes-v2/${id}/submit-for-review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changed_by: 'workroom-ui', reason: 'submitted from Workroom list' }),
+      });
       onRefresh();
     } catch { /* */ }
   };
@@ -293,7 +301,7 @@ function QuotesTab({ quotes, onRefresh, onNewQuote }: { quotes: any[]; onRefresh
                         title="View PDF"><Eye className="w-3.5 h-3.5" /></button>
                       {q.status === 'draft' && (
                         <button onClick={() => sendQuote(q.id)} className="p-1 rounded transition" style={{ color: '#3b82f6' }}
-                          title="Mark as sent"><Send className="w-3.5 h-3.5" /></button>
+                          title="Submit for review"><Send className="w-3.5 h-3.5" /></button>
                       )}
                       <button onClick={() => deleteQuote(q.id)} className="p-1 rounded transition" style={{ color: 'var(--text-muted)' }}
                         title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>

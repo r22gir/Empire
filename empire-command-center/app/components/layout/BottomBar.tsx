@@ -105,7 +105,7 @@ export default function BottomBar({ services }: Props) {
         {/* Service status */}
         <div className="flex items-center gap-4">
           {SERVICES.map(s => {
-            const isOk = services?.[s]?.status === 'online' || services?.[s] === true;
+            const isOk = services?.[s]?.status === 'online' || services?.[s] === true || services?.[s] === 'online';
             return (
               <div key={s} className="flex items-center gap-[5px] text-[10px] text-[#888] font-mono whitespace-nowrap">
                 <span className={`w-[5px] h-[5px] rounded-full ${isOk ? 'bg-[#22c55e]' : 'bg-[#f59e0b]'}`} />

@@ -1,18 +1,28 @@
 """
 Brain configuration — paths, models, limits.
-Local NVMe is primary. External drive is backup-only (no live I/O).
+
+Canonical brain path is resolved at runtime via `EMPIRE_BRAIN_DIR` (preferred)
+or a canonical default (`~/empire-data/brain`). No legacy fallback to
+`~/empire-repo/backend/data/brain` — the old lane is being retired.
 """
 import os
 from pathlib import Path
 
-# Brain location — local NVMe is primary (fast, reliable, no USB power issues)
-LOCAL_BRAIN = Path.home() / "empire-repo" / "backend" / "data" / "brain"
+
+def _brain_root() -> Path:
+    """Canonical brain root. Honors EMPIRE_BRAIN_DIR; default is canonical."""
+    root = Path(
+        os.environ.get(
+            "EMPIRE_BRAIN_DIR", os.path.expanduser("~/empire-data/brain")
+        )
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def get_brain_path() -> Path:
-    """Get brain storage path — always local NVMe."""
-    LOCAL_BRAIN.mkdir(parents=True, exist_ok=True)
-    return LOCAL_BRAIN
+    """Get brain storage path."""
+    return _brain_root()
 
 
 def get_db_path() -> str:

@@ -2,6 +2,7 @@
 import os
 import re
 import logging
+from datetime import datetime
 from typing import Tuple
 
 logger = logging.getLogger("max.guardrails")
@@ -98,10 +99,16 @@ def is_founder_message(message_context: dict) -> bool:
     CC / web = always founder (Command Center is the owner's tool).
     Telegram = match by chat_id.
     Unknown channel = not founder (require PIN fallback).
+    H74 (D45, 2026-08-28): missing or unrecognized channel resolves to
+    anonymous, NEVER founder. Pre-fix the allow-list tuple contained ""
+    and `request.channel or ""` defaulted to "", so any caller omitting
+    the `channel` body field walked past every privilege gate. The empty
+    string is intentionally absent from the tuple below.
     """
     channel = message_context.get("channel", "")
-    # Command Center (any variant) = always founder
-    if channel in ("web", "web_cc", "cc", "command_center", "command-center", ""):
+    # Command Center (any variant) = always founder.
+    # NO empty string in this tuple: see H74 docstring above.
+    if channel in ("web", "web_cc", "cc", "command_center", "command-center"):
         return True
     # Telegram: match by chat_id
     if not _FOUNDER_CHAT_ID:
@@ -131,19 +138,50 @@ BLOCKED_TOPICS = [
 ]
 
 def check_input(text: str, message_context: dict = None) -> Tuple[bool, str]:
+    """Scan input for prompt-injection and blocked-topic patterns.
+
+    H81 Phase 2 (2026-09-01): the scan ALWAYS RUNS — even for
+    founder. Detections are logged at WARNING with the matched
+    pattern, channel, chat_id, founder flag, and a truncated
+    excerpt, so a later review can reconstruct what was attempted.
+    Nothing is refused on the basis of that detection for founder
+    traffic; the message proceeds. Non-founder callers are still
+    refused as before — the gate has NOT been weakened.
+
+    Founder ruling (Phase 2 dispatch): scan and log, never block.
+    Phase 3 will add identity-checking before the scan for an
+    attacker who can reach the chat endpoint.
+    """
     text_lower = text.lower()
-    founder = is_founder_message(message_context or {})
+    msg_ctx = message_context or {}
+    founder = is_founder_message(msg_ctx)
+    channel = msg_ctx.get("channel", "")
+    chat_id = msg_ctx.get("chat_id", "")
+    excerpt = (text or "")[:80]  # truncate; full text in caller scope
+    ts = datetime.now().isoformat()
+
     for pattern in INJECTION_PATTERNS:
         if re.search(pattern, text_lower, re.IGNORECASE):
-            if founder:
-                logger.info(f"Founder override: skipping prompt_injection block")
-            else:
+            logger.warning(
+                f"Guardrail detection [{ts}] kind=prompt_injection "
+                f"pattern={pattern!r} channel={channel!r} "
+                f"chat_id={chat_id!r} founder={founder} "
+                f"excerpt={excerpt!r}"
+            )
+            if not founder:
                 return False, "prompt_injection"
+
     for pattern in BLOCKED_TOPICS:
         if re.search(pattern, text_lower, re.IGNORECASE):
+            logger.warning(
+                f"Guardrail detection [{ts}] kind=blocked_topic "
+                f"pattern={pattern!r} channel={channel!r} "
+                f"chat_id={chat_id!r} founder={founder} "
+                f"excerpt={excerpt!r}"
+            )
             if not founder:
                 return False, "blocked_topic"
-            logger.info(f"Founder override: skipping blocked_topic block")
+
     return True, "ok"
 
 

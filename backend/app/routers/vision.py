@@ -5,10 +5,13 @@ Image understanding uses MiniMax Token Plan through the working mmx CLI transpor
 Image generation remains explicit and separate from image-understanding quota.
 """
 import os, json, re, httpx, asyncio, logging, base64, uuid, time
+from io import BytesIO
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Any, Optional
+
+from PIL import Image, UnidentifiedImageError
 
 from app.services.data_paths import data_root
 from app.services.max.minimax_tools import minimax_tools_status, minimax_understand_image
@@ -164,7 +167,41 @@ def _decode_image_input(image: str) -> tuple[bytes, str]:
             ext = ".bmp"
         else:
             raise HTTPException(400, "Unsupported image payload")
+
+    # D43 1a — decode-verify at the boundary. Magic bytes can pass while the
+    # payload itself is not a decodable image (e.g. a 136-byte PNG header
+    # followed by 128 bytes of `x` padding). PIL's verify() opens the file and
+    # confirms the decoder accepts the structure.
+    #
+    # Note: verify() invalidates the Image object for pixel access; downstream
+    # uses the file path (write_bytes + mmx CLI subprocess), so we don't need
+    # to re-open — we only re-open to read dimensions for the log line.
+    try:
+        Image.open(BytesIO(data)).verify()
+    except (UnidentifiedImageError, Exception) as exc:  # PIL raises a variety
+        raise HTTPException(
+            status_code=400,
+            detail="Image payload is not a decodable image",
+        ) from exc
+
+    # Re-open for dimensions (verify() above closes the image).
+    try:
+        with Image.open(BytesIO(data)) as dim_img:
+            log.info(
+                "vision_decode_verified ext=%s size=%dx%d bytes=%d",
+                ext, dim_img.size[0], dim_img.size[1], len(data),
+            )
+    except Exception:
+        # Already verified once; ignore secondary failures.
+        pass
+
     return data, ext
+
+
+# Public alias for cross-module use (drawings.py, quote_requests.py).
+# Same body, same guarantees — the unprefixed name signals it is part of the
+# public API of this module.
+decode_image_input = _decode_image_input
 
 
 def _looks_like_base64_payload(text: str) -> bool:
@@ -261,25 +298,188 @@ _F4_PING_COOLDOWN_SECONDS = 600
 _last_f4_ping_at: float = 0.0
 
 
-async def _parsed_json_from_minimax_result(result: dict[str, Any]) -> dict[str, Any]:
-    """Parse a MiniMax mmx_cli result into the mockup schema.
+def _positive_inches(value: Any) -> Optional[float]:
+    """Inches worth copying onto a quote line. Zero and junk stay unset."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        text = re.sub(r"[^\d.+-]", "", value.strip())
+        if not text:
+            return None
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if number <= 0:
+        return None
+    return number
 
-    Tries in order:
-      1. Direct JSON extraction — works when mmx happens to return JSON.
-      2. Two-stage formatter — M3 converts mmx prose to schema-valid JSON
+
+def normalize_measure_result(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Lift window_info.estimated_width/height onto width_inches/height_inches.
+
+    Save-to-Quote and the approval flow read the flat fields. MiniMax often
+    returns the mockup formatter shape instead, which saved lines as None
+    dimensions and $0.
+    """
+    if not isinstance(parsed, dict):
+        return parsed
+    window = parsed.get("window_info") if isinstance(parsed.get("window_info"), dict) else {}
+    width = _positive_inches(parsed.get("width_inches"))
+    height = _positive_inches(parsed.get("height_inches"))
+    if width is None:
+        width = (
+            _positive_inches(window.get("estimated_width"))
+            or _positive_inches(window.get("width"))
+            or _positive_inches(window.get("width_inches"))
+        )
+    if height is None:
+        height = (
+            _positive_inches(window.get("estimated_height"))
+            or _positive_inches(window.get("height"))
+            or _positive_inches(window.get("height_inches"))
+        )
+    if width is not None:
+        parsed["width_inches"] = width
+    if height is not None:
+        parsed["height_inches"] = height
+    if not str(parsed.get("window_type") or "").strip():
+        window_type = window.get("type") or window.get("window_type")
+        if window_type:
+            parsed["window_type"] = window_type
+    return parsed
+
+
+def _measure_json_ready(parsed: dict[str, Any]) -> bool:
+    if any(key in parsed for key in ("width_inches", "height_inches", "window_type")):
+        return True
+    window = parsed.get("window_info")
+    if not isinstance(window, dict):
+        return False
+    return any(
+        key in window
+        for key in ("estimated_width", "estimated_height", "width", "height", "type")
+    )
+
+
+def _direct_json_matches(parsed: dict[str, Any], result_schema: str) -> bool:
+    """Stage-1 accept rule.
+
+    Mockup keeps its historical gate (proposals / room_assessment) so prose
+    still goes through the design formatter.
+
+    QIS analyze-items accepts an object that already has ``items[]``. That
+    JSON must not be rewritten into the mockup proposal schema — Quote Review
+    reads ``analysis.items`` and toasts ``Found ${items.length}``.
+
+    Measure accepts flat inches or nested window_info so a valid measurement
+    is not rewritten into design proposals (that second LLM call also pushes
+    the Next rewrite proxy past its 30s socket timeout).
+    """
+    if result_schema == "items":
+        return isinstance(parsed.get("items"), list)
+    if result_schema == "measure":
+        return _measure_json_ready(parsed)
+    return "proposals" in parsed or "room_assessment" in parsed
+
+
+def _prepare_items_analysis(
+    parsed: dict[str, Any],
+    source_model: str,
+    format_status: str,
+    **runtime_extra: Any,
+) -> dict[str, Any]:
+    """Normalize a QIS analysis so Quote Review can read items[].
+
+    Adds the display aliases the review screen renders (description, width,
+    height) without dropping QIS fields the quote assembler prices
+    (name, type, dimensions, quantity). Drops ``proposals`` so a mixed
+    mockup payload cannot hide the line items.
+    """
+    items_out: list[dict[str, Any]] = []
+    for raw in parsed.get("items") or []:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        dims = item.get("dimensions") if isinstance(item.get("dimensions"), dict) else {}
+        if not str(item.get("description") or "").strip():
+            item["description"] = item.get("name") or item.get("type") or "Item"
+        if item.get("width") in (None, "") and dims.get("width") not in (None, ""):
+            item["width"] = dims.get("width")
+        if item.get("height") in (None, "") and dims.get("height") not in (None, ""):
+            item["height"] = dims.get("height")
+        items_out.append(item)
+    parsed["items"] = items_out
+    parsed.pop("proposals", None)
+    runtime = {
+        "provider": "minimax",
+        "transport": "mmx_cli",
+        "format_status": format_status,
+        "model": source_model,
+        "image_generation_used": False,
+        "quota_bucket": "mcp_understand_image",
+        "result_schema": "items",
+    }
+    runtime.update(runtime_extra)
+    parsed["_vision_runtime"] = runtime
+    return parsed
+
+
+def _empty_items_analysis(source_model: str, reason: str, prose: str = "") -> dict[str, Any]:
+    """QIS failure shape: items[] present and empty. No mockup proposals."""
+    return _prepare_items_analysis(
+        {
+            "room_type": "unknown",
+            "style": "unknown",
+            "items": [],
+            "overall_notes": "Photo analysis could not be structured into line items.",
+            "questions": [],
+        },
+        source_model,
+        "items_formatter_fallback",
+        reason=reason[:300],
+        description=(prose or "")[:2000],
+    )
+
+
+async def _parsed_json_from_minimax_result(
+    result: dict[str, Any],
+    *,
+    result_schema: str = "mockup",
+) -> dict[str, Any]:
+    """Parse a MiniMax mmx_cli result.
+
+    ``result_schema="mockup"`` (default, used by /vision/mockup):
+      1. Direct JSON when it already has proposals or room_assessment.
+      2. Two-stage formatter — M3 converts mmx prose to the mockup schema
          (one retry on parse failure).
-      3. F4 fallback — wrap the prose with empty proposals so the UI
-         degrades gracefully (description shown, no mockup images) instead
-         of throwing a 500. Both F4 paths also notify the founder.
+      3. F4 fallback — empty proposals so /vision/mockup is never a 500.
+         Both F4 paths also notify the founder.
 
-    Never raises — always returns a dict so /api/v1/vision/mockup is never
-    a customer-facing 500 for this class of failure.
+    ``result_schema="items"`` (used by /vision/analyze-items):
+      1. Direct JSON when it already has items[]. Do not run the mockup
+         formatter.
+      2. Items formatter — M3 converts prose into the QIS items schema.
+      3. Empty items[] (no proposals, no founder mockup ping).
+
+    ``result_schema="measure"`` (used by /vision/measure):
+      1. Direct JSON when it already has flat inches or window_info dims.
+         Nested estimated_width/height are copied onto width_inches/height.
+      2. Otherwise the mockup formatter, then the same dim lift.
     """
     source_model = result.get("model") or "mmx_vision"
 
     if not result.get("success"):
         error = result.get("error") or "MiniMax image understanding failed verification"
         log.warning(f"vision_mockup: MiniMax result not successful: {error}")
+        if result_schema == "items":
+            return _empty_items_analysis(
+                source_model, reason=f"minimax result unsuccessful: {error[:120]}"
+            )
         return await _wrap_prose_as_empty_schema(
             "", source_model, reason=f"minimax result unsuccessful: {error[:120]}"
         )
@@ -290,7 +490,31 @@ async def _parsed_json_from_minimax_result(result: dict[str, Any]) -> dict[str, 
     # Stage 1: direct parse (mmx occasionally returns JSON-ish already).
     try:
         parsed = _extract_json_object(text)
-        if isinstance(parsed, dict) and ("proposals" in parsed or "room_assessment" in parsed):
+        if isinstance(parsed, dict) and _direct_json_matches(parsed, result_schema):
+            if result_schema == "items":
+                prepared = _prepare_items_analysis(parsed, source_model, "direct_parse")
+                log.info(
+                    "vision_parse schema=items format_status=direct_parse items=%d",
+                    len(prepared.get("items") or []),
+                )
+                return prepared
+            if result_schema == "measure":
+                prepared = normalize_measure_result(parsed)
+                prepared["_vision_runtime"] = {
+                    "provider": "minimax",
+                    "transport": "mmx_cli",
+                    "format_status": "direct_parse",
+                    "model": source_model,
+                    "image_generation_used": False,
+                    "quota_bucket": "mcp_understand_image",
+                    "result_schema": "measure",
+                }
+                log.info(
+                    "vision_parse schema=measure format_status=direct_parse width=%s height=%s",
+                    prepared.get("width_inches"),
+                    prepared.get("height_inches"),
+                )
+                return prepared
             parsed["_vision_runtime"] = {
                 "provider": "minimax",
                 "transport": "mmx_cli",
@@ -302,7 +526,16 @@ async def _parsed_json_from_minimax_result(result: dict[str, Any]) -> dict[str, 
     except HTTPException:
         pass  # not parseable; fall through to formatter
 
-    # Stage 2: format mmx's prose through chat LLM.
+    if result_schema == "items":
+        log.info("vision_parse schema=items format_status=items_formatter_pending")
+        return await _format_mmx_prose_to_items_schema(text, source_model)
+
+    if result_schema == "measure":
+        log.info("vision_parse schema=measure format_status=formatter_pending")
+        formatted = await _format_mmx_prose_to_schema(text, source_model)
+        return normalize_measure_result(formatted)
+
+    # Stage 2 (mockup only): format mmx's prose through chat LLM.
     return await _format_mmx_prose_to_schema(text, source_model)
 
 
@@ -381,6 +614,107 @@ async def _format_mmx_prose_to_schema(prose: str, source_model: str) -> dict[str
     log.warning(f"vision_formatter exhausted retries ({last_error}); F4 fallback")
     return await _wrap_prose_as_empty_schema(
         prose, source_model, reason=f"formatter exhausted retries: {last_error}"
+    )
+
+
+_QIS_ITEMS_SCHEMA = {
+    "room_type": "string",
+    "style": "string",
+    "items": [{
+        "name": "string",
+        "type": (
+            "drapery_panel | roman_shade | roller_shade | valance | cornice | swag | "
+            "dining_chair_seat | dining_chair_full | accent_chair | wingback_chair | club_chair | "
+            "loveseat | sofa_2cushion | sofa_3cushion | sectional_per_section | "
+            "ottoman | bench_small | bench_medium | bench_large | banquette | headboard | "
+            "seat_cushion | back_cushion | throw_pillow | bolster"
+        ),
+        "quantity": "number",
+        "dimensions": {"width": "inches", "height": "inches", "depth": "inches"},
+        "construction": "string",
+        "current_material": "string",
+        "condition": "string",
+        "cushion_count": "number",
+        "special_features": ["string"],
+        "recommended_treatment": "string",
+        "notes": "string",
+        "location_in_photo": "string",
+    }],
+    "overall_notes": "string",
+    "questions": ["string"],
+}
+
+_QIS_ITEMS_FORMATTER_SYSTEM = (
+    "You are a precise JSON formatter for a window-treatment quote tool. "
+    "Output ONLY valid JSON matching the schema the user provides. "
+    "No markdown fences, no commentary, no design-tier proposals."
+)
+
+
+async def _format_mmx_prose_to_items_schema(prose: str, source_model: str) -> dict[str, Any]:
+    """Turn mmx prose into QIS ``{items: [...]}``.
+
+    This is the analyze-items counterpart of the mockup formatter. It must
+    not emit the mockup proposal schema — Quote Review counts ``items``.
+    """
+    schema_str = json.dumps(_QIS_ITEMS_SCHEMA, indent=2)
+    user_prompt = (
+        "Convert the photo description below into a JSON object matching this exact schema:\n\n"
+        f"{schema_str}\n\n"
+        "Rules:\n"
+        "- items: one entry per distinct quotable piece (window treatment or furniture). "
+        "Identical pieces share one entry with quantity.\n"
+        "- type: use exactly one value from the type list in the schema.\n"
+        "- dimensions: inches. Use 0 when unknown.\n"
+        "- Do NOT invent design tiers, price ranges, or a proposals array.\n"
+        "- If nothing quotable is visible, return items as an empty array.\n"
+        "- overall_notes: brief caveat. questions: 0-3 customer questions.\n\n"
+        "Output ONLY the JSON object. Nothing else.\n\n"
+        f"Photo description:\n{(prose or '')[:6000]}"
+    )
+
+    last_error: Optional[str] = None
+    for attempt in range(2):
+        try:
+            response = await ai_router.chat(
+                [AIMessage(role="user", content=user_prompt)],
+                model=AIModel.MINIMAX,
+                system_prompt=_QIS_ITEMS_FORMATTER_SYSTEM,
+                source="vision_items_formatter",
+            )
+            content = (response.content or "").strip()
+            try:
+                parsed = _extract_json_object(content)
+            except HTTPException as exc:
+                last_error = f"parse failed: {exc.detail}"
+                log.warning(f"vision_items_formatter attempt {attempt + 1}: {last_error}")
+                continue
+            if not isinstance(parsed, dict) or not isinstance(parsed.get("items"), list):
+                last_error = "parsed result has no items array"
+                log.warning(f"vision_items_formatter attempt {attempt + 1}: {last_error}")
+                continue
+            prepared = _prepare_items_analysis(
+                parsed,
+                source_model,
+                "items_formatter",
+                format_attempts=attempt + 1,
+                formatter_model=getattr(response, "model_used", "minimax"),
+            )
+            log.info(
+                "vision_items_formatter succeeded on attempt %s items=%d",
+                attempt + 1,
+                len(prepared.get("items") or []),
+            )
+            return prepared
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            log.warning(f"vision_items_formatter attempt {attempt + 1} failed: {last_error}")
+
+    log.warning(f"vision_items_formatter exhausted retries ({last_error})")
+    return _empty_items_analysis(
+        source_model,
+        reason=f"items formatter exhausted retries: {last_error}",
+        prose=prose,
     )
 
 
@@ -469,22 +803,40 @@ async def _notify_f4_fallback(reason: str, source_model: str, prose_snippet: str
         log.warning(f"vision_mockup: telegram ping failed: {type(exc).__name__}: {exc}")
 
 
-async def call_minimax_image_understanding(prompt: str, image_url: str, max_tokens: int = 4500) -> dict[str, Any]:
+async def call_minimax_image_understanding(
+    prompt: str,
+    image_url: str,
+    max_tokens: int = 4500,
+    *,
+    result_schema: str = "mockup",
+) -> dict[str, Any]:
     """Call MiniMax image understanding through the shared mmx CLI wrapper."""
     image_path = _materialize_image_input(image_url)
     result = await minimax_understand_image(image_path, prompt=prompt)
-    parsed = await _parsed_json_from_minimax_result(result)
-    log.info("provider=minimax capability=image_understanding transport=mmx_cli response_status=ok parsed_json_valid=true")
+    parsed = await _parsed_json_from_minimax_result(result, result_schema=result_schema)
+    log.info("provider=minimax capability=image_understanding transport=mmx_cli response_status=ok parsed_json_valid=true schema=%s", result_schema)
     return parsed
 
-async def call_vision(prompt: str, image: str, max_tokens: int = 4500) -> dict:
+async def call_vision(
+    prompt: str,
+    image: str,
+    max_tokens: int = 4500,
+    *,
+    result_schema: str = "mockup",
+) -> dict:
     """Send image + prompt to best available vision model and parse JSON response.
 
     Priority: MiniMax image understanding through mmx CLI.
     xAI/Grok fallback is disabled unless explicitly enabled by provider policy.
+
+    result_schema="mockup" keeps the design-proposal formatter.
+    result_schema="items" returns QIS items[] for Quote Review analyze.
+    result_schema="measure" keeps flat inches (and lifts window_info dims).
     """
     try:
-        return await call_minimax_image_understanding(prompt, image, max_tokens=max_tokens)
+        return await call_minimax_image_understanding(
+            prompt, image, max_tokens=max_tokens, result_schema=result_schema
+        )
     except HTTPException as exc:
         log.warning("MiniMax mmx_cli vision failed: %s", exc.detail)
         if not _xai_vision_allowed():
@@ -643,8 +995,13 @@ async def generate_image(prompt: str) -> Optional[str]:
 
 @router.post("/analyze-items")
 async def analyze_items(req: AnalyzeItemsRequest):
-    """Run AI vision with a custom prompt (used by QIS item analyzer)."""
-    return await call_vision(req.prompt, req.image, max_tokens=6000)
+    """Run AI vision for QIS item detection (Quote Review Analyze).
+
+    Returns ``{items: [...]}``. MiniMax output is not passed through the
+    mockup proposal formatter, which drops line items and makes the client
+    toast "Found 0 item(s)" on HTTP 200.
+    """
+    return await call_vision(req.prompt, req.image, max_tokens=6000, result_schema="items")
 
 
 @router.get("/status")
@@ -736,7 +1093,8 @@ Return JSON only:
 
 @router.post("/measure")
 async def measure(req: ImageRequest):
-    return await call_vision(MEASURE_PROMPT, req.image)
+    data = await call_vision(MEASURE_PROMPT, req.image, result_schema="measure")
+    return normalize_measure_result(data)
 
 
 # ── /outline — Dimensional installation plan ───────────────

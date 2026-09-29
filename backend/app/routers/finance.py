@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime, date, timedelta
 
 from app.db.database import get_db, dict_row, dict_rows
+from app.services.chain_guard import require_customer, MissingCustomerLink
 from app.middleware.rate_limiter import limiter
 from app.services.pricing import (
     PRICING_ENGINE_VERSION,
@@ -141,6 +142,7 @@ def _next_invoice_number(conn) -> str:
 
 def _recalc_invoice(conn, invoice_id: str):
     """Recalculate invoice totals from subtotal, tax, and payments."""
+    _ensure_finance_extensions(conn)
     inv = dict_row(conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone())
     if not inv:
         return
@@ -174,11 +176,17 @@ def _recalc_invoice(conn, invoice_id: str):
     if status == "paid":
         paid_at = datetime.now().isoformat()
 
+    payment_status = inv.get("payment_status") or "unpaid"
+    if status == "paid":
+        payment_status = "paid"
+    elif status == "partial":
+        payment_status = "partial"
+
     conn.execute(
         """UPDATE invoices SET tax_amount = ?, total = ?, amount_paid = ?,
-           balance_due = ?, status = ?, paid_at = COALESCE(paid_at, ?),
+           balance_due = ?, status = ?, payment_status = ?, paid_at = COALESCE(paid_at, ?),
            updated_at = datetime('now') WHERE id = ?""",
-        (tax_amount, total, amount_paid, balance_due, status, paid_at, invoice_id)
+        (tax_amount, total, amount_paid, balance_due, status, payment_status, paid_at, invoice_id)
     )
 
 
@@ -537,6 +545,9 @@ def _ensure_finance_extensions(conn):
         "pricing_snapshot_json": "TEXT",
         "tax_policy_json": "TEXT",
         "pricing_engine_version": "TEXT",
+        "stripe_checkout_session_id": "TEXT",
+        "stripe_checkout_url": "TEXT",
+        "stripe_checkout_attempt": "INTEGER DEFAULT 0",
     }
     for col, ctype in inv_cols.items():
         parts = ctype.split(" DEFAULT ")
@@ -948,6 +959,229 @@ def _compose_stage_invoice(conn, source: dict, request: InvoiceComposeRequest) -
         "terms": request.terms or source.get("terms") or default_terms,
         "due_date": request.due_date or (date.today() + timedelta(days=30)).isoformat(),
         "deposit_required": total if stage == "deposit" else 0,
+    }
+
+
+def _persist_composed_invoice(conn, source: dict, composed: dict) -> dict:
+    """Insert one composed invoice and return the enriched row."""
+    business_unit = _normalise_business(source.get("business_unit") or "workroom")
+    if business_unit == "all":
+        business_unit = "workroom"
+    customer_id = _find_or_create_customer_for_invoice(
+        conn,
+        source.get("customer_name"),
+        source.get("customer_email"),
+        source.get("customer_phone"),
+        source.get("customer_address"),
+        business_unit,
+    )
+    inv_number = _next_invoice_number(conn)
+    conn.execute(
+        """INSERT INTO invoices
+           (id, invoice_number, customer_id, quote_id, job_id, status, subtotal, tax_rate,
+            tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
+            client_name, client_email, client_phone, client_address, business_unit,
+            deposit_required, deposit_received, discount_amount, discount_type,
+            invoice_date, payment_status, source_type, source_id, invoice_stage,
+            pricing_snapshot_json, tax_policy_json, pricing_engine_version)
+           VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'draft', ?, ?,
+                   ?, ?, 0, ?, ?, ?, ?, ?,
+                   ?, ?, ?, ?, ?,
+                   ?, 0, ?, ?,
+                   ?, 'unpaid', ?, ?, ?,
+                   ?, ?, ?)""",
+        (
+            inv_number,
+            customer_id,
+            source.get("quote_id"),
+            source.get("job_id"),
+            composed["subtotal"],
+            composed["tax_rate"],
+            composed["tax_amount"],
+            composed["total"],
+            composed["total"],
+            json.dumps(composed["line_items"]),
+            composed["notes"],
+            composed["terms"],
+            composed["due_date"],
+            source.get("customer_name"),
+            source.get("customer_email"),
+            source.get("customer_phone"),
+            source.get("customer_address"),
+            business_unit,
+            composed["deposit_required"],
+            composed["discount_amount"],
+            composed["discount_type"],
+            date.today().isoformat(),
+            source["source_type"],
+            source["source_id"],
+            composed["stage"],
+            json.dumps(composed.get("pricing_snapshot_json"), default=str) if composed.get("pricing_snapshot_json") else None,
+            json.dumps(composed.get("tax_policy"), default=str) if composed.get("tax_policy") else None,
+            PRICING_ENGINE_VERSION,
+        ),
+    )
+    row = conn.execute(
+        """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+           FROM invoices i
+           LEFT JOIN customers c ON c.id = i.customer_id
+           WHERE i.invoice_number = ?""",
+        (inv_number,),
+    ).fetchone()
+    invoice = _enrich_invoice(dict_row(row))
+    if source.get("job_id"):
+        conn.execute("UPDATE jobs SET invoice_id = ? WHERE id = ?", (invoice["id"], source["job_id"]))
+    return invoice
+
+
+_CASH_QUOTE_BUSINESSES = {
+    "workroom": "workroom",
+    "empire workroom": "workroom",
+    "woodcraft": "woodcraft",
+    "wood craft": "woodcraft",
+    "empire woodcraft": "woodcraft",
+    "craftforge": "woodcraft",
+}
+
+
+def cash_quote_business(quote: dict) -> str:
+    """Workroom is the default. WoodCraft is allowed. Other businesses are rejected."""
+    raw = quote.get("business_unit") or quote.get("business") or quote.get("business_name")
+    if not raw or not str(raw).strip():
+        return "workroom"
+    key = _CASH_QUOTE_BUSINESSES.get(str(raw).strip().lower())
+    if not key:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Deposit pay links are limited to Workroom and WoodCraft quotes "
+                f"(got {raw})"
+            ),
+        )
+    return key
+
+
+def _load_cash_quote(quote_id: str) -> dict:
+    quote_file = QUOTES_DIR / f"{quote_id}.json"
+    if quote_file.exists():
+        quote = json.loads(quote_file.read_text())
+    else:
+        try:
+            from app.services.quote_service import get_quote as get_sql_quote
+            quote = get_sql_quote(quote_id)
+        except Exception:
+            quote = None
+        if not quote:
+            raise HTTPException(status_code=404, detail=f"Quote not found: {quote_id}")
+        if not quote.get("deposit") and quote.get("deposit_percent"):
+            quote = dict(quote)
+            quote["deposit"] = {"deposit_percent": quote.get("deposit_percent")}
+    if not isinstance(quote, dict):
+        raise HTTPException(status_code=404, detail=f"Quote not found: {quote_id}")
+    return quote
+
+
+def _find_deposit_invoice(conn, quote_id: str):
+    """Prefer a paid deposit, otherwise the oldest open deposit for this quote."""
+    return conn.execute(
+        """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+           FROM invoices i
+           LEFT JOIN customers c ON c.id = i.customer_id
+           WHERE i.status != 'cancelled'
+             AND lower(COALESCE(i.invoice_stage, '')) = 'deposit'
+             AND (
+               (lower(COALESCE(i.source_type, '')) = 'quote' AND i.source_id = ?)
+               OR i.quote_id = ?
+             )
+           ORDER BY CASE
+                      WHEN i.status = 'paid' OR lower(COALESCE(i.payment_status, '')) = 'paid' THEN 0
+                      ELSE 1
+                    END,
+                    i.created_at ASC
+           LIMIT 1""",
+        (quote_id, quote_id),
+    ).fetchone()
+
+
+def _deposit_compose_request(source: dict, percent: float | None) -> InvoiceComposeRequest:
+    if percent is not None:
+        return InvoiceComposeRequest(source_type="quote", source_id=source["source_id"], invoice_type="deposit", percent=percent)
+    deposit_amount = _to_float(source.get("deposit_required"))
+    deposit_percent = _to_float(source.get("deposit_percent"))
+    if deposit_amount > 0:
+        return InvoiceComposeRequest(source_type="quote", source_id=source["source_id"], invoice_type="deposit", amount=deposit_amount)
+    if deposit_percent > 0:
+        return InvoiceComposeRequest(source_type="quote", source_id=source["source_id"], invoice_type="deposit", percent=deposit_percent)
+    return InvoiceComposeRequest(source_type="quote", source_id=source["source_id"], invoice_type="deposit", percent=50)
+
+
+class DepositPayLinkRequest(BaseModel):
+    percent: Optional[float] = None
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+
+def create_quote_deposit_pay_link(
+    quote_id: str,
+    percent: float | None = None,
+    success_url: str | None = None,
+    cancel_url: str | None = None,
+) -> dict:
+    """Quote → one deposit invoice → one Stripe Checkout link.
+
+    Client fields are copied from the quote. A second call returns the same
+    invoice and the same open pay link. payment_status is link_ready until
+    Stripe reports the session paid.
+    """
+    from app.routers.payments import RETURN_HOST_NOTE, issue_or_reuse_invoice_checkout
+
+    quote = _load_cash_quote(quote_id)
+    business = cash_quote_business(quote)
+    quote = dict(quote)
+    quote["business_unit"] = business
+    source = build_quote_invoice_source(quote, quote_id)
+    source["business_unit"] = business
+
+    invoice_created = False
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        _ensure_finance_extensions(conn)
+        existing = _find_deposit_invoice(conn, quote_id)
+        if existing:
+            invoice = _enrich_invoice(dict_row(existing))
+        else:
+            composed = _compose_stage_invoice(conn, source, _deposit_compose_request(source, percent))
+            invoice = _persist_composed_invoice(conn, source, composed)
+            invoice_created = True
+
+    pay_link = issue_or_reuse_invoice_checkout(invoice["id"], success_url, cancel_url)
+    with get_db() as conn:
+        _ensure_finance_extensions(conn)
+        row = conn.execute(
+            """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+               FROM invoices i
+               LEFT JOIN customers c ON c.id = i.customer_id
+               WHERE i.id = ?""",
+            (invoice["id"],),
+        ).fetchone()
+        invoice = _enrich_invoice(dict_row(row))
+
+    customer = {
+        "name": source.get("customer_name") or invoice.get("client_name") or "",
+        "email": source.get("customer_email") or invoice.get("client_email") or "",
+        "phone": source.get("customer_phone") or invoice.get("client_phone") or "",
+        "address": source.get("customer_address") or invoice.get("client_address") or "",
+    }
+    return {
+        "invoice": invoice,
+        "invoice_created": invoice_created,
+        "pay_link": pay_link,
+        "customer": customer,
+        "copied_from_quote": True,
+        "business": business,
+        "quote_id": quote_id,
+        "payment_status": pay_link.get("payment_status") or invoice.get("payment_status") or "unpaid",
+        "return_host_note": pay_link.get("return_host_note") or RETURN_HOST_NOTE,
     }
 
 
@@ -1406,6 +1640,21 @@ def create_invoice(request: Request, invoice: InvoiceCreate):
                 business_unit,
             )
 
+        # D48 (narrow): the find-or-create above is left exactly as it was.
+        # This only closes the fall-through where neither customer_id nor a
+        # usable customer_name was supplied — including a whitespace-only
+        # name, which passes the check above but makes the helper return None
+        # (see _find_or_create_customer_for_invoice). invoices.customer_id is
+        # NOT NULL, so that path used to surface as a 500.
+        try:
+            customer_id = require_customer(
+                customer_id,
+                writer="create_invoice",
+                source="request body field 'customer_id' or 'customer_name'",
+            )
+        except MissingCustomerLink as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
         inv_number = _next_invoice_number(conn)
         tax_amount = round(invoice.subtotal * invoice.tax_rate, 2)
         total = round(invoice.subtotal + tax_amount, 2)
@@ -1470,77 +1719,8 @@ def compose_invoice(request: Request, payload: InvoiceComposeRequest):
     with get_db() as conn:
         _ensure_finance_extensions(conn)
         source = _load_composer_source(conn, payload.source_type, payload.source_id)
-        business_unit = _normalise_business(source["business_unit"] or "workroom")
-        if business_unit == "all":
-            business_unit = "workroom"
-        customer_id = _find_or_create_customer_for_invoice(
-            conn,
-            source["customer_name"],
-            source["customer_email"],
-            source["customer_phone"],
-            source["customer_address"],
-            business_unit,
-        )
         composed = _compose_stage_invoice(conn, source, payload)
-        inv_number = _next_invoice_number(conn)
-
-        conn.execute(
-            """INSERT INTO invoices
-               (id, invoice_number, customer_id, quote_id, job_id, status, subtotal, tax_rate,
-                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
-                client_name, client_email, client_phone, client_address, business_unit,
-                deposit_required, deposit_received, discount_amount, discount_type,
-                invoice_date, payment_status, source_type, source_id, invoice_stage,
-                pricing_snapshot_json, tax_policy_json, pricing_engine_version)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'draft', ?, ?,
-                       ?, ?, 0, ?, ?, ?, ?, ?,
-                       ?, ?, ?, ?, ?,
-                       ?, 0, ?, ?,
-                       ?, 'unpaid', ?, ?, ?,
-                       ?, ?, ?)""",
-            (
-                inv_number,
-                customer_id,
-                source.get("quote_id"),
-                source.get("job_id"),
-                composed["subtotal"],
-                composed["tax_rate"],
-                composed["tax_amount"],
-                composed["total"],
-                composed["total"],
-                json.dumps(composed["line_items"]),
-                composed["notes"],
-                composed["terms"],
-                composed["due_date"],
-                source["customer_name"],
-                source["customer_email"],
-                source["customer_phone"],
-                source["customer_address"],
-                business_unit,
-                composed["deposit_required"],
-                composed["discount_amount"],
-                composed["discount_type"],
-                date.today().isoformat(),
-                source["source_type"],
-                source["source_id"],
-                composed["stage"],
-                json.dumps(composed.get("pricing_snapshot_json"), default=str) if composed.get("pricing_snapshot_json") else None,
-                json.dumps(composed.get("tax_policy"), default=str) if composed.get("tax_policy") else None,
-                PRICING_ENGINE_VERSION,
-            ),
-        )
-
-        row = conn.execute(
-            """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
-               FROM invoices i
-               LEFT JOIN customers c ON c.id = i.customer_id
-               WHERE i.invoice_number = ?""",
-            (inv_number,),
-        ).fetchone()
-        invoice = _enrich_invoice(dict_row(row))
-
-        if source.get("job_id"):
-            conn.execute("UPDATE jobs SET invoice_id = ? WHERE id = ?", (invoice["id"], source["job_id"]))
+        invoice = _persist_composed_invoice(conn, source, composed)
 
         return {
             "invoice": invoice,
@@ -1556,6 +1736,24 @@ def compose_invoice(request: Request, payload: InvoiceComposeRequest):
                 "percent": composed["percent"],
             },
         }
+
+
+@limiter.limit("30/minute")
+@router.post("/quotes/{quote_id}/deposit-pay-link")
+def quote_deposit_pay_link(request: Request, quote_id: str, payload: DepositPayLinkRequest | None = None):
+    """Create or reuse a Workroom/WoodCraft deposit invoice and its Stripe pay link.
+
+    Client name, email, phone, and address are copied from the quote. A second
+    click returns the same invoice and the same open Checkout URL. The invoice
+    is not marked paid until Stripe reports payment.
+    """
+    payload = payload or DepositPayLinkRequest()
+    return create_quote_deposit_pay_link(
+        quote_id,
+        percent=payload.percent,
+        success_url=payload.success_url,
+        cancel_url=payload.cancel_url,
+    )
 
 
 @limiter.limit("30/minute")
@@ -1904,6 +2102,18 @@ def create_invoice_from_job(request: Request, job_id: str):
         if not job:
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
+        # D48: inherited from the job; jobs.customer_id is NOT NULL today, so
+        # this is defence-in-depth. Refuse rather than emit an invoice whose
+        # customer link is absent.
+        try:
+            customer_id = require_customer(
+                job.get("customer_id"),
+                writer="create_invoice_from_job",
+                source=f"job {job_id}",
+            )
+        except MissingCustomerLink as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
         # Get line items from linked quote if available
         line_items = []
         quote_id = job.get("quote_id")
@@ -1965,7 +2175,7 @@ def create_invoice_from_job(request: Request, job_id: str):
                VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?)""",
             (
                 inv_number,
-                job.get("customer_id"),
+                customer_id,
                 quote_id,
                 subtotal,
                 tax_rate,

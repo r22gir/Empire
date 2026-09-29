@@ -2,8 +2,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API, API_BASE } from '../../lib/api';
 import { Quote } from '../../lib/types';
-import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2 } from 'lucide-react';
+import { compressImageDataUrl, visionAbortSignal, visionTimeoutMessage } from '../../lib/visionImage';
+import { linesFromAnalyzedItems, quoteLineDescriptions } from '../../lib/photoQuote';
+import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2, ShieldCheck, X } from 'lucide-react';
 import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
+import DepositPayLinkButton from '../business/finance/DepositPayLink';
 
 interface UploadedPhoto {
   filename: string;
@@ -16,21 +19,37 @@ interface UploadedPhoto {
 
 interface AnalyzedItem {
   type: string;
+  name?: string;
   description: string;
   width?: number;
   height?: number;
+  quantity?: number;
+  dimensions?: { width?: number; height?: number; depth?: number };
   confidence?: number;
   selected?: boolean;
+  line_items?: any[];
 }
 
 interface AnalysisResult {
   items: AnalyzedItem[];
+  quote?: any;
   error?: string;
 }
 
 interface Props {
   quoteId?: string;
   onOpenBuilder?: () => void;
+}
+
+/** Amount shown on Quote Review. Server rate is the unit price; amount is qty × rate. */
+function lineItemAmount(item: { quantity?: number; rate?: number; amount?: number }) {
+  const qty = Number(item?.quantity ?? 0);
+  const rate = Number(item?.rate ?? 0);
+  const extended = Math.round(qty * rate * 100) / 100;
+  const stored = Number(item?.amount ?? 0);
+  if (!Number.isFinite(extended)) return stored;
+  if (Math.abs(extended - stored) > 0.02) return extended;
+  return Number.isFinite(stored) ? stored : extended;
 }
 
 export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
@@ -40,6 +59,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [uploadedPhotos, setUploadedPhotos] = useState<UploadedPhoto[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [addingLines, setAddingLines] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
@@ -52,16 +72,34 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [editDiscountAmt, setEditDiscountAmt] = useState(0);
   const [editDiscountType, setEditDiscountType] = useState<'dollar' | 'percent'>('dollar');
   const [dirty, setDirty] = useState(false);
+  // HOTFIX 4.1 — Approve PIN gate. The "Confirm Selection" button now
+  // opens a PIN modal that calls POST /quotes-v2/{id}/approve with
+  // founder_pin instead of bypassing straight to status='accepted'.
+  const [approveModalOpen, setApproveModalOpen] = useState(false);
+  const [approvePin, setApprovePin] = useState('');
+  const [approveError, setApproveError] = useState<string | null>(null);
+  const [approving, setApproving] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // HOTFIX 4b: removed silent "first row of list" fallback. Pre-fix,
+    // when no quoteId was passed (e.g. clicking a chat link that only
+    // carried "EST-2026-110"), this effect fetched the most recent
+    // quote and surfaced IT as if it were the requested one. The bug
+    // was: an active list with EST-2026-124 (draft) made every
+    // EST-2026-110 click land on EST-2026-124's review page.
+    //
+    // Post-fix: if no quoteId is passed, show a not-found state. The
+    // chat-link click handler in ChatScreen.tsx now resolves the
+    // quote_number to a real id via /quotes-v2/by-number/{qn} before
+    // navigating, so this branch should rarely fire — but if it does,
+    // the user sees a clear "no quote selected" hint instead of
+    // silently opening the wrong quote.
     if (!quoteId) {
-      fetch(API + '/quotes?limit=1').then(r => r.json()).then(data => {
-        const q = data.quotes?.[0] || data[0];
-        if (q) { setQuote(q); loadFull(q.id); }
-      }).catch(() => {});
+      setQuote(null);
+      setLoading(false);
       return;
     }
     loadFull(quoteId);
@@ -70,7 +108,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const loadFull = async (id: string) => {
     setLoading(true);
     try {
-      const res = await fetch(API + '/quotes/' + id);
+      const res = await fetch(API + '/quotes-v2/' + id);
       if (res.ok) setQuote(await res.json());
     } catch { /* silent */ }
     setLoading(false);
@@ -80,7 +118,11 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   useEffect(() => {
     if (!quote) return;
     const q = quote as any;
-    setEditItems(JSON.parse(JSON.stringify(q.line_items || [])));
+    const loaded = JSON.parse(JSON.stringify(q.line_items || [])).map((item: any) => ({
+      ...item,
+      amount: lineItemAmount(item),
+    }));
+    setEditItems(loaded);
     setEditNotes(q.notes || '');
     setEditTerms(q.terms || '');
     setEditTaxRate((q.tax_rate || 0) * 100);
@@ -91,7 +133,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   }, [quote]);
 
   // Recalculate totals from editable items
-  const computedSubtotal = editItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const computedSubtotal = editItems.reduce((sum, item) => sum + lineItemAmount(item), 0);
   const computedDiscount = editDiscountType === 'percent'
     ? Math.round(computedSubtotal * (editDiscountAmt / 100) * 100) / 100
     : editDiscountAmt;
@@ -125,7 +167,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     if (!quote) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API}/quotes/${quote.id}`, {
+      const res = await fetch(`${API}/quotes-v2/${quote.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -226,28 +268,97 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   }, [handlePhotoUpload]);
 
   const handleAnalyze = async (photo: UploadedPhoto, index: number) => {
-    setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: true } : p));
+    setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: true, analysis: null } : p));
     try {
-      const imgRes = await fetch(`${API_BASE}${photo.path}`);
+      const imgRes = await fetch(`${API_BASE}${photo.path}`, { signal: visionAbortSignal() });
+      if (!imgRes.ok) throw new Error(`Could not load photo (${imgRes.status})`);
       const blob = await imgRes.blob();
       const reader = new FileReader();
-      const b64 = await new Promise<string>((resolve) => {
-        reader.onload = () => resolve(reader.result as string);
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Could not read photo')), 20_000);
+        reader.onload = () => {
+          clearTimeout(timer);
+          resolve(reader.result as string);
+        };
+        reader.onerror = () => {
+          clearTimeout(timer);
+          reject(new Error('Could not read photo'));
+        };
         reader.readAsDataURL(blob);
       });
+      const image = await compressImageDataUrl(b64);
       const res = await fetch(`${API}/quotes/analyze-photo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: b64, customer_notes: quote?.customer_name || '' }),
+        body: JSON.stringify({
+          image,
+          notes: quote?.customer_name || '',
+          customer_notes: quote?.customer_name || '',
+          customer_name: quote?.customer_name || 'Customer',
+        }),
+        signal: visionAbortSignal(),
       });
       if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
       const data = await res.json();
       const items = (data.items || data.analysis?.items || data.analyzed_items || []).map((it: AnalyzedItem) => ({ ...it, selected: true }));
-      setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: false, analysis: { items } } : p));
-      showFeedback(`Found ${items.length} item(s)`);
-    } catch {
-      setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: false, analysis: { items: [], error: 'Analysis failed' } } : p));
-      showFeedback('Analysis failed');
+      setUploadedPhotos(prev => prev.map((p, i) => i === index ? {
+        ...p,
+        analyzing: false,
+        analysis: { items, quote: data.quote },
+      } : p));
+      showFeedback(items.length
+        ? `Found ${items.length} item(s). Check the ones you want, then add them to the quote.`
+        : 'Found 0 item(s)');
+    } catch (err) {
+      const timedOut = visionTimeoutMessage(err);
+      setUploadedPhotos(prev => prev.map((p, i) => i === index ? {
+        ...p,
+        analyzing: false,
+        analysis: { items: [], error: timedOut || 'Analysis failed' },
+      } : p));
+      showFeedback(timedOut || 'Analysis failed');
+    }
+  };
+
+  const addSelectedToQuoteLines = async () => {
+    if (!quote?.id || addingLines) return;
+    const incoming = uploadedPhotos.flatMap((photo) => linesFromAnalyzedItems(photo.analysis?.items || [], photo.analysis?.quote));
+    if (!incoming.length) {
+      showFeedback('Select at least one analyzed item');
+      return;
+    }
+    const have = quoteLineDescriptions(editItems);
+    const fresh = incoming.filter((line) => !have.has(line.description));
+    if (!fresh.length) {
+      showFeedback('Selected items are already on this quote');
+      return;
+    }
+    setAddingLines(true);
+    try {
+      let last: any = null;
+      for (const line of fresh) {
+        const res = await fetch(`${API}/quotes-v2/${quote.id}/items`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...line, business_unit: 'workroom' }),
+          signal: visionAbortSignal(),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          const detail = err.detail || err.error || `HTTP ${res.status}`;
+          throw new Error(typeof detail === 'string' ? detail : 'Could not add line');
+        }
+        last = await res.json();
+      }
+      const updated = last?.quote || last;
+      if (updated?.id) setQuote(updated);
+      else await loadFull(quote.id);
+      const notes = fresh.filter((line) => line.category === 'note').length;
+      showFeedback(`Added ${fresh.length} line(s) to ${quote.quote_number || 'this quote'}${notes ? ` (${notes} unpriced)` : ''}`);
+    } catch (err: any) {
+      showFeedback(visionTimeoutMessage(err) || err.message || 'Could not add line items');
+    } finally {
+      setAddingLines(false);
     }
   };
 
@@ -319,7 +430,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     if (action === 'pdf') {
       showFeedback('Generating PDF...');
       try {
-        const res = await fetch(`${API}/quotes/${quote.id}/pdf?skip_verification=true`, { method: 'POST' });
+        const res = await fetch(`${API}/quotes-v2/${quote.id}/pdf`);
         if (!res.ok) {
           const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
           showFeedback(err.error || 'PDF generation failed');
@@ -356,22 +467,72 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     } else if (action === 'print') {
       window.print();
     } else if (action === 'confirm') {
-      showFeedback('Confirming selection...');
+      // HOTFIX 4.1 — "Confirm Selection" only saves the tier selection
+      // (selected_proposal + selected_tier). It MUST NOT set the quote
+      // status to 'accepted' — that's a customer-side transition and
+      // reaching it from this screen with no PIN was the bypass bug.
+      showFeedback('Saving tier selection...');
       try {
-        const res = await fetch(API + `/quotes/${quote.id}`, {
+        const res = await fetch(API + `/quotes-v2/${quote.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            status: 'accepted',
             selected_proposal: selected,
             selected_tier: tiers[selected]?.key,
           }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          showFeedback(err.detail || err.error || 'Failed to update');
+          return;
+        }
         const data = await res.json();
         setQuote(data.quote || data);
-        showFeedback('Quote accepted!');
+        showFeedback('Tier selection saved.');
       } catch { showFeedback('Failed to update'); }
+    } else if (action === 'approve_send') {
+      // HOTFIX 4.1 — Founder approve-and-send flow. PIN-gated; calls
+      // POST /api/v1/quotes-v2/{id}/approve with founder_pin in the
+      // body. The server-side _require_founder_pin gates the actual
+      // founder_review -> sent transition; no client-side bypass is
+      // possible from this screen.
+      if (quote.status !== 'founder_review' && quote.status !== 'draft') {
+        showFeedback(`Cannot approve from '${quote.status}'.`);
+        return;
+      }
+      setApproveError(null);
+      setApprovePin('');
+      setApproveModalOpen(true);
+    } else if (action === 'approve_submit') {
+      // HOTFIX 4.1 — submit PIN and let the server validate.
+      if (approving) return;
+      setApproving(true);
+      setApproveError(null);
+      try {
+        const res = await fetch(API + `/quotes-v2/${quote.id}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            founder_pin: approvePin,
+            changed_by: 'founder',
+            reason: 'Approved from QuoteReviewScreen (HOTFIX 4.1)',
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          setApproveError(err.detail || err.error || `HTTP ${res.status}`);
+          return;
+        }
+        const data = await res.json();
+        setQuote(data.quote || data);
+        setApproveModalOpen(false);
+        setApprovePin('');
+        showFeedback('Quote approved and marked sent.');
+      } catch (e) {
+        setApproveError(`Network error: ${(e as Error).message}`);
+      } finally {
+        setApproving(false);
+      }
     } else if (action === 'video') {
       showFeedback('Video call feature coming soon');
     }
@@ -492,7 +653,22 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
               style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 13, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Camera size={14} /> Take Photo
             </button>
+            <button
+              onClick={() => { void addSelectedToQuoteLines(); }}
+              disabled={addingLines || !uploadedPhotos.some(p => (p.analysis?.items || []).some(it => it.selected !== false))}
+              style={{
+                padding: '8px 16px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff',
+                cursor: 'pointer', fontSize: 13, fontWeight: 700, minHeight: 44,
+                display: 'flex', alignItems: 'center', gap: 6,
+                opacity: addingLines || !uploadedPhotos.some(p => (p.analysis?.items || []).some(it => it.selected !== false)) ? 0.55 : 1,
+              }}
+            >
+              <Plus size={14} /> {addingLines ? 'Adding...' : 'Add selected to line items'}
+            </button>
           </div>
+          <p style={{ margin: '8px 0 0', fontSize: 11, color: '#777' }}>
+            Checkmarks only select items. They are written onto this Workroom quote when you add them.
+          </p>
         </div>
       ) : (
         <div
@@ -593,6 +769,28 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                       <input type="text" value={item.description || ''}
                         onChange={e => updateItem(i, 'description', e.target.value)}
                         style={{ width: '100%', fontSize: 12, padding: '6px 8px', border: '1px solid #ece8e0', borderRadius: 6, background: '#faf9f7', color: '#333' }} />
+                      {/* HOTFIX 5: per-row "Founder override" badge when
+                          price_overridden=1. The server's _item_to_dict
+                          now aliases rate/amount to final_price when
+                          overridden, so the editable inputs already
+                          show $1,933.33 — this badge makes the override
+                          state explicit so the founder doesn't accidentally
+                          edit and lose the override on a Save that goes
+                          through a path we haven't audited. */}
+                      {item.price_overridden ? (
+                        <span
+                          title={`Found set final price: $${(item.final_price ?? item.rate ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} (original unit_price was $${item.unit_price ?? 0}).`}
+                          style={{
+                            display: 'inline-block', marginTop: 4,
+                            fontSize: 10, fontWeight: 600, color: '#7c5a00',
+                            background: '#fcf3cf', border: '1px solid #e0b700',
+                            borderRadius: 4, padding: '1px 6px',
+                            textTransform: 'uppercase', letterSpacing: '0.5px',
+                          }}
+                        >
+                          Founder override
+                        </span>
+                      ) : null}
                     </td>
                     <td style={{ padding: '4px 4px' }}>
                       <input type="number" step="0.1" value={item.quantity ?? ''}
@@ -619,7 +817,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                       </div>
                     </td>
                     <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 600, color: '#1a1a1a', fontSize: 12 }}>
-                      ${(item.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      ${lineItemAmount(item).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </td>
                     <td style={{ padding: '4px 4px', textAlign: 'center' }}>
                       <button onClick={() => removeItem(i)} className="cursor-pointer"
@@ -676,9 +874,34 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                   <td></td>
                 </tr>
                 <tr style={{ borderTop: '2px solid #b8960c' }}>
-                  <td colSpan={4} style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 15 }}>Total</td>
+                  <td colSpan={4} style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 15 }}>
+                    Total
+                    <span
+                      title="HOTFIX 5: total is read from quotes_v2.total (canonical server value), not client-side recompute. The client-computed value would silently double-count when a line item's price_overridden=1."
+                      style={{
+                        marginLeft: 8, fontSize: 10, fontWeight: 500, color: '#888',
+                        background: '#fef9e7', border: '1px solid #f1c40f', borderRadius: 4, padding: '1px 6px',
+                      }}
+                    >
+                      canonical
+                    </span>
+                  </td>
                   <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 18, color: '#b8960c' }}>
-                    ${computedTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {/* HOTFIX 5: previously this read computedTotal (a
+                        client-side recompute that ignored price_overridden
+                        and rendered $3,600 instead of the canonical $2,900
+                        for the Maggie O'Neil EST-2026-110 quote). The
+                        server's _recalculate_totals honors final_price
+                        when price_overridden=1, so quotes_v2.total is the
+                        authoritative total. We display the canonical
+                        total and only flip to computedTotal while the
+                        user has unsaved edits (so they see what their
+                        in-progress change will look like). */}
+                    ${(
+                      dirty
+                        ? computedTotal
+                        : (quote as any).total ?? computedTotal
+                    ).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
                   <td></td>
                 </tr>
@@ -797,6 +1020,19 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         </div>
       )}
 
+      <div style={{ marginBottom: 12 }}>
+        <DepositPayLinkButton
+          quoteId={quote.id}
+          customer={{
+            name: quote.customer_name,
+            email: (quote as any).customer_email,
+            phone: (quote as any).customer_phone,
+            address: (quote as any).customer_address,
+          }}
+        />
+        <p className="text-[11px] text-[#888] mt-2">Sends a deposit Checkout link using this quote’s client. A second click reuses the same link.</p>
+      </div>
+
       {/* Create Invoice button — shown when quote is accepted */}
       {quote.status === 'accepted' && (
         <div style={{ marginBottom: 12 }}>
@@ -828,18 +1064,150 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       <div className="flex gap-2.5 flex-wrap">
         <button onClick={() => handleAction('confirm')}
           className="flex-1 flex items-center justify-center gap-2 bg-[#b8960c] text-white border-2 border-[#a08509] text-[13px] font-bold cursor-pointer hover:bg-[#a08509] shadow-[0_2px_8px_rgba(184,150,12,0.25)] transition-all active:scale-[0.98]"
-          style={{ height: 44, padding: '0 20px', borderRadius: 12 }}>
-          <Check size={18} /> Confirm Selection
+          style={{ height: 44, padding: '0 20px', borderRadius: 12 }}
+          title="Save the selected tier/proposal. Does NOT change the quote status.">
+          <Check size={18} /> Save Tier
         </button>
+        {quote &&
+          ['draft', 'founder_review'].includes(quote.status) && (
+          <button onClick={() => handleAction('approve_send')}
+            className="flex items-center justify-center gap-2 bg-[#16a34a] text-white border-2 border-[#15803d] text-[13px] font-bold cursor-pointer hover:bg-[#15803d] shadow-[0_2px_8px_rgba(22,163,74,0.25)] transition-all active:scale-[0.98]"
+            style={{ height: 44, padding: '0 20px', borderRadius: 12 }}
+            title="Move draft/founder_review -> sent. Requires PIN via modal.">
+            <ShieldCheck size={18} /> Approve &amp; Send
+          </button>
+        )}
         <ActionBtn icon={<ExternalLink size={16} />} label="QuoteBuilder" onClick={() => {
           if (onOpenBuilder) { onOpenBuilder(); }
         }} />
-        <ActionBtn icon={<FileText size={16} />} label="PDF" onClick={() => handleAction('pdf')} />
+        <ActionBtn icon={<FileText size={16} />} label="Download PDF" onClick={() => handleAction('pdf')} />
         <ActionBtn icon={<Send size={16} />} label="Telegram" onClick={() => handleAction('telegram')} />
         <ActionBtn icon={<Mail size={16} />} label="Email" onClick={() => handleAction('email')} />
         <ActionBtn icon={<Video size={16} />} label="Call" onClick={() => handleAction('video')} />
         <ActionBtn icon={<Printer size={16} />} label="Print" onClick={() => handleAction('print')} />
       </div>
+
+      {/* HOTFIX 4.1 — PIN modal for founder approve-and-send.
+          Replaces the bypass 'Confirm Selection' button. Modal is
+          closed by default; opens via handleAction('approve_send').
+          The PIN is sent server-side as founder_pin in the approve
+          body; the server uses _require_founder_pin to validate. */}
+      {approveModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="approve-pin-title"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(20,20,20,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !approving) {
+              setApproveModalOpen(false);
+              setApprovePin('');
+              setApproveError(null);
+            }
+          }}>
+          <div style={{
+            background: '#fff', borderRadius: 14, padding: 24,
+            width: '90%', maxWidth: 420, boxShadow: '0 24px 48px rgba(0,0,0,0.22)',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: 12,
+            }}>
+              <h3 id="approve-pin-title" style={{
+                fontSize: 17, fontWeight: 700, color: '#1a1a1a',
+                display: 'flex', alignItems: 'center', gap: 8, margin: 0,
+              }}>
+                <ShieldCheck size={20} color="#16a34a" />
+                Approve &amp; Send
+              </h3>
+              <button
+                onClick={() => {
+                  if (!approving) {
+                    setApproveModalOpen(false);
+                    setApprovePin('');
+                    setApproveError(null);
+                  }
+                }}
+                aria-label="Close"
+                style={{
+                  background: 'none', border: 'none', cursor: approving ? 'wait' : 'pointer',
+                  color: '#888', padding: 4,
+                }}>
+                <X size={20} />
+              </button>
+            </div>
+            <p style={{ fontSize: 13, color: '#555', margin: '0 0 16px', lineHeight: 1.5 }}>
+              Move <strong>{quote?.quote_number || quote?.id}</strong> from
+              <strong> {quote?.status} </strong> to <strong>sent</strong>.
+              PIN entry happens only via this portal modal — never
+              typed in chat. Enter your founder PIN to confirm.
+            </p>
+            <input
+              type="password"
+              autoComplete="off"
+              autoFocus
+              value={approvePin}
+              onChange={(e) => setApprovePin(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAction('approve_submit');
+              }}
+              placeholder="Founder PIN"
+              disabled={approving}
+              style={{
+                width: '100%', padding: '10px 12px', fontSize: 14,
+                border: '1.5px solid #ece8e0', borderRadius: 8,
+                fontFamily: 'ui-monospace, monospace', letterSpacing: '0.15em',
+                background: approving ? '#f8f8f6' : '#fff',
+                marginBottom: 10,
+              }}
+            />
+            {approveError && (
+              <div style={{
+                background: '#fef2f2', border: '1px solid #fecaca',
+                color: '#991b1b', borderRadius: 6, padding: '8px 10px',
+                fontSize: 12, marginBottom: 10,
+              }}>
+                {approveError}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  if (approving) return;
+                  setApproveModalOpen(false);
+                  setApprovePin('');
+                  setApproveError(null);
+                }}
+                disabled={approving}
+                style={{
+                  padding: '8px 14px', borderRadius: 6,
+                  border: '1.5px solid #ece8e0', background: '#fff',
+                  color: '#555', fontSize: 13, fontWeight: 600,
+                  cursor: approving ? 'wait' : 'pointer',
+                }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => handleAction('approve_submit')}
+                disabled={approving || approvePin.length < 4}
+                style={{
+                  padding: '8px 14px', borderRadius: 6, border: 'none',
+                  background: approving || approvePin.length < 4 ? '#9ca3af' : '#16a34a',
+                  color: '#fff', fontSize: 13, fontWeight: 700,
+                  cursor: approving || approvePin.length < 4 ? 'wait' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                <ShieldCheck size={16} />
+                {approving ? 'Approving...' : 'Approve & Send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

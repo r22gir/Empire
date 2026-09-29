@@ -456,31 +456,87 @@ class TelegramBot:
         self, text: str, image_filename: Optional[str] = None, chat_id: Optional[str] = None,
         user_meta: Optional[Dict[str, Any]] = None,
     ) -> tuple[str, str, list]:
-        """Send message to MAX via the backend API with conversation memory.
+        """Send message to MAX and return (html, plain_text, tool_results).
 
-        Returns (html_response, plain_text, tool_results) — html for Telegram display, plain for TTS, tool results list.
+        D45 commit 3 (Option A): the bot now calls _chat_with_max_service
+        IN-PROCESS instead of hitting /max/chat over loopback HTTP. The
+        bot sets canonical_channel='telegram' and
+        canonical_chat_id=<self.founder_chat_id>; the service honours
+        those and bypasses the body's channel field for privilege.
+        This is the only legitimate non-portal caller per D45 §0e.
+
+        Pre-fix this posted to /max/chat with body channel='telegram'
+        + chat_id=<founder>. Under STEP 1a's predicate change that
+        path was still founder (the Telegram-match branch succeeds
+        because chat_id matches). Under Option A — which removes the
+        body's privilege role — an HTTP call would silently lose
+        founder. The in-process path preserves it.
+
+        If `_chat_with_max_service` is not importable (older backend
+        build), falls back to the HTTP loopback path so a stale bot
+        does not silently degrade.
         """
         cid = str(chat_id or self.founder_chat_id or "default")
         history = _get_history(cid)[-_MAX_HISTORY:]
         try:
-            payload: Dict[str, Any] = {"message": text, "history": history, "conversation_id": f"telegram-{cid}", "channel": "telegram", "chat_id": cid}
+            from app.routers.max.router import ChatRequest, _chat_with_max_service
+            request = ChatRequest(
+                message=text,
+                history=history,
+                conversation_id=f"telegram-{cid}",
+                channel="telegram",
+                chat_id=cid,
+            )
             if image_filename:
-                payload["image_filename"] = image_filename
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post("http://localhost:8000/api/v1/max/chat", json=payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    model = data.get("model_used", "")
-                    response = data.get("response", "No response.")
-                    tool_results = data.get("tool_results", [])
-                    # Persist to disk
-                    _append_and_save(cid, "user", text, **(user_meta or {}))
-                    _append_and_save(cid, "assistant", response)
-                    html = f"{response}\n\n<i>— via {model}</i>"
-                    return html, response, tool_results
-                else:
+                request.image_filename = image_filename
+            # Founder verified by the canonical chat_id match in the
+            # predicate; we also pass canonical_founder=True so the
+            # body does not need to round-trip through the predicate
+            # again.
+            resp = await _chat_with_max_service(
+                request,
+                canonical_channel="telegram",
+                canonical_chat_id=cid,
+                canonical_founder=True,
+                # background_tasks=None: bot has its own history
+                # persistence via _append_and_save below.
+            )
+            model = resp.model_used or ""
+            response = resp.response or "No response."
+            tool_results = resp.tool_results or []
+            # Persist to disk (bot's own history path)
+            _append_and_save(cid, "user", text, **(user_meta or {}))
+            _append_and_save(cid, "assistant", response)
+            html = f"{response}\n\n<i>— via {model}</i>"
+            return html, response, tool_results
+        except ImportError as _imp_err:
+            # Fallback for older backend builds without the in-process
+            # function. Logs the mismatch so it's visible.
+            logger.warning(
+                f"[H74] _chat_with_max_service not importable ({_imp_err}); "
+                f"falling back to HTTP loopback. This is a build-skew indicator."
+            )
+            try:
+                payload: Dict[str, Any] = {"message": text, "history": history, "conversation_id": f"telegram-{cid}", "channel": "telegram", "chat_id": cid}
+                if image_filename:
+                    payload["image_filename"] = image_filename
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    resp = await client.post("http://localhost:8000/api/v1/max/chat", json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        model = data.get("model_used", "")
+                        response = data.get("response", "No response.")
+                        tool_results = data.get("tool_results", [])
+                        _append_and_save(cid, "user", text, **(user_meta or {}))
+                        _append_and_save(cid, "assistant", response)
+                        html = f"{response}\n\n<i>— via {model}</i>"
+                        return html, response, tool_results
                     err = f"Backend error: {resp.status_code}"
                     return err, err, []
+            except Exception as e:
+                logger.error(f"MAX chat error (HTTP fallback): {e}")
+                err = f"Could not reach MAX: {e}"
+                return err, err, []
         except Exception as e:
             logger.error(f"MAX chat error: {e}")
             err = f"Could not reach MAX: {e}"
@@ -1026,6 +1082,25 @@ class TelegramBot:
             import shutil
             shutil.move(str(photo_path), str(dest))
 
+            # D44 — copy the just-landed Telegram photo into the canonical
+            # job-images tree so MAX can list/describe it later. Per STOP 1
+            # ruling #5 the Telegram writer (this hardcoded path above) is
+            # not modified; we add a downstream copy at landing time. No
+            # quote context is known yet, so the row lands in the unassigned
+            # bucket keyed by telegram chat id. If the quote-creation path
+            # below succeeds, a second row with quote_id is inserted then.
+            try:
+                from app.services.job_image_store import store_job_image
+                _photo_chat_id = str(update.effective_chat.id) if update.effective_chat else None
+                store_job_image(
+                    dest.read_bytes(),
+                    source_channel="telegram",
+                    item_key=f"telegram_chat:{_photo_chat_id}" if _photo_chat_id else None,
+                    original_filename=dest.name,
+                )
+            except ValueError as _d44e:
+                logger.warning(f"D44 telegram image rejected: {_d44e}")
+
             vision_context = ""
             try:
                 import base64 as _b64_mod
@@ -1133,6 +1208,24 @@ class TelegramBot:
                                 import json as _json_mod
                                 with open(str(_q_photo_dir / f"telegram_{dest.name}.meta.json"), "w") as _mf:
                                     _json_mod.dump({"source": "telegram", "entity_type": "quote", "entity_id": _qid, "uploaded_at": datetime.now().isoformat()}, _mf)
+
+                                # D44 — now that we have the new quote id,
+                                # insert a job_documents row keyed to it.
+                                # The earlier store_job_image() call (line
+                                # ~1027) already created an unassigned row;
+                                # we don't try to "promote" that — instead
+                                # this row records the quote link that
+                                # existed only after the quote was created.
+                                from app.services.job_image_store import (
+                                    store_job_image as _d44_store,
+                                )
+                                _d44_store(
+                                    dest.read_bytes(),
+                                    source_channel="telegram",
+                                    quote_id=_qid,
+                                    item_key=f"telegram_quote:{_qid}",
+                                    original_filename=dest.name,
+                                )
                             except Exception as _pe:
                                 logger.warning(f"Failed to save photo to unified storage: {_pe}")
 

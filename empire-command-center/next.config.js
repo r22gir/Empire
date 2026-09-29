@@ -3,8 +3,18 @@ const BUILD_TIMESTAMP = Date.now();
 
 const BACKEND_UPSTREAM = process.env.NEXT_PUBLIC_BACKEND_UPSTREAM || 'http://127.0.0.1:8000';
 
+// Mirrors next.config.ts. Default rewrite proxyTimeout is 30s and the
+// cloned request body is capped at 10MB — both turn a phone Photo Analyzer
+// measure into "Failed to proxy ... socket hang up" / Analysis failed (500).
+const VISION_PROXY_TIMEOUT_MS = 180_000;
+const VISION_PROXY_BODY_LIMIT = '32mb';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: {
+    proxyTimeout: VISION_PROXY_TIMEOUT_MS,
+    proxyClientMaxBodySize: VISION_PROXY_BODY_LIMIT,
+  },
   async headers() {
     return [
       {
@@ -22,11 +32,19 @@ const nextConfig = {
   },
   // Same-origin /api/v1 proxy to the local FastAPI backend. Mirrors
   // next.config.ts; see the TS file for the full rationale.
+  // /intake_uploads/:path* is proxied too so client-uploaded photos
+  // (mounted by the FastAPI StaticFiles at /intake_uploads) render
+  // inside the same host. Without this proxy, the front-end would 404
+  // photos served from the backend (iX-day R1X-INT-FIX).
   async rewrites() {
     return [
       {
         source: '/api/v1/:path*',
         destination: `${BACKEND_UPSTREAM}/api/v1/:path*`,
+      },
+      {
+        source: '/intake_uploads/:path*',
+        destination: `${BACKEND_UPSTREAM}/intake_uploads/:path*`,
       },
     ];
   },

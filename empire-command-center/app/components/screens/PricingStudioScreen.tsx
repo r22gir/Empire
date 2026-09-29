@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API } from '../../lib/api';
 import ProductDocs from '../business/docs/ProductDocs';
+import ViewPdfControl from '../ViewPdfControl';
 
 type PricingStatus = {
   status: string;
@@ -248,6 +249,7 @@ export default function PricingStudioScreen() {
             <span style={{ fontSize: 11, color: '#62717f', background: '#f0ede8', padding: '3px 10px', borderRadius: 20, border: '1px solid #dedbd2' }}>
               {status ? `v${status.pricing_engine_version}` : '—'}
             </span>
+            <ViewPdfControl mode="print" title="Pricing Studio has no rate-sheet PDF yet. This prints the current view." />
             <button
               onClick={loadStatus}
               style={{ fontSize: 12, color: '#0f766e', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}

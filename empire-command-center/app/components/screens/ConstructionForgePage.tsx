@@ -9,6 +9,7 @@ import {
   Clock, Eye, ChevronDown, ChevronUp, Filter
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
+import ViewPdfControl from '../ViewPdfControl';
 
 const CF_API = `${API}/construction`;
 
@@ -106,6 +107,9 @@ export default function ConstructionForgePage({ initialSection }: ConstructionFo
 
       {/* Main Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <ViewPdfControl mode="print" title="ConstructionForge has no project PDF on this screen. This prints the current view." />
+        </div>
         {renderContent()}
       </div>
     </div>

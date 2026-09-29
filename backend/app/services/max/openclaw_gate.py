@@ -34,11 +34,26 @@ HEARTBEAT_PATH = Path(
     )
 )
 
+def _quarantine_locked() -> bool:
+    """Founder quarantine LOCK via env (OPENCLAW_QUARANTINE / _LOCK).
+
+    Kept minimal and separate from stash@{5} OpenClaw honesty WIP.
+    When locked, enqueue/dispatch must be denied even if the health
+    endpoint and worker look healthy.
+    """
+    for key in ("OPENCLAW_QUARANTINE_LOCK", "OPENCLAW_QUARANTINE"):
+        raw = (os.getenv(key) or "").strip().lower()
+        if raw in ("1", "true", "yes", "on", "lock", "locked", "quarantine"):
+            return True
+    return False
+
+
 GATE_MESSAGES = {
     "healthy": "OpenClaw healthy - delegating task now.",
     "degraded": "OpenClaw degraded ({reason}) - delegation blocked. Will retry when healthy.",
     "unknown": "OpenClaw status unknown - running in inspect-only mode. Manual delegation available.",
     "unavailable": "OpenClaw unavailable - task queued locally. Will delegate when service restores.",
+    "quarantine": "OpenClaw quarantine LOCK — enqueue/dispatch blocked. Founder must lift OPENCLAW_QUARANTINE.",
 }
 
 _cache: dict[str, Any] = {"checked_at_monotonic": 0.0, "result": None}
@@ -184,7 +199,26 @@ def check_openclaw_gate(force: bool = False, timeout: float = 2.0) -> OpenClawGa
 
     Healthy results only allow delegation inside the TTL. Once expired, the
     caller gets a fresh health check instead of silently trusting stale health.
+    Founder OPENCLAW_QUARANTINE/_LOCK always wins (never allow enqueue).
     """
+    health_endpoint = f"{OPENCLAW_URL}/health"
+    if _quarantine_locked():
+        queue_ready, queue_stats, recent_viability = _queue_snapshot()
+        worker_heartbeat = read_openclaw_worker_heartbeat()
+        result = _build_result(
+            "quarantine",
+            "OPENCLAW_QUARANTINE lock active — enqueue/dispatch blocked",
+            None,
+            queue_ready,
+            queue_stats,
+            recent_viability,
+            worker_heartbeat,
+            health_endpoint,
+        )
+        _cache["result"] = result
+        _cache["checked_at_monotonic"] = time.monotonic()
+        return result
+
     now = time.monotonic()
     cached = _cache.get("result")
     checked_at = float(_cache.get("checked_at_monotonic") or 0.0)

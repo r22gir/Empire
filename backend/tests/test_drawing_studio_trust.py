@@ -7,6 +7,7 @@ def test_bench_drawing_preview_and_pdf_use_current_dimensions():
     small = drawings.BenchRequest(
         name="Trust Bench",
         lf=6,
+        length_unit="ft",
         seat_depth=20,
         seat_height=18,
         back_height=18,
@@ -14,6 +15,7 @@ def test_bench_drawing_preview_and_pdf_use_current_dimensions():
     large = drawings.BenchRequest(
         name="Trust Bench",
         lf=8,
+        length_unit="ft",
         seat_depth=20,
         seat_height=18,
         back_height=18,

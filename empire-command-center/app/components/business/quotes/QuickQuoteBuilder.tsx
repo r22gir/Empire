@@ -3,6 +3,8 @@
 import React, { useState, useRef } from 'react';
 import { Zap, Upload, Loader2, CheckCircle, FileText, X, ImageIcon, Camera } from 'lucide-react';
 import { API } from '../../../lib/api';
+import { compressImageDataUrl, visionAbortSignal, visionTimeoutMessage } from '../../../lib/visionImage';
+import { normalizeMeasureResult } from '../../../lib/visionMeasure';
 
 interface QuickQuoteBuilderProps {
   onClose?: () => void;
@@ -53,21 +55,23 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
         reader.onload = () => resolve(reader.result as string);
         reader.readAsDataURL(imageFile);
       });
+      const image = await compressImageDataUrl(base64);
       const res = await fetch(`${API}/vision/measure`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64 }),
+        body: JSON.stringify({ image }),
+        signal: visionAbortSignal(),
       });
       if (!res.ok) throw new Error('Analysis failed');
-      const data = await res.json();
+      const data = normalizeMeasureResult(await res.json());
       setAnalysisResult(data);
       // Auto-fill description if empty
       if (!description.trim()) {
         const desc = `${data.window_type || 'Window'} — ${data.width_inches}"W × ${data.height_inches}"H. ${(data.treatment_suggestions || []).join(', ')}`;
         setDescription(desc);
       }
-    } catch {
-      setError('Photo analysis failed. You can still generate the quote manually.');
+    } catch (err) {
+      setError(visionTimeoutMessage(err) || 'Photo analysis failed. You can still generate the quote manually.');
     } finally {
       setAnalyzing(false);
     }

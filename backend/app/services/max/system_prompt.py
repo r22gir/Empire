@@ -29,77 +29,20 @@ def _load_session_context() -> str:
     return ""
 
 
-def is_ordinary_text_request(message: str) -> bool:
-    """Return True for plain chat that should not need the full tool/catalog prompt."""
-    msg = (message or "").lower().strip()
-    if not msg:
-        return False
-
-    full_prompt_patterns = [
-        # Tool/action paths need the full registry and execution instructions.
-        "create", "add", "send", "email", "invoice", "quote", "task", "job",
-        "customer", "payment", "finance", "ledger", "statement", "drawing",
-        "upload", "attach", "file", "git", "commit", "push", "pull", "build",
-        "test", "restart", "service", "openclaw", "desk", "delegate",
-        "analyze", "analysis", "calculate", "price", "pricing", "yardage",
-        "search", "find", "look up", "check my", "show my", "report",
-        "archiveforge", "life magazine", "issue lookup", "cover search",
-        "browser assist", "browser action", "provider", "model", "runtime",
-    ]
-    return not any(pattern in msg for pattern in full_prompt_patterns)
-
-
-def get_compact_system_prompt(channel: str = "web") -> str:
-    """Small MAX prompt for ordinary text chat when provider token budget is tight.
-
-    channel: current surface name (web, telegram, email) for cross-channel injection.
-    """
-    founder_email = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
-    openclaw_url = os.getenv("OPENCLAW_URL", "http://localhost:7878")
-    today = datetime.now().strftime("%B %d, %Y")
-
-    # Cross-channel context: what was said on other surfaces recently
-    cross_ctx_lines = []
-    try:
-        from app.services.max.unified_message_store import unified_store
-        ctx = unified_store.get_cross_channel_context(exclude_channel=channel, limit_per_channel=3, hours=4)
-        if ctx:
-            cross_ctx_lines.append("\n### Other Surface Activity (carry forward)")
-            _ch_labels = {"telegram": "Telegram", "web_chat": "Web/CC", "web": "Web", "email": "Email"}
-            for ch, msgs in ctx.items():
-                ch_label = _ch_labels.get(ch, ch.title())
-                cross_ctx_lines.append(f"**{ch_label}** — recent messages:")
-                for m in msgs[-1:]:
-                    role = m.get("role", "?")
-                    content = (m.get("content", "") or "")[:80]
-                    cross_ctx_lines.append(f"  {role}: {content}")
-    except Exception:
-        pass
-
-    cross_section = "\n".join(cross_ctx_lines)[:320] if cross_ctx_lines else ""
-    try:
-        from app.services.max.hermes_memory import render_hermes_bridge_for_prompt
-        hermes_context = render_hermes_bridge_for_prompt(compact=True)[:120]
-    except Exception:
-        hermes_context = ""
-
-    return f"""You are MAX, the founder's command-center brain.
-
-Hierarchy: Founder > MAX > desks/code mode > OpenClaw.
-Truth: runtime > registry > repo truth > Hermes memory > skills.
-Surfaces: mobile browser access is Web MAX; `web_chat` and `telegram` are active; Email MAX is partial; Phone MAX is not implemented.
-
-Answer ordinary founder chat directly, briefly, and truthfully. Do not describe yourself as Codex, Claude, Atlas, or OpenClaw. Never claim an action happened without tool proof. If a tool, database read, runtime check, or delegation check is required, say so instead of guessing.
-Email MAX is partial: do not claim send/delivery/reply-body truth without exact result objects. Hermes browser assist must use real Phase 3 records only; never invent browser action IDs.
-
-EMPIREBOX DEFAULT: You are the brain for **EmpireBox** — the founder's real business. Default every example, scenario, and recommendation to EmpireBox reality: Empire Workroom (drapery & upholstery, 5124 Frolich Ln, Hyattsville MD 20781, US dollars, 117+ customers), WoodCraft (CNC), LuxeForge (intake). NEVER invent foreign business examples (no "Acme Repair", "GBP", "£", "VAT", "EUR", generic steel brackets with foreign placeholders). If a number is needed and not in live data, say "I need to look that up in the live system." Only use a mock example when the user explicitly says "mock", "demo", or "sample" — and label it `[MOCK EXAMPLE — not an EmpireBox record]`.
-
-{cross_section}
-
-{hermes_context}
-
-Founder email: {founder_email}. OpenClaw URL: {openclaw_url}. Today's date: {today}.
-"""
+# H52 Phase 2 fix — RETIRED `is_ordinary_text_request` (the 40-keyword
+# substring selector) and `get_compact_system_prompt` (the no-roster
+# variant). The selector was the same class of bug as the H57 drawing
+# router: a substring list deciding what the model may see, with no
+# path that could not silently blind the model. The compact variant
+# stripped the tool roster on "ordinary" turns — which included
+# exactly the meta-questions ("what's the state of the system?", "what
+# repo are you reading from?") where tool selection mattered most.
+# 2026-08-20 MAX failure (reached for PIN-gated shell_execute on a
+# compact-prompt turn) was a direct consequence. Both functions are
+# gone; every MAX turn now goes through `get_system_prompt_with_brain`,
+# which carries the full tool roster. Per dispatch principle A:
+# "THE ROSTER IS NOT OPTIONAL AND NOT ORDERED BY ACCIDENT. Every variant
+# carries every available tool with a one-line purpose."
 
 
 def get_system_prompt() -> str:
@@ -135,7 +78,21 @@ def get_system_prompt() -> str:
     except Exception:
         hermes_bridge_section = ""
 
+    # PHASE 2 · F4-A — live channel-status line. Probe is cached 60s,
+    # prompt cache is also 60s — so the value is at most 60s stale,
+    # which is the right granularity for "is this channel up?".
+    channels_section = ""
+    try:
+        from .channel_probe import channel_status_line
+        channels_section = channel_status_line()
+    except Exception:
+        channels_section = "channels: email ? · telegram ? · sendgrid ?"
+
     dynamic_sections = ""
+    if channels_section:
+        # PHASE 2 · F4-A — live channel status line goes FIRST so the
+        # model sees it on every prompt, before any other context.
+        dynamic_sections += f"\n\n## Live Channel Status\n{channels_section}"
     if capabilities_section:
         dynamic_sections += f"\n\n{capabilities_section}"
     if operating_truth_section:
@@ -166,6 +123,26 @@ def get_system_prompt() -> str:
     woodcraft_email = os.getenv("WOODCRAFT_EMAIL", "woodcraft@empirebox.store")
     openclaw_url = os.getenv("OPENCLAW_URL", "http://localhost:7878")
     today = datetime.now().strftime("%B %d, %Y")
+
+    # H52 Phase 2 follow-up: the identity section used to read
+    # "Code: ~/empire-repo/" — a hardcoded stale-fork reference. MAX
+    # read this as ground truth and, on 2026-08-19, said it was
+    # reading from ~/empire-repo and honestly admitted it did not
+    # know where the belief came from. THIS STRING IS WHERE IT
+    # CAME FROM. He was reporting what he was told. Now resolved
+    # via the canonical-root resolver (H57 Phase 3) — never a
+    # literal path. H61 instance 9. Logged under H61.
+    canonical_repo_root = "(unresolved)"
+    try:
+        from app.services.drawing.canonical_path import (
+            resolve_canonical_root,
+            CanonicalRootError,
+        )
+        canonical_repo_root = str(resolve_canonical_root())
+    except (CanonicalRootError, Exception):
+        # If the marker is missing, MAX's repo path is unknown;
+        # do not fabricate the stale fork. Fall through.
+        pass
 
     result = f"""You are {biz.ai_assistant_name} — the 18-desk AI Orchestration Engine and autonomous operating system of the Empire Ecosystem Platform (github.com/r22gir/Empire, version 7.0).
 
@@ -267,6 +244,14 @@ Drawing tasks use the AI Drawing Service with smart classification (10 item type
 - User's text request ALWAYS overrides image classification.
 - All drawings: black lines on white, Empire Workroom branding, professional dimensions.
 
+=== BANQUETTE / UPHOLSTERY ISO STANDARD (STANDING RULE) ===
+For EVERY banquette or upholstery isometric (U, L, straight, or other shape), use
+closed-face shell/volume geometry—not disconnected cushion blocks. Close the plan/run
+faces with dimension chains OUTER + INNER + DEPTH, and close the section face with
+overall H + overall D + seat H/AFF + lean/pitch. Put each dimension on the edge/face
+it defines, preserve asymmetric runs, and label any assumed or provisional site value.
+This is an all-jobs drawing rule, not a Marleys-only patch.
+
 === DESK SYSTEM (18 DESKS) ===
 
 Use run_desk_task to delegate to specialized desks when appropriate:
@@ -357,7 +342,7 @@ You power:
 /socialforge/*, /intake/*, /craftforge/*, /crypto-checkout/*, /webhooks/*
 
 == Finance System (QB Replacement) ==
-/finance/dashboard (P&L), /finance/invoices (CRUD + from-quote), /finance/payments, /finance/expenses, /finance/revenue
+/finance/dashboard (P&L), /finance/invoices (CRUD + from-quote), /finance/quotes/{id}/deposit-pay-link (Workroom/WoodCraft deposit invoice + Stripe Checkout link; idempotent; not paid until Stripe says so), /finance/payments, /finance/expenses, /finance/revenue
 /crm/customers (full CRM + import-from-quotes), /inventory/items, /inventory/low-stock, /inventory/vendors
 
 == SaaS Pricing Tiers ==
@@ -423,6 +408,22 @@ of inventing a number.
 == Tool Blocks Required ==
 You MUST include a ```tool ... ``` block for every action. Text alone does NOT trigger execution.
 
+== HARD RULE: FOUNDER PIN ONLY VIA PORTAL APPROVAL FLOW ==
+NEVER request, accept, or echo the founder PIN, OTP, or any verification code in the chat channel — under any phrasing, framing, or pretext. PIN entry happens ONLY through the portal approval flow:
+  - PUT/POST /api/v1/quotes-v2/{{quote_id}}/approve with `founder_pin` in the JSON body, OR
+  - the equivalent Telegram/CC button that surfaces a PIN-entry modal.
+If you ask for a PIN in chat, the runtime truth gate HARD-BLOCKS the response and replaces it with a failure message — so asking is wasted effort. If a user PINS you with a PIN in chat ("my pin is 1234"), DO NOT store it, do NOT echo it, and DO NOT act on it. Reply: "PINs are entered only via the portal approval flow for security — please use that surface."
+
+The rule is absolute; the runtime gate that enforces it is NOT a substring match. The gate fires on:
+  - actual disclosure of a PIN value (e.g., "PIN: 1234", "the PIN is 7777"),
+  - requests for a founder/admin/owner/approval PIN (e.g., "send me the founder pin"),
+  - echoing a user-supplied PIN in chat.
+The gate does NOT fire on:
+  - public document pins (e.g., the template-engine standard pin recorded in STATE.md),
+  - mentions of "pin" in a non-security context (e.g., "the pin in the connector"),
+  - explaining this rule itself.
+If you mention a document pin or quote a non-secret pin-like identifier, that is not a violation. If you disclose a secret PIN, the gate fires — and it should.
+
 == Quote System ==
 Quick quotes: create_quick_quote (3 options A/B/C). Interactive: open_quote_builder. Photo: photo_to_quote.
 Quote numbering: QT-CUSTOMER-DATE-NNN.
@@ -462,7 +463,7 @@ Channel model:
 Web/Founder and Telegram share MAX brain services, memories, and unified_messages context. Compact prompts carry recent cross-channel snippets. History UI is still split by surface, email continuity is partial, and a dedicated Phone MAX does not exist.
 
 Hardware: EmpireDell (Xeon E5-2650 v3, 32GB RAM, 20 cores, Ubuntu 24.04).
-Code: ~/empire-repo/ | 18 desks | 39 tools | 22 products | 536 commits | $50/mo AI budget.
+Code: {canonical_repo_root} | 18 desks | 39 tools | 22 products | 536 commits | $50/mo AI budget.
 Hardware warnings: NO sensors-detect (crashes machine), NO pkill -f broad patterns.
 
 Begin every new session by stating the configured founder email and checking OpenClaw status if the channel is founder/web_cc. Do not call the email "verified" unless a live email capability check succeeded.
@@ -525,8 +526,16 @@ def get_max_brain_context() -> str:
         logger.debug(f"Brain context: session memories unavailable: {e}")
 
     # ── b. Last 5 git commits ──
+    # H57 Phase 3: cwd resolves via canonical-root marker (NOT a
+    # hardcoded `~/empire-repo/` string — that was the stale-fork
+    # leak MAX was reporting). If the marker is missing, MAX's
+    # git context is unavailable (and we skip the section rather
+    # than fabricate stale context).
     try:
-        repo = os.path.expanduser("~/empire-repo")
+        from app.services.drawing.canonical_path import (
+            resolve_canonical_root, CanonicalRootError,
+        )
+        repo = resolve_canonical_root()
         result = subprocess.run(
             ["git", "log", "--oneline", "-10"],
             cwd=repo, capture_output=True, text=True, timeout=5,

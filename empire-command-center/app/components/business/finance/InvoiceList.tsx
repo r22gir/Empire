@@ -26,6 +26,10 @@ interface Invoice {
   source_id?: string | null;
   invoice_stage?: string | null;
   business_unit?: string | null;
+  payment_status?: string | null;
+  stripe_checkout_url?: string | null;
+  client_phone?: string;
+  client_address?: string;
   payments?: PaymentRecord[];
   customer?: {
     id?: string;
@@ -334,6 +338,7 @@ export default function InvoiceList() {
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentNotes, setPaymentNotes] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [payLink, setPayLink] = useState<{ url?: string | null; status?: string; note?: string; error?: string } | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   const fetchInvoices = useCallback(async () => {
@@ -390,6 +395,7 @@ export default function InvoiceList() {
       setDetail(null);
       setDetailError(null);
       setActionError(null);
+      setPayLink(null);
     }
   }, [expanded, fetchDetail]);
 
@@ -402,6 +408,34 @@ export default function InvoiceList() {
   const refreshExpanded = async () => {
     await fetchInvoices();
     if (expanded) await fetchDetail(expanded);
+  };
+
+  const handlePayLink = async (invoiceId: string) => {
+    setActionBusy('pay-link');
+    setActionError(null);
+    try {
+      const res = await fetch(`${API}/payments/invoice-link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoice_id: invoiceId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = typeof data.detail === 'string' ? data.detail : `Pay link failed (${res.status})`;
+        throw new Error(detail);
+      }
+      setPayLink({
+        url: data.checkout_url,
+        status: data.payment_status || 'link_ready',
+        note: data.return_host_note,
+      });
+      await refreshExpanded();
+    } catch (err: any) {
+      setPayLink(null);
+      setActionError(err.message || 'Pay link failed');
+    } finally {
+      setActionBusy(null);
+    }
   };
 
   const handleMarkSent = async (invoiceId: string) => {
@@ -567,6 +601,7 @@ export default function InvoiceList() {
                     <div><span className="section-label" style={{ fontSize: 10 }}>Stage</span><span className="text-[#555] block">{inv.invoice_stage || 'Manual'}</span></div>
                     <div><span className="section-label" style={{ fontSize: 10 }}>Source</span><span className="text-[#555] block">{inv.source_type && inv.source_id ? `${inv.source_type}:${inv.source_id}` : 'Manual'}</span></div>
                     <div><span className="section-label" style={{ fontSize: 10 }}>Business</span><span className="text-[#555] block">{inv.business_unit || inv.customer?.business || 'workroom'}</span></div>
+                    <div><span className="section-label" style={{ fontSize: 10 }}>Payment</span><span className="text-[#555] block">{inv.payment_status === 'paid' ? 'Paid' : inv.payment_status === 'link_ready' ? 'Link ready — not paid' : inv.payment_status === 'awaiting_confirmation' ? 'Awaiting Stripe confirmation' : (inv.payment_status || 'Unpaid')}</span></div>
                     <div>
                       <span className="section-label" style={{ fontSize: 10 }}>Due Date</span>
                       <span className="text-[#555] block" suppressHydrationWarning>{inv.due_date ? new Date(inv.due_date).toLocaleDateString() : '\u2014'}</span>
@@ -587,7 +622,22 @@ export default function InvoiceList() {
                     >
                       Invoice PDF
                     </button>
+                    {(inv.business_unit === 'workroom' || inv.business_unit === 'woodcraft' || !inv.business_unit) && inv.payment_status !== 'paid' && inv.status !== 'paid' && (
+                      <button
+                        onClick={() => handlePayLink(inv.id)}
+                        disabled={actionBusy === 'pay-link'}
+                        className="px-3 py-2 text-xs font-bold text-white bg-[#0f766e] hover:bg-[#115e59] rounded-xl disabled:opacity-50 transition-colors cursor-pointer"
+                      >
+                        {actionBusy === 'pay-link' ? 'Getting link...' : 'Stripe pay link'}
+                      </button>
+                    )}
                   </div>
+                  {(payLink?.url || inv.stripe_checkout_url) && (
+                    <p className="mt-3 text-xs break-all text-[#0f766e]">
+                      {payLink?.url || inv.stripe_checkout_url}
+                      {payLink?.note ? <span className="block text-[10px] text-[#999] mt-1">{payLink.note}</span> : null}
+                    </p>
+                  )}
 
                   <div className="mt-5 pt-4" style={{ borderTop: '1px solid #ece8e0' }}>
                     <h4 className="text-xs font-bold text-[#1a1a1a] mb-3">Record Payment</h4>

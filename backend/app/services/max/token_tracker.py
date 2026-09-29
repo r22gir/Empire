@@ -99,7 +99,11 @@ MODEL_PROVIDER_HINTS = {
     "qwen": "qwen",
     "openai/": "openrouter",
     "llama3.1": "ollama",
-    "openclaw": "openclaw",
+    # NOTE: no "openclaw" entry — wrapper providers never round-trip through
+    # the model field. The wrapper's inner delegate (e.g. "deepseek-v4-flash")
+    # classifies via the "deepseek" hint above. If a model string ever
+    # contains "openclaw" again, that is stale legacy data and will fall
+    # through to no-hint.
 }
 
 MODEL_ALIASES = {

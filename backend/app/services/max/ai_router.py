@@ -31,6 +31,7 @@ from .routing_state import (
     provider_model_env,
     save_routing_state,
     update_routing_state,
+    openclaw_inner_model,
 )
 
 load_dotenv(Path(__file__).resolve().parents[3] / ".env")
@@ -172,6 +173,7 @@ class AIResponse:
     model_used: str
     fallback_used: bool = False
     function_calls: Optional[list] = None  # xAI /v1/responses function calls
+    provider_unavailable: bool = False  # True iff every configured provider failed; callers MUST treat as failure (not success)
 
 
 PROVIDER_LABELS: dict[str, str] = {
@@ -377,7 +379,13 @@ class AIRouter:
                 disabled_reason = "local_service_unavailable"
             disabled = disabled_reason is not None
             models = provider_model_choices(provider)
-            active_model = state.selected_model if state.selected_provider == provider else models[0]
+            # `models[0]` is safe for cloud providers (always at least one
+            # entry); wrapper providers may yield [] when their inner env is
+            # missing — surface that as None rather than crashing.
+            if state.selected_provider == provider:
+                active_model = state.selected_model
+            else:
+                active_model = models[0] if models else None
             base_url = None
             if provider == "xai":
                 base_url = self.xai_base_url
@@ -970,7 +978,13 @@ class AIRouter:
                 logger.info(f"[MAX] Chat via OpenClaw{' (fallback)' if fallback else ''}")
                 resp = await self._openclaw_chat(messages)
                 self._log_chat_cost(messages, resp, "openclaw", feature, business, tenant_id)
-                return AIResponse(content=resp, model_used="openclaw", fallback_used=fallback)
+                # Resolve inner model from DEEPSEEK_MODEL at call time.
+                # None when env is missing/empty — explicitly unknown.
+                return AIResponse(
+                    content=resp,
+                    model_used=openclaw_inner_model(),
+                    fallback_used=fallback,
+                )
 
             elif provider_type == "ollama":
                 logger.info(f"[MAX] Chat via Ollama{' (fallback)' if fallback else ''}")
@@ -1078,6 +1092,7 @@ class AIRouter:
             ),
             model_used="none",
             fallback_used=bool(state.fallback_enabled and len(attempted) > 1),
+            provider_unavailable=True,
         )
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
@@ -1259,7 +1274,13 @@ class AIRouter:
                     logger.info(f"[MAX] Chat via OpenClaw{' (fallback)' if fallback else ''}")
                     resp = await self._openclaw_chat(messages)
                     self._log_chat_cost(messages, resp, "openclaw", feature, business, tenant_id)
-                    return AIResponse(content=resp, model_used="openclaw", fallback_used=fallback)
+                    # Resolve inner model from DEEPSEEK_MODEL at call time.
+                    # None when env is missing/empty — explicitly unknown.
+                    return AIResponse(
+                        content=resp,
+                        model_used=openclaw_inner_model(),
+                        fallback_used=fallback,
+                    )
                 except Exception as e:
                     logger.warning(f"OpenClaw failed: {e}")
                     self._record_provider_error("openclaw", e)
@@ -1274,7 +1295,12 @@ class AIRouter:
                     logger.warning(f"Ollama failed: {e}")
                     self._record_provider_error("ollama", e)
 
-        return AIResponse(content=self._provider_unavailable_message(), model_used="none", fallback_used=True)
+        return AIResponse(
+            content=self._provider_unavailable_message(),
+            model_used="none",
+            fallback_used=True,
+            provider_unavailable=True,
+        )
 
     # ── Streaming chat ──────────────────────────────────────────────────
 
@@ -1511,7 +1537,9 @@ class AIRouter:
                     logger.info("[MAX] Streaming via OpenClaw")
                     resp = await self._openclaw_chat(messages)
                     self._log_chat_cost(messages, resp, "openclaw", feature, business, tenant_id)
-                    yield resp, "openclaw"
+                    # Resolve inner model from DEEPSEEK_MODEL at call time.
+                    # None when env is missing/empty — explicitly unknown.
+                    yield resp, openclaw_inner_model()
                     return
                 except Exception as e:
                     logger.warning(f"OpenClaw stream failed: {e}")

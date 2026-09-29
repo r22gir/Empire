@@ -9,7 +9,7 @@ from app.services.max.operating_registry import (
     get_skill_truth,
     load_operating_registry,
 )
-from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt
+from app.services.max.system_prompt import get_system_prompt, get_max_brain_context
 
 
 def test_operating_registry_loads_required_truth():
@@ -41,11 +41,8 @@ def test_operating_context_is_prompt_safe_and_truthful():
 
 
 def test_system_prompts_include_operating_truth_without_phone_overclaim():
-    compact_prompt = get_compact_system_prompt(channel="mobile_browser")
     full_prompt = get_system_prompt()
 
-    assert "mobile browser access is Web MAX" in compact_prompt
-    assert "Phone MAX is not implemented" in compact_prompt
     assert "MAX Operating Truth Registry" in full_prompt
     assert "Email MAX: partial" in full_prompt
     assert "a dedicated Phone MAX does not exist" in full_prompt
@@ -64,12 +61,9 @@ def test_system_prompts_read_hermes_bridge_beneath_registry_truth(monkeypatch, t
     from app.services.max.system_prompt import _prompt_cache
 
     _prompt_cache.update({"prompt": None, "expires": 0})
-    compact_prompt = get_compact_system_prompt(channel="web")
     full_prompt = get_system_prompt()
 
-    assert "Hermes Memory Bridge" in compact_prompt
     assert "Hermes Memory Bridge" in full_prompt
-    assert "runtime > registry > repo truth > Hermes memory > skills" in compact_prompt
     assert "Bridge context line." in full_prompt
     assert "Supporting memory line." in full_prompt
     assert "Founder preference line." in full_prompt

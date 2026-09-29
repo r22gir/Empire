@@ -22,7 +22,10 @@ from typing import Any
 
 
 DRAWING_KEYWORDS = (
-    "drawing",
+    # H57 FIX (2026-08-19): bare "drawing" removed — it matched
+    # too broadly (any mention of "drawing" routed, including
+    # "what is a drawing"). Multi-token phrases that contain the
+    # word still match (regex matches the full phrase).
     "render",
     "sketch",
     "elevation",
@@ -34,7 +37,36 @@ DRAWING_KEYWORDS = (
     "pdf drawing",
     "bench drawing",
     "cad",
+    # H57 FIX: "generate" + "make" verbs — cover positive fixture 5
+    # ("generate the B1 sheet for the Willard bench") and
+    # similar explicit generation requests.
+    "generate drawing",
+    "generate the",
+    "make a",
+    "make me",
+    # Sprint 1d Phase A Fix #2: founder re-ask keywords — so "redraw the
+    # Willard bench", "regenerate as 4-view", "redo with the new dims",
+    # "new version", "same version" all route to drawing-router
+    # instead of silently falling through to plain chat.
+    "redraw",
+    "regenerate",
+    "redo",
+    "new version",
+    "same version",
 )
+
+
+def clear_handoff_state() -> None:
+    """Sprint 1d Phase A Fix #3: zero any module-level state.
+
+    Called by chat_with_max at the start of every turn. Belt-and-suspenders
+    for any future state-creep that would otherwise leak dims/dims-keyed
+    items between turns. The structured-question flow (`handoff.missing`)
+    is the proper way to ask the founder for missing data; this helper
+    only ensures no stale dataclass survives across turns.
+    """
+    global _LAST_HANDOFF  # noqa: defined lazily below if needed
+    _LAST_HANDOFF = None
 
 # Drawing-specific multi-token "plan" phrases. Bare "plan" is intentionally NOT
 # in DRAWING_KEYWORDS: it appears in phrases like "plan mode", "make a plan",
@@ -225,9 +257,17 @@ DIMENSION_ALIASES = {
     "wide": "width",
     "width": "width",
     "w": "width",
-    "long": "width",
-    "length": "width",
-    "l": "width",
+    # HOTFIX 4.0 (c) — 'long' / 'length' / 'l' map to LENGTH (the drop
+    # axis for drapery/roman/valance/cornice/wall_panel AND the
+    # long-edge axis for bench/banquette). The previous mapping to
+    # 'width' silently overwrote the user's first 'wide' dimension
+    # when they wrote "38 wide 64 long" — see _extract_dimensions
+    # test_c for the live bug report. Item-type context below
+    # disambiguates the bench case (where 'long' is the long-edge
+    # width) by overriding 'length' -> 'width' for furniture.
+    "long": "length",
+    "length": "length",
+    "l": "length",
     "deep": "depth",
     "depth": "depth",
     "d": "depth",
@@ -235,6 +275,7 @@ DIMENSION_ALIASES = {
     "height": "height",
     "h": "height",
     "overall height": "height",
+    "drop": "length",      # valance / cornice / roman: drop == length axis
     "seat height": "seat_height",
     "seat h": "seat_height",
     "back height": "back_height",
@@ -247,13 +288,38 @@ class DrawingHandoff:
     is_drawing_intent: bool
     subject: str = ""
     item_type: str = "generic"
+    # HOTFIX 4.0b — explicit B1 product_type when detected. The
+    # interceptor used to only carry a coarse bucket (window/bench/etc.)
+    # which left render_spec unable to dispatch. We now carry:
+    #   b1_product_type — the actual product_type from the B1
+    #                     registry (e.g. 'flat_fold', 'pinch_pleat',
+    #                     'headboard_channel', 'banquette'). Default
+    #                     None until resolved via _try_resolve_b1_type.
+    #   translated_dims  — the dimensions dict after alias translation
+    #                     (length -> height for roman/drapery; length
+    #                     -> drop for valance/cornice). Pre-fill keys.
+    b1_product_type: str | None = None
     dimensions: dict[str, str] = field(default_factory=dict)
+    translated_dims: dict[str, str] = field(default_factory=dict)
     missing: list[str] = field(default_factory=list)
+    # missing_template_keys: template-side required keys that the
+    # translated_dims still don't cover. Surfaced to the founder as
+    # the structured-question set when the handoff is NOT ready.
+    missing_template_keys: list[str] = field(default_factory=list)
     views: list[str] = field(default_factory=list)
     output_format: str = "inline_svg_pdf"
     source_image: str | None = None
     tool_payload: dict[str, Any] | None = None
     response: str = ""
+
+    @property
+    def ready(self) -> bool:
+        """HOTFIX 4.0b — True iff translated dims cover every
+        template-required key (and the B1 product_type is known).
+        Replaces the legacy 'subject + enough dims' gate; the
+        interceptor used to consider itself ready with just any
+        bucket item_type, which led to dead-end output."""
+        return bool(self.b1_product_type and not self.missing_template_keys)
     # D3: 6-way intent classification (per D1 + D1-Addendum).
     # Default "unknown" preserves backward compatibility for any caller
     # that does not read the new field. Valid values: animated_diagram,
@@ -263,25 +329,44 @@ class DrawingHandoff:
 
     @property
     def ready(self) -> bool:
-        return self.tool_payload is not None and not self.missing
+        """HOTFIX 4.0b — True iff translated dims cover every
+        template-required key (and the B1 product_type is known).
+
+        Pre-fix, `ready` was defined as:
+            self.tool_payload is not None and not self.missing
+        which over-read `tool_payload` (set only at the very end of
+        build_drawing_handoff) and over-claimed ready=True for
+        generic-bucket handoffs whose dims were incomplete. The new
+        definition supersedes both: the B1 template validates the
+        translated dims; tool_payload is no longer required."""
+        return bool(self.b1_product_type and not self.missing_template_keys)
 
 
 def is_drawing_intent(text: str) -> bool:
     """Returns True if text requests a drawing/rendering action.
 
-    Negation patterns (not asking you to draw, etc.) suppress drawing intent.
+    H57 FIX (2026-08-19): route on INTENT TO GENERATE, never on
+    vocabulary. A message that merely MENTIONS a drawing is not a
+    request for one.
 
-    Note: "plan" is intentionally NOT a bare drawing keyword. The router
-    historically routed "plan mode, propose Telegram voice pipeline" to the
-    drawing handler because the word "plan" appeared anywhere in the message.
-    Now the router requires a strong draw pattern (draw a X, draw me X) OR
-    a drawing-specific multi-token phrase (floor plan, plan view, etc.).
+    Three suppress classes (any of these returns False):
+      1. Question forms ("what is", "explain", "how does", ...)
+      2. Long pastes (>500 chars containing the word — likely a paste,
+         not a request)
+      3. Explicit user rejections + plan-mode phrases (pre-existing)
+
+    Then a strong draw pattern OR a drawing-specific multi-token
+    phrase OR a known animation phrase returns True.
+
+    Finally a word-boundary substring match against DRAWING_KEYWORDS
+    (the bare "drawing", "render", etc. — but ONLY as a whole word,
+    never a substring of a longer word like "withdrawing").
     """
     if not text:
         return False
     lowered = text.lower()
 
-    # Suppress drawing intent when user explicitly rejects drawing
+    # Strip negation patterns (pre-existing). User explicitly rejects.
     negation_patterns = (
         "not asking you to draw",
         "not asking you to render",
@@ -303,8 +388,42 @@ def is_drawing_intent(text: str) -> bool:
     if any(neg in lowered for neg in negation_patterns):
         return False
 
-    # Suppress drawing intent when the user is in plan mode / proposal mode.
-    # These phrases describe a planning conversation, not a drawing request.
+    # H57: question forms NEVER route. A user asking "what is a
+    # drawing" or "explain the difference between a drawing and a
+    # sketch" is asking a question, not requesting a fabrication.
+    question_forms = (
+        "what is",
+        "what's",
+        "whats",
+        "what does",
+        "explain",
+        "tell me about",
+        "how does",
+        "how do",
+        "why ",
+        "why?",
+        "define ",
+        "meaning of",
+        "describe ",
+        "difference between",
+    )
+    # Only treat as a question when the question form is the LEADING
+    # intent — not when "what" appears mid-sentence in a fabrication
+    # request. We accept a trailing "?" as a strong question signal.
+    if lowered.endswith("?"):
+        if any(qf in lowered for qf in question_forms):
+            return False
+    if any(lowered.startswith(qf) for qf in question_forms):
+        return False
+
+    # H57: long pastes (body > 500 chars) NEVER route. A 200-line
+    # dispatch paste containing "drapery" or "drawing" is a
+    # document being submitted for review, not a generation prompt.
+    # Cap at 500 chars per the dispatch's threshold.
+    if len(text) > 500 and any(kw in lowered for kw in DRAWING_KEYWORDS):
+        return False
+
+    # Pre-existing: plan mode / proposal mode (separate intent)
     plan_mode_patterns = (
         "plan mode",
         "propose a plan",
@@ -335,6 +454,17 @@ def is_drawing_intent(text: str) -> bool:
     if any(pattern in lowered for pattern in strong_draw_patterns):
         return True
 
+    # H57 FIX: explicit drawing request with item-type + dims.
+    # A message that names an item (shade, bench, valance, etc.) AND
+    # specifies dimensions (width 38, drop 70, 68 high, etc.) is a
+    # fabrication request even without the verb "draw" — per
+    # dispatch fixture 6 ("Roman shade, width 68, drop 70").
+    if any(item in lowered for item in _ITEM_TYPE_KEYWORDS_LOWER):
+        # Look for dimension-like text — at least one digit followed
+        # by a unit, OR an explicit width/drop/high keyword.
+        if _DIM_LIKE.search(text):
+            return True
+
     # Drawing-specific multi-token "plan" phrases. Bare "plan" alone is NOT enough.
     if any(phrase in lowered for phrase in DRAWING_PLAN_PHRASES):
         return True
@@ -360,11 +490,73 @@ def is_drawing_intent(text: str) -> bool:
     if any(pattern in lowered for pattern in animation_patterns):
         return True
 
-    return any(keyword in lowered for keyword in DRAWING_KEYWORDS)
+    # H57 FIX: word-boundary substring match. Pre-fix used
+    # `keyword in lowered` which matched "drawing" inside
+    # "withdrawing", "redrawing", "drawings", etc. Post-fix uses a
+    # regex with word boundaries (\b). The pattern is case-insensitive
+    # and matches Unicode word characters on either side.
+    import re as _re
+    for keyword in DRAWING_KEYWORDS:
+        # \b in re treats _ as a word character; keywords with
+        # embedded spaces (e.g. "section view") match whole phrase.
+        # The match is whole-word (not substring of a longer word).
+        if _re.search(r"(?<![A-Za-z0-9])" + _re.escape(keyword) + r"(?![A-Za-z0-9])",
+                      lowered):
+            return True
+    return False
+
+
+# H57 FIX: helper constants for the "item + dims" intent check
+# (positive fixture 6: "Roman shade, width 68, drop 70").
+# Lower-cased once at module load for fast matching.
+_ITEM_TYPE_KEYWORDS_LOWER = tuple(
+    kw.lower() for kw in (
+        "bench", "banquette", "booth", "chair", "drapery", "curtain",
+        "shade", "roman", "cornice", "valance", "headboard",
+    )
+)
+# Matches dimension-like text: a number with a unit (e.g. "68\"", "70 in",
+# "38cm") or an explicit width/drop/high keyword with a number.
+import re as _re_module
+_DIM_LIKE = _re_module.compile(
+    r"(?:\b\d+\s*(?:[\"'\u2033]\b|in\b|cm\b|mm\b|ft\b|inch\b|"
+    r"inches\b|wide\b|tall\b|high\b|drop\b))"
+    r"|(?:width\s*\d|drop\s*\d|height\s*\d|high\s*\d|long\s*\d)",
+    _re_module.IGNORECASE,
+)
 
 
 def _extract_item_type(text: str) -> tuple[str, str]:
+    """HOTFIX 4.0b (b) — fix the silent 'generic' bug from R3.
+
+    Pre-fix, this returned ('shade', 'window') for "flat roman shade"
+    (substring match) and ('', 'generic') for the explicit
+    "use the render_shop_drawing tool: product_type flat_fold, dims
+    width 38 height 64" prompt (no substring keyword). The
+    'generic' bucket then surfaced a misleading missing-field list.
+
+    Post-fix:
+      1. Detect an explicit "product_type <name>" mention FIRST and
+         return that B1 product_type as both subject AND item_type
+         (the router will later call render_shop_drawing with it).
+      2. Otherwise, fall back to the substring keyword table. The
+         match with the longest keyword wins so "flat roman shade"
+         doesn't accidentally collapse to "roman" → a higher-specificity
+         hint should win. (Today we keep the first-match behavior
+         because the B1 type resolution happens separately in
+         _try_resolve_b1_type.)
+    """
     lowered = text.lower()
+
+    # Path 1: explicit B1 product_type mention. The router's
+    # _try_resolve_b1_type picks up the same patterns; we just surface
+    # the b1 type as the subject here so the user-visible handoff
+    # carries an explicit name (no more "generic").
+    for pattern, b1_type in _EXPLICIT_B1_TYPE_PATTERNS:
+        if pattern in lowered and b1_type is not None:
+            return b1_type, b1_type
+
+    # Path 2: substring match against ITEM_KEYWORDS.
     for keyword, item_type in ITEM_KEYWORDS.items():
         if keyword in lowered:
             return keyword, item_type
@@ -387,30 +579,438 @@ def _normalize_dimension(label: str) -> str:
     return DIMENSION_ALIASES.get(label, label.replace(" ", "_"))
 
 
-def _extract_dimensions(text: str) -> dict[str, str]:
+# ── HOTFIX 4.0b (a) — router-to-engine wiring helpers ────────────────
+
+# Map (item_type, free-text style hint) → B1 product_type. The chat
+# most commonly names the style without using the precise registry
+# name ("flat roman shade" instead of "flat_fold"). Each entry is a
+# (style-hint-substring, B1 product_type). First match wins.
+_B1_TYPE_BY_STYLE_HINT = (
+    # ── Drapery (15 styles) — natural-language aliases ────────────
+    ("pinch-pleat",       "pinch_pleat"),
+    ("pinch pleat",       "pinch_pleat"),
+    ("french pleat",      "french_pleat"),
+    ("euro pleat",        "euro_pleat"),
+    ("cartridge pleat",   "cartridge_pleat"),
+    ("box pleat",         "box_pleat"),
+    ("inverted box",      "inverted_box_pleat"),
+    ("goblet pleat",      "goblet_pleat"),
+    ("butterfly pleat",   "butterfly_pleat"),
+    ("ripplefold",        "ripplefold"),
+    ("rod-pocket",        "rod_pocket"),
+    ("rod pocket",        "rod_pocket"),
+    ("tab top",           "tab_top"),
+    ("grommet",           "grommet"),
+    ("pencil pleat",      "pencil_pleat"),
+    ("smocked",           "smocked"),
+    ("fan pleat",         "fan_pleat"),
+    # ── Roman shades (9 styles) ─────────────────────────────────
+    ("flat_roman",        "flat_fold"),
+    ("flat roman",        "flat_fold"),
+    ("hobbled",           "hobbled_teardrop"),
+    ("hobbled teardrop",  "hobbled_teardrop"),
+    ("european relaxed",  "european_relaxed"),
+    ("balloon",           "balloon"),
+    ("austrian",          "austrian"),
+    ("london",            "london"),
+    ("cascade",           "cascade"),
+    ("waterfall",         "waterfall"),
+    ("tulip",             "tulip"),
+    # generic "roman shade" without "flat" → flat_fold (the most common)
+    ("roman shade",       "flat_fold"),
+    ("roman",             "flat_fold"),
+    # ── Valance collisions — longer hints beat the bare drapery/roman slug
+    ("box pleat valance", "valance/box_pleat"),
+    ("valance box pleat", "valance/box_pleat"),
+    ("inverted box pleat valance", "valance/inverted_box_pleat"),
+    ("inverted box valance", "valance/inverted_box_pleat"),
+    ("balloon valance",   "valance/balloon"),
+    ("valance balloon",   "valance/balloon"),
+    ("austrian valance",  "valance/austrian"),
+    ("valance austrian",  "valance/austrian"),
+    ("london valance",    "valance/london"),
+    ("valance london",    "valance/london"),
+    ("rod pocket valance","valance/rod_pocket"),
+    ("valance rod pocket","valance/rod_pocket"),
+    # ── Valance (14 styles) ────────────────────────────────────
+    ("kingston",          "kingston"),
+    ("cambridge",         "cambridge"),
+    ("scalloped",         "scalloped"),
+    ("arched",            "arched"),
+    ("serpentine",        "serpentine"),
+    ("flat board mounted","flat_board_mounted"),
+    ("flat_board_mounted","flat_board_mounted"),
+    ("shaped",            "shaped"),
+    ("pleated valance",   "pleated"),
+    ("pleated",           "pleated"),
+    ("gathered",          "gathered"),
+    ("swag and jabot",    "swag_and_jabot"),
+    ("swag_and_jabot",    "swag_and_jabot"),
+    ("jabot",             "swag_and_jabot"),
+    ("cascades",          "cascades"),
+    ("empire valance",    "empire"),
+    ("empire",            "empire"),
+    ("tab valance",       "tab"),
+    ("cornice with fabric","cornice_with_fabric"),
+    ("cornice_with_fabric","cornice_with_fabric"),
+    ("valance",           "kingston"),   # generic fallback
+    # ── Cornice collisions — longer than the bare valance slug
+    ("arched cornice",    "cornice/arched"),
+    ("cornice arched",    "cornice/arched"),
+    ("scalloped cornice", "cornice/scalloped"),
+    ("cornice scalloped", "cornice/scalloped"),
+    ("double serpentine cornice", "double_serpentine"),
+    ("serpentine cornice","cornice/serpentine"),
+    ("cornice serpentine","cornice/serpentine"),
+    # ── Cornice (5 styles) ─────────────────────────────────────
+    ("straight cornice",  "straight"),
+    ("cornice straight",  "straight"),
+    ("double serpentine", "double_serpentine"),
+    ("pagoda",            "pagoda"),
+    ("stepped",           "stepped"),
+    ("custom profile",    "custom_profile"),
+    ("cornice",           "straight"),
+    # ── Bench / Banquette (treated as furniture long-axis = width) ──
+    ("banquette",         "banquette"),
+    ("bench",             "bench"),
+    # ── Headboard ─────────────────────────────────────────────
+    ("headboard channel", "headboard_channel"),
+    ("channel headboard", "headboard_channel"),
+    ("upholstered headboard", "headboard_channel"),
+    ("headboard",         "headboard_channel"),
+)
+
+# Explicit "use the X tool: product_type Y, dims ..." patterns. The
+# R3 reproduction showed the interceptor ignoring explicit B1 type
+# mentions — this list catches them.
+_EXPLICIT_B1_TYPE_PATTERNS = (
+    ("render_shop_drawing tool", None),  # presence-only signal
+    ("product_type flat_fold", "flat_fold"),
+    ("product_type pinch_pleat", "pinch_pleat"),
+    ("product_type flat_roman", "flat_fold"),
+    ("product_type roman", "flat_fold"),
+    ("product_type headboard_channel", "headboard_channel"),
+    ("product_type banquette", "banquette"),
+    ("product_type bench", "bench"),
+    ("product_type double_serpentine", "double_serpentine"),
+    ("product_type scalloped", "scalloped"),
+)
+
+
+def _try_resolve_b1_type(message: str, item_type: str) -> str | None:
+    """HOTFIX 4.0b — resolve a B1 product_type from the message text.
+
+    Two paths:
+      1. Explicit "product_type <name>" patterns (R3 reproduction case)
+      2. Style-hint substring mapping ("flat roman shade" -> flat_fold)
+
+    Returns None when no B1 product_type can be resolved — the
+    handoff is then NOT ready (template-ready gate requires a B1
+    type) and the founder is asked for a precise B1 type.
+    """
+    lowered = message.lower()
+    # Path 1: explicit "product_type <name>" mentions.
+    for pattern, b1_type in _EXPLICIT_B1_TYPE_PATTERNS:
+        if pattern in lowered and b1_type is not None:
+            return b1_type
+    # Path 2: style-hint substring mapping. Longer hints win over
+    # shorter so "flat roman shade" beats "roman".
+    best_hit: tuple[int, str] | None = None
+    for hint, b1_type in _B1_TYPE_BY_STYLE_HINT:
+        if hint in lowered:
+            if best_hit is None or len(hint) > best_hit[0]:
+                best_hit = (len(hint), b1_type)
+    return best_hit[1] if best_hit else None
+
+
+def _translate_dims_for_b1_product(
+    dimensions: dict[str, str], b1_product_type: str | None,
+) -> dict[str, str]:
+    """HOTFIX 4.0b — alias-translate the parsed dims to the
+    template-required keys.
+
+    The user-parser stays surface-level (it captures 'length' for
+    'long'/'long' etc.). The translation layer maps the user's
+    intent onto the B1 template's required-dim keys:
+
+      length -> height   for roman shades, drapery, headboard
+      length -> drop     for valance, cornice
+      length stays length after furniture override (the parser
+                            already re-mapped furniture's 'long' to
+                            'width' so by the time we get here, the
+                            remaining keys are usually width/height/
+                            depth/...).
+    """
+    out = dict(dimensions)
+    if not b1_product_type:
+        return out
+    # Family is "Roman Shades", "Drapery", etc. — normalize to a
+    # spaces-removed lowercase key so we can match against compact
+    # sets without whitespace surprises.
+    family = b1_product_type_to_family(b1_product_type).replace(" ", "").lower()
+
+    # Window-treatments (roman shades + drapery + headboard_channel):
+    # the user-written "length" or "long" is actually the height axis.
+    roman_family = {"romanshades", "drapery", "channelheadboard"}
+    valance_family = {"valance"}
+    cornice_family = {"cornice"}
+
+    if family in roman_family:
+        if "length" in out and "height" not in out:
+            out["height"] = out.pop("length")
+    elif family in valance_family or family in cornice_family:
+        if "length" in out and "drop" not in out:
+            out["drop"] = out.pop("length")
+    return out
+
+
+def b1_product_type_to_family(b1_product_type: str) -> str:
+    """Map B1 product_type to its family name. Centralized so the
+    router and the drawing_intent module agree on which translation
+    rule applies."""
+    try:
+        from app.services.drawing.templates.registry import family_for
+        return family_for(b1_product_type) or ""
+    except Exception:
+        return ""
+
+
+# HOTFIX 4.0 (c) — for furniture (bench / banquette / sofa / chair /
+# ottoman / daybed / settee), the conventional 'long' axis is the
+# FRONT EDGE (i.e. width). For every other family (drapery / roman /
+# valance / cornice / wall panel / headboard), 'long'/'length' means
+# the perpendicular drop or the vertical rise — distinct from 'width'.
+# Per-item-type overrides re-bind 'length' -> 'width' for furniture
+# so "bench 96 wide 36 high 22 deep" still routes the 'long'-side
+# dimensions to width where it belongs.
+_DIMENSION_OVERRIDES_BY_ITEM_TYPE: dict[str, dict[str, str]] = {
+    # Furniture: long-axis = width (the LENGTH of a bench is its width).
+    "bench":        {"length": "width",  "long": "width"},
+    "banquette":    {"length": "width",  "long": "width"},
+    "sofa":         {"length": "width",  "long": "width"},
+    "chair":        {"length": "width",  "long": "width"},
+    "dining_chair": {"length": "width",  "long": "width"},
+    "bar_stool":    {"length": "width",  "long": "width"},
+    "chaise":       {"length": "width",  "long": "width"},
+    "daybed":       {"length": "width",  "long": "width"},
+    "settee":       {"length": "width",  "long": "width"},
+    "loveseat":     {"length": "width",  "long": "width"},
+    "sectional":    {"length": "width",  "long": "width"},
+}
+
+
+def _apply_item_type_overrides(
+    dimensions: dict[str, str], item_type: str | None
+) -> dict[str, str]:
+    """Re-bind long/length keys when the item_type is furniture where
+    long == width. No-op when item_type is not in the override table
+    (drapery, roman, valance, cornice — keep long as length)."""
+    if not item_type:
+        return dimensions
+    overrides = _DIMENSION_OVERRIDES_BY_ITEM_TYPE.get(
+        item_type.lower().strip()
+    )
+    if not overrides:
+        return dimensions
+    out = dict(dimensions)
+    for src, dst in overrides.items():
+        if src in out:
+            val = out.pop(src)
+            # Last-write-wins — preserve the founder's intent if both
+            # keys are present (e.g. user wrote "96 long, 88 wide").
+            out.setdefault(dst, val)
+    return out
+
+
+def _extract_dimensions(
+    text: str, item_type: str | None = None
+) -> dict[str, str]:
+    """HOTFIX 4.0 — extract dimensions from natural-language input.
+
+    Accepts:
+      "38 wide 64 long"                       (value-first; no unit)
+      "18in wide 24in long"                   (value-first with units)
+      "width: 96, height: 36, depth: 22"      (label-first, comma-separated)
+      "28 long, 22 in wide"                   (order doesn't matter)
+
+    For furniture (bench, banquette, sofa, ...) the long / length
+    dimension is the WIDTH (front-edge length). For window treatments
+    (drapery, roman, valance, cornice), the long / length dimension
+    is the perpendicular drop. The override map above re-binds the
+    parsed keys accordingly so the founder's intent — width along the
+    front edge, length along the drop, etc. — survives the parse
+    step unchanged.
+
+    Spec-Phase A precedent: never invent dim values. Missing dims
+    remain missing; a downstream validator surfaces them as
+    structured questions.
+    """
     dimensions: dict[str, str] = {}
-    # 96" wide, 22 in deep, 36 high, 8 ft long
+    # R12.1 — value pattern now accepts:
+    #   69, 69.5, 69-1/2, 69 1/2, 5/8                (bare / decimal / fraction)
+    #   5' 9, 5' 9-1/2, 5 feet 9, 5 feet 9-1/2         (feet + inches)
+    # The captured value token is parsed to float inches by
+    # _parse_dimension_value below. Unparseable tokens or
+    # out-of-bounds values are dropped (logged) so the dimension
+    # surfaces as "missing" rather than silently rendering as a
+    # bogus value (e.g. the live 69 1/2" wide bug that produced 2").
     value_first = re.compile(
-        r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?\s+"
-        r"(?P<label>overall height|seat height|seat h|back height|back h|wide|width|long|length|deep|depth|high|height)\b",
+        r"(?P<value>"
+        r"\d+(?:\.\d+)?(?:[-\s]\d+/\d+)?"            # 69, 69.5, 69-1/2, 69 1/2
+        r"|\d+/\d+"                                    # 5/8 standalone
+        r"|\d+(?:\.\d+)?\s*(?:'|feet)\s+\d+(?:\.\d+)?(?:[-\s]\d+/\d+)?"  # 5' 9, 5' 9-1/2, 5 feet 9, 5 feet 9-1/2
+        r")\s*"
+        r"(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?"
+        r"\s+"
+        r"(?P<label>overall height|seat height|seat h|back height|back h|wide|width|long|length|deep|depth|high|height|drop)\b",
         re.IGNORECASE,
     )
-    # width 96", seat height 18
+    # Label-first pattern: same fraction / feet-inches support.
     label_first = re.compile(
-        r"(?P<label>overall height|seat height|seat h|back height|back h|width|length|depth|height)\s*[:=]?\s*"
-        r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?",
+        r"(?P<label>overall height|seat height|seat h|back height|back h|width|length|drop|depth|height)"
+        r"\s*[:=]?\s*"
+        r"(?P<value>"
+        r"\d+(?:\.\d+)?(?:[-\s]\d+/\d+)?"
+        r"|\d+/\d+"
+        r"|\d+(?:\.\d+)?\s*(?:'|feet)\s+\d+(?:\.\d+)?(?:[-\s]\d+/\d+)?"
+        r")\s*"
+        r"(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?",
         re.IGNORECASE,
     )
 
     for pattern in (value_first, label_first):
         for match in pattern.finditer(text):
             label = _normalize_dimension(match.group("label"))
-            value = match.group("value")
+            value_str = match.group("value")
             unit = (match.group("unit") or '"').lower()
-            suffix = "ft" if unit in ("ft", "feet", "'") else '"'
-            dimensions[label] = f"{value}{suffix}"
 
+            # Parse the captured value token to float inches.
+            inches = _parse_dimension_value(value_str)
+            if inches is None:
+                # Unparseable — fail loudly per R12.1 directive.
+                # Drop the dimension so it surfaces as missing in
+                # the handoff and the founder gets a structured
+                # question instead of a silent 2" shade.
+                import logging
+                logging.getLogger(__name__).warning(
+                    "R12.1: dropped unparseable token %r for label %r in %r",
+                    value_str, label, text,
+                )
+                continue
+
+            # Plausibility gate — refuse to emit values outside the
+            # sane range. Bounds come from the templates' own
+            # required dims: smallest Empire product is ~6" (a small
+            # valance topper) and the largest is <25' (oversized
+            # banquet). 3" lower bound catches the 2" bug; 600"
+            # upper bound (50 feet) catches foot-vs-inch typos
+            # (e.g. a width typed as 600 feet instead of 600").
+            if inches < _DIMENSION_BOUNDS[0] or inches > _DIMENSION_BOUNDS[1]:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "R12.1: dropped %r for label %r — value %.3f out of bounds %r",
+                    value_str, label, inches, _DIMENSION_BOUNDS,
+                )
+                continue
+
+            suffix = "ft" if unit in ("ft", "feet", "'") else '"'
+            dimensions[label] = f"{inches:g}{suffix}"
+
+    dimensions = _apply_item_type_overrides(dimensions, item_type)
     return dimensions
+
+
+# R12.1 — plausibility bounds for any single rendered dimension.
+# Picked from the templates' own required dims (templates/roman.py:61,
+# drapery.py:48, valance.py:43, cornice.py:40, bench_curved.py:42,
+# headboard_channel.py:35). No template accepts a dimension below
+# ~6" or above ~25 feet in real Empire work; the 3" floor catches
+# the 2" parse bug, the 600" (50') ceiling catches the foot/inch
+# typo. A value outside this range is dropped (logged) and the
+# dimension surfaces as missing in the handoff.
+_DIMENSION_BOUNDS = (3.0, 600.0)
+
+
+def _parse_dimension_value(token: str) -> float | None:
+    """R12.1 — parse a single dimension token to inches. Pure.
+
+    Reuses the proven feet/inches/fraction logic from
+    b2_qc.py:1868 (sheet-scale reverse parser) but extended for
+    user-input dimension values.
+
+    Accepts (the founder's required set, per R12.1 directive):
+      69                          bare integer → 69.0
+      69.5                        decimal → 69.5
+      69 1/2, 69-1/2              whole + fraction → 69.5
+      5/8                         standalone fraction → 0.625
+      5' 9"                       feet + inches → 69.0
+      5' 9-1/2"                   feet + inches + fraction → 69.5
+      5 feet 9 inches              word form → 69.0
+      5 feet 9-1/2 inches          word form + fraction → 69.5
+
+    Returns None on anything unparseable — never a partial
+    number. A dimension the parser cannot read fails loudly by
+    having _extract_dimensions drop it (so the dimension
+    surfaces as "missing" in the handoff and the founder gets a
+    structured question, not a silent bogus render).
+
+    The same fraction bug that produced width=2 from "69 1/2"
+    is fixed here: the regex is anchored, the captured token is
+    always one of the known forms, and a malformed token returns
+    None instead of silently consuming the digit after the `/`.
+    """
+    if not token:
+        return None
+    t = token.strip()
+    if not t:
+        return None
+
+    # Form A: feet-inches with optional fraction.
+    #   5' 9", 5' 9-1/2", 5 feet 9, 5 feet 9-1/2, 5 feet 9 inches
+    m = re.match(
+        r"^(\d+(?:\.\d+)?)\s*(?:'|feet)\s+(\d+(?:\.\d+)?)"
+        r"(?:[-\s](\d+)/(\d+))?\s*(?:inches|\"|in)?$",
+        t, re.IGNORECASE,
+    )
+    if m:
+        feet = float(m.group(1))
+        inches = float(m.group(2))
+        if m.group(3) is not None:
+            num = float(m.group(3))
+            den = float(m.group(4))
+            if den <= 0:
+                return None
+            inches += num / den
+        return feet * 12.0 + inches
+
+    # Form B: whole + fraction (hyphen or space).
+    #   69-1/2, 69 1/2
+    m = re.match(r"^(\d+(?:\.\d+)?)[-\s](\d+)/(\d+)$", t)
+    if m:
+        whole = float(m.group(1))
+        num = float(m.group(2))
+        den = float(m.group(3))
+        if den <= 0:
+            return None
+        return whole + num / den
+
+    # Form C: standalone fraction.
+    #   5/8, 7/16
+    m = re.match(r"^(\d+)/(\d+)$", t)
+    if m:
+        num = float(m.group(1))
+        den = float(m.group(2))
+        if den <= 0:
+            return None
+        return num / den
+
+    # Form D: bare number (integer or decimal).
+    #   69, 69.5
+    m = re.match(r"^(\d+(?:\.\d+)?)$", t)
+    if m:
+        return float(m.group(1))
+
+    return None
 
 
 def _has_enough_dimensions(item_type: str, dimensions: dict[str, str], source_image: str | None) -> tuple[bool, list[str]]:
@@ -444,6 +1044,46 @@ def _shape_for_text(text: str) -> str:
     return "straight"
 
 
+def _compute_missing_template_keys(
+    translated_dims: dict[str, str], b1_product_type: str | None,
+) -> list[str]:
+    """HOTFIX 4.0b — compute the template-required keys that the
+    translated dims still don't cover. Calls templates.registry.
+    get_template(b1_product_type).validate_spec({dims}) — that
+    function is the canonical source of "what's missing for THIS
+    family" and is the same gate the render_shop_drawing tool runs
+    before invoking render_spec.
+
+    Returns an empty list when the translated dims satisfy the
+    template (handoff.ready). Imports the registry lazily to avoid
+    import-time cycles (the templates module imports back into
+    the data dir lazily via product_catalog).
+    """
+    if not b1_product_type:
+        return ["b1_product_type"]
+    try:
+        from app.services.drawing.templates import get_template
+        from app.services.drawing.templates.catalog_namespace import (
+            prepare_drawing_spec,
+        )
+        spec, resolved = prepare_drawing_spec({
+            "product_type": b1_product_type,
+            "dims": translated_dims,
+        })
+        template = get_template(
+            spec["product_type"], family=resolved.catalog_family,
+        )
+    except KeyError:
+        # B1 product_type not in the B1 registry — surface it as the
+        # missing key so the founder can pick a real one.
+        return ["b1_product_type"]
+    except Exception:
+        return ["b1_product_type"]
+
+    missing = template.validate_spec(spec).missing_required
+    return list(missing)
+
+
 def build_drawing_handoff(message: str, *, image_filename: str | None = None) -> DrawingHandoff:
     if not is_drawing_intent(message):
         # Even when the message is not a drawing intent, classify it for
@@ -460,30 +1100,73 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
     intent_mode = classify_intent_mode(message)
 
     subject, item_type = _extract_item_type(message)
-    dimensions = _extract_dimensions(message)
+    dimensions = _extract_dimensions(message, item_type=item_type)
     views = _extract_views(message)
-    enough, missing = _has_enough_dimensions(item_type, dimensions, image_filename)
 
+    # HOTFIX 4.0b — resolve B1 product_type, alias-translate dims,
+    # and validate the translated set against the template's required
+    # keys. Pre-fix, the handoff was "ready" with just enough
+    # generic-bucket dims to pass _has_enough_dimensions; that
+    # resulted in a dead-end response. Post-fix the ready gate is the
+    # template's REQUIRED set covered by translated dims AND a known
+    # B1 product_type.
+    b1_product_type = _try_resolve_b1_type(message, item_type)
+    translated_dims = _translate_dims_for_b1_product(
+        dimensions, b1_product_type
+    )
+    missing_template_keys = _compute_missing_template_keys(
+        translated_dims, b1_product_type
+    )
+
+    # legacy fields kept populated so the existing router code path
+    # still gets something to look at during the migration window.
+    enough, missing_legacy = _has_enough_dimensions(
+        item_type, translated_dims, image_filename
+    )
     handoff = DrawingHandoff(
         is_drawing_intent=True,
         subject=subject,
         item_type=item_type,
+        b1_product_type=b1_product_type,
         dimensions=dimensions,
-        missing=missing,
+        translated_dims=translated_dims,
+        missing=missing_legacy,
+        missing_template_keys=missing_template_keys,
         views=views,
         source_image=image_filename,
         intent_mode=intent_mode,
     )
 
-    if image_filename and not dimensions:
+    # Migration: while the router is being updated for HOTFIX 4.0b,
+    # surface BOTH the legacy missing list AND the template-key gap so
+    # any callers reading either field still get a useful answer.
+    #
+    # HOTFIX 4.0b priority order:
+    #   1. If b1_product_type resolved AND missing_template_keys
+    #      non-empty: ONLY surface the template's missing keys (those
+    #      are the truth). Drop the legacy bucket — it would be
+    #      misleading (e.g. asking for "height" when the valance
+    #      template wants "drop").
+    #   2. If b1_product_type resolved and template is satisfied:
+    #      ready=True, no missing.
+    #   3. Else, fall back to the legacy gate (image / subject /
+    #      enough).
+    if b1_product_type and missing_template_keys:
+        handoff.missing_template_keys = missing_template_keys
+        handoff.missing = missing_template_keys
+    elif image_filename and not dimensions:
         handoff.missing = [
             "real extracted dimensions",
             "confirmed item type" if not subject else "confirmed dimensions from source image",
         ]
+    elif b1_product_type:
+        # B1 product_type resolved and template satisfied — ready.
+        # No missing.
+        pass
     elif not subject:
         handoff.missing = ["subject/item", "dimensions or source image"]
     elif not enough:
-        handoff.missing = missing
+        handoff.missing = missing_legacy
 
     if handoff.missing:
         if image_filename:
@@ -509,13 +1192,40 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
         "output_format": handoff.output_format,
     }
     if item_type == "bench":
-        payload.update({
+        # Sprint 1d Phase A Fix #1: NEVER invent default dims (per Standard
+        # Hard Rule 1). Each of width/depth/seat_height/back_height is taken
+        # from the founder's message only — if any is missing, it's added
+        # to handoff.missing so the structured-question flow fires.
+        # Note: `back_height` falls back to `height` ONLY when the founder
+        # explicitly supplied a "height" value (e.g. "the bench is 17 tall"),
+        # because users often mean seat-to-top-of-back. We still flag the
+        # missing key (back_height) if neither was supplied.
+        _supplied_back_height = dimensions.get("back_height")
+        _supplied_height = dimensions.get("height")
+        _back_height_value = (
+            _supplied_back_height
+            if _supplied_back_height is not None and _supplied_back_height != ""
+            else (_supplied_height if _supplied_height not in (None, "") else None)
+        )
+        _bench_dims = {
             "shape": _shape_for_text(message),
-            "width": dimensions.get("width", "120\"").rstrip('"'),
-            "depth": dimensions.get("depth", "22\"").rstrip('"'),
-            "seat_height": dimensions.get("seat_height", "18\"").rstrip('"'),
-            "back_height": dimensions.get("back_height", dimensions.get("height", "36\"")).rstrip('"'),
-        })
+            "width": (dimensions.get("width", "") or "").rstrip('"') or None,
+            "depth": (dimensions.get("depth", "") or "").rstrip('"') or None,
+            "seat_height": (dimensions.get("seat_height", "") or "").rstrip('"') or None,
+            "back_height": (
+                _back_height_value.rstrip('"')
+                if isinstance(_back_height_value, str) and _back_height_value
+                else _back_height_value
+            ),
+        }
+        # Drop Nones so the renderer never gets placeholders.
+        _bench_dims = {k: v for k, v in _bench_dims.items() if v}
+        if not _bench_dims:
+            handoff.missing.extend(
+                ["bench dimensions (width / depth / seat_height / back_height)"]
+            )
+        else:
+            payload.update(_bench_dims)
     if image_filename:
         payload["source_image"] = image_filename
 

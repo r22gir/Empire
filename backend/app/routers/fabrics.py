@@ -17,7 +17,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["fabrics"])
 
-INTAKE_DB = os.path.expanduser("~/empire-repo/backend/data/intake.db")
+# iX-day R1X-INT-FIX: INTAKE_DB constant REMOVED. The stale-fork
+# `~/empire-repo/backend/data/intake.db` path is dead. The live
+# `intake_fabrics` table lives in canonical empire.db (see
+# `_init_intake_fabrics_table` below). Old `/client-submit`,
+# `/intake/pending`, `/intake/{intake_id}`, `/intake/match/{id}` endpoints
+# that referenced this constant were dead code (no front-end callers) and
+# have been deleted.
 
 # ── Pydantic schemas ──────────────────────────────────────────
 
@@ -56,13 +62,10 @@ class FabricUpdate(BaseModel):
     notes: Optional[str] = None
     is_active: Optional[int] = None
 
-class ClientFabricSubmit(BaseModel):
-    intake_id: str
-    client_fabric_name: Optional[str] = None
-    client_fabric_code: Optional[str] = None
-    client_notes: Optional[str] = None
-    has_own_fabric: bool = False
-    yards_available: Optional[float] = None
+# iX-day R1X-INT-FIX: ClientFabricSubmit REMOVED. Schema referenced the
+# old (stale-fork) intake_fabrics columns. No callers — front-end uses
+# the canonical-scoped IntakeFabricCreate defined near the bottom of this
+# file via /intake-project/{intake_id}/fabrics.
 
 class YardageRequest(BaseModel):
     width_inches: float = 0
@@ -77,7 +80,7 @@ class YardageRequest(BaseModel):
 # ── Helper: ensure fabrics table exists ───────────────────────
 
 def _ensure_tables():
-    """Create fabrics and intake_fabrics tables if they don't exist."""
+    """Create fabrics table if it doesn't exist (canonical empire.db)."""
     with get_db() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS fabrics (
@@ -113,28 +116,11 @@ def _ensure_tables():
             CREATE INDEX IF NOT EXISTS idx_fabrics_supplier ON fabrics(supplier);
         """)
 
-    # intake_fabrics goes in intake.db
-    if os.path.exists(INTAKE_DB):
-        intake_conn = sqlite3.connect(INTAKE_DB)
-        intake_conn.executescript("""
-            CREATE TABLE IF NOT EXISTS intake_fabrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                intake_id TEXT NOT NULL,
-                fabric_id INTEGER,
-                client_fabric_name TEXT,
-                client_fabric_code TEXT,
-                client_swatch_photo TEXT,
-                client_notes TEXT,
-                has_own_fabric INTEGER DEFAULT 0,
-                yards_available REAL,
-                owner_matched INTEGER DEFAULT 0,
-                owner_notes TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
-            );
-            CREATE INDEX IF NOT EXISTS idx_intake_fabrics_intake ON intake_fabrics(intake_id);
-        """)
-        intake_conn.commit()
-        intake_conn.close()
+    # iX-day R1X-INT-FIX: intake_fabrics creation in stale-fork REMOVED.
+    # The canonical intake_fabrics lives in empire.db and is created by
+    # `_init_intake_fabrics_table` below (rich schema: scope, room_name,
+    # item_name, fabric_preference, fabric_name, …). The old schema
+    # (client_fabric_name, client_fabric_code, has_own_fabric, …) is dead.
 
 
 # Run on import
@@ -264,73 +250,12 @@ async def fabric_catalog(search: Optional[str] = None):
         return fabrics
 
 
-@router.post("/client-submit")
-async def client_submit_fabric(data: ClientFabricSubmit):
-    """Client submits their own fabric info during intake. Goes to intake_fabrics."""
-    if not os.path.exists(INTAKE_DB):
-        raise HTTPException(500, "Intake database not available")
-
-    intake_conn = sqlite3.connect(INTAKE_DB)
-    intake_conn.row_factory = sqlite3.Row
-    try:
-        intake_conn.execute(
-            """INSERT INTO intake_fabrics
-               (intake_id, client_fabric_name, client_fabric_code, client_notes,
-                has_own_fabric, yards_available)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (
-                data.intake_id,
-                data.client_fabric_name,
-                data.client_fabric_code,
-                data.client_notes,
-                1 if data.has_own_fabric else 0,
-                data.yards_available,
-            ),
-        )
-        intake_conn.commit()
-        row_id = intake_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-        return {"id": row_id, "status": "submitted"}
-    finally:
-        intake_conn.close()
-
-
-@router.post("/client-submit/photo")
-async def client_submit_photo(
-    intake_fabric_id: int = Form(...),
-    file: UploadFile = File(...),
-):
-    """Client uploads a swatch photo for their fabric submission."""
-    if not os.path.exists(INTAKE_DB):
-        raise HTTPException(500, "Intake database not available")
-
-    # Proxy to the existing photos upload system
-    from pathlib import Path
-    photos_dir = Path(os.path.expanduser("~/empire-repo/backend/data/photos/fabric/client"))
-    photos_dir.mkdir(parents=True, exist_ok=True)
-
-    import uuid
-    ext = Path(file.filename or "photo.jpg").suffix or ".jpg"
-    filename = f"{uuid.uuid4().hex[:12]}{ext}"
-    file_path = photos_dir / filename
-
-    content = await file.read()
-    with open(file_path, "wb") as f:
-        f.write(content)
-
-    photo_path = f"/photos/fabric/client/{filename}"
-
-    # Update intake_fabrics record
-    intake_conn = sqlite3.connect(INTAKE_DB)
-    try:
-        intake_conn.execute(
-            "UPDATE intake_fabrics SET client_swatch_photo = ? WHERE id = ?",
-            (photo_path, intake_fabric_id),
-        )
-        intake_conn.commit()
-    finally:
-        intake_conn.close()
-
-    return {"photo_path": photo_path, "filename": filename}
+# iX-day R1X-INT-FIX: `/client-submit` and `/client-submit/photo` REMOVED.
+# Both wrote to the stale-fork `~/empire-repo/backend/data/intake.db` (and
+# the deprecated `~/empire-repo/backend/data/photos/fabric/client/`).
+# The front-end uses the canonical `/intake-project/{intake_id}/fabrics`
+# endpoint (defined further down), which writes to empire.db. No callers
+# of the dead endpoints were found via repo-wide grep.
 
 
 @router.get("/{fabric_id}")
@@ -444,65 +369,13 @@ async def upload_swatch(fabric_id: int, file: UploadFile = File(...)):
         return dict_row(row)
 
 
-# ── INTAKE FABRIC REVIEW (owner endpoints) ───────────────────
-
-@router.get("/intake/pending")
-async def list_pending_intake_fabrics():
-    """List all client-submitted fabrics pending owner review."""
-    if not os.path.exists(INTAKE_DB):
-        return []
-
-    intake_conn = sqlite3.connect(INTAKE_DB)
-    intake_conn.row_factory = sqlite3.Row
-    try:
-        rows = intake_conn.execute(
-            "SELECT * FROM intake_fabrics WHERE owner_matched = 0 ORDER BY created_at DESC"
-        ).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        intake_conn.close()
-
-
-@router.get("/intake/{intake_id}")
-async def get_intake_fabrics(intake_id: str):
-    """Get all fabric submissions for a specific intake project."""
-    if not os.path.exists(INTAKE_DB):
-        return []
-
-    intake_conn = sqlite3.connect(INTAKE_DB)
-    intake_conn.row_factory = sqlite3.Row
-    try:
-        rows = intake_conn.execute(
-            "SELECT * FROM intake_fabrics WHERE intake_id = ? ORDER BY created_at",
-            (intake_id,),
-        ).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        intake_conn.close()
-
-
-@router.put("/intake/match/{intake_fabric_id}")
-async def match_intake_fabric(intake_fabric_id: int, fabric_id: int, owner_notes: Optional[str] = None):
-    """Owner matches a client-submitted fabric to a library fabric."""
-    if not os.path.exists(INTAKE_DB):
-        raise HTTPException(500, "Intake database not available")
-
-    # Verify the fabric exists
-    with get_db() as conn:
-        fabric = conn.execute("SELECT id FROM fabrics WHERE id = ?", (fabric_id,)).fetchone()
-        if not fabric:
-            raise HTTPException(404, f"Fabric {fabric_id} not found in library")
-
-    intake_conn = sqlite3.connect(INTAKE_DB)
-    try:
-        intake_conn.execute(
-            "UPDATE intake_fabrics SET fabric_id = ?, owner_matched = 1, owner_notes = ? WHERE id = ?",
-            (fabric_id, owner_notes, intake_fabric_id),
-        )
-        intake_conn.commit()
-        return {"status": "matched", "intake_fabric_id": intake_fabric_id, "fabric_id": fabric_id}
-    finally:
-        intake_conn.close()
+# iX-day R1X-INT-FIX: `/intake/pending`, `/intake/{intake_id}`, and
+# `/intake/match/{intake_fabric_id}` REMOVED. All three read or wrote
+# to the stale-fork `~/empire-repo/backend/data/intake.db`. The owner
+# review surface for intake fabrics now lives in the canonical
+# `/intake-project/{intake_id}/fabrics` GET endpoint (see below) and
+# the rest of the fabrics library tooling. No front-end callers existed
+# for the removed endpoints.
 
 
 # ── INTAKE FABRIC INFO (empire.db) ────────────────────────────

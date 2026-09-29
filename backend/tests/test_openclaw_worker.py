@@ -419,7 +419,7 @@ def test_code_task_description_is_passed_to_code_task_runner(monkeypatch):
         verification_notes = []
         log = [FakeLog()]
 
-    def fake_submit(prompt):
+    def fake_submit(prompt, **kwargs):
         captured["prompt"] = prompt
         return FakeCodeTask()
 

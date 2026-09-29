@@ -2,7 +2,7 @@
 Unified Photo Storage API.
 All photos from all sources (intake, quote builder, telegram, web) go through here.
 
-Storage layout: backend/data/photos/{entity_type}/{entity_id}/
+Storage layout: ~/empire-data/photos/{entity_type}/{entity_id}/
 Entity types: quote, intake, telegram, craftforge, general
 """
 import json
@@ -19,15 +19,32 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 
+from app.services.drawing.canonical_path import (
+    canonical_photos_dir,
+    canonical_intake_uploads_dir,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/photos", tags=["photos"])
 
-PHOTOS_BASE = Path(os.path.expanduser("~/empire-repo/backend/data/photos"))
+# iX-day R1X-INT-FIX: PHOTOS_BASE and INTAKE_UPLOADS now resolve through
+# the canonical-path guard. The stale-fork
+# `~/empire-repo/backend/data/photos/` and
+# `~/empire-repo/backend/data/intake_uploads/` paths are dead.
+# New uploads go to ~/empire-data/photos/ and ~/empire-data/intake_uploads/.
+PHOTOS_BASE = Path(canonical_photos_dir())
 PHOTOS_BASE.mkdir(parents=True, exist_ok=True)
 
-# Legacy paths for migration/linking
-INTAKE_UPLOADS = Path(os.path.expanduser("~/empire-repo/backend/data/intake_uploads"))
+# Intake uploads target dir for the unified photo store. New uploads still
+# write file blobs here (per-project subdir by intake_id); the public
+# /intake_uploads mount is owned by main.py and reads from the canonical
+# intake_uploads dir.
+INTAKE_UPLOADS = Path(canonical_intake_uploads_dir())
+INTAKE_UPLOADS.mkdir(parents=True, exist_ok=True)
+
+# Telegram uploads are read-only here (legacy archive); the live telegram
+# upload path is a different module.
 TELEGRAM_UPLOADS = Path(os.path.expanduser("~/empire-repo/uploads/images"))
 
 VALID_ENTITY_TYPES = {"quote", "intake", "telegram", "craftforge", "general"}
@@ -202,6 +219,35 @@ async def upload_photos(
             "source": source,
         })
         logger.info(f"Photo saved: {entity_type}/{entity_id}/{filename} ({len(content)} bytes, source={source})")
+
+        # D44 — also land the file in the canonical job-images tree so MAX
+        # can list/describe it. Only fire for actual image payloads (the
+        # caller may upload .glb / .pdf for scans and 3D models); route_to
+        # is inferred from entity_type for the workroom/woodcraft split.
+        if suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".heic"}:
+            try:
+                from app.services.job_image_store import store_job_image
+                _d44_quote_id = entity_id if entity_type == "quote" else None
+                _d44_item_key = (
+                    f"{entity_type}:{entity_id}" if entity_type != "quote" else None
+                )
+                _d44_route_to = (
+                    "woodcraft" if entity_type == "craftforge"
+                    else "workroom"
+                )
+                store_job_image(
+                    content,
+                    source_channel="quote_ui",
+                    quote_id=_d44_quote_id,
+                    item_key=_d44_item_key,
+                    route_to=_d44_route_to,
+                    document_type="photo",
+                    original_filename=f.filename,
+                )
+            except ValueError as _d44e:
+                logger.warning(
+                    f"D44 /photos/upload image rejected for {entity_type}/{entity_id}: {_d44e}"
+                )
 
     return {
         "entity_type": entity_type,

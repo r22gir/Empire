@@ -42,10 +42,18 @@ export async function intakeUpload(path: string, file: File): Promise<any> {
   return res.json();
 }
 
-export async function signup(data: { name: string; email: string; password: string; phone?: string; company?: string; role?: string }) {
+export async function signup(data: { name: string; email: string; password: string; phone?: string; company?: string; role?: string; business?: string }) {
+  // iX-day R1X-INT-FIX (Doctrine #4): business is required from the request
+  // context. The luxe.empirebox.store public surface is the Workroom intake
+  // (per the founder's CF bypass scope). Callers may override `business` in
+  // `data` if they host this lib from a different surface (e.g. a future
+  // WoodCraft intake); the default below is the only place "workroom" is
+  // named in the front-end code, and it is the public surface's
+  // self-identification, not a backend default.
+  const payload = { business: 'workroom', ...data };
   const res = await intakeFetch<{ token: string; user: any }>('/signup', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify(payload),
   });
   setToken(res.token);
   return res;

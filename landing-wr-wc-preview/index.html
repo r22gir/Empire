@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="robots" content="noindex"/>
+<title>Empire Workroom — compare three style directions (preview)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500&family=Newsreader:opsz,wght@6..72,400&family=Cormorant+Garamond:ital,wght@0,500;1,500&family=Outfit:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+  :root{--ink:#1c1915;--muted:#5c564c;--paper:#f6f1e8}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:Outfit,"Segoe UI",sans-serif;line-height:1.45}
+  a{color:inherit}
+  :focus-visible{outline:2px solid #6e3d28;outline-offset:3px}
+  header{padding:28px 6vw 8px;max-width:1100px}
+  h1{font-family:Newsreader,Palatino,serif;font-weight:400;font-size:clamp(2rem,4vw,3.2rem);letter-spacing:-.03em;line-height:1.05;margin:8px 0}
+  .kicker{letter-spacing:.16em;text-transform:uppercase;font-size:12px;color:#6e3d28}
+  .note{color:var(--muted);max-width:40rem}
+  .grid{display:grid;grid-template-columns:1fr;gap:18px;padding:18px 6vw 48px;max-width:1100px}
+  .card{display:block;text-decoration:none;border-radius:16px;overflow:hidden;min-height:220px}
+  .card:hover{transform:translateY(-2px)}
+  .card .pad{padding:28px 26px 24px}
+  .card h2{margin:0 0 8px;font-size:1.7rem;font-weight:500}
+  .card p{margin:0;max-width:36rem}
+  .go{display:inline-block;margin-top:16px;letter-spacing:.12em;text-transform:uppercase;font-size:12px}
+  .a{background:#f3efe6;color:#1b1814;border:1px solid #1b1814}
+  .a h2{font-family:Newsreader,Palatino,serif;font-weight:400;font-size:2rem}
+  .b{background:#0e0d0c;color:#f4efe6}
+  .b h2{font-family:"Cormorant Garamond",Palatino,serif;font-style:italic;font-weight:500;font-size:2.3rem}
+  .b p{color:#c2b8ab}
+  .b .go{color:#c6a56a;border-bottom:1px solid #c6a56a}
+  .c{background:#f4efe6;color:#2a241e;border:1px solid rgba(90,70,50,.15);box-shadow:0 12px 30px rgba(60,42,28,.05)}
+  .c h2{font-family:Fraunces,Palatino,serif;font-weight:500}
+  footer{padding:0 6vw 40px;color:var(--muted);font-size:13px;max-width:1100px}
+  @media (min-width:800px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">Preview only · not published</p>
+  <h1>Three directions for Empire Workroom</h1>
+  <p class="note">Same shop, same nineteen consent-yes photographs of finished rooms. The voice leads with beauty — your designs come true — and the layouts are different on purpose. Open each one full page. This index is only the door.</p>
+  <p class="note">Photographs load from <code>assets/portfolio/</code>. If a frame is empty, the JPEGs are not in this checkout yet. Copy them in (see <code>assets/portfolio/README.md</code>) and reload. Nothing here is wired to a lead form.</p>
+</header>
+<main class="grid">
+  <a class="card a" href="a/">
+    <div class="pad">
+      <p class="kicker">Style A</p>
+      <h2>Editorial atelier</h2>
+      <p>Magazine masthead, a full-bleed cover, and finished rooms set as feature stories. Linen paper, ink, a serif that behaves like a headline in print. This is the copy to read first.</p>
+      <span class="go">Open A</span>
+    </div>
+  </a>
+  <a class="card b" href="b/">
+    <div class="pad">
+      <p class="kicker" style="color:#c6a56a">Style B</p>
+      <h2>Quiet luxury showroom</h2>
+      <p>Near-black field, one room at a time, gold used like a jeweler’s mark. A sideways viewing room for the finished rooms. Shared lines match A; the layout does not.</p>
+      <span class="go">Open B</span>
+    </div>
+  </a>
+  <a class="card c" href="c/">
+    <div class="pad">
+      <p class="kicker">Style C</p>
+      <h2>Soft modern craft</h2>
+      <p>Paper texture, a photograph with the headline on a card in front of it, then a masonry of rooms. Warm, tactile, still a lookbook. Shared lines match A; the layout does not.</p>
+      <span class="go">Open C</span>
+    </div>
+  </a>
+</main>
+<footer>
+  Recommendation and risks: <a href="STYLE_REPORT.md">STYLE_REPORT.md</a> (open in the repo, or a markdown viewer).<br/>
+  Contact on every style is mailto <strong>workroom@empirebox.store</strong> — routing not verified. Do not point ads at this preview.
+</footer>
+</body>
+</html>

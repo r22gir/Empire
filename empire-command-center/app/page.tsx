@@ -51,7 +51,6 @@ import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
 import RelistAppPage from './components/screens/RelistAppPage';
 import ArchiveForgePage from './components/screens/ArchiveForgePage';
 import VendorOpsPage from './components/screens/VendorOpsPage';
-import LeadForgePageNew from './components/screens/LeadForgePageNew';
 import DevPanel from './components/screens/DevPanel';
 import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
 import MaxContinuityScreen from './components/screens/MaxContinuityScreen';
@@ -195,6 +194,23 @@ export default function CommandCenter() {
   useEffect(() => {
     const applyDeepLink = () => {
       const params = new URLSearchParams(window.location.search);
+      const productParam = params.get('product');
+      const sectionParam = params.get('section');
+      // Tailscale / on-box Command Center. Do not depend on studio.empirebox.store.
+      if (productParam === 'workroom' || productParam === 'woodcraft') {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct('workroom');
+        setActiveScreen('dashboard');
+        setActiveSection(sectionParam || (productParam === 'woodcraft' ? 'quotes' : null));
+        return;
+      }
+      if (productParam === 'craft') {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct('craft');
+        setActiveScreen('dashboard');
+        setActiveSection(sectionParam);
+        return;
+      }
       const candidate = params.get('screen') || window.location.hash.replace(/^#/, '');
       // First check product deep links (e.g. apostapp -> activeProduct='apost').
       // This lets screens reached via activeProduct (ApostApp) be deep-linked
@@ -263,10 +279,22 @@ export default function CommandCenter() {
     else setActiveScreen('dashboard');
   }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
-  const handleScreenChange = useCallback((screen: ScreenMode | string) => {
+  const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
+
+  const handleScreenChange = useCallback((screen: ScreenMode | string, id?: string) => {
     pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
     setActiveScreen(screen as ScreenMode);
     setActiveSection(null);
+    // HOTFIX 4b: route the optional id from a chat-link click through to
+    // QuoteReviewScreen. Pre-fix this prop only carried a string screen
+    // name, so a click on "EST-2026-110" had no id to pass and
+    // QuoteReviewScreen fell back to "first row of list" (which could
+    // be EST-2026-124 from a draft row).
+    if (screen === 'quote' && id) {
+      setActiveQuoteId(id);
+    } else if (screen !== 'quote') {
+      setActiveQuoteId(null);
+    }
   }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
   const handleModuleClick = useCallback((module: string) => {
@@ -429,7 +457,7 @@ export default function CommandCenter() {
         case 'assist': return <EmpireAssistPage />;
         case 'support': return <SupportForgePage />;
         case 'contractor': return <ContractorForgePage />;
-        case 'lead': return <LeadForgePageNew initialSection={activeSection || undefined} />;
+        case 'lead': return <LeadForgePage initialSection={activeSection || undefined} />;
         case 'market': return <MarketForgePage />;
         case 'pay': return <EmpirePayPage />;
         case 'ship': return <ShipForgePage />;
@@ -500,9 +528,10 @@ export default function CommandCenter() {
           onSend={handleSendMessage}
           onStop={chat.stopStreaming}
           onScreenChange={handleScreenChange}
-          onProductNavigate={(product, screen = 'dashboard') => {
+          onProductNavigate={(product, screen = 'dashboard', section) => {
             setActiveProduct(product as EcosystemProduct);
             setActiveScreen(screen as ScreenMode);
+            if (section !== undefined) setActiveSection(section);
           }}
           setOnMessageComplete={chat.setOnMessageComplete}
           onLoadChat={handleLoadChat}
@@ -510,7 +539,7 @@ export default function CommandCenter() {
         />
       );
     }
-    if (activeScreen === 'quote') return <QuoteReviewScreen />;
+    if (activeScreen === 'quote') return <QuoteReviewScreen quoteId={activeQuoteId ?? undefined} />;
     if (activeScreen === 'jobs') return <JobsScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : undefined} />;
     if (activeScreen === 'invoices') return <InvoiceScreen />;
     if (activeScreen === 'docs') return <DocumentScreen />;

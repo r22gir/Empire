@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime, date, timedelta
 
 from app.db.database import get_db, dict_row, dict_rows
+from app.services.chain_guard import require_customer, MissingCustomerLink
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -296,6 +297,18 @@ def list_jobs(
 @router.post("/")
 def create_job(job: JobCreate):
     """Create a new job."""
+    # D48: this router is not mounted (main.py:179, replaced by jobs_unified),
+    # so this path is unreachable today — hardened anyway because it is one
+    # uncommented line away from being live, and jobs.customer_id is NOT NULL.
+    try:
+        customer_id = require_customer(
+            job.customer_id,
+            writer="create_job",
+            source="request body field 'customer_id'",
+        )
+    except MissingCustomerLink as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     with get_db() as conn:
         conn.execute(
             """INSERT INTO jobs
@@ -305,7 +318,7 @@ def create_job(job: JobCreate):
                VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.title,
-                job.customer_id,
+                customer_id,
                 job.quote_id,
                 job.invoice_id,
                 job.status,
