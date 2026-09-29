@@ -21,7 +21,7 @@ from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
 from app.services.max.guardrails import check_input, sanitize_output, sanitize_output_streaming, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
-from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
+from app.services.max.tool_executor import parse_tool_blocks, parse_tool_blocks_with_errors, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
 from app.services.max.minimax_tools import minimax_tools_status
 from app.services.max.tool_result_normalizer import (
     normalize_tool_result_entry as _normalize_tool_result_entry_canonical,
@@ -39,10 +39,10 @@ from app.services.max.grounding_verifier import verify_web_response, log_to_audi
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.factual_guard import is_factual_question, enforce_web_search
 from app.services.max.guardrails import uncertainty_fallback, should_defer_uncertain
-from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt_with_brain, is_ordinary_text_request
+from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.runtime_truth_check import (
     format_runtime_truth_check,
-    should_run_runtime_truth_check,
+    should_run_runtime_truth_check, should_force_runtime_truth_check,
     should_run_whats_new_summary,
     run_whats_new_summary,
     format_whats_new_summary,
@@ -116,6 +116,71 @@ def _window_conversation(history: list[dict]) -> list[dict]:
 
     context_msg = {"role": "system", "content": summary}
     return [context_msg] + recent
+
+
+def _build_replay_messages(
+    windowed_history: list[dict],
+    conversation_id: str | None,
+    current_message: str,
+    max_replay_turns: int = 3,
+) -> list:
+    """Build the model's messages array for the chat path.
+
+    PHASE 2 · F1 (H48 fix). Replaces the naive
+    ``[AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]``
+    pattern at router.py:2366 / :3132. The original dropped the
+    ``tool_results`` field from previous turns; this helper re-injects
+    the most recent N turns' tool results as a system-prompt-style user
+    message so the model can see what previous turns actually observed.
+
+    Windowing-aware: the dialogue history is already windowed by
+    ``_window_conversation`` (recent verbatim, older summarized). The
+    tool_results replay is independent — bounded by ``max_replay_turns``
+    so the prompt stays within budget.
+
+    Used by both /chat (:2366) and /chat/stream (:3132) so the same
+    UX applies regardless of door.
+    """
+    messages = [AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]
+    if conversation_id:
+        try:
+            from app.services.max.chat_session import (
+                load_recent_turns,
+                format_replay_block,
+            )
+            recent = load_recent_turns(conversation_id, max_turns=max_replay_turns)
+            block = format_replay_block(recent)
+            if block:
+                # H53 FIX (2026-08-19): the replay block carries
+                # `[SYSTEM: Prior-turn tool results — ...]` scaffolding.
+                # It MUST land in role="system" so MAX never sees
+                # system-prompt content in the user channel — that
+                # shape was what triggered MAX's correct prior refusal.
+                messages.append(AIMessage(role="system", content=block))
+        except Exception as exc:
+            logger.debug(f"[chat_session] replay load failed: {exc}")
+    messages.append(AIMessage(role="user", content=current_message))
+    return messages
+
+
+def _record_session_turn(
+    conversation_id: str | None,
+    role: str,
+    content: str,
+    tool_results: list | None,
+) -> None:
+    """Persist one turn to the chat session store.
+
+    Best-effort: a DB failure must not break the chat response. Used
+    by both /chat and /chat/stream for symmetry with the replay helper.
+    """
+    if not conversation_id:
+        return
+    try:
+        from app.services.max.chat_session import record_turn
+        record_turn(conversation_id, role, content, tool_results)
+    except Exception as exc:
+        logger.debug(f"[chat_session] record failed: {exc}")
 
 
 async def _safe_background(coro, label: str):
@@ -259,18 +324,155 @@ def _save_runtime_truth_exchange(request, response_text: str, result: ToolResult
 
 
 def _execute_drawing_handoff(handoff):
-    logger.info(
-        "[MAX] Drawing intent routed to sketch_to_drawing: item_type=%s views=%s dims=%s source_image=%s",
-        handoff.item_type,
-        ",".join(handoff.views),
-        sorted(handoff.dimensions.keys()),
-        bool(handoff.source_image),
+    """QUARANTINED HOTFIX 4.0b2 — DELETED IN NEXT COMMIT.
+
+    Pre-fix, this was the only place that called sketch_to_drawing
+    via execute_tool (the dead-end path that emitted the gate's
+    refusal message and never reached the B1 engine). The chat/stream
+    path kept calling it after /chat was rewritten in 4.0b — that's
+    the bug 8:42 AM Jul 24 surfaced. The shared
+    _resolve_drawing_render(handoff) helper now does this work for
+    BOTH endpoints; this function is kept only as a quarantine marker
+    so that if anything imports it, we'll see the import at boot.
+
+    DELETE-on-next-pass: remove once grep confirms no callers.
+    """
+    raise NotImplementedError(
+        "_execute_drawing_handoff quarantined — use _drawing_render "
+        "(HOTFIX 4.0b2 deduplication). If you reach this raise, an import "
+        "somewhere still references the dead-end path; find it and reroute "
+        "to _drawing_render."
     )
-    result = execute_tool({"tool": "sketch_to_drawing", **(handoff.tool_payload or {})})
-    return _quality_gate_drawing_result(handoff, result)
 
 
-def _quality_gate_drawing_result(handoff, result):
+def _drawing_render(handoff) -> dict:
+    """HOTFIX 4.0b2 — shared drawing-router body used by BOTH
+    /chat and /chat/stream.
+
+    Returns a dict the caller formats into either a ChatResponse
+    (non-stream) or a sequence of SSE events (stream):
+
+      {
+        "ready": bool,
+        "response_text": str,
+        "tool_result_dict": dict,         # to pass to ChatResponse.tool_results
+                                         #   or yield as {"type": "tool_result", ...}
+        "missing_template_keys": list[str],
+        "metadata_skill_used": str,        # "render_shop_drawing" on success,
+                                         #   "sketch_to_drawing" on missing-list path
+        "model_used": str,                 # always "drawing-router"
+        "status_event": str | None,        # optional SSE status-line text on success
+      }
+
+    Behavior:
+      - ready=True  → execute_tool("render_shop_drawing", ...) and
+        return its result. The response_text reads "Drawn {type} (B1, ...).
+      - ready=False → return the missing-field response, preferring
+        template-truth missing keys when b1_product_type is known.
+
+    Pre-fix, the body of this logic was duplicated in two handlers
+    (/chat and /chat/stream). The Jul 24 8:42 AM live repro surfaced
+    the exact defect class: the stream handler still called the
+    legacy _execute_drawing_handoff → sketch_to_drawing → dead-end.
+    One function. Both handlers. Test DoctrineGuard pins this so the
+    duplication doesn't re-grow.
+    """
+    import json as _json
+
+    logger.info(
+        "[MAX] Drawing intent intercepted: ready=%s b1_product_type=%r missing_template=%s mode=%s message=%r",
+        handoff.ready,
+        handoff.b1_product_type,
+        handoff.missing_template_keys,
+        handoff.intent_mode,
+        (handoff.subject or "")[:120],
+    )
+
+    # ── Incomplete: surface the template-truth missing list ──
+    if not handoff.ready:
+        if handoff.missing_template_keys and handoff.b1_product_type:
+            return {
+                "ready": False,
+                "response_text": (
+                    f"I have the {handoff.b1_product_type!r} "
+                    f"product_type but I'm still missing: "
+                    f"{', '.join(handoff.missing_template_keys)}. "
+                    f"Please supply those so I can render the B1 sheet."
+                ),
+                "tool_result_dict": {},
+                "missing_template_keys": list(handoff.missing_template_keys),
+                "metadata_skill_used": "render_shop_drawing",
+                "model_used": "drawing-router",
+                "status_event": None,
+            }
+        return {
+            "ready": False,
+            "response_text": _drawing_missing_response(handoff),
+            "tool_result_dict": {},
+            "missing_template_keys": list(handoff.missing_template_keys),
+            "metadata_skill_used": "sketch_to_drawing",
+            "model_used": "drawing-router",
+            "status_event": None,
+        }
+
+    # ── Complete: invoke render_shop_drawing (the B1 entry point) ──
+    from app.services.max.tool_executor import execute_tool
+    translated_dims = {
+        k: float(str(v).rstrip('"').rstrip("ft"))
+        for k, v in handoff.translated_dims.items()
+        if v is not None
+    }
+    # Pass U/L shape through so render_shop_drawing routes to
+    # bench_renderer true polylines instead of B1 rectangle stub.
+    try:
+        from app.services.max.drawing_intent import _shape_for_text
+        _shape = _shape_for_text(getattr(handoff, "subject", "") or "")
+        if not _shape or _shape == "straight":
+            # Fall back to full message if subject lacked shape tokens.
+            _shape = _shape_for_text(str(getattr(handoff, "raw_message", "") or ""))
+        if _shape and _shape != "straight":
+            translated_dims["shape"] = _shape
+    except Exception:
+        pass
+    result = execute_tool({
+        "tool":         "render_shop_drawing",
+        "product_type": handoff.b1_product_type,
+        "dims":         translated_dims,
+        "shape":        translated_dims.get("shape", ""),
+        # HOTFIX B2 (2) — client_name MUST be empty when the founder
+        # didn't name a real client. handoff.subject is the parsed
+        # ITEM TYPE ("shade", "headboard", etc.), not a real client
+        # name. Passing it through would print "CLIENT: shade" in
+        # the title block, which is wrong. The B2 title block OMITS
+        # the CLIENT row entirely when this is empty.
+        "client_name":  "",
+        "site_address": "",
+        "material":     "",
+        "date":         "",
+    })
+    if result.success:
+        pdf_path = result.result.get("pdf_path", "?")
+        body = (
+            f"Drawn {handoff.b1_product_type} (B1, "
+            f"{', '.join(f'{k}={v!r}' for k, v in handoff.translated_dims.items())}) "
+            f"→ {pdf_path}"
+        )
+        # SSE-streaming status line (kept short — non-stream callers
+        # ignore this and use response_text directly).
+        status = f"B1 template {handoff.b1_product_type} rendered ({len(translated_dims)} dims)."
+    else:
+        body = f"Drawing workflow failed: {result.error}"
+        status = None
+
+    return {
+        "ready": True,
+        "response_text": body,
+        "tool_result_dict": _drawing_tool_result_dict(result),
+        "missing_template_keys": [],
+        "metadata_skill_used": "render_shop_drawing",
+        "model_used": "drawing-router",
+        "status_event": status,
+    }
     if not result.success:
         return result
 
@@ -470,6 +672,41 @@ def _is_decision_only_request(message: str | None) -> bool:
 
 def _is_action_tool(tool_call: dict[str, Any]) -> bool:
     return str(tool_call.get("tool") or "").strip() in ACTION_TOOLS
+
+
+# H52 Phase 2 follow-up — fifth interception layer.
+#
+# DOCTRINE: A router MUST NEVER silently rewrite a tool call the model made.
+# If a redirect is necessary, the model must be told it happened and what it
+# became. Silent rewriting means the model is debugging a system it cannot
+# see — which is what the previous five interception layers had in common
+# (H57 drawing router, H52 is_ordinary_text_request selector, H53 [SYSTEM]
+# replay block, H62 PIN substring gate, this layer). All removed or narrowed.
+#
+# The chat router previously auto-routed file_read/file_write/file_edit/
+# file_append/git_ops on the chat lane to run_desk_task (CodeForge). The
+# rationale comment was "Atlas (Opus) handles path expansion, validation,
+# and smart truncation" — these are real benefits for CODE-EDIT tasks.
+# Path validation now lives in the canonical resolver (H57 Phase 3); the
+# other benefits are real but apply only to writes.
+#
+# SCOPE: only writes go through the desk. Reads reach the model directly.
+# file_read and git_ops are REMOVED from the rewrite set. file_write,
+# file_edit, file_append are KEPT (legitimate write case).
+_CODEFORGE_WRITE_TOOLS = {"file_write", "file_edit", "file_append"}
+
+
+def _should_reroute_to_codeforge(tool_name: str, has_explicit_desk: bool) -> bool:
+    """Decide whether a tool call the model emitted should be rewritten as
+    a CodeForge desk task. Reads never. Writes only when the chat lane is
+    in use (no explicit desk already in play).
+
+    Returns True only if the tool is in _CODEFORGE_WRITE_TOOLS AND the
+    caller did not already specify a desk.
+    """
+    if has_explicit_desk:
+        return False  # user already routed to a desk; do not second-guess
+    return tool_name in _CODEFORGE_WRITE_TOOLS
 
 
 def _decision_only_response(request: ChatRequest) -> ChatResponse:
@@ -1128,7 +1365,7 @@ def _is_current_events_request(message: str | None) -> bool:
     if not text.strip():
         return False
     # Keep service/runtime and explicit module questions on their own routes.
-    if should_run_runtime_truth_check(text):
+    if should_force_runtime_truth_check(text):
         return False
     if resolve_empire_module_question(text):
         return False
@@ -1386,7 +1623,18 @@ def _apply_gpu_safety_output_guardrail(message: str | None, response_text: str) 
 
 
 def _apply_truth_guardrails(message: str | None, response_text: str, tool_results: list[Any] | None) -> str:
-    enforced = enforce_runtime_truth_response(message, response_text, tool_results)
+    # HOTFIX 2026-07-15 (HOTFIX 3): enforce_runtime_truth_response now
+    # returns tuple[str, list[str]] (failures, warnings) per 0aa5e67.
+    # Unpack here so this wrapper's -> str contract holds; downstream
+    # callers (sanitize_output, strip_tool_blocks, regex guards, len())
+    # all assume str and would TypeError on a tuple. Surface warnings
+    # via logger (not yet propagated to response metadata — that's a
+    # follow-up). Symptom seen in production: chat response ended with
+    # "expected string or bytes-like object, got 'tuple'" originating
+    # from regex/string fns that received a tuple-typed final_content.
+    enforced, warnings = enforce_runtime_truth_response(message, response_text, tool_results)
+    for w in warnings:
+        logger.warning(f"theater-detector: {w}")
     if enforced != response_text:
         return enforced
 
@@ -1738,7 +1986,7 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
         # truth check (async handler at line ~2030), not to module knowledge
         # which returns a static doc definition.  Check BEFORE
         # _empire_module_response so runtime truth beats module aliases.
-        if should_run_runtime_truth_check(request.message):
+        if should_force_runtime_truth_check(request.message):
             return None
 
         # Skip module knowledge for analysis/priority/opinion questions.
@@ -1926,14 +2174,108 @@ def _explicit_no_drawing_router(message: str | None) -> bool:
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks, http_response: Response):
+    """POST /api/v1/max/chat — non-streaming chat with MAX.
+
+    D45 commit 3 (Option A): the handler DECLARES its own canonical
+    channel here (web_cc). The body field `channel` is no longer the
+    source of privilege — it stays on the request only for
+    envelope/routing labels (logs, prompt-channel directive at line
+    2575 of the service body). Privilege is decided from the
+    canonical declaration.
+
+    chat_id is still read from the body when present, because the
+    Telegram-match branch of the predicate requires it for the
+    chat_id-supplied path; the canonical declaration here is the
+    WEB (CC) channel, not telegram, so the chat_id body field is
+    unused for the canonical-web path. Future Telegram-front-of-CC
+    work would need a separate handler — out of scope for this
+    dispatch.
+    """
     import time as _time_mod
     _chat_start = _time_mod.time()
-    _response_id = str(uuid.uuid4())[:12]  # unique per request for feedback linkage
+    _response_id = str(uuid.uuid4())[:12]
 
-    msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
+    # Option A: handler declares canonical_channel = "web_cc". Body
+    # `channel` ignored for privilege.
+    canonical_channel = "web_cc"
+    canonical_chat_id: Optional[str] = request.chat_id  # body-supplied, may be None
+    msg_ctx = {"channel": canonical_channel, "chat_id": canonical_chat_id or ""}
     founder = is_founder_message(msg_ctx)
     if founder:
         logger.info(f"Founder message detected via chat_id={request.chat_id}")
+
+    resp = await _chat_with_max_service(
+        request,
+        canonical_channel=canonical_channel,
+        canonical_chat_id=canonical_chat_id,
+        canonical_founder=founder,
+        background_tasks=background_tasks,
+        _chat_start=_chat_start,
+        _response_id=_response_id,
+    )
+    http_response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    http_response.headers["Pragma"] = "no-cache"
+    return resp
+
+
+async def _chat_with_max_service(
+    request: ChatRequest,
+    *,
+    canonical_channel: str,
+    canonical_chat_id: Optional[str],
+    canonical_founder: bool,
+    background_tasks: Optional[BackgroundTasks] = None,
+    _chat_start: Optional[float] = None,
+    _response_id: str = "",
+) -> ChatResponse:
+    """D45 commit 2 — shared chat core for /chat (HTTP) and the Telegram
+    in-process path.
+
+    The body that used to live inline in chat_with_max is here. The
+    caller declares canonical_channel / canonical_chat_id /
+    canonical_founder; this function overrides request.channel and
+    request.chat_id accordingly so the rest of the body reads them
+    uniformly via request.channel. Background-task scheduling is
+    optional — when background_tasks is None (Telegram in-process
+    path), the post-response bookkeeping is skipped because the bot
+    has its own history persistence.
+    """
+    # Apply canonical values to the request object so the rest of
+    # this body — which reads request.channel / request.chat_id
+    # extensively — sees the declared channel, not the body field.
+    import time as _time_mod
+
+    # Option E (D45 commit 3): spoof-detection warning. The body
+    # channel is dead weight under Option A; ANY caller claiming
+    # 'telegram' in the body is either confused or attempting to
+    # route through the legacy Telegram-match path. Log it for
+    # visibility. (Additive: no behaviour change beyond logging.)
+    if request.channel == "telegram":
+        try:
+            from app.services.max.founder_auth import FOUNDER_TELEGRAM_CHAT_ID
+            expected_chat_id = FOUNDER_TELEGRAM_CHAT_ID
+        except Exception:
+            expected_chat_id = ""
+        logger.warning(
+            f"[H74 E] Body channel='telegram' on /max/chat (chat_id="
+            f"{request.chat_id!r}, expected={expected_chat_id!r}). "
+            f"Under Option A the body field is dead weight — the "
+            f"handler declared canonical_channel={canonical_channel!r} "
+            f"regardless. This caller is treated as a portal caller. "
+            f"If you are routing Telegram through HTTP, the in-process "
+            f"path in telegram_bot._chat_with_max is the correct shape."
+        )
+
+    request.channel = canonical_channel or request.channel
+    if canonical_chat_id is not None:
+        request.chat_id = canonical_chat_id
+    founder = canonical_founder
+    msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
+
+    def _add_task(coro, *args, **kwargs):
+        if background_tasks is not None:
+            background_tasks.add_task(coro, *args, **kwargs)
+
 
     is_safe, reason = check_input(request.message, message_context=msg_ctx)
     if not is_safe:
@@ -2096,7 +2438,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             metadata=metadata,
         )
 
-    if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
+    if not request.desk and not request.image_filename and should_force_runtime_truth_check(request.message):
         result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
         response_text = (
             format_runtime_truth_check(result.result or {}, request.message)
@@ -2145,41 +2487,160 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             metadata=_response_metadata(request.channel, skill_used="image_availability_check"),
         )
 
-    drawing_handoff = (
-        build_drawing_handoff(request.message, image_filename=request.image_filename)
-        if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
-        else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
-    )
-    if drawing_handoff.is_drawing_intent:
-        # D3: log the 6-way intent_mode (per REPORT-d1-drawing-workflow-research.md
-        # and the D1 Addendum). Default is "unknown" for backward compatibility.
-        logger.info(
-            "[MAX] Drawing intent intercepted before chat model: ready=%s missing=%s intent_mode=%s message=%r",
-            drawing_handoff.ready,
-            drawing_handoff.missing,
-            drawing_handoff.intent_mode,
-            request.message[:160],
-        )
-        if not drawing_handoff.ready:
-            return ChatResponse(
-                response=_drawing_missing_response(drawing_handoff),
-                model_used="drawing-router",
-                fallback_used=False,
-                tool_results=None,
-                metadata=_response_metadata(request.channel, skill_used="sketch_to_drawing"),
+    # Sprint 1d Phase A Fix #3 — clear any stale handoff state at the start
+    # of every chat turn (belt-and-suspenders for any future state-creep).
+    try:
+        from app.services.max.drawing_intent import clear_handoff_state
+        clear_handoff_state()
+    except Exception:
+        pass
+
+    # Sprint 1d Phase A Fix #2 — check for a pending drawing job (resume).
+    # Cancel keywords: drop pending, skip drawing route entirely.
+    # Otherwise: if a continuation reply matches, merge dims and use the
+    # merged snapshot; if it doesn't match, route normally and KEEP pending.
+    merged_handoff = None
+    if request.conversation_id and request.channel:
+        try:
+            from app.services.max.drawing_pending import (
+                is_cancel_message, clear_pending, get_pending,
+                is_continuation_reply, merge_founder_reply, set_pending,
             )
-        drawing_result = _execute_drawing_handoff(drawing_handoff)
-        response_text = (
-            "Drawing generated through Drawing Studio."
-            if drawing_result.success
-            else f"Drawing workflow failed: {drawing_result.error}"
+            msg_text = request.message or ""
+            # H57 FIX: explicit cancel keywords clear pending and
+            # RELEASE the turn back to MAX (no solicitation loop).
+            if is_cancel_message(msg_text):
+                clear_pending(request.conversation_id, request.channel)
+            # H57 FIX: if a pending exists but this turn is NOT a
+            # continuation reply, RELEASE the pending — do not keep
+            # it alive across turns. The user must never be trapped
+            # in a solicitation loop with no exit.
+            pending = get_pending(request.conversation_id, request.channel)
+            if pending and is_drawing_intent(msg_text):
+                if is_continuation_reply(msg_text, pending.get("missing", [])):
+                    merged_handoff = merge_founder_reply(pending, msg_text)
+                else:
+                    # Non-continuation with drawing intent — release
+                    # the pending; this turn gets a fresh handoff.
+                    clear_pending(request.conversation_id, request.channel)
+            # If pending exists but this turn is NOT drawing intent
+            # (e.g. founder said something unrelated), the pending is
+            # abandoned — release it so it can't fire next turn.
+            elif pending and not is_drawing_intent(msg_text):
+                clear_pending(request.conversation_id, request.channel)
+        except Exception as exc:
+            logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
+
+    drawing_handoff = (
+        merged_handoff
+        if merged_handoff is not None
+        else (
+            build_drawing_handoff(request.message, image_filename=request.image_filename)
+            if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
+            else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
         )
+    )
+
+    # PHASE 2 · R12 corrected Option A — continuation guard. The
+    # pending-table path above is dead architecture (set_pending
+    # requires both missing AND tool_payload — mutually exclusive),
+    # so a pure-dim continuation reply like "38 wide 64 long" after
+    # a "draw me a flat roman shade" turn falls through to the LLM
+    # and triggers the 13-21s sketch_to_drawing retry loop. Scan
+    # the last few assistant turns in chat history; if the most
+    # recent drawing-router turn was a missing-keys response and
+    # the current message looks like a continuation reply, build
+    # a transient DrawingHandoff from the message and route to
+    # _drawing_render without invoking the LLM.
+    if (drawing_handoff.is_drawing_intent is False
+            and not request.desk and not request.image_filename):
+        try:
+            from app.services.max.drawing_pending import looks_like_continuation
+            continuation_ctx = looks_like_continuation(
+                request.message, request.history or []
+            )
+        except Exception:
+            continuation_ctx = None
+        if continuation_ctx:
+            from types import SimpleNamespace as _SN
+            from app.services.max.drawing_intent import (
+                _extract_dimensions, _translate_dims_for_b1_product,
+                _compute_missing_template_keys,
+            )
+            b1 = continuation_ctx["b1_product_type"]
+            dims = _extract_dimensions(request.message, item_type=b1)
+            translated = _translate_dims_for_b1_product(dims, b1)
+            still_missing = _compute_missing_template_keys(translated, b1)
+            handoff = _SN(
+                is_drawing_intent=True,
+                ready=not still_missing,
+                b1_product_type=b1,
+                translated_dims=translated,
+                missing_template_keys=list(still_missing or []),
+                missing=[],
+                dimensions=dims,
+                intent_mode="shop_drawing",
+                subject="",
+                item_type=b1,
+                views=[],
+                output_format="inline_svg_pdf",
+                source_image=None,
+                tool_payload=None,
+                response="",
+            )
+            render = _drawing_render(handoff)
+            return ChatResponse(
+                response=render["response_text"],
+                model_used=render["model_used"],
+                fallback_used=False,
+                tool_results=(
+                    [render["tool_result_dict"]]
+                    if render["tool_result_dict"] else None
+                ),
+                metadata=_response_metadata(
+                    request.channel,
+                    skill_used=render["metadata_skill_used"],
+                ),
+            )
+
+    if drawing_handoff.is_drawing_intent:
+        # HOTFIX 4.0b2 — both /chat and /chat/stream funnel through
+        # the same _drawing_render(handoff) helper. Pre-fix, the
+        # body of this block was duplicated in the stream handler
+        # (line ~3030) and only /chat was patched in 4.0b; the
+        # stream handler kept calling _execute_drawing_handoff and
+        # the LLM never saw a tool_result on the UI path. Both
+        # endpoints now share this helper, so the deduplication IS
+        # the fix.
+        render = _drawing_render(drawing_handoff)
+
+        # Resume snapshot: only when the legacy `missing` list is
+        # non-empty AND a tool_payload was built (Phase A Fix #2).
+        # Post-fix, the gate fires on template-validity, so this
+        # only fires on the legacy missing-keys path.
+        if not render["ready"]:
+            try:
+                from app.services.max.drawing_pending import set_pending
+                if (drawing_handoff.missing
+                        and drawing_handoff.tool_payload):
+                    snap = dict(drawing_handoff.tool_payload)
+                    snap["missing"] = list(drawing_handoff.missing)
+                    set_pending(request.conversation_id, request.channel, snap)
+            except Exception:
+                pass
+
         return ChatResponse(
-            response=response_text,
-            model_used="drawing-router",
+            response=render["response_text"],
+            model_used=render["model_used"],
             fallback_used=False,
-            tool_results=[_drawing_tool_result_dict(drawing_result)],
-            metadata=_response_metadata(request.channel, skill_used="sketch_to_drawing"),
+            tool_results=(
+                [render["tool_result_dict"]]
+                if render["tool_result_dict"] else None
+            ),
+            metadata=_response_metadata(
+                request.channel,
+                skill_used=render["metadata_skill_used"],
+            ),
         )
 
     try:
@@ -2188,8 +2649,12 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         if len(windowed_history) < len(request.history):
             logger.info(f"Conversation windowed: {len(request.history)} -> {len(windowed_history)} messages")
 
-        messages = [AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]
-        messages.append(AIMessage(role="user", content=request.message))
+        # PHASE 2 · F1 — windowing-aware replay with prior tool_results
+        messages = _build_replay_messages(
+            windowed_history,
+            request.conversation_id,
+            request.message,
+        )
         model = None
         if request.model:
             try:
@@ -2197,25 +2662,21 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             except ValueError:
                 pass
 
-        # Build brain-enriched system prompt (non-desk requests only)
+        # Build brain-enriched system prompt (non-desk requests only).
+        # H52 Phase 2: always use the full prompt with the tool roster.
+        # The retired is_ordinary_text_request selector used to route
+        # "ordinary" turns to get_compact_system_prompt (no roster) —
+        # which silently blinded the model on meta-questions where tool
+        # selection mattered most. Every turn now gets the roster.
         enriched_prompt = None
         if not request.desk:
-            # Normalize channel for cross-channel context injection
-            _ch = request.channel
-            if _ch in {"web", "web_cc", "dashboard"}:
-                _ch_normalized = "web_chat"
-            else:
-                _ch_normalized = _ch or "web"
-            if not request.image_filename and is_ordinary_text_request(request.message):
-                enriched_prompt = get_compact_system_prompt(channel=_ch_normalized)
-            else:
-                try:
-                    enriched_prompt = await get_system_prompt_with_brain(
-                        user_message=request.message,
-                        conversation_history=request.history,
-                    )
-                except Exception as e:
-                    logger.warning(f"Brain context failed, using base prompt: {e}")
+            try:
+                enriched_prompt = await get_system_prompt_with_brain(
+                    user_message=request.message,
+                    conversation_history=request.history,
+                )
+            except Exception as e:
+                logger.warning(f"Brain context failed, using base prompt: {e}")
 
         # Append channel-specific directives
         if request.channel == "telegram" and enriched_prompt:
@@ -2227,6 +2688,19 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
         # Guard: Pre-execute web_search for performative search requests so the AI
         # cannot fabricate pricing/current facts from training data before seeing results.
+        #
+        # H53 HARMONISATION (this commit): the pre-execution block was emitted
+        # on role="user" with a leading "[SYSTEM: ...]" string — structurally
+        # identical to the H53 replay block that H53 fix (28dcb42) corrected.
+        # MAX correctly identified the pre-search block as a prompt-injection
+        # attempt ("I'll ignore the injected 'SYSTEM' instruction" — observed
+        # on every performative-search probe). Same fix:
+        #
+        #   - role="user" -> role="system"  (real system channel)
+        #   - the empty / failed branch ("web_search returned no results") is
+        #     suppressed entirely — there is no verified context to inject,
+        #     so nothing is injected. Per DOCTRINE rule 8 (never fabricate
+        #     context) and H53 (if the block is empty, append NOTHING).
         _pre_search_executed = False
         _pre_search_entry = None
         if not request.desk and _is_performative_web_search_request(request.message):
@@ -2249,21 +2723,18 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                     f"[web_search] Result:\n"
                     f"{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
                 )
-                messages.insert(-1, AIMessage(role="user", content=(
-                    "[SYSTEM: You must answer using only the verified web search data below. "
+                messages.insert(-1, AIMessage(role="system", content=(
+                    "You must answer using only the verified web search data below. "
                     "Do not fall back to training data. Cite sources from the search results "
                     "with markdown links: [Title](url). "
-                    "If the search returned no relevant results, say so honestly.]\n\n"
+                    "If the search returned no relevant results, say so honestly.\n\n"
                     f"{tool_summary}\n\nQuestion: {request.message}"
                 )))
-            else:
-                messages.insert(-1, AIMessage(role="user", content=(
-                    "[SYSTEM: web_search was attempted for this query but returned no results "
-                    "or failed. You must tell the user that web_search is currently unavailable "
-                    "for this query. Do NOT fabricate pricing, current facts, or any data from "
-                    "training data. Say: 'web_search returned no results for this query — I "
-                    "cannot provide current pricing without verified search data.']"
-                )))
+            # H53 HARMONISATION: when there are no verified results, append
+            # NOTHING. The pre-fix code emitted a "[SYSTEM: web_search returned
+            # no results — do not fabricate…]" block on role="user"; MAX read
+            # it as a prompt-injection attempt. The doctrine answer is silence,
+            # not a fabricated apology.
 
         response = await asyncio.wait_for(
             ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
@@ -2304,8 +2775,85 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         current_response = response
 
         for _tool_round in range(3):
-            # Check for ```tool ... ``` blocks first (existing text-based format)
-            tool_calls = parse_tool_blocks(current_response.content)
+            # H67 FIX (2026-08-20): initialize round_results at the top of
+            # the loop body so the tool_block_errors branch below can
+            # safely read+extend it. Pre-fix this initialisation lived 17
+            # lines later; on the first iteration with malformed tool
+            # blocks the read at "round_results = error_entries + round_results"
+            # raised UnboundLocalError. Introduced 2026-07-16 in f97d808,
+            # latent 39 days, fired once on 2026-08-20 at 19:11 EDT.
+            round_results = []
+            # Check for ```tool ... ``` blocks first (existing text-based format).
+            # HOTFIX 2026-07-16 (parser fix): when multiple NDJSON objects
+            # appear in a single block, parse_tool_blocks_with_errors
+            # yields (actions, per-object errors). We surface each error
+            # as a synthetic tool-result entry so MAX can self-correct;
+            # the parse-actions still execute per BLOCK_PARSE_POLICY.
+            tool_calls, tool_block_errors = parse_tool_blocks_with_errors(
+                current_response.content
+            )
+            if tool_block_errors:
+                for err in tool_block_errors:
+                    logger.warning(
+                        "[chat] tool block parse error: object %d at line "
+                        "%s col %s — %s",
+                        err["index"], err.get("line"), err.get("column"), err["error"],
+                    )
+                error_entries = [
+                    {
+                        # Synthetic tool name; MAX will see this in the
+                        # tool_results round and self-correct on its next
+                        # reply. It is intentionally NOT in
+                        # VERIFICATION_REQUIRED_TOOLS so the runtime
+                        # truth gate does not require proof for this
+                        # error feedback — the error IS the proof.
+                        "tool": "_tool_block_parse_error",
+                        "success": False,
+                        "error": (
+                            f"tool block object {e['index']} malformed: "
+                            f"{e['error']}. Re-emit this object as a valid "
+                            f"JSON line in your next reply. Other objects "
+                            f"in the same block DID execute."
+                            for e in tool_block_errors
+                        )
+                        if len(tool_block_errors) == 1
+                        else (
+                            f"{len(tool_block_errors)} tool block objects "
+                            f"malformed: " + "; ".join(
+                                f"#{e['index']}:{e['error']}"
+                                for e in tool_block_errors
+                            ) + ". Re-emit each as a valid JSON line. "
+                              "Other objects in the same block DID execute."
+                        ),
+                        "result": {
+                            "parse_errors": tool_block_errors,
+                            "policy": "BLOCK_PARSE_POLICY: execute good, surface bad",
+                        },
+                    }
+                ]
+                # Make error_entries a flat list (one entry per error so
+                # MAX gets a one-per-error summary).
+                error_entries = [{
+                    "tool": "_tool_block_parse_error",
+                    "success": False,
+                    "error": (
+                        f"tool block object {e['index']} malformed: "
+                        f"{e['error']}. Re-emit this object as a valid "
+                        f"JSON line in your next reply. Other objects "
+                        f"in the same block DID execute."
+                    ),
+                    "result": {
+                        "index": e["index"],
+                        "line": e.get("line"),
+                        "column": e.get("column"),
+                        "snippet": e["snippet"],
+                        "policy": "BLOCK_PARSE_POLICY: execute good, surface bad",
+                    },
+                } for e in tool_block_errors]
+                # Prepend error entries so MAX sees them in this round's
+                # tool_results context BEFORE the follow-up instruction.
+                round_results = error_entries + round_results
+                tool_results_list = error_entries + tool_results_list
             # Also check xAI /v1/responses function_calls format
             if not tool_calls and hasattr(current_response, 'function_calls') and current_response.function_calls:
                 tool_calls = current_response.function_calls
@@ -2315,18 +2863,19 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             if _is_decision_only_request(request.message) and any(_is_action_tool(tc) for tc in tool_calls):
                 return _decision_only_response(request)
 
-            # File/git tool calls from main chat get re-routed to CodeForge desk
+            # File-WRITE tool calls from main chat get re-routed to CodeForge desk
             # because Atlas (Opus) handles path expansion, validation, and smart truncation
-            _CODEFORGE_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops"}
+            # for code-edit tasks. Reads (file_read, git_ops) are NEVER rewritten —
+            # see _should_reroute_to_codeforge and the H52-Phase-2-follow-up doctrine
+            # comment on _CODEFORGE_WRITE_TOOLS above.
 
-            round_results = []
             for tc in tool_calls:
                 # Inject image_filename into quote tools so uploaded photos flow through
                 if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                     tc["image_filename"] = request.image_filename
 
-                # Auto-reroute file/git tools to CodeForge desk
-                if tc.get("tool") in _CODEFORGE_TOOLS and not request.desk:
+                # Auto-reroute write tools to CodeForge desk (reads NEVER)
+                if _should_reroute_to_codeforge(str(tc.get("tool") or ""), bool(request.desk)):
                     tool_name = tc["tool"]
                     path = tc.get("path", "")
                     desc_parts = [f"Tool: {tool_name}"]
@@ -2363,8 +2912,17 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                 round_results.append(entry)
                 tool_results_list.append(entry)
 
-            if should_halt_after_tool_failure(round_results, user_message=request.message):
-                final_content = runtime_truth_failure_message(runtime_truth_failures(round_results, user_message=request.message))
+            # D52 H80: round-aware halt. Round 0 is free — the model sees the
+            # tool error and may self-correct (e.g., a typo'd column name).
+            # Rounds 1 and 2 halt on any verification failure, so a db_query
+            # that failed on round 0 and again on round 1 still gates the
+            # turn. The post-gen backstop at _apply_truth_guardrails
+            # (router.py:2969) sees the FULL tool_results_list across all
+            # rounds and replaces the final response if any db_query
+            # failure made it through, so round 0 is genuinely free.
+            if _tool_round >= 1 and should_halt_after_tool_failure(round_results, user_message=request.message):
+                _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
+                final_content = runtime_truth_failure_message(_failures)
                 break
 
             # Build tool summary and ask AI for follow-up
@@ -2378,21 +2936,27 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                     tool_summary_parts.append(f"[{r['tool']}] Error: {r.get('error', 'Unknown')}")
             tool_summary = "\n\n".join(tool_summary_parts)
             if any(r.get("tool") in ACTION_TOOLS and r.get("success") for r in round_results):
+                # H53 HARMONISATION: dropped the leading "[SYSTEM: " prefix
+                # and rephrased as a plain instruction — the role="user"
+                # below moves the whole scaffolding onto the system channel.
                 tool_summary += (
-                    "\n\n[SYSTEM: Task identity rule — if you mention a task/delegation id, "
+                    "\n\nTask identity rule — if you mention a task/delegation id, "
                     "use only task_id/openclaw_task_id from the current tool result above. "
-                    "Never use IDs from session handoff, active task state, or prior history.]"
+                    "Never use IDs from session handoff, active task state, or prior history."
                 )
 
             is_last_round = _tool_round >= 2
             followup_instruction = (
-                "[SYSTEM: Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks.]"
+                "Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks."
                 if is_last_round else
-                "[SYSTEM: Tool results below. You may call additional tools if needed to complete the task, or give a final answer.]"
+                "Tool results below. You may call additional tools if needed to complete the task, or give a final answer."
             )
 
             loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_response.content)))
-            loop_messages.append(AIMessage(role="user", content=f"{followup_instruction}\n\n{tool_summary}"))
+            # H53 HARMONISATION: this combined message was role="user" with a
+            # "[SYSTEM: ...]" prefix. Same shape as the pre-search guard fixed in
+            # e9c18cc. Tool-result scaffolding goes on the system channel.
+            loop_messages.append(AIMessage(role="system", content=f"{followup_instruction}\n\n{tool_summary}"))
 
             current_response = await ai_router.chat(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools)
             # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
@@ -2426,7 +2990,11 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
 
         # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
-        tools_used_names = [r.get("tool") if isinstance(r, dict) else r.tool for r in tool_results_list]
+        # D52 H80: receipt suppression. tools_used_names feeds the
+        # web-search guard AND the user-facing tools_used metadata.
+        # Failed calls are not tools that "were used" — count only successes.
+        _succeeded_results = [r for r in tool_results_list if r.get("success")]
+        tools_used_names = [r.get("tool") if isinstance(r, dict) else r.tool for r in _succeeded_results]
         if is_factual_question(request.message) and "web_search" not in tools_used_names:
             from app.services.max.search_context import build_search_query
             _fg_built = build_search_query(request.message, history=request.history)
@@ -2444,19 +3012,28 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             search_entry = _normalize_tool_result_entry(search_result)
             tool_results_list.append(search_entry)
 
-            # Build grounding context and re-query AI with verified data
-            tool_summary = f"[web_search] Result:\n{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
-            grounded_messages = list(messages)
-            grounded_messages.append(AIMessage(role="user", content=(
-                "[SYSTEM: You must answer using only the verified web search data below. "
-                "Do not fall back to training data. Cite sources from the search results.]\n\n"
-                f"{tool_summary}\n\nQuestion: {request.message}"
-            )))
-            grounded_response = await ai_router.chat(
-                grounded_messages, model=model, desk=request.desk,
-                system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools
-            )
-            final_content = grounded_response.content
+            # H53 HARMONISATION (H66): only build the grounded re-query if
+            # web_search actually returned verified data. The pre-fix code
+            # emitted a "[SYSTEM: use the verified data" block even when the
+            # search returned empty / failed — that is the H53 fabrication
+            # bug. Suppress the entire block when there is nothing verified
+            # to inject. The original (potentially hallucinated) response
+            # stands; the guard's purpose was to catch the hallucination, but
+            # we cannot fix it with data we do not have.
+            if search_result.success and search_result.result:
+                # Build grounding context and re-query AI with verified data
+                tool_summary = f"[web_search] Result:\n{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
+                grounded_messages = list(messages)
+                grounded_messages.append(AIMessage(role="system", content=(
+                    "You must answer using only the verified web search data below. "
+                    "Do not fall back to training data. Cite sources from the search results.\n\n"
+                    f"{tool_summary}\n\nQuestion: {request.message}"
+                )))
+                grounded_response = await ai_router.chat(
+                    grounded_messages, model=model, desk=request.desk,
+                    system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools
+                )
+                final_content = grounded_response.content
 
         # Guard: Structured uncertainty fallback for low-confidence/hypothetical questions
         if should_defer_uncertain(request.message):
@@ -2512,7 +3089,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         conv_id = request.conversation_id or str(uuid.uuid4())
         conversation_tracker.add_message(conv_id, "user", request.message)
         conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(final_content))
-        background_tasks.add_task(conversation_tracker.check_and_summarize, conv_id)
+        _add_task(conversation_tracker.check_and_summarize, conv_id)
 
         # Save to unified cross-channel store
         try:
@@ -2581,14 +3158,14 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
         # Learning: real-time (every exchange) or batch (every N messages)
         if REALTIME_LEARNING_ENABLED:
-            background_tasks.add_task(
+            _add_task(
                 conversation_tracker.learn_from_exchange,
                 conv_id, request.message, response.content
             )
         elif BATCH_LEARNING_ENABLED:
             msg_count = conversation_tracker.get_message_count(conv_id)
             if msg_count > 0 and msg_count % BATCH_LEARNING_INTERVAL == 0:
-                background_tasks.add_task(
+                _add_task(
                     conversation_tracker.learn_from_exchange,
                     conv_id, request.message, response.content
                 )
@@ -2598,7 +3175,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # Auto-save valuable exchanges to shared memory store (web/CC conversations)
         _channel_source = request.channel or "web"
         if _channel_source != "telegram":  # Telegram auto-save handled in telegram_bot.py
-            background_tasks.add_task(
+            _add_task(
                 _auto_save_exchange_to_memory,
                 request.message, final_content, _channel_source, conv_id,
             )
@@ -2691,23 +3268,29 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
         # Log response for evaluation loop (non-blocking)
         _final_latency_ms = int((_time_mod.time() - _chat_start) * 1000)
-        background_tasks.add_task(
+        _add_task(
             evaluation_service.log_response,
             response_id=_response_id,
             channel=request.channel or "web",
             conversation_id=conv_id,
             message=request.message,
             model_used=response.model_used,
-            tools_used=[r.get("tool") for r in tool_results_list] if tool_results_list else [],
+            tools_used=[r.get("tool") for r in _succeeded_results] if _succeeded_results else [],
             tool_results=tool_results_list if tool_results_list else [],
             latency_ms=_final_latency_ms,
             response_length=len(final_content),
             fallback_used=response.fallback_used,
             metadata_envelope=resp.metadata,
         )
-        # Prevent phone/browser caching stale responses
-        http_response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-        http_response.headers["Pragma"] = "no-cache"
+        # Cache-control headers are set on http_response by the /chat
+        # handler wrapper, not here (D45 commit 2).
+
+        # PHASE 2 · F1 — persist this turn so the next request can replay
+        # the tool_results. Best-effort: a DB failure here MUST NOT break
+        # the response. Recording happens for both doors identically.
+        _record_session_turn(conv_id, "user", request.message, None)
+        _record_session_turn(conv_id, "assistant", final_content, tool_results_list)
+
         return resp
     except asyncio.TimeoutError:
         # The 45s / configured cap was hit. Be truthful: the primary
@@ -2795,7 +3378,7 @@ async def chat_stream(request: ChatRequest):
 
         return StreamingResponse(whats_new_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
+    if not request.desk and not request.image_filename and should_force_runtime_truth_check(request.message):
         async def runtime_truth_gen():
             conv_id = request.conversation_id or str(uuid.uuid4())
             result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
@@ -2824,39 +3407,154 @@ async def chat_stream(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'done', 'model_used': 'image-availability-check', 'metadata': _response_metadata(request.channel, skill_used='image_availability_check')})}\n\n"
         return StreamingResponse(image_unavailable_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
+    # H57 FIX M-bM-^@M-^T stream door: also release pending on non-continuation
+    # turns. Same logic as /chat non-stream (router.py:2356-2380).
+    merged_handoff = None
+    if request.conversation_id and request.channel:
+        try:
+            from app.services.max.drawing_pending import (
+                is_cancel_message, clear_pending, get_pending,
+                is_continuation_reply, merge_founder_reply, set_pending,
+            )
+            msg_text = request.message or ""
+            if is_cancel_message(msg_text):
+                clear_pending(request.conversation_id, request.channel)
+            pending = get_pending(request.conversation_id, request.channel)
+            if pending and is_drawing_intent(msg_text):
+                if is_continuation_reply(msg_text, pending.get("missing", [])):
+                    merged_handoff = merge_founder_reply(pending, msg_text)
+                else:
+                    clear_pending(request.conversation_id, request.channel)
+            elif pending and not is_drawing_intent(msg_text):
+                clear_pending(request.conversation_id, request.channel)
+        except Exception as exc:
+            logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
+
     drawing_handoff = (
-        build_drawing_handoff(request.message, image_filename=request.image_filename)
-        if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
-        else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
-    )
-    if drawing_handoff.is_drawing_intent:
-        # D3: log the 6-way intent_mode (per REPORT-d1-drawing-workflow-research.md
-        # and the D1 Addendum). Default is "unknown" for backward compatibility.
-        logger.info(
-            "[MAX] Drawing intent intercepted before stream model: ready=%s missing=%s intent_mode=%s message=%r",
-            drawing_handoff.ready,
-            drawing_handoff.missing,
-            drawing_handoff.intent_mode,
-            request.message[:160],
+        merged_handoff
+        if merged_handoff is not None
+        else (
+            build_drawing_handoff(request.message, image_filename=request.image_filename)
+            if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
+            else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
         )
+    )
+
+    # PHASE 2 · R12 corrected Option A — continuation guard (mirror
+    # of the /chat handler above). See that block for the rationale.
+    # Stream variant emits SSE events instead of a ChatResponse.
+    if (drawing_handoff.is_drawing_intent is False
+            and not request.desk and not request.image_filename):
+        try:
+            from app.services.max.drawing_pending import looks_like_continuation
+            continuation_ctx = looks_like_continuation(
+                request.message, request.history or []
+            )
+        except Exception:
+            continuation_ctx = None
+        if continuation_ctx:
+            from types import SimpleNamespace as _SN
+            from app.services.max.drawing_intent import (
+                _extract_dimensions, _translate_dims_for_b1_product,
+                _compute_missing_template_keys,
+            )
+            b1 = continuation_ctx["b1_product_type"]
+            dims = _extract_dimensions(request.message, item_type=b1)
+            translated = _translate_dims_for_b1_product(dims, b1)
+            still_missing = _compute_missing_template_keys(translated, b1)
+            handoff = _SN(
+                is_drawing_intent=True,
+                ready=not still_missing,
+                b1_product_type=b1,
+                translated_dims=translated,
+                missing_template_keys=list(still_missing or []),
+                missing=[],
+                dimensions=dims,
+                intent_mode="shop_drawing",
+                subject="",
+                item_type=b1,
+                views=[],
+                output_format="inline_svg_pdf",
+                source_image=None,
+                tool_payload=None,
+                response="",
+            )
+            render = _drawing_render(handoff)
+            conv_id = request.conversation_id or str(uuid.uuid4())
+
+            async def continuation_gen():
+                if render["status_event"]:
+                    yield f"data: {json.dumps({'type': 'text', 'content': render['status_event']})}\n\n"
+                yield f"data: {json.dumps({'type': 'text', 'content': render['response_text']})}\n\n"
+                if render["tool_result_dict"]:
+                    yield f"data: {json.dumps({'type': 'tool_result', **render['tool_result_dict']})}\n\n"
+                yield (
+                    "data: "
+                    + json.dumps({
+                        "type": "done",
+                        "model_used": render["model_used"],
+                        "conversation_id": conv_id,
+                        "metadata": _response_metadata(
+                            request.channel,
+                            skill_used=render["metadata_skill_used"],
+                        ),
+                    })
+                    + "\n\n"
+                )
+
+            return StreamingResponse(
+                continuation_gen(),
+                media_type="text/event-stream",
+                headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+            )
+
+    if drawing_handoff.is_drawing_intent:
+        # HOTFIX 4.0b2 — both /chat and /chat/stream funnel through
+        # the same _drawing_render(handoff) helper. See comment at
+        # the /chat handler above for the duplication rationale.
 
         async def drawing_gen():
+            nonlocal drawing_handoff
             conv_id = request.conversation_id or str(uuid.uuid4())
-            if not drawing_handoff.ready:
-                yield f"data: {json.dumps({'type': 'text', 'content': _drawing_missing_response(drawing_handoff)})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'model_used': 'drawing-router', 'conversation_id': conv_id})}\n\n"
-                return
+            render = _drawing_render(drawing_handoff)
 
-            yield f"data: {json.dumps({'type': 'text', 'content': 'Starting the Drawing Studio workflow. '})}\n\n"
-            result = _execute_drawing_handoff(drawing_handoff)
-            yield f"data: {json.dumps({'type': 'tool_result', **_drawing_tool_result_dict(result)})}\n\n"
-            final_text = (
-                "Drawing generated through Drawing Studio."
-                if result.success
-                else f"Drawing workflow failed: {result.error}"
+            # Optional status line (B1 render status). The text stream
+            # is the visible "I'm rendering now…" line; absent for
+            # failure or missing-keys paths.
+            if render["status_event"]:
+                yield f"data: {json.dumps({'type': 'text', 'content': render['status_event']})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'text', 'content': render['response_text']})}\n\n"
+
+            # tool_result only on the rendered path (when tool_result_dict is non-empty)
+            if render["tool_result_dict"]:
+                yield f"data: {json.dumps({'type': 'tool_result', **render['tool_result_dict']})}\n\n"
+
+            # Resume snapshot — same wiring as /chat non-stream path.
+            if not render["ready"]:
+                try:
+                    from app.services.max.drawing_pending import set_pending
+                    if (drawing_handoff.missing
+                            and drawing_handoff.tool_payload):
+                        snap = dict(drawing_handoff.tool_payload)
+                        snap["missing"] = list(drawing_handoff.missing)
+                        set_pending(request.conversation_id, request.channel, snap)
+                except Exception:
+                    pass
+
+            yield (
+                "data: "
+                + json.dumps({
+                    "type": "done",
+                    "model_used": render["model_used"],
+                    "conversation_id": conv_id,
+                    "metadata": _response_metadata(
+                        request.channel,
+                        skill_used=render["metadata_skill_used"],
+                    ),
+                })
+                + "\n\n"
             )
-            yield f"data: {json.dumps({'type': 'text', 'content': final_text})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'model_used': 'drawing-router', 'conversation_id': conv_id})}\n\n"
 
         return StreamingResponse(drawing_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
@@ -2865,8 +3563,13 @@ async def chat_stream(request: ChatRequest):
     if len(windowed_history) < len(request.history):
         logger.info(f"[stream] Conversation windowed: {len(request.history)} -> {len(windowed_history)} messages")
 
-    messages = [AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]
-    messages.append(AIMessage(role="user", content=request.message))
+    # PHASE 2 · F1 — same helper as /chat, so both doors rebuild
+    # tool_results-aware context identically.
+    messages = _build_replay_messages(
+        windowed_history,
+        request.conversation_id,
+        request.message,
+    )
     model = None
     if request.model:
         try:
@@ -2879,25 +3582,17 @@ async def chat_stream(request: ChatRequest):
         logger.info("Budget threshold reached — auto-switching to Ollama")
         model = AIModel.OLLAMA
 
-    # Build brain-enriched system prompt before streaming (non-desk only)
+    # Build brain-enriched system prompt before streaming (non-desk only).
+    # H52 Phase 2: always full prompt (see /chat note above).
     enriched_prompt = None
     if not request.desk:
-        # Normalize channel for cross-channel context injection
-        _stream_ch = request.channel
-        if _stream_ch in {"web", "web_cc", "dashboard"}:
-            _stream_ch_normalized = "web_chat"
-        else:
-            _stream_ch_normalized = _stream_ch or "web"
-        if not request.image_filename and is_ordinary_text_request(request.message):
-            enriched_prompt = get_compact_system_prompt(channel=_stream_ch_normalized)
-        else:
-            try:
-                enriched_prompt = await get_system_prompt_with_brain(
-                    user_message=request.message,
-                    conversation_history=request.history,
-                )
-            except Exception as e:
-                logger.warning(f"Brain context failed, using base prompt: {e}")
+        try:
+            enriched_prompt = await get_system_prompt_with_brain(
+                user_message=request.message,
+                conversation_history=request.history,
+            )
+        except Exception as e:
+            logger.warning(f"Brain context failed, using base prompt: {e}")
 
     # Append channel-specific directives
     if request.channel == "telegram" and enriched_prompt:
@@ -2946,26 +3641,23 @@ async def chat_stream(request: ChatRequest):
                 execute_tool, search_tc, desk=request.desk, founder=founder
             )
             _stream_pre_search_entry = _normalize_tool_result_entry(search_result)
+            # H53 HARMONISATION: role="user" with "[SYSTEM: ...]" prefix was
+            # structurally identical to the H53 replay block. Append on
+            # role="system"; suppress the empty-result branch entirely.
             if search_result.success and search_result.result:
                 tool_summary = (
                     f"[web_search] Result:\n"
                     f"{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
                 )
-                messages.insert(-1, AIMessage(role="user", content=(
-                    "[SYSTEM: You must answer using only the verified web search data below. "
+                messages.insert(-1, AIMessage(role="system", content=(
+                    "You must answer using only the verified web search data below. "
                     "Do not fall back to training data. Cite sources from the search results "
                     "with markdown links: [Title](url). "
-                    "If the search returned no relevant results, say so honestly.]\n\n"
+                    "If the search returned no relevant results, say so honestly.\n\n"
                     f"{tool_summary}\n\nQuestion: {request.message}"
                 )))
-            else:
-                messages.insert(-1, AIMessage(role="user", content=(
-                    "[SYSTEM: web_search was attempted for this query but returned no results "
-                    "or failed. You must tell the user that web_search is currently unavailable "
-                    "for this query. Do NOT fabricate pricing, current facts, or any data from "
-                    "training data. Say: 'web_search returned no results for this query — I "
-                    "cannot provide current pricing without verified search data.']"
-                )))
+            # If web_search returned nothing, append NOTHING. Do not fabricate
+            # a "[SYSTEM: ...]" apology — that was the H53 shape in this code path.
         try:
             async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
                 model_used = m_used
@@ -2979,7 +3671,41 @@ async def chat_stream(request: ChatRequest):
             current_text = full_response
 
             for _tool_round in range(3):
-                tool_calls = parse_tool_blocks(current_text)
+                # H67 FIX (2026-08-20): see non-streaming version above.
+                # round_results must be initialised before the
+                # tool_block_errors branch reads it. Latent since
+                # f97d808 (2026-07-16), fired 2026-08-20 19:11 EDT.
+                round_results = []
+                # HOTFIX 2026-07-16 (parser fix): same NDJSON-tolerant
+                # parse + structured error feedback as the non-streaming
+                # chat path above.
+                tool_calls, tool_block_errors = parse_tool_blocks_with_errors(current_text)
+                if tool_block_errors:
+                    for err in tool_block_errors:
+                        logger.warning(
+                            "[stream] tool block parse error: object %d at "
+                            "line %s col %s — %s",
+                            err["index"], err.get("line"), err.get("column"), err["error"],
+                        )
+                    error_entries = [{
+                        "tool": "_tool_block_parse_error",
+                        "success": False,
+                        "error": (
+                            f"tool block object {e['index']} malformed: "
+                            f"{e['error']}. Re-emit this object as a valid "
+                            f"JSON line in your next reply. Other objects "
+                            f"in the same block DID execute."
+                        ),
+                        "result": {
+                            "index": e["index"],
+                            "line": e.get("line"),
+                            "column": e.get("column"),
+                            "snippet": e["snippet"],
+                            "policy": "BLOCK_PARSE_POLICY: execute good, surface bad",
+                        },
+                    } for e in tool_block_errors]
+                    round_results = error_entries + round_results
+                    tool_results_list = error_entries + tool_results_list
                 if not tool_calls:
                     break
 
@@ -2988,17 +3714,16 @@ async def chat_stream(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'text', 'content': full_response})}\n\n"
                     break
 
-                # File/git tool calls from main chat get re-routed to CodeForge desk
-                _CODEFORGE_TOOLS_STREAM = {"file_read", "file_write", "file_edit", "file_append", "git_ops"}
+                # File-WRITE tool calls from main chat get re-routed to CodeForge desk
+                # (reads NEVER — see _should_reroute_to_codeforge).
 
-                round_results = []
                 for tc in tool_calls:
                     # Inject image_filename into quote tools so uploaded photos flow through
                     if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                         tc["image_filename"] = request.image_filename
 
-                    # Auto-reroute file/git tools to CodeForge desk
-                    if tc.get("tool") in _CODEFORGE_TOOLS_STREAM and not request.desk:
+                    # Auto-reroute write tools to CodeForge desk (reads NEVER)
+                    if _should_reroute_to_codeforge(str(tc.get("tool") or ""), bool(request.desk)):
                         tool_name = tc["tool"]
                         path = tc.get("path", "")
                         desc_parts = [f"Tool: {tool_name}"]
@@ -3033,10 +3758,18 @@ async def chat_stream(request: ChatRequest):
                     entry = _normalize_tool_result_entry(result)
                     round_results.append(entry)
                     tool_results_list.append(entry)
-                    yield f"data: {json.dumps({'type': 'tool_result', **entry})}\n\n"
+                    # D52 H80: receipt suppression. Only emit the
+                    # `tool_result` SSE event for successes. Failed calls
+                    # stay in tool_results_list for the post-gen backstop
+                    # at line 3794 but do not produce a UI badge that
+                    # could be read as a successful invocation.
+                    if entry.get("success"):
+                        yield f"data: {json.dumps({'type': 'tool_result', **entry})}\n\n"
 
-                if should_halt_after_tool_failure(round_results, user_message=request.message):
-                    full_response = runtime_truth_failure_message(runtime_truth_failures(round_results, user_message=request.message))
+                # D52 H80: same round-aware halt as the chat path above.
+                if _tool_round >= 1 and should_halt_after_tool_failure(round_results, user_message=request.message):
+                    _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
+                    full_response = runtime_truth_failure_message(_failures)
                     yield f"data: {json.dumps({'type': 'text', 'content': full_response})}\n\n"
                     break
 
@@ -3053,21 +3786,28 @@ async def chat_stream(request: ChatRequest):
                 tool_summary = "\n\n".join(tool_summary_parts)
                 round_results_dicts = normalize_tool_results(round_results)
                 if any(r.get("tool") in ACTION_TOOLS and r.get("success") for r in round_results_dicts):
+                    # H53 HARMONISATION (e9c18cc + this commit): dropped the
+                    # leading "[SYSTEM: " prefix and rephrased as a plain
+                    # instruction. The role="user" below moves the whole
+                    # scaffolding onto the system channel.
                     tool_summary += (
-                        "\n\n[SYSTEM: Task identity rule — if you mention a task/delegation id, "
+                        "\n\nTask identity rule — if you mention a task/delegation id, "
                         "use only task_id/openclaw_task_id from the current tool result above. "
-                        "Never use IDs from session handoff, active task state, or prior history.]"
+                        "Never use IDs from session handoff, active task state, or prior history."
                     )
 
                 is_last_round = _tool_round >= 2
                 followup_instruction = (
-                    "[SYSTEM: Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks.]"
+                    "Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks."
                     if is_last_round else
-                    "[SYSTEM: Tool results below. You may call additional tools if needed to complete the task, or give a final answer.]"
+                    "Tool results below. You may call additional tools if needed to complete the task, or give a final answer."
                 )
 
                 loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_text)))
-                loop_messages.append(AIMessage(role="user", content=f"{followup_instruction}\n\n{tool_summary}"))
+                # H53 HARMONISATION: role="user" with "[SYSTEM: ...]" prefix was
+                # structurally identical to the H53 replay block and the
+                # pre-search guard. Scaffolding goes on the system channel.
+                loop_messages.append(AIMessage(role="system", content=f"{followup_instruction}\n\n{tool_summary}"))
 
                 yield f"data: {json.dumps({'type': 'text', 'content': chr(10) + chr(10)})}\n\n"
                 followup_text = ""
@@ -3304,6 +4044,11 @@ async def chat_stream(request: ChatRequest):
             if _quality_badge:
                 _done_data['quality'] = _quality_badge
             yield f"data: {json.dumps(_done_data)}\n\n"
+
+            # PHASE 2 · F1 — persist this turn so the next request can
+            # replay the tool_results. Mirrors the /chat side. Best-effort.
+            _record_session_turn(conv_id, "user", request.message, None)
+            _record_session_turn(conv_id, "assistant", full_response, tool_results_list)
         except Exception as e:
             logger.error(f"Stream error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
@@ -3847,7 +4592,7 @@ async def health_check():
 async def max_status():
     """Aggregated MAX operating status for runtime/evaluation freshness."""
     from app.services.max.operating_registry import get_registry_load_info, load_operating_registry
-    from app.services.max.startup_health import read_startup_health_record
+    from app.services.max.startup_health import enrich_startup_health_record
     from app.services.max.runtime_truth_check import _git_commit
     from app.services.max.openclaw_gate import check_openclaw_gate
     from app.services.max.hermes_memory import get_hermes_memory_status
@@ -3901,7 +4646,7 @@ async def max_status():
             for item in registry.get("surfaces", [])
         ],
         "active_skill_hooks": callable_hooks,
-        "startup_health": read_startup_health_record(),
+        "startup_health": enrich_startup_health_record(),
         "hermes_memory_bridge": get_hermes_memory_status(),
         "openclaw_gate": check_openclaw_gate().to_dict(),
         "registry_reload_requires_restart": False,
@@ -3909,7 +4654,18 @@ async def max_status():
         "routing_state": routing_state_payload,
         "providers": {"models": routing_state_payload.get("provider_registry", [])},
         "minimax_tools": minimax_tools_status(),
+        "desks_online": _status_desks_online(),
     }
+
+
+def _status_desks_online():
+    """Count/ids of freeze-honoring desks registered on AIDeskManager."""
+    try:
+        ai_desk_manager.initialize()
+        ids = sorted(getattr(ai_desk_manager.router, "desk_ids", []) or [])
+        return {"count": len(ids), "ids": ids}
+    except Exception as e:
+        return {"count": 0, "ids": [], "error": str(e)}
 
 
 @router.get("/evaluation/scores")
@@ -4522,30 +5278,97 @@ async def get_quality_metrics():
 class CodeTaskRequest(BaseModel):
     prompt: str
     pin: str = ""
-    channel: str = "web_cc"
+    # H74 (D45, 2026-08-28, commit 3): the model previously defaulted
+    # channel to "web_cc" — a default value nobody supplied resolving
+    # to a privileged channel is exactly the defect this dispatch
+    # exists to close. The field is now REQUIRED. Portal callers
+    # (ChatScreen.tsx and the runtime tests) already send an
+    # explicit channel; the model default only ever fired for
+    # body-shaped callers that omitted the key, which were the
+    # bypass.
+    channel: str
+    # R11 (2026-08-22): the tree the task actually ran in. The validator
+    # uses this for ground-truth capture. Optional on the wire; if absent
+    # we default to the backend process cwd, which is the canonical repo
+    # root for the running unit. Never silently default to a stale path.
+    working_dir: str = ""
 
 
 @router.post("/code-task")
 async def submit_code_task(request: CodeTaskRequest):
     """Submit an async code task to CodeForge/Atlas.
-    Founder channels (web_cc, telegram founder) skip PIN.
-    Non-founder channels require PIN.
-    Poll status via GET /code-task/{id}/status.
+
+    H74 (D45, 2026-08-28, commit 3 — Option A): the handler now
+    declares its own canonical channel internally. The body's
+    `channel` field is used only for non-privilege routing labels
+    (logs, metadata envelope). Privilege comes from the
+    canonical-channel/canonical-founder pair the handler declares.
+    Founder (web_cc) skips PIN. Telegram-founder paths are not used
+    for /code-task today; if added, the Telegram chat_id must come
+    from the body alongside an explicit `channel='telegram'` and
+    the chat_id must match FOUNDER_TELEGRAM_CHAT_ID — see Option E
+    warning below.
     """
     import os
-    msg_ctx = {"channel": request.channel or "web_cc"}
+    # Option A: the handler declares canonical_channel = "web_cc".
+    # The body's channel field is logged for envelope metadata but
+    # NOT consulted for privilege. canonical_chat_id stays None for
+    # /code-task because the portal is the only legitimate channel.
+    canonical_channel = "web_cc"
+    canonical_chat_id: Optional[str] = None
+
+    # Option E: spoof-detection warning. /code-task today only
+    # legitimately serves the web path; a body claiming 'telegram'
+    # without a matching chat_id is a spoof attempt.
+    if request.channel == "telegram":
+        try:
+            from app.services.max.founder_auth import FOUNDER_TELEGRAM_CHAT_ID
+            expected_chat_id = FOUNDER_TELEGRAM_CHAT_ID
+        except Exception:
+            expected_chat_id = ""
+        # CodeTaskRequest has no chat_id field today; if a future
+        # variant adds one, the warning would catch a non-matching
+        # claim.
+        logger.warning(
+            f"[H74 E] Body claims 'telegram' on /max/code-task; the handler's "
+            f"canonical channel is 'web_cc'. The predicate's Telegram-match "
+            f"branch will require FOUNDER_PIN. Logging for visibility."
+        )
+
+    # The predicate is still consulted for the canonical-channel
+    # case (web_cc → founder). Future Option-A variants of this
+    # handler can switch canonical_channel to anything the handler
+    # wants; the body field is dead weight for privilege.
+    msg_ctx = {"channel": canonical_channel, "chat_id": ""}
     founder = is_founder_message(msg_ctx)
     if not founder:
-        founder_pin = os.getenv("FOUNDER_PIN", "7777")
-        if not request.pin or str(request.pin) != founder_pin:
+        # H62 FIX (2026-08-22): empty default — pre-fix this was "7777" (privilege-escalation literal). HOTFIX 4.2 only fixed tool_executor.py.
+        founder_pin = os.getenv("FOUNDER_PIN", "")
+        if not founder_pin:
+            logger.critical(
+                "FOUNDER_PIN env var is UNSET. /max/code-task refuses until "
+                "operator configures the systemd drop-in. Pre-fix this silently "
+                "defaulted to a privilege-escalation literal. (H62 FIX, 2026-08-22)"
+            )
+        if not founder_pin or not request.pin or str(request.pin) != founder_pin:
             raise HTTPException(status_code=403, detail="Invalid PIN. Code Mode requires founder authorization.")
 
     from app.services.max.code_task_runner import code_task_runner
 
-    task = code_task_runner.submit(request.prompt, founder=founder)
+    # R11: working_dir is required. Caller may supply it; otherwise the
+    # backend process cwd is the authoritative tree. Never default to
+    # a hardcoded path — the validator must check the tree the task ran in.
+    working_dir = (request.working_dir or "").strip() or os.getcwd()
+
+    task = code_task_runner.submit(
+        request.prompt,
+        working_dir=working_dir,
+        founder=founder,
+    )
     return {
         "task_id": task.id,
         "state": task.state.value,
+        "working_dir": task.working_dir,
         "message": "Task submitted to Atlas (CodeForge). Poll /code-task/{id}/status for progress.",
     }
 
@@ -4569,10 +5392,16 @@ class VerifyPinRequest(BaseModel):
 async def verify_pin(request: VerifyPinRequest):
     """Verify founder PIN without performing any action. Used by Code Mode toggle."""
     import os
-    founder_pin = os.getenv("FOUNDER_PIN", "7777")
-    if str(request.pin) == founder_pin:
-        return {"valid": True}
-    raise HTTPException(status_code=403, detail="Invalid PIN")
+    # H62 FIX (2026-08-22): empty default — pre-fix this was "7777" (privilege-escalation literal). HOTFIX 4.2 only fixed tool_executor.py.
+    founder_pin = os.getenv("FOUNDER_PIN", "")
+    if not founder_pin:
+        logger.critical(
+            "FOUNDER_PIN env var is UNSET. /max/verify-pin refuses until "
+            "operator configures the systemd drop-in. Pre-fix this silently "
+            "defaulted to a privilege-escalation literal. (H62 FIX, 2026-08-22)"
+        )
+    if not founder_pin or str(request.pin) != founder_pin:
+        raise HTTPException(status_code=403, detail="Invalid PIN")
 
 
 # ── TTS (Text-to-Speech) ─────────────────────────────────────────────
@@ -4589,7 +5418,32 @@ async def text_to_speech(request: TTSRequest):
     from app.services.max.tts_service import tts_service
 
     if not tts_service.is_configured:
-        raise HTTPException(status_code=503, detail="TTS not configured — XAI_API_KEY missing")
+        # H68 D40: the pre-fix 503 hard-coded "XAI_API_KEY missing"
+        # even when the configured provider is MiniMax. That message
+        # is the same class of defect this dispatch exists to close:
+        # a system reporting a state that is not true. The TTS service
+        # has two providers (MiniMax primary, xAI fallback per
+        # tts_service.py:62-72); is_configured returns True if EITHER
+        # is set. When neither is set, the message names both.
+        missing: list[str] = []
+        if not tts_service.is_minimax_configured:
+            missing.append("MINIMAX_API_KEY")
+        if not tts_service.is_xai_configured:
+            missing.append("XAI_API_KEY")
+        if not missing:
+            # is_configured was False but neither provider reported
+            # itself as unconfigured — should be unreachable, but
+            # surface it honestly rather than naming a phantom key.
+            missing.append("(unknown — see tts_service.last_error)")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"TTS not configured — missing: {', '.join(missing)}. "
+                f"TTS service has two providers: MiniMax (primary) and "
+                f"xAI Grok (fallback); is_configured requires at least "
+                f"one provider key."
+            ),
+        )
 
     audio_bytes = await tts_service.synthesize_for_web(request.text)
     if not audio_bytes:

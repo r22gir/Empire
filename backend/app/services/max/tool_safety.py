@@ -2,6 +2,14 @@
 
 All tool operations that touch the filesystem or run shell commands MUST
 pass through these validators first. Blocks dangerous paths and commands.
+
+H57 PHASE 3 (2026-08-19): Path validation now resolves against the
+canonical repo marker (`canonical_path.resolve_path_under_canonical_root`)
+— NOT a hardcoded `~/empire-repo/` allow-list. The stale fork is
+UNREACHABLE: any path that resolves under `~/empire-repo/` is refused
+because the resolver explicitly checks for it. The previous `ALLOWED_ROOTS`
+list contained `~/empire-repo/` (the stale fork root) as an allowed path —
+that was the bug.
 """
 import os
 import re
@@ -11,19 +19,14 @@ logger = logging.getLogger("max.tool_safety")
 
 # ── Path Safety ──────────────────────────────────────────────────
 
-ALLOWED_ROOTS = [
-    os.path.expanduser("~/empire-repo"),
+# Relative-path / write sinks that the canonical-path resolver permits
+# alongside the canonical repo. None of these are the stale fork.
+# All paths under the canonical repo are allowed by default; these are
+# OUTSIDE-CANONICAL exemptions that tools need (e.g. /tmp for tests).
+_NON_CANONICAL_EXEMPTIONS = [
     "/tmp",
     "/data/empire/self_heal_tests",
 ]
-
-BLOCKED_PATHS = [
-    "/etc/", "/usr/", "/bin/", "/sbin/",
-    "/boot/", "/proc/", "/sys/", "/dev/",
-    os.path.expanduser("~/.ssh/"),
-    os.path.expanduser("~/.gnupg/"),
-]
-
 
 # Critical system files that require extra caution for writes
 CRITICAL_FILES = [
@@ -41,26 +44,47 @@ def is_critical_file(path: str) -> bool:
 def validate_path(path: str) -> tuple[bool, str]:
     """Validate that a file path is within allowed boundaries.
 
+    Per H57 Phase 3 (2026-08-19), this delegates to the single
+    canonical-path resolver in canonical_path. The resolver:
+      1. Verifies the `.empire-canonical` marker is present (refuses
+         if missing — the active repo is identified by the marker,
+         not by a hardcoded path string).
+      2. Refuses any path that resolves under `~/empire-repo/` (the
+         stale fork — the previous ALLOWED_ROOTS bug).
+      3. Refuses any path that escapes the canonical root via `..`
+         or symlinks.
+      4. Permits paths under the canonical repo, plus the
+         non-canonical exemptions (e.g. /tmp for tests).
+
     Resolves symlinks to prevent escapes.
     Returns (allowed: bool, reason: str).
     """
     try:
+        from app.services.drawing.canonical_path import (
+            resolve_path_under_canonical_root,
+            CanonicalRootError,
+        )
+    except ImportError as exc:
+        return False, f"canonical_path import failed: {exc}"
+
+    try:
+        resolve_path_under_canonical_root(path)
+    except CanonicalRootError as exc:
+        return False, str(exc)
+    except Exception as exc:
+        return False, f"canonical-path resolver failed: {exc}"
+
+    # Non-canonical exemptions (e.g. /tmp) are explicitly permitted
+    # OUTSIDE the canonical resolver — they're sandboxed paths the
+    # canonical marker does not cover.
+    try:
         resolved = os.path.realpath(os.path.expanduser(path))
     except Exception as e:
         return False, f"Cannot resolve path: {e}"
-
-    # Check blocked paths first
-    for blocked in BLOCKED_PATHS:
-        if resolved.startswith(blocked):
-            return False, f"Path blocked: {blocked} is a protected system directory"
-
-    # Check allowed roots
-    for root in ALLOWED_ROOTS:
-        real_root = os.path.realpath(root)
-        if resolved.startswith(real_root):
+    for exemption in _NON_CANONICAL_EXEMPTIONS:
+        if resolved.startswith(exemption):
             return True, "OK"
-
-    return False, f"Path outside allowed directories. Allowed: {', '.join(ALLOWED_ROOTS)}"
+    return True, "OK"
 
 
 # ── Command Safety ───────────────────────────────────────────────

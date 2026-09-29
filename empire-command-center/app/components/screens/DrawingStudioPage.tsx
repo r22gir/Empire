@@ -281,6 +281,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
                 bench_type: bd.bench_type || 'straight',
                 name: data.name || 'Bench',
                 lf: bd.total_length_ft || 10,
+                length_unit: 'ft',
                 seat_depth: parseDim('seat_depth_in', 20),
                 seat_height: parseDim('seat_height_in', 18),
                 back_height: parseDim('back_height_in', 18),
@@ -394,6 +395,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
           bench_type: benchType,
           name: name || 'Bench',
           lf: lf || 10,
+          length_unit: 'ft',
           seat_depth: parseDimVal('seat_depth', parseDimVal('depth', 20)),
           seat_height: parseDimVal('seat_height', 18),
           back_height: parseDimVal('back_height', 18),
@@ -816,17 +818,32 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
               {loading ? 'Generating...' : previewIsCurrent ? 'Regenerate Drawing' : svgPreview ? 'Update Drawing' : 'Generate Drawing'}
             </button>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={downloadPdf} disabled={pdfLoading || !hasDimensions} style={{
-                ...btnBase, flex: 1, background: hasDimensions ? '#1a1a2e' : '#eee', color: hasDimensions ? '#d4af37' : '#bbb',
-              }}>
+              <button
+                onClick={downloadPdf}
+                disabled={pdfLoading || !hasDimensions}
+                title={hasDimensions ? 'Download PDF' : 'Enter at least one dimension before a PDF can be generated.'}
+                style={{
+                  ...btnBase, flex: 1, background: hasDimensions ? '#1a1a2e' : '#eee', color: hasDimensions ? '#d4af37' : '#bbb',
+                }}
+              >
                 {pdfLoading ? '...' : svgPreview && !previewIsCurrent ? 'Update + PDF' : 'Download PDF'}
               </button>
-              <button onClick={emailPdf} disabled={emailLoading || !svgPreview} style={{
-                ...btnBase, flex: 1, background: svgPreview ? '#16a34a' : '#eee', color: svgPreview ? '#fff' : '#bbb',
-              }}>
+              <button
+                onClick={emailPdf}
+                disabled={emailLoading || !svgPreview}
+                title={svgPreview ? 'Email PDF' : 'Generate the drawing first. Email sends that PDF.'}
+                style={{
+                  ...btnBase, flex: 1, background: svgPreview ? '#16a34a' : '#eee', color: svgPreview ? '#fff' : '#bbb',
+                }}
+              >
                 {emailLoading ? '...' : 'Email PDF'}
               </button>
             </div>
+            {!hasDimensions && (
+              <div style={{ fontSize: 12, color: '#7b7466', textAlign: 'center', lineHeight: 1.4 }}>
+                Download PDF stays off until a dimension is entered. No empty file is created.
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => sendToDesk('Workroom')} disabled={!svgPreview} style={{
                 ...btnBase, flex: 1, padding: '10px', fontSize: 12,

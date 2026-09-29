@@ -1,5 +1,7 @@
 # LeadForge Specification
 
+Workroom capture lives in [WORKROOM_LEAD_INTAKE.md](WORKROOM_LEAD_INTAKE.md): `POST /api/v1/leads/intake` upserts ForgeCRM, writes a LeadForge lead, and can open a Workroom quote. LuxeForge uses that same path. Do not treat the older ContractorForge embedding below as the Workroom ad intake.
+
 _AI-powered lead generation module built into ContractorForge / LuxeForge_
 
 ---

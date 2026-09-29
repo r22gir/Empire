@@ -19,7 +19,9 @@ import logging
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.business_routing import route_to_for_item_type
 from app.services.data_paths import quote_pdf_dir, quotes_data_dir
+from app.services.drawing.canonical_path import canonical_empire_db_path
 from app.db.database import get_db, dict_row
+from app.routers.vision import decode_image_input
 
 logger = logging.getLogger(__name__)
 
@@ -182,11 +184,29 @@ def _quote_path(quote_id: str) -> str:
 
 
 def _load_quote(quote_id: str) -> dict:
+    """Load a quote via the canonical-first shared resolver.
+
+    PHASE 2 · F5.2: delegates to `quote_service.resolve_quote` so
+    routers AND tools use ONE shared resolver (not a second copy
+    of the canonical-first logic). The resolver tries canonical
+    `quotes_v2` SQL first; falls back to legacy JSON only if the
+    canonical lookup fails.
+
+    After resolve_quote, also check this module's QUOTES_DIR. Tests
+    (and alternate mounts) monkeypatch quotes.QUOTES_DIR while
+    resolve_quote still reads quotes_data_dir(); without this
+    fallback, create_quote_from_rooms/_save_quote writes a file
+    that update_quote cannot load (404).
+    """
+    from app.services.quote_service import resolve_quote
+    q = resolve_quote(quote_id)
+    if q:
+        return q
     path = _quote_path(quote_id)
-    if not os.path.exists(path):
-        raise HTTPException(404, f"Quote {quote_id} not found")
-    with open(path) as f:
-        return json.load(f)
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    raise HTTPException(404, f"Quote {quote_id} not found")
 
 
 def _save_quote(quote: dict):
@@ -733,6 +753,14 @@ async def analyze_photo_for_quote(body: dict):
     if not image:
         raise HTTPException(400, "Image data required")
 
+    # D43 0e — vision path that bypasses _materialize_image_input (sends raw
+    # base64 to analyze_photo_items → ollama/xAI). Verify the image is
+    # decodable so a fake PNG header cannot reach the model.
+    try:
+        decode_image_input(image)
+    except HTTPException:
+        raise
+
     analysis = await analyze_photo_items(image, customer_notes)
 
     quote = assemble_quote(
@@ -1219,11 +1247,13 @@ async def get_quote_intake_photos(quote_id: str):
     photos = quote.get("photos", [])
     intake_project_id = quote.get("intake_project_id")
 
-    # If the quote has an intake_project_id, also look up photos from intake.db
+    # If the quote has an intake_project_id, also look up photos from empire.db
+    # (iX-day R1X-INT-FIX: was `~/empire-repo/backend/data/intake.db` — stale fork.
+    # intake_projects now lives in canonical empire.db with the business column.)
     if intake_project_id:
         try:
             import sqlite3
-            db_path = os.path.expanduser("~/empire-repo/backend/data/intake.db")
+            db_path = str(canonical_empire_db_path())
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             row = conn.execute(
@@ -1477,7 +1507,15 @@ class PhotoAttach(BaseModel):
 async def attach_photos(quote_id: str, photos: list[PhotoAttach]):
     """Attach photos to specific rooms/windows/upholstery items in a quote."""
     quote = _load_quote(quote_id)
-    uploads_dir = os.path.expanduser("~/empire-repo/backend/data/uploads/images")
+    # H57 Phase 3: write target is under canonical repo, NOT the
+    # stale fork. canonical_path.resolve_path_under_canonical_root
+    # refuses escapes (symlinks/..) and refuses the stale fork.
+    from app.services.drawing.canonical_path import (
+        resolve_path_under_canonical_root,
+    )
+    uploads_dir = resolve_path_under_canonical_root(
+        "backend/data/uploads/images"
+    )
 
     if "photos" not in quote or not isinstance(quote.get("photos"), list):
         quote["photos"] = []
@@ -2801,10 +2839,16 @@ def _download_image_as_data_uri(url: str) -> str:
     """Download an external image URL and return a base64 data URI for reliable PDF embedding."""
     if not url or url.startswith("data:"):
         return url
-    # Handle local API paths — read directly from disk
+    # Handle local API paths — read directly from disk. H57 Phase 3:
+    # path resolved via canonical repo marker (NOT `~/empire-repo/`).
     if url.startswith("/api/v1/vision/images/"):
         fname = url.split("/")[-1]
-        local_path = os.path.expanduser(f"~/empire-repo/backend/data/generated/{fname}")
+        from app.services.drawing.canonical_path import (
+            resolve_path_under_canonical_root,
+        )
+        local_path = resolve_path_under_canonical_root(
+            f"backend/data/generated/{fname}"
+        )
         if os.path.exists(local_path):
             try:
                 with open(local_path, "rb") as f:
@@ -3306,41 +3350,28 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 
 @router.get("/{quote_id}/pdf")
 async def download_pdf(quote_id: str):
-    """Download a previously generated PDF. Auto-generates if not yet created.
-    Falls back to quotes_v2 (SQL) if JSON quote not found."""
+    """Download quote PDF — Max default is McLean gold landscape.
+
+    Always routes through generate_quote_pdf (mclean_estimate_pdf).
+    Do not serve stale WeasyPrint portrait stubs from disk cache.
+    """
+    from app.services.quote_pdf_service import generate_quote_pdf
+    from app.services.quote_service import get_quote
+
     try:
-        quote = _load_quote(quote_id)
-    except HTTPException:
-        # Not a JSON quote — try SQL quotes_v2
+        pdf_bytes = generate_quote_pdf(quote_id)
+    except FileNotFoundError:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+
+    q = get_quote(quote_id)
+    if not q:
         try:
-            from app.services.quote_pdf_service import generate_quote_pdf
-            pdf_bytes = generate_quote_pdf(quote_id)
-            from app.services.quote_service import get_quote
-            q = get_quote(quote_id)
-            filename = f"{q.get('quote_number', quote_id)}.pdf"
-            return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-            )
-        except FileNotFoundError:
+            q = _load_quote(quote_id)
+        except HTTPException:
             raise HTTPException(404, f"Quote {quote_id} not found")
-
-    pdf_path = os.path.join(
-        str(quote_pdf_dir()),
-        f"{quote['quote_number']}.pdf",
-    )
-    if not os.path.exists(pdf_path):
-        # Auto-generate on first GET request (skip verification for convenience)
-        return await generate_pdf(quote_id, skip_verification=True)
-
-    with open(pdf_path, "rb") as f:
-        pdf_bytes = f.read()
-
+    filename = f"{(q or {}).get('quote_number', quote_id)}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{quote["quote_number"]}.pdf"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

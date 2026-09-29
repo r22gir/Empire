@@ -20,6 +20,20 @@ DESK_ALIASES = {
 
 # Keyword → desk_id mapping for fallback routing
 KEYWORD_MAP = {
+    "codeforge": {
+        "keywords": [
+            "code", "fix", "bug", "patch", "edit", "refactor", "implement",
+            "add feature", "scaffold", "commit", "git", "push", "diff",
+            "file read", "file write", "read file", "write file",
+            "fix bug", "code fix", "code patch", "code change", "code edit",
+            "test runner", "run test", "run tests", "check tests", "verify",
+            "build", "compile", "deploy code", "merge", "branch", "pull request",
+            "typecheck", "lint", "linting", "format code", "refactor code",
+            "add endpoint", "add route", "add function", "add class",
+            "wire", "wire up", "implement function", "implement method",
+            "update file", "patch file",
+        ],
+    },
     "forge": {
         "keywords": [
             "quote", "estimate", "price", "pricing", "drape", "shade", "cornice",

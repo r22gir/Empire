@@ -41,9 +41,71 @@ except ImportError:
 
 logger = logging.getLogger("max.tool_executor")
 
+# Per-block safety cap on parse errors. A normal block has 0 errors; a
+# really corrupted block (e.g. tail-garbage mid-stream) might produce
+# many, but never many-many. When len(errors) hits the cap we declare
+# the block unrecoverable and stop — so a single bad block can never
+# overwhelm the conversation with spurious per-byte errors.
+MAX_PER_BLOCK_ERRORS = 16
+
+# HOTFIX 2026-08-16 (POLICY) — standing CC on every outbound MAX email.
+# Every send_email call MUST CC rafa22giraldo@gmail.com. This is
+# enforced in the tool itself, NOT in the prompt, so the model cannot
+# forget it. Both addresses are in MAX_EMAIL_ALLOWED_RECIPIENTS so the
+# allowlist check passes. Reply-To is set to max@empirebox.store (the
+# address the future inbound poller — SendGrid Inbound Parse webhook at
+# /webhooks/email/inbound AND Gmail check_inbox — will watch).
+DEFAULT_EMAIL_CC = ("rafa22giraldo@gmail.com",)
+DEFAULT_REPLY_TO = "max@empirebox.store"
+
 # ── Dangerous Tool PIN Gate ───────────────────────────────────────
-DANGEROUS_TOOLS = {"shell_execute", "env_set", "db_query"}
-FOUNDER_PIN = os.getenv("FOUNDER_PIN", "7777")
+# db_query removed 2026-08-31 (D52, founder ruling). It is read-only at the
+# connection level (mode=ro URI) and cannot write regardless of the SQL.
+# Gating it beside shell_execute and env_set meant MAX could not read the
+# founder's own invoice table, and the resulting refusals were narrated over
+# rather than reported. Founder ruling: full read access; gate later if wanted.
+# shell_execute and env_set REMAIN GATED.
+DANGEROUS_TOOLS = {"shell_execute", "env_set"}
+# HOTFIX 4.2 (2026-07-24) — FOUNDER_PIN fails CLOSED.
+#
+# Pre-fix: os.getenv("FOUNDER_PIN", "7777") meant that an unset env
+# var silently fell back to "7777" — meaning any chat caller (or a
+# prompt-injection attack on the chat layer) could invoke
+# shell_execute / env_set by typing the literal "7777"
+# PIN, even when the operator never configured one. That's a
+# privilege-escalation default.
+#
+# Post-fix: the default is "" (empty string). When FOUNDER_PIN is
+# unset, the dangerous-tools gate refuses ALL invocations with a
+# structured error and a CRITICAL log. Per-tool callers (MAX chat,
+# drawing-router, the founder portal approval flow) must continue
+# to work via the `_require_founder_pin` service-layer guard in
+# quote_service, which is the canonical access path. This module
+# only protects the dangerous-tools gate.
+#
+# A startup CRITICAL log fires when the env var is unset so the
+# operator notices at boot — not only when the gate fires.
+FOUNDER_PIN = os.getenv("FOUNDER_PIN", "")
+
+# HOTFIX 4.2 — startup CRITICAL log. Fires at import time. We use
+# the same logger (`max.tool_executor`) as the rest of the file
+# so the CRITICAL line shows up in the same journal as any
+# subsequent gate refusal. The `_already_warned_PIN_unset` flag
+# prevents a duplicate line on every re-import under test runners
+# that reload modules.
+_already_warned_PIN_unset = False
+if not FOUNDER_PIN:
+    if not _already_warned_PIN_unset:
+        logger.critical(
+            "FOUNDER_PIN env var is UNSET. The dangerous-tools gate "
+            "(shell_execute, env_set) will REFUSE every "
+            "invocation until FOUNDER_PIN is configured. Pre-fix this "
+            "silently defaulted to '7777' (a privilege-escalation "
+            "default). Set FOUNDER_PIN=<your-PIN> in the systemd "
+            "unit's Environment= to enable dangerous tools. See "
+            "HOTFIX 4.2 (2026-07-24)."
+        )
+        _already_warned_PIN_unset = True
 
 TOOL_BLOCK_RE = re.compile(r"```(?:tool|json|action|actions)?\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
 
@@ -117,8 +179,58 @@ def _parse_action_payload(payload) -> list[dict]:
 
 
 def parse_tool_blocks(text: str) -> list[dict]:
-    """Extract executable tool-action JSON objects from fenced blocks or raw JSON."""
-    results = []
+    """Extract executable tool-action JSON objects from fenced blocks or raw JSON.
+
+    HOTFIX 2026-07-16 (parser fix):
+
+      Pre-fix, this function called `json.loads(candidate)` on the
+      entire fenced-block body. When MAX emits multiple newline-
+      delimited JSON objects in one block (its natural behavior — see
+      the 12:45 and 17:12 transcripts), `json.loads()` raises
+      `Extra data: line 2 column 1` because JSON permits only one
+      top-level value. The exception was caught and the block was
+      silently skipped — so MAX received NO error feedback, NO
+      executed tools, and could not self-correct.
+
+      Post-fix: parse each block via `json.JSONDecoder().raw_decode()`
+      in a loop. Successfully-decoded objects are appended to results
+      in order. Malformed objects produce a structured error marker;
+      callers that want to surface errors (the chat router) use
+      `parse_tool_blocks_with_errors()` instead. Single-object blocks
+      behave exactly as before.
+
+    Policy on mixed blocks (BLOCK_PARSE_POLICY): EXECUTE GOOD, SURFACE
+    BAD. Execute every successfully-decoded object in order; for
+    every malformed object, build a structured error marker so the
+    chat router can feed it back to MAX as a tool result. Going
+    strict (whole-block reject on first error) would force MAX to
+    re-emit the entire block — including the calls that already
+    succeeded — which is wasteful and brittle.
+    """
+    return parse_tool_blocks_with_errors(text)[0]
+
+
+def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
+    """Like parse_tool_blocks, but also returns a list of structured
+    error markers — one per malformed object — so the chat router
+    can build a synthetic tool-error result for each.
+
+    Returns:
+        (actions, errors):
+          actions — list of parsed tool-action dicts (successful).
+          errors  — list of error dicts, each:
+                       {
+                         "index": int,        # 1-based object index in the block
+                         "line": int | None,  # line number of the failing parse
+                         "column": int | None,
+                         "error": str,        # human-readable json error
+                         "snippet": str,      # raw block content (truncated)
+                       }
+
+    Block-parse policy: see parse_tool_blocks docstring.
+    """
+    results: list[dict] = []
+    errors: list[dict] = []
     seen_payloads: set[str] = set()
 
     for match in TOOL_BLOCK_RE.finditer(text):
@@ -126,22 +238,116 @@ def parse_tool_blocks(text: str) -> list[dict]:
         if candidate in seen_payloads:
             continue
         seen_payloads.add(candidate)
-        try:
-            obj = json.loads(candidate)
-        except json.JSONDecodeError as e:
-            logger.warning(f"Malformed tool JSON: {e}")
-            continue
-        results.extend(_parse_action_payload(obj))
+
+        block_actions, block_errors = _parse_ndjson_block(candidate)
+        results.extend(block_actions)
+        errors.extend(block_errors)
 
     stripped = text.strip()
     if not results and stripped and stripped[0] in "{[":
-        try:
-            obj = json.loads(stripped)
-            results.extend(_parse_action_payload(obj))
-        except json.JSONDecodeError as e:
-            logger.warning(f"Malformed raw tool JSON: {e}")
+        # Single raw JSON message (no fences) — same NDJSON-tolerant parser.
+        raw_actions, raw_errors = _parse_ndjson_block(stripped)
+        results.extend(raw_actions)
+        errors.extend(raw_errors)
 
-    return results
+    return results, errors
+
+
+def _parse_ndjson_block(body: str) -> tuple[list[dict], list[dict]]:
+    """Parse one fenced-block body (or a raw JSON message) via
+    json.JSONDecoder().raw_decode() in a loop.
+
+    Tolerant of:
+      - a single object (the pre-fix case; behaves identically)
+      - NDJSON: multiple newline-delimited objects
+      - objects separated by arbitrary whitespace (spaces / tabs /
+        blank lines) — anything the decoder treats as token
+        terminators works here.
+
+    Returns:
+        (actions, errors) — see parse_tool_blocks_with_errors.
+
+    Per BLOCK_PARSE_POLICY: continues past parse failures so a
+    malformed object doesn't kill the rest of the block. Each error
+    captured here is surfaced to the router via the errors list.
+
+    Safety cap: MAX_PER_BLOCK_ERRORS. If a block produces more errors
+    than this cap, we declare it unrecoverable (probably tail-
+    corrupted) and stop parsing — so a single malformed block can
+    never overwhelm the conversation with spurious errors.
+    """
+    actions: list[dict] = []
+    errors: list[dict] = []
+    decoder = json.JSONDecoder()
+    idx = 0
+    n = len(body)
+    obj_index = 0
+    abort_due_to_cap = False
+    while idx < n:
+        # Skip whitespace between objects (NDJSON + extra-blank-line
+        # friendly). Stops on the first non-whitespace byte.
+        while idx < n and body[idx] in " \t\r\n":
+            idx += 1
+        if idx >= n:
+            break
+        try:
+            obj, end_idx = decoder.raw_decode(body, idx)
+            obj_index += 1
+            actions.extend(_parse_action_payload(obj))
+            idx = end_idx
+        except json.JSONDecodeError as e:
+            obj_index += 1
+            errors.append({
+                "index": obj_index,
+                "line": e.lineno,
+                "column": e.colno,
+                "error": f"{e.msg} (line {e.lineno}, column {e.colno})",
+                "snippet": body[idx:min(n, idx + 240)],
+            })
+            logger.warning(
+                "tool block object %d malformed at line %d col %d: %s — "
+                "raw block (truncated): %r",
+                obj_index, e.lineno, e.colno, e.msg,
+                body[idx:min(n, idx + 240)],
+            )
+            # Skip past this failed object. We advance to the GREATEST
+            # of:
+            #   - e.pos + 1          (the byte after the parser's
+            #                        failure point)
+            #   - next_newline + 1   (start of the next line)
+            # Without this `max`, when the bad object has no trailing
+            # newline (e.g. the LAST line in a block) the loop would
+            # re-parse from the middle of the bad object on every
+            # iteration, emitting one spurious "Expecting value"
+            # error per byte.
+            next_nl = body.find("\n", idx)
+            next_nl_advance = next_nl + 1 if next_nl != -1 else n
+            advance = max(e.pos + 1, next_nl_advance)
+            if advance <= idx:
+                # The parser didn't even advance past its starting
+                # position — pathological input. Force a 1-char step
+                # so we eventually exit the loop.
+                advance = idx + 1
+            idx = advance
+            if len(errors) >= MAX_PER_BLOCK_ERRORS:
+                abort_due_to_cap = True
+                break
+    if abort_due_to_cap:
+        # Final entry: block aborted due to error cap. The chat
+        # router surfaces this as one tool-error result; MAX uses it
+        # to know to re-emit the block from scratch.
+        errors.append({
+            "index": obj_index + 1,
+            "line": None,
+            "column": None,
+            "error": (
+                f"block_aborted: >{MAX_PER_BLOCK_ERRORS} malformed "
+                f"objects without forward progress — block is likely "
+                f"tail-corrupted; re-emit the block from scratch."
+            ),
+            "snippet": body[idx:min(n, idx + 240)],
+        })
+    return actions, errors
 
 
 def strip_tool_blocks(text: str) -> str:
@@ -246,19 +452,44 @@ def tool(name: str):
     return decorator
 
 
-def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None, founder: bool = False) -> ToolResult:
+def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None, founder: bool = False, channel: Optional[str] = None) -> ToolResult:
     """Dispatch and execute a tool call (with tier gating and access control).
 
     Args:
-        founder: If True, skip all PIN/access checks. The caller (router) has
-                 already verified this is the founder via is_founder_message().
+        founder: If True, bypass the access_controller permission flow
+                 (deny/locked/confirm/pin actions). Does NOT bypass the
+                 dangerous-tools PIN gate (H81 Phase 2, 2026-09-01).
+        channel: Optional channel label propagated to the audit log
+                 (H81 Phase 2 task 2). Stored on tool_call['_channel']
+                 so tool handlers can read it for log_execution. The
+                 chat router does not pass this today; the audit
+                 column will be NULL until the router plumbing is
+                 updated (Phase 3 backlog).
     """
     tool_name = tool_call.get("tool", "")
     try:
-        # ── FOUNDER BYPASS: CC / Telegram founder = full access, no PIN ──
+        # ── FOUNDER access_controller BYPASS only ──
+        # H81 Phase 2 (2026-09-01): founder still bypasses the
+        # access_controller permission flow (deny/locked/confirm/pin
+        # actions) but NO LONGER bypasses the dangerous-tools PIN
+        # gate below. Pre-H81 the founder branch silently skipped
+        # the PIN gate for shell_execute and env_set; that was the
+        # unverified bypass. The PIN gate now runs uniformly for
+        # every caller. The previous "founder = full access" prose
+        # in this comment was misleading; see git history.
         if founder:
-            logger.info(f"Founder auto-auth — executing '{tool_name}' without PIN/access check")
+            logger.info(
+                f"Founder context — bypassing access_controller "
+                f"permission check for '{tool_name}'"
+            )
             tool_call["_founder"] = True  # pass founder flag to tool handlers
+        # H81 Phase 2 — propagate channel label to tool handlers so
+        # the audit log can record which channel the call came from.
+        # Currently the router does not pass `channel` (Phase 3
+        # backlog), so _channel will be unset for the live chat
+        # handlers and the audit column will be NULL.
+        if channel is not None:
+            tool_call["_channel"] = channel
         else:
             # Access control check (non-founder users)
             if access_context and access_controller:
@@ -288,21 +519,42 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                         access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_pin", channel=user.get("channel", ""))
                         return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__pin__{session_id}__{summary}")
 
-            # Dangerous tool PIN gate (legacy — only for non-founder)
-            if tool_name in DANGEROUS_TOOLS:
-                pin = (access_context or {}).get("pin")
-                if not pin:
-                    return ToolResult(
-                        tool=tool_name, success=False,
-                        error=f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed."
-                    )
-                if str(pin) != FOUNDER_PIN:
-                    logger.warning(f"Invalid PIN attempt for dangerous tool '{tool_name}'")
-                    return ToolResult(
-                        tool=tool_name, success=False,
-                        error="❌ Invalid PIN. Access denied."
-                    )
-                logger.info(f"PIN verified — executing dangerous tool '{tool_name}'")
+        # Dangerous tool PIN gate — RUNS FOR EVERY CALLER, founder
+        # and non-founder alike (H81 Phase 2). HOTFIX 4.2 fail-closed
+        # semantics preserved: empty FOUNDER_PIN refuses with
+        # CRITICAL log; missing PIN refuses; mismatched PIN refuses.
+        if tool_name in DANGEROUS_TOOLS:
+            if not FOUNDER_PIN:
+                logger.critical(
+                    "BLOCKED dangerous tool '%s' invocation: "
+                    "FOUNDER_PIN env var is unset. The dangerous-"
+                    "tools gate is fail-closed (HOTFIX 4.2).",
+                    tool_name,
+                )
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error=(
+                        f"Tool '{tool_name}' is disabled: FOUNDER_PIN "
+                        f"env var is unset on the server. The "
+                        f"dangerous-tools gate fails closed until "
+                        f"FOUNDER_PIN is configured in the systemd "
+                        f"unit's Environment=. Set FOUNDER_PIN=<your-PIN> "
+                        f"to enable. (HOTFIX 4.2)"
+                    ),
+                )
+            pin = (access_context or {}).get("pin")
+            if not pin:
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error=f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed."
+                )
+            if str(pin) != FOUNDER_PIN:
+                logger.warning(f"Invalid PIN attempt for dangerous tool '{tool_name}'")
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error="❌ Invalid PIN. Access denied."
+                )
+            logger.info(f"PIN verified — executing dangerous tool '{tool_name}'")
 
         # Tier check
         from app.middleware.tier_middleware import require_tool
@@ -349,6 +601,9 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "edit_file": "file_edit",
             "append_file": "file_append",
             "create_quote": "create_engine_quote",
+            "deposit_link": "deposit_pay_link",
+            "pay_link": "deposit_pay_link",
+            "payment_link": "deposit_pay_link",
             "make_quote": "create_engine_quote",
             "new_quote": "create_engine_quote",
             # NOTE: do NOT map bare "quote" → create_engine_quote;
@@ -606,105 +861,65 @@ def _get_desk_status(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("search_quotes")
 def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Search quotes by customer name or status. Searches BOTH Workroom and CraftForge quotes."""
-    customer = params.get("customer_name", "").lower()
+    """Search canonical quotes (quotes_v2 table) by customer name + status.
+
+    Hotfix 2026-07-15: repointed from legacy JSON store
+    (backend/data/quotes/{id}.json — stale pre-consolidation records)
+    to canonical quote_service.list_quotes so MAX sees the same data
+    that show_quote_for_review reads and what the Workroom frontend
+    WorkroomPage fetches.
+
+    CraftForge designs are a separate concern (drawings for design
+    instances, not customer-facing quotes) and stay on their existing
+    JSON path in CraftForge's own router. Quote tools here only
+    search canonical Workroom + WoodCraft quotes.
+    """
+    from app.services.quote_service import list_quotes as _qs_list_quotes
+    customer = (params.get("customer_name") or "").strip()
     status = params.get("status")
-    source_filter = params.get("source", "").lower()  # "workroom", "craftforge", or "" for both
-    limit = min(params.get("limit", 10), 20)
+    business_unit = params.get("business_unit")  # workroom | woodcraft | None
+    limit = min(int(params.get("limit") or 10), 20)
 
-    quotes = []
+    raw = _qs_list_quotes(status=status, business_unit=business_unit, limit=200)
+    # list_quotes returns {'quotes': [...], 'total': ..., 'limit': ..., 'offset': ...}
+    quotes = raw.get("quotes") if isinstance(raw, dict) else raw
 
-    # ── Search Workroom quotes ──
-    if source_filter in ("", "workroom", "all"):
-        if os.path.exists(QUOTES_DIR):
-            for fname in os.listdir(QUOTES_DIR):
-                if not fname.endswith(".json") or fname.startswith("_") or "_verification" in fname:
-                    continue
-                try:
-                    with open(os.path.join(QUOTES_DIR, fname)) as f:
-                        q = json.load(f)
-                    if "id" not in q:
-                        continue
-                except (json.JSONDecodeError, OSError):
-                    continue
-                if customer and customer not in q.get("customer_name", "").lower():
-                    continue
-                if status and q.get("status") != status:
-                    continue
-                # Resolve total: flat field → tiers.A → tiers.B → tiers.C
-                total = q.get("total") or 0
-                if not total:
-                    tiers = q.get("tiers") or {}
-                    for t in ("A", "B", "C"):
-                        tier = tiers.get(t)
-                        if tier and tier.get("subtotal"):
-                            total = tier["subtotal"]
-                            break
-                # Resolve items count: flat line_items → tiers items → rooms
-                items_count = len(q.get("line_items") or [])
-                if not items_count:
-                    tiers = q.get("tiers") or {}
-                    tier_a = tiers.get("A") or {}
-                    items_count = len(tier_a.get("items") or [])
-                if not items_count:
-                    items_count = sum(len(r.get("items") or r.get("windows") or []) for r in (q.get("rooms") or []))
-                quotes.append({
-                    "id": q["id"],
-                    "quote_number": q.get("quote_number"),
-                    "customer_name": q.get("customer_name"),
-                    "total": total,
-                    "status": q.get("status"),
-                    "created_at": q.get("created_at", "")[:10],
-                    "items_count": items_count,
-                    "source": "workroom",
-                })
-
-    # ── Search CraftForge quotes ──
-    cf_dir = str(dp.craftforge_designs_dir())
-    if source_filter in ("", "craftforge", "all"):
-        if os.path.exists(cf_dir):
-            for fname in os.listdir(cf_dir):
-                if not fname.endswith(".json") or fname.startswith("_"):
-                    continue
-                try:
-                    with open(os.path.join(cf_dir, fname)) as f:
-                        q = json.load(f)
-                    if "id" not in q:
-                        continue
-                except (json.JSONDecodeError, OSError):
-                    continue
-                if customer and customer not in q.get("customer_name", "").lower():
-                    continue
-                if status and q.get("status") != status:
-                    continue
-                total = q.get("total") or q.get("subtotal") or 0
-                items_count = len(q.get("line_items") or q.get("materials") or [])
-                quotes.append({
-                    "id": q["id"],
-                    "quote_number": q.get("design_number") or q.get("quote_number"),
-                    "customer_name": q.get("customer_name"),
-                    "total": total,
-                    "status": q.get("status"),
-                    "created_at": q.get("created_at", "")[:10],
-                    "items_count": items_count,
-                    "source": "craftforge",
-                })
-
-    quotes.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    out = []
+    for q in quotes:
+        if customer and customer.lower() not in (q.get("customer_name") or "").lower():
+            continue
+        out.append({
+            "id": q.get("id"),
+            "quote_number": q.get("quote_number"),
+            "customer_name": q.get("customer_name"),
+            "total": q.get("total"),
+            "status": q.get("status"),
+            "created_at": (q.get("created_at") or "")[:10],
+            "items_count": q.get("item_count") or 0,
+            "source": "canonical",
+            "business_unit": q.get("business_unit"),
+        })
+    out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return ToolResult(tool="search_quotes", success=True, result={
-        "quotes": quotes[:limit], "count": len(quotes),
+        "quotes": out[:limit], "count": len(out),
     })
 
 
 @tool("get_quote")
 def _get_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Get full details of a specific quote."""
+    """Get full details of a specific quote.
+
+    Hotfix 2026-07-15: repointed from legacy JSON store
+    (backend/data/quotes/{id}.json) to canonical quote_service.get_quote
+    so that MAX sees the same data show_quote_for_review reads. The legacy
+    path was returning stale pre-consolidation records (e.g. Nov-2025 EST-2026-110,
+    Lauren Bassett) because quotes_v2 was the only canonical store post-1d.
+    """
+    from app.services.quote_service import get_quote as _qs_get_quote
     quote_id = params.get("quote_id", "")
-    path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
-    if not os.path.exists(path):
+    q = _qs_get_quote(quote_id)
+    if not q:
         return ToolResult(tool="get_quote", success=False, error=f"Quote {quote_id} not found")
-    with open(path) as f:
-        q = json.load(f)
     return ToolResult(tool="get_quote", success=True, result=q)
 
 
@@ -1454,6 +1669,37 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── CANONICAL ENGINE-PRICED QUOTE TOOL ─────────────────────────────
 
+def _normalize_manual_line_inputs(li: dict) -> dict:
+    """For manual_line only: copy top-level Becky-shape fields into inputs.
+
+    Models often emit description / unit_price / quantity at the line-item
+    top level (matching create_becky_quote shape) while leaving inputs empty
+    or missing those keys. price_manual_line reads only from inputs, so map
+    them in when missing/empty. Other categories are untouched.
+    """
+    inputs = dict(li.get("inputs") or {})
+    category = str(li.get("category") or "").strip().lower()
+    if category != "manual_line":
+        return inputs
+
+    def _missing(key: str) -> bool:
+        val = inputs.get(key)
+        return val is None or (isinstance(val, str) and str(val).strip() == "")
+
+    for key in ("description", "unit_price", "quantity"):
+        if _missing(key) and li.get(key) is not None and li.get(key) != "":
+            inputs[key] = li.get(key)
+
+    # Also accept common aliases the model sometimes uses at top level.
+    if _missing("unit_price"):
+        for alias in ("price", "rate", "amount"):
+            if li.get(alias) is not None and li.get(alias) != "":
+                inputs["unit_price"] = li.get(alias)
+                break
+
+    return inputs
+
+
 @tool("create_engine_quote")
 def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Create a quote via the pricing engine (canonical quotes_v2 store).
@@ -1476,6 +1722,25 @@ def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult
             error="line_items required (use category + inputs from PRICING_SPECS)",
         )
 
+    normalized_items = []
+    for li in line_items:
+        if not isinstance(li, dict):
+            continue
+        inputs = _normalize_manual_line_inputs(li)
+        description = li.get("description", "")
+        # Prefer nested description when top-level was empty (manual_line).
+        if (not description or str(description).strip() == "") and inputs.get("description"):
+            description = inputs.get("description")
+        qty = li.get("quantity", 1)
+        if (qty is None or qty == "") and inputs.get("quantity") is not None:
+            qty = inputs.get("quantity")
+        normalized_items.append({
+            "category":    li.get("category"),
+            "description": description,
+            "inputs":      inputs,
+            "quantity":    qty if qty is not None else 1,
+        })
+
     body = {
         "customer_name":       customer_name,
         "business_unit":       business_unit,
@@ -1485,16 +1750,7 @@ def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult
         "project_name":        params.get("project_name", ""),
         "project_description": params.get("project_description", ""),
         "tax_rate":            params.get("tax_rate", 0.0),
-        "line_items": [
-            {
-                "category":    li.get("category"),
-                "description": li.get("description", ""),
-                "inputs":      li.get("inputs") or {},
-                "quantity":    li.get("quantity", 1),
-            }
-            for li in line_items
-            if isinstance(li, dict)
-        ],
+        "line_items":          normalized_items,
     }
 
     try:
@@ -1634,6 +1890,43 @@ def _show_quote_for_review(params: dict, desk: Optional[str] = None) -> ToolResu
             for li in q.get("line_items", []) or []
         ],
     })
+
+
+@tool("create_invoice_from_quote")
+def _create_invoice_from_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Sprint 1d Payment Phase 1: explicit quote→invoice action.
+
+    Calls POST /quotes-v2/{id}/to-invoice. The endpoint is gated to
+    quote.status ∈ {sent, accepted, in_production, completed} — a draft
+    or founder_review quote returns HTTP 409 (use /submit-for-review +
+    /approve first).
+
+    Returns honest payload: invoice snapshot from canonical invoices
+    table, store="quotes_v2", engine="lifecycle_v1".
+    """
+    quote_id = params.get("quote_id", "")
+    if not quote_id:
+        return ToolResult(tool="create_invoice_from_quote", success=False,
+                         error="quote_id required")
+    try:
+        import httpx
+        with httpx.Client(timeout=30) as c:
+            r = c.post(f"http://localhost:8000/api/v1/quotes-v2/{quote_id}/to-invoice")
+        if r.status_code == 404:
+            return ToolResult(tool="create_invoice_from_quote", success=False,
+                             error=f"Quote {quote_id} not found")
+        if r.status_code == 409:
+            return ToolResult(
+                tool="create_invoice_from_quote", success=False,
+                error=f"gate rejected: {r.json().get('detail', 'unknown')}",
+            )
+        if r.status_code != 200:
+            return ToolResult(tool="create_invoice_from_quote", success=False,
+                             error=f"API error: {r.status_code} {r.text[:200]}")
+        return ToolResult(tool="create_invoice_from_quote", success=True, result=r.json())
+    except Exception as e:
+        return ToolResult(tool="create_invoice_from_quote", success=False,
+                         error=f"{type(e).__name__}: {e}")
 
 
 @tool("approve_quote")
@@ -2098,14 +2391,11 @@ def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult
     if not quote_id:
         return ToolResult(tool="send_quote_telegram", success=False, error="No quote_id provided")
 
-    # Load quote
-    quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
-    if not os.path.exists(quote_path):
+    # PHASE 2 · F5.2 — shared canonical-first resolver (not legacy JSON direct)
+    from app.services.quote_service import resolve_quote
+    quote = resolve_quote(quote_id)
+    if not quote:
         return ToolResult(tool="send_quote_telegram", success=False, error=f"Quote {quote_id} not found")
-
-    import json as _json
-    with open(quote_path) as f:
-        quote = _json.load(f)
 
     quote_number = quote.get("quote_number", quote_id)
     customer = quote.get("customer_name", "Unknown")
@@ -2157,10 +2447,25 @@ async def _generate_pdf_for_quote(quote_id: str):
 
     AI-generated quotes (source=max_quick_quote) skip verification
     since they use a different data structure than QIS quotes.
+
+    PHASE 2 · F5.2: uses the shared resolver `quote_service.resolve_quote`
+    so the router-side and tool-side load paths share ONE canonical-first
+    resolver instead of duplicating the logic.
     """
-    from app.routers.quotes import generate_pdf as _gen_pdf_endpoint, _load_quote
-    quote = _load_quote(quote_id)
-    skip = quote.get("source", "").startswith("max_")
+    from app.services.quote_service import resolve_quote
+    from app.routers.quotes import generate_pdf as _gen_pdf_endpoint
+    quote = resolve_quote(quote_id)
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote {quote_id} not found")
+    # PHASE 2 · F5.3 — skip verification when:
+    #   - source starts with "max_" (AI-generated / legacy), OR
+    #   - status is past draft/proposal (sent/accepted/in_production/completed)
+    #     — founder has already verified + approved the canonical quote, so a
+    #     re-verification is redundant and may fail on tier/dimension checks
+    #     that don't apply to canonical-shape quotes.
+    status = (quote.get("status") or "").lower()
+    verified_statuses = {"sent", "accepted", "in_production", "completed", "cancelled"}
+    skip = (quote.get("source") or "").startswith("max_") or status in verified_statuses
     await _gen_pdf_endpoint(quote_id, skip_verification=skip)
 
 
@@ -2186,6 +2491,9 @@ def _check_email(params: dict, desk: Optional[str] = None) -> ToolResult:
 @tool("send_email")
 def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Send an email with optional file attachments."""
+    from app.services.max.email_recipient_whitelist import (
+        authorize_email_recipient, recipient_whitelist_status,
+    )
     to = params.get("to", "").strip()
     subject = params.get("subject", "").strip()
     body = params.get("body", "").strip()
@@ -2197,8 +2505,75 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not subject or not body:
         return ToolResult(tool="send_email", success=False, error="subject and body are required")
 
+    # ── HOTFIX 2026-07-16 (d): outbound recipient allowlist ─────────
+    # No MAX tool call may email a client/customer address under any
+    # circumstances. The allowlist only covers FOUNDER_EMAIL,
+    # WORKROOM_EMAIL, WOODCRAFT_EMAIL (env) and entries listed in
+    # MAX_EMAIL_ALLOWED_RECIPIENTS. Anything else is refused with a
+    # structured verdict (no address exposed in the error). The cc
+    # list is checked too — passing `to=okaddress, cc=client@x.com`
+    # is also rejected.
     attachments = params.get("attachments", [])
     cc = params.get("cc")
+    verdict_to = authorize_email_recipient(to)
+    if not verdict_to["recipient_authorized"]:
+        logger.warning(
+            f"send_email BLOCKED: recipient_authorized=False "
+            f"reason={verdict_to['blocked_reason']} "
+            f"(whitelist has {recipient_whitelist_status()['allowed_recipient_count']} entries)"
+        )
+        return ToolResult(
+            tool="send_email", success=False,
+            error=(
+                f"recipient_not_in_whitelist: {verdict_to['blocked_reason']} "
+                f"(ask the founder to add this address to MAX_EMAIL_ALLOWED_RECIPIENTS "
+                f"if it's a legitimate internal recipient)"
+            ),
+            result=verdict_to,
+        )
+
+    # HOTFIX 2026-08-16 (POLICY) — every outbound MAX email CCs the
+    # standing address. Merge DEFAULT_EMAIL_CC with any user-supplied
+    # cc (deduped, case-insensitive). This is enforced in the tool,
+    # NOT in the prompt, so the model cannot forget it.
+    cc_list: list[str] = []
+    if cc:
+        cc_list = [a.strip() for a in str(cc).split(",") if a.strip()]
+    seen = {to.lower()}
+    for a in cc_list:
+        seen.add(a.lower())
+    for default_cc in DEFAULT_EMAIL_CC:
+        if default_cc.lower() not in seen:
+            cc_list.append(default_cc)
+            seen.add(default_cc.lower())
+    if cc_list:
+        cc_authorized = [
+            (a, authorize_email_recipient(a))
+            for a in cc_list
+        ]
+        bad = [(a, v) for a, v in cc_authorized
+               if not v["recipient_authorized"]]
+        if bad:
+            bad_addrs = ", ".join(a for a, _ in bad)
+            logger.warning(
+                f"send_email BLOCKED: cc contains {len(bad)} non-allowlisted "
+                f"address(es) (whitelist has "
+                f"{recipient_whitelist_status()['allowed_recipient_count']} entries)"
+            )
+            return ToolResult(
+                tool="send_email", success=False,
+                error=(
+                    f"recipient_not_in_whitelist: cc contains "
+                    f"{len(bad)} non-allowlisted address(es): "
+                    f"{bad_addrs[:80]}..."
+                ),
+                result={
+                    "rejected_cc": [
+                        {"address": a, "reason": v["blocked_reason"]}
+                        for a, v in bad
+                    ],
+                },
+            )
 
     # Auto-convert SVG attachments to PDF via WeasyPrint
     converted_attachments = []
@@ -2224,12 +2599,25 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         svc = EmailService()
         if not svc.is_configured:
             return ToolResult(tool="send_email", success=False, error="Email not configured — set SENDGRID_API_KEY or SMTP_USER/SMTP_PASSWORD in .env")
-        logger.info(f"send_email: to={to}, subject={subject}, attachments={converted_attachments}")
-        sent = svc.send(to=to, subject=subject, body_html=body, attachments=converted_attachments, cc=cc)
+        logger.info(f"send_email: to={to}, subject={subject}, attachments={converted_attachments}, cc={cc_list}")
+        # HOTFIX 2026-08-16 (POLICY) — explicit Reply-To override so the
+        # future inbound poller (SendGrid Inbound Parse webhook at
+        # /webhooks/email/inbound AND Gmail check_inbox) catches the
+        # reply. Same address as SMTP_REPLY_TO per the F4 decision.
+        sent = svc.send(
+            to=to,
+            subject=subject,
+            body_html=body,
+            attachments=converted_attachments,
+            cc=", ".join(cc_list) if cc_list else None,
+            reply_to=DEFAULT_REPLY_TO,
+        )
         if not sent:
             return ToolResult(tool="send_email", success=False, error="Email provider did not verify send acceptance")
         return ToolResult(tool="send_email", success=True, result={
             "sent_to": to, "subject": subject,
+            "cc": cc_list,
+            "reply_to": DEFAULT_REPLY_TO,
             "attachments_sent": len(converted_attachments),
             "attachment_files": [os.path.basename(a) for a in converted_attachments],
             "body_verified": bool(body.strip()),
@@ -2241,6 +2629,9 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
 @tool("send_quote_email")
 def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Generate PDF for a quote and send it to a recipient via email."""
+    from app.services.max.email_recipient_whitelist import (
+        authorize_email_recipient, recipient_whitelist_status,
+    )
     quote_id = params.get("quote_id", "")
     to = params.get("to", "").strip()
     if not quote_id:
@@ -2248,14 +2639,33 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not to:
         return ToolResult(tool="send_quote_email", success=False, error="No recipient email (to) provided")
 
-    # Load quote
-    quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
-    if not os.path.exists(quote_path):
-        return ToolResult(tool="send_quote_email", success=False, error=f"Quote {quote_id} not found")
+    # ── HOTFIX 2026-07-16 (d): outbound recipient allowlist ─────────
+    # Same allowlist as send_email — no client/customer sends. Per
+    # audit directive: NEVER email a client address from MAX tools;
+    # founder uses the portal approval flow to surface customer
+    # emails (the quote-accept link in /quote/[id]/page.tsx uses the
+    # canonical email field stored in quotes_v2.customer_email).
+    verdict_to = authorize_email_recipient(to)
+    if not verdict_to["recipient_authorized"]:
+        logger.warning(
+            f"send_quote_email BLOCKED: recipient_authorized=False "
+            f"reason={verdict_to['blocked_reason']} quote_id={quote_id}"
+        )
+        return ToolResult(
+            tool="send_quote_email", success=False,
+            error=(
+                f"recipient_not_in_whitelist: {verdict_to['blocked_reason']} "
+                f"(customer emails go through the portal accept flow — never "
+                f"via MAX email tools)"
+            ),
+            result=verdict_to,
+        )
 
-    import json as _json
-    with open(quote_path) as f:
-        quote = _json.load(f)
+    # PHASE 2 · F5.2 — shared canonical-first resolver (not legacy JSON direct)
+    from app.services.quote_service import resolve_quote
+    quote = resolve_quote(quote_id)
+    if not quote:
+        return ToolResult(tool="send_quote_email", success=False, error=f"Quote {quote_id} not found")
 
     quote_number = quote.get("quote_number", quote_id)
     customer = quote.get("customer_name", "Unknown")
@@ -2335,12 +2745,10 @@ def _svg_to_pdf(params: dict, desk: Optional[str] = None) -> ToolResult:
                 return ToolResult(tool="svg_to_pdf", success=False, error=f"SVG file not found: {svg_path}")
             svg_content = p.read_text()
 
-        # Default output path
+        # Default output path — HOTFIX 4.0 (d) uses canonical resolver
         if not output_path:
-            output_dir = os.path.expanduser("~/empire-repo/uploads")
-            os.makedirs(output_dir, exist_ok=True)
-            import uuid
-            output_path = os.path.join(output_dir, f"drawing_{uuid.uuid4().hex[:8]}.pdf")
+            from app.services.drawing.canonical_path import new_drawing_path
+            output_path = str(new_drawing_path(prefix="svg", suffix=".pdf"))
 
         # Wrap SVG in HTML and render via WeasyPrint
         html_content = f"""<!DOCTYPE html>
@@ -2392,19 +2800,312 @@ def _auto_email_pdf(pdf_path: str, email_to: str, drawing_name: str) -> dict | N
         return {"emailed": False, "error": str(e)}
 
 
+@tool("render_shop_drawing")
+def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """HOTFIX 4.0 (a) — Render a parametric B1 shop drawing for an
+    explicit product_type + dims.
+
+    This is the canonical path for Founder-style drawing requests
+    such as "create a shop drawing for a flat roman shade, 38 wide 64
+    long". The B1 template registry (app.services.drawing.templates)
+    ships 6 families and ~46 product_types — every B1 implementation
+    MUST use render_spec() here, never defaults from any other path.
+
+    Required params:
+      product_type — one of the B1-registered product_types
+                     (pinch_pleat, flat_fold, scalloped, straight,
+                     bench, banquette, headboard_channel, ...),
+                     a catalog id `family/style` (valances/box_pleat,
+                     cornices/arched), or a vision alias (flat_roman,
+                     arched_cornice, pinch-pleat).
+                     See templates.registry.implemented_product_types()
+                     for the flat list. Shared slugs need family.
+      family, style — catalog pair. Use these when the style slug is
+                     shared (valance box_pleat, cornice arched).
+                     `family` + `style` may replace product_type.
+      dims         — dict of width/height/drop/thickness/etc. The
+                     required keys depend on product_type and are
+                     surfaced via validate_spec() (a missing-dim list).
+
+    Optional params:
+      client_name, site_address, material, date — title-block rows.
+      output_filename — overrides the auto-generated UUID name.
+      email_to        — auto-email the PDF after writing.
+
+    Returns:
+      On success: dict with pdf_path, size_bytes, and a structured
+                  warnings list (e.g. "ASSUMED 4" foam thickness").
+      On failure: returns a structured error explaining what's missing
+                  (no defaults are invented).
+    """
+    try:
+        from app.services.drawing.templates import render_spec
+    except Exception as e:
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=f"templates package unavailable: {e}",
+        )
+
+    product_type = str(params.get("product_type", "")).strip()
+    catalog_family = str(
+        params.get("family") or params.get("catalog_family") or ""
+    ).strip()
+    catalog_style = str(
+        params.get("style") or params.get("catalog_style") or ""
+    ).strip()
+    if not product_type and not (catalog_family and catalog_style):
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=(
+                "render_shop_drawing requires explicit product_type "
+                "(e.g. 'flat_fold', 'pinch_pleat', 'bench', "
+                "'headboard_channel') or family+style "
+                "(e.g. family='valance', style='box_pleat'). "
+                "Caller-side natural-language intent parsing should "
+                "fill this in via drawing_intent. "
+                "Defaults are NEVER invented."
+            ),
+        )
+    if not product_type:
+        product_type = catalog_style
+
+    dims = params.get("dims")
+    if not isinstance(dims, dict) or not dims:
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=(
+                f"render_shop_drawing requires explicit dims for "
+                f"product_type={product_type!r}. No defaults invented."
+            ),
+        )
+
+    # ── U/L banquette true-polyline route (2026-09-24) ──────────────
+    # B1 BenchCurvedTemplate is a W×(D+bump) rectangle. True U/L plan
+    # polylines live in vision.bench_renderer (also POST /drawings/bench).
+    # When shape is u_shape/l_shape, route there and persist attach.
+    # Drapery/roman/valance/cornice/headboard paths unchanged.
+    try:
+        from app.services.max.ul_banquette_drawings import (
+            resolve_ul_shape,
+            render_ul_banquette_pdf,
+        )
+        _ul_shape = resolve_ul_shape(params, dims, product_type)
+    except Exception as _ul_imp_err:
+        logger.warning("ul_banquette_drawings import failed: %s", _ul_imp_err)
+        _ul_shape = None
+    if _ul_shape and product_type.lower() in {
+        "bench", "banquette", "u_shape", "l_shape",
+        "banquette_u", "banquette_l", "booth",
+    }:
+        pt = "banquette" if product_type.lower() in {
+            "u_shape", "l_shape", "banquette_u", "banquette_l", "booth",
+        } else product_type.lower()
+        try:
+            ul_result = render_ul_banquette_pdf(
+                params=params, dims=dims, product_type=pt, shape=_ul_shape,
+            )
+        except ValueError as e:
+            return ToolResult(
+                tool="render_shop_drawing", success=False, error=str(e),
+            )
+        except Exception as e:
+            logger.exception("U/L banquette render failed")
+            return ToolResult(
+                tool="render_shop_drawing", success=False,
+                error=f"U/L banquette render failed: {type(e).__name__}: {e}",
+            )
+        # Optional email (Marleys mandate: omit email_to — never send).
+        email_to = str(params.get("email_to", "")).strip()
+        email_status = None
+        if email_to:
+            if email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
+                email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+            email_status = _auto_email_pdf(
+                ul_result["pdf_path"], email_to, ul_result.get("product_type", pt),
+            )
+            ul_result["email"] = email_status
+        return ToolResult(
+            tool="render_shop_drawing", success=True, result=ul_result,
+        )
+
+    spec = {
+        "product_type": product_type,
+        "family": catalog_family,
+        "style": catalog_style,
+        "dims": {str(k): float(v) for k, v in dims.items() if v is not None},
+        "client_name":  params.get("client_name", ""),
+        "site_address": params.get("site_address", ""),
+        "material":     params.get("material", ""),
+        "date":         params.get("date", ""),
+    }
+
+    try:
+        pdf_bytes = render_spec(spec)
+    except ValueError as e:
+        # Missing required dims — surface structured; never invent.
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=str(e),
+            result={
+                "spec": spec, "missing_required_dims":
+                [k for k in dims if dims.get(k) is None],
+            },
+        )
+    except KeyError as e:
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=(
+                f"product_type={product_type!r} is not implemented in "
+                f"the B1 registry ({e}). Use one of the listed "
+                f"product_types."
+            ),
+        )
+    except Exception as e:
+        # R12.3.3 — B2QCFailure is a subclass of AssertionError
+        # raised by b2_qc.enforce_b2_qc on any geometric QC
+        # failure (element-spread, zone-bounds, text-collision,
+        # text-over-geometry, same-baseline-overlap, dim-witness-
+        # borrow, column-overflow). The generic Exception handler
+        # catches it but produces a non-specific "AssertionError:
+        # <message>" line. Detect the QC subclass first and
+        # surface the failure as a structured 422-style error with
+        # the gate name + message intact.
+        try:
+            from app.services.drawing.templates.b2_qc import B2QCFailure
+        except ImportError:  # pragma: no cover — b2_qc always present
+            B2QCFailure = None
+        if B2QCFailure is not None and isinstance(e, B2QCFailure):
+            return ToolResult(
+                tool="render_shop_drawing", success=False,
+                error=str(e),
+                result={
+                    "qc_failure": True,
+                    "gate": "b2_qc",
+                    "family": product_type,
+                    "spec": spec,
+                },
+            )
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=f"render_spec raised {type(e).__name__}: {e}",
+        )
+
+    # HOTFIX 4.0 (d) — output path comes from canonical_drawings_dir
+    # (NOT from ~/empire-repo/, the stale fork).
+    from app.services.drawing.canonical_path import new_drawing_path
+    out_path = new_drawing_path(prefix=product_type, suffix=".pdf")
+    # Caller-provided override is honored only when it lands under
+    # the canonical root (refuses stale-fork writes).
+    override = str(params.get("output_filename", "")).strip()
+    if override:
+        from pathlib import Path as _P
+        candidate = _P(override)
+        try:
+            candidate.relative_to(new_drawing_path().parent)
+        except (ValueError, FileNotFoundError):
+            return ToolResult(
+                tool="render_shop_drawing", success=False,
+                error=(
+                    f"output_filename={override!r} does not live under "
+                    f"the canonical drawings dir; refusing to write "
+                    f"outside the canonical root."
+                ),
+            )
+        out_path = candidate
+
+    out_path.write_bytes(pdf_bytes)
+    size = out_path.stat().st_size
+
+    email_to = str(params.get("email_to", "")).strip()
+    email_status: dict | None = None
+    if email_to:
+        if email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
+            email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+        email_status = _auto_email_pdf(str(out_path), email_to, product_type)
+
+    return ToolResult(
+        tool="render_shop_drawing", success=True,
+        result={
+            "pdf_path": str(out_path),
+            "size_bytes": size,
+            "product_type": product_type,
+            "dims": spec["dims"],
+            "drawing_engine": "templates.render_spec (B1)",
+            "email": email_status,
+            "warnings": (
+                # Heuristic for surfacing — read first 200 chars of
+                # the rendered PDF for an ASSUMED-list preview.
+                "(see assumptions block in PDF)"
+            ),
+        },
+    )
+
+
 @tool("sketch_to_drawing")
 def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Generate professional architectural drawings (PDF) for any item type.
+    """HOTFIX 4.0 (b) — Draw-from-image ONLY.
 
-    Auto-classifies input to determine what to draw: bench, window treatment,
-    pillow, upholstery, table, or generic measurement diagram.
+    Per Empire Drawing Standard v1.0 hard rule 1 (spec fidelity), this
+    tool MUST NOT emit default dimensions. If the caller supplies
+    explicit numeric dimensions, the tool defers to render_shop_drawing
+    (templates.render_spec). If no dimensions are supplied but the
+    request is text-only, it REFUSES with a structured error so the
+    caller knows to route to render_shop_drawing.
 
-    Accepts either:
-    - quote_id: generate drawings for all areas in a quote
-    - shape + lf + name: generate a single bench drawing (bench items only)
-    - name + description + dimensions: generate a measurement diagram for any item type
-    - item_type: override auto-classification (bench, window, pillow, upholstery, table, generic)
+    Use cases:
+      1. IMAGE-INPUT: caller passes an image path / image_url.
+         The tool classifies the image and emits a measurement diagram.
+         Image classification may yield a default item_type default
+         rendered with OVERLAID measurements drawn from the image
+         (NOT invented).
+      2. QUOTE-ID: caller passes a quote_id. The tool renders the
+         quote's existing line items verbatim.
+
+    Refused cases (must reroute to render_shop_drawing):
+      - Text-only with `dimensions` field provided → render_shop_drawing
+      - Text-only without `dimensions` AND without an image →
+        refuses with `dimensions_required_for_text_requests`
     """
+    has_image = any(
+        params.get(k) for k in ("image_path", "image_url", "image")
+    )
+    has_quote_id = bool(params.get("quote_id"))
+    explicit_dims = bool(
+        params.get("dimensions") or params.get("width")
+        or params.get("height") or params.get("length") or params.get("depth")
+    )
+    item_type_param = str(params.get("item_type", "")).strip()
+
+    # HOTFIX 4.0 (b) gate: text-only requests with explicit dims
+    # MUST route to render_shop_drawing. We do not silently default.
+    if not has_image and not has_quote_id and explicit_dims:
+        return ToolResult(
+            tool="sketch_to_drawing", success=False,
+            error=(
+                "sketch_to_drawing: text-only requests with explicit "
+                "dimensions must use render_shop_drawing (the B1 "
+                "parametric engine). Refusing to emit a default-dim "
+                "drawing — see Empire Drawing Standard v1.0 hard rule 1."
+            ),
+            result={
+                "reroute_to": "render_shop_drawing",
+                "product_type_required": True,
+            },
+        )
+
+    # HOTFIX 4.0 (b) gate: text-only, no dims — refuse with a clear
+    # message so the caller knows to gather dims first (rendered by
+    # drawing_intent on the chat side).
+    if not has_image and not has_quote_id and not explicit_dims:
+        return ToolResult(
+            tool="sketch_to_drawing", success=False,
+            error=(
+                "sketch_to_drawing: text-only with no dimensions. Use "
+                "render_shop_drawing with explicit dims, or pass an "
+                "image path so the tool can extract measurements."
+            ),
+        )
+
     try:
         from app.services.vision.drawing_service import classify_input, render_measurement_diagram
         from app.services.vision.bench_renderer import (
@@ -2439,14 +3140,11 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
         logger.info(f"sketch_to_drawing: classified as '{item_type}' (confidence={classification.get('confidence','?')}) from input")
 
         if quote_id:
-            # Generate from quote data — quotes are always bench/seating
-            quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
-            if not os.path.exists(quote_path):
+            # PHASE 2 · F5.2 — shared canonical-first resolver
+            from app.services.quote_service import resolve_quote
+            quote = resolve_quote(quote_id)
+            if not quote:
                 return ToolResult(tool="sketch_to_drawing", success=False, error=f"Quote {quote_id} not found")
-
-            import json as _json
-            with open(quote_path) as f:
-                quote = _json.load(f)
 
             quote_num = quote.get("quote_number", quote_id)
             line_items = quote.get("line_items", [])
@@ -2455,9 +3153,10 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
 
             drawings = render_quote_drawings(line_items, quote_num)
             if not output_path:
-                out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
-                os.makedirs(out_dir, exist_ok=True)
-                output_path = os.path.join(out_dir, f"{quote_num}_drawings.pdf")
+                # HOTFIX 4.0 (d) — canonical output path; never ~/empire-repo/.
+                from app.services.drawing.canonical_path import canonical_drawings_dir
+                out_dir = canonical_drawings_dir()
+                output_path = str(out_dir / f"{quote_num}_drawings.pdf")
 
             drawings_to_pdf(drawings, output_path)
             size = os.path.getsize(output_path)
@@ -2474,45 +3173,40 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
 
         # ── Bench items → professional 4-quadrant renderer (bench_renderer.py) ──
         if item_type == "bench":
-            shape = params.get("shape", "straight").lower()
-            lf = float(params.get("lf", params.get("length_ft", 10)))
-            if not name or name == "Drawing":
-                name = f"{shape.title()} Bench"
-
-            width_in = lf * 12
-            # Parse optional dimensions
-            seat_depth = float(params.get("seat_depth", params.get("depth", 18)))
-            seat_height = float(params.get("seat_height", 18))
-            back_height = float(params.get("back_height", 34))
-            if params.get("dimensions"):
-                for k, v in params["dimensions"].items():
-                    try:
-                        val = float(str(v).replace('"', '').replace("'", '').strip())
-                        if "depth" in k.lower() or "seat_d" in k.lower():
-                            seat_depth = val
-                        elif "seat_h" in k.lower():
-                            seat_height = val
-                        elif "back" in k.lower():
-                            back_height = val
-                        elif "width" in k.lower() or "length" in k.lower():
-                            width_in = val
-                    except (ValueError, TypeError):
-                        pass
-
-            # Always use bench_renderer.py — produces 4-quadrant professional layout
-            # (Plan View + Isometric + Front Elevation + Title Block, 1200x850)
+            from app.services.drawing.bench_quote_bridge import resolve_sketch_bench
             from app.services.vision.bench_renderer import (
                 render_straight, render_l_shape, render_u_shape,
             )
-            quote_num = params.get("quote_num", "")
-            cushion_width = float(params.get("cushion_width", 24))
-            panel_style = params.get("panel_style", "vertical_channels")
-            channel_count = int(params.get("channel_count", 6))
-            client = params.get("client", "")
-            project = params.get("project", "")
 
-            style_kw = dict(cushion_width=cushion_width, panel_style=panel_style,
-                            channel_count=channel_count, client=client, project=project)
+            # One policy with POST /drawings/bench: inches-first widths,
+            # quote BH wins, omitted BH is 18" (not the retired 34"),
+            # explicit flat is not rewritten to channels.
+            resolved = resolve_sketch_bench(params)
+            shape = resolved["shape"]
+            lf = float(params.get("lf", params.get("length_ft", resolved["width_in"] / 12.0)))
+            if not name or name == "Drawing":
+                name = f"{shape.title()} Bench"
+
+            style_kw = dict(
+                cushion_width=resolved["cushion_width"],
+                panel_style=resolved["panel_style"],
+                channel_count=resolved["channel_count"],
+                has_back=resolved["has_back"],
+                business_unit=resolved["business_unit"],
+                product_type=resolved["product_type"],
+                category_chip=resolved["category_chip"],
+                chrome=resolved["chrome"],
+                assumptions=resolved["assumptions"],
+                back_height_assumed=resolved["back_height_assumed"],
+                length_unit="in",
+                client=resolved["client"],
+                project=resolved["project"],
+            )
+            quote_num = resolved["quote_num"]
+            width_in = resolved["width_in"]
+            seat_depth = resolved["seat_depth"]
+            seat_height = resolved["seat_height"]
+            back_height = resolved["back_height"]
 
             if "u" in shape:
                 mult = int(params.get("multiplier", 1))
@@ -2530,10 +3224,10 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
             logger.info(f"sketch_to_drawing: bench '{shape}' rendered via bench_renderer.py (4-quadrant, 1200x850)")
 
             if not output_path:
-                out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
-                os.makedirs(out_dir, exist_ok=True)
-                import uuid as _uuid
-                output_path = os.path.join(out_dir, f"drawing_{_uuid.uuid4().hex[:8]}.pdf")
+                # HOTFIX 4.0 (d) — canonical output path.
+                from app.services.drawing.canonical_path import canonical_drawings_dir
+                out_dir = canonical_drawings_dir()
+                output_path = str(out_dir / f"drawing_{_uuid.uuid4().hex[:8]}.pdf")
 
             drawings_to_pdf([{"name": name, "svg": svg, "lf": lf}], output_path)
             size = os.path.getsize(output_path)
@@ -2585,10 +3279,10 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
         )
 
         if not output_path:
-            out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
-            os.makedirs(out_dir, exist_ok=True)
-            import uuid as _uuid
-            output_path = os.path.join(out_dir, f"drawing_{_uuid.uuid4().hex[:8]}.pdf")
+            # HOTFIX 4.0 (d) — canonical output path; never ~/empire-repo/.
+            from app.services.drawing.canonical_path import canonical_drawings_dir
+            out_dir = canonical_drawings_dir()
+            output_path = str(out_dir / f"drawing_{_uuid.uuid4().hex[:8]}.pdf")
 
         drawings_to_pdf([{"name": name, "svg": svg, "lf": 0}], output_path)
         size = os.path.getsize(output_path)
@@ -2907,6 +3601,176 @@ def _understand_image(params: dict, desk: Optional[str] = None) -> ToolResult:
             "latency_ms": latency_ms,
             "response_id": response_id,
             "fallback_used": fallback_used,
+        },
+    )
+
+
+# ── D44 · JOB IMAGE TOOLS ──────────────────────────────────────────────
+# MAX can list and describe images that landed in job_documents via any of
+# the five channels. The list tool queries the DB (not the filesystem) so it
+# surfaces metadata — source_channel, route_to, item_key — that the existing
+# photo list endpoint doesn't know about. The describe tool re-validates the
+# file via the D43 decode-verify guard before handing bytes to vision, so
+# an image that fails validation isn't returned as if it were fine.
+
+@tool("list_job_images")
+def _list_job_images(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """List images stored for a job, a quote, or the unassigned bucket.
+
+    Exactly one of job_id, quote_id, or unassigned must be set.
+    Returns up to 50 rows ordered by created_at DESC.
+    """
+    from app.services.job_image_store import list_job_documents
+    job_id = (params.get("job_id") or "").strip() or None
+    quote_id = (params.get("quote_id") or "").strip() or None
+    unassigned = bool(params.get("unassigned", False))
+    limit = int(params.get("limit", 50) or 50)
+    if limit < 1 or limit > 200:
+        limit = 50
+
+    chosen = sum(1 for x in (job_id, quote_id, unassigned) if x)
+    if chosen != 1:
+        return ToolResult(
+            tool="list_job_images",
+            success=False,
+            error="Pass exactly one of job_id, quote_id, or unassigned=true.",
+        )
+
+    try:
+        rows = list_job_documents(
+            job_id=job_id, quote_id=quote_id, unassigned=unassigned, limit=limit,
+        )
+    except ValueError as exc:
+        return ToolResult(tool="list_job_images", success=False, error=str(exc))
+
+    return ToolResult(
+        tool="list_job_images",
+        success=True,
+        result={
+            "count": len(rows),
+            "filter": {
+                "job_id": job_id, "quote_id": quote_id, "unassigned": unassigned,
+            },
+            "images": [
+                {
+                    "id": r["id"],
+                    "filename": r["filename"],
+                    "url": r["url"],
+                    "job_id": r["job_id"],
+                    "quote_id": r["quote_id"],
+                    "document_type": r["document_type"],
+                    "item_key": r["item_key"],
+                    "route_to": r["route_to"],
+                    "source_channel": r["source_channel"],
+                    "revision": r["revision"],
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ],
+        },
+    )
+
+
+@tool("describe_job_image")
+def _describe_job_image(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Read a stored job image, re-validate it, and describe it via vision.
+
+    document_id is the job_documents.id from list_job_images. The file is
+    re-validated through the D43 decode-verify guard; an image that fails
+    validation is returned as an error rather than a description.
+    """
+    from app.services.job_image_store import (
+        get_job_document,
+        read_and_validate_job_image,
+        resolve_document_path,
+    )
+    document_id = (params.get("document_id") or "").strip()
+    if not document_id:
+        return ToolResult(
+            tool="describe_job_image",
+            success=False,
+            error="document_id is required (the job_documents.id from list_job_images).",
+        )
+
+    row = get_job_document(document_id)
+    if not row:
+        return ToolResult(
+            tool="describe_job_image",
+            success=False,
+            error=f"document_id {document_id!r} not found in job_documents",
+        )
+
+    path = resolve_document_path(row)
+    try:
+        _ = read_and_validate_job_image(row)
+    except FileNotFoundError as exc:
+        return ToolResult(
+            tool="describe_job_image",
+            success=False,
+            error=f"file missing on disk: {exc}",
+        )
+    except ValueError as exc:
+        return ToolResult(
+            tool="describe_job_image",
+            success=False,
+            error=f"image failed re-validation: {exc}",
+        )
+
+    # D44 routing fix — describe_job_image routes through MiniMax mmx_vision
+    # (same path D43 proved end-to-end on /api/v1/vision/measure, real PNG
+    # in → structured description out) rather than xAI Grok → OpenAI. MAX
+    # already has MAX_DISABLE_XAI=true in the systemd unit, so the xAI
+    # branch is dead in production. _understand_image calls xAI first and
+    # then OpenAI (unconfigured), so it 403s. mmx vision describe runs as
+    # a subprocess and is the live working path.
+    #
+    # Call minimax_understand_image directly (not via the @tool wrapper)
+    # so we can surface the full runtime envelope — provider, model,
+    # transport, tool — instead of the inner `data` slice that the tool
+    # wrapper forwards. The wrapper's async helper does the same dance.
+    from app.services.max.minimax_tools import (
+        minimax_understand_image as _mmx_understand,
+    )
+    import asyncio as _asyncio
+    _loop = _asyncio.new_event_loop()
+    try:
+        mmx_result = _loop.run_until_complete(
+            _mmx_understand(image=str(path), prompt=(
+                "Describe this image in detail. Focus on what the image "
+                "shows: objects, materials, dimensions visible in the frame, "
+                "and any text or measurements. Be precise and observant."
+            ))
+        )
+    finally:
+        _loop.close()
+
+    if not mmx_result.get("success"):
+        return ToolResult(
+            tool="describe_job_image",
+            success=False,
+            error=mmx_result.get("error", "mmx vision failed"),
+            result={"document_id": document_id, "path": str(path)},
+        )
+
+    mmx_data = mmx_result.get("data") or {}
+    return ToolResult(
+        tool="describe_job_image",
+        success=True,
+        result={
+            "document_id": document_id,
+            "filename": row.get("filename"),
+            "source_channel": row.get("source_channel"),
+            "job_id": row.get("job_id"),
+            "quote_id": row.get("quote_id"),
+            "path": str(path),
+            "summary": mmx_data.get("summary"),
+            "notable_details": mmx_data.get("notable_details"),
+            "confidence": mmx_data.get("confidence"),
+            "provider": mmx_result.get("provider"),
+            "model": mmx_result.get("model"),
+            "transport": mmx_data.get("transport"),
+            "tool": mmx_data.get("tool"),
+            "full_response": mmx_data.get("full_response"),
         },
     )
 
@@ -3373,11 +4237,23 @@ async def _run_atlas_background(task_id: str, title: str, params: dict):
             priority=params.get("priority", "normal"),
             source="atlas_async",
         )
+        # H76 STEP 3a: deliverable gate runs AFTER the desk returns and BEFORE
+        # the atlas_tasks row is written. A task that completed without a real
+        # artifact is downgraded to FAILED with a reason.
+        # The desk_manager already enforced the gate for the `tasks` table
+        # write; we re-run here on the in-process DeskTask to keep the
+        # atlas_tasks row consistent.
+        _enforce_deliverable_gate(task, getattr(task, "desk_id", None))
         state = task.state.value if hasattr(task.state, "value") else str(task.state)
         _log_async_task(task_id, title, state, result=task.result)
 
-        # Notify founder on completion/failure
-        _notify = f"Atlas task #{task_id} {state}: {title}"
+        # H76 STEP 3b: notifier reads the deliverable-gate verdict, NOT just
+        # task.state. A "completed" message must be backed by an artifact; a
+        # "failed" message carries the gate's reason.
+        if state == "completed":
+            _notify = f"Atlas task #{task_id} COMPLETED: {title}"
+        else:
+            _notify = f"Atlas task #{task_id} FAILED: {title}"
         if task.result:
             _notify += f"\n{str(task.result)[:200]}"
         try:
@@ -3397,6 +4273,89 @@ async def _run_atlas_background(task_id: str, title: str, params: dict):
                 await telegram_bot.send_message(f"Atlas task #{task_id} FAILED: {str(e)[:150]}")
         except Exception:
             pass
+
+
+def _enforce_deliverable_gate(task: "DeskTask", desk_id: str | None) -> None:
+    """H76 deliverable gate — mutates `task` in place.
+
+    A task that reached state=COMPLETED without producing an artifact is
+    downgraded to state=FAILED with a reason that names the gate that fired.
+    The gate is read by `_log_async_task` (writes the atlas_tasks row) and by
+    the Telegram notifier (so the founder sees the truthful state).
+
+    Rules (per founder ruling 2026-08-26, 🛑 1):
+
+    C2 (chat desks — clients, sales, support, finance, market, contractors,
+        innovation, marketing): non-empty result AND result does not start
+        with "No available provider could satisfy".
+
+    G2 (codeforge): in addition to C2, when task.result contains a
+        "Created {N} file(s): {paths}" or "Edited {path}" marker, every
+        named path must exist on disk. When no marker is present, a
+        codeforge task is FAILED unless `task.actions` records at least
+        one successful tool action (file_read, scaffold, file_edit, test,
+        git_ops). This catches the D35 §7 fabricated-completion pattern
+        where `ai_execute_task` returned text without any tool call.
+    """
+    if task.state.value != "completed":
+        return
+    result = (task.result or "").strip()
+    # ── C2 ────────────────────────────────────────────────────────────
+    if not result:
+        task.state = type(task.state)("failed")
+        task.result = "FAILED: task produced no result (deliverable gate C2: empty)"
+        return
+    if result.startswith("No available provider could satisfy"):
+        task.state = type(task.state)("failed")
+        task.result = (
+            "FAILED: no AI provider could satisfy this request "
+            "(deliverable gate C2: provider unavailable)"
+        )
+        return
+    # ── G2 (codeforge only) ────────────────────────────────────────────
+    if desk_id == "codeforge":
+        import os
+        import re
+        edited_match = re.search(r"^Edited\s+(.+)$", result, re.MULTILINE)
+        created_match = re.search(
+            r"^Created\s+\d+\s+file\(s\):\s*(.+)$", result, re.MULTILINE
+        )
+        if edited_match:
+            target = edited_match.group(1).strip()
+            if not os.path.exists(target):
+                task.state = type(task.state)("failed")
+                task.result = (
+                    f"FAILED: codeforge claimed 'Edited {target}' "
+                    f"but the file does not exist on disk "
+                    f"(deliverable gate G2: file existence)"
+                )
+                return
+        elif created_match:
+            paths = [p.strip() for p in created_match.group(1).split(",")]
+            missing = [p for p in paths if not os.path.exists(p)]
+            if missing:
+                task.state = type(task.state)("failed")
+                task.result = (
+                    f"FAILED: codeforge claimed to create {len(paths)} file(s) "
+                    f"but {len(missing)} do not exist on disk: {missing} "
+                    f"(deliverable gate G2: file existence)"
+                )
+                return
+        else:
+            tool_actions = [
+                a for a in task.actions
+                if a.success and a.action in (
+                    "file_read", "scaffold", "file_edit", "test", "git_ops",
+                )
+            ]
+            if not tool_actions:
+                task.state = type(task.state)("failed")
+                task.result = (
+                    "FAILED: codeforge task produced no 'Created/Edited' marker "
+                    "and no successful tool action "
+                    "(deliverable gate G2: no tool action)"
+                )
+                return
 
 
 def _log_async_task(task_id: str, title: str, status: str, result=None, error=None):
@@ -3706,6 +4665,12 @@ BLOCKED_PATTERNS = [
 def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Execute a shell command. Founder channels bypass allowlist.
     Blocked patterns (rm -rf, sensors-detect, etc.) always enforced for safety.
+
+    H81 Phase 2 — every invocation is now logged to the audit DB
+    (success AND failure) with channel and founder columns populated
+    when available. Pre-H81 shell_execute never called log_execution,
+    so a 7928-row audit DB contained zero shell_execute rows. After
+    this change every invocation writes one row.
     """
     import subprocess
 
@@ -3713,31 +4678,63 @@ def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not command:
         return ToolResult(tool="shell_execute", success=False, error="No command provided")
 
+    founder = params.get("_founder", False)
+    channel = params.get("_channel")
+
     # Safety checks — block dangerous patterns (always enforced, even for founder)
     for blocked in BLOCKED_PATTERNS:
         if blocked in command:
-            return ToolResult(
+            tr = ToolResult(
                 tool="shell_execute", success=False,
                 error=f"Blocked command pattern: {blocked}",
             )
+            log_execution(
+                "shell_execute",
+                {"command": command},
+                f"blocked:{blocked}",
+                access_level=2,
+                desk=desk,
+                success=False,
+                channel=channel,
+                founder=founder,
+            )
+            return tr
 
     # Founder bypasses allowlist; non-founder must match allowed prefixes
-    founder = params.get("_founder", False)
     if not founder:
         allowed = any(command.startswith(cmd) for cmd in ALLOWED_COMMANDS)
         if not allowed:
-            return ToolResult(
+            tr = ToolResult(
                 tool="shell_execute", success=False,
                 error=f"Command not in allowlist. Allowed: {', '.join(ALLOWED_COMMANDS[:10])}...",
             )
+            log_execution(
+                "shell_execute",
+                {"command": command},
+                "not_in_allowlist",
+                access_level=2,
+                desk=desk,
+                success=False,
+                channel=channel,
+                founder=founder,
+            )
+            return tr
 
-    # Execute with timeout
+    # Execute with timeout. cwd resolves to canonical repo
+    # (H57 Phase 3) — NOT to the stale fork ~/empire-repo/.
+    try:
+        from app.services.drawing.canonical_path import (
+            resolve_canonical_root, CanonicalRootError,
+        )
+        canonical_cwd = resolve_canonical_root()
+    except CanonicalRootError:
+        canonical_cwd = None  # falls back to caller-controlled cwd
     try:
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True,
-            timeout=30, cwd=os.path.expanduser("~/empire-repo"),
+            timeout=30, cwd=canonical_cwd,
         )
-        return ToolResult(
+        tr = ToolResult(
             tool="shell_execute", success=True,
             result={
                 "stdout": result.stdout[:2000],
@@ -3745,10 +4742,43 @@ def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "returncode": result.returncode,
             },
         )
+        log_execution(
+            "shell_execute",
+            {"command": command},
+            {"returncode": result.returncode, "stdout_len": len(result.stdout), "stderr_len": len(result.stderr)},
+            access_level=2,
+            desk=desk,
+            success=True,
+            channel=params.get("_channel"),
+            founder=founder,
+        )
+        return tr
     except subprocess.TimeoutExpired:
-        return ToolResult(tool="shell_execute", success=False, error="Command timed out (30s limit)")
+        tr = ToolResult(tool="shell_execute", success=False, error="Command timed out (30s limit)")
+        log_execution(
+            "shell_execute",
+            {"command": command},
+            "timeout",
+            access_level=2,
+            desk=desk,
+            success=False,
+            channel=params.get("_channel"),
+            founder=founder,
+        )
+        return tr
     except Exception as e:
-        return ToolResult(tool="shell_execute", success=False, error=str(e))
+        tr = ToolResult(tool="shell_execute", success=False, error=str(e))
+        log_execution(
+            "shell_execute",
+            {"command": command},
+            str(e),
+            access_level=2,
+            desk=desk,
+            success=False,
+            channel=params.get("_channel"),
+            founder=founder,
+        )
+        return tr
 
 
 # ── OPENCLAW DISPATCH ──────────────────────────────────────────────
@@ -3890,7 +4920,8 @@ def _reset_max_state(params: dict, desk: Optional[str] = None) -> ToolResult:
     # 1. Reload .env
     try:
         from dotenv import load_dotenv
-        load_dotenv(os.path.expanduser("~/empire-repo/backend/.env"), override=True)
+        # DISABLED 2026-08-30 — pulled sk_live from stale tree, overrode systemd env
+        # load_dotenv(os.path.expanduser("~/empire-repo/backend/.env"), override=True)
         founder_email = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
         results.append(f"Environment reloaded — FOUNDER_EMAIL: {founder_email}")
     except Exception as e:
@@ -3925,9 +4956,54 @@ def _reset_max_state(params: dict, desk: Optional[str] = None) -> ToolResult:
     return ToolResult(tool="reset_max_state", success=True, result={"actions": results})
 
 
+@tool("deposit_pay_link")
+def _deposit_pay_link(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Workroom/WoodCraft quote → deposit invoice → Stripe Checkout link.
+
+    Copies the client from the quote. A second call reuses the open link.
+    Does not mark the invoice paid.
+    """
+    quote_id = (params.get("quote_id") or "").strip()
+    if not quote_id:
+        return ToolResult(tool="deposit_pay_link", success=False, error="quote_id is required")
+    try:
+        from fastapi import HTTPException
+        from app.routers.finance import create_quote_deposit_pay_link
+        result = create_quote_deposit_pay_link(quote_id, percent=params.get("percent"))
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return ToolResult(tool="deposit_pay_link", success=False, error=detail)
+    except Exception as exc:
+        return ToolResult(tool="deposit_pay_link", success=False, error=str(exc))
+
+    pay = result.get("pay_link") or {}
+    customer = result.get("customer") or {}
+    invoice = result.get("invoice") or {}
+    return ToolResult(tool="deposit_pay_link", success=True, result={
+        "quote_id": quote_id,
+        "business": result.get("business"),
+        "invoice_id": invoice.get("id"),
+        "invoice_number": invoice.get("invoice_number"),
+        "invoice_created": result.get("invoice_created"),
+        "amount": pay.get("amount"),
+        "checkout_url": pay.get("checkout_url"),
+        "payment_status": result.get("payment_status"),
+        "reused": pay.get("reused"),
+        "stripe_configured": pay.get("stripe_configured"),
+        "error": pay.get("error"),
+        "customer_name": customer.get("name"),
+        "customer_email": customer.get("email"),
+        "customer_phone": customer.get("phone"),
+        "customer_address": customer.get("address"),
+        "copied_from_quote": True,
+        "paid": result.get("payment_status") == "paid",
+        "return_host_note": result.get("return_host_note"),
+    })
+
+
 # ── TOOL DOCUMENTATION (for system prompt) ─────────────────────────
 
-TOOLS_DOC = """## Available Tools (42 total)
+TOOLS_DOC = """## Available Tools (43 total)
 You have access to real tools that query live data. Use them instead of making up information.
 To call a tool, include a tool block in your response:
 
@@ -3957,10 +5033,12 @@ If a tool call fails with "Unknown tool", check the name against this list.
   `{"tool": "search_conversations", "query": "keyword or phrase", "channel": "telegram|web|cc"}`
 
 ### Action Tools
+- **deposit_pay_link** — Workroom or WoodCraft quote only. Creates (or reuses) a deposit invoice on the finance router and a Stripe Checkout link on the payments router. Client name/email/phone/address are copied from the quote. A second call returns the same invoice and the same open link. payment_status stays `link_ready` until Stripe reports paid — do not tell the founder the deposit is collected when status is not `paid`.
+  `{"tool": "deposit_pay_link", "quote_id": "abc123"}`
 - **create_quick_quote** — DEPRECATED. Legacy JSON store (`/home/rg/empire-data/quotes/*.json`). Does NOT use the pricing engine. Returns `store: "json_legacy"`, `engine: "qis"`, `deprecation_notice`. Will be retired in sprint 1d. **Do NOT pick this tool for new quotes — use `create_engine_quote` instead.**
 - **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.**
-  `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`
-  Categories (from PRICING_SPECS in `backend/app/data/product_catalog.py`): `drapery`, `roman_shade`, `valance`, `cornice`, `fabric_only`, `hardware_rod_1_1_8`, `hardware_ripplefold_track`, `hardware_rings`, `hardware_brackets`, `labor`, `pillow`, `cover`. PricingInputError → HTTP 400 (never silent fallback for catalog items).
+  `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4, "packs": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`
+  Categories (from PRICING_SPECS in `backend/app/data/product_catalog.py`): `drapery`, `roman_shade`, `valance`, `cornice`, `fabric_only`, `hardware_rod_1_1_8`, `hardware_ripplefold_track`, `hardware_rings`, `hardware_brackets`, `labor`, `pillow`, `cover`. NEW (D38 / H77): `com_fabric` (the one permitted $0 line — pass `customer_supplied: true` with `fabric_name` and `quantity`), `hardware_rod_set` ($325 flat for 4-8 ft, founder supplies `override_price` beyond), `hardware_ripplefold_set` ($250 flat for 4-8 ft, founder supplies `override_price` beyond), `installation` (pass `treatment: roman_shade` $95/each or `treatment: drapery` $145 for first 8 ft), `manual_line` (pass-through: `description` + `unit_price` + `quantity`). PricingInputError → HTTP 400 (never silent fallback for catalog items).
 
 ### Approval Gate Tools (Sprint 1c)
 State machine: `draft → founder_review → sent → accepted → in_production → completed` (plus `cancelled` from any non-terminal). Once `sent`, prices are immutable.
@@ -4025,11 +5103,12 @@ State machine: `draft → founder_review → sent → accepted → in_production
   Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`
   IMPORTANT: Always use this tool to convert SVG drawings to PDF. Do NOT write conversion scripts.
 - **sketch_to_drawing** — Generate professional architectural drawings for ANY item type. Auto-classifies input and routes to the correct renderer. Returns a PDF file path.
-  **Bench drawings** produce a 4-QUADRANT layout: Plan View + Isometric View + Front Elevation + Empire Workroom Title Block.
+  **Bench drawings** produce a 4-QUADRANT layout: Plan View + Isometric View + Front Elevation + title block. Workroom letterhead is the default; pass `"business_unit": "woodcraft"` for WoodCraft chrome and a `WC · …` category chip.
+  `lf` is linear feet. `width` / `width_in` are inches (a 36" width stays 36"). Omitted `back_height` is 18" and the sheet marks it assumed — a number you pass wins (the old silent 34" default is retired). `panel_style: "flat"` stays flat; `has_back: false` draws no back.
   Bench (straight): `{"tool": "sketch_to_drawing", "shape": "straight", "lf": 10, "name": "Main Dining Bench", "seat_depth": 18, "seat_height": 18, "back_height": 34}`
   Bench (L-shape): `{"tool": "sketch_to_drawing", "shape": "l_shape", "lf": 12, "name": "Corner Booth"}`
   Bench (U-shape): `{"tool": "sketch_to_drawing", "shape": "u_shape", "lf": 15, "name": "U Booth", "multiplier": 2}`
-  **Style params** (optional, owner decides): `"cushion_width": 24` (default 24"), `"panel_style": "vertical_channels"` (or horizontal_channels/tufted/button_tufted/flat), `"channel_count": 6`
+  **Style params** (optional, owner decides): `"cushion_width": 24` (default 24"), `"panel_style": "vertical_channels"` (or horizontal_channels/tufted/button_tufted/flat), `"channel_count": 6`, `"has_back": true`
   **Client/Project**: `"client": "John Smith", "project": "Restaurant Renovation"`
   From quote: `{"tool": "sketch_to_drawing", "quote_id": "30ad17d4"}`
   Window: `{"tool": "sketch_to_drawing", "name": "Office Windows", "item_type": "window", "dimensions": {"Width": "72\"", "Height": "48\"", "Drop": "84\""}}`
@@ -4087,7 +5166,7 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
   ⚠️ ONLY use this tool when the founder EXPLICITLY asks for a "presentation", "report", "briefing", or "research document". Do NOT auto-generate presentations for casual conversation topics, analogies, or keywords mentioned in passing. If unsure, ask: "Would you like me to create a presentation about X?"
 
 ### Shell Execution
-- **shell_execute** — Execute a safe, allowlisted shell command. Blocked patterns are rejected.
+- **shell_execute** — ⚠️ **PIN-GATED. Founder PIN required via portal approval flow.** As of 2026-08-20 there is no working unlock surface on this lane (H62); calls without a PIN return an honest refusal, not a silent fallback. Per DOCTRINE rule 31, PIN approval never travels through chat or email — the model must NOT ask for a PIN in chat. **For inspect-only status / freshness / commit-divergence questions, use `empire_runtime_truth_check` instead — it does not require a PIN and returns the same kind of information.** When reachable, executes a safe, allowlisted shell command. Blocked patterns are rejected.
   `{"tool": "shell_execute", "command": "git status"}`
   `{"tool": "shell_execute", "command": "df -h"}`
   Allowed commands: ls, cat, head, tail, wc, echo, sort, uniq, tee, touch, mkdir, cp, mv, df, du, free, ps, uptime, date, whoami, hostname, pwd, find, grep, python3, sqlite3, git (all operations), curl, wget, pip, pip3, npm, npx, sudo systemctl, systemctl (status/restart/start/stop/is-active), journalctl, ollama list/ps, docker ps/images, chmod 600.
@@ -4106,6 +5185,10 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
 - **reset_max_state** — Reset MAX: clear caches, reload .env, verify OpenClaw. FOUNDER ONLY.
   `{"tool": "reset_max_state"}`
   Triggers: "MAX reset", "reset yourself", "clear your cache", "reload config", "refresh yourself", "start fresh"
+
+### Payment Phase 1 Tools (Sprint 1d)
+- **create_invoice_from_quote** — Explicit quote→invoice action. Calls `POST /api/v1/quotes-v2/{id}/to-invoice`. The endpoint is GATED to quote.status ∈ {sent, accepted, in_production, completed}. A draft or founder_review quote returns HTTP 409 (use /submit-for-review + /approve first). Returns honest payload: invoice snapshot from canonical invoices table, store="quotes_v2", engine="lifecycle_v1". Use when the founder says "create an invoice from this quote", "bill the Willard", "invoice the bench + panel".
+  `{"tool": "create_invoice_from_quote", "quote_id": "4d9b1d03"}`
 
 ### TOOL DISCIPLINE — READ BEFORE EVERY RESPONSE
 - NEVER fabricate data. All statistics, charts, and numbers must come from real tool results.
@@ -4175,9 +5258,20 @@ def _file_read(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not path:
         return ToolResult(tool="file_read", success=False, error="path is required")
 
-    # Expand relative paths to empire-repo
-    if not os.path.isabs(path):
-        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+    # Resolve relative paths against the canonical repo (H57 Phase 3).
+    # The previous default of `~/empire-repo/` was the stale-fork leak —
+    # MAX was reading the wrong tree without knowing it.
+    from app.services.drawing.canonical_path import (
+        resolve_path_under_canonical_root,
+        CanonicalRootError,
+    )
+    try:
+        if not os.path.isabs(path):
+            # Path is relative — resolve under canonical repo.
+            path = resolve_path_under_canonical_root(path)
+    except CanonicalRootError as exc:
+        log_execution("file_read", params, str(exc), desk=desk, success=False)
+        return ToolResult(tool="file_read", success=False, error=str(exc))
 
     ok, reason = validate_path(path)
     if not ok:
@@ -4228,8 +5322,19 @@ def _file_write(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not path:
         return ToolResult(tool="file_write", success=False, error="path is required")
 
-    if not os.path.isabs(path):
-        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+    # Resolve relative paths against the canonical repo (H57 Phase 3).
+    # The previous default of `~/empire-repo/` was the stale-fork leak —
+    # writes landed in the wrong tree without the founder knowing.
+    from app.services.drawing.canonical_path import (
+        resolve_path_under_canonical_root,
+        CanonicalRootError,
+    )
+    try:
+        if not os.path.isabs(path):
+            path = resolve_path_under_canonical_root(path)
+    except CanonicalRootError as exc:
+        log_execution("file_write", params, str(exc), desk=desk, success=False)
+        return ToolResult(tool="file_write", success=False, error=str(exc))
 
     ok, reason = validate_path(path)
     if not ok:
@@ -4495,15 +5600,28 @@ def _env_get(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("env_set")
 def _env_set(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Add or update an env variable in .env file. Level 2 — logged."""
+    """Add or update an env variable in .env file. Level 2 — logged.
+
+    H81 Phase 2 — failures now log too. Pre-H81 only the success
+    branch wrote a row; the except at the end returned the error
+    silently with no audit footprint. After this change every
+    invocation writes one row, success or failure, with channel
+    and founder columns populated when available.
+    """
     env_path = os.path.expanduser("~/empire-repo/backend/.env")
     var_name = params.get("name", "").strip()
     var_value = params.get("value", "").strip()
+    channel = params.get("_channel")
+    founder = params.get("_founder", False)
 
     if not var_name:
-        return ToolResult(tool="env_set", success=False, error="Variable name is required")
+        tr = ToolResult(tool="env_set", success=False, error="Variable name is required")
+        log_execution("env_set", {"name": var_name}, "missing_name", access_level=2, desk=desk, success=False, channel=channel, founder=founder)
+        return tr
     if not var_value:
-        return ToolResult(tool="env_set", success=False, error="Variable value is required")
+        tr = ToolResult(tool="env_set", success=False, error="Variable value is required")
+        log_execution("env_set", {"name": var_name}, "missing_value", access_level=2, desk=desk, success=False, channel=channel, founder=founder)
+        return tr
 
     try:
         lines = []
@@ -4525,11 +5643,12 @@ def _env_set(params: dict, desk: Optional[str] = None) -> ToolResult:
             f.writelines(lines)
 
         os.chmod(env_path, 0o600)
-        log_execution("env_set", {"name": var_name}, "set", access_level=2, desk=desk, success=True)
+        log_execution("env_set", {"name": var_name}, "set", access_level=2, desk=desk, success=True, channel=channel, founder=founder)
         return ToolResult(tool="env_set", success=True, result={
             "name": var_name, "action": "replaced" if replaced else "added",
         })
     except Exception as e:
+        log_execution("env_set", {"name": var_name}, str(e), access_level=2, desk=desk, success=False, channel=channel, founder=founder)
         return ToolResult(tool="env_set", success=False, error=str(e))
 
 
@@ -4545,16 +5664,23 @@ def _db_query(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not query.upper().startswith("SELECT"):
         return ToolResult(tool="db_query", success=False, error="Only SELECT queries are allowed")
 
-    # Block dangerous patterns
-    dangerous = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE", "ATTACH", "DETACH"]
-    query_upper = query.upper()
+    # Block dangerous patterns. Word-boundary match. The old substring scan
+    # blocked "created_at" on CREATE and "updated_at" on UPDATE, making the
+    # two most common columns in the schema unqueryable.
+    import re as _re
+    dangerous = ["DROP","DELETE","INSERT","UPDATE","ALTER","CREATE","ATTACH","DETACH",
+                 "PRAGMA","VACUUM","REINDEX","REPLACE"]
     for d in dangerous:
-        if d in query_upper:
-            return ToolResult(tool="db_query", success=False, error=f"Query contains blocked keyword: {d}")
+        if _re.search(rf"\b{d}\b", query, flags=_re.IGNORECASE):
+            return ToolResult(tool="db_query", success=False,
+                              error=f"Query contains blocked keyword: {d}")
 
     db_path = str(dp.db_path())
     try:
-        conn = sqlite3.connect(db_path, timeout=10)
+        # Read-only at the connection level. SQLite refuses any write on a
+        # mode=ro URI regardless of what the SQL says — a mechanism, not a
+        # string check. The keyword scan above is now belt-and-braces.
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
         conn.row_factory = sqlite3.Row
         cursor = conn.execute(query)
         rows = cursor.fetchall()
@@ -4573,7 +5699,21 @@ def _db_query(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("git_ops")
 def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Run git operations in ~/empire-repo."""
+    """Run git operations in the canonical repo.
+
+    H52 Phase 2 fix: cwd was hardcoded to ~/empire-repo (the stale fork
+    per H57 Phase 3). It now goes through the canonical-root resolver,
+    so MAX's git context is about the repo MAX is actually reasoning
+    about. Logged under H61 — same "config on disk correct, config in
+    force wrong" class as the systemd unit.
+
+    Also fixed: the prior return shape was `{output, exit_code}` with
+    success=True even on stdout+stderr == "". A success-with-empty-output
+    is indistinguishable from "ran and produced output". Per dispatch
+    principle C: a tool that runs and produces nothing must self-report
+    so. Added `empty: true` when stdout+stderr is empty on exit 0, and
+    `truncated: true` when output was capped at 3000 chars.
+    """
     start = _time.time()
     raw_command = params.get("command", "")
     args = params.get("args", "")
@@ -4605,7 +5745,26 @@ def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
     else:  # push
         level = 3
 
-    repo = os.path.expanduser("~/empire-repo")
+    # H52 Phase 2 fix — resolve canonical repo, not the stale fork.
+    try:
+        from app.services.drawing.canonical_path import (
+            resolve_canonical_root,
+            CanonicalRootError,
+        )
+        repo = str(resolve_canonical_root())
+    except CanonicalRootError as exc:
+        return ToolResult(
+            tool="git_ops",
+            success=False,
+            error=f"Canonical repo not found: {exc}",
+        )
+    except Exception as exc:
+        return ToolResult(
+            tool="git_ops",
+            success=False,
+            error=f"Could not resolve canonical repo: {exc}",
+        )
+
     cmd_parts = ["git", command]
     if command_args:
         cmd_parts.extend(shlex.split(command_args))
@@ -4621,13 +5780,26 @@ def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
             cmd_parts, cwd=repo,
             capture_output=True, text=True, timeout=30,
         )
-        output = result.stdout + result.stderr
+        raw_output = result.stdout + result.stderr
+        truncated = len(raw_output) > 3000
+        output = raw_output[:3000]
+        is_empty = (output == "")
         duration = int((_time.time() - start) * 1000)
         success = result.returncode == 0
-        log_execution("git_ops", params, {"exit_code": result.returncode}, access_level=level, desk=desk, success=success, duration_ms=duration)
-        return ToolResult(tool="git_ops", success=success, result={
-            "command": full_cmd, "output": output[:3000], "exit_code": result.returncode,
-        })
+        log_execution("git_ops", params, {"exit_code": result.returncode, "empty": is_empty}, access_level=level, desk=desk, success=success, duration_ms=duration)
+        return ToolResult(
+            tool="git_ops",
+            success=success,
+            result={
+                "command": full_cmd,
+                "output": output,
+                "output_byte_length": len(raw_output),
+                "empty": is_empty,
+                "truncated": truncated,
+                "exit_code": result.returncode,
+                "cwd": repo,
+            },
+        )
     except subprocess.TimeoutExpired:
         log_execution("git_ops", params, "timeout", access_level=level, desk=desk, success=False)
         return ToolResult(tool="git_ops", success=False, error="Git command timed out")

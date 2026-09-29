@@ -1,0 +1,15 @@
+EmpireBox canonical root marker.
+
+This file proves the surrounding directory is the ACTIVE canonical
+repo (~/empire-repo-main). Read by canonical_path.resolve_canonical_root()
+to refuse paths that resolve to anywhere else.
+
+The stale fork (~/empire-repo/) MUST NOT have this file. If it ever
+gains one through a botched clone, canonical_path.resolve_canonical_root()
+will misidentify that tree as canonical — this file is the single point
+of truth.
+
+If you find yourself editing this file's content for any reason other
+than updating the token below, stop. The token is rotated only by the
+canonical-repo-eradication dispatch — and the dispatch requires
+freshly generating the file after the stale tree is removed.

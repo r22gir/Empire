@@ -201,6 +201,20 @@ def test_mmx_subprocess_env_does_not_pass_anthropic_base_url(monkeypatch):
     assert "MINIMAX_BASE_URL" not in env
 
 
+def test_vision_cli_prompt_keeps_qis_items_schema():
+    """analyze-items prompt used to be cut at 2000 chars, dropping the items schema tail."""
+    from app.services.max.minimax_tools import vision_cli_prompt
+    from app.services.quote_engine.item_analyzer import ANALYSIS_PROMPT
+
+    prompt = ANALYSIS_PROMPT.format(customer_notes_section="No customer notes provided.")
+    sent = vision_cli_prompt(prompt)
+
+    assert len(prompt) > 2000
+    assert sent == prompt
+    assert '"items"' in sent
+    assert '"questions"' in sent
+
+
 def test_tool_names_registered_in_executor():
     """All MiniMax tools are registered in TOOL_REGISTRY."""
     from app.services.max.tool_executor import TOOL_REGISTRY

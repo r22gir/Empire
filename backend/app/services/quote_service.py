@@ -50,6 +50,192 @@ def _audit_log(conn, entity_type: str, entity_id: str, action: str,
           changed_by, reason))
 
 
+# Categories whose engine `computed.unit_price_used` is the per-unit rate
+# and whose proposed_price is qty × that rate. The quote_line_items.unit_price
+# column must store the per-unit rate; subtotal/final_price store the extension.
+_UNIT_QTY_CATEGORIES = {"manual_line", "pillow", "cover"}
+
+
+def _as_float(value, default=None):
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _computed_dict(row: dict) -> dict:
+    """Parse computed_json whether the row still has the TEXT column or a dict."""
+    raw = row.get("computed_json")
+    if raw is None:
+        raw = row.get("computed")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _line_quantity(li: dict) -> float:
+    """Line quantity the review screen and flat_math check both use.
+
+    Prefer the top-level quantity. Fall back to inputs.quantity so a
+    manual_line priced from nested inputs is not stored as qty 1.
+    """
+    qty = li.get("quantity") if isinstance(li, dict) else None
+    if (qty is None or qty == "") and isinstance(li, dict):
+        inputs = li.get("inputs")
+        if isinstance(inputs, dict):
+            qty = inputs.get("quantity")
+    parsed = _as_float(qty, 1.0)
+    if parsed is None or parsed <= 0:
+        return 1.0
+    return parsed
+
+
+def _coerce_unit_qty_inputs(category, inputs, legacy):
+    """Keep the pricing engine on the per-unit rate × line quantity.
+
+    Quote Review saves echo the DB row. Historically unit_price stored the
+    line total (qty × unit) while computed_json.unit_price_used held the
+    real unit. Feeding that column back into manual_line/pillow/cover
+    doubled the line on the next save. Line quantity also wins over a
+    stale inputs.quantity of 1, which left Amount equal to Rate.
+    """
+    inputs = dict(inputs or {})
+    legacy = legacy or {}
+    cat = str(category or "").lower()
+    if cat not in _UNIT_QTY_CATEGORIES:
+        return inputs
+
+    row_qty = _as_float(legacy.get("quantity"))
+    if row_qty and row_qty > 0:
+        inputs["quantity"] = row_qty
+
+    computed = _computed_dict({**legacy, **inputs})
+    unit_used = _as_float(computed.get("unit_price_used"))
+    qty = _as_float(inputs.get("quantity"), 1.0) or 1.0
+    raw_unit = _as_float(inputs.get("unit_price"))
+    if unit_used is not None and raw_unit is not None and qty > 1:
+        if abs(raw_unit - round(unit_used * qty, 2)) <= 0.02:
+            inputs["unit_price"] = unit_used
+
+    rate = inputs.get("rate")
+    if rate is None:
+        rate = legacy.get("rate")
+    rate_f = _as_float(rate)
+    raw_unit = _as_float(inputs.get("unit_price"))
+    if rate_f is not None and raw_unit is not None and qty > 1:
+        if abs(raw_unit - round(rate_f * qty, 2)) <= 0.02 and abs(raw_unit - rate_f) > 0.02:
+            inputs["unit_price"] = rate_f
+    if inputs.get("unit_price") in (None, "") and rate_f:
+        inputs["unit_price"] = rate_f
+    return inputs
+
+
+def _line_rate_and_amount(row: dict) -> tuple:
+    """Per-unit rate and extended amount for Quote Review + flat_math.
+
+    Contract: amount == round(quantity × rate, 2) within a cent.
+    rate is the unit price (computed_json.unit_price_used when the engine
+    recorded one). amount is the line total.
+
+    Two stored shapes both occur:
+      - Catalog convention: unit_price column holds the line total and
+        unit_price_used holds the unit. Rate must be the unit, amount the
+        existing subtotal (do not double).
+      - Unextended rows: unit_price, subtotal, and the displayed rate are
+        all the unit price while quantity > 1. Amount must become qty × rate.
+    Founder overrides: final_price is the line's contribution to the quote
+    total (HOTFIX 5). For qty 1, rate and amount both equal final_price.
+    """
+    qty = _as_float(row.get("quantity"), 1.0)
+    if qty is None or qty <= 0:
+        qty = 1.0
+
+    if bool(row.get("price_overridden")) and row.get("final_price") is not None:
+        amount = round(float(row.get("final_price")), 2)
+        rate = amount if abs(qty - 1.0) < 1e-9 else round(amount / qty, 2)
+        return rate, amount
+
+    computed = _computed_dict(row)
+    unit_used = _as_float(computed.get("unit_price_used"))
+    unit_price = _as_float(row.get("unit_price"), 0.0)
+    if unit_price is None:
+        unit_price = 0.0
+    subtotal = _as_float(row.get("subtotal"))
+
+    rate = round(unit_used, 2) if unit_used is not None else round(unit_price, 2)
+    extended = round(qty * rate, 2)
+
+    if subtotal is not None and abs(subtotal - extended) <= 0.02:
+        return rate, round(subtotal, 2)
+
+    # Intentional $0 lines (COM, no-charge) stay $0 even when a unit rate
+    # is recorded for the audit trail.
+    if subtotal is not None and abs(subtotal) <= 0.02:
+        final_price = _as_float(row.get("final_price"))
+        if final_price is None or abs(final_price) <= 0.02:
+            return rate, 0.0
+        if abs(final_price - extended) <= 0.02:
+            return rate, round(final_price, 2)
+        if abs(final_price - rate) <= 0.02 and qty > 1:
+            return rate, extended
+        return rate, round(final_price, 2)
+
+    if subtotal is None:
+        return rate, extended
+
+    if abs(subtotal - rate) <= 0.02 and qty > 1:
+        return rate, extended
+
+    amount = round(subtotal, 2)
+    if abs(round(qty * rate, 2) - amount) > 0.02 and qty > 0:
+        rate = round(amount / qty, 2)
+    return rate, amount
+
+
+def _align_flat_financials(quote: dict) -> dict:
+    """When line amounts were extended, keep flat quote totals in step.
+
+    flat_math checks line amount == qty × rate AND subtotal == sum(amounts)
+    AND total == subtotal + tax − discount. Correcting a line without
+    moving the quote totals would just move the failure to the subtotal.
+    Only flat quotes are adjusted; tier quotes keep their stored total.
+    """
+    if not quote or quote.get("pricing_mode") != "flat":
+        return quote
+    items = quote.get("line_items") or []
+    if not items:
+        return quote
+    computed = round(sum(float(i.get("amount") or 0) for i in items), 2)
+    stored = float(quote.get("subtotal") or 0)
+    if abs(computed - stored) <= 0.02:
+        return quote
+    tax_rate = float(quote.get("tax_rate") or 0)
+    discount_amount = float(quote.get("discount_amount") or 0)
+    discount_type = quote.get("discount_type") or "dollar"
+    if discount_type == "percent" and discount_amount > 0:
+        discount = round(computed * (discount_amount / 100.0), 2)
+    else:
+        discount = discount_amount
+    tax_amount = round(computed * tax_rate, 2)
+    total = round(computed + tax_amount - discount, 2)
+    deposit_percent = float(quote.get("deposit_percent") or 0)
+    paid = float(quote.get("deposit_paid") or 0)
+    quote["subtotal"] = computed
+    quote["tax_amount"] = tax_amount
+    quote["total"] = total
+    quote["deposit_required"] = round(total * deposit_percent / 100.0, 2)
+    quote["balance_due"] = round(total - paid, 2)
+    return quote
+
+
 def _price_line_item(category, inputs, business_unit, legacy):
     """Build the pricing columns for a line item.
 
@@ -62,10 +248,15 @@ def _price_line_item(category, inputs, business_unit, legacy):
       - If `category` is NOT in PRICING_SPECS, fall back to manual pricing
         (qty × rate) so existing free-form line items keep working.
 
+    unit_price is the per-unit rate when the engine records unit_price_used.
+    subtotal / proposed_price / final_price stay the extended line total
+    (quantity × rate). Storing the line total in unit_price made Quote
+    Review show Amount == Rate for qty > 1.
+
     Returns a dict ready to merge into the INSERT/UPDATE column list.
     """
     bu = business_unit or "workroom"
-    inputs = inputs or {}
+    inputs = _coerce_unit_qty_inputs(category, inputs, legacy)
     if category and str(category).lower() in PRICING_SPECS:
         # Fail loud — never silently fall back to qty × rate for catalog items.
         # Empty inputs produce a bogus $0.00 from the engine, which is exactly
@@ -80,20 +271,47 @@ def _price_line_item(category, inputs, business_unit, legacy):
         result = price_workroom_line(category, inputs, business_unit=bu)
         # Belt-and-suspenders: if the engine still produced 0 with non-empty
         # inputs (e.g. all-zero measurements), refuse to persist it.
+        # D38 / H77 — the ONE carve-out: com_fabric + customer_supplied=true
+        # is permitted to emit $0.00. The carve-out is keyed on BOTH
+        # conditions; either alone is rejected.
+        # D39 / H77 — the SECOND carve-out: no_charge=true WITH a non-empty
+        # no_charge_reason. Both flags required; either alone is rejected.
+        # Tests at tests/test_d38_pricing_categories_proof.py lock the COM
+        # path; tests/test_d39_*.py lock the no_charge path. Adding a third
+        # permitted zero requires changing this check — the dispatch's
+        # "third cannot appear silently" argument rides on this gate being
+        # the single point of permission.
         if result["proposed_price"] <= 0:
-            raise PricingInputError(
-                f"catalog category '{category}' produced proposed_price=0 "
-                f"with inputs={inputs}"
+            computed = result.get("computed") or {}
+            is_com_zero = (
+                str(category).lower() == "com_fabric"
+                and computed.get("customer_supplied") is True
             )
+            no_charge_reason = (computed.get("no_charge_reason") or "").strip()
+            is_no_charge_zero = (
+                computed.get("no_charge") is True
+                and bool(no_charge_reason)
+            )
+            if not (is_com_zero or is_no_charge_zero):
+                raise PricingInputError(
+                    f"catalog category '{category}' produced proposed_price=0 "
+                    f"with inputs={inputs}"
+                )
         proposed = result["proposed_price"]
+        computed = result.get("computed") or {}
+        unit_used = _as_float(computed.get("unit_price_used"))
+        # Per-unit column when the engine recorded one. Line total stays in
+        # subtotal / proposed_price / final_price so quote totals do not change
+        # for lines that were already extended.
+        unit_price_col = unit_used if unit_used is not None else proposed
         return {
             "subtotal":         proposed,
-            "unit_price":       proposed,
+            "unit_price":       unit_price_col,
             "proposed_price":   proposed,
             "final_price":      result["final_price"],
             "price_overridden": 0,
             "business_unit":    result["business_unit"],
-            "computed_json":    json.dumps(result["computed"], default=str),
+            "computed_json":    json.dumps(computed, default=str),
         }
 
     # Legacy manual path — only for non-catalog items
@@ -286,13 +504,26 @@ def _item_to_dict(row) -> dict:
         else:
             d[key] = None
         del d[jf]
-    # Frontend (QuoteReviewScreen) reads item.rate / item.amount; DB stores
-    # unit_price / subtotal. Emit aliases so the review editor and verification
-    # panel show real values (symmetric with the write side accepting both).
-    if d.get("rate") is None:
-        d["rate"] = d.get("unit_price")
-    if d.get("amount") is None:
-        d["amount"] = d.get("subtotal")
+    # Frontend (QuoteReviewScreen) reads item.rate / item.amount.
+    # rate is the per-unit price; amount is quantity × rate.
+    #
+    # HOTFIX 5 (2026-07-15): when price_overridden=1 the customer price
+    # lives in final_price (the line total that _recalculate_totals sums).
+    # _line_rate_and_amount keeps amount = final_price and, for qty > 1,
+    # sets rate = final_price / qty so flat_math does not multiply the
+    # line total by quantity again. Qty 1 still has rate == amount ==
+    # final_price (Maggie O'Neil EST-2026-110).
+    rate_value, amount_value = _line_rate_and_amount(d)
+    stored_sub = _as_float(d.get("subtotal"))
+    if (
+        not bool(d.get("price_overridden"))
+        and stored_sub is not None
+        and abs(amount_value - stored_sub) > 0.02
+    ):
+        # Response-only: PDFs read subtotal. The DB row is unchanged until save.
+        d["subtotal"] = amount_value
+    d["rate"] = rate_value
+    d["amount"] = amount_value
     return d
 
 
@@ -345,7 +576,39 @@ def get_quote(quote_id: str) -> dict:
             "SELECT * FROM quote_photos WHERE quote_id = ?", (quote_id,)
         ).fetchall()
         q['quote_photos'] = dict_rows(photos)
-        return q
+        return _align_flat_financials(q)
+
+
+def get_quote_by_number(quote_number: str) -> dict | None:
+    """HOTFIX 4b (2026-07-15): resolve a human-facing quote number
+    (e.g. "EST-2026-110") to the canonical quote row. Used by the
+    frontend's chat-link click handler so a click on the visible
+    "EST-2026-110" badge always lands on the right quote — previously
+    the frontend fell back to "first row of list" when no id was passed,
+    which silently opened the most recent quote (any active list moved
+    EST-2026-110's link to EST-2026-124's row).
+
+    Returns None if not found. Pinned to canonical quotes_v2 (SQL),
+    never reads the legacy JSON store."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM quotes_v2 WHERE quote_number = ? LIMIT 1",
+            (quote_number,)
+        ).fetchone()
+        if not row:
+            return None
+        q = _quote_to_dict(row)
+        quote_id = q['id']
+        items = conn.execute(
+            "SELECT * FROM quote_line_items WHERE quote_id = ? ORDER BY line_number",
+            (quote_id,)
+        ).fetchall()
+        q['line_items'] = [_item_to_dict(i) for i in items]
+        photos = conn.execute(
+            "SELECT * FROM quote_photos WHERE quote_id = ?", (quote_id,)
+        ).fetchall()
+        q['quote_photos'] = dict_rows(photos)
+        return _align_flat_financials(q)
 
 
 def create_quote(data: dict) -> dict:
@@ -358,6 +621,18 @@ def create_quote(data: dict) -> dict:
         dep = data.get('deposit', {})
         deposit_percent = dep.get('deposit_percent', 50) if isinstance(dep, dict) else 50
 
+        # D39 / H77 — Issued-document provenance (STEP 1d).
+        # issued_document is the identifier of an issued (already-billed)
+        # document that governs this quote's rates — e.g. "NELMA-814" for a
+        # paper invoice. NULL means "no issued document — rates come from
+        # the catalog." Each line carries its own rate_source (default
+        # 'catalog'; "issued:<doc>" when an issued document governs). The
+        # engine does not enforce this; the service records it.
+        issued_document = (data.get('issued_document') or '').strip() or None
+        default_rate_source = (
+            f"issued:{issued_document}" if issued_document else "catalog"
+        )
+
         conn.execute("""
             INSERT INTO quotes_v2 (
                 id, quote_number, customer_name, customer_email, customer_phone,
@@ -365,8 +640,8 @@ def create_quote(data: dict) -> dict:
                 status, tax_rate, discount_amount, discount_type, deposit_percent,
                 valid_days, terms, notes, pricing_mode, location, lining_preference,
                 rooms_json, ai_mockups_json, ai_outlines_json, measurements_json,
-                expires_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                issued_document, expires_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             quote_id, quote_number,
             data.get('customer_name', ''),
@@ -391,12 +666,16 @@ def create_quote(data: dict) -> dict:
             json.dumps(data.get('ai_mockups', []), default=str) if data.get('ai_mockups') else None,
             json.dumps(data.get('ai_outlines', []), default=str) if data.get('ai_outlines') else None,
             json.dumps(data.get('measurements', {}), default=str) if data.get('measurements') else None,
+            issued_document,
             (datetime.now() + timedelta(days=data.get('valid_days', 30))).isoformat(),
             now, now,
         ))
 
         # Insert line items — sprint 1b routes through _price_line_item
-        # (catalog categories → engine; non-catalog → manual qty × rate)
+        # (catalog categories → engine; non-catalog → manual qty × rate).
+        # D39: each line carries its own rate_source (default to
+        # quotes_v2.issued_document's source if set; caller may override
+        # per-line via li['rate_source']).
         for idx, li in enumerate(data.get('line_items', data.get('items', []))):
             if not isinstance(li, dict):
                 continue
@@ -406,13 +685,18 @@ def create_quote(data: dict) -> dict:
                 business_unit=data.get('business_unit'),
                 legacy=li,
             )
-            qty = float(li.get('quantity', pricing["unit_price"] and 1) or 1)
+            qty = _line_quantity(li)
+            # Per-line rate_source: caller override > issued_document default
+            line_rate_source = (
+                (li.get('rate_source') or '').strip()
+                or default_rate_source
+            )
             conn.execute("""
                 INSERT INTO quote_line_items (
                     quote_id, line_number, description, quantity, unit, unit_price, subtotal,
-                    category, pricing_snapshot_json,
+                    category, rate_source, pricing_snapshot_json,
                     proposed_price, final_price, price_overridden, business_unit, computed_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 quote_id, idx + 1,
                 li.get('description', ''),
@@ -421,6 +705,7 @@ def create_quote(data: dict) -> dict:
                 pricing["unit_price"],
                 pricing["subtotal"],
                 li.get('category', 'labor'),
+                line_rate_source,
                 json.dumps(li.get('pricing_snapshot_json') or li.get('pricing_snapshot'), default=str)
                 if (li.get('pricing_snapshot_json') or li.get('pricing_snapshot')) else None,
                 pricing["proposed_price"],
@@ -446,7 +731,13 @@ def update_quote(quote_id: str, data: dict) -> dict:
 
         updatable = [
             'customer_name', 'customer_email', 'customer_phone', 'customer_address',
-            'business_unit', 'project_name', 'project_description', 'status',
+            'business_unit', 'project_name', 'project_description',
+            # HOTFIX 4.1 (2026-07-16): 'status' was REMOVED from this
+            # whitelist so PATCH can never silently set a customer-side
+            # status (e.g. status='accepted') and bypass the founder
+            # PIN gate. Status transitions route through the explicit
+            # /submit-for-review, /approve (PIN-gated), /reject
+            # routes — see approve_quote() in this module.
             'tax_rate', 'discount_amount', 'discount_type', 'deposit_percent',
             'valid_days', 'terms', 'notes', 'pricing_mode', 'location',
             'lining_preference', 'job_id', 'customer_id',
@@ -473,6 +764,63 @@ def update_quote(quote_id: str, data: dict) -> dict:
 
         params.append(quote_id)
         conn.execute(f"UPDATE quotes_v2 SET {', '.join(sets)} WHERE id = ?", params)
+
+        # Workroom QuoteBuilder autosave: replace line items when provided.
+        # Keeps UI create/update on quotes_v2 without dual-writing JSON.
+        if "line_items" in data or "items" in data:
+            items = data.get("line_items", data.get("items")) or []
+            conn.execute("DELETE FROM quote_line_items WHERE quote_id = ?", (quote_id,))
+            issued_document = (data.get("issued_document") or "").strip() or None
+            if not issued_document:
+                row = conn.execute(
+                    "SELECT issued_document FROM quotes_v2 WHERE id = ?", (quote_id,)
+                ).fetchone()
+                issued_document = (row["issued_document"] if row else None) or None
+            default_rate_source = (
+                f"issued:{issued_document}" if issued_document else "catalog"
+            )
+            bu = data.get("business_unit") or (
+                existing["business_unit"] if "business_unit" in existing.keys() else "workroom"
+            )
+            for idx, li in enumerate(items):
+                if not isinstance(li, dict):
+                    continue
+                pricing = _price_line_item(
+                    category=li.get("category"),
+                    inputs=li.get("inputs") or li,
+                    business_unit=bu,
+                    legacy=li,
+                )
+                qty = _line_quantity(li)
+                line_rate_source = (
+                    (li.get("rate_source") or "").strip() or default_rate_source
+                )
+                conn.execute("""
+                    INSERT INTO quote_line_items (
+                        quote_id, line_number, description, quantity, unit, unit_price, subtotal,
+                        category, rate_source, pricing_snapshot_json,
+                        proposed_price, final_price, price_overridden, business_unit, computed_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    quote_id, idx + 1,
+                    li.get("description", ""),
+                    qty,
+                    li.get("unit", "ea"),
+                    pricing["unit_price"],
+                    pricing["subtotal"],
+                    li.get("category", "labor"),
+                    line_rate_source,
+                    json.dumps(li.get("pricing_snapshot_json") or li.get("pricing_snapshot"), default=str)
+                    if (li.get("pricing_snapshot_json") or li.get("pricing_snapshot")) else None,
+                    pricing["proposed_price"],
+                    pricing["final_price"],
+                    pricing["price_overridden"],
+                    pricing["business_unit"],
+                    pricing["computed_json"],
+                ))
+            _audit_log(conn, "quote", quote_id, "updated", "line_items", None,
+                       f"{len(items)} items", "api")
+
         _recalculate_totals(conn, quote_id, 'api')
 
     return get_quote(quote_id)
@@ -511,7 +859,21 @@ def add_line_item(quote_id: str, data: dict) -> dict:
             business_unit=data.get('business_unit'),
             legacy=data,
         )
-        qty = float(data.get('quantity', 1) or 1)
+        qty = _line_quantity(data)
+
+        # D39 / H77 — per-line rate_source (STEP 1d). Caller may override
+        # via data['rate_source']; otherwise we fall back to the parent
+        # quote's issued_document bearing (or 'catalog' if there is none).
+        line_rate_source = (data.get('rate_source') or '').strip()
+        if not line_rate_source:
+            qdoc = conn.execute(
+                "SELECT issued_document FROM quotes_v2 WHERE id = ?",
+                (quote_id,),
+            ).fetchone()
+            parent_issued = (qdoc["issued_document"] if qdoc else None) or None
+            line_rate_source = (
+                f"issued:{parent_issued}" if parent_issued else "catalog"
+            )
 
         conn.execute("""
             INSERT INTO quote_line_items (
@@ -521,9 +883,9 @@ def add_line_item(quote_id: str, data: dict) -> dict:
                 lining_type, lining_cost,
                 labor_description, labor_hours, labor_rate, labor_total,
                 hardware_description, hardware_cost,
-                quantity, unit, unit_price, subtotal, category, pricing_snapshot_json,
+                quantity, unit, unit_price, subtotal, category, rate_source, pricing_snapshot_json,
                 proposed_price, final_price, price_overridden, business_unit, computed_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             quote_id, max_ln + 1,
             data.get('item_type', ''),
@@ -549,6 +911,7 @@ def add_line_item(quote_id: str, data: dict) -> dict:
             pricing["unit_price"],
             pricing["subtotal"],
             data.get('category', 'labor'),
+            line_rate_source,
             json.dumps(data.get('pricing_snapshot_json') or data.get('pricing_snapshot'), default=str)
             if (data.get('pricing_snapshot_json') or data.get('pricing_snapshot')) else None,
             pricing["proposed_price"],
@@ -831,3 +1194,49 @@ def search_quotes(q: str, limit: int = 20) -> list:
             ORDER BY created_at DESC LIMIT ?
         """, (s, s, s, s, s, limit)).fetchall()
         return [_quote_to_dict(r) for r in rows]
+
+
+# ── PHASE 2 · F5.2 — shared resolver (canonical-first) ─────────
+# Single source of truth for quote-by-id resolution. Used by both
+# routers/quotes.py and services/max/tool_executor.py so the logic
+# is NOT duplicated. Pre-F5, the tool layer had three independent
+# paths that read legacy JSON directly (send_quote_telegram,
+# send_quote_email, _generate_pdf_for_quote, sketch_to_drawing)
+# and broke for canonical quotes. The H44 fix put canonical-first
+# into _load_quote; this finishes the job by making the SAME
+# resolver available to the tool layer.
+
+def resolve_quote(quote_id: str) -> Optional[dict]:
+    """Canonical-first resolver. Returns the quote dict or None.
+
+    Tries `quotes_v2` SQL first (canonical). Falls back to the legacy
+    JSON store at `data_paths.quotes_data_dir()` (audit trail).
+
+    Used by:
+      - routers/quotes.py:_load_quote
+      - services/max/tool_executor.py tools that need a quote by id
+
+    Always returns a dict (legacy JSON shape) or None. Callers that
+    need to distinguish canonical from JSON can check for the
+    canonical-only fields (e.g. `line_items` always present in
+    canonical, may be missing in legacy).
+    """
+    if not quote_id:
+        return None
+    # 1. Canonical: quotes_v2 SQL
+    try:
+        q = get_quote(quote_id)
+        if q:
+            return q
+    except Exception:
+        pass
+    # 2. Legacy JSON fallback
+    try:
+        from app.services.data_paths import quotes_data_dir
+        path = quotes_data_dir() / f"{quote_id}.json"
+        if path.exists():
+            with open(path) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return None

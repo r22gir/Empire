@@ -69,6 +69,26 @@ async def create_quote(body: dict):
     return {"status": "created", "quote": result}
 
 
+@router.get("/by-number/{quote_number}")
+async def get_quote_by_number(quote_number: str):
+    """HOTFIX 4b (2026-07-15): resolve a human-facing quote number
+    ('EST-2026-110') to the canonical quote row. Pinned BEFORE the
+    catch-all '/{quote_id}' route so FastAPI's matcher hits the
+    literal path first.
+
+    Frontend hot path: ChatScreen click on a 'EST-2026-XXX' badge
+    calls this to get the canonical id, then navigates with the id
+    so QuoteReviewScreen loads the exact right quote (previously
+    it fell back to 'first row of the list' which silently opened
+    the wrong row)."""
+    q = quote_service.get_quote_by_number(quote_number)
+    if not q:
+        raise HTTPException(
+            404, f"Quote {quote_number} not found in canonical store"
+        )
+    return q
+
+
 @router.get("/{quote_id}")
 async def get_quote(quote_id: str):
     """Get a single quote with line items and photos."""
@@ -284,7 +304,25 @@ async def quote_to_work_order(quote_id: str):
 
 @router.post("/{quote_id}/to-invoice")
 async def quote_to_invoice(quote_id: str):
-    """Create an invoice from a completed quote."""
+    """Create an invoice from a quote.
+
+    Sprint 1d Payment Phase 1: gated to quote.status in
+    {sent, accepted, in_production, completed} (the canonical
+    customer-facing states). Draft / founder_review / cancelled /
+    proposal states return HTTP 409 — use /submit-for-review +
+    /approve first.
+    """
+    q = quote_service.get_quote(quote_id)
+    if not q:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    allowed = {"sent", "accepted", "in_production", "completed"}
+    if q.get("status") not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"quote is in status {q.get('status')!r}; "
+                    f"to-invoice requires one of {sorted(allowed)}. "
+                    f"Use /submit-for-review + /approve first."),
+        )
     try:
         from app.services.lifecycle_service import create_invoice_from_quote
         inv = create_invoice_from_quote(quote_id)

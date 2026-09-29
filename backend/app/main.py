@@ -50,6 +50,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Public Luxe edge — registered before no-cache so denial responses still
+# receive the cache headers. See app.security.luxe_public_edge.
+from app.security.luxe_public_edge import luxe_public_edge_response
+
+
+@app.middleware("http")
+async def luxe_public_edge_middleware(request: Request, call_next):
+    denied = luxe_public_edge_response(request)
+    if denied is not None:
+        return denied
+    return await call_next(request)
+
 
 # No-cache middleware — EVERY response gets anti-cache headers
 # This prevents phones/browsers/CDNs from serving stale data
@@ -122,6 +134,13 @@ load_router("app.routers.crypto_payments", "/api/v1/crypto-payments", ["crypto"]
 load_router("app.routers.economic", "/api/v1/economic", ["economic"])
 load_router("app.routers.chat_backup", "/api/v1/chat-backup", ["chat-backup"])
 load_router("app.routers.memory", "/api/v1", ["memory"])
+# PHASE 2 · F5-H43 — Portal button compat. Mounted BEFORE the legacy
+# quotes.py so FastAPI dispatches its routes in preference to the
+# broken legacy implementations (which read stale-fork JSON). The
+# compat router covers /quotes/{id}/accept, /send, /pdf, DELETE,
+# /jobs/from-quote, /finance/invoices/from-quote. The legacy quotes.py
+# still handles everything else it already handled correctly.
+load_router("app.routers.portal_button_compat", "/api/v1", ["portal-button-compat"])
 load_router("app.routers.quotes", "/api/v1", ["quotes"])
 load_router("app.routers.quotes_v2", "/api/v1", ["quotes-v2"])
 load_router("app.routers.pricing", "/api/v1", ["pricing"])
@@ -252,7 +271,9 @@ load_router("app.routers.recovery_control", "/api/v1", ["recovery"])
 
 # Serve intake uploads as static files
 from fastapi.staticfiles import StaticFiles
-_intake_uploads = os.path.expanduser("~/empire-repo/backend/data/intake_uploads")
+from app.services.drawing.canonical_path import canonical_intake_uploads_dir
+
+_intake_uploads = str(canonical_intake_uploads_dir())
 os.makedirs(_intake_uploads, exist_ok=True)
 app.mount("/intake_uploads", StaticFiles(directory=_intake_uploads), name="intake_uploads")
 
@@ -357,6 +378,25 @@ async def start_background_services():
         print(f"✓ MAX startup health: commit={record.get('running_commit_hash')} registry={record.get('registry_version')}")
     except Exception as e:
         print(f"✗ MAX startup health record: {e}")
+
+    # D28 2a/2b — code-task sweep + rehydrate. Order is load-bearing:
+    # sweep MUST run first so every persisted row has a terminal state
+    # before rehydrate populates the in-memory dict (a rehydrated task
+    # has no asyncio.Task behind it; D27 4). Both calls are
+    # best-effort: a missing table or unreachable DB must not block
+    # startup. The backend starting matters more than rehydration
+    # succeeding (D28 2b).
+    try:
+        from app.services.max.code_task_persistence import sweep_stranded_tasks
+        from app.services.max.code_task_runner import code_task_runner
+        swept = sweep_stranded_tasks()
+        rehydrated = code_task_runner.rehydrate()
+        if swept or rehydrated:
+            print(f"✓ Code-task startup: swept={swept} rehydrated={rehydrated}")
+        else:
+            print("✓ Code-task startup: clean (no stranded rows, nothing to rehydrate)")
+    except Exception as e:
+        print(f"✗ Code-task startup failed (continuing without rehydration): {e}")
 
     if not is_primary:
         print("⏭ Secondary worker — skipping singleton background services")
@@ -655,6 +695,12 @@ load_router("app.routers.contacts", "/api/v1", ["contacts"])
 
 # LeadForge — Lead generation & sales machine
 load_router("app.routers.leadforge", "/api/v1", ["leadforge"])
+try:
+    from app.routers.leadforge import intake_alias_router
+    app.include_router(intake_alias_router, prefix="/api/v1", tags=["leadforge"])
+    print("✓ Loaded: /api/v1/leadforge intake alias")
+except Exception as e:
+    print(f"✗ LeadForge intake alias: {e}")
 
 # Workroom intake — shared LeadForge + LuxeForge door (CRM → quote)
 load_router("app.routers.workroom_intake", "/api/v1", ["workroom-intake"])
@@ -672,3 +718,9 @@ except Exception as e:
 
 # TranscriptForge — Legal/High-Risk Transcription Pipeline
 load_router("app.routers.transcriptforge", "", ["transcriptforge"])
+
+# Label Station — Weigh & Label PWA
+from app.modules.label_station import router as label_station_router
+
+app.include_router(label_station_router)
+print("✓ Loaded: /label")

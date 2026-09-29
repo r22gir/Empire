@@ -12,7 +12,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Optional, List
 import json
+import logging
 import sqlite3
+
+logger = logging.getLogger(__name__)
 import os
 import uuid
 from pathlib import Path
@@ -20,6 +23,7 @@ from datetime import datetime, date, timedelta
 
 from app.db.database import get_db, dict_row, dict_rows
 from app.services.business_routing import route_to_for_item_type
+from app.services.chain_guard import require_customer, MissingCustomerLink
 
 router = APIRouter(tags=["jobs-unified"])
 
@@ -451,10 +455,42 @@ def init_schema():
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
+        # D44 — job_documents v2: nullable job_id (key off quote_id instead), add
+        # quote_id + source_channel columns. The old v1 schema had job_id NOT NULL
+        # which forced every uploader to invent a job row. Per STOP 1 ruling #1 we
+        # key documents off quote_id (PENDING never blocks); job_id stays for the
+        # jobs_unified paths that already use it. Migration: drop the v1 table iff
+        # the schema is detected as v1 AND the table is empty (safe in production
+        # today — confirmed 0 rows at STOP 1). Non-empty v1 tables are left
+        # untouched so a future row-ful environment does not silently lose data.
+        try:
+            cur = conn.execute("PRAGMA table_info(job_documents)")
+            v1_cols = {row[1]: row for row in cur.fetchall()}
+            v1_job_id = v1_cols.get("job_id")
+            if v1_job_id is not None and v1_job_id[3] == 1 and "source_channel" not in v1_cols:
+                row_count = conn.execute(
+                    "SELECT COUNT(*) FROM job_documents"
+                ).fetchone()[0]
+                if row_count == 0:
+                    conn.execute("DROP TABLE job_documents")
+                    logger.info(
+                        "D44 migration: dropped v1 job_documents (0 rows) "
+                        "before recreating as v2"
+                    )
+                else:
+                    logger.warning(
+                        "D44 migration: job_documents has %d rows in v1 "
+                        "schema; manual migration required before v2 columns "
+                        "are available", row_count,
+                    )
+        except sqlite3.OperationalError as e:
+            logger.warning("D44 migration pre-check failed: %s", e)
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS job_documents (
                 id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
-                job_id TEXT NOT NULL REFERENCES jobs(id),
+                job_id TEXT REFERENCES jobs(id),
+                quote_id TEXT,
                 document_type TEXT,
                 item_key TEXT,
                 route_to TEXT,
@@ -462,6 +498,7 @@ def init_schema():
                 filename TEXT,
                 revision INTEGER DEFAULT 1,
                 visible_to_client INTEGER DEFAULT 0,
+                source_channel TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
@@ -519,6 +556,8 @@ def init_schema():
         for idx in [
             "CREATE INDEX IF NOT EXISTS idx_job_items_job ON job_items(job_id)",
             "CREATE INDEX IF NOT EXISTS idx_job_docs_job ON job_documents(job_id)",
+            "CREATE INDEX IF NOT EXISTS idx_job_docs_quote ON job_documents(quote_id)",
+            "CREATE INDEX IF NOT EXISTS idx_job_docs_source ON job_documents(source_channel)",
             "CREATE INDEX IF NOT EXISTS idx_job_sel_job ON job_selections(job_id)",
             "CREATE INDEX IF NOT EXISTS idx_job_rev_job ON job_revisions(job_id)",
             "CREATE INDEX IF NOT EXISTS idx_job_events_job ON job_events(job_id)",
@@ -1061,6 +1100,17 @@ def list_jobs(
 @router.post("/jobs")
 def create_job(job: JobCreateSchema):
     """Create a new job with auto-generated job_number."""
+    # D48: reject before opening a connection — jobs.customer_id is NOT NULL,
+    # and refusing here means no job_number is consumed by a doomed request.
+    try:
+        customer_id = require_customer(
+            job.customer_id,
+            writer="create_job",
+            source="request body field 'customer_id'",
+        )
+    except MissingCustomerLink as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     with get_db() as conn:
         job_number = _next_job_number(conn)
         job_id = None
@@ -1078,7 +1128,7 @@ def create_job(job: JobCreateSchema):
             (
                 job_number,
                 job.title,
-                job.customer_id,
+                customer_id,
                 job.quote_id,
                 job.pipeline_stage if job.pipeline_stage != "intake" else "pending",
                 job.job_type,
@@ -1974,6 +2024,18 @@ def invoice_from_job(job_id: str):
 
         job = _enrich_job(dict_row(job_row))
 
+        # D48: the customer link is inherited from the job. jobs.customer_id is
+        # NOT NULL today, so this is defence-in-depth rather than an active bug
+        # — but the invoice must not inherit an absent link if that changes.
+        try:
+            customer_id = require_customer(
+                job.get("customer_id"),
+                writer="invoice_from_job",
+                source=f"job {job_id}",
+            )
+        except MissingCustomerLink as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
         # Build line items from job items
         line_items = []
         item_rows = conn.execute("SELECT * FROM job_items WHERE job_id = ?", (job_id,)).fetchall()
@@ -2019,7 +2081,7 @@ def invoice_from_job(job_id: str):
                        ?, ?, ?, ?,
                        ?, ?, 'unpaid')""",
             (
-                inv_number, job.get("customer_id"), job.get("quote_id"), job_id,
+                inv_number, customer_id, job.get("quote_id"), job_id,
                 subtotal, tax_rate, tax_amount, total, total,
                 json.dumps(line_items),
                 f"Invoice for job {job.get('job_number', job_id)}",

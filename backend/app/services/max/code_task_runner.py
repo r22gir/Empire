@@ -12,15 +12,41 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Optional
 
 from app.services.max.ai_router import AIMessage, AIModel, AIResponse, ai_router
+from app.services.max.code_task_persistence import insert_task, update_task
 
 logger = logging.getLogger("max.code_task")
+
+# F3 — explicit handler at INFO+ that survives uvicorn's dictConfig.
+# WHY this exists: uvicorn 0.41's LOGGING_CONFIG does NOT configure the root
+# logger and uvicorn writes application logs to stderr. On the running unit
+# `empire-backend` (live at ~/.config/systemd/user/empire-backend.service)
+# `StandardError=inherit` (the unit file in this repo sets `journal` but the
+# installed unit never picked that up), so stderr is NOT journaled. The only
+# stream journalctl sees is stdout (StandardOutput=journal), which is where
+# uvicorn's "access" handler writes. Without an explicit handler, every
+# logger.error call here was silently discarded.
+# This handler writes to stdout, which IS journaled. It is attached at module
+# import and survives any subsequent dictConfig because we do not let uvicorn
+# touch the "max.code_task" logger.
+if not any(isinstance(h, logging.StreamHandler) and getattr(h, "_max_code_task", False) for h in logger.handlers):
+    _max_code_task_handler = logging.StreamHandler(stream=sys.stdout)
+    _max_code_task_handler.setLevel(logging.INFO)
+    _max_code_task_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s max.code_task %(message)s")
+    )
+    _max_code_task_handler._max_code_task = True  # marker so we don't double-attach
+    logger.addHandler(_max_code_task_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False  # do not double-log via root/stderr
 
 # Tools Atlas is allowed to use in Code Mode
 ALLOWED_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops", "test_runner", "shell_execute", "package_manager", "service_manager", "project_scaffold"}
@@ -173,6 +199,10 @@ def _sanitize_value(value, limit: int = 1200):
 
 
 def _infer_provider_from_model(model_used: str | None) -> str:
+    """Infer the provider from a model string. Returns "unknown" for wrapper
+    models (e.g. anything that resolves to None or to a string we do not
+    recognise) — NEVER the wrapper's own provider id. The wrapper provider
+    is identified by where the call ROUTED, not by the model field."""
     model = (model_used or "").lower()
     if model.startswith("claude") or model.startswith("anthropic"):
         return "anthropic"
@@ -184,8 +214,13 @@ def _infer_provider_from_model(model_used: str | None) -> str:
         return "groq"
     if model.startswith("ollama"):
         return "ollama"
-    if model.startswith("openclaw"):
-        return "openclaw"
+    if model.startswith("deepseek"):
+        return "deepseek"
+    # NOTE: deliberately NO `"openclaw"` branch — wrapper providers never
+    # round-trip through the model field. The openclaw wrapper's model is
+    # resolved to its inner delegate (DEEPSEEK_MODEL) at the AIResponse
+    # boundary; if a model string contains "openclaw" here, that is stale
+    # legacy data and should classify as "unknown".
     return "unknown"
 
 
@@ -396,7 +431,10 @@ async def _request_code_response(
     )
     task.provider_used = _infer_provider_from_model(response.model_used) or provider_hint
     task.model_used = response.model_used
-    task.supports_tool_calls = bool(response.function_calls) if response.function_calls is not None else supports_native_tools
+    # F1 — supports_tool_calls is NOT set here. The scorer lives in _execute
+    # so it can read the parsed tool_calls (native + parse_tool_blocks merge),
+    # not the raw provider field. Two places deciding the same fact was the
+    # bug; one source of truth — the parser — replaces both.
     return response
 
 
@@ -431,6 +469,47 @@ def _repo_head_commit() -> str | None:
     except Exception:
         pass
     return None
+
+
+def _repo_changed_paths(working_dir: str) -> set[str] | None:
+    """Return the set of repo-relative paths currently changed in `working_dir`,
+    or None if the working tree is not a git repo (or git is unavailable).
+
+    R11 (2026-08-22): ground-truth capture for the validator. A whitelist of
+    tools is the same class of defect as a hardcoded model name — it asserts
+    something the runner does not actually know. The validator must answer
+    "did files change" by looking, not by remembering which tools ran.
+
+    `working_dir` is the tree the task actually ran in. Caller MUST supply it;
+    there is no default. A validator checking the wrong tree passes everything.
+
+    Returns None (not an empty set) on git failure so the caller can distinguish
+    "no changes" from "could not check" and fall back explicitly.
+    """
+    if not working_dir or not os.path.isdir(working_dir):
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=working_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    changed: set[str] = set()
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        if path and not Path(path).name.endswith(".bak") and ".bak-" not in path:
+            changed.add(path)
+    return changed
 
 
 def _tool_record(tool_call: dict, result, *, success: bool, error: str | None = None) -> dict:
@@ -503,11 +582,110 @@ def _compose_verified_summary(task: "CodeTask") -> str:
     return "\n".join(lines).strip()
 
 
+def _format_failure_evidence(task: "CodeTask", final_outcome: str) -> str:
+    """F2 — build a structured failure-result string that records what the
+    model actually returned. Every failure path calls this and assigns the
+    return value to task.result, so the row in openclaw_tasks can be read
+    without re-running the task. Without this, a failure path is a verdict
+    with no evidence.
+
+    Truncates the response text to 4000 chars but always records the
+    original length and the response.function_calls summary so the
+    diagnostic part is never thrown away.
+    """
+    lines = [f"Final outcome: {final_outcome}"]
+    lines.append(f"Provider used: {task.provider_used or 'unknown'}")
+    lines.append(f"Model used: {task.model_used or 'unknown'}")
+    supports = task.supports_tool_calls
+    lines.append(
+        f"Supports tool calls: {supports if supports is not None else 'unknown'}"
+    )
+    lines.append(f"Prompt attempts: {task.prompt_attempts}")
+    lines.append(f"Failure reason: {task.failure_reason or task.error or 'none'}")
+
+    if task.last_response_text is not None:
+        original_len = len(task.last_response_text)
+        text = task.last_response_text
+        if original_len > 4000:
+            text = text[:4000] + f"...(truncated; original_len={original_len})"
+        lines.append("")
+        lines.append("Last model response text:")
+        lines.append(text)
+
+    if task.last_function_calls_summary is not None:
+        lines.append("")
+        lines.append("Last response.function_calls:")
+        lines.append(task.last_function_calls_summary)
+
+    if task.last_parse_outcome is not None:
+        lines.append("")
+        lines.append("Last parse outcome:")
+        lines.append(task.last_parse_outcome)
+
+    return "\n".join(lines).strip()
+
+
+def _capture_response_evidence(task: "CodeTask", response, tool_calls: list[dict]) -> None:
+    """F2 — record the model's actual response on the task so any later
+    failure path can persist it. Called once per model response inside the
+    execute loop, immediately after the response is parsed.
+
+    `parse_tool_blocks` is imported lazily inside `_execute`, so this helper
+    does NOT call it directly. The parse outcome is derived from the
+    `tool_calls` argument (which the caller computed using the parser) and
+    from `response.function_calls`.
+    """
+    task.last_response_text = getattr(response, "content", None) or ""
+    fc = getattr(response, "function_calls", None)
+    if fc is None:
+        task.last_function_calls_summary = "absent (response.function_calls is None)"
+    elif len(fc) == 0:
+        task.last_function_calls_summary = "present but empty (response.function_calls == [])"
+    else:
+        summary_lines = [f"count={len(fc)}"]
+        for idx, call in enumerate(fc, start=1):
+            name = (
+                call.get("name")
+                or call.get("tool")
+                or call.get("function", {}).get("name")
+                or "unknown"
+            )
+            args = (
+                call.get("arguments")
+                or call.get("args")
+                or call.get("params")
+                or call.get("function", {}).get("arguments")
+            )
+            if isinstance(args, str) and len(args) > 200:
+                args = args[:200] + "...(truncated)"
+            summary_lines.append(f"  {idx}. {name} args={args}")
+        task.last_function_calls_summary = "\n".join(summary_lines)
+
+    native_normalized = [
+        n for n in (
+            _normalize_native_tool_call(call) for call in (fc or [])
+        ) if n
+    ]
+    parser_was_consulted = not native_normalized
+    parser_matched = parser_was_consulted and len(tool_calls) > 0
+    parse_outcome = (
+        f"native: matched={bool(native_normalized)} count={len(native_normalized)}; "
+        f"parse_tool_blocks: attempted={parser_was_consulted} matched={parser_matched}; "
+        f"effective_tool_calls_after_merge={len(tool_calls)}"
+    )
+    task.last_parse_outcome = parse_outcome
+
+
 @dataclass
 class CodeTask:
     """An async code task."""
     id: str
     prompt: str
+    # R11 (2026-08-22): the tree the task actually ran in. The validator uses
+    # this for ground-truth capture (git status --porcelain before vs after).
+    # REQUIRED at construction — no default. A validator checking the wrong
+    # tree passes everything; "absent" must fail loud, never silently default.
+    working_dir: str = ""
     execution_mode: str = "auto"
     provider_used: Optional[str] = None
     model_used: Optional[str] = None
@@ -529,6 +707,20 @@ class CodeTask:
     verified_commit_hash: Optional[str] = None
     verification_notes: list[str] = field(default_factory=list)
     log: list[CodeTaskLog] = field(default_factory=list)
+    # F2 evidence — captured after every model response so that any failure
+    # path can persist what the model actually returned.
+    last_response_text: Optional[str] = None
+    last_function_calls_summary: Optional[str] = None
+    last_parse_outcome: Optional[str] = None
+    # R11 (2026-08-22): ground-truth baseline for the validator. Captured at
+    # _execute() entry via `git status --porcelain` in `working_dir`. The
+    # post-execute porcelain diff against this set is the source of
+    # `files_changed` (replaces the prior 3-tool whitelist).
+    files_snapshot_before: set[str] = field(default_factory=set)
+    # R11 (2026-08-22): True iff the baseline `git status --porcelain` call
+    # succeeded. False (or False because of git failure) means the validator
+    # falls back to the legacy 3-tool whitelist — explicitly logged.
+    files_snapshot_ground_truth: bool = False
 
     def add_log(self, action: str, detail: str):
         self.log.append(CodeTaskLog(
@@ -560,6 +752,9 @@ class CodeTask:
             "verified_test_runs": self.verified_test_runs,
             "verified_commit_hash": self.verified_commit_hash,
             "verification_notes": self.verification_notes,
+            "last_response_text": self.last_response_text,
+            "last_function_calls_summary": self.last_function_calls_summary,
+            "last_parse_outcome": self.last_parse_outcome,
             "log": [
                 {"timestamp": l.timestamp, "action": l.action, "detail": l.detail}
                 for l in self.log
@@ -571,24 +766,108 @@ class CodeTaskRunner:
     """Manages async code tasks executed by CodeForge/Atlas."""
 
     def __init__(self):
+        # SINGLE-WORKER ASSUMPTION (D28 §1b, D27 §4):
+        # uvicorn is started with NO --workers flag (verified
+        # `ps -ef | grep uvicorn` — single PID), so this dict is the
+        # authoritative state for the lifetime of the process. The
+        # persistence layer (code_task_persistence.py) writes to
+        # ~/empire-data/empire.db on every state transition; reads on
+        # restart come from the DB, NOT from a rehydrated dict. If a
+        # second uvicorn worker is ever added:
+        #   - this dict will diverge across workers (each has its own)
+        #   - the persistence writers will race on the same row id
+        #   - the startup-reconcile (STEP 2) will mark 'running' rows
+        #     from the OTHER worker as 'error' on every boot
+        # Migration path if multi-worker: acquire a process-level
+        # UNIQUE-writer lock in code_task_persistence, or move the
+        # table to a backend that supports atomic upserts (Postgres).
         self._tasks: dict[str, CodeTask] = {}
         self._running: dict[str, asyncio.Task] = {}
 
     def get_task(self, task_id: str) -> Optional[CodeTask]:
         return self._tasks.get(task_id)
 
-    def submit(self, prompt: str, founder: bool = False) -> CodeTask:
-        """Submit a new code task. Returns immediately with task ID."""
+    def rehydrate(self) -> int:
+        """Load every code_mode_tasks row back into the in-memory dict.
+
+        D28 2a / D27 4: a rehydrated task has NO asyncio.Task behind it.
+        It is history-only, queryable via get_task() and to_dict(), but
+        it MUST NOT read as actively running. We enforce this two ways:
+
+          1. Caller runs sweep_stranded_tasks() BEFORE rehydrate(), so
+             every persisted row already has a terminal state
+             (completed/error). The persisted state column on a
+             rehydrated task is therefore never 'running'.
+
+          2. rehydrate() writes ONLY to self._tasks, never to
+             self._running. There is no asyncio.Task to cancel, no
+             thread to interrupt, no live state to mutate. Code that
+             inspects runner._running (the authoritative "is this
+             task alive" map per D27 4) gets None for every rehydrated
+             id, which is the truthful answer.
+
+        Combined, the two guarantees make "actively running" a strict
+        function of runner._running: a rehydrated task cannot be there,
+        so it cannot read as running.
+
+        Returns the number of tasks loaded. Never raises - on DB error
+        the persistence layer returns [] and rehydrate() returns 0.
+        """
+        from app.services.max.code_task_persistence import fetch_all_tasks
+
+        tasks = fetch_all_tasks()
+        loaded = 0
+        for task in tasks:
+            # Overwrite is intentional: a re-run on a hot boot must end
+            # with the latest row per id. The PK guarantees uniqueness,
+            # so this only matters if a test re-inserts under the same
+            # id, in which case "newest created_at wins" is sane.
+            self._tasks[task.id] = task
+            loaded += 1
+        if loaded:
+            logger.info(
+                f"code_task_runner.rehydrate: loaded {loaded} task(s) "
+                f"into _tasks (no asyncio.Task created; sweep ran first)"
+            )
+        return loaded
+
+    def submit(self, prompt: str, working_dir: str = "", founder: bool = False) -> CodeTask:
+        """Submit a new code task. Returns immediately with task ID.
+
+        R11 (2026-08-22): `working_dir` is the tree the task actually ran in.
+        The validator uses it for ground-truth capture (git status --porcelain).
+        REQUIRED — there is no default. A validator checking the wrong tree
+        passes everything; "absent" must fail loud, never silently default.
+        """
+        if not working_dir or not os.path.isdir(working_dir):
+            logger.critical(
+                "CodeTaskRunner.submit REFUSED: working_dir is required (the "
+                "validator must check the tree the task actually ran in). "
+                f"Got working_dir={working_dir!r}. Caller must supply the "
+                "absolute path of the directory the task should be evaluated "
+                "against. (R11, 2026-08-22)"
+            )
+            raise ValueError(
+                "working_dir is required: the validator must check the tree "
+                "the task actually ran in. Pass an absolute path to an existing "
+                "directory. (R11, 2026-08-22)"
+            )
         task = CodeTask(
             id=str(uuid.uuid4())[:12],
             prompt=prompt,
+            working_dir=os.path.abspath(working_dir),
             execution_mode=_infer_execution_mode(prompt),
             founder=founder,
         )
         self._tasks[task.id] = task
+        # Persist the row IMMEDIATELY (D28 §1b). Without this INSERT the
+        # task only exists in this process's dict; the moment the backend
+        # restarts before _execute() reaches :838, the task is gone. The
+        # insert_task() helper is best-effort (logs+continues on failure).
+        insert_task(task)
         # Start execution in background
         self._running[task.id] = asyncio.create_task(self._execute(task))
-        logger.info(f"Code task {task.id} submitted: {prompt[:80]}")
+        logger.info(f"Code task {task.id} submitted: working_dir={task.working_dir} prompt={prompt[:80]}")
         return task
 
     async def _execute(self, task: CodeTask):
@@ -596,10 +875,38 @@ class CodeTaskRunner:
 
         Loop: Atlas responds → parse tool blocks → execute tools → feed results
         back → Atlas continues until no more tool calls or it outputs a final summary.
+
+        R11 (2026-08-22): capture `git status --porcelain` at entry. The post-
+        execute diff against this baseline is the source of `files_changed` at
+        the validator terminal. Replaces the prior 3-tool whitelist.
         """
+        # R11: ground-truth baseline. If the working_dir is a git repo, capture
+        # the porcelain state. If git fails, mark ground_truth=False and fall
+        # back to the legacy whitelist at the validator terminal (logged).
+        baseline = _repo_changed_paths(task.working_dir)
+        if baseline is not None:
+            task.files_snapshot_before = baseline
+            task.files_snapshot_ground_truth = True
+            task.add_log(
+                "ground_truth",
+                f"Captured git status baseline: {len(baseline)} changed paths",
+            )
+        else:
+            task.files_snapshot_ground_truth = False
+            task.add_log(
+                "ground_truth_fallback",
+                f"git status --porcelain failed in {task.working_dir!r}; "
+                "validator will fall back to the legacy 3-tool whitelist. "
+                "(R11, 2026-08-22)",
+            )
+
         task.state = CodeTaskState.RUNNING
         task.started_at = datetime.utcnow().isoformat()
         task.add_log("started", "Atlas is analyzing the request...")
+        # D28 §1b: persist the state='running' transition. A row that
+        # never sees this update reads as 'queued' (the default after
+        # insert_task) and may be wrongly swept on the next reconcile.
+        update_task(task)
 
         try:
             from app.services.max.desks.desk_manager import desk_manager
@@ -628,7 +935,13 @@ class CodeTaskRunner:
                 selected_model, provider_hint, supports_native_tools = _select_code_model()
                 task.provider_used = provider_hint
                 task.model_used = selected_model.value if selected_model else None
-                task.supports_tool_calls = supports_native_tools
+                # F1 — supports_tool_calls is NOT set here from
+                # supports_native_tools. It is set after parsing (below), from
+                # the merged tool_calls list, so the scorer reads the parsed
+                # result. Pre-fix the same field was set twice — once from
+                # the raw provider field (line 423 / now removed) and once
+                # from supports_native_tools (this line, now removed) — and
+                # both disagreed with the parser for JSON-only responses.
                 response = await asyncio.wait_for(
                     _request_code_response(
                         prompt,
@@ -661,6 +974,17 @@ class CodeTaskRunner:
                 if not tool_calls:
                     tool_calls = parse_tool_blocks(response_text)
                 clean_text = response_text.strip()
+
+                # F2 — capture what the model actually returned and what the
+                # parser saw, so any subsequent failure path can persist it.
+                _capture_response_evidence(task, response, tool_calls)
+
+                # F1 — single source of truth. The scorer reads the PARSED
+                # RESULT, not the raw provider field. A model that returns
+                # valid JSON in format 2 or 3 has response.function_calls == None
+                # but a non-empty tool_calls list from parse_tool_blocks; that
+                # is the answer, not a fallback to supports_native_tools.
+                task.supports_tool_calls = bool(tool_calls)
 
                 # No tool calls = Atlas is done
                 if not tool_calls:
@@ -792,9 +1116,38 @@ class CodeTaskRunner:
                 task.add_log("warning", f"Reached {MAX_ITERATIONS} iteration limit")
 
             task.executed_tool_calls = executed_tool_calls
-            task.files_changed = sorted(actual_files_changed)[:20]
             task.files_inspected = sorted(actual_files_inspected)[:20]
             task.verified_test_runs = verified_test_runs
+
+            # R11 (2026-08-22): ground-truth file-change capture. The validator
+            # at line ~1098 must answer "did files change" by looking, not by
+            # remembering which tools ran. Diff `git status --porcelain` after
+            # the loop against the baseline captured at _execute() entry.
+            # Whitelist-derived `actual_files_changed` is kept as evidence
+            # (logged, surfaced) but is no longer the source of truth.
+            if task.files_snapshot_ground_truth:
+                after_paths = _repo_changed_paths(task.working_dir)
+                if after_paths is not None:
+                    diff = sorted(after_paths - task.files_snapshot_before)[:20]
+                    task.files_changed = diff
+                    task.add_log(
+                        "ground_truth_diff",
+                        f"git status diff: {len(diff)} new path(s) "
+                        f"({len(task.files_snapshot_before)} -> {len(after_paths)})",
+                    )
+                else:
+                    # Baseline succeeded but end-of-task porcelain failed. Fall
+                    # back to the legacy whitelist (explicitly logged) rather
+                    # than silently defaulting to "no changes".
+                    task.files_changed = sorted(actual_files_changed)[:20]
+                    task.add_log(
+                        "ground_truth_fallback_at_end",
+                        "git status --porcelain failed at end-of-task; "
+                        "validator using legacy 3-tool whitelist. (R11)",
+                    )
+            else:
+                # Baseline failed; the legacy whitelist is the only signal.
+                task.files_changed = sorted(actual_files_changed)[:20]
 
             if force_one_tool_call and no_tool_retries >= MAX_NO_TOOL_RETRIES and not executed_tool_calls:
                 task.state = CodeTaskState.ERROR
@@ -804,8 +1157,12 @@ class CodeTaskRunner:
                     "No deterministic fallback plan could be inferred from the prompt."
                 )
                 task.error = task.failure_reason
+                task.result = _format_failure_evidence(
+                    task, "selected code model did not emit executable tool calls"
+                )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
+                update_task(task)  # D28 §1b terminal-hook (site :1084)
                 logger.error(f"Code task {task.id} did not provide executable tool calls after retries")
                 return
 
@@ -816,8 +1173,12 @@ class CodeTaskRunner:
                     f"(provider={task.provider_used or 'unknown'}, model={task.model_used or 'unknown'}, attempts={task.prompt_attempts})"
                 )
                 task.error = task.failure_reason
+                task.result = _format_failure_evidence(
+                    task, "completed without actual tool execution"
+                )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
+                update_task(task)  # D28 §1b terminal-hook (site :1100)
                 logger.error(f"Code task {task.id} had no executed tool calls")
                 return
 
@@ -826,8 +1187,12 @@ class CodeTaskRunner:
                     task.state = CodeTaskState.ERROR
                     task.failure_reason = "Read-only code task executed a mutating tool call."
                     task.error = task.failure_reason
+                    task.result = _format_failure_evidence(
+                        task, "read-only code task executed a mutating tool call"
+                    )
                     task.completed_at = datetime.utcnow().isoformat()
                     task.add_log("error", task.error)
+                    update_task(task)  # D28 §1b terminal-hook (site :1116)
                     logger.error(f"Code task {task.id} violated read-only mode")
                     return
             else:
@@ -838,8 +1203,12 @@ class CodeTaskRunner:
                         f"(provider={task.provider_used or 'unknown'}, model={task.model_used or 'unknown'}, attempts={task.prompt_attempts})"
                     )
                     task.error = task.failure_reason
+                    task.result = _format_failure_evidence(
+                        task, "completed without actual file changes"
+                    )
                     task.completed_at = datetime.utcnow().isoformat()
                     task.add_log("error", task.error)
+                    update_task(task)  # D28 §1b terminal-hook (site :1128)
                     logger.error(f"Code task {task.id} had no actual file changes")
                     return
 
@@ -853,8 +1222,12 @@ class CodeTaskRunner:
                 task.state = CodeTaskState.ERROR
                 task.failure_reason = "git commit succeeded but could not be verified in repository history."
                 task.error = task.failure_reason
+                task.result = _format_failure_evidence(
+                    task, "git commit reported success but could not be verified"
+                )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
+                update_task(task)  # D28 §1b terminal-hook (site :1149)
                 logger.error(f"Code task {task.id} could not verify commit")
                 return
 
@@ -862,14 +1235,19 @@ class CodeTaskRunner:
                 task.state = CodeTaskState.ERROR
                 task.failure_reason = f"Verified commit hash is not present in git history: {task.verified_commit_hash}"
                 task.error = task.failure_reason
+                task.result = _format_failure_evidence(
+                    task, "verified commit hash is not present in git history"
+                )
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
+                update_task(task)  # D28 §1b terminal-hook (site :1161)
                 logger.error(f"Code task {task.id} invalid commit hash")
                 return
 
             task.result = _compose_verified_summary(task)
             task.state = CodeTaskState.COMPLETED
             task.completed_at = datetime.utcnow().isoformat()
+            update_task(task)  # D28 §1b terminal-hook (site :1173 — success)
             logger.info(
                 f"Code task {task.id} completed: {len(task.files_changed)} files changed, {len(task.executed_tool_calls)} tool calls"
             )
@@ -877,15 +1255,39 @@ class CodeTaskRunner:
         except asyncio.TimeoutError:
             task.state = CodeTaskState.ERROR
             task.error = "Task timed out — Atlas was unresponsive for too long"
+            task.failure_reason = task.error
+            task.result = _format_failure_evidence(task, "task timed out")
             task.completed_at = datetime.utcnow().isoformat()
             task.add_log("error", "Timed out waiting for Atlas")
+            update_task(task)  # D28 §1b terminal-hook (site :1180 — asyncio.TimeoutError)
             logger.error(f"Code task {task.id} timed out")
+
+        except asyncio.CancelledError:
+            # D28 §1c: explicit CancelledError handler. Py3.8+ has
+            # asyncio.CancelledError inheriting BaseException (NOT Exception),
+            # so the `except Exception` below does NOT catch it. Without this
+            # branch the `finally:` pops _running but leaves the row reading
+            # 'running' — and a startup-reconcile would later overwrite our
+            # choice. We persist a terminal 'error' so the row is consistent
+            # with what the founder sees in the runner's logs. STEP 2's
+            # reconcile covers the kill -9 case where NO handler runs.
+            task.state = CodeTaskState.ERROR
+            task.error = "Task cancelled before completion"
+            task.failure_reason = task.error
+            task.completed_at = datetime.utcnow().isoformat()
+            task.add_log("error", task.error)
+            update_task(task)  # D28 §1c CancelledError terminal-hook
+            logger.error(f"Code task {task.id} cancelled")
+            raise
 
         except Exception as e:
             task.state = CodeTaskState.ERROR
             task.error = str(e)
+            task.failure_reason = task.error
+            task.result = _format_failure_evidence(task, f"exception: {e}")
             task.completed_at = datetime.utcnow().isoformat()
             task.add_log("error", f"Failed: {e}")
+            update_task(task)  # D28 §1b terminal-hook (site :1189 — generic Exception)
             logger.error(f"Code task {task.id} failed: {e}")
 
         finally:

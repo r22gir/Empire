@@ -413,35 +413,48 @@ def _render_bench_drawing(item: FurnitureItem) -> dict:
         render_straight, render_l_shape, render_u_shape,
     )
 
+    from app.services.drawing.bench_quote_bridge import (
+        length_to_inches_from_text,
+        normalize_panel_style,
+        resolve_back_height,
+        resolve_has_back,
+    )
+
     bd = item.bench_details or {}
     bench_type = bd.get("bench_type", "straight")
-    width = item.dim_inches("width", 120)
-    if width < 50:
-        width = width * 12  # probably feet, convert to inches
+    raw_width = (item.all_dimensions or {}).get("width", "")
+    width = length_to_inches_from_text(raw_width, default=0.0) or item.dim_inches("width", 120)
     depth = item.dim_inches("seat_depth", 20)
     seat_h = item.dim_inches("seat_height", 18)
-    back_h = item.dim_inches("back_height", 34)
-    panel_style = bd.get("panel_style", "vertical_channels")
+    raw_back = (item.all_dimensions or {}).get("back_height", "")
+    if raw_back:
+        back_h, _assumed = resolve_back_height(length_to_inches_from_text(raw_back, default=0.0))
+    else:
+        back_h, _assumed = resolve_back_height(bd.get("back_height"))
+    panel_style = normalize_panel_style(bd.get("panel_style"), default="vertical_channels")
     channel_count = bd.get("channel_count", 6)
     cushion_width = bd.get("cushion_width", 24)
 
+    has_back = resolve_has_back(bd.get("has_back"), panel_style)
+    style = dict(
+        panel_style=panel_style, channel_count=channel_count,
+        cushion_width=cushion_width, has_back=has_back,
+        back_height_assumed=_assumed and has_back,
+    )
     if "u" in bench_type:
         svg = render_u_shape(
             item.name, width, depth_in=depth, seat_h_in=seat_h, back_h_in=back_h,
-            panel_style=panel_style, channel_count=channel_count,
-            cushion_width=cushion_width,
+            **style,
         )
     elif "l" in bench_type:
         svg = render_l_shape(
             item.name, width, depth_in=depth, seat_h_in=seat_h, back_h_in=back_h,
-            panel_style=panel_style, channel_count=channel_count,
-            cushion_width=cushion_width,
+            **style,
         )
     else:
         svg = render_straight(
             item.name, width, depth_in=depth, seat_h_in=seat_h, back_h_in=back_h,
-            panel_style=panel_style, channel_count=channel_count,
-            cushion_width=cushion_width,
+            **style,
         )
 
     return {"item_id": item.id, "name": item.name, "svg": svg, "item_type": "bench"}

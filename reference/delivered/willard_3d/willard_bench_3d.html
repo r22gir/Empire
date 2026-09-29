@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Willard CST-23 · Style B — Live Model · REV E5</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#e9e1d0;font-family:Helvetica,Arial,sans-serif}
+  #hud{position:fixed;top:0;left:0;right:0;padding:14px 20px;pointer-events:none;
+       background:linear-gradient(#e9e1d0f2,#e9e1d000)}
+  #hud h1{margin:0;font-size:18px;letter-spacing:.04em;color:#2c2418}
+  #hud p{margin:4px 0 0;font-size:12px;color:#6b5a44}
+  #foot{position:fixed;left:0;right:0;bottom:0;padding:10px 20px;background:#222;color:#faf8f4;
+        font-size:12px;display:flex;justify-content:space-between;font-weight:bold}
+  #foot span:last-child{color:#f0c090}
+  #ctl{position:fixed;right:16px;top:78px;display:flex;flex-direction:column;gap:6px}
+  #ctl button{pointer-events:auto;border:1px solid #4a2f18;background:#faf8f4;color:#2c2418;
+      font:600 12px Helvetica;padding:7px 10px;border-radius:3px;cursor:pointer}
+  #ctl button:focus-visible{outline:2px solid #a2542f;outline-offset:1px}
+  #ctl button.on{background:#4a2f18;color:#f0e6d2}
+</style>
+</head>
+<body>
+<div id="hud">
+  <h1>WILLARD CST-23 · STYLE B-44 — LIVE MODEL · REV E5 (SLIDE-IN, NO ARMRESTS)</h1>
+  <p>Drag to orbit · scroll or pinch to zoom · finishes indicative — geometry from the construction spec</p>
+</div>
+<div id="ctl">
+  <button id="bFront">Front</button>
+  <button id="bRear">Rear</button>
+  <button id="bArm">Arm detail</button>
+  <button id="bFrame" aria-pressed="false">Show frame</button>
+  <button id="bSpr" aria-pressed="false">Springs seat</button>
+</div>
+<div id="foot"><span>EMPIRE WORKROOM · MAGGIE O'NEIL — THE WILLARD · 08/09/2026</span><span>FOR DISCUSSION — NOT FOR CONSTRUCTION</span></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ---------- D16 spec (inches) ---------- */
+const R_FRONT=37.07, DEPTH=26.75, CHORD=79.87, CROWN=44, SEAT=18, CUSH=5, NCH=8;
+const RR=63.82, TH=1.3522;  // wall R64.32 less 1/2in clearance; sweep 77.47deg
+const STOCK=1.5;   // slide-in end panels, no armrests
+function xRear(h){ return 26.0; }  // plumb back frame
+const xFace=h=>h<=19?18.0:18.0+(h-19)/25*5.75;
+/* ---------- scene ---------- */
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0xe9e1d0);
+const cam=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,1,2000);
+const ren=new THREE.WebGLRenderer({antialias:true});
+ren.setPixelRatio(Math.min(devicePixelRatio,2)); ren.setSize(innerWidth,innerHeight);
+document.body.appendChild(ren.domElement);
+scene.add(new THREE.HemisphereLight(0xfff4e0,0x8a7a5a,0.95));
+const key=new THREE.DirectionalLight(0xffffff,0.7); key.position.set(-120,180,160); scene.add(key);
+const M={
+  vinyl:new THREE.MeshStandardMaterial({color:0xffffff,roughness:.75,side:THREE.DoubleSide}),
+  vinylD:new THREE.MeshStandardMaterial({color:0xffffff,roughness:.8,side:THREE.DoubleSide}),
+  chan:new THREE.MeshStandardMaterial({color:0x47563a,roughness:.9}),
+  wood:new THREE.MeshStandardMaterial({color:0xb98a55,roughness:.55}),
+  woodD:new THREE.MeshStandardMaterial({color:0x9a6f3e,roughness:.6}),
+  gold:new THREE.MeshStandardMaterial({color:0xc9a13b,roughness:.35,metalness:.55}),
+  navy:new THREE.MeshStandardMaterial({color:0x1d2b45,roughness:.5}),
+  cream:new THREE.MeshStandardMaterial({color:0xe9dcc4,roughness:.7}),
+  birch:new THREE.MeshStandardMaterial({color:0xe9e2cf,roughness:.85,side:THREE.DoubleSide}),
+  rail:new THREE.MeshStandardMaterial({color:0xcdbd97,roughness:.85,side:THREE.DoubleSide})
+};
+const root=new THREE.Group(); scene.add(root);
+const edgeMat=new THREE.LineBasicMaterial({color:0x2c2418});
+function outline(mesh,deg=28){
+  mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry,deg),edgeMat));
+  return mesh;
+}
+function nympheusTexture(){          // indicative water-lily damask, one vertical repeat
+  const c=document.createElement('canvas'); c.width=256; c.height=768;
+  const g=c.getContext('2d');
+  g.fillStyle='#3c4a31'; g.fillRect(0,0,256,768);
+  g.strokeStyle='#5f7050'; g.lineWidth=5;
+  g.beginPath(); g.moveTo(128,760);
+  g.bezierCurveTo(70,600,186,520,128,380); g.bezierCurveTo(70,240,186,160,128,20); g.stroke();
+  function leaf(cx,cy,sx,rot,fill){
+    g.save(); g.translate(cx,cy); g.rotate(rot); g.scale(sx,1);
+    g.fillStyle=fill; g.beginPath();
+    g.moveTo(0,0); g.bezierCurveTo(46,-16,66,-58,8,-92); g.bezierCurveTo(-18,-58,-26,-20,0,0);
+    g.fill(); g.restore();
+  }
+  for(const[cy,fl] of [[640,'#586a48'],[430,'#526343'],[210,'#586a48']]){
+    leaf(128,cy, 1, -0.5,fl); leaf(128,cy,-1, 0.5,fl);
+    leaf(128,cy-28, 0.62,-1.15,'#6a7c58'); leaf(128,cy-28,-0.62,1.15,'#6a7c58');
+  }
+  for(const cy of [560,340,120]){
+    g.fillStyle='#c9a13b'; g.beginPath(); g.ellipse(128,cy,11,20,0,0,7); g.fill();
+    g.fillStyle='#e0c06a'; g.beginPath(); g.ellipse(128,cy-6,5,10,0,0,7); g.fill();
+  }
+  const t=new THREE.CanvasTexture(c); t.anisotropy=4; return t;
+}
+const chanMat=new THREE.MeshStandardMaterial({map:nympheusTexture(),roughness:.9,side:THREE.DoubleSide});
+function vinylTexture(base,fleck){       // leather grain for the specified brown vinyl
+  const c=document.createElement('canvas'); c.width=c.height=256;
+  const g=c.getContext('2d'); g.fillStyle=base; g.fillRect(0,0,256,256);
+  for(let i=0;i<2600;i++){g.fillStyle=Math.random()<.5?fleck:'rgba(0,0,0,0.10)';
+    g.fillRect(Math.random()*256,Math.random()*256,1.6,1.6);}
+  g.strokeStyle='rgba(0,0,0,0.12)';
+  for(let i=0;i<48;i++){g.beginPath();const x=Math.random()*256,y=Math.random()*256;
+    g.moveTo(x,y);g.quadraticCurveTo(x+14,y+8,x+30,y+3);g.stroke();}
+  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(5,3); return t;
+}
+function fringeTexture(){                // Rupi 158 — 6in gold strand band on header
+  const c=document.createElement('canvas'); c.width=512; c.height=128;
+  const g=c.getContext('2d'); g.fillStyle='#6e4a22'; g.fillRect(0,0,512,128);
+  g.fillStyle='#8a5f33'; g.fillRect(0,0,512,22);         // header
+  for(let x=2;x<512;x+=4){const wob=Math.sin(x*0.35)*2;
+    g.strokeStyle=x%8<4?'#c9a13b':'#dcb95c'; g.lineWidth=2.4;
+    g.beginPath(); g.moveTo(x,22); g.quadraticCurveTo(x+wob,75,x+wob*1.6,126); g.stroke();}
+  const t=new THREE.CanvasTexture(c); t.wrapS=THREE.RepeatWrapping; t.repeat.set(9,1); return t;
+}
+const vinylMap=vinylTexture('#86592c','rgba(255,230,190,0.14)');
+const vinylMapD=vinylTexture('#7a5228','rgba(255,225,180,0.12)');
+M.vinyl.map=vinylMap; M.vinylD.map=vinylMapD;
+const cushMap=vinylTexture('#9c6f3e','rgba(255,235,200,0.16)');
+const fringeMat=new THREE.MeshStandardMaterial({map:fringeTexture(),roughness:.85,side:THREE.DoubleSide});
+
+const bench=new THREE.Group(), frame=new THREE.Group(); frame.visible=false;
+root.add(bench,frame);
+/* plan helper: angle a along sweep; radial offset r from curvature center at origin.
+   world: x=r*sin(a), z=r*cos(a)-RR (so bench rear mid at z=0, room toward -z... front toward viewer +?) */
+const C0=RR; // shift so mid-rear at z≈0
+function pos(a,r,h){return new THREE.Vector3(r*Math.sin(a), h, -(r*Math.cos(a)-C0));}
+/* arc slab builder: between radii r1..r2, heights h1..h2, angular a1..a2 */
+function arcBox(a1,a2,r1,r2,h1,h2,mat,segs=10){
+  const g=new THREE.BufferGeometry(), v=[],idx=[];
+  for(let i=0;i<=segs;i++){const a=a1+(a2-a1)*i/segs;
+    for(const[r,h] of [[r1,h1],[r2,h1],[r2,h2],[r1,h2]]){const p=pos(a,r,h);v.push(p.x,p.y,p.z);}}
+  for(let i=0;i<segs;i++){const b=i*4;
+    const q=(o1,o2,o3,o4)=>idx.push(b+o1,b+o2,b+o3,b+o1,b+o3,b+o4);
+    q(0,4,5,1); q(3,2,6,7); q(0,3,7,4); q(1,5,6,2);}
+  // caps
+  idx.push(0,1,2,0,2,3); const b=segs*4; idx.push(b,b+3,b+2,b,b+2,b+1);
+  g.setIndex(idx); g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));
+  g.computeVertexNormals(); return new THREE.Mesh(g,mat);
+}
+const A0=-TH/2, A1=TH/2, RF_=R_FRONT;
+const dEnd=(STOCK+0.15)/(RF_-0.5), A0c=A0+dEnd, A1c=A1-dEnd;  // cushion inside the panels, hair of margin
+const dCh=(STOCK+0.3)/(RF_+18.0);  // channels stop at panel inner faces (min face radius)
+/* ---- upholstered body ---- */
+bench.add(outline(arcBox(A0c,A1c,RF_,RF_+4,1,13,M.vinylD,16)));      // base band between ends
+const cushMat=new THREE.MeshStandardMaterial({map:cushMap,roughness:.7,side:THREE.DoubleSide});
+bench.add(outline(arcBox(A0,A1,RF_+0.6,RF_+20,13,SEAT,cushMat,16),40)); // cushion body
+(function boxedNose(){  // near-vertical front, soft 1.2in corner radii, lofted along the arc
+  const segs=28, rF=RF_-0.5, rc=1.2, prof=[];
+  for(let j=0;j<=5;j++){const t=j/5*Math.PI/2;                 // top corner
+    prof.push([rF+rc-rc*Math.sin(t), 16.8+rc*Math.cos(t)]);}
+  prof.push([rF,15.9],[rF,15.1]);                              // flat front
+  for(let j=0;j<=5;j++){const t=j/5*Math.PI/2;                 // bottom corner
+    prof.push([rF+rc-rc*Math.cos(t), 14.2-rc*Math.sin(t)]);}
+  const g=new THREE.BufferGeometry(), v=[], uv=[], idx=[]; const n=prof.length;
+  for(let i=0;i<=segs;i++){const a=A0c+(A1c-A0c)*i/segs;
+    prof.forEach((pt,j)=>{const p=pos(a,pt[0],pt[1]); v.push(p.x,p.y,p.z); uv.push(i/segs*6,j/(n-1));});}
+  for(let i=0;i<segs;i++)for(let j=0;j<n-1;j++){
+    const b=i*n+j; idx.push(b,b+n,b+n+1,b,b+n+1,b+1);}
+  g.setIndex(idx); g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));
+  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+  g.computeVertexNormals();
+  bench.add(new THREE.Mesh(g,cushMat));
+})();
+for(let i=0;i<NCH;i++){                 // channels — between panel inner faces
+  const A0i=A0+dCh, A1i=A1-dCh;
+  const a1=A0i+(A1i-A0i)*i/NCH+0.004, a2=A0i+(A1i-A0i)*(i+1)/NCH-0.004;
+  const hs=[19,26,33,39,43.55], g=new THREE.BufferGeometry(), v=[], idx=[];
+  for(const a of [a1,a2]) for(const h of hs){
+    for(const off of [-2,0]){const p=pos(a,RF_+xFace(h)+off,h); v.push(p.x,p.y,p.z);}}
+  const n=hs.length*2;
+  const q=(A,B,C,D)=>idx.push(A,B,C,A,C,D);
+  for(let j=0;j<hs.length-1;j++){
+    const f0=j*2+1, f1=(j+1)*2+1;                 // outer face
+    q(f0, n+f0, n+f1, f1);
+    q(j*2, (j+1)*2, n+(j+1)*2, n+j*2);           // inner
+  }
+  q(1,0,n,n+1);                                   // bottom
+  const t=hs.length*2-2; q(t, t+1, n+t+1, n+t);   // top edge
+  g.setIndex(idx); g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));
+  const uv=[];
+  for(const ua of [0,1]) for(const h of hs) for(const off of [-2,0])
+    uv.push(ua,(h-19)/(43.55-19));
+  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+  g.computeVertexNormals();
+  bench.add(outline(new THREE.Mesh(g,chanMat),35));
+  const mid=(a1+a2)/2, w=(a2-a1)*(RF_+xFace(43.5));
+  const capGeo=new THREE.CylinderGeometry(0.42,0.42,w-0.9,12); capGeo.rotateZ(Math.PI/2);  // soft square edge
+  const cap=new THREE.Mesh(capGeo,M.chan);
+  cap.position.copy(pos(mid,RF_+xFace(43.55)-1.0,43.8));
+  cap.rotation.y=-mid; bench.add(cap);
+}
+(function backSkin(){   // lofted to the true rear curve x_rear(h)
+  const hs=[1,8,16,24,32,40,43.5], segs=16;
+  const g=new THREE.BufferGeometry(), v=[], idx=[];
+  for(let i=0;i<=segs;i++){const a=A0+(A1-A0)*i/segs;
+    for(const h of hs){const p=pos(a,RF_+xRear(h)+0.35,h); v.push(p.x,p.y,p.z);}}
+  const n=hs.length;
+  for(let i=0;i<segs;i++)for(let j=0;j<n-1;j++){
+    const b=i*n+j; idx.push(b,b+n,b+n+1,b,b+n+1,b+1);}
+  g.setIndex(idx); g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));
+  g.computeVertexNormals();
+  bench.add(new THREE.Mesh(g,new THREE.MeshStandardMaterial({map:vinylMapD,roughness:.8,side:THREE.DoubleSide})));
+})();
+/* FABRIC trim — Rupi 158: 6in band across the front bottom (header + gold strands) */
+(function fringeBand(){
+  const g=new THREE.BufferGeometry(), v=[], uv=[], idx=[]; const segs=24;
+  for(let i=0;i<=segs;i++){const a=A0c+(A1c-A0c)*i/segs;
+    for(const h of [7,1]){const p=pos(a,RF_-0.35,h); v.push(p.x,p.y,p.z); uv.push(i/segs,h===7?0:1);}}
+  for(let i=0;i<segs;i++){const b=i*2; idx.push(b,b+2,b+3,b,b+3,b+1);}
+  g.setIndex(idx); g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));
+  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2)); g.computeVertexNormals();
+  bench.add(new THREE.Mesh(g,fringeMat));
+})();
+/* ---- arm shape (D16 profile) ---- */
+function armShape(){
+  // front edge sits 0.9 PROUD of the cushion nose; rear lands on the outer back
+  const s=new THREE.Shape();
+  s.moveTo(0,0); s.lineTo(0,18.2);
+  s.quadraticCurveTo(1.0,19.2,2.4,19); s.lineTo(16.1,19);
+  s.quadraticCurveTo(17.5,19.1,17.9,20.2);
+  s.lineTo(23.65,42.0);
+  s.quadraticCurveTo(24.1,44,26.1,44); s.lineTo(27.65,44);
+  s.lineTo(27.65,0); s.closePath(); return s;
+}
+function crestTexture(){
+  const c=document.createElement('canvas'); c.width=c.height=256;
+  const g=c.getContext('2d');
+  g.fillStyle='#1d2b45'; g.beginPath(); g.arc(128,128,124,0,7); g.fill();
+  g.strokeStyle='#8a6a2f'; g.lineWidth=10; g.beginPath(); g.arc(128,128,118,0,7); g.stroke();
+  g.fillStyle='#c9a13b'; g.font='italic bold 130px Georgia'; g.textAlign='center';
+  g.fillText('W',128,168);
+  g.strokeStyle='#c9a13b'; g.lineWidth=7; g.beginPath(); g.arc(128,120,72,0.35,Math.PI-0.35); g.stroke();
+  const t=new THREE.CanvasTexture(c); return t;
+}
+function buildArm(outSign){
+  const grp=new THREE.Group();
+  grp.add(outline(new THREE.Mesh(new THREE.ExtrudeGeometry(armShape(),{depth:STOCK,bevelEnabled:false}),M.vinyl),24));
+  return grp;
+}
+/* fringe returns — both ends, bottom 6in */
+for(const side of [1,-1]){
+  const a=side*TH/2;
+  const g=new THREE.BufferGeometry(), v=[], uv=[], idx=[]; const n=12;
+  const t=new THREE.Vector3(Math.cos(a),0,Math.sin(a)).multiplyScalar(side*0.15);
+  for(let i=0;i<=n;i++){const r=RF_+DEPTH*i/n;
+    for(const h of [7,1]){const p=pos(a,r,h).add(t); v.push(p.x,p.y,p.z); uv.push(i/n*3,h===7?0:1);}}
+  for(let i=0;i<n;i++){const b=i*2; idx.push(b,b+2,b+3,b,b+3,b+1);}
+  g.setIndex(idx); g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));
+  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2)); g.computeVertexNormals();
+  bench.add(new THREE.Mesh(g,fringeMat));
+}
+/* place arms at ends — rotation.y = PI/2 - a maps profile depth axis onto the radial (verified) */
+for(const side of [1,-1]){
+  const a=side*TH/2;
+  const arm=buildArm(side);           // decor on the outward face
+  arm.rotation.y=Math.PI/2-a;
+  arm.position.copy(pos(a,RF_-0.9,0));
+  // extrusion +z now runs along +tangent (cos a,0,sin a): push thickness OUTSIDE the bench
+  const t=new THREE.Vector3(Math.cos(a),0,Math.sin(a));
+  arm.position.add(t.multiplyScalar(side>0? -STOCK : 0));
+  bench.add(arm);
+}
+/* ---- frame skeleton ---- */
+frame.add(arcBox(A0,A1,RF_+0.2,RF_+1.7,1,12.25,M.rail,16));      // front rail
+frame.add(arcBox(A0,A1,RF_+24.5,RF_+26.0,1,12.25,M.rail,16));    // rear rail
+const deckMesh=arcBox(A0,A1,RF_+0.5,RF_+25.2,12.25,13,M.birch,16); frame.add(deckMesh); // deck (Option A)
+/* Option B — sinuous-spring seat in lieu of ply deck */
+const springs=new THREE.Group(); springs.visible=false; frame.add(springs);
+{
+  const steel=new THREE.MeshStandardMaterial({color:0x3c3f45,roughness:.4,metalness:.7});
+  for(let i=0;i<9;i++){
+    const a=A0+(A1-A0)*(i+0.5)/9, pts=[];
+    for(let t=0;t<=40;t++){
+      const r=RF_+2.2+(23.0)*t/40;
+      const wig=1.15*Math.sin(t/40*Math.PI*7);
+      const aa=a+wig/r;
+      pts.push(pos(aa,r,12.55));
+    }
+    springs.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),120,0.14,6,false),steel));
+  }
+  const ew=[]; for(let i=0;i<=24;i++){ew.push(pos(A0+(A1-A0)*i/24,RF_+2.0,12.55));}
+  springs.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(ew),60,0.16,6,false),steel));
+}
+frame.add(arcBox(A0,A1,RF_,RF_+0.75,1,13,M.birch,16));           // front skin framing
+/* joists J1-J9 — radial between rails */
+for(let i=0;i<9;i++){
+  const a=A0+(A1-A0)*i/8;
+  const jl=(RF_+24.5)-(RF_+1.7);
+  const j=new THREE.Mesh(new THREE.BoxGeometry(jl,11.25,0.75),M.birch);
+  j.rotation.y=Math.PI/2-a;                       // length along the radial (proven mapping)
+  j.position.copy(pos(a,(RF_+1.7+RF_+24.5)/2,1+11.25/2));
+  frame.add(j);
+}
+/* glides x12 */
+for(let k=0;k<6;k++){const ga=A0+(A1-A0)*k/5;
+  for(const gr of [RF_+3.5,RF_+23.0]){
+    const g=new THREE.Mesh(new THREE.CylinderGeometry(1.4,1.4,1,14),
+        new THREE.MeshStandardMaterial({color:0x3a6b3a,roughness:.7}));
+    g.position.copy(pos(ga,gr,0.5)); frame.add(g);
+  }}
+/* end blocking + arm-bolt cleats */
+for(const side of [1,-1]){
+  const a=side*TH/2;
+  const bl=new THREE.Mesh(new THREE.BoxGeometry(26,11.25,1.5),M.rail);
+  bl.rotation.y=Math.PI/2-a;
+  bl.position.copy(pos(a,(RF_+8+RF_+22)/2,1+11.25/2));
+  bl.position.add(new THREE.Vector3(Math.cos(a),0,Math.sin(a)).multiplyScalar(side*-1.2));
+  frame.add(bl);
+}
+for(let i=0;i<9;i++){
+  const a=A0+(A1-A0)*i/8;
+  const sh=new THREE.Shape();
+  sh.moveTo(18,1); sh.lineTo(26,1); sh.lineTo(26,44);
+  sh.lineTo(23.75,44); sh.lineTo(18,19); sh.closePath();
+  const st=new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{depth:0.75,bevelEnabled:false}),M.birch);
+  st.rotation.y=Math.PI/2-a;
+  st.position.copy(pos(a,RF_,0));
+  st.position.add(new THREE.Vector3(Math.cos(a),0,Math.sin(a)).multiplyScalar(-0.375));
+  frame.add(st);
+}
+for(const h of [8,16,24,32,40,44]){
+  frame.add(arcBox(A0,A1,RF_+xFace(h),RF_+xRear(h),h-0.375,h+0.375,M.rail,16));
+}
+/* ---------- camera + custom orbit (no OrbitControls in r128 CDN) ---------- */
+const target=new THREE.Vector3(0,20,-12);
+let az=0.62, el=0.32, dist=145, drag=false, px=0, py=0;
+function apply(){
+  cam.position.set(target.x+dist*Math.cos(el)*Math.sin(az),
+                   target.y+dist*Math.sin(el),
+                   target.z+dist*Math.cos(el)*Math.cos(az));
+  cam.lookAt(target);
+}
+apply();
+addEventListener('pointerdown',e=>{if(e.target.tagName==='BUTTON')return;drag=true;px=e.clientX;py=e.clientY;});
+addEventListener('pointerup',()=>drag=false);
+addEventListener('pointermove',e=>{if(!drag)return;
+  az-=(e.clientX-px)*0.006; el=Math.min(1.35,Math.max(-0.15,el+(e.clientY-py)*0.005));
+  px=e.clientX;py=e.clientY;apply();});
+addEventListener('wheel',e=>{dist=Math.min(320,Math.max(60,dist+e.deltaY*0.15));apply();},{passive:true});
+let pinch=0;
+addEventListener('touchmove',e=>{if(e.touches.length===2){
+  const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+  if(pinch)dist=Math.min(320,Math.max(60,dist-(d-pinch)*0.4)); pinch=d; apply();}},{passive:true});
+addEventListener('touchend',()=>pinch=0);
+function fly(a,e2,d){az=a;el=e2;dist=d;apply();}
+bFront.onclick=()=>fly(0.0,0.26,150);
+bRear.onclick =()=>fly(Math.PI,0.28,160);
+bArm.onclick  =()=>fly(1.30,0.15,85);
+bFrame.onclick=()=>{frame.visible=!frame.visible;bench.visible=!frame.visible;
+  bFrame.classList.toggle('on',frame.visible);
+  bFrame.setAttribute('aria-pressed',frame.visible);
+  bFrame.textContent=frame.visible?'Show finished':'Show frame';};
+bSpr.onclick=()=>{const on=!springs.visible; springs.visible=on; deckMesh.visible=!on;
+  bSpr.classList.toggle('on',on); bSpr.setAttribute('aria-pressed',on);
+  if(!frame.visible) bFrame.onclick();};
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();
+  ren.setSize(innerWidth,innerHeight);});
+const mq=matchMedia('(prefers-reduced-motion: reduce)');
+(function loop(){requestAnimationFrame(loop);
+  if(!drag && !mq.matches) az+=0.0009, apply();
+  ren.render(scene,cam);})();
+</script>
+</body>
+</html>

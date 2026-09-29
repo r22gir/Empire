@@ -48,6 +48,17 @@ def get_conn():
 def create_all_tables(conn: sqlite3.Connection):
     """Create all unified business tables. Idempotent."""
 
+    # D48 STEP 2: the chain tables (customers, invoices, jobs, payments) are
+    # defined in init_db.SCHEMA_SQL, not here. Execute that first so any DB
+    # built by this function — notably the test DB in tests/conftest.py —
+    # carries the same NOT NULL / FK constraints as production. Without this
+    # the test schema lacked invoices and jobs entirely, so no test could
+    # reach the chain constraints. The two schemas define disjoint table
+    # sets, so this is additive; init_db stays the single source of truth
+    # for the chain DDL rather than it being copied into a second place.
+    from app.db.init_db import SCHEMA_SQL
+    conn.executescript(SCHEMA_SQL)
+
     conn.executescript("""
     -- Financial Audit Log (created FIRST — everything else logs to it)
     CREATE TABLE IF NOT EXISTS financial_audit_log (
@@ -111,6 +122,7 @@ def create_all_tables(conn: sqlite3.Connection):
         pdf_path TEXT,
         sent_at TEXT,
         accepted_at TEXT,
+        issued_document TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -161,6 +173,7 @@ def create_all_tables(conn: sqlite3.Connection):
         manual_price_override REAL,
         price_is_manual INTEGER DEFAULT 0,
         category TEXT DEFAULT 'labor',
+        rate_source TEXT DEFAULT 'catalog',
         drawing_id TEXT,
         drawing_svg TEXT,
         photo_ids_json TEXT,
@@ -257,8 +270,61 @@ def create_all_tables(conn: sqlite3.Connection):
     );
     CREATE INDEX IF NOT EXISTS idx_pv2_invoice ON payments_v2(invoice_id);
     CREATE INDEX IF NOT EXISTS idx_pv2_customer ON payments_v2(customer_id);
+    """)
+    conn.commit()
 
-    -- Chart of Accounts
+    # ── 2026-07-15 HOTFIX 4: the next two blocks used to live INSIDE the
+    # executescript("""...""") above. Python comments ('#') in the SQL
+    # string broke the script with 'unrecognized token: #', so fresh
+    # bootstrap DBs couldn't be rebuilt. They are real schema work
+    # (Sprint 1d Payment Phase 1 ALTERs + chart_of_accounts CREATE) and
+    # run here, after the script, against the same connection.
+
+    # Sprint 1d Payment Phase 1: payments_v2 needs business_unit + stripe_session_id.
+    # webhook writes via stripe_session_id; idempotency on stripe_session_id
+    # so webhook re-fires don't create duplicates. Idempotent ALTER — safe
+    # to re-run.
+    for _alter_sql in (
+        "ALTER TABLE payments_v2 ADD COLUMN business_unit TEXT NOT NULL DEFAULT 'workroom'",
+        "ALTER TABLE payments_v2 ADD COLUMN stripe_session_id TEXT",
+    ):
+        try:
+            conn.execute(_alter_sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists / already applied
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_payments_v2_stripe_session_id "
+        "ON payments_v2(stripe_session_id) WHERE stripe_session_id IS NOT NULL"
+    )
+    conn.commit()
+
+    # ---------------------------------------------------------------------
+    # D39 / H77 — Issued-document provenance (continued H77).
+    # quotes_v2.issued_document is a TEXT column on the quote holding the
+    # identifier of an issued (already-billed) document that governs this
+    # quote's rates — e.g. "NELMA-814" for a paper invoice whose numbers
+    # the founder is reusing here. Nullable; NULL means "no issued
+    # document — rates come from the catalog." Per-line rate_source lives
+    # on quote_line_items (added below with the rest of the D38 columns).
+    # The engine does not enforce this — it records it. A future session
+    # reading the quote must see the rates are historical by intent, not
+    # by drift, and not silently "correct" them.
+    # ---------------------------------------------------------------------
+    for _alter_sql in (
+        "ALTER TABLE quotes_v2 ADD COLUMN issued_document TEXT",
+    ):
+        try:
+            conn.execute(_alter_sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists (idempotent re-run)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_quotes_v2_issued_document "
+        "ON quotes_v2(issued_document)"
+    )
+    conn.commit()
+
+    # Chart of Accounts
+    conn.execute("""
     CREATE TABLE IF NOT EXISTS chart_of_accounts (
         code TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -268,7 +334,7 @@ def create_all_tables(conn: sqlite3.Connection):
         is_active INTEGER DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
+    )
     """)
     conn.commit()
 
@@ -285,12 +351,21 @@ def create_all_tables(conn: sqlite3.Connection):
         "ALTER TABLE quote_line_items ADD COLUMN price_overridden INTEGER DEFAULT 0",
         "ALTER TABLE quote_line_items ADD COLUMN business_unit TEXT DEFAULT 'workroom'",
         "ALTER TABLE quote_line_items ADD COLUMN computed_json TEXT",
+        # D39 / H77 — Issued-document provenance. See STEP 1d of the
+        # dispatch. Per-line rate_source: "catalog" (the engine's catalog
+        # rate governed the line) or "issued:<doc-id>" (the line is governed
+        # by a founder-supplied historical document such as a paper
+        # invoice). The engine does NOT enforce this — it records it.
+        # A future session reading the row can see the rates are historical
+        # by intent, not by drift, and must not "correct" them.
+        "ALTER TABLE quote_line_items ADD COLUMN rate_source TEXT DEFAULT 'catalog'",
     ):
         try:
             conn.execute(_alter_sql)
         except sqlite3.OperationalError:
             pass  # column already exists (idempotent re-run)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_qli_business ON quote_line_items(business_unit)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_qli_rate_source ON quote_line_items(rate_source)")
     conn.commit()
 
     # ---------------------------------------------------------------------

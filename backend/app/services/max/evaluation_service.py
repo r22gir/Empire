@@ -254,7 +254,9 @@ class EvaluationService:
         if "ollama" in model or "llama" in model:
             return "ollama"
         if "openclaw" in model:
-            return "openclaw"
+            # Stale legacy data — the wrapper no longer round-trips its
+            # provider id through the model field. Classify honestly.
+            return "unknown"
         return "unknown"
 
     # ── Core logging ─────────────────────────────────────────────────

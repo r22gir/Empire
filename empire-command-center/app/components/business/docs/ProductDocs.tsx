@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { DOCS_REGISTRY, DOC_TYPE_COLORS, type DocEntry } from '../../../lib/docs-registry';
 import { FileText, Search, ChevronDown, ChevronRight, BookOpen, Image, FileType, Download, ExternalLink } from 'lucide-react';
 
@@ -34,6 +34,42 @@ const FORMAT_ICONS: Record<string, { label: string; color: string; bg: string }>
   pptx: { label: 'PPTX', color: '#ea580c', bg: '#fff7ed' },
   other: { label: 'FILE', color: '#737373', bg: '#f5f5f5' },
 };
+
+function MissingDoc({ title, path: docPath }: { title: string; path: string }) {
+  return (
+    <div style={{ padding: 24, background: '#f7f3ea' }}>
+      <div style={{ fontWeight: 700, color: '#20241f', fontSize: 15 }}>Document not in this workspace</div>
+      <p style={{ fontSize: 13, color: '#5c564c', maxWidth: 520, lineHeight: 1.5, margin: '8px 0' }}>
+        {title} is listed in Docs, but the file is not here. Nothing is previewed and no empty PDF was generated.
+      </p>
+      <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, color: '#7b7466' }}>{docPath}</div>
+    </div>
+  );
+}
+
+function GuardedPreview({ docPath, title, children }: { docPath: string; title: string; children: ReactNode }) {
+  const state = useDocReady(docPath, true);
+  if (state !== 'ready') {
+    if (state === 'missing') return <MissingDoc title={title} path={docPath} />;
+    return <div style={{ padding: 20, color: '#888', fontSize: 13 }}>Checking file…</div>;
+  }
+  return <>{children}</>;
+}
+
+function useDocReady(docPath: string, active: boolean) {
+  const [state, setState] = useState<'idle' | 'checking' | 'ready' | 'missing'>('idle');
+  useEffect(() => {
+    if (!active) return;
+    let cancel = false;
+    setState('checking');
+    fetch(`/api/docs/serve?path=${encodeURIComponent(docPath)}&probe=1`)
+      .then(r => r.json())
+      .then(data => { if (!cancel) setState(data?.ok ? 'ready' : 'missing'); })
+      .catch(() => { if (!cancel) setState('missing'); });
+    return () => { cancel = true; };
+  }, [docPath, active]);
+  return state;
+}
 
 export default function ProductDocs({ product }: Props) {
   const [search, setSearch] = useState('');
@@ -248,6 +284,7 @@ export default function ProductDocs({ product }: Props) {
               {isExpanded && (
                 <div style={{ borderTop: '1px solid #ece8e0', background: '#fefefe' }}>
                   {format === 'image' ? (
+                    <GuardedPreview docPath={doc.path} title={doc.title}>
                     <div style={{ padding: 16, textAlign: 'center' }}>
                       <img
                         src={`/api/docs/serve?path=${encodeURIComponent(doc.path)}`}
@@ -255,7 +292,9 @@ export default function ProductDocs({ product }: Props) {
                         style={{ maxWidth: '100%', maxHeight: 500, borderRadius: 8, border: '1px solid #ece8e0' }}
                       />
                     </div>
+                    </GuardedPreview>
                   ) : format === 'pdf' ? (
+                    <GuardedPreview docPath={doc.path} title={doc.title}>
                     <div style={{ padding: 0 }}>
                       <iframe
                         src={`/api/docs/serve?path=${encodeURIComponent(doc.path)}`}
@@ -288,7 +327,9 @@ export default function ProductDocs({ product }: Props) {
                         </a>
                       </div>
                     </div>
+                    </GuardedPreview>
                   ) : (format === 'docx' || format === 'pptx' || format === 'html') ? (
+                    <GuardedPreview docPath={doc.path} title={doc.title}>
                     <div style={{ padding: 16 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', background: '#faf9f7', borderRadius: 10, border: '1px solid #ece8e0' }}>
                         <FileText size={24} style={{ color: fi.color }} />
@@ -311,6 +352,7 @@ export default function ProductDocs({ product }: Props) {
                         </a>
                       </div>
                     </div>
+                    </GuardedPreview>
                   ) : (
                     <div>
                       <div style={{ padding: '14px 18px', maxHeight: 500, overflowY: 'auto' }}>

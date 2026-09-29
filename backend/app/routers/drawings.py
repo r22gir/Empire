@@ -16,6 +16,8 @@ import uuid
 from app.services.business_routing import route_to_for_item_type
 from app.services.drawing import provider_status
 from app.services.drawing import yardage
+from app.services.drawing.bench_quote_bridge import resolve_bench_request
+from app.routers.vision import decode_image_input
 
 router = APIRouter()
 log = logging.getLogger("drawings")
@@ -85,22 +87,61 @@ async def serve_drawing_file(filename: str):
 
 
 class BenchRequest(BaseModel):
+    """Bench / banquette drawing request.
+
+    Units: INCHES-FIRST. `lf` and the run fields (leg1/leg2/back_length/
+    left_depth) are inches unless `length_unit` or `unit` is `ft`.
+    A 36" bench stays 36". The old "≤40 means feet" guess is retired.
+    Callers that still send linear feet (Drawing Studio LF box, quote
+    batch) pass length_unit="ft".
+
+    `width_in`, when set, is always inches and wins over `lf`.
+
+    Back height: omitted → shared 18" default, marked assumed on the
+    sheet. A quote-supplied `back_height` always wins (never the retired
+    Max-only 34" default). `has_back=false` draws no back.
+
+    `panel_style=flat` stays flat. It is not rewritten to channels.
+
+    U-shape field semantics (CRITICAL — do not swap):
+      back_length  = outer BACK run
+      left_depth   = LEFT WING LENGTH along the room — NOT thickness
+      right_depth  = historically seat-depth of return; for upholstery_on_shell
+                     Max bridge uses side_right / arm_right for RIGHT WING LENGTH
+                     and seat_depth for wing THICKNESS. Prefer Max dims
+                     {side_left, side_right, depth} over these legacy names.
+      seat_depth   = seat cushion depth = wing THICKNESS (inches)
+
+    For upholstery-on-existing-shell sheets (Marleys), Max routes through
+    `ul_banquette_drawings` → `upholstery_shell_renderer` (not millwork).
+    """
     bench_type: str = "straight"  # straight, l_shape, u_shape
     name: str = "Bench"
-    lf: float = 10  # linear feet
+    lf: float = 10  # inches unless length_unit="ft"
+    length_unit: str = "in"  # in | ft — explicit unit; default inches
+    unit: Optional[str] = None  # alias for length_unit when set
+    width_in: Optional[float] = None  # always inches; wins over lf
     rate: float = 0  # $/LF — owner sets pricing
-    seat_depth: float = 20
-    seat_height: float = 18
-    back_height: float = 18
+    seat_depth: float = 20  # inches (always) — wing THICKNESS / seat depth
+    seat_height: float = 18  # inches (always)
+    # None → shared default (18"), marked assumed. Quote value wins.
+    back_height: Optional[float] = None
     panel_style: str = "flat"  # flat, vertical_channels, horizontal_channels, tufted
+    cushion_width: float = 24  # inches
+    channel_count: int = 6
+    # None → back is drawn unless panel_style is none/no_back/backless.
+    has_back: Optional[bool] = None
+    business_unit: str = ""  # workroom | woodcraft | craftforge
+    product_type: str = ""  # freestanding_bench | banquette | ...
+    diagram_note: str = ""
     quote_num: str = ""
-    # L-shape specific
+    # L-shape — same unit as lf.
     leg1_length: float = 0
     leg2_length: float = 0
-    # U-shape specific
-    back_length: float = 0
-    left_depth: float = 0
-    right_depth: float = 0
+    # U-shape — same unit as lf.
+    back_length: float = 0          # outer BACK run
+    left_depth: float = 0           # LEFT WING LENGTH (along room), NOT thickness
+    right_depth: float = 0          # legacy return seat-depth; prefer side_right for wing LENGTH
 
 
 @router.post("/drawings/bench")
@@ -113,7 +154,13 @@ async def generate_bench_svg(req: BenchRequest):
     )
 
     svg = _render(req)
-    return {"svg": svg, "bench_type": req.bench_type, "name": req.name}
+    resolved = resolve_bench_request(req)
+    return {
+        "svg": svg,
+        "bench_type": req.bench_type,
+        "name": req.name,
+        "resolved": resolved.public_dict(),
+    }
 
 
 @router.post("/drawings/bench/pdf")
@@ -140,6 +187,31 @@ async def generate_bench_pdf(req: BenchRequest):
     )
 
 
+def _bench_run_inches(value, unit: Optional[str] = None) -> float:
+    """AI / generate bench widths: inches unless the payload says feet."""
+    from app.services.drawing.bench_quote_bridge import length_to_inches, length_to_inches_from_text
+
+    if isinstance(value, str):
+        return length_to_inches_from_text(value, default=0.0)
+    return length_to_inches(value, unit or "in")
+
+
+def _as_inches(value: float, *, already_inches_hint: bool = False, unit: str = "in") -> float:
+    """Convert a BenchRequest run length to inches.
+
+    Inches-first (2026-09-27). The retired rule treated ≤40 as feet, so
+    a 36" bench became 432". Feet convert only when `unit` is ft, or
+    when already_inches_hint is false AND unit says ft.
+
+    already_inches_hint forces inches (no ×12).
+    """
+    from app.services.drawing.bench_quote_bridge import length_to_inches
+
+    if already_inches_hint:
+        unit = "in"
+    return length_to_inches(value, unit)
+
+
 @router.post("/drawings/bench/dxf")
 async def generate_bench_dxf(req: BenchRequest):
     """Generate a DXF (CNC) file for a bench or banquette.
@@ -157,8 +229,9 @@ async def generate_bench_dxf(req: BenchRequest):
         render_u_shape,
     )
 
-    width_in = req.lf * 12
-    panel_style = req.panel_style if req.panel_style != "flat" else "vertical_channels"
+    resolved = resolve_bench_request(req)
+    width_in = resolved.width_in
+    panel_style = resolved.panel_style
 
     # Build a BenchModel that matches the SVG renderer output
     model = BenchModel(
@@ -166,9 +239,12 @@ async def generate_bench_dxf(req: BenchRequest):
         width=width_in,
         depth=req.seat_depth,
         seat_h=req.seat_height,
-        back_h=req.back_height,
+        back_h=resolved.back_height,
         panel_style=panel_style,
         quote_num=req.quote_num or "",
+        has_back=resolved.has_back,
+        channel_count=resolved.channel_count,
+        cushion_width=resolved.cushion_width,
     )
 
     # L-shape and U-shape benches use a single BenchModel for the longest
@@ -183,22 +259,23 @@ async def generate_bench_dxf(req: BenchRequest):
         )
 
     # Also render the matching SVG so the operator can compare CNC parts to
-    # the 4-quadrant drawing. We use the same helper as /drawings/bench.
+    # the 4-quadrant drawing. Lengths are already inches.
+    style = _style_kwargs(resolved)
     if req.bench_type == "l_shape":
-        long_in = req.leg1_length * 12 if req.leg1_length > 0 else width_in * 0.6
+        long_in = resolved.long_in if resolved.long_in > 0 else width_in * 0.6
         _ = render_l_shape(
             req.name,
             long_in,
-            width_in - long_in,
+            width_in - long_in if width_in > long_in else resolved.short_in,
             req.seat_depth,
             req.seat_height,
-            req.back_height,
+            resolved.back_height,
             quote_num=req.quote_num,
-            panel_style=panel_style,
+            **style,
         )
     elif req.bench_type == "u_shape":
-        back_in = req.back_length * 12 if req.back_length > 0 else width_in * 0.45
-        side_in = req.left_depth * 12 if req.left_depth > 0 else width_in * 0.275
+        back_in = resolved.back_run_in if resolved.back_run_in > 0 else width_in * 0.45
+        side_in = resolved.side_in if resolved.side_in > 0 else width_in * 0.275
         _ = render_u_shape(
             req.name,
             back_in,
@@ -206,9 +283,9 @@ async def generate_bench_dxf(req: BenchRequest):
             req.seat_depth,
             req.seat_depth,
             req.seat_height,
-            req.back_height,
+            resolved.back_height,
             quote_num=req.quote_num,
-            panel_style=panel_style,
+            **style,
         )
     else:
         _ = render_straight(
@@ -216,9 +293,9 @@ async def generate_bench_dxf(req: BenchRequest):
             width_in,
             req.seat_depth,
             req.seat_height,
-            req.back_height,
+            resolved.back_height,
             quote_num=req.quote_num,
-            panel_style=panel_style,
+            **style,
         )
 
     base_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
@@ -287,6 +364,23 @@ async def estimate_yardage(req: YardageRequest):
     return result
 
 
+def _style_kwargs(resolved) -> dict:
+    """Renderer kwargs from a resolved bench. Lengths are already inches."""
+    return dict(
+        panel_style=resolved.panel_style,
+        cushion_width=resolved.cushion_width,
+        channel_count=resolved.channel_count,
+        has_back=resolved.has_back,
+        business_unit=resolved.business_unit,
+        product_type=resolved.product_type,
+        category_chip=resolved.category_chip,
+        chrome=resolved.chrome,
+        assumptions=resolved.assumptions,
+        back_height_assumed=resolved.back_height_assumed,
+        length_unit="in",
+    )
+
+
 def _render(req: BenchRequest) -> str:
     from app.services.vision.bench_renderer import (
         render_straight,
@@ -294,44 +388,31 @@ def _render(req: BenchRequest) -> str:
         render_u_shape,
     )
 
-    width_in = req.lf * 12
-    d = req.seat_depth
-    sh = req.seat_height
-    bh = req.back_height
-
-    ps = req.panel_style if req.panel_style != "flat" else "vertical_channels"
+    resolved = resolve_bench_request(req)
+    width_in = resolved.width_in
+    d = resolved.seat_depth
+    sh = resolved.seat_height
+    bh = resolved.back_height
+    style = _style_kwargs(resolved)
 
     if req.bench_type == "l_shape":
-        long_in = req.leg1_length * 12 if req.leg1_length > 0 else width_in * 0.6
-        short_in = req.leg2_length * 12 if req.leg2_length > 0 else width_in * 0.4
+        long_in = resolved.long_in if resolved.long_in > 0 else (width_in * 0.6 if width_in else 0)
+        short_in = resolved.short_in if resolved.short_in > 0 else (width_in * 0.4 if width_in else 0)
         return render_l_shape(
-            req.name,
-            long_in,
-            short_in,
-            d,
-            sh,
-            bh,
-            quote_num=req.quote_num,
-            panel_style=ps,
+            req.name, long_in, short_in, d, sh, bh,
+            quote_num=req.quote_num, **style,
         )
     elif req.bench_type == "u_shape":
-        back_in = req.back_length * 12 if req.back_length > 0 else width_in * 0.45
-        side_in = req.left_depth * 12 if req.left_depth > 0 else width_in * 0.275
+        back_in = resolved.back_run_in if resolved.back_run_in > 0 else (width_in * 0.45 if width_in else 0)
+        side_in = resolved.side_in if resolved.side_in > 0 else (width_in * 0.275 if width_in else 0)
         side_d = req.right_depth if req.right_depth > 0 else d
         return render_u_shape(
-            req.name,
-            back_in,
-            side_in,
-            d,
-            side_d,
-            sh,
-            bh,
-            quote_num=req.quote_num,
-            panel_style=ps,
+            req.name, back_in, side_in, d, side_d, sh, bh,
+            quote_num=req.quote_num, **style,
         )
     else:
         return render_straight(
-            req.name, width_in, d, sh, bh, quote_num=req.quote_num, panel_style=ps
+            req.name, width_in, d, sh, bh, quote_num=req.quote_num, **style,
         )
 
 
@@ -382,6 +463,14 @@ class SketchAnalyzeRequest(BaseModel):
 @router.post("/drawings/analyze-sketch")
 async def analyze_sketch(req: SketchAnalyzeRequest):
     """Analyze a hand-drawn sketch photo and extract bench dimensions via AI vision."""
+    # D43 0e — Drawing Studio is the priority. The base64 image goes
+    # straight to xAI Grok without going through _materialize_image_input,
+    # so verify it as a real image here. See reports/2026-08-27_d43_step0.md §0b.
+    try:
+        decode_image_input(req.image)
+    except HTTPException:
+        raise
+
     if not provider_status.xai_configured():
         raise HTTPException(
             status_code=503,
@@ -467,6 +556,14 @@ async def analyze_furniture(req: FurnitureAnalyzeRequest):
     Returns items with classifications, dimensions, per-item drawings, and
     optional fabrication data. Upgrades analyze-sketch from single to multi-item.
     """
+    # D43 0e — Drawing Studio is the priority. Same guard as analyze_sketch:
+    # decode-verify the base64 image before sending to the model, so a fake
+    # PNG header cannot reach the LLM and produce fabricated dimensions.
+    try:
+        decode_image_input(req.image)
+    except HTTPException:
+        raise
+
     # Truthful 503 if the requested provider is unconfigured, OR if every
     # possible provider is unconfigured (so the analyzer has no fallback).
     if not provider_status._provider_configured(req.provider):
@@ -545,6 +642,12 @@ async def analyze_furniture(req: FurnitureAnalyzeRequest):
 @router.post("/drawings/analyze-furniture/pdf")
 async def analyze_furniture_pdf(req: FurnitureAnalyzeRequest):
     """Multi-object furniture analysis with PDF output."""
+    # D43 0e — same guard as analyze_furniture above.
+    try:
+        decode_image_input(req.image)
+    except HTTPException:
+        raise
+
     if not provider_status._provider_configured(req.provider):
         raise HTTPException(
             status_code=503,
@@ -1059,9 +1162,7 @@ async def generate_ai_bench(req: AIBenchRequest):
     # Parse bench_type: "bench_straight" → "straight"
     bt = req.bench_type.replace("bench_", "")
     dims = req.dimensions or {}
-    width_in = float(dims.get("width", dims.get("total_length", 120)))
-    if width_in < 50:
-        width_in = width_in * 12  # convert feet to inches
+    width_in = _bench_run_inches(dims.get("width", dims.get("total_length", 120)), dims.get("unit"))
     depth = float(dims.get("seat_depth", dims.get("depth", 20)))
     seat_h = float(dims.get("seat_height", 18))
     back_h = float(dims.get("back_height", 18))
@@ -1094,9 +1195,7 @@ async def generate_ai_bench_pdf(req: AIBenchRequest):
 
     bt = req.bench_type.replace("bench_", "")
     dims = req.dimensions or {}
-    width_in = float(dims.get("width", dims.get("total_length", 120)))
-    if width_in < 50:
-        width_in = width_in * 12
+    width_in = _bench_run_inches(dims.get("width", dims.get("total_length", 120)), dims.get("unit"))
     depth = float(dims.get("seat_depth", dims.get("depth", 20)))
     seat_h = float(dims.get("seat_height", 18))
     back_h = float(dims.get("back_height", 18))

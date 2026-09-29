@@ -108,6 +108,25 @@ def build_line_items(
         yards = yardage_result["yards"]
     yards = round(float(yards or 0), 2)
 
+    # ── H68 D40: dimension provenance at the line-item boundary ──
+    # Read fabric_width + provenance from the yardage result and
+    # surface them on the line item. Per the ruling: a value entering
+    # line_item_builder carries its source or is marked PENDING.
+    # PENDING never blocks — the line item still renders, with a
+    # PENDING label on the fabric dimension when no provenance was
+    # supplied upstream.
+    fabric_width_in = yardage_result.get("fabric_width")
+    fabric_width_provenance = yardage_result.get(
+        "fabric_width_provenance", "pending"
+    )
+    pattern_repeat_in = yardage_result.get("pattern_repeat_in", 0)
+    pattern_repeat_provenance = yardage_result.get(
+        "pattern_repeat_provenance", "pending"
+    )
+    # Per-line yards provenance: explicit when caller supplied
+    # fabric_yards_needed, otherwise pending (yardage calc default).
+    yards_provenance = "explicit" if item.get("fabric_yards_needed") not in (None, "") else "pending"
+
     custom_fabric_cost = item.get("fabric_cost_at_quote")
     custom_fabric_margin = item.get("fabric_margin_at_quote") or 0
     custom_fabric_name = item.get("fabric_name") or item.get("fabric_code")
@@ -132,6 +151,15 @@ def build_line_items(
         "unit": "yd",
         "rate": fabric_rate,
         "amount": fabric_total,
+        # ── H68 D40: dimension provenance on the line item ──
+        # Surface provenance so quote_service / downstream renders
+        # can label PENDING fields. These are recorded for audit;
+        # PENDING never blocks the line item.
+        "fabric_width_in": fabric_width_in,
+        "fabric_width_provenance": fabric_width_provenance,
+        "pattern_repeat_in": pattern_repeat_in,
+        "pattern_repeat_provenance": pattern_repeat_provenance,
+        "yards_provenance": yards_provenance,
     })
 
     backing_yards = item.get("backing_yards_needed")

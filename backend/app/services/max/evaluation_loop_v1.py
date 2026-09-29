@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +13,11 @@ from app.services.max.operating_registry import get_registry_load_info
 from app.services.max.surface_identity import normalize_surface
 
 
-LEDGER_DB_PATH = Path.home() / "empire-repo" / "backend" / "data" / "brain" / "unified_messages.db"
+LEDGER_DB_PATH = Path(
+    os.environ.get(
+        "EMPIRE_BRAIN_DIR", os.path.expanduser("~/empire-data/brain")
+    )
+) / "unified_messages.db"
 
 
 def init_score_schema(db_path: Path | None = None) -> None:

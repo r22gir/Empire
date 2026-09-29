@@ -7,6 +7,7 @@ import { API } from '../../lib/api';
 import QuoteCard from '../business/quotes/QuoteCard';
 import InlineDrawing from '../InlineDrawing';
 import ContinuityPanel from '../ContinuityPanel';
+import ViewPdfControl from '../ViewPdfControl';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -55,7 +56,7 @@ interface Props {
   onSend: (msg: string, imageFilename?: string | null) => void;
   onStop: () => void;
   onScreenChange?: (screen: string) => void;
-  onProductNavigate?: (product: string, screen?: string) => void;
+  onProductNavigate?: (product: string, screen?: string, section?: string) => void;
   setOnMessageComplete?: (cb: ((msg: Message) => void) | null) => void;
   onLoadChat?: (chatId: string) => void;
   onNewChat?: () => void;
@@ -76,6 +77,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [maxStatus, setMaxStatus] = useState<any>(null);
   const [recordingTimer, setRecordingTimer] = useState(0);
   const [showMoreActions, setShowMoreActions] = useState(false);
+  const [quickQuoteNotice, setQuickQuoteNotice] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -362,12 +364,14 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const handleQuickAction = (action: string) => {
     switch (action) {
       case 'quick-quote':
-        if (attachedImage) {
-          onSend('Create a quick quote from this photo. Measure the window, suggest treatments, and generate a quote with pricing.', attachedImage);
-          setAttachedImage(null);
+        // Open the Workroom quote flow. Do not send a chat prompt — that
+        // path reports "Connection error" whenever the assistant backend
+        // is offline, and it never reached the quote builder.
+        setShowMoreActions(false);
+        if (onProductNavigate) {
+          onProductNavigate('workroom', 'dashboard', 'quick-quote');
         } else {
-          // Prompt to attach image first, or just start quote flow
-          onSend('I need to create a new quote. Help me start a quick quote — ask me for the customer name, room, and window details.');
+          setQuickQuoteNotice('Quick Quote is not wired from this chat. Open Empire Workroom → Quotes.');
         }
         break;
       case 'briefing': onScreenChange?.('inbox'); break;
@@ -442,7 +446,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         borderBottom: '1px solid var(--border)',
         background: 'var(--card-bg)',
       }}>
-        <div style={{ width: 44 }} />
+        <ViewPdfControl mode="print" title="Opens the browser print dialog for this conversation. Chat has no quote PDF of its own." />
         <span style={{
           fontSize: 14,
           fontWeight: 900,
@@ -494,6 +498,19 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           </span>
         )}
       </div>
+
+      {quickQuoteNotice && (
+        <div style={{
+          flexShrink: 0,
+          background: '#f7f3ea',
+          borderBottom: '1px solid #b8912f',
+          padding: '8px 12px',
+          fontSize: 12,
+          color: '#20241f',
+        }}>
+          {quickQuoteNotice}
+        </div>
+      )}
 
       {maxStatus && (
         <div
@@ -1203,7 +1220,7 @@ function StatusChip({ label, tone }: { label: string; tone: 'ok' | 'warn' | 'dar
   );
 }
 
-function renderContent(content: string, onScreenChange?: (s: string) => void) {
+function renderContent(content: string, onScreenChange?: (s: string, id?: string) => void) {
   return content.split('\n').map((line, i) => {
     // Bold
     let processed = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
@@ -1214,13 +1231,19 @@ function renderContent(content: string, onScreenChange?: (s: string) => void) {
     if (hasQuoteRef && onScreenChange) {
       processed = processed.replace(
         /(QuoteBuilder\s*interface|QuoteBuilder)/gi,
-        '<a class="quote-link" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">$1</a>'
+        '<a class="quote-link" data-link-type="builder" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">$1</a>'
       );
     }
-    // Detect quote numbers like EST-2026-027 and make clickable
+    // Detect quote numbers like EST-2026-027 and make clickable. The
+    // data-quote-number attr lets the click handler resolve the visible
+    // badge to its canonical id via /quotes-v2/by-number/{qn}. Without
+    // this, a click routed to screen='quote' with NO id and the
+    // QuoteReviewScreen silently fell back to the first row of the list
+    // (HOTFIX 4b defect).
     processed = processed.replace(
       /(EST-\d{4}-\d{3})/g,
-      '<a class="quote-link" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">$1</a>'
+      (match: string) =>
+        `<a class="quote-link" data-link-type="quote-number" data-quote-number="${match}" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${match}</a>`
     );
     const html = processed + (i < content.split('\n').length - 1 ? '<br/>' : '');
     return (
@@ -1229,9 +1252,39 @@ function renderContent(content: string, onScreenChange?: (s: string) => void) {
         dangerouslySetInnerHTML={{ __html: html }}
         onClick={(e) => {
           const target = e.target as HTMLElement;
-          if (target.classList.contains('quote-link')) {
-            onScreenChange?.('quote');
+          if (!target.classList.contains('quote-link')) return;
+          const linkType = target.getAttribute('data-link-type');
+          if (linkType === 'quote-number') {
+            const quoteNumber = target.getAttribute('data-quote-number');
+            if (!quoteNumber) return;
+            // Resolve the visible "EST-2026-110" to its canonical id.
+            // Stay silent on miss — never fall back to "first row of
+            // the list" again; that's the exact bug we're fixing.
+            fetch(`${API}/quotes-v2/by-number/${encodeURIComponent(quoteNumber)}`)
+              .then(r => {
+                if (r.status === 404) {
+                  throw new Error(`Quote ${quoteNumber} not found`);
+                }
+                if (!r.ok) throw new Error(`Resolver returned ${r.status}`);
+                return r.json();
+              })
+              .then((q: any) => {
+                if (q && q.id) onScreenChange?.('quote', q.id);
+              })
+              .catch(err => {
+                // Visible in dev console only — don't navigate. The user
+                // remains on chat and can re-ask MAX to surface the
+                // quote id explicitly.
+                // eslint-disable-next-line no-console
+                console.error(`[quote-link] failed to resolve ${quoteNumber}:`, err);
+              });
+            return;
           }
+          if (linkType === 'builder') {
+            onScreenChange?.('quote');
+            return;
+          }
+          onScreenChange?.('quote');
         }}
       />
     );

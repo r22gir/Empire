@@ -229,6 +229,89 @@ function buildInitialRooms(incoming?: any[]): Room[] {
   }));
 }
 
+
+/** Fetch quote PDF from canonical quotes-v2 (GET); fall back to legacy POST /quotes/:id/pdf. */
+async function fetchQuotePdfBlob(quoteId: string): Promise<Blob | null> {
+  try {
+    const v2 = await fetch(API_URL + `/quotes-v2/${quoteId}/pdf`).then(async r => r.ok ? r : fetch(API_URL + `/quotes/${quoteId}/pdf`, { method: 'POST' }));
+    if (v2.ok) return await v2.blob();
+  } catch { /* try legacy */ }
+  try {
+    const legacy = await fetch(API_URL + `/quotes/${quoteId}/pdf`, { method: 'POST' });
+    if (legacy.ok) return await legacy.blob();
+  } catch { /* */ }
+  return null;
+}
+
+
+/** Map QuoteBuilder room/line payload → quotes_v2 create/update body.
+ *  Room window totals become manual_line items (engine pass-through) so
+ *  UI-created quotes land in the same store as MAX drafts.
+ */
+function toQuotesV2Payload(raw: Record<string, any>): Record<string, any> {
+  const lineItems = (raw.line_items || []).map((li: any) => {
+    const qty = Number(li.quantity) || 1;
+    // manual_line requires unit_price > 0; dimensional/zero lines get a 1¢ placeholder
+    const rawPrice = Number(li.rate ?? li.unit_price ?? (li.amount != null ? li.amount / qty : 0)) || 0;
+    const unitPrice = rawPrice > 0 ? rawPrice : 0.01;
+    const description = String(li.description || 'Line item').trim() || 'Line item';
+    return {
+      category: 'manual_line',
+      description,
+      quantity: qty,
+      unit: li.unit || 'ea',
+      unit_price: unitPrice,
+      inputs: { description, unit_price: unitPrice, quantity: qty },
+    };
+  });
+  // Guarantee at least one line so pricing guardrails don't reject empty catalog inputs
+  if (lineItems.length === 0) {
+    lineItems.push({
+      category: 'manual_line',
+      description: 'Draft — no line items yet',
+      quantity: 1,
+      unit: 'ea',
+      unit_price: 0.01,
+      inputs: { description: 'Draft — no line items yet', unit_price: 0.01, quantity: 1 },
+    });
+  }
+  return {
+    customer_name: raw.customer_name || 'Customer',
+    customer_email: raw.customer_email || '',
+    customer_phone: raw.customer_phone || '',
+    customer_address: raw.customer_address || '',
+    business_unit: 'workroom',
+    project_name: raw.project_name || '',
+    tax_rate: raw.tax_rate ?? 0.08,
+    terms: raw.terms || '',
+    valid_days: raw.valid_days ?? 30,
+    notes: raw.notes || '',
+    rooms: raw.rooms || [],
+    ai_mockups: raw.ai_mockups || raw['ai_mockups'] || null,
+    ai_outlines: raw.ai_outlines || raw['ai_outlines'] || null,
+    measurements: raw.max_analysis || raw.measurements || null,
+    line_items: lineItems,
+  };
+}
+
+async function saveQuoteToV2(raw: Record<string, any>, existingId?: string | null) {
+  const body = toQuotesV2Payload(raw);
+  if (existingId) {
+    const res = await fetch(API_URL + `/quotes-v2/${existingId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.detail || 'PATCH quotes-v2 failed');
+    return { status: 'updated', quote: data.quote || data };
+  }
+  const res = await fetch(API_URL + '/quotes-v2', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.detail || 'POST quotes-v2 failed');
+  return data; // { status: 'created', quote }
+}
+
 export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, initialMaxAnalysis }: Props) {
   // Customer
   const [customer, setCustomer] = useState({
@@ -774,24 +857,20 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
 
       const mockupData = [{ roomName, photo: uploadedImage || null, ...analysisResult, generated_images: imageResults }];
 
-      const res = await fetch(API_URL + '/quotes', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const result = await saveQuoteToV2({
           customer_name: custName, customer_email: customer.email, customer_phone: customer.phone,
           customer_address: customer.address, project_name: projectName || 'AI Design Consultation',
           line_items: lineItems, subtotal: total, total, tax_rate: 0.08,
-          business_name: 'Empire', terms: '50% deposit required. Balance due upon completion.', valid_days: 30,
+          terms: '50% deposit required. Balance due upon completion.', valid_days: 30,
           rooms: [{ name: roomName, windows: pdfWindows, upholstery: [] }],
           ai_mockups: mockupData,
           ai_outlines: collectedOutlines.length > 0 ? collectedOutlines : null,
           max_analysis: maxAnalysis || null,
-        }),
-      });
-      const result = await res.json();
-      if (result.status === 'created') {
+        });
+      if (result.status === 'created' || result.quote?.id) {
         setSavedQuote({ id: result.quote.id, quote_number: result.quote.quote_number });
-        // Download the PDF
-        const pdfRes = await fetch(API_URL + `/quotes/${result.quote.id}/pdf`, { method: 'POST' });
+        // Download the PDF (quotes-v2 GET)
+        const pdfRes = await fetch(API_URL + `/quotes-v2/${result.quote.id}/pdf`);
         if (pdfRes.ok) {
           const blob = await pdfRes.blob();
           const url = URL.createObjectURL(blob);
@@ -818,9 +897,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
       const outlineData = [{ roomName, photo: uploadedImage || null, ...analysisResult }];
 
       // Create a quote with just the outline data (no line items needed — it's a dimensional plan)
-      const res = await fetch(API_URL + '/quotes', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const result = await saveQuoteToV2({
           customer_name: custName, customer_email: customer.email, customer_phone: customer.phone,
           customer_address: customer.address,
           project_name: projectName || `Window Dimensional Plan — ${roomName}`,
@@ -829,7 +906,6 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
             quantity: 1, unit: 'ea', rate: 0, amount: 0, category: 'labor',
           }],
           subtotal: 0, total: 0, tax_rate: 0,
-          business_name: 'Empire',
           terms: 'Dimensional plan for reference. Final measurements to be confirmed on-site.',
           valid_days: 60,
           rooms: [{ name: roomName, windows: [{
@@ -850,13 +926,11 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
           ai_outlines: outlineData,
           ai_mockups: collectedMockups.length > 0 ? collectedMockups : null,
           max_analysis: maxAnalysis || null,
-        }),
-      });
-      const result = await res.json();
-      if (result.status === 'created') {
+        });
+      if (result.status === 'created' || result.quote?.id) {
         setSavedQuote({ id: result.quote.id, quote_number: result.quote.quote_number });
         setCollectedOutlines(prev => [...prev, ...outlineData]);
-        const pdfRes = await fetch(API_URL + `/quotes/${result.quote.id}/pdf`, { method: 'POST' });
+        const pdfRes = await fetch(API_URL + `/quotes-v2/${result.quote.id}/pdf`);
         if (pdfRes.ok) {
           const blob = await pdfRes.blob();
           const url = URL.createObjectURL(blob);
@@ -906,58 +980,56 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
     })),
   ]);
 
+  const buildSaveRaw = (custName: string) => ({
+    customer_name: custName, customer_email: customer.email,
+    customer_phone: customer.phone, customer_address: customer.address,
+    project_name: projectName, line_items: buildLineItems(),
+    subtotal: grandTotal, total: grandTotal, tax_rate: 0.08,
+    terms: '50% deposit required. Balance due upon completion.',
+    valid_days: 30,
+    rooms: rooms.map(r => ({
+      name: r.name,
+      windows: r.windows.map(w => {
+        const y = calcYardage(w);
+        return {
+          name: w.name, width: w.width, height: w.height, quantity: w.quantity,
+          treatmentType: w.treatmentType, liningType: w.liningType,
+          hardwareType: w.hardwareType, hardwareColor: w.hardwareColor || 'brushed-nickel', motorization: w.motorization,
+          mountType: w.mountType, notes: w.notes,
+          fabricGrade: w.fabricGrade, fullness: w.fullness, laborRate: w.laborRate,
+          price: y.total,
+          yardage: { panels: y.panelsNeeded, perWindow: y.yardagePerWindow, waste: y.wasteYardage, total: y.totalYardage },
+          breakdown: { materials: y.materialsTotal, labor: y.laborTotal, hardware: y.hardwareTotal, tax: y.tax },
+          sourcePhoto: w.sourcePhoto || null,
+          photos: w.photos || [],
+          scan3D: w.scan3D || null,
+          aiAnalysis: w.aiAnalysis || null,
+        };
+      }),
+      upholstery: r.upholstery.map(u => ({
+        name: u.name, furnitureType: u.furnitureType, fabricYards: u.fabricYards,
+        fabricType: u.fabricType, laborType: u.laborType, cushionCount: u.cushionCount,
+        width: u.width, depth: u.depth, height: u.height, notes: u.notes,
+        price: calcUpholsteryPrice(u),
+        sourcePhoto: u.sourcePhoto || null,
+        photos: u.photos || [],
+        scan3D: u.scan3D || null,
+        aiAnalysis: u.aiAnalysis || null,
+      })),
+    })),
+    ai_outlines: collectedOutlines.length > 0 ? collectedOutlines : null,
+    ai_mockups: collectedMockups.length > 0 ? collectedMockups : null,
+    max_analysis: maxAnalysis || null,
+  });
+
   const saveQuote = async () => {
     const custName = ensureCustomerName();
     setSaving(true);
     try {
-      const res = await fetch(API_URL + '/quotes', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customer_name: custName, customer_email: customer.email,
-          customer_phone: customer.phone, customer_address: customer.address,
-          project_name: projectName, line_items: buildLineItems(),
-          subtotal: grandTotal, total: grandTotal, tax_rate: 0.08,
-          business_name: 'Empire', terms: '50% deposit required. Balance due upon completion.',
-          valid_days: 30,
-          // Full structured room data for rich PDF
-          rooms: rooms.map(r => ({
-            name: r.name,
-            windows: r.windows.map(w => {
-              const y = calcYardage(w);
-              return {
-                name: w.name, width: w.width, height: w.height, quantity: w.quantity,
-                treatmentType: w.treatmentType, liningType: w.liningType,
-                hardwareType: w.hardwareType, hardwareColor: w.hardwareColor || 'brushed-nickel', motorization: w.motorization,
-                mountType: w.mountType, notes: w.notes,
-                fabricGrade: w.fabricGrade, fullness: w.fullness, laborRate: w.laborRate,
-                price: y.total,
-                yardage: { panels: y.panelsNeeded, perWindow: y.yardagePerWindow, waste: y.wasteYardage, total: y.totalYardage },
-                breakdown: { materials: y.materialsTotal, labor: y.laborTotal, hardware: y.hardwareTotal, tax: y.tax },
-                sourcePhoto: w.sourcePhoto || null,
-                photos: w.photos || [],
-                scan3D: w.scan3D || null,
-                aiAnalysis: w.aiAnalysis || null,
-              };
-            }),
-            upholstery: r.upholstery.map(u => ({
-              name: u.name, furnitureType: u.furnitureType, fabricYards: u.fabricYards,
-              fabricType: u.fabricType, laborType: u.laborType, cushionCount: u.cushionCount,
-              width: u.width, depth: u.depth, height: u.height, notes: u.notes,
-              price: calcUpholsteryPrice(u),
-              sourcePhoto: u.sourcePhoto || null,
-              photos: u.photos || [],
-              scan3D: u.scan3D || null,
-              aiAnalysis: u.aiAnalysis || null,
-            })),
-          })),
-          ai_outlines: collectedOutlines.length > 0 ? collectedOutlines : null,
-          ai_mockups: collectedMockups.length > 0 ? collectedMockups : null,
-          max_analysis: maxAnalysis || null,
-        }),
-      });
-      const result = await res.json();
-      if (result.status === 'created') setSavedQuote({ id: result.quote.id, quote_number: result.quote.quote_number });
-    } catch { alert('Save failed. Check backend.'); }
+      const result = await saveQuoteToV2(buildSaveRaw(custName), savedQuote?.id || null);
+      const q = result.quote;
+      if (q?.id) setSavedQuote({ id: q.id, quote_number: q.quote_number });
+    } catch (e) { console.error(e); alert('Save failed. Check backend.'); }
     finally { setSaving(false); }
   };
 
@@ -965,7 +1037,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
     if (!savedQuote) { await saveQuote(); return; }
     setGeneratingPdf(true);
     try {
-      const res = await fetch(API_URL + `/quotes/${savedQuote.id}/pdf`, { method: 'POST' });
+      const res = await fetch(API_URL + `/quotes-v2/${savedQuote.id}/pdf`).then(async r => r.ok ? r : fetch(API_URL + `/quotes/${savedQuote.id}/pdf`, { method: 'POST' }));
       if (!res.ok) throw new Error('PDF failed');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -978,7 +1050,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
   const printQuote = async () => {
     if (!savedQuote) { await saveQuote(); return; }
     try {
-      const res = await fetch(API_URL + `/quotes/${savedQuote.id}/pdf`, { method: 'POST' });
+      const res = await fetch(API_URL + `/quotes-v2/${savedQuote.id}/pdf`).then(async r => r.ok ? r : fetch(API_URL + `/quotes/${savedQuote.id}/pdf`, { method: 'POST' }));
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const win = window.open(url, '_blank');
@@ -996,7 +1068,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
   const loadPdfPreview = async (quoteId: string) => {
     setLoadingPreview(true);
     try {
-      const res = await fetch(API_URL + `/quotes/${quoteId}/pdf`, { method: 'POST' });
+      const res = await fetch(API_URL + `/quotes-v2/${quoteId}/pdf`).then(async r => r.ok ? r : fetch(API_URL + `/quotes/${quoteId}/pdf`, { method: 'POST' }));
       if (!res.ok) throw new Error('PDF generation failed');
       const blob = await res.blob();
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
@@ -1011,48 +1083,8 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
       ensureCustomerName();
       setSaving(true);
       try {
-        const lineItems = buildLineItems();
-        const res = await fetch(API_URL + '/quotes', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            customer_name: customer.name || 'Customer', customer_email: customer.email,
-            customer_phone: customer.phone, customer_address: customer.address,
-            project_name: projectName || 'Estimate', line_items: lineItems,
-            subtotal: grandTotal, total: grandTotal, tax_rate: 0.08,
-            business_name: 'Empire', terms: '50% deposit required. Balance due upon completion.',
-            valid_days: 30,
-            rooms: rooms.map(r => ({
-              name: r.name,
-              windows: r.windows.map(w => {
-                const y = calcYardage(w);
-                return {
-                  name: w.name, width: w.width, height: w.height, quantity: w.quantity,
-                  treatmentType: w.treatmentType, liningType: w.liningType,
-                  hardwareType: w.hardwareType, hardwareColor: w.hardwareColor || 'brushed-nickel', motorization: w.motorization,
-                  mountType: w.mountType, notes: w.notes,
-                  fabricGrade: w.fabricGrade, fullness: w.fullness, laborRate: w.laborRate,
-                  price: y.total,
-                  yardage: { panels: y.panelsNeeded, perWindow: y.yardagePerWindow, waste: y.wasteYardage, total: y.totalYardage },
-                  breakdown: { materials: y.materialsTotal, labor: y.laborTotal, hardware: y.hardwareTotal, tax: y.tax },
-                  sourcePhoto: w.sourcePhoto || null, photos: w.photos || [],
-                  scan3D: w.scan3D || null, aiAnalysis: w.aiAnalysis || null,
-                };
-              }),
-              upholstery: r.upholstery.map(u => ({
-                name: u.name, furnitureType: u.furnitureType, fabricYards: u.fabricYards,
-                fabricType: u.fabricType, laborType: u.laborType, cushionCount: u.cushionCount,
-                width: u.width, depth: u.depth, height: u.height, notes: u.notes,
-                price: calcUpholsteryPrice(u), sourcePhoto: u.sourcePhoto || null, photos: u.photos || [],
-                scan3D: u.scan3D || null, aiAnalysis: u.aiAnalysis || null,
-              })),
-            })),
-            ai_outlines: collectedOutlines.length > 0 ? collectedOutlines : null,
-            ai_mockups: collectedMockups.length > 0 ? collectedMockups : null,
-            max_analysis: maxAnalysis || null,
-          }),
-        });
-        const result = await res.json();
-        if (result.status === 'created') {
+        const result = await saveQuoteToV2(buildSaveRaw(customer.name || 'Customer'));
+        if (result.status === 'created' || result.quote?.id) {
           setSavedQuote({ id: result.quote.id, quote_number: result.quote.quote_number });
           await loadPdfPreview(result.quote.id);
         }
@@ -1097,7 +1129,8 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
   const loadQuoteHistory = async () => {
     setLoadingHistory(true);
     try {
-      const res = await fetch(API_URL + '/quotes');
+      // Canonical quotes_v2 — same store MAX writes to
+      const res = await fetch(API_URL + '/quotes-v2?limit=100&business_unit=workroom');
       const data = await res.json();
       setQuoteHistory(Array.isArray(data) ? data : data.quotes || []);
     } catch { setQuoteHistory([]); }
@@ -1106,9 +1139,9 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
 
   const loadQuoteById = async (id: string) => {
     try {
-      const res = await fetch(API_URL + `/quotes/${id}`);
+      const res = await fetch(API_URL + `/quotes-v2/${id}`);
       const q = await res.json();
-      // Populate customer fields
+      // Populate customer fields (quotes_v2 shape)
       setCustomer({ name: q.customer_name || '', email: q.customer_email || '', phone: q.customer_phone || '', address: q.customer_address || '' });
       setProjectName(q.project_name || '');
       // Populate rooms from structured room data
@@ -1172,13 +1205,9 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
             upholstery: r.upholstery.map(u => ({ name: u.name, furnitureType: u.furnitureType, fabricYards: u.fabricYards, fabricType: u.fabricType, laborType: u.laborType, cushionCount: u.cushionCount, width: u.width, depth: u.depth, height: u.height, notes: u.notes, price: calcUpholsteryPrice(u), sourcePhoto: u.sourcePhoto || null, photos: u.photos || [], aiAnalysis: u.aiAnalysis || null })),
           })),
         };
-        if (savedQuote) {
-          await fetch(API_URL + `/quotes/${savedQuote.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        } else {
-          const res = await fetch(API_URL + '/quotes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-          const result = await res.json();
-          if (result.status === 'created') setSavedQuote({ id: result.quote.id, quote_number: result.quote.quote_number });
-        }
+        const result = await saveQuoteToV2(body, savedQuote?.id || null);
+          const q = result.quote;
+          if (q?.id) setSavedQuote({ id: q.id, quote_number: q.quote_number });
         setLastAutoSave(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
       } catch { /* silent auto-save failure */ }
     }, 60000);

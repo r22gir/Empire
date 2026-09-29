@@ -50,7 +50,8 @@ interface WorkroomPageProps {
 }
 
 export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
-  const [section, setSection] = useState<Section>((initialSection as Section) || 'overview');
+  const openQuickQuote = initialSection === 'quick-quote';
+  const [section, setSection] = useState<Section>(openQuickQuote ? 'quotes' : ((initialSection as Section) || 'overview'));
   const [quotes, setQuotes] = useState<any[]>([]);
   const [stats, setStats] = useState({ pipeline: 0, openQuotes: 0, accepted: 0 });
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
@@ -58,13 +59,12 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
 
   // Sync section when initialSection prop changes (e.g. from module click)
   useEffect(() => {
-    if (initialSection) {
-      setSection(initialSection as Section);
-    }
+    if (initialSection === 'quick-quote') setSection('quotes');
+    else if (initialSection) setSection(initialSection as Section);
   }, [initialSection]);
 
   useEffect(() => {
-    fetch(API + '/quotes?limit=20&business=workroom').then(r => r.json()).then(data => {
+    fetch(API + '/quotes-v2?limit=100&business_unit=workroom').then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       const q = Array.isArray(raw) ? raw : [];
       setQuotes(q);
@@ -106,7 +106,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
           </Suspense>
         );
       case 'quotes':
-        return <QuotesSection quotes={quotes} initialQuoteId={initialQuoteId} onClearInitial={() => setInitialQuoteId(null)} />;
+        return <QuotesSection quotes={quotes} initialQuoteId={initialQuoteId} onClearInitial={() => setInitialQuoteId(null)} startQuickQuote={openQuickQuote} />;
       case 'inventory':
         return <Suspense fallback={<Loading />}><InventorySection /></Suspense>;
       case 'jobs':
@@ -424,11 +424,19 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
 
 // -- Quotes Section --
 
-function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }: { quotes: any[]; initialQuoteId?: string | null; onClearInitial?: () => void }) {
-  const [quotes, setQuotes] = useState(initialQuotes);
+function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, startQuickQuote }: { quotes: any[]; initialQuoteId?: string | null; onClearInitial?: () => void; startQuickQuote?: boolean }) {
+  const [business, setBusiness] = useState<'workroom' | 'woodcraft'>(() => {
+    if (typeof window === 'undefined') return 'workroom';
+    return new URLSearchParams(window.location.search).get('business') === 'woodcraft' ? 'woodcraft' : 'workroom';
+  });
+  const [quotes, setQuotes] = useState(() => (
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('business') === 'woodcraft'
+      ? []
+      : initialQuotes
+  ));
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
-  const [showQuickQuote, setShowQuickQuote] = useState(false);
+  const [showQuickQuote, setShowQuickQuote] = useState(!!startQuickQuote);
   const [showQuickCalc, setShowQuickCalc] = useState(false);
   const [pipelineQuoteId, setPipelineQuoteId] = useState<string | null>(null);
   const [analyzingQuoteId, setAnalyzingQuoteId] = useState<string | null>(null);
@@ -438,8 +446,13 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }
   const [showBuilder, setShowBuilder] = useState(false);
   const [builderQuoteId, setBuilderQuoteId] = useState<string | null>(null);
 
-  // Sync with parent quotes prop
-  useEffect(() => { setQuotes(initialQuotes); }, [initialQuotes]);
+  useEffect(() => {
+    fetch(API + `/quotes?limit=50&business=${business}`).then(r => r.json()).then(data => {
+      const raw = data.quotes || data || [];
+      setQuotes(Array.isArray(raw) ? raw : []);
+    }).catch(() => {});
+  }, [business]);
+  useEffect(() => { if (startQuickQuote) setShowQuickQuote(true); }, [startQuickQuote]);
 
   const filtered = quotes.filter(q => {
     if (filter !== 'all' && q.status !== filter) return false;
@@ -450,7 +463,7 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }
   });
 
   const refetchQuotes = () => {
-    fetch(API + '/quotes?limit=50&business=workroom').then(r => r.json()).then(data => {
+    fetch(API + `/quotes?limit=50&business=${business}`).then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       setQuotes(Array.isArray(raw) ? raw : []);
     }).catch(() => {});
@@ -478,7 +491,7 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }
     setDeleting(true);
     for (const id of selected) {
       try {
-        await fetch(`${API}/quotes/${id}`, { method: 'DELETE' });
+        await fetch(`${API}/quotes-v2/${id}`, { method: 'DELETE' });
       } catch { /* skip failed */ }
     }
     setSelected(new Set());
@@ -529,6 +542,27 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }
         <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }} className="flex items-center gap-2">
           <ClipboardList size={20} className="text-[#b8960c]" /> Quotes
         </h2>
+        <div className="flex items-center gap-1">
+          {(['workroom', 'woodcraft'] as const).map(key => (
+            <button
+              key={key}
+              onClick={() => setBusiness(key)}
+              className="cursor-pointer"
+              style={{
+                height: 32,
+                padding: '0 10px',
+                borderRadius: 8,
+                fontSize: 11,
+                fontWeight: 700,
+                border: business === key ? '1.5px solid #b8960c' : '1px solid #ece8e0',
+                background: business === key ? '#fdf8eb' : '#fff',
+                color: business === key ? '#8a7010' : '#777',
+              }}
+            >
+              {key === 'workroom' ? 'Workroom' : 'WoodCraft'}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setShowBuilder(true)}

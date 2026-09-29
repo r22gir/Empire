@@ -10,11 +10,13 @@ import {
   Activity, Crosshair
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
+import WorkroomLeadForm from '../workroom/WorkroomLeadForm';
 
 const LF_API = `${API}/leads`;
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
+  { id: 'intake', label: 'Workroom Intake', icon: Mail },
   { id: 'pipeline', label: 'Pipeline', icon: Target },
   { id: 'finder', label: 'Prospect Finder', icon: Crosshair },
   { id: 'campaigns', label: 'Campaigns', icon: Send },
@@ -55,6 +57,7 @@ export default function LeadForgePage({ initialSection }: LeadForgePageProps) {
   const renderContent = () => {
     switch (section) {
       case 'dashboard': return <DashboardSection />;
+      case 'intake': return <WorkroomIntakeSection />;
       case 'pipeline': return <PipelineSection />;
       case 'finder': return <ProspectFinderSection />;
       case 'campaigns': return <CampaignsSection />;
@@ -161,9 +164,38 @@ function DashboardSection() {
   );
 }
 
+function WorkroomIntakeSection() {
+  return (
+    <div style={{ maxWidth: 560 }}>
+      <SH
+        title="Workroom intake"
+        subtitle="business=workroom. Saves a LeadForge lead and a ForgeCRM contact. LuxeForge posts to the same API."
+      />
+      <WorkroomLeadForm captureSurface="command_center" showOperatorResult />
+    </div>
+  );
+}
+
 function PipelineSection() {
   const [leads, setLeads] = useState<any[]>([]);
+  const [quoteState, setQuoteState] = useState<Record<number, string>>({});
+  const [busyId, setBusyId] = useState<number | null>(null);
   useEffect(() => { fetch(`${LF_API}?limit=500`).then(r => r.json()).then(d => setLeads(d.leads || d || [])).catch(() => setLeads([])); }, []);
+
+  const createQuote = async (leadId: number) => {
+    setBusyId(leadId);
+    try {
+      const res = await fetch(`${LF_API}/${leadId}/workroom-quote`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Quote failed');
+      const quote = data.quote || {};
+      setQuoteState(prev => ({ ...prev, [leadId]: quote.quote_number || quote.id || 'saved' }));
+    } catch {
+      setQuoteState(prev => ({ ...prev, [leadId]: 'failed' }));
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const COLS = [
     { key: 'new', label: 'New' },
@@ -198,7 +230,23 @@ function PipelineSection() {
                   </div>
                   {lead.company && <div style={{ color: '#888', fontSize: 10 }}>{lead.company}</div>}
                   {lead.estimated_value > 0 && <div style={{ color: '#b8960c', fontWeight: 600, fontSize: 10 }}>${lead.estimated_value.toLocaleString()}</div>}
-                  <div style={{ fontSize: 9, color: '#aaa', marginTop: 2 }}>{lead.source}</div>
+                  <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>
+                    Source: {lead.source || '—'}{lead.utm_campaign ? ` · ${lead.utm_campaign}` : ''}
+                  </div>
+                  {lead.business_unit === 'workroom' && (
+                    quoteState[lead.id] && quoteState[lead.id] !== 'failed' ? (
+                      <div style={{ fontSize: 9, color: '#16a34a', fontWeight: 600, marginTop: 4 }}>Quote {quoteState[lead.id]}</div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => createQuote(lead.id)}
+                        disabled={busyId === lead.id}
+                        style={{ marginTop: 6, fontSize: 9, padding: '3px 6px', background: '#1a1a2e', color: '#d4af37', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        {busyId === lead.id ? 'Opening…' : quoteState[lead.id] === 'failed' ? 'Retry quote' : 'Create Workroom quote'}
+                      </button>
+                    )
+                  )}
                 </div>
               ))}
             </div>

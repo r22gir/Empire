@@ -46,8 +46,8 @@ def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
 def build_startup_health_record() -> dict[str, Any]:
     from app.services.max.operating_registry import get_registry_load_info
 
-    commit = _run(["git", "rev-parse", "--short", "HEAD"])
-    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    commit = _run(["git", "-C", str(_repo_root()), "rev-parse", "--short", "HEAD"])
+    branch = _run(["git", "-C", str(_repo_root()), "rev-parse", "--abbrev-ref", "HEAD"])
     registry = get_registry_load_info()
     stale_conditions = []
     if registry.get("last_error"):
@@ -82,7 +82,61 @@ def write_startup_health_record() -> dict[str, Any]:
 
 
 def read_startup_health_record() -> dict[str, Any] | None:
+    """Raw boot-time record from disk (no live enrichment)."""
     try:
         return json.loads(STARTUP_HEALTH_PATH.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _live_repo_commit() -> tuple[str, str]:
+    """Return (short_hash, branch) from live git in the repo root."""
+    commit = _run(["git", "-C", str(_repo_root()), "rev-parse", "--short", "HEAD"])
+    branch = _run(["git", "-C", str(_repo_root()), "rev-parse", "--abbrev-ref", "HEAD"])
+    # Guard against git error strings looking like hashes
+    if not commit or " " in commit or len(commit) > 40:
+        commit = "unknown"
+    if not branch or " " in branch and "fatal" in branch.lower():
+        branch = "unknown"
+    return commit, branch
+
+
+def enrich_startup_health_record(record: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Return startup_health with honesty vs live repo HEAD.
+
+    Boot fields stay as recorded at process start. Live comparison is
+    attached so /status never silently drifts from current_commit.
+    """
+    if record is None:
+        record = read_startup_health_record()
+    if not isinstance(record, dict):
+        return record
+
+    out = dict(record)
+    live_hash, live_branch = _live_repo_commit()
+    boot_hash = out.get("running_commit_hash")
+    matches = bool(boot_hash and live_hash and boot_hash == live_hash and live_hash != "unknown")
+    out["boot_commit_hash"] = boot_hash
+    out["current_repo_commit"] = live_hash
+    out["current_repo_branch"] = live_branch
+    out["matches_current_commit"] = matches
+    if matches:
+        out["honesty"] = "ok"
+        out["warning"] = None
+        # Keep known_stale clean of prior mismatch markers we may add
+        stale = list(out.get("known_stale_state_conditions") or [])
+        out["known_stale_state_conditions"] = [
+            s for s in stale if s != "startup_commit_stale_vs_repo_head"
+        ]
+    else:
+        out["honesty"] = "stale_vs_repo_head"
+        out["warning"] = (
+            f"startup_health.running_commit_hash ({boot_hash}) differs from "
+            f"live repo HEAD ({live_hash}); boot record is historical — "
+            f"restart backend to regenerate, or treat current_commit as authority."
+        )
+        stale = list(out.get("known_stale_state_conditions") or [])
+        if "startup_commit_stale_vs_repo_head" not in stale:
+            stale.append("startup_commit_stale_vs_repo_head")
+        out["known_stale_state_conditions"] = stale
+    return out

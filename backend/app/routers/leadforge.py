@@ -15,6 +15,8 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.services.workroom_lead_intake import WorkroomIntake
+
 # ── DB Setup ──────────────────────────────────────────────────────────
 
 DB_PATH = os.getenv(
@@ -24,6 +26,9 @@ DB_PATH = os.getenv(
 
 
 def _get_conn() -> sqlite3.Connection:
+    parent = os.path.dirname(DB_PATH)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -48,7 +53,7 @@ def _dict(row):
     if row is None:
         return None
     d = dict(row)
-    for k in ("score_factors", "tags", "follow_up_sequence"):
+    for k in ("score_factors", "tags", "follow_up_sequence", "photo_urls", "intake_payload"):
         if k in d and isinstance(d[k], str):
             try:
                 d[k] = json.loads(d[k])
@@ -165,9 +170,32 @@ CREATE TABLE IF NOT EXISTS lf_followup_queue (
 """
 
 
+_LEAD_INTAKE_COLUMNS = {
+    "customer_id": "TEXT",
+    "utm_campaign": "TEXT",
+    "job_type": "TEXT",
+    "city_region": "TEXT",
+    "photo_urls": "TEXT",
+    "consent_contact": "INTEGER DEFAULT 0",
+    "capture_surface": "TEXT",
+    "intake_payload": "TEXT",
+    "campaign": "TEXT",
+    "quote_id": "TEXT",
+}
+
+
+def _migrate_lf_lead_columns(conn):
+    """Add Workroom intake columns. Safe to re-run."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(lf_leads)").fetchall()}
+    for name, decl in _LEAD_INTAKE_COLUMNS.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE lf_leads ADD COLUMN {name} {decl}")
+
+
 def _init_tables():
     with _db() as conn:
         conn.executescript(_SCHEMA)
+        _migrate_lf_lead_columns(conn)
 
 
 _init_tables()
@@ -425,6 +453,22 @@ def get_stale_leads(days: int = Query(7, ge=1)):
     return {"leads": _dicts(rows), "total": len(rows), "stale_days": days}
 
 
+@router.post("/intake")
+async def intake_lead(body: WorkroomIntake):
+    """Workroom ad/CC intake. LuxeForge uses the same handler."""
+    from app.services.workroom_lead_intake import submit_intake
+
+    return await submit_intake(body)
+
+
+@router.get("/intake/contract")
+def intake_lead_contract():
+    """Field contract for Workroom and LuxeForge capture surfaces."""
+    from app.services.workroom_lead_intake import intake_contract
+
+    return intake_contract()
+
+
 @router.get("/{lead_id}")
 def get_lead(lead_id: int):
     """Get a single lead."""
@@ -535,6 +579,14 @@ def create_activity(lead_id: int, act: ActivityCreate):
 
 
 # ── LeadForge → ForgeCRM Promotion (Sprint 1d Item 4) ─────────────
+
+@router.post("/{lead_id}/workroom-quote")
+async def create_lead_workroom_quote(lead_id: int):
+    """Open a Workroom quote prefilled from this lead. Repeat calls return the same draft."""
+    from app.services.workroom_lead_intake import create_workroom_quote
+
+    return await create_workroom_quote(lead_id)
+
 
 @router.post("/{lead_id}/promote")
 def promote_lead_to_forgecrm(lead_id: int):
@@ -1624,3 +1676,21 @@ def preview_step(campaign_id: int, step_id: int, prospect_id: int = Query(...)):
     if not result:
         raise HTTPException(404, "Step not found")
     return result
+
+
+# Spec alias: POST /api/v1/leadforge/intake (same handler as /api/v1/leads/intake).
+intake_alias_router = APIRouter(prefix="/leadforge", tags=["leadforge-intake"])
+
+
+@intake_alias_router.post("/intake")
+async def intake_lead_alias(body: WorkroomIntake):
+    from app.services.workroom_lead_intake import submit_intake
+
+    return await submit_intake(body)
+
+
+@intake_alias_router.get("/intake/contract")
+def intake_contract_alias():
+    from app.services.workroom_lead_intake import intake_contract
+
+    return intake_contract()

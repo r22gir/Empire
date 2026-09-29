@@ -2,6 +2,15 @@
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { API_BASE } from '../../../lib/api';
+import { compressImageDataUrl, visionAbortSignal, visionTimeoutMessage } from '../../../lib/visionImage';
+import { normalizeMeasureResult } from '../../../lib/visionMeasure';
+import {
+  asWorkroomQuoteLine,
+  linesFromPhotoGallery,
+  newWorkroomPhotoQuoteBody,
+  quoteLineDescriptions,
+  type WorkroomQuoteLine,
+} from '../../../lib/photoQuote';
 import {
   Camera, Upload, Loader2, Ruler, Armchair, Paintbrush, ClipboardList,
   X, CheckCircle, AlertTriangle, Sparkles, TriangleAlert, Info, Box, Video,
@@ -40,6 +49,8 @@ interface PhotoAnalysisPanelProps {
   customerName?: string;
   customerEmail?: string;
   jobId?: string;
+  /** Existing Workroom quote. Save to Quote appends lines instead of creating another quote. */
+  quoteId?: string;
 }
 
 interface MeasureResult {
@@ -615,12 +626,16 @@ function ManualMeasureEntry({ onAddToQuote }: { onAddToQuote?: (item: any) => vo
 
 const MODE_ORDER: AnalysisMode[] = ['measure', 'upholstery', 'mockup', 'outline'];
 
-export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, initialImage, compact = false, customerName, customerEmail, jobId }: PhotoAnalysisPanelProps) {
+export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, initialImage, compact = false, customerName, customerEmail, jobId, quoteId }: PhotoAnalysisPanelProps) {
   const [mode, setMode] = useState<AnalysisMode>('measure');
   const [imageData, setImageData] = useState<string>(initialImage || '');
   const [preferences, setPreferences] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [savingQuote, setSavingQuote] = useState(false);
+  const [quoteNotice, setQuoteNotice] = useState('');
+  const [savedQuoteId, setSavedQuoteId] = useState<string | null>(quoteId || null);
+  const [savedQuoteNumber, setSavedQuoteNumber] = useState('');
   const [result, setResult] = useState<any>(null);
   // Store results per mode so they persist when switching tabs
   const [allResults, setAllResults] = useState<Record<string, any>>({});
@@ -852,9 +867,9 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (!file.type.startsWith('image/') || file.size > 20 * 1024 * 1024) continue;
-      try {
-        const b64 = await fileToBase64(file);
-        const id = `photo-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
+    try {
+      const b64 = await compressImageDataUrl(await fileToBase64(file));
+      const id = `photo-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
         const entry: PhotoEntry = {
           id,
           imageData: b64,
@@ -893,7 +908,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     }
     setError('');
     try {
-      const b64 = await fileToBase64(file);
+      const b64 = await compressImageDataUrl(await fileToBase64(file));
       setImageData(b64);
       setResult(null);
       // Add to gallery
@@ -931,7 +946,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     }
   };
 
-  const capturePhoto = () => {
+  const capturePhoto = async () => {
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -940,7 +955,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    const dataUrl = await compressImageDataUrl(canvas.toDataURL('image/jpeg', 0.85));
     setImageData(dataUrl);
     setResult(null);
     addPhotoEntry(dataUrl, `Camera ${new Date().toLocaleTimeString()}`);
@@ -994,32 +1009,41 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     };
 
     // If 3D model is loaded but no imageData, capture the canvas first
-    const analysisImage = imageData || '';
-    if (!analysisImage && model3D) {
+    const analysisImageRaw = imageData || '';
+    if (!analysisImageRaw && model3D) {
       setError('Use the Capture button in the 3D viewer first, then Analyze.');
       setLoading(false);
       return;
     }
 
-    const body: any = { image: analysisImage };
-    if ((mode === 'measure' || mode === 'mockup') && preferences.trim()) {
-      body.preferences = preferences.trim();
-    }
-    if (mode === 'mockup' && selectedStyles.length > 0) {
-      body.styles = selectedStyles;
-      // Append styles to preferences for AI context
-      const styleNames = selectedStyles.map(s => DESIGN_STYLES.find(ds => ds.key === s)?.label || s).join(', ');
-      body.preferences = `${body.preferences || ''} Requested styles: ${styleNames}`.trim();
-    }
-
     try {
+      // Resize before POST. Restored sessions and initialImage can still be a
+      // full phone JPEG; the Next rewrite proxy hangs up on that body.
+      const analysisImage = await compressImageDataUrl(analysisImageRaw);
+      const body: any = { image: analysisImage };
+      if ((mode === 'measure' || mode === 'mockup') && preferences.trim()) {
+        body.preferences = preferences.trim();
+      }
+      if (mode === 'mockup' && selectedStyles.length > 0) {
+        body.styles = selectedStyles;
+        // Append styles to preferences for AI context
+        const styleNames = selectedStyles.map(s => DESIGN_STYLES.find(ds => ds.key === s)?.label || s).join(', ');
+        body.preferences = `${body.preferences || ''} Requested styles: ${styleNames}`.trim();
+      }
+
       const res = await fetch(`${API}${endpointMap[mode]}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: visionAbortSignal(),
       });
-      if (!res.ok) throw new Error(`Analysis failed (${res.status})`);
-      const data = await res.json();
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({} as any));
+        const message = detail?.detail || detail?.error || `Analysis failed (${res.status})`;
+        throw new Error(typeof message === 'string' ? message : `Analysis failed (${res.status})`);
+      }
+      const raw = await res.json();
+      const data = mode === 'measure' ? normalizeMeasureResult(raw) : raw;
       setResult(data);
       setAllResults(prev => ({ ...prev, [mode]: data }));
       // Save result to active photo entry
@@ -1034,36 +1058,169 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
       }
       onAnalysisComplete?.(mode, data);
     } catch (err: any) {
-      setError(err.message || 'Analysis failed. Please try again.');
+      setError(visionTimeoutMessage(err) || err.message || 'Analysis failed. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  /* ── Create Quote in Backend ── */
+  /* ── Create / update a Workroom quote (quotes-v2) ── */
 
-  const createQuoteFromAnalysis = async () => {
-    const measureData = currentResults['measure'] as MeasureResult | undefined;
-    const upholsteryData = currentResults['upholstery'] as UpholsteryResult | undefined;
-    const mockupData = currentResults['mockup'] as MockupResult | undefined;
-    const outlineData = currentResults['outline'] as OutlineResult | undefined;
+  const readApiError = async (res: Response) => {
+    const data = await res.json().catch(() => ({} as any));
+    const detail = data?.detail || data?.error || data?.message;
+    if (Array.isArray(detail)) {
+      return detail.map((entry: any) => entry?.msg || JSON.stringify(entry)).join('; ');
+    }
+    if (detail && typeof detail === 'object') return JSON.stringify(detail);
+    return detail || `Request failed (${res.status})`;
+  };
 
-    // 1. Create or find customer in ForgeCRM
+  const photoQuoteLines = (): WorkroomQuoteLine[] => linesFromPhotoGallery(
+    photos,
+    currentResults,
+  );
+
+  const quoteBodyFor = (lines: WorkroomQuoteLine[]) => {
+    const measureData = currentResults['measure']
+      ? normalizeMeasureResult(currentResults['measure'] as MeasureResult)
+      : undefined;
+    return newWorkroomPhotoQuoteBody({
+      customerName,
+      customerEmail,
+      projectName: `AI Analysis${jobId ? ` — ${jobId}` : ''}`,
+      projectDescription: `AI Photo Analysis: ${completedSteps.length}/4 steps completed. ${photos.length} photo(s) analyzed.${selectedStyles.length ? ` Styles: ${selectedStyles.join(', ')}` : ''}`,
+      notes: `Generated from AI Photo Analysis.\nPhotos: ${photos.length}\nSteps: ${completedSteps.map(s => MODES.find(m => m.key === s)?.label).join(', ')}`,
+      lines,
+      measurements: measureData ? {
+        width: measureData.width_inches,
+        height: measureData.height_inches,
+        unit: 'in',
+        window_type: measureData.window_type || null,
+        notes: measureData.notes || null,
+      } : null,
+    });
+  };
+
+  const persistWorkroomLines = async (
+    lines: WorkroomQuoteLine[],
+    mode: 'create' | 'replace' | 'append',
+  ) => {
+    if (!lines.length) {
+      throw new Error('No items to put on the quote. Analyze a photo first.');
+    }
+    const signal = visionAbortSignal();
+    const targetId = quoteId || savedQuoteId;
+    const writeMode = !targetId ? 'create' : (quoteId || mode === 'append' ? 'append' : 'replace');
+
+    if (writeMode === 'create') {
+      const res = await fetch(`${API}/quotes-v2`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(quoteBodyFor(lines)),
+        signal,
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const data = await res.json();
+      return { quote: data.quote || data, created: true, added: lines.length, already: false };
+    }
+
+    if (writeMode === 'append') {
+      const existingRes = await fetch(`${API}/quotes-v2/${targetId}`, { signal });
+      if (!existingRes.ok) throw new Error(await readApiError(existingRes));
+      const existing = await existingRes.json();
+      const quoteRow = existing.quote || existing;
+      const have = quoteLineDescriptions(quoteRow.line_items);
+      const fresh = lines.filter((line) => !have.has(line.description));
+      if (!fresh.length) {
+        return { quote: quoteRow, created: false, added: 0, already: true };
+      }
+      let last = quoteRow;
+      for (const line of fresh) {
+        const res = await fetch(`${API}/quotes-v2/${targetId}/items`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...line, business_unit: 'workroom' }),
+          signal,
+        });
+        if (!res.ok) throw new Error(await readApiError(res));
+        const data = await res.json();
+        last = data.quote || last;
+      }
+      return { quote: last, created: false, added: fresh.length, already: false };
+    }
+
+    const res = await fetch(`${API}/quotes-v2/${targetId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...quoteBodyFor(lines),
+        business_unit: 'workroom',
+        pricing_mode: 'flat',
+      }),
+      signal,
+    });
+    if (!res.ok) throw new Error(await readApiError(res));
+    const data = await res.json();
+    return { quote: data.quote || data, created: false, added: lines.length, already: false };
+  };
+
+  const announceWorkroomQuote = (
+    quote: any,
+    outcome: { created: boolean; added: number; already: boolean },
+    crmCustomerId?: string | null,
+  ) => {
+    const qNum = quote?.quote_number || savedQuoteNumber || 'quote';
+    const count = Array.isArray(quote?.line_items) ? quote.line_items.length : outcome.added;
+    const total = Number(quote?.total || 0);
+    if (quote?.id) setSavedQuoteId(quote.id);
+    if (quote?.quote_number) setSavedQuoteNumber(quote.quote_number);
+    const priced = (quote?.line_items || []).filter((line: any) => Number(line.amount) > 0).length;
+    const unpriced = count - priced;
+    const money = Number.isFinite(total) ? `$${total.toFixed(2)}` : '';
+    let message: string;
+    if (outcome.already) {
+      message = `${qNum} already has those items (${count} line(s) on the Workroom quote).`;
+    } else if (outcome.created) {
+      message = `Quote ${qNum} created on Empire Workroom with ${count} line(s)${money ? `, total ${money}` : ''}. Open Workroom → Quotes.`;
+    } else {
+      message = `Quote ${qNum} updated on Empire Workroom (${outcome.added} new line(s), ${count} total${money ? `, ${money}` : ''}). Open Workroom → Quotes.`;
+    }
+    if (unpriced > 0) {
+      message += ` ${unpriced} line(s) have no price yet — set a rate on the quote.`;
+    }
+    if (crmCustomerId) message += ' Customer saved to ForgeCRM.';
+    setError('');
+    setQuoteNotice(message);
+    alert(message);
+    return quote;
+  };
+
+  const createQuoteFromAnalysis = async (mode: 'create' | 'replace' | 'append' = savedQuoteId || quoteId ? 'replace' : 'create') => {
+    const lines = photoQuoteLines();
+    if (!lines.length) {
+      const message = 'No items to put on the quote. Analyze a photo first.';
+      setQuoteNotice('');
+      setError(message);
+      alert(`Failed to save quote: ${message}`);
+      return null;
+    }
+    setSavingQuote(true);
+    setQuoteNotice('');
     let crmCustomerId: string | null = null;
     if (customerName) {
       try {
-        // Check if customer already exists
-        const searchRes = await fetch(`${API}/crm/customers?search=${encodeURIComponent(customerName)}&limit=1`);
+        const searchRes = await fetch(`${API}/crm/customers?search=${encodeURIComponent(customerName)}&limit=1`, {
+          signal: visionAbortSignal(8000),
+        });
         const searchData = await searchRes.json();
         const existing = (searchData.customers || []).find((c: any) =>
           c.name?.toLowerCase() === customerName.toLowerCase() ||
           (customerEmail && c.email?.toLowerCase() === customerEmail.toLowerCase())
         );
-
         if (existing) {
           crmCustomerId = existing.id;
         } else {
-          // Create new customer in CRM
           const createRes = await fetch(`${API}/crm/customers`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1077,6 +1234,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
               tags: ['ai-analysis'],
               notes: `Created from AI Photo Analysis on ${new Date().toLocaleDateString()}. ${photos.length} photo(s) analyzed.`,
             }),
+            signal: visionAbortSignal(8000),
           });
           if (createRes.ok) {
             const crmData = await createRes.json();
@@ -1086,96 +1244,66 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
       } catch { /* CRM creation is non-blocking */ }
     }
 
-    // 2. Build line items from analysis results
-    const lineItems: any[] = [];
-
-    if (measureData) {
-      lineItems.push({
-        description: `Window Measurement — ${measureData.window_type || 'Standard'} (${measureData.width_inches}" W x ${measureData.height_inches}" H)`,
-        quantity: 1, unit: 'ea', rate: 0, amount: 0, category: 'labor',
-      });
-    }
-
-    if (upholsteryData) {
-      lineItems.push({
-        description: `${upholsteryData.furniture_type || 'Furniture'} Reupholstery — ${upholsteryData.style || 'Standard'}`,
-        quantity: 1, unit: 'ea',
-        rate: upholsteryData.estimated_labor_cost_low || 0,
-        amount: upholsteryData.estimated_labor_cost_low || 0,
-        category: 'labor',
-      });
-      if (upholsteryData.fabric_yards_plain > 0) {
-        lineItems.push({
-          description: `Fabric (plain) — ${upholsteryData.fabric_yards_plain} yards`,
-          quantity: upholsteryData.fabric_yards_plain, unit: 'ea', rate: 25, amount: upholsteryData.fabric_yards_plain * 25,
-          category: 'materials',
-        });
-      }
-    }
-
-    if (mockupData?.proposals?.length) {
-      mockupData.proposals.forEach((p: any) => {
-        lineItems.push({
-          description: `Design Proposal: ${p.tier} — ${p.treatment_type || ''} ${p.style || ''}`.trim(),
-          quantity: 1, unit: 'ea',
-          rate: p.price_range_low || 0,
-          amount: p.price_range_low || 0,
-          category: 'labor',
-        });
-      });
-    }
-
-    const subtotal = lineItems.reduce((s, i) => s + (i.amount || 0), 0);
-    const taxRate = 0.06;
-
-    const payload = {
-      customer_name: customerName || 'Walk-in Customer',
-      customer_email: customerEmail || null,
-      customer_phone: null,
-      customer_address: null,
-      project_name: `AI Analysis${jobId ? ` — ${jobId}` : ''}`,
-      project_description: `AI Photo Analysis: ${completedSteps.length}/4 steps completed. ${photos.length} photo(s) analyzed.${selectedStyles.length ? ` Styles: ${selectedStyles.join(', ')}` : ''}`,
-      line_items: lineItems,
-      measurements: measureData ? {
-        width: measureData.width_inches,
-        height: measureData.height_inches,
-        unit: 'in',
-        window_type: measureData.window_type || null,
-        notes: measureData.notes || null,
-      } : null,
-      subtotal,
-      tax_rate: taxRate,
-      tax_amount: Math.round(subtotal * taxRate * 100) / 100,
-      discount_amount: 0,
-      total: Math.round(subtotal * (1 + taxRate) * 100) / 100,
-      deposit: { deposit_percent: 50, deposit_amount: Math.round(subtotal * (1 + taxRate) * 50) / 100 },
-      notes: `Generated from AI Photo Analysis.\nPhotos: ${photos.length}\nSteps: ${completedSteps.map(s => MODES.find(m => m.key === s)?.label).join(', ')}`,
-      rooms: [],
-      ai_outlines: outlineData ? [outlineData] : [],
-      ai_mockups: mockupData?.proposals || [],
-    };
-
     try {
-      const res = await fetch(`${API}/quotes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      const outcome = await persistWorkroomLines(lines, quoteId ? 'append' : mode);
+      const quote = announceWorkroomQuote(outcome.quote, outcome, crmCustomerId);
+      onSaveQuote?.({
+        customer: customerName,
+        email: customerEmail,
+        photos,
+        styles: selectedStyles,
+        quoteId: quote?.id,
+        quoteNumber: quote?.quote_number,
+        line_items: quote?.line_items,
+        crmCustomerId,
       });
-      if (!res.ok) throw new Error(`Failed (${res.status})`);
-      const data = await res.json();
-      const qNum = data.quote?.quote_number || data.quote_number || 'New';
-      onSaveQuote?.({ ...payload, quoteId: data.quote?.id, quoteNumber: qNum, crmCustomerId });
-      alert(`Quote ${qNum} created!${crmCustomerId ? ` Customer saved to ForgeCRM.` : ''}\nView in Empire Workroom → Quotes.`);
-      return data;
+      return quote;
     } catch (err: any) {
-      alert(`Failed to create quote: ${err.message}`);
+      const message = visionTimeoutMessage(err) || err.message || 'Failed to save quote';
+      setQuoteNotice('');
+      setError(message);
+      alert(`Failed to save quote: ${message}`);
       return null;
+    } finally {
+      setSavingQuote(false);
+    }
+  };
+
+  const saveApprovalLines = async (data: { lineItems?: any[]; addToExisting?: boolean }) => {
+    const lines = (data.lineItems || [])
+      .map((item) => asWorkroomQuoteLine(item))
+      .filter((line): line is WorkroomQuoteLine => line != null);
+    setSavingQuote(true);
+    setQuoteNotice('');
+    try {
+      const outcome = await persistWorkroomLines(lines, data.addToExisting ? 'append' : (quoteId ? 'append' : 'replace'));
+      const quote = announceWorkroomQuote(outcome.quote, outcome);
+      onSaveQuote?.({
+        customer: customerName,
+        email: customerEmail,
+        photos,
+        styles: selectedStyles,
+        quoteId: quote?.id,
+        quoteNumber: quote?.quote_number,
+        line_items: quote?.line_items,
+      });
+      return quote;
+    } catch (err: any) {
+      const message = visionTimeoutMessage(err) || err.message || 'Failed to save quote';
+      setQuoteNotice('');
+      setError(message);
+      alert(`Failed to save quote: ${message}`);
+      return null;
+    } finally {
+      setSavingQuote(false);
     }
   };
 
   /* ── Result renderers ── */
 
-  const renderMeasureResults = (data: MeasureResult) => (
+  const renderMeasureResults = (raw: MeasureResult) => {
+    const data = normalizeMeasureResult(raw);
+    return (
     <div>
       {/* Dimension Drawing on Photo */}
       {imageData && data.width_inches > 0 && data.height_inches > 0 && (
@@ -1238,6 +1366,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
       )}
     </div>
   );
+  };
 
   const renderUpholsteryResults = (data: UpholsteryResult) => (
     <div>
@@ -1716,20 +1845,10 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
             imageData={imageData}
             onRedetect={() => { setResult(null); setShowApprovalFlow(false); }}
             onFinalize={(data) => {
-              if (onSaveQuote) {
-                data.items.forEach(item => onSaveQuote({
-                  type: item.type,
-                  description: item.description,
-                  measurements: { width_inches: item.width_inches, height_inches: item.height_inches },
-                  mount_type: item.mount_type,
-                  treatment: item.treatment,
-                  lining: item.lining,
-                  source: 'ai_approval_flow',
-                }));
-              }
+              void saveApprovalLines(data);
             }}
             onAddToQuote={(data) => {
-              if (onSaveQuote) onSaveQuote(data);
+              void saveApprovalLines(data);
             }}
           />
         </div>
@@ -1832,13 +1951,14 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           >
             <RotateCcw size={12} /> New
           </button>
-          {photos.length > 0 && completedSteps.length > 0 && (
+          {(completedSteps.length > 0 || photos.some(p => p.results?.measure || p.results?.upholstery || p.results?.mockup)) && (
             <button
-              onClick={createQuoteFromAnalysis}
-              className="flex items-center gap-1 cursor-pointer hover:brightness-110 transition-all"
+              onClick={() => { void createQuoteFromAnalysis(); }}
+              disabled={savingQuote}
+              className="flex items-center gap-1 cursor-pointer hover:brightness-110 transition-all disabled:opacity-60"
               style={{ padding: '4px 12px', borderRadius: 8, border: 'none', background: '#16a34a', fontSize: 11, fontWeight: 700, color: '#fff' }}
             >
-              <CheckCircle size={12} /> Save to Quote
+              <CheckCircle size={12} /> {savingQuote ? 'Saving...' : (savedQuoteId ? 'Update Quote' : 'Save to Quote')}
             </button>
           )}
           {result && (
@@ -2538,6 +2658,11 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
             {error}
           </div>
         )}
+        {quoteNotice && (
+          <div style={{ padding: '10px 14px', borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: 12, color: '#166534', fontWeight: 600, marginBottom: 14 }}>
+            {quoteNotice}
+          </div>
+        )}
 
         {/* Analyze button */}
         {!result && !(mode === 'measure' && measureInputMethod === 'manual') && (
@@ -2690,14 +2815,15 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
                   </div>
                 )}
                 <button
-                  onClick={createQuoteFromAnalysis}
-                  className="flex items-center gap-2 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98]"
+                  onClick={() => { void createQuoteFromAnalysis(); }}
+                  disabled={savingQuote}
+                  className="flex items-center gap-2 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
                   style={{
                     margin: '12px auto 0', padding: '10px 24px', borderRadius: 10, fontSize: 13, fontWeight: 700,
                     border: 'none', background: '#16a34a', color: '#fff', boxShadow: '0 2px 10px rgba(22,163,106,0.3)',
                   }}
                 >
-                  <CheckCircle size={14} /> Save Analysis to Quote
+                  <CheckCircle size={14} /> {savingQuote ? 'Saving...' : 'Save Analysis to Quote'}
                 </button>
               </div>
             )}

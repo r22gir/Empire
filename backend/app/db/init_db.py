@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS customers (
 CREATE TABLE IF NOT EXISTS invoices (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
     invoice_number TEXT UNIQUE,
-    customer_id TEXT,
+    customer_id TEXT NOT NULL,
     quote_id TEXT,
     status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'paid', 'partial', 'overdue', 'cancelled')),
     subtotal REAL DEFAULT 0,
@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     due_date TEXT,
     sent_at TEXT,
     paid_at TEXT,
+    is_legacy INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (customer_id) REFERENCES customers(id)
@@ -130,13 +131,14 @@ CREATE TABLE IF NOT EXISTS invoices (
 -- Payments
 CREATE TABLE IF NOT EXISTS payments (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
-    invoice_id TEXT,
+    invoice_id TEXT NOT NULL,
     customer_id TEXT,
     amount REAL NOT NULL,
     method TEXT DEFAULT 'check' CHECK (method IN ('cash', 'check', 'card', 'zelle', 'venmo', 'wire', 'crypto', 'other')),
     reference TEXT, -- check number, transaction ID, etc.
     notes TEXT,
     payment_date TEXT DEFAULT (date('now')),
+    is_legacy INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (invoice_id) REFERENCES invoices(id),
     FOREIGN KEY (customer_id) REFERENCES customers(id)
@@ -192,7 +194,7 @@ CREATE TABLE IF NOT EXISTS vendors (
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
     title TEXT NOT NULL,
-    customer_id TEXT,
+    customer_id TEXT NOT NULL,
     quote_id TEXT,
     invoice_id TEXT,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'scheduled', 'in_progress', 'on_hold', 'completed', 'cancelled')),
@@ -209,6 +211,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     notes TEXT,
     address TEXT,
     metadata TEXT,
+    is_legacy INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (customer_id) REFERENCES customers(id)

@@ -117,6 +117,15 @@ class AIDeskManager:
             logger.info(f"Task '{title}' → {desk.desk_name}: {reason}")
             try:
                 result = await asyncio.wait_for(desk.handle_task(task), timeout=60.0)
+                # H76 STEP 3a: deliverable gate. A task that completed without
+                # a real artifact is downgraded to FAILED with a reason that
+                # names the gate. The tasks table row will reflect the truthful
+                # state (was previously "done" with a fake-quality template).
+                try:
+                    from app.services.max.tool_executor import _enforce_deliverable_gate
+                    _enforce_deliverable_gate(result, desk_id)
+                except Exception as _gate_err:
+                    logger.debug(f"deliverable gate import/run failed (non-fatal): {_gate_err}")
                 # Sync result back to SQLite tasks table
                 self._sync_task_to_db(result, desk_id)
                 return result
