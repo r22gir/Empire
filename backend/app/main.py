@@ -702,6 +702,10 @@ try:
 except Exception as e:
     print(f"✗ LeadForge intake alias: {e}")
 
+# Workroom manual capture — inbox → LeadForge + ForgeCRM + quote draft.
+# Founder door only. Does not send email and is not a public marketing form.
+load_router("app.routers.workroom_capture", "/api/v1", ["workroom-capture"])
+
 # Onboarding & Tier
 load_router("app.routers.onboarding", "/api/v1", ["onboarding"])
 

@@ -28,3 +28,7 @@ Empire Workroom is the primary business unit. Manages the full lifecycle: custom
 ## Storage
 - Quotes: JSON files in `backend/data/quotes/`
 - Images: `~/data/generated/`
+
+## Inbox capture (Stage 0)
+Founder door for `workroom@empirebox.store` (routes to `empirebox2026@gmail.com`).
+Open `/workroom/capture`. It posts to `POST /api/v1/workroom-capture/intake`, upserts ForgeCRM by email, writes a LeadForge event, and can open a Workroom quote draft. It does not send email. Docs: `docs/workroom/`.
