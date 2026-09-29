@@ -56,6 +56,9 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
   const [stats, setStats] = useState({ pipeline: 0, openQuotes: 0, accepted: 0 });
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
   const [initialQuoteId, setInitialQuoteId] = useState<string | null>(null);
+  // Bumped on every sidebar tab click so re-clicking Quotes remounts
+  // QuotesSection and returns to the list instead of a stale detail view.
+  const [navKey, setNavKey] = useState(0);
 
   // Sync section when initialSection prop changes (e.g. from module click)
   useEffect(() => {
@@ -106,7 +109,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
           </Suspense>
         );
       case 'quotes':
-        return <QuotesSection quotes={quotes} initialQuoteId={initialQuoteId} onClearInitial={() => setInitialQuoteId(null)} startQuickQuote={openQuickQuote} />;
+        return <QuotesSection key={navKey} quotes={quotes} initialQuoteId={initialQuoteId} onClearInitial={() => setInitialQuoteId(null)} startQuickQuote={openQuickQuote} />;
       case 'inventory':
         return <Suspense fallback={<Loading />}><InventorySection /></Suspense>;
       case 'jobs':
@@ -168,7 +171,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
               const isActive = section === nav.id && !selectedCustomer;
               return (
                 <button key={nav.id}
-                  onClick={() => { setSection(nav.id); setSelectedCustomer(null); }}
+                  onClick={() => { setSection(nav.id); setSelectedCustomer(null); setNavKey(k => k + 1); }}
                   className="w-full flex items-center gap-3 text-left cursor-pointer transition-all"
                   style={{
                     padding: '10px 14px',
@@ -454,7 +457,7 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, 
   const [builderQuoteId, setBuilderQuoteId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(API + `/quotes?limit=50&business=${business}`).then(r => r.json()).then(data => {
+    fetch(API + `/quotes-v2?limit=100&business_unit=${business}`).then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       setQuotes(Array.isArray(raw) ? raw : []);
     }).catch(() => {});
@@ -470,7 +473,7 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, 
   });
 
   const refetchQuotes = () => {
-    fetch(API + `/quotes?limit=50&business=${business}`).then(r => r.json()).then(data => {
+    fetch(API + `/quotes-v2?limit=100&business_unit=${business}`).then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       setQuotes(Array.isArray(raw) ? raw : []);
     }).catch(() => {});

@@ -417,8 +417,8 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   if (!quote) return (
     <div className="flex-1 flex items-center justify-center flex-col gap-3">
       <FileText size={48} className="text-[#d8d3cb]" />
-      <p className="text-base font-semibold text-[#888]">No quote selected</p>
-      <p className="text-sm text-[#aaa]">Create a quote via chat to review here</p>
+      <p className="text-base font-semibold text-[#888]">{quoteId ? `Quote ${quoteId} not found` : 'No quote selected'}</p>
+      <p className="text-sm text-[#aaa]">{quoteId ? 'Go back to Quotes and pick it from the list' : 'Create a quote via chat to review here'}</p>
     </div>
   );
 
