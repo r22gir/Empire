@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Empire Workroom — Your designs come true</title>
+<meta name="description" content="Empire Workroom makes drapery, Romans, banquettes, beds, and soft seating for designers and trade. You envision the room. We make it real."/>
+<link rel="canonical" href="https://workroom.empirebox.store/"/>
+<meta name="theme-color" content="#0e0d0c"/>
+<link rel="icon" href="/favicon.ico"/>
+<meta property="og:type" content="website"/>
+<meta property="og:site_name" content="Empire Workroom"/>
+<meta property="og:title" content="Empire Workroom — Your designs come true"/>
+<meta property="og:description" content="Empire Workroom makes drapery, Romans, banquettes, beds, and soft seating for designers and trade. You envision the room. We make it real."/>
+<meta property="og:url" content="https://workroom.empirebox.store/"/>
+<meta property="og:image" content="https://workroom.empirebox.store/workroom-showroom/og.jpg"/>
+<meta property="og:image:width" content="1200"/>
+<meta property="og:image:height" content="630"/>
+<meta property="og:image:alt" content="Floor-to-ceiling white tufted headboard in a bedroom suite by Empire Workroom"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="Empire Workroom — Your designs come true"/>
+<meta name="twitter:description" content="Empire Workroom makes drapery, Romans, banquettes, beds, and soft seating for designers and trade. You envision the room. We make it real."/>
+<meta name="twitter:image" content="https://workroom.empirebox.store/workroom-showroom/og.jpg"/>
+<link rel="preload" as="image" href="/workroom-showroom/photos/bed-cognac-panel-headboard.jpg" fetchpriority="high"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=Jost:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+  :root{
+    --bg:#0e0d0c;
+    --bg2:#161412;
+    --ivory:#f4efe6;
+    --muted:#c2b8ab;
+    --gold:#c6a56a;
+    --line:rgba(198,165,106,.45);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ivory);
+    font-family:Jost,"Avenir Next","Segoe UI",sans-serif;
+    font-weight:300;line-height:1.55;-webkit-font-smoothing:antialiased;
+  }
+  img{max-width:100%;display:block}
+  a{color:inherit}
+  :focus-visible{outline:2px solid var(--gold);outline-offset:3px}
+  .skip{position:absolute;left:12px;top:-60px;background:var(--ivory);color:var(--bg);padding:8px 12px;z-index:50}
+  .skip:focus{top:8px}
+  .hero{
+    position:relative;min-height:100svh;display:flex;flex-direction:column;justify-content:flex-end;
+    background:#0e0d0c;
+  }
+  .hero .still{
+    position:absolute;inset:0;
+  }
+  .hero .still img{width:100%;height:100%;object-fit:cover}
+  .hero .still::after{
+    content:"";position:absolute;inset:0;
+    background:
+      linear-gradient(to bottom, rgba(8,7,6,.78) 0%, rgba(8,7,6,0) 22%),
+      linear-gradient(to top, rgba(8,7,6,.9) 0%, rgba(8,7,6,.55) 34%, rgba(8,7,6,.28) 100%);
+  }
+  .hero.is-missing .still::after{
+    background:#141210;
+  }
+  .topbar{
+    position:absolute;top:0;left:0;right:0;z-index:2;
+    display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px 20px;
+    padding:22px 6vw;align-items:center;
+  }
+  .word{
+    font-family:"Cormorant Garamond",Palatino,serif;
+    letter-spacing:.22em;font-size:15px;font-weight:500;text-decoration:none;
+  }
+  .topbar nav{display:flex;flex-wrap:wrap;gap:14px 22px}
+  .topbar nav a{
+    font-size:12px;letter-spacing:.16em;text-transform:uppercase;text-decoration:none;color:var(--ivory);
+  }
+  .hero-copy{position:relative;z-index:2;padding:12vh 6vw 56px;max-width:920px}
+  .eyebrow{
+    color:var(--gold);letter-spacing:.22em;text-transform:uppercase;font-size:11px;font-weight:500;margin:0 0 18px;
+  }
+  h1{
+    font-family:"Cormorant Garamond",Palatino,serif;
+    font-weight:500;font-size:clamp(3rem,8vw,6.4rem);
+    line-height:.92;letter-spacing:-.02em;margin:0 0 18px;
+  }
+  h1 em{font-style:italic;font-weight:500}
+  .hero-copy p{max-width:34rem;color:var(--ivory);margin:0 0 22px;font-size:1.05rem}
+  .gold-link{
+    color:var(--gold);text-decoration:none;letter-spacing:.14em;text-transform:uppercase;font-size:12px;font-weight:500;
+    border-bottom:1px solid var(--gold);padding-bottom:4px;
+  }
+  .manifesto{
+    padding:88px 6vw;max-width:760px;margin:0 auto;
+  }
+  .manifesto h2{
+    font-family:"Cormorant Garamond",Palatino,serif;
+    font-weight:500;font-style:italic;font-size:clamp(2rem,4vw,3.1rem);
+    line-height:1.15;margin:0 0 18px;
+  }
+  .manifesto p{color:var(--muted);margin:0 0 12px}
+  .hair{width:48px;height:1px;background:var(--gold);margin:0 0 28px;border:0}
+  .plate{padding:0 0 8px;background:var(--bg)}
+  .plate figure{margin:0}
+  .frame{position:relative;background:#1c1916;overflow:hidden}
+  .frame img{width:100%;height:100%;object-fit:cover}
+  .plate .frame{aspect-ratio:16/9;max-height:86vh}
+  .wall-label{
+    display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;
+    padding:14px 6vw 28px;color:var(--muted);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+  }
+  .wall-label strong{color:var(--ivory);font-weight:400;letter-spacing:.04em;text-transform:none;font-size:14px}
+  .viewing{padding:24px 0 10px}
+  .viewing header{padding:0 6vw 16px;display:flex;justify-content:space-between;gap:12px;align-items:end}
+  .viewing h2{
+    font-family:"Cormorant Garamond",Palatino,serif;font-weight:500;font-size:clamp(1.8rem,3vw,2.6rem);margin:0;
+  }
+  .controls{display:flex;gap:8px}
+  .controls button{
+    width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:transparent;color:var(--ivory);
+    font-size:18px;cursor:pointer;
+  }
+  .controls button:hover{border-color:var(--gold);color:var(--gold)}
+  .strip{
+    display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;
+    padding:8px 6vw 28px;scrollbar-color:var(--gold) transparent;
+  }
+  .strip:focus-visible{outline-offset:-4px}
+  .strip figure{
+    flex:0 0 min(78vw, 420px);scroll-snap-align:start;margin:0;
+  }
+  .strip .frame{aspect-ratio:3/4}
+  .strip figcaption{padding-top:10px;color:var(--muted);font-size:13px}
+  .strip figcaption span{display:block;color:var(--gold);letter-spacing:.16em;text-transform:uppercase;font-size:10px;margin-bottom:4px}
+  .rooms{padding:40px 6vw 20px}
+  .rooms h2{
+    font-family:"Cormorant Garamond",Palatino,serif;font-weight:500;font-size:clamp(2rem,4vw,3rem);margin:0 0 8px;
+  }
+  .rooms .intro{color:var(--muted);max-width:36rem;margin:0 0 28px}
+  .stack{display:grid;grid-template-columns:1fr;gap:36px}
+  .stack .frame{aspect-ratio:5/4}
+  .stack figcaption{padding-top:10px}
+  .stack figcaption span{color:var(--gold);letter-spacing:.16em;text-transform:uppercase;font-size:10px}
+  .stack h3{font-family:"Cormorant Garamond",Palatino,serif;font-weight:500;font-size:1.7rem;margin:6px 0}
+  .stack p{margin:0;color:var(--muted)}
+  .two{display:grid;grid-template-columns:1fr;gap:22px;margin-top:28px}
+  .two .frame{aspect-ratio:4/5}
+  .steps{list-style:none;margin:28px 0 0;padding:0;max-width:640px}
+  .steps li{display:grid;grid-template-columns:4.5rem 1fr;gap:8px;padding:18px 0;border-top:1px solid rgba(244,239,230,.14)}
+  .steps strong{font-family:"Cormorant Garamond",Palatino,serif;font-size:1.4rem;font-weight:500;color:var(--gold)}
+  details{margin-top:28px;color:var(--muted);max-width:40rem}
+  details summary{cursor:pointer;color:var(--ivory)}
+  .close{padding:88px 6vw 64px;text-align:left}
+  .close h2{
+    font-family:"Cormorant Garamond",Palatino,serif;font-weight:500;font-style:italic;
+    font-size:clamp(2.8rem,7vw,5.5rem);line-height:.95;margin:0 0 18px;
+  }
+  .close .mail{font-size:1.15rem}
+  .fine{color:var(--muted);font-size:13px;max-width:36rem}
+  footer{
+    padding:24px 6vw 40px;color:var(--muted);font-size:12px;letter-spacing:.06em;border-top:1px solid rgba(244,239,230,.1);
+  }
+  footer a{color:var(--ivory);text-decoration:none;border-bottom:1px solid var(--line)}
+  @media (max-width:520px){
+    .topbar{padding:18px 6vw}
+    .topbar nav{gap:10px 16px}
+    .hero-copy{padding:10vh 6vw 44px}
+    .viewing header{flex-wrap:wrap}
+  }
+  figure.is-missing img{opacity:0}
+  @media (min-width:800px){
+    .stack{grid-template-columns:1.15fr .85fr;align-items:end}
+    .two{grid-template-columns:1fr 1fr}
+    .strip figure{flex-basis:320px}
+    .plate .frame{aspect-ratio:2.2/1}
+  }
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    .strip{scroll-snap-type:none}
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#content">Skip to showroom</a>
+
+<main id="content">
+  <section class="hero" id="hero">
+    <div class="still">
+      <img data-craft data-hero src="/workroom-showroom/photos/bed-cognac-panel-headboard.jpg" alt="Cognac paneled headboard in a dim bedroom" width="1024" height="768" fetchpriority="high" decoding="async"/>
+    </div>
+    <div class="topbar">
+      <a class="word" href="#hero">EMPIRE WORKROOM</a>
+      <nav aria-label="Page">
+        <a href="#rooms">Rooms</a>
+        <a href="#hang">The making</a>
+        <a href="#start">Write</a>
+      </nav>
+    </div>
+    <div class="hero-copy">
+      <p class="eyebrow">Designers &amp; trade</p>
+      <h1>Your designs come <em>true.</em></h1>
+      <p>Drapery, Romans, banquettes, beds, and soft seating — the rooms and cloth you picture, made so the beauty is real.</p>
+      <a class="gold-link" href="#start">Write the workroom</a>
+    </div>
+  </section>
+
+  <section class="manifesto">
+    <hr class="hair"/>
+    <h2>You envision the room. We make it real.</h2>
+    <p>Empire Workroom is the soft-goods shop for designers and trade. You hold the vision. We produce and finish the drapery, upholstery, and seating so that vision is the one in the house. With the quote we can include idea drawings — sheets of the piece — so the idea is plain before it is made. Your design stays yours.</p>
+    <p>WoodCraft joins when the job needs furniture or millwork. Talk to us about the room, the fabric, and the date.</p>
+  </section>
+
+  <section class="plate" aria-label="Featured suite">
+    <figure>
+      <div class="frame">
+        <img data-craft src="/workroom-showroom/photos/bed-white-tufted-headboard.jpg" alt="Floor-to-ceiling white tufted headboard in a bedroom suite" width="1600" height="1200" loading="lazy" decoding="async"/>
+      </div>
+      <figcaption class="wall-label">
+        <span>Beds · 01</span>
+        <strong>Floor-to-ceiling white tufted headboard</strong>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section class="viewing" aria-labelledby="viewing-title">
+    <header>
+      <div>
+        <p class="eyebrow">Viewing room</p>
+        <h2 id="viewing-title">Finished rooms</h2>
+      </div>
+      <div class="controls">
+        <button type="button" id="prev" aria-label="Previous rooms">←</button>
+        <button type="button" id="next" aria-label="Next rooms">→</button>
+      </div>
+    </header>
+    <div class="strip" id="strip" tabindex="0" aria-label="Room photographs, scroll sideways">
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/drapery-music-room.jpg" alt="Music room with blue floor-to-ceiling drapes and a piano" width="1170" height="818" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Drapery</span>Music room, floor to ceiling</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/drapery-bay-floral.jpg" alt="Floral drapery on a bay window" width="1200" height="1600" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Drapery</span>Bay window floral</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/sheers-tall-living.jpg" alt="Tall sheers in a living room" width="1200" height="1600" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Drapery</span>Tall living sheers</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/banquette-teal-tufted-bench.jpg" alt="Teal diamond-tufted bench with striped drapery" width="1200" height="1600" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Banquette</span>Teal diamond-tufted bench</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/banquette-plant-wall.jpg" alt="Banquette finished against a plant wall" width="1600" height="1200" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Banquette</span>Plant-wall banquette</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/bed-mauve-channel.jpg" alt="Mauve channel bed with drapery" width="1200" height="1600" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Beds</span>Mauve channel bed</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/seating-grey-sectional-bay.jpg" alt="Grey sectional with a cognac ottoman" width="1200" height="1600" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Seating</span>Grey sectional + cognac ottoman</figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/seating-herringbone-sectional.jpg" alt="Grey herringbone sectional" width="1600" height="1088" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Seating</span>Herringbone sectional</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="rooms" id="rooms">
+    <p class="eyebrow">The shop</p>
+    <h2>Built for the trade.</h2>
+    <p class="intro">You hold the vision. We care about the handwork: pleat, welt, seat, the fall of the cloth. Empire Workroom is the work. WoodCraft is the wood, only when the job asks.</p>
+    <div class="stack">
+      <figure>
+        <div class="frame">
+          <img data-craft src="/workroom-showroom/photos/drapery-bay-cream-lounge.jpg" alt="Cream bay drapes in a lounge with dark chairs" width="1200" height="1600" loading="lazy" decoding="async"/>
+        </div>
+      </figure>
+      <div>
+        <span class="eyebrow">Primary</span>
+        <h3>Empire Workroom</h3>
+        <p>Drapery, Romans, upholstery, and soft seating — your fabric and notes, a clear quote, and the finished piece in the room.</p>
+      </div>
+    </div>
+    <div class="two">
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/romans-bay-nook.jpg" alt="Roman shades in a bay nook" width="1600" height="1200" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Romans</span><h3>Bay Romans nook</h3></figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/drapery-window-nook.jpg" alt="Drapery in a window nook" width="1200" height="1600" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Drapery</span><h3>Window nook</h3></figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/valance-bath-dragonfly.jpg" alt="Dragonfly valance in a bath" width="1600" height="1200" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Drapery</span><h3>Bath valance</h3></figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/chairs-maze-dining.jpg" alt="Geometric maze dining chairs" width="1600" height="1200" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Chairs</span><h3>Maze dining chairs</h3></figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/seating-barstools.jpg" alt="Upholstered barstools" width="1200" height="1600" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Seating</span><h3>Barstools</h3></figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img data-craft src="/workroom-showroom/photos/softgoods-trellis-corner.jpg" alt="Layered trellis corner" width="1600" height="1200" loading="lazy" decoding="async"/></div>
+        <figcaption><span>Soft goods</span><h3>Trellis corner</h3></figcaption>
+      </figure>
+    </div>
+    <div class="stack" style="margin-top:48px">
+      <div>
+        <span class="eyebrow">Alongside</span>
+        <h3>WoodCraft</h3>
+        <p>Built-ins, islands, and custom wood that sit cleanly next to Workroom soft goods when the job calls for both.</p>
+      </div>
+      <figure>
+        <div class="frame">
+          <img data-craft src="/workroom-showroom/photos/woodcraft-champagne-lounge.jpg" alt="Champagne lounge with built-in millwork" width="1200" height="1600" loading="lazy" decoding="async"/>
+        </div>
+      </figure>
+    </div>
+    <figure style="margin-top:22px">
+      <div class="frame" style="aspect-ratio:16/8">
+        <img data-craft src="/workroom-showroom/photos/woodcraft-chevron-island.jpg" alt="Finished chevron island" width="1600" height="1200" loading="lazy" decoding="async"/>
+      </div>
+      <figcaption class="wall-label"><span>WoodCraft</span><strong>Chevron island, finished</strong></figcaption>
+    </figure>
+  </section>
+
+  <section class="rooms" id="hang">
+    <hr class="hair"/>
+    <h2>From your vision to the finished room.</h2>
+    <ol class="steps">
+      <li><strong>01</strong><span>You send the vision — photos, measures, fabric or finish notes, and the look you want.</span></li>
+      <li><strong>02</strong><span>We send a clear quote, with idea drawings when they help the piece read. Those sheets show the idea. They are not a design of the whole project, and they are not construction documents.</span></li>
+      <li><strong>03</strong><span>The shop makes it — sewing room, frame shop, or both.</span></li>
+      <li><strong>04</strong><span>We finish it in the room, ready for your client.</span></li>
+    </ol>
+    <details>
+      <summary>How jobs stay organized on our side</summary>
+      <p>The back office is EmpireBox — photos, pricing, drawings, day-to-day ops across Workroom and WoodCraft. Most designers never open it. It keeps the job out of five email threads. It is not the product on this page.</p>
+    </details>
+  </section>
+
+  <section class="close" id="start">
+    <p class="eyebrow">Write us</p>
+    <h2>Bring us what you see.</h2>
+    <p>The piece, the fabric, and the date. Soft goods first. WoodCraft comes in when the room needs wood.</p>
+    <p class="mail"><a class="gold-link" href="mailto:workroom@empirebox.store?subject=Workroom%20job%20%E2%80%94%20designer">workroom@empirebox.store</a></p>
+    <p class="mail" style="margin-top:18px"><a class="gold-link" href="mailto:workroom@empirebox.store?subject=WoodCraft%20job%20%E2%80%94%20trade">WoodCraft, same desk</a></p>
+  </section>
+</main>
+<footer>
+  Empire Workroom — drapery and upholstery for designers and trade. WoodCraft when the job needs wood.<br/>
+  <a href="mailto:workroom@empirebox.store">workroom@empirebox.store</a>
+</footer>
+<script>
+(function(){
+  document.querySelectorAll("img[data-craft]").forEach(function(img){
+    var mark=function(){
+      if(img.hasAttribute("data-hero")){
+        var hero=document.getElementById("hero");
+        if(hero) hero.classList.add("is-missing");
+      }
+      var f=img.closest("figure");
+      if(f) f.classList.add("is-missing");
+    };
+    img.addEventListener("error", mark);
+    if(img.complete && img.naturalWidth===0) mark();
+  });
+  var strip=document.getElementById("strip");
+  function go(dir){
+    strip.scrollBy({left: dir * Math.max(280, strip.clientWidth * 0.8), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
+  }
+  document.getElementById("prev").addEventListener("click", function(){go(-1);});
+  document.getElementById("next").addEventListener("click", function(){go(1);});
+  strip.addEventListener("keydown", function(e){
+    if(e.key==="ArrowRight"){e.preventDefault();go(1);}
+    if(e.key==="ArrowLeft"){e.preventDefault();go(-1);}
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { workroomHostDecision } from "./app/lib/workroomHost";
 
 // Public Luxe hostnames. Keep this allowlist in sync with
 // backend/app/security/luxe_public_edge.py. Cloudflare currently tunnels
@@ -119,6 +120,34 @@ export function middleware(request: NextRequest) {
       });
     }
 
+    return NextResponse.next();
+  }
+
+  // --- WORKROOM showroom host: public Style B landing (read-only) ---
+  // workroom.empirebox.store serves the static Empire Workroom showroom
+  // from public/workroom-showroom/. "/" rewrites to its index.html; only
+  // the showroom folder and favicon are reachable; everything else 404s.
+  // The apex and Luxe rules above/below are unchanged. See
+  // app/lib/workroomHost.ts (+ workroomHost.test.ts).
+  const workroom = workroomHostDecision(host, request.method, pathname);
+  if (workroom.action === "method-not-allowed") {
+    return new NextResponse("Method Not Allowed", {
+      status: 405,
+      headers: { Allow: "GET, HEAD" },
+    });
+  }
+  if (workroom.action === "rewrite") {
+    const url = request.nextUrl.clone();
+    url.pathname = workroom.pathname;
+    return NextResponse.rewrite(url);
+  }
+  if (workroom.action === "not-found") {
+    return new NextResponse("Not Found", {
+      status: 404,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+  if (workroom.action === "next") {
     return NextResponse.next();
   }
 
