@@ -702,6 +702,9 @@ try:
 except Exception as e:
     print(f"✗ LeadForge intake alias: {e}")
 
+# Workroom intake — shared LeadForge + LuxeForge door (CRM → quote)
+load_router("app.routers.workroom_intake", "/api/v1", ["workroom-intake"])
+
 # Onboarding & Tier
 load_router("app.routers.onboarding", "/api/v1", ["onboarding"])
 
