@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { CheckCircle, Mail, FileDown, FileText, Hammer, X, Loader2, Trash2 } from 'lucide-react';
 import { API } from '../../../lib/api';
+import DepositPayLinkButton from '../finance/DepositPayLink';
 
 interface QuoteActionsProps {
   quoteId: string;
@@ -230,6 +231,7 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
           color="#b8960c"
           onClick={() => handleAction('pdf', `/quotes-v2/${quoteId}/pdf`, 'GET')}
         />
+        <DepositPayLinkButton quoteId={quoteId} compact={compact} />
         <ActionBtn
           id="invoice"
           label="Create Invoice"

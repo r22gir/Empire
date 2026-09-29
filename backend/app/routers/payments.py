@@ -13,6 +13,7 @@ from typing import Optional, List
 from datetime import datetime
 import os
 import logging
+import sqlite3
 import httpx
 
 from app.middleware.rate_limiter import limiter
@@ -197,19 +198,18 @@ class CheckoutRequest(BaseModel):
 class InvoiceLinkRequest(BaseModel):
     """Generate a one-time payment link for an invoice (WoodCraft + Workroom).
 
-    Sprint 1d Payment Phase 1: supports full / percentage / fixed
-    partial amounts. All amounts resolve server-side. Business identity
-    ('workroom' | 'woodcraft') is propagated to the Stripe checkout
-    session via metadata → webhook → canonical payments_v2.
+    Supports full / percentage / fixed partial amounts (amount_mode). All amounts
+    resolve server-side. Business identity is propagated via metadata → webhook →
+    canonical payments_v2. success_url/cancel_url default to the Command Center on
+    this machine (WORKROOM_CHECKOUT_RETURN_BASE, default http://127.0.0.1:3005).
     """
     invoice_id: str
-    # amount_mode: 'full' (default) charges the entire balance_due;
-    # 'percentage' charges amount_value percent (0 < x <= 100);
+    # amount_mode: 'full' charges balance_due; 'percentage' charges amount_value%;
     # 'fixed' charges exactly amount_value dollars.
     amount_mode: str = "full"
     amount_value: float = 0
-    success_url: str = "https://studio.empirebox.store/payments/invoice-success?session_id={CHECKOUT_SESSION_ID}"
-    cancel_url: str = "https://studio.empirebox.store/payments/invoice-cancel"
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
 
 
 class PortalRequest(BaseModel):
@@ -252,6 +252,48 @@ async def _notify_emergency(title: str, message: str, context: dict = None):
         logger.error(f"Failed to send emergency notification: {e}")
 
 
+RETURN_HOST_NOTE = (
+    "The pay link is a Stripe Checkout URL. Success and cancel URLs use "
+    "WORKROOM_CHECKOUT_RETURN_BASE (default http://127.0.0.1:3005, Command Center "
+    "on this machine; open it over Tailscale on port 3005). studio.empirebox.store "
+    "is not the return host. A Cloudflare 521 on the public host does not mean the "
+    "Stripe pay link failed, and it does not mean the invoice is paid."
+)
+
+
+def workroom_checkout_return_urls() -> tuple[str, str]:
+    """Absolute return URLs for Stripe Checkout. Read at call time."""
+    base = os.getenv("WORKROOM_CHECKOUT_RETURN_BASE", "http://127.0.0.1:3005").rstrip("/")
+    success = (
+        f"{base}/?product=workroom&section=invoices"
+        "&checkout=success&session_id={CHECKOUT_SESSION_ID}"
+    )
+    cancel = f"{base}/?product=workroom&section=invoices&checkout=cancel"
+    return success, cancel
+
+
+def _ensure_checkout_columns(conn) -> None:
+    """Store the Checkout session on the invoice without a second payments table."""
+    for column, col_type in (
+        ("stripe_checkout_session_id", "TEXT"),
+        ("stripe_checkout_url", "TEXT"),
+        ("stripe_checkout_attempt", "INTEGER DEFAULT 0"),
+        ("payment_status", "TEXT DEFAULT 'unpaid'"),
+    ):
+        try:
+            conn.execute(f"ALTER TABLE invoices ADD COLUMN {column} {col_type}")
+        except sqlite3.OperationalError:
+            pass
+
+
+def _session_field(session, name: str):
+    if session is None:
+        return None
+    if isinstance(session, dict):
+        return session.get(name)
+    return getattr(session, name, None)
+
+
 def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "card",
                            stripe_session_id: str = None,
                            amount_cents: int = None,
@@ -271,6 +313,7 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
     try:
         from app.db.database import get_db, dict_row
         with get_db() as conn:
+            _ensure_checkout_columns(conn)
             inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
             if not inv:
                 logger.warning(f"Invoice {invoice_id} not found for status update")
@@ -339,13 +382,14 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
                 ).fetchone()
                 amount_paid = paid_row["total_paid"]
                 balance_due = round(total - amount_paid, 2)
+                settled = balance_due <= 0
 
                 new_status = "paid" if balance_due <= 0.005 else "partial"
                 conn.execute(
-                    """UPDATE invoices SET status = ?, amount_paid = ?, balance_due = ?,
+                    """UPDATE invoices SET status = ?, payment_status = ?, amount_paid = ?, balance_due = ?,
                        paid_at = CASE WHEN ? = 'paid' THEN datetime('now') ELSE paid_at END,
                        updated_at = datetime('now') WHERE id = ?""",
-                    (new_status, amount_paid, max(balance_due, 0), new_status, invoice_id),
+                    (new_status, new_status, amount_paid, max(balance_due, 0), new_status, invoice_id),
                 )
 
                 # Update customer total_revenue from canonical payments_v2
@@ -367,6 +411,257 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
         import traceback
         logger.error(f"Failed to update invoice {invoice_id}: {e}\n{traceback.format_exc()}")
         return False
+
+
+def _set_invoice_payment_status(invoice_id: str, payment_status: str, *, clear_link: bool = False) -> bool:
+    """Record an honest non-paid Checkout state. Does not mark the invoice paid."""
+    try:
+        from app.db.database import get_db
+        with get_db() as conn:
+            _ensure_checkout_columns(conn)
+            if clear_link:
+                conn.execute(
+                    """UPDATE invoices
+                       SET payment_status = ?,
+                           stripe_checkout_url = NULL,
+                           stripe_checkout_session_id = NULL,
+                           stripe_checkout_attempt = COALESCE(stripe_checkout_attempt, 0) + 1,
+                           updated_at = datetime('now')
+                       WHERE id = ?
+                         AND COALESCE(payment_status, '') NOT IN ('paid', 'partial')
+                         AND status NOT IN ('paid', 'partial')""",
+                    (payment_status, invoice_id),
+                )
+            else:
+                conn.execute(
+                    """UPDATE invoices
+                       SET payment_status = ?, updated_at = datetime('now')
+                       WHERE id = ?
+                         AND COALESCE(payment_status, '') NOT IN ('paid', 'partial')
+                         AND status NOT IN ('paid', 'partial')""",
+                    (payment_status, invoice_id),
+                )
+        return True
+    except Exception as e:
+        logger.error(f"Failed to set payment_status on {invoice_id}: {e}")
+        return False
+
+
+def _load_invoice_for_checkout(invoice_id: str) -> dict:
+    from app.db.database import get_db, dict_row
+    with get_db() as conn:
+        _ensure_checkout_columns(conn)
+        row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Invoice {invoice_id} not found")
+        return dict_row(row)
+
+
+def _invoice_is_settled(inv: dict) -> bool:
+    status = (inv.get("status") or "").lower()
+    pay = (inv.get("payment_status") or "").lower()
+    balance = inv.get("balance_due")
+    if balance is None:
+        balance = inv.get("total") or 0
+    return status == "paid" or pay == "paid" or float(balance or 0) <= 0
+
+
+def _refresh_stored_checkout(inv: dict) -> dict:
+    """Ask Stripe what the stored session is doing. Keep the stored link if Stripe cannot be read."""
+    session_id = inv.get("stripe_checkout_session_id")
+    if stripe is None or not session_id:
+        return inv
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+    except Exception as e:
+        logger.warning(f"Could not refresh Checkout session {session_id}: {e}")
+        return inv
+
+    pay = (_session_field(session, "payment_status") or "").lower()
+    sess_status = (_session_field(session, "status") or "").lower()
+    if pay == "paid":
+        _update_invoice_status(inv["id"], "paid", payment_method="card", stripe_session_id=session_id)
+        return _load_invoice_for_checkout(inv["id"])
+    if sess_status == "expired":
+        _set_invoice_payment_status(inv["id"], "expired", clear_link=True)
+        return _load_invoice_for_checkout(inv["id"])
+    return inv
+
+
+def issue_or_reuse_invoice_checkout(
+    invoice_id: str,
+    success_url: Optional[str] = None,
+    cancel_url: Optional[str] = None,
+) -> dict:
+    """Create or reuse one Stripe Checkout session for an invoice balance.
+
+    Reuses a stored open link. A second call with the same invoice does not
+    create a second session. payment_status stays link_ready until Stripe
+    reports the session paid.
+    """
+    default_success, default_cancel = workroom_checkout_return_urls()
+    success_url = success_url or default_success
+    cancel_url = cancel_url or default_cancel
+
+    inv = _refresh_stored_checkout(_load_invoice_for_checkout(invoice_id))
+    invoice_number = inv.get("invoice_number", invoice_id)
+    amount = float(inv.get("balance_due") if inv.get("balance_due") is not None else inv.get("total") or 0)
+
+    if _invoice_is_settled(inv):
+        return {
+            "checkout_url": None,
+            "session_id": inv.get("stripe_checkout_session_id"),
+            "invoice_id": invoice_id,
+            "invoice_number": invoice_number,
+            "amount": 0,
+            "reused": True,
+            "stripe_configured": stripe is not None,
+            "payment_status": "paid",
+            "error": None,
+            "return_host_note": RETURN_HOST_NOTE,
+        }
+
+    stored_url = (inv.get("stripe_checkout_url") or "").strip()
+    stored_status = inv.get("payment_status") or "unpaid"
+    if stored_url and stored_status in {"link_ready", "awaiting_confirmation", "unpaid"}:
+        return {
+            "checkout_url": stored_url,
+            "session_id": inv.get("stripe_checkout_session_id"),
+            "invoice_id": invoice_id,
+            "invoice_number": invoice_number,
+            "amount": round(amount, 2),
+            "reused": True,
+            "stripe_configured": stripe is not None,
+            "payment_status": stored_status if stored_status != "unpaid" else "link_ready",
+            "error": None,
+            "return_host_note": RETURN_HOST_NOTE,
+        }
+
+    if stripe is None:
+        return {
+            "checkout_url": None,
+            "session_id": None,
+            "invoice_id": invoice_id,
+            "invoice_number": invoice_number,
+            "amount": round(amount, 2),
+            "reused": False,
+            "stripe_configured": False,
+            "payment_status": inv.get("payment_status") or "unpaid",
+            "error": "Stripe not configured — set STRIPE_SECRET_KEY. No pay link was created.",
+            "return_host_note": RETURN_HOST_NOTE,
+        }
+
+    amount_cents = int(round(amount * 100))
+    if amount_cents <= 0:
+        return {
+            "checkout_url": None,
+            "session_id": None,
+            "invoice_id": invoice_id,
+            "invoice_number": invoice_number,
+            "amount": 0,
+            "reused": False,
+            "stripe_configured": True,
+            "payment_status": inv.get("payment_status") or "unpaid",
+            "error": "Invoice has no outstanding balance",
+            "return_host_note": RETURN_HOST_NOTE,
+        }
+
+    attempt = int(inv.get("stripe_checkout_attempt") or 0)
+    idempotency_key = f"empire-invoice-{invoice_id}-{amount_cents}-{attempt}"
+    customer_email = (inv.get("client_email") or "").strip() or None
+
+    try:
+        session_params = {
+            "mode": "payment",
+            "line_items": [{
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": amount_cents,
+                    "product_data": {
+                        "name": f"Invoice {invoice_number}",
+                        "description": f"Payment for invoice {invoice_number}",
+                    },
+                },
+                "quantity": 1,
+            }],
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            "metadata": {
+                "invoice_id": invoice_id,
+                "invoice_number": invoice_number,
+                "flow": "workroom_invoice",
+                "business_unit": inv.get("business_unit") or "workroom",
+                "quote_id": inv.get("quote_id") or "",
+                "invoice_stage": inv.get("invoice_stage") or "",
+            },
+            "idempotency_key": idempotency_key,
+        }
+        if customer_email:
+            session_params["customer_email"] = customer_email
+        session = stripe.checkout.Session.create(**session_params)
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe invoice link error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+    checkout_url = _session_field(session, "url")
+    session_id = _session_field(session, "id")
+    from app.db.database import get_db
+    with get_db() as conn:
+        _ensure_checkout_columns(conn)
+        conn.execute(
+            """UPDATE invoices
+               SET stripe_checkout_session_id = ?,
+                   stripe_checkout_url = ?,
+                   payment_status = 'link_ready',
+                   updated_at = datetime('now')
+               WHERE id = ?
+                 AND COALESCE(payment_status, '') NOT IN ('paid', 'partial')
+                 AND status NOT IN ('paid')""",
+            (session_id, checkout_url, invoice_id),
+        )
+
+    return {
+        "checkout_url": checkout_url,
+        "session_id": session_id,
+        "invoice_id": invoice_id,
+        "invoice_number": invoice_number,
+        "amount": amount_cents / 100,
+        "reused": False,
+        "stripe_configured": True,
+        "payment_status": "link_ready",
+        "error": None,
+        "return_host_note": RETURN_HOST_NOTE,
+    }
+
+
+def apply_workroom_checkout_event(event_type: str, data: dict) -> dict:
+    """Apply a Stripe Checkout event to a workroom invoice. Paid only when Stripe says paid."""
+    metadata = data.get("metadata") or {}
+    if metadata.get("flow") != "workroom_invoice":
+        return {"applied": False, "reason": "not_workroom_invoice"}
+    invoice_id = metadata.get("invoice_id") or ""
+    if not invoice_id:
+        return {"applied": False, "reason": "missing_invoice_id"}
+
+    stripe_payment_status = (data.get("payment_status") or "").lower()
+    session_id = data.get("id") or ""
+
+    if event_type == "checkout.session.completed" and stripe_payment_status == "paid":
+        _update_invoice_status(invoice_id, "paid", payment_method="card", stripe_session_id=session_id)
+        return {"applied": True, "payment_status": "paid", "invoice_id": invoice_id}
+    if event_type == "checkout.session.async_payment_succeeded":
+        _update_invoice_status(invoice_id, "paid", payment_method="card", stripe_session_id=session_id)
+        return {"applied": True, "payment_status": "paid", "invoice_id": invoice_id}
+    if event_type == "checkout.session.completed":
+        _set_invoice_payment_status(invoice_id, "awaiting_confirmation")
+        return {"applied": True, "payment_status": "awaiting_confirmation", "invoice_id": invoice_id}
+    if event_type == "checkout.session.async_payment_failed":
+        _set_invoice_payment_status(invoice_id, "failed")
+        return {"applied": True, "payment_status": "failed", "invoice_id": invoice_id}
+    if event_type == "checkout.session.expired":
+        _set_invoice_payment_status(invoice_id, "expired", clear_link=True)
+        return {"applied": True, "payment_status": "expired", "invoice_id": invoice_id}
+    return {"applied": False, "reason": "ignored_event"}
 
 
 def _mark_apostille_order_paid(order_id: str, stripe_session_id: str = "", amount_cents: int = 0):
@@ -509,7 +804,8 @@ async def create_invoice_payment_link(request: Request, req: InvoiceLinkRequest)
       - amount_mode 'percentage' charges amount_value percent of balance_due.
       - amount_mode 'fixed' charges exactly amount_value dollars.
     All amounts resolve server-side. Business identity is propagated
-    via metadata → webhook → canonical payments_v2.
+    via metadata → webhook → canonical payments_v2. success_url/cancel_url
+    default to the Command Center on this machine via WORKROOM_CHECKOUT_RETURN_BASE.
     """
     _require_stripe()
 
@@ -557,6 +853,10 @@ async def create_invoice_payment_link(request: Request, req: InvoiceLinkRequest)
     business_unit = inv_dict.get("business_unit", "workroom")
     payment_kind = "partial" if amount_dollars < (total_dollars - 0.01) else "full"
 
+    default_success, default_cancel = workroom_checkout_return_urls()
+    success_url = req.success_url or default_success
+    cancel_url = req.cancel_url or default_cancel
+
     try:
         session = stripe.checkout.Session.create(
             mode="payment",
@@ -571,15 +871,15 @@ async def create_invoice_payment_link(request: Request, req: InvoiceLinkRequest)
                 },
                 "quantity": 1,
             }],
-            success_url=req.success_url,
-            cancel_url=req.cancel_url,
+            success_url=success_url,
+            cancel_url=cancel_url,
             metadata={
                 "invoice_id": req.invoice_id,
                 "invoice_number": invoice_number,
-                "business_unit": business_unit,           # ← Phase 1: propagated
-                "payment_kind": payment_kind,                # ← Phase 1: 'full'|'partial'
-                "amount_cents": str(amount_cents),           # ← Phase 1: redundant safety
-                "flow": "workroom_invoice",                  # ← preserves existing handler routing
+                "business_unit": business_unit,
+                "payment_kind": payment_kind,
+                "amount_cents": str(amount_cents),
+                "flow": "workroom_invoice",
             },
         )
 
@@ -714,33 +1014,19 @@ async def stripe_webhook(request: Request):
             )
 
         elif flow == "workroom_invoice":
-            invoice_id = metadata.get("invoice_id", "")
             invoice_number = metadata.get("invoice_number", "")
-            if invoice_id:
-                # Sprint 1d Phase 1: read business_unit + amount_cents from
-                # metadata (set by create_invoice_payment_link) so the
-                # webhook doesn't have to fetch from Stripe again.
-                bu = metadata.get("business_unit")
-                amt_cents = None
-                mc = metadata.get("amount_cents")
-                if mc and str(mc).isdigit():
-                    amt_cents = int(mc)
-                _update_invoice_status(
-                    invoice_id, "paid",
-                    payment_method="card",
-                    stripe_session_id=data.get("id"),
-                    amount_cents=amt_cents,
-                    business_unit=bu,
-                )
+            applied = apply_workroom_checkout_event(event_type, data)
+            if applied.get("payment_status") == "paid":
                 await _notify_internal(
                     title=f"Invoice {invoice_number} Paid",
                     message=f"Invoice {invoice_number} paid via Stripe (${data.get('amount_total', 0) / 100:.2f})",
                     context={
-                        "invoice_id": invoice_id,
+                        "invoice_id": applied.get("invoice_id"),
                         "invoice_number": invoice_number,
                         "amount": data.get("amount_total", 0) / 100,
                         "stripe_session_id": data.get("id"),
-                        "business_unit": bu,
+                        "business_unit": metadata.get("business_unit"),
+                        "payment_status": "paid",
                     },
                 )
 
@@ -763,6 +1049,13 @@ async def stripe_webhook(request: Request):
                         "stripe_session_id": data.get("id"),
                     },
                 )
+
+    elif event_type in (
+        "checkout.session.async_payment_succeeded",
+        "checkout.session.async_payment_failed",
+        "checkout.session.expired",
+    ):
+        apply_workroom_checkout_event(event_type, data)
 
     # ── customer.subscription.updated ──
     elif event_type == "customer.subscription.updated":

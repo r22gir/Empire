@@ -194,6 +194,23 @@ export default function CommandCenter() {
   useEffect(() => {
     const applyDeepLink = () => {
       const params = new URLSearchParams(window.location.search);
+      const productParam = params.get('product');
+      const sectionParam = params.get('section');
+      // Tailscale / on-box Command Center. Do not depend on studio.empirebox.store.
+      if (productParam === 'workroom' || productParam === 'woodcraft') {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct('workroom');
+        setActiveScreen('dashboard');
+        setActiveSection(sectionParam || (productParam === 'woodcraft' ? 'quotes' : null));
+        return;
+      }
+      if (productParam === 'craft') {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct('craft');
+        setActiveScreen('dashboard');
+        setActiveSection(sectionParam);
+        return;
+      }
       const candidate = params.get('screen') || window.location.hash.replace(/^#/, '');
       // First check product deep links (e.g. apostapp -> activeProduct='apost').
       // This lets screens reached via activeProduct (ApostApp) be deep-linked

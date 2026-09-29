@@ -590,6 +590,7 @@ EMPIRE_CATALOG = {
             {"method": "GET", "path": "/api/v1/finance/dashboard", "description": "P&L overview"},
             {"method": "GET/POST", "path": "/api/v1/finance/invoices", "description": "List/create invoices"},
             {"method": "POST", "path": "/api/v1/finance/invoices/from-quote/{id}", "description": "Create invoice from quote"},
+            {"method": "POST", "path": "/api/v1/finance/quotes/{id}/deposit-pay-link", "description": "Workroom/WoodCraft deposit invoice and Stripe Checkout link"},
             {"method": "POST", "path": "/api/v1/finance/payments", "description": "Record payment"},
             {"method": "GET/POST", "path": "/api/v1/finance/expenses", "description": "Track expenses"},
             {"method": "GET", "path": "/api/v1/finance/revenue", "description": "Revenue by period"},
