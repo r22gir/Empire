@@ -454,7 +454,7 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, 
   const [builderQuoteId, setBuilderQuoteId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(API + `/quotes?limit=50&business=${business}`).then(r => r.json()).then(data => {
+    fetch(API + `/quotes-v2?limit=100&business_unit=${business}`).then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       setQuotes(Array.isArray(raw) ? raw : []);
     }).catch(() => {});
@@ -470,7 +470,7 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, 
   });
 
   const refetchQuotes = () => {
-    fetch(API + `/quotes?limit=50&business=${business}`).then(r => r.json()).then(data => {
+    fetch(API + `/quotes-v2?limit=100&business_unit=${business}`).then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       setQuotes(Array.isArray(raw) ? raw : []);
     }).catch(() => {});
