@@ -20,9 +20,9 @@ from app.services.pricing import (
     WORKROOM_RATE_TABLE_VERSION,
     WOODCRAFT_RATE_TABLE_VERSION,
     PricingInputError,
-    price_woodcraft_item,
-    price_workroom_item,
 )
+from app.services.pricing.quote_sync import studio_calculate
+from app.services.pricing.rate_cards import component_rates
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,16 @@ async def canonical_pricing_status():
             "workroom": WORKROOM_RATE_TABLE_VERSION,
             "woodcraft": WOODCRAFT_RATE_TABLE_VERSION,
         },
+        "rate_cards": {
+            "workroom": {
+                "version": WORKROOM_RATE_TABLE_VERSION,
+                "rates": component_rates("workroom"),
+            },
+            "woodcraft": {
+                "version": WOODCRAFT_RATE_TABLE_VERSION,
+                "rates": component_rates("woodcraft"),
+            },
+        },
         "business_units": ["workroom", "woodcraft"],
         "snapshot_based": True,
         "manual_override_requires_reason": True,
@@ -51,19 +61,7 @@ async def canonical_pricing_status():
 async def calculate_workroom_price(body: dict):
     """Calculate an explainable Empire Workroom pricing snapshot."""
     try:
-        return price_workroom_item(
-            body.get("product_category") or body.get("item_type"),
-            body.get("pricing_inputs") or body,
-            discount_type=body.get("discount_type", "dollar"),
-            discount_amount=float(body.get("discount_amount", 0) or 0),
-            tax_policy=body.get("tax_policy"),
-            deposit_required=body.get("deposit_required", True),
-            deposit_percent=float(body.get("deposit_percent", 50) or 0),
-            override_amount=body.get("override_amount"),
-            override_reason=body.get("override_reason"),
-            source_quote_id=body.get("source_quote_id"),
-            source_line_item_id=body.get("source_line_item_id"),
-        )
+        return studio_calculate("workroom", body)
     except PricingInputError as e:
         raise HTTPException(400, str(e))
 
@@ -72,19 +70,7 @@ async def calculate_workroom_price(body: dict):
 async def calculate_woodcraft_price(body: dict):
     """Calculate an explainable Woodcraft/CraftForge pricing snapshot."""
     try:
-        return price_woodcraft_item(
-            body.get("product_category") or body.get("category"),
-            body.get("pricing_inputs") or body,
-            discount_type=body.get("discount_type", "dollar"),
-            discount_amount=float(body.get("discount_amount", 0) or 0),
-            tax_policy=body.get("tax_policy"),
-            deposit_required=body.get("deposit_required", True),
-            deposit_percent=float(body.get("deposit_percent", 50) or 0),
-            override_amount=body.get("override_amount"),
-            override_reason=body.get("override_reason"),
-            source_quote_id=body.get("source_quote_id"),
-            source_line_item_id=body.get("source_line_item_id"),
-        )
+        return studio_calculate("woodcraft", body)
     except PricingInputError as e:
         raise HTTPException(400, str(e))
 

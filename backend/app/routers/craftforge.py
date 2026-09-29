@@ -368,7 +368,8 @@ async def create_design(design: DesignCreate):
         "created_at": datetime.utcnow().isoformat(),
         "updated_at": datetime.utcnow().isoformat(),
     }
-    # Store EXACTLY what the frontend sends — no auto-calculation
+    from app.services.pricing.quote_sync import apply_canonical_cnc_pricing
+    apply_canonical_cnc_pricing(data)
     _save(DESIGNS_DIR, design_id, data)
     _sync_woodcraft_customer(data)
     return data
@@ -430,6 +431,8 @@ async def update_design(design_id: str, update: DesignUpdate):
         else:
             data[key] = val
     data["updated_at"] = datetime.utcnow().isoformat()
+    from app.services.pricing.quote_sync import apply_canonical_cnc_pricing
+    apply_canonical_cnc_pricing(data)
     _save(DESIGNS_DIR, design_id, data)
     _sync_woodcraft_customer(data)
     return data
@@ -820,18 +823,17 @@ async def generate_design_pdf(design_id: str):
                 <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{mins} min</td>
             </tr>"""
 
-    # Dimensions
+    # Dimensions — inches as fractions (14½"), never 14.5 or 72.00
     dims = ""
     if design.get("width") or design.get("height") or design.get("depth"):
-        dim_unit = design.get("unit", "in")
-        parts = []
-        if design.get("width"):
-            parts.append(f'{format_length_for_sheet(design["width"], dim_unit)} W')
-        if design.get("height"):
-            parts.append(f'{format_length_for_sheet(design["height"], dim_unit)} H')
-        if design.get("depth"):
-            parts.append(f'{format_length_for_sheet(design["depth"], dim_unit)} D')
-        dims = f'<p style="margin:4px 0;font-size:0.88em;color:#555"><strong>Dimensions:</strong> {" × ".join(parts)}</p>'
+        from app.services.pricing.dimensions import format_design_dimensions
+
+        dim_text = format_design_dimensions(
+            design.get("width"), design.get("height"), design.get("depth"),
+            design.get("unit", "in"),
+        )
+        if dim_text:
+            dims = f'<p style="margin:4px 0;font-size:0.88em;color:#555"><strong>Dimensions:</strong> {dim_text}</p>'
 
     # Photos for PDF — read files as base64
     import base64 as b64

@@ -19,6 +19,8 @@ from .pricing_tables import (
     get_upgrade_cost,
 )
 from .yardage_calculator import calculate_yardage
+from app.services.pricing.dimensions import format_inches
+from app.services.pricing.quote_sync import canonical_fabrication_price
 
 logger = logging.getLogger(__name__)
 
@@ -221,16 +223,17 @@ def build_line_items(
     if cushion_count:
         labor_dims["cushion_count"] = cushion_count
 
-    base_labor = get_labor_cost(item_type, labor_dims)
+    canonical_labor = canonical_fabrication_price(item_type, labor_dims)
+    if canonical_labor is not None:
+        base_labor = canonical_labor
+    else:
+        base_labor = get_labor_cost(item_type, labor_dims)
     labor_rate = round(base_labor * tier_info["labor"], 2)
 
     # Build a descriptive label
     size_label = ""
     if dims.get("width"):
-        if dims["width"] >= 12:
-            size_label = f"{dims['width'] / 12:.0f}ft"
-        else:
-            size_label = f"{dims['width']}in"
+        size_label = format_inches(dims["width"])
     labor_desc = f"{item_name} reupholstery"
     if size_label:
         labor_desc += f" — {size_label} {item_name.lower()}"

@@ -18,6 +18,7 @@ import logging
 
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.business_routing import route_to_for_item_type
+from app.services.pricing.dimensions import format_inches
 from app.services.data_paths import quote_pdf_dir, quotes_data_dir
 from app.services.drawing.canonical_path import canonical_empire_db_path
 from app.db.database import get_db, dict_row
@@ -1614,6 +1615,8 @@ def _build_window_drawing(w: dict) -> str:
     name = w.get("name", "Window")
     w_in = w.get("width", 48)
     h_in = w.get("height", 60)
+    w_label = format_inches(w_in)
+    h_label = format_inches(h_in)
     mount = w.get("mountType", "wall").title()
     treatment = w.get("treatmentType", "")
     lining = w.get("liningType", "standard").replace("-", " ").title()
@@ -1746,14 +1749,14 @@ def _build_window_drawing(w: dict) -> str:
       <line x1="{wx}" y1="{wy-12}" x2="{wx+win_w}" y2="{wy-12}" stroke="#D4AF37" stroke-width="1.2"/>
       <line x1="{wx}" y1="{wy-18}" x2="{wx}" y2="{wy-6}" stroke="#D4AF37" stroke-width="0.8"/>
       <line x1="{wx+win_w}" y1="{wy-18}" x2="{wx+win_w}" y2="{wy-6}" stroke="#D4AF37" stroke-width="0.8"/>
-      <text x="{cx}" y="{wy-17}" text-anchor="middle" font-size="11" fill="#D4AF37" font-weight="bold">{w_in}"</text>"""
+      <text x="{cx}" y="{wy-17}" text-anchor="middle" font-size="11" fill="#D4AF37" font-weight="bold">{w_label}</text>"""
 
     # Height dimension (right)
     svg += f"""
       <line x1="{wx+win_w+12}" y1="{wy}" x2="{wx+win_w+12}" y2="{wy+win_h}" stroke="#D4AF37" stroke-width="1.2"/>
       <line x1="{wx+win_w+6}" y1="{wy}" x2="{wx+win_w+18}" y2="{wy}" stroke="#D4AF37" stroke-width="0.8"/>
       <line x1="{wx+win_w+6}" y1="{wy+win_h}" x2="{wx+win_w+18}" y2="{wy+win_h}" stroke="#D4AF37" stroke-width="0.8"/>
-      <text x="{wx+win_w+26}" y="{cy+4}" text-anchor="start" font-size="11" fill="#D4AF37" font-weight="bold">{h_in}"</text>"""
+      <text x="{wx+win_w+26}" y="{cy+4}" text-anchor="start" font-size="11" fill="#D4AF37" font-weight="bold">{h_label}</text>"""
 
     # Mount indicator
     if mount.lower() == 'ceiling':
@@ -1858,6 +1861,7 @@ def _build_upholstery_drawing(u: dict) -> str:
     w_in = u.get("width", 72)
     d_in = u.get("depth", 36)
     h_in = u.get("height", 34)
+    w_lbl, d_lbl, h_lbl = format_inches(w_in), format_inches(d_in), format_inches(h_in)
     fabric_yards = u.get("fabricYards", 0)
     fabric_type = u.get("fabricType", "").title()
     fabric = f"{fabric_yards} yd {fabric_type}"
@@ -1922,7 +1926,7 @@ def _build_upholstery_drawing(u: dict) -> str:
         if has_welting:
             svg_body += f"""<line x1="60" y1="35" x2="160" y2="35" stroke="#D4AF37" stroke-width="2"/>
             <line x1="60" y1="95" x2="160" y2="95" stroke="#D4AF37" stroke-width="2"/>"""
-        dims = f'{w_in}"L'
+        dims = f'{w_lbl}L'
 
     elif is_pillow:
         svg_w, svg_h = 220, 150
@@ -1939,7 +1943,7 @@ def _build_upholstery_drawing(u: dict) -> str:
             <text x="{svg_w/2}" y="{py+ph+20}" text-anchor="middle" font-size="7" fill="#D4AF37" font-weight="600">WITH FLANGE (+$15)</text>"""
         if has_welting:
             svg_body += f"""<rect x="{px}" y="{py}" width="{pw}" height="{ph}" fill="none" stroke="#D4AF37" stroke-width="2.5" rx="8"/>"""
-        dims = f'{w_in}"×{d_in}"'
+        dims = f'{w_lbl}×{d_lbl}'
 
     elif is_ottoman:
         svg_w, svg_h = 220, 140
@@ -1958,7 +1962,7 @@ def _build_upholstery_drawing(u: dict) -> str:
                     svg_body += f'<circle cx="{tx}" cy="{ty}" r="3" fill="{fill_accent}" stroke="{stroke}" stroke-width="0.8"/>'
         if has_skirt:
             svg_body += f'<rect x="{ox-2}" y="{oy+oh+8}" width="{ow+4}" height="8" fill="{fill}" stroke="{stroke}" stroke-width="0.8" rx="1"/>'
-        dims = f'{w_in}"W×{d_in}"D×{h_in}"H'
+        dims = f'{w_lbl}W×{d_lbl}D×{h_lbl}H'
 
     elif is_bench:
         svg_w, svg_h = 240, 130
@@ -1972,7 +1976,7 @@ def _build_upholstery_drawing(u: dict) -> str:
             for c in range(5):
                 tx = bx + 20 + c * 35
                 svg_body += f'<circle cx="{tx}" cy="{by+bh/2}" r="3" fill="{fill_accent}" stroke="{stroke}" stroke-width="0.8"/>'
-        dims = f'{w_in}"W×{d_in}"D×{h_in}"H'
+        dims = f'{w_lbl}W×{d_lbl}D×{h_lbl}H'
 
     elif is_headboard:
         svg_w, svg_h = 240, 150
@@ -1987,7 +1991,7 @@ def _build_upholstery_drawing(u: dict) -> str:
                     tx = hx + 25 + c * 42
                     ty = hy + 18 + r * 28
                     svg_body += f'<circle cx="{tx}" cy="{ty}" r="3" fill="{fill_accent}" stroke="{stroke}" stroke-width="0.8"/>'
-        dims = f'{w_in}"W×{h_in}"H'
+        dims = f'{w_lbl}W×{h_lbl}H'
 
     elif is_chair:
         svg_w, svg_h = 220, 150
@@ -2012,7 +2016,7 @@ def _build_upholstery_drawing(u: dict) -> str:
                     tx = bx + 35 + c * 50
                     ty = by - 18 + r * 14
                     svg_body += f'<circle cx="{tx}" cy="{ty}" r="2.5" fill="{fill_accent}" stroke="{stroke}" stroke-width="0.6"/>'
-        dims = f'{w_in}"W×{d_in}"D×{h_in}"H'
+        dims = f'{w_lbl}W×{d_lbl}D×{h_lbl}H'
 
     else:
         # Default sofa
@@ -2056,7 +2060,7 @@ def _build_upholstery_drawing(u: dict) -> str:
                 svg_body += f'<circle cx="{nx}" cy="{by+6}" r="1.2" fill="#D4AF37" opacity="0.8"/>'
         if has_skirt:
             svg_body += f'<rect x="{bx-12}" y="{by+bh+8}" width="{bw+24}" height="8" fill="{fill}" stroke="{stroke}" stroke-width="0.8" rx="1"/>'
-        dims = f'{w_in}"W×{d_in}"D×{h_in}"H'
+        dims = f'{w_lbl}W×{d_lbl}D×{h_lbl}H'
 
     # ── Welting indicator across all types (adds a bold seam line) ──
     welting_label = ""
@@ -2146,6 +2150,8 @@ def _build_proposal_drawing(w: dict) -> str:
     name = w.get("name", "Option")
     w_in = w.get("width", 48)
     h_in = w.get("height", 60)
+    w_label = format_inches(w_in)
+    h_label = format_inches(h_in)
     treatment = w.get("treatmentType", "Custom")
     hardware = w.get("hardwareType", "decorative")
     motor = w.get("motorization", "none")
@@ -2266,14 +2272,14 @@ def _build_proposal_drawing(w: dict) -> str:
       <line x1="{wx}" y1="{wy-15}" x2="{wx+win_w}" y2="{wy-15}" stroke="#D4AF37" stroke-width="1.2"/>
       <line x1="{wx}" y1="{wy-20}" x2="{wx}" y2="{wy-9}" stroke="#D4AF37" stroke-width="0.8"/>
       <line x1="{wx+win_w}" y1="{wy-20}" x2="{wx+win_w}" y2="{wy-9}" stroke="#D4AF37" stroke-width="0.8"/>
-      <text x="{cx}" y="{wy-19}" text-anchor="middle" font-size="11" fill="#D4AF37" font-weight="bold">{w_in}"</text>"""
+      <text x="{cx}" y="{wy-19}" text-anchor="middle" font-size="11" fill="#D4AF37" font-weight="bold">{w_label}</text>"""
 
     # Height dimension (right)
     svg += f"""
       <line x1="{wx+win_w+15}" y1="{wy}" x2="{wx+win_w+15}" y2="{wy+win_h}" stroke="#D4AF37" stroke-width="1.2"/>
       <line x1="{wx+win_w+8}" y1="{wy}" x2="{wx+win_w+22}" y2="{wy}" stroke="#D4AF37" stroke-width="0.8"/>
       <line x1="{wx+win_w+8}" y1="{wy+win_h}" x2="{wx+win_w+22}" y2="{wy+win_h}" stroke="#D4AF37" stroke-width="0.8"/>
-      <text x="{wx+win_w+28}" y="{wy+win_h/2+4}" text-anchor="start" font-size="11" fill="#D4AF37" font-weight="bold">{h_in}"</text>"""
+      <text x="{wx+win_w+28}" y="{wy+win_h/2+4}" text-anchor="start" font-size="11" fill="#D4AF37" font-weight="bold">{h_label}</text>"""
 
     # Spec text below
     spec_y = wy + win_h + 18
@@ -2524,6 +2530,8 @@ def _build_outline_svg(outline: dict) -> str:
 
     w_in = wo.get("width", 48)
     h_in = wo.get("height", 60)
+    w_label = format_inches(w_in)
+    h_label = format_inches(h_in)
     above = cl.get("above_window", 0)
     below = cl.get("below_window", 0)
     left = cl.get("left_wall", 0)
@@ -2562,12 +2570,12 @@ def _build_outline_svg(outline: dict) -> str:
       <line x1="{wx}" y1="{wy - 15}" x2="{wx + win_w}" y2="{wy - 15}" stroke="#D4AF37" stroke-width="1.5"/>
       <line x1="{wx}" y1="{wy - 22}" x2="{wx}" y2="{wy - 8}" stroke="#D4AF37" stroke-width="1"/>
       <line x1="{wx + win_w}" y1="{wy - 22}" x2="{wx + win_w}" y2="{wy - 8}" stroke="#D4AF37" stroke-width="1"/>
-      <text x="{cx}" y="{wy - 20}" text-anchor="middle" font-size="12" fill="#D4AF37" font-weight="bold">{w_in}"</text>
+      <text x="{cx}" y="{wy - 20}" text-anchor="middle" font-size="12" fill="#D4AF37" font-weight="bold">{w_label}</text>
       <!-- Height dimension -->
       <line x1="{wx + win_w + 15}" y1="{wy}" x2="{wx + win_w + 15}" y2="{wy + win_h}" stroke="#D4AF37" stroke-width="1.5"/>
       <line x1="{wx + win_w + 8}" y1="{wy}" x2="{wx + win_w + 22}" y2="{wy}" stroke="#D4AF37" stroke-width="1"/>
       <line x1="{wx + win_w + 8}" y1="{wy + win_h}" x2="{wx + win_w + 22}" y2="{wy + win_h}" stroke="#D4AF37" stroke-width="1"/>
-      <text x="{wx + win_w + 30}" y="{cy + 4}" text-anchor="start" font-size="12" fill="#D4AF37" font-weight="bold">{h_in}"</text>"""
+      <text x="{wx + win_w + 30}" y="{cy + 4}" text-anchor="start" font-size="12" fill="#D4AF37" font-weight="bold">{h_label}</text>"""
 
     # Clearances
     if above:

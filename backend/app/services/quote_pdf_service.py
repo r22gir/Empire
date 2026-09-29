@@ -19,9 +19,25 @@ from reportlab.platypus import (
     HRFlowable, PageBreak,
 )
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from app.services.quote_service import get_quote
 from app.services.data_paths import quote_pdf_dir
+from app.services.pricing.dimensions import quote_item_dimension_text
+
+_UNICODE_FONT = "DejaVuSans"
+_UNICODE_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+
+def _body_font() -> str:
+    """Helvetica has no fraction glyphs. DejaVu does, when the host has it."""
+    if _UNICODE_FONT in pdfmetrics.getRegisteredFontNames():
+        return _UNICODE_FONT
+    if os.path.exists(_UNICODE_FONT_PATH):
+        pdfmetrics.registerFont(TTFont(_UNICODE_FONT, _UNICODE_FONT_PATH))
+        return _UNICODE_FONT
+    return "Helvetica"
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +69,7 @@ def _get_styles():
     ))
     styles.add(ParagraphStyle(
         'ItemDesc', parent=styles['Normal'],
+        fontName=_body_font(),
         fontSize=9, textColor=BRAND_TEXT, leading=12,
     ))
     styles.add(ParagraphStyle(
@@ -170,11 +187,9 @@ def generate_quote_pdf_legacy_portrait(quote_id: str) -> bytes:
                 desc_parts.append(f"Room: {item['room']}")
             if item.get('item_type') and item.get('item_style'):
                 desc_parts.append(f"{item['item_type']} — {item['item_style']}")
-            if item.get('width') or item.get('height'):
-                w = item.get('width', 0) or 0
-                h = item.get('height', 0) or 0
-                if w or h:
-                    desc_parts.append(f"Dimensions: {w}\" × {h}\"")
+            dim_text = quote_item_dimension_text(item)
+            if dim_text:
+                desc_parts.append(f"Dimensions: {dim_text}")
             if item.get('fabric_name'):
                 desc_parts.append(f"Fabric: {item['fabric_name']}")
             if item.get('yards_needed') and float(item.get('yards_needed', 0) or 0) > 0:
