@@ -695,6 +695,12 @@ load_router("app.routers.contacts", "/api/v1", ["contacts"])
 
 # LeadForge — Lead generation & sales machine
 load_router("app.routers.leadforge", "/api/v1", ["leadforge"])
+try:
+    from app.routers.leadforge import intake_alias_router
+    app.include_router(intake_alias_router, prefix="/api/v1", tags=["leadforge"])
+    print("✓ Loaded: /api/v1/leadforge intake alias")
+except Exception as e:
+    print(f"✗ LeadForge intake alias: {e}")
 
 # Onboarding & Tier
 load_router("app.routers.onboarding", "/api/v1", ["onboarding"])
