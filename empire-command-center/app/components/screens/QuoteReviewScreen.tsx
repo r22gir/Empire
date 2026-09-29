@@ -924,6 +924,46 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
               </tfoot>
             </table>
 
+            {(() => {
+              const collect = (item: any) => {
+                const idea = item?.idea_diagram;
+                if (idea?.status === 'not_applicable') return null;
+                const svg = idea?.svg || item?.drawing_svg;
+                if (!svg && !idea?.note) return null;
+                return {
+                  label: item.description || item.name || item.type || idea?.category || 'Item',
+                  svg: typeof svg === 'string' && svg.includes('<svg') ? svg : '',
+                  note: idea?.note || '',
+                  status: idea?.status || (svg ? 'attached' : 'degraded'),
+                };
+              };
+              const fromLines = editItems.map(collect).filter(Boolean) as { label: string; svg: string; note: string; status: string }[];
+              const fromRooms = (quote.rooms || []).flatMap((room: any) => (room.items || []).map(collect)).filter(Boolean) as { label: string; svg: string; note: string; status: string }[];
+              const diagrams = fromLines.length ? fromLines : fromRooms;
+              if (!diagrams.length) return null;
+              return (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>Idea diagrams</div>
+                  <p style={{ margin: '4px 0 10px', fontSize: 12, color: '#667085' }}>
+                    Category and dimensions only. These sheets transmit the idea — final design is a later process.
+                  </p>
+                  {diagrams.map((diagram, index) => (
+                    <div key={`${diagram.label}-${index}`} style={{ marginBottom: 12, padding: 10, border: '1px solid #ece8e0', borderRadius: 8, background: '#fff' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{diagram.label}</div>
+                      {diagram.svg ? (
+                        <div style={{ maxWidth: 720 }} dangerouslySetInnerHTML={{ __html: diagram.svg }} />
+                      ) : (
+                        <p style={{ margin: 0, fontSize: 12, color: '#8a5a00' }}>{diagram.note || 'Idea diagram unavailable. The quote totals are unchanged.'}</p>
+                      )}
+                      {diagram.svg && diagram.note ? (
+                        <p style={{ margin: '6px 0 0', fontSize: 11, color: '#98a2b3' }}>{diagram.note}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
             {/* Editable notes */}
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: '#777', marginBottom: 4 }}>Notes</div>

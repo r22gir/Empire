@@ -513,9 +513,55 @@ def _quote_to_dict(row) -> dict:
     return d
 
 
+def _ensure_idea_diagram_column(conn) -> None:
+    """Additive column for idea-diagram metadata. Safe on already-migrated DBs."""
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(quote_line_items)").fetchall()}
+    except Exception:
+        return
+    if "idea_diagram_json" not in cols:
+        try:
+            conn.execute("ALTER TABLE quote_line_items ADD COLUMN idea_diagram_json TEXT")
+        except Exception:
+            pass
+
+
+def _idea_persist_fields(line: dict) -> dict:
+    """Classify and draw an idea diagram without letting a failure block the quote."""
+    try:
+        from app.services.drawing.idea_drawing import build_idea_diagram, idea_metadata
+        diagram = build_idea_diagram(line if isinstance(line, dict) else {})
+    except Exception as exc:
+        diagram = {
+            "status": "degraded",
+            "category": None,
+            "dimensions": {},
+            "labels": {},
+            "assumed": [],
+            "fidelity": "idea",
+            "final_design": "later",
+            "note": f"Idea diagram failed: {exc}",
+            "svg": None,
+            "drawing_id": "idea:degraded",
+        }
+        try:
+            from app.services.drawing.idea_drawing import idea_metadata
+        except Exception:
+            def idea_metadata(payload):
+                return {"status": payload.get("status"), "note": payload.get("note")}
+    meta = idea_metadata(diagram)
+    svg = diagram.get("svg") if diagram.get("status") != "not_applicable" else None
+    return {
+        "drawing_id": diagram.get("drawing_id") if diagram.get("status") != "not_applicable" else None,
+        "drawing_svg": svg,
+        "idea_diagram_json": json.dumps(meta, default=str),
+        "idea_diagram": meta,
+    }
+
+
 def _item_to_dict(row) -> dict:
     d = dict(row)
-    for jf in ['photo_ids_json', 'pricing_snapshot_json']:
+    for jf in ['photo_ids_json', 'pricing_snapshot_json', 'idea_diagram_json']:
         key = jf.replace('_json', '')
         if d.get(jf):
             try:
@@ -692,11 +738,14 @@ def create_quote(data: dict) -> dict:
             now, now,
         ))
 
+        _ensure_idea_diagram_column(conn)
+
         # Insert line items — sprint 1b routes through _price_line_item
         # (catalog categories → engine; non-catalog → manual qty × rate).
         # D39: each line carries its own rate_source (default to
         # quotes_v2.issued_document's source if set; caller may override
         # per-line via li['rate_source']).
+        # Idea diagrams are attached after pricing and cannot fail the quote.
         for idx, li in enumerate(data.get('line_items', data.get('items', []))):
             if not isinstance(li, dict):
                 continue
@@ -706,6 +755,7 @@ def create_quote(data: dict) -> dict:
                 business_unit=data.get('business_unit'),
                 legacy=li,
             )
+            idea = _idea_persist_fields(li)
             qty = _line_quantity(li)
             # Per-line rate_source: caller override > issued_document default
             line_rate_source = (
@@ -714,12 +764,15 @@ def create_quote(data: dict) -> dict:
             )
             conn.execute("""
                 INSERT INTO quote_line_items (
-                    quote_id, line_number, description, quantity, unit, unit_price, subtotal,
+                    quote_id, line_number, item_type, description, quantity, unit, unit_price, subtotal,
                     category, rate_source, pricing_snapshot_json,
-                    proposed_price, final_price, price_overridden, business_unit, computed_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    width, height, depth,
+                    proposed_price, final_price, price_overridden, business_unit, computed_json,
+                    drawing_id, drawing_svg, idea_diagram_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 quote_id, idx + 1,
+                li.get('item_type') or li.get('type') or '',
                 li.get('description', ''),
                 qty,
                 li.get('unit', 'ea'),
@@ -729,11 +782,15 @@ def create_quote(data: dict) -> dict:
                 line_rate_source,
                 json.dumps(li.get('pricing_snapshot_json') or li.get('pricing_snapshot'), default=str)
                 if (li.get('pricing_snapshot_json') or li.get('pricing_snapshot')) else None,
+                li.get('width'), li.get('height'), li.get('depth'),
                 pricing["proposed_price"],
                 pricing["final_price"],
                 pricing["price_overridden"],
                 pricing["business_unit"],
                 pricing["computed_json"],
+                idea["drawing_id"],
+                idea["drawing_svg"],
+                idea["idea_diagram_json"],
             ))
 
         _recalculate_totals(conn, quote_id, 'api')
@@ -866,6 +923,7 @@ def add_line_item(quote_id: str, data: dict) -> dict:
         q = conn.execute("SELECT id FROM quotes_v2 WHERE id = ?", (quote_id,)).fetchone()
         if not q:
             return None
+        _ensure_idea_diagram_column(conn)
 
         max_ln = conn.execute(
             "SELECT COALESCE(MAX(line_number), 0) FROM quote_line_items WHERE quote_id = ?",
@@ -881,6 +939,7 @@ def add_line_item(quote_id: str, data: dict) -> dict:
             legacy=data,
         )
         qty = _line_quantity(data)
+        idea = _idea_persist_fields(data)
 
         # D39 / H77 — per-line rate_source (STEP 1d). Caller may override
         # via data['rate_source']; otherwise we fall back to the parent
@@ -905,8 +964,9 @@ def add_line_item(quote_id: str, data: dict) -> dict:
                 labor_description, labor_hours, labor_rate, labor_total,
                 hardware_description, hardware_cost,
                 quantity, unit, unit_price, subtotal, category, rate_source, pricing_snapshot_json,
-                proposed_price, final_price, price_overridden, business_unit, computed_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                proposed_price, final_price, price_overridden, business_unit, computed_json,
+                drawing_id, drawing_svg, idea_diagram_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             quote_id, max_ln + 1,
             data.get('item_type', ''),
@@ -940,6 +1000,9 @@ def add_line_item(quote_id: str, data: dict) -> dict:
             pricing["price_overridden"],
             pricing["business_unit"],
             pricing["computed_json"],
+            idea["drawing_id"],
+            idea["drawing_svg"],
+            idea["idea_diagram_json"],
         ))
 
         _recalculate_totals(conn, quote_id, 'api')
@@ -1135,6 +1198,7 @@ def update_line_item(quote_id: str, item_id: int, data: dict) -> dict:
         ).fetchone()
         if not existing:
             return None
+        _ensure_idea_diagram_column(conn)
 
         updatable = [
             'item_type', 'item_style', 'description', 'room',
@@ -1162,6 +1226,14 @@ def update_line_item(quote_id: str, item_id: int, data: dict) -> dict:
         if 'subtotal' not in data:
             sets.append("subtotal = ?")
             params.append(round(qty * rate, 2))
+
+        # Refresh the idea diagram from the edited category and dimensions.
+        # A drawing failure is stored as a degraded note and does not roll back the edit.
+        merged = dict(existing)
+        merged.update({k: v for k, v in data.items() if v is not None})
+        idea = _idea_persist_fields(merged)
+        sets.extend(["drawing_id = ?", "drawing_svg = ?", "idea_diagram_json = ?"])
+        params.extend([idea["drawing_id"], idea["drawing_svg"], idea["idea_diagram_json"]])
 
         params.append(item_id)
         conn.execute(f"UPDATE quote_line_items SET {', '.join(sets)} WHERE id = ?", params)

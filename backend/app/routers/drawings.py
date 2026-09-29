@@ -872,6 +872,43 @@ def _render_general(req: GeneralDrawingRequest) -> tuple[str, str]:
         return svg, resolved_type
 
 
+class IdeaDiagramRequest(BaseModel):
+    diagram_category: Optional[str] = None
+    category: Optional[str] = None
+    item_type: Optional[str] = None
+    name: str = ""
+    description: str = ""
+    dimensions: dict = {}
+    item: dict = {}
+
+
+@router.post("/drawings/idea")
+async def idea_diagram(req: IdeaDiagramRequest):
+    """Parametric idea diagram from a Max diagram category and any dimensions.
+
+    Always returns a result. A classification or render problem is
+    ``status: degraded`` with a note — it is not an HTTP failure.
+    """
+    from app.services.drawing.idea_drawing import build_idea_diagram
+
+    payload = dict(req.item or {})
+    if req.diagram_category:
+        payload["diagram_category"] = req.diagram_category
+    if req.category and "category" not in payload:
+        payload["category"] = req.category
+    if req.item_type and "item_type" not in payload:
+        payload["item_type"] = req.item_type
+    if req.name and "name" not in payload:
+        payload["name"] = req.name
+    if req.description and "description" not in payload:
+        payload["description"] = req.description
+    if req.dimensions:
+        merged = dict(payload.get("dimensions") or {})
+        merged.update(req.dimensions)
+        payload["dimensions"] = merged
+    return build_idea_diagram(payload)
+
+
 @router.post("/drawings/generate")
 async def generate_universal_drawing(req: UniversalDrawingRequest):
     """Universal drawing endpoint — smart classification routes to correct renderer.

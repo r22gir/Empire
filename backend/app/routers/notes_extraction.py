@@ -173,17 +173,31 @@ async def create_draft_from_notes(payload: DraftQuoteRequest):
         if cm.get("matched_address"):
             customer["address"] = cm["matched_address"]
 
-    # Build diagrams for PDF inclusion
+    # Idea diagrams for PDF inclusion. A failed sheet is recorded honestly
+    # and does not stop the draft quote.
     diagrams = []
     for item in payload.items:
-        m = item.get("measurements", {})
-        if m.get("width_inches") or m.get("height_inches"):
-            try:
-                d = diagram_generator.generate(item)
-                diagrams.append(d)
-            except Exception:
-                diagrams.append(None)
-        else:
+        try:
+            from app.services.drawing.idea_drawing import build_idea_diagram
+            diagram = build_idea_diagram(item)
+            item["idea_diagram"] = {
+                "status": diagram.get("status"),
+                "category": diagram.get("category"),
+                "dimensions": diagram.get("dimensions"),
+                "labels": diagram.get("labels"),
+                "note": diagram.get("note"),
+                "fidelity": diagram.get("fidelity"),
+                "final_design": diagram.get("final_design"),
+            }
+            diagrams.append(diagram if diagram.get("svg") else None)
+        except Exception as diagram_err:
+            logger.warning(f"Idea diagram skipped for notes item: {diagram_err}")
+            item["idea_diagram"] = {
+                "status": "degraded",
+                "note": f"Idea diagram failed: {diagram_err}",
+                "fidelity": "idea",
+                "final_design": "later",
+            }
             diagrams.append(None)
 
     quote = {

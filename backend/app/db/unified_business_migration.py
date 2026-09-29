@@ -176,6 +176,7 @@ def create_all_tables(conn: sqlite3.Connection):
         rate_source TEXT DEFAULT 'catalog',
         drawing_id TEXT,
         drawing_svg TEXT,
+        idea_diagram_json TEXT,
         photo_ids_json TEXT,
         item_status TEXT DEFAULT 'pending',
         pricing_snapshot_json TEXT,
@@ -359,6 +360,7 @@ def create_all_tables(conn: sqlite3.Connection):
         # A future session reading the row can see the rates are historical
         # by intent, not by drift, and must not "correct" them.
         "ALTER TABLE quote_line_items ADD COLUMN rate_source TEXT DEFAULT 'catalog'",
+        "ALTER TABLE quote_line_items ADD COLUMN idea_diagram_json TEXT",
     ):
         try:
             conn.execute(_alter_sql)
