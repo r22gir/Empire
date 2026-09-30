@@ -31,6 +31,8 @@ CLIENT_RATE_RULES: dict[str, dict[str, object]] = {
         "tassel_totals_include_tiebacks_and_center_tassels": True,
         "no_holdback_cylinders_when_tassel_tiebacks_used": True,
         "holdback_rule": "when tassel tiebacks are used, no holdback cylinders are billed",
+        "sheer_removal_installation_rate_per_window": 150.00,
+        "sheer_removal_installation_rule": "sheer removal/installation $150 per window",
         "swag_trim_application_included_in_valance_rate": True,
         "trim_edges": "leading edge only",
         "tassel_tiebacks_replace_holdbacks": True,
