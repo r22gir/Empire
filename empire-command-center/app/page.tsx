@@ -64,6 +64,7 @@ import ProductDocs from './components/business/docs/ProductDocs';
 
 import TasksScreen from './components/screens/TasksScreen';
 import PresentationScreen from './components/screens/PresentationScreen';
+import LiveVoiceCall from './components/LiveVoiceCall';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));
@@ -603,6 +604,10 @@ export default function CommandCenter() {
         <div className="flex-1 flex flex-col overflow-y-auto bg-[var(--chat-bg)]">
           {renderCenterContent()}
         </div>
+
+        {/* MAX live voice (xAI realtime) — floating mic on the main chat/dashboard screens.
+            PresentationScreen renders its own. */}
+        {(activeScreen === 'chat' || activeScreen === 'dashboard') && <LiveVoiceCall />}
 
         {/* Right panel moved into left nav as Dashboard tab */}
       </div>

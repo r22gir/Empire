@@ -5,6 +5,7 @@ import { Mic, MicOff, Send, Monitor, Square, MessageSquare, Sparkles, Wifi, Wifi
 import InlineDrawing from '../InlineDrawing';
 
 import { API } from '../../lib/api';
+import LiveVoiceCall from '../LiveVoiceCall';
 
 type PresentationMode = 'presentation' | 'compact' | 'text';
 
@@ -770,6 +771,9 @@ export default function PresentationScreen() {
           ${sessionCost.toFixed(3)} session
         </span>
       </div>
+
+      {/* MAX live voice (xAI realtime): tap-to-talk live call, floating bottom-right */}
+      <LiveVoiceCall />
 
       {/* Compact mode: floating mini avatar */}
       {mode === 'compact' && (
