@@ -65,7 +65,13 @@ def test_access_jwt_valid_accepted_wrong_aud_rejected(monkeypatch):
 def test_session_exposes_only_read_only_tools_and_voice_flag(monkeypatch):
     ev = vl.session_update_event()
     names = [t["name"] for t in ev["session"]["tools"]]
-    assert names == ["search_quotes", "get_quote", "search_contacts"]
+    assert names == list(vl.VOICE_READ_ONLY_TOOLS) + ["queue_for_founder_approval"]
+    for must in ("get_tasks", "get_desk_status", "get_services_health", "get_system_stats", "check_email",
+                 "list_job_images", "search_conversations", "get_weather", "list_quotes_awaiting_review",
+                 "show_quote_for_review"):
+        assert must in names
+    for banned in ("send_email", "shell_execute", "file_write", "approve_quote", "deposit_pay_link", "create_task"):
+        assert banned not in names
     assert ev["session"]["turn_detection"]["type"] == "server_vad"
     assert ev["session"]["audio"]["input"]["format"] == {"type": "audio/pcm", "rate": 24000}
     monkeypatch.setenv("XAI_API_KEY", "k")
@@ -102,3 +108,150 @@ def test_barge_in_cancels_active_response_and_drops_its_audio():
     assert any(isinstance(m, dict) and m.get("type") == "interrupt" and m.get("response_id") == "r1" for m in ws.sent)
     assert sum(1 for m in ws.sent if isinstance(m, tuple)) == 1  # post-cancel audio dropped
     assert call.interrupts == 1
+
+
+@pytest.mark.parametrize("name", ["send_email", "shell_execute", "file_write", "file_delete", "approve_quote",
+                                  "reject_quote", "deposit_pay_link", "create_task", "bash", "send_mail"])
+def test_voice_allowlist_refuses_writes_server_side(monkeypatch, name):
+    import app.services.max.tool_executor as te
+    called = []
+    monkeypatch.setattr(te, "execute_tool", lambda *a, **k: called.append(a))
+    out = vl.run_voice_tool(name, {"to": "x@example.com", "command": "id"})
+    assert out["success"] is False and "not available in voice mode" in out["error"]
+    assert called == []  # refused before tool_executor is touched
+
+
+def test_static_instructions_do_not_read_stale_memory_md(monkeypatch, tmp_path):
+    stale = tmp_path / "memory.md"
+    stale.write_text("# MAX AI — COMPLETE BRAIN v5.1\n## Last Updated: 2026-03-18\n")
+    monkeypatch.setenv("MAX_MEMORY_PATH", str(stale))
+    text = vl.build_instructions()
+    assert "v5.1" not in text and "2026-03-18" not in text and "March 18" not in text
+    assert "saved" in text and "queue_for_founder_approval" in text
+
+
+def test_voice_brain_strips_stale_lines_and_caps_size():
+    from app.services.max import voice_brain as vb
+    assert vb.strip_stale("ok line\nI'm on brain v5.1 from March 18th\nkeep") == "ok line\nkeep"
+    text = vb.assemble(model="m", read_tools=["get_tasks"], core="C" * 50000, snapshot="S",
+                       brain="B" * 50000, memory="M" * 50000)
+    assert len(text) <= vb.MAX_INSTRUCTION_CHARS
+    assert "Transcripts" in text and "Live snapshot" in text
+
+
+def test_voice_brain_cache(monkeypatch):
+    from app.services.max import voice_brain as vb
+    vb.clear_cache()
+    calls = []
+
+    async def fake_build(**kw):
+        calls.append(1)
+        return "INSTR", {"chars": 5}
+
+    monkeypatch.setattr(vb, "build_voice_instructions", fake_build)
+    t1, m1 = asyncio.run(vb.get_voice_instructions(model="m", read_tools=[]))
+    t2, m2 = asyncio.run(vb.get_voice_instructions(model="m", read_tools=[]))
+    assert t1 == t2 == "INSTR" and len(calls) == 1 and m2["cached"] is True
+    vb.clear_cache()
+
+
+def test_queue_for_founder_approval_creates_waiting_task_and_executes_nothing(monkeypatch, tmp_path):
+    import sqlite3
+    from contextlib import contextmanager
+    db = tmp_path / "t.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT, priority TEXT,"
+        " desk TEXT, created_by TEXT, tags TEXT, metadata TEXT, created_at TEXT, updated_at TEXT);"
+        "CREATE TABLE task_activity (task_id TEXT, actor TEXT, action TEXT, detail TEXT, created_at TEXT);")
+    conn.commit(); conn.close()
+
+    @contextmanager
+    def fake_get_db():
+        c = sqlite3.connect(db); c.row_factory = sqlite3.Row
+        try:
+            yield c; c.commit()
+        finally:
+            c.close()
+
+    import app.db.database as dbm
+    import app.services.max.tool_executor as te
+    monkeypatch.setattr(dbm, "get_db", fake_get_db)
+    executed = []
+    monkeypatch.setattr(te, "execute_tool", lambda *a, **k: executed.append(a))
+    out = vl.run_voice_tool("queue_for_founder_approval",
+                            {"action": "Send Max this transcript", "details": "the voice call", "_founder": True},
+                            call_id="abc", conversation_id="voice-abc")
+    assert out["success"] is True and out["result"]["executed"] is False
+    assert executed == []  # never goes through tool_executor / create_task
+    c = sqlite3.connect(db); c.row_factory = sqlite3.Row
+    row = dict(c.execute("SELECT * FROM tasks").fetchone())
+    assert row["status"] == "waiting" and row["created_by"] == "voice"
+    assert json.loads(row["tags"]) == ["voice-request", "needs-founder-approval"]
+    assert "auto_execute" not in row["metadata"]  # TaskWorker trigger key must be absent
+    assert "voice-abc" in row["description"]
+
+
+def test_transcript_records_lines_tools_and_summary(monkeypatch, tmp_path):
+    from app.services.max import voice_transcript as vt
+    from app.services.max.unified_message_store import UnifiedMessageStore
+    import app.services.max.unified_message_store as ums
+    store = UnifiedMessageStore(tmp_path / "u.db")
+    monkeypatch.setattr(ums, "unified_store", store)
+    monkeypatch.setattr(vt, "CHATS_DIR", tmp_path / "chats")
+    mem = []
+    monkeypatch.setattr(vt.VoiceTranscript, "_write_memory", lambda self: mem.append(self.summary))
+    t = vt.VoiceTranscript("abcdef1234", auth_via="loopback", model="grok-voice")
+    t.start()
+    t.add_user("Any tasks open?")
+    t.add_tool("get_tasks", {"_founder": True}, True, "2 result(s)")
+    t.add_assistant("Two open tasks.")
+    res = t.finish(12.0, "hangup")
+    assert res["saved"] is True
+    rows = store.get_conversation("voice-abcdef1234")
+    assert [r["role"] for r in rows] == ["system", "user", "tool", "assistant", "system", "system"]
+    assert all(r["channel"] == "voice" for r in rows)
+    assert "_founder" not in rows[2]["content"]
+    assert "Any tasks open?" in t.summary and "get_tasks" in t.summary and mem
+    chat = json.loads((tmp_path / "chats" / "founder" / "vabcdef1.json").read_text())
+    assert chat["channel"] == "voice" and chat["messages"][0]["content"] == "Any tasks open?"
+    last = vt.last_voice_call()
+    assert last["conversation_id"] == "voice-abcdef1234" and last["summary"] and not last["in_progress"]
+    assert vt.is_generic_voice_query("what did we discuss on the last voice call")
+    assert "Two open tasks" in vt.render_last_voice_call_for_prompt()
+
+
+def test_live_call_feeds_transcript_from_events():
+    ws = _WS()
+    call = vl.LiveCall(ws)
+    got = []
+
+    class T:
+        conversation_id = "voice-x"
+        def add_user(self, *a): got.append(("user",) + a)
+        def add_assistant(self, *a): got.append(("assistant",) + a)
+
+    call.transcript = T()
+
+    async def fake_send_upstream(payload):
+        pass
+
+    call.send_upstream = fake_send_upstream
+
+    async def run():
+        await call.handle_upstream_event({"type": "conversation.item.input_audio_transcription.completed",
+                                          "transcript": "hi", "item_id": "i1"})
+        await call.handle_upstream_event({"type": "response.created", "response": {"id": "r1"}})
+        await call.handle_upstream_event({"type": "response.output_audio_transcript.delta", "response_id": "r1", "delta": "Hel"})
+        await call.handle_upstream_event({"type": "response.output_audio_transcript.done", "response_id": "r1", "transcript": "Hello"})
+        await call.handle_upstream_event({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
+        # barged-in response: only deltas, then done -> recorded as interrupted partial
+        await call.handle_upstream_event({"type": "response.created", "response": {"id": "r2"}})
+        await call.handle_upstream_event({"type": "response.output_audio_transcript.delta", "response_id": "r2", "delta": "Long ans"})
+        await call.handle_upstream_event({"type": "input_audio_buffer.speech_started"})
+        await call.handle_upstream_event({"type": "response.done", "response": {"id": "r2", "status": "cancelled"}})
+
+    asyncio.run(run())
+    assert got[0] == ("user", "hi", "i1")
+    assert got[1] == ("assistant", "Hello", "r1", False)
+    assert got[2] == ("assistant", "Long ans", "r2", True)

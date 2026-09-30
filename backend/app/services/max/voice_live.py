@@ -12,7 +12,7 @@ Browser protocol (our socket)
     {"type":"text","text":"..."} : optional typed turn
   server -> client
     binary frame        : PCM16 LE mono @ SAMPLE_RATE (Max speaking)
-    {"type":"ready", call_id, cap_seconds, sample_rate, model, voice}
+    {"type":"ready", call_id, cap_seconds, sample_rate, model, voice, conversation_id}
     {"type":"transcript", role:"user"|"assistant", text|delta, final}
     {"type":"speech_started"} / {"type":"speech_stopped"}
     {"type":"interrupt", response_id} -> client must flush playback NOW
@@ -20,13 +20,26 @@ Browser protocol (our socket)
     {"type":"response_done", response_id}
     {"type":"ping", remaining}   (heartbeat every HEARTBEAT_SECONDS)
     {"type":"warning", remaining} (30 s before the hard cap)
-    {"type":"ended", reason, duration_s}
+    {"type":"ended", reason, duration_s, transcript_saved, conversation_id}
     {"type":"error", message}
 
+Voice upgrade (2026-09-30, founder-approved)
+  * FRESH BRAIN: instructions are built at call start by voice_brain from
+    the same sources as text /max/chat (system_prompt incl. CURRENT
+    OPERATING FACTS, get_max_brain_context, brain ContextBuilder/MemoryStore)
+    plus a live snapshot; cached 60 s. max/memory.md (stale "v5.1 /
+    2026-03-18") is no longer read for voice.
+  * TRANSCRIPTS: every call is saved to Max's conversation history
+    (channel "voice") by voice_transcript, with an end-of-call summary.
+  * TOOLS: server-side allowlist (VOICE_TOOL_ALLOWLIST) of read-only tools
+    plus queue_for_founder_approval, which only files a pending task
+    (status 'waiting', tags voice-request / needs-founder-approval) and never
+    executes anything. Everything else is refused server-side.
+
 Safety
-  * Only READ-ONLY tools (search_quotes, get_quote, search_contacts) are
-    exposed and they run server-side through tool_executor.execute_tool.
-    Anything else the model asks for is refused.
+  * Tools run server-side; anything not in VOICE_TOOL_ALLOWLIST is refused
+    before tool_executor is touched (send_email, shell_execute, file_write,
+    approve/reject, deposit links, deletes ... are all refused).
   * Hard cap per call (MAX_VOICE_CALL_CAP_SECONDS, default 600 s) with
     auto-hangup; limited concurrent calls.
   * xAI is used for voice via its own flag (MAX_VOICE_XAI_ENABLED, default
@@ -50,8 +63,24 @@ XAI_REALTIME_URL = os.getenv("XAI_REALTIME_URL", "wss://api.x.ai/v1/realtime")
 SAMPLE_RATE = 24000
 HEARTBEAT_SECONDS = 15
 MAX_CONCURRENT_CALLS = 2
-READ_ONLY_TOOLS = ("search_quotes", "get_quote", "search_contacts")
 TOOL_OUTPUT_LIMIT = 6000
+
+# ── Server-side tool allowlist ──────────────────────────────────────
+VOICE_READ_ONLY_TOOLS = (
+    "search_quotes", "get_quote", "search_contacts",
+    "get_tasks", "get_desk_status", "get_services_health", "get_system_stats",
+    "check_email", "list_job_images", "search_conversations", "get_weather",
+    "list_quotes_awaiting_review", "show_quote_for_review",
+)
+QUEUE_TOOL = "queue_for_founder_approval"
+VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL,))
+READ_ONLY_TOOLS = VOICE_READ_ONLY_TOOLS  # backwards-compatible name
+# Explicitly named so logs/tests are clear; the allowlist above is what enforces.
+VOICE_DENIED_EXAMPLES = frozenset({
+    "send_email", "send_telegram", "shell_execute", "env_set", "file_write", "file_edit",
+    "file_append", "file_delete", "approve_quote", "reject_quote", "deposit_pay_link",
+    "create_task", "service_manager", "git_ops", "delete_quote", "delete_contact",
+})
 
 _active_calls: set[str] = set()
 
@@ -94,86 +123,138 @@ def voice_status() -> dict[str, Any]:
         "sample_rate": SAMPLE_RATE,
         "active_calls": len(_active_calls),
         "text_routing_xai_disabled": _flag("MAX_DISABLE_XAI", False),
+        "tools": sorted(VOICE_TOOL_ALLOWLIST),
+        "transcripts_saved": True,
     }
 
 
-# ── Instructions (Max persona + short memory summary) ────────────────
-
-def _memory_summary(max_chars: int = 1200) -> str:
-    """Short, read-only summary pulled from max/memory.md (never written)."""
-    path = Path(os.getenv("MAX_MEMORY_PATH", str(Path.home() / "empire-repo-main" / "max" / "memory.md")))
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return ""
-    keep: list[str] = []
-    for line in text.splitlines():
-        s = line.strip()
-        if not s or s.startswith("<!--") or s.startswith("```"):
-            continue
-        if len(s) > 220:
-            s = s[:217] + "..."
-        keep.append(s)
-        if sum(len(x) + 1 for x in keep) > max_chars:
-            break
-    return "\n".join(keep)[:max_chars]
-
+# ── Instructions ────────────────────────────────────────────────────
 
 def build_instructions() -> str:
-    memory = _memory_summary()
-    parts = [
-        "# Role\n"
-        "You are Max, the AI chief of staff for Empire (Empire Workroom — custom "
-        "drapery, upholstery and window treatments in the Washington DC area — and "
-        "the wider EmpireBox platform). You are talking live, by voice, with the "
-        "founder, Rafael.",
-        "# Style\n"
-        "Speak naturally and briefly: one to three short sentences per turn unless "
-        "asked for detail. No markdown, lists, emojis or URLs; say numbers and money "
-        "the way a person would. If you were interrupted, stop and listen. Match "
-        "Rafael's language (English or Spanish).",
-        "# Tools\n"
-        "You can look things up with read-only tools: search_quotes, get_quote "
-        "(quote ids look like EST-2026-285; say 'E S T twenty twenty-six two eighty-"
-        "five' naturally), and search_contacts. Use them whenever Rafael asks about a "
-        "quote, customer or contact instead of guessing. Say a quick 'one sec' before "
-        "a lookup. You cannot create, edit, send, approve, delete, restart or run "
-        "anything in this voice mode; if asked, say it needs the text chat in the "
-        "Command Center.",
-        "# Truth\n"
-        "Only state facts you got from a tool result or the context below. If a "
-        "lookup fails or finds nothing, say so plainly. Never invent quote amounts, "
-        "statuses or names.",
-    ]
-    if memory:
-        parts.append("# Context (memory summary)\n" + memory)
-    return "\n\n".join(parts)
+    """Static fallback instructions (no live sources).
+
+    Used only if the fresh voice brain (voice_brain.get_voice_instructions)
+    cannot be built. Deliberately does NOT read max/memory.md: that file is a
+    stale "v5.1 / 2026-03-18" summary that /max/chat does not load.
+    """
+    from app.services.max.voice_brain import VOICE_CAPABILITIES, VOICE_ROLE, VOICE_STYLE, VOICE_TRUTH
+    return "\n\n".join([
+        VOICE_ROLE.format(model=voice_model()),
+        VOICE_STYLE,
+        VOICE_CAPABILITIES.format(read_tools=", ".join(VOICE_READ_ONLY_TOOLS)),
+        VOICE_TRUTH,
+        "# Live snapshot\nThe live snapshot could not be loaded for this call. Use the tools "
+        "(get_tasks, get_desk_status, get_services_health, list_quotes_awaiting_review) before "
+        "stating current status.",
+    ])
+
+
+async def fresh_instructions() -> tuple[str, dict]:
+    try:
+        from app.services.max.voice_brain import get_voice_instructions
+        return await asyncio.wait_for(
+            get_voice_instructions(model=voice_model(), read_tools=list(VOICE_READ_ONLY_TOOLS)),
+            timeout=10,
+        )
+    except Exception as exc:
+        logger.warning("voice_live: fresh instructions unavailable (%s); using static fallback",
+                       type(exc).__name__)
+        return build_instructions(), {"fallback": True, "error": type(exc).__name__}
 
 
 # ── Tools ───────────────────────────────────────────────────────────
+
+def _obj(props: dict, required: list | None = None) -> dict:
+    out: dict[str, Any] = {"type": "object", "properties": props}
+    if required:
+        out["required"] = required
+    return out
+
+
+_STR = {"type": "string"}
+_INT = {"type": "integer"}
 
 _FALLBACK_TOOL_SCHEMAS = {
     # Parameter names match the tool_executor handlers.
     "search_quotes": {
         "description": "List/search Empire quotes (newest first). Filter by customer name and/or status. Read-only.",
-        "parameters": {"type": "object", "properties": {
+        "parameters": _obj({
             "customer_name": {"type": "string", "description": "Part of the customer's name (optional)"},
-            "status": {"type": "string", "description": "Optional status filter: draft, sent, accepted, rejected, expired"},
+            "status": {"type": "string", "description": "Optional status filter: draft, founder_review, sent, accepted, rejected, expired"},
             "limit": {"type": "integer", "description": "Max results (default 5, max 20)"},
-        }},
+        }),
     },
     "get_quote": {
         "description": "Get one quote's details (status, customer, totals, items) by quote number like EST-2026-285 or internal id. Read-only.",
-        "parameters": {"type": "object", "properties": {
-            "quote_id": {"type": "string", "description": "Quote number (e.g. EST-2026-285) or internal quote id"},
-        }, "required": ["quote_id"]},
+        "parameters": _obj({"quote_id": {"type": "string", "description": "Quote number (e.g. EST-2026-285) or internal quote id"}}, ["quote_id"]),
     },
     "search_contacts": {
         "description": "Search customers/contacts by name, email, phone or company. Read-only.",
-        "parameters": {"type": "object", "properties": {
+        "parameters": _obj({
             "search": {"type": "string", "description": "Name, email, phone or company"},
             "limit": {"type": "integer", "description": "Max results (default 5)"},
-        }, "required": ["search"]},
+        }, ["search"]),
+    },
+    "get_tasks": {
+        "description": "List Empire tasks from the task system (newest first). Optional status: todo, in_progress, waiting, done. With no status, returns open tasks (todo, in_progress, waiting). Read-only.",
+        "parameters": _obj({
+            "status": {"type": "string", "description": "todo | in_progress | waiting | done (optional)"},
+            "desk": {"type": "string", "description": "Desk name filter (optional)"},
+            "limit": {"type": "integer", "description": "Max results (default 10)"},
+        }),
+    },
+    "get_desk_status": {
+        "description": "Task counts per desk (todo / in_progress / waiting / done) and total open. Read-only.",
+        "parameters": _obj({}),
+    },
+    "get_services_health": {
+        "description": "Which Empire services are online (backend, Command Center, OpenClaw, Ollama, ...). Read-only.",
+        "parameters": _obj({}),
+    },
+    "get_system_stats": {
+        "description": "EmpireDell machine stats: CPU, RAM, disk, uptime. Read-only.",
+        "parameters": _obj({}),
+    },
+    "check_email": {
+        "description": "Read the Gmail inbox (read-only: sender, subject, date, snippet). Never sends or changes mail.",
+        "parameters": _obj({
+            "limit": {"type": "integer", "description": "Max emails (default 5, max 10)"},
+            "unread_only": {"type": "boolean", "description": "Only unread (default true)"},
+        }),
+    },
+    "list_job_images": {
+        "description": "List photos/images stored for a job or quote (or the unassigned bucket). Pass exactly one of job_id, quote_id, unassigned=true. Read-only.",
+        "parameters": _obj({
+            "job_id": _STR, "quote_id": {"type": "string", "description": "Quote id or number"},
+            "unassigned": {"type": "boolean"}, "limit": {"type": "integer", "description": "Max rows (default 10)"},
+        }),
+    },
+    "search_conversations": {
+        "description": "Search Max's conversation history across channels (web, Telegram, voice): memories, summaries and messages. Use channel 'voice' and query 'last voice call' to recall the previous voice call. Read-only.",
+        "parameters": _obj({
+            "query": {"type": "string", "description": "Keyword or phrase"},
+            "channel": {"type": "string", "description": "Optional: web, telegram, cc, voice"},
+            "limit": {"type": "integer", "description": "Max results (default 8)"},
+        }, ["query"]),
+    },
+    "get_weather": {
+        "description": "Current weather (Open-Meteo). Default city Washington DC. Read-only.",
+        "parameters": _obj({"city": {"type": "string", "description": "City (default Washington DC)"}}),
+    },
+    "list_quotes_awaiting_review": {
+        "description": "Quotes waiting for Rafael's review/approval (founder_review, plus legacy proposal quotes). Test quotes are hidden. Read-only — you cannot approve or reject from voice.",
+        "parameters": _obj({"business_unit": {"type": "string", "description": "Optional business unit filter"}}),
+    },
+    "show_quote_for_review": {
+        "description": "Show one quote as prepared for review: proposed vs final price per line, totals. Read-only.",
+        "parameters": _obj({"quote_id": {"type": "string", "description": "Quote id or number like EST-2026-285"}}, ["quote_id"]),
+    },
+    QUEUE_TOOL: {
+        "description": "Queue a request for Rafael's approval. Creates ONE pending task (tagged voice-request, needs-founder-approval) in the Empire task system and executes NOTHING. Use for anything that would send, write, change or run something, e.g. 'send Max this transcript', 'draft an email to X', 'approve quote Y'. Tell Rafael it is queued for approval, not done.",
+        "parameters": _obj({
+            "action": {"type": "string", "description": "Short imperative description, e.g. 'Send Max the transcript of this voice call'"},
+            "details": {"type": "string", "description": "Everything needed to do it later: who, what, which quote/customer, wording"},
+        }, ["action"]),
     },
 }
 
@@ -181,27 +262,71 @@ _QUOTE_KEEP = ("id", "quote_number", "status", "customer_name", "project_name", 
                "business_unit", "subtotal", "tax_amount", "discount_amount", "total", "deposit_required",
                "deposit_paid", "balance_due", "created_at", "updated_at", "sent_at", "accepted_at",
                "expires_at", "notes")
+_QUOTE_LIST_KEEP = ("quote_number", "customer_name", "project_name", "status", "total", "business_unit",
+                    "updated_at", "state_metadata")
 
 
 def _compact_for_voice(name: str, data: dict[str, Any]) -> dict[str, Any]:
-    """Trim large tool payloads (photos, mockups, raw measurements) for speech."""
-    if name != "get_quote" or not isinstance(data.get("result"), dict):
+    """Trim large tool payloads (photos, mockups, raw measurements, bodies) for speech."""
+    res = data.get("result")
+    if not isinstance(res, dict):
         return data
-    q = data["result"]
-    slim = {k: q.get(k) for k in _QUOTE_KEEP if q.get(k) not in (None, "", [], {})}
-    items = q.get("line_items") or []
-    slim["line_items_count"] = len(items)
-    slim["line_items"] = [
-        {k: it.get(k) for k in ("description", "name", "room", "quantity", "total", "amount") if isinstance(it, dict) and it.get(k) not in (None, "")}
-        for it in items[:8]
-    ]
     out = dict(data)
-    out["result"] = slim
+    if name == "get_quote":
+        q = res
+        slim = {k: q.get(k) for k in _QUOTE_KEEP if q.get(k) not in (None, "", [], {})}
+        items = q.get("line_items") or []
+        slim["line_items_count"] = len(items)
+        slim["line_items"] = [
+            {k: it.get(k) for k in ("description", "name", "room", "quantity", "total", "amount") if isinstance(it, dict) and it.get(k) not in (None, "")}
+            for it in items[:8]
+        ]
+        out["result"] = slim
+    elif name == "list_quotes_awaiting_review":
+        rows = []
+        hidden = 0
+        for key in ("awaiting_review", "legacy_pending_migration", "quotes"):
+            for q in res.get(key) or []:
+                if not isinstance(q, dict):
+                    continue
+                if q.get("is_test"):
+                    hidden += 1
+                    continue
+                rows.append({k: q.get(k) for k in _QUOTE_LIST_KEEP if q.get(k) not in (None, "")})
+        out["result"] = {"count": len(rows), "quotes": rows[:15], "test_quotes_hidden": hidden}
+    elif name == "show_quote_for_review":
+        slim = dict(res)
+        slim["line_items"] = (res.get("line_items") or [])[:10]
+        slim["line_items_count"] = len(res.get("line_items") or [])
+        out["result"] = slim
+    elif name == "check_email":
+        emails = []
+        for e in (res.get("emails") or [])[:10]:
+            if isinstance(e, dict):
+                emails.append({"from": e.get("from"), "subject": e.get("subject"), "date": e.get("date"),
+                               "unread": e.get("unread"), "snippet": str(e.get("snippet") or "")[:200]})
+        out["result"] = {"count": res.get("count", len(emails)), "emails": emails}
+    elif name == "list_job_images":
+        imgs = [{k: i.get(k) for k in ("filename", "job_id", "quote_id", "source_channel", "created_at") if i.get(k)}
+                for i in (res.get("images") or [])[:15] if isinstance(i, dict)]
+        out["result"] = {"count": res.get("count", len(imgs)), "images": imgs, "filter": res.get("filter")}
+    elif name == "search_conversations":
+        rows = []
+        for r in (res.get("results") or [])[:12]:
+            if isinstance(r, dict):
+                rows.append({k: (str(v)[:300] if isinstance(v, str) else v) for k, v in r.items()
+                             if k in ("type", "role", "content", "summary", "channel", "date", "subject",
+                                      "conversation_id", "started_at", "lines")})
+        out["result"] = {"query": res.get("query"), "count": res.get("count", len(rows)), "results": rows}
+    elif name == "get_tasks":
+        tasks = [{k: t.get(k) for k in ("id", "title", "status", "priority", "desk", "due_date", "created_at")}
+                 for t in (res.get("tasks") or [])[:15] if isinstance(t, dict)]
+        out["result"] = {"count": res.get("count", len(tasks)), "tasks": tasks}
     return out
 
 
 def realtime_tool_definitions() -> list[dict[str, Any]]:
-    """Realtime-format (flat) function definitions for the read-only tools.
+    """Realtime-format (flat) function definitions for the voice allowlist.
 
     Prefer the canonical schemas from tool_executor.get_xai_tool_definitions()
     so parameter names match the handlers; fall back to local schemas.
@@ -211,12 +336,12 @@ def realtime_tool_definitions() -> list[dict[str, Any]]:
         from app.services.max.tool_executor import get_xai_tool_definitions
         for d in get_xai_tool_definitions() or []:
             fn = d.get("function") if isinstance(d, dict) and "function" in d else d
-            if isinstance(fn, dict) and fn.get("name") in READ_ONLY_TOOLS:
+            if isinstance(fn, dict) and fn.get("name") in VOICE_READ_ONLY_TOOLS:
                 canonical[fn["name"]] = fn
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("voice_live: canonical tool schemas unavailable: %s", exc)
     out = []
-    for name in READ_ONLY_TOOLS:
+    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL,):
         fn = canonical.get(name) or _FALLBACK_TOOL_SCHEMAS[name]
         out.append({
             "type": "function",
@@ -227,23 +352,125 @@ def realtime_tool_definitions() -> list[dict[str, Any]]:
     return out
 
 
-def run_readonly_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Execute one read-only tool via the canonical executor (sync)."""
-    if name not in READ_ONLY_TOOLS:
-        return {"success": False, "error": f"Tool '{name}' is not available in voice mode (read-only tools only)."}
-    from app.services.max.tool_executor import execute_tool
+def queue_for_founder_approval(action: str, details: str = "", *, call_id: str = "",
+                               conversation_id: str = "") -> dict[str, Any]:
+    """File ONE pending task for founder approval. Executes nothing.
+
+    Written straight into the tasks table (same table/shape as create_task)
+    instead of calling the create_task tool, because create_task immediately
+    auto-executes the task through desk_manager and may queue it to OpenClaw.
+    Status 'waiting', created_by 'voice' and no auto_execute metadata key keep
+    it out of the TaskWorker (which only picks status='todo' AND
+    created_by='max' / metadata "auto_execute") and the startup probe
+    (status='todo' urgent/high). tags: voice-request, needs-founder-approval.
+    """
+    action = " ".join(str(action or "").split())[:200]
+    details = str(details or "").strip()[:4000]
+    if not action:
+        return {"success": False, "error": "action is required"}
+    from datetime import datetime as _dt
+    from app.db.database import get_db
+    from app.services.max.voice_brain import now_et
+    task_id = uuid.uuid4().hex[:8]
+    now = _dt.utcnow().isoformat()
+    title = f"[Voice request - needs founder approval] {action}"[:240]
+    description = (
+        f"Requested by Rafael on a live voice call with Max ({now_et().strftime('%Y-%m-%d %I:%M %p')} ET).\n"
+        f"Voice Max cannot execute actions; this is queued for founder approval only. Nothing was sent, "
+        f"changed or run.\n\nAction: {action}\nDetails: {details or '-'}\n\n"
+        f"Voice transcript: conversation {conversation_id or '-'} (channel voice), call {call_id or '-'}."
+    )
+    tags = ["voice-request", "needs-founder-approval"]
+    metadata = {
+        "source": "voice_live", "channel": "voice", "call_id": call_id, "conversation_id": conversation_id,
+        "requested_action": action, "requested_details": details, "requires_founder_approval": True,
+        "execution": "none - founder approval required",
+    }
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO tasks (id, title, description, status, priority, desk, created_by, tags, metadata,
+                                  created_at, updated_at)
+               VALUES (?, ?, ?, 'waiting', 'normal', 'founder', 'voice', ?, ?, ?, ?)""",
+            (task_id, title, description, json.dumps(tags), json.dumps(metadata), now, now),
+        )
+        conn.execute(
+            "INSERT INTO task_activity (task_id, actor, action, detail, created_at) VALUES (?, 'max_voice', 'created', ?, ?)",
+            (task_id, "Queued from live voice for founder approval (not executed)", now),
+        )
+        row = conn.execute("SELECT id, title, status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if not row or row["status"] != "waiting":
+        return {"success": False, "error": "task insert could not be verified"}
+    logger.info("voice_live[%s]: queued founder-approval task %s: %s", call_id or "-", task_id, action)
+    return {"success": True, "tool": QUEUE_TOOL, "result": {
+        "task_id": task_id, "status": "waiting", "tags": tags, "title": title,
+        "executed": False, "note": "Queued for Rafael's approval. Nothing was sent or run.",
+    }}
+
+
+def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
+                   conversation_id: str = "") -> dict[str, Any]:
+    """Execute one allowlisted voice tool (sync). Server-side allowlist enforced here."""
+    if name not in VOICE_TOOL_ALLOWLIST:
+        logger.warning("voice_live[%s]: refused non-allowlisted tool %r", call_id or "-", name)
+        return {"success": False, "error": f"Tool '{name}' is not available in voice mode (read-only tools "
+                                           f"plus queue_for_founder_approval only). Offer to queue it for "
+                                           f"Rafael's approval instead."}
     call = {k: v for k, v in (arguments or {}).items() if not str(k).startswith("_")}
+    if name == QUEUE_TOOL:
+        return queue_for_founder_approval(call.get("action", ""), call.get("details", ""),
+                                          call_id=call_id, conversation_id=conversation_id)
+    from app.services.max.tool_executor import TOOL_REGISTRY, execute_tool
+    if name not in TOOL_REGISTRY:
+        return {"success": False, "error": f"Tool '{name}' is not registered."}
     call["tool"] = name
-    if name == "search_quotes" and not call.get("limit"):
-        call["limit"] = 5
-    if name == "search_contacts":
+    if name == "search_quotes":
+        if not call.get("customer_name") and call.get("query"):
+            call["customer_name"] = call.pop("query")
+        call["limit"] = min(int(call.get("limit") or 5), 20)
+    elif name == "search_contacts":
         if not call.get("search") and call.get("query"):
             call["search"] = call.pop("query")
         call.setdefault("limit", 5)
-    if name == "search_quotes" and not call.get("customer_name") and call.get("query"):
-        call["customer_name"] = call.pop("query")
+    elif name == "get_tasks":
+        call["limit"] = min(int(call.get("limit") or 10), 25)
+        if not call.get("status"):
+            merged: list[dict] = []
+            for st in ("in_progress", "todo", "waiting"):
+                r = execute_tool(dict(call, status=st), desk=None, access_context=None, founder=False,
+                                 channel="voice_live").to_dict()
+                merged += (r.get("result") or {}).get("tasks") or []
+            return _compact_for_voice(name, {"tool": name, "success": True,
+                                             "result": {"tasks": merged, "count": len(merged),
+                                                        "statuses": ["in_progress", "todo", "waiting"]}})
+    elif name == "check_email":
+        call["limit"] = min(int(call.get("limit") or 5), 10)
+    elif name == "list_job_images":
+        call["limit"] = min(int(call.get("limit") or 10), 50)
+    elif name == "search_conversations":
+        call["limit"] = min(int(call.get("limit") or 8), 20)
+    elif name == "get_weather":
+        call["city"] = call.get("city") or "Washington DC"
     result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
     return _compact_for_voice(name, result.to_dict())
+
+
+def run_readonly_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Backwards-compatible wrapper (read-only tools only)."""
+    if name not in VOICE_READ_ONLY_TOOLS:
+        return {"success": False, "error": f"Tool '{name}' is not available in voice mode (read-only tools only)."}
+    return run_voice_tool(name, arguments)
+
+
+def _tool_note(name: str, data: dict[str, Any]) -> str:
+    """One-line human note for the transcript."""
+    if not data.get("success"):
+        return str(data.get("error") or "failed")[:200]
+    res = data.get("result") or {}
+    if name == QUEUE_TOOL:
+        return f"task {res.get('task_id')} pending founder approval (not executed): {res.get('title', '')}"
+    if isinstance(res, dict) and "count" in res:
+        return f"{res.get('count')} result(s)"
+    return ""
 
 
 def _tool_output_text(data: dict[str, Any]) -> str:
@@ -255,10 +482,10 @@ def _tool_output_text(data: dict[str, Any]) -> str:
 
 # ── Session config ──────────────────────────────────────────────────
 
-def session_update_event() -> dict[str, Any]:
+def session_update_event(instructions: Optional[str] = None) -> dict[str, Any]:
     session: dict[str, Any] = {
         "voice": voice_name(),
-        "instructions": build_instructions(),
+        "instructions": instructions or build_instructions(),
         "turn_detection": {
             "type": "server_vad",
             "threshold": float(os.getenv("MAX_VOICE_VAD_THRESHOLD", "0.5")),
@@ -302,6 +529,27 @@ class LiveCall:
         self._send_lock = asyncio.Lock()
         self._closed = asyncio.Event()      # call is over (any reason)
         self._client_gone = False           # browser socket unusable
+        self.instructions_meta: dict[str, Any] = {}
+        self._assistant_partial: dict[str, list[str]] = {}
+        self._assistant_final: set[str] = set()
+        self.transcript = None
+        try:
+            from app.services.max.voice_transcript import VoiceTranscript
+            self.transcript = VoiceTranscript(self.call_id, user=user, auth_via=auth_via, model=voice_model())
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("voice_live[%s]: transcript disabled: %s", self.call_id, exc)
+
+    @property
+    def conversation_id(self) -> str:
+        return self.transcript.conversation_id if self.transcript else f"voice-{self.call_id}"
+
+    def _record(self, method: str, *args: Any, **kwargs: Any) -> None:
+        if self.transcript is None:
+            return
+        try:
+            getattr(self.transcript, method)(*args, **kwargs)
+        except Exception as exc:  # never break the call over persistence
+            logger.warning("voice_live[%s]: transcript %s failed: %s", self.call_id, method, exc)
 
     # client helpers
     async def send_client_json(self, payload: dict[str, Any]) -> None:
@@ -370,6 +618,7 @@ class LiveCall:
                 await self.send_client_json({"type": "pong", "remaining": self.remaining()})
             elif etype == "text" and str(event.get("text") or "").strip():
                 self._turn_started = time.monotonic()
+                self._record("add_user", str(event["text"])[:2000], "typed")
                 await self.send_upstream({
                     "type": "conversation.item.create",
                     "item": {"type": "message", "role": "user",
@@ -440,6 +689,7 @@ class LiveCall:
             await self.send_client_json({"type": "speech_stopped"})
             return
         if etype == "conversation.item.input_audio_transcription.completed":
+            self._record("add_user", event.get("transcript", ""), event.get("item_id"))
             await self.send_client_json({"type": "transcript", "role": "user",
                                          "text": event.get("transcript", ""), "final": True,
                                          "item_id": event.get("item_id")})
@@ -452,6 +702,7 @@ class LiveCall:
             return
         if etype in ("response.output_audio_transcript.delta", "response.audio_transcript.delta"):
             rid = event.get("response_id")
+            self._assistant_partial.setdefault(rid or "_", []).append(event.get("delta", "") or "")
             if rid and rid in self.cancelled:
                 return
             await self.send_client_json({"type": "transcript", "role": "assistant",
@@ -459,6 +710,11 @@ class LiveCall:
                                          "response_id": rid})
             return
         if etype in ("response.output_audio_transcript.done", "response.audio_transcript.done"):
+            rid = event.get("response_id") or "_"
+            if rid not in self._assistant_final:
+                self._assistant_final.add(rid)
+                self._assistant_partial.pop(rid, None)
+                self._record("add_assistant", event.get("transcript", ""), rid, rid in self.cancelled)
             await self.send_client_json({"type": "transcript", "role": "assistant",
                                          "text": event.get("transcript", ""), "final": True,
                                          "response_id": event.get("response_id")})
@@ -485,6 +741,10 @@ class LiveCall:
             rid = resp.get("id") or event.get("response_id") or self.active_response
             if rid == self.active_response:
                 self.active_response = None
+            if rid and rid not in self._assistant_final and self._assistant_partial.get(rid):
+                self._assistant_final.add(rid)
+                partial = "".join(self._assistant_partial.pop(rid, []))
+                self._record("add_assistant", partial, rid, rid in self.cancelled)
             tasks = self.pending_tools.pop(rid, None) or self.pending_tools.pop("_", None)
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -522,12 +782,14 @@ class LiveCall:
     async def _run_tool(self, name: str, call_id: str, args: dict[str, Any]) -> tuple[str, str]:
         started = time.monotonic()
         try:
-            data = await asyncio.to_thread(run_readonly_tool, name, args)
+            data = await asyncio.to_thread(run_voice_tool, name, args, call_id=self.call_id,
+                                           conversation_id=self.conversation_id)
         except Exception as exc:
             data = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
         ok = bool(data.get("success"))
         logger.info("voice_live[%s]: tool %s ok=%s in %dms", self.call_id, name, ok,
                     int((time.monotonic() - started) * 1000))
+        self._record("add_tool", name, args, ok, _tool_note(name, data))
         await self.send_client_json({"type": "tool", "name": name, "status": "done", "ok": ok})
         return call_id, _tool_output_text(data)
 
@@ -561,6 +823,8 @@ class LiveCall:
 
         key = os.getenv("XAI_API_KEY", "")
         url = f"{XAI_REALTIME_URL}?model={voice_model()}"
+        # Build the fresh voice brain while the upstream socket connects.
+        instr_task = asyncio.create_task(fresh_instructions(), name="voice-instructions")
         try:
             self.upstream = await websockets.connect(
                 url,
@@ -583,11 +847,18 @@ class LiveCall:
             logger.error("voice_live[%s]: xAI connect failed: %s", self.call_id, detail)
             await self.send_client_json({"type": "error", "message": f"Voice provider connect failed ({detail})"})
             self.end_reason = "upstream_connect_failed"
+            instr_task.cancel()
             return
-        await self.send_upstream(session_update_event())
+        instructions, self.instructions_meta = await instr_task
+        logger.info("voice_live[%s]: instructions %s chars (~%s tokens, cached=%s, fallback=%s)",
+                    self.call_id, len(instructions), len(instructions) // 4,
+                    self.instructions_meta.get("cached"), self.instructions_meta.get("fallback", False))
+        await self.send_upstream(session_update_event(instructions))
+        self._record("start")
         await self.send_client_json({
             "type": "ready", "call_id": self.call_id, "cap_seconds": self.cap,
             "sample_rate": SAMPLE_RATE, "model": voice_model(), "voice": voice_name(),
+            "conversation_id": self.conversation_id, "transcript_saved": self.transcript is not None,
         })
         tasks = [
             asyncio.create_task(self.pump_client(), name="voice-client"),
@@ -633,7 +904,16 @@ async def handle_live_call(client_ws, *, auth_via: str = "", user: str = "") -> 
     finally:
         _active_calls.discard(call.call_id)
         duration = round(time.monotonic() - call.started, 1)
-        await call.send_client_json({"type": "ended", "reason": call.end_reason, "duration_s": duration})
+        saved: dict[str, Any] = {"saved": False}
+        if call.transcript is not None:
+            try:
+                saved = await asyncio.wait_for(
+                    asyncio.to_thread(call.transcript.finish, duration, call.end_reason), timeout=20)
+            except Exception as exc:
+                logger.warning("voice_live[%s]: transcript finish failed: %s", call.call_id, exc)
+        await call.send_client_json({"type": "ended", "reason": call.end_reason, "duration_s": duration,
+                                     "transcript_saved": bool(saved.get("saved")),
+                                     "conversation_id": call.conversation_id})
         logger.info(
             "voice_live[%s]: call ended reason=%s duration_s=%.1f tool_calls=%d interrupts=%d "
             "audio_in_kb=%d audio_out_kb=%d",
@@ -652,7 +932,8 @@ def _log_call_record(call: LiveCall, duration: float) -> None:
             "duration_s": duration, "reason": call.end_reason, "auth": call.auth_via,
             "user": call.user, "model": voice_model(), "tool_calls": call.tool_calls,
             "interrupts": call.interrupts, "audio_in_bytes": call.audio_in_bytes,
-            "audio_out_bytes": call.audio_out_bytes,
+            "audio_out_bytes": call.audio_out_bytes, "conversation_id": call.conversation_id,
+            "instructions_chars": call.instructions_meta.get("chars"),
         }
         with open(base / "live_calls.jsonl", "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec) + "\n")
