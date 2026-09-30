@@ -76,6 +76,41 @@ logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
 
 
+def _safe_dumps(obj, **kwargs):
+    """json.dumps that can never crash a turn on a non-JSON value.
+
+    2026-09-29 MAX tune-up: tool results / SSE events occasionally carried
+    PosixPath, datetime, Decimal, bytes... A bare json.dumps raised
+    TypeError inside the stream generator and killed the whole turn.
+    Unknown types are stringified instead.
+    """
+    kwargs.setdefault("default", str)
+    return json.dumps(obj, **kwargs)
+
+
+# Tools whose handlers make synchronous HTTP calls back into THIS backend
+# (127.0.0.1:8000) or run slow subprocess probes. Executed on the event loop
+# they block the only worker, so their own self-probes time out and the
+# runtime/health report comes back falsely "down". Run them in a thread.
+_THREADED_TOOLS = {"empire_runtime_truth_check", "get_services_health", "test_runner"}
+
+
+async def _execute_tool_nonblocking(tc, **kwargs):
+    if isinstance(tc, dict) and tc.get("tool") in _THREADED_TOOLS:
+        return await asyncio.to_thread(_safe_execute_tool, tc, **kwargs)
+    return _safe_execute_tool(tc, **kwargs)
+
+
+def _safe_execute_tool(tc, **kwargs):
+    """execute_tool wrapper: an exception becomes an error ToolResult."""
+    try:
+        return execute_tool(tc, **kwargs)
+    except Exception as exc:  # pragma: no cover - defensive
+        _name = str((tc or {}).get("tool") or "?") if isinstance(tc, dict) else "?"
+        logger.exception("Tool %s raised outside executor: %s", _name, exc)
+        return ToolResult(tool=_name, success=False, error=f"{type(exc).__name__}: {exc}")
+
+
 # ── Conversation windowing ───────────────────────────────────────────
 MAX_CONTEXT_MESSAGES = 10   # Keep last N messages verbatim
 SUMMARY_THRESHOLD = 8       # Summarize after this many older messages
@@ -241,7 +276,7 @@ def _drawing_missing_response(handoff) -> str:
     }
     if handoff.source_image:
         payload["source_image"] = handoff.source_image
-    return f"{handoff.response}\n\nStructured drawing handoff:\n```json\n{json.dumps(payload, indent=2)}\n```"
+    return f"{handoff.response}\n\nStructured drawing handoff:\n```json\n{_safe_dumps(payload, indent=2)}\n```"
 
 
 def _runtime_truth_tool_payload() -> dict:
@@ -1742,7 +1777,7 @@ def _persist_link_brief(record: dict[str, Any]) -> str:
     path = data_root() / "max" / "link_intelligence_briefs.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=True) + "\n")
+        f.write(_safe_dumps(record, ensure_ascii=True) + "\n")
     return str(path)
 
 
@@ -2138,8 +2173,8 @@ def _stream_immediate_response(response: ChatResponse, conversation_id: str | No
     async def gen():
         cleaned_response = sanitize_output(_sanitize_internal_leakage_text(response.response))
         for tool_result in response.tool_results or []:
-            yield f"data: {json.dumps({'type': 'tool_result', **tool_result})}\n\n"
-        yield f"data: {json.dumps({'type': 'text', 'content': cleaned_response})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'tool_result', **tool_result})}\n\n"
+        yield f"data: {_safe_dumps({'type': 'text', 'content': cleaned_response})}\n\n"
         done = {
             "type": "done",
             "model_used": response.model_used,
@@ -2148,7 +2183,7 @@ def _stream_immediate_response(response: ChatResponse, conversation_id: str | No
         }
         if response.quality:
             done["quality"] = response.quality
-        yield f"data: {json.dumps(done)}\n\n"
+        yield f"data: {_safe_dumps(done)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
@@ -2721,7 +2756,7 @@ async def _chat_with_max_service(
             if search_result.success and search_result.result:
                 tool_summary = (
                     f"[web_search] Result:\n"
-                    f"{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
+                    f"{_safe_dumps(search_result.result, indent=2, default=str)[:4000]}"
                 )
                 messages.insert(-1, AIMessage(role="system", content=(
                     "You must answer using only the verified web search data below. "
@@ -2907,7 +2942,7 @@ async def _chat_with_max_service(
                     logger.info(f"[chat] Auto-routing {tool_name} to CodeForge: {title}")
                     tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
-                result = execute_tool(tc, desk=request.desk, access_context=_ac_context, founder=founder)
+                result = await _execute_tool_nonblocking(tc, desk=request.desk, access_context=_ac_context, founder=founder)
                 entry = _normalize_tool_result_entry(result)
                 round_results.append(entry)
                 tool_results_list.append(entry)
@@ -2931,7 +2966,7 @@ async def _chat_with_max_service(
                 if r["success"] and r["result"]:
                     # Give web_read more room so AI has enough content to cite accurately
                     limit = 5000 if r['tool'] == 'web_read' else 3000
-                    tool_summary_parts.append(f"[{r['tool']}] Result:\n{json.dumps(r['result'], indent=2, default=str)[:limit]}")
+                    tool_summary_parts.append(f"[{r['tool']}] Result:\n{_safe_dumps(r['result'], indent=2, default=str)[:limit]}")
                 else:
                     tool_summary_parts.append(f"[{r['tool']}] Error: {r.get('error', 'Unknown')}")
             tool_summary = "\n\n".join(tool_summary_parts)
@@ -3022,7 +3057,7 @@ async def _chat_with_max_service(
             # we cannot fix it with data we do not have.
             if search_result.success and search_result.result:
                 # Build grounding context and re-query AI with verified data
-                tool_summary = f"[web_search] Result:\n{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
+                tool_summary = f"[web_search] Result:\n{_safe_dumps(search_result.result, indent=2, default=str)[:4000]}"
                 grounded_messages = list(messages)
                 grounded_messages.append(AIMessage(role="system", content=(
                     "You must answer using only the verified web search data below. "
@@ -3152,7 +3187,7 @@ async def _chat_with_max_service(
                     "preview": (request.message[:120]).strip(),
                     "messages": _nc_all,
                 }
-                _nc_chat_file.write_text(json.dumps(_nc_chat_data, indent=2, default=str))
+                _nc_chat_file.write_text(_safe_dumps(_nc_chat_data, indent=2, default=str))
             except Exception as _nc_err:
                 logger.debug(f"[chat] history save failed: {_nc_err}")
 
@@ -3330,8 +3365,8 @@ async def chat_stream(request: ChatRequest):
     if not is_safe:
         logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
         async def refusal_gen():
-            yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
         return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     # v6.0 — unified sanitizer check on streaming endpoint
@@ -3339,8 +3374,8 @@ async def chat_stream(request: ChatRequest):
     if not sec_result["safe"]:
         logger.warning(f"Sanitizer blocked stream ({sec_result['threat_type']}): {request.message[:100]}")
         async def refusal_gen():
-            yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
         return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     for msg in request.history[-3:]:
@@ -3350,8 +3385,8 @@ async def chat_stream(request: ChatRequest):
         hist_safe, _ = check_input(content)
         if not hist_safe:
             async def refusal_gen():
-                yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
             return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     link_intel = await _link_intelligence_response(request)
@@ -3373,8 +3408,8 @@ async def chat_stream(request: ChatRequest):
             conv_id = request.conversation_id or str(uuid.uuid4())
             result = await asyncio.to_thread(run_whats_new_summary)
             response_text = format_whats_new_summary(result)
-            yield f"data: {json.dumps({'type': 'text', 'content': response_text})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'model_used': 'whats-new-summary', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='whats_new_summary')})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'text', 'content': response_text})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'whats-new-summary', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='whats_new_summary')})}\n\n"
 
         return StreamingResponse(whats_new_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
@@ -3382,29 +3417,29 @@ async def chat_stream(request: ChatRequest):
         async def runtime_truth_gen():
             conv_id = request.conversation_id or str(uuid.uuid4())
             result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
-            yield f"data: {json.dumps({'type': 'tool_result', **result.to_dict()})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'tool_result', **result.to_dict()})}\n\n"
             response_text = (
                 format_runtime_truth_check(result.result or {}, request.message)
                 if result.success
                 else f"Runtime truth check failed: {result.error}"
             )
             _save_runtime_truth_exchange(request, response_text, result, founder)
-            yield f"data: {json.dumps({'type': 'text', 'content': response_text})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'model_used': 'empire-runtime-truth-check', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='empire_runtime_truth_check')})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'text', 'content': response_text})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'empire-runtime-truth-check', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='empire_runtime_truth_check')})}\n\n"
 
         return StreamingResponse(runtime_truth_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     if not request.desk and not request.image_filename and should_clarify_inventory_request(request.message):
         async def clarification_gen():
-            yield f"data: {json.dumps({'type': 'text', 'content': build_inventory_clarification(request.message)})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'model_used': 'clarification-gate', 'metadata': _response_metadata(request.channel, skill_used='inventory_ambiguity_gate')})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'text', 'content': build_inventory_clarification(request.message)})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'clarification-gate', 'metadata': _response_metadata(request.channel, skill_used='inventory_ambiguity_gate')})}\n\n"
 
         return StreamingResponse(clarification_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     if request.image_filename and _image_upload_path(request.image_filename) is None:
         async def image_unavailable_gen():
-            yield f"data: {json.dumps({'type': 'text', 'content': 'IMAGE_NOT_AVAILABLE'})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'model_used': 'image-availability-check', 'metadata': _response_metadata(request.channel, skill_used='image_availability_check')})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'text', 'content': 'IMAGE_NOT_AVAILABLE'})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'image-availability-check', 'metadata': _response_metadata(request.channel, skill_used='image_availability_check')})}\n\n"
         return StreamingResponse(image_unavailable_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     # H57 FIX M-bM-^@M-^T stream door: also release pending on non-continuation
@@ -3484,13 +3519,13 @@ async def chat_stream(request: ChatRequest):
 
             async def continuation_gen():
                 if render["status_event"]:
-                    yield f"data: {json.dumps({'type': 'text', 'content': render['status_event']})}\n\n"
-                yield f"data: {json.dumps({'type': 'text', 'content': render['response_text']})}\n\n"
+                    yield f"data: {_safe_dumps({'type': 'text', 'content': render['status_event']})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'text', 'content': render['response_text']})}\n\n"
                 if render["tool_result_dict"]:
-                    yield f"data: {json.dumps({'type': 'tool_result', **render['tool_result_dict']})}\n\n"
+                    yield f"data: {_safe_dumps({'type': 'tool_result', **render['tool_result_dict']})}\n\n"
                 yield (
                     "data: "
-                    + json.dumps({
+                    + _safe_dumps({
                         "type": "done",
                         "model_used": render["model_used"],
                         "conversation_id": conv_id,
@@ -3522,13 +3557,13 @@ async def chat_stream(request: ChatRequest):
             # is the visible "I'm rendering now…" line; absent for
             # failure or missing-keys paths.
             if render["status_event"]:
-                yield f"data: {json.dumps({'type': 'text', 'content': render['status_event']})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'text', 'content': render['status_event']})}\n\n"
 
-            yield f"data: {json.dumps({'type': 'text', 'content': render['response_text']})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'text', 'content': render['response_text']})}\n\n"
 
             # tool_result only on the rendered path (when tool_result_dict is non-empty)
             if render["tool_result_dict"]:
-                yield f"data: {json.dumps({'type': 'tool_result', **render['tool_result_dict']})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'tool_result', **render['tool_result_dict']})}\n\n"
 
             # Resume snapshot — same wiring as /chat non-stream path.
             if not render["ready"]:
@@ -3544,7 +3579,7 @@ async def chat_stream(request: ChatRequest):
 
             yield (
                 "data: "
-                + json.dumps({
+                + _safe_dumps({
                     "type": "done",
                     "model_used": render["model_used"],
                     "conversation_id": conv_id,
@@ -3647,7 +3682,7 @@ async def chat_stream(request: ChatRequest):
             if search_result.success and search_result.result:
                 tool_summary = (
                     f"[web_search] Result:\n"
-                    f"{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
+                    f"{_safe_dumps(search_result.result, indent=2, default=str)[:4000]}"
                 )
                 messages.insert(-1, AIMessage(role="system", content=(
                     "You must answer using only the verified web search data below. "
@@ -3663,7 +3698,7 @@ async def chat_stream(request: ChatRequest):
                 model_used = m_used
                 safe_chunk = sanitize_output_streaming(chunk)
                 full_response += safe_chunk
-                yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'text', 'content': safe_chunk})}\n\n"
 
             # Multi-turn tool loop: execute tools, allow follow-up tools (max 3 rounds)
             tool_results_list = [_stream_pre_search_entry] if _stream_pre_search_entry else []
@@ -3711,7 +3746,7 @@ async def chat_stream(request: ChatRequest):
 
                 if _is_decision_only_request(request.message) and any(_is_action_tool(tc) for tc in tool_calls):
                     full_response = _decision_only_response(request).response
-                    yield f"data: {json.dumps({'type': 'text', 'content': full_response})}\n\n"
+                    yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
                     break
 
                 # File-WRITE tool calls from main chat get re-routed to CodeForge desk
@@ -3754,7 +3789,7 @@ async def chat_stream(request: ChatRequest):
                         logger.info(f"[stream] Auto-routing {tool_name} to CodeForge: {title}")
                         tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
-                    result = execute_tool(tc, desk=request.desk, access_context=_stream_ac_context, founder=founder)
+                    result = await _execute_tool_nonblocking(tc, desk=request.desk, access_context=_stream_ac_context, founder=founder)
                     entry = _normalize_tool_result_entry(result)
                     round_results.append(entry)
                     tool_results_list.append(entry)
@@ -3764,13 +3799,13 @@ async def chat_stream(request: ChatRequest):
                     # at line 3794 but do not produce a UI badge that
                     # could be read as a successful invocation.
                     if entry.get("success"):
-                        yield f"data: {json.dumps({'type': 'tool_result', **entry})}\n\n"
+                        yield f"data: {_safe_dumps({'type': 'tool_result', **entry})}\n\n"
 
                 # D52 H80: same round-aware halt as the chat path above.
                 if _tool_round >= 1 and should_halt_after_tool_failure(round_results, user_message=request.message):
                     _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
                     full_response = runtime_truth_failure_message(_failures)
-                    yield f"data: {json.dumps({'type': 'text', 'content': full_response})}\n\n"
+                    yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
                     break
 
                 tool_summary_parts = []
@@ -3780,7 +3815,7 @@ async def chat_stream(request: ChatRequest):
                     tool_res = _r.get("result", "")
                     tool_err = _r.get("error", "Unknown")
                     if _r.get("success") and tool_res:
-                        tool_summary_parts.append(f"[{tool_key}] Result:\n{json.dumps(tool_res, indent=2, default=str)[:3000]}")
+                        tool_summary_parts.append(f"[{tool_key}] Result:\n{_safe_dumps(tool_res, indent=2, default=str)[:3000]}")
                     else:
                         tool_summary_parts.append(f"[{tool_key}] Error: {tool_err}")
                 tool_summary = "\n\n".join(tool_summary_parts)
@@ -3809,13 +3844,13 @@ async def chat_stream(request: ChatRequest):
                 # pre-search guard. Scaffolding goes on the system channel.
                 loop_messages.append(AIMessage(role="system", content=f"{followup_instruction}\n\n{tool_summary}"))
 
-                yield f"data: {json.dumps({'type': 'text', 'content': chr(10) + chr(10)})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'text', 'content': chr(10) + chr(10)})}\n\n"
                 followup_text = ""
                 async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
                     model_used = m_used
                     safe_chunk = sanitize_output_streaming(chunk)
                     followup_text += safe_chunk
-                    yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
+                    yield f"data: {_safe_dumps({'type': 'text', 'content': safe_chunk})}\n\n"
 
                 current_text = followup_text
                 # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
@@ -3826,7 +3861,7 @@ async def chat_stream(request: ChatRequest):
             truth_checked_response = _apply_truth_guardrails(request.message, full_response, tool_results_list)
             if truth_checked_response != full_response:
                 full_response = truth_checked_response
-                yield f"data: {json.dumps({'type': 'runtime_truth_correction', 'content': full_response})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'runtime_truth_correction', 'content': full_response})}\n\n"
             conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(full_response))
             asyncio.create_task(_safe_background(
                 conversation_tracker.check_and_summarize(conv_id),
@@ -3904,7 +3939,7 @@ async def chat_stream(request: ChatRequest):
                     logger.info(f"[stream] Quality engine fixed {_qr.fixed_count} issues in {_q_channel.value} response")
                     _original_len = len(full_response)
                     full_response = _qr.cleaned
-                    yield f"data: {json.dumps({'type': 'quality_fix', 'source': 'quality_engine', 'original_length': _original_len, 'cleaned_length': len(full_response), 'issues': [str(i) for i in _qr.issues]})}\n\n"
+                    yield f"data: {_safe_dumps({'type': 'quality_fix', 'source': 'quality_engine', 'original_length': _original_len, 'cleaned_length': len(full_response), 'issues': [str(i) for i in _qr.issues]})}\n\n"
                     # Update conversation tracker with cleaned version
                     conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(full_response))
             except Exception as _qe_err:
@@ -3916,12 +3951,12 @@ async def chat_stream(request: ChatRequest):
             if _gpu_guard_resp != full_response:
                 logger.warning(f"[stream] GPU safety output guardrail replaced response")
                 full_response = _gpu_guard_resp
-                yield f"data: {json.dumps({'type': 'gpu_safety_replace', 'replacement': full_response})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'gpu_safety_replace', 'replacement': full_response})}\n\n"
             full_response = _sanitize_internal_leakage_text(full_response)
 
             # Emit grounding events (after quality engine so all fixes are sequential)
             for _ge in _grounding_events:
-                yield f"data: {json.dumps(_ge)}\n\n"
+                yield f"data: {_safe_dumps(_ge)}\n\n"
 
             # 3. Accuracy monitor audit log
             try:
@@ -4005,7 +4040,7 @@ async def chat_stream(request: ChatRequest):
                         "preview": (request.message[:120]).strip(),
                         "messages": _all_msgs,
                     }
-                    _chat_file.write_text(json.dumps(_chat_data, indent=2, default=str))
+                    _chat_file.write_text(_safe_dumps(_chat_data, indent=2, default=str))
                 except Exception as _save_err:
                     logger.debug(f"[stream] Chat history save failed: {_save_err}")
 
@@ -4033,7 +4068,7 @@ async def chat_stream(request: ChatRequest):
                     "(proved the AI bypassed the earlier check)"
                 )
                 full_response = _stream_final_truth_guarded
-                yield f"data: {json.dumps({'type': 'runtime_truth_correction', 'content': full_response})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'runtime_truth_correction', 'content': full_response})}\n\n"
 
             _done_data = {
                 'type': 'done',
@@ -4043,7 +4078,7 @@ async def chat_stream(request: ChatRequest):
             }
             if _quality_badge:
                 _done_data['quality'] = _quality_badge
-            yield f"data: {json.dumps(_done_data)}\n\n"
+            yield f"data: {_safe_dumps(_done_data)}\n\n"
 
             # PHASE 2 · F1 — persist this turn so the next request can
             # replay the tool_results. Mirrors the /chat side. Best-effort.
@@ -4051,7 +4086,7 @@ async def chat_stream(request: ChatRequest):
             _record_session_turn(conv_id, "assistant", full_response, tool_results_list)
         except Exception as e:
             logger.error(f"Stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'error', 'content': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
