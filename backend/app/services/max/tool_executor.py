@@ -973,8 +973,12 @@ def _get_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     Lauren Bassett) because quotes_v2 was the only canonical store post-1d.
     """
     from app.services.quote_service import get_quote as _qs_get_quote
-    quote_id = params.get("quote_id", "")
+    quote_id = str(params.get("quote_id") or params.get("quote_number") or "").strip()
     q = _qs_get_quote(quote_id)
+    if not q and quote_id:
+        # Accept the human-facing quote number too (e.g. "EST-2026-285").
+        from app.services.quote_service import get_quote_by_number as _qs_by_number
+        q = _qs_by_number(quote_id.upper())
     if not q:
         return ToolResult(tool="get_quote", success=False, error=f"Quote {quote_id} not found")
     return ToolResult(tool="get_quote", success=True, result=q)
