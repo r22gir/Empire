@@ -709,6 +709,38 @@ def _is_action_tool(tool_call: dict[str, Any]) -> bool:
     return str(tool_call.get("tool") or "").strip() in ACTION_TOOLS
 
 
+_DEDUPE_SEND_TOOLS = {"send_email", "send_quote_email"}
+
+
+def _dedupe_send_tool_calls(tool_calls: list[dict[str, Any]], seen: set[str]) -> list[dict[str, Any]]:
+    """Suppress identical outbound-email calls within one chat turn.
+
+    MiniMax can emit the same send block twice in one response. Executing both
+    is unsafe because provider submission is not transactional with the chat
+    result. Keep the first exact call, and let distinct sends remain visible.
+    ``seen`` persists across tool rounds so a repeated follow-up cannot resend.
+    """
+    deduped: list[dict[str, Any]] = []
+    for tool_call in tool_calls:
+        name = str(tool_call.get("tool") or "").strip()
+        if name not in _DEDUPE_SEND_TOOLS:
+            deduped.append(tool_call)
+            continue
+        fingerprint = _safe_dumps(
+            {
+                "tool": name,
+                "params": {k: v for k, v in tool_call.items() if k != "_channel"},
+            },
+            sort_keys=True,
+        )
+        if fingerprint in seen:
+            logger.warning("[chat] suppressed duplicate %s call in one turn", name)
+            continue
+        seen.add(fingerprint)
+        deduped.append(tool_call)
+    return deduped
+
+
 # H52 Phase 2 follow-up — fifth interception layer.
 #
 # DOCTRINE: A router MUST NEVER silently rewrite a tool call the model made.
@@ -2808,6 +2840,7 @@ async def _chat_with_max_service(
         final_content = response.content
         loop_messages = list(messages)
         current_response = response
+        _seen_send_tool_calls: set[str] = set()
 
         for _tool_round in range(3):
             # H67 FIX (2026-08-20): initialize round_results at the top of
@@ -2892,6 +2925,7 @@ async def _chat_with_max_service(
             # Also check xAI /v1/responses function_calls format
             if not tool_calls and hasattr(current_response, 'function_calls') and current_response.function_calls:
                 tool_calls = current_response.function_calls
+            tool_calls = _dedupe_send_tool_calls(tool_calls, _seen_send_tool_calls)
             if not tool_calls:
                 break
 
@@ -3745,6 +3779,7 @@ async def chat_stream(request: ChatRequest):
             tool_results_list = [_stream_pre_search_entry] if _stream_pre_search_entry else []
             loop_messages = list(messages)
             current_text = full_response
+            _seen_send_tool_calls: set[str] = set()
 
             for _tool_round in range(3):
                 # H67 FIX (2026-08-20): see non-streaming version above.
@@ -3782,6 +3817,7 @@ async def chat_stream(request: ChatRequest):
                     } for e in tool_block_errors]
                     round_results = error_entries + round_results
                     tool_results_list = error_entries + tool_results_list
+                tool_calls = _dedupe_send_tool_calls(tool_calls, _seen_send_tool_calls)
                 if not tool_calls:
                     break
 
