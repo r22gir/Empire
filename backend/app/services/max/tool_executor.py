@@ -2700,6 +2700,7 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             "sent_to": to, "subject": subject,
             "cc": cc_list,
             "reply_to": DEFAULT_REPLY_TO,
+            "message_id": svc.last_message_id,
             "attachments_sent": len(converted_attachments),
             "attachment_files": [os.path.basename(a) for a in converted_attachments],
             "body_verified": bool(body.strip()),

@@ -23,7 +23,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-from email.utils import formataddr
+from email.utils import formataddr, make_msgid
 from pathlib import Path
 
 from app.services.max.email_template import html_to_text, render_house_email
@@ -48,6 +48,7 @@ class EmailService:
         # Explicit sender address (allows Gmail send-as alias, e.g. max@empirebox.store)
         self.from_addr = os.environ.get("SMTP_FROM", "") or self.user
         self.reply_to = os.environ.get("SMTP_REPLY_TO", "") or self.from_addr
+        self.last_message_id: str | None = None
 
     @property
     def is_configured(self) -> bool:
@@ -90,11 +91,15 @@ class EmailService:
         source_text = body_text if body_text is not None else html_to_text(body_html or "")
         self._verify_send_payload(to, subject, source_text, attachments)
         rendered = render_house_email(source_text, recipient_name=recipient_name)
+        # Always generate a fresh ID for each provider submission. With no
+        # In-Reply-To or References, this deliberately starts a new thread.
+        domain = self.from_addr.rsplit("@", 1)[-1] if "@" in self.from_addr else None
+        self.last_message_id = make_msgid(domain=domain)
 
         if self.sendgrid_key:
-            sent = self._send_sendgrid(to, subject, rendered.plain_text, rendered.html, attachments, cc, in_reply_to, references, reply_to)
+            sent = self._send_sendgrid(to, subject, rendered.plain_text, rendered.html, attachments, cc, in_reply_to, references, reply_to, self.last_message_id)
         else:
-            sent = self._send_smtp(to, subject, rendered.plain_text, rendered.html, attachments, cc, in_reply_to, references, reply_to)
+            sent = self._send_smtp(to, subject, rendered.plain_text, rendered.html, attachments, cc, in_reply_to, references, reply_to, self.last_message_id)
         if sent:
             self._write_outbound_ledger(to, subject, rendered.html, attachments, cc)
         return sent
@@ -135,7 +140,10 @@ class EmailService:
                 sender=self.sendgrid_from if self.sendgrid_key else (self.user or self.sendgrid_from),
                 cc=cc,
                 attachments=attachments or [],
-                metadata={"service": "app.services.max.email_service.EmailService"},
+                metadata={
+                    "service": "app.services.max.email_service.EmailService",
+                    "message_id": self.last_message_id,
+                },
             )
             if not inserted:
                 logger.info("Outbound email ledger entry already exists for %s: %s", to, subject)
@@ -153,6 +161,7 @@ class EmailService:
         in_reply_to: str | None = None,
         references: str | None = None,
         reply_to: str | None = None,
+        message_id: str | None = None,
     ) -> bool:
         """Send a multipart alternative message through SendGrid."""
         try:
@@ -182,6 +191,8 @@ class EmailService:
                 sg_headers["Reply-To"] = reply_to
             elif self.reply_to:
                 sg_headers["Reply-To"] = self.reply_to
+            if message_id:
+                sg_headers["Message-ID"] = message_id
             if sg_headers:
                 personalization["headers"] = sg_headers
 
@@ -231,12 +242,15 @@ class EmailService:
         in_reply_to: str | None = None,
         references: str | None = None,
         reply_to: str | None = None,
+        message_id: str | None = None,
     ) -> bool:
         """Send multipart plain-text + HTML alternatives through SMTP."""
         msg = MIMEMultipart("mixed")
         msg["From"] = formataddr((self.from_name, self.from_addr))
         msg["To"] = to
         msg["Subject"] = subject
+        if message_id:
+            msg["Message-ID"] = message_id
         if in_reply_to:
             msg["In-Reply-To"] = in_reply_to
         if references:

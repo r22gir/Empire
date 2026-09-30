@@ -46,6 +46,9 @@ def test_max_email_service_uses_sendgrid_http_without_sdk(monkeypatch, tmp_path)
     assert sent["json"]["from"]["email"] == "max@empirebox.store"
     assert sent["json"]["personalizations"][0]["to"][0]["email"] == "founder@example.com"
     assert sent["json"]["personalizations"][0]["cc"][0]["email"] == "copy@example.com"
+    assert sent["json"]["personalizations"][0]["headers"]["Message-ID"].startswith("<")
+    assert "In-Reply-To" not in sent["json"]["personalizations"][0]["headers"]
+    assert "References" not in sent["json"]["personalizations"][0]["headers"]
     assert [part["type"] for part in sent["json"]["content"]] == ["text/plain", "text/html"]
     assert "Empire Workroom" in sent["json"]["content"][0]["value"]
     assert "<div class=\"signature\">" in sent["json"]["content"][1]["value"]
@@ -165,6 +168,9 @@ def test_smtp_uses_smtp_from_when_set(monkeypatch, tmp_path):
     assert from_addr == "max@empirebox.store"
     parsed = message_from_string(sent_records[0]["msg"])
     assert parsed.get_content_type() == "multipart/mixed"
+    assert parsed["Message-ID"].startswith("<")
+    assert parsed["In-Reply-To"] is None
+    assert parsed["References"] is None
     alternative = next(part for part in parsed.walk() if part.get_content_type() == "multipart/alternative")
     alternatives = alternative.get_payload()
     assert [part.get_content_type() for part in alternatives[:2]] == ["text/plain", "text/html"]
