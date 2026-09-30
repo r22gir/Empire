@@ -944,27 +944,28 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
         c.drawString(MARGIN_L + 8, y, label)
         c.drawRightString(PW - MARGIN_R, y, _money(amount))
         y -= 18
-    y -= 8
-    _hr(c, y, col=GOLD)
-    y -= 20
-    _section_label(c, MARGIN_L, y, "OPTIONAL PASSWAY HARDWARE", mono)
-    y -= 18
     optional = (quote.get("metadata") or {}).get("optional_hardware") or {}
-    y = table_header(y)
-    optional_rows = [
-        {"description": '2" rings, 8-pack', "quantity": 3, "unit": "pack", "unit_price": 74.95, "amount": optional.get("rings", 224.85)},
-        {"description": '2" reeded pole, 8 ft', "quantity": 1, "unit": "ea", "unit_price": 210.82, "amount": optional.get("pole", 210.82)},
-        {"description": '2" single brackets, 3½" return', "quantity": 3, "unit": "ea", "unit_price": 32.08, "amount": optional.get("brackets", 96.24)},
-    ]
-    for item in optional_rows:
-        y = table_row(item, y)
-    optional_total = float(optional.get("total", 531.91) or 531.91)
-    y = subtotal_row("Optional passway hardware", optional_total, y)
-    y -= 6
-    c.setFont(sans_b, 10)
-    c.setFillColor(DK)
-    c.drawString(desc_x, y, "Total with optional hardware")
-    c.drawRightString(amount_x, y, _money(grand_total + optional_total))
+    optional_total = float(optional.get("total", 0) or 0)
+    if optional_total > 0:
+        y -= 8
+        _hr(c, y, col=GOLD)
+        y -= 20
+        _section_label(c, MARGIN_L, y, "OPTIONAL PASSWAY HARDWARE", mono)
+        y -= 18
+        y = table_header(y)
+        optional_rows = [
+            {"description": '2" rings, 8-pack', "quantity": 3, "unit": "pack", "unit_price": 74.95, "amount": optional.get("rings", 224.85)},
+            {"description": '2" reeded pole, 8 ft', "quantity": 1, "unit": "ea", "unit_price": 210.82, "amount": optional.get("pole", 210.82)},
+            {"description": '2" single brackets, 3½" return', "quantity": 3, "unit": "ea", "unit_price": 32.08, "amount": optional.get("brackets", 96.24)},
+        ]
+        for item in optional_rows:
+            y = table_row(item, y)
+        y = subtotal_row("Optional passway hardware", optional_total, y)
+        y -= 6
+        c.setFont(sans_b, 10)
+        c.setFillColor(DK)
+        c.drawString(desc_x, y, "Total with optional hardware")
+        c.drawRightString(amount_x, y, _money(grand_total + optional_total))
     c.save()
     return buf.getvalue()
 
