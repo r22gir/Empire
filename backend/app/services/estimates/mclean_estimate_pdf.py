@@ -849,6 +849,8 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
             desc = "Leading-edge trim application"
         elif desc.startswith("Center tassels"):
             desc = "Center tassels (2 per swag)"
+        elif desc.startswith("Sheer panels"):
+            desc = "Sheer panels"
         qty = float(item.get("quantity") or 1)
         unit = str(item.get("unit") or "ea")
         amount = float(item.get("amount") or 0)
@@ -943,8 +945,8 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
     optional = (quote.get("metadata") or {}).get("optional_hardware") or {}
     y = table_header(y)
     optional_rows = [
-        {"description": '2" rings, 8-pack', "quantity": 3, "unit": "ea", "unit_price": 74.95, "amount": optional.get("rings", 224.85)},
-        {"description": '2" reeded pole, 8 ft', "quantity": 1, "unit": "ft", "unit_price": 210.82, "amount": optional.get("pole", 210.82)},
+        {"description": '2" rings, 8-pack', "quantity": 3, "unit": "pack", "unit_price": 74.95, "amount": optional.get("rings", 224.85)},
+        {"description": '2" reeded pole, 8 ft', "quantity": 1, "unit": "ea", "unit_price": 210.82, "amount": optional.get("pole", 210.82)},
         {"description": '2" single brackets, 3½" return', "quantity": 3, "unit": "ea", "unit_price": 32.08, "amount": optional.get("brackets", 96.24)},
     ]
     for item in optional_rows:
