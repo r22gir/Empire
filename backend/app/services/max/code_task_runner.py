@@ -245,15 +245,27 @@ def _select_code_model() -> tuple[AIModel | None, str, bool]:
                 return model, _infer_provider_from_model(model.value), False
         return None, "unknown", False
 
-    if ai_router.xai_key:
+    # 2026-09-29: never auto-pick a kill-switched provider (MAX_DISABLE_*),
+    # e.g. the exhausted Anthropic key behind MAX_DISABLE_CLAUDE=true.
+    def _usable(canon: str, key: str) -> bool:
+        if not key:
+            return False
+        try:
+            return ai_router._provider_disabled_reason(canon) is None
+        except Exception:
+            return True
+
+    if _usable("xai", ai_router.xai_key):
         return AIModel.GROK, "xai", True
-    if ai_router.anthropic_key:
+    if _usable("minimax", getattr(ai_router, "minimax_key", "")):
+        return AIModel.MINIMAX, "minimax", False
+    if _usable("claude", ai_router.anthropic_key):
         return AIModel.CLAUDE_OPUS, "anthropic", False
-    if ai_router.openai_key:
+    if _usable("openai", ai_router.openai_key):
         return AIModel.OPENAI_4O, "openai", False
-    if ai_router.groq_key:
+    if _usable("groq", ai_router.groq_key):
         return AIModel.GROQ, "groq", False
-    return AIModel.CLAUDE_OPUS, "unknown", False
+    return None, "unknown", False
 
 
 def _code_protocol_intro(task: "CodeTask", execution_mode: str) -> str:
@@ -963,6 +975,22 @@ class CodeTaskRunner:
                 if not response:
                     task.add_log("warning", f"Model returned empty response on iteration {iteration + 1}")
                     break
+
+                # 2026-09-29: provider down + fallback disabled -> fail cleanly
+                # with the router's explanation instead of looping/claiming work.
+                if getattr(response, "provider_unavailable", False):
+                    task.state = CodeTaskState.ERROR
+                    task.failure_reason = (
+                        f"Code model provider unavailable (provider={task.provider_used or 'unknown'}, "
+                        f"model={task.model_used or 'unknown'}): {(response.content or '').strip()[:400]}"
+                    )
+                    task.error = task.failure_reason
+                    task.result = _format_failure_evidence(task, "code model provider unavailable (no fallback)")
+                    task.completed_at = datetime.utcnow().isoformat()
+                    task.add_log("error", task.error)
+                    update_task(task)
+                    logger.error(f"Code task {task.id} aborted: provider unavailable")
+                    return
 
                 response_text = response.content or ""
                 tool_calls = [

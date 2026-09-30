@@ -1010,6 +1010,73 @@ class AIRouter:
             self._record_provider_error(canonical or provider_type, e)
         return None
 
+    # ── Legacy (explicit-model) chain policy — 2026-09-29 MAX tune-up ──
+    # The explicit-model path (code_task_runner, desk ai_call, router with an
+    # explicit model) used to fall back MiniMax -> Grok -> Claude -> Groq ->
+    # OpenClaw -> Ollama regardless of MAX_ALLOW_FALLBACK and the MAX_DISABLE_*
+    # kill switches, so a MiniMax hiccup silently burned the exhausted
+    # Anthropic key. These helpers make that path honor the same policy as
+    # _chat_via_selected_routing.
+    _LEGACY_CANONICAL = {
+        "grok": "xai", "claude": "claude", "claude-opus-4-6": "claude",
+        "claude-sonnet-4-6": "claude", "groq": "groq", "openclaw": "openclaw",
+        "ollama-llama": "ollama", "gemini": "gemini", "gpt-4.1-nano": "openai",
+        "gpt-4o-mini": "openai", "gpt-4o": "openai", "minimax": "minimax",
+        "deepseek": "deepseek", "qwen": "qwen", "openrouter": "openrouter",
+    }
+    _KILL_SWITCH_REASONS = {
+        "disabled_by_kill_switch", "credits_unavailable",
+        "founder_disabled_due_to_stall_suspected", "disabled_by_platformforge",
+    }
+
+    def _legacy_canonical(self, model) -> str:
+        value = getattr(model, "value", model) or ""
+        return self._LEGACY_CANONICAL.get(str(value), canonical_provider(str(value)))
+
+    def _explicit_model_kill_switched(self, model) -> str | None:
+        canon = self._legacy_canonical(model)
+        if not canon:
+            return None
+        reason = self._provider_disabled_reason(canon)
+        return reason if reason in self._KILL_SWITCH_REASONS else None
+
+    @staticmethod
+    def _openclaw_quarantined() -> bool:
+        return os.getenv("OPENCLAW_QUARANTINE", "").strip().lower() in ("1", "true", "yes", "on")
+
+    def _legacy_provider_chain(self, use_model, primary_failed: bool, state: RoutingState) -> list:
+        """Ordered providers for the explicit-model chain, policy-filtered."""
+        all_providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.GROQ, AIModel.OPENCLAW, AIModel.OLLAMA]
+        ordered = [] if primary_failed else [use_model]
+        if state.fallback_enabled:
+            ordered += all_providers
+        providers = []
+        for candidate in ordered:
+            if candidate in providers:
+                continue
+            if candidate == AIModel.GROK and (self.max_disable_xai or not self.xai_key):
+                continue
+            if candidate == AIModel.OLLAMA and self.max_disable_ollama:
+                continue
+            if candidate == AIModel.OPENCLAW and self._openclaw_quarantined():
+                continue
+            canon = self._legacy_canonical(candidate)
+            reason = self._provider_disabled_reason(canon, state) if canon else None
+            if reason and not (reason == "missing_key" and canon in {"openclaw", "ollama"}):
+                continue
+            providers.append(candidate)
+        return providers
+
+    def _fallback_disabled_message(self, requested) -> str:
+        name = getattr(requested, "value", requested)
+        canon = self._legacy_canonical(requested)
+        err = self.last_provider_errors.get(canon) or self.last_provider_errors.get(str(name)) or "unknown error"
+        return (
+            f"Requested provider '{name}' failed and fallback is disabled "
+            f"(MAX_ALLOW_FALLBACK=false), so no other provider was called. "
+            f"Last error: {str(err)[:300]}"
+        )
+
     @staticmethod
     def _is_circuit_break_error(error_text: str | None) -> bool:
         text = (error_text or "").lower()
@@ -1138,7 +1205,13 @@ class AIRouter:
 
         # Canonical selector authority: when no explicit model enum is requested,
         # route through persisted selected provider/model state.
-        if model is None:
+        _ks_reason = self._explicit_model_kill_switched(use_model) if model is not None else None
+        if _ks_reason:
+            logger.info(
+                f"[MAX] Explicit model {getattr(use_model, 'value', use_model)} is kill-switched "
+                f"({_ks_reason}); routing via canonical selector instead"
+            )
+        if model is None or _ks_reason:
             return await self._chat_via_selected_routing(
                 full_messages=full_messages,
                 messages=messages,
@@ -1173,6 +1246,7 @@ class AIRouter:
         # Resolve Claude variants to the base CLAUDE provider for fallback chain
         # but track the specific model requested
         claude_model_id = "claude-sonnet-4-6"  # default Claude model
+        _requested_model = use_model
         if use_model == AIModel.CLAUDE_OPUS:
             claude_model_id = "claude-opus-4-6"
             use_model = AIModel.CLAUDE
@@ -1227,20 +1301,20 @@ class AIRouter:
                 self._record_provider_error("minimax", e)
                 use_model = AIModel.GROK  # fallback to Grok
 
-        # Build ordered provider chain: requested model first, then full fallback
-        # Chain: Grok -> Claude -> Groq -> OpenClaw -> Ollama
-        all_providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.GROQ, AIModel.OPENCLAW, AIModel.OLLAMA]
-        providers = []
-        for candidate in [use_model] + all_providers:
-            if candidate in providers:
-                continue
-            if candidate == AIModel.GROK and (self.max_disable_xai or not self.xai_key):
-                continue
-            if candidate == AIModel.OLLAMA and self.max_disable_ollama:
-                continue
-            providers.append(candidate)
+        # Build ordered provider chain: requested model first, then (only when
+        # MAX_ALLOW_FALLBACK=true) the policy-filtered fallback providers.
+        _state = self._refresh_routing_state()
+        _primary_failed = use_model != _requested_model and _requested_model not in (AIModel.CLAUDE_OPUS, AIModel.CLAUDE_SONNET)
+        if _primary_failed and not _state.fallback_enabled:
+            return AIResponse(
+                content=self._fallback_disabled_message(_requested_model),
+                model_used=getattr(_requested_model, "value", str(_requested_model)),
+                fallback_used=False,
+                provider_unavailable=True,
+            )
+        providers = self._legacy_provider_chain(use_model, _primary_failed, _state)
 
-        is_first = True
+        is_first = not _primary_failed
         for provider in providers:
             fallback = not is_first
             is_first = False
@@ -1344,7 +1418,13 @@ class AIRouter:
 
         # Keep stream route under the same authoritative selector policy by
         # resolving the response through canonical non-stream routing first.
-        if model is None:
+        _ks_reason = self._explicit_model_kill_switched(use_model) if model is not None else None
+        if _ks_reason:
+            logger.info(
+                f"[MAX] Explicit stream model {getattr(use_model, 'value', use_model)} is kill-switched "
+                f"({_ks_reason}); routing via canonical selector instead"
+            )
+        if model is None or _ks_reason:
             selected = await self._chat_via_selected_routing(
                 full_messages=full_messages,
                 messages=messages,
@@ -1442,6 +1522,7 @@ class AIRouter:
         # Legacy fallback chain for desk routing / explicit model requests
         # Resolve Claude variants
         claude_model_id = "claude-sonnet-4-6"
+        _requested_model = use_model
         if use_model == AIModel.CLAUDE_OPUS:
             claude_model_id = "claude-opus-4-6"
             use_model = AIModel.CLAUDE
@@ -1487,17 +1568,13 @@ class AIRouter:
                 self._record_provider_error("minimax", e)
                 use_model = AIModel.GROK
 
-        # Build ordered provider chain: requested model first, then full fallback
-        all_providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.GROQ, AIModel.OPENCLAW, AIModel.OLLAMA]
-        providers = []
-        for candidate in [use_model] + all_providers:
-            if candidate in providers:
-                continue
-            if candidate == AIModel.GROK and (self.max_disable_xai or not self.xai_key):
-                continue
-            if candidate == AIModel.OLLAMA and self.max_disable_ollama:
-                continue
-            providers.append(candidate)
+        # Build ordered provider chain (policy-filtered; see chat()).
+        _state = self._refresh_routing_state()
+        _primary_failed = use_model != _requested_model and _requested_model not in (AIModel.CLAUDE_OPUS, AIModel.CLAUDE_SONNET)
+        if _primary_failed and not _state.fallback_enabled:
+            yield self._fallback_disabled_message(_requested_model), "error"
+            return
+        providers = self._legacy_provider_chain(use_model, _primary_failed, _state)
 
         for provider in providers:
             if provider == AIModel.GROK and self.xai_key:
