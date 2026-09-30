@@ -481,8 +481,11 @@ def _service_status(unit: str) -> dict[str, Any]:
 
 def _http_json(url: str, timeout: float = 4.0) -> dict[str, Any]:
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
             resp = client.get(url)
+        if _is_access_redirect(resp):
+            return {"ok": False, "status_code": resp.status_code, "access_gated": True,
+                    "data": "Cloudflare Access login required (cannot read headless)"}
         data: Any
         try:
             data = resp.json()
@@ -493,13 +496,44 @@ def _http_json(url: str, timeout: float = 4.0) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
-def _http_status(url: str, timeout: float = 4.0) -> dict[str, Any]:
-    try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            resp = client.get(url)
-        return {"ok": resp.status_code < 400, "status_code": resp.status_code, "bytes": len(resp.content)}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+def _is_access_redirect(resp: "httpx.Response") -> bool:
+    loc = resp.headers.get("location", "") if resp is not None else ""
+    return resp is not None and resp.status_code in (301, 302, 303, 307, 308) and "cloudflareaccess.com" in loc
+
+
+def _public_label(probe: Any) -> str:
+    if not isinstance(probe, dict):
+        return "not checked"
+    if probe.get("access_gated"):
+        return f"{probe.get('status_code')} (Cloudflare Access login — reachable, auth-gated)"
+    return str(probe.get("status_code") if probe.get("status_code") is not None else probe.get("error", "unreachable"))
+
+
+def _http_status(url: str, timeout: float = 4.0, retries: int = 1) -> dict[str, Any]:
+    """GET probe. 2026-09-29 truth fixes:
+
+    * Redirects are followed manually so a Cloudflare Access login redirect is
+      reported as ``access_gated`` (reachable, auth required) instead of the
+      login page's misleading 200.
+    * A local service that answers with any HTTP status < 500 is reachable;
+      one retry absorbs a transient hiccup (e.g. Next.js cold route compile)
+      so a live Command Center on :3005 is not reported offline.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+                resp = client.get(url)
+                hops = 0
+                while resp.is_redirect and hops < 5 and not _is_access_redirect(resp):
+                    resp = client.get(resp.headers["location"] if "://" in resp.headers.get("location", "") else str(resp.url.join(resp.headers.get("location", "/"))))
+                    hops += 1
+            if _is_access_redirect(resp):
+                return {"ok": True, "status_code": resp.status_code, "access_gated": True, "bytes": 0}
+            return {"ok": resp.status_code < 500, "status_code": resp.status_code, "bytes": len(resp.content)}
+        except Exception as exc:
+            last_exc = exc
+    return {"ok": False, "error": str(last_exc)}
 
 
 def _check_hermes_dashboard() -> dict[str, Any]:
@@ -676,10 +710,10 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         public_frontend_root = _http_status("https://studio.empirebox.store/")
         public_memory_bank = _http_status("https://api.empirebox.store/api/v1/chats/memory-bank?channel=all&limit=1")
 
-    local_hash = (local_api_git.get("data") or {}).get("last_commit_hash") if isinstance(local_api_git.get("data"), dict) else None
+    local_hash = ((local_api_git.get("data") or {}).get("commit_hash") or (local_api_git.get("data") or {}).get("last_commit_hash")) if isinstance(local_api_git.get("data"), dict) else None
     public_hash = None
     if public_api_git and isinstance(public_api_git.get("data"), dict):
-        public_hash = public_api_git["data"].get("last_commit_hash")
+        public_hash = public_api_git["data"].get("commit_hash") or public_api_git["data"].get("last_commit_hash")
 
     # Run Hermes inspection (read-only, no cron trigger)
     hermes_dashboard = _check_hermes_dashboard()
@@ -691,7 +725,11 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     stale_or_broken: list[str] = []
     if not backend_service["active"] or not _port_open("127.0.0.1", 8000) or not local_backend_root["ok"]:
         stale_or_broken.append("backend_port_8000_unhealthy")
-    if not frontend_service["active"] or not _port_open("127.0.0.1", 3005) or not local_frontend_root["ok"]:
+    # 2026-09-29: the Command Center is healthy when :3005 accepts connections
+    # and answers HTTP (<500). systemd state alone is not a liveness signal
+    # (e.g. a portal started outside the unit is still serving).
+    _fe_port = _port_open("127.0.0.1", 3005, timeout=2.0)
+    if not _fe_port or not local_frontend_root["ok"]:
         stale_or_broken.append("frontend_port_3005_unhealthy")
     if local_hash and commit["hash"] and local_hash != commit["hash"]:
         stale_or_broken.append("local_api_commit_stale")
@@ -1424,12 +1462,12 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
     public_hash = None
     public_git = public.get("api_git") or {}
     if isinstance(public_git.get("data"), dict):
-        public_hash = public_git["data"].get("last_commit_hash")
+        public_hash = public_git["data"].get("commit_hash") or public_git["data"].get("last_commit_hash")
 
     local_hash = None
     local_git = local.get("api_git") or {}
     if isinstance(local_git.get("data"), dict):
-        local_hash = local_git["data"].get("last_commit_hash")
+        local_hash = local_git["data"].get("commit_hash") or local_git["data"].get("last_commit_hash")
 
     if _wants_key_only(message):
         return "\n".join(
@@ -1473,7 +1511,7 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
         f"- v10 Test Frontend (port 3010): {'UP' if f3010.get('port_open') else 'DOWN/not started'} | {f3010.get('service', 'dev server')}",
         f"- Local API commit: {local_hash} matches_current={local.get('api_matches_current_commit')}",
         f"- Public API commit: {public_hash} matches_current={public.get('api_matches_current_commit')}",
-        f"- Public API root: {(public.get('api_root') or {}).get('status_code')} | Public Studio root: {(public.get('studio_root') or {}).get('status_code')}",
+        f"- Public API root: {_public_label(public.get('api_root'))} | Public Studio root: {_public_label(public.get('studio_root'))}",
         f"- Hermes dashboard (port 9119): state={result.get('hermes_dashboard', {}).get('state')} process_detected={result.get('hermes_dashboard', {}).get('process_detected')} evidence={result.get('hermes_dashboard', {}).get('evidence')}",
         f"- Hermes cron: state={result.get('hermes_cron', {}).get('state')} jobs={result.get('hermes_cron', {}).get('jobs_count')}",
         f"- Selected provider: {result.get('routing_state', {}).get('selected_provider')} ({result.get('routing_state', {}).get('selected_provider_label') or result.get('routing_state', {}).get('selected_provider')})",

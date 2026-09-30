@@ -25,7 +25,7 @@ EMPIRE_CATALOG = {
             "info": "info@empirebox.store",
             "support": "support@empirebox.store",
         },
-        "repo": "github.com/r22gir/Empire (private, main branch)",
+        "repo": "github.com/r22gir/Empire (private; live branch feature/drawing-standard — never work on main)",
         "origin": "Inspired by Alex Finn (AI YouTuber) — OpenClaw + Ollama + Claude API on Mac Mini. Adapted by RG starting on Beelink EQR5.",
     },
 
@@ -73,7 +73,7 @@ EMPIRE_CATALOG = {
             "url": "studio.empirebox.store",
             "cc_screen": "DashboardScreen.tsx",
             "tech": "Next.js 14, React 18, TypeScript, Tailwind CSS",
-            "systemd": "empire-cc",
+            "systemd": "empire-portal",
             "features": ["MAX AI chat", "Workroom dashboard", "CraftForge dashboard", "Desks management", "Tasks", "Documents", "Inbox", "System report", "Cost tracker", "Quote builder", "Vision analysis"],
             "desk": None,
             "target_user": "Founder (RG)",
@@ -475,7 +475,7 @@ EMPIRE_CATALOG = {
 
     "services": {
         "backend": {"name": "Backend API (FastAPI)", "port": 8000, "systemd": "empire-backend", "type": "systemd", "health_url": "/api/v1/system/stats"},
-        "cc": {"name": "Command Center (Next.js)", "port": 3005, "systemd": "empire-cc", "type": "systemd", "health_url": "/"},
+        "cc": {"name": "Command Center (Next.js)", "port": 3005, "systemd": "empire-portal", "type": "systemd", "health_url": "/"},
         "openclaw": {"name": "OpenClaw AI", "port": 7878, "systemd": "empire-openclaw", "type": "systemd", "health_url": "/health"},
         "ollama": {"name": "Ollama LLM Server", "port": 11434, "systemd": "ollama", "type": "systemd", "health_url": "/api/tags"},
         "recoveryforge": {"name": "RecoveryForge", "port": 3077, "systemd": None, "type": "standalone"},
@@ -487,7 +487,7 @@ EMPIRE_CATALOG = {
 
     "integrations": {
         "xai_grok": {"name": "xAI Grok", "env_var": "XAI_API_KEY", "configured": True, "purpose": "Primary AI provider — chat, vision, TTS (Rex voice)", "model": "grok-3-fast"},
-        "anthropic_claude": {"name": "Anthropic Claude", "env_var": "ANTHROPIC_API_KEY", "configured": True, "purpose": "Secondary AI — Sonnet for general, Opus for Atlas coding", "models": ["claude-sonnet-4-6", "claude-opus-4-6"]},
+        "anthropic_claude": {"name": "Anthropic Claude", "env_var": "ANTHROPIC_API_KEY", "configured": True, "purpose": "DISABLED 2026-09 — keys exhausted (MAX_DISABLE_CLAUDE); never used as fallback", "models": ["claude-sonnet-4-6", "claude-opus-4-6"]},
         "groq": {"name": "Groq", "env_var": "GROQ_API_KEY", "configured": True, "purpose": "Fast inference — Llama 3.3 70B + Whisper STT", "model": "llama-3.3-70b-versatile"},
         "telegram": {"name": "Telegram Bot", "env_var": "TELEGRAM_BOT_TOKEN", "configured": True, "purpose": "Founder notifications, quote PDFs, voice messages"},
         "stability_ai": {"name": "Stability AI", "env_var": "STABILITY_API_KEY", "configured": True, "purpose": "Image inpainting for design mockups"},
@@ -670,7 +670,7 @@ EMPIRE_CATALOG = {
     },
 
     "ai_models": {
-        "routing_chain": ["xAI Grok (primary)", "Claude Sonnet 4.6", "Groq Llama 3.3 70B", "OpenClaw", "Ollama"],
+        "routing_chain": ["Canonical selector: MiniMax M3 (primary)", "No automatic fallback (MAX_ALLOW_FALLBACK=false)"],
         "models": {
             "grok-3-fast": {"provider": "xAI", "cost_input": 5.00, "cost_output": 15.00, "timeout": 15, "primary": True},
             "claude-sonnet-4-6": {"provider": "Anthropic", "cost_input": 3.00, "cost_output": 15.00, "timeout": 30, "primary": False},
@@ -695,7 +695,7 @@ EMPIRE_CATALOG = {
             "Dual-use rule: RG dogfoods products first, then sells to SaaS subscribers",
             "Iframe rule: external apps (RecoveryForge, RelistApp) embedded via iframe in CC",
             "Desk separation: each desk has its own agent, personality, tools, and optional model preference",
-            "AI routing fallback chain: Grok → Claude → Groq → OpenClaw → Ollama",
+            "AI routing: canonical selector (MiniMax M3); fallback off; Claude/Grok/Groq/Ollama kill-switched; OpenClaw quarantined",
             "Tool blocks are the ONLY way MAX executes actions — text alone does nothing",
             "File safety: truncation protection, auto-backup, critical file guard for key files",
             "Cost tracking: every AI API call auto-logged with tokens, cost, provider, model",
