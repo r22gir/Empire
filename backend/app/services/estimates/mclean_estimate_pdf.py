@@ -815,38 +815,82 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
     _section_label(c, MARGIN_L, y, "AREA BREAKDOWN", mono)
     y -= 16
 
+    # Estimate-table columns: # | Description | Qty | Unit | Unit Price | Amount.
+    desc_x = MARGIN_L + 22
+    qty_x = PW - MARGIN_R - 272
+    unit_x = PW - MARGIN_R - 222
+    rate_x = PW - MARGIN_R - 142
+    amount_x = PW - MARGIN_R
+    row_number = [1]
+
+    def table_header(y0: float) -> float:
+        c.setFont(sans_b, 7.5)
+        c.setFillColor(GOLD)
+        c.drawString(MARGIN_L, y0, "#")
+        c.drawString(desc_x, y0, "Description")
+        c.drawRightString(qty_x, y0, "Qty")
+        c.drawString(unit_x, y0, "Unit")
+        c.drawRightString(rate_x, y0, "Unit Price")
+        c.drawRightString(amount_x, y0, "Amount")
+        c.setStrokeColor(HAIR)
+        c.setLineWidth(0.6)
+        c.line(MARGIN_L, y0 - 5, amount_x, y0 - 5)
+        return y0 - 16
+
+    def table_row(item: Dict[str, Any], y0: float) -> float:
+        desc = str(item.get("description") or "Item")
+        qty = float(item.get("quantity") or 1)
+        unit = str(item.get("unit") or "ea")
+        amount = float(item.get("amount") or 0)
+        rate = float(item.get("unit_price") or (amount / qty if qty else 0))
+        qty_text = str(int(qty)) if qty.is_integer() else f"{qty:g}"
+        c.setStrokeColor(HAIR)
+        c.setLineWidth(0.35)
+        c.line(MARGIN_L, y0 + 4, amount_x, y0 + 4)
+        c.setFont(sans, 8)
+        c.setFillColor(DETAIL)
+        c.drawString(MARGIN_L, y0 - 5, str(row_number[0]))
+        c.drawString(desc_x, y0 - 5, desc[:72])
+        c.drawRightString(qty_x, y0 - 5, qty_text)
+        c.drawString(unit_x, y0 - 5, unit)
+        c.drawRightString(rate_x, y0 - 5, _money(rate))
+        c.drawRightString(amount_x, y0 - 5, _money(amount))
+        c.line(MARGIN_L, y0 - 10, amount_x, y0 - 10)
+        row_number[0] += 1
+        return y0 - 14
+
+    def subtotal_row(label: str, amount: float, y0: float) -> float:
+        c.setFont(sans_b, 8)
+        c.setFillColor(DK)
+        c.drawString(desc_x, y0 - 5, label)
+        c.drawRightString(amount_x, y0 - 5, _money(amount))
+        c.setStrokeColor(GOLD)
+        c.setLineWidth(0.55)
+        c.line(MARGIN_L, y0 + 4, amount_x, y0 + 4)
+        c.line(MARGIN_L, y0 - 10, amount_x, y0 - 10)
+        return y0 - 14
+
     def draw_area(area: Dict[str, Any], y0: float) -> float:
         name = str(area.get("name") or "Area")
+        c.setFillColor(PANEL)
+        c.rect(MARGIN_L, y0 - 12, CONTENT_W, 18, fill=1, stroke=0)
         c.setFont(sans_b, 10)
         c.setFillColor(DK)
-        c.drawString(MARGIN_L, y0, name[:100])
-        y0 -= 13
+        c.drawString(MARGIN_L + 6, y0 - 5, name[:100])
+        y0 -= 22
+        y0 = table_header(y0)
         for label, key in (("Original items", "original_items"), ("Add-ons", "addons")):
             c.setFont(sans_b, 8.5)
             c.setFillColor(GOLD)
-            c.drawString(MARGIN_L + 8, y0, label)
+            c.drawString(desc_x, y0, label)
             y0 -= 12
             for item in list(area.get(key) or []):
-                desc = str(item.get("description") or "Item")
-                amount = float(item.get("amount") or 0)
-                c.setFont(sans, 8.5)
-                c.setFillColor(DETAIL)
-                c.drawString(MARGIN_L + 18, y0, desc[:112])
-                c.drawRightString(PW - MARGIN_R, y0, _money(amount))
-                y0 -= 11
+                y0 = table_row(item, y0)
             subtotal_key = "original_subtotal" if key == "original_items" else "addons_subtotal"
             subtotal_label = "Original subtotal" if key == "original_items" else "Add-ons subtotal"
-            c.setFont(sans_b, 8.5)
-            c.setFillColor(DK)
-            c.drawString(MARGIN_L + 18, y0, subtotal_label)
-            c.drawRightString(PW - MARGIN_R, y0, _money(area.get(subtotal_key) or 0))
-            y0 -= 13
-        _hr(c, y0 + 4, weight=0.7, col=GOLD)
-        c.setFont(sans_b, 9)
-        c.setFillColor(DK)
-        c.drawString(MARGIN_L + 8, y0 - 4, "Area total")
-        c.drawRightString(PW - MARGIN_R, y0 - 4, _money(area.get("total") or 0))
-        return y0 - 20
+            y0 = subtotal_row(subtotal_label, float(area.get(subtotal_key) or 0), y0)
+        y0 = subtotal_row("Area total", float(area.get("total") or 0), y0)
+        return y0 - 10
 
     for idx, area in enumerate(areas):
         if idx and idx % 2 == 0:
@@ -884,26 +928,21 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
     _section_label(c, MARGIN_L, y, "OPTIONAL PASSWAY HARDWARE", mono)
     y -= 18
     optional = (quote.get("metadata") or {}).get("optional_hardware") or {}
-    for desc, key, default in (
-        ('2" rings, 8-pack — 3 packs', "rings", 224.85),
-        ('2" reeded pole, 8 ft — 1', "pole", 210.82),
-        ('2" single brackets, 3½" return — 3', "brackets", 96.24),
-    ):
-        c.setFont(sans, 9)
-        c.setFillColor(DETAIL)
-        c.drawString(MARGIN_L + 8, y, desc)
-        c.drawRightString(PW - MARGIN_R, y, _money(optional.get(key, default)))
-        y -= 15
+    y = table_header(y)
+    optional_rows = [
+        {"description": '2" rings, 8-pack', "quantity": 3, "unit": "ea", "unit_price": 74.95, "amount": optional.get("rings", 224.85)},
+        {"description": '2" reeded pole, 8 ft', "quantity": 1, "unit": "ft", "unit_price": 210.82, "amount": optional.get("pole", 210.82)},
+        {"description": '2" single brackets, 3½" return', "quantity": 3, "unit": "ea", "unit_price": 32.08, "amount": optional.get("brackets", 96.24)},
+    ]
+    for item in optional_rows:
+        y = table_row(item, y)
     optional_total = float(optional.get("total", 531.91) or 531.91)
-    y -= 5
+    y = subtotal_row("Optional passway hardware", optional_total, y)
+    y -= 6
     c.setFont(sans_b, 10)
     c.setFillColor(DK)
-    c.drawString(MARGIN_L + 8, y, "Optional passway hardware")
-    c.drawRightString(PW - MARGIN_R, y, _money(optional_total))
-    y -= 20
-    c.setFont(sans_b, 10)
-    c.drawString(MARGIN_L + 8, y, "Total with optional hardware")
-    c.drawRightString(PW - MARGIN_R, y, _money(grand_total + optional_total))
+    c.drawString(desc_x, y, "Total with optional hardware")
+    c.drawRightString(amount_x, y, _money(grand_total + optional_total))
     c.save()
     return buf.getvalue()
 

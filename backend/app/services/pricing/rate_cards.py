@@ -25,6 +25,7 @@ CLIENT_RATE_RULES: dict[str, dict[str, object]] = {
         "hardware_shipping_line": False,
         "valances_are_add_ons_over_ripplefold": True,
         "swags_per_window": 1,
+        "center_tassels_per_swag": 2,
         "swag_trim_application_included_in_valance_rate": True,
         "trim_edges": "leading edge only",
         "tassel_tiebacks_replace_holdbacks": True,
