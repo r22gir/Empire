@@ -177,10 +177,13 @@ _INT = {"type": "integer"}
 _FALLBACK_TOOL_SCHEMAS = {
     # Parameter names match the tool_executor handlers.
     "search_quotes": {
-        "description": "List/search Empire quotes (newest first). Filter by customer name and/or status. Read-only.",
+        "description": "List/search Empire quotes newest by updated_at. Matches customer, project/site, address, notes, and quote number. Use latest=true for the newest match or today=true for today's newest quote. Read-only.",
         "parameters": _obj({
+            "query": {"type": "string", "description": "Free-text customer/project/site/notes search, e.g. Willard (optional)"},
             "customer_name": {"type": "string", "description": "Part of the customer's name (optional)"},
             "status": {"type": "string", "description": "Optional status filter: draft, founder_review, sent, accepted, rejected, expired"},
+            "latest": {"type": "boolean", "description": "Return only the newest matching quote"},
+            "today": {"type": "boolean", "description": "Restrict to quotes created or updated today"},
             "limit": {"type": "integer", "description": "Max results (default 5, max 20)"},
         }),
     },

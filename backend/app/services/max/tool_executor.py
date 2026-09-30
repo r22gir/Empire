@@ -930,8 +930,13 @@ def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
         params.get("query") or params.get("search") or params.get("customer_name") or ""
     ).strip()
     lowered = raw_query.lower()
-    today_requested = bool(re.search(r"\btoday(?:'s|s)?\b", lowered))
-    latest_requested = bool(re.search(r"\b(?:latest|last)\b", lowered))
+    today_requested = bool(
+        params.get("today") or re.search(r"\btoday(?:'s|s)?\b", lowered)
+    )
+    latest_requested = bool(
+        params.get("latest") or params.get("latest_only")
+        or re.search(r"\b(?:latest|last)\b", lowered)
+    )
     # Search terms are the meaningful entity words; temporal/request words
     # should not become literal SQL search terms.
     term = re.sub(r"\b(?:today(?:'s|s)?|latest|last|quote|quotes)\b", " ", lowered)
