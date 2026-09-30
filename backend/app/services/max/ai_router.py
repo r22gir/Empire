@@ -196,7 +196,7 @@ from .token_tracker import token_tracker
 
 # Per-desk model routing — overrides primary model when desk is specified
 DESK_MODEL_ROUTING = {
-    "codeforge": AIModel.CLAUDE_OPUS,     # Atlas — code quality critical
+    "codeforge": AIModel.MINIMAX,         # Atlas — MiniMax M3 (was Claude Opus; Anthropic keys exhausted)
     "analytics": AIModel.CLAUDE_SONNET,   # Raven — data analysis
     "quality": AIModel.CLAUDE_SONNET,     # Phoenix — accuracy critical
     "innovation": AIModel.CLAUDE_SONNET,  # Spark — creative reasoning

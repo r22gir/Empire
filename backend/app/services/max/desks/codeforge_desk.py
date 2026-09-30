@@ -25,7 +25,7 @@ class CodeForgeDesk(BaseDesk):
         "git_ops", "test_runner", "project_scaffold",
         "code_review", "bug_fixing", "feature_development",
     ]
-    preferred_model = "claude-opus-4-6"  # Atlas gets Opus for coding tasks
+    preferred_model = "minimax"  # Atlas: MiniMax (MINIMAX_MODEL=MiniMax-M3); Anthropic keys exhausted 2026-09-29
 
     def __init__(self):
         super().__init__()

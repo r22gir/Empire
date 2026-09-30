@@ -216,6 +216,8 @@ def _infer_provider_from_model(model_used: str | None) -> str:
         return "ollama"
     if model.startswith("deepseek"):
         return "deepseek"
+    if model.startswith("minimax"):
+        return "minimax"
     # NOTE: deliberately NO `"openclaw"` branch — wrapper providers never
     # round-trip through the model field. The openclaw wrapper's model is
     # resolved to its inner delegate (DEEPSEEK_MODEL) at the AIResponse

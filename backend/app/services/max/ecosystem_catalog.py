@@ -358,7 +358,7 @@ EMPIRE_CATALOG = {
             "role": "Development operations — code creation, editing, testing, version control",
             "personality": "Precise, methodical — reads before writing, tests after changing",
             "tools": ["file_read", "file_write", "file_edit", "file_append", "git_ops", "test_runner", "project_scaffold"],
-            "preferred_model": "claude-opus-4-6",
+            "preferred_model": "minimax",
         },
         "website": {
             "name": "WebsiteDesk",
@@ -680,7 +680,7 @@ EMPIRE_CATALOG = {
             "ollama-llama3.1": {"provider": "Local", "cost_input": 0, "cost_output": 0, "timeout": 30, "primary": False},
         },
         "per_desk_routing": {
-            "codeforge": "claude-opus-4-6",
+            "codeforge": "minimax (MiniMax-M3)",
             "analytics": "claude-sonnet-4-6",
             "quality": "claude-sonnet-4-6",
             "default": "grok-3-fast",
