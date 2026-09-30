@@ -46,6 +46,9 @@ def test_max_email_service_uses_sendgrid_http_without_sdk(monkeypatch, tmp_path)
     assert sent["json"]["from"]["email"] == "max@empirebox.store"
     assert sent["json"]["personalizations"][0]["to"][0]["email"] == "founder@example.com"
     assert sent["json"]["personalizations"][0]["cc"][0]["email"] == "copy@example.com"
+    assert [part["type"] for part in sent["json"]["content"]] == ["text/plain", "text/html"]
+    assert "Empire Workroom" in sent["json"]["content"][0]["value"]
+    assert "<div class=\"signature\">" in sent["json"]["content"][1]["value"]
     assert sent["json"]["attachments"][0]["filename"] == Path(attachment).name
 
 
@@ -160,6 +163,13 @@ def test_smtp_uses_smtp_from_when_set(monkeypatch, tmp_path):
     from_name, from_addr = _decoded_address(sent_records[0]["msg"], "From")
     assert from_name == "MAX — Empire AI"
     assert from_addr == "max@empirebox.store"
+    parsed = message_from_string(sent_records[0]["msg"])
+    assert parsed.get_content_type() == "multipart/mixed"
+    alternative = next(part for part in parsed.walk() if part.get_content_type() == "multipart/alternative")
+    alternatives = alternative.get_payload()
+    assert [part.get_content_type() for part in alternatives[:2]] == ["text/plain", "text/html"]
+    assert "\n" in alternatives[0].get_payload(decode=True).decode("utf-8")
+    assert "class=\"signature\"" in alternatives[1].get_payload(decode=True).decode("utf-8")
 
 
 def test_smtp_reply_to_header_when_configured(monkeypatch, tmp_path):

@@ -26,6 +26,8 @@ from email import encoders
 from email.utils import formataddr
 from pathlib import Path
 
+from app.services.max.email_template import html_to_text, render_house_email
+
 import httpx
 
 logger = logging.getLogger("max.email_service")
@@ -56,12 +58,13 @@ class EmailService:
         self,
         to: str,
         subject: str,
-        body_html: str,
+        body_html: str | None = None,
         attachments: list[str] | None = None,
         cc: str | None = None,
         in_reply_to: str | None = None,
         references: str | None = None,
         reply_to: str | None = None,
+        body_text: str | None = None,
     ) -> bool:
         """Send an email. Returns True on success.
 
@@ -70,7 +73,8 @@ class EmailService:
         Args:
             to: recipient email address
             subject: email subject line
-            body_html: HTML body content
+            body_html: legacy HTML body input (converted to the house template)
+            body_text: preferred plain-text source for the house template
             attachments: list of file paths to attach
             cc: optional CC address
             in_reply_to: Message-ID this email replies to (sets In-Reply-To)
@@ -81,21 +85,23 @@ class EmailService:
             raise RuntimeError(
                 "Email not configured — set SENDGRID_API_KEY or SMTP_USER/SMTP_PASSWORD env vars"
             )
-        self._verify_send_payload(to, subject, body_html, attachments)
+        source_text = body_text if body_text is not None else html_to_text(body_html or "")
+        self._verify_send_payload(to, subject, source_text, attachments)
+        rendered = render_house_email(source_text)
 
         if self.sendgrid_key:
-            sent = self._send_sendgrid(to, subject, body_html, attachments, cc, in_reply_to, references, reply_to)
+            sent = self._send_sendgrid(to, subject, rendered.plain_text, rendered.html, attachments, cc, in_reply_to, references, reply_to)
         else:
-            sent = self._send_smtp(to, subject, body_html, attachments, cc, in_reply_to, references, reply_to)
+            sent = self._send_smtp(to, subject, rendered.plain_text, rendered.html, attachments, cc, in_reply_to, references, reply_to)
         if sent:
-            self._write_outbound_ledger(to, subject, body_html, attachments, cc)
+            self._write_outbound_ledger(to, subject, rendered.html, attachments, cc)
         return sent
 
     def _verify_send_payload(
         self,
         to: str,
         subject: str,
-        body_html: str,
+        body_text: str,
         attachments: list[str] | None = None,
     ) -> None:
         """Fail before provider calls when the message or attachments are not real."""
@@ -103,7 +109,7 @@ class EmailService:
             raise ValueError("Email recipient is required")
         if not str(subject or "").strip():
             raise ValueError("Email subject is required")
-        if not str(body_html or "").strip():
+        if not str(body_text or "").strip():
             raise ValueError("Email body is empty; refusing to report a delivered analysis")
         missing = [str(path) for path in (attachments or []) if not Path(str(path)).exists()]
         if missing:
@@ -138,6 +144,7 @@ class EmailService:
         self,
         to: str,
         subject: str,
+        body_text: str,
         body_html: str,
         attachments: list[str] | None = None,
         cc: str | None = None,
@@ -145,16 +152,10 @@ class EmailService:
         references: str | None = None,
         reply_to: str | None = None,
     ) -> bool:
-        """Send via SendGrid v3 API using httpx.
-
-        The backend already depends on httpx. Keeping this path SDK-free avoids
-        a false "configured but unusable" state when the optional sendgrid
-        package is not installed.
-        """
+        """Send a multipart alternative message through SendGrid."""
         try:
             import base64
             import mimetypes
-            import httpx
 
             personalization: dict = {"to": [{"email": to}]}
             if cc:
@@ -164,10 +165,12 @@ class EmailService:
                 "personalizations": [personalization],
                 "from": {"email": self.sendgrid_from, "name": self.from_name},
                 "subject": subject,
-                "content": [{"type": "text/html", "value": body_html}],
+                "content": [
+                    {"type": "text/plain", "value": body_text},
+                    {"type": "text/html", "value": body_html},
+                ],
             }
 
-            # Threading / reply headers (SendGrid custom args)
             sg_headers: dict = {}
             if in_reply_to:
                 sg_headers["In-Reply-To"] = in_reply_to
@@ -178,7 +181,6 @@ class EmailService:
             elif self.reply_to:
                 sg_headers["Reply-To"] = self.reply_to
             if sg_headers:
-                # Per personalization for reply threading
                 personalization["headers"] = sg_headers
 
             encoded_attachments = []
@@ -203,7 +205,7 @@ class EmailService:
                 timeout=30,
             )
             if response.status_code < 300:
-                logger.info(f"Email sent via SendGrid to {to} — subject: {subject}")
+                logger.info("Email sent via SendGrid to %s — subject: %s", to, subject)
                 return True
             logger.error(
                 "SendGrid returned status %s for %s: %s",
@@ -212,14 +214,15 @@ class EmailService:
                 response.text[:500],
             )
             raise RuntimeError(f"SendGrid error: status {response.status_code}")
-        except Exception as e:
-            logger.error(f"SendGrid send failed: {e}")
+        except Exception as exc:
+            logger.error("SendGrid send failed: %s", exc)
             raise
 
     def _send_smtp(
         self,
         to: str,
         subject: str,
+        body_text: str,
         body_html: str,
         attachments: list[str] | None = None,
         cc: str | None = None,
@@ -227,12 +230,11 @@ class EmailService:
         references: str | None = None,
         reply_to: str | None = None,
     ) -> bool:
-        """Send via SMTP with full threading header support."""
-        msg = MIMEMultipart()
+        """Send multipart plain-text + HTML alternatives through SMTP."""
+        msg = MIMEMultipart("mixed")
         msg["From"] = formataddr((self.from_name, self.from_addr))
         msg["To"] = to
         msg["Subject"] = subject
-        # Threading headers
         if in_reply_to:
             msg["In-Reply-To"] = in_reply_to
         if references:
@@ -243,18 +245,17 @@ class EmailService:
         if cc:
             msg["Cc"] = cc
 
-        msg.attach(MIMEText(body_html, "html"))
+        alternatives = MIMEMultipart("alternative")
+        alternatives.attach(MIMEText(body_text, "plain", "utf-8"))
+        alternatives.attach(MIMEText(body_html, "html", "utf-8"))
+        msg.attach(alternatives)
 
-        # Attach files
         for filepath in (attachments or []):
             path = Path(filepath)
             part = MIMEBase("application", "octet-stream")
             part.set_payload(path.read_bytes())
             encoders.encode_base64(part)
-            part.add_header(
-                "Content-Disposition",
-                f'attachment; filename="{path.name}"',
-            )
+            part.add_header("Content-Disposition", f'attachment; filename="{path.name}"')
             msg.attach(part)
 
         recipients = [to]
@@ -268,10 +269,10 @@ class EmailService:
                 server.ehlo()
                 server.login(self.user, self.password)
                 server.sendmail(self.from_addr, recipients, msg.as_string())
-            logger.info(f"Email sent via SMTP to {to} — subject: {subject}")
+            logger.info("Email sent via SMTP to %s — subject: %s", to, subject)
             return True
-        except Exception as e:
-            logger.error(f"SMTP send failed: {e}")
+        except Exception as exc:
+            logger.error("SMTP send failed: %s", exc)
             raise
 
 

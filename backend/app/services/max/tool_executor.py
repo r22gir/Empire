@@ -2688,7 +2688,7 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         sent = svc.send(
             to=to,
             subject=subject,
-            body_html=body,
+            body_text=body,
             attachments=converted_attachments,
             cc=", ".join(cc_list) if cc_list else None,
             reply_to=DEFAULT_REPLY_TO,
@@ -2772,23 +2772,20 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             return ToolResult(tool="send_quote_email", success=False, error="Email not configured — set SMTP_USER and SMTP_PASSWORD in .env")
 
         subject = f"Estimate {quote_number} — {customer}"
-        body_html = f"""
-        <div style="font-family: Arial, sans-serif; max-width: 600px;">
-            <h2 style="color: #D4AF37;">Estimate {quote_number}</h2>
-            <p>Hi,</p>
-            <p>Please find attached your estimate for review.</p>
-            <table style="margin: 16px 0; border-collapse: collapse;">
-                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Customer:</td><td>{customer}</td></tr>
-                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Estimate Total:</td><td>${total:,.2f}</td></tr>
-                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Quote #:</td><td>{quote_number}</td></tr>
-            </table>
-            <p>If you have any questions, please don't hesitate to reach out.</p>
-            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
-            <p style="color: #888; font-size: 12px;">Sent via Empire — Powered by MAX AI</p>
-        </div>
-        """
+        body_text = f"""Hi,
 
-        sent = svc.send(to=to, subject=subject, body_html=body_html, attachments=[pdf_path])
+Please find attached your estimate for review.
+
+Attached:
+- Estimate {quote_number}
+
+Customer: {customer}
+Estimate total: ${total:,.2f}
+Quote number: {quote_number}
+
+If you have any questions, please don't hesitate to reach out."""
+
+        sent = svc.send(to=to, subject=subject, body_text=body_text, attachments=[pdf_path])
         if not sent:
             return ToolResult(tool="send_quote_email", success=False, error="Email provider did not verify send acceptance")
         pdf_size = os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
