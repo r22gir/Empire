@@ -9,11 +9,20 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File as FileParam
+from fastapi import APIRouter, UploadFile, File as FileParam, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 logger = logging.getLogger("max.avatar")
 router = APIRouter(prefix="/avatar", tags=["avatar"])
+
+# PresentationScreen sends mode="presentation"; it is the voiced (TTS) mode,
+# same as the legacy "full". Before 2026-09-29 only "full" triggered TTS, so
+# the presentation avatar never spoke.
+VOICED_MODES = {"full", "presentation", "voice"}
+
+
+def _is_voiced(mode: Optional[str]) -> bool:
+    return (mode or "").strip().lower() in VOICED_MODES
 
 
 # ── Schemas ──────────────────────────────────────────────────────────
@@ -82,7 +91,7 @@ async def avatar_speak(req: SpeakRequest):
     """Generate speech for avatar. Only 'full' mode calls TTS (costs money)."""
     from app.services.max.token_tracker import token_tracker
 
-    if req.mode in ("text", "compact"):
+    if not _is_voiced(req.mode):
         # Zero-cost: just return text
         token_tracker.log_usage(
             model="avatar-text", provider="local",
@@ -133,7 +142,7 @@ async def avatar_chat(req: ChatRequest):
     timestamps = None
 
     # Only generate TTS in full mode with voice=True
-    if req.voice and req.mode == "full":
+    if req.voice and _is_voiced(req.mode):
         from app.services.max.tts_service import tts_service
         audio_bytes = await tts_service.synthesize_for_web(response_text[:500])
         if audio_bytes:
@@ -179,7 +188,7 @@ async def avatar_listen(file: UploadFile = FileParam(...), mode: str = "text"):
             transcript = "[STT not configured — GROQ_API_KEY missing]"
 
         # Forward to chat
-        chat_req = ChatRequest(message=transcript, voice=(mode == "full"), mode=mode)
+        chat_req = ChatRequest(message=transcript, voice=_is_voiced(mode), mode=mode)
         chat_resp = await avatar_chat(chat_req)
 
         return {
@@ -205,6 +214,45 @@ async def avatar_status():
         "tts_service": "grok" if tts_service.is_configured else "none",
         "stt_service": "groq-whisper" if stt_service.is_configured else "none",
         "mode": "text",
+        "voiced_modes": sorted(VOICED_MODES),
         "desks_active": 13,
         "quality_engine": True,
+        "live_voice": _live_voice_status(),
     }
+
+
+def _live_voice_status() -> dict:
+    try:
+        from app.services.max.voice_live import voice_status
+        return voice_status()
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"enabled": False, "reason": f"voice_live unavailable: {type(exc).__name__}"}
+
+
+@router.websocket("/live")
+async def avatar_live(websocket: WebSocket):
+    """Live back-and-forth voice with MAX (xAI Grok realtime), /api/v1/avatar/live.
+
+    Auth mirrors the Command Center: Cloudflare Access JWT when proxied through
+    the tunnel, loopback otherwise. The xAI key never leaves the server.
+    """
+    from app.services.max.voice_live import authorize_websocket, handle_live_call
+
+    try:
+        ok, via, user = authorize_websocket(websocket)
+    except Exception as exc:
+        ok, via, user = False, f"auth error ({type(exc).__name__})", ""
+    if not ok:
+        logger.warning("avatar/live: rejected websocket (%s)", via)
+        await websocket.close(code=4401, reason="unauthorized")
+        return
+    await websocket.accept()
+    try:
+        await handle_live_call(websocket, auth_via=via, user=user)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
