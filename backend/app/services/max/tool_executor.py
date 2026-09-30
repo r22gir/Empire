@@ -2689,6 +2689,7 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             to=to,
             subject=subject,
             body_text=body,
+            recipient_name=params.get("recipient_name"),
             attachments=converted_attachments,
             cc=", ".join(cc_list) if cc_list else None,
             reply_to=DEFAULT_REPLY_TO,
@@ -2785,7 +2786,13 @@ Quote number: {quote_number}
 
 If you have any questions, please don't hesitate to reach out."""
 
-        sent = svc.send(to=to, subject=subject, body_text=body_text, attachments=[pdf_path])
+        sent = svc.send(
+            to=to,
+            subject=subject,
+            body_text=body_text,
+            recipient_name=customer,
+            attachments=[pdf_path],
+        )
         if not sent:
             return ToolResult(tool="send_quote_email", success=False, error="Email provider did not verify send acceptance")
         pdf_size = os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0

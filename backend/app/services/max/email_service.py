@@ -65,6 +65,7 @@ class EmailService:
         references: str | None = None,
         reply_to: str | None = None,
         body_text: str | None = None,
+        recipient_name: str | None = None,
     ) -> bool:
         """Send an email. Returns True on success.
 
@@ -75,6 +76,7 @@ class EmailService:
             subject: email subject line
             body_html: legacy HTML body input (converted to the house template)
             body_text: preferred plain-text source for the house template
+            recipient_name: optional addressee used by the house greeting
             attachments: list of file paths to attach
             cc: optional CC address
             in_reply_to: Message-ID this email replies to (sets In-Reply-To)
@@ -87,7 +89,7 @@ class EmailService:
             )
         source_text = body_text if body_text is not None else html_to_text(body_html or "")
         self._verify_send_payload(to, subject, source_text, attachments)
-        rendered = render_house_email(source_text)
+        rendered = render_house_email(source_text, recipient_name=recipient_name)
 
         if self.sendgrid_key:
             sent = self._send_sendgrid(to, subject, rendered.plain_text, rendered.html, attachments, cc, in_reply_to, references, reply_to)

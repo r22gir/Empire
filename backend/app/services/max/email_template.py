@@ -22,6 +22,8 @@ SIGNATURE_LINES = (
 _AMOUNT_RE = re.compile(
     r"^(?P<label>[^:]+):\s*(?P<amount>[$€£]\s?[-\d,]+(?:\.\d{2})?)\s*$"
 )
+_GREETING_RE = re.compile(r"^hi(?:\s+[^,]+)?[,]?$", re.IGNORECASE)
+_SIGNOFF_LINES = {"thanks,", "thank you,", "best,", "regards,"}
 
 
 @dataclass(frozen=True)
@@ -60,11 +62,22 @@ def html_to_text(value: str) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
-def _plain_with_signature(body_text: str) -> str:
+def _prepare_body(body_text: str, recipient_name: str | None = None) -> str:
+    """Add the house greeting/sign-off without duplicating existing ones."""
     body = body_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    lines = body.split("\n") if body else []
+    first = next((line.strip() for line in lines if line.strip()), "")
+    if not _GREETING_RE.match(first):
+        greeting = f"Hi {recipient_name.strip()}," if recipient_name and recipient_name.strip() else "Hi,"
+        body = f"{greeting}\n\n{body}" if body else greeting
+    if not any(line.strip().lower() in _SIGNOFF_LINES for line in body.splitlines()):
+        body = f"{body.rstrip()}\n\nThanks,"
+    return body
+
+
+def _plain_with_signature(body_text: str, recipient_name: str | None = None) -> str:
+    body = _prepare_body(body_text, recipient_name)
     signature = "\n".join(SIGNATURE_LINES)
-    if body.endswith(signature):
-        return body
     return f"{body}\n\n{signature}"
 
 
@@ -78,9 +91,12 @@ def _amount_table(lines: list[str]) -> str:
         match = _AMOUNT_RE.match(line.strip())
         if not match:
             continue
+        label = match.group("label").strip()
+        row_class = " class=\"grand-total\"" if label.casefold() == "grand total" else ""
         rows.append(
-            "<tr><th scope=\"row\">{label}</th><td>{amount}</td></tr>".format(
-                label=escape(match.group("label").strip(), quote=False),
+            "<tr{row_class}><td class=\"label\">{label}</td><td class=\"amount\">{amount}</td></tr>".format(
+                row_class=row_class,
+                label=escape(label, quote=False),
                 amount=escape(match.group("amount").strip(), quote=False),
             )
         )
@@ -127,10 +143,11 @@ def _body_to_html(body_text: str) -> str:
     return "\n".join(rendered)
 
 
-def render_house_email(body_text: str) -> RenderedEmail:
+def render_house_email(body_text: str, recipient_name: str | None = None) -> RenderedEmail:
     """Return the house plain-text and branded HTML email alternatives."""
-    plain = _plain_with_signature(body_text)
-    body_html = _body_to_html(body_text)
+    prepared_body = _prepare_body(body_text, recipient_name)
+    plain = _plain_with_signature(prepared_body)
+    body_html = _body_to_html(prepared_body)
     signature_html = (
         '<div class="signature"><strong>Empire Workroom</strong>'
         "<br>Rafael Giraldo"
@@ -138,7 +155,16 @@ def render_house_email(body_text: str) -> RenderedEmail:
         "<br>+1 703-213-6484</div>"
     )
     html = f"""<!doctype html>
-<html><body style="margin:0;background:#f7f5f0;color:#252525;font-family:Arial,Helvetica,sans-serif;line-height:1.5">
+<html><head><meta charset="utf-8"><style>
+.email-body p {{ margin: 0 0 12px; }}
+.email-body ul {{ margin: 0 0 16px 22px; padding: 0; }}
+.amounts {{ width: 100%; max-width: 600px; border-collapse: collapse; margin: 8px 0 0; }}
+.amounts td {{ padding: 6px 0; font-weight: 400; }}
+.amounts .label {{ text-align: left; }}
+.amounts .amount {{ text-align: right; white-space: nowrap; }}
+.amounts tr.grand-total td {{ border-top: 1px solid #c7c7c7; font-weight: 700; }}
+.signature {{ margin-top: 24px; }}
+</style></head><body style="margin:0;background:#f7f5f0;color:#252525;font-family:Arial,Helvetica,sans-serif;line-height:1.5">
   <div style="max-width:680px;margin:0 auto;padding:32px 28px;background:#fff">
     <div style="border-top:4px solid #b08d35;padding-top:20px">
       <div class="email-body">{body_html}</div>
