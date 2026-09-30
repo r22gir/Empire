@@ -2997,6 +2997,36 @@ async def _chat_with_max_service(
             # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
             final_content = current_response.content
 
+        # 2026-09-29 tune-up: never end a tool turn with an empty answer. When
+        # the last round came back empty or with only tool blocks (the loop
+        # ran out of rounds), ask once more for a final answer without tools;
+        # if that is still empty, summarize the tool outcomes plainly.
+        if tool_results_list and not strip_tool_blocks(final_content or "").strip():
+            try:
+                _final_msgs = list(loop_messages)
+                _final_msgs.append(AIMessage(role="system", content=(
+                    "You have already run these tools this turn: "
+                    + ", ".join(str(r.get("tool")) for r in tool_results_list)
+                    + ". Do NOT call any more tools. Using only the tool results above, "
+                    "give the founder a complete, concise final answer now."
+                )))
+                _final_resp = await ai_router.chat(
+                    _final_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
+                    conversation_id=request.conversation_id or "",
+                )
+                final_content = strip_tool_blocks(_final_resp.content or "")
+            except Exception as _final_err:
+                logger.warning(f"[chat] final-answer recovery failed: {type(_final_err).__name__}: {_final_err}")
+            if not (final_content or "").strip():
+                _ok = [str(r.get("tool")) for r in tool_results_list if r.get("success")]
+                _bad = [f"{r.get('tool')} ({r.get('error')})" for r in tool_results_list if not r.get("success")]
+                final_content = (
+                    "I ran the tools but the model returned no final answer. "
+                    + (f"Succeeded: {', '.join(_ok)}. " if _ok else "")
+                    + (f"Failed: {'; '.join(_bad)}. " if _bad else "")
+                    + "The raw tool results are attached to this reply."
+                )
+
         # Grounding verification: strip hallucinated citations from web-sourced responses
         if tool_results_list:
             tool_results_list = normalize_tool_results(tool_results_list)
