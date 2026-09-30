@@ -235,6 +235,13 @@ class AIRouter:
         self.minimax_key = os.getenv("MINIMAX_API_KEY", "")
         self.minimax_base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
         self.minimax_model = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
+        # MiniMax-M3 docs recommend 131072 output tokens (maximum 524288).
+        try:
+            self.minimax_max_tokens = int(os.getenv("MINIMAX_MAX_TOKENS", "131072"))
+            if self.minimax_max_tokens < 1:
+                raise ValueError
+        except ValueError:
+            self.minimax_max_tokens = 131072
         # Empire-wide provider policy — set via MAX_PRIMARY_PROVIDER and MAX_DISABLE_XAI env vars
         self.max_primary_provider = os.getenv("MAX_PRIMARY_PROVIDER", "").lower()
         self.max_disable_xai = os.getenv("MAX_DISABLE_XAI", "").lower() in ("true", "1", "yes")
@@ -2041,7 +2048,7 @@ class AIRouter:
             resp = await client.post(
                 f"{self.minimax_base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
-                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096}
+                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens}
             )
             if resp.status_code != 200:
                 raise Exception(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
@@ -2056,7 +2063,7 @@ class AIRouter:
                 "POST",
                 f"{self.minimax_base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
-                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096, "stream": True}
+                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens, "stream": True}
             ) as response:
                 if response.status_code != 200:
                     error_body = await response.aread()
