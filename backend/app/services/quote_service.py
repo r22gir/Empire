@@ -843,7 +843,7 @@ def create_quote(data: dict) -> dict:
                     width, height, depth,
                     proposed_price, final_price, price_overridden, business_unit, computed_json,
                     drawing_id, drawing_svg, idea_diagram_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 quote_id, idx + 1,
                 li.get('item_type') or li.get('type') or '',

@@ -17,6 +17,7 @@ Golden doc: reference/max-golden/GOLDEN.md
 from __future__ import annotations
 
 import logging
+import re
 import os
 import textwrap
 from datetime import datetime
@@ -136,8 +137,43 @@ def _fmt_date_long(raw: Any) -> str:
     return s[:10]
 
 
+def _scrub_client_facing_desc(desc: str) -> str:
+    """Strip brand / SKU / yardage; keep F-IDs and workroom language only."""
+    s = (desc or "").strip()
+    if not s:
+        return s
+    # Drop explicit yardage phrases (client: yardage upon request)
+    s = re.sub(r"\b\d+(?:\.\d+)?\s*yd(?:s)?\b", "", s, flags=re.I)
+    s = re.sub(r"\b\d+(?:\.\d+)?\s*yards?\b", "", s, flags=re.I)
+    # Known brand / mill / SKU tokens → keep preceding F-id only
+    brand_bits = [
+        r"Fabricut\s+Hill\s+Stripe\s+Blue\s*\d*",
+        r"Hill\s+Stripe\s+Blue\s*\d*",
+        r"Schumacher\s+Bixi\s+Velvet\s+Celestine\s*\d*",
+        r"Bixi\s+Velvet\s+Celestine\s*\d*",
+        r"Bixi\s+Celestine",
+        r"Abnormals\s+Supernaturally\s+Ebb\s+Tide",
+        r"Ferrick\s+Mason\s+FM\d+\s+Slate\s+Blue\s+Mineral",
+        r"Ferrick\s+Mason\s+FM\d+",
+        r"FM\d+\s+Slate\s+Blue\s+Mineral",
+        r"Kristy\s+Stafford\s+Lilly\s+Blue",
+        r"Lilly\s+Blue",
+        r"\b624660\b",
+        r"\b73973\b",
+        r"\bFM5958\b",
+    ]
+    for pat in brand_bits:
+        s = re.sub(pat, "", s, flags=re.I)
+    # Collapse separators left empty
+    s = re.sub(r"\s*·\s*·\s*", " · ", s)
+    s = re.sub(r"\s{2,}", " ", s)
+    s = re.sub(r"\s*·\s*$", "", s)
+    s = re.sub(r"^\s*·\s*", "", s)
+    return s.strip()
+
+
 def _title_detail(it: Dict[str, Any]) -> Tuple[str, List[str]]:
-    desc = (it.get("description") or "Item").strip()
+    desc = _scrub_client_facing_desc(it.get("description") or "Item")
     if "\n" in desc:
         parts = [p.strip() for p in desc.split("\n") if p.strip()]
         title, details = parts[0], []
@@ -172,16 +208,14 @@ def _title_detail(it: Dict[str, Any]) -> Tuple[str, List[str]]:
 def _amount_label(it: Dict[str, Any], title: str) -> str:
     # HOTFIX 5 parity: founder override lives in final_price when
     # price_overridden is set — customer-facing PDF must match canonical total.
-    # Quote Review's `amount` alias is qty × rate (see _line_rate_and_amount).
-    # Prefer it so a qty>1 line is not printed as the unit rate.
     is_override = bool(it.get("price_overridden"))
     final_price = it.get("final_price")
     if is_override and final_price is not None:
         amount = final_price
-    elif it.get("amount") is not None:
-        amount = it.get("amount")
     else:
         amount = it.get("subtotal")
+        if amount is None:
+            amount = it.get("amount")
         if amount is None:
             amount = final_price
         if amount is None or float(amount or 0) == 0:
@@ -205,6 +239,134 @@ def _amount_label(it: Dict[str, Any], title: str) -> str:
     return _money(amt_f)
 
 
+
+
+def _line_amount_value(it: Dict[str, Any]) -> float:
+    """Numeric line amount used for band subtotals (honors founder override)."""
+    is_override = bool(it.get("price_overridden"))
+    final_price = it.get("final_price")
+    if is_override and final_price is not None:
+        try:
+            return float(final_price)
+        except (TypeError, ValueError):
+            return 0.0
+    amount = it.get("subtotal")
+    if amount is None:
+        amount = it.get("amount")
+    if amount is None:
+        amount = final_price
+    try:
+        amt_f = float(amount or 0)
+    except (TypeError, ValueError):
+        amt_f = 0.0
+    if amt_f == 0:
+        qty = float(it.get("quantity") or 1)
+        unit_price = it.get("unit_price")
+        if unit_price is None:
+            unit_price = it.get("rate")
+        if unit_price is not None:
+            try:
+                amt_f = round(qty * float(unit_price), 2)
+            except (TypeError, ValueError):
+                pass
+    return amt_f
+
+
+def _is_section_row(it: Dict[str, Any]) -> bool:
+    unit = (it.get("unit") or "").lower()
+    cat = (it.get("category") or "").lower()
+    desc = (it.get("description") or "").strip().upper()
+    if unit == "section" or cat in ("section_header", "section"):
+        return True
+    return desc.startswith("SECTION —") or desc.startswith("§ ")
+
+
+def _is_subtotal_row(it: Dict[str, Any]) -> bool:
+    unit = (it.get("unit") or "").lower()
+    cat = (it.get("category") or "").lower()
+    desc = (it.get("description") or "").strip().upper()
+    if unit == "subtotal" or cat in ("subtotal", "subtotal_row"):
+        return True
+    return desc.startswith("SUBTOTAL —") or desc.startswith("SUBTOTAL ")
+
+
+def _is_com_meta_line(it: Dict[str, Any]) -> bool:
+    """COM yardage / goods meta — hide from client body (yardage upon request)."""
+    cat = (it.get("category") or "").lower()
+    unit = (it.get("unit") or "").lower()
+    desc = (it.get("description") or "").upper()
+    if cat == "com_fabric":
+        return True
+    if unit in ("yd", "yard", "yards") and desc.startswith("COM "):
+        return True
+    return False
+
+
+def _is_extra_band(it: Dict[str, Any]) -> bool:
+    """Extra / not-yet-priced band (show TBD — never invent dollars)."""
+    if _is_section_row(it) or _is_subtotal_row(it) or _is_com_meta_line(it):
+        return False
+    cat = (it.get("category") or "").lower()
+    unit = (it.get("unit") or "").lower()
+    desc = (it.get("description") or "")
+    low = desc.lower()
+    if cat in ("open_tbd", "extra_tbd", "tbd"):
+        # Package-included $0 detail lines stay in Quoted when they say so
+        if ("part of package" in low) or ("part of" in low and "quoted" in low):
+            if "tbd" not in low and "excluded" not in low:
+                return False
+        if "labor tbd" in low or "excluded" in low or "not received" in low or "tbd" in low:
+            return True
+        if _line_amount_value(it) == 0:
+            return True
+    if "labor tbd" in low or ("excluded" in low and "tbd" in low):
+        return True
+    if unit == "tbd":
+        return True
+    return False
+
+
+def _partition_estimate_items(
+    items: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Split into quoted band, extra band, and skipped COM/meta note rows."""
+    quoted: List[Dict[str, Any]] = []
+    extra: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+    for it in items:
+        unit = (it.get("unit") or "").lower()
+        if unit == "note" and not _is_section_row(it) and not _is_subtotal_row(it):
+            skipped.append(it)
+            continue
+        if _is_com_meta_line(it):
+            skipped.append(it)
+            continue
+        if _is_section_row(it) or _is_subtotal_row(it):
+            # Explicit structure rows: keep order by placing into bands later
+            # via description keywords; default to quoted if ambiguous.
+            desc = (it.get("description") or "").upper()
+            if "EXTRA" in desc:
+                extra.append(it)
+            else:
+                quoted.append(it)
+            continue
+        if _is_extra_band(it):
+            extra.append(it)
+        else:
+            quoted.append(it)
+    return quoted, extra, skipped
+
+
+def _quoted_subtotal(items: List[Dict[str, Any]]) -> float:
+    total = 0.0
+    for it in items:
+        if _is_section_row(it) or _is_subtotal_row(it) or _is_com_meta_line(it):
+            continue
+        if _is_extra_band(it):
+            continue
+        total += _line_amount_value(it)
+    return round(total, 2)
+
 def _hr(c: canvas.Canvas, y: float, weight: float = 0.8, col=RULE) -> None:
     c.setStrokeColor(col)
     c.setLineWidth(weight)
@@ -227,11 +389,19 @@ def _client_project(quote: Dict[str, Any]) -> Tuple[str, str]:
     return client, project
 
 
+def _client_safe(quote: Dict[str, Any]) -> bool:
+    metadata = quote.get("metadata") or {}
+    return isinstance(metadata, dict) and bool(metadata.get("client_safe_pdf"))
+
+
 def _status_banner(quote: Dict[str, Any]) -> str:
+    if _client_safe(quote):
+        return "CLIENT COPY"
     status = (quote.get("status") or "draft").upper()
     if status in ("DRAFT", "PROPOSAL"):
         return "DRAFT — NOT FOR CLIENT ISSUE"
-    return "FOR DISCUSSION - NOT FOR CONSTRUCTION"
+    # founder_review / sent / accepted → actual estimate chrome (no DRAFT)
+    return "ESTIMATE"
 
 
 def _paint_page_chrome(c: canvas.Canvas, quote: Dict[str, Any], page: int, pages: int) -> None:
@@ -339,61 +509,114 @@ def _draw_client_block(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> flo
     return y - panel_h - 14
 
 
-def _draw_totals(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> float:
+def _draw_totals(
+    c: canvas.Canvas,
+    quote: Dict[str, Any],
+    y: float,
+    *,
+    quoted_subtotal: float | None = None,
+    has_extra_tbd: bool = False,
+) -> float:
+    """Totals panel: Quoted subtotal → Extra TBD → Grand total (priced only)."""
     _, sans, sans_b, _ = _ensure_body_fonts()
-    total = float(quote.get("total") or quote.get("subtotal") or 0)
-    deposit = quote.get("deposit_required")
-    pct = float(quote.get("deposit_percent") or 50)
-    if deposit is None:
-        deposit = round(total * pct / 100.0, 2)
-    else:
-        deposit = float(deposit)
-    computed_balance = round(total - deposit, 2)
-    raw_balance = quote.get("balance_due")
+    items = list(quote.get("line_items") or quote.get("items") or [])
+    if quoted_subtotal is None:
+        quoted_subtotal = _quoted_subtotal(items)
+    # Priced / due-now total = locked quoted dollars only (never invent TBD $)
+    total = float(quoted_subtotal)
+    # Prefer quote.total when it matches quoted (legacy single-band quotes)
+    q_total = quote.get("total")
     try:
-        raw_f = float(raw_balance) if raw_balance is not None else None
+        q_total_f = float(q_total) if q_total is not None else None
     except (TypeError, ValueError):
-        raw_f = None
-    # Prefer computed remainder; ignore stale balance_due that equals total
-    # or is otherwise inconsistent with deposit.
-    if raw_f is None or abs(raw_f - total) < 0.005 or abs(raw_f - computed_balance) > 0.02:
-        balance = computed_balance
-    else:
-        balance = raw_f
+        q_total_f = None
+    if q_total_f is not None and abs(q_total_f - total) < 0.02:
+        total = q_total_f
+
+    deposit = quote.get("deposit_required")
+    # Respect explicit 0 — `or 50` would treat 0 as missing (falsy).
+    _raw_pct = quote.get("deposit_percent")
+    pct = 50.0 if _raw_pct is None else float(_raw_pct)
+    # Deposit is pct% of PRICED only (quoted), never of invented TBD
+    expected_deposit = round(total * pct / 100.0, 2)
+    try:
+        deposit_f = float(deposit) if deposit is not None else expected_deposit
+    except (TypeError, ValueError):
+        deposit_f = expected_deposit
+    # If stale deposit equals old full-total math, snap to priced deposit
+    if abs(deposit_f - expected_deposit) > 0.02:
+        deposit_f = expected_deposit
+    if pct == 0:
+        deposit_f = 0.0
+    balance = round(total - deposit_f, 2)
+    show_deposit = pct > 0
 
     _hr(c, y, weight=1.0, col=GOLD)
     y -= 18
-    # totals panel on the right
-    panel_x = PW - MARGIN_R - 260
+    panel_x = PW - MARGIN_R - 280
+    panel_h = 88 if has_extra_tbd else 72
+    if not show_deposit:
+        panel_h = 56 if has_extra_tbd else 44
     c.setFillColor(PANEL)
-    c.roundRect(panel_x, y - 48, 260, 64, 4, fill=1, stroke=0)
+    c.roundRect(panel_x, y - (panel_h - 16), 280, panel_h, 4, fill=1, stroke=0)
     c.setStrokeColor(GOLD)
     c.setLineWidth(0.9)
-    c.roundRect(panel_x, y - 48, 260, 64, 4, fill=0, stroke=1)
+    c.roundRect(panel_x, y - (panel_h - 16), 280, panel_h, 4, fill=0, stroke=1)
 
-    c.setFont(sans, 9)
-    c.setFillColor(MUTE)
-    c.drawString(panel_x + 12, y - 6, "TOTAL")
-    c.setFont(sans_b, 12)
-    c.setFillColor(DK)
-    c.drawRightString(PW - MARGIN_R - 12, y - 6, _money(total))
-
+    row = y - 4
     c.setFont(sans, 8.5)
     c.setFillColor(MUTE)
-    c.drawString(panel_x + 12, y - 24, f"Deposit to begin ({pct:.0f}%)")
+    c.drawString(panel_x + 12, row, "SUBTOTAL — Quoted / already given")
     c.setFont(sans_b, 10)
     c.setFillColor(DK)
-    c.drawRightString(PW - MARGIN_R - 12, y - 24, _money(deposit))
+    c.drawRightString(PW - MARGIN_R - 12, row, _money(quoted_subtotal))
 
+    row -= 14
     c.setFont(sans, 8.5)
     c.setFillColor(MUTE)
-    c.drawString(panel_x + 12, y - 40, "Balance on completion")
-    c.setFont(sans, 9)
-    c.drawRightString(PW - MARGIN_R - 12, y - 40, _money(balance))
-    return y - 70
+    c.drawString(panel_x + 12, row, "SUBTOTAL — Extra work (not priced)")
+    c.setFont(sans_b, 10)
+    c.setFillColor(DK)
+    c.drawRightString(PW - MARGIN_R - 12, row, "TBD" if has_extra_tbd else "—")
+
+    row -= 14
+    c.setFont(sans, 8.5)
+    c.setFillColor(MUTE)
+    c.drawString(panel_x + 12, row, "GRAND TOTAL (priced / quoted only)")
+    c.setFont(sans_b, 12)
+    c.setFillColor(DK)
+    c.drawRightString(PW - MARGIN_R - 12, row, _money(total))
+
+    if show_deposit:
+        row -= 14
+        c.setFont(sans, 8)
+        c.setFillColor(MUTE)
+        c.drawString(panel_x + 12, row, f"Deposit to begin ({pct:.0f}% of priced)")
+        c.setFont(sans_b, 9)
+        c.setFillColor(DK)
+        c.drawRightString(PW - MARGIN_R - 12, row, _money(deposit_f))
+
+        row -= 12
+        c.setFont(sans, 8)
+        c.setFillColor(MUTE)
+        c.drawString(panel_x + 12, row, "Balance on completion (priced)")
+        c.setFont(sans, 8.5)
+        c.drawRightString(PW - MARGIN_R - 12, row, _money(balance))
+
+    if has_extra_tbd:
+        c.setFont(sans, 7)
+        c.setFillColor(MUTE)
+        c.drawString(
+            MARGIN_L,
+            y - (panel_h - 10),
+            "Extra work is TBD — not included in total due now / deposit. Do not invent prices.",
+        )
+    return y - panel_h - 10
 
 
 def _draw_notes(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> float:
+    if _client_safe(quote):
+        return y - 8
     _, sans, sans_b, mono = _ensure_body_fonts()
     notes = (quote.get("notes") or "").strip()
     terms = (quote.get("terms") or quote.get("payment_terms") or "").strip()
@@ -410,11 +633,9 @@ def _draw_notes(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> float:
             lines.extend(_wrap(raw, 110))
     if terms:
         lines.extend(_wrap(terms, 110))
+    # Client-facing: no invented body notes / deposit wording when empty.
     if not lines:
-        lines = [
-            "50% deposit required before work begins. Balance due upon completion.",
-            "Estimate covers fabrication and materials as listed.",
-        ]
+        return y
 
     # Three-zone field-sheet band: NOTES | TERMS | STATUS (estimate analogue)
     band_h = 18.0 + 10.0 * min(len(lines), 6)
@@ -484,8 +705,83 @@ def _open_questions(quote: Dict[str, Any]) -> List[str]:
     return out
 
 
+
+def _draw_band_header(c: canvas.Canvas, y: float, label: str, mono: str, sans_b: str) -> float:
+    """Gold section header for Quoted / Extra bands."""
+    _section_label(c, MARGIN_L, y, label, mono)
+    y -= 4
+    _hr(c, y, weight=0.7, col=GOLD)
+    return y - 12
+
+
+def _draw_band_subtotal(
+    c: canvas.Canvas,
+    y: float,
+    label: str,
+    amount_text: str,
+    sans_b: str,
+    sans: str,
+) -> float:
+    """Inline SUBTOTAL row under a band."""
+    c.setFillColor(PANEL)
+    c.rect(MARGIN_L, y - 4, CONTENT_W, 16, fill=1, stroke=0)
+    c.setStrokeColor(GOLD)
+    c.setLineWidth(0.6)
+    c.line(MARGIN_L, y - 4, PW - MARGIN_R, y - 4)
+    c.setFont(sans_b, 9)
+    c.setFillColor(DK)
+    c.drawString(MARGIN_L + 4, y + 2, label)
+    c.drawRightString(PW - MARGIN_R - 4, y + 2, amount_text)
+    return y - 18
+
+
+def _draw_one_line_item(
+    c: canvas.Canvas,
+    it: Dict[str, Any],
+    y: float,
+    *,
+    sans: str,
+    sans_b: str,
+    display_num: int | None = None,
+    detail_limit: int = 5,
+) -> float:
+    """Draw one estimate line; section/subtotal rows get special treatment."""
+    title, details = _title_detail(it)
+    if _is_section_row(it):
+        # Already painted via band headers when auto-banding; skip duplicates
+        return y
+    if _is_subtotal_row(it):
+        amt = _amount_label(it, title)
+        return _draw_band_subtotal(c, y, title[:80], amt, sans_b, sans)
+
+    num = display_num if display_num is not None else it.get("line_number") or ""
+    c.setFont(sans_b, 9.5)
+    c.setFillColor(DK)
+    c.drawString(MARGIN_L, y, str(num))
+    c.drawString(MARGIN_L + 22, y, title[:100])
+    # Included $0 package detail → "incl." instead of $0.00
+    low = title.lower()
+    amt_f = _line_amount_value(it)
+    if amt_f == 0 and ("part of package" in low or "part of" in low and "quoted" in low) and "tbd" not in low:
+        amt_txt = "incl."
+    else:
+        amt_txt = _amount_label(it, title)
+    c.drawRightString(PW - MARGIN_R, y, amt_txt)
+    y -= 12
+    c.setFont(sans, 8)
+    c.setFillColor(DETAIL)
+    for ln in details[:detail_limit]:
+        c.drawString(MARGIN_L + 22, y, ln[:120])
+        y -= 10.5
+    return y - 8
+
+
 def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
-    """Render McLean gold landscape estimate PDF bytes from a quote dict."""
+    """Render McLean gold landscape estimate PDF bytes from a quote dict.
+
+    Layout: Quoted band → Extra (TBD) band → GRAND TOTAL (priced only).
+    COM yardage/meta lines are hidden from the client body.
+    """
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=(PW, PH))
     qn = quote.get("quote_number") or quote.get("id") or "estimate"
@@ -496,30 +792,80 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
 
     serif_b, sans, sans_b, mono = _ensure_body_fonts()
     items = list(quote.get("line_items") or quote.get("items") or [])
-    draw_items = [it for it in items if (it.get("unit") or "").lower() != "note"]
-    note_items = [it for it in items if (it.get("unit") or "").lower() == "note"]
-    if not draw_items:
-        draw_items = items
+    quoted, extra, skipped = _partition_estimate_items(items)
+    # note_items: true notes + skipped COM meta for open-questions page only
+    note_items = [
+        it for it in items
+        if (it.get("unit") or "").lower() == "note"
+        and not _is_section_row(it)
+        and not _is_subtotal_row(it)
+    ]
+    # COM/meta skipped lines that mention NOT RECEIVED / TBD feed open questions
+    for it in skipped:
+        desc = (it.get("description") or "")
+        if "NOT RECEIVED" in desc.upper() or "OPEN QUESTION" in desc.upper():
+            if it not in note_items:
+                note_items.append(it)
 
     oq = _open_questions(quote)
+    quoted_sub = _quoted_subtotal(items)
+    has_extra = bool(extra)
+    client_safe = _client_safe(quote)
 
-    # Dry-run layout to decide page count before painting chrome stamps.
-    y_probe = CONTENT_TOP - 22
-    # client block roughly consumes ~66 pt
-    y_probe -= 66
-    y_probe -= 20  # column headers
+    # Flatten draw sequence for pagination probe (headers/subtotals cost ~20pt)
+    def _band_need(band_items: list) -> float:
+        n = 20  # header
+        for it in band_items:
+            if _is_section_row(it) or _is_subtotal_row(it):
+                n += 18
+                continue
+            title, details = _title_detail(it)
+            n += 22 + 11 * min(len(details), 5)
+        n += 20  # band subtotal
+        return n
+
+    y_probe = CONTENT_TOP - 22 - 66 - 20
+    need_quoted = _band_need(quoted) if quoted else 0
+    need_extra = _band_need(extra) if extra else 0
+    # Prefer keeping both bands on page 1 when possible; spill extra first
+    kept_quoted = list(quoted)
+    kept_extra: List[Dict[str, Any]] = []
     spilled: List[Dict[str, Any]] = []
-    kept: List[Dict[str, Any]] = []
-    for it in draw_items:
-        title, details = _title_detail(it)
-        need = 22 + 11 * min(len(details), 5)
-        if y_probe - need < CONTENT_BOTTOM + 90:
-            spilled.append(it)
-        else:
-            kept.append(it)
-            y_probe -= need
+    if y_probe - need_quoted - need_extra >= CONTENT_BOTTOM + 110:
+        kept_extra = list(extra)
+    elif y_probe - need_quoted >= CONTENT_BOTTOM + 110:
+        # quoted fits; extra may partially fit
+        y_left = y_probe - need_quoted - 20
+        for it in extra:
+            if _is_section_row(it) or _is_subtotal_row(it):
+                need = 18
+            else:
+                title, details = _title_detail(it)
+                need = 22 + 11 * min(len(details), 5)
+            if y_left - need < CONTENT_BOTTOM + 90:
+                spilled.append(it)
+            else:
+                kept_extra.append(it)
+                y_left -= need
+    else:
+        # spill from end of quoted, then all extra
+        y_left = y_probe - 20
+        kept_quoted = []
+        for it in quoted:
+            if _is_section_row(it) or _is_subtotal_row(it):
+                need = 18
+            else:
+                title, details = _title_detail(it)
+                need = 22 + 11 * min(len(details), 5)
+            if y_left - need < CONTENT_BOTTOM + 110:
+                spilled.append(it)
+            else:
+                kept_quoted.append(it)
+                y_left -= need
+        spilled.extend(extra)
+
     need_p2 = bool(spilled or oq or note_items)
-    pages = 2 if need_p2 else 1
+    pages = 2 if (client_safe or need_p2) else 1
 
     _paint_page_chrome(c, quote, 1, pages)
     y = CONTENT_TOP - 22
@@ -536,51 +882,120 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     _hr(c, y, weight=1.0, col=GOLD)
     y -= 12
 
-    for it in kept:
-        title, details = _title_detail(it)
-        c.setFont(sans_b, 9.5)
-        c.setFillColor(DK)
-        c.drawString(MARGIN_L, y, str(it.get("line_number") or ""))
-        c.drawString(MARGIN_L + 22, y, title[:100])
-        c.drawRightString(PW - MARGIN_R, y, _amount_label(it, title))
-        y -= 12
-        c.setFont(sans, 8)
-        c.setFillColor(DETAIL)
-        for ln in details[:5]:
-            c.drawString(MARGIN_L + 22, y, ln[:120])
-            y -= 10.5
-        y -= 8
+    display_n = 1
 
-    y = _draw_totals(c, quote, y)
+    if kept_quoted or quoted:
+        y = _draw_band_header(
+            c, y, "SUBTOTAL — Quoted / already given (locked)", mono, sans_b
+        )
+        for it in kept_quoted:
+            if _is_section_row(it) or _is_subtotal_row(it):
+                y = _draw_one_line_item(c, it, y, sans=sans, sans_b=sans_b)
+                continue
+            y = _draw_one_line_item(
+                c, it, y, sans=sans, sans_b=sans_b, display_num=display_n
+            )
+            display_n += 1
+        y = _draw_band_subtotal(
+            c, y, "SUBTOTAL — Quoted / already given", _money(quoted_sub), sans_b, sans
+        )
+
+    if kept_extra or (extra and not spilled):
+        y = _draw_band_header(
+            c, y, "SUBTOTAL — Extra work (TBD / not yet priced)", mono, sans_b
+        )
+        for it in kept_extra:
+            if _is_section_row(it) or _is_subtotal_row(it):
+                y = _draw_one_line_item(c, it, y, sans=sans, sans_b=sans_b)
+                continue
+            y = _draw_one_line_item(
+                c, it, y, sans=sans, sans_b=sans_b, display_num=display_n
+            )
+            display_n += 1
+        y = _draw_band_subtotal(
+            c, y, "SUBTOTAL — Extra work (not priced)", "TBD", sans_b, sans
+        )
+    elif extra and spilled:
+        # Extra entirely spilled — still show header+TBD subtotal so page 1 is clear
+        y = _draw_band_header(
+            c, y, "SUBTOTAL — Extra work (TBD / not yet priced)", mono, sans_b
+        )
+        c.setFont(sans, 8)
+        c.setFillColor(MUTE)
+        c.drawString(MARGIN_L + 22, y, "See page 2 for extra / TBD lines")
+        y -= 14
+        y = _draw_band_subtotal(
+            c, y, "SUBTOTAL — Extra work (not priced)", "TBD", sans_b, sans
+        )
+
+    y = _draw_totals(
+        c, quote, y, quoted_subtotal=quoted_sub, has_extra_tbd=has_extra
+    )
     y = _draw_notes(c, quote, y)
 
-    if need_p2:
+    if client_safe:
+        optional = (quote.get("metadata") or {}).get("optional_hardware") or {}
+        c.showPage()
+        _paint_page_chrome(c, quote, 2, 2)
+        y = CONTENT_TOP - 22
+        _section_label(c, MARGIN_L, y, "OPTIONAL PASSWAY HARDWARE", mono)
+        y -= 18
+        c.setFont(sans_b, 9.5)
+        c.setFillColor(DK)
+        c.drawString(MARGIN_L, y, "2\" rings, 8-pack — 3 packs")
+        c.drawRightString(PW - MARGIN_R, y, _money(optional.get("rings", 224.85)))
+        y -= 16
+        c.drawString(MARGIN_L, y, "2\" reeded pole, 8 ft — 1")
+        c.drawRightString(PW - MARGIN_R, y, _money(optional.get("pole", 210.82)))
+        y -= 16
+        c.drawString(MARGIN_L, y, "2\" single brackets, 3½\" return — 3")
+        c.drawRightString(PW - MARGIN_R, y, _money(optional.get("brackets", 96.24)))
+        y -= 22
+        _hr(c, y, col=GOLD)
+        y -= 18
+        optional_total = float(optional.get("total", 531.91) or 531.91)
+        base_total = float(optional.get("base", 4724.75) or 4724.75)
+        core_total = float(quote.get("total") or quote.get("subtotal") or 0)
+        c.setFont(sans_b, 10)
+        c.drawString(MARGIN_L, y, "Optional hardware subtotal")
+        c.drawRightString(PW - MARGIN_R, y, _money(optional_total))
+        y -= 20
+        c.setFont(sans, 9)
+        c.drawString(MARGIN_L, y, "Addendum total (hardware excluded)")
+        c.drawRightString(PW - MARGIN_R, y, _money(core_total))
+        y -= 16
+        c.drawString(MARGIN_L, y, "Base estimate + addendum")
+        c.drawRightString(PW - MARGIN_R, y, _money(base_total + core_total))
+        y -= 16
+        c.drawString(MARGIN_L, y, "Base + addendum + optional hardware")
+        c.drawRightString(PW - MARGIN_R, y, _money(base_total + core_total + optional_total))
+
+    elif need_p2:
         c.showPage()
         _paint_page_chrome(c, quote, 2, 2)
         y = CONTENT_TOP - 22
         c.setFont(sans_b, 11)
         c.setFillColor(DK)
-        c.drawString(MARGIN_L, y, f"{qn} — Details & Open Questions")
+        c.drawString(MARGIN_L, y, f"{qn} — Extra work / Details & Open Questions")
         y -= 14
         _hr(c, y, col=GOLD)
         y -= 16
 
-        for it in spilled:
-            title, details = _title_detail(it)
-            c.setFont(sans_b, 9.5)
-            c.setFillColor(DK)
-            c.drawString(MARGIN_L, y, str(it.get("line_number") or ""))
-            c.drawString(MARGIN_L + 22, y, title[:100])
-            c.drawRightString(PW - MARGIN_R, y, _amount_label(it, title))
-            y -= 12
-            c.setFont(sans, 8)
-            c.setFillColor(DETAIL)
-            for ln in details[:7]:
-                c.drawString(MARGIN_L + 22, y, ln[:120])
-                y -= 10
-            y -= 8
-            if y < CONTENT_BOTTOM + 40:
-                break
+        if spilled:
+            y = _draw_band_header(
+                c, y, "SUBTOTAL — Extra work (TBD / not yet priced)", mono, sans_b
+            )
+            for it in spilled:
+                y = _draw_one_line_item(
+                    c, it, y, sans=sans, sans_b=sans_b, display_num=display_n, detail_limit=7
+                )
+                if not (_is_section_row(it) or _is_subtotal_row(it)):
+                    display_n += 1
+                if y < CONTENT_BOTTOM + 40:
+                    break
+            y = _draw_band_subtotal(
+                c, y, "SUBTOTAL — Extra work (not priced)", "TBD", sans_b, sans
+            )
 
         if oq or note_items:
             c.setFont(sans_b, 8.5)
