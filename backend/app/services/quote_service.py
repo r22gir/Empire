@@ -897,7 +897,7 @@ def update_quote(quote_id: str, data: dict) -> dict:
         json_fields = {
             'rooms': 'rooms_json', 'ai_mockups': 'ai_mockups_json',
             'ai_outlines': 'ai_outlines_json', 'measurements': 'measurements_json',
-            'photos': 'photos_json',
+            'photos': 'photos_json', 'metadata': 'metadata_json',
         }
 
         sets, params = ["updated_at = ?"], [datetime.now().isoformat()]
