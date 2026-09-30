@@ -721,9 +721,13 @@ def list_quotes(status: str = None, business_unit: str = None,
             where.append("business_unit = ?")
             params.append(business_unit)
         if search:
-            where.append("(customer_name LIKE ? OR project_name LIKE ? OR quote_number LIKE ? OR id LIKE ?)")
+            where.append(
+                "(customer_name LIKE ? OR project_name LIKE ? OR project_description LIKE ? "
+                "OR customer_address LIKE ? OR notes LIKE ? OR quote_number LIKE ? OR id LIKE ? "
+                "OR metadata_json LIKE ?)"
+            )
             s = f"%{search}%"
-            params.extend([s, s, s, s])
+            params.extend([s, s, s, s, s, s, s, s])
         if not include_test:
             where.append("(is_test IS NULL OR is_test = 0)")
 
@@ -731,7 +735,7 @@ def list_quotes(status: str = None, business_unit: str = None,
 
         total = conn.execute(f"SELECT COUNT(*) FROM quotes_v2 {where_sql}", params).fetchone()[0]
         rows = conn.execute(
-            f"SELECT * FROM quotes_v2 {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            f"SELECT * FROM quotes_v2 {where_sql} ORDER BY updated_at DESC, created_at DESC LIMIT ? OFFSET ?",
             params + [limit, offset]
         ).fetchall()
 

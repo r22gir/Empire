@@ -918,50 +918,75 @@ def _get_desk_status(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("search_quotes")
 def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Search canonical quotes (quotes_v2 table) by customer name + status.
+    """Search canonical quotes by customer, project/site, notes, or date.
 
-    Hotfix 2026-07-15: repointed from legacy JSON store
-    (backend/data/quotes/{id}.json — stale pre-consolidation records)
-    to canonical quote_service.list_quotes so MAX sees the same data
-    that show_quote_for_review reads and what the Workroom frontend
-    WorkroomPage fetches.
-
-    CraftForge designs are a separate concern (drawings for design
-    instances, not customer-facing quotes) and stay on their existing
-    JSON path in CraftForge's own router. Quote tools here only
-    search canonical Workroom + WoodCraft quotes.
+    Natural-language requests such as "Willard last quote" and "today's
+    quote" are resolved against updated_at (then created_at), not just the
+    customer name or creation date.
     """
     from app.services.quote_service import list_quotes as _qs_list_quotes
-    customer = (params.get("customer_name") or "").strip()
+
+    raw_query = str(
+        params.get("query") or params.get("search") or params.get("customer_name") or ""
+    ).strip()
+    lowered = raw_query.lower()
+    today_requested = bool(re.search(r"\btoday(?:'s|s)?\b", lowered))
+    latest_requested = bool(re.search(r"\b(?:latest|last)\b", lowered))
+    # Search terms are the meaningful entity words; temporal/request words
+    # should not become literal SQL search terms.
+    term = re.sub(r"\b(?:today(?:'s|s)?|latest|last|quote|quotes)\b", " ", lowered)
+    term = " ".join(term.split())
     status = params.get("status")
-    business_unit = params.get("business_unit")  # workroom | woodcraft | None
+    business_unit = params.get("business_unit")
     limit = min(int(params.get("limit") or 10), 20)
 
-    raw = _qs_list_quotes(status=status, business_unit=business_unit, limit=200)
-    # list_quotes returns {'quotes': [...], 'total': ..., 'limit': ..., 'offset': ...}
-    quotes = raw.get("quotes") if isinstance(raw, dict) else raw
+    raw = _qs_list_quotes(
+        status=status, business_unit=business_unit, search=term or None, limit=200
+    )
+    quotes = list(raw.get("quotes") if isinstance(raw, dict) else (raw or []))
+    today = datetime.now().date()
+
+    def parsed_date(value):
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+        except (TypeError, ValueError):
+            return None
+
+    if today_requested:
+        quotes = [
+            q for q in quotes
+            if parsed_date(q.get("updated_at")) == today
+            or parsed_date(q.get("created_at")) == today
+        ]
+    quotes.sort(
+        key=lambda q: (q.get("updated_at") or "", q.get("created_at") or ""),
+        reverse=True,
+    )
 
     out = []
     for q in quotes:
-        if customer and customer.lower() not in (q.get("customer_name") or "").lower():
-            continue
         out.append({
             "id": q.get("id"),
             "quote_number": q.get("quote_number"),
             "customer_name": q.get("customer_name"),
+            "project_name": q.get("project_name"),
             "total": q.get("total"),
             "original_subtotal": q.get("original_subtotal"),
             "addons_subtotal": q.get("addons_subtotal"),
-            "optional_hardware_total": q.get("optional_hardware_total"),
             "status": q.get("status"),
-            "created_at": (q.get("created_at") or "")[:10],
+            "created_at": q.get("created_at"),
+            "updated_at": q.get("updated_at"),
             "items_count": q.get("item_count") or 0,
             "source": "canonical",
             "business_unit": q.get("business_unit"),
         })
-    out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    # "last/latest" and "today's" ask for the best current match, so do not
+    # let an older duplicate draft outrank the just-updated 293.
+    return_limit = 1 if (latest_requested or today_requested) else limit
     return ToolResult(tool="search_quotes", success=True, result={
-        "quotes": out[:limit], "count": len(out),
+        "quotes": out[:return_limit], "count": len(out),
     })
 
 
