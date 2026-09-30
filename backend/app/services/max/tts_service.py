@@ -41,9 +41,11 @@ MAX_TEXT_LENGTH = 4096
 # MiniMax TTS config — primary
 # Default voice matches the existing minimax_tts tool in minimax_tools.py so
 # the two paths produce interchangeable audio characteristics.
-MINIMAX_TTS_DEFAULT_VOICE = os.getenv("MINIMAX_TTS_VOICE", "male-qn-qingque")
-MINIMAX_TTS_DEFAULT_MODEL = os.getenv("MINIMAX_TTS_MODEL", "speech-01")
-MINIMAX_TTS_API_PATH = "/audio/speech"
+# 2026-09-29: English system voice (the old default was a Mandarin voice).
+MINIMAX_TTS_DEFAULT_VOICE = os.getenv("MINIMAX_TTS_VOICE", "English_Persuasive_Man")
+MINIMAX_TTS_DEFAULT_MODEL = os.getenv("MINIMAX_TTS_MODEL", "speech-2.8-turbo")
+# MiniMax synchronous T2A endpoint (JSON, hex audio). "/audio/speech" 404s.
+MINIMAX_TTS_API_PATH = "/t2a_v2"
 
 
 class TTSService:
@@ -111,9 +113,16 @@ class TTSService:
                     json={
                         "model": model,
                         "text": clean_text,
-                        "voice_id": voice,
-                        "speed": 1.0,
-                        "response_format": output_format,
+                        "stream": False,
+                        "output_format": "hex",
+                        "language_boost": "auto",
+                        "voice_setting": {"voice_id": voice, "speed": 1.0, "vol": 1.0, "pitch": 0},
+                        "audio_setting": {
+                            "sample_rate": 32000,
+                            "bitrate": 128000,
+                            "format": output_format if output_format in ("mp3", "wav", "flac", "pcm", "opus") else "mp3",
+                            "channel": 1,
+                        },
                     },
                 )
             if resp.status_code != 200:
@@ -121,7 +130,25 @@ class TTSService:
                     f"MiniMax TTS HTTP {resp.status_code}: {resp.text[:200]}"
                 )
                 return None
-            audio_data = resp.content
+            try:
+                payload = resp.json()
+            except Exception:
+                payload = None
+            if isinstance(payload, dict):
+                base_resp = payload.get("base_resp") or {}
+                if base_resp.get("status_code") not in (0, None):
+                    logger.warning(
+                        f"MiniMax TTS error {base_resp.get('status_code')}: {str(base_resp.get('status_msg'))[:200]}"
+                    )
+                    return None
+                try:
+                    audio_data = bytes.fromhex(((payload.get("data") or {}).get("audio")) or "")
+                except ValueError:
+                    logger.warning("MiniMax TTS returned undecodable audio")
+                    return None
+            else:
+                # Raw audio body (proxies / legacy-compatible gateways).
+                audio_data = resp.content or b""
             if not audio_data or len(audio_data) < 500:
                 logger.warning(f"MiniMax TTS returned empty/tiny audio ({len(audio_data)}b)")
                 return None

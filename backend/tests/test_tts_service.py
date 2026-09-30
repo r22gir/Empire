@@ -144,7 +144,9 @@ def test_minimax_failure_falls_back_to_xai(monkeypatch):
     # The first call must have been to MiniMax, the second to xAI
     first_url = mock_client.post.call_args_list[0].args[0]
     second_url = mock_client.post.call_args_list[1].args[0]
-    assert "/audio/speech" in first_url, f"first call should be MiniMax, got {first_url}"
+    # 2026-09-29: MiniMax TTS moved to the documented /v1/t2a_v2 endpoint
+    # (the old /audio/speech path returns 404 in production).
+    assert "/t2a_v2" in first_url, f"first call should be MiniMax, got {first_url}"
     assert "api.x.ai" in second_url, f"second call should be xAI, got {second_url}"
     # Cleanup
     try:
