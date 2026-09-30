@@ -5268,7 +5268,7 @@ def _file_read(params: dict, desk: Optional[str] = None) -> ToolResult:
     try:
         if not os.path.isabs(path):
             # Path is relative — resolve under canonical repo.
-            path = resolve_path_under_canonical_root(path)
+            path = str(resolve_path_under_canonical_root(path))
     except CanonicalRootError as exc:
         log_execution("file_read", params, str(exc), desk=desk, success=False)
         return ToolResult(tool="file_read", success=False, error=str(exc))
