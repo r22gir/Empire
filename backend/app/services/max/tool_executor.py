@@ -66,6 +66,60 @@ DEFAULT_REPLY_TO = "max@empirebox.store"
 # rather than reported. Founder ruling: full read access; gate later if wanted.
 # shell_execute and env_set REMAIN GATED.
 DANGEROUS_TOOLS = {"shell_execute", "env_set"}
+# 2026-09-29 MAX tune-up: some tools are only dangerous for certain
+# sub-commands. service_manager status/logs stay read-only (level 1), but
+# restart/start/stop mutate live services, so they go through the SAME
+# founder-PIN gate as shell_execute. Kept separate from DANGEROUS_TOOLS so
+# that set stays exactly {shell_execute, env_set} (HOTFIX 4.2 contract).
+DANGEROUS_TOOL_ACTIONS = {
+    "service_manager": {"restart", "start", "stop"},
+}
+
+
+def _is_dangerous_call(tool_name: str, tool_call: Optional[dict] = None) -> bool:
+    """True when this call must pass the founder-PIN gate."""
+    if tool_name in DANGEROUS_TOOLS:
+        return True
+    actions = DANGEROUS_TOOL_ACTIONS.get(tool_name)
+    if actions:
+        cmd = str((tool_call or {}).get("command") or "status").strip().lower()
+        return cmd in actions
+    return False
+
+
+def _json_safe(value):
+    """Return a JSON-serializable version of *value* (non-JSON types -> str).
+
+    Fast path: if json.dumps already succeeds the value is returned as-is so
+    callers keep native types. Otherwise it is round-tripped with default=str
+    (PosixPath, datetime, Decimal, bytes, sets, ... can no longer kill a turn).
+    """
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError, OverflowError):
+        try:
+            return json.loads(json.dumps(value, default=str))
+        except Exception:
+            return {"_unserializable": str(value)[:4000]}
+
+
+def _coerce_tool_result(tool_name: str, result) -> "ToolResult":
+    """Guarantee execute_tool always hands back a JSON-safe ToolResult."""
+    if not isinstance(result, ToolResult):
+        if isinstance(result, dict):
+            result = ToolResult(tool=tool_name, success=bool(result.get("success", True)),
+                                result=result.get("result", result), error=result.get("error"))
+        elif result is None:
+            result = ToolResult(tool=tool_name, success=False, error=f"Tool '{tool_name}' returned no result")
+        else:
+            result = ToolResult(tool=tool_name, success=True, result={"value": result})
+    if result.result is not None:
+        safe = _json_safe(result.result)
+        result.result = safe if isinstance(safe, dict) else {"value": safe}
+    if result.error is not None and not isinstance(result.error, str):
+        result.error = str(result.error)
+    return result
 # HOTFIX 4.2 (2026-07-24) — FOUNDER_PIN fails CLOSED.
 #
 # Pre-fix: os.getenv("FOUNDER_PIN", "7777") meant that an unset env
@@ -468,100 +522,9 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
     """
     tool_name = tool_call.get("tool", "")
     try:
-        # ── FOUNDER access_controller BYPASS only ──
-        # H81 Phase 2 (2026-09-01): founder still bypasses the
-        # access_controller permission flow (deny/locked/confirm/pin
-        # actions) but NO LONGER bypasses the dangerous-tools PIN
-        # gate below. Pre-H81 the founder branch silently skipped
-        # the PIN gate for shell_execute and env_set; that was the
-        # unverified bypass. The PIN gate now runs uniformly for
-        # every caller. The previous "founder = full access" prose
-        # in this comment was misleading; see git history.
-        if founder:
-            logger.info(
-                f"Founder context — bypassing access_controller "
-                f"permission check for '{tool_name}'"
-            )
-            tool_call["_founder"] = True  # pass founder flag to tool handlers
-        # H81 Phase 2 — propagate channel label to tool handlers so
-        # the audit log can record which channel the call came from.
-        # Currently the router does not pass `channel` (Phase 3
-        # backlog), so _channel will be unset for the live chat
-        # handlers and the audit column will be NULL.
-        if channel is not None:
-            tool_call["_channel"] = channel
-        else:
-            # Access control check (non-founder users)
-            if access_context and access_controller:
-                user = access_context.get("user")
-                if user:
-                    level = int(access_controller.classify_tool(tool_name))
-                    action, _ = access_controller.check_permission(user, tool_name, desk)
-                    if action == "deny":
-                        access_controller.audit_log(user.get("id", ""), tool_name, level, "denied", channel=user.get("channel", ""))
-                        return ToolResult(tool=tool_name, success=False, error="Access denied: insufficient permissions")
-                    if action == "locked":
-                        return ToolResult(tool=tool_name, success=False, error="Account locked due to failed PIN attempts. Try again in 15 minutes.")
-                    if action == "confirm":
-                        session_id = access_controller.create_pending_session(
-                            user.get("id", ""), tool_name, tool_call, desk,
-                            user.get("channel", ""), user.get("chat_id", ""), level
-                        )
-                        summary = f"Tool '{tool_name}' requires confirmation"
-                        access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_confirm", channel=user.get("channel", ""))
-                        return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__confirm__{session_id}__{summary}")
-                    if action == "pin":
-                        session_id = access_controller.create_pending_session(
-                            user.get("id", ""), tool_name, tool_call, desk,
-                            user.get("channel", ""), user.get("chat_id", ""), level
-                        )
-                        summary = f"Tool '{tool_name}' requires PIN authorization"
-                        access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_pin", channel=user.get("channel", ""))
-                        return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__pin__{session_id}__{summary}")
-
-        # Dangerous tool PIN gate — RUNS FOR EVERY CALLER, founder
-        # and non-founder alike (H81 Phase 2). HOTFIX 4.2 fail-closed
-        # semantics preserved: empty FOUNDER_PIN refuses with
-        # CRITICAL log; missing PIN refuses; mismatched PIN refuses.
-        if tool_name in DANGEROUS_TOOLS:
-            if not FOUNDER_PIN:
-                logger.critical(
-                    "BLOCKED dangerous tool '%s' invocation: "
-                    "FOUNDER_PIN env var is unset. The dangerous-"
-                    "tools gate is fail-closed (HOTFIX 4.2).",
-                    tool_name,
-                )
-                return ToolResult(
-                    tool=tool_name, success=False,
-                    error=(
-                        f"Tool '{tool_name}' is disabled: FOUNDER_PIN "
-                        f"env var is unset on the server. The "
-                        f"dangerous-tools gate fails closed until "
-                        f"FOUNDER_PIN is configured in the systemd "
-                        f"unit's Environment=. Set FOUNDER_PIN=<your-PIN> "
-                        f"to enable. (HOTFIX 4.2)"
-                    ),
-                )
-            pin = (access_context or {}).get("pin")
-            if not pin:
-                return ToolResult(
-                    tool=tool_name, success=False,
-                    error=f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed."
-                )
-            if str(pin) != FOUNDER_PIN:
-                logger.warning(f"Invalid PIN attempt for dangerous tool '{tool_name}'")
-                return ToolResult(
-                    tool=tool_name, success=False,
-                    error="❌ Invalid PIN. Access denied."
-                )
-            logger.info(f"PIN verified — executing dangerous tool '{tool_name}'")
-
-        # Tier check
-        from app.middleware.tier_middleware import require_tool
-        tier_error = require_tool(tool_name)
-        if tier_error:
-            return ToolResult(tool=tool_name, success=False, error=tier_error)
-
+        # 2026-09-29: auto-correction now runs BEFORE access control and the
+        # PIN gate. Previously an alias such as "bash"/"run_command" was
+        # rewritten to shell_execute AFTER the gate check, skipping it.
         # ── Auto-correct common tool name mistakes ──
         TOOL_CORRECTIONS = {
             "run_command": "shell_execute",
@@ -631,16 +594,110 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             tool_name = corrected
             tool_call["tool"] = corrected
 
+        # ── FOUNDER access_controller BYPASS only ──
+        # H81 Phase 2 (2026-09-01): founder still bypasses the
+        # access_controller permission flow (deny/locked/confirm/pin
+        # actions) but NO LONGER bypasses the dangerous-tools PIN
+        # gate below. Pre-H81 the founder branch silently skipped
+        # the PIN gate for shell_execute and env_set; that was the
+        # unverified bypass. The PIN gate now runs uniformly for
+        # every caller. The previous "founder = full access" prose
+        # in this comment was misleading; see git history.
+        if founder:
+            logger.info(
+                f"Founder context — bypassing access_controller "
+                f"permission check for '{tool_name}'"
+            )
+            tool_call["_founder"] = True  # pass founder flag to tool handlers
+        # H81 Phase 2 — propagate channel label to tool handlers so
+        # the audit log can record which channel the call came from.
+        # Currently the router does not pass `channel` (Phase 3
+        # backlog), so _channel will be unset for the live chat
+        # handlers and the audit column will be NULL.
+        if channel is not None:
+            tool_call["_channel"] = channel
+        else:
+            # Access control check (non-founder users)
+            if access_context and access_controller:
+                user = access_context.get("user")
+                if user:
+                    level = int(access_controller.classify_tool(tool_name, tool_call))
+                    action, _ = access_controller.check_permission(user, tool_name, desk, tool_call)
+                    if action == "deny":
+                        access_controller.audit_log(user.get("id", ""), tool_name, level, "denied", channel=user.get("channel", ""))
+                        return ToolResult(tool=tool_name, success=False, error="Access denied: insufficient permissions")
+                    if action == "locked":
+                        return ToolResult(tool=tool_name, success=False, error="Account locked due to failed PIN attempts. Try again in 15 minutes.")
+                    if action == "confirm":
+                        session_id = access_controller.create_pending_session(
+                            user.get("id", ""), tool_name, tool_call, desk,
+                            user.get("channel", ""), user.get("chat_id", ""), level
+                        )
+                        summary = f"Tool '{tool_name}' requires confirmation"
+                        access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_confirm", channel=user.get("channel", ""))
+                        return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__confirm__{session_id}__{summary}")
+                    if action == "pin":
+                        session_id = access_controller.create_pending_session(
+                            user.get("id", ""), tool_name, tool_call, desk,
+                            user.get("channel", ""), user.get("chat_id", ""), level
+                        )
+                        summary = f"Tool '{tool_name}' requires PIN authorization"
+                        access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_pin", channel=user.get("channel", ""))
+                        return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__pin__{session_id}__{summary}")
+
+        # Dangerous tool PIN gate — RUNS FOR EVERY CALLER, founder
+        # and non-founder alike (H81 Phase 2). HOTFIX 4.2 fail-closed
+        # semantics preserved: empty FOUNDER_PIN refuses with
+        # CRITICAL log; missing PIN refuses; mismatched PIN refuses.
+        if _is_dangerous_call(tool_name, tool_call):
+            if not FOUNDER_PIN:
+                logger.critical(
+                    "BLOCKED dangerous tool '%s' invocation: "
+                    "FOUNDER_PIN env var is unset. The dangerous-"
+                    "tools gate is fail-closed (HOTFIX 4.2).",
+                    tool_name,
+                )
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error=(
+                        f"Tool '{tool_name}' is disabled: FOUNDER_PIN "
+                        f"env var is unset on the server. The "
+                        f"dangerous-tools gate fails closed until "
+                        f"FOUNDER_PIN is configured in the systemd "
+                        f"unit's Environment=. Set FOUNDER_PIN=<your-PIN> "
+                        f"to enable. (HOTFIX 4.2)"
+                    ),
+                )
+            pin = (access_context or {}).get("pin")
+            if not pin:
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error=f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed."
+                )
+            if str(pin) != FOUNDER_PIN:
+                logger.warning(f"Invalid PIN attempt for dangerous tool '{tool_name}'")
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error="❌ Invalid PIN. Access denied."
+                )
+            logger.info(f"PIN verified — executing dangerous tool '{tool_name}'")
+
+        # Tier check
+        from app.middleware.tier_middleware import require_tool
+        tier_error = require_tool(tool_name)
+        if tier_error:
+            return ToolResult(tool=tool_name, success=False, error=tier_error)
+
         handler = TOOL_REGISTRY.get(tool_name)
         if handler:
-            return handler(tool_call, desk)
+            return _coerce_tool_result(tool_name, handler(tool_call, desk))
 
         available = ", ".join(sorted(TOOL_REGISTRY.keys()))
         return ToolResult(tool=tool_name, success=False,
                           error=f"Unknown tool: {tool_name}. Available tools: {available}")
     except Exception as e:
-        logger.error(f"Tool execution error ({tool_name}): {e}")
-        return ToolResult(tool=tool_name, success=False, error=str(e))
+        logger.exception(f"Tool execution error ({tool_name}): {e}")
+        return ToolResult(tool=tool_name, success=False, error=f"{type(e).__name__}: {e}")
 
 
 # ── TASK TOOLS ─────────────────────────────────────────────────────
@@ -5003,7 +5060,7 @@ def _deposit_pay_link(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── TOOL DOCUMENTATION (for system prompt) ─────────────────────────
 
-TOOLS_DOC = """## Available Tools (43 total)
+TOOLS_DOC = """## Available Tools (__TOOL_COUNT__ total)
 You have access to real tools that query live data. Use them instead of making up information.
 To call a tool, include a tool block in your response:
 
@@ -6726,3 +6783,12 @@ def _max_room_redesign(params: dict, desk: Optional[str] = None) -> ToolResult:
     except Exception as e:
         logger.error(f"max_room_redesign failed: {e}")
         return ToolResult(tool="max_room_redesign", success=False, error=str(e)[:300])
+
+
+# ── Tool count in TOOLS_DOC (2026-09-29) ───────────────────────────
+# TOOLS_DOC is defined mid-module, before every @tool handler has been
+# registered, so its header count used to be a hand-maintained literal that
+# went stale ("43 total" while 67 handlers were registered). Resolve it here,
+# after all registrations, from the live registry.
+TOOL_COUNT = len(TOOL_REGISTRY)
+TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))

@@ -79,6 +79,16 @@ TOOL_LEVELS = {
     "update_contact": 2, "delete_contact": 2, "clear_data": 2,
     "shell_execute": 3, "dispatch_to_openclaw": 3, "deploy": 3,
     "erase_dataset": 3, "drop_table": 3,
+    "env_set": 3,
+    # 2026-09-29: service_manager is command-sensitive — status/logs are
+    # read-only (level 1); restart/start/stop are level 3 (PIN), matching
+    # the founder-PIN gate in tool_executor.DANGEROUS_TOOL_ACTIONS.
+    "service_manager": 1,
+}
+
+# Per-command overrides for tools whose risk depends on the sub-command.
+TOOL_ACTION_LEVELS = {
+    "service_manager": {"status": 1, "logs": 1, "restart": 3, "start": 3, "stop": 3},
 }
 
 LEVEL_PATTERNS = {
@@ -125,7 +135,12 @@ class AccessController:
                 ).fetchone()
             return dict_row(row)
 
-    def classify_tool(self, tool_name):
+    def classify_tool(self, tool_name, tool_call=None):
+        action_levels = TOOL_ACTION_LEVELS.get(tool_name)
+        if action_levels is not None:
+            cmd = str((tool_call or {}).get("command") or "status").strip().lower()
+            # Unknown sub-commands are treated as the most dangerous level.
+            return AccessLevel(action_levels.get(cmd, max(action_levels.values())))
         if tool_name in TOOL_LEVELS:
             return AccessLevel(TOOL_LEVELS[tool_name])
         for level in (3, 2):
@@ -134,12 +149,12 @@ class AccessController:
                     return AccessLevel(level)
         return AccessLevel.AUTO
 
-    def check_permission(self, user, tool_name, desk=None):
+    def check_permission(self, user, tool_name, desk=None, tool_call=None):
         if not user:
             return ("deny", None)
 
         role = user.get("role", "viewer")
-        level = int(self.classify_tool(tool_name))
+        level = int(self.classify_tool(tool_name, tool_call))
         perms = ROLE_PERMISSIONS.get(role, ROLE_PERMISSIONS["viewer"])
         action = perms.get(level, "deny")
 
