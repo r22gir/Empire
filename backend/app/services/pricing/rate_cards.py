@@ -29,6 +29,8 @@ CLIENT_RATE_RULES: dict[str, dict[str, object]] = {
         "willard_tassel_count_total": 14,
         "willard_tassel_scope": "per swag window: 1 tieback pair + 2 center tassels; passway: 1 tieback pair",
         "tassel_totals_include_tiebacks_and_center_tassels": True,
+        "no_holdback_cylinders_when_tassel_tiebacks_used": True,
+        "holdback_rule": "when tassel tiebacks are used, no holdback cylinders are billed",
         "swag_trim_application_included_in_valance_rate": True,
         "trim_edges": "leading edge only",
         "tassel_tiebacks_replace_holdbacks": True,
