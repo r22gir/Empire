@@ -3030,7 +3030,18 @@ async def _chat_with_max_service(
         # Failed calls are not tools that "were used" — count only successes.
         _succeeded_results = [r for r in tool_results_list if r.get("success")]
         tools_used_names = [r.get("tool") if isinstance(r, dict) else r.tool for r in _succeeded_results]
-        if is_factual_question(request.message) and "web_search" not in tools_used_names:
+        # 2026-09-29 tune-up: when local/internal tools (file_read, git_ops,
+        # quotes, db...) already answered, the question was about Empire's own
+        # data, not the public web. Auto web_search here replaced a correct
+        # repo answer with a reply about irrelevant search results.
+        _local_tools_answered = any(
+            n and n not in ("web_search", "web_read") for n in tools_used_names
+        )
+        if (
+            is_factual_question(request.message)
+            and "web_search" not in tools_used_names
+            and not _local_tools_answered
+        ):
             from app.services.max.search_context import build_search_query
             _fg_built = build_search_query(request.message, history=request.history)
             _fg_query = _fg_built["query"]
