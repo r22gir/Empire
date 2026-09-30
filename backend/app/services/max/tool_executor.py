@@ -950,6 +950,9 @@ def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
             "quote_number": q.get("quote_number"),
             "customer_name": q.get("customer_name"),
             "total": q.get("total"),
+            "original_subtotal": q.get("original_subtotal"),
+            "addons_subtotal": q.get("addons_subtotal"),
+            "optional_hardware_total": q.get("optional_hardware_total"),
             "status": q.get("status"),
             "created_at": (q.get("created_at") or "")[:10],
             "items_count": q.get("item_count") or 0,
@@ -981,6 +984,17 @@ def _get_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         q = _qs_by_number(quote_id.upper())
     if not q:
         return ToolResult(tool="get_quote", success=False, error=f"Quote {quote_id} not found")
+    # Make the area-grouped split explicit so Max's summary answer cannot
+    # mistake the add-ons-only line-item subtotal for the customer total.
+    if q.get("original_subtotal") is not None:
+        q = dict(q)
+        q["financial_summary"] = {
+            "original_subtotal": q.get("original_subtotal"),
+            "addons_subtotal": q.get("addons_subtotal"),
+            "grand_total": q.get("grand_total", q.get("total")),
+            "optional_hardware_total": q.get("optional_hardware_total"),
+            "deposit_required": q.get("deposit_required"),
+        }
     return ToolResult(tool="get_quote", success=True, result=q)
 
 
