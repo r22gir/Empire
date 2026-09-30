@@ -381,11 +381,17 @@ def _client_project(quote: Dict[str, Any]) -> Tuple[str, str]:
         or quote.get("quote_number")
         or "ESTIMATE"
     ).strip()
-    # Keep header project line readable
+    # Client copies hide internal version tags and allow the clean project
+    # label to fit in the chrome header. Internal/draft copies retain legacy
+    # truncation behavior.
+    client_safe = _client_safe(quote)
+    if client_safe:
+        project = re.sub(r"\s+v\d+\s*$", "", project, flags=re.IGNORECASE)
     if len(client) > 36:
         client = client[:33] + "…"
-    if len(project) > 40:
-        project = project[:37] + "…"
+    project_limit = 60 if client_safe else 40
+    if len(project) > project_limit:
+        project = project[:project_limit - 3] + "…"
     return client, project
 
 
@@ -488,7 +494,7 @@ def _draw_client_block(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> flo
             attn = line.strip()
             break
     left2 = attn or (f"Tel: {phone}" if phone else "")
-    project = quote.get("project_name") or ""
+    project = _client_project(quote)[1] if _client_safe(quote) else (quote.get("project_name") or "")
     material = ""
     for it in quote.get("line_items") or []:
         fab = it.get("fabric_name")
@@ -550,6 +556,8 @@ def _draw_totals(
         deposit_f = 0.0
     balance = round(total - deposit_f, 2)
     show_deposit = pct > 0
+    client_safe = _client_safe(quote)
+    no_extra_client_copy = client_safe and not has_extra_tbd
 
     _hr(c, y, weight=1.0, col=GOLD)
     y -= 18
@@ -566,23 +574,26 @@ def _draw_totals(
     row = y - 4
     c.setFont(sans, 8.5)
     c.setFillColor(MUTE)
-    c.drawString(panel_x + 12, row, "SUBTOTAL — Quoted / already given")
+    quoted_label = "Addendum items" if no_extra_client_copy else "SUBTOTAL — Quoted / already given"
+    c.drawString(panel_x + 12, row, quoted_label)
     c.setFont(sans_b, 10)
     c.setFillColor(DK)
     c.drawRightString(PW - MARGIN_R - 12, row, _money(quoted_subtotal))
 
-    row -= 14
-    c.setFont(sans, 8.5)
-    c.setFillColor(MUTE)
-    c.drawString(panel_x + 12, row, "SUBTOTAL — Extra work (not priced)")
-    c.setFont(sans_b, 10)
-    c.setFillColor(DK)
-    c.drawRightString(PW - MARGIN_R - 12, row, "TBD" if has_extra_tbd else "—")
+    if not no_extra_client_copy:
+        row -= 14
+        c.setFont(sans, 8.5)
+        c.setFillColor(MUTE)
+        c.drawString(panel_x + 12, row, "SUBTOTAL — Extra work (not priced)")
+        c.setFont(sans_b, 10)
+        c.setFillColor(DK)
+        c.drawRightString(PW - MARGIN_R - 12, row, "TBD")
 
     row -= 14
     c.setFont(sans, 8.5)
     c.setFillColor(MUTE)
-    c.drawString(panel_x + 12, row, "GRAND TOTAL (priced / quoted only)")
+    total_label = "Addendum subtotal" if no_extra_client_copy else "GRAND TOTAL (priced / quoted only)"
+    c.drawString(panel_x + 12, row, total_label)
     c.setFont(sans_b, 12)
     c.setFillColor(DK)
     c.drawRightString(PW - MARGIN_R - 12, row, _money(total))
@@ -591,7 +602,9 @@ def _draw_totals(
         row -= 14
         c.setFont(sans, 8)
         c.setFillColor(MUTE)
-        c.drawString(panel_x + 12, row, f"Deposit to begin ({pct:.0f}% of priced)")
+        deposit_label = (f"Deposit to begin ({pct:.0f}%)" if client_safe
+                         else f"Deposit to begin ({pct:.0f}% of priced)")
+        c.drawString(panel_x + 12, row, deposit_label)
         c.setFont(sans_b, 9)
         c.setFillColor(DK)
         c.drawRightString(PW - MARGIN_R - 12, row, _money(deposit_f))
@@ -599,7 +612,7 @@ def _draw_totals(
         row -= 12
         c.setFont(sans, 8)
         c.setFillColor(MUTE)
-        c.drawString(panel_x + 12, row, "Balance on completion (priced)")
+        c.drawString(panel_x + 12, row, "Balance on completion" if client_safe else "Balance on completion (priced)")
         c.setFont(sans, 8.5)
         c.drawRightString(PW - MARGIN_R - 12, row, _money(balance))
 
@@ -776,6 +789,125 @@ def _draw_one_line_item(
     return y - 8
 
 
+def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -> bytes:
+    """Render a client-safe addendum grouped by area.
+
+    This is metadata-driven so future addendum quotes can supply original
+    items and add-ons per opening without changing the renderer. Each area
+    is shown as Original items → Add-ons → three subtotals; the final page
+    carries the original/add-on/grand totals and optional hardware.
+    """
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=(PW, PH))
+    qn = quote.get("quote_number") or quote.get("id") or "estimate"
+    c.setTitle(f"Estimate {qn} — Nelma's Workroom")
+    c.setAuthor("Nelma's Workroom - Powered by Empire Workroom")
+    c.setCreator("Nelma's Workroom")
+    c.setSubject("Client addendum estimate grouped by area")
+    serif_b, sans, sans_b, mono = _ensure_body_fonts()
+    areas = list(grouping.get("areas") or [])
+    area_pages = max(1, (len(areas) + 1) // 2)
+    total_pages = area_pages + 1
+    page = 1
+    _paint_page_chrome(c, quote, page, total_pages)
+    y = CONTENT_TOP - 22
+    y = _draw_client_block(c, quote, y)
+    _section_label(c, MARGIN_L, y, "AREA BREAKDOWN", mono)
+    y -= 16
+
+    def draw_area(area: Dict[str, Any], y0: float) -> float:
+        name = str(area.get("name") or "Area")
+        c.setFont(sans_b, 10)
+        c.setFillColor(DK)
+        c.drawString(MARGIN_L, y0, name[:100])
+        y0 -= 13
+        for label, key in (("Original items", "original_items"), ("Add-ons", "addons")):
+            c.setFont(sans_b, 8.5)
+            c.setFillColor(GOLD)
+            c.drawString(MARGIN_L + 8, y0, label)
+            y0 -= 12
+            for item in list(area.get(key) or []):
+                desc = str(item.get("description") or "Item")
+                amount = float(item.get("amount") or 0)
+                c.setFont(sans, 8.5)
+                c.setFillColor(DETAIL)
+                c.drawString(MARGIN_L + 18, y0, desc[:112])
+                c.drawRightString(PW - MARGIN_R, y0, _money(amount))
+                y0 -= 11
+            subtotal_key = "original_subtotal" if key == "original_items" else "addons_subtotal"
+            subtotal_label = "Original subtotal" if key == "original_items" else "Add-ons subtotal"
+            c.setFont(sans_b, 8.5)
+            c.setFillColor(DK)
+            c.drawString(MARGIN_L + 18, y0, subtotal_label)
+            c.drawRightString(PW - MARGIN_R, y0, _money(area.get(subtotal_key) or 0))
+            y0 -= 13
+        _hr(c, y0 + 4, weight=0.7, col=GOLD)
+        c.setFont(sans_b, 9)
+        c.setFillColor(DK)
+        c.drawString(MARGIN_L + 8, y0 - 4, "Area total")
+        c.drawRightString(PW - MARGIN_R, y0 - 4, _money(area.get("total") or 0))
+        return y0 - 20
+
+    for idx, area in enumerate(areas):
+        if idx and idx % 2 == 0:
+            c.showPage()
+            page += 1
+            _paint_page_chrome(c, quote, page, total_pages)
+            y = CONTENT_TOP - 22
+            _section_label(c, MARGIN_L, y, "AREA BREAKDOWN", mono)
+            y -= 16
+        y = draw_area(area, y)
+
+    c.showPage()
+    page += 1
+    _paint_page_chrome(c, quote, page, total_pages)
+    y = CONTENT_TOP - 22
+    _section_label(c, MARGIN_L, y, "ADDENDUM TOTALS", mono)
+    y -= 20
+    original_total = float(grouping.get("original_total") or 0)
+    addons_total = float(grouping.get("addons_total") or 0)
+    grand_total = float(grouping.get("grand_total") or (original_total + addons_total))
+    rows = [
+        ("Original total", original_total),
+        ("Add-ons total", addons_total),
+        ("Grand total", grand_total),
+    ]
+    for label, amount in rows:
+        c.setFont(sans_b if label == "Grand total" else sans, 10)
+        c.setFillColor(DK)
+        c.drawString(MARGIN_L + 8, y, label)
+        c.drawRightString(PW - MARGIN_R, y, _money(amount))
+        y -= 18
+    y -= 8
+    _hr(c, y, col=GOLD)
+    y -= 20
+    _section_label(c, MARGIN_L, y, "OPTIONAL PASSWAY HARDWARE", mono)
+    y -= 18
+    optional = (quote.get("metadata") or {}).get("optional_hardware") or {}
+    for desc, key, default in (
+        ('2" rings, 8-pack — 3 packs', "rings", 224.85),
+        ('2" reeded pole, 8 ft — 1', "pole", 210.82),
+        ('2" single brackets, 3½" return — 3', "brackets", 96.24),
+    ):
+        c.setFont(sans, 9)
+        c.setFillColor(DETAIL)
+        c.drawString(MARGIN_L + 8, y, desc)
+        c.drawRightString(PW - MARGIN_R, y, _money(optional.get(key, default)))
+        y -= 15
+    optional_total = float(optional.get("total", 531.91) or 531.91)
+    y -= 5
+    c.setFont(sans_b, 10)
+    c.setFillColor(DK)
+    c.drawString(MARGIN_L + 8, y, "Optional passway hardware")
+    c.drawRightString(PW - MARGIN_R, y, _money(optional_total))
+    y -= 20
+    c.setFont(sans_b, 10)
+    c.drawString(MARGIN_L + 8, y, "Total with optional hardware")
+    c.drawRightString(PW - MARGIN_R, y, _money(grand_total + optional_total))
+    c.save()
+    return buf.getvalue()
+
+
 def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     """Render McLean gold landscape estimate PDF bytes from a quote dict.
 
@@ -811,6 +943,9 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     quoted_sub = _quoted_subtotal(items)
     has_extra = bool(extra)
     client_safe = _client_safe(quote)
+    area_grouping = (quote.get("metadata") or {}).get("area_grouping")
+    if client_safe and isinstance(area_grouping, dict) and area_grouping.get("areas"):
+        return _draw_grouped_client_copy(quote, area_grouping)
 
     # Flatten draw sequence for pagination probe (headers/subtotals cost ~20pt)
     def _band_need(band_items: list) -> float:
@@ -885,9 +1020,12 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     display_n = 1
 
     if kept_quoted or quoted:
-        y = _draw_band_header(
-            c, y, "SUBTOTAL — Quoted / already given (locked)", mono, sans_b
+        quoted_header = (
+            "Addendum items"
+            if client_safe and not has_extra
+            else "SUBTOTAL — Quoted / already given"
         )
+        y = _draw_band_header(c, y, quoted_header, mono, sans_b)
         for it in kept_quoted:
             if _is_section_row(it) or _is_subtotal_row(it):
                 y = _draw_one_line_item(c, it, y, sans=sans, sans_b=sans_b)
@@ -896,11 +1034,16 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
                 c, it, y, sans=sans, sans_b=sans_b, display_num=display_n
             )
             display_n += 1
+        quoted_subtotal_label = (
+            "Addendum subtotal"
+            if client_safe and not has_extra
+            else "SUBTOTAL — Quoted / already given"
+        )
         y = _draw_band_subtotal(
-            c, y, "SUBTOTAL — Quoted / already given", _money(quoted_sub), sans_b, sans
+            c, y, quoted_subtotal_label, _money(quoted_sub), sans_b, sans
         )
 
-    if kept_extra or (extra and not spilled):
+    if (not (client_safe and not has_extra)) and (kept_extra or (extra and not spilled)):
         y = _draw_band_header(
             c, y, "SUBTOTAL — Extra work (TBD / not yet priced)", mono, sans_b
         )
@@ -915,7 +1058,7 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
         y = _draw_band_subtotal(
             c, y, "SUBTOTAL — Extra work (not priced)", "TBD", sans_b, sans
         )
-    elif extra and spilled:
+    elif (not (client_safe and not has_extra)) and extra and spilled:
         # Extra entirely spilled — still show header+TBD subtotal so page 1 is clear
         y = _draw_band_header(
             c, y, "SUBTOTAL — Extra work (TBD / not yet priced)", mono, sans_b
