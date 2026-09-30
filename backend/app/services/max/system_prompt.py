@@ -620,7 +620,8 @@ def get_max_brain_context() -> str:
         cross_ctx = unified_store.get_cross_channel_context(limit_per_channel=4, hours=2)
         if cross_ctx:
             cross_lines = ["### Recent Cross-Channel Activity"]
-            channel_labels = {"telegram": "Telegram", "web": "Web/CC", "cc": "Command Center"}
+            channel_labels = {"telegram": "Telegram", "web": "Web/CC", "cc": "Command Center",
+                              "voice": "Voice (live call)"}
             for ch, msgs in cross_ctx.items():
                 ch_label = channel_labels.get(ch, ch.title())
                 cross_lines.append(f"**{ch_label}**:")
@@ -631,6 +632,18 @@ def get_max_brain_context() -> str:
             sections.append("\n".join(cross_lines))
     except Exception as e:
         logger.debug(f"Brain context: cross-channel context unavailable: {e}")
+
+    # ── g. Last live voice call (2026-09-30 voice upgrade) ──
+    # Voice calls are saved to the unified store (channel "voice") with an
+    # end-of-call summary, so text MAX can answer "what did we discuss on
+    # the last voice call?" and continue it.
+    try:
+        from app.services.max.voice_transcript import render_last_voice_call_for_prompt
+        last_voice = render_last_voice_call_for_prompt(max_chars=1800)
+        if last_voice:
+            sections.append("### Last Voice Call (saved transcript, channel voice)\n" + last_voice)
+    except Exception as e:
+        logger.debug(f"Brain context: last voice call unavailable: {e}")
 
     result = "\n\n".join(sections) if sections else ""
 

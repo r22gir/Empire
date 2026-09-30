@@ -2251,6 +2251,12 @@ def _get_weather(params: dict, desk: Optional[str] = None) -> ToolResult:
         "miami": (25.76, -80.19),
         "atlanta": (33.75, -84.39),
         "seattle": (47.61, -122.33),
+        # Empire Workroom is in the Washington DC area (2026-09-30).
+        "washington": (38.91, -77.04),
+        "washington dc": (38.91, -77.04),
+        "washington, dc": (38.91, -77.04),
+        "washington d.c.": (38.91, -77.04),
+        "dc": (38.91, -77.04),
     }
 
     coords = CITY_COORDS.get(city.lower(), (34.05, -118.24))
@@ -5090,8 +5096,8 @@ If a tool call fails with "Unknown tool", check the name against this list.
   `{"tool": "get_tasks", "desk": "forge|sales|support|...", "status": "todo|in_progress|done"}`
 - **get_desk_status** — Get task counts across all desks
   `{"tool": "get_desk_status"}`
-- **search_conversations** — Search conversation history across all channels (Telegram, Web, CC). Searches brain memories, conversation summaries, and chat backups.
-  `{"tool": "search_conversations", "query": "keyword or phrase", "channel": "telegram|web|cc"}`
+- **search_conversations** — Search conversation history across all channels (Telegram, Web, CC, live Voice). Searches brain memories, conversation summaries, chat backups and saved voice-call transcripts. For the last voice call use `{"tool": "search_conversations", "query": "last voice call", "channel": "voice"}`.
+  `{"tool": "search_conversations", "query": "keyword or phrase", "channel": "telegram|web|cc|voice"}`
 
 ### Action Tools
 - **deposit_pay_link** — Workroom or WoodCraft quote only. Creates (or reuses) a deposit invoice on the finance router and a Stripe Checkout link on the payments router. Client name/email/phone/address are copied from the quote. A second call returns the same invoice and the same open link. payment_status stays `link_ready` until Stripe reports paid — do not tell the founder the deposit is collected when status is not `paid`.
@@ -6520,6 +6526,44 @@ def _search_conversations(params: dict, desk: Optional[str] = None) -> ToolResul
     except Exception as e:
         logger.warning(f"search_conversations: chat backup search failed: {e}")
 
+    # 4. Live voice-call transcripts (unified store, channel "voice").
+    #    2026-09-30 voice upgrade. A generic query ("last voice call",
+    #    "voice call", ...) returns the most recent call's summary + lines,
+    #    since a LIKE match on those words would find nothing.
+    voice_first: list = []
+    if not channel or channel == "voice":
+        try:
+            from app.services.max.voice_transcript import (
+                is_generic_voice_query, last_voice_call, search_voice_messages,
+            )
+            if channel == "voice" or "voice" in query.lower():
+                if is_generic_voice_query(query) or channel == "voice" and query.lower() in ("voice", "call", "last call"):
+                    call = last_voice_call(max_lines=40)
+                    if call:
+                        voice_first.append({
+                            "type": "voice_call",
+                            "channel": "voice",
+                            "conversation_id": call["conversation_id"],
+                            "started_at": call.get("started_at"),
+                            "ended_at": call.get("ended_at"),
+                            "summary": call.get("summary", ""),
+                            "lines": call.get("lines", []),
+                            "date": str(call.get("started_at") or "")[:10],
+                            "source": "voice",
+                        })
+            for row in search_voice_messages(query, limit=limit):
+                results.append({
+                    "type": "voice_message",
+                    "role": row.get("role", ""),
+                    "content": (row.get("content") or "")[:500],
+                    "channel": "voice",
+                    "conversation_id": row.get("conversation_id", ""),
+                    "date": str(row.get("created_at") or "")[:10],
+                    "source": "voice",
+                })
+        except Exception as e:
+            logger.warning(f"search_conversations: voice transcript search failed: {e}")
+
     # Channel filter for memory/summary results if requested
     if channel:
         filtered = []
@@ -6533,7 +6577,7 @@ def _search_conversations(params: dict, desk: Optional[str] = None) -> ToolResul
 
     # Sort by date descending
     results.sort(key=lambda x: x.get("date", ""), reverse=True)
-    results = results[:limit]
+    results = (voice_first + results)[:limit]
 
     duration = int((_time.time() - start) * 1000)
     log_execution("search_conversations", params, {"count": len(results)}, access_level=1, desk=desk, success=True, duration_ms=duration)
