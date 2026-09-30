@@ -57,6 +57,8 @@ RULE = HAIR
 DETAIL = MUTE
 DK = INK
 PANEL = HexColor("#efe9dc")
+# Warm zebra tint for estimate-table detail rows; subtotal rows stay unshaded.
+ROW_SHADE = HexColor("#efe8dc")
 
 _FONT_DIR = Path("/usr/share/fonts/truetype/dejavu")
 _FONTS_READY = False
@@ -858,6 +860,11 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
         qty_text = str(int(qty)) if qty.is_integer() else f"{qty:g}"
         c.setStrokeColor(HAIR)
         c.setLineWidth(0.35)
+        # Shade every other detail row across the full table width. Subtotal
+        # rows use their own rule treatment and are never shaded.
+        if row_number[0] % 2 == 0:
+            c.setFillColor(ROW_SHADE)
+            c.rect(MARGIN_L, y0 - 10, amount_x - MARGIN_L, 14, fill=1, stroke=0)
         c.line(MARGIN_L, y0 + 4, amount_x, y0 + 4)
         c.setFont(sans, 8)
         c.setFillColor(DETAIL)
