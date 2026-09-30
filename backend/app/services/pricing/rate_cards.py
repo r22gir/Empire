@@ -76,7 +76,7 @@ def component_rates(business_unit: str) -> dict[str, float]:
 
 def client_rate_rules(client_key: str) -> dict[str, object]:
     """Return a copy of durable client-specific rate and format rules."""
-    key = (client_key or "").strip().lower().replace(" ", "_").replace("'", "")
+    key = (client_key or "").strip().lower().replace(" ", "_").replace("'", "_")
     if key not in CLIENT_RATE_RULES:
         raise KeyError(f"No client rate rules for '{client_key}'")
     return dict(CLIENT_RATE_RULES[key])
