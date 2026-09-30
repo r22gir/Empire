@@ -806,7 +806,9 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
     c.setSubject("Client addendum estimate grouped by area")
     serif_b, sans, sans_b, mono = _ensure_body_fonts()
     areas = list(grouping.get("areas") or [])
-    area_pages = max(1, (len(areas) + 1) // 2)
+    # Give each area its own table block/page. This prevents orphaned area
+    # headers and guarantees the ruled rows stay above the footer.
+    area_pages = max(1, len(areas))
     total_pages = area_pages + 1
     page = 1
     _paint_page_chrome(c, quote, page, total_pages)
@@ -839,6 +841,14 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
 
     def table_row(item: Dict[str, Any], y0: float) -> float:
         desc = str(item.get("description") or "Item")
+        if desc.startswith("Valance add-on"):
+            desc = "Valance add-on"
+        elif desc.startswith("Tassel tiebacks"):
+            desc = "Tassel tiebacks (pairs)"
+        elif desc.startswith("Leading-edge trim application"):
+            desc = "Leading-edge trim application"
+        elif desc.startswith("Center tassels"):
+            desc = "Center tassels (2 per swag)"
         qty = float(item.get("quantity") or 1)
         unit = str(item.get("unit") or "ea")
         amount = float(item.get("amount") or 0)
@@ -868,7 +878,7 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
         c.setLineWidth(0.55)
         c.line(MARGIN_L, y0 + 4, amount_x, y0 + 4)
         c.line(MARGIN_L, y0 - 10, amount_x, y0 - 10)
-        return y0 - 14
+        return y0 - 24
 
     def draw_area(area: Dict[str, Any], y0: float) -> float:
         name = str(area.get("name") or "Area")
@@ -893,7 +903,10 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
         return y0 - 10
 
     for idx, area in enumerate(areas):
-        if idx and idx % 2 == 0:
+        # One complete area per page keeps headers with their first rows and
+        # guarantees no table row can enter the footer band. Every new page
+        # repeats the column header through draw_area/table_header.
+        if idx:
             c.showPage()
             page += 1
             _paint_page_chrome(c, quote, page, total_pages)
