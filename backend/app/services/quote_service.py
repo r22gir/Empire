@@ -486,6 +486,31 @@ def set_quote_test_flag(quote_id: str, is_test: bool = True, changed_by: str = "
     return get_quote(quote_id)
 
 
+def _area_grouped_financials(metadata) -> Optional[dict]:
+    """Return the canonical financial split for area-grouped addenda.
+
+    Area-grouped addenda keep original items in metadata (not line rows), so
+    their stored quote total must include both metadata original items and the
+    canonical add-on line items.
+    """
+    if not isinstance(metadata, dict):
+        return None
+    grouping = metadata.get("area_grouping")
+    if not isinstance(grouping, dict):
+        return None
+    original = round(float(grouping.get("original_total") or 0), 2)
+    addons = round(float(grouping.get("addons_total") or 0), 2)
+    grand = round(float(grouping.get("grand_total") or (original + addons)), 2)
+    return {
+        "original_subtotal": original,
+        "addons_subtotal": addons,
+        "grand_total": grand,
+        "optional_hardware_total": round(
+            float((metadata.get("optional_hardware") or {}).get("total") or 0), 2
+        ),
+    }
+
+
 def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
     """Recalculate quote totals from line items. Log changes to audit.
 
@@ -507,7 +532,7 @@ def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
     )
 
     q = conn.execute(
-        "SELECT subtotal, tax_rate, discount_amount, discount_type, total, deposit_percent FROM quotes_v2 WHERE id = ?",
+        "SELECT subtotal, tax_rate, discount_amount, discount_type, total, deposit_percent, metadata_json FROM quotes_v2 WHERE id = ?",
         (quote_id,)
     ).fetchone()
     if not q:
@@ -520,8 +545,19 @@ def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
     old_total = q[4] or 0
     deposit_percent = q[5] or 50
 
-    # Use items_subtotal if we have items, else keep existing
-    subtotal = items_subtotal if items else old_subtotal
+    # Area-grouped addenda have original items in metadata, not line rows.
+    # Store the customer-facing subtotal/total as original + add-ons while
+    # retaining the separate split in the returned quote fields.
+    try:
+        grouped_meta = json.loads(q[6]) if q[6] else None
+    except (json.JSONDecodeError, TypeError):
+        grouped_meta = None
+    grouped_financials = _area_grouped_financials(grouped_meta)
+    subtotal = (
+        grouped_financials["grand_total"]
+        if grouped_financials
+        else (items_subtotal if items else old_subtotal)
+    )
 
     if discount_type == 'percent' and discount_amount > 0:
         discount = round(subtotal * (discount_amount / 100), 2)
@@ -561,6 +597,12 @@ def _quote_to_dict(row) -> dict:
         else:
             d[key] = None
         del d[jf]
+    grouped_financials = _area_grouped_financials(d.get("metadata"))
+    if grouped_financials:
+        d.update(grouped_financials)
+        # subtotal/total are persisted as the customer-facing grand total.
+        d["subtotal"] = grouped_financials["grand_total"]
+        d["total"] = grouped_financials["grand_total"]
     return d
 
 
