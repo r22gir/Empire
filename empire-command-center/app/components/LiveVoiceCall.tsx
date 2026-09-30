@@ -153,65 +153,8 @@ export function useLiveVoice() {
     const ws = new WebSocket(liveUrl());
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-      });
-    } catch (e: any) {
-      setError(e?.name === 'NotAllowedError' ? 'Microphone permission was denied.' : `Microphone unavailable: ${e?.message || e}`);
-      cleanup('error');
-      return;
-    }
-    streamRef.current = stream;
-    const source = ctx.createMediaStreamSource(stream);
-
-    const sendChunk = (pcm: ArrayBuffer, rms: number) => {
-      const sock = wsRef.current;
-      if (!sock || sock.readyState !== WebSocket.OPEN) return;
-      if (isPlaying() && rms < BARGE_IN_RMS) {
-        sock.send(new ArrayBuffer(pcm.byteLength)); // silence keeps VAD timing steady
-      } else {
-        sock.send(pcm);
-      }
-    };
-
-    try {
-      if (ctx.audioWorklet) {
-        await ctx.audioWorklet.addModule('/max-mic-worklet.js');
-        const node = new AudioWorkletNode(ctx, 'max-mic-processor', { processorOptions: { targetRate: SAMPLE_RATE } });
-        node.port.onmessage = (ev: MessageEvent) => sendChunk(ev.data.pcm, ev.data.rms);
-        source.connect(node);
-        // Keep the graph pulling without making the mic audible.
-        const mute = ctx.createGain(); mute.gain.value = 0;
-        node.connect(mute); mute.connect(ctx.destination);
-        nodeRef.current = node;
-      } else {
-        // Fallback for old engines: ScriptProcessor + naive resample.
-        const proc = ctx.createScriptProcessor(4096, 1, 1);
-        const ratio = ctx.sampleRate / SAMPLE_RATE;
-        proc.onaudioprocess = (e: AudioProcessingEvent) => {
-          const inp = e.inputBuffer.getChannelData(0);
-          const n = Math.floor(inp.length / ratio);
-          const out = new Int16Array(n);
-          let sum = 0;
-          for (let i = 0; i < n; i++) {
-            const s = Math.max(-1, Math.min(1, inp[Math.floor(i * ratio)]));
-            sum += s * s;
-            out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-          }
-          sendChunk(out.buffer, Math.sqrt(sum / Math.max(1, n)));
-        };
-        source.connect(proc);
-        const mute = ctx.createGain(); mute.gain.value = 0;
-        proc.connect(mute); mute.connect(ctx.destination);
-        nodeRef.current = proc;
-      }
-    } catch (e: any) {
-      setError(`Audio setup failed: ${e?.message || e}`);
-      cleanup('error');
-      return;
-    }
-
+    // Attach handlers immediately: the server can answer (ready / error) before
+    // the mic permission prompt and AudioWorklet load finish.
     ws.onmessage = (ev: MessageEvent) => {
       if (ev.data instanceof ArrayBuffer) { playPcm(ev.data); return; }
       let msg: any;
@@ -272,6 +215,71 @@ export function useLiveVoice() {
     };
     ws.onerror = () => { setError('Connection error (are you signed in to studio.empirebox.store?)'); };
     ws.onclose = () => { if (stateRef.current !== 'idle' && stateRef.current !== 'error') cleanup('idle'); };
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      });
+    } catch (e: any) {
+      setError(e?.name === 'NotAllowedError' ? 'Microphone permission was denied.' : `Microphone unavailable: ${e?.message || e}`);
+      cleanup('error');
+      return;
+    }
+    if (wsRef.current !== ws || ctxRef.current !== ctx) {
+      // Call ended (error/hangup) while the mic prompt was open.
+      stream.getTracks().forEach(t => t.stop());
+      return;
+    }
+    streamRef.current = stream;
+    const source = ctx.createMediaStreamSource(stream);
+
+    const sendChunk = (pcm: ArrayBuffer, rms: number) => {
+      const sock = wsRef.current;
+      if (!sock || sock.readyState !== WebSocket.OPEN) return;
+      if (isPlaying() && rms < BARGE_IN_RMS) {
+        sock.send(new ArrayBuffer(pcm.byteLength)); // silence keeps VAD timing steady
+      } else {
+        sock.send(pcm);
+      }
+    };
+
+    try {
+      if (ctx.audioWorklet) {
+        await ctx.audioWorklet.addModule('/max-mic-worklet.js');
+        if (ctxRef.current !== ctx) return; // call ended while loading
+        const node = new AudioWorkletNode(ctx, 'max-mic-processor', { processorOptions: { targetRate: SAMPLE_RATE } });
+        node.port.onmessage = (ev: MessageEvent) => sendChunk(ev.data.pcm, ev.data.rms);
+        source.connect(node);
+        // Keep the graph pulling without making the mic audible.
+        const mute = ctx.createGain(); mute.gain.value = 0;
+        node.connect(mute); mute.connect(ctx.destination);
+        nodeRef.current = node;
+      } else {
+        // Fallback for old engines: ScriptProcessor + naive resample.
+        const proc = ctx.createScriptProcessor(4096, 1, 1);
+        const ratio = ctx.sampleRate / SAMPLE_RATE;
+        proc.onaudioprocess = (e: AudioProcessingEvent) => {
+          const inp = e.inputBuffer.getChannelData(0);
+          const n = Math.floor(inp.length / ratio);
+          const out = new Int16Array(n);
+          let sum = 0;
+          for (let i = 0; i < n; i++) {
+            const s = Math.max(-1, Math.min(1, inp[Math.floor(i * ratio)]));
+            sum += s * s;
+            out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+          sendChunk(out.buffer, Math.sqrt(sum / Math.max(1, n)));
+        };
+        source.connect(proc);
+        const mute = ctx.createGain(); mute.gain.value = 0;
+        proc.connect(mute); mute.connect(ctx.destination);
+        nodeRef.current = proc;
+      }
+    } catch (e: any) {
+      setError(`Audio setup failed: ${e?.message || e}`);
+      cleanup('error');
+      return;
+    }
+
   }, [cleanup, flushPlayback, playPcm, upsertLine]);
 
   useEffect(() => () => cleanup('idle'), [cleanup]);
