@@ -245,6 +245,12 @@ def looks_like_continuation(text: str, history) -> "dict | None":
     if not text or not history:
         return None
     try:
+        from app.services.max.drawing_intent import is_business_document_intent
+        if is_business_document_intent(text):
+            return None
+    except Exception:
+        pass
+    try:
         # Walk the last few assistant turns. We stop at the first
         # matching turn so the most recent missing-keys context
         # wins (a new drawing intent overrides an older one).

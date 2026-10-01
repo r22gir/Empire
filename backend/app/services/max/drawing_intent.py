@@ -37,13 +37,12 @@ DRAWING_KEYWORDS = (
     "pdf drawing",
     "bench drawing",
     "cad",
-    # H57 FIX: "generate" + "make" verbs — cover positive fixture 5
-    # ("generate the B1 sheet for the Willard bench") and
-    # similar explicit generation requests.
+    # H57 FIX: explicit generation phrases only — bare "generate the"
+    # / "make a" matched invoice and quote requests ("generate the
+    # invoice", "make a quote for the bench").
     "generate drawing",
-    "generate the",
-    "make a",
-    "make me",
+    "generate the b1",
+    "b1 sheet",
     # Sprint 1d Phase A Fix #2: founder re-ask keywords — so "redraw the
     # Willard bench", "regenerate as 4-view", "redo with the new dims",
     # "new version", "same version" all route to drawing-router
@@ -342,6 +341,53 @@ class DrawingHandoff:
         return bool(self.b1_product_type and not self.missing_template_keys)
 
 
+# Invoice / quote / billing language must reach MAX + finance tools, not
+# drawing-router — even when the message names benches, banquettes, sf, or
+# line-item dimensions.
+_BUSINESS_DOCUMENT_PATTERNS = (
+    re.compile(r"\binvoices?\b", re.IGNORECASE),
+    re.compile(r"\bquot(?:e|ing)s?\b", re.IGNORECASE),
+    re.compile(r"\bestimates?\b", re.IGNORECASE),
+    re.compile(r"\best-\d{4}-\d+\b", re.IGNORECASE),
+    re.compile(r"\binv-\d{4}-\d+\b", re.IGNORECASE),
+    re.compile(r"\bdraft\s+invoices?\b", re.IGNORECASE),
+    re.compile(r"\bsplit\b.{0,80}\binvoices?\b", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\binvoices?\b.{0,80}\bsplit\b", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\bsplit\s+from\s+inv-", re.IGNORECASE),
+    re.compile(r"\bdeposit\b", re.IGNORECASE),
+    re.compile(r"\bpayments?\b", re.IGNORECASE),
+    re.compile(r"\btotal\b", re.IGNORECASE),
+    re.compile(r"\bpricing\b", re.IGNORECASE),
+    re.compile(r"\b(?:unit\s+)?price\b", re.IGNORECASE),
+    re.compile(r"\$\s*\d", re.IGNORECASE),
+    re.compile(r"(?<!\w)\d+(?:\.\d+)?\s*sf\b", re.IGNORECASE),
+)
+
+
+def is_business_document_intent(text: str) -> bool:
+    """True when the user is asking for quotes, invoices, splits, or pricing."""
+    if not text:
+        return False
+    return any(p.search(text) for p in _BUSINESS_DOCUMENT_PATTERNS)
+
+
+def _intent_mode_keywords_imply_drawing(lowered: str) -> bool:
+    """D3 drawing modes that should route through drawing-router.
+
+    Excludes planning_help — those stay in normal MAX chat."""
+    for mode in (
+        "animated_diagram",
+        "visual_explainer",
+        "shop_drawing",
+        "sketch_analysis",
+        "concept_image",
+    ):
+        for keyword in INTENT_MODE_KEYWORDS[mode]:
+            if keyword in lowered:
+                return True
+    return False
+
+
 def is_drawing_intent(text: str) -> bool:
     """Returns True if text requests a drawing/rendering action.
 
@@ -354,6 +400,7 @@ def is_drawing_intent(text: str) -> bool:
       2. Long pastes (>500 chars containing the word — likely a paste,
          not a request)
       3. Explicit user rejections + plan-mode phrases (pre-existing)
+      4. Invoice / quote / estimate / split / pricing requests
 
     Then a strong draw pattern OR a drawing-specific multi-token
     phrase OR a known animation phrase returns True.
@@ -386,6 +433,11 @@ def is_drawing_intent(text: str) -> bool:
         "no drawing-router",
     )
     if any(neg in lowered for neg in negation_patterns):
+        return False
+
+    # Billing / quote / invoice turns always beat drawing — including mixed
+    # prompts that also mention furniture types or dimensions.
+    if is_business_document_intent(text):
         return False
 
     # H57: question forms NEVER route. A user asking "what is a
@@ -454,16 +506,9 @@ def is_drawing_intent(text: str) -> bool:
     if any(pattern in lowered for pattern in strong_draw_patterns):
         return True
 
-    # H57 FIX: explicit drawing request with item-type + dims.
-    # A message that names an item (shade, bench, valance, etc.) AND
-    # specifies dimensions (width 38, drop 70, 68 high, etc.) is a
-    # fabrication request even without the verb "draw" — per
-    # dispatch fixture 6 ("Roman shade, width 68, drop 70").
-    if any(item in lowered for item in _ITEM_TYPE_KEYWORDS_LOWER):
-        # Look for dimension-like text — at least one digit followed
-        # by a unit, OR an explicit width/drop/high keyword.
-        if _DIM_LIKE.search(text):
-            return True
+    # D3 explicit modes (shop drawing, sketch analysis, concept image, …)
+    if _intent_mode_keywords_imply_drawing(lowered):
+        return True
 
     # Drawing-specific multi-token "plan" phrases. Bare "plan" alone is NOT enough.
     if any(phrase in lowered for phrase in DRAWING_PLAN_PHRASES):
@@ -504,26 +549,6 @@ def is_drawing_intent(text: str) -> bool:
                       lowered):
             return True
     return False
-
-
-# H57 FIX: helper constants for the "item + dims" intent check
-# (positive fixture 6: "Roman shade, width 68, drop 70").
-# Lower-cased once at module load for fast matching.
-_ITEM_TYPE_KEYWORDS_LOWER = tuple(
-    kw.lower() for kw in (
-        "bench", "banquette", "booth", "chair", "drapery", "curtain",
-        "shade", "roman", "cornice", "valance", "headboard",
-    )
-)
-# Matches dimension-like text: a number with a unit (e.g. "68\"", "70 in",
-# "38cm") or an explicit width/drop/high keyword with a number.
-import re as _re_module
-_DIM_LIKE = _re_module.compile(
-    r"(?:\b\d+\s*(?:[\"'\u2033]\b|in\b|cm\b|mm\b|ft\b|inch\b|"
-    r"inches\b|wide\b|tall\b|high\b|drop\b))"
-    r"|(?:width\s*\d|drop\s*\d|height\s*\d|high\s*\d|long\s*\d)",
-    _re_module.IGNORECASE,
-)
 
 
 def _extract_item_type(text: str) -> tuple[str, str]:

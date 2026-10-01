@@ -123,9 +123,13 @@ class TestH57PositiveFixtures:
         ) is True
 
     def test_positive_6_explicit_drawing_request(self):
-        """Founder fixture 6. Explicit drawing request with dims → True."""
+        """Fabrication with dims alone is not drawing — need an explicit
+        draw/render/sketch/shop-drawing request."""
         assert is_drawing_intent(
             "Roman shade, width 68, drop 70"
+        ) is False
+        assert is_drawing_intent(
+            "draw a roman shade, width 68, drop 70"
         ) is True
 
     def test_positive_strong_draw_pattern_draw_a(self):
@@ -240,8 +244,10 @@ def test_drawing_keywords_constant_includes_intent_words():
     assert "sketch" in DRAWING_KEYWORDS
     assert "elevation" in DRAWING_KEYWORDS
     assert "isometric" in DRAWING_KEYWORDS
-    # H57 FIX: generate + make verbs added (positive fixture 5)
+    # H57 FIX: generate verbs — B1 sheet only (not bare "generate the")
     assert "generate drawing" in DRAWING_KEYWORDS
-    assert "generate the" in DRAWING_KEYWORDS
-    assert "make a" in DRAWING_KEYWORDS
-    assert "make me" in DRAWING_KEYWORDS
+    assert "generate the b1" in DRAWING_KEYWORDS
+    assert "b1 sheet" in DRAWING_KEYWORDS
+    assert "generate the" not in DRAWING_KEYWORDS
+    assert "make a" not in DRAWING_KEYWORDS
+    assert "make me" not in DRAWING_KEYWORDS
