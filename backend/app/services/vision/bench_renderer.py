@@ -313,9 +313,24 @@ def _esc(txt):
     return str(txt).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-def _poly(pts, sw=SW_MED, fill="none", stroke=BLACK):
+def _poly(pts, sw=SW_MED, fill="none", stroke=BLACK, attrs: str = ""):
     points = " ".join(f"{p[0]:.1f},{p[1]:.1f}" for p in pts)
-    return f'<polygon points="{points}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}" stroke-linejoin="round"/>'
+    extra = f" {attrs}" if attrs else ""
+    return (
+        f'<polygon points="{points}" fill="{fill}" stroke="{stroke}" '
+        f'stroke-width="{sw}" stroke-linejoin="round"{extra}/>'
+    )
+
+
+def _iso_corners(ox, oy, scale, corners_3d):
+    """Map (x, y, z) inch corners to 2D screen points."""
+    return [_iso(x, y, z, ox, oy, scale) for x, y, z in corners_3d]
+
+
+def _iso_face(parts, ox, oy, scale, corners_3d, sw=SW_MED, fill="none", stroke=BLACK):
+    """Closed isometric face (3+ corners)."""
+    pts = _iso_corners(ox, oy, scale, corners_3d)
+    parts.append(_poly(pts, sw=sw, fill=fill, stroke=stroke, attrs='data-iso-face="1"'))
 
 
 def _line(x1, y1, x2, y2, sw=SW_MED, stroke=BLACK, dash=""):
@@ -846,65 +861,53 @@ def _elev_u_shape(parts, ox, oy, scale, back, side, depth, side_depth, seat_h, b
 
 def _draw_bench_box(parts, ox, oy, scale, sx, sy, width, depth, seat_h, back_h,
                     panel_style="vertical_channels", channel_count=6):
-    """Draw one bench section in isometric: seat box + back panel + style pattern."""
+    """Draw one bench section in isometric: closed seat solid + back panel."""
     w, d, sh, bh = width, depth, seat_h, back_h
     has_back = bh is not None and bh > 0 and panel_style != "none"
     bt = BACK_T if has_back else 0
+    y_seat_rear = sy + d - (bt if has_back else 0)
+    y_back = sy + d
 
-    # Seat box — front face
-    parts.append(_poly([
-        _iso(sx, sy, 0, ox, oy, scale),
-        _iso(sx + w, sy, 0, ox, oy, scale),
-        _iso(sx + w, sy, sh, ox, oy, scale),
-        _iso(sx, sy, sh, ox, oy, scale),
-    ], SW_HEAVY))
-    # Seat — top face
-    parts.append(_poly([
-        _iso(sx, sy, sh, ox, oy, scale),
-        _iso(sx + w, sy, sh, ox, oy, scale),
-        _iso(sx + w, sy + d - bt, sh, ox, oy, scale),
-        _iso(sx, sy + d - bt, sh, ox, oy, scale),
-    ], SW_MED))
-    # Seat — right side
-    parts.append(_poly([
-        _iso(sx + w, sy, 0, ox, oy, scale),
-        _iso(sx + w, sy + d - bt, 0, ox, oy, scale),
-        _iso(sx + w, sy + d - bt, sh, ox, oy, scale),
-        _iso(sx + w, sy, sh, ox, oy, scale),
-    ], SW_MED))
+    # Seat — five closed faces (no dangling edges)
+    _iso_face(parts, ox, oy, scale, [
+        (sx, sy, 0), (sx + w, sy, 0), (sx + w, sy, sh), (sx, sy, sh),
+    ], sw=SW_HEAVY)
+    _iso_face(parts, ox, oy, scale, [
+        (sx, sy, sh), (sx + w, sy, sh), (sx + w, y_seat_rear, sh), (sx, y_seat_rear, sh),
+    ], sw=SW_MED)
+    _iso_face(parts, ox, oy, scale, [
+        (sx, sy, 0), (sx, y_seat_rear, 0), (sx, y_seat_rear, sh), (sx, sy, sh),
+    ], sw=SW_MED)
+    _iso_face(parts, ox, oy, scale, [
+        (sx + w, sy, 0), (sx + w, y_seat_rear, 0), (sx + w, y_seat_rear, sh), (sx + w, sy, sh),
+    ], sw=SW_MED)
+    _iso_face(parts, ox, oy, scale, [
+        (sx, y_seat_rear, 0), (sx + w, y_seat_rear, 0),
+        (sx + w, y_seat_rear, sh), (sx, y_seat_rear, sh),
+    ], sw=SW_MED)
 
     if not has_back:
         return
 
-    # Back panel — front face
-    parts.append(_poly([
-        _iso(sx, sy + d - bt, sh, ox, oy, scale),
-        _iso(sx + w, sy + d - bt, sh, ox, oy, scale),
-        _iso(sx + w, sy + d - bt, sh + bh, ox, oy, scale),
-        _iso(sx, sy + d - bt, sh + bh, ox, oy, scale),
-    ], SW_HEAVY))
-    # Back — top face
-    parts.append(_poly([
-        _iso(sx, sy + d - bt, sh + bh, ox, oy, scale),
-        _iso(sx + w, sy + d - bt, sh + bh, ox, oy, scale),
-        _iso(sx + w, sy + d, sh + bh, ox, oy, scale),
-        _iso(sx, sy + d, sh + bh, ox, oy, scale),
-    ], SW_MED))
-    # Back — right side
-    parts.append(_poly([
-        _iso(sx + w, sy + d - bt, sh, ox, oy, scale),
-        _iso(sx + w, sy + d, sh, ox, oy, scale),
-        _iso(sx + w, sy + d, sh + bh, ox, oy, scale),
-        _iso(sx + w, sy + d - bt, sh + bh, ox, oy, scale),
-    ], SW_MED))
+    # Back — front, top, left end, right end (rear face omitted — not visible)
+    _iso_face(parts, ox, oy, scale, [
+        (sx, y_seat_rear, sh), (sx + w, y_seat_rear, sh),
+        (sx + w, y_seat_rear, sh + bh), (sx, y_seat_rear, sh + bh),
+    ], sw=SW_HEAVY)
+    _iso_face(parts, ox, oy, scale, [
+        (sx, y_seat_rear, sh + bh), (sx + w, y_seat_rear, sh + bh),
+        (sx + w, y_back, sh + bh), (sx, y_back, sh + bh),
+    ], sw=SW_MED)
+    _iso_face(parts, ox, oy, scale, [
+        (sx, y_seat_rear, sh), (sx, y_back, sh),
+        (sx, y_back, sh + bh), (sx, y_seat_rear, sh + bh),
+    ], sw=SW_MED)
+    _iso_face(parts, ox, oy, scale, [
+        (sx + w, y_seat_rear, sh), (sx + w, y_back, sh),
+        (sx + w, y_back, sh + bh), (sx + w, y_seat_rear, sh + bh),
+    ], sw=SW_MED)
 
-    # Seat/back separation
-    sl1 = _iso(sx, sy + d - bt, sh, ox, oy, scale)
-    sl2 = _iso(sx + w, sy + d - bt, sh, ox, oy, scale)
-    parts.append(_line(sl1[0], sl1[1], sl2[0], sl2[1], 1.0))
-
-    # Back style pattern on back face (isometric)
-    _draw_back_style_iso(parts, ox, oy, scale, sx, sy + d - bt, width, sh, bh, bt,
+    _draw_back_style_iso(parts, ox, oy, scale, sx, y_seat_rear, width, sh, bh, bt,
                          panel_style, channel_count)
 
 
@@ -1303,7 +1306,9 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
     bp, *_ = build_fn(*iso_args, svg_w=iso_draw.w, svg_h=iso_draw.h,
                        panel_style=panel_style, channel_count=channel_count)
     iso_group.extend(bp)
-    parts.append(f'<g transform="translate({iso_draw.x:.1f},{iso_draw.y:.1f})">')
+    parts.append(
+        f'<g transform="translate({iso_draw.x:.1f},{iso_draw.y:.1f})" data-panel="iso">'
+    )
     parts.extend(iso_group)
     parts.append('</g>')
 

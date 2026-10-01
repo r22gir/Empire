@@ -147,7 +147,9 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
     assert "34" in svg
     validate_bench_svg_layout(svg, layout)
     from app.services.vision.bench_svg_text_layout import validate_bench_svg_text_layout
+    from app.services.vision.bench_iso_layout import validate_bench_iso_faces_closed
     validate_bench_svg_text_layout(svg, layout)
+    validate_bench_iso_faces_closed(svg, has_back=True)
 
 
 def test_roman_side_section_labels_no_overlap():
