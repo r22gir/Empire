@@ -2585,15 +2585,14 @@ def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult
     # Generate PDF
     pdf_dir = str(dp.quote_pdf_dir())
     os.makedirs(pdf_dir, exist_ok=True)
-    pdf_path = os.path.join(pdf_dir, f"{quote_number}.pdf")
 
     try:
-        _run_async(_generate_pdf_for_quote(quote["id"]))
-        if not os.path.exists(pdf_path):
-            return ToolResult(tool="send_quote_telegram", success=False, error="PDF generation failed")
+        pdf_path = _run_async(_generate_pdf_for_quote(quote["id"]))
         pdf_size = os.path.getsize(pdf_path)
         if pdf_size <= 0:
             return ToolResult(tool="send_quote_telegram", success=False, error="PDF generation produced an empty file")
+    except QuotePdfGenerationError as e:
+        return ToolResult(tool="send_quote_telegram", success=False, error=str(e))
     except Exception as e:
         return ToolResult(tool="send_quote_telegram", success=False, error=f"PDF generation failed: {e}")
 
@@ -2623,7 +2622,27 @@ def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult
     })
 
 
-async def _generate_pdf_for_quote(quote_id: str):
+class QuotePdfGenerationError(Exception):
+    """PDF generation blocked (verification gate) or failed to write output."""
+
+
+def _pdf_error_from_verification_payload(content: dict) -> str:
+    base = content.get("error") or "Quote failed verification"
+    errors = content.get("errors") or []
+    detail_parts: list[str] = []
+    for err in errors:
+        if isinstance(err, dict):
+            msg = err.get("message")
+            if msg:
+                detail_parts.append(str(msg))
+        elif err:
+            detail_parts.append(str(err))
+    if detail_parts:
+        return f"PDF generation failed: {base} — {'; '.join(detail_parts)}"
+    return f"PDF generation failed: {base}"
+
+
+async def _generate_pdf_for_quote(quote_id: str) -> str:
     """Generate PDF for a quote by ID (reuses quotes router logic).
 
     AI-generated quotes (source=max_quick_quote) skip verification
@@ -2632,7 +2651,13 @@ async def _generate_pdf_for_quote(quote_id: str):
     PHASE 2 · F5.2: uses the shared resolver `quote_service.resolve_quote`
     so the router-side and tool-side load paths share ONE canonical-first
     resolver instead of duplicating the logic.
+
+    Returns the on-disk PDF path. Raises QuotePdfGenerationError when the
+    router returns a verification JSONResponse (4xx) instead of raising.
     """
+    from fastapi import HTTPException
+    from starlette.responses import JSONResponse
+
     from app.services.quote_service import resolve_quote
     from app.routers.quotes import generate_pdf as _gen_pdf_endpoint
     quote = resolve_quote(quote_id)
@@ -2644,10 +2669,30 @@ async def _generate_pdf_for_quote(quote_id: str):
     #     — founder has already verified + approved the canonical quote, so a
     #     re-verification is redundant and may fail on tier/dimension checks
     #     that don't apply to canonical-shape quotes.
+    #   - canonical quotes_v2 with explicit line_items (manual_line /
+    #     founder-priced lines) — tiers/measurements do not apply.
     status = (quote.get("status") or "").lower()
     verified_statuses = {"sent", "accepted", "in_production", "completed", "cancelled"}
-    skip = (quote.get("source") or "").startswith("max_") or status in verified_statuses
-    await _gen_pdf_endpoint(quote_id, skip_verification=skip)
+    has_line_items = bool(quote.get("line_items"))
+    skip = (
+        (quote.get("source") or "").startswith("max_")
+        or status in verified_statuses
+        or has_line_items
+    )
+    response = await _gen_pdf_endpoint(quote_id, skip_verification=skip)
+    if isinstance(response, JSONResponse):
+        try:
+            content = json.loads(response.body.decode())
+        except Exception:
+            content = {}
+        raise QuotePdfGenerationError(_pdf_error_from_verification_payload(content))
+
+    quote_number = quote.get("quote_number", quote_id)
+    pdf_dir = str(dp.quote_pdf_dir())
+    pdf_path = os.path.join(pdf_dir, f"{quote_number}.pdf")
+    if not os.path.exists(pdf_path):
+        raise QuotePdfGenerationError("PDF generation failed: file was not written")
+    return pdf_path
 
 
 # ── EMAIL TOOLS ───────────────────────────────────────────────────
@@ -2857,12 +2902,11 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     # Generate PDF
     pdf_dir = str(dp.quote_pdf_dir())
     os.makedirs(pdf_dir, exist_ok=True)
-    pdf_path = os.path.join(pdf_dir, f"{quote_number}.pdf")
 
     try:
-        _run_async(_generate_pdf_for_quote(quote["id"]))
-        if not os.path.exists(pdf_path):
-            return ToolResult(tool="send_quote_email", success=False, error="PDF generation failed")
+        pdf_path = _run_async(_generate_pdf_for_quote(quote["id"]))
+    except QuotePdfGenerationError as e:
+        return ToolResult(tool="send_quote_email", success=False, error=str(e))
     except Exception as e:
         return ToolResult(tool="send_quote_email", success=False, error=f"PDF generation failed: {e}")
 
