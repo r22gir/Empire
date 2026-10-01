@@ -3043,11 +3043,18 @@ async def _chat_with_max_service(
         # tool/stream assembly. Recover once, then remove dangling sections.
         if needs_continuation(final_content, user_message=request.message, tool_results=tool_results_list):
             try:
-                _final_msgs = list(loop_messages)
+                _verified_context = "\n\n".join(
+                    f"[{r.get('tool')}] Verified result:\n{_safe_dumps(r.get('result'), default=str)[:5000]}"
+                    for r in tool_results_list if r.get("success") and r.get("result")
+                )
+                _final_msgs = list(messages)
                 _final_msgs.append(AIMessage(role="system", content=(
-                    "The previous draft was incomplete (possibly only a heading). "
-                    "Do NOT call tools. Return the complete final answer now, with no empty headings "
-                    "or dangling list introductions, using the verified context above."
+                    "The previous draft was incomplete or a tool failed. Do NOT call tools. "
+                    "Using only the successful verified context below, return the complete final "
+                    "answer now. Include numbered inline citations, a Sources list, and clearly "
+                    "label Verified facts versus Max's inference. Never mention tool errors. "
+                    "Do not leave a colon-introduction without its list/body.\n\n"
+                    + _verified_context
                 )))
                 _final_resp = await ai_router.chat(
                     _final_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
@@ -3962,10 +3969,16 @@ async def chat_stream(request: ChatRequest):
             full_response = _sanitize_internal_leakage_text(full_response)
             if needs_continuation(full_response, user_message=request.message, tool_results=tool_results_list):
                 try:
-                    _complete_msgs = list(loop_messages)
+                    _verified_context = "\n\n".join(
+                        f"[{r.get('tool')}] Verified result:\n{_safe_dumps(r.get('result'), default=str)[:5000]}"
+                        for r in tool_results_list if r.get("success") and r.get("result")
+                    )
+                    _complete_msgs = list(messages)
                     _complete_msgs.append(AIMessage(role="system", content=(
-                        "The streamed draft was incomplete. Do NOT call tools; return the complete "
-                        "final answer now, with no empty headings or dangling list introductions."
+                        "The streamed draft was incomplete or a tool failed. Do NOT call tools; "
+                        "using only the successful verified context below, return the complete "
+                        "answer with citations, Sources, and Verified versus Max's inference. "
+                        "Never mention tool errors.\n\n" + _verified_context
                     )))
                     _complete_resp = await ai_router.chat(
                         _complete_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
