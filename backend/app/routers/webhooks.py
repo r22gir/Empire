@@ -2,6 +2,7 @@
 Webhook routes for receiving notifications from external services.
 Email (SendGrid inbound), eBay notifications, and Stripe (see payments.py for primary handler).
 """
+from app.instance_url import empire_api_url
 from fastapi import APIRouter, HTTPException, Request
 import logging
 import os
@@ -152,7 +153,7 @@ async def handle_inbound_email(request: Request):
     try:
         import httpx
         async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post("http://localhost:8000/api/v1/notifications/internal", json={
+            await client.post(empire_api_url("/api/v1/notifications/internal"), json={
                 "source": "Email",
                 "type": "email_inbound",
                 "title": f"Email from {sender}",
@@ -197,7 +198,7 @@ async def handle_ebay_notification(request: Request):
     try:
         import httpx
         async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post("http://localhost:8000/api/v1/notifications/internal", json={
+            await client.post(empire_api_url("/api/v1/notifications/internal"), json={
                 "source": "eBay",
                 "type": "ebay_webhook",
                 "title": f"eBay: {event_type}",
@@ -226,7 +227,7 @@ async def handle_stripe_webhook(request: Request):
         headers = dict(request.headers)
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
-                "http://localhost:8000/api/v1/payments/webhook",
+                empire_api_url("/api/v1/payments/webhook"),
                 content=body,
                 headers={"stripe-signature": headers.get("stripe-signature", ""),
                          "content-type": "application/json"},

@@ -2,6 +2,7 @@
 EmpireOrchestrator — MAX-Hermes-OpenClaw Autonomous Loop
 Monitors ecosystem health, delegates to OpenClaw, logs to Hermes, notifies founder.
 """
+from app.instance_url import API_V1, empire_api_url
 import asyncio
 import logging
 import os
@@ -17,9 +18,8 @@ from app.services.max.hermes_memory import get_hermes_memory_status
 
 logger = logging.getLogger("orchestrator")
 
-API = "http://localhost:8000/api/v1"
+API = API_V1
 OPENCLAW_API = "http://localhost:7878"
-BACKEND_HEALTH = "http://localhost:8000/health"
 FRONTEND_HEALTH = "http://localhost:3005"
 
 
@@ -43,7 +43,7 @@ class EmpireOrchestrator:
     async def check_backend_health(self) -> dict:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.get(BACKEND_HEALTH)
+                r = await client.get(empire_api_url("/health"))
                 return {"healthy": r.ok, "service": "backend", "latency_ms": r.elapsed.total_seconds() * 1000}
         except Exception as e:
             return {"healthy": False, "service": "backend", "error": str(e)}
@@ -139,7 +139,7 @@ class EmpireOrchestrator:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(
-                    f"http://localhost:8000/api/v1/hermes/search",
+                    empire_api_url(f"/api/v1/hermes/search"),
                     params={"query": incident_type, "limit": 5},
                 )
                 if r.ok:
@@ -153,7 +153,7 @@ class EmpireOrchestrator:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(
-                    f"http://localhost:8000/api/v1/hermes/incidents",
+                    empire_api_url(f"/api/v1/hermes/incidents"),
                     json={
                         "incident_id": incident_id,
                         "resolved": success,
@@ -199,7 +199,7 @@ class EmpireOrchestrator:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(
-                    f"http://localhost:8000/api/v1/notifications/telegram",
+                    empire_api_url(f"/api/v1/notifications/telegram"),
                     json={
                         "message": message,
                         "priority": priority,

@@ -21,13 +21,13 @@ systemctl --user daemon-reload
 systemctl --user enable --now empire-amp.service
 ```
 
-The process listens on **127.0.0.1:8010**.
+The process listens on **127.0.0.1:8011**. The Next.js frontend for this instance listens on **127.0.0.1:3011**.
 
 Check:
 
 ```bash
-curl -s http://127.0.0.1:8010/health
-curl -s http://127.0.0.1:8010/api/v1/edition
+curl -s http://127.0.0.1:8011/health
+curl -s http://127.0.0.1:8011/api/v1/edition
 ```
 
 `/api/v1/edition` is public so the UI can show the edition and the Spanish "sin acceso" state. Everything else requires the allowlist.
@@ -37,8 +37,9 @@ Frontend for this instance (separate from the Workroom command center process if
 ```bash
 NEXT_PUBLIC_EMPIRE_EDITION=amp \
 NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
-NEXT_PUBLIC_API_URL=http://127.0.0.1:8010/api/v1 \
-npm run dev
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
+EMPIRE_API_BASE=http://127.0.0.1:8011 \
+npx next dev -p 3011
 ```
 
 The language switcher still toggles English. With no saved choice, this edition starts in Spanish.
@@ -71,7 +72,17 @@ An admin who is already allowlisted can also `POST /api/v1/amp/allowlist` with `
 {"detail": "Sin acceso. Esta edición solo está disponible para cuentas autorizadas.", "code": "sin_acceso"}
 ```
 
-Send the identity as `X-User-Email` or `X-User-Name`, or as the AMP login bearer token.
+Identity is not a request header. `X-User-Email` and the other client identity headers are ignored. A caller is allowed only when:
+
+- Cloudflare Access presents a valid `Cf-Access-Jwt-Assertion` (checked against `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs` and `CF_ACCESS_AUD`), and that email is on the allowlist; or
+- the browser holds the httpOnly `amp_session` cookie from the Spanish login at `/login` (one-time code, or the magic link).
+
+When SMTP is not configured, generate the link on the server. It is printed, not emailed:
+
+```bash
+EMPIRE_EDITION=amp EMPIRE_DATA_DIR=/data/amp AMP_JWT_SECRET=... AMP_PUBLIC_BASE_URL=https://amp.empirebox.store \
+  ./venv/bin/python scripts/amp_allowlist.py login-link --email person@example.com
+```
 
 ## Nueva empresa
 
@@ -87,7 +98,7 @@ Do not edit the live tunnel from this repo. Add this ingress entry on the existi
 
 ```yaml
 - hostname: amp.empirebox.store
-  service: http://localhost:8010
+  service: http://localhost:8011
 ```
 
 Workroom hostnames stay on port 8000. This document does not change them.

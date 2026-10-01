@@ -6,6 +6,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from fastapi.responses import JSONResponse, RedirectResponse
+
 from app.edition import (
     assistant_name,
     edition_manifest,
@@ -13,7 +15,7 @@ from app.edition import (
     greeting,
     is_amp,
 )
-from app.services import amp_allowlist, amp_businesses
+from app.services import amp_access, amp_allowlist, amp_businesses
 
 router = APIRouter(tags=["edition"])
 
@@ -39,9 +41,9 @@ class ContactCreate(BaseModel):
 
 
 def _caller(request: Request) -> tuple[Optional[str], Optional[str]]:
-    email = request.headers.get("x-user-email")
-    username = request.headers.get("x-user-name")
-    return email, username
+    """Verified AMP identity only. Client identity headers are ignored."""
+    email = getattr(request.state, "amp_email", None)
+    return email, None
 
 
 def _require_admin(request: Request) -> None:
@@ -49,6 +51,77 @@ def _require_admin(request: Request) -> None:
     role = amp_allowlist.entry_role(email=email, username=username)
     if role not in {"owner", "admin"}:
         raise HTTPException(status_code=403, detail="Sin acceso. Se requiere una cuenta administrador.")
+
+
+class LoginRequestBody(BaseModel):
+    email: str
+
+
+class LoginVerifyBody(BaseModel):
+    email: str
+    code: str
+
+
+_LOGIN_GENERIC = {
+    "ok": True,
+    "detail": (
+        "Si el correo está autorizado, enviamos un código de acceso. "
+        "Si no llega, un administrador puede generar un enlace."
+    ),
+}
+
+
+@router.post("/amp/auth/request")
+async def request_login(body: LoginRequestBody):
+    """Ask for a one-time code. Same response whether or not the email is listed.
+
+    Does not send mail unless SMTP is configured, and never returns the code.
+    """
+    if not is_amp():
+        raise HTTPException(404, "El acceso por correo solo aplica a la edición AMP")
+    try:
+        amp_access.jwt_secret()
+    except amp_access.AmpAccessError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    amp_access.request_login_email(body.email)
+    return _LOGIN_GENERIC
+
+
+@router.post("/amp/auth/verify")
+async def verify_login(body: LoginVerifyBody):
+    if not is_amp():
+        raise HTTPException(404, "El acceso por correo solo aplica a la edición AMP")
+    email = amp_access.redeem_code(body.email, body.code)
+    if not email:
+        raise HTTPException(status_code=403, detail="Código inválido o vencido.")
+    response = JSONResponse({"ok": True, "email": email})
+    amp_access.apply_session_cookie(response, email)
+    return response
+
+
+@router.get("/amp/auth/magic")
+async def magic_login(token: str = ""):
+    if not is_amp():
+        raise HTTPException(404, "El acceso por correo solo aplica a la edición AMP")
+    email = amp_access.redeem_magic_token(token)
+    if not email:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "Enlace inválido o vencido.",
+                "code": "sin_acceso",
+            },
+        )
+    response = RedirectResponse(url=amp_access.login_redirect_path(), status_code=303)
+    amp_access.apply_session_cookie(response, email)
+    return response
+
+
+@router.post("/amp/auth/logout")
+async def logout():
+    response = JSONResponse({"ok": True})
+    amp_access.clear_session_cookie(response)
+    return response
 
 
 @router.get("/edition")

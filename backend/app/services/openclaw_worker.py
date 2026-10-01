@@ -3,6 +3,7 @@
 Runs as an asyncio background task inside the FastAPI app.
 One task at a time (protect EmpireDell resources).
 """
+from app.instance_url import empire_api_url
 
 import asyncio
 import json
@@ -626,7 +627,7 @@ async def _execute_local_diagnostic_writer(task: dict) -> ExecutionResult | None
         return None
 
     health = {
-        "backend": await _http_status("http://localhost:8000/health"),
+        "backend": await _http_status(empire_api_url("/health")),
         "frontend": await _http_status("http://localhost:3005"),
         "openclaw": await _http_status("http://localhost:7878/health"),
     }
@@ -675,7 +676,7 @@ async def _execute_local_diagnostic_writer(task: dict) -> ExecutionResult | None
         result="\n".join(evidence_lines),
         commands=[
             "git rev-parse HEAD",
-            "GET http://localhost:8000/health",
+            f"GET {empire_api_url('/health')}",
             "GET http://localhost:3005",
             "GET http://localhost:7878/health",
         ],
@@ -1217,7 +1218,7 @@ async def verify_services() -> dict:
     """Quick health check on all services."""
     checks = {}
     async with httpx.AsyncClient(timeout=10) as client:
-        for name, url in [("backend", "http://localhost:8000/health"),
+        for name, url in [("backend", empire_api_url("/health")),
                           ("frontend", "http://localhost:3005"),
                           ("openclaw", "http://localhost:7878/health")]:
             try:
@@ -1323,7 +1324,7 @@ async def _handle_drawing_task(task: dict) -> str:
     # Call the renderer via API
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
-            "http://localhost:8000/api/v1/drawings/bench",
+            empire_api_url("/api/v1/drawings/bench"),
             json={
                 "bench_type": bench_type,
                 "name": name,

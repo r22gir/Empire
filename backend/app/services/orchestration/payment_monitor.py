@@ -2,6 +2,7 @@
 Payment Monitor — Auto-chase overdue invoices
 Runs hourly, sends reminders, escalates after 7 days.
 """
+from app.instance_url import API_V1
 import logging
 from datetime import datetime, timedelta
 import httpx
@@ -10,7 +11,7 @@ from app.config.workroom_billing import get_workroom_billing
 
 logger = logging.getLogger("payment_monitor")
 
-API = "http://localhost:8000/api/v1"
+API = API_V1
 
 
 class PaymentMonitor:

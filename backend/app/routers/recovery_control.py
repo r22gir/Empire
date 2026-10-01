@@ -4,11 +4,10 @@ This module provides a lightweight, standalone recovery control surface that doe
 depend on the main Command Center being healthy. It exposes service status, restart
 capabilities, and connectivity checks via the backend API (port 8000).
 
-Access: curl http://localhost:8000/api/v1/recovery/status
-        curl -X POST http://localhost:8000/api/v1/recovery/restart/backend
-        curl -X POST http://localhost:8000/api/v1/recovery/restart/frontend
-        curl -X POST http://localhost:8000/api/v1/recovery/restart/cloudflared
-        curl http://localhost:8000/api/v1/recovery/connectivity
+Access uses this instance's API (EMPIRE_API_BASE; Workroom default is the
+local backend). Examples: GET /api/v1/recovery/status,
+POST /api/v1/recovery/restart/backend, POST /api/v1/recovery/restart/frontend,
+POST /api/v1/recovery/restart/cloudflared, GET /api/v1/recovery/connectivity.
 """
 import json
 import os

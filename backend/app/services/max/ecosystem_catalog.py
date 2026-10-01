@@ -7,6 +7,8 @@ Source: Full codebase audit (422+ commits, 48 screens, 38 tools, 17 desks, 7 dat
 
 from datetime import datetime
 
+from app.instance_url import empire_api_netloc
+
 EMPIRE_CATALOG = {
     "company": {
         "name": "Empire Box / EmpireBox",
@@ -482,7 +484,7 @@ EMPIRE_CATALOG = {
         "recoveryforge": {"name": "RecoveryForge", "port": 3077, "systemd": None, "type": "standalone"},
         "relistapp": {"name": "RelistApp", "port": 3007, "systemd": None, "type": "standalone"},
         "amp": {"name": "AMP (via CC)", "port": 3003, "systemd": None, "type": "standalone"},
-        "cloudflare_tunnel": {"name": "Cloudflare Tunnel", "port": None, "systemd": "cloudflared", "type": "systemd", "routes": {"studio.empirebox.store": "localhost:3005", "api.empirebox.store": "localhost:8000"}},
+        "cloudflare_tunnel": {"name": "Cloudflare Tunnel", "port": None, "systemd": "cloudflared", "type": "systemd", "routes": {"studio.empirebox.store": "localhost:3005", "api.empirebox.store": empire_api_netloc()}},
         "telegram_bot": {"name": "Telegram Bot (@Empire_Max_Bot)", "port": None, "systemd": None, "type": "embedded", "note": "Runs inside backend process"},
     },
 

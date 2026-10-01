@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 
@@ -22,6 +22,8 @@ def _amp_env(monkeypatch, tmp_path, *, name="Max-e"):
     monkeypatch.setenv("EMPIRE_DEFAULT_LOCALE", "es")
     monkeypatch.setenv("AMP_OWNER_EMAIL", "owner@example.com")
     monkeypatch.setenv("AMP_OWNER_USERNAME", "owner")
+    monkeypatch.setenv("AMP_JWT_SECRET", "test-amp-jwt-secret")
+    monkeypatch.setenv("AMP_PUBLIC_BASE_URL", "http://127.0.0.1:8011")
 
 
 def _workroom_env(monkeypatch):
@@ -52,6 +54,16 @@ def _client(monkeypatch, tmp_path) -> TestClient:
     def craft():
         return {"ok": True}
 
+    @app.get("/api/v1/whoami")
+    def whoami(request: Request):
+        return {
+            "x_user_email": request.headers.get("x-user-email"),
+            "x_user_name": request.headers.get("x-user-name"),
+            "cf_user_email": request.headers.get("cf-access-authenticated-user-email"),
+            "email": getattr(request.state, "amp_email", None),
+            "via": getattr(request.state, "amp_auth_via", None),
+        }
+
     app.include_router(edition_router, prefix="/api/v1")
     app.include_router(amp_router, prefix="/api/v1/amp")
     # SocialForge router, so approval gating is the real one.
@@ -60,8 +72,18 @@ def _client(monkeypatch, tmp_path) -> TestClient:
     return TestClient(app)
 
 
+def _session(email="owner@example.com"):
+    from app.services.amp_access import create_session_token
+    return {"Authorization": f"Bearer {create_session_token(email)}"}
+
+
 def _owner():
-    return {"X-User-Email": "owner@example.com"}
+    return _session("owner@example.com")
+
+
+def _cookie(client, email="owner@example.com"):
+    from app.services.amp_access import SESSION_COOKIE, create_session_token
+    client.cookies.set(SESSION_COOKIE, create_session_token(email))
 
 
 def _assert_no_prices(value):
@@ -242,11 +264,16 @@ def test_allowlist_allow_and_deny(monkeypatch, tmp_path):
         json={"email": "juan@example.com", "role": "member"},
     )
     assert added.status_code == 200
-    as_juan = client.get("/api/v1/businesses", headers={"X-User-Email": "juan@example.com"})
+    as_juan = client.get("/api/v1/businesses", headers=_session("juan@example.com"))
     assert as_juan.status_code == 200
-    # A member cannot administer the list.
-    forbidden = client.get("/api/v1/amp/allowlist", headers={"X-User-Email": "juan@example.com"})
+    # A member cannot administer the list. The email header does not grant admin.
+    forbidden = client.get("/api/v1/amp/allowlist", headers=_session("juan@example.com"))
     assert forbidden.status_code == 403
+    spoofed_admin = client.get(
+        "/api/v1/amp/allowlist",
+        headers={**_session("juan@example.com"), "X-User-Email": "owner@example.com"},
+    )
+    assert spoofed_admin.status_code == 403
 
 
 def test_allowlist_cli(monkeypatch, tmp_path):
@@ -419,22 +446,24 @@ def test_content_course_audio_and_mood(monkeypatch, tmp_path):
     )
     assert signup.status_code == 200, signup.text
     token = signup.json()["token"]
+    # The content-account bearer is not an edition session. The cookie is.
+    _cookie(client)
     mood = client.post(
         "/api/v1/amp/moods",
-        headers={**_owner(), "Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {token}"},
         json={"mood": "ansioso", "emoji": "😟", "date": "2026-10-01"},
     )
     assert mood.status_code == 200, mood.text
     assert mood.json()["kind"] == "daily_checkin"
     again = client.post(
         "/api/v1/amp/moods",
-        headers={**_owner(), "Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {token}"},
         json={"mood": "en_paz", "date": "2026-10-01"},
     )
     assert again.status_code == 200
     listing = client.get(
         "/api/v1/amp/moods",
-        headers={**_owner(), "Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {token}"},
     )
     days = [row["date"] for row in listing.json()]
     assert days.count("2026-10-01") == 1
@@ -460,3 +489,253 @@ def test_social_requires_approval_on_amp(monkeypatch, tmp_path):
     )
     assert live.status_code == 403
     assert "Sin aprobación" in live.json()["detail"]
+
+
+def test_spoofed_identity_header_is_denied(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    spoofed = client.get(
+        "/api/v1/businesses",
+        headers={
+            "X-User-Email": "owner@example.com",
+            "X-User-Name": "owner",
+            "Cf-Access-Authenticated-User-Email": "owner@example.com",
+        },
+    )
+    assert spoofed.status_code == 403
+    assert spoofed.json()["code"] == "sin_acceso"
+
+
+def test_valid_session_cookie_is_allowed_and_strips_headers(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _cookie(client, "owner@example.com")
+    allowed = client.get(
+        "/api/v1/businesses",
+        headers={"X-User-Email": "nobody@example.com", "X-User-Name": "nobody"},
+    )
+    assert allowed.status_code == 200
+    who = client.get(
+        "/api/v1/whoami",
+        headers={
+            "X-User-Email": "nobody@example.com",
+            "Cf-Access-Authenticated-User-Email": "nobody@example.com",
+        },
+    )
+    assert who.status_code == 200
+    body = who.json()
+    assert body["email"] == "owner@example.com"
+    assert body["via"] == "session"
+    assert body["x_user_email"] is None
+    assert body["cf_user_email"] is None
+
+
+def test_invalid_and_expired_session_are_denied(monkeypatch, tmp_path):
+    import time
+    from jose import jwt as jose_jwt
+
+    client = _client(monkeypatch, tmp_path)
+    from app.services.amp_access import SESSION_COOKIE
+
+    client.cookies.set(SESSION_COOKIE, "not-a-token")
+    invalid = client.get("/api/v1/businesses")
+    assert invalid.status_code == 403
+    assert invalid.json()["code"] == "sin_acceso"
+
+    expired = jose_jwt.encode(
+        {
+            "email": "owner@example.com",
+            "purpose": "amp_access",
+            "aud": "amp-access",
+            "exp": int(time.time()) - 60,
+        },
+        "test-amp-jwt-secret",
+        algorithm="HS256",
+    )
+    client.cookies.set(SESSION_COOKIE, expired)
+    denied = client.get("/api/v1/businesses")
+    assert denied.status_code == 403
+
+    # A content-account token signed with the same secret is not an edition session.
+    other = jose_jwt.encode(
+        {"sub": "user-1", "email": "owner@example.com", "exp": int(time.time()) + 3600},
+        "test-amp-jwt-secret",
+        algorithm="HS256",
+    )
+    client.cookies.clear()
+    bearer = client.get("/api/v1/businesses", headers={"Authorization": f"Bearer {other}"})
+    assert bearer.status_code == 403
+
+
+def test_login_code_sets_secure_cookie_and_does_not_email(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    sent = {}
+
+    def _no_send(*args, **kwargs):
+        sent["called"] = True
+        raise AssertionError("mail must not be sent when SMTP is unset")
+
+    monkeypatch.setattr("app.services.amp_access.try_send_login_email", _no_send)
+    asked = client.post("/api/v1/amp/auth/request", json={"email": "owner@example.com"})
+    assert asked.status_code == 200
+    assert "code" not in asked.json()
+    assert "token" not in asked.json()
+    assert "called" not in sent
+
+    from app.services.amp_access import issue_login_challenge
+    issued = issue_login_challenge("owner@example.com", with_code=True)
+    verified = client.post(
+        "/api/v1/amp/auth/verify",
+        json={"email": "owner@example.com", "code": issued["code"]},
+    )
+    assert verified.status_code == 200, verified.text
+    cookie = verified.headers.get("set-cookie", "")
+    assert "amp_session=" in cookie
+    assert "HttpOnly" in cookie
+    assert "Secure" in cookie
+    replay = client.post(
+        "/api/v1/amp/auth/verify",
+        json={"email": "owner@example.com", "code": issued["code"]},
+    )
+    assert replay.status_code == 403
+
+
+def _rsa_keypair():
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from jose.utils import long_to_base64
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    pub = key.public_key().public_numbers()
+    jwk = {
+        "kty": "RSA",
+        "kid": "test",
+        "alg": "RS256",
+        "use": "sig",
+        "n": long_to_base64(pub.n).decode(),
+        "e": long_to_base64(pub.e).decode(),
+    }
+    return pem, jwk
+
+
+def test_cloudflare_jwt_allowed_only_when_email_is_allowlisted(monkeypatch, tmp_path):
+    import time
+    from jose import jwt as jose_jwt
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("CF_ACCESS_TEAM_DOMAIN", "amp-team.cloudflareaccess.com")
+    monkeypatch.setenv("CF_ACCESS_AUD", "test-aud")
+    pem, jwk = _rsa_keypair()
+    monkeypatch.setattr(
+        "app.services.amp_access.fetch_access_certs",
+        lambda host: {"keys": [jwk]},
+    )
+
+    def token(email, *, aud="test-aud", exp_delta=300):
+        now = int(time.time())
+        return jose_jwt.encode(
+            {
+                "aud": [aud],
+                "iss": "https://amp-team.cloudflareaccess.com",
+                "email": email,
+                "iat": now,
+                "exp": now + exp_delta,
+            },
+            pem,
+            algorithm="RS256",
+            headers={"kid": "test"},
+        )
+
+    allowed = client.get(
+        "/api/v1/businesses",
+        headers={
+            "Cf-Access-Jwt-Assertion": token("owner@example.com"),
+            "X-User-Email": "nobody@example.com",
+        },
+    )
+    assert allowed.status_code == 200, allowed.text
+    who = client.get(
+        "/api/v1/whoami",
+        headers={"Cf-Access-Jwt-Assertion": token("owner@example.com")},
+    )
+    assert who.json()["email"] == "owner@example.com"
+    assert who.json()["via"] == "cloudflare"
+    assert who.json()["x_user_email"] is None
+
+    stranger = client.get(
+        "/api/v1/businesses",
+        headers={"Cf-Access-Jwt-Assertion": token("nobody@example.com")},
+    )
+    assert stranger.status_code == 403
+    assert stranger.json()["code"] == "sin_acceso"
+
+    bad_aud = client.get(
+        "/api/v1/businesses",
+        headers={"Cf-Access-Jwt-Assertion": token("owner@example.com", aud="other-aud")},
+    )
+    assert bad_aud.status_code == 403
+    expired = client.get(
+        "/api/v1/businesses",
+        headers={"Cf-Access-Jwt-Assertion": token("owner@example.com", exp_delta=-60)},
+    )
+    assert expired.status_code == 403
+
+
+def test_login_link_cli_prints_one_time_url(monkeypatch, tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    _amp_env(monkeypatch, tmp_path)
+    script = Path(__file__).resolve().parents[1] / "scripts" / "amp_allowlist.py"
+    env = os.environ.copy()
+    added = subprocess.run(
+        [sys.executable, str(script), "login-link", "--email", "owner@example.com"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert added.returncode == 0, added.stderr
+    assert added.stdout.strip().startswith("http://127.0.0.1:8011/api/v1/amp/auth/magic?token=")
+    missing = subprocess.run(
+        [sys.executable, str(script), "login-link", "--email", "nope@example.com"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert missing.returncode == 2
+    assert "Sin acceso" in missing.stderr
+
+    from urllib.parse import parse_qs, urlparse
+    token = parse_qs(urlparse(added.stdout.strip()).query)["token"][0]
+    client = _client(monkeypatch, tmp_path)
+    opened = client.get("/api/v1/amp/auth/magic", params={"token": token}, follow_redirects=False)
+    assert opened.status_code == 303, opened.text
+    assert "HttpOnly" in opened.headers.get("set-cookie", "")
+    again = client.get("/api/v1/amp/auth/magic", params={"token": token}, follow_redirects=False)
+    assert again.status_code == 403
+
+
+def test_workroom_api_base_and_lock_stay_default(monkeypatch, tmp_path):
+    monkeypatch.delenv("EMPIRE_API_BASE", raising=False)
+    monkeypatch.delenv("EMPIRE_DATA_DIR", raising=False)
+    monkeypatch.delenv("EMPIRE_WORKER_LOCK", raising=False)
+    from app.instance_url import empire_api_base, empire_api_url, primary_worker_lock_path
+
+    assert empire_api_base() == "http://localhost:8000"
+    assert empire_api_url("/api/v1/health") == "http://localhost:8000/api/v1/health"
+    assert str(primary_worker_lock_path()) == "/tmp/empire_primary_worker.lock"
+
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("EMPIRE_API_BASE", "http://127.0.0.1:8011")
+    assert empire_api_base() == "http://127.0.0.1:8011"
+    assert empire_api_url("/health") == "http://127.0.0.1:8011/health"
+    assert primary_worker_lock_path() == tmp_path / "run" / "empire_primary_worker.lock"
+
+    monkeypatch.setenv("EMPIRE_WORKER_LOCK", str(tmp_path / "custom.lock"))
+    assert primary_worker_lock_path() == tmp_path / "custom.lock"

@@ -4,6 +4,7 @@ Dispatches desk tasks to OpenClaw for autonomous execution.
 Add to: backend/app/routers/openclaw_bridge.py
 Register in: backend/app/main.py
 """
+from app.instance_url import empire_api_url
 
 import asyncio
 import httpx
@@ -261,7 +262,7 @@ async def _log_notification(task_id: str, title: str, status: str, summary: str)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             await client.post(
-                "http://localhost:8000/api/v1/notifications/internal",
+                empire_api_url("/api/v1/notifications/internal"),
                 json={
                     "source": "System",
                     "type": "task_complete",

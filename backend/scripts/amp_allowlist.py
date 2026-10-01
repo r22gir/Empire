@@ -16,6 +16,9 @@ Examples (on the Dell, from the backend directory):
 
   EMPIRE_EDITION=amp EMPIRE_DATA_DIR=/data/amp \\
     ./venv/bin/python scripts/amp_allowlist.py remove --email person@example.com
+
+  EMPIRE_EDITION=amp EMPIRE_DATA_DIR=/data/amp AMP_JWT_SECRET=... \\
+    ./venv/bin/python scripts/amp_allowlist.py login-link --email person@example.com
 """
 from __future__ import annotations
 
@@ -44,6 +47,9 @@ def main() -> int:
     remove.add_argument("--email")
     remove.add_argument("--username")
 
+    link = sub.add_parser("login-link")
+    link.add_argument("--email", required=True)
+
     args = parser.parse_args()
     try:
         if args.cmd == "list":
@@ -54,6 +60,16 @@ def main() -> int:
         elif args.cmd == "remove":
             removed = amp_allowlist.remove_entry(email=args.email, username=args.username)
             print(json.dumps({"removed": removed}))
+        elif args.cmd == "login-link":
+            from app.services.amp_access import AmpAccessError, issue_login_challenge
+
+            try:
+                issued = issue_login_challenge(args.email, with_code=False)
+            except AmpAccessError as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
+            # One line, so an admin can copy the one-time link. Nothing is emailed.
+            print(issued["link"])
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2

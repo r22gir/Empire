@@ -2,10 +2,12 @@
 
 No-op when EMPIRE_EDITION is unset or workroom, so Workroom routes,
 allowlists, and module visibility stay as they are.
+
+On the AMP edition, identity comes only from a verified Cloudflare Access
+JWT or the AMP login session. ``X-User-Email`` and the other client-supplied
+identity headers are stripped before the request is handled.
 """
 from __future__ import annotations
-
-import os
 
 from fastapi.responses import JSONResponse
 
@@ -18,27 +20,28 @@ from app.edition import (
     sin_acceso_body,
 )
 from app.services import amp_allowlist
+from app.services.amp_access import (
+    resolve_request_email,
+    strip_client_identity_headers,
+)
 
 
-def _identity(request) -> tuple[str | None, str | None]:
-    email = request.headers.get("x-user-email")
-    username = request.headers.get("x-user-name")
-    auth = request.headers.get("authorization") or ""
-    if auth.lower().startswith("bearer "):
-        token = auth.split(" ", 1)[1].strip()
-        try:
-            from jose import jwt
-            secret = os.getenv("AMP_JWT_SECRET", "empire-amp-secret-change-in-prod")
-            payload = jwt.decode(token, secret, algorithms=["HS256"])
-            email = email or payload.get("email")
-        except Exception:
-            pass
-    return email, username
+def _drop_cached_headers(request) -> None:
+    """Starlette caches ``request.headers``. Rebuild it after the strip."""
+    request.__dict__.pop("headers", None)
+    request.__dict__.pop("_headers", None)
+    request.scope.pop("headers_raw", None)
 
 
 async def amp_access_middleware(request, call_next):
     if not is_amp():
         return await call_next(request)
+
+    email, via = resolve_request_email(request.scope)
+    strip_client_identity_headers(request.scope)
+    _drop_cached_headers(request)
+    request.state.amp_email = email
+    request.state.amp_auth_via = via
 
     blocked = disabled_module_for_path(request.url.path)
     if blocked:
@@ -53,10 +56,11 @@ async def amp_access_middleware(request, call_next):
     slug = request.headers.get("x-empire-business") or "amp"
     token = set_active_business(slug)
     try:
+        if request.method.upper() == "OPTIONS":
+            return await call_next(request)
         if access_exempt(request.method, request.url.path):
             return await call_next(request)
-        email, username = _identity(request)
-        if not amp_allowlist.is_allowed(email=email, username=username):
+        if not email or not amp_allowlist.is_allowed(email=email):
             return JSONResponse(status_code=403, content=sin_acceso_body())
         return await call_next(request)
     finally:

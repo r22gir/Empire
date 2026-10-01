@@ -1,6 +1,7 @@
 """
 MAX API Router - Endpoints for AI Assistant Manager.
 """
+from app.instance_url import empire_api_url
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Response, Query
 from fastapi.responses import StreamingResponse
@@ -6200,7 +6201,7 @@ async def get_system_report():
     # ── Connectivity Check ──
     import aiohttp
     services_to_check = [
-        ("Backend API", "http://localhost:8000/health"),
+        ("Backend API", empire_api_url("/health")),
         ("Command Center", "http://localhost:3009"),
         ("AMP Portal", "http://localhost:3003"),
         ("Ollama", "http://localhost:11434/api/version"),

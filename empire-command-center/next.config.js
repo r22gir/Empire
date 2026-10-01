@@ -1,7 +1,12 @@
 // Mirrors next.config.ts so production builds do not depend on transpiling TS config.
 const BUILD_TIMESTAMP = Date.now();
 
-const BACKEND_UPSTREAM = process.env.NEXT_PUBLIC_BACKEND_UPSTREAM || 'http://127.0.0.1:8000';
+function empireUpstream() {
+  const raw = process.env.EMPIRE_API_BASE || process.env.NEXT_PUBLIC_BACKEND_UPSTREAM || 'http://127.0.0.1:8000';
+  return String(raw).replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
+}
+
+const BACKEND_UPSTREAM = empireUpstream();
 
 // Mirrors next.config.ts. Default rewrite proxyTimeout is 30s and the
 // cloned request body is capped at 10MB — both turn a phone Photo Analyzer

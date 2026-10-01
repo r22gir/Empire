@@ -1,10 +1,12 @@
+import { empireApiV1 } from './instanceUrl';
+
 function resolveApiBase(): string {
   if (typeof window === 'undefined') {
-    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+    return empireApiV1();
   }
   const host = window.location.hostname;
   if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') {
-    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+    return empireApiV1();
   }
   // Same-origin /api/v1 for any non-localhost host (studio.empirebox.store,
   // forge.empirebox.store, LAN IPs, etc.). The Next.js server proxies

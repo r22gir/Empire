@@ -2,6 +2,7 @@
 MAX Orchestration Router
 REST endpoints for autonomous orchestration control.
 """
+from app.instance_url import API_V1, empire_api_url
 from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks
 import httpx
@@ -15,7 +16,7 @@ from app.services.orchestration.client_notifier import client_notifier
 
 router = APIRouter(prefix="/orchestration", tags=["orchestration"])
 
-API = "http://localhost:8000/api/v1"
+API = API_V1
 
 
 # ── Status & Health ─────────────────────────────────────────────────────────────
@@ -23,7 +24,7 @@ API = "http://localhost:8000/api/v1"
 @router.get("/status")
 async def get_business_health():
     """Return full business ecosystem health score."""
-    backend_ok = await check_service("http://localhost:8000/health")
+    backend_ok = await check_service(empire_api_url("/health"))
     frontend_ok = await check_service("http://localhost:3005")
     openclaw_ok = await check_service("http://localhost:7878/health")
     ollama_ok = await check_service("http://localhost:11434/api/tags")
@@ -171,7 +172,7 @@ async def check_ecosystem_health():
                   "(tasks=60, desks=18, memories='3000+'). Real data wiring "
                   "is queued for a follow-up sprint.",
         "services_checked_live": {
-            "backend_up": await check_service("http://localhost:8000/health"),
+            "backend_up": await check_service(empire_api_url("/health")),
             "frontend_up": await check_service("http://localhost:3005"),
             "openclaw_up": await check_service("http://localhost:7878/health"),
             "ollama_up": await check_service("http://localhost:11434/api/tags"),

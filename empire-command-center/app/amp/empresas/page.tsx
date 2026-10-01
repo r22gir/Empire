@@ -19,8 +19,8 @@ const COPY = {
     create: 'Crear empresa',
     yours: 'Empresas',
     empty: 'Todavía no hay empresas adicionales.',
-    denied: 'Sin acceso. Esta edición solo está disponible para cuentas autorizadas.',
-    email: 'Tu email (cuenta autorizada)',
+    denied: 'Sin acceso. Entra con tu correo autorizado.',
+    login: 'Iniciar sesión',
   },
   en: {
     title: 'New company',
@@ -33,15 +33,14 @@ const COPY = {
     create: 'Create company',
     yours: 'Companies',
     empty: 'No additional companies yet.',
-    denied: 'No access. This edition is only available to authorized accounts.',
-    email: 'Your email (authorized account)',
+    denied: 'No access. Sign in with an authorized email.',
+    login: 'Sign in',
   },
 };
 
 export default function NuevaEmpresaPage() {
   const { locale, setLocale } = useTranslation();
   const text = locale === 'en' ? COPY.en : COPY.es;
-  const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [industry, setIndustry] = useState('');
   const [description, setDescription] = useState('');
@@ -51,16 +50,12 @@ export default function NuevaEmpresaPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const headers = (): HeadersInit => {
-    const h: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (email.trim()) h['X-User-Email'] = email.trim();
-    return h;
-  };
+  const headers = (): HeadersInit => ({ 'Content-Type': 'application/json' });
 
   async function load() {
     const [tplRes, bizRes] = await Promise.all([
-      fetch(`${API_BASE}/api/v1/businesses/templates`, { headers: headers() }),
-      fetch(`${API_BASE}/api/v1/businesses`, { headers: headers() }),
+      fetch(`${API_BASE}/api/v1/businesses/templates`, { headers: headers(), credentials: 'include' }),
+      fetch(`${API_BASE}/api/v1/businesses`, { headers: headers(), credentials: 'include' }),
     ]);
     if (tplRes.status === 403 || bizRes.status === 403) {
       setError(text.denied);
@@ -89,6 +84,7 @@ export default function NuevaEmpresaPage() {
     try {
       const res = await fetch(`${API_BASE}/api/v1/businesses`, {
         method: 'POST',
+        credentials: 'include',
         headers: headers(),
         body: JSON.stringify({
           name,
@@ -126,11 +122,12 @@ export default function NuevaEmpresaPage() {
       </div>
       <h1 style={{ fontFamily: 'Playfair Display, serif', fontSize: 36, margin: '0 0 8px' }}>{text.title}</h1>
       <p style={{ color: '#5C5650', lineHeight: 1.5 }}>{text.intro}</p>
-      <label style={{ display: 'block', fontSize: 13, marginBottom: 12 }}>
-        {text.email}
-        <input value={email} onChange={(e) => setEmail(e.target.value)} onBlur={() => load()} style={{ display: 'block', width: '100%', marginTop: 4, padding: 8 }} />
-      </label>
-      {error && <p role="alert" style={{ color: '#9b2c2c' }}>{error}</p>}
+      {error && (
+        <p role="alert" style={{ color: '#9b2c2c' }}>
+          {error}{' '}
+          <a href="/login" style={{ color: '#D4A030', fontWeight: 700 }}>{text.login}</a>
+        </p>
+      )}
       <form onSubmit={onSubmit} style={{ display: 'grid', gap: 12, marginTop: 8 }}>
         <label style={{ fontSize: 13 }}>
           {text.name}

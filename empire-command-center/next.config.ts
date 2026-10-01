@@ -5,7 +5,12 @@ import type { NextConfig } from "next";
 // between compilation and static page generation steps
 const BUILD_TIMESTAMP = Date.now();
 
-const BACKEND_UPSTREAM = process.env.NEXT_PUBLIC_BACKEND_UPSTREAM || "http://127.0.0.1:8000";
+function empireUpstream(): string {
+  const raw = process.env.EMPIRE_API_BASE || process.env.NEXT_PUBLIC_BACKEND_UPSTREAM || "http://127.0.0.1:8000";
+  return String(raw).replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
+}
+
+const BACKEND_UPSTREAM = empireUpstream();
 
 // Photo Analyzer POSTs go through this rewrite. Next's http-proxy default
 // proxyTimeout is 30s; MiniMax measure is ~20s and often longer once the

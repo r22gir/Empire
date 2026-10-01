@@ -3,6 +3,7 @@ ForgeDesk — WorkroomForge AI desk for custom window treatments.
 PRIORITY 1: Handles quoting, customer follow-up, scheduling, measurements.
 Integrates with WorkroomForge AI vision APIs for measurement, design, and analysis.
 """
+from app.instance_url import empire_api_url
 import logging
 import httpx
 from datetime import datetime
@@ -303,7 +304,7 @@ class ForgeDesk(BaseDesk):
         # Uploaded file reference
         file_match = re.search(r'(?:uploads?/images?/|file:?\s*)(\S+\.(?:jpg|jpeg|png|webp|gif))', text, re.IGNORECASE)
         if file_match:
-            return f"http://localhost:8000/api/v1/files/view/images/{file_match.group(1)}"
+            return empire_api_url(f"/api/v1/files/view/images/{file_match.group(1)}")
         return None
 
     async def _handle_general(self, task: DeskTask) -> DeskTask:

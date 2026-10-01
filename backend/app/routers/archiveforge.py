@@ -12,6 +12,7 @@ Scope:
 This router uses its own prefixed tables (ag_*) in the shared SQLite DB.
 All sample/reference data is local fixture — no live external dependencies.
 """
+from app.instance_url import empire_api_url, empire_api_base
 from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form, BackgroundTasks, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
@@ -64,7 +65,7 @@ MINIMAX_IMAGE_MAX_BYTES = 20 * 1024 * 1024
 # success unless this real endpoint accepts the product payload.
 MARKETFORGE_PRODUCTS_URL = os.getenv(
     "ARCHIVEFORGE_MARKETFORGE_PRODUCTS_URL",
-    "http://localhost:8000/marketplace/products",
+    empire_api_url("/marketplace/products"),
 )
 INTERNAL_MARKETFORGE_HOSTS = {"localhost", "127.0.0.1", "::1"}
 GOOGLE_BOOKS_API_URL = "https://www.googleapis.com/books/v1/volumes"
@@ -834,7 +835,7 @@ def _marketforge_photo_origin(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme and parsed.netloc:
         return f"{parsed.scheme}://{parsed.netloc}"
-    return os.getenv("ARCHIVEFORGE_API_BASE_URL", "http://localhost:8000")
+    return os.getenv("ARCHIVEFORGE_API_BASE_URL", empire_api_base())
 
 
 def _is_valid_marketforge_category_id(value: str) -> bool:
@@ -8753,7 +8754,7 @@ def _comps_for_archive(archive_id: int) -> list[dict]:
 
 
 def _exports_for_archive(archive_id: int) -> dict:
-    base_url = os.getenv("ARCHIVEFORGE_API_BASE_URL", "http://localhost:8000")
+    base_url = os.getenv("ARCHIVEFORGE_API_BASE_URL", empire_api_base())
     base = f"{base_url}/api/v1/archiveforge/{archive_id}"
     return {
         "pdf_url": f"{base}/listing-packet.pdf",

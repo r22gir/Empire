@@ -86,6 +86,11 @@ _ALLOWLIST_EXEMPT = (
     ("GET", "/health"),
     ("GET", "/"),
     ("GET", "/api/v1/edition"),
+    # Edition login. These do not trust client identity headers.
+    ("POST", "/api/v1/amp/auth/request"),
+    ("POST", "/api/v1/amp/auth/verify"),
+    ("GET", "/api/v1/amp/auth/magic"),
+    ("POST", "/api/v1/amp/auth/logout"),
 )
 
 _business_slug: ContextVar[str] = ContextVar("empire_business_slug", default="amp")

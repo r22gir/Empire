@@ -3,6 +3,7 @@ Quote/Estimate CRUD router.
 Stores quotes as JSON files (same pattern as chat history).
 PDF generation via POST /api/v1/quotes/{id}/pdf.
 """
+from app.instance_url import empire_api_url
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
@@ -2941,7 +2942,7 @@ def _download_image_as_data_uri(url: str) -> str:
             except Exception as e:
                 logger.warning(f"Failed to read local image {fname}: {e}")
         # Fallback to localhost fetch
-        url = f"http://localhost:8000{url}"
+        url = empire_api_url(f"{url}")
     try:
         resp = httpx.get(url, timeout=15, follow_redirects=True)
         resp.raise_for_status()

@@ -1,6 +1,7 @@
 """
 Dev API — service status, git info, audit log, and health checks for the Dev Panel.
 """
+from app.instance_url import empire_api_url
 import os
 import socket
 import subprocess
@@ -167,7 +168,7 @@ async def dev_health():
     async with httpx.AsyncClient(timeout=5) as client:
         for method, path, label in endpoints:
             try:
-                r = await client.request(method, f"http://localhost:8000{path}")
+                r = await client.request(method, empire_api_url(f"{path}"))
                 ok = 200 <= r.status_code < 500
                 endpoint_results.append({"label": label, "path": path, "status": r.status_code, "ok": ok})
             except Exception:

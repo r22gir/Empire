@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Mail, MessageSquare, RefreshCw, Server, ShieldCheck, Wifi } from 'lucide-react';
+import { API as API_BASE } from '../lib/api';
 
 type StrictStatus = 'verified_working' | 'partial' | 'verified_broken' | 'unverified' | 'disabled' | 'planned';
 
@@ -47,8 +48,6 @@ type ChannelPayload = {
     external_hermes_modified: boolean;
   };
 };
-
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1').replace(/\/$/, '');
 
 const channelIcons = {
   web_chat: MessageSquare,

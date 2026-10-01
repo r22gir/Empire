@@ -1,7 +1,7 @@
 """Deny-by-default gate for the public Luxe hostnames.
 
 Cloudflare tunnel ``empire-main`` sends ``luxe.empirebox.store/api/v1/*``
-straight at this process (``localhost:8000``). That path never reaches the
+straight at this process (the backend listen address). That path never reaches the
 Next.js intake allowlist, and the FastAPI routers for quotes, invoices,
 payments, jobs, leads, and MAX do not require a session.
 

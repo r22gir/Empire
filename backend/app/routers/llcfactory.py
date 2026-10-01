@@ -5,6 +5,7 @@ for the DC / MD / VA corridor.
 
 JSON file storage in ~/empire-repo/backend/data/llcfactory/.
 """
+from app.instance_url import empire_api_url
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -729,7 +730,7 @@ async def generate_operating_agreement(body: GenerateOARequest):
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                "http://localhost:8000/api/v1/max/chat/stream",
+                empire_api_url("/api/v1/max/chat/stream"),
                 json={"message": prompt, "desk_id": "legal"},
                 headers={"Accept": "text/event-stream"},
             )

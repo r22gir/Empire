@@ -2,6 +2,7 @@
 MAX Telegram Bot — Full-featured bot with voice, photo, and text support.
 Routes all messages through the MAX AI router (Grok primary).
 """
+from app.instance_url import empire_api_url
 
 import os
 import json as _json
@@ -395,7 +396,7 @@ class TelegramBot:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
-                    "http://localhost:8000/api/v1/max/chat",
+                    empire_api_url("/api/v1/max/chat"),
                     json={"message": classify_prompt, "history": [], "channel": None, "chat_id": None, "conversation_id": None},
                 )
                 if resp.status_code == 200:
@@ -425,7 +426,7 @@ class TelegramBot:
         }
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post("http://localhost:8000/api/v1/inbox", json=inbox_msg)
+                resp = await client.post(empire_api_url("/api/v1/inbox"), json=inbox_msg)
                 if resp.status_code == 200:
                     inbox_msg = resp.json().get("message", inbox_msg)
         except Exception as e:
@@ -441,7 +442,7 @@ class TelegramBot:
                         "desk_id": intent_data.get("desk_target") or "operations",
                         "priority": intent_data["priority"],
                     }
-                    resp = await client.post("http://localhost:8000/api/v1/max/tasks", json=task_payload)
+                    resp = await client.post(empire_api_url("/api/v1/max/tasks"), json=task_payload)
                     if resp.status_code == 200:
                         task_data = resp.json()
                         inbox_msg["linked_task_id"] = task_data.get("task", {}).get("id")
@@ -521,7 +522,7 @@ class TelegramBot:
                 if image_filename:
                     payload["image_filename"] = image_filename
                 async with httpx.AsyncClient(timeout=120.0) as client:
-                    resp = await client.post("http://localhost:8000/api/v1/max/chat", json=payload)
+                    resp = await client.post(empire_api_url("/api/v1/max/chat"), json=payload)
                     if resp.status_code == 200:
                         data = resp.json()
                         model = data.get("model_used", "")
@@ -591,7 +592,7 @@ class TelegramBot:
             return
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get("http://localhost:8000/api/v1/max/health")
+                resp = await client.get(empire_api_url("/api/v1/max/health"))
                 data = resp.json()
                 msg = (
                     f"⚡ <b>System Status</b>\n\n"
@@ -610,7 +611,7 @@ class TelegramBot:
             return
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get("http://localhost:8000/api/v1/max/desks")
+                resp = await client.get(empire_api_url("/api/v1/max/desks"))
                 desks = resp.json().get("desks", [])
                 if not desks:
                     await update.message.reply_text("No desks configured.")
@@ -629,7 +630,7 @@ class TelegramBot:
             return
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get("http://localhost:8000/api/v1/max/tasks", params={"status": "in_progress"})
+                resp = await client.get(empire_api_url("/api/v1/max/tasks"), params={"status": "in_progress"})
                 tasks = resp.json().get("tasks", [])
                 if not tasks:
                     await update.message.reply_text("No active tasks.")
@@ -769,7 +770,7 @@ class TelegramBot:
             return
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get("http://localhost:8000/api/v1/system/metrics")
+                resp = await client.get(empire_api_url("/api/v1/system/metrics"))
                 data = resp.json()
 
             import psutil
@@ -783,7 +784,7 @@ class TelegramBot:
 
             task_info = ""
             try:
-                resp2 = await client.get("http://localhost:8000/api/v1/max/tasks", params={"status": "in_progress"})
+                resp2 = await client.get(empire_api_url("/api/v1/max/tasks"), params={"status": "in_progress"})
                 tasks = resp2.json().get("tasks", [])
                 task_info = f"\n📋 <b>Tasks:</b> {len(tasks)} active"
             except Exception:
@@ -809,7 +810,7 @@ class TelegramBot:
             return
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get("http://localhost:8000/api/v1/notifications/log", params={"limit": 10})
+                resp = await client.get(empire_api_url("/api/v1/notifications/log"), params={"limit": 10})
                 data = resp.json()
                 notifs = data.get("notifications", [])
                 total = data.get("total", 0)
@@ -1111,7 +1112,7 @@ class TelegramBot:
                 _data_uri = f"data:{_mime};base64,{_img_b64}"
                 async with httpx.AsyncClient(timeout=120) as _vc:
                     _vr = await _vc.post(
-                        "http://localhost:8000/api/v1/vision/measure",
+                        empire_api_url("/api/v1/vision/measure"),
                         json={"image": _data_uri},
                     )
                 if _vr.status_code == 200:
@@ -1144,7 +1145,7 @@ class TelegramBot:
                     async with httpx.AsyncClient(timeout=120) as _nc:
                         with open(dest, "rb") as _nf:
                             _nr = await _nc.post(
-                                "http://localhost:8000/api/v1/quotes/from-notes",
+                                empire_api_url("/api/v1/quotes/from-notes"),
                                 files={"files": (dest.name, _nf, "image/jpeg")},
                             )
                     if _nr.status_code == 200:
@@ -1182,7 +1183,7 @@ class TelegramBot:
 
                         async with httpx.AsyncClient(timeout=30) as _dc:
                             _dr = await _dc.post(
-                                "http://localhost:8000/api/v1/quotes/from-notes/create-draft",
+                                empire_api_url("/api/v1/quotes/from-notes/create-draft"),
                                 json={
                                     "customer": _cust,
                                     "project": _nd.get("project"),

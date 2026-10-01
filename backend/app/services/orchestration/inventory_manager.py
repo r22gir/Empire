@@ -2,13 +2,14 @@
 Inventory Manager — Auto-reorder low stock materials
 Runs daily 9 AM, generates POs, sends approval requests.
 """
+from app.instance_url import API_V1
 import logging
 from datetime import datetime
 import httpx
 
 logger = logging.getLogger("inventory")
 
-API = "http://localhost:8000/api/v1"
+API = API_V1
 
 
 class InventoryManager:

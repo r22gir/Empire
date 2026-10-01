@@ -385,7 +385,6 @@ async def api_voice_transcribe(audio: UploadFile = FileParam(...), language: str
 # We use a simple file-lock: the first worker to acquire it becomes the
 # "primary" and starts all singleton background services.
 #
-_WORKER_LOCK_PATH = Path("/tmp/empire_primary_worker.lock")
 _worker_lock_file = None  # keep reference so the lock is held for process lifetime
 
 
@@ -395,11 +394,18 @@ def _acquire_primary_worker_lock() -> bool:
     Returns True if this process now holds the lock (i.e. is the primary).
     The lock is held for the lifetime of the process via the module-level
     ``_worker_lock_file`` reference.
+
+    Workroom keeps ``/tmp/empire_primary_worker.lock``. When
+    ``EMPIRE_DATA_DIR`` or ``EMPIRE_WORKER_LOCK`` is set (the AMP edition),
+    the lock file is private to that instance.
     """
     import fcntl
+    from app.instance_url import primary_worker_lock_path
     global _worker_lock_file
+    lock_path = primary_worker_lock_path()
     try:
-        _worker_lock_file = open(_WORKER_LOCK_PATH, "w")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        _worker_lock_file = open(lock_path, "w")
         fcntl.flock(_worker_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         _worker_lock_file.write(str(os.getpid()))
         _worker_lock_file.flush()

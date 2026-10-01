@@ -2,13 +2,14 @@
 Client Notifier — Job stage changes trigger personalized updates
 Webhook: /workroom/jobs/:id/stage
 """
+from app.instance_url import API_V1
 import logging
 from datetime import datetime
 import httpx
 
 logger = logging.getLogger("client_notifier")
 
-API = "http://localhost:8000/api/v1"
+API = API_V1
 
 from app.config.workroom_billing import get_workroom_billing
 

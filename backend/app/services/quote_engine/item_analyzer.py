@@ -5,6 +5,7 @@ Takes a customer photo and returns a structured list of all items detected,
 with dimensions, quantities, construction details, and recommended treatments.
 Uses Grok vision (via the backend vision endpoint) with Claude/MAX fallback.
 """
+from app.instance_url import empire_api_url
 
 import json
 import logging
@@ -71,7 +72,7 @@ Return ONLY valid JSON (no markdown, no explanation):
 async def analyze_photo_items(
     image_data: str,
     customer_notes: str = "",
-    api_base: str = "http://localhost:8000/api/v1",
+    api_base: Optional[str] = None,
 ) -> dict:
     """
     Send photo to AI vision for structured item analysis.
@@ -84,6 +85,8 @@ async def analyze_photo_items(
     Returns:
         dict with room_type, style, items[], overall_notes, questions[]
     """
+    if not api_base:
+        api_base = empire_api_url("/api/v1")
     notes_section = (
         f"Customer notes: {customer_notes}"
         if customer_notes

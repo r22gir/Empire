@@ -2,6 +2,7 @@
 Auto-Quote Engine — Photo → Analysis → Sketch → Quote → Email
 Triggered by new photo upload via /intake.
 """
+from app.instance_url import API_V1
 import logging
 from typing import Any
 import httpx
@@ -10,7 +11,7 @@ from app.config.workroom_billing import get_workroom_billing
 
 logger = logging.getLogger("auto_quote")
 
-API = "http://localhost:8000/api/v1"
+API = API_V1
 
 
 class AutoQuoteEngine:

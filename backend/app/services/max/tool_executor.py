@@ -3,6 +3,7 @@
 Tools give MAX the ability to query real data and take real actions instead of
 fabricating responses. Inspired by the OpenClaw skills-augmented agent pattern.
 """
+from app.instance_url import empire_api_base, empire_api_url
 import re
 import json
 import os
@@ -770,7 +771,7 @@ def _create_task(params: dict, desk: Optional[str] = None) -> ToolResult:
         openclaw_gate = check_openclaw_gate().to_dict()
         if openclaw_gate.get("allowed"):
             _oc_resp = _oc_httpx.post(
-                "http://localhost:8000/api/v1/openclaw/tasks",
+                empire_api_url("/api/v1/openclaw/tasks"),
                 json={
                     "title": title,
                     "description": description or title,
@@ -1068,7 +1069,7 @@ def _promote_lead_to_forgecrm(params: dict, desk: Optional[str] = None) -> ToolR
     try:
         import httpx
         with httpx.Client(timeout=30) as c:
-            r = c.post(f"http://localhost:8000/api/v1/leads/{lead_id}/promote")
+            r = c.post(empire_api_url(f"/api/v1/leads/{lead_id}/promote"))
         if r.status_code == 404:
             return ToolResult(tool="promote_lead_to_forgecrm", success=False,
                              error=f"Lead {lead_id} not found")
@@ -2044,7 +2045,7 @@ def _create_invoice_from_quote(params: dict, desk: Optional[str] = None) -> Tool
     try:
         import httpx
         with httpx.Client(timeout=30) as c:
-            r = c.post(f"http://localhost:8000/api/v1/quotes-v2/{quote_id}/to-invoice")
+            r = c.post(empire_api_url(f"/api/v1/quotes-v2/{quote_id}/to-invoice"))
         if r.status_code == 404:
             return ToolResult(tool="create_invoice_from_quote", success=False,
                              error=f"Quote {quote_id} not found")
@@ -2092,7 +2093,7 @@ def _split_invoice_from_invoice(params: dict, desk: Optional[str] = None) -> Too
         import httpx
         with httpx.Client(timeout=60) as c:
             r = c.post(
-                f"http://localhost:8000/api/v1/finance/invoices/{invoice_id}/split",
+                empire_api_url(f"/api/v1/finance/invoices/{invoice_id}/split"),
                 json=payload,
             )
         if r.status_code == 404:
@@ -4588,7 +4589,7 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
             try:
                 import httpx as _q_httpx
                 _q_httpx.post(
-                    "http://localhost:8000/api/v1/openclaw/tasks",
+                    empire_api_url("/api/v1/openclaw/tasks"),
                     json={
                         "title": title,
                         "description": params.get("description", title),
@@ -5192,7 +5193,7 @@ def _dispatch_to_openclaw(params: dict, desk: Optional[str] = None) -> ToolResul
 
     try:
         resp = _httpx.post(
-            f"http://localhost:8000/api/v1/openclaw/{endpoint}",
+            empire_api_url(f"/api/v1/openclaw/{endpoint}"),
             json={
                 "title": title,
                 "description": description,
@@ -5249,7 +5250,7 @@ def _queue_openclaw_task(params: dict, desk: Optional[str] = None) -> ToolResult
 
     try:
         resp = _httpx.post(
-            "http://localhost:8000/api/v1/openclaw/tasks",
+            empire_api_url("/api/v1/openclaw/tasks"),
             json={
                 "title": title,
                 "description": description,
@@ -5531,8 +5532,8 @@ State machine: `draft → founder_review → sent → accepted → in_production
   `{"tool": "empire_max_continuity_audit", "channel": "web"}`
   Use for "is MAX current on this device?", "what is the latest handoff state?", and "what task was active last?"
 - **ollama_toggle** — Turn Ollama on or off. When off, MAX is faster. When on, RecoveryForge can classify images.
-  To toggle: use shell_execute with `curl -X POST http://localhost:8000/api/v1/system/ollama/toggle`
-  To check status: use shell_execute with `curl http://localhost:8000/api/v1/system/ollama/status`
+  To toggle: use shell_execute with `curl -X POST __EMPIRE_API_BASE__/api/v1/system/ollama/toggle`
+  To check status: use shell_execute with `curl __EMPIRE_API_BASE__/api/v1/system/ollama/status`
   When founder says "turn on/off Ollama", "start/stop RecoveryForge", or "Ollama status" — use these.
 
 IMPORTANT: Always use tools for factual data. NEVER fabricate task lists, weather, system stats, quotes, or customer info. If a tool returns empty results, say so honestly.
@@ -6491,7 +6492,7 @@ def _test_runner(params: dict, desk: Optional[str] = None) -> ToolResult:
 
     if command == "endpoint" and url:
         try:
-            r = httpx.request(method, url if url.startswith("http") else f"http://localhost:8000{url}", timeout=10)
+            r = httpx.request(method, url if url.startswith("http") else empire_api_url(f"{url}"), timeout=10)
             ok = 200 <= r.status_code < 500
             results.append({
                 "url": url, "status": r.status_code, "ok": ok,
@@ -6512,7 +6513,7 @@ def _test_runner(params: dict, desk: Optional[str] = None) -> ToolResult:
         # Test endpoints
         for method_name, path, label in CRITICAL_ENDPOINTS:
             try:
-                r = httpx.request(method_name, f"http://localhost:8000{path}", timeout=5)
+                r = httpx.request(method_name, empire_api_url(f"{path}"), timeout=5)
                 ok = 200 <= r.status_code < 500
                 results.append({"label": label, "path": path, "status": r.status_code, "ok": ok})
                 if ok:
@@ -7176,3 +7177,4 @@ def _max_room_redesign(params: dict, desk: Optional[str] = None) -> ToolResult:
 # after all registrations, from the live registry.
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))
+TOOLS_DOC = TOOLS_DOC.replace("__EMPIRE_API_BASE__", empire_api_base())

@@ -8,6 +8,7 @@ Tables (already created):
   - maintenance_log: task tracking with status lifecycle
   - maintenance_config: key/value settings store
 """
+from app.instance_url import empire_api_url
 
 import os
 import re
@@ -690,7 +691,7 @@ def _run_canary_tests() -> dict:
     tests = []
     try:
         r = subprocess.run(
-            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:8000/health"],
+            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", empire_api_url("/health")],
             capture_output=True, text=True, timeout=10,
         )
         tests.append({"name": "backend_health", "passed": r.stdout.strip() == "200"})

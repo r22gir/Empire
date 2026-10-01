@@ -2,6 +2,7 @@
 MAX Self-Heal Engine — Staged, bounded, auditable.
 detect → snapshot → patch → canary → commit or revert → log
 """
+from app.instance_url import empire_api_url
 import subprocess, os, json, sqlite3, shutil
 from datetime import datetime
 
@@ -59,7 +60,7 @@ def _log_incident(trigger_type, endpoint, error_excerpt, files, summary, commit_
 def _run_canary_tests():
     tests = []
     try:
-        r = subprocess.run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:8000/health"],
+        r = subprocess.run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", empire_api_url("/health")],
                           capture_output=True, text=True, timeout=10)
         tests.append({"name": "backend_health", "passed": r.stdout.strip() == "200"})
     except:
