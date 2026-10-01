@@ -16,6 +16,7 @@ _HISTORICAL_RE = re.compile(r"\b(history|historical|in\s+\d{4}|during|before\s+\
 _HEADING_ONLY_RE = re.compile(r"(?m)^\s{0,3}#{1,6}\s+[^\n]+\s*$")
 _EMPTY_SECTION_RE = re.compile(r"(?ms)^\s{0,3}#{1,6}\s+[^\n]+\s*\n\s*(?=\n|#{1,6}\s|$)")
 _DANGLING_INTRO_RE = re.compile(r"(?im)(?:^|\n)\s*(?:here(?:'|’)s|key points?|the (?:main|best) options?|sources?|summary)\s*:\s*$")
+_TOOL_FAILURE_PLACEHOLDER_RE = re.compile(r"(?i)\b(?:i have not run that yet|web_(?:read|search):\s*(?:http|web read failed))\b")
 
 
 def _has_dangling_colon_intro(text: str) -> bool:
@@ -118,6 +119,9 @@ def needs_continuation(text: str | None, *, user_message: str | None = None, too
         return True
     if _EMPTY_SECTION_RE.search(body) or _DANGLING_INTRO_RE.search(body) or _has_dangling_colon_intro(body) or _HEADING_ONLY_RE.fullmatch(body):
         return True
+    if tool_results and any(isinstance(item, dict) and not item.get("success") for item in tool_results):
+        if _TOOL_FAILURE_PLACEHOLDER_RE.search(body) or len(body) < 200:
+            return True
     if _HEADING_ONLY_RE.fullmatch(body):
         return True
     if tool_results and len(body) < 40:

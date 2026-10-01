@@ -73,3 +73,12 @@ def test_colon_intro_without_list_is_incomplete_but_colon_with_list_is_complete(
     complete = "Max's inference:\nThe practical tradeoff is function vs. statement:\n- French for function\n- Goblet for statement"
     assert not needs_continuation(complete)
     assert "statement:" not in strip_empty_sections("The practical tradeoff is function vs. statement:")
+
+
+def test_tool_failure_placeholder_is_incomplete_when_verified_data_exists():
+    from app.services.max.answer_quality import needs_continuation
+
+    assert needs_continuation(
+        "I have not run that yet. web_read: HTTP 403",
+        tool_results=[{"tool": "web_search", "success": True}, {"tool": "web_read", "success": False}],
+    )
