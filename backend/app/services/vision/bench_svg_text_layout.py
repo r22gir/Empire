@@ -185,12 +185,14 @@ def _bench_panel_frames(layout: dict) -> dict[str, Rect]:
     if elev_safe is None:
         elev = layout["elev"]
         elev_safe = elev.inset(36, 28, 36, 36)
-    half_w = (elev_safe.w - _ELEV_GAP) / 2
+    gap = max(18.0, elev_safe.w * 0.04)
+    front_w = elev_safe.w * 0.34
+    side_w = elev_safe.w - gap - front_w
     return {
         "iso": layout["iso_draw"],
-        "front-elev": Rect(elev_safe.x + 4, elev_safe.y, half_w - 4, elev_safe.h),
+        "front-elev": Rect(elev_safe.x + 4, elev_safe.y, front_w - 4, elev_safe.h),
         "side-elev": Rect(
-            elev_safe.x + half_w + _ELEV_GAP, elev_safe.y, half_w - 4, elev_safe.h,
+            elev_safe.x + front_w + gap, elev_safe.y, side_w - 4, elev_safe.h,
         ),
     }
 
@@ -237,6 +239,70 @@ def _validate_panel_geometry_text(svg: str, layout: dict) -> None:
                     raise AssertionError(
                         f"{panel} dim text {box[4]!r} intersects geometry stroke"
                     )
+
+
+def validate_bench_side_elev_text_layout(svg: str, layout: dict | None = None) -> None:
+    """Side elevation only: dim labels must not overlap each other or bench geometry."""
+    layout = layout or idea_sheet_regions(title_rows=12)
+    frames = _bench_panel_frames(layout)
+    base = frames["side-elev"]
+    # Depth dims sit below the floor line; height dims sit to the right of geometry.
+    frame = Rect(base.x, base.y, base.w + 40, base.h + 54)
+    root = ET.fromstring(svg)
+    panel_g = None
+    for g in root.findall(".//svg:g", _SVG_NS):
+        if g.get("data-panel") == "side-elev":
+            panel_g = g
+            break
+    if panel_g is None:
+        raise AssertionError("no side-elev panel in SVG")
+
+    tx, ty = _parse_translate(panel_g.get("transform", ""))
+    text_boxes: list[tuple[float, float, float, float, str]] = []
+    segments: list[tuple[float, float, float, float]] = []
+    for child in panel_g.iter():
+        if child is panel_g:
+            continue
+        tag = child.tag.split("}")[-1]
+        if tag == "text":
+            for box in _text_boxes_local(child):
+                text_boxes.append(_shift_box(box, tx, ty))
+        else:
+            segments.extend(_geom_segments(child, tx, ty))
+
+    def _drawing_label(text: str) -> bool:
+        t = text.upper()
+        return (
+            '"' in text
+            or " SH" in t
+            or " BH" in t
+            or " DK" in t
+            or " CUSH" in t
+            or " SEAT" in t
+            or " OH" in t
+        )
+
+    labeled = [b for b in text_boxes if _drawing_label(b[4])]
+    for i, a in enumerate(labeled):
+        for b in labeled[i + 1 :]:
+            if _intersects(a, b, pad=1.5):
+                raise AssertionError(f"text overlap {a[4]!r} vs {b[4]!r}")
+
+    for box in text_boxes:
+        if _box_outside_frame(box, frame, _PANEL_PAD):
+            raise AssertionError(
+                f"side-elev text {box[4]!r} outside panel bbox (pad {_PANEL_PAD})"
+            )
+        label = box[4]
+        if not _drawing_label(label):
+            continue
+        for seg in segments:
+            x1, y1, x2, y2 = seg
+            bx0, by0, bx1, by1 = box[0], box[1], box[2], box[3]
+            if _seg_intersects_box(x1, y1, x2, y2, bx0, by0, bx1, by1, _GEOM_PAD):
+                raise AssertionError(
+                    f"side-elev dim text {box[4]!r} intersects geometry stroke"
+                )
 
 
 def validate_bench_svg_text_layout(svg: str, layout: dict | None = None) -> None:

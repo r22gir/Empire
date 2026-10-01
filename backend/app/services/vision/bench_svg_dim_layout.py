@@ -316,6 +316,117 @@ def validate_bench_raked_bh_parallel_to_back(svg: str) -> None:
         raise AssertionError("raked back requires oblique BH dimension on side elevation")
 
 
+def validate_bench_side_seat_dim_parallel_stack(svg: str, min_sep: float = 6.0) -> None:
+    """Side seat chain dims (CUSH/DK/SH) must be separate parallel vertical lines."""
+    root = ET.fromstring(svg)
+    panel = _side_elev_panel(root)
+    if panel is None:
+        return
+    tx, ty, g = panel
+    xs: list[float] = []
+    for el in g.iter():
+        if el.tag.split("}")[-1] != "line":
+            continue
+        if el.get("data-dim-stroke") != "1" or el.get("data-side-seat-dim") != "1":
+            continue
+        x1, x2 = _float_attr(el, "x1"), _float_attr(el, "x2")
+        if x1 is None or x2 is None:
+            continue
+        if abs(x1 - x2) > 1.5:
+            continue
+        xs.append(tx + (x1 + x2) / 2)
+    xs = sorted(set(round(x, 1) for x in xs))
+    if len(xs) < 3:
+        raise AssertionError(f"expected 3 parallel side seat dims, got {len(xs)}")
+    for a, b in zip(xs, xs[1:]):
+        if b - a < min_sep:
+            raise AssertionError(f"side seat dim lines too close ({a:.1f} vs {b:.1f})")
+
+
+def validate_bench_side_depth_inside_frame(
+    svg: str,
+    *,
+    overall_depth_in: float,
+    back_thickness_in: float,
+    usable_seat_in: float,
+) -> None:
+    """Back cushion sits inside stated depth; rear face flush with frame back (vertical)."""
+    root = ET.fromstring(svg)
+    panel = _side_elev_panel(root)
+    if panel is None:
+        raise AssertionError("no side-elev panel")
+    tx, ty, g = panel
+    floor_x0 = floor_x1 = None
+    for el in g.findall(".//svg:line", _SVG_NS):
+        if el.get("data-side-floor") == "1":
+            x1, x2 = _float_attr(el, "x1"), _float_attr(el, "x2")
+            if x1 is not None and x2 is not None:
+                floor_x0, floor_x1 = tx + min(x1, x2), tx + max(x1, x2)
+                break
+    if floor_x0 is None:
+        raise AssertionError("side floor line missing")
+    labels = " ".join(_side_dim_labels(svg))
+    od = _fmt_in_label(overall_depth_in)
+    us = _fmt_in_label(usable_seat_in)
+    bt = _fmt_in_label(back_thickness_in)
+    if od not in labels:
+        raise AssertionError(f'missing overall depth label {od} on side elevation')
+    if f'{us} SEAT' not in labels and f'{usable_seat_in:g}" SEAT' not in labels:
+        raise AssertionError(f'missing usable seat label ({usable_seat_in}" SEAT)')
+    if bt not in labels:
+        raise AssertionError(f'missing back thickness label {bt} on side elevation')
+    for poly in g.findall(".//svg:polygon", _SVG_NS):
+        if poly.get("data-side-back") != "1":
+            continue
+        pts = [(x + tx, y + ty) for x, y in _parse_points(poly.get("points", ""))]
+        if len(pts) < 4:
+            continue
+        by_y = sorted(pts, key=lambda p: p[1])
+        bottom = by_y[-2:]
+        rear_x = max(p[0] for p in bottom)
+        front_x = min(p[0] for p in bottom)
+        if abs(rear_x - floor_x1) > 2.0:
+            raise AssertionError(
+                f"back rear not flush with frame back ({rear_x:.1f} vs floor {floor_x1:.1f})"
+            )
+        scale = (floor_x1 - floor_x0) / max(overall_depth_in, 0.01)
+        expected_front = floor_x1 - back_thickness_in * scale
+        if abs(front_x - expected_front) > 2.5:
+            raise AssertionError(
+                f"back front face not {back_thickness_in}\" inside frame "
+                f"({front_x:.1f} vs expected {expected_front:.1f})"
+            )
+        for p in pts:
+            if p[0] > floor_x1 + 2.0 and p[1] > ty + 1:
+                angle_raw = poly.get("data-back-angle-deg", "0")
+                try:
+                    angle = float(angle_raw or 0)
+                except ValueError:
+                    angle = 0.0
+                if angle <= 0.05:
+                    raise AssertionError("vertical back must not extend past frame rear at seat level")
+        return
+
+
+def validate_bench_depth_frame_note(svg: str, *, depth_in: float, seat_in: float, back_in: float) -> None:
+    needle = (
+        f'D {_fmt_in_label(depth_in)} frame: {_fmt_in_label(seat_in)} seat + '
+        f'{_fmt_in_label(back_in)} back inside'
+    )
+    if needle not in svg.replace("&quot;", '"'):
+        raise AssertionError(f"missing depth frame NOTE: {needle!r}")
+
+
+def validate_bench_side_view_labels_clear(svg: str, layout: dict | None = None) -> None:
+    """Side-elev dimension labels must not overlap each other or bench geometry."""
+    from app.services.drawing.quote_sheet_layout import idea_sheet_regions
+    from app.services.drawing.quote_sheet_layout import idea_sheet_regions
+    from app.services.vision.bench_svg_text_layout import validate_bench_side_elev_text_layout
+
+    validate_bench_side_elev_text_layout(svg, layout or idea_sheet_regions(title_rows=14))
+    validate_bench_side_seat_dim_parallel_stack(svg)
+
+
 def validate_bench_iso_dims_clear_faces(svg: str) -> None:
     """No iso dimension stroke may pass through an iso face polygon interior."""
     root = ET.fromstring(svg)

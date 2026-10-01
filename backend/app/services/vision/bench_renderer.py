@@ -652,7 +652,8 @@ def _dim_h_local(parts, x1, x2, y_anchor, gap_below: float, label: str):
 
 
 def _dim_v(parts, p1, p2, label, offset_x, text_side="right", outward_text: bool = True,
-           text_dy: float = 4):
+           text_dy: float = 4, label_center: bool = False, dim_attrs: str = "",
+           label_frac: float | None = None, label_h_offset: float = 0):
     """Vertical dimension line. TEXT IS HORIZONTAL — placed beside the line."""
     gap = 2
     ext = 4
@@ -673,13 +674,24 @@ def _dim_v(parts, p1, p2, label, offset_x, text_side="right", outward_text: bool
     d2x = p2[0] + offset_x
     parts.append(
         f'<line x1="{d1x:.1f}" y1="{p1[1]:.1f}" x2="{d2x:.1f}" y2="{p2[1]:.1f}" '
-        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1" '
+        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1"{dim_attrs} '
         f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
     )
 
-    # Text — HORIZONTAL, placed beside the vertical dimension line
     mx = (d1x + d2x) / 2
-    my = (p1[1] + p2[1]) / 2
+    frac = 0.5 if label_frac is None else float(label_frac)
+    my = p1[1] + frac * (p2[1] - p1[1])
+    if label_center:
+        if label_h_offset < 0:
+            parts.append(_text(mx + label_h_offset, my + text_dy, label, 9, anchor="end",
+                               weight="600", fill=DIM_COLOR))
+        elif label_h_offset > 0:
+            parts.append(_text(mx + label_h_offset, my + text_dy, label, 9, anchor="start",
+                               weight="600", fill=DIM_COLOR))
+        else:
+            parts.append(_text(mx, my + text_dy, label, 9, anchor="middle",
+                               weight="600", fill=DIM_COLOR))
+        return
     if offset_x >= 0:
         if outward_text:
             tx, anch = mx + 10, "start"
@@ -695,34 +707,42 @@ def _dim_2d_h(parts, x1, x2, y, label, offset_y=20):
 
 
 def _dim_2d_v(parts, x, y1, y2, label, offset_x=20, outward_text: bool = True,
-              text_dy: float = 4):
+              text_dy: float = 4, label_center: bool = False, dim_attrs: str = "",
+              label_frac: float | None = None, label_h_offset: float = 0):
     side = "right" if offset_x > 0 else "left"
     _dim_v(parts, (x, y1), (x, y2), label, offset_x, side,
-           outward_text=outward_text, text_dy=text_dy)
+           outward_text=outward_text, text_dy=text_dy,
+           label_center=label_center, dim_attrs=dim_attrs,
+           label_frac=label_frac, label_h_offset=label_h_offset)
 
 
-def _dim_oblique(
+def _dim_oblique_rear(
     parts,
     p1: tuple[float, float],
     p2: tuple[float, float],
     label: str,
-    offset: float = 18.0,
+    offset: float = 26.0,
     attrs: str = "",
 ):
-    """Dimension parallel to segment p1→p2; offset along outward normal (screen right)."""
+    """Oblique dim parallel to p1→p2, offset to the rear (+x) of the side back."""
     x1, y1 = p1
     x2, y2 = p2
     dx, dy = x2 - x1, y2 - y1
     ln = math.hypot(dx, dy) or 1.0
-    nx, ny = dy / ln, -dx / ln
+    n1 = (dy / ln, -dx / ln)
+    n2 = (-dy / ln, dx / ln)
+    nx, ny = n1 if n1[0] >= n2[0] else n2
+    if nx < 0:
+        nx, ny = -nx, -ny
     ox, oy = nx * offset, ny * offset
     ext = 4.0
+    scale = 1 + ext / max(abs(offset), 1)
     parts.append(_line(
-        x1, y1, x1 + ox * (1 + ext / max(abs(offset), 1)), y1 + oy * (1 + ext / max(abs(offset), 1)),
+        x1, y1, x1 + ox * scale, y1 + oy * scale,
         SW_EXT, DIM_COLOR, dim_ext=True,
     ))
     parts.append(_line(
-        x2, y2, x2 + ox * (1 + ext / max(abs(offset), 1)), y2 + oy * (1 + ext / max(abs(offset), 1)),
+        x2, y2, x2 + ox * scale, y2 + oy * scale,
         SW_EXT, DIM_COLOR, dim_ext=True,
     ))
     ax, ay = x1 + ox, y1 + oy
@@ -734,7 +754,8 @@ def _dim_oblique(
         f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
     )
     mx, my = (ax + bx) / 2, (ay + by) / 2
-    parts.append(_text(mx + 8, my + 4, label, 9, anchor="start", weight="600", fill=DIM_COLOR))
+    parts.append(_text(mx + nx * 14, my + ny * 14 + 4, label, 9,
+                         anchor="start", weight="600", fill=DIM_COLOR))
 
 
 def _elev_height_dims_left(
@@ -787,14 +808,28 @@ def _elev_height_dims_right(
                 _dim_2d_v(parts, x, y_top, y_seat, f'{_in(back_h)} BH', offset_x=inner - 10)
             _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=inner)
             return
+        off_cush, off_dk, off_sh = 10, 18, 26
+        seat_attr = ' data-side-seat-dim="1"'
+        _dim_2d_v(
+            parts, x, y_seat, y_deck, f'{_in(cush)} CUSH',
+            offset_x=off_cush, text_dy=0, label_center=True,
+            label_frac=0.5, label_h_offset=12, dim_attrs=seat_attr,
+        )
+        _dim_2d_v(
+            parts, x, y_deck, y_floor, f'{_in(deck)} DK',
+            offset_x=off_dk, text_dy=0, label_center=True,
+            label_frac=0.28, dim_attrs=seat_attr,
+        )
+        _dim_2d_v(
+            parts, x, y_seat, y_floor, f'{_in(seat_h)} SH',
+            offset_x=off_sh, text_dy=0, label_center=True,
+            label_frac=0.72, dim_attrs=seat_attr,
+        )
         if back_h and back_h > 0 and not skip_back_height:
             _dim_2d_v(
                 parts, x, y_top, y_seat, f'{_in(back_h)} BH',
-                offset_x=18, text_dy=-12,
+                offset_x=28, text_dy=0, label_center=True, label_frac=0.5,
             )
-        _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=22, text_dy=22)
-        _dim_2d_v(parts, x, y_deck, y_floor, f'{_in(deck)} DK', offset_x=26, text_dy=-4)
-        _dim_2d_v(parts, x, y_seat, y_deck, f'{_in(cush)} CUSH', offset_x=26, text_dy=-14)
     else:
         if back_h and back_h > 0 and not skip_back_height:
             _dim_2d_v(parts, x, y_top, y_seat, f'{_in(back_h)} BH', offset_x=inner - 10)
@@ -1101,16 +1136,16 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
                    split_panel: bool = False, back_thickness_in=None,
                    seat_cushion_thickness_in: float = 0, back_angle_deg: float = 0,
                    seat_cushion_overhang_in: float = 0, frame_depth_in: float | None = None):
-    """Side elevation — frame depth + back thickness = overall depth at floor."""
+    """Side elevation — stated depth is full frame; back cushion sits inside at rear."""
     has_back = back_h is not None and back_h > 0 and panel_style != "none"
     bt_in = _back_thickness_in(has_back, back_thickness_in)
-    frame_depth = float(frame_depth_in) if frame_depth_in is not None else max(
-        0.0, float(depth) - bt_in,
-    )
+    overall_depth = float(frame_depth_in) if frame_depth_in is not None else float(depth)
+    usable_seat_depth = max(0.0, overall_depth - bt_in) if has_back else overall_depth
     oh_in = max(0.0, float(seat_cushion_overhang_in or 0))
-    frame_d = frame_depth * scale
+    frame_d = overall_depth * scale
     bt_s = bt_in * scale
-    d = (frame_depth + bt_in) * scale
+    usable_d = usable_seat_depth * scale
+    d = frame_d
     sh = seat_h * scale
     bh = (back_h if has_back else 0) * scale
     cush_in = max(0.0, float(seat_cushion_thickness_in or 0))
@@ -1131,16 +1166,18 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
     )
     parts.append(_rect(ox, oy - deck_s, frame_d, deck_s, SW_HEAVY))
     if cush_s > 0.5:
-        parts.append(_rect(ox - oh_s, oy - sh, frame_d + oh_s, cush_s, SW_MED, fill="#E8E8E8"))
+        cush_w = usable_d + oh_s
+        parts.append(_rect(ox - oh_s, oy - sh, cush_w, cush_s, SW_MED, fill="#E8E8E8"))
         parts.append(_line(ox, oy - deck_s, ox + frame_d, oy - deck_s, SW_LIGHT, GRAY))
     if has_back:
-        bx = ox + frame_d
+        bx_front = ox + frame_d - bt_s
+        bx_rear = ox + frame_d
         angle_attr = f' data-back-angle-deg="{rake_deg:.2f}"'
         back_pts = [
-            (bx, oy - sh),
-            (bx + bt_s, oy - sh),
-            (bx + bt_s + lean, top_y),
-            (bx + lean, top_y),
+            (bx_front, oy - sh),
+            (bx_rear, oy - sh),
+            (bx_rear + lean, top_y),
+            (bx_front + lean, top_y),
         ]
         parts.append(_poly(back_pts, SW_MED, attrs=f'data-side-back="1"{angle_attr}'))
         if panel_style in ("tufted", "button_tufted"):
@@ -1150,30 +1187,29 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
             parts.append("</defs>")
             parts.append(f'<g clip-path="url(#{clip_id})" data-side-back-tuft="1">')
             _draw_back_style_2d(
-                parts, bx, top_y, bt_s + lean, bh,
+                parts, bx_front, top_y, bt_s + lean, bh,
                 panel_style, channel_count,
             )
             parts.append("</g>")
         else:
             _draw_back_style_2d(
-                parts, bx, top_y, bt_s + lean, bh,
+                parts, bx_front, top_y, bt_s + lean, bh,
                 panel_style, channel_count,
             )
     if not draw_dims or panel_w < 20:
         return
     dim_band_h = 30.0
-    seat_depth_in = frame_depth
     raked = rake_deg > 0.05
     if split_panel:
-        _dim_h_local(parts, ox, ox + d, oy, 50, f'{_in(depth)} OVRL')
+        _dim_h_local(parts, ox, ox + frame_d, oy, 50, f'{_in(overall_depth)}')
         if has_back and bt_s > 1:
             _dim_h_local(
-                parts, ox + frame_d, ox + d, oy, 30,
+                parts, ox + frame_d - bt_s, ox + frame_d, oy, 30,
                 _in(bt_in),
             )
             _dim_h_local(
-                parts, ox, ox + frame_d, oy, 14,
-                _in(seat_depth_in),
+                parts, ox, ox + frame_d - bt_s, oy, 14,
+                f'{_in(usable_seat_depth)} SEAT',
             )
         if oh_s > 0.25:
             oh_y = oy - sh - 10
@@ -1197,9 +1233,10 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
             skip_back_height=raked,
         )
         if has_back and bh > 1 and raked:
-            _dim_oblique(
-                parts, (bx, oy - sh), (bx + lean, top_y),
-                f'{_in(back_h)} BH', offset=18,
+            rear_off = max(22.0, bt_s + 14.0)
+            _dim_oblique_rear(
+                parts, (bx_front, oy - sh), (bx_front + lean, top_y),
+                f'{_in(back_h)} BH', offset=rear_off,
                 attrs=' data-side-bh="1"',
             )
         return
@@ -1654,7 +1691,9 @@ def _iso_callouts_compact(
     # use the parallel left floor edge for the depth chain.
     ld1 = _iso(0, 0, 0, ox, oy, scale)
     ld2 = _iso(0, depth_in, 0, ox, oy, scale)
-    _dim_along_edge_clear(parts, ld1, ld2, f'{_in(depth_in)} D', interior, face_polys, 18)
+    _dim_along_edge_clear(
+        parts, ld1, ld2, f'{_in(depth_in)} frame', interior, face_polys, 18,
+    )
     total_z = seat_h_in + (back_h_in if has_back else 0)
     pf = _iso(width_in, 0, 0, ox, oy, scale)
     ps = _iso(width_in, 0, seat_h_in, ox, oy, scale)
@@ -1874,28 +1913,35 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
             elev_safe.x, elev_safe.y - CAPTION_H, elev_safe.w, elev_safe.h + CAPTION_H,
         )
         _view_frame(parts, elev_frame, "FRONT + SIDE ELEVATION")
-        gap = 22.0
-        half_w = (elev_safe.w - gap) / 2
-        left_safe = Rect(elev_safe.x + 4, elev_safe.y, half_w - 4, elev_safe.h)
-        right_safe = Rect(elev_safe.x + half_w + gap, elev_safe.y, half_w - 4, elev_safe.h)
+        gap = max(18.0, elev_safe.w * 0.04)
+        front_w = elev_safe.w * 0.34
+        side_w = elev_safe.w - gap - front_w
+        left_safe = Rect(elev_safe.x + 4, elev_safe.y, front_w - 4, elev_safe.h)
+        right_safe = Rect(elev_safe.x + front_w + gap, elev_safe.y, side_w - 4, elev_safe.h)
         dim_stack_h = 44.0
-        dim_lr = 72.0  # left height-chain labels + CUSH sub-dims
-        dim_gutter = 48.0  # side panel horizontal + height reserve
-        target_fill = 0.75
+        dim_lr = 56.0
+        dim_gutter = 40.0
+        target_fill_front = 0.72
+        target_fill_side = 0.90
         scale_w_front = (left_safe.w - dim_lr - 8) / float(width_in)
         scale_w_side = (right_safe.w - dim_gutter - 8) / float(depth_in)
-        scale_h = (left_safe.h * target_fill - dim_stack_h) / (elev_h or 1)
-        elev_scale = min(scale_w_front, scale_w_side, scale_h)
-        content_px = elev_h * elev_scale
-        block_h = content_px + dim_stack_h
-        block_top = max(6.0, (left_safe.h - block_h) / 2)
-        front_floor = block_top + content_px
-        geo_w = width_in * elev_scale
+        scale_h_front = (left_safe.h * target_fill_front - dim_stack_h) / (elev_h or 1)
+        scale_h_side = (right_safe.h * target_fill_side - dim_stack_h) / (elev_h or 1)
+        elev_scale_front = min(scale_w_front, scale_h_front)
+        elev_scale_side = min(scale_w_side, scale_h_side)
+        elev_scale = elev_scale_front
+        content_px_front = elev_h * elev_scale_front
+        content_px_side = elev_h * elev_scale_side
+        block_h_front = content_px_front + dim_stack_h
+        block_h_side = content_px_side + dim_stack_h
+        block_top = max(6.0, (left_safe.h - block_h_front) / 2)
+        front_floor = block_top + content_px_front
+        geo_w = width_in * elev_scale_front
         fox = max(dim_lr, (left_safe.w - geo_w) / 2)
         front_group = []
         _ek = dict(elev_kwargs or {})
         elev_fn(
-            front_group, fox, front_floor, elev_scale,
+            front_group, fox, front_floor, elev_scale_front,
             width_in, depth_in, seat_h_in, back_h_in,
             panel_style=panel_style, channel_count=channel_count,
             panel_w=left_safe.w, panel_h=left_safe.h,
@@ -1908,13 +1954,14 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         )
         parts.extend(front_group)
         parts.append('</g>')
-        side_floor = block_top + content_px
-        geo_sw = depth_in * elev_scale
+        block_top_side = max(6.0, (right_safe.h - block_h_side) / 2)
+        side_floor = block_top_side + content_px_side
+        geo_sw = depth_in * elev_scale_side
         sox = max(6.0, (right_safe.w - geo_sw - dim_gutter) / 2)
         side_group = []
         _sk = dict(side_kwargs or {})
         _side_straight(
-            side_group, sox, side_floor, elev_scale,
+            side_group, sox, side_floor, elev_scale_side,
             depth_in, seat_h_in, back_h_in,
             panel_style=panel_style, channel_count=channel_count,
             panel_w=right_safe.w, panel_h=right_safe.h, draw_dims=True,
@@ -2047,22 +2094,21 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
     cush_thk = fab.seat_cushion_thickness_in
     back_angle = fab.back_angle_deg
     overhang_in = fab.seat_cushion_overhang_in
-    frame_depth = fab.seat_frame_depth_in(depth_in)
+    seat_depth_usable = fab.seat_frame_depth_in(depth_in)
     deck_h = fab.seat_deck_height_in()
-    seat_depth_usable = frame_depth
 
     if has_back:
         dims_text = (
-            f'{_in(width_in)} W × {_in(depth_in)} D OVRL × '
+            f'{_in(width_in)} W × {_in(depth_in)} D × '
             f'{_in(seat_h_in)} SH × {_in(geo_back)} BH'
         )
     else:
         dims_text = f'{_in(width_in)} W × {_in(depth_in)} D × {_in(seat_h_in)} SH × NO BACK'
 
     extras = _sheet_extras(name, "straight", panel_style, has_back, geo_back, kw)
-    oh_part = f', {_in(overhang_in)} OH front' if overhang_in > 0 else ''
+    oh_part = f'; {_in(overhang_in)} OH front' if overhang_in > 0 else ''
     depth_note = (
-        f'D {_in(depth_in)} OVRL = {_in(frame_depth)} frame + {_in(bt_in)} back{oh_part}'
+        f'D {_in(depth_in)} frame: {_in(seat_depth_usable)} seat + {_in(bt_in)} back inside{oh_part}'
     )
     extras["assumptions"] = list(extras.get("assumptions") or []) + [depth_note]
     layout = _regions_for(
@@ -2110,7 +2156,7 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
         "seat_cushion_thickness_in": cush_thk,
         "back_angle_deg": back_angle,
         "seat_cushion_overhang_in": overhang_in,
-        "frame_depth_in": frame_depth,
+        "frame_depth_in": depth_in,
     }
     return _compose_multiview(
         name, "straight", _build_straight, _plan_straight, _elev_straight,

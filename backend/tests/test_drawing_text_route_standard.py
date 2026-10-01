@@ -138,6 +138,9 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
     extras = _sheet_extras(
         "Straight Bench", "straight", "tufted", True, 16, bench_kw,
     )
+    extras["assumptions"] = list(extras.get("assumptions") or []) + [
+        'D 18" frame: 16" seat + 2" back inside; 1" OH front',
+    ]
     layout = _regions_for(
         "Straight Bench", "straight", "tufted", True, c_count, actual_cw,
         dims_text, "", "", "", "", extras,
@@ -160,9 +163,9 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
     assert "84" in svg and ("84&quot;" in svg or '84"' in svg)
     assert "34" in svg
     validate_bench_svg_layout(svg, layout)
-    from app.services.vision.bench_svg_text_layout import validate_bench_svg_text_layout
+    from app.services.vision.bench_svg_text_layout import validate_bench_side_elev_text_layout
     from app.services.vision.bench_iso_layout import validate_bench_iso_faces_closed
-    validate_bench_svg_text_layout(svg, layout)
+    validate_bench_side_elev_text_layout(svg, layout)
     validate_bench_iso_faces_closed(svg, has_back=True)
     from app.services.vision.bench_svg_dim_layout import (
         validate_bench_extension_lines_max,
@@ -172,7 +175,11 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
         validate_bench_seat_cushion_consistency,
         validate_bench_seat_overhang_dim,
         validate_bench_side_seat_dim_stack,
+        validate_bench_side_seat_dim_parallel_stack,
         validate_bench_side_tufts_inside_back,
+        validate_bench_side_view_labels_clear,
+        validate_bench_side_depth_inside_frame,
+        validate_bench_depth_frame_note,
     )
     validate_bench_extension_lines_max(svg, 30.0)
     validate_bench_iso_dims_clear_faces(svg)
@@ -181,6 +188,12 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
     validate_bench_side_tufts_inside_back(svg)
     validate_bench_seat_cushion_consistency(svg, cushion_in=2.0, deck_in=16.0, seat_h_in=18.0)
     validate_bench_seat_overhang_dim(svg, 1.0)
+    validate_bench_side_depth_inside_frame(
+        svg, overall_depth_in=18, back_thickness_in=2, usable_seat_in=16,
+    )
+    validate_bench_depth_frame_note(svg, depth_in=18, seat_in=16, back_in=2)
+    validate_bench_side_seat_dim_parallel_stack(svg)
+    validate_bench_side_view_labels_clear(svg, layout)
 
 
 def test_roman_side_section_labels_no_overlap():

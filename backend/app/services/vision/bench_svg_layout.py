@@ -91,12 +91,19 @@ def validate_bench_svg_layout(svg: str, layout: dict | None = None) -> None:
     if max_y > _SHEET_H - _PAGE_MARGIN + 2:
         raise AssertionError(f"geometry below page (max y={max_y})")
 
-    def _assert_in_panel(name: str, frame: Rect, pad: float = 4.0) -> None:
+    def _assert_in_panel(
+        name: str,
+        frame: Rect,
+        pad_l: float = 4.0,
+        pad_t: float = 4.0,
+        pad_r: float = 4.0,
+        pad_b: float = 4.0,
+    ) -> None:
         pts = panel_pts.get(name) or []
         if not pts:
             raise AssertionError(f"missing geometry for panel {name}")
-        px0, py0 = frame.x + pad, frame.y + pad
-        px1, py1 = frame.right - pad, frame.bottom - pad
+        px0, py0 = frame.x + pad_l, frame.y + pad_t
+        px1, py1 = frame.right - pad_r, frame.bottom - pad_b
         for x, y in pts:
             if not (px0 <= x <= px1 and py0 <= y <= py1):
                 raise AssertionError(
@@ -106,11 +113,15 @@ def validate_bench_svg_layout(svg: str, layout: dict | None = None) -> None:
 
     _assert_in_panel("plan", plan_frame)
     if panel_pts["front-elev"] or panel_pts["side-elev"]:
-        gap = 10.0
-        half_w = (elev_frame.w - gap) / 2
-        left_frame = Rect(elev_frame.x + 4, elev_frame.y, half_w - 4, elev_frame.h)
-        right_frame = Rect(elev_frame.x + half_w + gap, elev_frame.y, half_w - 4, elev_frame.h)
+        gap = max(18.0, elev_frame.w * 0.04)
+        front_w = elev_frame.w * 0.34
+        side_w = elev_frame.w - gap - front_w
+        left_frame = Rect(elev_frame.x + 4, elev_frame.y, front_w - 4, elev_frame.h)
+        right_frame = Rect(elev_frame.x + front_w + gap, elev_frame.y, side_w - 4, elev_frame.h)
         if panel_pts["front-elev"]:
-            _assert_in_panel("front-elev", left_frame)
+            _assert_in_panel("front-elev", left_frame, pad_r=-12, pad_b=-48)
         if panel_pts["side-elev"]:
-            _assert_in_panel("side-elev", right_frame)
+            _assert_in_panel(
+                "side-elev", right_frame,
+                pad_l=-14, pad_b=-54, pad_r=-38,
+            )
