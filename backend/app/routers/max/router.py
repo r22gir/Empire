@@ -48,7 +48,12 @@ from app.services.max.finance_readiness_lane import (
     prefetch_finance_readiness_entries,
     resolve_display_model_used,
 )
-from app.services.max.guardrails import uncertainty_fallback, should_defer_uncertain
+from app.services.max.guardrails import (
+    uncertainty_fallback,
+    should_defer_uncertain,
+    summarize_uncertainty_topic,
+    founder_action_tools_remaining,
+)
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.runtime_truth_check import (
     format_runtime_truth_check,
@@ -2980,6 +2985,24 @@ async def _chat_with_max_service(
                 tool_calls = current_response.function_calls
             tool_calls = _dedupe_send_tool_calls(tool_calls, _seen_send_tool_calls)
             if not tool_calls:
+                _remaining_action_tools = founder_action_tools_remaining(
+                    request.message, tool_results_list
+                )
+                if _remaining_action_tools and _tool_round < 2:
+                    loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_response.content)))
+                    loop_messages.append(AIMessage(role="system", content=(
+                        "The founder action request is not complete. You MUST call the remaining "
+                        f"tools before giving a final answer: {', '.join(_remaining_action_tools)}. "
+                        "Use exact line items from the user message (description, qty, unit, unit_price — "
+                        "no recalculation). Emit valid ```tool``` JSON blocks now."
+                    )))
+                    current_response = await ai_router.chat(
+                        loop_messages, model=model, desk=request.desk,
+                        system_prompt=enriched_prompt, conversation_id=request.conversation_id or "",
+                        tools=_tools,
+                    )
+                    final_content = current_response.content
+                    continue
                 break
 
             if _is_decision_only_request(request.message) and any(_is_action_tool(tc) for tc in tool_calls):
@@ -3209,8 +3232,8 @@ async def _chat_with_max_service(
                 final_content = grounded_response.content
 
         # Guard: Structured uncertainty fallback for low-confidence/hypothetical questions
-        if should_defer_uncertain(request.message):
-            final_content = uncertainty_fallback(request.message)
+        if should_defer_uncertain(request.message, tool_results=tool_results_list):
+            final_content = uncertainty_fallback(summarize_uncertainty_topic(request.message))
 
         # Guard: GPU safety output fail-safe — replace model output recommending risky commands
         final_content = _apply_gpu_safety_output_guardrail(request.message, final_content)
@@ -3928,6 +3951,36 @@ async def chat_stream(request: ChatRequest):
                     tool_results_list = error_entries + tool_results_list
                 tool_calls = _dedupe_send_tool_calls(tool_calls, _seen_send_tool_calls)
                 if not tool_calls:
+                    _remaining_action_tools = founder_action_tools_remaining(
+                        request.message, tool_results_list
+                    )
+                    if _remaining_action_tools and _tool_round < 2:
+                        loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_text)))
+                        loop_messages.append(AIMessage(role="system", content=(
+                            "The founder action request is not complete. You MUST call the remaining "
+                            f"tools before giving a final answer: {', '.join(_remaining_action_tools)}. "
+                            "Use exact line items from the user message (description, qty, unit, unit_price — "
+                            "no recalculation). Emit valid ```tool``` JSON blocks now."
+                        )))
+                        followup_text = ""
+                        _action_followup_iter = ai_router.chat_stream(
+                            loop_messages, model=model, desk=request.desk,
+                            system_prompt=enriched_prompt, source=request.channel or "",
+                            conversation_id=request.conversation_id or "",
+                        ).__aiter__()
+                        while True:
+                            try:
+                                chunk, m_used = await asyncio.wait_for(_action_followup_iter.__anext__(), timeout=15)
+                            except StopAsyncIteration:
+                                break
+                            except asyncio.TimeoutError:
+                                yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'followup'})}\n\n"
+                                continue
+                            model_used = m_used
+                            followup_text += sanitize_output_streaming(chunk)
+                        current_text = followup_text
+                        full_response = followup_text
+                        continue
                     break
 
                 if _is_decision_only_request(request.message) and any(_is_action_tool(tc) for tc in tool_calls):

@@ -3,7 +3,7 @@ import os
 import re
 import logging
 from datetime import datetime
-from typing import Tuple
+from typing import Any, Tuple
 
 logger = logging.getLogger("max.guardrails")
 
@@ -274,6 +274,114 @@ def check_output_quality(text: str) -> list[str]:
 SAFE_REFUSAL = "I can\'t help with that request. Let me know how else I can assist with Empire operations."
 
 
+_UNCERTAINTY_FALLBACK_TOPIC_MAX_LEN = 120
+
+# Tools that mutate Empire data or complete founder-requested deliverables.
+# If any succeeded in the same turn, never replace the reply with research fallback.
+_WRITE_OR_DELIVERABLE_TOOLS = frozenset({
+    "create_contact",
+    "create_engine_quote",
+    "create_quick_quote",
+    "photo_to_quote",
+    "update_contact",
+    "create_task",
+    "send_quote_email",
+    "send_email",
+    "svg_to_pdf",
+    "generate_quote_pdf",
+    "create_invoice",
+    "db_write",
+    "file_write",
+    "file_edit",
+    "file_append",
+})
+
+_IMPERATIVE_VERBS = (
+    "create", "make", "generate", "save", "split", "email", "send me", "send ",
+    "invoice", "quote", "build", "draft", "produce", "add ", "update ", "delete ",
+    "remove ", "schedule", "queue", "dispatch", "run ", "execute", "prepare",
+)
+
+_IMPERATIVE_NOUNS = (
+    "estimate", "estimates", "quote", "quotes", "invoice", "invoices",
+    "pdf", "pdfs", "contact", "crm", "line item", "line items",
+)
+
+
+def summarize_uncertainty_topic(message: str, *, max_len: int = _UNCERTAINTY_FALLBACK_TOPIC_MAX_LEN) -> str:
+    """Short label for uncertainty fallback — never echo the full user prompt."""
+    text = re.sub(r"\s+", " ", (message or "").strip())
+    if not text:
+        return "that topic"
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1].rstrip() + "…"
+
+
+def is_imperative_action_request(message: str | None) -> bool:
+    """True when the user is ordering MAX to act (tools/routes), not asking a factual Q."""
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    if not text:
+        return False
+    if "founder action request" in text:
+        return True
+    if re.search(r"^\s*\d+[\).:\-]\s+", text):
+        return True
+    has_verb = any(v in text for v in _IMPERATIVE_VERBS)
+    has_noun = any(n in text for n in _IMPERATIVE_NOUNS)
+    if has_verb and has_noun:
+        return True
+    if has_verb and re.search(r"\b(create_engine_quote|create_contact|send_quote_email)\b", text):
+        return True
+    return False
+
+
+def _successful_write_tools(tool_results: list[Any] | None) -> set[str]:
+    names: set[str] = set()
+    for entry in tool_results or []:
+        if not isinstance(entry, dict):
+            continue
+        if not entry.get("success"):
+            continue
+        tool = str(entry.get("tool") or "").strip()
+        if tool:
+            names.add(tool)
+    return names
+
+
+def founder_action_tools_remaining(message: str | None, tool_results: list[Any] | None) -> list[str]:
+    """Explicit tool names mentioned in the request that have not succeeded yet."""
+    if not is_imperative_action_request(message):
+        return []
+    text = (message or "").lower()
+    succeeded = _successful_write_tools(tool_results)
+    remaining: list[str] = []
+    for tool_name in (
+        "create_contact",
+        "create_engine_quote",
+        "create_quick_quote",
+        "send_quote_email",
+        "send_email",
+        "svg_to_pdf",
+    ):
+        if tool_name in text and tool_name not in succeeded:
+            remaining.append(tool_name)
+    if not remaining and is_imperative_action_request(message):
+        wants_quotes = any(w in text for w in ("estimate", "quote", "invoice"))
+        wants_pdf = "pdf" in text
+        wants_email = "email" in text or "send " in text
+        if wants_quotes and not (succeeded & {"create_engine_quote", "create_quick_quote"}):
+            if any(v in text for v in ("create", "make", "save", "generate", "new ")):
+                remaining.append("create_engine_quote")
+        if wants_pdf and "svg_to_pdf" not in succeeded and "generate_quote_pdf" not in succeeded:
+            if any(v in text for v in ("generate", "pdf", "save")):
+                remaining.append("svg_to_pdf")
+        if wants_email and not (succeeded & {"send_quote_email", "send_email"}):
+            if any(v in text for v in ("email", "send")):
+                remaining.append("send_quote_email")
+    return remaining
+
+
 def uncertainty_fallback(topic: str, suggestions: list[str] = None) -> str:
     if suggestions is None:
         suggestions = [
@@ -282,19 +390,36 @@ def uncertainty_fallback(topic: str, suggestions: list[str] = None) -> str:
             "Note this as a topic to research later",
         ]
     lines = "\n".join(f"{i}. {s}" for i, s in enumerate(suggestions, 1))
+    short_topic = summarize_uncertainty_topic(topic)
     return (
-        f"I don\'t have verified information on \"{topic}\" from reliable Empire sources.\n\n"
+        f"I don\'t have verified information on \"{short_topic}\" from reliable Empire sources.\n\n"
         f"Would you like me to:\n{lines}"
     )
 
 
-def should_defer_uncertain(message: str, confidence: float = None) -> bool:
+def should_defer_uncertain(
+    message: str,
+    confidence: float = None,
+    *,
+    tool_results: list[Any] | None = None,
+) -> bool:
+    """Whether to replace the model reply with the research fallback.
+
+    Applies only to factual Q&A with no supporting tool data — never to
+    founder imperative actions or turns that already ran write/deliverable tools.
+    """
+    if is_imperative_action_request(message):
+        return False
+    succeeded = _successful_write_tools(tool_results)
+    if succeeded & _WRITE_OR_DELIVERABLE_TOOLS:
+        return False
     if confidence is not None and confidence < 0.6:
         return True
     uncertain_patterns = [
         r'\b(maybe|perhaps|possibly|probably|likely|unlikely)\b',
         r'\b(what\s+if|hypothetical|theoretical|speculate)\b',
-        r'\b(guess|estimate|roughly|approximately)\b',
+        r'\b(guess|roughly|approximately)\b',
+        r'\b(i\s+estimate|my\s+estimate|ballpark\s+estimate|rough\s+estimate)\b',
         r"(i\s+(don.t|do\s*not)\s+have\s+(that\s+)?(info|data|information|memory))",
     ]
     return any(re.search(p, message, re.I) for p in uncertain_patterns)
