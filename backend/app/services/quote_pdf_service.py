@@ -22,7 +22,7 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from app.config.workroom_billing import get_workroom_billing
+from app.config.workroom_billing import get_workroom_billing, resolve_billing
 from app.services.quote_service import get_quote
 from app.services.data_paths import quote_pdf_dir
 from app.services.pricing.dimensions import quote_item_dimension_text
@@ -172,6 +172,8 @@ def generate_quote_pdf_legacy_portrait(quote_id: str) -> bytes:
     if not quote:
         raise FileNotFoundError(f"Quote {quote_id} not found")
 
+    bill = resolve_billing(quote.get("billed_by"))
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=letter,
@@ -183,7 +185,7 @@ def generate_quote_pdf_legacy_portrait(quote_id: str) -> bytes:
 
     # ── Header ─────────────────────────────────────────────────
     header_data = [
-        [Paragraph(f"<b>{COMPANY_NAME}</b>", styles['BrandTitle']),
+        [Paragraph(f"<b>{bill.name}</b>", styles['BrandTitle']),
          Paragraph(f"<b>QUOTE</b><br/><font size=10 color='#888888'>#{quote.get('quote_number', quote_id)}</font>",
                    ParagraphStyle('QNum', parent=styles['Normal'], fontSize=18,
                                   alignment=TA_RIGHT, textColor=BRAND_PRIMARY))],
@@ -197,7 +199,7 @@ def generate_quote_pdf_legacy_portrait(quote_id: str) -> bytes:
 
     # Company details
     story.append(Paragraph(
-        f"{COMPANY_ADDRESS} | {COMPANY_PHONE} | {COMPANY_WEBSITE}",
+        f"{bill.address} | {bill.phone} | {bill.website}",
         styles['SmallMuted']
     ))
     story.append(Spacer(1, 8))
@@ -405,7 +407,7 @@ def generate_quote_pdf_legacy_portrait(quote_id: str) -> bytes:
     story.append(HRFlowable(width="100%", thickness=0.5, color=BRAND_MUTED))
     story.append(Spacer(1, 6))
     story.append(Paragraph(
-        f"Thank you for choosing {COMPANY_NAME}! | {COMPANY_PHONE} | {COMPANY_WEBSITE}",
+        f"Thank you for choosing {bill.name}! | {bill.phone} | {bill.website}",
         styles['Footer']
     ))
 

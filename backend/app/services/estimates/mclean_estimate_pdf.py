@@ -417,11 +417,14 @@ def _paint_page_chrome(c: canvas.Canvas, quote: Dict[str, Any], page: int, pages
     client, project = _client_project(quote)
     qn = quote.get("quote_number") or quote.get("id") or "ESTIMATE"
     created = _fmt_date(quote.get("created_at") or quote.get("updated_at"))
+    bill = get_workroom_billing(quote.get("billed_by"))
     render_chrome_bands(
         c,
         sheet_no=page,
         total=pages,
         right_title="ESTIMATE",
+        letterhead=bill.letterhead_upper,
+        powered_by=bill.chrome_subheader_upper,
         client=client,
         project=project,
         rev="A",
@@ -803,7 +806,7 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=(PW, PH))
     qn = quote.get("quote_number") or quote.get("id") or "estimate"
-    _bill = get_workroom_billing()
+    _bill = get_workroom_billing(quote.get("billed_by"))
     c.setTitle(f"Estimate {qn} — {_bill.name}")
     c.setAuthor(_bill.pdf_author)
     c.setCreator(_bill.name)
@@ -981,7 +984,7 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=(PW, PH))
     qn = quote.get("quote_number") or quote.get("id") or "estimate"
-    _bill = get_workroom_billing()
+    _bill = get_workroom_billing(quote.get("billed_by"))
     c.setTitle(f"Estimate {qn} — {_bill.name}")
     c.setAuthor(_bill.pdf_author)
     c.setCreator(_bill.name)

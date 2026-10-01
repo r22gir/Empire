@@ -140,7 +140,7 @@ def resolve_invoice_branding(invoice: dict, is_woodcraft: bool) -> dict:
             "accent": "#d4a636",
             "header_bg": "#3d2e1a",
         }
-    billing = get_workroom_billing()
+    billing = get_workroom_billing(invoice.get("billed_by"))
     return {
         "name": billing.name,
         "tagline": billing.tagline,

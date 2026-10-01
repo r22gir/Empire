@@ -1514,7 +1514,10 @@ async def send_quote(quote_id: str, body: Optional[SendQuoteRequest] = None):
             })
 
             from app.config.workroom_billing import get_workroom_billing
-            subject = f"Your Quote #{quote['quote_number']} from {get_workroom_billing().name}"
+            subject = (
+                f"Your Quote #{quote['quote_number']} from "
+                f"{get_workroom_billing(quote.get('billed_by')).name}"
+            )
 
             # Send with PDF attachment if available
             if pdf_bytes and SENDGRID_API_KEY:
@@ -3288,7 +3291,7 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 
     logo_html = ""
     from app.config.workroom_billing import get_workroom_billing
-    _wr_bill = get_workroom_billing()
+    _wr_bill = get_workroom_billing(quote.get("billed_by"))
     biz_name = quote.get("business_name") or _wr_bill.name
     biz_phone = _wr_bill.phone
     biz_email = _wr_bill.email

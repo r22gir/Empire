@@ -1854,6 +1854,16 @@ def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult
             "quantity":    qty if qty is not None else 1,
         })
 
+    billed_by = params.get("billed_by")
+    if not billed_by:
+        from app.config.workroom_billing import founder_requests_nelmas_billing
+        hint = " ".join(
+            str(params.get(k) or "")
+            for k in ("billing_note", "notes", "project_description", "project_name")
+        )
+        if founder_requests_nelmas_billing(hint):
+            billed_by = "nelmas_workroom"
+
     body = {
         "customer_name":       customer_name,
         "business_unit":       business_unit,
@@ -1865,6 +1875,8 @@ def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult
         "tax_rate":            params.get("tax_rate", 0.0),
         "line_items":          normalized_items,
     }
+    if billed_by:
+        body["billed_by"] = billed_by
 
     try:
         from app.services.quote_service import create_quote as _qs_create
@@ -5356,8 +5368,8 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
 ### Payment Phase 1 Tools (Sprint 1d)
 - **create_invoice_from_quote** — Explicit quote→invoice action. Calls `POST /api/v1/quotes-v2/{id}/to-invoice`. The endpoint is GATED to quote.status ∈ {sent, accepted, in_production, completed}. A draft or founder_review quote returns HTTP 409 (use /submit-for-review + /approve first). Returns honest payload: invoice snapshot from canonical invoices table, store="quotes_v2", engine="lifecycle_v1". Use when the founder says "create an invoice from this quote", "bill the Willard", "invoice the bench + panel".
   `{"tool": "create_invoice_from_quote", "quote_id": "4d9b1d03"}`
-- **split_invoice_from_invoice** — Split an existing invoice into one or more new draft invoices. Copies `line_items` exactly (no repricing, no drawings). Client PDF title is INVOICE only; new splits use Nelma's Workroom with 50% deposit due + balance due and plain line descriptions (no allocation math). Prior payments not copied unless `include_payments` is true.
-  `{"tool": "split_invoice_from_invoice", "invoice_id": "abc123", "splits": [{"line_items": [{"description": "Supplied fabric, plain backs", "quantity": 1, "unit": "ea", "unit_price": 500, "total": 500}]}]}`
+- **split_invoice_from_invoice** — Split an existing invoice into one or more new draft invoices. Copies `line_items` exactly (no repricing, no drawings). Default `billed_by` is Empire Workroom; set `billed_by: "nelmas_workroom"` on a split (or per-split) when the founder says bill as Nelma's. Client PDF title is INVOICE only; 50% deposit due + balance due; plain line descriptions (no allocation math). Prior payments not copied unless `include_payments` is true.
+  `{"tool": "split_invoice_from_invoice", "invoice_id": "abc123", "billed_by": "nelmas_workroom", "splits": [{"line_items": [{"description": "Supplied fabric, plain backs", "quantity": 1, "unit": "ea", "unit_price": 500, "total": 500}]}]}`
 
 ### TOOL DISCIPLINE — READ BEFORE EVERY RESPONSE
 - NEVER fabricate data. All statistics, charts, and numbers must come from real tool results.

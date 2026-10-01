@@ -64,6 +64,7 @@ DESIGNS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "craftfor
 class InvoiceCreate(BaseModel):
     customer_id: Optional[str] = None
     quote_id: Optional[str] = None
+    billed_by: Optional[str] = None
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
     customer_phone: Optional[str] = None
@@ -110,6 +111,7 @@ class InvoiceComposeRequest(BaseModel):
 class InvoiceSplitPart(BaseModel):
     line_items: List[dict]
     notes: Optional[str] = None
+    billed_by: Optional[str] = None
 
 
 class InvoiceSplitRequest(BaseModel):
@@ -536,6 +538,9 @@ def _safe_alter(conn, table: str, column: str, col_type: str, default=None):
 
 def _ensure_finance_extensions(conn):
     """Keep legacy finance endpoints safe when jobs_unified has not run first."""
+    from app.config.workroom_billing import ensure_billed_by_schema
+
+    ensure_billed_by_schema(conn)
     inv_cols = {
         "job_id": "TEXT",
         "client_name": "TEXT",
@@ -1684,15 +1689,19 @@ def create_invoice(request: Request, invoice: InvoiceCreate):
                     pass
             due = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
 
+        from app.config.workroom_billing import billed_by_for_storage
+
+        billed_by = billed_by_for_storage(invoice.billed_by)
+
         conn.execute(
             """INSERT INTO invoices
                (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
                 tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
                 client_name, client_email, client_phone, client_address, business_unit,
-                invoice_date, payment_status)
+                invoice_date, payment_status, billed_by)
                VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?,
                        ?, ?, ?, ?, ?,
-                       ?, 'unpaid')""",
+                       ?, 'unpaid', ?)""",
             (
                 inv_number,
                 customer_id,
@@ -1712,6 +1721,7 @@ def create_invoice(request: Request, invoice: InvoiceCreate):
                 invoice.customer_address,
                 business_unit,
                 date.today().isoformat(),
+                billed_by,
             )
         )
 
@@ -1737,6 +1747,7 @@ def split_invoice_from_existing(
     Totals are derived only from the supplied line rows (no repricing). Deposits and
     prior payments are not copied unless include_deposits / include_payments is true.
     """
+    from app.config.workroom_billing import billed_by_for_storage
     from app.services.invoice_pdf_service import subtotal_from_line_items
 
     if not body.splits:
@@ -1783,6 +1794,7 @@ def split_invoice_from_existing(
             if body.include_deposits:
                 deposit_required = float(source.get("deposit_required", 0) or deposit_required)
             client_job_deposit_schedule = 1
+            billed_by = billed_by_for_storage(part.billed_by or source.get("billed_by"))
 
             business_unit = _normalise_business(source.get("business_unit") or "workroom")
             if business_unit == "all":
@@ -1793,10 +1805,11 @@ def split_invoice_from_existing(
                    (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
                     tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
                     client_name, client_email, client_phone, client_address, business_unit,
-                    invoice_date, payment_status, deposit_required, client_job_deposit_schedule)
+                    invoice_date, payment_status, deposit_required, client_job_deposit_schedule,
+                    billed_by)
                    VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                            ?, ?, ?, ?, ?,
-                           ?, 'unpaid', ?, ?)""",
+                           ?, 'unpaid', ?, ?, ?)""",
                 (
                     inv_number,
                     source.get("customer_id"),
@@ -1819,6 +1832,7 @@ def split_invoice_from_existing(
                     date.today().isoformat(),
                     deposit_required,
                     client_job_deposit_schedule,
+                    billed_by,
                 ),
             )
             row = conn.execute(

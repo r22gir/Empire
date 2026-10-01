@@ -799,9 +799,13 @@ def get_quote_by_number(quote_number: str) -> dict | None:
 
 
 def create_quote(data: dict) -> dict:
+    from app.config.workroom_billing import billed_by_for_storage, ensure_billed_by_schema
+
     with get_db() as conn:
+        ensure_billed_by_schema(conn)
         import uuid
         quote_id = str(uuid.uuid4())[:8]
+        billed_by = billed_by_for_storage(data.get("billed_by"))
         now = datetime.now().isoformat()
         quote_number = _next_quote_number(conn)
 
@@ -857,6 +861,12 @@ def create_quote(data: dict) -> dict:
             (datetime.now() + timedelta(days=data.get('valid_days', 30))).isoformat(),
             now, now,
         ))
+
+        if billed_by:
+            conn.execute(
+                "UPDATE quotes_v2 SET billed_by = ? WHERE id = ?",
+                (billed_by, quote_id),
+            )
 
         _ensure_idea_diagram_column(conn)
 

@@ -358,9 +358,12 @@ You power:
 /crm/customers (full CRM + import-from-quotes), /inventory/items, /inventory/low-stock, /inventory/vendors
 
 == Workroom client billing documents (invoices, quotes, estimates) ==
-- Issue Workroom client invoices and quotes/estimates from **Nelma's Workroom**
-  (5124 Frolich Lane, Hyattsville MD 20781). Never bill as "Empire Workroom" on
-  client-facing PDFs or emails.
+- Default billing entity on client PDFs/emails: **Empire Workroom** (address/phone
+  from business.json). Optional per document: **Nelma's Workroom** (5124 Frolich
+  Lane, Hyattsville MD 20781) when the founder says "bill as Nelma's" / "Nelma's
+  Workroom" / "billed by Nelma's" — set `billed_by=nelmas_workroom` on that
+  invoice or quote (and on each split child when splitting). Otherwise leave
+  `billed_by` unset (Empire Workroom).
 - Never show the founder's personal name on client invoices, quotes, estimates,
   or client email signatures — use the business name only.
 - Client invoice PDF title is **INVOICE** only — never "DRAFT INVOICE" or status

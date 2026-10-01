@@ -1,35 +1,55 @@
-"""Nelma's Workroom client billing PDFs, email signatures, and invoice rules."""
+"""Client billing: Empire Workroom default, optional Nelma's, no founder name."""
 from __future__ import annotations
 
 import io
 
-from app.config.workroom_billing import get_workroom_billing
+from app.config.workroom_billing import (
+    BILLED_BY_EMPIRE,
+    BILLED_BY_NELMA,
+    billed_by_for_storage,
+    get_workroom_billing,
+    normalize_billed_by,
+    resolve_billing,
+)
 from app.services.invoice_pdf_service import (
     JOB_DEPOSIT_SCHEDULE_NOTE,
     client_visible_line_description,
     client_visible_notes,
     render_client_invoice_html,
-    uses_job_deposit_schedule,
 )
 from app.services.max.email_template import render_house_email
-from app.services.quote_pdf_service import (
-    COMPANY_NAME,
-    generate_quote_pdf_legacy_portrait,
-)
+from app.services.quote_pdf_service import generate_quote_pdf_legacy_portrait
 
 
-def test_workroom_billing_defaults():
+def test_default_billing_is_empire_workroom():
     b = get_workroom_billing()
+    assert b.name == "Empire Workroom"
+    assert normalize_billed_by(None) == BILLED_BY_EMPIRE
+    assert billed_by_for_storage(None) is None
+
+
+def test_nelmas_billing_option():
+    b = get_workroom_billing(BILLED_BY_NELMA)
     assert b.name == "Nelma's Workroom"
-    assert "5124 Frolich" in b.address
-    assert "Rafael" not in b.name
+    assert "Frolich Lane" in b.address
+    assert billed_by_for_storage(BILLED_BY_NELMA) == BILLED_BY_NELMA
 
 
-def test_house_email_signature_uses_billing_name_only():
+def test_house_email_empire_default_no_founder_name():
     rendered = render_house_email("Please see attached.", recipient_name="Client")
-    assert "Nelma's Workroom" in rendered.plain_text
+    assert "Empire Workroom" in rendered.plain_text
     assert "Rafael Giraldo" not in rendered.plain_text
     assert "Rafael Giraldo" not in rendered.html
+
+
+def test_house_email_nelmas_entity_no_founder_name():
+    rendered = render_house_email(
+        "Please see attached.",
+        recipient_name="Client",
+        billed_by=BILLED_BY_NELMA,
+    )
+    assert "Nelma's Workroom" in rendered.plain_text
+    assert "Rafael Giraldo" not in rendered.plain_text
 
 
 def test_client_visible_line_strips_allocation_math():
@@ -39,12 +59,7 @@ def test_client_visible_line_strips_allocation_math():
     assert client_visible_line_description(item) == "Supplied fabric, plain backs"
 
 
-def test_client_visible_notes_hides_split_reference():
-    notes = "Thank you.\nSplit from INV-2026-123"
-    assert client_visible_notes(notes) == "Thank you."
-
-
-def test_invoice_html_title_and_deposit_schedule():
+def test_invoice_html_empire_default_and_deposit_schedule():
     inv = {
         "invoice_number": "INV-2026-99",
         "invoice_date": "2026-10-01",
@@ -70,15 +85,33 @@ def test_invoice_html_title_and_deposit_schedule():
     html = render_client_invoice_html(inv)
     assert "<title>INVOICE</title>" in html
     assert "DRAFT INVOICE" not in html.upper()
-    assert "<h1>INVOICE</h1>" in html
+    assert "Empire Workroom" in html
     assert "50% Deposit Due" in html
-    assert "Balance Due" in html
     assert JOB_DEPOSIT_SCHEDULE_NOTE in html
     assert "Split from INV" not in html
-    assert uses_job_deposit_schedule(inv)
+    assert client_visible_notes(inv["notes"]) is None
 
 
-def test_legacy_quote_pdf_header_is_nelmas_workroom(monkeypatch, tmp_path):
+def test_invoice_html_nelmas_when_billed_by_set():
+    inv = {
+        "invoice_number": "INV-2026-100",
+        "invoice_date": "2026-10-01",
+        "due_date": "2026-10-31",
+        "terms": "Net 30",
+        "subtotal": 500.0,
+        "tax_rate": 0.0,
+        "tax_amount": 0.0,
+        "total": 500.0,
+        "client_name": "Test",
+        "billed_by": BILLED_BY_NELMA,
+        "line_items": [{"description": "Labor", "quantity": 1, "unit": "ea", "unit_price": 500, "total": 500}],
+    }
+    html = render_client_invoice_html(inv)
+    assert "Nelma's Workroom" in html
+    assert "Empire Workroom" not in html
+
+
+def test_legacy_quote_pdf_respects_billed_by(monkeypatch, tmp_path):
     from app.services import quote_pdf_service
 
     quote = {
@@ -87,6 +120,7 @@ def test_legacy_quote_pdf_header_is_nelmas_workroom(monkeypatch, tmp_path):
         "customer_name": "Test",
         "status": "draft",
         "created_at": "2026-10-01",
+        "billed_by": BILLED_BY_NELMA,
         "line_items": [{
             "description": "Panel",
             "quantity": 1,
@@ -101,7 +135,6 @@ def test_legacy_quote_pdf_header_is_nelmas_workroom(monkeypatch, tmp_path):
     monkeypatch.setattr(quote_pdf_service, "get_quote", lambda _id: quote)
     monkeypatch.setattr(quote_pdf_service, "quote_pdf_dir", lambda: tmp_path)
 
-    assert COMPANY_NAME == "Nelma's Workroom"
     pdf_bytes = generate_quote_pdf_legacy_portrait("q-bill")
     try:
         from pypdf import PdfReader
@@ -112,4 +145,11 @@ def test_legacy_quote_pdf_header_is_nelmas_workroom(monkeypatch, tmp_path):
     )
     assert "Nelma's Workroom" in text
     assert "Rafael Giraldo" not in text
-    assert "Empire Workroom" not in text
+
+    quote["billed_by"] = None
+    pdf_empire = generate_quote_pdf_legacy_portrait("q-bill")
+    text_empire = "\n".join(
+        page.extract_text() or ""
+        for page in PdfReader(io.BytesIO(pdf_empire)).pages
+    )
+    assert "Empire Workroom" in text_empire

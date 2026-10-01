@@ -13,14 +13,13 @@ import re
 
 from app.config.workroom_billing import get_workroom_billing
 
-_billing = get_workroom_billing()
 
-
-def _signature_lines() -> tuple[str, ...]:
+def _signature_lines(billed_by: str | None = None) -> tuple[str, ...]:
+    billing = get_workroom_billing(billed_by)
     return (
-        _billing.name,
-        _billing.email,
-        _billing.signature_phone_plain,
+        billing.name,
+        billing.email,
+        billing.signature_phone_plain,
     )
 
 _AMOUNT_RE = re.compile(
@@ -79,9 +78,13 @@ def _prepare_body(body_text: str, recipient_name: str | None = None) -> str:
     return body
 
 
-def _plain_with_signature(body_text: str, recipient_name: str | None = None) -> str:
+def _plain_with_signature(
+    body_text: str,
+    recipient_name: str | None = None,
+    billed_by: str | None = None,
+) -> str:
     body = _prepare_body(body_text, recipient_name)
-    signature = "\n".join(_signature_lines())
+    signature = "\n".join(_signature_lines(billed_by))
     return f"{body}\n\n{signature}"
 
 
@@ -147,16 +150,21 @@ def _body_to_html(body_text: str) -> str:
     return "\n".join(rendered)
 
 
-def render_house_email(body_text: str, recipient_name: str | None = None) -> RenderedEmail:
+def render_house_email(
+    body_text: str,
+    recipient_name: str | None = None,
+    billed_by: str | None = None,
+) -> RenderedEmail:
     """Return the house plain-text and branded HTML email alternatives."""
+    billing = get_workroom_billing(billed_by)
     prepared_body = _prepare_body(body_text, recipient_name)
-    plain = _plain_with_signature(prepared_body)
+    plain = _plain_with_signature(prepared_body, billed_by=billed_by)
     body_html = _body_to_html(prepared_body)
     signature_html = (
-        f'<div class="signature"><strong>{escape(_billing.name, quote=False)}</strong>'
-        f'<br><a href="mailto:{escape(_billing.email, quote=False)}">'
-        f"{escape(_billing.email, quote=False)}</a>"
-        f"<br>{escape(_billing.signature_phone_plain, quote=False)}</div>"
+        f'<div class="signature"><strong>{escape(billing.name, quote=False)}</strong>'
+        f'<br><a href="mailto:{escape(billing.email, quote=False)}">'
+        f"{escape(billing.email, quote=False)}</a>"
+        f"<br>{escape(billing.signature_phone_plain, quote=False)}</div>"
     )
     html = f"""<!doctype html>
 <html><head><meta charset="utf-8"><style>

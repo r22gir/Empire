@@ -1,8 +1,10 @@
-"""Client-facing billing identity for Workroom invoices, quotes, and estimates.
+"""Per-document Workroom billing identity for client PDFs and emails.
 
-Override via environment:
-  BILLING_ENTITY          — legal/display name (default Nelma's Workroom)
-  BILLING_ENTITY_ADDRESS  — full mailing address on PDFs/emails
+`billed_by` on invoices/quotes:
+  - NULL or omitted → Empire Workroom (default, from business.json)
+  - 'nelmas_workroom' → Nelma's Workroom (5124 Frolich Lane, Hyattsville, MD 20781)
+
+Shared phone/email come from business.json for both entities.
 """
 from __future__ import annotations
 
@@ -10,17 +12,17 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 _CONFIG_PATH = Path(__file__).parent / "business.json"
 
-_DEFAULT_NAME = "Nelma's Workroom"
-_DEFAULT_ADDRESS = "5124 Frolich Lane, Hyattsville, MD 20781"
-_DEFAULT_PHONE = "(703) 213-6484"
-_DEFAULT_EMAIL = "workroom@empirebox.store"
-_DEFAULT_WEBSITE = "empirebox.store"
-_DEFAULT_TAGLINE = "Custom Window Treatments & Upholstery"
+BILLED_BY_EMPIRE = "empire_workroom"
+BILLED_BY_NELMA = "nelmas_workroom"
+VALID_BILLED_BY = frozenset({BILLED_BY_EMPIRE, BILLED_BY_NELMA})
+
+_NELMA_NAME = "Nelma's Workroom"
+_NELMA_ADDRESS = "5124 Frolich Lane, Hyattsville, MD 20781"
 
 
 def _env(name: str, default: str) -> str:
@@ -32,6 +34,7 @@ def _env(name: str, default: str) -> str:
 
 @dataclass(frozen=True)
 class WorkroomBilling:
+    billed_by: str
     name: str
     address: str
     phone: str
@@ -53,7 +56,6 @@ class WorkroomBilling:
 
     @property
     def signature_phone_plain(self) -> str:
-        """House email signature line (E.164-style when possible)."""
         digits = re.sub(r"\D", "", self.phone or "")
         if len(digits) == 10:
             return f"+1 {digits[:3]}-{digits[3:6]}-{digits[6:]}"
@@ -62,27 +64,94 @@ class WorkroomBilling:
         return self.phone
 
 
-@lru_cache(maxsize=1)
-def get_workroom_billing() -> WorkroomBilling:
-    phone = _DEFAULT_PHONE
-    email = _DEFAULT_EMAIL
-    website = _DEFAULT_WEBSITE
-    tagline = _DEFAULT_TAGLINE
-    if _CONFIG_PATH.is_file():
-        try:
-            data = json.loads(_CONFIG_PATH.read_text())
-            phone = data.get("business_phone") or phone
-            email = data.get("business_email") or email
-            raw_site = data.get("business_website") or website
-            website = (
-                raw_site.replace("https://", "").replace("http://", "").rstrip("/")
-            )
-            tagline = data.get("business_tagline") or tagline
-        except (OSError, json.JSONDecodeError, TypeError):
-            pass
+def _load_business_json() -> dict:
+    if not _CONFIG_PATH.is_file():
+        return {}
+    try:
+        return json.loads(_CONFIG_PATH.read_text())
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _contact_from_config(data: dict) -> tuple[str, str, str, str]:
+    phone = data.get("business_phone") or "(703) 213-6484"
+    email = data.get("business_email") or "workroom@empirebox.store"
+    raw_site = data.get("business_website") or "empirebox.store"
+    website = raw_site.replace("https://", "").replace("http://", "").rstrip("/")
+    tagline = data.get("business_tagline") or "Custom Window Treatments & Upholstery"
+    return phone, email, website, tagline
+
+
+def normalize_billed_by(raw: Optional[str]) -> str:
+    """Map DB/API values to a canonical billed_by key (default Empire)."""
+    if raw is None or not str(raw).strip():
+        return BILLED_BY_EMPIRE
+    key = str(raw).strip().lower().replace(" ", "_").replace("'", "")
+    aliases = {
+        "nelmas_workroom": BILLED_BY_NELMA,
+        "nelma_workroom": BILLED_BY_NELMA,
+        "nelmas": BILLED_BY_NELMA,
+        "nelma": BILLED_BY_NELMA,
+        "empire_workroom": BILLED_BY_EMPIRE,
+        "empire": BILLED_BY_EMPIRE,
+        "workroom": BILLED_BY_EMPIRE,
+    }
+    if key in aliases:
+        return aliases[key]
+    if key in VALID_BILLED_BY:
+        return key
+    return BILLED_BY_EMPIRE
+
+
+def billed_by_for_storage(raw: Optional[str]) -> Optional[str]:
+    """Persist NULL for default Empire; store nelmas_workroom when selected."""
+    return BILLED_BY_NELMA if normalize_billed_by(raw) == BILLED_BY_NELMA else None
+
+
+def founder_requests_nelmas_billing(text: str) -> bool:
+    """True when founder language selects Nelma's Workroom billing."""
+    if not text:
+        return False
+    t = text.lower()
+    if "nelma" not in t:
+        return False
+    triggers = (
+        "bill as nelma",
+        "billed by nelma",
+        "nelma's workroom",
+        "nelmas workroom",
+        "bill under nelma",
+        "invoice as nelma",
+        "quote as nelma",
+    )
+    return any(p in t for p in triggers) or (
+        "nelma" in t and ("bill" in t or "billed" in t or "workroom" in t)
+    )
+
+
+def resolve_billing(billed_by: Optional[str] = None) -> WorkroomBilling:
+    key = normalize_billed_by(billed_by)
+    data = _load_business_json()
+    phone, email, website, tagline = _contact_from_config(data)
+    if key == BILLED_BY_NELMA:
+        return WorkroomBilling(
+            billed_by=BILLED_BY_NELMA,
+            name=_NELMA_NAME,
+            address=_NELMA_ADDRESS,
+            phone=phone,
+            email=email,
+            website=website,
+            tagline=tagline,
+        )
+    empire_name = _env("BILLING_ENTITY", data.get("business_name") or "Empire Workroom")
+    empire_address = _env(
+        "BILLING_ENTITY_ADDRESS",
+        data.get("business_address") or "5124 Frolich Ln, Hyattsville, MD 20781",
+    )
     return WorkroomBilling(
-        name=_env("BILLING_ENTITY", _DEFAULT_NAME),
-        address=_env("BILLING_ENTITY_ADDRESS", _DEFAULT_ADDRESS),
+        billed_by=BILLED_BY_EMPIRE,
+        name=empire_name,
+        address=empire_address,
         phone=phone,
         email=email,
         website=website,
@@ -90,6 +159,24 @@ def get_workroom_billing() -> WorkroomBilling:
     )
 
 
-def reload_workroom_billing() -> WorkroomBilling:
-    get_workroom_billing.cache_clear()
-    return get_workroom_billing()
+def get_workroom_billing(billed_by: Optional[str] = None) -> WorkroomBilling:
+    """Resolve billing for a document (default Empire Workroom)."""
+    return resolve_billing(billed_by)
+
+
+def reload_workroom_billing(billed_by: Optional[str] = None) -> WorkroomBilling:
+    return resolve_billing(billed_by)
+
+
+def ensure_billed_by_schema(conn) -> None:
+    """Additive nullable billed_by column — does not backfill or alter rows."""
+    for table in ("quotes_v2", "invoices"):
+        try:
+            cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        except Exception:
+            continue
+        if "billed_by" not in cols:
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN billed_by TEXT")
+            except Exception:
+                pass

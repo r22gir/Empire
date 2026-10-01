@@ -432,6 +432,11 @@ def create_all_tables(conn: sqlite3.Connection):
         conn.commit()
         logger.info("task_activity FK dropped; data preserved")
 
+    from app.config.workroom_billing import ensure_billed_by_schema
+
+    ensure_billed_by_schema(conn)
+    conn.commit()
+
     logger.info("All unified business tables created successfully")
 
 
