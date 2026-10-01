@@ -313,12 +313,13 @@ def _esc(txt):
     return str(txt).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-def _poly(pts, sw=SW_MED, fill="none", stroke=BLACK, attrs: str = ""):
+def _poly(pts, sw=SW_MED, fill="none", stroke=BLACK, attrs: str = "", geom=True):
     points = " ".join(f"{p[0]:.1f},{p[1]:.1f}" for p in pts)
     extra = f" {attrs}" if attrs else ""
+    gtag = ' data-geom="1"' if geom and stroke not in (DIM_COLOR,) else ""
     return (
         f'<polygon points="{points}" fill="{fill}" stroke="{stroke}" '
-        f'stroke-width="{sw}" stroke-linejoin="round"{extra}/>'
+        f'stroke-width="{sw}" stroke-linejoin="round"{extra}{gtag}/>'
     )
 
 
@@ -333,13 +334,21 @@ def _iso_face(parts, ox, oy, scale, corners_3d, sw=SW_MED, fill="none", stroke=B
     parts.append(_poly(pts, sw=sw, fill=fill, stroke=stroke, attrs='data-iso-face="1"'))
 
 
-def _line(x1, y1, x2, y2, sw=SW_MED, stroke=BLACK, dash=""):
+def _line(x1, y1, x2, y2, sw=SW_MED, stroke=BLACK, dash="", geom=True):
     d = f' stroke-dasharray="{dash}"' if dash else ""
-    return f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{stroke}" stroke-width="{sw}"{d}/>'
+    tag = ' data-geom="1"' if geom and stroke not in (DIM_COLOR, GRAY, LIGHT_GRAY) else ""
+    return (
+        f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+        f'stroke="{stroke}" stroke-width="{sw}"{d}{tag}/>'
+    )
 
 
-def _rect(x, y, w, h, sw=SW_MED, fill="none", stroke=BLACK):
-    return f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>'
+def _rect(x, y, w, h, sw=SW_MED, fill="none", stroke=BLACK, geom=True):
+    tag = ' data-geom="1"' if geom and stroke not in (DIM_COLOR,) else ""
+    return (
+        f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" '
+        f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{tag}/>'
+    )
 
 
 def _text(x, y, txt, size=10, anchor="middle", weight="normal", fill=BLACK):
@@ -411,8 +420,12 @@ def _dim_v(parts, p1, p2, label, offset_x, text_side="right"):
     # Text — HORIZONTAL, placed beside the vertical dimension line
     mx = (d1x + d2x) / 2
     my = (p1[1] + p2[1]) / 2
-    tx = mx + (10 if text_side == "right" else -10)
-    anch = "start" if text_side == "right" else "end"
+    if text_side == "right":
+        tx = mx + 8
+        anch = "end"
+    else:
+        tx = mx - 8
+        anch = "start"
     parts.append(_text(tx, my + 4, label, 9, anchor=anch, weight="600", fill=DIM_COLOR))
 
 
@@ -421,7 +434,45 @@ def _dim_2d_h(parts, x1, x2, y, label, offset_y=20):
 
 
 def _dim_2d_v(parts, x, y1, y2, label, offset_x=20):
-    _dim_v(parts, (x, y1), (x, y2), label, offset_x, "right" if offset_x > 0 else "left")
+    side = "right" if offset_x > 0 else "left"
+    _dim_v(parts, (x, y1), (x, y2), label, offset_x, side)
+
+
+def _elev_dim_offset_left(x: float, span: float) -> float:
+    """Keep dim line + label inside the panel (min x ≈ 8px)."""
+    label_w = 22.0
+    margin = 8.0
+    return -min(span, max(12.0, x - margin - label_w))
+
+
+def _elev_height_dims_left(parts, x, y_top, y_seat, y_floor, seat_h, back_h, panel_w: float = 0):
+    """Stacked vertical dims left of elevation (labels outside outline)."""
+    inner = _elev_dim_offset_left(x, 30.0)
+    outer = _elev_dim_offset_left(x, 46.0)
+    total = seat_h + (back_h or 0)
+    _dim_2d_v(parts, x, y_top, y_floor, _in(total), offset_x=outer)
+    if back_h and back_h > 0:
+        _dim_2d_v(parts, x, y_top, y_seat, f'{_in(back_h)} BH', offset_x=inner)
+    _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=inner)
+
+
+def _elev_dim_offset_right(x: float, panel_w: float, span: float) -> float:
+    label_w = 22.0
+    margin = 8.0
+    room = panel_w - x - margin - label_w
+    return min(span, max(12.0, room))
+
+
+def _elev_height_dims_right(parts, x, y_top, y_seat, y_floor, seat_h, back_h, panel_w: float = 0):
+    """Stacked vertical dims right of side elevation."""
+    pw = panel_w if panel_w > 0 else x + 80
+    inner = _elev_dim_offset_right(x, pw, 30.0)
+    outer = _elev_dim_offset_right(x, pw, 46.0)
+    total = seat_h + (back_h or 0)
+    _dim_2d_v(parts, x, y_top, y_floor, _in(total), offset_x=outer)
+    if back_h and back_h > 0:
+        _dim_2d_v(parts, x, y_top, y_seat, f'{_in(back_h)} BH', offset_x=inner)
+    _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=inner)
 
 
 def _dim_iso_width(parts, ox, oy, scale, x1, x2, y, z, label, below=True, offset=None):
@@ -725,6 +776,18 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
     if not draw_dims or panel_w < 20:
         return
     dim_band_h = 30.0
+    if split_panel:
+        bottom_y = panel_h - 12
+        _gutter_width(
+            parts, ox, ox + d, oy,
+            Rect(ox, bottom_y - dim_band_h, max(d, 20), dim_band_h),
+            _in(depth),
+        )
+        _elev_height_dims_right(
+            parts, ox + d, top_y, oy - sh, oy,
+            seat_h, back_h if has_back else 0, panel_w=panel_w,
+        )
+        return
     _gutter_width(
         parts, ox, ox + d, oy,
         Rect(ox, min(oy + 4, panel_h - dim_band_h), max(d, 20), dim_band_h),
@@ -801,7 +864,7 @@ def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
     cw = width / max(1, cushion_count)
     dim_band_h = 30.0
     if split_panel:
-        bottom_y = panel_h - 14
+        bottom_y = panel_h - 12
         bottom_band = Rect(ox, bottom_y - dim_band_h, w, dim_band_h)
         _gutter_width(parts, ox, ox + w, oy, bottom_band, _in(width))
         if cushion_count > 1:
@@ -810,17 +873,10 @@ def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
                 x1 = ox + w * i / cushion_count
                 x2 = ox + w * (i + 1) / cushion_count
                 _gutter_width(parts, x1, x2, oy - sh, seg_band, _in(cw))
-        left_band = Rect(4, max(top_y - 4, 8), 32, max(oy - top_y + 12, 28))
-        _gutter_height(
-            parts, top_y, oy, ox, left_band,
-            _in(seat_h + (back_h if has_back else 0)), side="left",
+        _elev_height_dims_left(
+            parts, ox, top_y, oy - sh, oy,
+            seat_h, back_h if has_back else 0, panel_w=panel_w,
         )
-        if has_back and bh > 2:
-            sh_y = oy - sh / 2 + 4
-            bh_y = top_y + bh / 2 + 4
-            sh_y, bh_y = _separate_baseline(sh_y, bh_y, gap=18)
-            _gutter_height(parts, oy, oy - sh, ox, left_band, _in(seat_h) + " SH", side="left", label_y=sh_y)
-            _gutter_height(parts, oy - sh, top_y, ox, left_band, _in(back_h) + " BH", side="left", label_y=bh_y)
     else:
         bottom_band = Rect(ox, min(oy + 2, panel_h - dim_band_h - 4), w, dim_band_h)
         _gutter_width(parts, ox, ox + w, oy, bottom_band, _in(width))
@@ -1057,8 +1113,8 @@ def _separate_baseline(y_a, y_b, gap=16):
 
 # Right and bottom lanes inside the iso panel. Geometry scales into
 # the remaining box so callouts cannot sit on the linework.
-_ISO_LANE_R = 88
-_ISO_LANE_B = 36
+_ISO_LANE_R = 52
+_ISO_LANE_B = 40
 
 
 def _iso_fit(dims_3d, svg_w, svg_h):
@@ -1107,24 +1163,49 @@ def _iso_callouts(parts, svg_w, svg_h, width_label, width_pts, stack):
                            anchor="end", weight="600", fill=DIM_COLOR))
 
 
-def _iso_callouts_compact(parts, ox, oy, scale, width_in, depth_in, seat_h_in, back_h_in, has_back):
-    """Iso dims offset outside the bench outline."""
-    _dim_iso_width(
-        parts, ox, oy, scale, 0, width_in, 0, 0, _in(width_in), below=True, offset=28,
-    )
-    _dim_iso_height(
-        parts, ox, oy, scale, 0, 0, 0, seat_h_in, f'{_in(seat_h_in)} SH',
-        right=False, offset=-42,
-    )
+def _iso_right_lane_labels(parts, svg_w: float, svg_h: float, stack: list[tuple[str, tuple[float, float]]]):
+    """Height-style callouts in the reserved right lane (leaders, no stroke through text)."""
+    if not stack:
+        return
+    n = len(stack)
+    top = 18.0
+    bot = svg_h - _ISO_LANE_B - 10.0
+    if n == 1:
+        ys = [(top + bot) / 2]
+    else:
+        step = (bot - top) / (n - 1)
+        ys = [top + i * step for i in range(n)]
+    text_x = svg_w - 8.0
+    leader_x = svg_w - _ISO_LANE_R + 14.0
+    for (label, target), ly in zip(stack, ys):
+        parts.append(_line(target[0], target[1], leader_x, ly - 3, SW_EXT, DIM_COLOR, geom=False))
+        parts.append(_text(text_x, ly, label, 9, anchor="end", weight="600", fill=DIM_COLOR))
+
+
+def _iso_callouts_compact(
+    parts, ox, oy, scale, width_in, depth_in, seat_h_in, back_h_in, has_back,
+    svg_w: float, svg_h: float,
+):
+    """Iso dims inside the right/bottom lanes (height labels in the right lane)."""
+    p1 = _iso(0, 0, 0, ox, oy, scale)
+    p2 = _iso(width_in, 0, 0, ox, oy, scale)
+    y_floor = max(p1[1], p2[1])
+    dim_line_y = min(max(y_floor + 14, svg_h - _ISO_LANE_B + 6), svg_h - 20)
+    _dim_h(parts, p1, p2, _in(width_in), dim_line_y - y_floor, "below")
+    pd1 = _iso(width_in, 0, 0, ox, oy, scale)
+    pd2 = _iso(width_in, depth_in, 0, ox, oy, scale)
+    depth_y = min(dim_line_y + 22, svg_h - 12)
+    _dim_h(parts, pd1, pd2, f'{_in(depth_in)} D', depth_y - pd1[1], "below")
+    height_stack: list[tuple[str, tuple[float, float]]] = [
+        (f'{_in(seat_h_in)} SH', _iso(width_in, depth_in, seat_h_in * 0.5, ox, oy, scale)),
+    ]
     if has_back:
-        _dim_iso_height(
-            parts, ox, oy, scale, 0, depth_in, seat_h_in, seat_h_in + back_h_in,
-            f'{_in(back_h_in)} BH', right=False, offset=-58,
-        )
-    _dim_iso_depth(
-        parts, ox, oy, scale, width_in, 0, depth_in, 0, f'{_in(depth_in)} D',
-        below=True, offset=36,
-    )
+        z_mid = seat_h_in + back_h_in * 0.5
+        height_stack.append((
+            f'{_in(back_h_in)} BH',
+            _iso(width_in, depth_in, z_mid, ox, oy, scale),
+        ))
+    _iso_right_lane_labels(parts, svg_w, svg_h, height_stack)
 
 
 def _build_straight(name, width_in, depth_in, seat_h_in, back_h_in, quote_num="",
@@ -1137,7 +1218,7 @@ def _build_straight(name, width_in, depth_in, seat_h_in, back_h_in, quote_num=""
                     panel_style, channel_count)
 
     _iso_callouts_compact(
-        parts, ox, oy, scale, width_in, depth_in, seat_h_in, back_h_in, has_back,
+        parts, ox, oy, scale, width_in, depth_in, seat_h_in, back_h_in, has_back, svg_w, svg_h,
     )
     return parts, scale, ox, oy
 
@@ -1327,17 +1408,20 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         half_w = (elev_safe.w - gap) / 2
         left_safe = Rect(elev_safe.x + 4, elev_safe.y, half_w - 4, elev_safe.h)
         right_safe = Rect(elev_safe.x + half_w + gap, elev_safe.y, half_w - 4, elev_safe.h)
-        gutter_lr = 34.0
-        gutter_bt = 50.0
+        dim_stack_h = 58.0
+        gutter_lr = 56.0
+        top_pad = 10.0
         max_w_in = max(float(width_in), float(depth_in))
+        geom_h_avail = max(24.0, left_safe.h - dim_stack_h - top_pad - 4.0)
         elev_scale = min(
             (left_safe.w - gutter_lr) / max_w_in,
             (right_safe.w - gutter_lr) / max_w_in,
-            (left_safe.h - gutter_bt) / (elev_h or 1),
-        ) * 0.98
+            geom_h_avail / (elev_h or 1),
+        ) * 0.995
         content_px = elev_h * elev_scale
-        front_floor = (left_safe.h + content_px) / 2
-        fox = (left_safe.w - width_in * elev_scale) / 2
+        front_floor = top_pad + content_px
+        geo_w = width_in * elev_scale
+        fox = gutter_lr + max(0.0, (left_safe.w - gutter_lr - geo_w) / 2)
         front_group = []
         elev_fn(
             front_group, fox, front_floor, elev_scale,
@@ -1352,8 +1436,9 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         )
         parts.extend(front_group)
         parts.append('</g>')
-        side_floor = (right_safe.h + content_px) / 2
-        sox = (right_safe.w - depth_in * elev_scale) / 2
+        side_floor = top_pad + content_px
+        geo_sw = depth_in * elev_scale
+        sox = gutter_lr + max(0.0, (right_safe.w - gutter_lr - geo_sw) / 2)
         side_group = []
         _side_straight(
             side_group, sox, side_floor, elev_scale,

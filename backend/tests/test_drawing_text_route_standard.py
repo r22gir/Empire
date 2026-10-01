@@ -118,9 +118,14 @@ def test_roman_fold_spacing_and_render_date():
 
 
 def test_bench_side_elevation_svg_has_depth_and_back_dims():
-    from app.services.vision.bench_renderer import render_straight, _resolve_cushions
+    from app.services.vision.bench_renderer import (
+        render_straight,
+        _resolve_cushions,
+        _regions_for,
+        _sheet_extras,
+        _fmt_in,
+    )
     from app.services.vision.bench_svg_layout import validate_bench_svg_layout
-    from app.services.drawing.quote_sheet_layout import idea_sheet_regions
 
     width = 84.0
     c_count, actual_cw = _resolve_cushions(width, 24)
@@ -128,7 +133,15 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
     assert c_count == 4
     assert actual_cw == 21.0
 
-    layout = idea_sheet_regions(title_rows=12)
+    bench_kw = {"sheet_kind": "shop"}
+    dims_text = f'{_fmt_in(width)} W × {_fmt_in(18)} D × {_fmt_in(18)} SH × {_fmt_in(16)} BH'
+    extras = _sheet_extras(
+        "Straight Bench", "straight", "tufted", True, 16, bench_kw,
+    )
+    layout = _regions_for(
+        "Straight Bench", "straight", "tufted", True, c_count, actual_cw,
+        dims_text, "", "", "", "", extras,
+    )
     svg = render_straight(
         "Straight Bench",
         84,

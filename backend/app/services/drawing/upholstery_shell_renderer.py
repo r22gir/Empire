@@ -2104,8 +2104,9 @@ def render_upholstery_shell_pdf(
         plan_top = h - 1.38 * inch
         plan_left = 0.55 * inch
         panel_top = 0.22 * inch + 1.12 * inch + 0.18 * inch + 2.48 * inch
+        notes_gap = 12.0  # pt between plan arm geometry and NOTES panel top
         avail_w = w - 3.0 * inch
-        avail_h = max(plan_top - panel_top, 2.0 * inch)
+        avail_h = max(plan_top - panel_top - notes_gap, 2.0 * inch)
         arm_span = max(u.arm_left, u.arm_right, u.seat_depth)
         scale = min(avail_w / max(u.back_outer, 1.0), avail_h / max(arm_span, 1.0))
         _draw_u_plan(c, plan_left, plan_top, scale, u, construction=constr)
