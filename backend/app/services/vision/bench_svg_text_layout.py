@@ -11,6 +11,7 @@ _CHAR_W = 0.55  # width factor × font-size per character
 _PANEL_PAD = 6.0
 _GEOM_PAD = 1.5
 _ELEV_GAP = 22.0
+_ELEV_FRONT_FRAC = 0.40
 
 
 def _parse_translate(transform: str) -> tuple[float, float]:
@@ -180,13 +181,68 @@ def _geom_segments(el, tx: float, ty: float) -> list[tuple[float, float, float, 
     return segs
 
 
+def _line_segments(el, tx: float, ty: float) -> list[tuple[float, float, float, float]]:
+    tag = el.tag.split("}")[-1]
+    if tag != "line":
+        return []
+    x1, y1 = _float_attr(el, "x1"), _float_attr(el, "y1")
+    x2, y2 = _float_attr(el, "x2"), _float_attr(el, "y2")
+    if None in (x1, y1, x2, y2):
+        return []
+    return [(tx + x1, ty + y1, tx + x2, ty + y2)]
+
+
+def _panel_stroke_segments(
+    g, tx: float, ty: float, *, for_label_qa: bool = False,
+) -> list[tuple[float, float, float, float]]:
+    segs: list[tuple[float, float, float, float]] = []
+    for child in g.iter():
+        if child is g:
+            continue
+        tag = child.tag.split("}")[-1]
+        if tag == "line":
+            if for_label_qa and child.get("data-dim-ext") == "1":
+                continue
+            if for_label_qa:
+                is_dim = child.get("data-dim-stroke") == "1"
+                is_geom = child.get("data-geom") == "1"
+                if not is_dim and not is_geom:
+                    continue
+            segs.extend(_line_segments(child, tx, ty))
+            continue
+        segs.extend(_geom_segments(child, tx, ty))
+    return segs
+
+
+def _is_dim_label(text: str) -> bool:
+    t = text.upper()
+    return (
+        '"' in text
+        or " SH" in t
+        or " BH" in t
+        or " DK" in t
+        or " CUSH" in t
+        or " SEAT" in t
+        or " OH" in t
+        or " FL" in t
+    )
+
+
+def _panel_text_clip_frame(panel: str, base: Rect) -> Rect:
+    if panel == "side-elev":
+        return Rect(base.x, base.y, base.w + 38, base.h + 52)
+    if panel == "front-elev":
+        return Rect(base.x, base.y, base.w + 4, base.h + 46)
+    return base
+
+
 def _bench_panel_frames(layout: dict) -> dict[str, Rect]:
     elev_safe = layout.get("elev_safe")
     if elev_safe is None:
         elev = layout["elev"]
         elev_safe = elev.inset(36, 28, 36, 36)
     gap = max(18.0, elev_safe.w * 0.04)
-    front_w = elev_safe.w * 0.34
+    front_w = elev_safe.w * _ELEV_FRONT_FRAC
     side_w = elev_safe.w - gap - front_w
     return {
         "iso": layout["iso_draw"],
@@ -241,13 +297,48 @@ def _validate_panel_geometry_text(svg: str, layout: dict) -> None:
                     )
 
 
+def _validate_bench_elev_panel_text(
+    panel: str,
+    panel_g,
+    layout: dict,
+) -> None:
+    frames = _bench_panel_frames(layout)
+    if panel not in frames:
+        raise AssertionError(f"unknown panel {panel}")
+    clip_frame = _panel_text_clip_frame(panel, frames[panel])
+    tx, ty = _parse_translate(panel_g.get("transform", ""))
+    text_boxes: list[tuple[float, float, float, float, str]] = []
+    for child in panel_g.iter():
+        if child is panel_g:
+            continue
+        if child.tag.split("}")[-1] == "text":
+            for box in _text_boxes_local(child):
+                text_boxes.append(_shift_box(box, tx, ty))
+    segments = _panel_stroke_segments(panel_g, tx, ty, for_label_qa=True)
+    labeled = [b for b in text_boxes if _is_dim_label(b[4])]
+    for i, a in enumerate(labeled):
+        for b in labeled[i + 1 :]:
+            if _intersects(a, b, pad=1.5):
+                raise AssertionError(f"{panel} text overlap {a[4]!r} vs {b[4]!r}")
+    for box in text_boxes:
+        if _box_outside_frame(box, clip_frame, _PANEL_PAD):
+            raise AssertionError(
+                f"{panel} text {box[4]!r} clipped by panel bbox (pad {_PANEL_PAD})"
+            )
+        if not _is_dim_label(box[4]):
+            continue
+        bx0, by0, bx1, by1 = box[0], box[1], box[2], box[3]
+        for seg in segments:
+            x1, y1, x2, y2 = seg
+            if _seg_intersects_box(x1, y1, x2, y2, bx0, by0, bx1, by1, _GEOM_PAD):
+                raise AssertionError(
+                    f"{panel} label {box[4]!r} intersects line or geometry"
+                )
+
+
 def validate_bench_side_elev_text_layout(svg: str, layout: dict | None = None) -> None:
     """Side elevation only: dim labels must not overlap each other or bench geometry."""
     layout = layout or idea_sheet_regions(title_rows=12)
-    frames = _bench_panel_frames(layout)
-    base = frames["side-elev"]
-    # Depth dims sit below the floor line; height dims sit to the right of geometry.
-    frame = Rect(base.x, base.y, base.w + 40, base.h + 54)
     root = ET.fromstring(svg)
     panel_g = None
     for g in root.findall(".//svg:g", _SVG_NS):
@@ -256,53 +347,23 @@ def validate_bench_side_elev_text_layout(svg: str, layout: dict | None = None) -
             break
     if panel_g is None:
         raise AssertionError("no side-elev panel in SVG")
+    _validate_bench_elev_panel_text("side-elev", panel_g, layout)
 
-    tx, ty = _parse_translate(panel_g.get("transform", ""))
-    text_boxes: list[tuple[float, float, float, float, str]] = []
-    segments: list[tuple[float, float, float, float]] = []
-    for child in panel_g.iter():
-        if child is panel_g:
-            continue
-        tag = child.tag.split("}")[-1]
-        if tag == "text":
-            for box in _text_boxes_local(child):
-                text_boxes.append(_shift_box(box, tx, ty))
-        else:
-            segments.extend(_geom_segments(child, tx, ty))
 
-    def _drawing_label(text: str) -> bool:
-        t = text.upper()
-        return (
-            '"' in text
-            or " SH" in t
-            or " BH" in t
-            or " DK" in t
-            or " CUSH" in t
-            or " SEAT" in t
-            or " OH" in t
-        )
-
-    labeled = [b for b in text_boxes if _drawing_label(b[4])]
-    for i, a in enumerate(labeled):
-        for b in labeled[i + 1 :]:
-            if _intersects(a, b, pad=1.5):
-                raise AssertionError(f"text overlap {a[4]!r} vs {b[4]!r}")
-
-    for box in text_boxes:
-        if _box_outside_frame(box, frame, _PANEL_PAD):
-            raise AssertionError(
-                f"side-elev text {box[4]!r} outside panel bbox (pad {_PANEL_PAD})"
-            )
-        label = box[4]
-        if not _drawing_label(label):
-            continue
-        for seg in segments:
-            x1, y1, x2, y2 = seg
-            bx0, by0, bx1, by1 = box[0], box[1], box[2], box[3]
-            if _seg_intersects_box(x1, y1, x2, y2, bx0, by0, bx1, by1, _GEOM_PAD):
-                raise AssertionError(
-                    f"side-elev dim text {box[4]!r} intersects geometry stroke"
-                )
+def validate_bench_front_side_view_labels_clear(
+    svg: str, layout: dict | None = None,
+) -> None:
+    """Front + side shop elevations: labels clear of lines, geometry, and panel edges."""
+    layout = layout or idea_sheet_regions(title_rows=12)
+    root = ET.fromstring(svg)
+    found: set[str] = set()
+    for g in root.findall(".//svg:g", _SVG_NS):
+        panel = g.get("data-panel")
+        if panel in ("front-elev", "side-elev"):
+            _validate_bench_elev_panel_text(panel, g, layout)
+            found.add(panel)
+    if "side-elev" not in found:
+        raise AssertionError("no side-elev panel in SVG")
 
 
 def validate_bench_svg_text_layout(svg: str, layout: dict | None = None) -> None:

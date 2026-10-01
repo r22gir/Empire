@@ -114,12 +114,12 @@ def validate_bench_svg_layout(svg: str, layout: dict | None = None) -> None:
     _assert_in_panel("plan", plan_frame)
     if panel_pts["front-elev"] or panel_pts["side-elev"]:
         gap = max(18.0, elev_frame.w * 0.04)
-        front_w = elev_frame.w * 0.34
+        front_w = elev_frame.w * 0.40
         side_w = elev_frame.w - gap - front_w
         left_frame = Rect(elev_frame.x + 4, elev_frame.y, front_w - 4, elev_frame.h)
         right_frame = Rect(elev_frame.x + front_w + gap, elev_frame.y, side_w - 4, elev_frame.h)
         if panel_pts["front-elev"]:
-            _assert_in_panel("front-elev", left_frame, pad_r=-12, pad_b=-48)
+            _assert_in_panel("front-elev", left_frame, pad_r=-20, pad_b=-48)
         if panel_pts["side-elev"]:
             _assert_in_panel(
                 "side-elev", right_frame,

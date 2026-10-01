@@ -163,9 +163,11 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
     assert "84" in svg and ("84&quot;" in svg or '84"' in svg)
     assert "34" in svg
     validate_bench_svg_layout(svg, layout)
-    from app.services.vision.bench_svg_text_layout import validate_bench_side_elev_text_layout
+    from app.services.vision.bench_svg_text_layout import (
+        validate_bench_front_side_view_labels_clear,
+    )
     from app.services.vision.bench_iso_layout import validate_bench_iso_faces_closed
-    validate_bench_side_elev_text_layout(svg, layout)
+    validate_bench_front_side_view_labels_clear(svg, layout)
     validate_bench_iso_faces_closed(svg, has_back=True)
     from app.services.vision.bench_svg_dim_layout import (
         validate_bench_extension_lines_max,

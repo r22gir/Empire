@@ -70,6 +70,7 @@ LIGHT_GRAY = "#CCCCCC"
 # Legacy names — use fabrication `back_thickness` (default 2") in new drawings.
 BACK_T = 2          # plan back thickness when not overridden (inches)
 SIDE_BACK_THK = 2   # side elevation back thickness default (inches)
+FRONT_ELEV_PANEL_FRAC = 0.40  # front vs side width in split elevation panel
 
 # Layout — sheet size is shared. Quadrant constants remain so older
 # callers that read them still import; composition uses idea_sheet_regions.
@@ -648,7 +649,25 @@ def _dim_h_local(parts, x1, x2, y_anchor, gap_below: float, label: str):
         f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1" '
         f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
     )
-    parts.append(_text((x1 + x2) / 2, y_dim + 12, label, 9, weight="600", fill=DIM_COLOR))
+    parts.append(_text((x1 + x2) / 2, y_dim + 12, label, 9, anchor="middle",
+                       weight="600", fill=DIM_COLOR))
+
+
+def _dim_h_local_above(parts, x1, x2, y_anchor, gap_above: float, label: str):
+    """Horizontal dim above an anchor edge (e.g. back top — clear of tufting)."""
+    gap = 2
+    ext = 4
+    above = min(max(gap_above, 14.0), 40.0)
+    y_dim = y_anchor - above
+    parts.append(_line(x1, y_anchor - gap, x1, y_dim - ext, SW_EXT, DIM_COLOR, dim_ext=True))
+    parts.append(_line(x2, y_anchor - gap, x2, y_dim - ext, SW_EXT, DIM_COLOR, dim_ext=True))
+    parts.append(
+        f'<line x1="{x1:.1f}" y1="{y_dim:.1f}" x2="{x2:.1f}" y2="{y_dim:.1f}" '
+        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1" '
+        f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
+    )
+    parts.append(_text((x1 + x2) / 2, y_dim - 8, label, 9, anchor="middle",
+                       weight="600", fill=DIM_COLOR))
 
 
 def _dim_v(parts, p1, p2, label, offset_x, text_side="right", outward_text: bool = True,
@@ -682,14 +701,14 @@ def _dim_v(parts, p1, p2, label, offset_x, text_side="right", outward_text: bool
     frac = 0.5 if label_frac is None else float(label_frac)
     my = p1[1] + frac * (p2[1] - p1[1])
     if label_center:
-        if label_h_offset < 0:
-            parts.append(_text(mx + label_h_offset, my + text_dy, label, 9, anchor="end",
-                               weight="600", fill=DIM_COLOR))
-        elif label_h_offset > 0:
-            parts.append(_text(mx + label_h_offset, my + text_dy, label, 9, anchor="start",
+        hoff = label_h_offset
+        if hoff == 0:
+            hoff = 11 if offset_x >= 0 else -11
+        if hoff < 0:
+            parts.append(_text(mx + hoff, my + text_dy, label, 9, anchor="end",
                                weight="600", fill=DIM_COLOR))
         else:
-            parts.append(_text(mx, my + text_dy, label, 9, anchor="middle",
+            parts.append(_text(mx + hoff, my + text_dy, label, 9, anchor="start",
                                weight="600", fill=DIM_COLOR))
         return
     if offset_x >= 0:
@@ -754,7 +773,8 @@ def _dim_oblique_rear(
         f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
     )
     mx, my = (ax + bx) / 2, (ay + by) / 2
-    parts.append(_text(mx + nx * 14, my + ny * 14 + 4, label, 9,
+    label_off = 20.0
+    parts.append(_text(mx + nx * label_off, my + ny * label_off + 4, label, 9,
                          anchor="start", weight="600", fill=DIM_COLOR))
 
 
@@ -812,23 +832,24 @@ def _elev_height_dims_right(
         seat_attr = ' data-side-seat-dim="1"'
         _dim_2d_v(
             parts, x, y_seat, y_deck, f'{_in(cush)} CUSH',
-            offset_x=off_cush, text_dy=0, label_center=True,
-            label_frac=0.5, label_h_offset=12, dim_attrs=seat_attr,
+            offset_x=off_cush, text_dy=-3, label_center=True,
+            label_frac=0.2, label_h_offset=22, dim_attrs=seat_attr,
         )
         _dim_2d_v(
             parts, x, y_deck, y_floor, f'{_in(deck)} DK',
             offset_x=off_dk, text_dy=0, label_center=True,
-            label_frac=0.28, dim_attrs=seat_attr,
+            label_frac=0.28, label_h_offset=12, dim_attrs=seat_attr,
         )
         _dim_2d_v(
             parts, x, y_seat, y_floor, f'{_in(seat_h)} SH',
             offset_x=off_sh, text_dy=0, label_center=True,
-            label_frac=0.72, dim_attrs=seat_attr,
+            label_frac=0.72, label_h_offset=12, dim_attrs=seat_attr,
         )
         if back_h and back_h > 0 and not skip_back_height:
             _dim_2d_v(
                 parts, x, y_top, y_seat, f'{_in(back_h)} BH',
-                offset_x=28, text_dy=0, label_center=True, label_frac=0.5,
+                offset_x=28, text_dy=0, label_center=True,
+                label_frac=0.5, label_h_offset=12,
             )
     else:
         if back_h and back_h > 0 and not skip_back_height:
@@ -1338,10 +1359,10 @@ def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
             for i in range(b_sec):
                 x1 = ox + w * i / b_sec
                 x2 = ox + w * (i + 1) / b_sec
-                _dim_h_local(parts, x1, x2, top_y, 12, _in(bsw))
+                _dim_h_local_above(parts, x1, x2, top_y, 16, _in(bsw))
         _dim_h_local(parts, ox, ox + w, oy, 18, _in(width))
-        _elev_height_dims_left(
-            parts, ox, top_y, oy - sh, oy,
+        _elev_height_dims_right(
+            parts, ox + w, top_y, oy - sh, oy,
             seat_h, back_h if has_back else 0, panel_w=panel_w,
             seat_cushion_thickness_in=cush_in,
             deck_height_in=max(0.0, float(seat_h) - cush_in),
@@ -1914,12 +1935,13 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         )
         _view_frame(parts, elev_frame, "FRONT + SIDE ELEVATION")
         gap = max(18.0, elev_safe.w * 0.04)
-        front_w = elev_safe.w * 0.34
+        front_w = elev_safe.w * FRONT_ELEV_PANEL_FRAC
         side_w = elev_safe.w - gap - front_w
         left_safe = Rect(elev_safe.x + 4, elev_safe.y, front_w - 4, elev_safe.h)
         right_safe = Rect(elev_safe.x + front_w + gap, elev_safe.y, side_w - 4, elev_safe.h)
         dim_stack_h = 44.0
-        dim_lr = 56.0
+        dim_lr = 84.0
+        dim_rhs_labels = 84.0
         dim_gutter = 40.0
         target_fill_front = 0.72
         target_fill_side = 0.90
@@ -1937,7 +1959,7 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         block_top = max(6.0, (left_safe.h - block_h_front) / 2)
         front_floor = block_top + content_px_front
         geo_w = width_in * elev_scale_front
-        fox = max(dim_lr, (left_safe.w - geo_w) / 2)
+        fox = max(6.0, (left_safe.w - geo_w - dim_rhs_labels) / 2)
         front_group = []
         _ek = dict(elev_kwargs or {})
         elev_fn(

@@ -421,9 +421,13 @@ def validate_bench_side_view_labels_clear(svg: str, layout: dict | None = None) 
     """Side-elev dimension labels must not overlap each other or bench geometry."""
     from app.services.drawing.quote_sheet_layout import idea_sheet_regions
     from app.services.drawing.quote_sheet_layout import idea_sheet_regions
-    from app.services.vision.bench_svg_text_layout import validate_bench_side_elev_text_layout
+    from app.services.vision.bench_svg_text_layout import (
+        validate_bench_front_side_view_labels_clear,
+    )
 
-    validate_bench_side_elev_text_layout(svg, layout or idea_sheet_regions(title_rows=14))
+    validate_bench_front_side_view_labels_clear(
+        svg, layout or idea_sheet_regions(title_rows=14),
+    )
     validate_bench_side_seat_dim_parallel_stack(svg)
 
 
