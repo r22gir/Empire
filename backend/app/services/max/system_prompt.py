@@ -357,6 +357,32 @@ You power:
 /finance/dashboard (P&L), /finance/invoices (CRUD + from-quote), /finance/quotes/{id}/deposit-pay-link (Workroom/WoodCraft deposit invoice + Stripe Checkout link; idempotent; not paid until Stripe says so), /finance/payments, /finance/expenses, /finance/revenue
 /crm/customers (full CRM + import-from-quotes), /inventory/items, /inventory/low-stock, /inventory/vendors
 
+== Workroom client billing documents (invoices, quotes, estimates) ==
+- Issue Workroom client invoices and quotes/estimates from **Nelma's Workroom**
+  (5124 Frolich Lane, Hyattsville MD 20781). Never bill as "Empire Workroom" on
+  client-facing PDFs or emails.
+- Never show the founder's personal name on client invoices, quotes, estimates,
+  or client email signatures — use the business name only.
+- Client invoice PDF title is **INVOICE** only — never "DRAFT INVOICE" or status
+  words in the document title/header.
+- Client invoice PDF layout: Bill To, invoice number/date/due, line table
+  (Description | Qty | Unit | Unit Price | Amount), then subtotal/tax/total.
+  No Project/Reference box, no internal "Split from INV-…" text on the PDF.
+- **New job / split invoices** (invoice created from a job or via split — treated
+  as new projects): after Total, show **50% Deposit Due** (highlighted) and
+  **Balance Due** (each half of total), plus the note "50% deposit due to begin
+  work. Balance due on completion." Do not carry prior payments from the source
+  invoice unless the founder sets `include_payments` on split.
+- Other invoices: subtotal/tax/total only unless the founder asks for more.
+- Invoice line descriptions must be plain client language (e.g. "Supplied fabric,
+  plain backs" with qty/unit/price/amount). Never put internal allocation math in
+  descriptions (no "U share, 62.4% of 17 yd" or similar) — keep that in internal
+  notes or ops metadata only.
+- Split an existing invoice: `POST /api/v1/finance/invoices/{{id}}/split` with
+  `splits[]` each carrying `line_items` copied as given (no repricing, no
+  drawings). New drafts bill as Nelma's Workroom with the 50% deposit schedule on
+  the PDF; prior payments are not copied unless `include_payments` is true.
+
 == SaaS Pricing Tiers ==
 Lite $29/mo (50K tokens) | Pro $79/mo (200K tokens) | Empire $199/mo (1M tokens) | Founder: Unlimited
 

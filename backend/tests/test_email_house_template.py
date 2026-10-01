@@ -18,7 +18,7 @@ def test_willard_example_renders_readable_house_email():
     assert rendered.plain_text.startswith("Hi Maggie O'Neill,\n\nWillard InterContinental lobby")
     assert "Attached:\n- Estimate 838 Addendum" in rendered.plain_text
     assert "Original items: $4,580.99\nAdd-ons: $4,707.21\nGrand total: $9,288.20" in rendered.plain_text
-    assert "Thanks,\n\nEmpire Workroom\nRafael Giraldo\nworkroom@empirebox.store\n+1 703-213-6484" in rendered.plain_text
+    assert "Thanks,\n\nNelma's Workroom\nworkroom@empirebox.store\n+1 703-213-6484" in rendered.plain_text
 
     assert "<p>Hi Maggie O'Neill,</p>" in rendered.html
     assert "<p>Willard InterContinental lobby – Maggie O'Neill</p>" in rendered.html

@@ -1674,7 +1674,10 @@ def list_invoices(
 @router.post("/invoices")
 def create_invoice(inv: InvoiceCreateSchema):
     """Create a new invoice."""
+    from app.routers.finance import _ensure_finance_extensions
+
     with get_db() as conn:
+        _ensure_finance_extensions(conn)
         business_unit = _normalise_business(inv.business_unit)
         if business_unit == "all":
             business_unit = "workroom"
@@ -1691,6 +1694,12 @@ def create_invoice(inv: InvoiceCreateSchema):
         total = round(taxable + tax_amount, 2)
         due = inv.due_date or (date.today() + timedelta(days=30)).isoformat()
 
+        deposit_required = inv.deposit_required
+        client_job_schedule = 0
+        if inv.job_id:
+            deposit_required = round(total * 0.5, 2)
+            client_job_schedule = 1
+
         conn.execute(
             """INSERT INTO invoices
                (id, invoice_number, customer_id, quote_id, job_id, status,
@@ -1698,13 +1707,13 @@ def create_invoice(inv: InvoiceCreateSchema):
                 line_items, notes, terms, due_date,
                 client_name, client_email, client_phone, client_address, billing_address,
                 business_unit, discount_amount, discount_type, deposit_required,
-                invoice_date, payment_status)
+                invoice_date, payment_status, client_job_deposit_schedule)
                VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'draft',
                        ?, ?, ?, ?, 0, ?,
                        ?, ?, ?, ?,
                        ?, ?, ?, ?, ?,
                        ?, ?, ?, ?,
-                       ?, 'unpaid')""",
+                       ?, 'unpaid', ?)""",
             (
                 inv_number, customer_id, inv.quote_id, inv.job_id,
                 subtotal, inv.tax_rate, tax_amount, total, total,
@@ -1713,8 +1722,9 @@ def create_invoice(inv: InvoiceCreateSchema):
                 inv.client_name, inv.client_email, inv.client_phone,
                 inv.client_address, inv.billing_address,
                 business_unit, inv.discount_amount,
-                inv.discount_type, inv.deposit_required,
+                inv.discount_type, deposit_required,
                 inv.invoice_date or date.today().isoformat(),
+                client_job_schedule,
             ),
         )
 
@@ -2113,11 +2123,8 @@ def invoice_from_job(job_id: str):
 
 @router.get("/invoices/{invoice_id}/pdf")
 def invoice_pdf(invoice_id: str):
-    """Generate a professional branded PDF for an invoice using WeasyPrint."""
-    try:
-        import weasyprint
-    except ImportError:
-        raise HTTPException(status_code=503, detail="WeasyPrint not installed")
+    """Generate a client-facing invoice PDF (shared renderer with /finance)."""
+    from app.services.invoice_pdf_service import generate_client_invoice_pdf_bytes
 
     with get_db() as conn:
         row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
@@ -2128,264 +2135,23 @@ def invoice_pdf(invoice_id: str):
 
         customer = None
         if inv.get("customer_id"):
-            cust_row = conn.execute("SELECT * FROM customers WHERE id = ?", (inv["customer_id"],)).fetchone()
+            cust_row = conn.execute(
+                "SELECT * FROM customers WHERE id = ?", (inv["customer_id"],)
+            ).fetchone()
             if cust_row:
                 customer = dict_row(cust_row)
 
-        payments = _canonical_invoice_payments(conn, invoice_id)
-
-        # Linked job info
-        job = None
-        if inv.get("job_id"):
-            job_row = conn.execute("SELECT * FROM jobs WHERE id = ?", (inv["job_id"],)).fetchone()
-            if job_row:
-                job = dict_row(job_row)
-
-    # ── Business branding ──────────────────────────────────────────
     biz_unit = inv.get("business_unit", "workroom") or "workroom"
     is_woodcraft = biz_unit in ("woodcraft", "wood craft", "craftforge")
-
     if not is_woodcraft and customer and customer.get("business") == "woodcraft":
         is_woodcraft = True
 
-    biz_cfg = {}
-    cfg_file = CONFIG_DIR / ("woodcraft_business.json" if is_woodcraft else "business.json")
     try:
-        biz_cfg = json.loads(cfg_file.read_text())
-    except Exception:
-        pass
-
-    biz_name = biz_cfg.get("business_name", "WoodCraft" if is_woodcraft else "Empire Workroom")
-    biz_tagline = biz_cfg.get("business_tagline", "Custom Woodwork & CNC" if is_woodcraft else "Custom Window Treatments & Upholstery")
-    biz_phone = biz_cfg.get("business_phone", "")
-    biz_email = biz_cfg.get("business_email", "")
-    biz_address = biz_cfg.get("business_address", "")
-    biz_website = biz_cfg.get("business_website", "")
-
-    accent = "#d4a636" if is_woodcraft else "#b8960c"
-    header_bg = "#3d2e1a" if is_woodcraft else "#2c2416"
-
-    # ── Client info ────────────────────────────────────────────────
-    client_name = inv.get("client_name") or (customer["name"] if customer else "Customer")
-    client_email = inv.get("client_email") or (customer.get("email", "") if customer else "")
-    client_phone = inv.get("client_phone") or (customer.get("phone", "") if customer else "")
-    client_addr = inv.get("client_address") or inv.get("billing_address") or (customer.get("address", "") if customer else "")
-
-    client_block = f"<strong>{client_name}</strong>"
-    if client_email:
-        client_block += f"<br>{client_email}"
-    if client_phone:
-        client_block += f"<br>{client_phone}"
-    if client_addr:
-        client_block += f"<br>{client_addr}"
-
-    # ── Line items ─────────────────────────────────────────────────
-    items_html = ""
-    for item in inv.get("line_items") or []:
-        desc = item.get("description", "")
-        # Include fabric/hardware details if present
-        details = []
-        if item.get("fabric"):
-            details.append(f"Fabric: {item['fabric']}")
-        if item.get("hardware"):
-            details.append(f"Hardware: {item['hardware']}")
-        if details:
-            desc += f"<br><span style='font-size:9pt;color:#888'>{' | '.join(details)}</span>"
-
-        qty = item.get("quantity", 1)
-        unit_price = item.get("unit_price", item.get("rate", 0))
-        total = item.get("total", item.get("amount", 0))
-        items_html += f"""<tr>
-            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd">{desc}</td>
-            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:center">{qty}</td>
-            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:right">${unit_price:,.2f}</td>
-            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:right">${total:,.2f}</td>
-        </tr>"""
-
-    if not items_html:
-        items_html = f"""<tr>
-            <td style="padding:10px 12px" colspan="3">Services as quoted</td>
-            <td style="padding:10px 12px;text-align:right">${inv.get('subtotal', 0):,.2f}</td>
-        </tr>"""
-
-    # ── Discount row ───────────────────────────────────────────────
-    discount_html = ""
-    disc_amt = inv.get("discount_amount", 0) or 0
-    if disc_amt > 0:
-        disc_type = inv.get("discount_type", "flat")
-        if disc_type == "percent":
-            disc_display = f"Discount ({disc_amt}%)"
-            disc_value = round(inv.get("subtotal", 0) * disc_amt / 100, 2)
-        else:
-            disc_display = "Discount"
-            disc_value = disc_amt
-        discount_html = f"""<tr>
-            <td style="padding:6px 12px;color:#dc2626">{disc_display}</td>
-            <td style="padding:6px 12px;text-align:right;color:#dc2626">-${disc_value:,.2f}</td>
-        </tr>"""
-
-    # ── Deposit info ───────────────────────────────────────────────
-    deposit_html = ""
-    dep_req = inv.get("deposit_required", 0) or 0
-    dep_recv = inv.get("deposit_received", 0) or 0
-    if dep_req > 0:
-        deposit_html = f"""
-        <tr><td style="padding:6px 12px">Deposit Required</td>
-            <td style="padding:6px 12px;text-align:right">${dep_req:,.2f}</td></tr>
-        <tr><td style="padding:6px 12px">Deposit Received</td>
-            <td style="padding:6px 12px;text-align:right">${dep_recv:,.2f}</td></tr>"""
-
-    # ── Payments table ─────────────────────────────────────────────
-    payments_html = ""
-    if payments:
-        payments_html = """<div style="margin-top:20px">
-        <h3 style="font-size:11pt;color:""" + accent + """;margin-bottom:8px">Payments Received</h3>
-        <table style="width:100%;border-collapse:collapse">
-        <tr style="background:#f5f3ef">
-            <th style="padding:6px 10px;text-align:left;font-size:9pt">Date</th>
-            <th style="padding:6px 10px;text-align:left;font-size:9pt">Method</th>
-            <th style="padding:6px 10px;text-align:left;font-size:9pt">Reference</th>
-            <th style="padding:6px 10px;text-align:right;font-size:9pt">Amount</th>
-        </tr>"""
-        for p in payments:
-            payments_html += f"""<tr>
-                <td style="padding:6px 10px;border-bottom:1px solid #eee">{p.get('created_at', '')[:10]}</td>
-                <td style="padding:6px 10px;border-bottom:1px solid #eee">{p.get('method', '')}</td>
-                <td style="padding:6px 10px;border-bottom:1px solid #eee">{p.get('reference', '') or ''}</td>
-                <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${p.get('amount', 0):,.2f}</td>
-            </tr>"""
-        payments_html += "</table></div>"
-
-    # ── Job info block ─────────────────────────────────────────────
-    job_html = ""
-    if job:
-        job_html = f"""<div class="info-box">
-            <h3>Job Details</h3>
-            <div>{job.get('job_number', '')}</div>
-            <div>{job.get('title', '')}</div>
-            <div>{job.get('description', '') or ''}</div>
-        </div>"""
-
-    status_color = {
-        "draft": "#888", "sent": "#2563eb", "partial": "#d97706",
-        "paid": "#16a34a", "overdue": "#dc2626", "cancelled": "#6b7280",
-    }.get(inv.get("status", "draft"), "#888")
-
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<style>
-  @page {{ size: letter; margin: 0.75in; }}
-  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a1a2e; font-size: 11pt; line-height: 1.5; }}
-  .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 3px solid {accent}; }}
-  .logo {{ font-size: 24pt; font-weight: 800; color: #1a1a2e; }}
-  .logo span {{ color: {accent}; }}
-  .tagline {{ font-size: 9pt; color: #888; margin-top: 2px; }}
-  .invoice-title {{ text-align: right; }}
-  .invoice-title h1 {{ margin: 0; font-size: 28pt; color: {accent}; letter-spacing: 2px; }}
-  .invoice-number {{ font-size: 11pt; color: #666; margin-top: 4px; }}
-  .status {{ display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 9pt; font-weight: 600; text-transform: uppercase; color: white; background: {status_color}; }}
-  .info-grid {{ display: flex; justify-content: space-between; margin: 24px 0; gap: 20px; }}
-  .info-box {{ flex: 1; }}
-  .info-box h3 {{ margin: 0 0 6px; font-size: 9pt; text-transform: uppercase; color: {accent}; letter-spacing: 1px; }}
-  table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-  thead {{ background: #f5f3ef; }}
-  th {{ padding: 10px 12px; text-align: left; font-size: 9pt; text-transform: uppercase; color: #666; letter-spacing: 0.5px; border-bottom: 2px solid {accent}; }}
-  .totals {{ margin-left: auto; width: 280px; }}
-  .totals tr td {{ padding: 6px 12px; }}
-  .totals .total-row {{ font-size: 14pt; font-weight: 700; color: #1a1a2e; border-top: 2px solid {accent}; }}
-  .totals .balance-row {{ font-size: 13pt; font-weight: 700; color: #dc2626; }}
-  .footer {{ margin-top: 40px; padding-top: 20px; border-top: 1px solid #e8e4dd; font-size: 9pt; color: #888; text-align: center; }}
-  .payment-methods {{ margin-top: 20px; padding: 15px; background: #f9f8f5; border-radius: 8px; font-size: 10pt; }}
-  .payment-methods h3 {{ margin: 0 0 8px; font-size: 10pt; color: {accent}; }}
-</style>
-</head><body>
-
-<div class="header">
-  <div>
-    <div class="logo">{'<span>Wood</span>Craft' if is_woodcraft else '<span>Empire</span> Workroom'}</div>
-    <div class="tagline">{biz_tagline}</div>
-    <div style="font-size:9pt;color:#666;margin-top:4px">
-      {biz_phone}{'<br>' if biz_phone else ''}{biz_email}{'<br>' if biz_email else ''}{biz_address}
-    </div>
-  </div>
-  <div class="invoice-title">
-    <h1>INVOICE</h1>
-    <div class="invoice-number">{inv.get('invoice_number', '')}</div>
-    <div style="margin-top:6px"><span class="status">{inv.get('status', 'draft')}</span></div>
-  </div>
-</div>
-
-<div class="info-grid">
-  <div class="info-box">
-    <h3>Bill To</h3>
-    {client_block}
-  </div>
-  {job_html}
-  <div class="info-box" style="text-align:right">
-    <h3>Invoice Details</h3>
-    <div><strong>Date:</strong> {inv.get('invoice_date', inv.get('created_at', '')[:10])}</div>
-    <div><strong>Due:</strong> {inv.get('due_date', '')}</div>
-    <div><strong>Terms:</strong> {inv.get('terms', 'Net 30')}</div>
-  </div>
-</div>
-
-<table>
-  <thead>
-    <tr>
-      <th style="width:50%">Description</th>
-      <th style="text-align:center">Qty</th>
-      <th style="text-align:right">Unit Price</th>
-      <th style="text-align:right">Amount</th>
-    </tr>
-  </thead>
-  <tbody>
-    {items_html}
-  </tbody>
-</table>
-
-<table class="totals">
-  <tr>
-    <td>Subtotal</td>
-    <td style="text-align:right">${inv.get('subtotal', 0):,.2f}</td>
-  </tr>
-  {discount_html}
-  <tr>
-    <td>Tax ({(inv.get('tax_rate', 0) or 0) * 100:.1f}%)</td>
-    <td style="text-align:right">${inv.get('tax_amount', 0):,.2f}</td>
-  </tr>
-  <tr class="total-row">
-    <td style="padding-top:10px"><strong>Total</strong></td>
-    <td style="text-align:right;padding-top:10px"><strong>${inv.get('total', 0):,.2f}</strong></td>
-  </tr>
-  {deposit_html}
-  <tr>
-    <td>Amount Paid</td>
-    <td style="text-align:right">${inv.get('amount_paid', 0):,.2f}</td>
-  </tr>
-  <tr class="balance-row">
-    <td><strong>Balance Due</strong></td>
-    <td style="text-align:right"><strong>${inv.get('balance_due', 0):,.2f}</strong></td>
-  </tr>
-</table>
-
-{payments_html}
-
-<div class="payment-methods">
-  <h3>Payment Methods Accepted</h3>
-  <div><strong>Zelle:</strong> {biz_email or 'Contact for details'}</div>
-  <div><strong>Check:</strong> Made payable to {biz_name}</div>
-  <div><strong>Credit/Debit Card:</strong> Contact us for card payment link</div>
-</div>
-
-<div class="footer">
-  <div>{biz_name} &mdash; {biz_tagline}</div>
-  <div>{biz_website}</div>
-  <div style="margin-top:6px">Thank you for your business!</div>
-</div>
-
-</body></html>"""
-
-    pdf = weasyprint.HTML(string=html).write_pdf()
+        pdf = generate_client_invoice_pdf_bytes(
+            inv, customer=customer, is_woodcraft=is_woodcraft,
+        )
+    except ImportError:
+        raise HTTPException(status_code=503, detail="WeasyPrint not installed")
 
     return Response(
         content=pdf,

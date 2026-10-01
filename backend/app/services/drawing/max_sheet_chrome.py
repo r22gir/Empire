@@ -36,19 +36,22 @@ MUTE = HexColor("#7b7466")
 CREAM_TEXT = HexColor("#f4efe2")
 MUTE_BAND = HexColor("#a49b88")
 
+from app.config.workroom_billing import get_workroom_billing
+
+_billing = get_workroom_billing()
+
 # ── Default brand language (Max drawing / client sheets) ────────────
-LETTERHEAD = "NELMA'S WORKROOM"
-POWERED_BY = "POWERED BY EMPIRE WORKROOM"
+LETTERHEAD = _billing.letterhead_upper
+POWERED_BY = _billing.chrome_subheader_upper
 LOCALE = "HYATTSVILLE MD"
 STATUS_DISCUSSION = "FOR DISCUSSION - NOT FOR CONSTRUCTION"
-PDF_AUTHOR = "Nelma's Workroom - Powered by Empire Workroom"
-PDF_CREATOR = "Nelma's Workroom"
+PDF_AUTHOR = _billing.pdf_author
+PDF_CREATOR = _billing.name
 
 # Estimate path: same landscape chrome bands + brand words (founder lock).
-# Body stays estimate-shaped — do not invent a field-measurement layout.
-ESTIMATE_COMPANY = "NELMA'S WORKROOM"
-ESTIMATE_TAGLINE = "POWERED BY EMPIRE WORKROOM · CUSTOM UPHOLSTERY & FABRICATION"
-ESTIMATE_ADDRESS = "5124 Frolich Ln, Hyattsville, MD 20781"
+ESTIMATE_COMPANY = _billing.letterhead_upper
+ESTIMATE_TAGLINE = f"{_billing.chrome_subheader_upper} · HYATTSVILLE MD"
+ESTIMATE_ADDRESS = _billing.address
 
 GOLDEN_PDF_REL = "reference/max-golden/McLean_Whittington_REV_A.pdf"
 GOLDEN_MD5 = "f882144aefc03745533fdaae95ea86b4"

@@ -10,25 +10,29 @@ logger = logging.getLogger("client_notifier")
 
 API = "http://localhost:8000/api/v1"
 
+from app.config.workroom_billing import get_workroom_billing
+
+_BILLING_NAME = get_workroom_billing().name
+
 STAGE_MESSAGES = {
     "quote_sent": {
         "subject": "Your proposal is ready! 🎨",
-        "body": "Hi {client_name},\n\nYour custom drapery proposal is ready for review! Check out your options at the link below.\n\nQuestions? Reply to this email — we're happy to help!\n\n— Empire Workroom",
+        "body": "Hi {client_name},\n\nYour custom drapery proposal is ready for review! Check out your options at the link below.\n\nQuestions? Reply to this email — we're happy to help!\n\n— {billing}",
         "include_link": True,
     },
     "approved": {
         "subject": "Great news! We're moving forward 🎉",
-        "body": "Hi {client_name},\n\nYour order is confirmed! We're excited to get started on your {product}.\n\nWe'll keep you updated as things progress. Sit back and relax — we've got this!\n\n— Empire Workroom",
+        "body": "Hi {client_name},\n\nYour order is confirmed! We're excited to get started on your {product}.\n\nWe'll keep you updated as things progress. Sit back and relax — we've got this!\n\n— {billing}",
         "include_link": True,
     },
     "in_production": {
         "subject": "Your order is being crafted! 🔨",
-        "body": "Hi {client_name},\n\nGreat progress — your {product} is now being crafted!\n\nCurrent status: {stage}\nEstimated completion: {deadline}\n\nWe'll send photos as we go!\n\n— Empire Workroom",
+        "body": "Hi {client_name},\n\nGreat progress — your {product} is now being crafted!\n\nCurrent status: {stage}\nEstimated completion: {deadline}\n\nWe'll send photos as we go!\n\n— {billing}",
         "include_link": True,
     },
     "complete": {
         "subject": "Your order is ready for pickup! 🎊",
-        "body": "Hi {client_name},\n\nYour {product} is ready! 🥳\n\nPickup/shipping details: [link]\n\nThank you for choosing Empire Workroom!\n\n— Empire Workroom",
+        "body": "Hi {client_name},\n\nYour {product} is ready! 🥳\n\nPickup/shipping details: [link]\n\nThank you for choosing {billing}!\n\n— {billing}",
         "include_link": True,
     },
 }
@@ -67,6 +71,7 @@ class ClientNotifier:
             product=product,
             stage=new_stage.replace("_", " ").title(),
             deadline=job.get("estimated_completion", "TBD"),
+            billing=_BILLING_NAME,
         )
 
         # Attach progress photo if available
@@ -93,6 +98,7 @@ class ClientNotifier:
                 product=job.get("product", "your order"),
                 stage=stage.replace("_", " ").title(),
                 deadline=job.get("estimated_completion", "TBD"),
+                billing=_BILLING_NAME,
             ),
         }
 

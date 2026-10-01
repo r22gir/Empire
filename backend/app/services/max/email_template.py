@@ -11,13 +11,17 @@ from html import escape
 from html.parser import HTMLParser
 import re
 
+from app.config.workroom_billing import get_workroom_billing
 
-SIGNATURE_LINES = (
-    "Empire Workroom",
-    "Rafael Giraldo",
-    "workroom@empirebox.store",
-    "+1 703-213-6484",
-)
+_billing = get_workroom_billing()
+
+
+def _signature_lines() -> tuple[str, ...]:
+    return (
+        _billing.name,
+        _billing.email,
+        _billing.signature_phone_plain,
+    )
 
 _AMOUNT_RE = re.compile(
     r"^(?P<label>[^:]+):\s*(?P<amount>[$€£]\s?[-\d,]+(?:\.\d{2})?)\s*$"
@@ -77,7 +81,7 @@ def _prepare_body(body_text: str, recipient_name: str | None = None) -> str:
 
 def _plain_with_signature(body_text: str, recipient_name: str | None = None) -> str:
     body = _prepare_body(body_text, recipient_name)
-    signature = "\n".join(SIGNATURE_LINES)
+    signature = "\n".join(_signature_lines())
     return f"{body}\n\n{signature}"
 
 
@@ -149,10 +153,10 @@ def render_house_email(body_text: str, recipient_name: str | None = None) -> Ren
     plain = _plain_with_signature(prepared_body)
     body_html = _body_to_html(prepared_body)
     signature_html = (
-        '<div class="signature"><strong>Empire Workroom</strong>'
-        "<br>Rafael Giraldo"
-        "<br><a href=\"mailto:workroom@empirebox.store\">workroom@empirebox.store</a>"
-        "<br>+1 703-213-6484</div>"
+        f'<div class="signature"><strong>{escape(_billing.name, quote=False)}</strong>'
+        f'<br><a href="mailto:{escape(_billing.email, quote=False)}">'
+        f"{escape(_billing.email, quote=False)}</a>"
+        f"<br>{escape(_billing.signature_phone_plain, quote=False)}</div>"
     )
     html = f"""<!doctype html>
 <html><head><meta charset="utf-8"><style>

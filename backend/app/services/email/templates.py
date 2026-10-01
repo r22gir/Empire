@@ -6,6 +6,9 @@ and Empire brand colors: off-white #f5f3ef, gold #b8960c, text #333.
 """
 
 from app.config.business_config import biz
+from app.config.workroom_billing import get_workroom_billing
+
+_client_billing = get_workroom_billing()
 
 
 def _fmt_money(value) -> str:
@@ -25,7 +28,7 @@ def _base_wrapper(content: str, preheader: str = "") -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{biz.business_name}</title>
+<title>{_client_billing.name}</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f5f3ef;font-family:Georgia,'Times New Roman',serif;">
 <!-- Preheader (hidden preview text) -->
@@ -37,7 +40,7 @@ def _base_wrapper(content: str, preheader: str = "") -> str:
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
 <!-- Gold header bar -->
 <tr><td style="background-color:#b8960c;padding:24px 32px;text-align:center;">
-<h1 style="margin:0;font-size:24px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">{biz.business_name}</h1>
+<h1 style="margin:0;font-size:24px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">{_client_billing.name}</h1>
 <p style="margin:4px 0 0;font-size:13px;color:rgba(255,255,255,0.85);font-style:italic;">Custom Drapery &amp; Upholstery</p>
 </td></tr>
 <!-- Content area -->
@@ -97,9 +100,9 @@ def _footer(extra_line: str = "") -> str:
     return f"""\
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="padding:24px 32px;background-color:#f9f7f3;border-top:1px solid #e8e4de;text-align:center;">
-<p style="margin:0;font-size:14px;font-weight:600;color:#b8960c;">{biz.business_name}</p>
-<p style="margin:6px 0 0;font-size:12px;color:#999;">Washington, DC Metro Area</p>
-<p style="margin:4px 0 0;font-size:12px;color:#999;">Powered by {biz.business_name}</p>
+<p style="margin:0;font-size:14px;font-weight:600;color:#b8960c;">{_client_billing.name}</p>
+<p style="margin:6px 0 0;font-size:12px;color:#999;">{_client_billing.address}</p>
+<p style="margin:4px 0 0;font-size:12px;color:#999;">{_client_billing.email} &bull; {_client_billing.phone}</p>
 {extra}
 </td></tr>
 </table>"""

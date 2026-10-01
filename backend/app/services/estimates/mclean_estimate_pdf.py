@@ -30,6 +30,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
+from app.config.workroom_billing import get_workroom_billing
 from app.services.drawing.max_sheet_chrome import (
     FTR_H,
     GOLD,
@@ -802,9 +803,10 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=(PW, PH))
     qn = quote.get("quote_number") or quote.get("id") or "estimate"
-    c.setTitle(f"Estimate {qn} — Nelma's Workroom")
-    c.setAuthor("Nelma's Workroom - Powered by Empire Workroom")
-    c.setCreator("Nelma's Workroom")
+    _bill = get_workroom_billing()
+    c.setTitle(f"Estimate {qn} — {_bill.name}")
+    c.setAuthor(_bill.pdf_author)
+    c.setCreator(_bill.name)
     c.setSubject("Client addendum estimate grouped by area")
     serif_b, sans, sans_b, mono = _ensure_body_fonts()
     areas = list(grouping.get("areas") or [])
@@ -979,9 +981,10 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=(PW, PH))
     qn = quote.get("quote_number") or quote.get("id") or "estimate"
-    c.setTitle(f"Estimate {qn} — Nelma's Workroom")
-    c.setAuthor("Nelma's Workroom - Powered by Empire Workroom")
-    c.setCreator("Nelma's Workroom")
+    _bill = get_workroom_billing()
+    c.setTitle(f"Estimate {qn} — {_bill.name}")
+    c.setAuthor(_bill.pdf_author)
+    c.setCreator(_bill.name)
     c.setSubject("Client estimate — McLean gold landscape chrome")
 
     serif_b, sans, sans_b, mono = _ensure_body_fonts()

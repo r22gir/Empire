@@ -1513,7 +1513,8 @@ async def send_quote(quote_id: str, body: Optional[SendQuoteRequest] = None):
                 "quote_url": f"https://studio.empirebox.store/quote/{quote_id}",
             })
 
-            subject = f"Your Quote #{quote['quote_number']} from Empire Workroom"
+            from app.config.workroom_billing import get_workroom_billing
+            subject = f"Your Quote #{quote['quote_number']} from {get_workroom_billing().name}"
 
             # Send with PDF attachment if available
             if pdf_bytes and SENDGRID_API_KEY:
@@ -3286,11 +3287,13 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
         pass
 
     logo_html = ""
-    biz_name = quote.get("business_name") or _biz_cfg.get("business_name", "Empire Workroom")
-    biz_phone = _biz_cfg.get("business_phone", "")
-    biz_email = _biz_cfg.get("business_email", "")
-    biz_address = _biz_cfg.get("business_address", "")
-    biz_website = _biz_cfg.get("business_website", "")
+    from app.config.workroom_billing import get_workroom_billing
+    _wr_bill = get_workroom_billing()
+    biz_name = quote.get("business_name") or _wr_bill.name
+    biz_phone = _wr_bill.phone
+    biz_email = _wr_bill.email
+    biz_address = _wr_bill.address
+    biz_website = _wr_bill.website
     if quote.get("business_logo_url"):
         logo_html = f'<img src="{quote["business_logo_url"]}" style="max-height:60px;margin-bottom:8px" /><br>'
 

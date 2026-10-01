@@ -1,0 +1,343 @@
+"""Client-facing Workroom / WoodCraft invoice PDF (HTML → WeasyPrint)."""
+from __future__ import annotations
+
+import json
+import re
+from html import escape
+from pathlib import Path
+from typing import Optional
+
+from app.config.workroom_billing import get_workroom_billing
+
+JOB_DEPOSIT_SCHEDULE_NOTE = (
+    "50% deposit due to begin work. Balance due on completion."
+)
+
+_INTERNAL_NOTE_LINE = re.compile(
+    r"^\s*(split\s+from|project\s*/\s*reference|reference\s*:)\b",
+    re.IGNORECASE,
+)
+_SPLIT_FROM_INV = re.compile(r"split\s+from\s+INV[-\s]?", re.IGNORECASE)
+_ALLOCATION_LINE = re.compile(
+    r"^(?:[UL]\s+)?share\s*,?\s*\d+(?:\.\d+)?%\s+of\s+",
+    re.IGNORECASE,
+)
+_ALLOCATION_TAIL = re.compile(
+    r"(?:\s*[-–—,;]\s*)(?:[UL]\s+)?share\s*,?\s*\d+(?:\.\d+)?%\s+of\s+[\d.]+\s*(?:yd|yds|yards?|sf|sq\.?\s*ft\.?)?.*",
+    re.IGNORECASE,
+)
+_ALLOCATION_PCT = re.compile(
+    r"\s*\d+(?:\.\d+)?%\s+of\s+[\d.]+\s*(?:yd|yds|yards?|sf|sq\.?\s*ft\.?)\b.*",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_allocation_only(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return True
+    if _ALLOCATION_LINE.match(t):
+        return True
+    return bool(
+        re.search(r"share\s*,?\s*\d+(?:\.\d+)?%\s+of\s+", t, re.IGNORECASE)
+        and re.search(r"%\s+of\s+[\d.]", t, re.IGNORECASE)
+    )
+
+
+def client_visible_line_description(item: dict) -> str:
+    """Client invoice line text — no internal yardage/share allocation math."""
+    for key in ("client_description", "display_description", "public_description"):
+        val = item.get(key)
+        if val and str(val).strip():
+            return str(val).strip().split("\n")[0].strip()
+
+    raw = (item.get("description") or "").strip()
+    if not raw:
+        return ""
+
+    lines = [ln.strip() for ln in raw.replace("\r\n", "\n").split("\n") if ln.strip()]
+    for line in lines:
+        if _looks_like_allocation_only(line):
+            continue
+        cleaned = _ALLOCATION_TAIL.sub("", line)
+        cleaned = _ALLOCATION_PCT.sub("", cleaned).strip(" ,;–—-")
+        if cleaned and not _looks_like_allocation_only(cleaned):
+            return cleaned
+
+    first = lines[0]
+    first = _ALLOCATION_TAIL.sub("", first)
+    first = _ALLOCATION_PCT.sub("", first).strip(" ,;–—-")
+    return first or lines[0]
+
+
+def uses_job_deposit_schedule(invoice: dict) -> bool:
+    """New-job / split-child invoices show 50% deposit + balance due on the PDF."""
+    flag = invoice.get("client_job_deposit_schedule")
+    if flag in (1, True, "1", "true"):
+        return True
+    return False
+
+
+def job_deposit_amounts(total: float) -> tuple[float, float]:
+    """Return (deposit_due, balance_due) as equal halves of invoice total."""
+    half = round(float(total or 0) * 0.5, 2)
+    remainder = round(float(total or 0) - half, 2)
+    return half, remainder
+
+
+def client_visible_notes(notes: Optional[str]) -> Optional[str]:
+    """Strip internal-only reference lines from notes shown on client PDFs."""
+    if not notes or not str(notes).strip():
+        return None
+    kept: list[str] = []
+    for line in str(notes).replace("\r\n", "\n").split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _INTERNAL_NOTE_LINE.match(stripped):
+            continue
+        if _SPLIT_FROM_INV.search(stripped):
+            continue
+        kept.append(stripped)
+    text = "\n".join(kept).strip()
+    return text or None
+
+
+def _line_amount(item: dict) -> float:
+    for key in ("total", "amount"):
+        if item.get(key) is not None:
+            try:
+                return float(item[key])
+            except (TypeError, ValueError):
+                pass
+    try:
+        qty = float(item.get("quantity", 1) or 1)
+        rate = float(item.get("unit_price", item.get("rate", 0)) or 0)
+        return round(qty * rate, 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _load_biz_cfg(is_woodcraft: bool) -> dict:
+    config_dir = Path(__file__).resolve().parent.parent / "config"
+    path = config_dir / ("woodcraft_business.json" if is_woodcraft else "business.json")
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def resolve_invoice_branding(invoice: dict, is_woodcraft: bool) -> dict:
+    if is_woodcraft:
+        cfg = _load_biz_cfg(True)
+        return {
+            "name": cfg.get("business_name", "WoodCraft by Empire"),
+            "tagline": cfg.get("business_tagline", "Custom Woodwork & CNC"),
+            "phone": cfg.get("business_phone", ""),
+            "email": cfg.get("business_email", ""),
+            "address": cfg.get("business_address", ""),
+            "website": cfg.get("business_website", ""),
+            "accent": "#d4a636",
+            "header_bg": "#3d2e1a",
+        }
+    billing = get_workroom_billing()
+    return {
+        "name": billing.name,
+        "tagline": billing.tagline,
+        "phone": billing.phone,
+        "email": billing.email,
+        "address": billing.address,
+        "website": billing.website,
+        "accent": "#b8960c",
+        "header_bg": "#2c2416",
+    }
+
+
+def render_client_invoice_html(
+    invoice: dict,
+    *,
+    customer: Optional[dict] = None,
+    is_woodcraft: bool = False,
+) -> str:
+    """Minimal client invoice: Bill To, meta, line table, totals, optional note."""
+    brand = resolve_invoice_branding(invoice, is_woodcraft)
+    accent = brand["accent"]
+
+    client_name = (
+        invoice.get("client_name")
+        or (customer or {}).get("name")
+        or "Customer"
+    )
+    client_email = invoice.get("client_email") or (customer or {}).get("email", "")
+    client_phone = invoice.get("client_phone") or (customer or {}).get("phone", "")
+    client_addr = (
+        invoice.get("client_address")
+        or invoice.get("billing_address")
+        or (customer or {}).get("address", "")
+    )
+
+    client_block = f"<strong>{client_name}</strong>"
+    if client_email:
+        client_block += f"<br>{client_email}"
+    if client_phone:
+        client_block += f"<br>{client_phone}"
+    if client_addr:
+        client_block += f"<br>{client_addr}"
+
+    items = list(invoice.get("line_items") or [])
+    rows_html = ""
+    for idx, item in enumerate(items):
+        bg = "#f9f7f3" if idx % 2 == 0 else "#ffffff"
+        desc = escape(client_visible_line_description(item), quote=False)
+        unit = (item.get("unit") or "ea").strip() or "ea"
+        qty = item.get("quantity", 1)
+        unit_price = item.get("unit_price", item.get("rate", 0))
+        amount = _line_amount(item)
+        rows_html += f"""<tr style="background:{bg}">
+            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd">{desc}</td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:center">{qty}</td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:center">{unit}</td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:right">${float(unit_price or 0):,.2f}</td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:right">${amount:,.2f}</td>
+        </tr>"""
+
+    if not rows_html:
+        sub = float(invoice.get("subtotal", 0) or 0)
+        rows_html = f"""<tr style="background:#f9f7f3">
+            <td style="padding:10px 12px" colspan="4">Services as quoted</td>
+            <td style="padding:10px 12px;text-align:right">${sub:,.2f}</td>
+        </tr>"""
+
+    inv_num = invoice.get("invoice_number", "")
+    inv_date = (invoice.get("invoice_date") or invoice.get("created_at") or "")[:10]
+    due = invoice.get("due_date", "N/A")
+    terms = invoice.get("terms", "Net 30")
+    tax_rate = float(invoice.get("tax_rate", 0) or 0)
+    subtotal = float(invoice.get("subtotal", 0) or 0)
+    tax_amount = float(invoice.get("tax_amount", 0) or 0)
+    total = float(invoice.get("total", 0) or 0)
+
+    schedule = uses_job_deposit_schedule(invoice) and not is_woodcraft
+    deposit_due, balance_due = job_deposit_amounts(total) if schedule else (0.0, 0.0)
+
+    note_parts: list[str] = []
+    if schedule:
+        note_parts.append(JOB_DEPOSIT_SCHEDULE_NOTE)
+    client_note = client_visible_notes(invoice.get("notes"))
+    if client_note:
+        note_parts.append(client_note)
+    note_html = ""
+    if note_parts:
+        body = "<br>".join(escape(p, quote=False) for p in note_parts)
+        note_html = (
+            f'<div style="margin:24px 0;padding:12px;background:#f5f3ef;'
+            f'border-radius:8px;font-size:10pt">{body}</div>'
+        )
+
+    totals_deposit_rows = ""
+    if schedule:
+        totals_deposit_rows = f"""
+  <tr class="deposit-due-row"><td><strong>50% Deposit Due</strong></td>
+      <td style="text-align:right;font-weight:700;color:{accent}">${deposit_due:,.2f}</td></tr>
+  <tr><td>Balance Due</td><td style="text-align:right">${balance_due:,.2f}</td></tr>"""
+
+    contact_bits = [b for b in (brand["phone"], brand["email"], brand["address"]) if b]
+    contact_html = "<br>".join(contact_bits)
+
+    logo_html = brand["name"]
+    if is_woodcraft:
+        logo_html = '<span style="color:#d4a636">Wood</span>Craft'
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  @page {{ size: letter; margin: 0.75in; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a1a2e; font-size: 11pt; line-height: 1.5; }}
+  .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; padding-bottom: 18px; border-bottom: 3px solid {accent}; }}
+  .logo {{ font-size: 22pt; font-weight: 800; color: #1a1a2e; }}
+  .tagline {{ font-size: 9pt; color: #666; margin-top: 4px; }}
+  .invoice-title {{ text-align: right; }}
+  .invoice-title h1 {{ margin: 0; font-size: 26pt; color: {accent}; letter-spacing: 2px; }}
+  .invoice-number {{ font-size: 11pt; color: #666; margin-top: 4px; }}
+  .info-grid {{ display: flex; justify-content: space-between; margin: 20px 0; gap: 24px; }}
+  .info-box h3 {{ margin: 0 0 6px; font-size: 9pt; text-transform: uppercase; color: {accent}; letter-spacing: 1px; }}
+  table {{ width: 100%; border-collapse: collapse; margin: 16px 0; }}
+  thead {{ background: #f5f3ef; }}
+  th {{ padding: 10px 12px; text-align: left; font-size: 9pt; text-transform: uppercase; color: #666; letter-spacing: 0.5px; border-bottom: 2px solid {accent}; }}
+  .totals {{ margin-left: auto; width: 300px; }}
+  .totals tr td {{ padding: 6px 12px; }}
+  .totals .total-row {{ font-size: 14pt; font-weight: 700; border-top: 2px solid {accent}; }}
+  .totals .deposit-due-row td {{ padding-top: 10px; }}
+  .footer {{ margin-top: 36px; padding-top: 14px; border-top: 1px solid #e8e4dd; font-size: 9pt; color: #888; text-align: center; }}
+</style></head><body>
+<title>INVOICE</title>
+
+<div class="header">
+  <div>
+    <div class="logo">{logo_html}</div>
+    <div class="tagline">{brand["tagline"]}</div>
+    <div style="font-size:9pt;color:#666;margin-top:6px;line-height:1.6">{contact_html}</div>
+  </div>
+  <div class="invoice-title">
+    <h1>INVOICE</h1>
+    <div class="invoice-number">{inv_num}</div>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="info-box">
+    <h3>Bill To</h3>
+    <p style="margin:0">{client_block}</p>
+  </div>
+  <div class="info-box" style="text-align:right">
+    <h3>Invoice Details</h3>
+    <p style="margin:0">
+      <strong>Date:</strong> {inv_date}<br>
+      <strong>Due:</strong> {due}<br>
+      <strong>Terms:</strong> {terms}
+    </p>
+  </div>
+</div>
+
+<table>
+  <thead><tr>
+    <th>Description</th>
+    <th style="text-align:center">Qty</th>
+    <th style="text-align:center">Unit</th>
+    <th style="text-align:right">Unit Price</th>
+    <th style="text-align:right">Amount</th>
+  </tr></thead>
+  <tbody>{rows_html}</tbody>
+</table>
+
+<table class="totals">
+  <tr><td>Subtotal</td><td style="text-align:right">${subtotal:,.2f}</td></tr>
+  <tr><td>Tax ({tax_rate * 100:.1f}%)</td><td style="text-align:right">${tax_amount:,.2f}</td></tr>
+  <tr class="total-row"><td>Total</td><td style="text-align:right">${total:,.2f}</td></tr>
+  {totals_deposit_rows}
+</table>
+
+{note_html}
+
+<div class="footer">
+  {brand["name"]} &mdash; Thank you for your business<br>
+  {brand["phone"]} &bull; {brand["email"]} &bull; {brand["website"]}
+</div>
+
+</body></html>"""
+
+
+def generate_client_invoice_pdf_bytes(
+    invoice: dict,
+    *,
+    customer: Optional[dict] = None,
+    is_woodcraft: bool = False,
+) -> bytes:
+    import weasyprint
+
+    html = render_client_invoice_html(invoice, customer=customer, is_woodcraft=is_woodcraft)
+    return weasyprint.HTML(string=html).write_pdf()
+
+
+def subtotal_from_line_items(line_items: list[dict]) -> float:
+    return round(sum(_line_amount(item) for item in (line_items or [])), 2)

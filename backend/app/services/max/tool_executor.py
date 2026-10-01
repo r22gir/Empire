@@ -2042,6 +2042,49 @@ def _create_invoice_from_quote(params: dict, desk: Optional[str] = None) -> Tool
                          error=f"{type(e).__name__}: {e}")
 
 
+@tool("split_invoice_from_invoice")
+def _split_invoice_from_invoice(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Split an existing invoice into new draft invoices (line items copied as given).
+
+    POST /api/v1/finance/invoices/{invoice_id}/split — no repricing, no drawings.
+    Deposits/payments are omitted unless include_deposits / include_payments is true.
+    Client PDFs bill as Nelma's Workroom; use plain line descriptions (no allocation math).
+    """
+    invoice_id = params.get("invoice_id", "")
+    splits = params.get("splits")
+    if not invoice_id:
+        return ToolResult(tool="split_invoice_from_invoice", success=False, error="invoice_id required")
+    if not splits or not isinstance(splits, list):
+        return ToolResult(tool="split_invoice_from_invoice", success=False, error="splits[] required")
+    payload = {
+        "splits": splits,
+        "include_deposits": bool(params.get("include_deposits")),
+        "include_payments": bool(params.get("include_payments")),
+    }
+    try:
+        import httpx
+        with httpx.Client(timeout=60) as c:
+            r = c.post(
+                f"http://localhost:8000/api/v1/finance/invoices/{invoice_id}/split",
+                json=payload,
+            )
+        if r.status_code == 404:
+            return ToolResult(tool="split_invoice_from_invoice", success=False, error="Invoice not found")
+        if r.status_code == 400:
+            return ToolResult(
+                tool="split_invoice_from_invoice", success=False,
+                error=r.json().get("detail", r.text[:200]),
+            )
+        if r.status_code != 200:
+            return ToolResult(
+                tool="split_invoice_from_invoice", success=False,
+                error=f"API error: {r.status_code} {r.text[:200]}",
+            )
+        return ToolResult(tool="split_invoice_from_invoice", success=True, result=r.json())
+    except Exception as e:
+        return ToolResult(tool="split_invoice_from_invoice", success=False, error=f"{type(e).__name__}: {e}")
+
+
 @tool("approve_quote")
 def _approve_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Sprint 1c: founder-only transition founder_review → sent.
@@ -5313,6 +5356,8 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
 ### Payment Phase 1 Tools (Sprint 1d)
 - **create_invoice_from_quote** — Explicit quote→invoice action. Calls `POST /api/v1/quotes-v2/{id}/to-invoice`. The endpoint is GATED to quote.status ∈ {sent, accepted, in_production, completed}. A draft or founder_review quote returns HTTP 409 (use /submit-for-review + /approve first). Returns honest payload: invoice snapshot from canonical invoices table, store="quotes_v2", engine="lifecycle_v1". Use when the founder says "create an invoice from this quote", "bill the Willard", "invoice the bench + panel".
   `{"tool": "create_invoice_from_quote", "quote_id": "4d9b1d03"}`
+- **split_invoice_from_invoice** — Split an existing invoice into one or more new draft invoices. Copies `line_items` exactly (no repricing, no drawings). Client PDF title is INVOICE only; new splits use Nelma's Workroom with 50% deposit due + balance due and plain line descriptions (no allocation math). Prior payments not copied unless `include_payments` is true.
+  `{"tool": "split_invoice_from_invoice", "invoice_id": "abc123", "splits": [{"line_items": [{"description": "Supplied fabric, plain backs", "quantity": 1, "unit": "ea", "unit_price": 500, "total": 500}]}]}`
 
 ### TOOL DISCIPLINE — READ BEFORE EVERY RESPONSE
 - NEVER fabricate data. All statistics, charts, and numbers must come from real tool results.

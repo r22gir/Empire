@@ -22,9 +22,12 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
+from app.config.workroom_billing import get_workroom_billing
 from app.services.quote_service import get_quote
 from app.services.data_paths import quote_pdf_dir
 from app.services.pricing.dimensions import quote_item_dimension_text
+
+_workroom_billing = get_workroom_billing()
 
 _UNICODE_FONT = "DejaVuSans"
 _UNICODE_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
@@ -48,12 +51,12 @@ BRAND_LIGHT = colors.HexColor("#f5f5f5")
 BRAND_TEXT = colors.HexColor("#333333")
 BRAND_MUTED = colors.HexColor("#888888")
 
-# ── Business info ──────────────────────────────────────────────
-COMPANY_NAME = "Empire Workroom"
-COMPANY_ADDRESS = "Washington, DC"
-COMPANY_PHONE = "(202) 555-0100"
-COMPANY_EMAIL = "info@empirebox.store"
-COMPANY_WEBSITE = "empirebox.store"
+# ── Client billing identity (legacy portrait PDF) ───────────────
+COMPANY_NAME = _workroom_billing.name
+COMPANY_ADDRESS = _workroom_billing.address
+COMPANY_PHONE = _workroom_billing.phone
+COMPANY_EMAIL = _workroom_billing.email
+COMPANY_WEBSITE = _workroom_billing.website
 
 
 def _get_styles():

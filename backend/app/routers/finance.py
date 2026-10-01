@@ -107,6 +107,18 @@ class InvoiceComposeRequest(BaseModel):
     due_date: Optional[str] = None
 
 
+class InvoiceSplitPart(BaseModel):
+    line_items: List[dict]
+    notes: Optional[str] = None
+
+
+class InvoiceSplitRequest(BaseModel):
+    """Split a source invoice into new draft invoices (line items copied as given)."""
+    splits: List[InvoiceSplitPart]
+    include_deposits: bool = False
+    include_payments: bool = False
+
+
 class CollectionReminderRequest(BaseModel):
     business: Optional[str] = None
     action: str = "reminder_logged"
@@ -548,6 +560,7 @@ def _ensure_finance_extensions(conn):
         "stripe_checkout_session_id": "TEXT",
         "stripe_checkout_url": "TEXT",
         "stripe_checkout_attempt": "INTEGER DEFAULT 0",
+        "client_job_deposit_schedule": "INTEGER DEFAULT 0",
     }
     for col, ctype in inv_cols.items():
         parts = ctype.split(" DEFAULT ")
@@ -1713,6 +1726,119 @@ def create_invoice(request: Request, invoice: InvoiceCreate):
 
 
 @limiter.limit("30/minute")
+@router.post("/invoices/{invoice_id}/split")
+def split_invoice_from_existing(
+    request: Request,
+    invoice_id: str,
+    body: InvoiceSplitRequest,
+):
+    """Create one or more draft invoices by copying line items from an existing invoice.
+
+    Totals are derived only from the supplied line rows (no repricing). Deposits and
+    prior payments are not copied unless include_deposits / include_payments is true.
+    """
+    from app.services.invoice_pdf_service import subtotal_from_line_items
+
+    if not body.splits:
+        raise HTTPException(status_code=400, detail="At least one split is required")
+
+    created: list[dict] = []
+    with get_db() as conn:
+        _ensure_finance_extensions(conn)
+        src_row = conn.execute(
+            "SELECT * FROM invoices WHERE id = ?", (invoice_id,)
+        ).fetchone()
+        if not src_row:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+        source = _enrich_invoice(dict_row(src_row))
+        src_number = source.get("invoice_number", invoice_id)
+
+        for part in body.splits:
+            if not part.line_items:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Each split must include at least one line item",
+                )
+            line_items = [dict(li) for li in part.line_items]
+            subtotal = subtotal_from_line_items(line_items)
+            tax_rate = float(source.get("tax_rate", 0) or 0)
+            tax_amount = round(subtotal * tax_rate, 2)
+            total = round(subtotal + tax_amount, 2)
+            inv_number = _next_invoice_number(conn)
+            due = source.get("due_date")
+            if not due:
+                due = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+
+            internal_note = f"Split from {src_number}"
+            notes = part.notes.strip() if part.notes and part.notes.strip() else internal_note
+            if part.notes and internal_note not in notes:
+                notes = f"{notes}\n{internal_note}"
+
+            amount_paid = 0.0
+            if body.include_payments:
+                amount_paid = float(source.get("amount_paid", 0) or 0)
+            balance_due = round(max(total - amount_paid, 0), 2)
+
+            deposit_required = round(total * 0.5, 2)
+            if body.include_deposits:
+                deposit_required = float(source.get("deposit_required", 0) or deposit_required)
+            client_job_deposit_schedule = 1
+
+            business_unit = _normalise_business(source.get("business_unit") or "workroom")
+            if business_unit == "all":
+                business_unit = "workroom"
+
+            conn.execute(
+                """INSERT INTO invoices
+                   (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
+                    tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
+                    client_name, client_email, client_phone, client_address, business_unit,
+                    invoice_date, payment_status, deposit_required, client_job_deposit_schedule)
+                   VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                           ?, ?, ?, ?, ?,
+                           ?, 'unpaid', ?, ?)""",
+                (
+                    inv_number,
+                    source.get("customer_id"),
+                    source.get("quote_id"),
+                    subtotal,
+                    tax_rate,
+                    tax_amount,
+                    total,
+                    amount_paid,
+                    balance_due,
+                    json.dumps(line_items),
+                    notes,
+                    source.get("terms", "Net 30"),
+                    due,
+                    source.get("client_name"),
+                    source.get("client_email"),
+                    source.get("client_phone"),
+                    source.get("client_address"),
+                    business_unit,
+                    date.today().isoformat(),
+                    deposit_required,
+                    client_job_deposit_schedule,
+                ),
+            )
+            row = conn.execute(
+                """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+                   FROM invoices i
+                   LEFT JOIN customers c ON c.id = i.customer_id
+                   WHERE i.invoice_number = ?""",
+                (inv_number,),
+            ).fetchone()
+            created.append(_enrich_invoice(dict_row(row)))
+
+    return {
+        "source_invoice_id": invoice_id,
+        "source_invoice_number": src_number,
+        "invoices": created,
+        "count": len(created),
+    }
+
+
+@limiter.limit("30/minute")
 @router.post("/invoices/compose")
 def compose_invoice(request: Request, payload: InvoiceComposeRequest):
     """Compose a deposit, progress, or final invoice from a quote, job, or WoodCraft design."""
@@ -2168,15 +2294,19 @@ def create_invoice_from_job(request: Request, job_id: str):
         due = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         inv_number = _next_invoice_number(conn)
 
+        deposit_required = round(total * 0.5, 2)
         conn.execute(
             """INSERT INTO invoices
-               (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
-                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?)""",
+               (id, invoice_number, customer_id, quote_id, job_id, status, subtotal, tax_rate,
+                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
+                business_unit, deposit_required, client_job_deposit_schedule, invoice_date, payment_status)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?,
+                       'workroom', ?, 1, ?, 'unpaid')""",
             (
                 inv_number,
                 customer_id,
                 quote_id,
+                job_id,
                 subtotal,
                 tax_rate,
                 tax_amount,
@@ -2185,6 +2315,8 @@ def create_invoice_from_job(request: Request, job_id: str):
                 json.dumps(line_items),
                 f"Generated from job {job['title']}",
                 due,
+                deposit_required,
+                date.today().isoformat(),
             )
         )
 
@@ -2201,12 +2333,8 @@ def create_invoice_from_job(request: Request, job_id: str):
 
 @router.get("/invoices/{invoice_id}/pdf")
 def invoice_pdf(request: Request, invoice_id: str):
-    """Generate a branded PDF for an invoice."""
-    import weasyprint
-    import json as _json
-
-    # Determine which business config to use (resolved after loading invoice below)
-    _config_dir = Path(__file__).resolve().parent.parent / "config"
+    """Generate a client-facing invoice PDF (Nelma's Workroom for workroom unit)."""
+    from app.services.invoice_pdf_service import generate_client_invoice_pdf_bytes
 
     with get_db() as conn:
         row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
@@ -2215,7 +2343,6 @@ def invoice_pdf(request: Request, invoice_id: str):
 
         invoice = _enrich_invoice(dict_row(row))
 
-        # Get customer info
         customer = None
         if invoice.get("customer_id"):
             cust_row = conn.execute(
@@ -2224,159 +2351,28 @@ def invoice_pdf(request: Request, invoice_id: str):
             if cust_row:
                 customer = dict_row(cust_row)
 
-    # Detect WoodCraft/CraftForge invoices for correct branding
     _is_woodcraft = False
     _notes = invoice.get("notes", "") or ""
     if "WoodCraft" in _notes or "CraftForge" in _notes:
         _is_woodcraft = True
     elif invoice.get("quote_id"):
-        _cf_design_path = Path(__file__).resolve().parent.parent.parent / "data" / "craftforge" / "designs" / f"{invoice['quote_id']}.json"
+        _cf_design_path = (
+            Path(__file__).resolve().parent.parent.parent
+            / "data" / "craftforge" / "designs" / f"{invoice['quote_id']}.json"
+        )
         if _cf_design_path.exists():
             _is_woodcraft = True
     if not _is_woodcraft and customer and customer.get("business") == "woodcraft":
         _is_woodcraft = True
-
-    if _is_woodcraft:
-        _biz_cfg_path = _config_dir / "woodcraft_business.json"
-    else:
-        _biz_cfg_path = _config_dir / "business.json"
+    if _normalise_business(invoice.get("business_unit")) == "woodcraft":
+        _is_woodcraft = True
 
     try:
-        _biz_cfg = _json.loads(_biz_cfg_path.read_text())
-    except Exception:
-        _biz_cfg = {}
-    _biz_name = _biz_cfg.get("business_name", "Empire Workroom")
-    _biz_tagline = _biz_cfg.get("business_tagline", "Custom Window Treatments & Upholstery")
-    _biz_phone = _biz_cfg.get("business_phone", "")
-    _biz_email = _biz_cfg.get("business_email", "")
-    _biz_address = _biz_cfg.get("business_address", "")
-    _biz_website = _biz_cfg.get("business_website", "")
-
-    # Set brand colors based on business
-    if _is_woodcraft:
-        _accent_color = "#d4a636"
-        _header_bg = "#3d2e1a"
-    else:
-        _accent_color = "#b8960c"
-        _header_bg = "#2c2416"
-
-    # Build line items table
-    items_html = ""
-    for item in invoice.get("line_items") or []:
-        desc = item.get("description", "")
-        qty = item.get("quantity", 1)
-        unit_price = item.get("unit_price", item.get("rate", 0))
-        total = item.get("total", item.get("amount", 0))
-        items_html += f"""<tr>
-            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd">{desc}</td>
-            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:center">{qty}</td>
-            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:right">${unit_price:,.2f}</td>
-            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:right">${total:,.2f}</td>
-        </tr>"""
-
-    if not items_html:
-        items_html = f"""<tr>
-            <td style="padding:10px 12px" colspan="3">Services as quoted</td>
-            <td style="padding:10px 12px;text-align:right">${invoice.get('subtotal', 0):,.2f}</td>
-        </tr>"""
-
-    customer_name = customer["name"] if customer else "Customer"
-    customer_email = customer.get("email", "") if customer else ""
-    customer_phone = customer.get("phone", "") if customer else ""
-    customer_address = customer.get("address", "") if customer else ""
-
-    customer_block = f"<strong>{customer_name}</strong>"
-    if customer_email:
-        customer_block += f"<br>{customer_email}"
-    if customer_phone:
-        customer_block += f"<br>{customer_phone}"
-    if customer_address:
-        customer_block += f"<br>{customer_address}"
-
-    status_color = {"draft": "#888", "sent": "#2563eb", "partial": "#d97706", "paid": "#16a34a", "overdue": "#dc2626", "cancelled": "#6b7280"}.get(invoice.get("status", "draft"), "#888")
-
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<style>
-  @page {{ size: letter; margin: 0.75in; }}
-  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a1a2e; font-size: 11pt; line-height: 1.5; }}
-  .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 3px solid {_accent_color}; }}
-  .logo {{ font-size: 24pt; font-weight: 800; color: #1a1a2e; }}
-  .logo span {{ color: {_accent_color}; }}
-  .invoice-title {{ text-align: right; }}
-  .invoice-title h1 {{ margin: 0; font-size: 28pt; color: {_accent_color}; letter-spacing: 2px; }}
-  .invoice-number {{ font-size: 11pt; color: #666; margin-top: 4px; }}
-  .status {{ display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 9pt; font-weight: 600; text-transform: uppercase; color: white; background: {status_color}; }}
-  .info-grid {{ display: flex; justify-content: space-between; margin: 24px 0; }}
-  .info-box {{ flex: 1; }}
-  .info-box h3 {{ margin: 0 0 6px; font-size: 9pt; text-transform: uppercase; color: {_accent_color}; letter-spacing: 1px; }}
-  table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-  thead {{ background: #f5f3ef; }}
-  th {{ padding: 10px 12px; text-align: left; font-size: 9pt; text-transform: uppercase; color: #666; letter-spacing: 0.5px; border-bottom: 2px solid {_accent_color}; }}
-  .totals {{ margin-left: auto; width: 280px; }}
-  .totals tr td {{ padding: 6px 12px; }}
-  .totals .total-row {{ font-size: 14pt; font-weight: 700; color: #1a1a2e; border-top: 2px solid {_accent_color}; }}
-  .footer {{ margin-top: 40px; padding-top: 16px; border-top: 1px solid #e8e4dd; font-size: 9pt; color: #888; text-align: center; }}
-</style></head><body>
-
-<div class="header">
-  <div>
-    <div class="logo">{_biz_name.split()[0]} <span>{' '.join(_biz_name.split()[1:])}</span></div>
-    <div style="font-size:9pt;color:#666;margin-top:4px">{_biz_tagline}</div>
-    <div style="font-size:8pt;color:#888;margin-top:6px;line-height:1.6">
-      {_biz_phone}<br>{_biz_email}<br>{_biz_address}
-    </div>
-  </div>
-  <div class="invoice-title">
-    <h1>INVOICE</h1>
-    <div class="invoice-number">{invoice.get('invoice_number', '')}</div>
-    <div style="margin-top:6px"><span class="status">{invoice.get('status', 'draft')}</span></div>
-  </div>
-</div>
-
-<div class="info-grid">
-  <div class="info-box">
-    <h3>Bill To</h3>
-    <p>{customer_block}</p>
-  </div>
-  <div class="info-box" style="text-align:right">
-    <h3>Invoice Details</h3>
-    <p>
-      <strong>Date:</strong> {invoice.get('created_at', '')[:10]}<br>
-      <strong>Due:</strong> {invoice.get('due_date', 'N/A')}<br>
-      <strong>Terms:</strong> {invoice.get('terms', 'Net 30')}
-    </p>
-  </div>
-</div>
-
-<table>
-  <thead><tr>
-    <th>Description</th>
-    <th style="text-align:center">Qty</th>
-    <th style="text-align:right">Unit Price</th>
-    <th style="text-align:right">Amount</th>
-  </tr></thead>
-  <tbody>{items_html}</tbody>
-</table>
-
-<table class="totals">
-  <tr><td>Subtotal</td><td style="text-align:right">${invoice.get('subtotal', 0):,.2f}</td></tr>
-  <tr><td>Tax ({invoice.get('tax_rate', 0)*100:.1f}%)</td><td style="text-align:right">${invoice.get('tax_amount', 0):,.2f}</td></tr>
-  <tr class="total-row"><td>Total</td><td style="text-align:right">${invoice.get('total', 0):,.2f}</td></tr>
-  <tr><td>Paid</td><td style="text-align:right">${invoice.get('amount_paid', 0):,.2f}</td></tr>
-  <tr style="font-weight:700;color:{_accent_color}"><td>Balance Due</td><td style="text-align:right">${invoice.get('balance_due', 0):,.2f}</td></tr>
-</table>
-
-{"<div style='margin:20px 0;padding:12px;background:#f5f3ef;border-radius:8px;font-size:10pt'><strong>Notes:</strong> " + invoice.get('notes', '') + "</div>" if invoice.get('notes') else ""}
-
-<div class="footer">
-  {_biz_name} &mdash; Thank you for your business<br>
-  {_biz_phone} &bull; {_biz_email} &bull; {_biz_website}
-</div>
-
-</body></html>"""
-
-    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+        pdf_bytes = generate_client_invoice_pdf_bytes(
+            invoice, customer=customer, is_woodcraft=_is_woodcraft,
+        )
+    except ImportError:
+        raise HTTPException(status_code=503, detail="WeasyPrint not installed")
 
     # Save PDF
     pdf_dir = Path(__file__).resolve().parent.parent.parent / "data" / "invoices" / "pdf"

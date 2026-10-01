@@ -50,7 +50,7 @@ def test_max_email_service_uses_sendgrid_http_without_sdk(monkeypatch, tmp_path)
     assert "In-Reply-To" not in sent["json"]["personalizations"][0]["headers"]
     assert "References" not in sent["json"]["personalizations"][0]["headers"]
     assert [part["type"] for part in sent["json"]["content"]] == ["text/plain", "text/html"]
-    assert "Empire Workroom" in sent["json"]["content"][0]["value"]
+    assert "Nelma's Workroom" in sent["json"]["content"][0]["value"]
     assert "<div class=\"signature\">" in sent["json"]["content"][1]["value"]
     assert sent["json"]["attachments"][0]["filename"] == Path(attachment).name
 

@@ -10,6 +10,8 @@ import os
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from app.config.workroom_billing import get_workroom_billing
+
 logger = logging.getLogger("empire.email")
 
 # SendGrid configuration
@@ -72,7 +74,7 @@ async def _send_via_sendgrid(to: str, subject: str, html_body: str) -> bool:
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
                 "personalizations": [{"to": [{"email": to}]}],
-                "from": {"email": from_email, "name": "Empire Workroom"},
+                "from": {"email": from_email, "name": get_workroom_billing().name},
                 "subject": subject,
                 "content": [{"type": "text/html", "value": html_body}],
             },

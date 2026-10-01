@@ -6,6 +6,8 @@ import logging
 from datetime import datetime, timedelta
 import httpx
 
+from app.config.workroom_billing import get_workroom_billing
+
 logger = logging.getLogger("payment_monitor")
 
 API = "http://localhost:8000/api/v1"
@@ -41,6 +43,7 @@ class PaymentMonitor:
 
         tone = "friendly" if days_overdue < self.escalation_days else "firm"
 
+        billing = get_workroom_billing().name
         body = f"""Hi {client_name},
 
 Hope you're loving your {product}! 🙏
@@ -53,7 +56,7 @@ If you have any questions or need an extension, just reply and we'll sort it out
 If payment was already sent, please disregard this message!
 
 Warm regards,
-Empire Workroom
+{billing}
 """
 
         subject = f"Gentle reminder — Invoice #{invoice_id} ({days_overdue} days overdue)"

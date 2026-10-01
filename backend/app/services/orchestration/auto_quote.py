@@ -6,6 +6,8 @@ import logging
 from typing import Any
 import httpx
 
+from app.config.workroom_billing import get_workroom_billing
+
 logger = logging.getLogger("auto_quote")
 
 API = "http://localhost:8000/api/v1"
@@ -108,7 +110,7 @@ class AutoQuoteEngine:
                     f"{API}/socialforge/send_email",
                     json={
                         "to": client_email,
-                        "subject": f"Your Custom Drapery Proposal — Empire Workroom",
+                        "subject": f"Your Custom Drapery Proposal — {get_workroom_billing().name}",
                         "body": f"""Hi {client_name},
 
 Your custom drapery proposal is ready! 🪟
@@ -120,7 +122,7 @@ Based on your room, we've prepared 3 options:
 
 Reply to this email or book a free consultation at studio.empirebox.store/intake.
 
-— Empire Workroom""",
+— {get_workroom_billing().name}""",
                         "attachment_url": proposal_pdf,
                     },
                 )
