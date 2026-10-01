@@ -57,7 +57,30 @@ _RINGED_STYLES = {
 }
 
 
-def fold_descriptor(product_type: str, geo_h: float) -> str:
+def roman_slat_layout(
+    height: float,
+    slat_pitch: float,
+) -> tuple[int, float, float | None]:
+    """Honor requested fold pitch; return (count, pitch, bottom_remainder_in)."""
+    h = float(height)
+    pitch = float(slat_pitch)
+    if h <= 0 or pitch <= 0:
+        return 1, h or pitch or 1.0, None
+    n_floor = int(h // pitch)
+    remainder = h - n_floor * pitch
+    if n_floor >= 1 and remainder >= (1 / 32):
+        return n_floor, pitch, remainder
+    n = max(1, round(h / pitch))
+    actual = h / n
+    return n, actual, None
+
+
+def fold_descriptor(
+    product_type: str,
+    geo_h: float,
+    *,
+    slat_height: float | None = None,
+) -> str:
     """R12.3.1 — single source of truth for the fold-count string
     printed in the header band and the title block FOLDS row.
 
@@ -76,14 +99,19 @@ def fold_descriptor(product_type: str, geo_h: float) -> str:
     `_DEFAULT_SLAT_HEIGHTS` table the geometry/layout_math/title
     code uses, so every site on the sheet agrees.
     """
-    slat = _DEFAULT_SLAT_HEIGHTS.get(product_type)
-    if slat is None or slat <= 0 or geo_h <= 0:
+    slat = float(
+        slat_height
+        if slat_height is not None and slat_height > 0
+        else _DEFAULT_SLAT_HEIGHTS.get(product_type, 7.0)
+    )
+    if slat <= 0 or geo_h <= 0:
         return ""
-    n_slats = max(1, round(geo_h / slat))
-    actual_slat = geo_h / n_slats
-    # Reuse _fmt_in for consistent 1/16" fraction formatting (R12.2).
-    # Local import to avoid a circular import at module load.
+    n_slats, actual_slat, bottom = roman_slat_layout(geo_h, slat)
     from app.services.drawing.templates.b2_renderers import _fmt_in
+    if bottom is not None and bottom >= (1 / 32):
+        return (
+            f"{n_slats} @ {_fmt_in(actual_slat)} + {_fmt_in(bottom)} bottom"
+        )
     return f"{n_slats} folds @ {_fmt_in(actual_slat)}"
 
 
@@ -118,10 +146,17 @@ class RomanTemplate(FamilyTemplate):
     def assumptions(self, spec: Dict) -> List[str]:
         dims = spec.get("dims", {}) or {}
         product_type = spec.get("product_type", "flat_fold")
-        out: List[str] = [
-            f"Slat height: ASSUMED {format_inches(_DEFAULT_SLAT_HEIGHTS.get(product_type, 7))} "
-            f"per slat for style {product_type}.",
-        ]
+        user_slat = dims.get("slat_height") or dims.get("fold_height")
+        if user_slat not in (None, ""):
+            slat_note = (
+                f"Fold spacing: {format_inches(float(user_slat))} per founder request."
+            )
+        else:
+            slat_note = (
+                f"Slat height: ASSUMED {format_inches(_DEFAULT_SLAT_HEIGHTS.get(product_type, 7))} "
+                f"per slat for style {product_type}."
+            )
+        out: List[str] = [slat_note]
         if "mounting_depth" not in dims:
             out.append(
                 "Mounting depth: ASSUMED 2-1/2\" inside mount — founder must "
@@ -145,8 +180,7 @@ class RomanTemplate(FamilyTemplate):
             or dims.get("fold_height")
             or _DEFAULT_SLAT_HEIGHTS[product_type]
         )
-        n_slats = max(1, round(height / slat))
-        actual_slat = height / n_slats  # snap to evenly spaced
+        n_slats, actual_slat, bottom_rem = roman_slat_layout(height, slat)  # snap to evenly spaced
         points: List[GeometryPoint] = []
         edges: List[GeometryEdge] = []
         # Outer frame (4 corners)
@@ -162,8 +196,13 @@ class RomanTemplate(FamilyTemplate):
         edges.append(GeometryEdge("TL", "BL", "elevation"))
         edges.append(GeometryEdge("TR", "BR", "elevation"))
         # Horizontal slat seams
-        for i in range(1, n_slats):
-            y = i * actual_slat
+        seam_ys: list[float] = []
+        if bottom_rem is not None and bottom_rem >= (1 / 32):
+            seam_ys = [i * actual_slat for i in range(1, n_slats)]
+            seam_ys.append(height - bottom_rem)
+        else:
+            seam_ys = [i * actual_slat for i in range(1, n_slats)]
+        for i, y in enumerate(seam_ys, start=1):
             name = f"slat_{i}"
             points.append(GeometryPoint(f"{name}_L", 0.0, y, "elevation"))
             points.append(GeometryPoint(f"{name}_R", width, y, "elevation"))
@@ -196,8 +235,18 @@ class RomanTemplate(FamilyTemplate):
             or dims.get("fold_height")
             or _DEFAULT_SLAT_HEIGHTS[product_type]
         )
-        n_slats = max(1, round(height / slat))
-        actual_slat = height / n_slats
+        n_slats, actual_slat, bottom_rem = roman_slat_layout(height, slat)
+        segments = [(n_slats, actual_slat)]
+        gaps: list = []
+        note = "FLUSH BOTH ENDS"
+        if bottom_rem is not None and bottom_rem >= (1 / 32):
+            segments.append((1, bottom_rem))
+            note = (
+                f"{n_slats} × {format_inches(actual_slat)} + "
+                f"{format_inches(bottom_rem)} bottom = {format_inches(height)}"
+            )
+        elif abs(n_slats * actual_slat - height) >= (1 / 64):
+            note = "WARN: closure off > 1/64\" — review slat count"
         return [
             MathLine(
                 label="Width (single panel; no subdivision)",
@@ -210,14 +259,10 @@ class RomanTemplate(FamilyTemplate):
             MathLine(
                 label="Height closure (slats)",
                 target_in=height,
-                segments=[(n_slats, actual_slat)],
-                gaps=[],
-                total=n_slats * actual_slat,
-                note=(
-                    "FLUSH BOTH ENDS"
-                    if abs(n_slats * actual_slat - height) < (1 / 64)
-                    else "WARN: closure off > 1/64\" — review slat count"
-                ),
+                segments=segments,
+                gaps=gaps,
+                total=sum(n * s for n, s in segments),
+                note=note,
             ),
         ]
 

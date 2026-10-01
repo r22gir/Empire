@@ -78,6 +78,25 @@ if TYPE_CHECKING:
 PAGE_W_IN = 11.0
 PAGE_H_IN = 8.5
 MARGIN_IN = 0.32  # golden: tighter than B2d's 0.5
+
+
+def _spec_render_date(spec) -> str:
+    raw = (spec or {}).get("date") or ""
+    if str(raw).strip():
+        return str(raw).strip()
+    return date.today().strftime("%m/%d/%Y")
+
+
+def _roman_slat_height_from_spec(spec) -> float | None:
+    dims = (spec or {}).get("dims") or {}
+    raw = dims.get("slat_height") or dims.get("fold_height")
+    if raw in (None, ""):
+        return None
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return val if val > 0 else None
 # Sheet border — golden's outer 1.1pt frame sits AT MARGIN_IN.
 
 # ── Empire palette (golden v10) ─────────────────────────────────
@@ -512,7 +531,7 @@ def _render_header_band(c, spec, family_name, product_type, geo_w, geo_h):
         big_title = f"{product_type.replace('_', ' ').upper()} {family_name.upper()}"
     c.drawString(_P(bx + 0.27), _P(by + 0.17), big_title)
     # Right top line (gold) — rev + date
-    date_str = spec.get("date") or "07/26/2026"
+    date_str = _spec_render_date(spec)
     rev_n = spec.get("rev", "0")
     ls_text(c, PAGE_W_IN - MARGIN_IN - 0.28, by + 0.58,
             f"CST-DRAFT  ·  {date_str}  ·  REV {rev_n}", 8, GOLD,
@@ -534,7 +553,10 @@ def _render_header_band(c, spec, family_name, product_type, geo_w, geo_h):
     if descriptor is None:
         if family_name == "Roman Shades":
             from app.services.drawing.templates.roman import fold_descriptor
-            descriptor = fold_descriptor(product_type, geo_h)
+            descriptor = fold_descriptor(
+                product_type, geo_h,
+                slat_height=_roman_slat_height_from_spec(spec),
+            )
         else:
             descriptor = ""  # family-specific; caller may override
     if descriptor:
@@ -740,7 +762,10 @@ def _render_title_column(
         # "9 @ 7-1/8\"" was correct for 64"-tall only; every
         # other height (e.g. the live 55" case) was wrong.
         from app.services.drawing.templates.roman import fold_descriptor
-        n_folds_descriptor = fold_descriptor(product_type, geo_h)
+        n_folds_descriptor = fold_descriptor(
+            product_type, geo_h,
+            slat_height=_roman_slat_height_from_spec(spec),
+        )
         # fold_descriptor returns "N folds @ X-Y/Z\""; the title
         # block drops the "folds " verb and uses "N @ X-Y/Z"".
         if n_folds_descriptor:
@@ -772,7 +797,7 @@ def _render_title_column(
         ("", _fabric_reg.orientation_label(
             fabric_obj.orientation if fabric_obj else "standard")),
         ("SCALE:", _format_scale_row(scale_factor)),
-        ("REV:", f"{spec.get('rev', '0')} · {spec.get('date', '07/26/2026')}"),
+        ("REV:", f"{spec.get('rev', '0')} · {_spec_render_date(spec)}"),
     ]
     # (rows already defined above with colons). Compute the value
     # column offset based on the actual width of the longest TRACKED
@@ -1437,10 +1462,16 @@ def _render_front_elevation(
     # R12.3.1 — fold-pitch witness reads from the same fold_descriptor
     # source as the header band and FOLDS row (was hardcoded "9 @ 7-1/8\"").
     from app.services.drawing.templates.roman import fold_descriptor
-    _fd = fold_descriptor(product_type, geo_h)
+    _fd = fold_descriptor(
+        product_type, geo_h,
+        slat_height=_roman_slat_height_from_spec(spec),
+    )
     if _fd:
         # Drop the "folds " verb for the vertical witness label.
-        _n_part, _, _pitch_part = _fd.partition(" folds @ ")
+        if " folds @ " in _fd:
+            _n_part, _, _pitch_part = _fd.partition(" folds @ ")
+        else:
+            _n_part, _, _pitch_part = _fd.partition(" @ ")
         c.drawCentredString(0, 0, f"{_n_part} @ {_pitch_part}")
     else:
         c.drawCentredString(0, 0, "")

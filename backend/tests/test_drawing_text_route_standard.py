@@ -1,5 +1,6 @@
 """Text-measurement drawing routing, sketch auto-follow, multi-PDF email, status block."""
 import importlib
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -81,6 +82,50 @@ def _pdf_text(pdf_path: str) -> str:
     return Path(pdf_path).read_bytes().decode("latin-1", errors="ignore")
 
 
+def test_u_pack_default_empire_branding_and_single_job_line():
+    from app.services.drawing.banquette_branding import (
+        normalize_banquette_job_label,
+        resolve_banquette_branding,
+    )
+    head, sub, drawn = resolve_banquette_branding({})
+    assert head == "EMPIRE WORKROOM"
+    assert "NELMA" not in head
+    assert drawn == "MAX AI"
+    job = normalize_banquette_job_label("U-Banquette Upholstery", "u_shape", "")
+    assert job == "U-Banquette Upholstery"
+    assert "—" not in job or job.count("U-Banquette") == 1
+
+
+def test_roman_fold_spacing_and_render_date():
+    from app.services.drawing.templates.roman import fold_descriptor, roman_slat_layout
+    from app.services.drawing.templates.b2_renderers import _spec_render_date
+
+    assert roman_slat_layout(60.0, 6.0) == (10, 6.0, None)
+    assert "6" in fold_descriptor("flat_fold", 60.0, slat_height=6.0)
+    assert "10" in fold_descriptor("flat_fold", 60.0, slat_height=6.0)
+    today = date.today().strftime("%m/%d/%Y")
+    assert _spec_render_date({}) == today
+
+
+def test_bench_side_elevation_svg_has_depth_and_back_dims():
+    from app.services.vision.bench_renderer import render_straight
+
+    svg = render_straight(
+        "Straight Bench",
+        84,
+        depth_in=18,
+        seat_h_in=18,
+        back_h_in=16,
+        panel_style="tufted",
+        include_side_elevation=True,
+        sheet_kind="shop",
+    )
+    assert "SHOP DRAWING" in svg
+    assert "QUOTE" not in svg.split("SHOP DRAWING")[0][-80:]
+    assert '18"' in svg or "18" in svg
+    assert "16" in svg
+
+
 def test_fresh_u_banquette_pdf_has_no_marley_fixture_strings():
     max_router = importlib.import_module("app.routers.max.router")
     handoff = build_drawing_handoff(U_BANQUETTE_FRESH)
@@ -93,6 +138,9 @@ def test_fresh_u_banquette_pdf_has_no_marley_fixture_strings():
     blob = _pdf_text(pdf_path).lower()
     for marker in FORBIDDEN_UL_PDF_MARKERS:
         assert marker.lower() not in blob, f"unexpected fixture text {marker!r} in PDF"
+    assert "empire workroom" in blob
+    assert "nelma's workroom" not in blob
+    assert "u-banquette upholstery — u-banquette upholstery" not in blob
 
 
 def test_u_banquette_render_shop_drawing_produces_pdf():

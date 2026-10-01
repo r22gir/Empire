@@ -1747,10 +1747,17 @@ def _check_title_and_witnesses(page, family: str = "Roman Shades", spec: dict | 
                 expected_w = _fmt_in(float(dims["width"]))
             product_type = spec.get("product_type", "flat_fold")
             if "height" in dims:
-                fd = fold_descriptor(product_type, float(dims["height"]))
+                slat_raw = dims.get("slat_height") or dims.get("fold_height")
+                slat_h = float(slat_raw) if slat_raw not in (None, "") else None
+                fd = fold_descriptor(
+                    product_type, float(dims["height"]),
+                    slat_height=slat_h,
+                )
                 if fd:
-                    # "N folds @ X-Y/Z"" — split into the "N @" and pitch
-                    n_part, _, pitch_part = fd.partition(" folds @ ")
+                    if " folds @ " in fd:
+                        n_part, _, pitch_part = fd.partition(" folds @ ")
+                    else:
+                        n_part, _, pitch_part = fd.partition(" @ ")
                     expected_folds = f"{n_part} @ {pitch_part}"
                 expected_height = f"{_fmt_in(float(dims['height']))} SHADE"
         except Exception:

@@ -448,31 +448,32 @@ def _draw_back_style_2d(parts, x, y, w, h, panel_style, channel_count, scale=1.0
             cy = y + h * i / count
             parts.append(_line(x + 2, cy, x + w - 2, cy, SW_CHANNEL, LIGHT_GRAY))
     elif panel_style == "tufted" or panel_style == "button_tufted":
-        # Diamond/button tufting grid
+        # Diamond/button tufting grid — stay inside the back panel rect.
+        pad = 2.0
         rows = max(2, channel_count // 2)
         cols = max(3, channel_count)
+        y0, y1 = y + pad, y + h - pad
+        x0, x1 = x + pad, x + w - pad
         for r in range(rows + 1):
             for c in range(cols + 1):
-                cx = x + w * c / cols
-                cy = y + h * r / rows
-                # Offset every other row
+                cx = x0 + (x1 - x0) * c / cols
+                cy = y0 + (y1 - y0) * r / rows
                 if r % 2 == 1:
-                    cx += w / cols / 2
-                    if cx > x + w:
+                    cx += (x1 - x0) / cols / 2
+                    if cx > x1:
                         continue
                 parts.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="1.5" fill="{GRAY}" stroke="none"/>')
-        # Diamond lines for tufted
         if panel_style == "tufted":
             for r in range(rows):
                 for c in range(cols):
-                    cx1 = x + w * c / cols
-                    cy1 = y + h * r / rows
-                    cx2 = x + w * (c + 0.5) / cols
-                    cy2 = y + h * (r + 0.5) / rows
+                    cx1 = x0 + (x1 - x0) * c / cols
+                    cy1 = y0 + (y1 - y0) * r / rows
+                    cx2 = x0 + (x1 - x0) * (c + 0.5) / cols
+                    cy2 = y0 + (y1 - y0) * (r + 0.5) / rows
                     if r % 2 == 1:
-                        cx1 += w / cols / 2
-                        cx2 += w / cols / 2
-                    if cx2 <= x + w and cy2 <= y + h:
+                        cx1 += (x1 - x0) / cols / 2
+                        cx2 += (x1 - x0) / cols / 2
+                    if x0 <= cx2 <= x1 and y0 <= cy2 <= y1:
                         parts.append(_line(cx1, cy1, cx2, cy2, SW_CHANNEL, LIGHT_GRAY))
     elif panel_style == "vertical_channels":
         count = max(2, channel_count)
@@ -660,18 +661,29 @@ def _plan_u_shape(parts, ox, oy, scale, back, side, depth, side_depth, seat_h, b
 
 # ── FRONT ELEVATION ───────────────────────────────────────────────
 
-def _side_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
+def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
                    panel_style="vertical_channels", channel_count=6):
-    """Side elevation: depth × (seat + back)."""
+    """Side elevation: depth × (seat height + back height)."""
     has_back = back_h is not None and back_h > 0 and panel_style != "none"
     d = depth * scale
     sh = seat_h * scale
     bh = (back_h if has_back else 0) * scale
-    parts.append(_line(ox - 8, oy, ox + d + 8, oy, SW_FLOOR, GRAY, "6,3"))
+    lean = min(d * 0.12, 10.0)
+    parts.append(_line(ox - 8, oy, ox + d + lean + 8, oy, SW_FLOOR, GRAY, "6,3"))
     parts.append(_rect(ox, oy - sh, d, sh, SW_HEAVY))
     if has_back:
-        parts.append(_rect(ox, oy - sh - bh, d, bh, SW_MED))
-        _draw_back_style_2d(parts, ox, oy - sh - bh, d, bh, panel_style, channel_count)
+        parts.append(_rect(ox + lean * 0.35, oy - sh - bh, d, bh, SW_MED))
+        _draw_back_style_2d(
+            parts, ox + lean * 0.35, oy - sh - bh, d, bh,
+            panel_style, channel_count,
+        )
+    _gutter_width(parts, ox, ox + d, oy, Rect(ox - 28, oy + 6, 26, 40), _in(depth))
+    total_h = seat_h + (back_h if has_back else 0)
+    _gutter_height(
+        parts, oy - sh - bh, oy, ox + d + lean + 6,
+        Rect(ox + d + lean + 10, oy - total_h * scale - 8, 34, total_h * scale + 16),
+        _in(total_h), side="right",
+    )
 
 
 def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
@@ -1063,7 +1075,7 @@ def _build_u_shape(name, back_in, side_in, depth_in, side_depth_in, seat_h_in, b
 
 # ── MULTI-VIEW COMPOSITION ──────────────────────────────────────
 
-def _sheet_header(parts, frame, chip, quote_num):
+def _sheet_header(parts, frame, chip, quote_num, sheet_kind="idea"):
     parts.append(_rect(frame.x, frame.y, frame.w, frame.h, 0, fill="#f6f3ec", stroke="none"))
     parts.append(_line(frame.x, frame.bottom, frame.right, frame.bottom, 1.4, "#b8912f"))
     if chip:
@@ -1071,14 +1083,21 @@ def _sheet_header(parts, frame, chip, quote_num):
             frame.x + 12, frame.y + 23, chip, SVG_TYPE["caption"],
             anchor="start", weight="bold",
         ))
-    parts.append(_text(
-        frame.right - 12, frame.y + 15, quote_num or "QUOTE",
-        11, anchor="end", weight="bold",
-    ))
-    parts.append(_text(
-        frame.right - 12, frame.y + 29, "IDEA SHEET",
-        9, anchor="end", fill=GRAY,
-    ))
+    right_title = "SHOP DRAWING" if sheet_kind == "shop" else "IDEA SHEET"
+    if quote_num:
+        parts.append(_text(
+            frame.right - 12, frame.y + 15, quote_num,
+            11, anchor="end", weight="bold",
+        ))
+        parts.append(_text(
+            frame.right - 12, frame.y + 29, right_title,
+            9, anchor="end", fill=GRAY,
+        ))
+    else:
+        parts.append(_text(
+            frame.right - 12, frame.y + 22, right_title,
+            11, anchor="end", weight="bold",
+        ))
 
 
 def _draw_ortho_dims(parts, layout, ortho):
@@ -1118,14 +1137,15 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
                        plan_kwargs=None, category_chip="", chrome=None,
                        assumptions=None, has_back=True, title_panel_style=None,
                        layout=None, ortho=None, plan_aside="",
-                       include_side_elevation=False, side_args=()):
+                       include_side_elevation=False, side_args=(),
+                       sheet_kind="idea"):
     """Compose the shared idea-sheet: plan + elevation, iso, title block."""
     layout = layout or idea_sheet_regions()
     parts = [_defs()]
     parts.append(f'<rect width="{LAYOUT_W}" height="{LAYOUT_H}" fill="white"/>')
     parts.append(_rect(12, 12, LAYOUT_W - 24, LAYOUT_H - 24, 1.15))
 
-    _sheet_header(parts, layout["header"], category_chip, quote_num)
+    _sheet_header(parts, layout["header"], category_chip, quote_num, sheet_kind=sheet_kind)
 
     _view_frame(parts, layout["plan"], "PLAN VIEW", aside=plan_aside)
     plan_group = []
@@ -1149,26 +1169,31 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
 
     elev_safe = layout["elev_safe"]
     if include_side_elevation and side_args:
-        half = elev_safe.w / 2 - 6
-        _view_frame(parts, Rect(elev_safe.x, elev_safe.y - CAPTION_H, elev_safe.w, elev_safe.h + CAPTION_H),
-                    "FRONT + SIDE ELEVATION")
+        half = elev_safe.w / 2 - 12
+        elev_frame = Rect(
+            elev_safe.x, elev_safe.y - CAPTION_H, elev_safe.w, elev_safe.h + CAPTION_H,
+        )
+        _view_frame(parts, elev_frame, "FRONT + SIDE ELEVATION")
         front_group = []
-        fe_args = (elev_args[0], elev_args[1], elev_args[2] * (half / max(elev_safe.w, 1)),
-                   *elev_args[3:])
+        front_scale = elev_args[2] * (half / max(elev_safe.w / 2, 1))
+        fe_args = (elev_args[0], elev_args[1], front_scale, *elev_args[3:])
         elev_fn(front_group, *fe_args, panel_style=panel_style, channel_count=channel_count)
         parts.append(f'<g transform="translate({elev_safe.x:.1f},{elev_safe.y:.1f})">')
         parts.extend(front_group)
         parts.append('</g>')
+        depth_in, seat_h_in, back_h_in, side_ox, side_oy, side_scale = side_args
         side_group = []
-        sx = elev_safe.x + half + 12
-        side_fn = _side_straight
-        se_args = (sx, elev_args[1], elev_args[2] * (half / max(elev_safe.w, 1)), *side_args[3:])
-        side_fn(side_group, *se_args, panel_style=panel_style, channel_count=channel_count)
-        parts.append(f'<g transform="translate(0,0)">')
+        _side_straight(
+            side_group, side_ox, side_oy, side_scale,
+            depth_in, seat_h_in, back_h_in,
+            panel_style=panel_style, channel_count=channel_count,
+        )
+        parts.append('<g>')
         parts.extend(side_group)
         parts.append('</g>')
-        parts.append(_text(elev_safe.x + half * 0.5, elev_safe.y - 8, "FRONT", 11, weight="600"))
-        parts.append(_text(sx + half * 0.35, elev_safe.y - 8, "SIDE", 11, weight="600"))
+        label_y = elev_safe.y + CAPTION_H + 12
+        parts.append(_text(elev_safe.x + half * 0.45, label_y, "FRONT", 10, weight="600"))
+        parts.append(_text(side_ox + depth_in * side_scale * 0.35, label_y, "SIDE", 10, weight="600"))
     else:
         _view_frame(parts, layout["elev"], "FRONT ELEVATION")
         elev_group = []
@@ -1177,7 +1202,8 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         parts.extend(elev_group)
         parts.append('</g>')
 
-    _draw_ortho_dims(parts, layout, ortho)
+    if not include_side_elevation:
+        _draw_ortho_dims(parts, layout, ortho)
 
     title = layout["title"]
     _title_block(parts, title.x, title.y, title.w, title.h,
@@ -1300,6 +1326,18 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
     iso_args = (name, width_in, depth_in, seat_h_in, geo_back, quote_num)
 
     include_side = bool(kw.get("include_side_elevation"))
+    side_args = ()
+    if include_side:
+        half_w = max(layout["elev_safe"].w / 2 - 16, 100)
+        side_scale, side_ox, _ = _auto_scale_2d(
+            depth_in, elev_h or 1, half_w, layout["elev_safe"].h, margin=8, fill=0.88,
+        )
+        side_args = (
+            depth_in, seat_h_in, geo_back,
+            layout["elev_safe"].x + layout["elev_safe"].w / 2 + 8,
+            elev_ground_y, side_scale,
+        )
+    sheet_kind = "shop" if kw.get("sheet_kind") == "shop" else "idea"
     return _compose_multiview(
         name, "straight", _build_straight, _plan_straight, _elev_straight,
         dims_text, c_count, cushion_width, draw_panel, channel_count,
@@ -1308,7 +1346,8 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
         layout=layout, ortho=ortho,
         plan_aside=_back_style_label(panel_style, has_back=has_back),
         include_side_elevation=include_side,
-        side_args=elev_args if include_side else (),
+        side_args=side_args,
+        sheet_kind=sheet_kind,
         **extras,
     )
 

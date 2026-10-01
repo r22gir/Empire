@@ -199,7 +199,9 @@ class SheetMeta:
     )
     client: str = "Not assigned"
     rev: str = "H-ORTHO-2"
-    drawn_by: str = "MAX AI / Empire Workroom"
+    drawn_by: str = "MAX AI"
+    letterhead: str = "EMPIRE WORKROOM"
+    letterhead_sub: str = "CUSTOM UPHOLSTERY & FABRICATION"
     date_str: str = ""
     # construction: "basketweave" (pattern backs) | "plain" (BUDGET plain backs+seats)
     construction: str = "basketweave"
@@ -790,10 +792,12 @@ def _title_block(c, w, h, sheet, sheet_title, meta: SheetMeta, total_sheets: int
 
     c.setFillColor(NAVY)
     c.setFont("Helvetica-Bold", TB_COMPANY_FONT)
-    c.drawString(0.6 * inch, tb_y + 0.82 * inch, "NELMA'S WORKROOM")
+    c.drawString(0.6 * inch, tb_y + 0.82 * inch, (meta.letterhead or "EMPIRE WORKROOM")[:42])
     c.setFont("Helvetica", 7)
     c.setFillColor(GOLD)
-    c.drawString(0.6 * inch, tb_y + 0.66 * inch, "POWERED BY EMPIRE WORKROOM")
+    sub = (meta.letterhead_sub or "").strip()
+    if sub:
+        c.drawString(0.6 * inch, tb_y + 0.66 * inch, sub[:52])
     c.setFont("Helvetica", TB_BODY_FONT)
     c.setFillColor(GRAY)
     c.drawString(0.6 * inch, tb_y + 0.48 * inch, meta.job[:58])
@@ -2093,20 +2097,26 @@ def render_upholstery_shell_pdf(
             "U BANQUETTE — TOP (PLAN)",
             "Asymmetric arms · outer / inner / seat depth · developed outer = lf takeoff",
         )
-        # Enlarge plan into page real estate (H-ORTHO-2)
-        scale = (9.4 * inch) / u.back_outer
-        _draw_u_plan(c, 0.55 * inch, h - 1.15 * inch, scale, u, construction=constr)
-        _legend(c, w - 2.55 * inch, h - 1.35 * inch, [
+        # Fit plan in upper band; keep NOTES / KEY DIMS above title block (no overlap).
+        plan_top = h - 1.28 * inch
+        plan_left = 0.55 * inch
+        panel_top = 0.22 * inch + 1.12 * inch + 0.18 * inch + 2.25 * inch
+        avail_w = w - 3.0 * inch
+        avail_h = max(plan_top - panel_top, 2.0 * inch)
+        arm_span = max(u.arm_left, u.arm_right, u.seat_depth)
+        scale = min(avail_w / max(u.back_outer, 1.0), avail_h / max(arm_span, 1.0))
+        _draw_u_plan(c, plan_left, plan_top, scale, u, construction=constr)
+        _legend(c, w - 2.45 * inch, plan_top - 0.12 * inch, [
             (LT_BLUE, "Shell / wall outline"),
             (CUSH, "Seat cushion footprint"),
             (NAVY, "Developed run"),
         ])
         _key_dims_panel(
-            c, w - 4.05 * inch, 3.75 * inch, u, L,
+            c, w - 3.65 * inch, panel_top, u, L,
             construction=constr, include_l=include_l,
         )
         _notes_panel(
-            c, 0.45 * inch, 3.75 * inch,
+            c, 0.45 * inch, panel_top,
             "NOTES",
             [
                 "Blue = shell/wall · orange dashed = seat footprint",
@@ -2114,7 +2124,7 @@ def render_upholstery_shell_pdf(
                 f'Booth footprint width {u.footprint_width:.2f}" ≠ lf takeoff',
                 "Units: inches · upholstery on existing shell",
             ],
-            box_w=4.8 * inch, box_h=1.05 * inch,
+            box_w=3.0 * inch, box_h=2.05 * inch,
         )
         finish("U Top (Plan)")
 

@@ -3107,6 +3107,7 @@ def _render_bench_shop_drawing(params: dict, dims: dict) -> ToolResult | None:
         seat_h_in=resolved["seat_height"],
         back_h_in=resolved["back_height"],
         quote_num=quote_num,
+        sheet_kind="shop",
         cushion_width=resolved["cushion_width"],
         panel_style=resolved["panel_style"],
         channel_count=resolved["channel_count"],

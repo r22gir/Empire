@@ -26,6 +26,10 @@ from app.services.drawing.canonical_path import (
     new_drawing_path,
     canonical_empire_db_path,
 )
+from app.services.drawing.banquette_branding import (
+    normalize_banquette_job_label,
+    resolve_banquette_branding,
+)
 from app.services.drawing.upholstery_shell_renderer import (
     UShellSpec,
     LShellSpec,
@@ -242,19 +246,19 @@ def render_ul_banquette_pdf(
         ) else "basketweave"
     )
     rev = str(params.get("rev") or dims.get("rev") or ("B-PLAIN" if construction == "plain" else "H-ORTHO-2")).strip()
-    job_label = site or name
-    if include_l and shape == "u_shape":
-        job_label = f"{job_label} — U+L Banquette Upholstery"
-    elif shape == "u_shape":
-        job_label = f"{job_label} — U-Banquette Upholstery"
-    else:
-        job_label = f"{job_label} — L-Banquette Upholstery"
+    job_label = normalize_banquette_job_label(
+        name, shape, site, include_l=include_l,
+    )
+    letterhead, letterhead_sub, drawn_by = resolve_banquette_branding(params)
     meta = SheetMeta(
         quote_num=quote_num,
         job=job_label,
         client=client or "Not assigned",
         construction=construction,
         rev=rev,
+        letterhead=letterhead,
+        letterhead_sub=letterhead_sub,
+        drawn_by=drawn_by,
     )
 
     out_path = new_drawing_path(prefix="banquette_upholstery", suffix=".pdf")
