@@ -111,6 +111,32 @@ def validate_bench_extension_lines_max(svg: str, max_len: float = 30.0) -> None:
             )
 
 
+def validate_bench_side_back_rake_rearward(svg: str) -> None:
+    """Side elevation back must rake rearward (top x > bottom x toward seat rear)."""
+    root = ET.fromstring(svg)
+    for g in root.findall(".//svg:g", _SVG_NS):
+        if g.get("data-panel") != "side-elev":
+            continue
+        tx, ty = _parse_translate(g.get("transform", ""))
+        for poly in g.findall(".//svg:polygon", _SVG_NS):
+            if poly.get("data-side-back") != "1":
+                continue
+            pts = [(x + tx, y + ty) for x, y in _parse_points(poly.get("points", ""))]
+            if len(pts) < 4:
+                raise AssertionError("side back polygon missing corners")
+            by_y = sorted(pts, key=lambda p: p[1])
+            bottom = by_y[-2:]
+            top = by_y[:2]
+            bottom_max_x = max(p[0] for p in bottom)
+            top_max_x = max(p[0] for p in top)
+            if top_max_x <= bottom_max_x + 0.5:
+                raise AssertionError(
+                    "side back top must lean rearward (top x > bottom x)"
+                )
+            return
+    raise AssertionError("no side back polygon (data-side-back) in side-elev panel")
+
+
 def validate_bench_iso_dims_clear_faces(svg: str) -> None:
     """No iso dimension stroke may pass through an iso face polygon interior."""
     root = ET.fromstring(svg)

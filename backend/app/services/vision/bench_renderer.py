@@ -642,7 +642,8 @@ def _dim_h_local(parts, x1, x2, y_anchor, gap_below: float, label: str):
     parts.append(_text((x1 + x2) / 2, y_dim + 12, label, 9, weight="600", fill=DIM_COLOR))
 
 
-def _dim_v(parts, p1, p2, label, offset_x, text_side="right", outward_text: bool = True):
+def _dim_v(parts, p1, p2, label, offset_x, text_side="right", outward_text: bool = True,
+           text_dy: float = 4):
     """Vertical dimension line. TEXT IS HORIZONTAL — placed beside the line."""
     gap = 2
     ext = 4
@@ -677,16 +678,18 @@ def _dim_v(parts, p1, p2, label, offset_x, text_side="right", outward_text: bool
             tx, anch = mx + 8, "end"
     else:
         tx, anch = mx - 10, "end"
-    parts.append(_text(tx, my + 4, label, 9, anchor=anch, weight="600", fill=DIM_COLOR))
+    parts.append(_text(tx, my + text_dy, label, 9, anchor=anch, weight="600", fill=DIM_COLOR))
 
 
 def _dim_2d_h(parts, x1, x2, y, label, offset_y=20):
     _dim_h(parts, (x1, y), (x2, y), label, offset_y, "below" if offset_y > 0 else "above")
 
 
-def _dim_2d_v(parts, x, y1, y2, label, offset_x=20):
+def _dim_2d_v(parts, x, y1, y2, label, offset_x=20, outward_text: bool = True,
+              text_dy: float = 4):
     side = "right" if offset_x > 0 else "left"
-    _dim_v(parts, (x, y1), (x, y2), label, offset_x, side)
+    _dim_v(parts, (x, y1), (x, y2), label, offset_x, side,
+           outward_text=outward_text, text_dy=text_dy)
 
 
 def _elev_height_dims_left(parts, x, y_top, y_seat, y_floor, seat_h, back_h, panel_w: float = 0):
@@ -988,23 +991,25 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
     sh = seat_h * scale
     bh = (back_h if has_back else 0) * scale
     bt_s = SIDE_BACK_THK * scale
-    lean = min(4.0 * scale, d * 0.08)
+    rake_deg = 9.0
+    lean = (back_h if has_back else 0) * scale * math.tan(math.radians(rake_deg))
+    lean = min(lean, 4.0 * scale)
     top_y = oy - sh - bh
     parts.append(_line(ox, oy, ox + d, oy, SW_FLOOR, GRAY, "6,3"))
     # Seat block (full depth)
     parts.append(_rect(ox, oy - sh, d, sh, SW_HEAVY))
     if has_back:
         bx = ox + d - bt_s
-        # Raked back panel at rear edge (not a full-depth block)
+        # Raked back at rear: top leans rearward (seat front is left, rear is right).
         back_pts = [
             (bx, oy - sh),
             (bx + bt_s, oy - sh),
-            (bx + bt_s - lean, top_y),
-            (bx - lean, top_y),
+            (bx + bt_s + lean, top_y),
+            (bx + lean, top_y),
         ]
-        parts.append(_poly(back_pts, SW_MED))
+        parts.append(_poly(back_pts, SW_MED, attrs='data-side-back="1"'))
         _draw_back_style_2d(
-            parts, bx - lean, top_y, bt_s + lean, bh,
+            parts, bx, top_y, bt_s + lean, bh,
             panel_style, channel_count,
         )
     if not draw_dims or panel_w < 20:
@@ -1624,20 +1629,20 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         half_w = (elev_safe.w - gap) / 2
         left_safe = Rect(elev_safe.x + 4, elev_safe.y, half_w - 4, elev_safe.h)
         right_safe = Rect(elev_safe.x + half_w + gap, elev_safe.y, half_w - 4, elev_safe.h)
-        dim_stack_h = 48.0
-        gutter_lr = 64.0
+        dim_stack_h = 44.0
+        dim_lr = 64.0  # left height-chain labels (34" total) + padding
+        dim_gutter = 36.0  # side panel horizontal reserve
         target_fill = 0.75
-        max_w_in = max(float(width_in), float(depth_in))
-        scale_w_front = (left_safe.w - gutter_lr) / float(width_in)
-        scale_w_side = (right_safe.w - gutter_lr) / float(depth_in)
+        scale_w_front = (left_safe.w - dim_lr - 8) / float(width_in)
+        scale_w_side = (right_safe.w - dim_gutter - 8) / float(depth_in)
         scale_h = (left_safe.h * target_fill - dim_stack_h) / (elev_h or 1)
-        elev_scale = min(scale_w_front, scale_w_side, scale_h) * 0.995
+        elev_scale = min(scale_w_front, scale_w_side, scale_h)
         content_px = elev_h * elev_scale
         block_h = content_px + dim_stack_h
-        block_top = max(8.0, (left_safe.h - block_h) / 2)
+        block_top = max(6.0, (left_safe.h - block_h) / 2)
         front_floor = block_top + content_px
         geo_w = width_in * elev_scale
-        fox = gutter_lr + max(0.0, (left_safe.w - gutter_lr - geo_w) / 2)
+        fox = max(dim_lr, (left_safe.w - geo_w) / 2)
         front_group = []
         elev_fn(
             front_group, fox, front_floor, elev_scale,
@@ -1654,7 +1659,7 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         parts.append('</g>')
         side_floor = block_top + content_px
         geo_sw = depth_in * elev_scale
-        sox = gutter_lr + max(0.0, (right_safe.w - gutter_lr - geo_sw) / 2)
+        sox = max(6.0, (right_safe.w - geo_sw - dim_gutter) / 2)
         side_group = []
         _side_straight(
             side_group, sox, side_floor, elev_scale,
