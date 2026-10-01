@@ -2802,6 +2802,7 @@ async def _chat_with_max_service(
                 messages.insert(-1, AIMessage(role="system", content=(
                     "You must answer using only the verified web search data below. "
                     "Do not fall back to training data. " + grounding_directive(request.message) + "\n\n"
+                    "Do not call web_read; answer directly from the verified search-result snippets. "
                     "If the search returned no relevant results, say so honestly.\n\n"
                     f"{tool_summary}\n\nQuestion: {request.message}"
                 )))
@@ -3794,6 +3795,7 @@ async def chat_stream(request: ChatRequest):
                 messages.insert(-1, AIMessage(role="system", content=(
                     "You must answer using only the verified web search data below. "
                     "Do not fall back to training data. " + grounding_directive(request.message) + "\n\n"
+                    "Do not call web_read; answer directly from the verified search-result snippets. "
                     "If the search returned no relevant results, say so honestly.\n\n"
                     f"{tool_summary}\n\nQuestion: {request.message}"
                 )))
