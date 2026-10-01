@@ -199,7 +199,7 @@ class SheetMeta:
     quote_num: str = "Not assigned"
     job: str = "Custom banquette upholstery"
     note: str = (
-        "Upholstery on existing shell · dimensions per founder request · iso PARKED"
+        "Upholstery on shell · dims per field measure"
     )
     client: str = "Not assigned"
     rev: str = "H-ORTHO-2"
@@ -227,7 +227,7 @@ class SheetMeta:
             )
         if self.construction == "plain" and "basketweave" in (self.note or "").lower():
             self.note = (
-                "Upholstery on existing shell · BUDGET PLAIN backs + seats · iso PARKED"
+                "Upholstery on existing shell · BUDGET PLAIN backs + seats"
             )
 
     @property
@@ -840,7 +840,6 @@ def _draft_stamp(c, w, h):
     c.drawRightString(w - 0.45 * inch, h - 0.36 * inch, "DRAFT")
     c.setFont("Helvetica", 7.5)
     c.setFillColor(GRAY)
-    c.drawRightString(w - 0.45 * inch, h - 0.52 * inch, "iso PARKED")
     c.restoreState()
 
 
@@ -2046,7 +2045,7 @@ def render_upholstery_shell_pdf(
         if meta.construction == "plain":
             meta.option_label = "BUDGET PLAIN BACKS + SEATS"
             if "basketweave" in (meta.note or "").lower():
-                meta.note = "Upholstery on existing shell · BUDGET PLAIN backs + seats · iso PARKED"
+                meta.note = "Upholstery on existing shell · BUDGET PLAIN backs + seats"
         else:
             meta.option_label = meta.option_label or "BASKETWEAVE BACK / PLAIN SEAT"
     constr = meta.construction

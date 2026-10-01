@@ -40,6 +40,10 @@ BENCH_TUFTED_MSG = (
     "straight bench 84 in long, 18 deep, 18 high, tufted back 16 in tall, "
     "front + side elevation"
 )
+FORBIDDEN_CLIENT_MARKERS = (
+    "founder",
+    "iso parked",
+)
 FORBIDDEN_UL_PDF_MARKERS = (
     "EST-2026-272",
     "Dave Romero",
@@ -114,9 +118,15 @@ def test_roman_fold_spacing_and_render_date():
 
 
 def test_bench_side_elevation_svg_has_depth_and_back_dims():
-    from app.services.vision.bench_renderer import render_straight
+    from app.services.vision.bench_renderer import render_straight, _resolve_cushions
     from app.services.vision.bench_svg_layout import validate_bench_svg_layout
     from app.services.drawing.quote_sheet_layout import idea_sheet_regions
+
+    width = 84.0
+    c_count, actual_cw = _resolve_cushions(width, 24)
+    assert c_count * actual_cw == width
+    assert c_count == 4
+    assert actual_cw == 21.0
 
     layout = idea_sheet_regions(title_rows=12)
     svg = render_straight(
@@ -132,9 +142,27 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
     assert "SHOP DRAWING" in svg
     assert 'data-panel="side-elev"' in svg
     assert 'data-panel="front-elev"' in svg
-    assert '18"' in svg or "18" in svg
-    assert "16" in svg
+    assert '4 @ 21"' in svg or "21" in svg
+    assert "84" in svg and ("84&quot;" in svg or '84"' in svg)
+    assert "34" in svg
     validate_bench_svg_layout(svg, layout)
+
+
+def test_roman_side_section_labels_no_overlap():
+    from app.services.drawing.roman_label_layout import assert_roman_side_labels_clear
+    from app.services.max.tool_executor import execute_tool
+
+    res = execute_tool({
+        "tool": "render_shop_drawing",
+        "product_type": "flat_fold",
+        "dims": {"width": 36, "height": 60, "slat_height": 6, "mounting_depth": 2.5},
+        "client_name": "Demo",
+    })
+    assert res.success, res.error
+    assert_roman_side_labels_clear(res.result["pdf_path"])
+    text = _pdf_text(res.result["pdf_path"]).lower()
+    for marker in FORBIDDEN_CLIENT_MARKERS:
+        assert marker not in text, f"client-facing marker {marker!r} in roman PDF"
 
 
 def test_fresh_u_banquette_pdf_has_no_marley_fixture_strings():
@@ -156,6 +184,8 @@ def test_fresh_u_banquette_pdf_has_no_marley_fixture_strings():
         blob = _pdf_text(pdf_path).lower()
     for marker in FORBIDDEN_UL_PDF_MARKERS:
         assert marker.lower() not in blob, f"unexpected fixture text {marker!r} in PDF"
+    for marker in FORBIDDEN_CLIENT_MARKERS:
+        assert marker not in blob, f"client-facing marker {marker!r} in U PDF"
     assert "empire workroom" in blob
     assert "nelma's workroom" not in blob
     assert "u-banquette upholstery — u-banquette upholstery" not in blob

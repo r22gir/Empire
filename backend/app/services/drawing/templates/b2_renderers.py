@@ -1751,18 +1751,20 @@ def _render_side_section(
                _P(0.030), _P(0.125), fill=1, stroke=1)
         c.setFillColor(INK)
         c.setFont("Helvetica-Bold", 6.3)
-        c.drawRightString(_P(x_front - 0.06), _P(yf - 0.02),
-                          "HEM BAR (RAISED)")
         stack_mid = (hy - 0.07 - flat) - (stack_h - flat) * 0.52
         stack_label = f'STACK {_fmt_in(stack_h - flat)}'
-        c.setFillColor(DIM)
-        c.setFont("Helvetica-Bold", 6.0)
-        c.drawRightString(_P(wallx - 0.10), _P(stack_mid + 0.20), stack_label)
-        c.drawRightString(_P(wallx - 0.10), _P(stack_mid - 0.02),
-                          '(FLAT TOP, FOLDS BELOW)')
+        label_rx = wallx - 0.12
         c.setFillColor(INK)
         c.setFont("Helvetica-Bold", 6.0)
-        c.drawString(_P(x_front - 0.22), _P(stack_mid + 0.08), 'FOLD STACK')
+        c.drawRightString(_P(label_rx), _P(stack_mid + 0.42), 'FOLD STACK')
+        c.setFillColor(DIM)
+        c.setFont("Helvetica-Bold", 6.0)
+        c.drawRightString(_P(label_rx), _P(stack_mid + 0.20), stack_label)
+        c.setFont("Helvetica", 5.8)
+        c.drawRightString(_P(label_rx), _P(stack_mid - 0.04), '(FLAT TOP, FOLDS BELOW)')
+        c.setFont("Helvetica-Bold", 6.3)
+        c.setFillColor(INK)
+        c.drawRightString(_P(label_rx), _P(yf - 0.06), "HEM BAR (RAISED)")
         # R10: partial-raise label — drawn BELOW the stack with
         # shorter tracking so it fits inside the side-section
         # viewport (the founder's G1.3 bounds gate caught the
@@ -2016,8 +2018,7 @@ def _get_assumptions(geometry, product_type: str, spec: dict = None) -> list[str
         first, second = sorted(set(slat_ys))[0], sorted(set(slat_ys))[1]
         actual = second - first
         out.append(
-            f"Slat: ASSUMED {_fmt_in(actual)} ({n} total) — "
-            f"founder MUST verify."
+            f"Slat: ASSUMED {_fmt_in(actual)} ({n} total) — verify on site."
         )
     dims = (spec or {}).get("dims", {}) or {}
     if "mounting_depth" in dims:

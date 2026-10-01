@@ -149,7 +149,7 @@ class RomanTemplate(FamilyTemplate):
         user_slat = dims.get("slat_height") or dims.get("fold_height")
         if user_slat not in (None, ""):
             slat_note = (
-                f"Fold spacing: {format_inches(float(user_slat))} per founder request."
+                f"Fold spacing: {format_inches(float(user_slat))} per job request."
             )
         else:
             slat_note = (
@@ -159,8 +159,8 @@ class RomanTemplate(FamilyTemplate):
         out: List[str] = [slat_note]
         if "mounting_depth" not in dims:
             out.append(
-                "Mounting depth: ASSUMED 2-1/2\" inside mount — founder must "
-                "confirm before fabrication."
+                "Mounting depth: ASSUMED 2-1/2\" inside mount — verify on site "
+                "before fabrication."
             )
         if product_type in _RINGED_STYLES:
             n = _RINGED_STYLES[product_type]
