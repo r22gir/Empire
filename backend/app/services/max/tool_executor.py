@@ -359,10 +359,8 @@ def _parse_ndjson_block(body: str) -> tuple[list[dict], list[dict]]:
                 "snippet": body[idx:min(n, idx + 240)],
             })
             logger.warning(
-                "tool block object %d malformed at line %d col %d: %s — "
-                "raw block (truncated): %r",
+                "tool block object %d malformed at line %d col %d: %s",
                 obj_index, e.lineno, e.colno, e.msg,
-                body[idx:min(n, idx + 240)],
             )
             # Skip past this failed object. We advance to the GREATEST
             # of:
@@ -405,8 +403,18 @@ def _parse_ndjson_block(body: str) -> tuple[list[dict], list[dict]]:
 
 
 def strip_tool_blocks(text: str) -> str:
-    """Remove tool blocks from visible text."""
-    return TOOL_BLOCK_RE.sub("", text).strip()
+    """Remove executable tool protocol text from visible text.
+
+    Fenced blocks are removed directly. A response consisting solely of raw
+    JSON tool actions is also suppressed; those actions are for the dispatcher,
+    never for the user-facing transcript.
+    """
+    cleaned = TOOL_BLOCK_RE.sub("", text).strip()
+    if cleaned and cleaned[0] in "[{":
+        actions, _errors = _parse_ndjson_block(cleaned)
+        if actions:
+            return ""
+    return cleaned
 
 
 def _fetch_openclaw_task(task_id: int | str) -> dict | None:
@@ -5685,33 +5693,46 @@ def _file_append(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("env_get")
 def _env_get(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """List .env variable names (not values) or check if a specific variable exists."""
+    """Check env presence without ever returning a secret or secret-like name.
+
+    Sensitive variable names are intentionally treated as an opaque set/unset
+    probe. This prevents both values and useful secret inventory from entering
+    model context or tool/audit output.
+    """
     env_path = os.path.expanduser("~/empire-repo/backend/.env")
-    var_name = params.get("name", "").strip()
+    var_name = str(params.get("name", "") or "").strip()
+    sensitive_name = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD)", re.IGNORECASE)
 
     try:
         with open(env_path, "r") as f:
             lines = f.readlines()
 
         env_vars = []
+        found_set = None
         for line in lines:
             line = line.strip()
-            if not line or line.startswith("#"):
+            if not line or line.startswith("#") or "=" not in line:
                 continue
-            if "=" in line:
-                name = line.split("=", 1)[0].strip()
-                has_value = bool(line.split("=", 1)[1].strip())
+            name, raw_value = (part.strip() for part in line.split("=", 1))
+            has_value = bool(raw_value)
+            if var_name and name == var_name:
+                found_set = has_value
+            # Never expose names matching common credential markers in list mode.
+            if not sensitive_name.search(name):
                 env_vars.append({"name": name, "set": has_value})
 
         if var_name:
-            found = next((v for v in env_vars if v["name"] == var_name), None)
-            if found:
-                return ToolResult(tool="env_get", success=True, result={"name": var_name, "exists": True, "set": found["set"]})
-            return ToolResult(tool="env_get", success=True, result={"name": var_name, "exists": False})
+            # Sensitive probes return only a boolean; neither the requested name
+            # nor an existence distinction is placed in the result.
+            if sensitive_name.search(var_name):
+                return ToolResult(tool="env_get", success=True, result={"set": bool(found_set)})
+            if found_set is not None:
+                return ToolResult(tool="env_get", success=True, result={"name": var_name, "exists": True, "set": found_set})
+            return ToolResult(tool="env_get", success=True, result={"name": var_name, "exists": False, "set": False})
 
         return ToolResult(tool="env_get", success=True, result={"variables": env_vars, "count": len(env_vars)})
-    except Exception as e:
-        return ToolResult(tool="env_get", success=False, error=str(e))
+    except Exception:
+        return ToolResult(tool="env_get", success=False, error="Unable to inspect environment configuration")
 
 
 @tool("env_set")

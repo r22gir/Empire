@@ -3802,11 +3802,24 @@ async def chat_stream(request: ChatRequest):
             # If web_search returned nothing, append NOTHING. Do not fabricate
             # a "[SYSTEM: ...]" apology — that was the H53 shape in this code path.
         try:
-            async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
+            # Buffer each model turn before publishing it. Tool calls are a
+            # model-side protocol, not user-visible text; emitting chunks as
+            # they arrive used to leak fenced JSON into the chat transcript.
+            _initial_iter = ai_router.chat_stream(
+                messages, model=model, image_filename=request.image_filename,
+                desk=request.desk, system_prompt=enriched_prompt,
+                source=request.channel or "", conversation_id=request.conversation_id or "",
+            ).__aiter__()
+            while True:
+                try:
+                    chunk, m_used = await asyncio.wait_for(_initial_iter.__anext__(), timeout=15)
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'model'})}\n\n"
+                    continue
                 model_used = m_used
-                safe_chunk = sanitize_output_streaming(chunk)
-                full_response += safe_chunk
-                yield f"data: {_safe_dumps({'type': 'text', 'content': safe_chunk})}\n\n"
+                full_response += sanitize_output_streaming(chunk)
 
             # Multi-turn tool loop: execute tools, allow follow-up tools (max 3 rounds)
             tool_results_list = [_stream_pre_search_entry] if _stream_pre_search_entry else []
@@ -3856,7 +3869,6 @@ async def chat_stream(request: ChatRequest):
 
                 if _is_decision_only_request(request.message) and any(_is_action_tool(tc) for tc in tool_calls):
                     full_response = _decision_only_response(request).response
-                    yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
                     break
 
                 # File-WRITE tool calls from main chat get re-routed to CodeForge desk
@@ -3899,7 +3911,14 @@ async def chat_stream(request: ChatRequest):
                         logger.info(f"[stream] Auto-routing {tool_name} to CodeForge: {title}")
                         tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
-                    result = await _execute_tool_nonblocking(tc, desk=request.desk, access_context=_stream_ac_context, founder=founder)
+                    yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'tool', 'message': 'Running requested lookup'})}\n\n"
+                    try:
+                        result = await asyncio.wait_for(
+                            _execute_tool_nonblocking(tc, desk=request.desk, access_context=_stream_ac_context, founder=founder),
+                            timeout=90,
+                        )
+                    except asyncio.TimeoutError:
+                        result = ToolResult(tool=str(tc.get("tool") or "unknown"), success=False, error="Tool timed out")
                     entry = _normalize_tool_result_entry(result)
                     round_results.append(entry)
                     tool_results_list.append(entry)
@@ -3915,7 +3934,6 @@ async def chat_stream(request: ChatRequest):
                 if _tool_round >= 1 and should_halt_after_tool_failure(round_results, user_message=request.message):
                     _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
                     full_response = runtime_truth_failure_message(_failures)
-                    yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
                     break
 
                 tool_summary_parts = []
@@ -3954,20 +3972,29 @@ async def chat_stream(request: ChatRequest):
                 # pre-search guard. Scaffolding goes on the system channel.
                 loop_messages.append(AIMessage(role="system", content=f"{followup_instruction}\n\n{tool_summary}"))
 
-                yield f"data: {_safe_dumps({'type': 'text', 'content': chr(10) + chr(10)})}\n\n"
                 followup_text = ""
-                async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
+                _followup_iter = ai_router.chat_stream(
+                    loop_messages, model=model, desk=request.desk,
+                    system_prompt=enriched_prompt, source=request.channel or "",
+                    conversation_id=request.conversation_id or "",
+                ).__aiter__()
+                while True:
+                    try:
+                        chunk, m_used = await asyncio.wait_for(_followup_iter.__anext__(), timeout=15)
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError:
+                        yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'followup'})}\n\n"
+                        continue
                     model_used = m_used
-                    safe_chunk = sanitize_output_streaming(chunk)
-                    followup_text += safe_chunk
-                    yield f"data: {_safe_dumps({'type': 'text', 'content': safe_chunk})}\n\n"
+                    followup_text += sanitize_output_streaming(chunk)
 
                 current_text = followup_text
                 # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
                 full_response = followup_text
 
-            # Completeness guard for streamed assembly. The initial chunks cannot be
-            # retracted, so emit a replacement event the frontend can atomically apply.
+            # Completeness guard for streamed assembly. Since model turns are
+            # buffered, the client receives only this final sanitized response.
             full_response = _sanitize_internal_leakage_text(full_response)
             if needs_continuation(full_response, user_message=request.message, tool_results=tool_results_list):
                 try:
@@ -3989,15 +4016,16 @@ async def chat_stream(request: ChatRequest):
                     _replacement = strip_empty_sections(strip_tool_blocks(_complete_resp.content or ""))
                     if _replacement:
                         full_response = _replacement
-                        yield f"data: {_safe_dumps({'type': 'response_replacement', 'content': full_response, 'reason': 'completeness_guard'})}\n\n"
                 except Exception as _complete_err:
                     logger.warning("[stream] completeness recovery failed: %s", _complete_err)
             full_response = strip_empty_sections(full_response)
             truth_checked_response = _apply_truth_guardrails(request.message, full_response, tool_results_list)
             if truth_checked_response != full_response:
                 full_response = truth_checked_response
-                yield f"data: {_safe_dumps({'type': 'runtime_truth_correction', 'content': full_response})}\n\n"
-            conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(full_response))
+            full_response = strip_empty_sections(strip_tool_blocks(_sanitize_internal_leakage_text(full_response)))
+            if full_response:
+                yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
+            conversation_tracker.add_message(conv_id, "assistant", full_response)
             asyncio.create_task(_safe_background(
                 conversation_tracker.check_and_summarize(conv_id),
                 "summarization"

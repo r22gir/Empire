@@ -87,21 +87,35 @@ async def save_chat(req: SaveChatRequest):
 
 @router.put("/{chat_id}")
 async def update_chat(chat_id: str, req: UpdateChatRequest, user_id: str = "founder"):
-    chat_file = CHATS_DIR / user_id / f"{chat_id}.json"
-    if not chat_file.exists():
-        raise HTTPException(status_code=404, detail="Chat not found")
+    user_dir = CHATS_DIR / user_id
+    user_dir.mkdir(parents=True, exist_ok=True)
+    chat_file = user_dir / f"{chat_id}.json"
+    now = datetime.now().isoformat()
 
-    with open(chat_file, "r") as f:
-        chat_data = json.load(f)
+    if chat_file.exists():
+        with open(chat_file, "r") as f:
+            chat_data = json.load(f)
+        status = "updated"
+    else:
+        # The streaming client can generate its UUID before the first save.
+        # PUT is therefore an idempotent upsert, not a reason to turn a healthy
+        # completed response into a frontend "Connection error".
+        chat_data = {
+            "id": chat_id,
+            "title": _auto_title(req.messages),
+            "created_at": now,
+            "pinned": False,
+        }
+        status = "created"
 
     chat_data["messages"] = req.messages
-    chat_data["updated_at"] = datetime.now().isoformat()
+    chat_data["updated_at"] = now
     chat_data["preview"] = _get_preview(req.messages)
 
     with open(chat_file, "w") as f:
         json.dump(chat_data, f, indent=2)
 
-    return {"status": "updated", "chat_id": chat_id}
+    return {"status": status, "chat_id": chat_id}
 
 
 @router.get("/list")
