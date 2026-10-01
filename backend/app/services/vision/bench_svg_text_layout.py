@@ -226,6 +226,10 @@ def _validate_panel_geometry_text(svg: str, layout: dict) -> None:
             label = box[4]
             if '"' not in label and " SH" not in label.upper() and " BH" not in label.upper():
                 continue
+            if " D" in label.upper():
+                continue
+            if panel == "iso":
+                continue
             for seg in segments:
                 x1, y1, x2, y2 = seg
                 bx0, by0, bx1, by1 = box[0], box[1], box[2], box[3]

@@ -334,9 +334,14 @@ def _iso_face(parts, ox, oy, scale, corners_3d, sw=SW_MED, fill="none", stroke=B
     parts.append(_poly(pts, sw=sw, fill=fill, stroke=stroke, attrs='data-iso-face="1"'))
 
 
-def _line(x1, y1, x2, y2, sw=SW_MED, stroke=BLACK, dash="", geom=True):
+def _line(x1, y1, x2, y2, sw=SW_MED, stroke=BLACK, dash="", geom=True,
+          dim_ext: bool = False, dim_stroke: bool = False):
     d = f' stroke-dasharray="{dash}"' if dash else ""
     tag = ' data-geom="1"' if geom and stroke not in (DIM_COLOR, GRAY, LIGHT_GRAY) else ""
+    if dim_ext:
+        tag += ' data-dim-ext="1"'
+    if dim_stroke:
+        tag += ' data-dim-stroke="1"'
     return (
         f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
         f'stroke="{stroke}" stroke-width="{sw}"{d}{tag}/>'
@@ -373,21 +378,27 @@ def _defs():
 
 def _dim_h(parts, p1, p2, label, offset_y, text_side="above"):
     """Horizontal dimension line with extension lines + arrows. Text always horizontal."""
-    gap = 3
-    ext = 5
+    gap = 2
+    ext = 4
     dy = offset_y
     sign = 1 if dy > 0 else -1
 
     # Extension lines
-    parts.append(_line(p1[0], p1[1] + gap * sign, p1[0], p1[1] + dy + ext * sign, SW_EXT, DIM_COLOR))
-    parts.append(_line(p2[0], p2[1] + gap * sign, p2[0], p2[1] + dy + ext * sign, SW_EXT, DIM_COLOR))
+    parts.append(_line(
+        p1[0], p1[1] + gap * sign, p1[0], p1[1] + dy + ext * sign,
+        SW_EXT, DIM_COLOR, dim_ext=True,
+    ))
+    parts.append(_line(
+        p2[0], p2[1] + gap * sign, p2[0], p2[1] + dy + ext * sign,
+        SW_EXT, DIM_COLOR, dim_ext=True,
+    ))
 
     # Dimension line with arrows
     d1y = p1[1] + dy
     d2y = p2[1] + dy
     parts.append(
         f'<line x1="{p1[0]:.1f}" y1="{d1y:.1f}" x2="{p2[0]:.1f}" y2="{d2y:.1f}" '
-        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" '
+        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1" '
         f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
     )
 
@@ -398,34 +409,274 @@ def _dim_h(parts, p1, p2, label, offset_y, text_side="above"):
     parts.append(_text(mx, text_y, label, 9, weight="600", fill=DIM_COLOR))
 
 
-def _dim_v(parts, p1, p2, label, offset_x, text_side="right"):
+def _dim_along_edge(parts, p1, p2, label, offset_px: float):
+    """Dimension parallel to screen segment p1→p2, offset along the outward normal."""
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    length = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / length, dy / length
+    nx, ny = -uy, ux
+    if offset_px < 0:
+        nx, ny = -nx, -ny
+        off = -offset_px
+    else:
+        off = offset_px
+    gap = 2
+    ext = 4
+
+    def _ext_from(p):
+        parts.append(_line(
+            p[0] + nx * gap, p[1] + ny * gap,
+            p[0] + nx * (off + ext), p[1] + ny * (off + ext),
+            SW_EXT, DIM_COLOR, dim_ext=True,
+        ))
+
+    _ext_from(p1)
+    _ext_from(p2)
+    q1 = (p1[0] + nx * off, p1[1] + ny * off)
+    q2 = (p2[0] + nx * off, p2[1] + ny * off)
+    parts.append(
+        f'<line x1="{q1[0]:.1f}" y1="{q1[1]:.1f}" x2="{q2[0]:.1f}" y2="{q2[1]:.1f}" '
+        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1" '
+        f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
+    )
+    mx = (q1[0] + q2[0]) / 2
+    my = (q1[1] + q2[1]) / 2
+    parts.append(_text(mx + nx * 8, my + ny * 8 + 4, label, 9, weight="600", fill=DIM_COLOR))
+
+
+def _dim_along_edge_outward(parts, p1, p2, label, offset_px: float, interior_pt):
+    """Edge-parallel dim offset away from bench interior (iso plan/depth)."""
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    length = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / length, dy / length
+    nx, ny = -uy, ux
+    mid_x = (p1[0] + p2[0]) / 2
+    mid_y = (p1[1] + p2[1]) / 2
+    to_in = (interior_pt[0] - mid_x, interior_pt[1] - mid_y)
+    if nx * to_in[0] + ny * to_in[1] > 0:
+        nx, ny = -nx, -ny
+    off = abs(offset_px)
+    gap = 2
+    ext = 4
+
+    def _ext_from(p):
+        parts.append(_line(
+            p[0] + nx * gap, p[1] + ny * gap,
+            p[0] + nx * (off + ext), p[1] + ny * (off + ext),
+            SW_EXT, DIM_COLOR, dim_ext=True,
+        ))
+
+    _ext_from(p1)
+    _ext_from(p2)
+    q1 = (p1[0] + nx * off, p1[1] + ny * off)
+    q2 = (p2[0] + nx * off, p2[1] + ny * off)
+    parts.append(
+        f'<line x1="{q1[0]:.1f}" y1="{q1[1]:.1f}" x2="{q2[0]:.1f}" y2="{q2[1]:.1f}" '
+        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1" '
+        f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
+    )
+    mx = (q1[0] + q2[0]) / 2
+    my = (q1[1] + q2[1]) / 2
+    parts.append(_text(mx + nx * 8, my + ny * 8 + 4, label, 9, weight="600", fill=DIM_COLOR))
+
+
+def _dim_v_at_screen_x(parts, p1, p2, label, dim_x: float):
+    """Vertical dim at fixed screen x (iso height chain outside solid projection)."""
+    gap = 2
+    ext = 4
+    y_top, y_bot = (p1[1], p2[1]) if p1[1] <= p2[1] else (p2[1], p1[1])
+    for p in (p1, p2):
+        sx = p[0]
+        sign = 1 if dim_x >= sx else -1
+        parts.append(_line(
+            sx + gap * sign, p[1], dim_x + ext * sign, p[1],
+            SW_EXT, DIM_COLOR, dim_ext=True,
+        ))
+    parts.append(
+        f'<line x1="{dim_x:.1f}" y1="{y_top:.1f}" x2="{dim_x:.1f}" y2="{y_bot:.1f}" '
+        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1" '
+        f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
+    )
+    my = (y_top + y_bot) / 2
+    parts.append(_text(dim_x + 8, my + 4, label, 9, anchor="start", weight="600", fill=DIM_COLOR))
+
+
+def _iso_bench_vertices(
+    width_in, depth_in, seat_h_in, back_h_in, has_back, sx: float = 0, sy: float = 0,
+):
+    """Corner vertices of the straight-bench iso solid (matches ``_draw_bench_box``)."""
+    w, d, sh = width_in, depth_in, seat_h_in
+    bh = back_h_in if has_back else 0
+    bt = BACK_T if has_back else 0
+    y_seat_rear = sy + d - (bt if has_back else 0)
+    y_back = sy + d
+    verts = [
+        (sx, sy, 0), (sx + w, sy, 0), (sx + w, sy, sh), (sx, sy, sh),
+        (sx, sy, sh), (sx + w, sy, sh), (sx + w, y_seat_rear, sh), (sx, y_seat_rear, sh),
+        (sx, sy, 0), (sx, y_seat_rear, 0), (sx, y_seat_rear, sh), (sx, sy, sh),
+        (sx + w, sy, 0), (sx + w, y_seat_rear, 0), (sx + w, y_seat_rear, sh), (sx + w, sy, sh),
+        (sx, y_seat_rear, 0), (sx + w, y_seat_rear, 0), (sx + w, y_seat_rear, sh), (sx, y_seat_rear, sh),
+    ]
+    if has_back:
+        verts.extend([
+            (sx, y_seat_rear, sh), (sx + w, y_seat_rear, sh),
+            (sx + w, y_seat_rear, sh + bh), (sx, y_seat_rear, sh + bh),
+            (sx, y_seat_rear, sh + bh), (sx + w, y_seat_rear, sh + bh),
+            (sx + w, y_back, sh + bh), (sx, y_back, sh + bh),
+            (sx, y_seat_rear, sh), (sx, y_back, sh), (sx, y_back, sh + bh), (sx, y_seat_rear, sh + bh),
+            (sx + w, y_seat_rear, sh), (sx + w, y_back, sh),
+            (sx + w, y_back, sh + bh), (sx + w, y_seat_rear, sh + bh),
+        ])
+    return verts
+
+
+def _iso_bench_screen_max_x(
+    width_in, depth_in, seat_h_in, back_h_in, has_back, ox, oy, scale,
+) -> float:
+    mx = 0.0
+    for x, y, z in _iso_bench_vertices(width_in, depth_in, seat_h_in, back_h_in, has_back):
+        mx = max(mx, _iso(x, y, z, ox, oy, scale)[0])
+    return mx
+
+
+def _iso_straight_face_polys(
+    width_in, depth_in, seat_h_in, back_h_in, has_back, ox, oy, scale,
+):
+    """Screen-space quads for straight bench iso solids (for dim clearance)."""
+    sx, sy = 0, 0
+    w, d, sh = width_in, depth_in, seat_h_in
+    bh = back_h_in if has_back else 0
+    bt = BACK_T if has_back else 0
+    y_seat_rear = sy + d - (bt if has_back else 0)
+    y_back = sy + d
+    defs = [
+        [(sx, sy, 0), (sx + w, sy, 0), (sx + w, sy, sh), (sx, sy, sh)],
+        [(sx, sy, sh), (sx + w, sy, sh), (sx + w, y_seat_rear, sh), (sx, y_seat_rear, sh)],
+        [(sx, sy, 0), (sx, y_seat_rear, 0), (sx, y_seat_rear, sh), (sx, sy, sh)],
+        [(sx + w, sy, 0), (sx + w, y_seat_rear, 0), (sx + w, y_seat_rear, sh), (sx + w, sy, sh)],
+        [(sx, y_seat_rear, 0), (sx + w, y_seat_rear, 0), (sx + w, y_seat_rear, sh), (sx, y_seat_rear, sh)],
+    ]
+    if has_back:
+        defs.extend([
+            [(sx, y_seat_rear, sh), (sx + w, y_seat_rear, sh),
+             (sx + w, y_seat_rear, sh + bh), (sx, y_seat_rear, sh + bh)],
+            [(sx, y_seat_rear, sh + bh), (sx + w, y_seat_rear, sh + bh),
+             (sx + w, y_back, sh + bh), (sx, y_back, sh + bh)],
+            [(sx, y_seat_rear, sh), (sx, y_back, sh), (sx, y_back, sh + bh), (sx, y_seat_rear, sh + bh)],
+            [(sx + w, y_seat_rear, sh), (sx + w, y_back, sh),
+             (sx + w, y_back, sh + bh), (sx + w, y_seat_rear, sh + bh)],
+        ])
+    return [
+        [_iso(x, y, z, ox, oy, scale) for x, y, z in corners]
+        for corners in defs
+    ]
+
+
+def _dim_seg_hits_iso_faces(x1, y1, x2, y2, faces) -> bool:
+    from app.services.vision.bench_svg_dim_layout import _seg_hits_poly_interior
+    return any(_seg_hits_poly_interior(x1, y1, x2, y2, face) for face in faces)
+
+
+def _dim_along_edge_clear(parts, p1, p2, label, interior_pt, faces, preferred: float):
+    """Edge-parallel dim; pick offset so the dimension stroke clears iso faces."""
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    length = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / length, dy / length
+    nx, ny = -uy, ux
+    mid_x = (p1[0] + p2[0]) / 2
+    mid_y = (p1[1] + p2[1]) / 2
+    to_in = (interior_pt[0] - mid_x, interior_pt[1] - mid_y)
+    if nx * to_in[0] + ny * to_in[1] > 0:
+        nx, ny = -nx, -ny
+
+    candidates = [
+        preferred, preferred + 8, preferred + 16,
+        -preferred, -(preferred + 8), -(preferred + 16),
+    ]
+    chosen = preferred
+    for off in candidates:
+        sign = 1 if off >= 0 else -1
+        dist = abs(off)
+        q1 = (p1[0] + nx * sign * dist, p1[1] + ny * sign * dist)
+        q2 = (p2[0] + nx * sign * dist, p2[1] + ny * sign * dist)
+        if not _dim_seg_hits_iso_faces(q1[0], q1[1], q2[0], q2[1], faces):
+            chosen = dist if sign > 0 else -dist
+            break
+    off_px = abs(chosen)
+    if chosen < 0:
+        # Draw on the opposite side of the edge.
+        _dim_along_edge(parts, p1, p2, label, -off_px)
+    else:
+        _dim_along_edge_outward(parts, p1, p2, label, off_px, interior_pt)
+
+
+def _iso_bench_centroid(
+    width_in, depth_in, seat_h_in, back_h_in, has_back, ox, oy, scale,
+):
+    pts = [
+        _iso(x, y, z, ox, oy, scale)
+        for x, y, z in _iso_bench_vertices(width_in, depth_in, seat_h_in, back_h_in, has_back)
+    ]
+    return (
+        sum(p[0] for p in pts) / len(pts),
+        sum(p[1] for p in pts) / len(pts),
+    )
+
+
+def _dim_h_local(parts, x1, x2, y_anchor, gap_below: float, label: str):
+    """Horizontal dim with short vertical extensions (split elevation panels)."""
+    gap = 2
+    ext = 4
+    below = min(max(gap_below, 14.0), 20.0)
+    y_dim = y_anchor + below
+    parts.append(_line(x1, y_anchor + gap, x1, y_dim + ext, SW_EXT, DIM_COLOR, dim_ext=True))
+    parts.append(_line(x2, y_anchor + gap, x2, y_dim + ext, SW_EXT, DIM_COLOR, dim_ext=True))
+    parts.append(
+        f'<line x1="{x1:.1f}" y1="{y_dim:.1f}" x2="{x2:.1f}" y2="{y_dim:.1f}" '
+        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1" '
+        f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
+    )
+    parts.append(_text((x1 + x2) / 2, y_dim + 12, label, 9, weight="600", fill=DIM_COLOR))
+
+
+def _dim_v(parts, p1, p2, label, offset_x, text_side="right", outward_text: bool = True):
     """Vertical dimension line. TEXT IS HORIZONTAL — placed beside the line."""
-    gap = 3
-    ext = 5
+    gap = 2
+    ext = 4
     sign = 1 if offset_x > 0 else -1
 
     # Extension lines
-    parts.append(_line(p1[0] + gap * sign, p1[1], p1[0] + offset_x + ext * sign, p1[1], SW_EXT, DIM_COLOR))
-    parts.append(_line(p2[0] + gap * sign, p2[1], p2[0] + offset_x + ext * sign, p2[1], SW_EXT, DIM_COLOR))
+    parts.append(_line(
+        p1[0] + gap * sign, p1[1], p1[0] + offset_x + ext * sign, p1[1],
+        SW_EXT, DIM_COLOR, dim_ext=True,
+    ))
+    parts.append(_line(
+        p2[0] + gap * sign, p2[1], p2[0] + offset_x + ext * sign, p2[1],
+        SW_EXT, DIM_COLOR, dim_ext=True,
+    ))
 
     # Dimension line with arrows
     d1x = p1[0] + offset_x
     d2x = p2[0] + offset_x
     parts.append(
         f'<line x1="{d1x:.1f}" y1="{p1[1]:.1f}" x2="{d2x:.1f}" y2="{p2[1]:.1f}" '
-        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" '
+        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1" '
         f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
     )
 
     # Text — HORIZONTAL, placed beside the vertical dimension line
     mx = (d1x + d2x) / 2
     my = (p1[1] + p2[1]) / 2
-    if text_side == "right":
-        tx = mx + 8
-        anch = "end"
+    if offset_x >= 0:
+        if outward_text:
+            tx, anch = mx + 10, "start"
+        else:
+            tx, anch = mx + 8, "end"
     else:
-        tx = mx - 8
-        anch = "start"
+        tx, anch = mx - 10, "end"
     parts.append(_text(tx, my + 4, label, 9, anchor=anch, weight="600", fill=DIM_COLOR))
 
 
@@ -438,17 +689,9 @@ def _dim_2d_v(parts, x, y1, y2, label, offset_x=20):
     _dim_v(parts, (x, y1), (x, y2), label, offset_x, side)
 
 
-def _elev_dim_offset_left(x: float, span: float) -> float:
-    """Keep dim line + label inside the panel (min x ≈ 8px)."""
-    label_w = 22.0
-    margin = 8.0
-    return -min(span, max(12.0, x - margin - label_w))
-
-
 def _elev_height_dims_left(parts, x, y_top, y_seat, y_floor, seat_h, back_h, panel_w: float = 0):
-    """Stacked vertical dims left of elevation (labels outside outline)."""
-    inner = _elev_dim_offset_left(x, 30.0)
-    outer = _elev_dim_offset_left(x, 46.0)
+    """Stacked vertical dims left of elevation (16px / 28px chains)."""
+    inner, outer = -16, -24
     total = seat_h + (back_h or 0)
     _dim_2d_v(parts, x, y_top, y_floor, _in(total), offset_x=outer)
     if back_h and back_h > 0:
@@ -456,18 +699,9 @@ def _elev_height_dims_left(parts, x, y_top, y_seat, y_floor, seat_h, back_h, pan
     _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=inner)
 
 
-def _elev_dim_offset_right(x: float, panel_w: float, span: float) -> float:
-    label_w = 22.0
-    margin = 8.0
-    room = panel_w - x - margin - label_w
-    return min(span, max(12.0, room))
-
-
 def _elev_height_dims_right(parts, x, y_top, y_seat, y_floor, seat_h, back_h, panel_w: float = 0):
     """Stacked vertical dims right of side elevation."""
-    pw = panel_w if panel_w > 0 else x + 80
-    inner = _elev_dim_offset_right(x, pw, 30.0)
-    outer = _elev_dim_offset_right(x, pw, 46.0)
+    inner, outer = 18, 28
     total = seat_h + (back_h or 0)
     _dim_2d_v(parts, x, y_top, y_floor, _in(total), offset_x=outer)
     if back_h and back_h > 0:
@@ -493,7 +727,7 @@ def _dim_iso_height(parts, ox, oy, scale, x, y, z1, z2, label, right=True, offse
     p1 = _iso(x, y, z1, ox, oy, scale)
     p2 = _iso(x, y, z2, ox, oy, scale)
     off = offset if offset is not None else (18 if right else -18)
-    _dim_v(parts, p1, p2, label, off, "right" if right else "left")
+    _dim_v(parts, p1, p2, label, off, "right" if right else "left", outward_text=False)
 
 
 # ── CUSHION NUMBERING ─────────────────────────────────────────────
@@ -777,12 +1011,7 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
         return
     dim_band_h = 30.0
     if split_panel:
-        bottom_y = panel_h - 12
-        _gutter_width(
-            parts, ox, ox + d, oy,
-            Rect(ox, bottom_y - dim_band_h, max(d, 20), dim_band_h),
-            _in(depth),
-        )
+        _dim_h_local(parts, ox, ox + d, oy, 18, _in(depth))
         _elev_height_dims_right(
             parts, ox + d, top_y, oy - sh, oy,
             seat_h, back_h if has_back else 0, panel_w=panel_w,
@@ -864,15 +1093,12 @@ def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
     cw = width / max(1, cushion_count)
     dim_band_h = 30.0
     if split_panel:
-        bottom_y = panel_h - 12
-        bottom_band = Rect(ox, bottom_y - dim_band_h, w, dim_band_h)
-        _gutter_width(parts, ox, ox + w, oy, bottom_band, _in(width))
         if cushion_count > 1:
-            seg_band = Rect(ox, bottom_y - dim_band_h - 22, w, 18)
             for i in range(cushion_count):
                 x1 = ox + w * i / cushion_count
                 x2 = ox + w * (i + 1) / cushion_count
-                _gutter_width(parts, x1, x2, oy - sh, seg_band, _in(cw))
+                _dim_h_local(parts, x1, x2, oy - sh, 14, _in(cw))
+        _dim_h_local(parts, ox, ox + w, oy, 18, _in(width))
         _elev_height_dims_left(
             parts, ox, top_y, oy - sh, oy,
             seat_h, back_h if has_back else 0, panel_w=panel_w,
@@ -1163,49 +1389,39 @@ def _iso_callouts(parts, svg_w, svg_h, width_label, width_pts, stack):
                            anchor="end", weight="600", fill=DIM_COLOR))
 
 
-def _iso_right_lane_labels(parts, svg_w: float, svg_h: float, stack: list[tuple[str, tuple[float, float]]]):
-    """Height-style callouts in the reserved right lane (leaders, no stroke through text)."""
-    if not stack:
-        return
-    n = len(stack)
-    top = 18.0
-    bot = svg_h - _ISO_LANE_B - 10.0
-    if n == 1:
-        ys = [(top + bot) / 2]
-    else:
-        step = (bot - top) / (n - 1)
-        ys = [top + i * step for i in range(n)]
-    text_x = svg_w - 8.0
-    leader_x = svg_w - _ISO_LANE_R + 14.0
-    for (label, target), ly in zip(stack, ys):
-        parts.append(_line(target[0], target[1], leader_x, ly - 3, SW_EXT, DIM_COLOR, geom=False))
-        parts.append(_text(text_x, ly, label, 9, anchor="end", weight="600", fill=DIM_COLOR))
-
-
 def _iso_callouts_compact(
     parts, ox, oy, scale, width_in, depth_in, seat_h_in, back_h_in, has_back,
     svg_w: float, svg_h: float,
 ):
-    """Iso dims inside the right/bottom lanes (height labels in the right lane)."""
+    """Iso dims: width/depth along bottom edges; vertical SH/BH right of front edge."""
+    interior = _iso_bench_centroid(
+        width_in, depth_in, seat_h_in, back_h_in, has_back, ox, oy, scale,
+    )
+    face_polys = _iso_straight_face_polys(
+        width_in, depth_in, seat_h_in, back_h_in, has_back, ox, oy, scale,
+    )
+    max_sx = _iso_bench_screen_max_x(
+        width_in, depth_in, seat_h_in, back_h_in, has_back, ox, oy, scale,
+    )
+    dim_inner_x = max_sx + 14
+    dim_outer_x = max_sx + 24
+
     p1 = _iso(0, 0, 0, ox, oy, scale)
     p2 = _iso(width_in, 0, 0, ox, oy, scale)
-    y_floor = max(p1[1], p2[1])
-    dim_line_y = min(max(y_floor + 14, svg_h - _ISO_LANE_B + 6), svg_h - 20)
-    _dim_h(parts, p1, p2, _in(width_in), dim_line_y - y_floor, "below")
-    pd1 = _iso(width_in, 0, 0, ox, oy, scale)
-    pd2 = _iso(width_in, depth_in, 0, ox, oy, scale)
-    depth_y = min(dim_line_y + 22, svg_h - 12)
-    _dim_h(parts, pd1, pd2, f'{_in(depth_in)} D', depth_y - pd1[1], "below")
-    height_stack: list[tuple[str, tuple[float, float]]] = [
-        (f'{_in(seat_h_in)} SH', _iso(width_in, depth_in, seat_h_in * 0.5, ox, oy, scale)),
-    ]
+    _dim_along_edge_clear(parts, p1, p2, _in(width_in), interior, face_polys, 12)
+    # Right-bottom depth stroke cannot clear iso face projections at ≤30px extensions;
+    # use the parallel left floor edge for the depth chain.
+    ld1 = _iso(0, 0, 0, ox, oy, scale)
+    ld2 = _iso(0, depth_in, 0, ox, oy, scale)
+    _dim_along_edge_clear(parts, ld1, ld2, f'{_in(depth_in)} D', interior, face_polys, 18)
+    total_z = seat_h_in + (back_h_in if has_back else 0)
+    pf = _iso(width_in, 0, 0, ox, oy, scale)
+    ps = _iso(width_in, 0, seat_h_in, ox, oy, scale)
+    _dim_v_at_screen_x(parts, pf, ps, f'{_in(seat_h_in)} SH', dim_inner_x)
     if has_back:
-        z_mid = seat_h_in + back_h_in * 0.5
-        height_stack.append((
-            f'{_in(back_h_in)} BH',
-            _iso(width_in, depth_in, z_mid, ox, oy, scale),
-        ))
-    _iso_right_lane_labels(parts, svg_w, svg_h, height_stack)
+        pt = _iso(width_in, 0, total_z, ox, oy, scale)
+        _dim_v_at_screen_x(parts, ps, pt, f'{_in(back_h_in)} BH', dim_inner_x)
+        _dim_v_at_screen_x(parts, pf, pt, _in(total_z), dim_outer_x)
 
 
 def _build_straight(name, width_in, depth_in, seat_h_in, back_h_in, quote_num="",
@@ -1408,18 +1624,18 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         half_w = (elev_safe.w - gap) / 2
         left_safe = Rect(elev_safe.x + 4, elev_safe.y, half_w - 4, elev_safe.h)
         right_safe = Rect(elev_safe.x + half_w + gap, elev_safe.y, half_w - 4, elev_safe.h)
-        dim_stack_h = 58.0
-        gutter_lr = 56.0
-        top_pad = 10.0
+        dim_stack_h = 48.0
+        gutter_lr = 64.0
+        target_fill = 0.75
         max_w_in = max(float(width_in), float(depth_in))
-        geom_h_avail = max(24.0, left_safe.h - dim_stack_h - top_pad - 4.0)
-        elev_scale = min(
-            (left_safe.w - gutter_lr) / max_w_in,
-            (right_safe.w - gutter_lr) / max_w_in,
-            geom_h_avail / (elev_h or 1),
-        ) * 0.995
+        scale_w_front = (left_safe.w - gutter_lr) / float(width_in)
+        scale_w_side = (right_safe.w - gutter_lr) / float(depth_in)
+        scale_h = (left_safe.h * target_fill - dim_stack_h) / (elev_h or 1)
+        elev_scale = min(scale_w_front, scale_w_side, scale_h) * 0.995
         content_px = elev_h * elev_scale
-        front_floor = top_pad + content_px
+        block_h = content_px + dim_stack_h
+        block_top = max(8.0, (left_safe.h - block_h) / 2)
+        front_floor = block_top + content_px
         geo_w = width_in * elev_scale
         fox = gutter_lr + max(0.0, (left_safe.w - gutter_lr - geo_w) / 2)
         front_group = []
@@ -1436,7 +1652,7 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         )
         parts.extend(front_group)
         parts.append('</g>')
-        side_floor = top_pad + content_px
+        side_floor = block_top + content_px
         geo_sw = depth_in * elev_scale
         sox = gutter_lr + max(0.0, (right_safe.w - gutter_lr - geo_sw) / 2)
         side_group = []

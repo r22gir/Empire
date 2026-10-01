@@ -996,10 +996,6 @@ def _draw_u_plan(c, ox, oy, scale, u: UShellSpec, colored: bool = False, constru
         c.setFillColor(CUSH)
         c.setFont("Helvetica-Bold", CALLOUT_FONT)
         c.drawCentredString(sx(W / 2), sy(min(AL, AR) * 0.55 + D), "SEAT CUSHION FOOTPRINT")
-    c.setFillColor(GRAY)
-    c.setFont("Helvetica", NOTE_FONT)
-    c.drawString(sx(D) + 4, sy(AL) - 12, "miter @ corners")
-
     # Developed-run callout kept compact under plan (panel on sheet carries detail)
     c.setFillColor(NAVY)
     c.setFont("Helvetica-Bold", NOTE_FONT)
