@@ -2060,16 +2060,23 @@ def _split_invoice_from_invoice(params: dict, desk: Optional[str] = None) -> Too
 
     POST /api/v1/finance/invoices/{invoice_id}/split — no repricing, no drawings.
     Deposits/payments are omitted unless include_deposits / include_payments is true.
-    Client PDFs bill as Nelma's Workroom; use plain line descriptions (no allocation math).
+    Default billed_by is Empire Workroom; pass billed_by=nelmas_workroom when founder
+    requests Nelma's. Use plain line descriptions (no allocation math).
     """
     invoice_id = params.get("invoice_id", "")
     splits = params.get("splits")
+    default_billed_by = params.get("billed_by")
     if not invoice_id:
         return ToolResult(tool="split_invoice_from_invoice", success=False, error="invoice_id required")
     if not splits or not isinstance(splits, list):
         return ToolResult(tool="split_invoice_from_invoice", success=False, error="splits[] required")
+    if default_billed_by:
+        for part in splits:
+            if isinstance(part, dict) and not part.get("billed_by"):
+                part["billed_by"] = default_billed_by
     payload = {
         "splits": splits,
+        "billed_by": default_billed_by,
         "include_deposits": bool(params.get("include_deposits")),
         "include_payments": bool(params.get("include_payments")),
     }

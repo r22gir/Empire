@@ -117,6 +117,7 @@ class InvoiceSplitPart(BaseModel):
 class InvoiceSplitRequest(BaseModel):
     """Split a source invoice into new draft invoices (line items copied as given)."""
     splits: List[InvoiceSplitPart]
+    billed_by: Optional[str] = None
     include_deposits: bool = False
     include_payments: bool = False
 
@@ -1794,7 +1795,9 @@ def split_invoice_from_existing(
             if body.include_deposits:
                 deposit_required = float(source.get("deposit_required", 0) or deposit_required)
             client_job_deposit_schedule = 1
-            billed_by = billed_by_for_storage(part.billed_by or source.get("billed_by"))
+            billed_by = billed_by_for_storage(
+                part.billed_by or body.billed_by or source.get("billed_by")
+            )
 
             business_unit = _normalise_business(source.get("business_unit") or "workroom")
             if business_unit == "all":
