@@ -5505,7 +5505,8 @@ State machine: `draft → founder_review → sent → accepted → in_production
 - **web_search** — Search the web for current information, prices, suppliers, tutorials, or any topic. Returns titles, URLs, and snippets from DuckDuckGo.
   `{"tool": "web_search", "query": "best fabric suppliers for drapery wholesale", "num_results": 5}`
   Use for: research, current pricing, supplier info, industry news, competitor analysis, or any factual question needing live data.
-  After getting results, cite sources with markdown links: [Title](url)
+  For a factual or research question the runtime reads the full text of the top relevant pages (skipping dead or paywalled ones) before you answer. Answer from that page text. Do not stop at snippets, and do not offer to open the articles.
+  After getting results, cite sources with numbered markdown links: [1](url)
 - **web_read** — Fetch and read a web page. Returns extracted text content from any URL.
   `{"tool": "web_read", "url": "https://example.com/article", "max_chars": 6000}`
   Use after web_search to read full articles, or when the user shares a URL. Combine with web_search for deep research.

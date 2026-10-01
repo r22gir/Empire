@@ -52,7 +52,11 @@ from app.services.max.grounding_verifier import verify_web_response, log_to_audi
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.factual_guard import is_factual_question, enforce_web_search, grounding_directive
 from app.services.max.answer_quality import (
-    detect_quality_flags, freshness_directive, needs_continuation, strip_empty_sections,
+    COMPLETENESS_RECOVERY_INSTRUCTION,
+    detect_quality_flags,
+    freshness_directive,
+    needs_continuation,
+    repair_reply_structure,
 )
 from app.services.max.finance_readiness_lane import (
     finance_system_preamble,
@@ -1792,6 +1796,54 @@ def _normalize_tool_result_entry(item: Any) -> dict[str, Any]:
     }
 
 
+def _should_read_research_pages(question: str | None) -> bool:
+    """Factual and explicit research questions get full-page reads, not snippets."""
+    text = question or ""
+    if _is_local_finance_readiness_request(text):
+        return False
+    return is_factual_question(text) or _is_performative_web_search_request(text)
+
+
+async def _ground_search_payload(question: str, payload: dict, read_urls: set[str]) -> dict:
+    """Fetch top pages for a web_search payload off the event loop."""
+    from app.services.max.web_research import ground_web_search
+
+    if not isinstance(payload, dict):
+        payload = {}
+    grounded = await asyncio.to_thread(
+        ground_web_search, question, payload, skip_urls=set(read_urls),
+    )
+    for entry in grounded.get("tool_entries") or []:
+        url = str((entry.get("result") or {}).get("url") or "").strip()
+        if url:
+            read_urls.add(url.rstrip("/"))
+    return grounded
+
+
+async def _attach_research_page_reads(
+    question: str,
+    round_results: list[dict],
+    tool_results_list: list[dict],
+    read_urls: set[str],
+) -> list[dict]:
+    """After web_search in this round, read unread pages and record them as web_read."""
+    if not _should_read_research_pages(question):
+        return []
+    added: list[dict] = []
+    for entry in list(round_results):
+        if entry.get("tool") != "web_search" or not entry.get("success"):
+            continue
+        payload = entry.get("result")
+        if not isinstance(payload, dict):
+            continue
+        grounded = await _ground_search_payload(question, payload, read_urls)
+        for page_entry in grounded.get("tool_entries") or []:
+            round_results.append(page_entry)
+            tool_results_list.append(page_entry)
+            added.append(page_entry)
+    return added
+
+
 def _has_verified_email_send_result(tool_results: list[Any] | None) -> bool:
     for item in tool_results or []:
         entry = _normalize_tool_result_entry(item)
@@ -2956,6 +3008,8 @@ async def _chat_with_max_service(
         #     context) and H53 (if the block is empty, append NOTHING).
         _pre_search_executed = False
         _pre_search_entry = None
+        _research_page_entries: list[dict[str, Any]] = []
+        _research_read_urls: set[str] = set()
         _finance_prefetch_entries: list[dict[str, Any]] = []
         if _is_local_finance_readiness_request(request.message):
             _finance_prefetch_entries = await _prefetch_finance_readiness_entries(
@@ -2988,17 +3042,11 @@ async def _chat_with_max_service(
             _pre_search_entry = _normalize_tool_result_entry(search_result)
             _pre_search_executed = True
             if search_result.success and search_result.result:
-                tool_summary = (
-                    f"[web_search] Result:\n"
-                    f"{_safe_dumps(search_result.result, indent=2, default=str)[:4000]}"
+                _grounded = await _ground_search_payload(
+                    request.message, search_result.result, _research_read_urls,
                 )
-                messages.insert(-1, AIMessage(role="system", content=(
-                    "You must answer using only the verified web search data below. "
-                    "Do not fall back to training data. " + grounding_directive(request.message) + "\n\n"
-                    "Do not call web_read; answer directly from the verified search-result snippets. "
-                    "If the search returned no relevant results, say so honestly.\n\n"
-                    f"{tool_summary}\n\nQuestion: {request.message}"
-                )))
+                _research_page_entries = list(_grounded.get("tool_entries") or [])
+                messages.insert(-1, AIMessage(role="system", content=_grounded["message"]))
             # H53 HARMONISATION: when there are no verified results, append
             # NOTHING. The pre-fix code emitted a "[SYSTEM: web_search returned
             # no results — do not fabricate…]" block on role="user"; MAX read
@@ -3041,6 +3089,7 @@ async def _chat_with_max_service(
         tool_results_list = list(_finance_prefetch_entries)
         if _pre_search_entry:
             tool_results_list.append(_pre_search_entry)
+        tool_results_list.extend(_research_page_entries)
         final_content = response.content
         loop_messages = list(messages)
         current_response = response
@@ -3235,6 +3284,10 @@ async def _chat_with_max_service(
                 round_results.append(entry)
                 tool_results_list.append(entry)
 
+            research_entries = await _attach_research_page_reads(
+                request.message, round_results, tool_results_list, _research_read_urls,
+            )
+
             # D52 H80: round-aware halt. Round 0 is free — the model sees the
             # tool error and may self-correct (e.g., a typo'd column name).
             # Rounds 1 and 2 halt on any verification failure, so a db_query
@@ -3268,6 +3321,8 @@ async def _chat_with_max_service(
                     "Never use IDs from session handoff, active task state, or prior history."
                 )
 
+            if research_entries:
+                tool_summary += "\n\n" + grounding_directive(request.message)
             is_last_round = _tool_round >= 2
             followup_instruction = (
                 "Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks."
@@ -3295,12 +3350,7 @@ async def _chat_with_max_service(
                 )
                 _final_msgs = list(messages)
                 _final_msgs.append(AIMessage(role="system", content=(
-                    "The previous draft was incomplete or a tool failed. Do NOT call tools. "
-                    "Using only the successful verified context below, return the complete final "
-                    "answer now. Include numbered inline citations, a Sources list, and clearly "
-                    "label Verified facts versus Max's inference. Never mention tool errors. "
-                    "Every Phase heading must include concrete steps or deliverables, not only a Goal line.\n\n"
-                    + _verified_context
+                    COMPLETENESS_RECOVERY_INSTRUCTION + "\n\n" + _verified_context
                 )))
                 _final_resp = await ai_router.chat(
                     _final_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
@@ -3313,7 +3363,7 @@ async def _chat_with_max_service(
                     response.model_used = _final_resp.model_used
             except Exception as _final_err:
                 logger.warning(f"[chat] completeness recovery failed: {type(_final_err).__name__}: {_final_err}")
-            final_content = strip_empty_sections(final_content)
+            final_content = repair_reply_structure(final_content)
             if not final_content.strip():
                 _ok = [str(r.get("tool")) for r in tool_results_list if r.get("success")]
                 _bad = [f"{r.get('tool')} ({r.get('error')})" for r in tool_results_list if not r.get("success")]
@@ -3395,14 +3445,13 @@ async def _chat_with_max_service(
             # stands; the guard's purpose was to catch the hallucination, but
             # we cannot fix it with data we do not have.
             if search_result.success and search_result.result:
-                # Build grounding context and re-query AI with verified data
-                tool_summary = f"[web_search] Result:\n{_safe_dumps(search_result.result, indent=2, default=str)[:4000]}"
+                # Read the pages, then re-query from that text rather than snippets.
+                _fg_grounded = await _ground_search_payload(
+                    request.message, search_result.result, _research_read_urls,
+                )
+                tool_results_list.extend(_fg_grounded.get("tool_entries") or [])
                 grounded_messages = list(messages)
-                grounded_messages.append(AIMessage(role="system", content=(
-                    "You must answer using only the verified web search data below. "
-                    "Do not fall back to training data. Cite sources from the search results.\n\n"
-                    f"{tool_summary}\n\nQuestion: {request.message}"
-                )))
+                grounded_messages.append(AIMessage(role="system", content=_fg_grounded["message"]))
                 grounded_response = await ai_router.chat(
                     grounded_messages, model=model, desk=request.desk,
                     system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools
@@ -4024,6 +4073,8 @@ async def chat_stream(request: ChatRequest):
         full_response = ""
         # Guard: Pre-execute web_search for performative search requests before streaming
         _stream_pre_search_entry = None
+        _stream_page_entries: list[dict[str, Any]] = []
+        _stream_read_urls: set[str] = set()
         _stream_finance_entries = []
         if _is_local_finance_readiness_request(request.message):
             yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'finance', 'message': 'Loading finance counts and dollar totals'})}\n\n"
@@ -4055,17 +4106,11 @@ async def chat_stream(request: ChatRequest):
             # structurally identical to the H53 replay block. Append on
             # role="system"; suppress the empty-result branch entirely.
             if search_result.success and search_result.result:
-                tool_summary = (
-                    f"[web_search] Result:\n"
-                    f"{_safe_dumps(search_result.result, indent=2, default=str)[:4000]}"
+                _stream_grounded = await _ground_search_payload(
+                    request.message, search_result.result, _stream_read_urls,
                 )
-                messages.insert(-1, AIMessage(role="system", content=(
-                    "You must answer using only the verified web search data below. "
-                    "Do not fall back to training data. " + grounding_directive(request.message) + "\n\n"
-                    "Do not call web_read; answer directly from the verified search-result snippets. "
-                    "If the search returned no relevant results, say so honestly.\n\n"
-                    f"{tool_summary}\n\nQuestion: {request.message}"
-                )))
+                _stream_page_entries = list(_stream_grounded.get("tool_entries") or [])
+                messages.insert(-1, AIMessage(role="system", content=_stream_grounded["message"]))
             # If web_search returned nothing, append NOTHING. Do not fabricate
             # a "[SYSTEM: ...]" apology — that was the H53 shape in this code path.
         try:
@@ -4092,6 +4137,7 @@ async def chat_stream(request: ChatRequest):
             tool_results_list = list(_stream_finance_entries)
             if _stream_pre_search_entry:
                 tool_results_list.append(_stream_pre_search_entry)
+            tool_results_list.extend(_stream_page_entries)
             loop_messages = list(messages)
             current_text = full_response
             _seen_send_tool_calls: set[str] = set()
@@ -4260,6 +4306,14 @@ async def chat_stream(request: ChatRequest):
                     if entry.get("success"):
                         yield f"data: {_safe_dumps({'type': 'tool_result', **entry})}\n\n"
 
+                stream_research_entries = await _attach_research_page_reads(
+                    request.message, round_results, tool_results_list, _stream_read_urls,
+                )
+                if stream_research_entries:
+                    yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'research', 'message': f'Read {len(stream_research_entries)} source pages'})}\n\n"
+                    for research_entry in stream_research_entries:
+                        yield f"data: {_safe_dumps({'type': 'tool_result', **research_entry})}\n\n"
+
                 # D52 H80: same round-aware halt as the chat path above.
                 if _tool_round >= 1 and should_halt_after_tool_failure(round_results, user_message=request.message):
                     _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
@@ -4273,7 +4327,9 @@ async def chat_stream(request: ChatRequest):
                     tool_res = _r.get("result", "")
                     tool_err = _r.get("error", "Unknown")
                     if _r.get("success") and tool_res:
-                        tool_summary_parts.append(f"[{tool_key}] Result:\n{_safe_dumps(tool_res, indent=2, default=str)[:3000]}")
+                        # web_read carries the page text the answer has to cite.
+                        _limit = 5000 if tool_key == "web_read" else 3000
+                        tool_summary_parts.append(f"[{tool_key}] Result:\n{_safe_dumps(tool_res, indent=2, default=str)[:_limit]}")
                     else:
                         tool_summary_parts.append(f"[{tool_key}] Error: {tool_err}")
                 tool_summary = "\n\n".join(tool_summary_parts)
@@ -4289,6 +4345,8 @@ async def chat_stream(request: ChatRequest):
                         "Never use IDs from session handoff, active task state, or prior history."
                     )
 
+                if stream_research_entries:
+                    tool_summary += "\n\n" + grounding_directive(request.message)
                 is_last_round = _tool_round >= 2
                 followup_instruction = (
                     "Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks."
@@ -4334,28 +4392,24 @@ async def chat_stream(request: ChatRequest):
                     )
                     _complete_msgs = list(messages)
                     _complete_msgs.append(AIMessage(role="system", content=(
-                        "The streamed draft was incomplete or a tool failed. Do NOT call tools; "
-                        "using only the successful verified context below, return the complete "
-                        "answer with citations, Sources, and Verified versus Max's inference. "
-                        "Every Phase heading must include concrete steps or deliverables, not only a Goal line. "
-                        "Never mention tool errors.\n\n" + _verified_context
+                        COMPLETENESS_RECOVERY_INSTRUCTION + "\n\n" + _verified_context
                     )))
                     _complete_resp = await ai_router.chat(
                         _complete_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
                         conversation_id=request.conversation_id or "",
                     )
-                    _replacement = strip_empty_sections(strip_tool_blocks(_complete_resp.content or ""))
+                    _replacement = repair_reply_structure(strip_tool_blocks(_complete_resp.content or ""))
                     if _replacement:
                         full_response = _replacement
                     if getattr(_complete_resp, "model_used", None):
                         model_used = _complete_resp.model_used
                 except Exception as _complete_err:
                     logger.warning("[stream] completeness recovery failed: %s", _complete_err)
-            full_response = strip_empty_sections(full_response)
+            full_response = repair_reply_structure(full_response)
             truth_checked_response = _apply_truth_guardrails(request.message, full_response, tool_results_list)
             if truth_checked_response != full_response:
                 full_response = truth_checked_response
-            full_response = strip_empty_sections(strip_tool_blocks(_sanitize_internal_leakage_text(full_response)))
+            full_response = repair_reply_structure(strip_tool_blocks(_sanitize_internal_leakage_text(full_response)))
 
             # Save assistant response to unified cross-channel store
             try:
