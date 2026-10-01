@@ -43,6 +43,10 @@ LT_PEACH = HexColor("#feebc8")
 PATTERN_BACK = HexColor("#2a2a2a")      # one charcoal/black fabric fill
 PATTERN_BACK_DK = HexColor("#111111")   # outline / seam ink
 PATTERN_BACK_BAR = PATTERN_BACK          # compatibility alias; never a second fill
+
+_COM_FABRIC_TBD = "COM / fabric TBD"
+_PLAIN_MOCKUP_TAG = "BUDGET / BASIC PLAIN — plain backs + seats"
+_PATTERN_MOCKUP_TAG = "Pattern backs · plain seats"
 PATTERN_BACK_GAP = PATTERN_BACK_DK       # compatibility alias; no gap fill
 PATTERN_BACK_SEAM = HexColor("#080808")  # visible seams between the 2 bars
 PLAIN_SEAT = HexColor("#1c1c1c")        # plain smooth black seat
@@ -567,7 +571,7 @@ def compute_materials(
         'Do NOT order pattern yardage from face-SF x waste — order from BAR / closer / IC blanks.',
         'L depth/height still PROVISIONAL — L board counts & seat blanks change when locked to U.',
         f'Back lean/pitch provisional {u.back_lean_in:.1f}" top setback — boards follow angled back face; confirm lean on site.',
-        'COM / Nelma TBD — mockup colors placeholder only. No mill/SKU on this rev.',
+        f'{_COM_FABRIC_TBD} — mockup colors placeholder only. No mill/SKU on this rev.',
         'DRAFT deliverable — Face-SF figures kept for audit only; bar blanks are the order basis for PATTERN.',
     ]
     formulas = [
@@ -984,7 +988,7 @@ def _draw_u_plan(c, ox, oy, scale, u: UShellSpec, colored: bool = False, constru
         back_lab = "PLAIN BACK" if construction == "plain" else "BASKETWEAVE BACK"
         c.drawCentredString(sx(W / 2), sy(4), back_lab)
         c.setFont("Helvetica", NOTE_FONT - 1)
-        sub = "BUDGET / BASIC — no pattern modules" if construction == "plain" else "to match Sep 2022 / bar tile"
+        sub = "BUDGET / BASIC — no pattern modules" if construction == "plain" else "basketweave pattern backs"
         c.drawCentredString(sx(W / 2), sy(8), sub)
         c.setFillColor(HexColor("#aaaaaa"))
         c.setFont("Helvetica-Bold", CALLOUT_FONT)
@@ -2284,9 +2288,9 @@ def render_upholstery_shell_pdf(
         c, w, h,
         ("CLIENT MOCKUP — BUDGET PLAIN BACKS + SEATS" if is_plain else "CLIENT MOCKUP — BASKETWEAVE BACK / PLAIN SEAT"),
         (
-            "BUDGET / BASIC PLAIN — no basketweave modules · COM / Nelma TBD"
+            f"{_PLAIN_MOCKUP_TAG} · {_COM_FABRIC_TBD}"
             if is_plain else
-            "basketweave to match Sep 2022 / bar tile · plain smooth seat · COM / Nelma TBD"
+            f"{_PATTERN_MOCKUP_TAG} · {_COM_FABRIC_TBD}"
         ),
     )
     # U plan colored (left) + elev colored (right)
@@ -2313,12 +2317,12 @@ def render_upholstery_shell_pdf(
     c.setFillColor(GRAY)
     c.setFont("Helvetica", 6.5)
     if is_plain:
-        c.drawString(7.3 * inch, 2.36 * inch, "PLAIN backs + seats. No bar/")
-        c.drawString(7.3 * inch, 2.22 * inch, "tile pattern. COM TBD.")
+        c.drawString(7.3 * inch, 2.36 * inch, "PLAIN backs + seats — no modules.")
+        c.drawString(7.3 * inch, 2.22 * inch, _COM_FABRIC_TBD + ".")
         _plain_back_rect(c, 7.3 * inch, 1.55 * inch, 1.35 * inch, 0.55 * inch)
     else:
-        c.drawString(7.3 * inch, 2.36 * inch, "basketweave to match Sep 2022 /")
-        c.drawString(7.3 * inch, 2.22 * inch, "bar tile. COM TBD — not mill match.")
+        c.drawString(7.3 * inch, 2.36 * inch, "Basketweave pattern on backs;")
+        c.drawString(7.3 * inch, 2.22 * inch, f"plain seats. {_COM_FABRIC_TBD}.")
         # Mini weave swatch
         _basketweave_rect(c, 7.3 * inch, 1.55 * inch, 1.35 * inch, 0.55 * inch, tile=max(4.0, 0.55 * inch * (TILE_FACE_IN / 26.75)))
     c.setFillColor(PLAIN_SEAT)
@@ -2494,8 +2498,8 @@ def render_upholstery_shell_pdf(
                 f"Back face-SF (info): {back_face:.2f} sf",
                 f"Seat DECKS face: {mats.ply_seat_sf:.2f} sf",
                 f"Seat + back face: {back_face + mats.ply_seat_sf:.2f} sf",
-                "PLAIN pack — confirm ply if shop wraps existing shell",
-                "Shells already built — upholstery only",
+                "PLAIN pack — confirm ply / shell scope with shop",
+                "Upholstery scope per job notes — confirm before order",
             ],
             NAVY,
         )
@@ -2627,8 +2631,8 @@ def render_upholstery_shell_pdf(
                 f"Lean {u.back_lean_in:.1f}\" PROV setback."
             ),
             'Overall H prefers client net back above seat (30.5") + seat H AFF 18" PROV → shell 48.5".',
-            "COM / Nelma TBD. Shells already built — upholstery only. Confirm wrap/staple before fabric order.",
-            "DRAFT — not client-ready until Rafael visual sign-off.",
+            f"{_COM_FABRIC_TBD}. Confirm wrap/staple practice before fabric order.",
+            "DRAFT — for discussion; confirm dimensions on site before fabrication.",
         ]
         for a in plain_assumps:
             c.drawString(0.5 * inch, yy, "• " + a)

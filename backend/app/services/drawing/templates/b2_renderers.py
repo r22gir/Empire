@@ -1751,29 +1751,18 @@ def _render_side_section(
                _P(0.030), _P(0.125), fill=1, stroke=1)
         c.setFillColor(INK)
         c.setFont("Helvetica-Bold", 6.3)
-        c.drawRightString(_P(x_front - 0.04), _P(yf + 0.03),
+        c.drawRightString(_P(x_front - 0.06), _P(yf - 0.02),
                           "HEM BAR (RAISED)")
-        # Stack-height dim (golden) — 7" stack / fold anatomy
+        stack_mid = (hy - 0.07 - flat) - (stack_h - flat) * 0.52
+        stack_label = f'STACK {_fmt_in(stack_h - flat)}'
         c.setFillColor(DIM)
-        c.setFont("Helvetica-Bold", 6.3)
-        c.drawRightString(_P(wallx - 0.08),
-                          _P((hy - 0.07 - flat) - (stack_h - flat) * 0.55),
-                          'STACK 7"')
-        # R12.3.2 — the original `- 0.11" gap between STACK 7" and
-        # (FLAT TOP, FOLDS BELOW) put the two labels in pixel
-        # collision (label height ~0.087" + descender > 0.11" gap
-        # at heights ≤ 60). Use a deterministic 0.18" gap
-        # (≈12.9pt) which is label height + 0.09" margin — fits any
-        # sheet height without overlap.
-        c.drawRightString(_P(wallx - 0.08),
-                          _P((hy - 0.07 - flat) - (stack_h - flat) * 0.55 - 0.18),
+        c.setFont("Helvetica-Bold", 6.0)
+        c.drawRightString(_P(wallx - 0.10), _P(stack_mid + 0.20), stack_label)
+        c.drawRightString(_P(wallx - 0.10), _P(stack_mid - 0.02),
                           '(FLAT TOP, FOLDS BELOW)')
-        # FOLD STACK label (golden — leader on the right of the stack)
         c.setFillColor(INK)
-        c.setFont("Helvetica-Bold", 6.3)
-        c.drawRightString(_P(wallx - 0.08),
-                          _P((hy - 0.07 - flat) - (stack_h - flat) * 0.30),
-                          'FOLD STACK')
+        c.setFont("Helvetica-Bold", 6.0)
+        c.drawString(_P(x_front - 0.22), _P(stack_mid + 0.08), 'FOLD STACK')
         # R10: partial-raise label — drawn BELOW the stack with
         # shorter tracking so it fits inside the side-section
         # viewport (the founder's G1.3 bounds gate caught the

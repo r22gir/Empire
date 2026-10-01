@@ -662,14 +662,16 @@ def _plan_u_shape(parts, ox, oy, scale, back, side, depth, side_depth, seat_h, b
 # ── FRONT ELEVATION ───────────────────────────────────────────────
 
 def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
-                   panel_style="vertical_channels", channel_count=6):
-    """Side elevation: depth × (seat height + back height)."""
+                   panel_style="vertical_channels", channel_count=6,
+                   panel_w: float = 0, panel_h: float = 0):
+    """Side elevation: depth × (seat height + back height), local panel coords."""
     has_back = back_h is not None and back_h > 0 and panel_style != "none"
     d = depth * scale
     sh = seat_h * scale
     bh = (back_h if has_back else 0) * scale
     lean = min(d * 0.12, 10.0)
-    parts.append(_line(ox - 8, oy, ox + d + lean + 8, oy, SW_FLOOR, GRAY, "6,3"))
+    top_y = oy - sh - bh
+    parts.append(_line(ox - 6, oy, ox + d + lean + 6, oy, SW_FLOOR, GRAY, "6,3"))
     parts.append(_rect(ox, oy - sh, d, sh, SW_HEAVY))
     if has_back:
         parts.append(_rect(ox + lean * 0.35, oy - sh - bh, d, bh, SW_MED))
@@ -677,11 +679,22 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
             parts, ox + lean * 0.35, oy - sh - bh, d, bh,
             panel_style, channel_count,
         )
-    _gutter_width(parts, ox, ox + d, oy, Rect(ox - 28, oy + 6, 26, 40), _in(depth))
+    dim_band_h = 28.0
+    _gutter_width(
+        parts, ox, ox + d, oy,
+        Rect(ox, min(oy + 4, panel_h - dim_band_h), max(d, 20), dim_band_h),
+        _in(depth),
+    )
     total_h = seat_h + (back_h if has_back else 0)
+    dim_w = 30.0
     _gutter_height(
-        parts, oy - sh - bh, oy, ox + d + lean + 6,
-        Rect(ox + d + lean + 10, oy - total_h * scale - 8, 34, total_h * scale + 16),
+        parts, top_y, oy, ox + d + lean + 4,
+        Rect(
+            min(ox + d + lean + 8, panel_w - dim_w - 2),
+            max(top_y - 4, CAPTION_H),
+            dim_w,
+            max(oy - top_y + 8, 20),
+        ),
         _in(total_h), side="right",
     )
 
@@ -1138,7 +1151,7 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
                        assumptions=None, has_back=True, title_panel_style=None,
                        layout=None, ortho=None, plan_aside="",
                        include_side_elevation=False, side_args=(),
-                       sheet_kind="idea"):
+                       sheet_kind="idea", split_elevation=False):
     """Compose the shared idea-sheet: plan + elevation, iso, title block."""
     layout = layout or idea_sheet_regions()
     parts = [_defs()]
@@ -1153,7 +1166,9 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
     plan_safe = layout["plan_safe"]
     plan_fn(plan_group, *plan_args, cushion_width=cushion_width,
             panel_style=panel_style, channel_count=channel_count, **_pk)
-    parts.append(f'<g transform="translate({plan_safe.x:.1f},{plan_safe.y:.1f})">')
+    parts.append(
+        f'<g transform="translate({plan_safe.x:.1f},{plan_safe.y:.1f})" data-panel="plan">'
+    )
     parts.extend(plan_group)
     parts.append('</g>')
 
@@ -1168,32 +1183,56 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
     parts.append('</g>')
 
     elev_safe = layout["elev_safe"]
-    if include_side_elevation and side_args:
-        half = elev_safe.w / 2 - 12
+    if include_side_elevation and split_elevation:
+        width_in, depth_in, seat_h_in, back_h_in = (
+            elev_args[3], elev_args[4], elev_args[5], elev_args[6],
+        )
+        geo_back = float(back_h_in or 0) if back_h_in else 0.0
+        elev_h = seat_h_in + geo_back
         elev_frame = Rect(
             elev_safe.x, elev_safe.y - CAPTION_H, elev_safe.w, elev_safe.h + CAPTION_H,
         )
         _view_frame(parts, elev_frame, "FRONT + SIDE ELEVATION")
+        gap = 10.0
+        half_w = (elev_safe.w - gap) / 2
+        left_safe = Rect(elev_safe.x + 4, elev_safe.y, half_w - 4, elev_safe.h)
+        right_safe = Rect(elev_safe.x + half_w + gap, elev_safe.y, half_w - 4, elev_safe.h)
+        front_scale, fox, foy = _auto_scale_2d(
+            width_in, elev_h or 1, left_safe.w, left_safe.h, margin=8, fill=0.9,
+        )
+        front_floor = foy + elev_h * front_scale
         front_group = []
-        front_scale = elev_args[2] * (half / max(elev_safe.w / 2, 1))
-        fe_args = (elev_args[0], elev_args[1], front_scale, *elev_args[3:])
-        elev_fn(front_group, *fe_args, panel_style=panel_style, channel_count=channel_count)
-        parts.append(f'<g transform="translate({elev_safe.x:.1f},{elev_safe.y:.1f})">')
-        parts.extend(front_group)
-        parts.append('</g>')
-        depth_in, seat_h_in, back_h_in, side_ox, side_oy, side_scale = side_args
-        side_group = []
-        _side_straight(
-            side_group, side_ox, side_oy, side_scale,
-            depth_in, seat_h_in, back_h_in,
+        elev_fn(
+            front_group, fox, front_floor, front_scale,
+            width_in, depth_in, seat_h_in, back_h_in,
             panel_style=panel_style, channel_count=channel_count,
         )
-        parts.append('<g>')
+        parts.append(
+            f'<g transform="translate({left_safe.x:.1f},{left_safe.y:.1f})" '
+            f'data-panel="front-elev">'
+        )
+        parts.extend(front_group)
+        parts.append('</g>')
+        side_scale, sox, soy = _auto_scale_2d(
+            depth_in, elev_h or 1, right_safe.w, right_safe.h, margin=8, fill=0.9,
+        )
+        side_floor = soy + elev_h * side_scale
+        side_group = []
+        _side_straight(
+            side_group, sox, side_floor, side_scale,
+            depth_in, seat_h_in, back_h_in,
+            panel_style=panel_style, channel_count=channel_count,
+            panel_w=right_safe.w, panel_h=right_safe.h,
+        )
+        parts.append(
+            f'<g transform="translate({right_safe.x:.1f},{right_safe.y:.1f})" '
+            f'data-panel="side-elev">'
+        )
         parts.extend(side_group)
         parts.append('</g>')
-        label_y = elev_safe.y + CAPTION_H + 12
-        parts.append(_text(elev_safe.x + half * 0.45, label_y, "FRONT", 10, weight="600"))
-        parts.append(_text(side_ox + depth_in * side_scale * 0.35, label_y, "SIDE", 10, weight="600"))
+        label_y = elev_safe.y + CAPTION_H + 14
+        parts.append(_text(left_safe.x + left_safe.w * 0.45, label_y, "FRONT", 10, weight="600"))
+        parts.append(_text(right_safe.x + right_safe.w * 0.42, label_y, "SIDE", 10, weight="600"))
     else:
         _view_frame(parts, layout["elev"], "FRONT ELEVATION")
         elev_group = []
@@ -1326,17 +1365,6 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
     iso_args = (name, width_in, depth_in, seat_h_in, geo_back, quote_num)
 
     include_side = bool(kw.get("include_side_elevation"))
-    side_args = ()
-    if include_side:
-        half_w = max(layout["elev_safe"].w / 2 - 16, 100)
-        side_scale, side_ox, _ = _auto_scale_2d(
-            depth_in, elev_h or 1, half_w, layout["elev_safe"].h, margin=8, fill=0.88,
-        )
-        side_args = (
-            depth_in, seat_h_in, geo_back,
-            layout["elev_safe"].x + layout["elev_safe"].w / 2 + 8,
-            elev_ground_y, side_scale,
-        )
     sheet_kind = "shop" if kw.get("sheet_kind") == "shop" else "idea"
     return _compose_multiview(
         name, "straight", _build_straight, _plan_straight, _elev_straight,
@@ -1346,7 +1374,7 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
         layout=layout, ortho=ortho,
         plan_aside=_back_style_label(panel_style, has_back=has_back),
         include_side_elevation=include_side,
-        side_args=side_args,
+        split_elevation=include_side,
         sheet_kind=sheet_kind,
         **extras,
     )

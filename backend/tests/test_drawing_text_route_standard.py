@@ -47,6 +47,12 @@ FORBIDDEN_UL_PDF_MARKERS = (
     "Marleys",
     "107.750",
     "48.875",
+    "Nelma TBD",
+    "COM / Nelma",
+    "shells already built",
+    "Devon",
+    "Willard",
+    "Hillary",
 )
 
 
@@ -109,7 +115,10 @@ def test_roman_fold_spacing_and_render_date():
 
 def test_bench_side_elevation_svg_has_depth_and_back_dims():
     from app.services.vision.bench_renderer import render_straight
+    from app.services.vision.bench_svg_layout import validate_bench_svg_layout
+    from app.services.drawing.quote_sheet_layout import idea_sheet_regions
 
+    layout = idea_sheet_regions(title_rows=12)
     svg = render_straight(
         "Straight Bench",
         84,
@@ -121,9 +130,11 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
         sheet_kind="shop",
     )
     assert "SHOP DRAWING" in svg
-    assert "QUOTE" not in svg.split("SHOP DRAWING")[0][-80:]
+    assert 'data-panel="side-elev"' in svg
+    assert 'data-panel="front-elev"' in svg
     assert '18"' in svg or "18" in svg
     assert "16" in svg
+    validate_bench_svg_layout(svg, layout)
 
 
 def test_fresh_u_banquette_pdf_has_no_marley_fixture_strings():
@@ -135,7 +146,14 @@ def test_fresh_u_banquette_pdf_has_no_marley_fixture_strings():
     assert result.success, result.error
     pdf_path = (result.result or {}).get("pdf_path")
     assert pdf_path and Path(pdf_path).is_file()
-    blob = _pdf_text(pdf_path).lower()
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(pdf_path)
+        blob = "\n".join(
+            (page.extract_text() or "") for page in reader.pages
+        ).lower()
+    except ImportError:
+        blob = _pdf_text(pdf_path).lower()
     for marker in FORBIDDEN_UL_PDF_MARKERS:
         assert marker.lower() not in blob, f"unexpected fixture text {marker!r} in PDF"
     assert "empire workroom" in blob
