@@ -12,7 +12,11 @@ from app.services.drawing.bench_fabrication_params import (
     resolve_bench_fabrication,
 )
 from app.services.max.tool_executor import execute_tool
-from app.services.vision.bench_renderer import render_straight
+from app.services.vision.bench_renderer import (
+    _chained_section_dim_label,
+    _section_dims_should_collapse,
+    render_straight,
+)
 from app.services.vision.bench_svg_dim_layout import (
     validate_bench_depth_frame_note,
     validate_bench_raked_bh_parallel_to_back,
@@ -156,3 +160,58 @@ def test_render_straight_cushion_subdim():
         description=OWNER_A,
     )
     assert '2&quot; CUSH' in svg or '2" CUSH' in svg
+
+
+OWNER_10B_2S = (
+    "straight bench 84 in long, 18 in deep, 18 in high, tufted back 16 in, "
+    "2 seat cushions, 10 back cushions"
+)
+
+
+def _shop_svg_seat_back_sections(seat_n: int, back_n: int) -> str:
+    msg = (
+        f"straight bench 84 in long, 18 in deep, 18 in high, tufted back 16 in, "
+        f"{seat_n} seat cushions, {back_n} back cushions"
+    )
+    return _bench_svg_from_owner(msg)
+
+
+def _front_panel_text(svg: str) -> str:
+    import re
+    import xml.etree.ElementTree as ET
+
+    ns = {"svg": "http://www.w3.org/2000/svg"}
+    root = ET.fromstring(svg)
+    for g in root.findall(".//svg:g", ns):
+        if g.get("data-panel") != "front-elev":
+            continue
+        texts = []
+        for el in g.findall(".//svg:text", ns):
+            if el.text:
+                texts.append(el.text)
+        return " ".join(texts)
+    return ""
+
+
+@pytest.mark.parametrize("seat_n,back_n", [(1, 1), (2, 2), (3, 3), (2, 5), (2, 10), (4, 12)])
+def test_front_section_dims_no_label_overlap(seat_n, back_n):
+    svg = _shop_svg_seat_back_sections(seat_n, back_n)
+    validate_bench_front_side_view_labels_clear(svg)
+
+
+def test_section_dim_collapse_rules():
+    assert not _section_dims_should_collapse(1, 100, '42"')
+    assert not _section_dims_should_collapse(3, 80, '28"')
+    assert _section_dims_should_collapse(6, 80, '14"')
+    assert _section_dims_should_collapse(10, 30, '8-3/8"')
+    assert _chained_section_dim_label(10, 8.375) == '10 @ 8-3/8"'
+
+
+def test_owner_10_back_2_seat_chained_back_label():
+    svg = _bench_svg_from_owner(OWNER_10B_2S)
+    flat = svg.replace("&quot;", '"')
+    assert "10 @ 8-3/8" in flat or "10 @ 8.375" in flat
+    front = _front_panel_text(svg)
+    assert front.count('8-3/8"') <= 1
+    assert front.count('42"') == 2
+    validate_bench_front_side_view_labels_clear(svg)

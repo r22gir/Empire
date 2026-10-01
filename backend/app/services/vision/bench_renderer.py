@@ -670,6 +670,71 @@ def _dim_h_local_above(parts, x1, x2, y_anchor, gap_above: float, label: str):
                        weight="600", fill=DIM_COLOR))
 
 
+_DIM_LABEL_CHAR_W = 0.55
+_SECTION_LABEL_GAP_PX = 6.0
+_SECTION_LABEL_MAX_COUNT = 5
+
+
+def _dim_label_width_px(label: str, size: float = 9) -> float:
+    return len(label) * size * _DIM_LABEL_CHAR_W
+
+
+def _section_dims_should_collapse(n_sections: int, section_px: float, unit_label: str) -> bool:
+    n = max(1, int(n_sections))
+    if n <= 1:
+        return False
+    if n > _SECTION_LABEL_MAX_COUNT:
+        return True
+    return _dim_label_width_px(unit_label) + _SECTION_LABEL_GAP_PX > section_px
+
+
+def _chained_section_dim_label(n_sections: int, section_width_in: float) -> str:
+    return f'{int(n_sections)} @ {_fmt_in(section_width_in)}'
+
+
+def _dim_h_section_splits(
+    parts,
+    ox: float,
+    span_px: float,
+    n_sections: int,
+    section_width_in: float,
+    y_anchor: float,
+    *,
+    above: bool,
+    v_gap: float = 16,
+):
+    """Per-section dims, or one chained label with interior ticks when labels won't fit."""
+    n = max(1, int(n_sections))
+    if n <= 1:
+        return
+    unit = _fmt_in(section_width_in)
+    sec_px = span_px / n
+    collapse = _section_dims_should_collapse(n, sec_px, unit)
+    x0, x1 = ox, ox + span_px
+    if collapse:
+        chain = _chained_section_dim_label(n, section_width_in)
+        if above:
+            _dim_h_local_above(parts, x0, x1, y_anchor, v_gap, chain)
+            y_dim = y_anchor - min(max(v_gap, 14.0), 40.0)
+        else:
+            _dim_h_local(parts, x0, x1, y_anchor, v_gap, chain)
+            y_dim = y_anchor + min(max(v_gap, 14.0), 48.0)
+        for i in range(1, n):
+            sx = ox + span_px * i / n
+            parts.append(_line(
+                sx, y_dim - 4, sx, y_dim + 4, SW_DIM, DIM_COLOR,
+                geom=False, dim_stroke=True,
+            ))
+    else:
+        for i in range(n):
+            xa = ox + span_px * i / n
+            xb = ox + span_px * (i + 1) / n
+            if above:
+                _dim_h_local_above(parts, xa, xb, y_anchor, v_gap, unit)
+            else:
+                _dim_h_local(parts, xa, xb, y_anchor, v_gap, unit)
+
+
 def _dim_v(parts, p1, p2, label, offset_x, text_side="right", outward_text: bool = True,
            text_dy: float = 4, label_center: bool = False, dim_attrs: str = "",
            label_frac: float | None = None, label_h_offset: float = 0):
@@ -1350,16 +1415,15 @@ def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
     dim_band_h = 30.0
     if split_panel:
         if cushion_count > 1:
-            for i in range(cushion_count):
-                x1 = ox + w * i / cushion_count
-                x2 = ox + w * (i + 1) / cushion_count
-                _dim_h_local(parts, x1, x2, oy - sh, 14, _in(cw))
+            _dim_h_section_splits(
+                parts, ox, w, cushion_count, cw, oy - sh,
+                above=False, v_gap=14,
+            )
         if has_back and int(back_sections or 1) > 1:
-            b_sec = int(back_sections or 1)
-            for i in range(b_sec):
-                x1 = ox + w * i / b_sec
-                x2 = ox + w * (i + 1) / b_sec
-                _dim_h_local_above(parts, x1, x2, top_y, 16, _in(bsw))
+            _dim_h_section_splits(
+                parts, ox, w, int(back_sections or 1), bsw, top_y,
+                above=True, v_gap=16,
+            )
         _dim_h_local(parts, ox, ox + w, oy, 18, _in(width))
         _elev_height_dims_right(
             parts, ox + w, top_y, oy - sh, oy,
@@ -1373,10 +1437,18 @@ def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
         _gutter_width(parts, ox, ox + w, oy, bottom_band, _in(width))
         if cushion_count > 1:
             seg_band = Rect(ox, min(oy + 2, panel_h - dim_band_h - 22), w, 18)
-            for i in range(cushion_count):
-                x1 = ox + w * i / cushion_count
-                x2 = ox + w * (i + 1) / cushion_count
-                _gutter_width(parts, x1, x2, oy - sh, seg_band, _in(cw))
+            sec_px = w / cushion_count
+            unit = _fmt_in(cw)
+            if _section_dims_should_collapse(cushion_count, sec_px, unit):
+                _gutter_width(
+                    parts, ox, ox + w, oy - sh, seg_band,
+                    _chained_section_dim_label(cushion_count, cw),
+                )
+            else:
+                for i in range(cushion_count):
+                    x1 = ox + w * i / cushion_count
+                    x2 = ox + w * (i + 1) / cushion_count
+                    _gutter_width(parts, x1, x2, oy - sh, seg_band, unit)
         left_band = Rect(4, max(top_y - 4, 8), 30, max(oy - top_y + 12, 28))
         _gutter_height(parts, top_y, oy, ox, left_band, _in(seat_h + (back_h if has_back else 0)), side="left")
         if has_back and bh > 2:
