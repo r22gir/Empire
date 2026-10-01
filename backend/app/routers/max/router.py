@@ -3784,6 +3784,45 @@ async def chat_stream(request: ChatRequest):
         full_response = ""
         # Guard: Pre-execute web_search for performative search requests before streaming
         _stream_pre_search_entry = None
+        _stream_finance_entries = []
+        if _is_local_finance_readiness_request(request.message):
+            # Finance readiness is a local-data task. Execute the requested
+            # counts deterministically so the model cannot stop after a schema
+            # inventory or lose the table-to-count mapping across tool rounds.
+            finance_tables = (
+                ("quotes", "quotes_v2"), ("invoices", "invoices"),
+                ("payments", "payments"), ("expenses", "expenses"),
+                ("chart_of_accounts", "chart_of_accounts"),
+                ("customers", "customers"), ("contacts", "contacts"),
+                ("jobs", "jobs"), ("inventory_items", "inventory_items"),
+                ("leads", "leads"), ("vendors", "vendors"),
+            )
+            yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'finance', 'message': 'Counting requested finance records'})}\n\n"
+
+            async def _count_finance_table(label, table):
+                result = await asyncio.to_thread(
+                    execute_tool,
+                    {"tool": "db_query", "query": f"SELECT COUNT(*) AS record_count FROM {table}"},
+                    desk=request.desk, access_context=_stream_ac_context, founder=founder,
+                )
+                entry = _normalize_tool_result_entry(result)
+                if entry.get("success") and isinstance(entry.get("result"), dict):
+                    entry["result"]["requested_name"] = label
+                return entry
+
+            _stream_finance_entries = await asyncio.gather(
+                *(_count_finance_table(label, table) for label, table in finance_tables)
+            )
+            _finance_context = "\n".join(
+                f"[{e.get('result', {}).get('requested_name', '?')}] "
+                f"{_safe_dumps(e.get('result', {}), default=str)[:800]}"
+                for e in _stream_finance_entries if e.get("success")
+            )
+            messages.insert(-1, AIMessage(role="system", content=(
+                "Verified local finance counts are below. Use these exact values in a "
+                "labeled table, then provide the QuickBooks feature-gap plan. Do not "
+                "call web_search for this local-data request.\n" + _finance_context
+            )))
         if not request.desk and (
             (_is_performative_web_search_request(request.message)
              or is_factual_question(request.message))
@@ -3836,7 +3875,9 @@ async def chat_stream(request: ChatRequest):
                 full_response += sanitize_output_streaming(chunk)
 
             # Multi-turn tool loop: execute tools, allow follow-up tools (max 3 rounds)
-            tool_results_list = [_stream_pre_search_entry] if _stream_pre_search_entry else []
+            tool_results_list = list(_stream_finance_entries)
+            if _stream_pre_search_entry:
+                tool_results_list.append(_stream_pre_search_entry)
             loop_messages = list(messages)
             current_text = full_response
             _seen_send_tool_calls: set[str] = set()
