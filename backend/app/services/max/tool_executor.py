@@ -3135,6 +3135,7 @@ def _render_bench_shop_drawing(params: dict, dims: dict) -> ToolResult | None:
         back_sections=resolved.get("back_sections"),
         back_angle_deg=resolved.get("back_angle_deg"),
         cushion_count=resolved.get("cushion_count"),
+        seat_cushion_overhang=resolved.get("seat_cushion_overhang"),
     )
 
     out_dir = canonical_drawings_dir()

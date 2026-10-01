@@ -149,6 +149,173 @@ def validate_bench_side_back_rake_rearward(svg: str) -> None:
     raise AssertionError("no side back polygon (data-side-back) in side-elev panel")
 
 
+def _side_elev_panel(root) -> tuple[float, float, ET.Element] | None:
+    for g in root.findall(".//svg:g", _SVG_NS):
+        if g.get("data-panel") == "side-elev":
+            tx, ty = _parse_translate(g.get("transform", ""))
+            return tx, ty, g
+    return None
+
+
+def validate_bench_side_seat_dim_stack(svg: str) -> None:
+    """Side elevation seat dims: DK/CUSH/SH must not extend below floor."""
+    root = ET.fromstring(svg)
+    panel = _side_elev_panel(root)
+    if panel is None:
+        raise AssertionError("no side-elev panel")
+    tx, ty, g = panel
+    floor_y: float | None = None
+    for el in g.findall(".//svg:line", _SVG_NS):
+        if el.get("data-side-floor") == "1":
+            y1, y2 = _float_attr(el, "y1"), _float_attr(el, "y2")
+            if y1 is not None:
+                floor_y = ty + y1
+                break
+    if floor_y is None:
+        raise AssertionError("side floor line (data-side-floor) missing")
+
+    for el in g.iter():
+        tag = el.tag.split("}")[-1]
+        if tag != "line" or el.get("data-dim-stroke") != "1":
+            continue
+        x1, y1 = _float_attr(el, "x1"), _float_attr(el, "y1")
+        x2, y2 = _float_attr(el, "x2"), _float_attr(el, "y2")
+        if None in (x1, y1, x2, y2):
+            continue
+        y1, y2 = ty + y1, ty + y2
+        if abs(y1 - y2) < 2 or abs(x1 - x2) > 2:
+            continue
+        if max(y1, y2) > floor_y + 1.0:
+            raise AssertionError(
+                f"vertical seat dim extends below floor ({max(y1, y2):.1f} > {floor_y:.1f})"
+            )
+
+
+def validate_bench_side_tufts_inside_back(svg: str) -> None:
+    """Tuft circles/lines on side back must lie inside the back polygon."""
+    root = ET.fromstring(svg)
+    panel = _side_elev_panel(root)
+    if panel is None:
+        return
+    tx, ty, g = panel
+    back_poly: list[tuple[float, float]] = []
+    for poly in g.findall(".//svg:polygon", _SVG_NS):
+        if poly.get("data-side-back") == "1":
+            back_poly = [(x + tx, y + ty) for x, y in _parse_points(poly.get("points", ""))]
+            break
+    if not back_poly:
+        return
+    tuft_g = None
+    for child in g.findall(".//svg:g", _SVG_NS):
+        if child.get("data-side-back-tuft") == "1":
+            tuft_g = child
+            break
+    if tuft_g is None:
+        return
+    if tuft_g.get("clip-path"):
+        return
+    for circle in tuft_g.findall(".//svg:circle", _SVG_NS):
+        cx = _float_attr(circle, "cx")
+        cy = _float_attr(circle, "cy")
+        r = _float_attr(circle, "r") or 0
+        if cx is None or cy is None:
+            continue
+        cx, cy = tx + cx, ty + cy
+        if not _point_in_poly(cx, cy, back_poly):
+            raise AssertionError("tuft circle center outside side back polygon")
+        for ang in range(0, 360, 90):
+            rad = math.radians(ang)
+            px = cx + r * math.cos(rad)
+            py = cy + r * math.sin(rad)
+            if not _point_in_poly(px, py, back_poly):
+                raise AssertionError("tuft circle extends outside side back polygon")
+    for line in tuft_g.findall(".//svg:line", _SVG_NS):
+        x1, y1 = _float_attr(line, "x1"), _float_attr(line, "y1")
+        x2, y2 = _float_attr(line, "x2"), _float_attr(line, "y2")
+        if None in (x1, y1, x2, y2):
+            continue
+        for px, py in ((tx + x1, ty + y1), (tx + x2, ty + y2)):
+            if not _point_in_poly(px, py, back_poly):
+                raise AssertionError("tuft line endpoint outside side back polygon")
+
+
+def _side_dim_labels(svg: str) -> list[str]:
+    root = ET.fromstring(svg)
+    panel = _side_elev_panel(root)
+    if not panel:
+        return []
+    tx, ty, g = panel
+    labels: list[str] = []
+    for el in g.findall(".//svg:text", _SVG_NS):
+        t = (el.text or "").strip()
+        if t:
+            labels.append(t.replace("&quot;", '"'))
+    return labels
+
+
+def validate_bench_seat_cushion_consistency(
+    svg: str,
+    *,
+    cushion_in: float,
+    deck_in: float,
+    seat_h_in: float,
+) -> None:
+    """Side elevation must show matching SH, DK, and CUSH inch values."""
+    labels = " ".join(_side_dim_labels(svg))
+    cush_s = _fmt_in_label(cushion_in)
+    deck_s = _fmt_in_label(deck_in)
+    sh_s = _fmt_in_label(seat_h_in)
+    if f'{cush_s} CUSH' not in labels and f'{cushion_in:g}" CUSH' not in labels:
+        raise AssertionError(f'missing {cushion_in}" CUSH in side labels: {labels[:120]}')
+    if f'{deck_s} DK' not in labels and f'{deck_in:g}" DK' not in labels:
+        raise AssertionError(f'missing {deck_in}" DK in side labels')
+    if f'{sh_s} SH' not in labels and f'{seat_h_in:g}" SH' not in labels:
+        raise AssertionError(f'missing {seat_h_in}" SH in side labels')
+
+
+def _fmt_in_label(val: float) -> str:
+    if abs(val - round(val)) < 0.01:
+        return f'{int(round(val))}"'
+    return f'{val:g}"'
+
+
+def validate_bench_seat_overhang_dim(svg: str, overhang_in: float) -> None:
+    labels = " ".join(_side_dim_labels(svg))
+    oh = _fmt_in_label(overhang_in)
+    if f'{oh} OH' not in labels and overhang_in <= 0:
+        return
+    if f'{oh} OH' not in labels:
+        raise AssertionError(f'missing {overhang_in}" overhang (OH) dim on side elevation')
+
+
+def validate_bench_raked_bh_parallel_to_back(svg: str) -> None:
+    """When back is raked, BH dim must be oblique (not vertical)."""
+    root = ET.fromstring(svg)
+    panel = _side_elev_panel(root)
+    if not panel:
+        return
+    tx, ty, g = panel
+    angle_deg: float | None = None
+    for poly in g.findall(".//svg:polygon", _SVG_NS):
+        if poly.get("data-side-back") == "1":
+            try:
+                angle_deg = float(poly.get("data-back-angle-deg", "0") or 0)
+            except ValueError:
+                angle_deg = 0.0
+            break
+    if not angle_deg or angle_deg <= 0.05:
+        return
+    has_oblique_bh = False
+    for el in g.iter():
+        if el.tag.split("}")[-1] != "line" or el.get("data-dim-stroke") != "1":
+            continue
+        if el.get("data-dim-oblique") == "1" or el.get("data-side-bh") == "1":
+            has_oblique_bh = True
+            break
+    if not has_oblique_bh:
+        raise AssertionError("raked back requires oblique BH dimension on side elevation")
+
+
 def validate_bench_iso_dims_clear_faces(svg: str) -> None:
     """No iso dimension stroke may pass through an iso face polygon interior."""
     root = ET.fromstring(svg)

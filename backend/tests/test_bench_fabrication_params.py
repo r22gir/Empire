@@ -13,7 +13,14 @@ from app.services.drawing.bench_fabrication_params import (
 )
 from app.services.max.tool_executor import execute_tool
 from app.services.vision.bench_renderer import render_straight
-from app.services.vision.bench_svg_dim_layout import validate_bench_side_back_rake_rearward
+from app.services.vision.bench_svg_dim_layout import (
+    validate_bench_raked_bh_parallel_to_back,
+    validate_bench_seat_cushion_consistency,
+    validate_bench_seat_overhang_dim,
+    validate_bench_side_back_rake_rearward,
+    validate_bench_side_seat_dim_stack,
+    validate_bench_side_tufts_inside_back,
+)
 
 
 OWNER_A = (
@@ -100,12 +107,21 @@ def test_owner_vertical_back_svg():
     assert "CUSH" in svg
     assert 'data-back-angle-deg="0.00"' in svg
     validate_bench_side_back_rake_rearward(svg)
+    validate_bench_side_seat_dim_stack(svg)
+    validate_bench_side_tufts_inside_back(svg)
+    validate_bench_seat_cushion_consistency(svg, cushion_in=2.0, deck_in=16.0, seat_h_in=18.0)
+    validate_bench_seat_overhang_dim(svg, 1.0)
 
 
 def test_owner_raked_back_svg():
     svg = _bench_svg_from_owner(OWNER_B)
     assert 'data-back-angle-deg="10.00"' in svg
     validate_bench_side_back_rake_rearward(svg)
+    validate_bench_side_seat_dim_stack(svg)
+    validate_bench_side_tufts_inside_back(svg)
+    validate_bench_seat_cushion_consistency(svg, cushion_in=2.0, deck_in=16.0, seat_h_in=18.0)
+    validate_bench_seat_overhang_dim(svg, 1.0)
+    validate_bench_raked_bh_parallel_to_back(svg)
 
 
 def test_render_straight_cushion_subdim():

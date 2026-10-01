@@ -10,6 +10,7 @@ from app.services.drawing.bench_quote_bridge import length_to_inches_from_text
 
 DEFAULT_SEAT_CUSHION_THICKNESS_IN = 2.0
 DEFAULT_BACK_THICKNESS_IN = 2.0
+DEFAULT_SEAT_CUSHION_OVERHANG_IN = 1.0
 DEFAULT_BACK_ANGLE_DEG = 0.0
 RAKED_BACK_DEFAULT_DEG = 8.0
 
@@ -18,18 +19,22 @@ RAKED_BACK_DEFAULT_DEG = 8.0
 class BenchFabricationParams:
     seat_cushion_thickness_in: float
     back_thickness_in: float
+    seat_cushion_overhang_in: float
     seat_sections: int
     back_sections: int
     back_angle_deg: float
     seat_section_width_in: float
     back_section_width_in: float
+    seat_height_in: float = 18.0
 
-    @property
     def seat_deck_height_in(self) -> float:
-        return max(0.0, 0.0)  # set via seat_height on render
+        return max(0.0, float(self.seat_height_in) - self.seat_cushion_thickness_in)
+
+    def seat_frame_depth_in(self, overall_depth_in: float) -> float:
+        return max(0.0, float(overall_depth_in) - self.back_thickness_in)
 
     def seat_cushion_depth_in(self, overall_depth_in: float) -> float:
-        return max(0.0, float(overall_depth_in) - self.back_thickness_in)
+        return self.seat_frame_depth_in(overall_depth_in)
 
     def side_back_lean_px(self, back_h_in: float, scale: float) -> float:
         if self.back_angle_deg <= 0 or not back_h_in:
@@ -103,6 +108,13 @@ def parse_bench_fabrication_from_text(text: str) -> dict[str, Any]:
     if bt:
         out["back_thickness"] = float(bt.group(1))
 
+    oh = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:\"|in)?\s*(?:seat\s+)?(?:cushion\s+)?overhang",
+        t,
+    )
+    if oh:
+        out["seat_cushion_overhang"] = float(oh.group(1))
+
     m = re.search(
         r"raked\s+back\s+(\d+(?:\.\d+)?)\s*(?:deg(?:rees)?)?",
         t,
@@ -173,17 +185,25 @@ def resolve_bench_fabrication(
     else:
         angle = float(angle)
 
+    overhang = _float_from_text(
+        merged.get("seat_cushion_overhang") or merged.get("seat_cushion_overhang_in"),
+        DEFAULT_SEAT_CUSHION_OVERHANG_IN,
+    )
+    overhang = max(0.0, overhang)
+
     seat_w = float(width_in) / seat_sections
     back_w = float(width_in) / back_sections
 
     return BenchFabricationParams(
         seat_cushion_thickness_in=seat_cush,
         back_thickness_in=back_thk,
+        seat_cushion_overhang_in=overhang,
         seat_sections=seat_sections,
         back_sections=back_sections,
         back_angle_deg=angle,
         seat_section_width_in=seat_w,
         back_section_width_in=back_w,
+        seat_height_in=float(seat_height_in),
     )
 
 
@@ -216,6 +236,8 @@ def merge_fabrication_into_sketch(resolved: dict, notes: str = "", dims: Optiona
         back_angle_deg=fab.back_angle_deg,
         seat_section_width=fab.seat_section_width_in,
         back_section_width=fab.back_section_width_in,
+        seat_cushion_overhang=fab.seat_cushion_overhang_in,
+        seat_frame_depth=fab.seat_frame_depth_in(depth),
         cushion_count=fab.seat_sections,
     )
     return out

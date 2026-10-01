@@ -23,6 +23,7 @@ Rules enforced:
 import math
 import os
 import logging
+import uuid
 from datetime import datetime
 
 logger = logging.getLogger("bench_renderer")
@@ -700,6 +701,42 @@ def _dim_2d_v(parts, x, y1, y2, label, offset_x=20, outward_text: bool = True,
            outward_text=outward_text, text_dy=text_dy)
 
 
+def _dim_oblique(
+    parts,
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    label: str,
+    offset: float = 18.0,
+    attrs: str = "",
+):
+    """Dimension parallel to segment p1→p2; offset along outward normal (screen right)."""
+    x1, y1 = p1
+    x2, y2 = p2
+    dx, dy = x2 - x1, y2 - y1
+    ln = math.hypot(dx, dy) or 1.0
+    nx, ny = dy / ln, -dx / ln
+    ox, oy = nx * offset, ny * offset
+    ext = 4.0
+    parts.append(_line(
+        x1, y1, x1 + ox * (1 + ext / max(abs(offset), 1)), y1 + oy * (1 + ext / max(abs(offset), 1)),
+        SW_EXT, DIM_COLOR, dim_ext=True,
+    ))
+    parts.append(_line(
+        x2, y2, x2 + ox * (1 + ext / max(abs(offset), 1)), y2 + oy * (1 + ext / max(abs(offset), 1)),
+        SW_EXT, DIM_COLOR, dim_ext=True,
+    ))
+    ax, ay = x1 + ox, y1 + oy
+    bx, by = x2 + ox, y2 + oy
+    extra = f' data-dim-stroke="1" data-dim-oblique="1"{attrs}'
+    parts.append(
+        f'<line x1="{ax:.1f}" y1="{ay:.1f}" x2="{bx:.1f}" y2="{by:.1f}" '
+        f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}"{extra} '
+        f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
+    )
+    mx, my = (ax + bx) / 2, (ay + by) / 2
+    parts.append(_text(mx + 8, my + 4, label, 9, anchor="start", weight="600", fill=DIM_COLOR))
+
+
 def _elev_height_dims_left(
     parts, x, y_top, y_seat, y_floor, seat_h, back_h, panel_w: float = 0,
     deck_height_in: float | None = None, seat_cushion_thickness_in: float = 0,
@@ -720,15 +757,9 @@ def _elev_height_dims_left(
             _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=inner)
             return
         sub_x = -26 if not include_overall else -12
-        _dim_2d_v(parts, x, y_deck, y_floor, f'{_in(deck)} DK', offset_x=sub_x, text_dy=-22)
-        _dim_2d_v(
-            parts, x, y_seat, y_deck, f'{_in(cush)} CUSH',
-            offset_x=(-20 if not include_overall else sub_x), text_dy=22,
-        )
-        _dim_2d_v(
-            parts, x, y_seat, y_floor, f'{_in(seat_h)} SH',
-            offset_x=-14, text_dy=0,
-        )
+        _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=-22)
+        _dim_2d_v(parts, x, y_deck, y_floor, f'{_in(deck)} DK', offset_x=-30)
+        _dim_2d_v(parts, x, y_seat, y_deck, f'{_in(cush)} CUSH', offset_x=-30)
     elif seat_h:
         _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=inner)
 
@@ -736,35 +767,39 @@ def _elev_height_dims_left(
 def _elev_height_dims_right(
     parts, x, y_top, y_seat, y_floor, seat_h, back_h, panel_w: float = 0,
     deck_height_in: float | None = None, seat_cushion_thickness_in: float = 0,
-    include_overall: bool = True,
+    include_overall: bool = True, y_deck_px: float | None = None,
+    force_seat_breakdown: bool = False, skip_back_height: bool = False,
 ):
-    """Stacked vertical dims right of side elevation."""
+    """Stacked vertical dims right of side elevation (seat chain only if skip_back_height)."""
     inner, outer = 18, 28
     total = seat_h + (back_h or 0)
     if include_overall:
         _dim_2d_v(parts, x, y_top, y_floor, _in(total), offset_x=outer)
-    if back_h and back_h > 0:
-        _dim_2d_v(parts, x, y_top, y_seat, f'{_in(back_h)} BH', offset_x=inner - 10)
     cush = float(seat_cushion_thickness_in or 0)
     deck = deck_height_in if deck_height_in is not None else (float(seat_h) - cush)
     if cush > 0.05 and deck > 0.05:
-        scale_y = (y_floor - y_seat) / float(seat_h) if seat_h else 1
-        y_deck = y_floor + scale_y * deck
-        if abs(y_seat - y_deck) < 18:
+        if y_deck_px is not None:
+            y_deck = float(y_deck_px)
+        else:
+            y_deck = y_floor + (y_seat - y_floor) * (deck / float(seat_h))
+        if not force_seat_breakdown and abs(y_seat - y_deck) < 18:
+            if back_h and back_h > 0 and not skip_back_height:
+                _dim_2d_v(parts, x, y_top, y_seat, f'{_in(back_h)} BH', offset_x=inner - 10)
             _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=inner)
             return
-        sub_x = 26 if not include_overall else 22
-        _dim_2d_v(parts, x, y_deck, y_floor, f'{_in(deck)} DK', offset_x=sub_x, text_dy=-22)
-        _dim_2d_v(
-            parts, x, y_seat, y_deck, f'{_in(cush)} CUSH',
-            offset_x=(20 if not include_overall else sub_x), text_dy=22,
-        )
-        _dim_2d_v(
-            parts, x, y_seat, y_floor, f'{_in(seat_h)} SH',
-            offset_x=14, text_dy=0,
-        )
-    elif seat_h:
-        _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=inner)
+        if back_h and back_h > 0 and not skip_back_height:
+            _dim_2d_v(
+                parts, x, y_top, y_seat, f'{_in(back_h)} BH',
+                offset_x=18, text_dy=-12,
+            )
+        _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=22, text_dy=22)
+        _dim_2d_v(parts, x, y_deck, y_floor, f'{_in(deck)} DK', offset_x=26, text_dy=-4)
+        _dim_2d_v(parts, x, y_seat, y_deck, f'{_in(cush)} CUSH', offset_x=26, text_dy=-14)
+    else:
+        if back_h and back_h > 0 and not skip_back_height:
+            _dim_2d_v(parts, x, y_top, y_seat, f'{_in(back_h)} BH', offset_x=inner - 10)
+        if seat_h:
+            _dim_2d_v(parts, x, y_seat, y_floor, f'{_in(seat_h)} SH', offset_x=inner)
 
 
 def _dim_iso_width(parts, ox, oy, scale, x1, x2, y, z, label, below=True, offset=None):
@@ -809,6 +844,11 @@ def _miter_callout(parts, x, y, angle=45):
 
 # ── BACK STYLE RENDERING ──────────────────────────────────────────
 
+def _clip_path_polygon(parts, clip_id: str, pts: list[tuple[float, float]]) -> None:
+    points = " ".join(f"{p[0]:.1f},{p[1]:.1f}" for p in pts)
+    parts.append(f'<clipPath id="{clip_id}"><polygon points="{points}"/></clipPath>')
+
+
 def _draw_back_style_2d(parts, x, y, w, h, panel_style, channel_count, scale=1.0):
     """Draw back panel pattern in a 2D rectangle (plan or elevation view)."""
     if panel_style in ("flat", "none", "", None):
@@ -820,7 +860,7 @@ def _draw_back_style_2d(parts, x, y, w, h, panel_style, channel_count, scale=1.0
             parts.append(_line(x + 2, cy, x + w - 2, cy, SW_CHANNEL, LIGHT_GRAY))
     elif panel_style == "tufted" or panel_style == "button_tufted":
         # Diamond/button tufting grid — stay inside the back panel rect.
-        pad = 2.0
+        pad = max(2.0, min(w, h) * 0.12)
         rows = max(2, channel_count // 2)
         cols = max(3, channel_count)
         y0, y1 = y + pad, y + h - pad
@@ -896,16 +936,28 @@ def _back_style_label(panel_style, has_back=True):
 
 def _plan_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
                    cushion_width=24, panel_style="vertical_channels", channel_count=6,
-                   cushion_count=None, back_thickness_in=None, back_sections=None):
+                   cushion_count=None, back_thickness_in=None, back_sections=None,
+                   seat_cushion_overhang_in: float = 0,
+                   seat_cushion_thickness_in: float = 0):
     """Plan view — top-down rectangle with cushion dividers and numbering."""
     has_back = back_h is not None and back_h > 0 and panel_style != "none"
     bt = _back_thickness_in(has_back, back_thickness_in)
     w = width * scale
     d = depth * scale
     bt_s = bt * scale
+    frame_span = d - bt_s
+    oh_s = max(0.0, float(seat_cushion_overhang_in or 0)) * scale
 
-    # Seat area
-    parts.append(_rect(ox, oy, w, d - bt_s, SW_HEAVY))
+    # Seat frame (depth = overall − back thickness)
+    parts.append(_rect(ox, oy, w, frame_span, SW_HEAVY))
+    if oh_s > 0.25:
+        parts.append(_rect(
+            ox, oy - oh_s, w, oh_s, SW_MED, fill="#E8E8E8",
+        ))
+        parts.append(
+            f'<line x1="{ox:.1f}" y1="{oy:.1f}" x2="{ox + w:.1f}" y2="{oy:.1f}" '
+            f'stroke="{GRAY}" stroke-width="{SW_LIGHT}" data-plan-overhang-edge="1"/>'
+        )
     if has_back:
         # Back panel
         parts.append(_rect(ox, oy + d - bt_s, w, bt_s, SW_HEAVY, fill="#F0F0F0"))
@@ -921,11 +973,12 @@ def _plan_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
         c_count = int(cushion_count)
     else:
         c_count = max(1, math.ceil(width / cushion_width)) if cushion_width > 0 else 1
-    seat_span = d - bt_s
+    seat_span = frame_span
     if c_count > 1:
         for i in range(1, c_count):
             cx = ox + w * i / c_count
-            parts.append(_line(cx, oy + 2, cx, oy + seat_span - 2, SW_LIGHT, GRAY))
+            y0 = oy - oh_s if oh_s > 0.25 else oy
+            parts.append(_line(cx, y0 + 2, cx, oy + seat_span - 2, SW_LIGHT, GRAY))
     # Cushion labels — shrink when the seat is too shallow to hold 11px type
     label_size = 11 if seat_span >= 28 else 8
     for i in range(c_count):
@@ -1046,17 +1099,24 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
                    panel_style="vertical_channels", channel_count=6,
                    panel_w: float = 0, panel_h: float = 0, draw_dims: bool = True,
                    split_panel: bool = False, back_thickness_in=None,
-                   seat_cushion_thickness_in: float = 0, back_angle_deg: float = 0):
-    """Side elevation — thin back at rear edge; seat depth full width."""
+                   seat_cushion_thickness_in: float = 0, back_angle_deg: float = 0,
+                   seat_cushion_overhang_in: float = 0, frame_depth_in: float | None = None):
+    """Side elevation — frame depth + back thickness = overall depth at floor."""
     has_back = back_h is not None and back_h > 0 and panel_style != "none"
-    d = depth * scale
+    bt_in = _back_thickness_in(has_back, back_thickness_in)
+    frame_depth = float(frame_depth_in) if frame_depth_in is not None else max(
+        0.0, float(depth) - bt_in,
+    )
+    oh_in = max(0.0, float(seat_cushion_overhang_in or 0))
+    frame_d = frame_depth * scale
+    bt_s = bt_in * scale
+    d = (frame_depth + bt_in) * scale
     sh = seat_h * scale
     bh = (back_h if has_back else 0) * scale
-    bt_in = _back_thickness_in(has_back, back_thickness_in)
-    bt_s = bt_in * scale
     cush_in = max(0.0, float(seat_cushion_thickness_in or 0))
     cush_s = min(cush_in * scale, sh - 1)
     deck_s = sh - cush_s
+    oh_s = oh_in * scale
     rake_deg = float(back_angle_deg or 0)
     if rake_deg > 0 and has_back:
         lean = (back_h if has_back else 0) * scale * math.tan(math.radians(rake_deg))
@@ -1064,13 +1124,17 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
     else:
         lean = 0.0
     top_y = oy - sh - bh
-    parts.append(_line(ox, oy, ox + d, oy, SW_FLOOR, GRAY, "6,3"))
-    parts.append(_rect(ox, oy - deck_s, d, deck_s, SW_HEAVY))
+    parts.append(
+        f'<line x1="{ox:.1f}" y1="{oy:.1f}" x2="{ox + d:.1f}" y2="{oy:.1f}" '
+        f'stroke="{GRAY}" stroke-width="{SW_FLOOR}" stroke-dasharray="6,3" '
+        f'data-side-floor="1"/>'
+    )
+    parts.append(_rect(ox, oy - deck_s, frame_d, deck_s, SW_HEAVY))
     if cush_s > 0.5:
-        parts.append(_rect(ox, oy - sh, d, cush_s, SW_MED, fill="#E8E8E8"))
-        parts.append(_line(ox, oy - deck_s, ox + d, oy - deck_s, SW_LIGHT, GRAY))
+        parts.append(_rect(ox - oh_s, oy - sh, frame_d + oh_s, cush_s, SW_MED, fill="#E8E8E8"))
+        parts.append(_line(ox, oy - deck_s, ox + frame_d, oy - deck_s, SW_LIGHT, GRAY))
     if has_back:
-        bx = ox + d - bt_s
+        bx = ox + frame_d
         angle_attr = f' data-back-angle-deg="{rake_deg:.2f}"'
         back_pts = [
             (bx, oy - sh),
@@ -1079,32 +1143,65 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
             (bx + lean, top_y),
         ]
         parts.append(_poly(back_pts, SW_MED, attrs=f'data-side-back="1"{angle_attr}'))
-        _draw_back_style_2d(
-            parts, bx, top_y, bt_s + lean, bh,
-            panel_style, channel_count,
-        )
+        if panel_style in ("tufted", "button_tufted"):
+            clip_id = f"side-back-{uuid.uuid4().hex[:8]}"
+            parts.append("<defs>")
+            _clip_path_polygon(parts, clip_id, back_pts)
+            parts.append("</defs>")
+            parts.append(f'<g clip-path="url(#{clip_id})" data-side-back-tuft="1">')
+            _draw_back_style_2d(
+                parts, bx, top_y, bt_s + lean, bh,
+                panel_style, channel_count,
+            )
+            parts.append("</g>")
+        else:
+            _draw_back_style_2d(
+                parts, bx, top_y, bt_s + lean, bh,
+                panel_style, channel_count,
+            )
     if not draw_dims or panel_w < 20:
         return
     dim_band_h = 30.0
-    seat_depth_in = max(0.0, float(depth) - bt_in)
+    seat_depth_in = frame_depth
+    raked = rake_deg > 0.05
     if split_panel:
-        _dim_h_local(parts, ox, ox + d, oy, 48, _in(depth))
+        _dim_h_local(parts, ox, ox + d, oy, 50, f'{_in(depth)} OVRL')
         if has_back and bt_s > 1:
             _dim_h_local(
-                parts, ox + d - bt_s, ox + d, oy, 28,
+                parts, ox + frame_d, ox + d, oy, 30,
                 _in(bt_in),
             )
             _dim_h_local(
-                parts, ox, ox + d - bt_s, oy, 16,
+                parts, ox, ox + frame_d, oy, 14,
                 _in(seat_depth_in),
             )
+        if oh_s > 0.25:
+            oh_y = oy - sh - 10
+            parts.append(_line(ox - oh_s, oh_y, ox - oh_s, oy - sh + 2, SW_EXT, DIM_COLOR, dim_ext=True))
+            parts.append(_line(ox, oh_y, ox, oy - sh + 2, SW_EXT, DIM_COLOR, dim_ext=True))
+            parts.append(
+                f'<line x1="{ox - oh_s:.1f}" y1="{oh_y:.1f}" x2="{ox:.1f}" y2="{oh_y:.1f}" '
+                f'stroke="{DIM_COLOR}" stroke-width="{SW_DIM}" data-dim-stroke="1" '
+                f'marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>'
+            )
+            parts.append(_text((ox - oh_s + ox) / 2, oh_y - 6, f'{_in(oh_in)} OH', 9,
+                               weight="600", fill=DIM_COLOR))
         _elev_height_dims_right(
             parts, ox + d, top_y, oy - sh, oy,
             seat_h, back_h if has_back else 0, panel_w=panel_w,
             seat_cushion_thickness_in=cush_in,
             deck_height_in=max(0.0, float(seat_h) - cush_in),
             include_overall=False,
+            y_deck_px=oy - deck_s,
+            force_seat_breakdown=True,
+            skip_back_height=raked,
         )
+        if has_back and bh > 1 and raked:
+            _dim_oblique(
+                parts, (bx, oy - sh), (bx + lean, top_y),
+                f'{_in(back_h)} BH', offset=18,
+                attrs=' data-side-bh="1"',
+            )
         return
     _gutter_width(
         parts, ox, ox + d, oy,
@@ -1949,14 +2046,25 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
     bt_in = fab.back_thickness_in
     cush_thk = fab.seat_cushion_thickness_in
     back_angle = fab.back_angle_deg
-    seat_depth_usable = fab.seat_cushion_depth_in(depth_in)
+    overhang_in = fab.seat_cushion_overhang_in
+    frame_depth = fab.seat_frame_depth_in(depth_in)
+    deck_h = fab.seat_deck_height_in()
+    seat_depth_usable = frame_depth
 
     if has_back:
-        dims_text = f'{_in(width_in)} W × {_in(depth_in)} D × {_in(seat_h_in)} SH × {_in(geo_back)} BH'
+        dims_text = (
+            f'{_in(width_in)} W × {_in(depth_in)} D OVRL × '
+            f'{_in(seat_h_in)} SH × {_in(geo_back)} BH'
+        )
     else:
         dims_text = f'{_in(width_in)} W × {_in(depth_in)} D × {_in(seat_h_in)} SH × NO BACK'
 
     extras = _sheet_extras(name, "straight", panel_style, has_back, geo_back, kw)
+    oh_part = f', {_in(overhang_in)} OH front' if overhang_in > 0 else ''
+    depth_note = (
+        f'D {_in(depth_in)} OVRL = {_in(frame_depth)} frame + {_in(bt_in)} back{oh_part}'
+    )
+    extras["assumptions"] = list(extras.get("assumptions") or []) + [depth_note]
     layout = _regions_for(
         name, "straight", panel_style, has_back, c_count, actual_cw,
         dims_text, quote_num, client, project, kw.get("date", ""), extras,
@@ -2001,13 +2109,21 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
         "back_thickness_in": bt_in,
         "seat_cushion_thickness_in": cush_thk,
         "back_angle_deg": back_angle,
+        "seat_cushion_overhang_in": overhang_in,
+        "frame_depth_in": frame_depth,
     }
     return _compose_multiview(
         name, "straight", _build_straight, _plan_straight, _elev_straight,
         dims_text, c_count, actual_cw, draw_panel, channel_count,
         quote_num, client, project, date=kw.get("date", ""),
         plan_args=plan_args, elev_args=elev_args, iso_args=iso_args,
-        plan_kwargs={"cushion_count": c_count, "back_thickness_in": bt_in, "back_sections": back_sec},
+        plan_kwargs={
+            "cushion_count": c_count,
+            "back_thickness_in": bt_in,
+            "back_sections": back_sec,
+            "seat_cushion_overhang_in": overhang_in,
+            "seat_cushion_thickness_in": cush_thk,
+        },
         elev_kwargs={
             "back_sections": back_sec,
             "seat_cushion_thickness_in": cush_thk,
