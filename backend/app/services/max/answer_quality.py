@@ -17,6 +17,9 @@ _HEADING_ONLY_RE = re.compile(r"(?m)^\s{0,3}#{1,6}\s+[^\n]+\s*$")
 _EMPTY_SECTION_RE = re.compile(r"(?ms)^\s{0,3}#{1,6}\s+[^\n]+\s*\n\s*(?=\n|#{1,6}\s|$)")
 _DANGLING_INTRO_RE = re.compile(r"(?im)(?:^|\n)\s*(?:here(?:'|’)s|key points?|the (?:main|best) options?|sources?|summary)\s*:\s*$")
 _TOOL_FAILURE_PLACEHOLDER_RE = re.compile(r"(?i)\b(?:i have not run that yet|web_(?:read|search):\s*(?:http|web read failed))\b")
+_PHASE_HEADING_RE = re.compile(r"(?im)^\s{0,3}#{1,6}\s+phase\b")
+_GOAL_LINE_RE = re.compile(r"(?im)^\s*(?:\*\*)?goal:\s*")
+_STEP_LINE_RE = re.compile(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+\S")
 
 
 def _has_dangling_colon_intro(text: str) -> bool:
@@ -34,6 +37,23 @@ def _has_dangling_colon_intro(text: str) -> bool:
         # A following heading means the introduced section is empty. A bullet
         # or prose line is valid content and must not be flagged.
         if lines[next_index].lstrip().startswith(("#", "**Sources")):
+            return True
+    return False
+
+
+def _phase_sections_with_goal_only(text: str) -> bool:
+    """Detect phased plan headings whose body is only a Goal line (9/30 finance report)."""
+    if not _PHASE_HEADING_RE.search(text or ""):
+        return False
+    parts = re.split(r"(?m)^\s{0,3}#{1,6}\s+", text or "")
+    for part in parts[1:]:
+        body_lines = [ln.rstrip() for ln in part.splitlines()[1:] if ln.strip()]
+        if not body_lines:
+            return True
+        non_goal = [ln for ln in body_lines if not _GOAL_LINE_RE.match(ln.strip())]
+        if not non_goal:
+            return True
+        if not _STEP_LINE_RE.search("\n".join(non_goal)) and len(non_goal) < 2:
             return True
     return False
 
@@ -97,7 +117,13 @@ def detect_quality_flags(
     body = (text or "").strip()
     tools = tool_results or []
     flags = {name: False for name in FLAGS}
-    flags["empty_section"] = bool(_EMPTY_SECTION_RE.search(body) or _DANGLING_INTRO_RE.search(body) or _has_dangling_colon_intro(body) or _HEADING_ONLY_RE.fullmatch(body))
+    flags["empty_section"] = bool(
+        _EMPTY_SECTION_RE.search(body)
+        or _DANGLING_INTRO_RE.search(body)
+        or _has_dangling_colon_intro(body)
+        or _HEADING_ONLY_RE.fullmatch(body)
+        or _phase_sections_with_goal_only(body)
+    )
     flags["truncated"] = bool(
         finish_reason == "length"
         or (body and _HEADING_ONLY_RE.fullmatch(body) is not None)
@@ -117,7 +143,13 @@ def needs_continuation(text: str | None, *, user_message: str | None = None, too
     body = (text or "").strip()
     if not body:
         return True
-    if _EMPTY_SECTION_RE.search(body) or _DANGLING_INTRO_RE.search(body) or _has_dangling_colon_intro(body) or _HEADING_ONLY_RE.fullmatch(body):
+    if (
+        _EMPTY_SECTION_RE.search(body)
+        or _DANGLING_INTRO_RE.search(body)
+        or _has_dangling_colon_intro(body)
+        or _HEADING_ONLY_RE.fullmatch(body)
+        or _phase_sections_with_goal_only(body)
+    ):
         return True
     if tool_results and any(isinstance(item, dict) and not item.get("success") for item in tool_results):
         if _TOOL_FAILURE_PLACEHOLDER_RE.search(body) or len(body) < 200:

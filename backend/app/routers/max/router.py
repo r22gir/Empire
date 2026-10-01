@@ -41,6 +41,13 @@ from app.services.max.factual_guard import is_factual_question, enforce_web_sear
 from app.services.max.answer_quality import (
     detect_quality_flags, freshness_directive, needs_continuation, strip_empty_sections,
 )
+from app.services.max.finance_readiness_lane import (
+    finance_system_preamble,
+    format_finance_context,
+    is_local_finance_readiness_request as _is_local_finance_readiness_request,
+    prefetch_finance_readiness_entries,
+    resolve_display_model_used,
+)
 from app.services.max.guardrails import uncertainty_fallback, should_defer_uncertain
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.runtime_truth_check import (
@@ -708,12 +715,23 @@ def _is_decision_only_request(message: str | None) -> bool:
     return any(marker in text for marker in decision_markers)
 
 
-def _is_local_finance_readiness_request(message: str | None) -> bool:
-    """Route Empire finance counts to local DB tools, not web grounding."""
-    text = (message or "").lower()
-    finance_markers = ("finance", "quickbooks", "accounts", "invoice", "payment", "expense")
-    table_markers = ("quotes", "customers", "contacts", "jobs", "inventory", "leads", "vendors", "records", "count")
-    return any(marker in text for marker in finance_markers) and any(marker in text for marker in table_markers)
+async def _prefetch_finance_readiness_entries(
+    request: "ChatRequest",
+    *,
+    access_context: dict[str, Any] | None,
+    founder: bool,
+) -> list[dict[str, Any]]:
+    async def _execute_async(tool_call: dict[str, Any]) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            execute_tool,
+            tool_call,
+            desk=request.desk,
+            access_context=access_context,
+            founder=founder,
+        )
+        return _normalize_tool_result_entry(result)
+
+    return await prefetch_finance_readiness_entries(_execute_async, message=request.message)
 
 
 def _is_action_tool(tool_call: dict[str, Any]) -> bool:
@@ -2787,6 +2805,18 @@ async def _chat_with_max_service(
         #     context) and H53 (if the block is empty, append NOTHING).
         _pre_search_executed = False
         _pre_search_entry = None
+        _finance_prefetch_entries: list[dict[str, Any]] = []
+        if _is_local_finance_readiness_request(request.message):
+            _finance_prefetch_entries = await _prefetch_finance_readiness_entries(
+                request, access_context=None, founder=founder,
+            )
+            _finance_context = format_finance_context(
+                _finance_prefetch_entries,
+                dumps=lambda obj, **kw: _safe_dumps(obj, **kw),
+            )
+            messages.insert(-1, AIMessage(role="system", content=(
+                finance_system_preamble(include_totals=True) + "\n" + _finance_context
+            )))
         if not request.desk and (
             (_is_performative_web_search_request(request.message)
              or is_factual_question(request.message))
@@ -2857,7 +2887,9 @@ async def _chat_with_max_service(
             _ac_context = {"pin": _extracted_pin}
 
         # Multi-turn tool loop: execute tools, feed results back, allow follow-up tools (max 3 rounds)
-        tool_results_list = [_pre_search_entry] if _pre_search_entry else []
+        tool_results_list = list(_finance_prefetch_entries)
+        if _pre_search_entry:
+            tool_results_list.append(_pre_search_entry)
         final_content = response.content
         loop_messages = list(messages)
         current_response = response
@@ -3066,7 +3098,7 @@ async def _chat_with_max_service(
                     "Using only the successful verified context below, return the complete final "
                     "answer now. Include numbered inline citations, a Sources list, and clearly "
                     "label Verified facts versus Max's inference. Never mention tool errors. "
-                    "Do not leave a colon-introduction without its list/body.\n\n"
+                    "Every Phase heading must include concrete steps or deliverables, not only a Goal line.\n\n"
                     + _verified_context
                 )))
                 _final_resp = await ai_router.chat(
@@ -3076,6 +3108,8 @@ async def _chat_with_max_service(
                 _recovered = strip_tool_blocks(_final_resp.content or "")
                 if _recovered.strip():
                     final_content = _recovered
+                if getattr(_final_resp, "model_used", None):
+                    response.model_used = _final_resp.model_used
             except Exception as _final_err:
                 logger.warning(f"[chat] completeness recovery failed: {type(_final_err).__name__}: {_final_err}")
             final_content = strip_empty_sections(final_content)
@@ -3405,7 +3439,7 @@ async def _chat_with_max_service(
 
         resp = ChatResponse(
             response=sanitize_output(final_content),
-            model_used=response.model_used,
+            model_used=resolve_display_model_used(response.model_used, request.model),
             fallback_used=response.fallback_used,
             tool_results=tool_results_list if tool_results_list else None,
             quality=quality_badge,
@@ -3786,42 +3820,16 @@ async def chat_stream(request: ChatRequest):
         _stream_pre_search_entry = None
         _stream_finance_entries = []
         if _is_local_finance_readiness_request(request.message):
-            # Finance readiness is a local-data task. Execute the requested
-            # counts deterministically so the model cannot stop after a schema
-            # inventory or lose the table-to-count mapping across tool rounds.
-            finance_tables = (
-                ("quotes", "quotes_v2"), ("invoices", "invoices"),
-                ("payments", "payments"), ("expenses", "expenses"),
-                ("chart_of_accounts", "chart_of_accounts"),
-                ("customers", "customers"), ("contacts", "contacts"),
-                ("jobs", "jobs"), ("inventory_items", "inventory_items"),
-                ("leads", "leads"), ("vendors", "vendors"),
+            yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'finance', 'message': 'Loading finance counts and dollar totals'})}\n\n"
+            _stream_finance_entries = await _prefetch_finance_readiness_entries(
+                request, access_context=_stream_ac_context, founder=founder,
             )
-            yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'finance', 'message': 'Counting requested finance records'})}\n\n"
-
-            async def _count_finance_table(label, table):
-                result = await asyncio.to_thread(
-                    execute_tool,
-                    {"tool": "db_query", "query": f"SELECT COUNT(*) AS record_count FROM {table}"},
-                    desk=request.desk, access_context=_stream_ac_context, founder=founder,
-                )
-                entry = _normalize_tool_result_entry(result)
-                if entry.get("success") and isinstance(entry.get("result"), dict):
-                    entry["result"]["requested_name"] = label
-                return entry
-
-            _stream_finance_entries = await asyncio.gather(
-                *(_count_finance_table(label, table) for label, table in finance_tables)
-            )
-            _finance_context = "\n".join(
-                f"[{e.get('result', {}).get('requested_name', '?')}] "
-                f"{_safe_dumps(e.get('result', {}), default=str)[:800]}"
-                for e in _stream_finance_entries if e.get("success")
+            _finance_context = format_finance_context(
+                _stream_finance_entries,
+                dumps=lambda obj, **kw: _safe_dumps(obj, **kw),
             )
             messages.insert(-1, AIMessage(role="system", content=(
-                "Verified local finance counts are below. Use these exact values in a "
-                "labeled table, then provide the QuickBooks feature-gap plan. Do not "
-                "call web_search for this local-data request.\n" + _finance_context
+                finance_system_preamble(include_totals=True) + "\n" + _finance_context
             )))
         if not request.desk and (
             (_is_performative_web_search_request(request.message)
@@ -4062,6 +4070,7 @@ async def chat_stream(request: ChatRequest):
                         "The streamed draft was incomplete or a tool failed. Do NOT call tools; "
                         "using only the successful verified context below, return the complete "
                         "answer with citations, Sources, and Verified versus Max's inference. "
+                        "Every Phase heading must include concrete steps or deliverables, not only a Goal line. "
                         "Never mention tool errors.\n\n" + _verified_context
                     )))
                     _complete_resp = await ai_router.chat(
@@ -4071,6 +4080,8 @@ async def chat_stream(request: ChatRequest):
                     _replacement = strip_empty_sections(strip_tool_blocks(_complete_resp.content or ""))
                     if _replacement:
                         full_response = _replacement
+                    if getattr(_complete_resp, "model_used", None):
+                        model_used = _complete_resp.model_used
                 except Exception as _complete_err:
                     logger.warning("[stream] completeness recovery failed: %s", _complete_err)
             full_response = strip_empty_sections(full_response)
@@ -4298,7 +4309,7 @@ async def chat_stream(request: ChatRequest):
 
             _done_data = {
                 'type': 'done',
-                'model_used': model_used,
+                'model_used': resolve_display_model_used(model_used, request.model),
                 'conversation_id': conv_id,
                 'metadata': _response_metadata(request.channel),
             }

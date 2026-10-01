@@ -4,6 +4,13 @@ import json
 
 from app.api.v1 import chats
 from app.services.max import tool_executor
+from app.services.max.finance_readiness_lane import (
+    FINANCE_SUM_QUERIES,
+    finance_request_wants_dollar_totals,
+    format_finance_context,
+    is_local_finance_readiness_request,
+    resolve_display_model_used,
+)
 from app.services.max.tool_executor import _env_get, strip_tool_blocks
 
 
@@ -68,3 +75,42 @@ def test_tool_protocol_never_survives_visible_text():
     fenced = "Before\n```json\n{\"tool\": \"db_query\", \"query\": \"SELECT 1\"}\n```\nAfter"
     assert "\"tool\"" not in strip_tool_blocks(fenced)
     assert strip_tool_blocks('{"tool":"db_query","query":"SELECT 1"}') == ""
+
+
+def test_finance_readiness_detects_local_lane_and_totals():
+    prompt = (
+        "Give me a finance readiness report: count quotes, invoices, payments, "
+        "expenses, customers and vendors, show dollar totals, and plan QuickBooks migration."
+    )
+    assert is_local_finance_readiness_request(prompt)
+    assert finance_request_wants_dollar_totals(prompt)
+
+
+def test_finance_sum_queries_cover_quotes_invoices_payments_ar():
+    labels = {label for label, _ in FINANCE_SUM_QUERIES}
+    assert "quotes_dollar_total" in labels
+    assert "invoices_dollar_total" in labels
+    assert "payments_dollar_total" in labels
+    assert "ar_outstanding_balance_due" in labels
+    for _, sql in FINANCE_SUM_QUERIES:
+        assert sql.strip().upper().startswith("SELECT")
+        assert "SUM(" in sql.upper()
+
+
+def test_format_finance_context_labels_prefetched_rows():
+    entries = [
+        {
+            "success": True,
+            "tool": "db_query",
+            "result": {"requested_name": "quotes_dollar_total", "sum_total": 1200.5},
+        }
+    ]
+    text = format_finance_context(entries, dumps=lambda obj, **kw: json.dumps(obj, **kw))
+    assert "[quotes_dollar_total]" in text
+    assert "1200.5" in text
+
+
+def test_resolve_display_model_used_hides_unknown():
+    assert resolve_display_model_used("unknown", None) == "MAX auto"
+    assert resolve_display_model_used("", "claude-sonnet-4-6") == "claude-sonnet-4-6"
+    assert resolve_display_model_used("groq-llama-3.3-70b", "auto") == "groq-llama-3.3-70b"

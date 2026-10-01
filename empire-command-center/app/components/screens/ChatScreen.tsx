@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X } from 'lucide-react';
+import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X, Copy, Check } from 'lucide-react';
 import ChatHistoryPanel from '../ChatHistoryPanel';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
@@ -8,6 +8,8 @@ import QuoteCard from '../business/quotes/QuoteCard';
 import InlineDrawing from '../InlineDrawing';
 import ContinuityPanel from '../ContinuityPanel';
 import ViewPdfControl from '../ViewPdfControl';
+import ChatChartBlock from '../ChatChartBlock';
+import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../lib/chatContent';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -78,6 +80,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [recordingTimer, setRecordingTimer] = useState(0);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [quickQuoteNotice, setQuickQuoteNotice] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -356,6 +359,14 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     setInput('');
     setAttachedImage(null);
   };
+
+  const handleCopyMessage = useCallback(async (msg: Message) => {
+    const ok = await copyTextToClipboard(msg.content);
+    if (ok) {
+      setCopiedMessageId(msg.id);
+      window.setTimeout(() => setCopiedMessageId(prev => (prev === msg.id ? null : prev)), 2000);
+    }
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -697,7 +708,34 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               ...(msg.role === 'user' ? { justifyContent: 'flex-end' } : {}),
             }} suppressHydrationWarning>
               {msg.timestamp}
-              {msg.model && <span style={{ opacity: 0.7 }}>{msg.model}</span>}
+              {displayModelLabel(msg.model) && (
+                <span style={{ opacity: 0.7 }}>{displayModelLabel(msg.model)}</span>
+              )}
+              {msg.role === 'assistant' && (
+                <button
+                  type="button"
+                  onClick={() => handleCopyMessage(msg)}
+                  title="Copy reply"
+                  style={{
+                    minHeight: 44,
+                    minWidth: 44,
+                    padding: '8px 10px',
+                    margin: '-8px 0',
+                    background: 'none',
+                    border: 'none',
+                    color: copiedMessageId === msg.id ? '#16a34a' : 'var(--muted)',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 10,
+                    fontWeight: 600,
+                  }}
+                >
+                  {copiedMessageId === msg.id ? <Check size={14} /> : <Copy size={14} />}
+                  {copiedMessageId === msg.id ? 'Copied' : 'Copy'}
+                </button>
+              )}
               {msg.role === 'assistant' && msg.quality && (
                 <span
                   title={`${msg.quality.label}${msg.quality.warnings?.length ? '\n' + msg.quality.warnings.join('\n') : ''}`}
@@ -883,7 +921,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               border: '1px solid var(--border)',
               borderRadius: '14px 14px 14px 6px',
             }}>
-              {streamingContent || '...'}
+              {streamingContent ? renderContent(streamingContent, onScreenChange) : '...'}
             </div>
             <div style={{
               fontSize: 10,
@@ -894,7 +932,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               alignItems: 'center',
               gap: 6,
             }}>
-              {streamingModel && <span>{streamingModel}</span>}
+              {displayModelLabel(streamingModel) && <span>{displayModelLabel(streamingModel)}</span>}
               <span style={{ opacity: 0.6 }}>typing...</span>
               <button
                 onClick={onStop}
@@ -1221,7 +1259,15 @@ function StatusChip({ label, tone }: { label: string; tone: 'ok' | 'warn' | 'dar
 }
 
 function renderContent(content: string, onScreenChange?: (s: string, id?: string) => void) {
-  return content.split('\n').map((line, i) => {
+  const segments = splitChatContent(content);
+  return segments.map((segment, segIndex) => {
+    if (segment.kind === 'chart') {
+      return <ChatChartBlock key={`chart-${segIndex}`} chart={segment.chart} />;
+    }
+    const text = segment.text;
+    return (
+      <span key={`text-${segIndex}`}>
+        {text.split('\n').map((line, i, lines) => {
     // Bold
     let processed = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     // Italic
@@ -1245,7 +1291,7 @@ function renderContent(content: string, onScreenChange?: (s: string, id?: string
       (match: string) =>
         `<a class="quote-link" data-link-type="quote-number" data-quote-number="${match}" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${match}</a>`
     );
-    const html = processed + (i < content.split('\n').length - 1 ? '<br/>' : '');
+    const html = processed + (i < lines.length - 1 ? '<br/>' : '');
     return (
       <span
         key={i}
@@ -1287,6 +1333,9 @@ function renderContent(content: string, onScreenChange?: (s: string, id?: string
           onScreenChange?.('quote');
         }}
       />
+    );
+        })}
+      </span>
     );
   });
 }

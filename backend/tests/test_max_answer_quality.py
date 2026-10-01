@@ -82,3 +82,23 @@ def test_tool_failure_placeholder_is_incomplete_when_verified_data_exists():
         "I have not run that yet. web_read: HTTP 403",
         tool_results=[{"tool": "web_search", "success": True}, {"tool": "web_read", "success": False}],
     )
+
+
+def test_phase_heading_with_goal_only_triggers_continuation():
+    draft = (
+        "### Phase 0 — Inventory\n"
+        "Goal: Baseline counts and totals.\n\n"
+        "### Phase 1 — Workflows\n"
+        "Goal: Replace invoicing.\n"
+    )
+    assert needs_continuation(draft, user_message="Finance readiness report with phased plan")
+
+
+def test_phase_with_steps_is_complete():
+    complete = (
+        "### Phase 0 — Inventory\n"
+        "Goal: Baseline counts.\n"
+        "- Export chart of accounts\n"
+        "- Reconcile AR\n"
+    )
+    assert not needs_continuation(complete, user_message="Phased plan")
