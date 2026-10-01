@@ -90,7 +90,7 @@ def founder_action_incomplete_reasons(
         "create_contact": "Create CRM contact",
         "create_engine_quote": "Create estimate(s) via create_engine_quote",
         "create_quick_quote": "Create quote via create_quick_quote",
-        "send_quote_email": "Generate PDF(s) and email via send_quote_email (one call per quote_id)",
+        "send_quote_email": "Generate PDF(s) and email via send_quote_email (one call; multiple quote_ids in one email)",
         "send_email": "Send email via send_email",
         "svg_to_pdf": "Generate PDF via send_quote_email (per quote_id)",
     }
@@ -151,8 +151,9 @@ def founder_continuation_system_nudge(remaining_tools: list[str], assistant_text
         "The founder action request is not complete."
         + promise_note
         + f" You MUST call the remaining tools now before any final answer: {tools}. "
-        "For each estimate, call send_quote_email with quote_id from create_engine_quote results "
-        "(PDF generation is included). Use exact line items from the user message — no recalculation. "
+        "For estimates, call send_quote_email once with quote_ids (array) or quote_id when emailing "
+        "multiple PDFs in one message (PDF generation is included). Use exact line items from the "
+        "user message — no recalculation. "
         "Emit valid ```tool``` JSON blocks only; no performative 'now generating' text."
     )
 
@@ -202,6 +203,13 @@ def format_tool_progress_message(entry: dict[str, Any]) -> str:
     return f"✗ {tool}: {err}"
 
 
+_SKIP_STATUS_DONE_TOOLS = frozenset({
+    "web_search",
+    "web_read",
+    "_tool_block_parse_error",
+})
+
+
 def build_step_lines_from_tool_results(tool_results: list[Any] | None) -> list[str]:
     lines: list[str] = []
     for entry in tool_results or []:
@@ -209,6 +217,8 @@ def build_step_lines_from_tool_results(tool_results: list[Any] | None) -> list[s
             continue
         tool = entry.get("tool")
         if not tool or str(tool).startswith("_"):
+            continue
+        if str(tool) in _SKIP_STATUS_DONE_TOOLS:
             continue
         lines.append(format_tool_progress_message(entry))
     return lines

@@ -83,6 +83,56 @@ DRAWING_PLAN_PHRASES = (
     "section plan",
 )
 
+# Text-only fabrication prompts (no "draw me" verb) — bench, shade, etc. + numbers.
+_TEXT_MEASUREMENT_PRODUCT_PHRASES = (
+    "roman shade",
+    "flat fold",
+    "flat-fold",
+    "flat roman",
+    "pinch pleat",
+    "pinch-pleat",
+    "drapery",
+    "drape ",
+    "curtain",
+    "valance",
+    "cornice",
+    "headboard",
+    "banquette",
+    "booth",
+    "bench",
+    "cushion",
+    "ottoman",
+    "sofa",
+)
+
+_TEXT_MEASUREMENT_VIEW_HINTS = (
+    "elevation",
+    "elevations",
+    "plan view",
+    "front elevation",
+    "side elevation",
+    "shop drawing",
+    "with dimensions",
+    "dimensioned",
+)
+
+
+def is_text_measurement_drawing_request(text: str) -> bool:
+    """True when the message names a fabrication product and carries measurable dims."""
+    if not text or is_business_document_intent(text):
+        return False
+    lowered = text.lower()
+    has_product = any(p in lowered for p in _TEXT_MEASUREMENT_PRODUCT_PHRASES)
+    if not has_product:
+        return False
+    has_number = bool(re.search(r"\d", text))
+    compact = bool(
+        re.search(r"\d+(?:\.\d+)?\s*[x×]\s*\d+", lowered)
+        or re.search(r"\d+\s*w\b", lowered)
+    )
+    has_view_hint = any(h in lowered for h in _TEXT_MEASUREMENT_VIEW_HINTS)
+    return has_number and (compact or has_view_hint or len(re.findall(r"\d+", text)) >= 2)
+
 
 # ── D3 ────────────────────────────────────────────────────────────────
 # 6-way intent classification (per D1 + D1-Addendum).
@@ -310,35 +360,24 @@ class DrawingHandoff:
     source_image: str | None = None
     tool_payload: dict[str, Any] | None = None
     response: str = ""
-
-    @property
-    def ready(self) -> bool:
-        """HOTFIX 4.0b — True iff translated dims cover every
-        template-required key (and the B1 product_type is known).
-        Replaces the legacy 'subject + enough dims' gate; the
-        interceptor used to consider itself ready with just any
-        bucket item_type, which led to dead-end output."""
-        return bool(self.b1_product_type and not self.missing_template_keys)
+    raw_message: str = ""
     # D3: 6-way intent classification (per D1 + D1-Addendum).
-    # Default "unknown" preserves backward compatibility for any caller
-    # that does not read the new field. Valid values: animated_diagram,
-    # visual_explainer, shop_drawing, sketch_analysis, concept_image,
-    # planning_help, unknown.
     intent_mode: str = "unknown"
 
     @property
     def ready(self) -> bool:
-        """HOTFIX 4.0b — True iff translated dims cover every
-        template-required key (and the B1 product_type is known).
-
-        Pre-fix, `ready` was defined as:
-            self.tool_payload is not None and not self.missing
-        which over-read `tool_payload` (set only at the very end of
-        build_drawing_handoff) and over-claimed ready=True for
-        generic-bucket handoffs whose dims were incomplete. The new
-        definition supersedes both: the B1 template validates the
-        translated dims; tool_payload is no longer required."""
-        return bool(self.b1_product_type and not self.missing_template_keys)
+        """True when B1 template dims are satisfied, or U/L banquette UL-renderer dims are."""
+        if not self.b1_product_type:
+            return False
+        if not self.missing_template_keys:
+            return True
+        msg = self.raw_message or ""
+        shape = _shape_for_text(msg)
+        if shape in ("u_shape", "l_shape") and self.b1_product_type in (
+            "banquette", "bench", "booth",
+        ):
+            return _ul_banquette_dims_sufficient(self.translated_dims, shape)
+        return False
 
 
 # Invoice / quote / billing language must reach MAX + finance tools, not
@@ -504,6 +543,9 @@ def is_drawing_intent(text: str) -> bool:
         "draw this ",
     )
     if any(pattern in lowered for pattern in strong_draw_patterns):
+        return True
+
+    if is_text_measurement_drawing_request(text):
         return True
 
     # D3 explicit modes (shop drawing, sketch analysis, concept image, …)
@@ -1062,11 +1104,103 @@ def _has_enough_dimensions(item_type: str, dimensions: dict[str, str], source_im
 
 def _shape_for_text(text: str) -> str:
     lowered = text.lower()
-    if any(token in lowered for token in ("u-shape", "u shape", "u_shape")):
+    if any(token in lowered for token in ("u-shape", "u shape", "u_shape", "u-shaped")):
         return "u_shape"
-    if any(token in lowered for token in ("l-shape", "l shape", "l_shape")):
+    if any(token in lowered for token in ("l-shape", "l shape", "l_shape", "l-shaped")):
         return "l_shape"
     return "straight"
+
+
+def _strip_inches(token: str) -> str:
+    return str(token).strip().rstrip('"').rstrip("in").strip()
+
+
+def _extract_compact_dimensions(text: str) -> dict[str, str]:
+    """Parse 84x18x18 benches and 36W x 60H roman shades."""
+    out: dict[str, str] = {}
+    lowered = text.lower()
+    triple = re.search(
+        r"(?P<w>\d+(?:\.\d+)?)\s*[x×]\s*(?P<d>\d+(?:\.\d+)?)\s*[x×]\s*(?P<h>\d+(?:\.\d+)?)",
+        lowered,
+    )
+    if triple:
+        out["width"] = f'{triple.group("w")}"'
+        out["depth"] = f'{triple.group("d")}"'
+        out["seat_height"] = f'{triple.group("h")}"'
+        out["height"] = f'{triple.group("h")}"'
+    wh = re.search(
+        r"(?P<w>\d+(?:\.\d+)?)\s*w(?:ide)?\s*[x×]\s*(?P<h>\d+(?:\.\d+)?)\s*h(?:igh)?",
+        lowered,
+    )
+    if wh:
+        out["width"] = f'{wh.group("w")}"'
+        out["height"] = f'{wh.group("h")}"'
+    foam = re.search(r"(?P<f>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*foam", lowered)
+    if foam:
+        out["seat_foam"] = f'{foam.group("f")}"'
+    tuft = re.search(r"(?P<b>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*tufted\s+back", lowered)
+    if tuft:
+        out["back_height"] = f'{tuft.group("b")}"'
+    return out
+
+
+def _enrich_ul_banquette_dims(text: str, dims: dict[str, str]) -> dict[str, str]:
+    """Map founder phrasing (back wall, returns, …) to UL renderer keys."""
+    merged = dict(dims or {})
+    lowered = text.lower()
+
+    back_wall = re.search(
+        r"back\s+wall\s*(?P<v>\d+(?:\.\d+)?(?:\s*/\s*\d+)?(?:\s*-\s*\d+/\d+)?)",
+        lowered,
+    )
+    if back_wall:
+        merged["back_length"] = f'{_strip_inches(back_wall.group("v"))}"'
+        merged["width"] = merged.get("width") or merged["back_length"]
+
+    returns = re.search(
+        r"returns?\s*(?P<v>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?(?:\s+each)?",
+        lowered,
+    )
+    if returns:
+        val = f'{returns.group("v")}"'
+        merged["side_left"] = val
+        merged["side_right"] = val
+
+    back_above = re.search(
+        r"back\s*(?P<v>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s+above\s+seat",
+        lowered,
+    )
+    if back_above:
+        merged["back_height"] = f'{back_above.group("v")}"'
+        merged["net_back"] = merged["back_height"]
+
+    if "plain" in lowered and "back" in lowered:
+        merged["construction"] = "plain"
+
+    if merged.get("seat_height") and not merged.get("height"):
+        merged["height"] = merged["seat_height"]
+    if merged.get("depth") and not merged.get("seat_depth"):
+        merged["seat_depth"] = merged["depth"]
+    shape = _shape_for_text(text)
+    if shape:
+        merged["shape"] = shape
+    return merged
+
+
+def _ul_banquette_dims_sufficient(dims: dict[str, str], shape: str) -> bool:
+    """Minimum dims to invoke render_ul_banquette_pdf without silent defaults."""
+    if not dims:
+        return False
+    has_back = any(
+        dims.get(k) for k in ("back_length", "width", "back_outer", "back")
+    )
+    has_depth = any(dims.get(k) for k in ("depth", "seat_depth"))
+    if shape == "u_shape":
+        has_return = any(
+            dims.get(k) for k in ("side_left", "side_right", "side_length", "arm_left")
+        )
+        return bool(has_back and has_depth and has_return)
+    return bool(has_back and has_depth)
 
 
 def _compute_missing_template_keys(
@@ -1126,6 +1260,7 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
 
     subject, item_type = _extract_item_type(message)
     dimensions = _extract_dimensions(message, item_type=item_type)
+    dimensions.update(_extract_compact_dimensions(message))
     views = _extract_views(message)
 
     # HOTFIX 4.0b — resolve B1 product_type, alias-translate dims,
@@ -1139,9 +1274,17 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
     translated_dims = _translate_dims_for_b1_product(
         dimensions, b1_product_type
     )
+    translated_dims = _enrich_ul_banquette_dims(message, translated_dims)
     missing_template_keys = _compute_missing_template_keys(
         translated_dims, b1_product_type
     )
+    shape = _shape_for_text(message)
+    if (
+        shape in ("u_shape", "l_shape")
+        and b1_product_type in ("banquette", "bench", "booth")
+        and _ul_banquette_dims_sufficient(translated_dims, shape)
+    ):
+        missing_template_keys = []
 
     # legacy fields kept populated so the existing router code path
     # still gets something to look at during the migration window.
@@ -1160,6 +1303,7 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
         views=views,
         source_image=image_filename,
         intent_mode=intent_mode,
+        raw_message=message,
     )
 
     # Migration: while the router is being updated for HOTFIX 4.0b,

@@ -307,6 +307,27 @@ _IMPERATIVE_NOUNS = (
     "pdf", "pdfs", "contact", "crm", "line item", "line items",
 )
 
+_EST_NUMBER_RE = re.compile(r"\bEST-\d{4}-\d+\b", re.IGNORECASE)
+
+
+def _referenced_estimate_numbers(message: str | None) -> list[str]:
+    return list(dict.fromkeys(_EST_NUMBER_RE.findall(message or "")))
+
+
+def _user_asks_to_create_new_estimates(message: str | None) -> bool:
+    text = (message or "").lower()
+    if "create_engine_quote" in text:
+        return True
+    create_verbs = ("create", "make", "save", "generate", "new ", "draft ")
+    if not any(v in text for v in create_verbs):
+        return False
+    if any(w in text for w in ("new estimate", "new estimates", "new quote", "new quotes")):
+        return True
+    refs = _referenced_estimate_numbers(message)
+    if refs and not any(w in text for w in ("estimate", "quote")):
+        return False
+    return any(w in text for w in ("estimate", "quote", "invoice"))
+
 
 def summarize_uncertainty_topic(message: str, *, max_len: int = _UNCERTAINTY_FALLBACK_TOPIC_MAX_LEN) -> str:
     """Short label for uncertainty fallback — never echo the full user prompt."""
@@ -371,7 +392,13 @@ def founder_action_tools_remaining(message: str | None, tool_results: list[Any] 
         wants_pdf = "pdf" in text
         wants_email = "email" in text or "send " in text
         if wants_quotes and not (succeeded & {"create_engine_quote", "create_quick_quote"}):
-            if any(v in text for v in ("create", "make", "save", "generate", "new ")):
+            if _user_asks_to_create_new_estimates(message):
+                remaining.append("create_engine_quote")
+            elif _referenced_estimate_numbers(message) and not any(
+                v in text for v in ("create", "make", "save", "generate", "new ")
+            ):
+                pass
+            elif any(v in text for v in ("create", "make", "save", "generate", "new ")):
                 remaining.append("create_engine_quote")
         # Quote PDFs are generated inside send_quote_email / send_quote_telegram (no separate tool).
         pdf_delivered = succeeded & {"send_quote_email", "send_quote_telegram", "svg_to_pdf"}

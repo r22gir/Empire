@@ -303,6 +303,9 @@ def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
         raw_actions, raw_errors = _parse_ndjson_block(stripped)
         results.extend(raw_actions)
         errors.extend(raw_errors)
+    elif not results and stripped and '"tool"' not in stripped and "'tool'" not in stripped:
+        # Prose-only assistant replies (email bodies, narratives) — not tool blocks.
+        return results, errors
 
     return results, errors
 
@@ -344,6 +347,10 @@ def _parse_ndjson_block(body: str) -> tuple[list[dict], list[dict]]:
             idx += 1
         if idx >= n:
             break
+        if body[idx] != "{":
+            next_nl = body.find("\n", idx)
+            idx = next_nl + 1 if next_nl != -1 else n
+            continue
         try:
             obj, end_idx = decoder.raw_decode(body, idx)
             obj_index += 1
@@ -542,9 +549,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "command": "shell_execute",
             "bash": "shell_execute",
             "terminal": "shell_execute",
-            "draw": "sketch_to_drawing",
-            "generate_drawing": "sketch_to_drawing",
-            "create_drawing": "sketch_to_drawing",
+            "draw": "render_shop_drawing",
+            "generate_drawing": "render_shop_drawing",
+            "create_drawing": "render_shop_drawing",
+            "shop_drawing": "render_shop_drawing",
             "analyze_furniture": "sketch_to_drawing",
             "furniture_analyzer": "sketch_to_drawing",
             "analyze_photo": "sketch_to_drawing",
@@ -2854,30 +2862,39 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         return ToolResult(tool="send_email", success=False, error=str(e))
 
 
+def _normalize_quote_id_list(params: dict) -> list[str]:
+    raw = params.get("quote_ids")
+    if raw is None:
+        raw = params.get("quote_id_list")
+    ids: list[str] = []
+    if isinstance(raw, str):
+        ids = [p.strip() for p in re.split(r"[\s,]+", raw) if p.strip()]
+    elif isinstance(raw, (list, tuple)):
+        ids = [str(x).strip() for x in raw if str(x).strip()]
+    single = str(params.get("quote_id", "") or "").strip()
+    if single and single not in ids:
+        ids.insert(0, single)
+    return ids
+
+
 @tool("send_quote_email")
 def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Generate PDF for a quote and send it to a recipient via email."""
+    """Generate PDF(s) for quote(s) and send in one email to a recipient."""
     from app.services.max.email_recipient_whitelist import (
         authorize_email_recipient, recipient_whitelist_status,
     )
-    quote_id = params.get("quote_id", "")
+    quote_ids = _normalize_quote_id_list(params)
     to = params.get("to", "").strip()
-    if not quote_id:
+    if not quote_ids:
         return ToolResult(tool="send_quote_email", success=False, error="No quote_id provided")
     if not to:
         return ToolResult(tool="send_quote_email", success=False, error="No recipient email (to) provided")
 
-    # ── HOTFIX 2026-07-16 (d): outbound recipient allowlist ─────────
-    # Same allowlist as send_email — no client/customer sends. Per
-    # audit directive: NEVER email a client address from MAX tools;
-    # founder uses the portal approval flow to surface customer
-    # emails (the quote-accept link in /quote/[id]/page.tsx uses the
-    # canonical email field stored in quotes_v2.customer_email).
     verdict_to = authorize_email_recipient(to)
     if not verdict_to["recipient_authorized"]:
         logger.warning(
             f"send_quote_email BLOCKED: recipient_authorized=False "
-            f"reason={verdict_to['blocked_reason']} quote_id={quote_id}"
+            f"reason={verdict_to['blocked_reason']} quote_ids={quote_ids}"
         )
         return ToolResult(
             tool="send_quote_email", success=False,
@@ -2889,67 +2906,92 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             result=verdict_to,
         )
 
-    # PHASE 2 · F5.2 — shared canonical-first resolver (not legacy JSON direct)
     from app.services.quote_service import resolve_quote
-    quote = resolve_quote(quote_id)
-    if not quote:
-        return ToolResult(tool="send_quote_email", success=False, error=f"Quote {quote_id} not found")
 
-    quote_number = quote.get("quote_number", quote_id)
-    customer = quote.get("customer_name", "Unknown")
-    total = quote.get("total", 0)
-
-    # Generate PDF
     pdf_dir = str(dp.quote_pdf_dir())
     os.makedirs(pdf_dir, exist_ok=True)
 
-    try:
-        pdf_path = _run_async(_generate_pdf_for_quote(quote["id"]))
-    except QuotePdfGenerationError as e:
-        return ToolResult(tool="send_quote_email", success=False, error=str(e))
-    except Exception as e:
-        return ToolResult(tool="send_quote_email", success=False, error=f"PDF generation failed: {e}")
+    quotes: list[dict] = []
+    pdf_paths: list[str] = []
+    for qid in quote_ids:
+        quote = resolve_quote(qid)
+        if not quote:
+            return ToolResult(
+                tool="send_quote_email", success=False,
+                error=f"Quote {qid} not found",
+            )
+        try:
+            pdf_path = _run_async(_generate_pdf_for_quote(quote["id"]))
+        except QuotePdfGenerationError as e:
+            return ToolResult(tool="send_quote_email", success=False, error=str(e))
+        except Exception as e:
+            return ToolResult(
+                tool="send_quote_email", success=False,
+                error=f"PDF generation failed for {qid}: {e}",
+            )
+        quotes.append(quote)
+        pdf_paths.append(pdf_path)
 
-    # Send via email
+    primary = quotes[0]
+    quote_number = primary.get("quote_number", quote_ids[0])
+    customer = primary.get("customer_name", "Unknown")
+    total = primary.get("total", 0)
+    all_numbers = [q.get("quote_number", q.get("id")) for q in quotes]
+
     try:
         from app.services.max.email_service import EmailService
         svc = EmailService()
         if not svc.is_configured:
-            return ToolResult(tool="send_quote_email", success=False, error="Email not configured — set SMTP_USER and SMTP_PASSWORD in .env")
+            return ToolResult(
+                tool="send_quote_email", success=False,
+                error="Email not configured — set SMTP_USER and SMTP_PASSWORD in .env",
+            )
 
-        subject = f"Estimate {quote_number} — {customer}"
-        body_text = f"""Hi,
+        if len(quotes) == 1:
+            subject = f"Estimate {quote_number} — {customer}"
+            attach_lines = [f"- Estimate {quote_number}"]
+        else:
+            subject = f"Estimates {', '.join(str(n) for n in all_numbers)} — {customer}"
+            attach_lines = [f"- Estimate {n}" for n in all_numbers]
 
-Please find attached your estimate for review.
-
-Attached:
-- Estimate {quote_number}
-
-Customer: {customer}
-Estimate total: ${total:,.2f}
-Quote number: {quote_number}
-
-If you have any questions, please don't hesitate to reach out."""
+        body_text = params.get("body") or params.get("body_text") or ""
+        if not str(body_text).strip():
+            body_text = "Hi,\n\nPlease find attached your estimate(s) for review.\n\nAttached:\n"
+            body_text += "\n".join(attach_lines)
+            body_text += (
+                f"\n\nCustomer: {customer}\n"
+                f"Quote number(s): {', '.join(str(n) for n in all_numbers)}\n\n"
+                "If you have any questions, please don't hesitate to reach out."
+            )
 
         sent = svc.send(
             to=to,
             subject=subject,
             body_text=body_text,
             recipient_name=customer,
-            attachments=[pdf_path],
+            attachments=pdf_paths,
         )
         if not sent:
-            return ToolResult(tool="send_quote_email", success=False, error="Email provider did not verify send acceptance")
-        pdf_size = os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
+            return ToolResult(
+                tool="send_quote_email", success=False,
+                error="Email provider did not verify send acceptance",
+            )
+        pdf_sizes = [
+            os.path.getsize(p) if os.path.exists(p) else 0 for p in pdf_paths
+        ]
         return ToolResult(tool="send_quote_email", success=True, result={
             "sent_to": to,
+            "quote_id": primary.get("id", quote_ids[0]),
+            "quote_ids": [q.get("id", qid) for q, qid in zip(quotes, quote_ids)],
             "quote_number": quote_number,
+            "quote_numbers": all_numbers,
             "customer": customer,
             "total": total,
-            "pdf_path": pdf_path,
-            "pdf_size_bytes": pdf_size,
-            "attachments_sent": 1,
-            "attachment_files": [os.path.basename(pdf_path)],
+            "pdf_path": pdf_paths[0],
+            "pdf_paths": pdf_paths,
+            "pdf_size_bytes": pdf_sizes[0] if pdf_sizes else 0,
+            "attachments_sent": len(pdf_paths),
+            "attachment_files": [os.path.basename(p) for p in pdf_paths],
         })
     except Exception as e:
         return ToolResult(tool="send_quote_email", success=False, error=f"Email send failed: {e}")

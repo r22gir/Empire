@@ -19,7 +19,16 @@ from urllib.parse import urlparse
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
-from app.services.max.guardrails import check_input, sanitize_output, sanitize_output_streaming, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
+from app.services.max.guardrails import (
+    check_input,
+    sanitize_output,
+    sanitize_output_streaming,
+    SAFE_REFUSAL,
+    is_founder_message,
+    check_gpu_safety,
+    GPU_VERIFICATION_COMMANDS,
+    is_imperative_action_request,
+)
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, parse_tool_blocks_with_errors, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
 from app.services.max.minimax_tools import minimax_tools_status
@@ -34,7 +43,11 @@ from app.services.max.runtime_truth_enforcer import (
     should_halt_after_tool_failure,
 )
 from app.services.max.evaluation_service import evaluation_service
-from app.services.max.drawing_intent import build_drawing_handoff
+from app.services.max.drawing_intent import (
+    build_drawing_handoff,
+    is_drawing_intent,
+    is_text_measurement_drawing_request,
+)
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.factual_guard import is_factual_question, enforce_web_search, grounding_directive
@@ -304,7 +317,10 @@ def _runtime_truth_tool_payload() -> dict:
     return {"tool": "empire_runtime_truth_check", "public": True}
 
 
-def _resolve_max_chat_timeout() -> float:
+_DRAWING_DB_QUERY_CAP = 2
+
+
+def _resolve_max_chat_timeout(message: str | None = None) -> float:
     """Resolve the MAX chat timeout (seconds) from env.
 
     Order of precedence:
@@ -312,24 +328,150 @@ def _resolve_max_chat_timeout() -> float:
         MINIMAX_CHAT_TIMEOUT_SECONDS   (provider-specific override)
         120.0                          (default, was 45.0 historically)
 
-    The previous 45s cap was the documented source of the long-prompt
-    timeout bug: long plans and multi-step prompts that need >45s of
-    LLM time were cut off and surfaced as ``model_used='timeout'``
-    with ``fallback_used=True`` (the latter being a lie — no fallback
-    was attempted). 120s covers all realistic single-request latencies
-    from the MiniMax API while still failing fast enough to surface
-    real outages.
+    Drawing / multi-tool founder requests use a higher extended cap
+    (MAX_CHAT_EXTENDED_TIMEOUT_SECONDS, default 300s).
     """
+    base = 120.0
     for var in ("MAX_CHAT_TIMEOUT_SECONDS", "MINIMAX_CHAT_TIMEOUT_SECONDS"):
         raw = os.getenv(var)
         if raw:
             try:
                 value = float(raw)
                 if value > 0:
-                    return value
+                    base = value
+                    break
             except ValueError:
                 pass
-    return 120.0
+    extended = 300.0
+    raw_ext = os.getenv("MAX_CHAT_EXTENDED_TIMEOUT_SECONDS")
+    if raw_ext:
+        try:
+            extended = max(float(raw_ext), base)
+        except ValueError:
+            pass
+    if message and (
+        is_drawing_intent(message)
+        or is_text_measurement_drawing_request(message)
+        or is_imperative_action_request(message)
+    ):
+        return max(base, extended)
+    return base
+
+
+def _drawing_intent_active(message: str | None, image_filename: str | None) -> bool:
+    if image_filename:
+        return False
+    text = message or ""
+    return is_drawing_intent(text) or is_text_measurement_drawing_request(text)
+
+
+def _db_query_cap_reached(message: str | None, tool_results: list[Any] | None) -> bool:
+    if not _drawing_intent_active(message, None):
+        return False
+    count = sum(
+        1 for entry in (tool_results or [])
+        if isinstance(entry, dict) and entry.get("tool") == "db_query"
+    )
+    return count >= _DRAWING_DB_QUERY_CAP
+
+
+def _dims_for_render_shop(handoff) -> tuple[dict, str, str]:
+    numeric: dict[str, float] = {}
+    shape = ""
+    construction = ""
+    for k, v in (getattr(handoff, "translated_dims", None) or {}).items():
+        if v is None:
+            continue
+        if k == "shape":
+            shape = str(v).strip()
+            continue
+        if k in ("construction", "fabric_mode"):
+            construction = str(v).strip()
+            continue
+        try:
+            numeric[k] = float(str(v).rstrip('"').rstrip("ft").strip())
+        except ValueError:
+            continue
+    if not shape:
+        try:
+            from app.services.max.drawing_intent import _shape_for_text
+            shape = _shape_for_text(getattr(handoff, "raw_message", "") or "")
+        except Exception:
+            shape = ""
+    return numeric, shape, construction
+
+
+def _handoff_to_render_shop_tool_call(handoff) -> dict | None:
+    if not getattr(handoff, "ready", False) or not getattr(handoff, "b1_product_type", None):
+        return None
+    translated_dims, shape, construction = _dims_for_render_shop(handoff)
+    payload = {
+        "tool": "render_shop_drawing",
+        "product_type": handoff.b1_product_type,
+        "dims": translated_dims,
+        "shape": shape,
+        "client_name": "",
+        "site_address": "",
+        "material": "",
+        "date": "",
+    }
+    if construction:
+        payload["construction"] = construction
+    return payload
+
+
+def _coerce_drawing_tool_call(
+    tool_call: dict,
+    message: str | None,
+    image_filename: str | None,
+) -> dict:
+    """Route text+dims to render_shop_drawing; sketch_to_drawing only with images."""
+    name = str(tool_call.get("tool") or "")
+    has_image = bool(
+        image_filename
+        or tool_call.get("image_path")
+        or tool_call.get("image_url")
+        or tool_call.get("image")
+    )
+    if name == "sketch_to_drawing" and not has_image:
+        handoff = build_drawing_handoff(message or "", image_filename=image_filename)
+        routed = _handoff_to_render_shop_tool_call(handoff)
+        if routed:
+            return routed
+    return tool_call
+
+
+def _sketch_error_names_render_shop(result: ToolResult) -> bool:
+    if result.tool != "sketch_to_drawing" or result.success:
+        return False
+    err = (result.error or "").lower()
+    payload = result.result if isinstance(result.result, dict) else {}
+    return (
+        payload.get("reroute_to") == "render_shop_drawing"
+        or "render_shop_drawing" in err
+    )
+
+
+async def _maybe_auto_follow_render_shop(
+    tool_call: dict,
+    result: ToolResult,
+    message: str | None,
+    image_filename: str | None,
+    desk: str | None,
+    access_context: dict | None,
+    founder: bool,
+) -> tuple[ToolResult, dict | None]:
+    """Once per turn: if sketch_to_drawing refused, run render_shop_drawing."""
+    if not _sketch_error_names_render_shop(result):
+        return result, None
+    handoff = build_drawing_handoff(message or "", image_filename=image_filename)
+    routed = _handoff_to_render_shop_tool_call(handoff)
+    if not routed:
+        return result, None
+    follow = await _execute_tool_nonblocking(
+        routed, desk=desk, access_context=access_context, founder=founder,
+    )
+    return follow, routed
 
 
 def _response_metadata(channel: str | None, skill_used: str | None = None, extra: dict | None = None) -> dict:
@@ -473,39 +615,20 @@ def _drawing_render(handoff) -> dict:
 
     # ── Complete: invoke render_shop_drawing (the B1 entry point) ──
     from app.services.max.tool_executor import execute_tool
-    translated_dims = {
-        k: float(str(v).rstrip('"').rstrip("ft"))
-        for k, v in handoff.translated_dims.items()
-        if v is not None
-    }
-    # Pass U/L shape through so render_shop_drawing routes to
-    # bench_renderer true polylines instead of B1 rectangle stub.
-    try:
-        from app.services.max.drawing_intent import _shape_for_text
-        _shape = _shape_for_text(getattr(handoff, "subject", "") or "")
-        if not _shape or _shape == "straight":
-            # Fall back to full message if subject lacked shape tokens.
-            _shape = _shape_for_text(str(getattr(handoff, "raw_message", "") or ""))
-        if _shape and _shape != "straight":
-            translated_dims["shape"] = _shape
-    except Exception:
-        pass
-    result = execute_tool({
+    translated_dims, _shape, _construction = _dims_for_render_shop(handoff)
+    _render_params = {
         "tool":         "render_shop_drawing",
         "product_type": handoff.b1_product_type,
         "dims":         translated_dims,
-        "shape":        translated_dims.get("shape", ""),
-        # HOTFIX B2 (2) — client_name MUST be empty when the founder
-        # didn't name a real client. handoff.subject is the parsed
-        # ITEM TYPE ("shade", "headboard", etc.), not a real client
-        # name. Passing it through would print "CLIENT: shade" in
-        # the title block, which is wrong. The B2 title block OMITS
-        # the CLIENT row entirely when this is empty.
+        "shape":        _shape,
         "client_name":  "",
         "site_address": "",
         "material":     "",
         "date":         "",
-    })
+    }
+    if _construction:
+        _render_params["construction"] = _construction
+    result = execute_tool(_render_params)
     if result.success:
         pdf_path = result.result.get("pdf_path", "?")
         body = (
@@ -529,6 +652,10 @@ def _drawing_render(handoff) -> dict:
         "model_used": "drawing-router",
         "status_event": status,
     }
+
+
+def _quality_gate_drawing_result(handoff, result: ToolResult) -> ToolResult:
+    """Validate sketch_to_drawing SVG payloads before surfacing to the founder."""
     if not result.success:
         return result
 
@@ -563,9 +690,9 @@ def _drawing_render(handoff) -> dict:
     }
     for view in handoff.views:
         if view == "side_elevation" and "side" not in lower_svg:
-            # Existing bench sheets do not yet include a distinct side view; do not
-            # mark them production-complete, but do not block plan/front/isometric output.
-            payload.setdefault("quality_warnings", []).append("side_elevation_requested_but_not_distinct")
+            payload.setdefault("quality_warnings", []).append(
+                "side_elevation_requested_but_not_distinct"
+            )
             continue
         tokens = view_requirements.get(view)
         if tokens and not any(token in lower_svg for token in tokens):
@@ -2872,7 +2999,7 @@ async def _chat_with_max_service(
 
         response = await asyncio.wait_for(
             ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
-            timeout=_resolve_max_chat_timeout(),
+            timeout=_resolve_max_chat_timeout(request.message),
         )
 
         # Resolve access control user
@@ -3032,6 +3159,25 @@ async def _chat_with_max_service(
                 if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                     tc["image_filename"] = request.image_filename
 
+                tc = _coerce_drawing_tool_call(
+                    tc, request.message, request.image_filename,
+                )
+                if (
+                    tc.get("tool") == "db_query"
+                    and _db_query_cap_reached(request.message, tool_results_list)
+                ):
+                    entry = {
+                        "tool": "db_query",
+                        "success": False,
+                        "error": (
+                            "db_query capped for drawing request — use "
+                            "render_shop_drawing with parsed dims instead."
+                        ),
+                    }
+                    round_results.append(entry)
+                    tool_results_list.append(entry)
+                    continue
+
                 # Auto-reroute write tools to CodeForge desk (reads NEVER)
                 if _should_reroute_to_codeforge(str(tc.get("tool") or ""), bool(request.desk)):
                     tool_name = tc["tool"]
@@ -3066,6 +3212,17 @@ async def _chat_with_max_service(
                     tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
                 result = await _execute_tool_nonblocking(tc, desk=request.desk, access_context=_ac_context, founder=founder)
+                follow_tc = None
+                if _sketch_error_names_render_shop(result):
+                    result, follow_tc = await _maybe_auto_follow_render_shop(
+                        tc,
+                        result,
+                        request.message,
+                        request.image_filename,
+                        request.desk,
+                        _ac_context,
+                        founder,
+                    )
                 entry = _normalize_tool_result_entry(result)
                 round_results.append(entry)
                 tool_results_list.append(entry)
@@ -3522,7 +3679,7 @@ async def _chat_with_max_service(
         # answered", which is a lie. ``model_used='timeout'`` is the
         # only honest signal, and ``metadata.timeout`` distinguishes
         # this from a regular empty AIResponse.
-        timeout_secs = _resolve_max_chat_timeout()
+        timeout_secs = _resolve_max_chat_timeout(request.message)
         logger.error(f"Chat request timed out after {timeout_secs:.0f}s (MAX_CHAT_TIMEOUT_SECONDS)")
         return ChatResponse(
             response=(
@@ -4015,6 +4172,28 @@ async def chat_stream(request: ChatRequest):
                     if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                         tc["image_filename"] = request.image_filename
 
+                    tc = _coerce_drawing_tool_call(
+                        tc, request.message, request.image_filename,
+                    )
+                    if (
+                        tc.get("tool") == "db_query"
+                        and _db_query_cap_reached(request.message, tool_results_list)
+                    ):
+                        entry = {
+                            "tool": "db_query",
+                            "success": False,
+                            "error": (
+                                "db_query capped for drawing request — use "
+                                "render_shop_drawing with parsed dims instead."
+                            ),
+                        }
+                        round_results.append(entry)
+                        tool_results_list.append(entry)
+                        progress_line = format_tool_progress_message(entry)
+                        _stream_step_lines.append(progress_line)
+                        yield f"data: {_safe_dumps(_tool_progress_event(entry))}\n\n"
+                        continue
+
                     # Auto-reroute write tools to CodeForge desk (reads NEVER)
                     if _should_reroute_to_codeforge(str(tc.get("tool") or ""), bool(request.desk)):
                         tool_name = tc["tool"]
@@ -4054,6 +4233,16 @@ async def chat_stream(request: ChatRequest):
                         )
                     except asyncio.TimeoutError:
                         result = ToolResult(tool=str(tc.get("tool") or "unknown"), success=False, error="Tool timed out")
+                    if _sketch_error_names_render_shop(result):
+                        result, _ = await _maybe_auto_follow_render_shop(
+                            tc,
+                            result,
+                            request.message,
+                            request.image_filename,
+                            request.desk,
+                            _stream_ac_context,
+                            founder,
+                        )
                     entry = _normalize_tool_result_entry(result)
                     round_results.append(entry)
                     tool_results_list.append(entry)
