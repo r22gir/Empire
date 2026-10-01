@@ -417,6 +417,10 @@ def _handoff_to_render_shop_tool_call(handoff) -> dict | None:
     }
     if construction:
         payload["construction"] = construction
+    raw = getattr(handoff, "raw_message", "") or ""
+    if raw:
+        payload["description"] = raw
+        payload["raw_message"] = raw
     return payload
 
 
@@ -628,6 +632,10 @@ def _drawing_render(handoff) -> dict:
     }
     if _construction:
         _render_params["construction"] = _construction
+    raw = getattr(handoff, "raw_message", "") or ""
+    if raw:
+        _render_params["description"] = raw
+        _render_params["raw_message"] = raw
     result = execute_tool(_render_params)
     if result.success:
         pdf_path = result.result.get("pdf_path", "?")

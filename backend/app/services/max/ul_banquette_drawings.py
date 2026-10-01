@@ -161,31 +161,46 @@ def render_ul_banquette_pdf(
     )
     quote_num = str(
         params.get("quote_num") or params.get("quote_number")
-        or dims.get("quote_num") or "EST-2026-272"
-    ).strip()
+        or dims.get("quote_num") or ""
+    ).strip() or "Not assigned"
     quote_id = str(params.get("quote_id") or dims.get("quote_id") or "").strip()
     client = str(params.get("client_name") or params.get("client") or "").strip()
     site = str(params.get("site_address") or params.get("project") or "").strip()
 
-    back = _f(dims, "back_length", "back_outer", "back_outer_in", "back", "width",
-              default=249.75)
+    back = _f(dims, "back_length", "back_outer", "back_outer_in", "back", "width", default=None)
+    if back is None:
+        raise ValueError("U/L banquette requires back wall length (back_length or width)")
     arm_l = _f(dims, "side_left", "arm_left", "left_depth", "left_side",
                "arm_left_outer", default=None)
     arm_r = _f(dims, "side_right", "arm_right", "right_side", "arm_right_outer",
                default=None)
     side_fb = _f(dims, "side_length", "side", "side_in", "arm_outer", default=None)
     if arm_l is None:
-        arm_l = side_fb if side_fb is not None else 41.25
+        arm_l = side_fb
     if arm_r is None:
-        arm_r = side_fb if side_fb is not None else 52.0
-    # NEVER max() the arms — asymmetric is correct for Marleys
-    seat_d = _f(dims, "depth", "seat_depth", "side_depth", "seat_depth_in", default=16.25)
-    shell_h = _f(dims, "height", "shell_height", "shell_height_in", default=30.25)
+        arm_r = side_fb
+    if shape == "u_shape" and (arm_l is None or arm_r is None):
+        raise ValueError("U-banquette requires return lengths (side_left/side_right or returns)")
+    if arm_l is None:
+        arm_l = arm_r or 0.0
+    if arm_r is None:
+        arm_r = arm_l or 0.0
+    seat_d = _f(dims, "depth", "seat_depth", "side_depth", "seat_depth_in", default=None)
+    if seat_d is None:
+        raise ValueError("banquette requires seat depth")
     net_back = _f(dims, "back_height", "net_back", "net_back_cushion_height",
-                  "net_back_height", default=26.75)
+                  "net_back_height", default=None)
     seat_foam = _f(dims, "seat_foam", "foam", "seat_foam_in", default=2.0)
-    # U seat H AFF is distinct from foam thickness (Rafael: never label foam as seat H)
-    u_seat_h = _f(dims, "seat_height", "seat_h", "seat_height_aff", default=18.0)
+    u_seat_h = _f(dims, "seat_height", "seat_h", "seat_height_aff", default=None)
+    if u_seat_h is None:
+        raise ValueError("banquette requires seat height")
+    shell_h = _f(dims, "height", "shell_height", "shell_height_in", default=None)
+    if shell_h is None and net_back is not None:
+        shell_h = float(u_seat_h) + float(net_back) + float(seat_foam)
+    if shell_h is None:
+        shell_h = float(u_seat_h) + float(net_back or 18.0) + float(seat_foam)
+    if net_back is None:
+        net_back = max(float(shell_h) - float(u_seat_h) - float(seat_foam), 6.0)
 
     u_spec = UShellSpec(
         back_outer=back, arm_left=arm_l, arm_right=arm_r, seat_depth=seat_d,
@@ -199,26 +214,20 @@ def render_ul_banquette_pdf(
     if (long_in is None or short_in is None) and isinstance(legs, (list, tuple)) and len(legs) >= 2:
         a, b = float(legs[0]), float(legs[1])
         long_in, short_in = max(a, b), min(a, b)
-    if long_in is None:
-        long_in = 107.75
-    if short_in is None:
-        short_in = 48.875
-    l_depth = _f(dims, "l_depth", "l_seat_depth", default=None)
-    if l_depth is None:
-        l_depth = _f(dims, "depth", "seat_depth", default=19.0) if shape == "l_shape" else 19.0
-    l_height = _f(dims, "l_height", "l_shell_height", default=None)
-    if l_height is None:
-        l_height = _f(dims, "height", "shell_height", default=30.0) if shape == "l_shape" else 30.0
-    l_seat_h = _f(dims, "seat_height", "seat_h", default=18.0)
-
-    l_net = _f(dims, "l_net_back", "l_back_height", "net_back_l", default=None)
-    if l_net is None:
-        l_net = net_back  # inherit U net back (quote L-B basis)
-    l_spec = LShellSpec(
-        leg_short=short_in, leg_long=long_in, seat_depth=l_depth,
-        shell_height=l_height, seat_height=l_seat_h, net_back_height=l_net,
-        provisional=True,
-    )
+    include_l = shape == "l_shape" or bool(params.get("include_l"))
+    l_spec = LShellSpec()
+    if include_l:
+        if long_in is None or short_in is None:
+            raise ValueError("L-banquette requires long_leg and short_leg dimensions")
+        l_depth = _f(dims, "l_depth", "l_seat_depth", default=None) or seat_d
+        l_height = _f(dims, "l_height", "l_shell_height", default=None) or shell_h
+        l_seat_h = _f(dims, "seat_height", "seat_h", default=u_seat_h)
+        l_net = _f(dims, "l_net_back", "l_back_height", "net_back_l", default=None) or net_back
+        l_spec = LShellSpec(
+            leg_short=short_in, leg_long=long_in, seat_depth=l_depth,
+            shell_height=l_height, seat_height=l_seat_h, net_back_height=l_net,
+            provisional=False,
+        )
     # construction: basketweave (default) | plain / budget / budget_plain
     construction_raw = (
         params.get("construction") or params.get("fabric_mode")
@@ -233,11 +242,17 @@ def render_ul_banquette_pdf(
         ) else "basketweave"
     )
     rev = str(params.get("rev") or dims.get("rev") or ("B-PLAIN" if construction == "plain" else "H-ORTHO-2")).strip()
+    job_label = site or name
+    if include_l and shape == "u_shape":
+        job_label = f"{job_label} — U+L Banquette Upholstery"
+    elif shape == "u_shape":
+        job_label = f"{job_label} — U-Banquette Upholstery"
+    else:
+        job_label = f"{job_label} — L-Banquette Upholstery"
     meta = SheetMeta(
         quote_num=quote_num,
-        job=(f"{site} — U+L Banquette Upholstery" if site
-             else "Marleys Hyattsville — U+L Banquette Upholstery"),
-        client=client or "Dave Romero / Marleys Hyattsville",
+        job=job_label,
+        client=client or "Not assigned",
         construction=construction,
         rev=rev,
     )
@@ -254,8 +269,9 @@ def render_ul_banquette_pdf(
 
     summary = render_upholstery_shell_pdf(
         out_path=out_path, u=u_spec, L=l_spec, meta=meta,
-        include_u=True, include_l=True,
-        include_iso=False,  # PARKED — Rafael 2026-09-24: ortho TOP/FRONT/SIDE first
+        include_u=shape == "u_shape",
+        include_l=include_l,
+        include_iso=False,
         construction=construction,
     )
 
@@ -267,7 +283,11 @@ def render_ul_banquette_pdf(
         f"(not footprint width {u_spec.footprint_width:.2f}\").",
         f"U elev: shell {u_spec.shell_height}\"; net back {u_spec.net_back_height}\" sits ON "
         f"{u_spec.seat_foam}\" foam; seat H {u_spec.seat_height}\" AFF PROV (foam ≠ seat H).",
-        "Sheets: TOP/FRONT/SIDE U+L (iso PARKED) / client mockup / schedule / materials.",
+        (
+            "Sheets: TOP/FRONT/SIDE U+L (iso PARKED) / client mockup / schedule / materials."
+            if include_l
+            else "Sheets: TOP/FRONT/SIDE U (iso PARKED) / client mockup / schedule / materials."
+        ),
         (
             "BUDGET PLAIN: backs + seats both PLAIN — NO constructed basketweave / no pattern modules."
             if construction == "plain" else
@@ -277,8 +297,9 @@ def render_ul_banquette_pdf(
         f"@ {mats.get('fabric_width_in')}\" (15% waste).",
         f"1/2\" ply: {mats.get('ply_sheets_4x8')} sheets 4x8 ({mats.get('ply_with_waste_sf')} sf w/ waste).",
         "Cushion schedule by run + SF — no 24\" auto-slice hero.",
-        "L depth/height provisional — lock to U before fab.",
     ]
+    if include_l:
+        flags.append("L depth/height provisional — lock to U before fab.")
     for flag_key in ("flags", "open_questions", "provisional_flags"):
         extra = params.get(flag_key) or dims.get(flag_key)
         if isinstance(extra, list):

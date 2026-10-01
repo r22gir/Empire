@@ -140,7 +140,11 @@ class RomanTemplate(FamilyTemplate):
         width = float(dims["width"])
         height = float(dims["height"])
         product_type = spec.get("product_type", "flat_fold")
-        slat = _DEFAULT_SLAT_HEIGHTS[product_type]
+        slat = float(
+            dims.get("slat_height")
+            or dims.get("fold_height")
+            or _DEFAULT_SLAT_HEIGHTS[product_type]
+        )
         n_slats = max(1, round(height / slat))
         actual_slat = height / n_slats  # snap to evenly spaced
         points: List[GeometryPoint] = []
@@ -187,7 +191,11 @@ class RomanTemplate(FamilyTemplate):
         width = float(dims["width"])
         height = float(dims["height"])
         product_type = spec.get("product_type", "flat_fold")
-        slat = _DEFAULT_SLAT_HEIGHTS[product_type]
+        slat = float(
+            dims.get("slat_height")
+            or dims.get("fold_height")
+            or _DEFAULT_SLAT_HEIGHTS[product_type]
+        )
         n_slats = max(1, round(height / slat))
         actual_slat = height / n_slats
         return [

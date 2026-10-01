@@ -119,7 +119,7 @@ _TEXT_MEASUREMENT_VIEW_HINTS = (
 
 def is_text_measurement_drawing_request(text: str) -> bool:
     """True when the message names a fabrication product and carries measurable dims."""
-    if not text or is_business_document_intent(text):
+    if not text:
         return False
     lowered = text.lower()
     has_product = any(p in lowered for p in _TEXT_MEASUREMENT_PRODUCT_PHRASES)
@@ -129,6 +129,10 @@ def is_text_measurement_drawing_request(text: str) -> bool:
     compact = bool(
         re.search(r"\d+(?:\.\d+)?\s*[x×]\s*\d+", lowered)
         or re.search(r"\d+\s*w\b", lowered)
+        or re.search(
+            r"\d+(?:\.\d+)?\s*(?:in(?:ch(?:es)?)?\s*)?w\b.*[x×].*\d+",
+            lowered,
+        )
     )
     has_view_hint = any(h in lowered for h in _TEXT_MEASUREMENT_VIEW_HINTS)
     return has_number and (compact or has_view_hint or len(re.findall(r"\d+", text)) >= 2)
@@ -403,11 +407,71 @@ _BUSINESS_DOCUMENT_PATTERNS = (
 )
 
 
+_NEGATED_BUSINESS_RE = re.compile(
+    r"(?:"
+    r"do\s+not|don't|doesn't|never|without|not)\s+"
+    r"(?:create|send|make|generate|draft|email)?\s*"
+    r"(?:\w+\s*,?\s*){0,6}$",
+    re.IGNORECASE,
+)
+
+
+def _business_term_negated(text: str, match_start: int) -> bool:
+    """True when a finance keyword is only mentioned in a negated/opt-out phrase."""
+    prefix = (text or "")[:match_start]
+    window = prefix[-90:]
+    if re.search(
+        r"(?:do\s+not|don't|doesn't|never|without)\s+"
+        r"(?:create|send|make|generate|draft|email|save)?\s*"
+        r"(?:\w+\s*,?\s*){0,8}$",
+        window,
+        re.IGNORECASE,
+    ):
+        return True
+    if re.search(r"\bno\s+(?:\w+\s*,?\s*){0,4}$", window, re.IGNORECASE):
+        return True
+    if "test only" in window.lower() and "do not" in window.lower():
+        return True
+    return False
+
+
 def is_business_document_intent(text: str) -> bool:
-    """True when the user is asking for quotes, invoices, splits, or pricing."""
+    """True when the user is asking to create/send quotes, invoices, or pricing."""
     if not text:
         return False
-    return any(p.search(text) for p in _BUSINESS_DOCUMENT_PATTERNS)
+    lowered = text.lower()
+    affirmative = (
+        re.search(
+            r"\b(create|make|generate|draft|save|send|email)\s+.{0,50}\b"
+            r"(quote|invoice|estimate|contact)s?\b",
+            lowered,
+        )
+        and not re.search(
+            r"\b(do\s+not|don't|never)\s+(create|send|make|generate)",
+            lowered,
+        )
+    )
+    if affirmative:
+        return True
+    if re.search(r"\bquote\s+for\b", lowered):
+        return True
+    for p in _BUSINESS_DOCUMENT_PATTERNS:
+        for m in p.finditer(text):
+            if _business_term_negated(text, m.start()):
+                continue
+            if p.pattern in (
+                r"\bquot(?:e|ing)s?\b",
+                r"\bestimates?\b",
+                r"\binvoices?\b",
+            ):
+                if not affirmative:
+                    continue
+            return True
+    if re.search(r"\$\s*\d", text):
+        return True
+    if re.search(r"(?<!\w)\d+(?:\.\d+)?\s*sf\b", text, re.IGNORECASE):
+        return True
+    return False
 
 
 def _intent_mode_keywords_imply_drawing(lowered: str) -> bool:
@@ -474,10 +538,22 @@ def is_drawing_intent(text: str) -> bool:
     if any(neg in lowered for neg in negation_patterns):
         return False
 
-    # Billing / quote / invoice turns always beat drawing — including mixed
-    # prompts that also mention furniture types or dimensions.
+    # Strong fabrication signals beat billing vocabulary (e.g. TEST ONLY: do not
+    # create quotes … + draw a banquette with dims).
+    if any(pattern in lowered for pattern in (
+        "draw a ",
+        "draw me ",
+        "draw it ",
+        "draw the ",
+        "draw this ",
+    )):
+        return True
+
     if is_business_document_intent(text):
         return False
+
+    if is_text_measurement_drawing_request(text):
+        return True
 
     # H57: question forms NEVER route. A user asking "what is a
     # drawing" or "explain the difference between a drawing and a
@@ -672,6 +748,8 @@ _B1_TYPE_BY_STYLE_HINT = (
     ("smocked",           "smocked"),
     ("fan pleat",         "fan_pleat"),
     # ── Roman shades (9 styles) ─────────────────────────────────
+    ("flat fold",         "flat_fold"),
+    ("flat-fold",         "flat_fold"),
     ("flat_roman",        "flat_fold"),
     ("flat roman",        "flat_fold"),
     ("hobbled",           "hobbled_teardrop"),
@@ -1116,7 +1194,7 @@ def _strip_inches(token: str) -> str:
 
 
 def _extract_compact_dimensions(text: str) -> dict[str, str]:
-    """Parse 84x18x18 benches and 36W x 60H roman shades."""
+    """Parse 84x18x18 benches, 36W x 60H / 36 in W x 60 in H roman shades, etc."""
     out: dict[str, str] = {}
     lowered = text.lower()
     triple = re.search(
@@ -1128,19 +1206,66 @@ def _extract_compact_dimensions(text: str) -> dict[str, str]:
         out["depth"] = f'{triple.group("d")}"'
         out["seat_height"] = f'{triple.group("h")}"'
         out["height"] = f'{triple.group("h")}"'
-    wh = re.search(
+    for pat in (
+        r"(?P<w>\d+(?:\.\d+)?)\s*(?:in(?:ch(?:es)?)?\s*)?w(?:ide)?\s*[x×]\s*(?P<h>\d+(?:\.\d+)?)\s*(?:in(?:ch(?:es)?)?\s*)?h(?:igh)?",
+        r"(?P<w>\d+(?:\.\d+)?)\s*\"\s*w\s*[x×]\s*(?P<h>\d+(?:\.\d+)?)\s*\"\s*h",
         r"(?P<w>\d+(?:\.\d+)?)\s*w(?:ide)?\s*[x×]\s*(?P<h>\d+(?:\.\d+)?)\s*h(?:igh)?",
+        r"width\s*(?P<w>\d+(?:\.\d+)?).{0,20}height\s*(?P<h>\d+(?:\.\d+)?)",
+    ):
+        wh = re.search(pat, lowered)
+        if wh:
+            out["width"] = f'{wh.group("w")}"'
+            out["height"] = f'{wh.group("h")}"'
+            break
+    wh_plain = re.search(
+        r"(?P<w>\d+(?:\.\d+)?)\s*[x×]\s*(?P<h>\d+(?:\.\d+)?)(?:\s*(?:in|inch(?:es)?)?)?\s*(?:$|[^0-9])",
         lowered,
     )
-    if wh:
-        out["width"] = f'{wh.group("w")}"'
-        out["height"] = f'{wh.group("h")}"'
+    if wh_plain and "width" not in out:
+        out["width"] = f'{wh_plain.group("w")}"'
+        out["height"] = f'{wh_plain.group("h")}"'
+    long_m = re.search(r"(?P<v>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*long", lowered)
+    deep_m = re.search(r"(?P<v>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*deep", lowered)
+    high_m = re.search(r"(?P<v>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*high", lowered)
+    if long_m:
+        out["width"] = f'{long_m.group("v")}"'
+    if deep_m:
+        out["depth"] = f'{deep_m.group("v")}"'
+    if high_m and "seat_height" not in out:
+        out["seat_height"] = f'{high_m.group("v")}"'
+        out["height"] = f'{high_m.group("v")}"'
     foam = re.search(r"(?P<f>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*foam", lowered)
     if foam:
         out["seat_foam"] = f'{foam.group("f")}"'
-    tuft = re.search(r"(?P<b>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*tufted\s+back", lowered)
+    tuft = re.search(
+        r"(?P<b>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*(?:tufted\s+back|back\s*(?:is\s*)?tufted)",
+        lowered,
+    )
+    if not tuft:
+        tuft = re.search(
+            r"tufted\s+back\s*(?P<b>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*(?:tall|high)?",
+            lowered,
+        )
+    if not tuft:
+        tuft = re.search(
+            r"back\s*(?P<b>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*tall",
+            lowered,
+        )
     if tuft:
         out["back_height"] = f'{tuft.group("b")}"'
+    if "tufted" in lowered:
+        out["panel_style"] = "tufted"
+    if "inside mount" in lowered or "inside-mount" in lowered:
+        out["mount"] = "inside"
+    elif "outside mount" in lowered:
+        out["mount"] = "outside"
+    fold = re.search(
+        r"(?P<f>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?\s*folds?",
+        lowered,
+    )
+    if fold:
+        out["slat_height"] = f'{fold.group("f")}"'
+        out["fold_height"] = out["slat_height"]
     return out
 
 
@@ -1158,7 +1283,7 @@ def _enrich_ul_banquette_dims(text: str, dims: dict[str, str]) -> dict[str, str]
         merged["width"] = merged.get("width") or merged["back_length"]
 
     returns = re.search(
-        r"returns?\s*(?P<v>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?(?:\s+each)?",
+        r"(?:two\s+)?returns?\s*(?P<v>\d+(?:\.\d+)?)\s*(?:in|inch(?:es)?)?(?:\s+each)?",
         lowered,
     )
     if returns:

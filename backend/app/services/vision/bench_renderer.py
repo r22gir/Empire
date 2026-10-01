@@ -38,6 +38,7 @@ from app.services.drawing.bench_quote_bridge import (  # noqa: E402
 from app.services.drawing.inches import format_inches as _in
 from app.services.drawing.quote_sheet_layout import (  # noqa: E402
     CAPTION_H,
+    Rect,
     SHEET_H,
     SHEET_W,
     SVG_TYPE,
@@ -659,6 +660,20 @@ def _plan_u_shape(parts, ox, oy, scale, back, side, depth, side_depth, seat_h, b
 
 # ── FRONT ELEVATION ───────────────────────────────────────────────
 
+def _side_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
+                   panel_style="vertical_channels", channel_count=6):
+    """Side elevation: depth × (seat + back)."""
+    has_back = back_h is not None and back_h > 0 and panel_style != "none"
+    d = depth * scale
+    sh = seat_h * scale
+    bh = (back_h if has_back else 0) * scale
+    parts.append(_line(ox - 8, oy, ox + d + 8, oy, SW_FLOOR, GRAY, "6,3"))
+    parts.append(_rect(ox, oy - sh, d, sh, SW_HEAVY))
+    if has_back:
+        parts.append(_rect(ox, oy - sh - bh, d, bh, SW_MED))
+        _draw_back_style_2d(parts, ox, oy - sh - bh, d, bh, panel_style, channel_count)
+
+
 def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
                    panel_style="vertical_channels", channel_count=6):
     """Front elevation with floor line, seat, back, and dimensions."""
@@ -1102,7 +1117,8 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
                        plan_args=(), elev_args=(), iso_args=(),
                        plan_kwargs=None, category_chip="", chrome=None,
                        assumptions=None, has_back=True, title_panel_style=None,
-                       layout=None, ortho=None, plan_aside=""):
+                       layout=None, ortho=None, plan_aside="",
+                       include_side_elevation=False, side_args=()):
     """Compose the shared idea-sheet: plan + elevation, iso, title block."""
     layout = layout or idea_sheet_regions()
     parts = [_defs()]
@@ -1131,13 +1147,35 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
     parts.extend(iso_group)
     parts.append('</g>')
 
-    _view_frame(parts, layout["elev"], "FRONT ELEVATION")
-    elev_group = []
     elev_safe = layout["elev_safe"]
-    elev_fn(elev_group, *elev_args, panel_style=panel_style, channel_count=channel_count)
-    parts.append(f'<g transform="translate({elev_safe.x:.1f},{elev_safe.y:.1f})">')
-    parts.extend(elev_group)
-    parts.append('</g>')
+    if include_side_elevation and side_args:
+        half = elev_safe.w / 2 - 6
+        _view_frame(parts, Rect(elev_safe.x, elev_safe.y - CAPTION_H, elev_safe.w, elev_safe.h + CAPTION_H),
+                    "FRONT + SIDE ELEVATION")
+        front_group = []
+        fe_args = (elev_args[0], elev_args[1], elev_args[2] * (half / max(elev_safe.w, 1)),
+                   *elev_args[3:])
+        elev_fn(front_group, *fe_args, panel_style=panel_style, channel_count=channel_count)
+        parts.append(f'<g transform="translate({elev_safe.x:.1f},{elev_safe.y:.1f})">')
+        parts.extend(front_group)
+        parts.append('</g>')
+        side_group = []
+        sx = elev_safe.x + half + 12
+        side_fn = _side_straight
+        se_args = (sx, elev_args[1], elev_args[2] * (half / max(elev_safe.w, 1)), *side_args[3:])
+        side_fn(side_group, *se_args, panel_style=panel_style, channel_count=channel_count)
+        parts.append(f'<g transform="translate(0,0)">')
+        parts.extend(side_group)
+        parts.append('</g>')
+        parts.append(_text(elev_safe.x + half * 0.5, elev_safe.y - 8, "FRONT", 11, weight="600"))
+        parts.append(_text(sx + half * 0.35, elev_safe.y - 8, "SIDE", 11, weight="600"))
+    else:
+        _view_frame(parts, layout["elev"], "FRONT ELEVATION")
+        elev_group = []
+        elev_fn(elev_group, *elev_args, panel_style=panel_style, channel_count=channel_count)
+        parts.append(f'<g transform="translate({elev_safe.x:.1f},{elev_safe.y:.1f})">')
+        parts.extend(elev_group)
+        parts.append('</g>')
 
     _draw_ortho_dims(parts, layout, ortho)
 
@@ -1261,6 +1299,7 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
     }
     iso_args = (name, width_in, depth_in, seat_h_in, geo_back, quote_num)
 
+    include_side = bool(kw.get("include_side_elevation"))
     return _compose_multiview(
         name, "straight", _build_straight, _plan_straight, _elev_straight,
         dims_text, c_count, cushion_width, draw_panel, channel_count,
@@ -1268,6 +1307,8 @@ def render_straight(name, width_in, depth_in=20, seat_h_in=18, back_h_in=18,
         plan_args=plan_args, elev_args=elev_args, iso_args=iso_args,
         layout=layout, ortho=ortho,
         plan_aside=_back_style_label(panel_style, has_back=has_back),
+        include_side_elevation=include_side,
+        side_args=elev_args if include_side else (),
         **extras,
     )
 

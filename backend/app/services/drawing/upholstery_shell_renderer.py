@@ -192,12 +192,12 @@ class LShellSpec:
 
 @dataclass
 class SheetMeta:
-    quote_num: str = "EST-2026-272"
-    job: str = "Marley's Hyattsville — U+L Banquette Upholstery"
+    quote_num: str = "Not assigned"
+    job: str = "Custom banquette upholstery"
     note: str = (
-        "Upholstery on existing shell · basketweave back / plain seat · iso PARKED"
+        "Upholstery on existing shell · dimensions per founder request · iso PARKED"
     )
-    client: str = "Dave Romero / Marley's Hyattsville"
+    client: str = "Not assigned"
     rev: str = "H-ORTHO-2"
     drawn_by: str = "MAX AI / Empire Workroom"
     date_str: str = ""
@@ -1913,7 +1913,10 @@ def _draw_l_iso(c, origin_x, origin_y, area_w, area_h, L: LShellSpec, colored: b
     )
 
 
-def _key_dims_panel(c, x, y, u: UShellSpec, L: LShellSpec, construction: str = "basketweave"):
+def _key_dims_panel(
+    c, x, y, u: UShellSpec, L: LShellSpec,
+    construction: str = "basketweave", include_l: bool = False,
+):
     """KEY DIMS — labeled rows, larger type, more padding (H-ORTHO-2)."""
     box_h = 2.20 * inch
     box_w = 3.55 * inch
@@ -1931,9 +1934,12 @@ def _key_dims_panel(c, x, y, u: UShellSpec, L: LShellSpec, construction: str = "
         ("Shell H / net back", f'{u.shell_height:.2f}" / {u.net_back_height:.2f}"'),
         ("Seat H AFF (PROV)", f'{u.seat_height:.1f}"  ·  foam {u.seat_foam:.1f}" mat\'l'),
         ("Developed outer", f'{u.developed_outer_in:.2f}" = {u.developed_outer_lf:.2f} lf'),
-        ("L legs (PROV)", f'{L.leg_short:.3f}" + {L.leg_long:.3f}"'),
-        ("L depth / H / seat", f'{L.seat_depth:.1f}" / {L.shell_height:.1f}" / {L.seat_height:.1f}" AFF'),
     ]
+    if include_l:
+        rows.extend([
+            ("L legs (PROV)", f'{L.leg_short:.3f}" + {L.leg_long:.3f}"'),
+            ("L depth / H / seat", f'{L.seat_depth:.1f}" / {L.shell_height:.1f}" / {L.seat_height:.1f}" AFF'),
+        ])
     yy = y - 32
     for lab, val in rows:
         c.setFillColor(GRAY)
@@ -2039,6 +2045,16 @@ def render_upholstery_shell_pdf(
     is_plain = constr == "plain"
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if not include_l:
+        L = LShellSpec(
+            leg_short=0.0,
+            leg_long=0.0,
+            seat_depth=0.0,
+            shell_height=0.0,
+            seat_height=0.0,
+            net_back_height=0.0,
+            provisional=False,
+        )
     mats = compute_materials(u, L, fabric_width_in=fabric_width_in)
 
     # Sheet roster — TOP / FRONT / SIDE ortho lead; iso PARKED (omit by default)
@@ -2085,7 +2101,10 @@ def render_upholstery_shell_pdf(
             (CUSH, "Seat cushion footprint"),
             (NAVY, "Developed run"),
         ])
-        _key_dims_panel(c, w - 4.05 * inch, 3.75 * inch, u, L, construction=constr)
+        _key_dims_panel(
+            c, w - 4.05 * inch, 3.75 * inch, u, L,
+            construction=constr, include_l=include_l,
+        )
         _notes_panel(
             c, 0.45 * inch, 3.75 * inch,
             "NOTES",
@@ -2264,9 +2283,9 @@ def render_upholstery_shell_pdf(
     scale_m = (5.8 * inch) / u.back_outer
     _draw_u_plan(c, 0.55 * inch, h - 1.35 * inch, scale_m, u, colored=True, construction=constr)
     _draw_u_elev(c, 7.3 * inch, 3.4 * inch, 5.5, 3.2 * inch, u, colored=True, construction=constr)
-    # Small L plan colored bottom
-    scale_lm = (3.8 * inch) / L.leg_long
-    _draw_l_plan(c, 0.55 * inch, 3.35 * inch, scale_lm, L, colored=True, construction=constr)
+    if include_l and L.leg_long > 0:
+        scale_lm = (3.8 * inch) / L.leg_long
+        _draw_l_plan(c, 0.55 * inch, 3.35 * inch, scale_lm, L, colored=True, construction=constr)
 
     c.setFillColor(NAVY)
     c.setFont("Helvetica-Bold", 9)
@@ -2331,21 +2350,24 @@ def render_upholstery_shell_pdf(
             f"{u.seat_sf:.2f}",
             "Shop splits sew/handle",
         ),
-        (
-            "L-B", "L backs", _fab_back,
-            f'{L.developed_outer_lf:.2f} lf',
-            f'{L.net_back:.2f}" above seat',
-            f"{L.back_sf:.2f}",
-            "Lock height to U",
-        ),
-        (
-            "L-S", "L seats", "PLAIN",
-            f'{L.developed_outer_lf:.2f} lf',
-            f'{L.seat_depth:.1f}" depth',
-            f"{L.seat_sf:.2f}",
-            "Lock depth to U",
-        ),
     ]
+    if include_l and L.leg_long > 0:
+        rows.extend([
+            (
+                "L-B", "L backs", _fab_back,
+                f'{L.developed_outer_lf:.2f} lf',
+                f'{L.net_back_height:.2f}" above seat',
+                f"{L.back_sf:.2f}",
+                "Lock height to U",
+            ),
+            (
+                "L-S", "L seats", "PLAIN",
+                f'{L.developed_outer_lf:.2f} lf',
+                f'{L.seat_depth:.1f}" depth',
+                f"{L.seat_sf:.2f}",
+                "Lock depth to U",
+            ),
+        ])
     y = h - 1.05 * inch
     col_x = [0.45, 1.05, 2.15, 3.15, 5.55, 7.15, 8.0]
     # header bar
@@ -2397,7 +2419,7 @@ def render_upholstery_shell_pdf(
             "MATERIALS TAKEOFF — MODULAR BASKETWEAVE + PLAIN SEAT"
         ),
         (
-            f'Face-SF geometry · backs {u.back_sf + L.back_sf:.2f} sf + seats {u.seat_sf + L.seat_sf:.2f} sf · nest {round((mats.waste_fabric-1)*100)}% · NO bar/tile modules'
+            f'Face-SF geometry · backs {(u.back_sf + (L.back_sf if include_l else 0)):.2f} sf + seats {(u.seat_sf + (L.seat_sf if include_l else 0)):.2f} sf · nest {round((mats.waste_fabric-1)*100)}% · NO bar/tile modules'
             if is_plain else
             f'TILE {mats.module_face_in:.1f}" · STD bar {mats.bar_face_in[0]:.1f}"×{mats.bar_face_in[1]:.1f}" · 2 rows + {mats.height_leftover_in:.2f}" leftover OPEN · foam+{mats.module_staple_in:.1f}" staple · nest {round((mats.waste_fabric-1)*100)}%'
         ),
@@ -2423,23 +2445,33 @@ def render_upholstery_shell_pdf(
     fb = mats.module_fabric_blank_in
     pb = mats.module_ply_blank_in
     if is_plain:
-        back_face = u.back_sf + L.back_sf
-        card(
-            0.45 * inch, h - 2.95 * inch, "PLAIN BACKS (FACE-SF — NO MODULES)",
-            [
-                f"U backs face: {u.back_sf:.2f} sf  |  L backs: {L.back_sf:.2f} sf",
-                f"Total backs face-SF: {back_face:.2f} sf",
+        back_face = u.back_sf + (L.back_sf if include_l else 0.0)
+        plain_back_lines = [
+            f"U backs face: {u.back_sf:.2f} sf",
+        ]
+        if include_l and L.leg_long > 0:
+            plain_back_lines[0] += f"  |  L backs: {L.back_sf:.2f} sf"
+        plain_back_lines += [
+            f"Total backs face-SF: {back_face:.2f} sf",
                 f'Net back H {u.net_back_height:.2f}" × developed lf',
                 "NO bar / tile / basketweave modules",
                 "Shop wrap/staple practice — CONFIRM before order",
-            ],
+        ]
+        card(
+            0.45 * inch, h - 2.95 * inch, "PLAIN BACKS (FACE-SF — NO MODULES)",
+            plain_back_lines,
             PATTERN_BACK_DK,
+        )
+        seat_face_label = (
+            f"Face SF: U+L = {mats.plain_seat_sf:.2f} sf"
+            if include_l and L.leg_long > 0
+            else f"Face SF: U = {u.seat_sf:.2f} sf"
         )
         card(
             3.95 * inch, h - 2.95 * inch, "PLAIN SEATS (LARGE PIECES)",
             [
                 f"Seat blanks (wrap {mats.seat_wrap_edge_in:.1f}\"/edge): {mats.plain_fabric_sf_blanks:.2f} sf",
-                f"Face SF: U+L = {mats.plain_seat_sf:.2f} sf",
+                seat_face_label,
                 f"Yards raw: {mats.plain_yards_raw:.2f} yd",
                 f"ORDER: {mats.plain_yards_order:.2f} yd  @ {mats.fabric_width_in:.0f}\"",
                 "Large pieces — NOT modular basketweave.",
@@ -2552,12 +2584,22 @@ def render_upholstery_shell_pdf(
         yy = h - 4.08 * inch
         plain_fml = [
             f'U developed outer {u.developed_outer_in:.2f}" = {u.developed_outer_lf:.2f} lf; backs {u.back_sf:.2f} sf; seats {u.seat_sf:.2f} sf',
-            f'L developed outer {L.developed_outer_in:.3f}" = {L.developed_outer_lf:.2f} lf; backs {L.back_sf:.2f} sf; seats {L.seat_sf:.2f} sf [prov.]',
-            f'Total lf {u.developed_outer_lf + L.developed_outer_lf:.2f}; backs face-SF {u.back_sf + L.back_sf:.2f}; seats face-SF {u.seat_sf + L.seat_sf:.2f}',
+        ]
+        if include_l and L.leg_long > 0:
+            plain_fml.append(
+                f'L developed outer {L.developed_outer_in:.3f}" = {L.developed_outer_lf:.2f} lf; backs {L.back_sf:.2f} sf; seats {L.seat_sf:.2f} sf [prov.]',
+            )
+        total_lf = u.developed_outer_lf + (L.developed_outer_lf if include_l else 0.0)
+        total_backs = u.back_sf + (L.back_sf if include_l else 0.0)
+        total_seats = u.seat_sf + (L.seat_sf if include_l else 0.0)
+        plain_fml.append(
+            f'Total lf {total_lf:.2f}; backs face-SF {total_backs:.2f}; seats face-SF {total_seats:.2f}',
+        )
+        plain_fml.extend([
             f'back_sf = developed_lf × (net_back {u.net_back_height:.2f}" / 12); seat_sf = developed_lf × (seat_depth / 12)',
             f'Seat blanks wrap {mats.seat_wrap_edge_in:.1f}"/edge → plain seat fabric {mats.plain_fabric_sf_blanks:.2f} sf → order {mats.plain_yards_order:.2f} yd @ {mats.fabric_width_in:.0f}"',
             'Do NOT order PATTERN / bar-blank yardage for this BUDGET PLAIN pack.',
-        ]
+        ])
         for fml in plain_fml:
             c.drawString(0.5 * inch, yy, "• " + fml)
             yy -= 0.125 * inch
@@ -2575,7 +2617,6 @@ def render_upholstery_shell_pdf(
                 f"Lean {u.back_lean_in:.1f}\" PROV setback."
             ),
             'Overall H prefers client net back above seat (30.5") + seat H AFF 18" PROV → shell 48.5".',
-            "L depth/height still provisional — lock to U before fab. L legs = client 107.75 + 98.875.",
             "COM / Nelma TBD. Shells already built — upholstery only. Confirm wrap/staple before fabric order.",
             "DRAFT — not client-ready until Rafael visual sign-off.",
         ]

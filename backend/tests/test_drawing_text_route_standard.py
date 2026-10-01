@@ -1,5 +1,6 @@
 """Text-measurement drawing routing, sketch auto-follow, multi-PDF email, status block."""
 import importlib
+from pathlib import Path
 
 import pytest
 
@@ -24,15 +25,74 @@ U_BANQUETTE = (
 )
 BENCH_MSG = "Straight bench 84x18x18 with 16in tufted back, front+side elevations"
 ROMAN_MSG = "Roman shade 36W x 60H inside mount flat fold 6in folds"
+ROMAN_WINDOW_MSG = (
+    "window 36 in W x 60 in H, inside mount, flat fold, 6 in folds"
+)
+TEST_ONLY_PREFIX = (
+    "TEST ONLY: do not create quotes, invoices, contacts, or send any email. "
+)
+U_BANQUETTE_FRESH = (
+    "Draw a U-shaped banquette: back wall 120 in, two returns 72 in each, "
+    "seat depth 20, seat height 18, back 18 above seat, 2in foam, plain backs"
+)
+BENCH_TUFTED_MSG = (
+    "straight bench 84 in long, 18 deep, 18 high, tufted back 16 in tall, "
+    "front + side elevation"
+)
+FORBIDDEN_UL_PDF_MARKERS = (
+    "EST-2026-272",
+    "Dave Romero",
+    "Marley",
+    "Marleys",
+    "107.750",
+    "48.875",
+)
 
 
 def test_text_measurement_messages_route_as_drawing_intent():
-    for msg in (U_BANQUETTE, BENCH_MSG, ROMAN_MSG):
+    for msg in (U_BANQUETTE, BENCH_MSG, ROMAN_MSG, ROMAN_WINDOW_MSG, BENCH_TUFTED_MSG):
         assert is_drawing_intent(msg) is True
         handoff = build_drawing_handoff(msg)
         assert handoff.is_drawing_intent is True
         assert handoff.ready is True
         assert handoff.b1_product_type
+
+
+def test_negated_finance_phrase_does_not_block_drawing_intent():
+    msg = TEST_ONLY_PREFIX + U_BANQUETTE_FRESH
+    assert is_drawing_intent(msg) is True
+    handoff = build_drawing_handoff(msg)
+    assert handoff.ready is True
+    assert handoff.b1_product_type == "banquette"
+    max_router = importlib.import_module("app.routers.max.router")
+    routed = max_router._handoff_to_render_shop_tool_call(handoff)
+    assert routed and routed["tool"] == "render_shop_drawing"
+
+
+def _pdf_text(pdf_path: str) -> str:
+    for mod_name in ("pypdf", "PyPDF2"):
+        try:
+            PdfReader = importlib.import_module(mod_name).PdfReader
+        except ImportError:
+            continue
+        return "\n".join(
+            page.extract_text() or "" for page in PdfReader(pdf_path).pages
+        )
+    return Path(pdf_path).read_bytes().decode("latin-1", errors="ignore")
+
+
+def test_fresh_u_banquette_pdf_has_no_marley_fixture_strings():
+    max_router = importlib.import_module("app.routers.max.router")
+    handoff = build_drawing_handoff(U_BANQUETTE_FRESH)
+    assert handoff.ready
+    routed = max_router._handoff_to_render_shop_tool_call(handoff)
+    result = execute_tool(routed)
+    assert result.success, result.error
+    pdf_path = (result.result or {}).get("pdf_path")
+    assert pdf_path and Path(pdf_path).is_file()
+    blob = _pdf_text(pdf_path).lower()
+    for marker in FORBIDDEN_UL_PDF_MARKERS:
+        assert marker.lower() not in blob, f"unexpected fixture text {marker!r} in PDF"
 
 
 def test_u_banquette_render_shop_drawing_produces_pdf():

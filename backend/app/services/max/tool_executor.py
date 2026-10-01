@@ -3072,6 +3072,87 @@ def _auto_email_pdf(pdf_path: str, email_to: str, drawing_name: str) -> dict | N
         return {"emailed": False, "error": str(e)}
 
 
+def _render_bench_shop_drawing(params: dict, dims: dict) -> ToolResult | None:
+    """Straight bench / banquette → bench_renderer (plan + front + optional side)."""
+    try:
+        from app.services.drawing.bench_quote_bridge import resolve_sketch_bench
+        from app.services.drawing.canonical_path import canonical_drawings_dir
+        from app.services.vision.bench_renderer import render_straight
+        from app.services.vision.renderer_registry import get_business_unit
+    except Exception as e:
+        logger.warning("bench shop render import failed: %s", e)
+        return None
+
+    notes = str(
+        params.get("description") or params.get("notes") or params.get("raw_message") or ""
+    ).lower()
+    sketch_params = dict(params)
+    sketch_params.update(dims)
+    if dims.get("panel_style"):
+        sketch_params["panel_style"] = dims["panel_style"]
+    elif "tufted" in notes:
+        sketch_params["panel_style"] = "tufted"
+    resolved = resolve_sketch_bench(sketch_params, default_panel="flat")
+    if "tufted" in notes:
+        resolved["panel_style"] = "tufted"
+        resolved["has_back"] = True
+    name = str(params.get("name") or params.get("title") or "Straight Bench").strip()
+    quote_num = str(params.get("quote_num") or params.get("quote_number") or "").strip()
+    include_side = "side elevation" in notes or "side elev" in notes
+
+    svg = render_straight(
+        name,
+        resolved["width_in"],
+        depth_in=resolved["seat_depth"],
+        seat_h_in=resolved["seat_height"],
+        back_h_in=resolved["back_height"],
+        quote_num=quote_num,
+        cushion_width=resolved["cushion_width"],
+        panel_style=resolved["panel_style"],
+        channel_count=resolved["channel_count"],
+        has_back=resolved["has_back"],
+        business_unit=resolved["business_unit"],
+        product_type=resolved["product_type"],
+        category_chip=resolved["category_chip"],
+        chrome=resolved["chrome"],
+        assumptions=resolved["assumptions"],
+        back_height_assumed=resolved["back_height_assumed"],
+        length_unit="in",
+        client=resolved["client"],
+        project=resolved["project"],
+        include_side_elevation=include_side,
+    )
+
+    out_dir = canonical_drawings_dir()
+    output_path = str(out_dir / f"bench_{uuid.uuid4().hex[:8]}.pdf")
+    from app.services.vision.bench_renderer import drawings_to_pdf
+    drawings_to_pdf([{"name": name, "svg": svg, "lf": resolved["width_in"] / 12.0}], output_path)
+    size = os.path.getsize(output_path)
+    svg_path = output_path.replace(".pdf", ".svg")
+    with open(svg_path, "w", encoding="utf-8") as f:
+        f.write(svg)
+    filename = os.path.basename(output_path)
+    svg_filename = os.path.basename(svg_path)
+    return ToolResult(
+        tool="render_shop_drawing",
+        success=True,
+        result={
+            "pdf_path": output_path,
+            "svg_path": svg_path,
+            "size_bytes": size,
+            "product_type": "bench",
+            "item_type": "bench",
+            "svg": svg,
+            "svg_url": f"/api/v1/drawings/files/{svg_filename}",
+            "pdf_url": f"/api/v1/drawings/files/{filename}",
+            "drawing_engine": "vision.bench_renderer",
+            "business_unit": get_business_unit("bench"),
+            "panel_style": resolved["panel_style"],
+            "back_height_assumed": resolved["back_height_assumed"],
+        },
+    )
+
+
 @tool("render_shop_drawing")
 def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
     """HOTFIX 4.0 (a) — Render a parametric B1 shop drawing for an
@@ -3200,11 +3281,26 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
             tool="render_shop_drawing", success=True, result=ul_result,
         )
 
+    _bench_pt = product_type.lower()
+    _bench_shape = str(dims.get("shape") or params.get("shape") or "straight").lower()
+    if _bench_pt in ("bench", "banquette", "booth") and _bench_shape in (
+        "straight", "", "bench",
+    ):
+        bench_result = _render_bench_shop_drawing(params, dims)
+        if bench_result is not None:
+            return bench_result
+
+    _NON_NUMERIC_DIM_KEYS = frozenset({
+        "shape", "panel_style", "mount", "construction", "fabric_mode",
+    })
     spec = {
         "product_type": product_type,
         "family": catalog_family,
         "style": catalog_style,
-        "dims": {str(k): float(v) for k, v in dims.items() if v is not None},
+        "dims": {
+            str(k): float(v) for k, v in dims.items()
+            if v is not None and k not in _NON_NUMERIC_DIM_KEYS
+        },
         "client_name":  params.get("client_name", ""),
         "site_address": params.get("site_address", ""),
         "material":     params.get("material", ""),
