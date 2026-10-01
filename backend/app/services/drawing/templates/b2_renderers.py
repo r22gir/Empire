@@ -1673,8 +1673,10 @@ def _render_side_section(
         c.line(_P(wallx), _P(hy + 0.25), _P(wallx - 0.36), _P(hy + 0.47))
         c.setFillColor(DIM)
         c.setFont("Helvetica-Bold", 6.0)
-        c.drawRightString(_P(wallx - 0.39), _P(hy + 0.43),
-                          "WALL LINE (FACE)")
+        callout_lx = SIDE_X_IN + 0.10
+        c.setFillColor(DIM)
+        c.setFont("Helvetica-Bold", 6.0)
+        c.drawString(_P(callout_lx), _P(hy + 0.48), "WALL LINE (FACE)")
         # Mount board INSIDE the reveal (R3, R4)
         c.setFillColor(WOOD)
         c.setStrokeColor(INK)
@@ -1683,8 +1685,8 @@ def _render_side_section(
                _P(rev_px - 0.08), _P(0.05), fill=1, stroke=1)
         c.setFillColor(INK)
         c.setFont("Helvetica-Bold", 6.3)
-        c.drawRightString(_P(wallx - 0.08), _P(hy - 0.04),
-                          f"MOUNT BOARD — INSIDE, 2-1/2\"")
+        c.drawString(_P(callout_lx), _P(hy + 0.30),
+                    f"MOUNT BOARD — INSIDE, 2-1/2\"")
         # ────────────────────────────────────────────────────────
         # CORRECTION R3-2 (2026-08-16) — STACK ANATOMY.
         # Previous R2 port drew the raised stack as 8 discrete
@@ -1751,20 +1753,25 @@ def _render_side_section(
                _P(0.030), _P(0.125), fill=1, stroke=1)
         c.setFillColor(INK)
         c.setFont("Helvetica-Bold", 6.3)
-        stack_mid = (hy - 0.07 - flat) - (stack_h - flat) * 0.52
         stack_label = f'STACK {_fmt_in(stack_h - flat)}'
-        label_rx = wallx - 0.12
+        dx0, dy0 = SIDE_X_IN + 0.30, wall_y + 0.42
+        dw, dh = 1.65, 2.20
+        lx = SIDE_X_IN + 0.10
+        pitch = 0.17
+        y_lab = hy + 0.12
         c.setFillColor(INK)
         c.setFont("Helvetica-Bold", 6.0)
-        c.drawRightString(_P(label_rx), _P(stack_mid + 0.42), 'FOLD STACK')
+        c.drawString(_P(lx), _P(y_lab), 'FOLD STACK')
+        y_lab -= pitch
         c.setFillColor(DIM)
-        c.setFont("Helvetica-Bold", 6.0)
-        c.drawRightString(_P(label_rx), _P(stack_mid + 0.20), stack_label)
+        c.drawString(_P(lx), _P(y_lab), stack_label)
+        y_lab -= pitch
         c.setFont("Helvetica", 5.8)
-        c.drawRightString(_P(label_rx), _P(stack_mid - 0.04), '(FLAT TOP, FOLDS BELOW)')
+        c.drawString(_P(lx), _P(y_lab), '(FLAT TOP, FOLDS BELOW)')
+        y_lab -= pitch
         c.setFont("Helvetica-Bold", 6.3)
         c.setFillColor(INK)
-        c.drawRightString(_P(label_rx), _P(yf - 0.06), "HEM BAR (RAISED)")
+        c.drawString(_P(lx), _P(max(y_lab, dy0 + dh + 0.12)), "HEM BAR (RAISED)")
         # R10: partial-raise label — drawn BELOW the stack with
         # shorter tracking so it fits inside the side-section
         # viewport (the founder's G1.3 bounds gate caught the
@@ -1785,8 +1792,6 @@ def _render_side_section(
         # NOTE: drawn as 4 LINES (not a c.rect) so the QC
         # text-over-geometry gate (which checks rects only)
         # doesn't false-fire on the callout's internal labels.
-        dx0, dy0 = SIDE_X_IN + 0.30, wall_y + 0.62
-        dw, dh = 1.65, 2.20
         c.setStrokeColor(GOLD)
         c.setLineWidth(0.9)
         c.line(_P(dx0),       _P(dy0),       _P(dx0 + dw), _P(dy0))         # bottom

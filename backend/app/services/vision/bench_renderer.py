@@ -409,24 +409,24 @@ def _dim_2d_v(parts, x, y1, y2, label, offset_x=20):
     _dim_v(parts, (x, y1), (x, y2), label, offset_x, "right" if offset_x > 0 else "left")
 
 
-def _dim_iso_width(parts, ox, oy, scale, x1, x2, y, z, label, below=True):
+def _dim_iso_width(parts, ox, oy, scale, x1, x2, y, z, label, below=True, offset=None):
     p1 = _iso(x1, y, z, ox, oy, scale)
     p2 = _iso(x2, y, z, ox, oy, scale)
-    off = 22 if below else -22
+    off = offset if offset is not None else (22 if below else -22)
     _dim_h(parts, p1, p2, label, off, "below" if below else "above")
 
 
-def _dim_iso_depth(parts, ox, oy, scale, x, y1, y2, z, label, below=True):
+def _dim_iso_depth(parts, ox, oy, scale, x, y1, y2, z, label, below=True, offset=None):
     p1 = _iso(x, y1, z, ox, oy, scale)
     p2 = _iso(x, y2, z, ox, oy, scale)
-    off = 22 if below else -22
+    off = offset if offset is not None else (22 if below else -22)
     _dim_h(parts, p1, p2, label, off, "below" if below else "above")
 
 
-def _dim_iso_height(parts, ox, oy, scale, x, y, z1, z2, label, right=True):
+def _dim_iso_height(parts, ox, oy, scale, x, y, z1, z2, label, right=True, offset=None):
     p1 = _iso(x, y, z1, ox, oy, scale)
     p2 = _iso(x, y, z2, ox, oy, scale)
-    off = 18 if right else -18
+    off = offset if offset is not None else (18 if right else -18)
     _dim_v(parts, p1, p2, label, off, "right" if right else "left")
 
 
@@ -680,7 +680,8 @@ def _plan_u_shape(parts, ox, oy, scale, back, side, depth, side_depth, seat_h, b
 
 def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
                    panel_style="vertical_channels", channel_count=6,
-                   panel_w: float = 0, panel_h: float = 0, draw_dims: bool = True):
+                   panel_w: float = 0, panel_h: float = 0, draw_dims: bool = True,
+                   split_panel: bool = False):
     """Side elevation — thin back at rear edge; seat depth full width."""
     has_back = back_h is not None and back_h > 0 and panel_style != "none"
     d = depth * scale
@@ -689,10 +690,9 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
     bt_s = SIDE_BACK_THK * scale
     lean = min(4.0 * scale, d * 0.08)
     top_y = oy - sh - bh
-    parts.append(_line(ox - 6, oy, ox + d + 6, oy, SW_FLOOR, GRAY, "6,3"))
+    parts.append(_line(ox, oy, ox + d, oy, SW_FLOOR, GRAY, "6,3"))
     # Seat block (full depth)
     parts.append(_rect(ox, oy - sh, d, sh, SW_HEAVY))
-    parts.append(_line(ox, oy - sh, ox + d, oy - sh, SW_LIGHT, GRAY))
     if has_back:
         bx = ox + d - bt_s
         # Raked back panel at rear edge (not a full-depth block)
@@ -728,7 +728,7 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
         right_band,
         _in(total_h), side="right",
     )
-    if has_back and bh > 2:
+    if has_back and bh > 2 and not split_panel:
         sh_y = oy - sh / 2 + 4
         bh_y = top_y + bh / 2 + 4
         sh_y, bh_y = _separate_baseline(sh_y, bh_y, gap=16)
@@ -741,12 +741,25 @@ def _side_straight(parts, ox, oy, scale, depth, seat_h, back_h,
             parts, oy - sh, top_y, ox, left_band,
             _in(back_h) + " BH", side="left", label_y=bh_y,
         )
+    elif has_back and bh > 2 and split_panel:
+        sh_y = oy - sh / 2 + 4
+        bh_y = top_y + bh / 2 + 4
+        sh_y, bh_y = _separate_baseline(sh_y, bh_y, gap=16)
+        right_band = Rect(min(ox + d + 8, panel_w - 34), max(top_y - 4, 8), 32, max(oy - top_y + 12, 28))
+        _gutter_height(
+            parts, oy, oy - sh, ox + d, right_band,
+            _in(seat_h) + " SH", side="right", label_y=sh_y,
+        )
+        _gutter_height(
+            parts, oy - sh, top_y, ox + d, right_band,
+            _in(back_h) + " BH", side="right", label_y=bh_y,
+        )
 
 
 def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
                    panel_style="vertical_channels", channel_count=6,
                    panel_w: float = 0, panel_h: float = 0, cushion_count: int = 1,
-                   draw_dims: bool = True):
+                   draw_dims: bool = True, split_panel: bool = False):
     """Front elevation with floor line, seat, back, and dimensions."""
     has_back = back_h is not None and back_h > 0 and panel_style != "none"
     w = width * scale
@@ -755,8 +768,9 @@ def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
     top_y = oy - sh - bh
 
     # Floor line (dashed). "FL" sits on the seat, clear of the left gutter dim.
-    parts.append(_line(ox - 8, oy, ox + w + 8, oy, SW_FLOOR, GRAY, "6,3"))
-    parts.append(_text(ox + 6, oy - 8, "FL", 9, anchor="start", fill=GRAY))
+    parts.append(_line(ox - 4, oy, ox + w + 4, oy, SW_FLOOR, GRAY, "6,3"))
+    if not split_panel:
+        parts.append(_text(ox + 6, oy - 8, "FL", 9, anchor="start", fill=GRAY))
 
     # Seat box
     parts.append(_rect(ox, oy - sh, w, sh, SW_HEAVY))
@@ -770,24 +784,46 @@ def _elev_straight(parts, ox, oy, scale, width, depth, seat_h, back_h,
     if not draw_dims or panel_w < 20:
         return
     cw = width / max(1, cushion_count)
-    dim_band_h = 34.0
-    bottom_band = Rect(ox, min(oy + 2, panel_h - dim_band_h - 4), w, dim_band_h)
-    _gutter_width(parts, ox, ox + w, oy, bottom_band, _in(width))
-    if cushion_count > 1:
-        seg_band = Rect(ox, min(oy + 2, panel_h - dim_band_h - 22), w, 18)
-        for i in range(cushion_count):
-            x1 = ox + w * i / cushion_count
-            x2 = ox + w * (i + 1) / cushion_count
-            _gutter_width(parts, x1, x2, oy - sh, seg_band, _in(cw))
-    left_band = Rect(4, max(top_y - 4, 8), 30, max(oy - top_y + 12, 28))
-    _gutter_height(parts, top_y, oy, ox, left_band, _in(seat_h + (back_h if has_back else 0)), side="left")
-    if has_back and bh > 2:
-        sh_y = oy - sh / 2 + 4
-        bh_y = top_y + bh / 2 + 4
-        sh_y, bh_y = _separate_baseline(sh_y, bh_y, gap=16)
-        right_band = Rect(min(ox + w + 6, panel_w - 32), max(top_y - 4, 8), 30, max(oy - top_y + 12, 28))
-        _gutter_height(parts, oy, oy - sh, ox + w, right_band, _in(seat_h) + " SH", side="right", label_y=sh_y)
-        _gutter_height(parts, oy - sh, top_y, ox + w, right_band, _in(back_h) + " BH", side="right", label_y=bh_y)
+    dim_band_h = 30.0
+    if split_panel:
+        bottom_y = panel_h - 14
+        bottom_band = Rect(ox, bottom_y - dim_band_h, w, dim_band_h)
+        _gutter_width(parts, ox, ox + w, oy, bottom_band, _in(width))
+        if cushion_count > 1:
+            seg_band = Rect(ox, bottom_y - dim_band_h - 22, w, 18)
+            for i in range(cushion_count):
+                x1 = ox + w * i / cushion_count
+                x2 = ox + w * (i + 1) / cushion_count
+                _gutter_width(parts, x1, x2, oy - sh, seg_band, _in(cw))
+        left_band = Rect(4, max(top_y - 4, 8), 32, max(oy - top_y + 12, 28))
+        _gutter_height(
+            parts, top_y, oy, ox, left_band,
+            _in(seat_h + (back_h if has_back else 0)), side="left",
+        )
+        if has_back and bh > 2:
+            sh_y = oy - sh / 2 + 4
+            bh_y = top_y + bh / 2 + 4
+            sh_y, bh_y = _separate_baseline(sh_y, bh_y, gap=18)
+            _gutter_height(parts, oy, oy - sh, ox, left_band, _in(seat_h) + " SH", side="left", label_y=sh_y)
+            _gutter_height(parts, oy - sh, top_y, ox, left_band, _in(back_h) + " BH", side="left", label_y=bh_y)
+    else:
+        bottom_band = Rect(ox, min(oy + 2, panel_h - dim_band_h - 4), w, dim_band_h)
+        _gutter_width(parts, ox, ox + w, oy, bottom_band, _in(width))
+        if cushion_count > 1:
+            seg_band = Rect(ox, min(oy + 2, panel_h - dim_band_h - 22), w, 18)
+            for i in range(cushion_count):
+                x1 = ox + w * i / cushion_count
+                x2 = ox + w * (i + 1) / cushion_count
+                _gutter_width(parts, x1, x2, oy - sh, seg_band, _in(cw))
+        left_band = Rect(4, max(top_y - 4, 8), 30, max(oy - top_y + 12, 28))
+        _gutter_height(parts, top_y, oy, ox, left_band, _in(seat_h + (back_h if has_back else 0)), side="left")
+        if has_back and bh > 2:
+            sh_y = oy - sh / 2 + 4
+            bh_y = top_y + bh / 2 + 4
+            sh_y, bh_y = _separate_baseline(sh_y, bh_y, gap=16)
+            right_band = Rect(min(ox + w + 6, panel_w - 32), max(top_y - 4, 8), 30, max(oy - top_y + 12, 28))
+            _gutter_height(parts, oy, oy - sh, ox + w, right_band, _in(seat_h) + " SH", side="right", label_y=sh_y)
+            _gutter_height(parts, oy - sh, top_y, ox + w, right_band, _in(back_h) + " BH", side="right", label_y=bh_y)
 
 
 def _elev_l_shape(parts, ox, oy, scale, long, short, depth, seat_h, back_h,
@@ -1069,20 +1105,22 @@ def _iso_callouts(parts, svg_w, svg_h, width_label, width_pts, stack):
 
 
 def _iso_callouts_compact(parts, ox, oy, scale, width_in, depth_in, seat_h_in, back_h_in, has_back):
-    """Iso height/depth dims with short leaders (no long diagonals to sheet edge)."""
+    """Iso dims offset outside the bench outline."""
     _dim_iso_width(
-        parts, ox, oy, scale, 0, width_in, 0, 0, _in(width_in), below=True,
+        parts, ox, oy, scale, 0, width_in, 0, 0, _in(width_in), below=True, offset=28,
     )
     _dim_iso_height(
-        parts, ox, oy, scale, 0, 0, 0, seat_h_in, f'{_in(seat_h_in)} SH', right=False,
+        parts, ox, oy, scale, 0, 0, 0, seat_h_in, f'{_in(seat_h_in)} SH',
+        right=False, offset=-42,
     )
     if has_back:
         _dim_iso_height(
-            parts, ox, oy, scale, 0, 0, seat_h_in, seat_h_in + back_h_in,
-            f'{_in(back_h_in)} BH', right=False,
+            parts, ox, oy, scale, 0, depth_in, seat_h_in, seat_h_in + back_h_in,
+            f'{_in(back_h_in)} BH', right=False, offset=-58,
         )
     _dim_iso_depth(
-        parts, ox, oy, scale, width_in, 0, depth_in, 0, f'{_in(depth_in)} D', below=True,
+        parts, ox, oy, scale, width_in, 0, depth_in, 0, f'{_in(depth_in)} D',
+        below=True, offset=36,
     )
 
 
@@ -1280,20 +1318,20 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
             elev_safe.x, elev_safe.y - CAPTION_H, elev_safe.w, elev_safe.h + CAPTION_H,
         )
         _view_frame(parts, elev_frame, "FRONT + SIDE ELEVATION")
-        gap = 10.0
+        gap = 22.0
         half_w = (elev_safe.w - gap) / 2
         left_safe = Rect(elev_safe.x + 4, elev_safe.y, half_w - 4, elev_safe.h)
         right_safe = Rect(elev_safe.x + half_w + gap, elev_safe.y, half_w - 4, elev_safe.h)
-        dim_pad = 38.0
+        gutter_lr = 34.0
+        gutter_bt = 50.0
         max_w_in = max(float(width_in), float(depth_in))
         elev_scale = min(
-            (left_safe.w - dim_pad) / max_w_in,
-            (right_safe.w - dim_pad) / max_w_in,
-            (left_safe.h - dim_pad) / (elev_h or 1),
-            (right_safe.h - dim_pad) / (elev_h or 1),
-        ) * 0.90
-        floor_margin = 12.0
-        front_floor = left_safe.h - floor_margin
+            (left_safe.w - gutter_lr) / max_w_in,
+            (right_safe.w - gutter_lr) / max_w_in,
+            (left_safe.h - gutter_bt) / (elev_h or 1),
+        ) * 0.98
+        content_px = elev_h * elev_scale
+        front_floor = (left_safe.h + content_px) / 2
         fox = (left_safe.w - width_in * elev_scale) / 2
         front_group = []
         elev_fn(
@@ -1301,7 +1339,7 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
             width_in, depth_in, seat_h_in, back_h_in,
             panel_style=panel_style, channel_count=channel_count,
             panel_w=left_safe.w, panel_h=left_safe.h,
-            cushion_count=cushion_count, draw_dims=True,
+            cushion_count=cushion_count, draw_dims=True, split_panel=True,
         )
         parts.append(
             f'<g transform="translate({left_safe.x:.1f},{left_safe.y:.1f})" '
@@ -1309,7 +1347,7 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
         )
         parts.extend(front_group)
         parts.append('</g>')
-        side_floor = right_safe.h - floor_margin
+        side_floor = (right_safe.h + content_px) / 2
         sox = (right_safe.w - depth_in * elev_scale) / 2
         side_group = []
         _side_straight(
@@ -1317,6 +1355,7 @@ def _compose_multiview(name, bench_type, build_fn, plan_fn, elev_fn,
             depth_in, seat_h_in, back_h_in,
             panel_style=panel_style, channel_count=channel_count,
             panel_w=right_safe.w, panel_h=right_safe.h, draw_dims=True,
+            split_panel=True,
         )
         parts.append(
             f'<g transform="translate({right_safe.x:.1f},{right_safe.y:.1f})" '

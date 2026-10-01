@@ -2101,9 +2101,9 @@ def render_upholstery_shell_pdf(
             "Asymmetric arms · outer / inner / seat depth · developed outer = lf takeoff",
         )
         # Fit plan in upper band; keep NOTES / KEY DIMS above title block (no overlap).
-        plan_top = h - 1.28 * inch
+        plan_top = h - 1.38 * inch
         plan_left = 0.55 * inch
-        panel_top = 0.22 * inch + 1.12 * inch + 0.18 * inch + 2.25 * inch
+        panel_top = 0.22 * inch + 1.12 * inch + 0.18 * inch + 2.48 * inch
         avail_w = w - 3.0 * inch
         avail_h = max(plan_top - panel_top, 2.0 * inch)
         arm_span = max(u.arm_left, u.arm_right, u.seat_depth)
@@ -2123,8 +2123,8 @@ def render_upholstery_shell_pdf(
             "NOTES",
             [
                 "Blue = shell/wall · orange dashed = seat footprint",
-                "Opening toward bottom · BOTH arms drawn (never max)",
-                f'Booth footprint width {u.footprint_width:.2f}" ≠ lf takeoff',
+                "Opening toward bottom · Both arms drawn",
+                f'Developed outer {u.developed_outer_in:.2f}" ({u.developed_outer_lf:.2f} lf) — plan takeoff',
                 "Units: inches · upholstery on existing shell",
             ],
             box_w=3.0 * inch, box_h=2.05 * inch,

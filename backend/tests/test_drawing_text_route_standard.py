@@ -146,6 +146,8 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
     assert "84" in svg and ("84&quot;" in svg or '84"' in svg)
     assert "34" in svg
     validate_bench_svg_layout(svg, layout)
+    from app.services.vision.bench_svg_text_layout import validate_bench_svg_text_layout
+    validate_bench_svg_text_layout(svg, layout)
 
 
 def test_roman_side_section_labels_no_overlap():
@@ -159,7 +161,8 @@ def test_roman_side_section_labels_no_overlap():
         "client_name": "Demo",
     })
     assert res.success, res.error
-    assert_roman_side_labels_clear(res.result["pdf_path"])
+    from app.services.drawing.templates.b2_renderers import SIDE_Y_IN
+    assert_roman_side_labels_clear(res.result["pdf_path"], wall_y_in=SIDE_Y_IN + 0.20)
     text = _pdf_text(res.result["pdf_path"]).lower()
     for marker in FORBIDDEN_CLIENT_MARKERS:
         assert marker not in text, f"client-facing marker {marker!r} in roman PDF"
