@@ -37,7 +37,7 @@ from app.services.max.evaluation_service import evaluation_service
 from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
-from app.services.max.factual_guard import is_factual_question, enforce_web_search
+from app.services.max.factual_guard import is_factual_question, enforce_web_search, grounding_directive
 from app.services.max.answer_quality import (
     detect_quality_flags, freshness_directive, needs_continuation, strip_empty_sections,
 )
@@ -2776,7 +2776,10 @@ async def _chat_with_max_service(
         #     context) and H53 (if the block is empty, append NOTHING).
         _pre_search_executed = False
         _pre_search_entry = None
-        if not request.desk and _is_performative_web_search_request(request.message):
+        if not request.desk and (
+            _is_performative_web_search_request(request.message)
+            or is_factual_question(request.message)
+        ):
             from app.services.max.search_context import build_search_query
             _built = build_search_query(request.message, history=request.history)
             _search_query = _built["query"]
@@ -2798,8 +2801,7 @@ async def _chat_with_max_service(
                 )
                 messages.insert(-1, AIMessage(role="system", content=(
                     "You must answer using only the verified web search data below. "
-                    "Do not fall back to training data. Cite sources from the search results "
-                    "with markdown links: [Title](url). "
+                    "Do not fall back to training data. " + grounding_directive(request.message) + "\n\n"
                     "If the search returned no relevant results, say so honestly.\n\n"
                     f"{tool_summary}\n\nQuestion: {request.message}"
                 )))
@@ -3761,9 +3763,15 @@ async def chat_stream(request: ChatRequest):
         full_response = ""
         # Guard: Pre-execute web_search for performative search requests before streaming
         _stream_pre_search_entry = None
-        if not request.desk and _is_performative_web_search_request(request.message):
-            logger.info(f"[pre_search_guard:stream] Pre-executing web_search for: {request.message[:80]}")
-            search_tc = {"tool": "web_search", "query": request.message, "num_results": 5}
+        if not request.desk and (
+            _is_performative_web_search_request(request.message)
+            or is_factual_question(request.message)
+        ):
+            from app.services.max.search_context import build_search_query
+            _stream_built = build_search_query(request.message, history=request.history)
+            _stream_query = _stream_built["query"]
+            logger.info(f"[pre_search_guard:stream] Pre-executing web_search for: {_stream_query[:80]}")
+            search_tc = {"tool": "web_search", "query": _stream_query, "num_results": 5}
             search_result = await asyncio.to_thread(
                 execute_tool, search_tc, desk=request.desk, founder=founder
             )
@@ -3778,8 +3786,7 @@ async def chat_stream(request: ChatRequest):
                 )
                 messages.insert(-1, AIMessage(role="system", content=(
                     "You must answer using only the verified web search data below. "
-                    "Do not fall back to training data. Cite sources from the search results "
-                    "with markdown links: [Title](url). "
+                    "Do not fall back to training data. " + grounding_directive(request.message) + "\n\n"
                     "If the search returned no relevant results, say so honestly.\n\n"
                     f"{tool_summary}\n\nQuestion: {request.message}"
                 )))

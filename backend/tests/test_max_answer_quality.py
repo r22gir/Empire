@@ -42,3 +42,25 @@ def test_complete_drapery_answer_has_no_truncation_flag():
         user_message="How does a French pleat compare to a goblet pleat for drapery?",
     )
     assert not flags["truncated"]
+
+
+def test_evergreen_public_facts_require_web_grounding_and_citations():
+    from app.services.max.factual_guard import (
+        grounding_directive,
+        is_factual_question,
+    )
+
+    assert is_factual_question("How does a French pleat compare to a goblet pleat for drapery?")
+    policy = grounding_directive("How does a French pleat compare to a goblet pleat for drapery?")
+    assert "numbered inline markdown citation" in policy
+    assert "Sources list" in policy
+    assert "Max's inference" in policy
+    assert "do not impose a date limit" in policy
+
+
+def test_factual_guard_exempts_chitchat_and_internal_data():
+    from app.services.max.factual_guard import is_factual_question
+
+    assert not is_factual_question("How are you today?")
+    assert not is_factual_question("What is the status of quote # EST-2026-293?")
+    assert not is_factual_question("What is our founder pricing rule for goblet pleats?")
