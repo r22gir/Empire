@@ -5824,9 +5824,14 @@ def _db_query(params: dict, desk: Optional[str] = None) -> ToolResult:
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
         data = [dict(r) for r in rows[:100]]  # Cap at 100 rows
         conn.close()
+        # Preserve a non-sensitive table label in the result so a multi-query
+        # finance report can map each COUNT(*) to the table it came from.
+        table_match = _re.search(r"\bFROM\s+([A-Za-z_][A-Za-z0-9_]*)", query, flags=_re.IGNORECASE)
+        source_table = table_match.group(1) if table_match else None
 
         log_execution("db_query", {"query": query[:200]}, {"rows": len(data)}, desk=desk, success=True)
         return ToolResult(tool="db_query", success=True, result={
+            "source_table": source_table,
             "columns": columns, "rows": data, "count": len(data),
             "note": f"Showing {len(data)} of {len(rows)} rows" if len(rows) > 100 else None,
         })

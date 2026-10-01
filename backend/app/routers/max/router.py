@@ -1381,6 +1381,9 @@ def _sanitize_internal_leakage_text(text: str | None) -> str:
     cleaned = re.sub(r"\bI should check\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bruntime check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bdelegation check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
+    # Do not let secret-like environment variable names from stale context or
+    # model narration become visible; env_get itself returns only set/unset.
+    cleaned = re.sub(r"\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\b", "[REDACTED_ENV_NAME]", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
