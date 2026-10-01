@@ -708,6 +708,14 @@ def _is_decision_only_request(message: str | None) -> bool:
     return any(marker in text for marker in decision_markers)
 
 
+def _is_local_finance_readiness_request(message: str | None) -> bool:
+    """Route Empire finance counts to local DB tools, not web grounding."""
+    text = (message or "").lower()
+    finance_markers = ("finance", "quickbooks", "accounts", "invoice", "payment", "expense")
+    table_markers = ("quotes", "customers", "contacts", "jobs", "inventory", "leads", "vendors", "records", "count")
+    return any(marker in text for marker in finance_markers) and any(marker in text for marker in table_markers)
+
+
 def _is_action_tool(tool_call: dict[str, Any]) -> bool:
     return str(tool_call.get("tool") or "").strip() in ACTION_TOOLS
 
@@ -2780,8 +2788,9 @@ async def _chat_with_max_service(
         _pre_search_executed = False
         _pre_search_entry = None
         if not request.desk and (
-            _is_performative_web_search_request(request.message)
-            or is_factual_question(request.message)
+            (_is_performative_web_search_request(request.message)
+             or is_factual_question(request.message))
+            and not _is_local_finance_readiness_request(request.message)
         ):
             from app.services.max.search_context import build_search_query
             _built = build_search_query(request.message, history=request.history)
@@ -3122,6 +3131,7 @@ async def _chat_with_max_service(
         )
         if (
             is_factual_question(request.message)
+            and not _is_local_finance_readiness_request(request.message)
             and "web_search" not in tools_used_names
             and not _local_tools_answered
         ):
@@ -3775,8 +3785,9 @@ async def chat_stream(request: ChatRequest):
         # Guard: Pre-execute web_search for performative search requests before streaming
         _stream_pre_search_entry = None
         if not request.desk and (
-            _is_performative_web_search_request(request.message)
-            or is_factual_question(request.message)
+            (_is_performative_web_search_request(request.message)
+             or is_factual_question(request.message))
+            and not _is_local_finance_readiness_request(request.message)
         ):
             from app.services.max.search_context import build_search_query
             _stream_built = build_search_query(request.message, history=request.history)
