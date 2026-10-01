@@ -64,3 +64,12 @@ def test_factual_guard_exempts_chitchat_and_internal_data():
     assert not is_factual_question("How are you today?")
     assert not is_factual_question("What is the status of quote # EST-2026-293?")
     assert not is_factual_question("What is our founder pricing rule for goblet pleats?")
+
+
+def test_colon_intro_without_list_is_incomplete_but_colon_with_list_is_complete():
+    from app.services.max.answer_quality import needs_continuation, strip_empty_sections
+
+    assert needs_continuation("Max's inference:\nThe practical tradeoff is function vs. statement:")
+    complete = "Max's inference:\nThe practical tradeoff is function vs. statement:\n- French for function\n- Goblet for statement"
+    assert not needs_continuation(complete)
+    assert "statement:" not in strip_empty_sections("The practical tradeoff is function vs. statement:")

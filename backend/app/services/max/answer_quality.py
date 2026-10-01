@@ -18,6 +18,40 @@ _EMPTY_SECTION_RE = re.compile(r"(?ms)^\s{0,3}#{1,6}\s+[^\n]+\s*\n\s*(?=\n|#{1,6
 _DANGLING_INTRO_RE = re.compile(r"(?im)(?:^|\n)\s*(?:here(?:'|’)s|key points?|the (?:main|best) options?|sources?|summary)\s*:\s*$")
 
 
+def _has_dangling_colon_intro(text: str) -> bool:
+    """Detect a prose/list introduction ending in ':' with no body after it."""
+    lines = (text or "").splitlines()
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if len(stripped) < 4 or not stripped.endswith(":"):
+            continue
+        next_index = index + 1
+        while next_index < len(lines) and not lines[next_index].strip():
+            next_index += 1
+        if next_index >= len(lines):
+            return True
+        # A following heading means the introduced section is empty. A bullet
+        # or prose line is valid content and must not be flagged.
+        if lines[next_index].lstrip().startswith(("#", "**Sources")):
+            return True
+    return False
+
+
+def _strip_dangling_colon_intros(text: str) -> str:
+    lines = (text or "").splitlines()
+    kept = []
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if len(stripped) >= 4 and stripped.endswith(":"):
+            next_index = index + 1
+            while next_index < len(lines) and not lines[next_index].strip():
+                next_index += 1
+            if next_index >= len(lines) or lines[next_index].lstrip().startswith(("#", "**Sources")):
+                continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 def freshness_intent(message: str | None) -> str:
     text = message or ""
     if _HISTORICAL_RE.search(text):
@@ -47,6 +81,7 @@ def strip_empty_sections(text: str) -> str:
         return text or ""
     cleaned = _EMPTY_SECTION_RE.sub("", text)
     cleaned = _DANGLING_INTRO_RE.sub("", cleaned)
+    cleaned = _strip_dangling_colon_intros(cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
@@ -61,7 +96,7 @@ def detect_quality_flags(
     body = (text or "").strip()
     tools = tool_results or []
     flags = {name: False for name in FLAGS}
-    flags["empty_section"] = bool(_EMPTY_SECTION_RE.search(body) or _DANGLING_INTRO_RE.search(body) or _HEADING_ONLY_RE.fullmatch(body))
+    flags["empty_section"] = bool(_EMPTY_SECTION_RE.search(body) or _DANGLING_INTRO_RE.search(body) or _has_dangling_colon_intro(body) or _HEADING_ONLY_RE.fullmatch(body))
     flags["truncated"] = bool(
         finish_reason == "length"
         or (body and _HEADING_ONLY_RE.fullmatch(body) is not None)
@@ -81,7 +116,7 @@ def needs_continuation(text: str | None, *, user_message: str | None = None, too
     body = (text or "").strip()
     if not body:
         return True
-    if _EMPTY_SECTION_RE.search(body) or _DANGLING_INTRO_RE.search(body) or _HEADING_ONLY_RE.fullmatch(body):
+    if _EMPTY_SECTION_RE.search(body) or _DANGLING_INTRO_RE.search(body) or _has_dangling_colon_intro(body) or _HEADING_ONLY_RE.fullmatch(body):
         return True
     if _HEADING_ONLY_RE.fullmatch(body):
         return True
