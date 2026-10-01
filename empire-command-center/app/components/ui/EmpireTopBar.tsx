@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Bell, User, GitCommit, Wifi, WifiOff, Activity, Cpu, HardDrive } from 'lucide-react';
 import { EmpireStatusPill } from './EmpireStatusPill';
 import { API } from '../../lib/api';
+import { useAssistantName } from '../../lib/assistant';
 
 interface ProviderStatus {
   id: string;
@@ -18,6 +19,7 @@ interface EmpireTopBarProps {
 }
 
 export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: EmpireTopBarProps) {
+  const assistantName = useAssistantName();
   const [backendOk, setBackendOk] = useState(false);
   const [frontendOk, setFrontendOk] = useState(false);
 
@@ -93,7 +95,7 @@ export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: E
           />
           <EmpireStatusPill
             status="success"
-            label="MAX"
+            label={assistantName}
             size="sm"
             pulse
           />

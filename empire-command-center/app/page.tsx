@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BusinessTab, ScreenMode, EcosystemProduct } from './lib/types';
+import { AMP_HIDDEN_NAV, editionFromEnv } from './lib/edition';
+import { API_BASE } from './lib/api';
 import { useChat } from './hooks/useChat';
 import { useSystemData } from './hooks/useSystemData';
 import { useChatHistory } from './hooks/useChatHistory';
@@ -113,13 +115,29 @@ const PRODUCT_DEEP_LINKS: Partial<Record<string, EcosystemProduct>> = {
 };
 
 export default function CommandCenter() {
-  const [activeProduct, setActiveProduct] = useState<EcosystemProduct>('owner');
+  const [activeProduct, setActiveProduct] = useState<EcosystemProduct>(
+    editionFromEnv() === 'amp' ? 'amp' : 'owner'
+  );
   const [activeScreen, setActiveScreen] = useState<ScreenMode>('chat');
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [showQuickSwitch, setShowQuickSwitch] = useState(false);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [clientView, setClientView] = useState(false);
   const pendingDeepLinkScreen = useRef<ScreenMode | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/api/v1/edition`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || data?.edition !== 'amp') return;
+        setActiveProduct((current) => (AMP_HIDDEN_NAV.has(current) ? 'amp' : current));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // N2: In-app navigation history stack (LIFO). Used by the Global Back
   // button in TopBar. Each entry is a snapshot of the previous state

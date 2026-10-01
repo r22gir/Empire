@@ -2,14 +2,15 @@
 AMP — Actitud Mental Positiva. Personal development platform.
 User accounts, mood tracking, journal, affirmations, course progress.
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta
 from passlib.context import CryptContext
 from jose import jwt, JWTError
-import sqlite3, json, uuid, os, logging
+import sqlite3, json, uuid, os, logging, re
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["amp"])
@@ -18,22 +19,41 @@ JWT_SECRET = os.getenv("AMP_JWT_SECRET", "empire-amp-secret-change-in-prod")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 72
 
-DB_PATH = os.path.expanduser("~/empire-repo/backend/data/amp.db")
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
+CONTENT_TYPES = {"meditation", "affirmation", "course_lesson", "audio"}
+
+
+def amp_db_path() -> str:
+    """AMP sqlite. Edition amp writes under EMPIRE_DATA_DIR; otherwise backend/data/amp.db."""
+    from app.edition import amp_sqlite_path
+    return str(amp_sqlite_path())
+
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    path = amp_db_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    init_db(conn)
     return conn
 
 
-def init_db():
-    conn = get_db()
+def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
+    cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
+def init_db(conn=None):
+    own = conn is None
+    if own:
+        path = amp_db_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS amp_users (
             id TEXT PRIMARY KEY,
@@ -75,6 +95,15 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_moods_user ON amp_moods(user_id);
         CREATE INDEX IF NOT EXISTS idx_journal_user ON amp_journal(user_id);
         CREATE INDEX IF NOT EXISTS idx_progress_user ON amp_progress(user_id);
+        CREATE TABLE IF NOT EXISTS amp_course_weeks (
+            id TEXT PRIMARY KEY,
+            course_id TEXT NOT NULL,
+            week_number INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            theme TEXT,
+            summary TEXT,
+            FOREIGN KEY (course_id) REFERENCES amp_courses(id)
+        );
         CREATE TABLE IF NOT EXISTS amp_content (
             id TEXT PRIMARY KEY,
             type TEXT NOT NULL,
@@ -115,11 +144,12 @@ def init_db():
             FOREIGN KEY (course_id) REFERENCES amp_courses(id)
         );
     """)
+    _ensure_column(conn, "amp_content", "theme", "TEXT")
+    _ensure_column(conn, "amp_lessons", "week_number", "INTEGER")
+    _ensure_column(conn, "amp_lessons", "theme", "TEXT")
     conn.commit()
-    conn.close()
-
-
-init_db()
+    if own:
+        conn.close()
 
 
 # ── JWT ──
@@ -251,7 +281,13 @@ async def log_mood(req: MoodReq, user=Depends(get_current_user)):
     conn.execute("UPDATE amp_users SET last_visit = ?, streak = streak + 1 WHERE id = ?", (date, user["id"]))
     conn.commit()
     conn.close()
-    return {"status": "ok", "date": date}
+    recs = await recommend_content(req.mood, limit=3)
+    return {
+        "status": "ok",
+        "date": date,
+        "kind": "daily_checkin",
+        "recommendations": recs.get("recommendations", []),
+    }
 
 
 @router.get("/moods")
@@ -358,7 +394,15 @@ async def recommend_content(mood: str, limit: int = 5):
         "grateful": {"pillars": ["mentalidad"], "categories": ["gratitude", "abundance", "joy"]},
         "motivated": {"pillars": ["liderazgo", "mentalidad"], "categories": ["leadership", "goals", "abundance"]},
     }
-    mapping = MOOD_MAP.get(mood.lower(), {"pillars": ["bienestar"], "categories": ["meditation"]})
+    spanish = {
+        "feliz": "happy", "en_paz": "peaceful", "tranquilo": "peaceful",
+        "triste": "sad", "ansioso": "anxious", "ansiosa": "anxious",
+        "agradecido": "grateful", "agradecida": "grateful",
+        "motivado": "motivated", "motivada": "motivated",
+        "frustrado": "frustrated", "frustrada": "frustrated",
+    }
+    mood_key = spanish.get(mood.lower(), mood.lower())
+    mapping = MOOD_MAP.get(mood_key, {"pillars": ["bienestar"], "categories": ["meditation"]})
 
     conn = get_db()
     results = []
@@ -407,10 +451,15 @@ async def get_course(course_id: str):
     if not course:
         conn.close()
         raise HTTPException(404, "Course not found")
-    lessons = conn.execute("SELECT * FROM amp_lessons WHERE course_id = ? ORDER BY day_number", (course_id,)).fetchall()
+    lessons = conn.execute("SELECT * FROM amp_lessons WHERE course_id = ? ORDER BY week_number, day_number", (course_id,)).fetchall()
+    weeks = conn.execute(
+        "SELECT * FROM amp_course_weeks WHERE course_id = ? ORDER BY week_number",
+        (course_id,),
+    ).fetchall()
     conn.close()
     result = dict(course)
     result["lessons"] = [dict(l) for l in lessons]
+    result["weeks"] = [dict(w) for w in weeks]
     return result
 
 
@@ -666,3 +715,194 @@ async def admin_stats():
     journals = conn.execute("SELECT COUNT(*) as c FROM amp_journal").fetchone()["c"]
     conn.close()
     return {"total_users": users, "total_moods": moods, "total_journals": journals}
+
+
+# ━━━ CONTENT LIBRARY (vision: ContentItem) ━━━
+class ContentCreate(BaseModel):
+    type: str
+    title: str
+    description: Optional[str] = None
+    content_text: Optional[str] = None
+    theme: Optional[str] = None
+    duration_seconds: int = 0
+    premium: bool = False
+    pillar: Optional[str] = None
+    mood_tags: Optional[list[str]] = None
+    audio_url: Optional[str] = None
+
+
+class CourseCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    theme: Optional[str] = None
+    weeks: Optional[list[dict]] = None
+
+
+class WeekCreate(BaseModel):
+    week_number: int
+    title: str
+    theme: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class LessonCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    week_number: Optional[int] = None
+    day_number: Optional[int] = None
+    theme: Optional[str] = None
+    duration_seconds: int = 0
+    content_text: Optional[str] = None
+
+
+def _safe_audio_name(name: str) -> str:
+    base = os.path.basename(name or "audio")
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip(".-") or "audio"
+    return cleaned[:80]
+
+
+@router.post("/content")
+async def create_content(req: ContentCreate):
+    """Create a ContentItem. Types: meditation, affirmation, course_lesson, audio."""
+    kind = req.type.strip().lower()
+    if kind not in CONTENT_TYPES:
+        raise HTTPException(400, "Tipo inválido. Usa meditation, affirmation, course_lesson o audio.")
+    item_id = str(uuid.uuid4())
+    conn = get_db()
+    conn.execute(
+        """INSERT INTO amp_content
+           (id, type, title, description, content_text, audio_url, duration_seconds, pillar, mood_tags, theme, premium, author)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            item_id, kind, req.title.strip(), req.description, req.content_text, req.audio_url,
+            int(req.duration_seconds or 0), req.pillar,
+            json.dumps(req.mood_tags or [], ensure_ascii=False),
+            req.theme, 1 if req.premium else 0, "AMP",
+        ),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM amp_content WHERE id = ?", (item_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+@router.post("/audio")
+async def upload_audio(file: UploadFile = File(...)):
+    """Store an audio file under the AMP data root and return a stream URL."""
+    from app.edition import amp_audio_dir, assert_under_root, is_amp, require_data_root
+    folder = amp_audio_dir()
+    if is_amp():
+        folder = assert_under_root(folder, require_data_root())
+    stored = f"{uuid.uuid4().hex[:12]}-{_safe_audio_name(file.filename or 'audio.mp3')}"
+    dest = folder / stored
+    if is_amp():
+        dest = assert_under_root(dest, require_data_root())
+    data = await file.read()
+    dest.write_bytes(data)
+    return {
+        "filename": stored,
+        "bytes": len(data),
+        "stream_url": f"/api/v1/amp/audio/{stored}",
+        "path": str(dest),
+    }
+
+
+@router.get("/audio/{filename}")
+async def stream_audio(filename: str):
+    from app.edition import amp_audio_dir, assert_under_root, is_amp, require_data_root
+    safe = _safe_audio_name(filename)
+    if safe != filename:
+        raise HTTPException(400, "Nombre de archivo inválido")
+    path = amp_audio_dir() / safe
+    if is_amp():
+        path = assert_under_root(path, require_data_root())
+    if not path.is_file():
+        raise HTTPException(404, "Audio no encontrado")
+    return FileResponse(path, media_type="audio/mpeg", filename=safe)
+
+
+@router.post("/courses")
+async def create_course(req: CourseCreate):
+    """Multi-week program scaffold. No prices."""
+    course_id = str(uuid.uuid4())
+    conn = get_db()
+    weeks = req.weeks or []
+    lesson_count = sum(len(w.get("lessons") or []) for w in weeks)
+    conn.execute(
+        "INSERT INTO amp_courses (id, title, description, pillar, duration_days, lesson_count, premium) VALUES (?,?,?,?,?,?,0)",
+        (course_id, req.title.strip(), req.description, req.theme, max(len(weeks) * 7, 7), lesson_count),
+    )
+    for week in weeks:
+        week_id = str(uuid.uuid4())
+        number = int(week.get("week_number") or 1)
+        conn.execute(
+            "INSERT INTO amp_course_weeks (id, course_id, week_number, title, theme, summary) VALUES (?,?,?,?,?,?)",
+            (week_id, course_id, number, week.get("title") or f"Semana {number}", week.get("theme"), week.get("summary")),
+        )
+        for index, lesson in enumerate(week.get("lessons") or [], start=1):
+            conn.execute(
+                """INSERT INTO amp_lessons
+                   (id, course_id, day_number, title, description, content_text, duration_seconds, week_number, theme)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    str(uuid.uuid4()), course_id, lesson.get("day_number") or index,
+                    lesson.get("title") or f"Lección {index}", lesson.get("description"),
+                    lesson.get("content_text"), int(lesson.get("duration_seconds") or 0),
+                    number, lesson.get("theme") or week.get("theme"),
+                ),
+            )
+    conn.commit()
+    conn.close()
+    return await get_course(course_id)
+
+
+@router.post("/courses/{course_id}/weeks")
+async def add_week(course_id: str, req: WeekCreate):
+    conn = get_db()
+    course = conn.execute("SELECT id FROM amp_courses WHERE id = ?", (course_id,)).fetchone()
+    if not course:
+        conn.close()
+        raise HTTPException(404, "Curso no encontrado")
+    week_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO amp_course_weeks (id, course_id, week_number, title, theme, summary) VALUES (?,?,?,?,?,?)",
+        (week_id, course_id, req.week_number, req.title.strip(), req.theme, req.summary),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM amp_course_weeks WHERE id = ?", (week_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+@router.post("/courses/{course_id}/lessons")
+async def add_lesson(course_id: str, req: LessonCreate):
+    conn = get_db()
+    course = conn.execute("SELECT id FROM amp_courses WHERE id = ?", (course_id,)).fetchone()
+    if not course:
+        conn.close()
+        raise HTTPException(404, "Curso no encontrado")
+    lesson_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO amp_lessons
+           (id, course_id, day_number, title, description, content_text, duration_seconds, week_number, theme)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            lesson_id, course_id, req.day_number, req.title.strip(), req.description,
+            req.content_text, int(req.duration_seconds or 0), req.week_number, req.theme,
+        ),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM amp_lessons WHERE id = ?", (lesson_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+@router.get("/courses/{course_id}/weeks")
+async def list_weeks(course_id: str):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM amp_course_weeks WHERE course_id = ? ORDER BY week_number",
+        (course_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

@@ -149,6 +149,9 @@ export default function AmpLanding() {
         </div>
         <div style={{ position: 'relative', textAlign: 'center', maxWidth: 700, padding: '60px 20px' }}>
           <img src={AMP_LOGO} alt="Actitud Mental Positiva" style={{ height: 80, width: 'auto', objectFit: 'contain', marginBottom: 24 }} />
+          <p style={{ fontSize: 13, letterSpacing: 1.5, textTransform: 'uppercase', color: '#D4A030', margin: '0 0 12px', fontWeight: 700 }}>
+            El Portal de la Alegría
+          </p>
           <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 48, fontWeight: 700, color: '#FFF9F0', lineHeight: 1.2, margin: '0 0 20px' }}>
             Transforma tu mente,<br /><span style={{ color: '#D4A030' }}>transforma tu vida</span>
           </h1>

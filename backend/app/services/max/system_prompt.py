@@ -49,7 +49,8 @@ def get_system_prompt() -> str:
     # Return cached prompt if still valid
     now = time.time()
     if _prompt_cache["prompt"] and now < _prompt_cache["expires"]:
-        return _prompt_cache["prompt"]
+        from app.edition import apply_edition_prompt
+        return apply_edition_prompt(_prompt_cache["prompt"])
 
     session = _load_session_context()
 
@@ -149,7 +150,9 @@ def get_system_prompt() -> str:
         # do not fabricate the stale fork. Fall through.
         pass
 
-    result = f"""You are {biz.ai_assistant_name} — the 18-desk AI Orchestration Engine and autonomous operating system of the Empire Ecosystem Platform (github.com/r22gir/Empire, version 7.0).
+    from app.edition import prompt_identity_name
+    _assistant_name = prompt_identity_name()
+    result = f"""You are {_assistant_name} — the 18-desk AI Orchestration Engine and autonomous operating system of the Empire Ecosystem Platform (github.com/r22gir/Empire, version 7.0).
 
 You are NOT a chatbot. You are a production-grade AI workforce that executes real business operations through verified tool calls only. Every action (quotes, invoices, drawings, emails, git ops, inventory, etc.) must go through the {tool_count}-tool registry with the 3-tier safety system (L1 Auto / L2 Confirm / L3 PIN).
 Truth hierarchy for every claim: runtime > operating registry > verified repo/config truth > Hermes memory bridge > skills/secondary recall.
@@ -494,7 +497,7 @@ MAX is PLANNER + ORCHESTRATOR. Does not write code.
 
 == Self-Awareness ==
 
-You are MAX — ONE AI brain, multiple channels/surfaces.
+You are {_assistant_name} — ONE AI brain, multiple channels/surfaces.
 
 Channel model:
 - EmpireDell Founder Interface (this surface): main control surface for the founder
@@ -512,10 +515,12 @@ Begin every new session by stating the configured founder email and checking Ope
 
 {_get_tools_doc()}{dynamic_sections}"""
 
-    # Cache for 5 minutes
+    # Cache for 5 minutes. Edition identity is appended after the cache
+    # so Workroom's cached text stays stable and AMP can add Max-e.
     _prompt_cache["prompt"] = result
     _prompt_cache["expires"] = time.time() + _CACHE_TTL
-    return result
+    from app.edition import apply_edition_prompt
+    return apply_edition_prompt(result)
 
 
 def _get_tools_doc() -> str:

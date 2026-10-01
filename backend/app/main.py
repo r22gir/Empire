@@ -1,11 +1,35 @@
 """
 Main FastAPI application entry point for EmpireBox backend.
 """
+import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Keys a separate instance (systemd EnvironmentFile, tests) sets before
+# start. override=True on the shared Workroom .env must not clobber them.
+_EDITION_ENV_KEYS = (
+    "EMPIRE_EDITION",
+    "EMPIRE_DATA_DIR",
+    "EMPIRE_DEFAULT_LOCALE",
+    "ASSISTANT_NAME",
+    "ASSISTANT_PERSONA",
+    "DATABASE_URL",
+    "EMPIRE_TASK_DB",
+    "EMPIRE_BRAIN_DIR",
+    "MAX_MEMORY_PATH",
+    "EMPIRE_LOG_DIR",
+    "AMP_JWT_SECRET",
+    "AMP_OWNER_EMAIL",
+    "AMP_OWNER_USERNAME",
+)
+_preserved_edition_env = {key: os.environ[key] for key in _EDITION_ENV_KEYS if key in os.environ}
+
 # Load .env before anything reads os.getenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
+os.environ.update(_preserved_edition_env)
+
+from app.edition import apply_amp_process_paths
+apply_amp_process_paths()
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -49,6 +73,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# AMP edition gate. No-op unless EMPIRE_EDITION=amp.
+from app.middleware.edition_gate import amp_access_middleware
+
+app.middleware("http")(amp_access_middleware)
 
 # Public Luxe edge — registered before no-cache so denial responses still
 # receive the cache headers. See app.security.luxe_public_edge.
@@ -201,6 +230,9 @@ load_router("app.routers.intake_auth", "/api/v1/intake", ["intake"])
 
 # AMP — Actitud Mental Positiva platform
 load_router("app.routers.amp", "/api/v1/amp", ["amp"])
+
+# Edition manifest, allowlist, and Nueva empresa (no-op routes on Workroom)
+load_router("app.routers.edition", "/api/v1", ["edition"])
 
 # LLC Factory — Business formation services (DC/MD/VA)
 load_router("app.routers.llcfactory", "/api/v1", ["llcfactory"])

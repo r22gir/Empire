@@ -26,7 +26,22 @@ class UnifiedMessageStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
+    def _resolved_db_path(self) -> Path:
+        """AMP keeps conversation history under its own data root."""
+        try:
+            from app.edition import is_amp, assistant_brain_dir
+            if is_amp():
+                return assistant_brain_dir() / "unified_messages.db"
+        except Exception:
+            pass
+        return self.db_path
+
     def _get_conn(self):
+        path = self._resolved_db_path()
+        if path != self.db_path:
+            self.db_path = path
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_db()
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")

@@ -10,6 +10,7 @@ import ContinuityPanel from '../ContinuityPanel';
 import ViewPdfControl from '../ViewPdfControl';
 import ChatChartBlock from '../ChatChartBlock';
 import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../lib/chatContent';
+import { useAssistantName } from '../../lib/assistant';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -66,6 +67,7 @@ interface Props {
 }
 
 export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat }: Props) {
+  const assistantName = useAssistantName();
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
@@ -140,7 +142,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         const toolName = toolMatch[1];
         setAiStatus(TOOL_STATUS_MAP[toolName] || '🔧 Working on it...');
       } else if (!streamingContent || streamingContent.length < 5) {
-        setAiStatus('🧠 MAX is thinking...');
+        setAiStatus(`🧠 ${assistantName} is thinking...`);
       } else {
         setAiStatus('');
       }
@@ -466,7 +468,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           color: 'var(--text)',
           fontFamily: "'Inter', sans-serif",
         }}>
-          MAX
+          {assistantName}
         </span>
         <button
           onClick={() => setHistoryOpen(prev => !prev)}
@@ -1103,7 +1105,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               onKeyDown={handleKeyDown}
               onFocus={() => setInputFocused(true)}
               onBlur={() => setInputFocused(false)}
-              placeholder={codeMode ? 'Code Mode — describe what to build or fix...' : 'Message MAX...'}
+              placeholder={codeMode ? 'Code Mode — describe what to build or fix...' : `Message ${assistantName}...`}
               rows={1}
               style={{
                 flex: 1, padding: '13px 18px', border: 'none', outline: 'none',

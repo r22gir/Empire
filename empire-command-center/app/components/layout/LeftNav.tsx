@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { EcosystemProduct, ScreenMode } from '../../lib/types';
+import { AMP_HIDDEN_NAV, AMP_NAV_LABELS, useEdition } from '../../lib/edition';
 import RightPanel from './RightPanel';
 import {
   Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
@@ -94,6 +95,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'support', name: 'SupportForge', icon: <Headphones size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
       { id: 'ship', name: 'ShipForge', icon: <Truck size={16} />, status: 'active', color: '#2563eb', kind: 'product' },
       { id: 'amp', name: 'AMP', icon: <Sun size={16} />, status: 'active', color: '#f59e0b', kind: 'product' },
+      { id: 'nueva-empresa', name: 'Nueva empresa', icon: <Building2 size={16} />, status: 'active', color: '#D4A030', kind: 'product' },
       { id: 'archive', name: 'ArchiveForge', icon: <Archive size={16} />, status: 'active', color: '#06b6d4', kind: 'product' },
       { id: 'transcript', name: 'TranscriptForge', icon: <FileAudio size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
     ],
@@ -136,6 +138,8 @@ interface Props {
 }
 
 export default function LeftNav({ activeProduct, activeScreen, onProductChange, onScreenChange, dashboardProps }: Props) {
+  const edition = useEdition();
+  const ampEdition = edition === 'amp';
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -163,6 +167,10 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
 
   // On mobile: show hamburger button (rendered in TopBar area via CSS), overlay nav
   const handleNavClick = (item: NavItem) => {
+    if (item.id === 'nueva-empresa') {
+      window.location.href = '/amp/empresas';
+      return;
+    }
     if (item.kind === 'daily-summary') {
       setShowDashboard(s => !s);
       if (isMobile) setMobileOpen(false);
@@ -189,6 +197,13 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
   const isCollapsed = isMobile ? false : collapsed; // On mobile overlay, always show expanded
 
   // Helper: count visible items per group (active + dev + planned).
+  const visibleGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items
+      .filter((item) => (ampEdition ? !AMP_HIDDEN_NAV.has(item.id) : item.id !== 'nueva-empresa'))
+      .map((item) => (ampEdition && AMP_NAV_LABELS[item.id] ? { ...item, name: AMP_NAV_LABELS[item.id] } : item)),
+  })).filter((group) => group.items.length > 0);
+
   const groupCount = (g: NavGroup) => g.items.length;
 
   return (
@@ -253,7 +268,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
           </button>
 
           {/* Groups */}
-          {NAV_GROUPS.map((group, gi) => {
+          {visibleGroups.map((group, gi) => {
             const isOpen = expandedGroup === group.key;
             return (
               <div key={group.key} style={{ marginTop: gi === 0 ? 0 : 4 }}>

@@ -22,12 +22,38 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["socialforge"])
 
-DATA_DIR = os.path.expanduser("~/empire-repo/backend/data/socialforge")
-POSTS_DIR = os.path.join(DATA_DIR, "posts")
-CAMPAIGNS_DIR = os.path.join(DATA_DIR, "campaigns")
 
-for d in [POSTS_DIR, CAMPAIGNS_DIR]:
-    os.makedirs(d, exist_ok=True)
+def _storage_root() -> str:
+    from app.edition import socialforge_storage_dir
+    return str(socialforge_storage_dir())
+
+
+def _posts_dir() -> str:
+    path = os.path.join(_storage_root(), "posts")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _campaigns_dir() -> str:
+    path = os.path.join(_storage_root(), "campaigns")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _accounts_file() -> str:
+    return os.path.join(_storage_root(), "accounts.json")
+
+
+def _profile_file() -> str:
+    return os.path.join(_storage_root(), "business_profile.json")
+
+
+# Workroom keeps creating the legacy directory at import. The AMP edition
+# resolves a directory under its own data root at call time instead.
+if os.getenv("EMPIRE_EDITION", "").strip().lower() != "amp":
+    _legacy = os.path.expanduser("~/empire-repo/backend/data/socialforge")
+    for _d in (os.path.join(_legacy, "posts"), os.path.join(_legacy, "campaigns")):
+        os.makedirs(_d, exist_ok=True)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -115,7 +141,7 @@ class AIContentRequest(BaseModel):
 
 @router.get("/posts")
 async def list_posts(status: Optional[str] = None, platform: Optional[str] = None):
-    posts = _load_all(POSTS_DIR)
+    posts = _load_all(_posts_dir())
     if status:
         posts = [p for p in posts if p.get("status") == status]
     if platform:
@@ -126,7 +152,8 @@ async def list_posts(status: Optional[str] = None, platform: Optional[str] = Non
 @router.post("/posts")
 async def create_post(data: PostCreate):
     post_id = uuid.uuid4().hex[:12]
-    code = _next_code(POSTS_DIR, "POST")
+    code = _next_code(_posts_dir(), "POST")
+    from app.edition import coerce_social_status
     post = {
         "id": post_id,
         "code": code,
@@ -136,19 +163,19 @@ async def create_post(data: PostCreate):
         "media_url": data.media_url,
         "scheduled_for": data.scheduled_for,
         "campaign_id": data.campaign_id,
-        "status": data.status,
+        "status": coerce_social_status(data.status),
         "engagement": {"likes": 0, "comments": 0, "shares": 0, "reach": 0},
         "created_at": datetime.utcnow().isoformat(),
         "updated_at": datetime.utcnow().isoformat(),
         "posted_at": None,
     }
-    _save(POSTS_DIR, post_id, post)
+    _save(_posts_dir(), post_id, post)
     return post
 
 
 @router.get("/posts/{post_id}")
 async def get_post(post_id: str):
-    post = _load_one(POSTS_DIR, post_id)
+    post = _load_one(_posts_dir(), post_id)
     if not post:
         raise HTTPException(404, "Post not found")
     return post
@@ -156,21 +183,24 @@ async def get_post(post_id: str):
 
 @router.put("/posts/{post_id}")
 async def update_post(post_id: str, data: PostUpdate):
-    post = _load_one(POSTS_DIR, post_id)
+    post = _load_one(_posts_dir(), post_id)
     if not post:
         raise HTTPException(404, "Post not found")
+    from app.edition import coerce_social_status, is_amp
     for field, val in data.model_dump(exclude_none=True).items():
         post[field] = val
-    if data.status == "posted" and not post.get("posted_at"):
+    if is_amp() and data.status:
+        post["status"] = coerce_social_status(data.status)
+    if data.status == "posted" and not is_amp() and not post.get("posted_at"):
         post["posted_at"] = datetime.utcnow().isoformat()
     post["updated_at"] = datetime.utcnow().isoformat()
-    _save(POSTS_DIR, post_id, post)
+    _save(_posts_dir(), post_id, post)
     return post
 
 
 @router.delete("/posts/{post_id}")
 async def delete_post(post_id: str):
-    if not _delete(POSTS_DIR, post_id):
+    if not _delete(_posts_dir(), post_id):
         raise HTTPException(404, "Post not found")
     return {"deleted": True}
 
@@ -179,13 +209,13 @@ async def delete_post(post_id: str):
 
 @router.get("/campaigns")
 async def list_campaigns():
-    return _load_all(CAMPAIGNS_DIR)
+    return _load_all(_campaigns_dir())
 
 
 @router.post("/campaigns")
 async def create_campaign(data: CampaignCreate):
     camp_id = uuid.uuid4().hex[:12]
-    code = _next_code(CAMPAIGNS_DIR, "CAMP")
+    code = _next_code(_campaigns_dir(), "CAMP")
     campaign = {
         "id": camp_id,
         "code": code,
@@ -199,13 +229,13 @@ async def create_campaign(data: CampaignCreate):
         "created_at": datetime.utcnow().isoformat(),
         "updated_at": datetime.utcnow().isoformat(),
     }
-    _save(CAMPAIGNS_DIR, camp_id, campaign)
+    _save(_campaigns_dir(), camp_id, campaign)
     return campaign
 
 
 @router.delete("/campaigns/{camp_id}")
 async def delete_campaign(camp_id: str):
-    if not _delete(CAMPAIGNS_DIR, camp_id):
+    if not _delete(_campaigns_dir(), camp_id):
         raise HTTPException(404, "Campaign not found")
     return {"deleted": True}
 
@@ -278,9 +308,28 @@ class FacebookPostRequest(BaseModel):
     link: Optional[str] = None
 
 
+@router.post("/posts/{post_id}/approve")
+async def approve_post(post_id: str):
+    """AMP: Juan (or an allowlisted operator) approves before anything posts."""
+    post = _load_one(_posts_dir(), post_id)
+    if not post:
+        raise HTTPException(404, "Post not found")
+    post["status"] = "approved"
+    post["approved_at"] = datetime.utcnow().isoformat()
+    post["updated_at"] = datetime.utcnow().isoformat()
+    _save(_posts_dir(), post_id, post)
+    return post
+
+
 @router.post("/post/instagram")
 async def api_post_to_instagram(data: InstagramPostRequest):
     """Publish a post to Instagram via Graph API."""
+    from app.edition import is_amp
+    if is_amp():
+        raise HTTPException(
+            403,
+            "Sin aprobación. Nada se publica hasta que se apruebe el contenido.",
+        )
     result = await post_to_instagram(caption=data.caption, image_url=data.image_url)
     if not result["posted"]:
         raise HTTPException(400, result.get("error", "Instagram post failed"))
@@ -290,6 +339,12 @@ async def api_post_to_instagram(data: InstagramPostRequest):
 @router.post("/post/facebook")
 async def api_post_to_facebook(data: FacebookPostRequest):
     """Publish a post to Facebook Page via Graph API."""
+    from app.edition import is_amp
+    if is_amp():
+        raise HTTPException(
+            403,
+            "Sin aprobación. Nada se publica hasta que se apruebe el contenido.",
+        )
     result = await post_to_facebook(message=data.message, link=data.link)
     if not result["posted"]:
         raise HTTPException(400, result.get("error", "Facebook post failed"))
@@ -306,8 +361,8 @@ async def api_get_social_accounts():
 
 @router.get("/dashboard")
 async def dashboard():
-    posts = _load_all(POSTS_DIR)
-    campaigns = _load_all(CAMPAIGNS_DIR)
+    posts = _load_all(_posts_dir())
+    campaigns = _load_all(_campaigns_dir())
 
     drafts = [p for p in posts if p.get("status") == "draft"]
     scheduled = [p for p in posts if p.get("status") == "scheduled"]
@@ -344,7 +399,7 @@ async def dashboard():
 @router.get("/calendar")
 async def content_calendar(month: Optional[str] = None):
     """Get posts organized by date for calendar view."""
-    posts = _load_all(POSTS_DIR)
+    posts = _load_all(_posts_dir())
     calendar = {}
 
     for p in posts:
@@ -366,9 +421,6 @@ async def content_calendar(month: Optional[str] = None):
 
 
 # ── Accounts / Setup ──────────────────────────────────────────────────────
-
-ACCOUNTS_FILE = os.path.join(DATA_DIR, "accounts.json")
-PROFILE_FILE = os.path.join(DATA_DIR, "business_profile.json")
 
 # ── Business Profile ──────────────────────────────────────────────────────
 
@@ -418,16 +470,16 @@ class ProfileUpdate(BaseModel):
 
 
 def _load_profile() -> dict:
-    if os.path.exists(PROFILE_FILE):
-        with open(PROFILE_FILE) as f:
+    if os.path.exists(_profile_file()):
+        with open(_profile_file()) as f:
             return json.load(f)
-    with open(PROFILE_FILE, "w") as f:
+    with open(_profile_file(), "w") as f:
         json.dump(DEFAULT_PROFILE, f, indent=2)
     return DEFAULT_PROFILE.copy()
 
 
 def _save_profile(profile: dict):
-    with open(PROFILE_FILE, "w") as f:
+    with open(_profile_file(), "w") as f:
         json.dump(profile, f, indent=2)
 
 
@@ -499,8 +551,8 @@ DEFAULT_ACCOUNTS = [
 
 
 def _load_accounts() -> list[dict]:
-    if os.path.exists(ACCOUNTS_FILE):
-        with open(ACCOUNTS_FILE) as f:
+    if os.path.exists(_accounts_file()):
+        with open(_accounts_file()) as f:
             return json.load(f)
     # Initialize with defaults
     _save_accounts(DEFAULT_ACCOUNTS)
@@ -508,7 +560,7 @@ def _load_accounts() -> list[dict]:
 
 
 def _save_accounts(accounts: list[dict]):
-    with open(ACCOUNTS_FILE, "w") as f:
+    with open(_accounts_file(), "w") as f:
         json.dump(accounts, f, indent=2)
 
 

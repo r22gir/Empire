@@ -303,10 +303,21 @@ class MaxScheduler:
             #   3. ~/empire-repo/max/memory.md (legacy fallback during
             #      stale-fork retirement)
             memory_file = None
-            env_path = os.getenv("MAX_MEMORY_PATH")
-            if env_path:
+            from app.edition import is_amp, assistant_memory_path, default_persona, assistant_name
+            if is_amp():
+                # AMP instance memory is its own file. Never read or write
+                # the Workroom max/memory.md from this process.
+                memory_file = assistant_memory_path()
+                memory_file.parent.mkdir(parents=True, exist_ok=True)
+                if not memory_file.exists():
+                    memory_file.write_text(
+                        f"# Memoria de {assistant_name()}\n\n{default_persona()}\n",
+                        encoding="utf-8",
+                    )
+            env_path = os.getenv("MAX_MEMORY_PATH") if not is_amp() else None
+            if memory_file is None and env_path:
                 memory_file = Path(env_path)
-            else:
+            elif memory_file is None:
                 # backend/app/services/max/scheduler.py → repo root is 4 parents up.
                 # No legacy fallback to ~/empire-repo; canonical only.
                 canonical_repo = Path(__file__).resolve().parents[4]

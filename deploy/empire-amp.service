@@ -1,0 +1,29 @@
+# systemd --user unit for the AMP edition.
+#
+# This does not start anything by itself. On the Dell:
+#
+#   mkdir -p /data/amp
+#   cp deploy/empire-amp.env.example /home/rg/empire-amp.env
+#   # edit /home/rg/empire-amp.env locally; do not commit it
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/empire-amp.service ~/.config/systemd/user/empire-amp.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now empire-amp.service
+#
+# Do not point this unit at the Workroom .env. Do not restart the
+# Workroom service (port 8000) as part of bringing AMP up.
+
+[Unit]
+Description=EmpireBox AMP edition (Actitud Mental Positiva, Max-e)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/rg/empire-repo/backend
+EnvironmentFile=/home/rg/empire-amp.env
+ExecStart=/home/rg/empire-repo/backend/venv/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8010 --timeout-keep-alive 65
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

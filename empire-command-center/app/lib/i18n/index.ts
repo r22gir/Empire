@@ -47,6 +47,12 @@ async function loadModule(locale: Locale, module: string): Promise<TranslationMo
   }
 }
 
+function editionDefaultLocale(): Locale {
+  const edition = (process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').toLowerCase();
+  if (edition === 'amp') return 'es';
+  return 'en';
+}
+
 const I18nContext = createContext<I18nContextType>({
   locale: 'en',
   setLocale: () => {},
@@ -55,14 +61,15 @@ const I18nContext = createContext<I18nContextType>({
 });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>('en');
+  const [locale, setLocaleState] = useState<Locale>(editionDefaultLocale);
   const [translations, setTranslations] = useState<TranslationModule>({});
   const [isLoading, setIsLoading] = useState(false);
 
   // Initialize locale from storage or browser detection
   useEffect(() => {
     const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) as Locale : null;
-    const initial = stored || detectBrowserLocale();
+    // AMP edition defaults to Spanish. A saved choice (the English toggle) wins.
+    const initial = stored || (editionDefaultLocale() === 'es' ? 'es' : detectBrowserLocale());
     setLocaleState(initial);
   }, []);
 

@@ -1,6 +1,14 @@
 # AMP — Actitud Mental Positiva
 
-> Wellness and personal development platform — affirmations, journaling, mood tracking, mentorship.
+> El Portal de la Alegría — actitudmentalpositiva.com. Cursos con audio y meditaciones por tema, más el ánimo de cada día. Juan Diego Giraldo es el coach.
+
+## Edition
+
+The AMP edition is this module as its own process (`EMPIRE_EDITION=amp`, port 8010, data under `EMPIRE_DATA_DIR`, intended `/data/amp`). See `deploy/AMP_EDITION.md`. The assistant in that instance is **Max-e** (`ASSISTANT_NAME`), with his own memory, history, and settings. Workroom stays Max when the variable is unset.
+
+Workroom, WoodCraft, LuxeForge, and drawing tools are hidden there. CRM, LeadForge, SocialForge (approval before anything posts), packages/memberships, scheduling, and finance stay, mapped to coaching. Juan can add blank companies (`Nueva empresa`) under the same data root. Templates seed categories and CRM fields only, with no prices.
+
+Content lives in the existing router (`/api/v1/amp`): `ContentItem` types `meditation`, `affirmation`, `course_lesson`, `audio` (theme, duration, premium flag), multi-week courses, audio upload/stream under the data root, and one mood check-in per user per day.
 
 ## Status: Active
 
