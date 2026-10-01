@@ -91,6 +91,21 @@ def init_evaluation_schema(db_path: Path = None):
         if "metadata_envelope" not in existing_cols:
             conn.execute("ALTER TABLE max_response_evaluations ADD COLUMN metadata_envelope TEXT")
 
+        # Per-turn answer-quality flags feed the existing scorecard/status views.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS max_answer_quality_flags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                response_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                channel TEXT,
+                truncated INTEGER DEFAULT 0,
+                stale_source INTEGER DEFAULT 0,
+                empty_section INTEGER DEFAULT 0,
+                user_repeat INTEGER DEFAULT 0,
+                pushback INTEGER DEFAULT 0
+            )
+        """)
+
         # Explicit user feedback
         conn.execute("""
             CREATE TABLE IF NOT EXISTS max_feedback (
@@ -321,6 +336,38 @@ class EvaluationService:
             logger.warning(f"[evaluation] log_response failed: {e}")
 
         return response_id
+
+    def log_answer_quality_flags(self, response_id: str, channel: str, flags: dict[str, bool]) -> None:
+        """Persist per-turn self-score flags without blocking the answer path."""
+        import sqlite3
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """INSERT INTO max_answer_quality_flags
+                       (response_id, channel, truncated, stale_source, empty_section, user_repeat, pushback)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (response_id or None, channel or "chat",
+                     *[1 if flags.get(name) else 0 for name in ("truncated", "stale_source", "empty_section", "user_repeat", "pushback")]),
+                )
+        except Exception as exc:
+            logger.debug("[evaluation] answer quality flags failed: %s", exc)
+
+    def get_answer_quality_flags(self, days: int = 30) -> dict:
+        """Return flag counts for the existing evaluation scorecard."""
+        import sqlite3
+        empty = {name: 0 for name in ("truncated", "stale_source", "empty_section", "user_repeat", "pushback")}
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute(
+                    """SELECT COALESCE(SUM(truncated),0), COALESCE(SUM(stale_source),0),
+                              COALESCE(SUM(empty_section),0), COALESCE(SUM(user_repeat),0),
+                              COALESCE(SUM(pushback),0), COUNT(*)
+                       FROM max_answer_quality_flags
+                       WHERE created_at >= datetime('now', ?)""", (f"-{max(1, int(days))} days",)
+                ).fetchone()
+            return {**dict(zip((*empty.keys(), "turns"), row)), "days": days}
+        except Exception as exc:
+            return {**empty, "turns": 0, "days": days, "error": str(exc)}
 
     def _detect_implicit_signals(self, message: str, tool_results: list) -> dict:
         """Detect implicit dissatisfaction or success signals from message and tool results."""

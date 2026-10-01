@@ -38,6 +38,9 @@ from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.factual_guard import is_factual_question, enforce_web_search
+from app.services.max.answer_quality import (
+    detect_quality_flags, freshness_directive, needs_continuation, strip_empty_sections,
+)
 from app.services.max.guardrails import uncertainty_fallback, should_defer_uncertain
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.runtime_truth_check import (
@@ -2748,6 +2751,9 @@ async def _chat_with_max_service(
         # Append channel-specific directives
         if request.channel == "telegram" and enriched_prompt:
             enriched_prompt += TELEGRAM_DIRECTIVE
+        _freshness = freshness_directive(request.message)
+        if _freshness:
+            enriched_prompt = (enriched_prompt or "") + "\n\n" + _freshness
 
         # Pass tool definitions to xAI when image is attached — enables native function_call
         # via /v1/responses endpoint (function_calls returned alongside or instead of text)
@@ -3031,31 +3037,31 @@ async def _chat_with_max_service(
             # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
             final_content = current_response.content
 
-        # 2026-09-29 tune-up: never end a tool turn with an empty answer. When
-        # the last round came back empty or with only tool blocks (the loop
-        # ran out of rounds), ask once more for a final answer without tools;
-        # if that is still empty, summarize the tool outcomes plainly.
-        if tool_results_list and not strip_tool_blocks(final_content or "").strip():
+        # Completeness guard: the 9/30 incident returned only a heading after
+        # tool/stream assembly. Recover once, then remove dangling sections.
+        if needs_continuation(final_content, user_message=request.message, tool_results=tool_results_list):
             try:
                 _final_msgs = list(loop_messages)
                 _final_msgs.append(AIMessage(role="system", content=(
-                    "You have already run these tools this turn: "
-                    + ", ".join(str(r.get("tool")) for r in tool_results_list)
-                    + ". Do NOT call any more tools. Using only the tool results above, "
-                    "give the founder a complete, concise final answer now."
+                    "The previous draft was incomplete (possibly only a heading). "
+                    "Do NOT call tools. Return the complete final answer now, with no empty headings "
+                    "or dangling list introductions, using the verified context above."
                 )))
                 _final_resp = await ai_router.chat(
                     _final_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
                     conversation_id=request.conversation_id or "",
                 )
-                final_content = strip_tool_blocks(_final_resp.content or "")
+                _recovered = strip_tool_blocks(_final_resp.content or "")
+                if _recovered.strip():
+                    final_content = _recovered
             except Exception as _final_err:
-                logger.warning(f"[chat] final-answer recovery failed: {type(_final_err).__name__}: {_final_err}")
-            if not (final_content or "").strip():
+                logger.warning(f"[chat] completeness recovery failed: {type(_final_err).__name__}: {_final_err}")
+            final_content = strip_empty_sections(final_content)
+            if not final_content.strip():
                 _ok = [str(r.get("tool")) for r in tool_results_list if r.get("success")]
                 _bad = [f"{r.get('tool')} ({r.get('error')})" for r in tool_results_list if not r.get("success")]
                 final_content = (
-                    "I ran the tools but the model returned no final answer. "
+                    "I ran the tools but the model returned no complete final answer. "
                     + (f"Succeeded: {', '.join(_ok)}. " if _ok else "")
                     + (f"Failed: {'; '.join(_bad)}. " if _bad else "")
                     + "The raw tool results are attached to this reply."
@@ -3365,6 +3371,14 @@ async def _chat_with_max_service(
                 "(proved the AI bypassed the earlier check)"
             )
             final_content = _final_truth_guarded
+
+        _quality_flags = detect_quality_flags(
+            final_content, user_message=request.message, tool_results=normalize_tool_results(tool_results_list)
+        )
+        try:
+            evaluation_service.log_answer_quality_flags(_response_id, request.channel or "web", _quality_flags)
+        except Exception as _flag_err:
+            logger.debug("[chat] quality flag logging failed: %s", _flag_err)
 
         resp = ChatResponse(
             response=sanitize_output(final_content),
@@ -3707,6 +3721,9 @@ async def chat_stream(request: ChatRequest):
     # Append channel-specific directives
     if request.channel == "telegram" and enriched_prompt:
         enriched_prompt += TELEGRAM_DIRECTIVE
+    _freshness = freshness_directive(request.message)
+    if _freshness:
+        enriched_prompt = (enriched_prompt or "") + "\n\n" + _freshness
 
     # Conversation tracking ID
     conv_id = request.conversation_id or str(uuid.uuid4())
@@ -3933,8 +3950,27 @@ async def chat_stream(request: ChatRequest):
                 # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
                 full_response = followup_text
 
-            # Track assistant response — fire-and-forget background tasks
+            # Completeness guard for streamed assembly. The initial chunks cannot be
+            # retracted, so emit a replacement event the frontend can atomically apply.
             full_response = _sanitize_internal_leakage_text(full_response)
+            if needs_continuation(full_response, user_message=request.message, tool_results=tool_results_list):
+                try:
+                    _complete_msgs = list(loop_messages)
+                    _complete_msgs.append(AIMessage(role="system", content=(
+                        "The streamed draft was incomplete. Do NOT call tools; return the complete "
+                        "final answer now, with no empty headings or dangling list introductions."
+                    )))
+                    _complete_resp = await ai_router.chat(
+                        _complete_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
+                        conversation_id=request.conversation_id or "",
+                    )
+                    _replacement = strip_empty_sections(strip_tool_blocks(_complete_resp.content or ""))
+                    if _replacement:
+                        full_response = _replacement
+                        yield f"data: {_safe_dumps({'type': 'response_replacement', 'content': full_response, 'reason': 'completeness_guard'})}\n\n"
+                except Exception as _complete_err:
+                    logger.warning("[stream] completeness recovery failed: %s", _complete_err)
+            full_response = strip_empty_sections(full_response)
             truth_checked_response = _apply_truth_guardrails(request.message, full_response, tool_results_list)
             if truth_checked_response != full_response:
                 full_response = truth_checked_response
@@ -4146,6 +4182,14 @@ async def chat_stream(request: ChatRequest):
                 )
                 full_response = _stream_final_truth_guarded
                 yield f"data: {_safe_dumps({'type': 'runtime_truth_correction', 'content': full_response})}\n\n"
+
+            _quality_flags = detect_quality_flags(
+                full_response, user_message=request.message, tool_results=normalize_tool_results(tool_results_list)
+            )
+            try:
+                evaluation_service.log_answer_quality_flags(conv_id, request.channel or "web", _quality_flags)
+            except Exception as _flag_err:
+                logger.debug("[stream] quality flag logging failed: %s", _flag_err)
 
             _done_data = {
                 'type': 'done',
@@ -4784,7 +4828,7 @@ def _status_desks_online():
 async def max_evaluation_scores(limit: int = 10):
     """Recent Evaluation Loop v1 scores for MAX self-reporting."""
     from app.services.max.evaluation_loop_v1 import get_recent_scores
-    return {"scores": get_recent_scores(limit=limit), "limit": limit}
+    return {"scores": get_recent_scores(limit=limit), "quality_flags": evaluation_service.get_answer_quality_flags(), "limit": limit}
 
 
 @router.get("/self-assessment")

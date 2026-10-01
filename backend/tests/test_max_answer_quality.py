@@ -1,0 +1,44 @@
+"""Tests for intent-based freshness, completeness recovery signals, and score flags."""
+from app.services.max.answer_quality import (
+    detect_quality_flags,
+    freshness_directive,
+    freshness_intent,
+    needs_continuation,
+    strip_empty_sections,
+)
+
+
+def test_freshness_is_intent_based_without_universal_date_cap():
+    assert freshness_intent("What's the best news this week on AI agent orchestration?") == "fresh"
+    directive = freshness_directive("What's the best news this week on AI agent orchestration?")
+    assert "no universal 14-day cutoff" in directive
+    assert "publication date" in directive
+
+
+def test_historical_question_is_not_forced_to_recent_filter():
+    assert freshness_intent("How did agent orchestration evolve in 2021?") == "historical"
+    assert freshness_directive("How did agent orchestration evolve in 2021?") == ""
+
+
+def test_completeness_guard_catches_heading_only_and_dangling_sections():
+    assert needs_continuation("## Best options", user_message="Explain the best options for me")
+    text = "## Sources\n\n## Answer\nUseful answer."
+    assert "## Sources" not in strip_empty_sections(text)
+    flags = detect_quality_flags("## Sources", user_message="Give me sources")
+    assert flags["truncated"] and flags["empty_section"]
+
+
+def test_web_answer_without_date_or_url_is_stale_source_flag():
+    flags = detect_quality_flags(
+        "The leading story is important.",
+        tool_results=[{"tool": "web_search", "success": True}],
+    )
+    assert flags["stale_source"]
+
+
+def test_complete_drapery_answer_has_no_truncation_flag():
+    flags = detect_quality_flags(
+        "A French pleat is a tailored three-fold heading; a goblet pleat has rounded cups and a more formal look.",
+        user_message="How does a French pleat compare to a goblet pleat for drapery?",
+    )
+    assert not flags["truncated"]
