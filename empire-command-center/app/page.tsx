@@ -525,6 +525,7 @@ export default function CommandCenter() {
           messages={chat.messages}
           isStreaming={chat.isStreaming}
           streamingContent={chat.streamingContent}
+          streamingSteps={chat.streamingSteps}
           streamingModel={chat.streamingModel}
           onSend={handleSendMessage}
           onStop={chat.stopStreaming}

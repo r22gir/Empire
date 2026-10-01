@@ -52,7 +52,13 @@ from app.services.max.guardrails import (
     uncertainty_fallback,
     should_defer_uncertain,
     summarize_uncertainty_topic,
-    founder_action_tools_remaining,
+)
+from app.services.max.founder_action_continuation import (
+    FOUNDER_CONTINUATION_MAX_ROUNDS,
+    finalize_founder_action_reply,
+    format_tool_progress_message,
+    founder_continuation_system_nudge,
+    should_force_founder_action_continuation,
 )
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.runtime_truth_check import (
@@ -672,6 +678,7 @@ class ChatResponse(BaseModel):
     model_used: str
     fallback_used: bool = False
     tool_results: Optional[List[Dict[str, Any]]] = None
+    steps: Optional[List[str]] = None
     quality: Optional[Dict[str, Any]] = None
     response_id: Optional[str] = None  # for feedback linkage
     metadata: Optional[Dict[str, Any]] = None
@@ -703,6 +710,10 @@ ACTION_TOOLS = {
     "run_desk_task",
     "delegate_to_atlas",
 }
+
+
+def _tool_progress_event(entry: dict) -> dict:
+    return {"type": "progress", "phase": "tool", "message": format_tool_progress_message(entry)}
 
 
 def _is_decision_only_request(message: str | None) -> bool:
@@ -2899,6 +2910,8 @@ async def _chat_with_max_service(
         loop_messages = list(messages)
         current_response = response
         _seen_send_tool_calls: set[str] = set()
+        _founder_continuation_rounds = 0
+        _founder_step_lines: list[str] = []
 
         for _tool_round in range(3):
             # H67 FIX (2026-08-20): initialize round_results at the top of
@@ -2985,17 +2998,17 @@ async def _chat_with_max_service(
                 tool_calls = current_response.function_calls
             tool_calls = _dedupe_send_tool_calls(tool_calls, _seen_send_tool_calls)
             if not tool_calls:
-                _remaining_action_tools = founder_action_tools_remaining(
-                    request.message, tool_results_list
+                _asst_plain = strip_tool_blocks(current_response.content)
+                _force_continue, _nudge_tools = should_force_founder_action_continuation(
+                    request.message, tool_results_list, _asst_plain,
                 )
-                if _remaining_action_tools and _tool_round < 2:
-                    loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_response.content)))
-                    loop_messages.append(AIMessage(role="system", content=(
-                        "The founder action request is not complete. You MUST call the remaining "
-                        f"tools before giving a final answer: {', '.join(_remaining_action_tools)}. "
-                        "Use exact line items from the user message (description, qty, unit, unit_price — "
-                        "no recalculation). Emit valid ```tool``` JSON blocks now."
-                    )))
+                if _force_continue and _founder_continuation_rounds < FOUNDER_CONTINUATION_MAX_ROUNDS:
+                    _founder_continuation_rounds += 1
+                    loop_messages.append(AIMessage(role="assistant", content=_asst_plain))
+                    loop_messages.append(AIMessage(
+                        role="system",
+                        content=founder_continuation_system_nudge(_nudge_tools, _asst_plain),
+                    ))
                     current_response = await ai_router.chat(
                         loop_messages, model=model, desk=request.desk,
                         system_prompt=enriched_prompt, conversation_id=request.conversation_id or "",
@@ -3452,6 +3465,10 @@ async def _chat_with_max_service(
             )
             final_content = _final_truth_guarded
 
+        final_content, _founder_step_lines, _ = finalize_founder_action_reply(
+            request.message, tool_results_list, strip_tool_blocks(final_content),
+        )
+
         _quality_flags = detect_quality_flags(
             final_content, user_message=request.message, tool_results=normalize_tool_results(tool_results_list)
         )
@@ -3465,6 +3482,7 @@ async def _chat_with_max_service(
             model_used=resolve_display_model_used(response.model_used, request.model),
             fallback_used=response.fallback_used,
             tool_results=tool_results_list if tool_results_list else None,
+            steps=_founder_step_lines if _founder_step_lines else None,
             quality=quality_badge,
             response_id=_response_id,
             metadata=_response_metadata(request.channel),
@@ -3912,6 +3930,8 @@ async def chat_stream(request: ChatRequest):
             loop_messages = list(messages)
             current_text = full_response
             _seen_send_tool_calls: set[str] = set()
+            _founder_continuation_rounds = 0
+            _stream_step_lines: list[str] = []
 
             for _tool_round in range(3):
                 # H67 FIX (2026-08-20): see non-streaming version above.
@@ -3951,17 +3971,17 @@ async def chat_stream(request: ChatRequest):
                     tool_results_list = error_entries + tool_results_list
                 tool_calls = _dedupe_send_tool_calls(tool_calls, _seen_send_tool_calls)
                 if not tool_calls:
-                    _remaining_action_tools = founder_action_tools_remaining(
-                        request.message, tool_results_list
+                    _asst_plain = strip_tool_blocks(current_text)
+                    _force_continue, _nudge_tools = should_force_founder_action_continuation(
+                        request.message, tool_results_list, _asst_plain,
                     )
-                    if _remaining_action_tools and _tool_round < 2:
-                        loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_text)))
-                        loop_messages.append(AIMessage(role="system", content=(
-                            "The founder action request is not complete. You MUST call the remaining "
-                            f"tools before giving a final answer: {', '.join(_remaining_action_tools)}. "
-                            "Use exact line items from the user message (description, qty, unit, unit_price — "
-                            "no recalculation). Emit valid ```tool``` JSON blocks now."
-                        )))
+                    if _force_continue and _founder_continuation_rounds < FOUNDER_CONTINUATION_MAX_ROUNDS:
+                        _founder_continuation_rounds += 1
+                        loop_messages.append(AIMessage(role="assistant", content=_asst_plain))
+                        loop_messages.append(AIMessage(
+                            role="system",
+                            content=founder_continuation_system_nudge(_nudge_tools, _asst_plain),
+                        ))
                         followup_text = ""
                         _action_followup_iter = ai_router.chat_stream(
                             loop_messages, model=model, desk=request.desk,
@@ -4027,7 +4047,6 @@ async def chat_stream(request: ChatRequest):
                         logger.info(f"[stream] Auto-routing {tool_name} to CodeForge: {title}")
                         tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
-                    yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'tool', 'message': 'Running requested lookup'})}\n\n"
                     try:
                         result = await asyncio.wait_for(
                             _execute_tool_nonblocking(tc, desk=request.desk, access_context=_stream_ac_context, founder=founder),
@@ -4038,11 +4057,9 @@ async def chat_stream(request: ChatRequest):
                     entry = _normalize_tool_result_entry(result)
                     round_results.append(entry)
                     tool_results_list.append(entry)
-                    # D52 H80: receipt suppression. Only emit the
-                    # `tool_result` SSE event for successes. Failed calls
-                    # stay in tool_results_list for the post-gen backstop
-                    # at line 3794 but do not produce a UI badge that
-                    # could be read as a successful invocation.
+                    progress_line = format_tool_progress_message(entry)
+                    _stream_step_lines.append(progress_line)
+                    yield f"data: {_safe_dumps(_tool_progress_event(entry))}\n\n"
                     if entry.get("success"):
                         yield f"data: {_safe_dumps({'type': 'tool_result', **entry})}\n\n"
 
@@ -4142,13 +4159,6 @@ async def chat_stream(request: ChatRequest):
             if truth_checked_response != full_response:
                 full_response = truth_checked_response
             full_response = strip_empty_sections(strip_tool_blocks(_sanitize_internal_leakage_text(full_response)))
-            if full_response:
-                yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
-            conversation_tracker.add_message(conv_id, "assistant", full_response)
-            asyncio.create_task(_safe_background(
-                conversation_tracker.check_and_summarize(conv_id),
-                "summarization"
-            ))
 
             # Save assistant response to unified cross-channel store
             try:
@@ -4350,7 +4360,17 @@ async def chat_stream(request: ChatRequest):
                     "(proved the AI bypassed the earlier check)"
                 )
                 full_response = _stream_final_truth_guarded
-                yield f"data: {_safe_dumps({'type': 'runtime_truth_correction', 'content': full_response})}\n\n"
+
+            full_response, _stream_step_lines, _ = finalize_founder_action_reply(
+                request.message, tool_results_list, full_response,
+            )
+            if full_response:
+                yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
+            conversation_tracker.add_message(conv_id, "assistant", full_response)
+            asyncio.create_task(_safe_background(
+                conversation_tracker.check_and_summarize(conv_id),
+                "summarization"
+            ))
 
             _quality_flags = detect_quality_flags(
                 full_response, user_message=request.message, tool_results=normalize_tool_results(tool_results_list)
@@ -4366,6 +4386,8 @@ async def chat_stream(request: ChatRequest):
                 'conversation_id': conv_id,
                 'metadata': _response_metadata(request.channel),
             }
+            if _stream_step_lines:
+                _done_data['steps'] = _stream_step_lines
             if _quality_badge:
                 _done_data['quality'] = _quality_badge
             yield f"data: {_safe_dumps(_done_data)}\n\n"

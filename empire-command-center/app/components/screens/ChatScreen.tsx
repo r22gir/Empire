@@ -54,6 +54,7 @@ interface Props {
   messages: Message[];
   isStreaming: boolean;
   streamingContent: string;
+  streamingSteps?: string[];
   streamingModel: string;
   onSend: (msg: string, imageFilename?: string | null) => void;
   onStop: () => void;
@@ -64,7 +65,7 @@ interface Props {
   onNewChat?: () => void;
 }
 
-export default function ChatScreen({ messages, isStreaming, streamingContent, streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat }: Props) {
+export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat }: Props) {
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
@@ -911,6 +912,23 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         {/* Streaming indicator */}
         {isStreaming && (
           <div style={{ marginBottom: 16, maxWidth: '75%' }}>
+            {streamingSteps.length > 0 && (
+              <div style={{
+                marginBottom: 8,
+                padding: '10px 14px',
+                fontSize: 12,
+                lineHeight: 1.5,
+                background: '#f8fafc',
+                color: '#334155',
+                border: '1px solid var(--border)',
+                borderRadius: 10,
+                fontFamily: "'Inter', system-ui, sans-serif",
+              }}>
+                {streamingSteps.map((line, i) => (
+                  <div key={i} style={{ marginBottom: i < streamingSteps.length - 1 ? 4 : 0 }}>{line}</div>
+                ))}
+              </div>
+            )}
             <div style={{
               padding: '14px 18px',
               fontSize: 14,
@@ -921,7 +939,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               border: '1px solid var(--border)',
               borderRadius: '14px 14px 14px 6px',
             }}>
-              {streamingContent ? renderContent(streamingContent, onScreenChange) : '...'}
+              {streamingContent ? renderContent(streamingContent, onScreenChange) : (streamingSteps.length ? '' : '...')}
             </div>
             <div style={{
               fontSize: 10,

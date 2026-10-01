@@ -373,12 +373,20 @@ def founder_action_tools_remaining(message: str | None, tool_results: list[Any] 
         if wants_quotes and not (succeeded & {"create_engine_quote", "create_quick_quote"}):
             if any(v in text for v in ("create", "make", "save", "generate", "new ")):
                 remaining.append("create_engine_quote")
-        if wants_pdf and "svg_to_pdf" not in succeeded and "generate_quote_pdf" not in succeeded:
-            if any(v in text for v in ("generate", "pdf", "save")):
-                remaining.append("svg_to_pdf")
+        # Quote PDFs are generated inside send_quote_email / send_quote_telegram (no separate tool).
+        pdf_delivered = succeeded & {"send_quote_email", "send_quote_telegram", "svg_to_pdf"}
+        if wants_pdf and not pdf_delivered:
+            if wants_email and "send_quote_email" not in succeeded:
+                if any(v in text for v in ("generate", "pdf", "save", "email")):
+                    if "send_quote_email" not in remaining:
+                        remaining.append("send_quote_email")
+            elif any(v in text for v in ("generate", "pdf", "save")):
+                if "send_quote_telegram" not in succeeded and "send_quote_email" not in remaining:
+                    remaining.append("send_quote_email")
         if wants_email and not (succeeded & {"send_quote_email", "send_email"}):
             if any(v in text for v in ("email", "send")):
-                remaining.append("send_quote_email")
+                if "send_quote_email" not in remaining:
+                    remaining.append("send_quote_email")
     return remaining
 
 

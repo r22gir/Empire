@@ -25,6 +25,7 @@ export function useChat() {
   const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingSteps, setStreamingSteps] = useState<string[]>([]);
   const [streamingModel, setStreamingModel] = useState('');
   const abortRef = useRef<AbortController | null>(null);
   const chatIdRef = useRef<string | null>(null);
@@ -105,6 +106,7 @@ export function useChat() {
     setIsStreaming(true);
     streamingRef.current = true;
     setStreamingContent('');
+    setStreamingSteps([]);
     setStreamingModel('');
 
     const ctrl = new AbortController();
@@ -158,6 +160,8 @@ export function useChat() {
             if (ev.type === 'text' && ev.content) {
               accumulated += ev.content;
               setStreamingContent(accumulated);
+            } else if (ev.type === 'progress' && ev.phase === 'tool' && ev.message) {
+              setStreamingSteps(prev => (prev.includes(ev.message) ? prev : [...prev, ev.message]));
             } else if (ev.type === 'tool_result') {
               toolResults.push({ tool: ev.tool || 'unknown', success: ev.success ?? false, result: ev.result, error: ev.error });
             } else if (ev.type === 'done') {
@@ -186,6 +190,7 @@ export function useChat() {
       };
       updateMessages([...newMsgs, assistantMsg]);
       setStreamingContent('');
+      setStreamingSteps([]);
       if (onMessageCompleteRef.current) onMessageCompleteRef.current(assistantMsg);
     } catch (e: any) {
       if (e.name === 'AbortError') {
@@ -220,7 +225,7 @@ export function useChat() {
   }, []);
 
   return {
-    messages, isStreaming, streamingContent, streamingModel,
+    messages, isStreaming, streamingContent, streamingSteps, streamingModel,
     sendMessage, stopStreaming, loadMessages, setOnMessageComplete,
     chatId: chatIdRef.current,
   };
