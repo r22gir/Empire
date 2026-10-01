@@ -470,7 +470,13 @@ def resolve_sketch_bench(params: Optional[dict], *, default_panel: str = "vertic
 
     cushion = params.get("cushion_width", 24)
     channels = params.get("channel_count", 6)
-    return {
+    notes = str(
+        params.get("description")
+        or params.get("notes")
+        or params.get("raw_message")
+        or ""
+    )
+    base = {
         "width_in": width,
         "seat_depth": seat_depth,
         "seat_height": seat_height,
@@ -490,6 +496,9 @@ def resolve_sketch_bench(params: Optional[dict], *, default_panel: str = "vertic
         "project": params.get("project") or "",
         "quote_num": params.get("quote_num") or "",
     }
+    from app.services.drawing.bench_fabrication_params import merge_fabrication_into_sketch
+
+    return merge_fabrication_into_sketch(base, notes=notes, dims=params)
 
 
 def _first_number(*values, default: float) -> float:

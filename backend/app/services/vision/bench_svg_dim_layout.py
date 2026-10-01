@@ -112,7 +112,7 @@ def validate_bench_extension_lines_max(svg: str, max_len: float = 30.0) -> None:
 
 
 def validate_bench_side_back_rake_rearward(svg: str) -> None:
-    """Side elevation back must rake rearward (top x > bottom x toward seat rear)."""
+    """Side back: vertical when angle 0; rearward rake when angle > 0."""
     root = ET.fromstring(svg)
     for g in root.findall(".//svg:g", _SVG_NS):
         if g.get("data-panel") != "side-elev":
@@ -129,10 +129,22 @@ def validate_bench_side_back_rake_rearward(svg: str) -> None:
             top = by_y[:2]
             bottom_max_x = max(p[0] for p in bottom)
             top_max_x = max(p[0] for p in top)
-            if top_max_x <= bottom_max_x + 0.5:
-                raise AssertionError(
-                    "side back top must lean rearward (top x > bottom x)"
-                )
+            angle_raw = poly.get("data-back-angle-deg", "")
+            try:
+                angle = float(angle_raw) if angle_raw != "" else None
+            except ValueError:
+                angle = None
+            if angle is not None and angle <= 0.05:
+                if abs(top_max_x - bottom_max_x) > 1.0:
+                    raise AssertionError(
+                        f"vertical back expected top x ≈ bottom x; "
+                        f"got top={top_max_x:.1f} bottom={bottom_max_x:.1f}"
+                    )
+            else:
+                if top_max_x <= bottom_max_x + 0.5:
+                    raise AssertionError(
+                        "side back top must lean rearward (top x > bottom x)"
+                    )
             return
     raise AssertionError("no side back polygon (data-side-back) in side-elev panel")
 

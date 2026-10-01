@@ -3083,11 +3083,13 @@ def _render_bench_shop_drawing(params: dict, dims: dict) -> ToolResult | None:
         logger.warning("bench shop render import failed: %s", e)
         return None
 
-    notes = str(
+    notes_raw = str(
         params.get("description") or params.get("notes") or params.get("raw_message") or ""
-    ).lower()
+    )
+    notes = notes_raw.lower()
     sketch_params = dict(params)
     sketch_params.update(dims)
+    sketch_params.setdefault("description", notes_raw)
     if dims.get("panel_style"):
         sketch_params["panel_style"] = dims["panel_style"]
     elif "tufted" in notes:
@@ -3098,7 +3100,11 @@ def _render_bench_shop_drawing(params: dict, dims: dict) -> ToolResult | None:
         resolved["has_back"] = True
     name = str(params.get("name") or params.get("title") or "Straight Bench").strip()
     quote_num = str(params.get("quote_num") or params.get("quote_number") or "").strip()
-    include_side = "side elevation" in notes or "side elev" in notes
+    include_side = (
+        "side elevation" in notes
+        or "side elev" in notes
+        or "elevation" in notes
+    )
 
     svg = render_straight(
         name,
@@ -3122,6 +3128,13 @@ def _render_bench_shop_drawing(params: dict, dims: dict) -> ToolResult | None:
         client=resolved["client"],
         project=resolved["project"],
         include_side_elevation=include_side,
+        description=notes_raw,
+        seat_cushion_thickness=resolved.get("seat_cushion_thickness"),
+        back_thickness=resolved.get("back_thickness"),
+        seat_sections=resolved.get("seat_sections"),
+        back_sections=resolved.get("back_sections"),
+        back_angle_deg=resolved.get("back_angle_deg"),
+        cushion_count=resolved.get("cushion_count"),
     )
 
     out_dir = canonical_drawings_dir()

@@ -155,6 +155,7 @@ def test_bench_side_elevation_svg_has_depth_and_back_dims():
     assert "SHOP DRAWING" in svg
     assert 'data-panel="side-elev"' in svg
     assert 'data-panel="front-elev"' in svg
+    assert "SEAT CUSHIONS" in svg
     assert '4 @ 21"' in svg or "21" in svg
     assert "84" in svg and ("84&quot;" in svg or '84"' in svg)
     assert "34" in svg
