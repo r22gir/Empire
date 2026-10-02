@@ -258,6 +258,46 @@ def test_maxine_seed_refresh_rewrites_a_polluted_description(monkeypatch, tmp_pa
     assert "Argos Campestre" not in stored
 
 
+def test_maxine_interview_defaults_to_confidential_and_skips_private_files(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path, "maxine")
+    secret = tmp_path / "privado.txt"
+    secret.write_text("SECRETO-ARCHIVO-PRIVADO nit 900111222", encoding="utf-8")
+    from app.services.amp_businesses import finish_interview
+    from app.services.edition_facts import list_facts
+    from app.services.edition_seed import load_edition_seed
+
+    loaded = load_edition_seed()
+    assert loaded["projects"]
+    blob = "\n".join(fact["text"] for fact in list_facts())
+    assert "SECRETO-ARCHIVO-PRIVADO" not in blob
+    assert "Grupo Argos Campestre" not in blob
+    for path in Path(tmp_path, "businesses").rglob("*.json"):
+        raw = path.read_text(encoding="utf-8")
+        assert "Grupo Argos Campestre" not in raw
+        assert "SECRETO-ARCHIVO-PRIVADO" not in raw
+        assert "tax_id" not in raw
+
+    finish_interview(
+        "owner@example.com",
+        step=9,
+        answers={
+            "legal_name": "Grupo Argos Campestre S.A.S.",
+            "tax_id": "900111222",
+            "trade_name": "Lote demo",
+            "city": "Cartago",
+            "country": "Colombia",
+            "phase_name": "Etapa entrevista",
+            "lots": [{"lot_number": "B1", "status": "available"}],
+        },
+    )
+    stored = {fact["key"]: fact for fact in list_facts()}
+    assert "legal_name" not in stored
+    assert "tax_id" not in stored
+    assert stored["city"]["visibility"] == "confidential"
+    assert stored["trade_name"]["visibility"] == "confidential"
+    assert all(fact["visibility"] == "confidential" or fact["source"] != "interview" for fact in stored.values())
+
+
 def test_maxine_interview_and_payment_plan_share_construction_rows(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path, "maxine")
     from app.routers.construction import get_db

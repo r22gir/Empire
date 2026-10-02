@@ -291,6 +291,9 @@ def load_edition_seed(path: Optional[str] = None) -> dict:
     if "Rincón de San Jerónimo" not in text or "Portal Campestre 2" not in text:
         raise ValueError("La semilla no trae los dos proyectos")
     result = load_maxine_seed(text)
+    from app.services.edition_facts import scrub_company_phrase
+
+    scrub_company_phrase()
     marker = require_data_root() / "seed_loaded.json"
     marker.write_text(json.dumps({"path": str(file_path), "projects": result["projects"]}, ensure_ascii=False) + "\n", encoding="utf-8")
     return result
@@ -309,6 +312,9 @@ def refresh_seed_projects() -> Optional[dict]:
         return None
     text = file_path.read_text(encoding="utf-8")
     created = _apply_projects(_projects_from_seed(text))
+    from app.services.edition_facts import scrub_company_phrase
+
+    scrub_company_phrase()
     return {"edition": "maxine", "refreshed": True, "projects": created, "brand": "GAC"}
 
 

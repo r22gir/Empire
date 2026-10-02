@@ -130,16 +130,49 @@ def set_visibilities(items: list[dict]) -> list[dict]:
     return updated
 
 
+def is_forbidden_company_detail(key: str, value: str) -> bool:
+    """Grupo Argos Campestre is not a legal entity we store for Maxine."""
+    if (key or "") not in {"legal_name", "tax_id", "nit", "razon_social"}:
+        return False
+    return "grupo argos" in (value or "").casefold()
+
+
+def scrub_company_phrase() -> int:
+    """Drop the company name if an older seed wrote it into a fact."""
+    phrase = "Grupo Argos Campestre"
+    facts = _load()
+    kept = []
+    changed = False
+    for fact in facts:
+        text = str(fact.get("text") or "")
+        value = str(fact.get("value") or "")
+        if phrase in text or phrase in value:
+            changed = True
+            text = " ".join(text.replace(phrase, " ").split())
+            value = " ".join(value.replace(phrase, " ").split())
+            fact["text"] = text
+            fact["value"] = value
+            if len(text) < 8:
+                continue
+        kept.append(fact)
+    if changed or len(kept) != len(facts):
+        _save(kept)
+    return len(facts) - len(kept)
+
+
 def confirm_items_for_answers(answers: Optional[dict]) -> list[dict]:
     """Items the owner can mark. Missing flags stay confidential."""
-    answers = answers if isinstance(answers, dict) else {}
+    answers = dict(answers) if isinstance(answers, dict) else {}
+    if is_forbidden_company_detail("legal_name", str(answers.get("legal_name") or "")):
+        answers["legal_name"] = ""
+        answers["tax_id"] = ""
     flags = answers.get("fact_visibility") if isinstance(answers.get("fact_visibility"), dict) else {}
     rows: list[dict] = []
     seen = set()
 
     def add(key: str, label: str, value) -> None:
         text_value = "" if value is None else str(value).strip()
-        if not text_value or key in seen:
+        if not text_value or key in seen or is_forbidden_company_detail(key, text_value):
             return
         seen.add(key)
         rows.append({
