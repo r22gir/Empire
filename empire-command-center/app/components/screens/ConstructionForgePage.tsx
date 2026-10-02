@@ -11,7 +11,7 @@ import {
 import ProductDocs from '../business/docs/ProductDocs';
 import ViewPdfControl from '../ViewPdfControl';
 import UsageCard from '../UsageCard';
-import VoiceHelpCard from '../voice/VoiceHelpCard';
+import HelpMenu from '../voice/HelpMenu';
 import ReservationForm from '../voice/ReservationForm';
 import ArchivoCard from '../voice/ArchivoCard';
 import ProjectPhotos from '../voice/ProjectPhotos';
@@ -234,7 +234,7 @@ function DashboardSection() {
       )}
       {maxine ? (
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-start' }}>
-          <VoiceHelpCard />
+          <HelpMenu />
           <ArchivoCard />
           <WhatsAppStatus />
         </div>

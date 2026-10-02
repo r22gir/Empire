@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { API_BASE } from '../../../lib/api';
 import { useTranslation } from '../../../lib/i18n';
@@ -716,6 +717,10 @@ export default function EntrevistaPage() {
                   <p style={{ margin: '4px 0 0', color: '#5C5650' }}>{section.body}</p>
                 </div>
               ))}
+              <p style={{ marginTop: 16, lineHeight: 1.5 }}>
+                {t('Cuando termines, mira cómo entrar desde el celular, la tableta o el computador.', 'When you finish, see how to open this on a phone, tablet, or computer.')}{' '}
+                <Link href="/ayuda/dispositivos" style={{ color: '#D4A030', fontWeight: 800 }}>Cómo conectarte desde tus dispositivos</Link>
+              </p>
             </>
           )}
         </section>

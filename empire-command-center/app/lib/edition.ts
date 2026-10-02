@@ -19,6 +19,7 @@ export const MAXINE_NAV_LABELS: Record<string, string> = {
   'nueva-empresa': 'Nuevo proyecto',
   'daily-summary': 'Resumen',
   archivo: 'Archivo',
+  ayuda: 'Ayuda',
 };
 
 export const AMP_NAV_LABELS: Record<string, string> = {
@@ -30,6 +31,7 @@ export const AMP_NAV_LABELS: Record<string, string> = {
   social: 'SocialForge',
   'nueva-empresa': 'Empresas',
   archivo: 'Archivo',
+  ayuda: 'Ayuda',
 };
 
 export function editionFromEnv(): string {

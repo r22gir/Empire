@@ -7,7 +7,7 @@ import {
   Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
-  ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
+  ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool, CircleHelp,
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
   ChevronDown, ChevronRight,
 } from 'lucide-react';
@@ -46,6 +46,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'owner', name: "Owner's Desk", icon: <Crown size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
       { id: 'archivo', name: 'Archivo', icon: <Archive size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
+      { id: 'ayuda', name: 'Ayuda', icon: <CircleHelp size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
       { id: 'workroom', name: 'Empire Workroom', icon: <Scissors size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
       { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04', kind: 'product' },
       // Daily Summary is the inline Dashboard panel (rightPanel) — toggled, not navigated.
@@ -182,6 +183,10 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
       window.location.href = '/archivo';
       return;
     }
+    if (item.id === 'ayuda') {
+      window.location.href = '/ayuda';
+      return;
+    }
     if (item.kind === 'daily-summary') {
       setShowDashboard(s => !s);
       if (isMobile) setMobileOpen(false);
@@ -212,6 +217,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
     let items = group.items.filter((item) => {
       if (item.id === 'cibernettic' && !ampEdition) return false;
       if (item.id === 'archivo' && !ampEdition && !maxineEdition) return false;
+      if (item.id === 'ayuda' && !ampEdition && !maxineEdition) return false;
       if (maxineEdition) return !MAXINE_HIDDEN_NAV.has(item.id);
       if (ampEdition) return !AMP_HIDDEN_NAV.has(item.id);
       return item.id !== 'nueva-empresa';
