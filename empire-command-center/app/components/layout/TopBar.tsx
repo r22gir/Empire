@@ -2,6 +2,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Bell, ChevronDown, Check, ArrowLeft } from 'lucide-react';
 import { API } from '../../lib/api';
+import { useEdition } from '../../lib/edition';
+import { searchPlaceholder } from '../../lib/familyChrome';
 import LanguageSwitcher from '../LanguageSwitcher';
 
 type ProviderRow = {
@@ -76,6 +78,7 @@ interface Props {
 }
 
 export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack, canGoBack = true }: Props) {
+  const edition = useEdition();
   const [showNotifs, setShowNotifs] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [providerRows, setProviderRows] = useState<ProviderRow[]>([]);
@@ -252,7 +255,7 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
         className="hidden md:flex items-center gap-2 bg-[#f5f3ef] border border-[var(--border)] rounded-[var(--radius)] px-5 py-[10px] w-[320px] text-[13px] text-[var(--faint)] cursor-pointer hover:border-[var(--border-h)] transition-colors"
       >
         <span className="text-[11px] font-mono">⌘K</span>
-        <span>Search anything...</span>
+        <span>{searchPlaceholder(edition)}</span>
       </button>
 
       {/* Right controls */}

@@ -49,7 +49,7 @@ async function loadModule(locale: Locale, module: string): Promise<TranslationMo
 
 function editionDefaultLocale(): Locale {
   const edition = (process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').toLowerCase();
-  if (edition === 'amp') return 'es';
+  if (edition === 'amp' || edition === 'maxine') return 'es';
   return 'en';
 }
 

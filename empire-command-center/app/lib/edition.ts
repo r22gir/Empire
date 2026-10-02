@@ -17,7 +17,7 @@ export const MAXINE_NAV_LABELS: Record<string, string> = {
   social: 'Contenido',
   pay: 'Planes de pago',
   'nueva-empresa': 'Nuevo proyecto',
-  'daily-summary': 'Resumen',
+  'daily-summary': 'Resumen del día',
   archivo: 'Archivo',
   ayuda: 'Ayuda',
 };
@@ -30,6 +30,7 @@ export const AMP_NAV_LABELS: Record<string, string> = {
   lead: 'Ingreso',
   social: 'SocialForge',
   'nueva-empresa': 'Empresas',
+  'daily-summary': 'Resumen del día',
   archivo: 'Archivo',
   ayuda: 'Ayuda',
 };

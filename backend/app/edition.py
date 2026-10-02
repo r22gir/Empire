@@ -129,6 +129,10 @@ _ALLOWLIST_EXEMPT = (
     ("POST", "/api/v1/amp/auth/verify"),
     ("GET", "/api/v1/amp/auth/magic"),
     ("POST", "/api/v1/amp/auth/logout"),
+    # Meta calls this with no login cookie. The route still checks the
+    # verify token (GET) and X-Hub-Signature-256 (POST).
+    ("GET", "/api/v1/whatsapp/webhook"),
+    ("POST", "/api/v1/whatsapp/webhook"),
 )
 
 _business_slug: ContextVar[str] = ContextVar("empire_business_slug", default="amp")

@@ -5,7 +5,9 @@ import { Mic, MicOff, Send, Monitor, Square, MessageSquare, Sparkles, Wifi, Wifi
 import InlineDrawing from '../InlineDrawing';
 
 import { API } from '../../lib/api';
+import { useAssistantName } from '../../lib/assistant';
 import { simliFaceEdition, useEdition } from '../../lib/edition';
+import { presentationChrome } from '../../lib/familyChrome';
 import LiveVoiceCall from '../LiveVoiceCall';
 
 type PresentationMode = 'presentation' | 'compact' | 'text';
@@ -22,7 +24,7 @@ interface ChatMessage {
 }
 
 // ── TalkingHead Avatar Component (iframe-loaded) ────────────────────────
-function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition }: { mode: PresentationMode; isSpeaking: boolean; isThinking: boolean; iframeRef: React.RefObject<HTMLIFrameElement | null>; faceEdition: string }) {
+function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition, loadingLabel, simliCaption, mark }: { mode: PresentationMode; isSpeaking: boolean; isThinking: boolean; iframeRef: React.RefObject<HTMLIFrameElement | null>; faceEdition: string; loadingLabel: string; simliCaption: string; mark: string }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [avatarLine, setAvatarLine] = useState('');
@@ -41,7 +43,7 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition }: {
         }
       }
       if (event.data?.type === 'avatar-status') {
-        const renderer = event.data.renderer === 'simli' ? 'Simli face only' : 'TalkingHead';
+        const renderer = event.data.renderer === 'simli' ? simliCaption : 'TalkingHead';
         const flag = event.data.placeholder
           ? (event.data.placeholderNote || "Placeholder. TalkingHead female brunette sample (CC BY-NC 4.0, non-commercial), loaded with body M.")
           : '';
@@ -51,42 +53,13 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition }: {
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [mode]);
+  }, [mode, simliCaption]);
 
   if (mode !== 'presentation') return null;
 
   return (
-    <div
-      className="w-full h-[200px] md:w-[60%] md:h-auto"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(180deg, #1a1812 0%, #0d0b08 100%)',
-        borderRight: '2px solid #b8960c',
-        position: 'relative',
-        overflow: 'hidden',
-        flexShrink: 0,
-      }}
-    >
-      {/* Empire branding */}
-      <div style={{
-        position: 'absolute', top: 16, left: 20,
-        display: 'flex', alignItems: 'center', gap: 8, zIndex: 10,
-      }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: '50%',
-          background: 'linear-gradient(135deg, #b8960c, #d4af37)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Sparkles size={16} color="#fff" />
-        </div>
-        <span style={{ color: '#d4af37', fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>
-          MAX — Empire AI
-        </span>
-      </div>
-
+    <div className="presentation-face-wrap">
+    <div className="presentation-face">
       {/* Gold glow border effect */}
       <div style={{
         position: 'absolute', inset: 0,
@@ -94,6 +67,7 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition }: {
         borderRadius: 0,
         boxShadow: 'inset 0 0 60px rgba(184, 150, 12, 0.05)',
         pointerEvents: 'none',
+        zIndex: 2,
       }} />
 
       {/* Avatar canvas or placeholder */}
@@ -119,7 +93,7 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition }: {
               animation: isSpeaking ? 'sparkle-spin 2s linear infinite' : 'none',
             }} />
           </div>
-          <span style={{ color: '#d4af37', fontSize: 20, fontWeight: 700, letterSpacing: 2 }}>MAX</span>
+          <span style={{ color: '#d4af37', fontSize: 20, fontWeight: 700, letterSpacing: 2 }}>{mark}</span>
           {isThinking && (
             <div style={{ display: 'flex', gap: 6 }}>
               {[0, 1, 2].map(i => (
@@ -147,72 +121,43 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition }: {
         <iframe
           ref={iframeRef}
           src={`/avatar.html?edition=${faceEdition}`}
-          title="MAX avatar"
+          title={mark}
           style={{
-            width: '100%', height: '100%',
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
             border: 'none',
             opacity: loaded ? 1 : 0.3,
             transition: 'opacity 0.5s ease',
             background: 'transparent',
+            objectFit: 'contain',
           }}
           allow="autoplay"
         />
       )}
+      </div>
 
-      {!loaded && !error && (
-        <div style={{
-          position: 'absolute', bottom: 20,
-          color: '#b8960c', fontSize: 12, opacity: 0.6,
-        }}>
-          Loading avatar...
+      {(avatarLine || (!loaded && !error)) && (
+        <div className="presentation-caption">
+          {avatarLine || loadingLabel}
         </div>
       )}
 
-      {avatarLine && (
-        <div style={{
-          position: 'absolute', left: 12, right: 12, bottom: 8, zIndex: 12,
-          fontSize: 11, lineHeight: 1.35, color: '#f4e7b3',
-          background: 'rgba(20, 16, 8, 0.82)',
-          border: '1px solid rgba(184, 150, 12, 0.45)',
-          borderRadius: 6, padding: '6px 8px',
-        }}>
-          {avatarLine}
-        </div>
-      )}
-
-      <style>{`
-        @keyframes pulse-avatar {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.03); }
-        }
-        @keyframes pulse-think {
-          0%, 100% { transform: scale(1); opacity: 0.8; }
-          50% { transform: scale(1.02); opacity: 1; }
-        }
-        @keyframes sparkle-spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes dot-bounce {
-          0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-          40% { transform: translateY(-8px); opacity: 1; }
-        }
-        @keyframes speak-bar {
-          0%, 100% { height: 4px; }
-          50% { height: 20px; }
-        }
-      `}</style>
     </div>
   );
 }
 
 // ── Mini Avatar (Compact Mode) ───────────────────────────────────────
-function MiniAvatar({ onClick, isSpeaking, isThinking }: { onClick: () => void; isSpeaking: boolean; isThinking: boolean }) {
+function MiniAvatar({ onClick, isSpeaking, isThinking, title }: { onClick: () => void; isSpeaking: boolean; isThinking: boolean; title: string }) {
   return (
     <button
       onClick={onClick}
       style={{
-        position: 'fixed', bottom: 20, left: 20, zIndex: 50,
+        position: 'fixed',
+        bottom: 'calc(20px + env(safe-area-inset-bottom))',
+        left: 'calc(20px + env(safe-area-inset-left))',
+        zIndex: 50,
         width: 64, height: 64, borderRadius: '50%',
         background: 'linear-gradient(135deg, #b8960c, #d4af37)',
         border: '2px solid rgba(184,150,12,0.5)',
@@ -224,7 +169,7 @@ function MiniAvatar({ onClick, isSpeaking, isThinking }: { onClick: () => void; 
         transition: 'all 0.2s ease',
         animation: isThinking ? 'pulse-think 1.5s ease-in-out infinite' : 'none',
       }}
-      title="Expand to Presentation mode"
+      title={title}
     >
       <Sparkles size={28} color="#fff" />
     </button>
@@ -232,11 +177,11 @@ function MiniAvatar({ onClick, isSpeaking, isThinking }: { onClick: () => void; 
 }
 
 // ── Mode Toggle ──────────────────────────────────────────────────────
-function ModeToggle({ mode, onChange }: { mode: PresentationMode; onChange: (m: PresentationMode) => void }) {
+function ModeToggle({ mode, onChange, labels }: { mode: PresentationMode; onChange: (m: PresentationMode) => void; labels: { presentation: string; compact: string; text: string } }) {
   const modes: { id: PresentationMode; label: string; icon: React.ReactNode; dot?: string }[] = [
-    { id: 'presentation', label: 'Presentation', icon: <Monitor size={14} />, dot: '#b8960c' },
-    { id: 'compact', label: 'Compact', icon: <Square size={14} />, dot: '#9ca3af' },
-    { id: 'text', label: 'Text', icon: <MessageSquare size={14} /> },
+    { id: 'presentation', label: labels.presentation, icon: <Monitor size={14} />, dot: '#b8960c' },
+    { id: 'compact', label: labels.compact, icon: <Square size={14} />, dot: '#9ca3af' },
+    { id: 'text', label: labels.text, icon: <MessageSquare size={14} /> },
   ];
 
   return (
@@ -260,7 +205,7 @@ function ModeToggle({ mode, onChange }: { mode: PresentationMode; onChange: (m: 
             minHeight: 32,
             transition: 'all 0.15s ease',
           }}
-          title={`${m.label} mode${m.id === 'presentation' ? ' (Ctrl+Shift+P)' : ''}`}
+          title={m.id === 'presentation' ? `${m.label} (Ctrl+Shift+P)` : m.label}
         >
           {m.dot && <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.dot }} />}
           {m.icon}
@@ -289,6 +234,8 @@ export default function PresentationScreen() {
   const [simliCard, setSimliCard] = useState<{ minutes?: number; simli_enabled?: boolean; reason?: string } | null>(null);
   const [avatarPlaceholder, setAvatarPlaceholder] = useState(false);
   const edition = useEdition();
+  const assistantName = useAssistantName();
+  const chrome = presentationChrome(edition, assistantName);
   const faceEdition = simliFaceEdition(edition);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -628,7 +575,7 @@ export default function PresentationScreen() {
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="presentation-root" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Top bar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -638,20 +585,26 @@ export default function PresentationScreen() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Sparkles size={16} color="#b8960c" />
-          <span style={{ fontWeight: 700, fontSize: 14, color: '#1a1a1a' }}>MAX — Empire AI</span>
+          <span style={{ fontWeight: 700, fontSize: 14, color: '#1a1a1a' }}>{chrome.header}</span>
         </div>
-        <ModeToggle mode={mode} onChange={handleModeChange} />
+        <ModeToggle mode={mode} onChange={handleModeChange} labels={chrome} />
       </div>
 
-      {/* Main content — stack vertically on mobile via CSS */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        {/* Avatar panel (presentation mode only) */}
-        <AvatarPanel mode={mode} isSpeaking={isSpeaking} isThinking={isLoading} iframeRef={iframeRef} faceEdition={faceEdition} />
+      {/* Portrait: face on top, chat below. Landscape: face left, chat right. */}
+      <div className="presentation-stage">
+        <AvatarPanel
+          mode={mode}
+          isSpeaking={isSpeaking}
+          isThinking={isLoading}
+          iframeRef={iframeRef}
+          faceEdition={faceEdition}
+          loadingLabel={chrome.loading}
+          simliCaption={chrome.simliFace}
+          mark={chrome.header}
+        />
 
         {/* Chat panel */}
-        <div style={{
-          flex: 1,
-          display: 'flex', flexDirection: 'column',
+        <div className="presentation-chat" style={{
           background: 'var(--chat-bg)',
           position: 'relative',
         }}>
@@ -664,10 +617,10 @@ export default function PresentationScreen() {
               }}>
                 <Sparkles size={32} color="#b8960c" style={{ margin: '0 auto 12px', opacity: 0.4 }} />
                 <div style={{ fontWeight: 600, color: '#666', marginBottom: 4 }}>
-                  {mode === 'presentation' ? 'Presentation Mode' : mode === 'compact' ? 'Compact Mode' : 'Text Mode'}
+                  {mode === 'presentation' ? chrome.presentationMode : mode === 'compact' ? chrome.compactMode : chrome.textMode}
                 </div>
-                <div>Ask MAX anything. {mode === 'presentation' ? 'Voice + avatar active.' : 'Text responses only.'}</div>
-                <div style={{ marginTop: 8, fontSize: 10, color: '#bbb' }}>Ctrl+Shift+P to cycle modes</div>
+                <div>{chrome.ask} {mode === 'presentation' ? chrome.voice : chrome.textOnly}</div>
+                <div style={{ marginTop: 8, fontSize: 10, color: '#bbb' }}>{chrome.cycle}</div>
               </div>
             )}
 
@@ -712,7 +665,7 @@ export default function PresentationScreen() {
                     {msg.model && (
                       <span>{msg.model}</span>
                     )}
-                    {msg.hasAudio && <span>with voice</span>}
+                    {msg.hasAudio && <span>{chrome.withVoice}</span>}
                     <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
                   </div>
                 </div>
@@ -733,7 +686,7 @@ export default function PresentationScreen() {
                     }} />
                   ))}
                 </div>
-                MAX is thinking...
+                {chrome.thinking}
               </div>
             )}
 
@@ -760,7 +713,7 @@ export default function PresentationScreen() {
                     transition: 'all 0.15s ease',
                     animation: isRecording ? 'mic-pulse 1.5s ease-in-out infinite' : 'none',
                   }}
-                  title={isRecording ? 'Stop recording' : 'Start voice input'}
+                  title={isRecording ? chrome.stop : chrome.start}
                 >
                   {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
                 </button>
@@ -769,7 +722,7 @@ export default function PresentationScreen() {
                     position: 'absolute', top: -20, left: '50%', transform: 'translateX(-50%)',
                     fontSize: 10, color: '#E24B4A', fontWeight: 600, whiteSpace: 'nowrap',
                   }}>
-                    Listening...
+                    {chrome.listening}
                   </span>
                 )}
               </div>
@@ -779,7 +732,7 @@ export default function PresentationScreen() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
-                placeholder="Type or ask MAX..."
+                placeholder={chrome.placeholder}
                 style={{
                   flex: 1, height: 44,
                   border: '1px solid #e5e2dc',
@@ -805,7 +758,7 @@ export default function PresentationScreen() {
                   transition: 'all 0.15s ease',
                   flexShrink: 0,
                 }}
-                title="Send message"
+                title={chrome.send}
               >
                 <Send size={18} />
               </button>
@@ -817,7 +770,7 @@ export default function PresentationScreen() {
       {/* Status bar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '4px 16px',
+        padding: '4px 16px calc(4px + env(safe-area-inset-bottom))',
         borderTop: '1px solid var(--border)',
         background: 'var(--panel)',
         fontSize: 10, color: '#999',
@@ -826,21 +779,21 @@ export default function PresentationScreen() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {connected ? <Wifi size={10} color="#22c55e" /> : <WifiOff size={10} color="#ef4444" />}
-            {connected ? 'Connected' : 'Disconnected'}
+            {connected ? chrome.connected : chrome.disconnected}
           </span>
-          <span>18 desks</span>
+          <span>{chrome.desks}</span>
           <span>Grok TTS Rex</span>
-          <span>Quality engine active</span>
+          <span>{chrome.quality}</span>
           {avatarPlaceholder && <span>Placeholder brunette (CC BY-NC 4.0, body M)</span>}
         </div>
         <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span title={simliCard?.reason || 'Simli is unset. TalkingHead is the avatar.'}>
             {simliCard?.simli_enabled
               ? `Simli ${(Number(simliCard.minutes) || 0).toFixed(2)} min`
-              : 'Simli off — TalkingHead'}
+              : chrome.simliOff}
           </span>
           <span style={{ fontWeight: 600, color: sessionCost > 0 ? '#b8960c' : '#999' }}>
-            ${sessionCost.toFixed(3)} session
+            ${sessionCost.toFixed(3)} {chrome.session}
           </span>
         </span>
       </div>
@@ -854,10 +807,80 @@ export default function PresentationScreen() {
           onClick={() => handleModeChange('presentation')}
           isSpeaking={isSpeaking}
           isThinking={isLoading}
+          title={chrome.expand}
         />
       )}
 
       <style>{`
+        .presentation-root {
+          padding-top: env(safe-area-inset-top);
+          padding-left: env(safe-area-inset-left);
+          padding-right: env(safe-area-inset-right);
+        }
+        .presentation-stage {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .presentation-chat {
+          flex: 1;
+          min-width: 0;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        .presentation-face-wrap {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: flex-start;
+          flex-shrink: 0;
+          width: 100%;
+          padding: 8px 12px 0;
+          background: linear-gradient(180deg, #1a1812 0%, #0d0b08 100%);
+        }
+        .presentation-face {
+          position: relative;
+          width: min(512px, 100%, 46vh);
+          aspect-ratio: 1 / 1;
+          overflow: hidden;
+          flex-shrink: 0;
+          background: #111;
+        }
+        .presentation-caption {
+          position: static;
+          width: min(512px, 100%);
+          margin: 6px auto 8px;
+          font-size: 11px;
+          line-height: 1.35;
+          color: #f4e7b3;
+          background: rgba(20, 16, 8, 0.82);
+          border: 1px solid rgba(184, 150, 12, 0.45);
+          border-radius: 6px;
+          padding: 6px 8px;
+        }
+        @media (orientation: portrait) and (max-height: 740px) {
+          .presentation-caption { display: none; }
+        }
+        @media (orientation: landscape) {
+          .presentation-stage {
+            flex-direction: row;
+            align-items: stretch;
+          }
+          .presentation-face-wrap {
+            width: auto;
+            height: 100%;
+            justify-content: center;
+            padding: 8px;
+          }
+          .presentation-face {
+            width: min(512px, 42vw, 100%);
+            max-height: 100%;
+          }
+          .presentation-caption { display: block; max-width: min(512px, 42vw); }
+        }
         @keyframes dot-bounce {
           0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
           40% { transform: translateY(-8px); opacity: 1; }

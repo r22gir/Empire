@@ -15,11 +15,11 @@ NAV = ROOT / "empire-command-center" / "app" / "components" / "layout" / "LeftNa
 
 def _render(edition: str) -> str:
     script = """
-import { renderDeviceAccessPage } from './empire-command-center/app/lib/deviceAccess.ts';
+import { renderDeviceAccessPage } from './empire-command-center/app/lib/deviceAccess.mjs';
 process.stdout.write(renderDeviceAccessPage(process.env.EDITION || ''));
 """
     result = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        ["node", "--input-type=module", "-e", script],
         cwd=ROOT,
         check=True,
         capture_output=True,

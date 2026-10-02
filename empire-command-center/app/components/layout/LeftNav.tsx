@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { EcosystemProduct, ScreenMode } from '../../lib/types';
 import { AMP_HIDDEN_NAV, AMP_NAV_LABELS, MAXINE_HIDDEN_NAV, MAXINE_NAV_LABELS, useEdition } from '../../lib/edition';
+import { navGroupLabel } from '../../lib/familyChrome';
 import RightPanel from './RightPanel';
 import {
   Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
@@ -241,6 +242,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
   }).filter((group) => group.items.length > 0);
 
   const groupCount = (g: NavGroup) => g.items.length;
+  const editionForLabels = maxineEdition ? 'maxine' : ampEdition ? 'amp' : 'workroom';
 
   return (
     <>
@@ -321,7 +323,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
                       border: 'none',
                       marginBottom: isOpen ? 4 : 0,
                     }}
-                    title={isOpen ? `Collapse ${group.label}` : `Expand ${group.label}`}
+                    title={isOpen ? `Collapse ${navGroupLabel(editionForLabels, group.key, group.label)}` : `Expand ${navGroupLabel(editionForLabels, group.key, group.label)}`}
                     aria-expanded={isOpen}
                   >
                     <div className="flex items-center gap-1.5 min-w-0">
@@ -330,7 +332,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
                         : <ChevronRight size={11} className="text-[#999] shrink-0" />
                       }
                       <span style={{ fontSize: 10, fontWeight: 700, color: '#666', letterSpacing: 1, textTransform: 'uppercase' }}>
-                        {group.label}
+                        {navGroupLabel(editionForLabels, group.key, group.label)}
                       </span>
                       <span style={{ fontSize: 9, color: '#aaa', background: '#f0ede8', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>
                         {groupCount(group)}

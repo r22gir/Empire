@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { familyHomeRedirect } from "./app/lib/familyChrome.mjs";
 import { workroomHostDecision } from "./app/lib/workroomHost";
 
 // Public Luxe hostnames. Keep this allowlist in sync with
@@ -94,6 +95,17 @@ function isApexPathAllowed(pathname: string): boolean {
 export function middleware(request: NextRequest) {
   const host = (request.headers.get("host") || "").split(":")[0].toLowerCase();
   const { pathname } = request.nextUrl;
+
+  const home = familyHomeRedirect(
+    process.env.NEXT_PUBLIC_EMPIRE_EDITION || "",
+    pathname,
+    Boolean(request.cookies.get("amp_session")?.value),
+  );
+  if (home) {
+    const url = request.nextUrl.clone();
+    url.pathname = home;
+    return NextResponse.redirect(url);
+  }
 
   // --- R1X-PUB-EMPIREBOX: public apex host block ---
   if (PUBLIC_APEX_HOSTS.has(host)) {

@@ -10,8 +10,13 @@
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now empire-maxine.service
 #
+# Checkout lives at /home/rg/empire-maxine (not the Workroom tree).
 # Do not point this unit at the Workroom or AMP .env.
 # Do not restart those services as part of bringing Maxine up.
+# The lock guard refuses /tmp/empire_primary_worker.lock so this
+# process cannot become the Workroom primary worker.
+# --workers 2: the worker that does not take the lock prints
+# "Secondary worker — skipping singleton background services".
 
 [Unit]
 Description=EmpireBox Maxine edition (ConstructionForge command center)
@@ -19,9 +24,11 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/rg/empire-repo/backend
+WorkingDirectory=/home/rg/empire-maxine/backend
 EnvironmentFile=/home/rg/empire-maxine.env
-ExecStart=/home/rg/empire-repo/backend/venv/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8012 --timeout-keep-alive 65
+Environment=EMPIRE_WORKER_LOCK=/data/maxine/run/empire_primary_worker.lock
+ExecStartPre=/bin/sh -c 'case "$$EMPIRE_WORKER_LOCK" in ""|/tmp/empire_primary_worker.lock) echo "Maxine must not use the Workroom lock" >&2; exit 1;; esac'
+ExecStart=/home/rg/empire-maxine/backend/venv/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8012 --timeout-keep-alive 65 --workers 2
 Restart=on-failure
 RestartSec=5
 
