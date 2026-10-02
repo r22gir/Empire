@@ -240,6 +240,27 @@ def approve_draft(draft_id: str) -> dict:
     return get_draft(draft_id)
 
 
+def latest_draft_for_channel(channel: str) -> dict | None:
+    conn = connect()
+    try:
+        row = conn.execute(
+            """
+            SELECT d.id FROM voice_drafts d
+            JOIN voice_sessions s ON s.id = d.session_id
+            WHERE s.channel = ?
+            ORDER BY d.created_at DESC
+            LIMIT 1
+            """,
+            (channel,),
+        ).fetchone()
+        draft_id = row["id"] if row else None
+    finally:
+        conn.close()
+    if not draft_id:
+        return None
+    return get_draft(draft_id)
+
+
 def send_draft(draft_id: str, *, confirm: bool, channel: str = "") -> dict:
     """Explicit confirm still does not email. External delivery is not connected here."""
     draft = get_draft(draft_id)

@@ -411,14 +411,21 @@ def format_session_reply(view: dict) -> str:
     return "\n".join(lines)
 
 
+def _whatsapp_channel_line() -> dict:
+    try:
+        from app.services.whatsapp_cloud import channel_status
+
+        status = channel_status()
+        return {"connected": bool(status.get("enabled")), "how": status.get("reason_en") or ""}
+    except Exception:
+        return {"connected": False, "how": "WhatsApp is off."}
+
+
 def channel_report() -> dict:
     return {
         "web": {"connected": True, "how": "Micrófono en el chat: transcribe y entra al mismo borrador."},
         "telegram": {"connected": True, "how": "Las notas de voz que ya llegan al bot usan este borrador. No se envía el PDF solo."},
-        "whatsapp": {
-            "connected": False,
-            "how": "No hay un canal de voz entrante de WhatsApp en el código. No se creó una cuenta nueva.",
-        },
+        "whatsapp": _whatsapp_channel_line(),
         "locale": "es-CO",
         "auto_send": False,
     }

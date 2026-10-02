@@ -31,6 +31,9 @@ export default function ComoUsarLaVoz() {
       <p style={{ fontSize: 14, color: '#444' }}>
         Max-e y Maxine guardan el borrador en la copia de trabajo de esta máquina y, si conectaste tu Google Drive, en tu carpeta Max-e/ o Maxine/. Las fotos de un proyecto se etiquetan con lote y etapa. Google Photos solo trae lo que tú eliges.
       </p>
+      <p style={{ fontSize: 14, color: '#444' }}>
+        WhatsApp usa el número de esta instancia. Si las variables no están, el canal queda apagado. Las notas de voz arman el mismo borrador. El PDF sale solo cuando escribes que lo envíe. La guía está en docs/WHATSAPP_CHANNEL.md.
+      </p>
       <Link href="/" style={{ color: '#b8960c', fontWeight: 700 }}>Volver al centro de mando</Link>
     </main>
   );

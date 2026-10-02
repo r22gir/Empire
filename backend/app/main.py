@@ -249,6 +249,7 @@ load_router("app.routers.construction", "/api/v1", ["construction"])
 # Voice notes → borrador (quote, invoice, contract, plan de pagos). Never auto-sends.
 load_router("app.routers.voice_documents", "/api/v1", ["voice-documents"])
 load_router("app.routers.instance_files", "/api/v1", ["instance-files"])
+load_router("app.routers.whatsapp", "/api/v1", ["whatsapp"])
 
 # StoreFrontForge — Retail store management / POS
 load_router("app.routers.storefront", "/api/v1", ["storefront"])

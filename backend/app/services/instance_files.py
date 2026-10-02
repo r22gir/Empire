@@ -462,7 +462,7 @@ def _photos():
 
 
 def save_photo(*, data: bytes, filename: str, project: str, lot: str = "", stage: str = "", source: str = "upload", picker_session: str = "") -> dict:
-    if source not in {"upload", "chat", "google_photos_picker"}:
+    if source not in {"upload", "chat", "google_photos_picker", "whatsapp"}:
         raise FileArchiveError("Origen de foto desconocido")
     if source == "google_photos_picker" and not picker_session:
         raise FileArchiveError("Photos solo entra si el usuario lo eligió en el selector")

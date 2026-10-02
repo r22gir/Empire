@@ -15,6 +15,7 @@ import VoiceHelpCard from '../voice/VoiceHelpCard';
 import ReservationForm from '../voice/ReservationForm';
 import ArchivoCard from '../voice/ArchivoCard';
 import ProjectPhotos from '../voice/ProjectPhotos';
+import WhatsAppStatus from '../voice/WhatsAppStatus';
 import { useAssistantName } from '../../lib/assistant';
 import { useEdition } from '../../lib/edition';
 
@@ -235,6 +236,7 @@ function DashboardSection() {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-start' }}>
           <VoiceHelpCard />
           <ArchivoCard />
+          <WhatsAppStatus />
         </div>
       ) : null}
       {maxine ? <ReservationForm /> : null}

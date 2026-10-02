@@ -149,22 +149,21 @@ def _append_audit(
 
 
 def _phase3_channel_defaults() -> dict[str, Any]:
-    whatsapp_configured = bool(os.getenv("HERMES_WHATSAPP_WEBHOOK_URL") or os.getenv("WHATSAPP_ACCESS_TOKEN"))
+    from app.services.whatsapp_cloud import channel_status
+
+    whatsapp = channel_status()
     discord_configured = bool(os.getenv("HERMES_DISCORD_BOT_TOKEN") or os.getenv("DISCORD_BOT_TOKEN"))
     return {
         "whatsapp": {
             "channel": "whatsapp",
-            "status": "partial_disabled_gateway" if whatsapp_configured else "disabled",
-            "enabled": False,
-            "interface_point": "phase3_gateway_placeholder",
-            "transport_configured": whatsapp_configured,
+            "status": whatsapp["status"] if whatsapp["status"] != "closed" else "partial_disabled_gateway",
+            "enabled": whatsapp["enabled"],
+            "interface_point": "meta_cloud_api" if whatsapp["configured"] else "phase3_gateway_placeholder",
+            "transport_configured": whatsapp["configured"],
+            "edition": whatsapp["edition"],
             "browser_assist_supported": False,
             "autonomous_messaging_allowed": False,
-            "reason": (
-                "Transport config exists but autonomous messaging remains disabled."
-                if whatsapp_configured
-                else "No verified transport/auth configured. Interface point only."
-            ),
+            "reason": whatsapp["reason_en"],
         },
         "discord": {
             "channel": "discord",
@@ -575,7 +574,7 @@ def get_channel_interfaces() -> dict[str, Any]:
     ensure_hermes_phase3_scaffold()
     data = _json_load(channel_interfaces_path()) or {}
     defaults = _phase3_channel_defaults()
-    merged = {**defaults, **data}
+    merged = {**defaults, **data, "whatsapp": defaults["whatsapp"]}
     return merged
 
 
