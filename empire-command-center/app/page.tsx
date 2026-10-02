@@ -238,6 +238,14 @@ export default function CommandCenter() {
         return;
       }
       const candidate = params.get('screen') || window.location.hash.replace(/^#/, '');
+      // Presentation Mode (MAX Avatar): /?screen=presentation or /#presentation
+      if (candidate === 'presentation' || candidate === 'max-avatar') {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct('max-avatar');
+        setActiveScreen('presentation');
+        setActiveSection(null);
+        return;
+      }
       // First check product deep links (e.g. apostapp -> activeProduct='apost').
       // This lets screens reached via activeProduct (ApostApp) be deep-linked
       // even though they are not in the ScreenMode enum.

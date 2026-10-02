@@ -32,7 +32,7 @@ export default function MaxAvatarFrame() {
         if (statusRes.ok) {
           const status = await statusRes.json();
           const renderer = status.renderer === 'simli' ? 'Simli face only.' : 'TalkingHead.';
-          const flag = status.edition_avatar?.placeholder ? status.talkinghead_placeholder?.note : '';
+          const flag = status.renderer !== 'simli' && status.edition_avatar?.placeholder ? status.talkinghead_placeholder?.note : '';
           setNote([renderer, status.reason, flag].filter(Boolean).join(' '));
         } else if (!stop) {
           setNote('Simli status unavailable. TalkingHead is the avatar. ' + PLACEHOLDER);
