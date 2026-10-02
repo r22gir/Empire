@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -98,8 +99,14 @@ def test_wrong_pin_does_not_consume_the_pending_call(monkeypatch, caplog):
 
 
 def test_runtime_truth_reports_the_live_checkout_not_empire_repo_main():
-    from app.services.max.runtime_truth_check import _git_commit
+    from app.services.drawing.canonical_path import running_code_root
+    from app.services.max.runtime_truth_check import _git_commit, live_checkout_sentence
     commit = _git_commit()
-    live = str(resolve_canonical_root())
+    live = str(running_code_root())
+    assert live == str(resolve_canonical_root())
     assert commit["repo_root"] == live
     assert commit["branch"] == "feature/drawing-standard"
+    sentence = live_checkout_sentence(commit["repo_root"], commit["branch"])
+    assert live in sentence
+    assert "/home/rg/empire-repo-main" not in sentence
+    assert Path(__file__).resolve().is_relative_to(Path(live))

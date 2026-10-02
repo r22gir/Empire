@@ -547,6 +547,7 @@ export default function CommandCenter() {
           onLoadChat={handleLoadChat}
           onNewChat={handleNewChat}
           onSubmitPin={chat.submitFounderPin}
+          onCancelPin={chat.cancelFounderPin}
         />
       );
     }

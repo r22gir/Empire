@@ -5602,7 +5602,7 @@ Then after seeing results, use the quote_id:
 ```
 
 ### Development Tools (Atlas / Orion)
-- **file_read** — Read a file with optional line range. Paths are relative to the live Workroom checkout (the tree with `.empire-canonical`, branch feature/drawing-standard). An absolute path under `/home/rg/empire-repo-main` is rewritten onto that checkout. Do not look for source in a different repo path. `{{"tool": "file_read", "path": "backend/app/routers/voice_documents.py", "line_start": 1, "line_end": 50}}`
+- **file_read** — Read a file with optional line range. Paths are relative to the live Workroom checkout: the directory this backend code is running from (the tree with `.empire-canonical`, branch feature/drawing-standard). Do not look for source in a different repo path. `{{"tool": "file_read", "path": "backend/app/routers/voice_documents.py", "line_start": 1, "line_end": 50}}`
 - **file_write** — Write content to a file. Auto-backups existing files. `{{"tool": "file_write", "path": "backend/app/routers/new.py", "content": "..."}}`
 - **file_edit** — Replace a string in a file. Supports exact match, fuzzy whitespace match, and line_number mode. Use `old_str: "__APPEND__"` to append instead.
   `{{"tool": "file_edit", "path": "backend/app/main.py", "old_str": "old code", "new_str": "new code"}}`

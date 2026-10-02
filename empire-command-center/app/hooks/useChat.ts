@@ -2,7 +2,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Message, PinPrompt, ToolResult } from '../lib/types';
 import { API } from '../lib/api';
-import { redactSecret, toolResultPreview } from '../lib/founderPin';
+import { asksForFounderPin, redactSecret, toolResultPreview } from '../lib/founderPin';
 
 const WELCOME: Message = {
   id: 'welcome',
@@ -186,8 +186,16 @@ export function useChat() {
         }
       }
 
+      const assistantId = (Date.now() + 1).toString();
+      if (pinPrompts.length === 0 && asksForFounderPin(accumulated)) {
+        pinPrompts.push({
+          resumeId: `verify:${assistantId}`,
+          tool: 'founder PIN',
+          status: 'needed',
+        });
+      }
       const assistantMsg: Message = {
-        id: (Date.now() + 1).toString(),
+        id: assistantId,
         role: 'assistant',
         content: accumulated || 'No response.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -241,6 +249,7 @@ export function useChat() {
     };
     mark({ status: 'submitting', detail: undefined });
     try {
+      const verifyOnly = resumeId.startsWith('verify:');
       const verify = await fetch(API + '/max/verify-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -252,6 +261,10 @@ export function useChat() {
       }
       if (!verify.ok) {
         mark({ status: 'error', detail: 'PIN check failed. Try again.' });
+        return;
+      }
+      if (verifyOnly) {
+        mark({ status: 'done', detail: 'PIN accepted.' });
         return;
       }
       const resume = await fetch(API + '/max/resume-restricted-tool', {
@@ -292,6 +305,18 @@ export function useChat() {
     }
   }, [updateMessages]);
 
+  const cancelFounderPin = useCallback((messageId: string, resumeId: string) => {
+    updateMessages(prev => prev.map(msg => {
+      if (msg.id !== messageId || !msg.pinPrompts) return msg;
+      return {
+        ...msg,
+        pinPrompts: msg.pinPrompts.map(prompt => (
+          prompt.resumeId === resumeId ? { ...prompt, status: 'cancelled' as const, detail: undefined } : prompt
+        )),
+      };
+    }));
+  }, [updateMessages]);
+
   const stopStreaming = useCallback(() => { abortRef.current?.abort(); }, []);
 
   const onMessageCompleteRef = useRef<((msg: Message) => void) | null>(null);
@@ -301,7 +326,7 @@ export function useChat() {
 
   return {
     messages, isStreaming, streamingContent, streamingSteps, streamingModel,
-    sendMessage, stopStreaming, loadMessages, setOnMessageComplete, submitFounderPin,
+    sendMessage, stopStreaming, loadMessages, setOnMessageComplete, submitFounderPin, cancelFounderPin,
     chatId: chatIdRef.current,
   };
 }

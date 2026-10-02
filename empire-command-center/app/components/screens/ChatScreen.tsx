@@ -12,6 +12,7 @@ import ChatChartBlock from '../ChatChartBlock';
 import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../lib/chatContent';
 import FounderPinCard from '../chat/FounderPinCard';
 import { useTranslation } from '../../lib/i18n';
+import { composerLooksLikePin } from '../../lib/founderPin';
 import {
   HOLD_ARM_MS,
   HOLD_LONGER_HINT,
@@ -78,9 +79,10 @@ interface Props {
   onLoadChat?: (chatId: string) => void;
   onNewChat?: () => void;
   onSubmitPin?: (messageId: string, resumeId: string, pin: string) => Promise<void> | void;
+  onCancelPin?: (messageId: string, resumeId: string) => void;
 }
 
-export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat, onSubmitPin }: Props) {
+export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat, onSubmitPin, onCancelPin }: Props) {
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
@@ -530,6 +532,14 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
   const handleSend = () => {
     if (!input.trim() && !attachedImage) return;
+    const pinCardOpen = messages.some(msg =>
+      msg.pinPrompts?.some(prompt => prompt.status === 'needed' || prompt.status === 'error' || prompt.status === 'submitting'),
+    );
+    if (pinCardOpen && composerLooksLikePin(input)) {
+      setInput('');
+      showMicToast('Use the PIN card. It is not sent in the chat.');
+      return;
+    }
     if (codeMode) {
       submitCodeTask(input.trim());
       setInput('');
@@ -996,12 +1006,13 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               }
               return null;
             })}
-            {msg.pinPrompts?.map(prompt => (
+            {msg.pinPrompts?.filter(prompt => prompt.status !== 'cancelled').map(prompt => (
               <FounderPinCard
                 key={prompt.resumeId}
                 prompt={prompt}
                 disabled={isStreaming}
                 onSubmit={(resumeId, pin) => onSubmitPin?.(msg.id, resumeId, pin)}
+                onCancel={(resumeId) => onCancelPin?.(msg.id, resumeId)}
               />
             ))}
           </div>

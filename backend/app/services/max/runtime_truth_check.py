@@ -383,12 +383,22 @@ def should_run_whats_new_summary(message: str | None) -> bool:
 
 
 def _live_repo_root() -> str | None:
-    """Workroom checkout that contains this process, not empire-repo-main."""
+    """Checkout that contains this file. No hardcoded checkout path."""
     try:
-        from app.services.drawing.canonical_path import resolve_canonical_root
-        return str(resolve_canonical_root())
+        from app.services.drawing.canonical_path import running_code_root
+        return str(running_code_root())
     except Exception:
         return None
+
+
+def live_checkout_sentence(repo_root: str | None, branch: str | None) -> str:
+    """Self-diagnosis line. Names only the directory this code runs from."""
+    root = repo_root or _live_repo_root() or "(unresolved)"
+    branch_name = branch or "feature/drawing-standard"
+    return (
+        f"- Live Workroom checkout: {root} branch {branch_name}. "
+        "This is the directory the running backend code is in."
+    )
 
 
 def _git_recent_commits(count: int = 5) -> list[dict[str, str]]:
@@ -1516,7 +1526,7 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
     lines = [
         "Runtime truth check completed.",
         f"- Mode: {result.get('mode')} ({result.get('repair_capability')})",
-        f"- Live Workroom checkout: {result.get('repo_root') or '(unresolved)'} branch {commit.get('branch')} (feature/drawing-standard). Do not read /home/rg/empire-repo-main; that path is rewritten onto this checkout.",
+        live_checkout_sentence(result.get("repo_root"), commit.get("branch")),
         f"- Current repo commit: {commit.get('hash')} ({commit.get('message')})",
         f"- Registry: version={(result.get('registry') or {}).get('registry_version')} loaded_at={(result.get('registry') or {}).get('loaded_at')} last_error={(result.get('registry') or {}).get('last_error')}",
         f"- OpenClaw gate: state={openclaw_gate.get('state')} allowed={openclaw_gate.get('allowed')} reason={openclaw_gate.get('reason')}",

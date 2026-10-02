@@ -8,12 +8,15 @@ interface Props {
   prompt: PinPrompt;
   disabled?: boolean;
   onSubmit: (resumeId: string, pin: string) => Promise<void> | void;
+  onCancel?: (resumeId: string) => void;
 }
 
-export default function FounderPinCard({ prompt, disabled, onSubmit }: Props) {
+export default function FounderPinCard({ prompt, disabled, onSubmit, onCancel }: Props) {
   const [value, setValue] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
   const busy = prompt.status === 'submitting' || disabled;
+
+  if (prompt.status === 'cancelled') return null;
 
   if (prompt.status === 'done') {
     return (
@@ -112,24 +115,46 @@ export default function FounderPinCard({ prompt, disabled, onSubmit }: Props) {
           {localError || prompt.detail}
         </div>
       )}
-      <button
-        type="submit"
-        disabled={busy || !value.trim()}
-        style={{
-          marginTop: 12,
-          width: '100%',
-          minHeight: 48,
-          border: 'none',
-          borderRadius: 10,
-          background: busy || !value.trim() ? '#d6d3cd' : '#1a1a1a',
-          color: '#fff',
-          fontSize: 16,
-          fontWeight: 700,
-          cursor: busy || !value.trim() ? 'default' : 'pointer',
-        }}
-      >
-        {busy ? 'Checking…' : 'Approve and continue'}
-      </button>
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setValue('');
+            onCancel?.(prompt.resumeId);
+          }}
+          style={{
+            flex: 1,
+            minHeight: 48,
+            borderRadius: 10,
+            border: '1.5px solid #ece8e0',
+            background: '#fff',
+            color: '#1a1a1a',
+            fontSize: 16,
+            fontWeight: 700,
+            cursor: busy ? 'default' : 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={busy || !value.trim()}
+          style={{
+            flex: 1,
+            minHeight: 48,
+            border: 'none',
+            borderRadius: 10,
+            background: busy || !value.trim() ? '#d6d3cd' : '#1a1a1a',
+            color: '#fff',
+            fontSize: 16,
+            fontWeight: 700,
+            cursor: busy || !value.trim() ? 'default' : 'pointer',
+          }}
+        >
+          {busy ? 'Checking…' : 'Submit'}
+        </button>
+      </div>
     </form>
   );
 }

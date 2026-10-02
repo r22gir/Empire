@@ -1,4 +1,13 @@
-/** Chat PIN card helpers. The PIN value never belongs in history or logs. */
+/** Chat PIN card helpers. The PIN value never belongs in history, logs, or the model. */
+
+export function asksForFounderPin(text: string | null | undefined): boolean {
+  return /founder\s+pin/i.test(text || '');
+}
+
+/** A composer message that is only a PIN must not be sent as chat text. */
+export function composerLooksLikePin(text: string | null | undefined): boolean {
+  return /^\d{4,12}$/.test((text || '').trim());
+}
 
 export function redactSecret(text: string, secret: string): string {
   if (!secret) return text;

@@ -22,7 +22,7 @@ export interface QualityBadge {
 export interface PinPrompt {
   resumeId: string;
   tool: string;
-  status: 'needed' | 'submitting' | 'done' | 'error';
+  status: 'needed' | 'submitting' | 'done' | 'error' | 'cancelled';
   detail?: string;
 }
 

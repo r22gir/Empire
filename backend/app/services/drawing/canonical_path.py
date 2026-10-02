@@ -64,6 +64,14 @@ class CanonicalRootError(Exception):
     """
 
 
+def running_code_root() -> Path:
+    """Checkout that contains this module.
+
+    Walks up from this file. The path is not a hardcoded checkout string.
+    """
+    return resolve_canonical_root(Path(__file__).resolve())
+
+
 def resolve_canonical_root(start: os.PathLike | str | None = None) -> Path:
     """Return the absolute path of the canonical repo root, verified
     by the presence of the `.empire-canonical` marker.
