@@ -230,6 +230,9 @@ load_router("app.routers.drawings", "/api/v1", ["drawings"])
 # Voice notes → draft quote / drawing (same pipeline as Telegram voice)
 load_router("app.routers.voice_documents", "/api/v1", ["voice-documents"])
 
+# WhatsApp Business Cloud API. Disabled unless the four WHATSAPP_* env vars are set.
+load_router("app.routers.whatsapp", "/api/v1", ["whatsapp"])
+
 # Fabric Library
 load_router("app.routers.fabrics", "/api/v1/fabrics", ["fabrics"])
 

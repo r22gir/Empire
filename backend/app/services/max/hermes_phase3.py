@@ -148,24 +148,40 @@ def _append_audit(
     return entry
 
 
+def _whatsapp_channel_view() -> dict[str, Any]:
+    """Live Cloud API status. Saved interface JSON cannot hide a disabled channel."""
+    try:
+        from app.services.max.whatsapp_channel import channel_status
+
+        live = channel_status()
+    except Exception as exc:
+        live = {
+            "enabled": False,
+            "configured": False,
+            "status": "disabled",
+            "missing": [],
+            "reason": f"WhatsApp status unavailable ({exc.__class__.__name__}).",
+        }
+    return {
+        "channel": "whatsapp",
+        "status": live.get("status") or "disabled",
+        "enabled": bool(live.get("enabled")),
+        "interface_point": "/api/v1/whatsapp/webhook",
+        "transport_configured": bool(live.get("configured")),
+        "browser_assist_supported": False,
+        "autonomous_messaging_allowed": False,
+        "drafts_require_explicit_confirm": True,
+        "customer_care_window_hours": 24,
+        "allowlist": "founder_numbers_only",
+        "missing": list(live.get("missing") or []),
+        "reason": live.get("reason") or "WhatsApp is disabled.",
+    }
+
+
 def _phase3_channel_defaults() -> dict[str, Any]:
-    whatsapp_configured = bool(os.getenv("HERMES_WHATSAPP_WEBHOOK_URL") or os.getenv("WHATSAPP_ACCESS_TOKEN"))
     discord_configured = bool(os.getenv("HERMES_DISCORD_BOT_TOKEN") or os.getenv("DISCORD_BOT_TOKEN"))
     return {
-        "whatsapp": {
-            "channel": "whatsapp",
-            "status": "partial_disabled_gateway" if whatsapp_configured else "disabled",
-            "enabled": False,
-            "interface_point": "phase3_gateway_placeholder",
-            "transport_configured": whatsapp_configured,
-            "browser_assist_supported": False,
-            "autonomous_messaging_allowed": False,
-            "reason": (
-                "Transport config exists but autonomous messaging remains disabled."
-                if whatsapp_configured
-                else "No verified transport/auth configured. Interface point only."
-            ),
-        },
+        "whatsapp": _whatsapp_channel_view(),
         "discord": {
             "channel": "discord",
             "status": "partial_disabled_gateway" if discord_configured else "disabled",
@@ -576,6 +592,7 @@ def get_channel_interfaces() -> dict[str, Any]:
     data = _json_load(channel_interfaces_path()) or {}
     defaults = _phase3_channel_defaults()
     merged = {**defaults, **data}
+    merged["whatsapp"] = defaults["whatsapp"]
     return merged
 
 
