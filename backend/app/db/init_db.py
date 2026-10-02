@@ -460,7 +460,18 @@ def _init_chat_backup_tables():
 
 
 def init_database():
-    """Create all tables and seed desk configs."""
+    """Create all tables and seed desk configs.
+
+    Two uvicorn workers import this at startup. The file lock makes the
+    second worker wait instead of migrating the same SQLite file at once.
+    """
+    from app.db.migration_lock import migration_lock
+
+    with migration_lock():
+        _init_database_locked()
+
+
+def _init_database_locked():
     # Ensure data directory exists
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 

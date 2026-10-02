@@ -92,6 +92,15 @@ export function presentationChrome(edition, assistantName) {
   };
 }
 
+/** Chat greeting. Family editions use the assistant name in Spanish. */
+export function chatWelcome(edition, assistantName) {
+  const name = (assistantName || '').trim() || assistantFallback(edition);
+  if (!isFamilyEdition(edition)) {
+    return "Hello! I'm **MAX**, your Empire AI Assistant.\n\n_Tip: Ctrl+V to paste images · Shift+Enter for newlines_";
+  }
+  return `¡Hola! Soy **${name}**, tu asistente de EmpireBox.\n\n_Consejo: Ctrl+V para pegar imágenes · Shift+Enter para una línea nueva_`;
+}
+
 /** Logged-out family home goes to /login. Workroom stays on the shell. */
 export function familyHomeRedirect(edition, pathname, hasSession) {
   if (!isFamilyEdition(edition)) return null;

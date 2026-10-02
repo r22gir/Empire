@@ -37,3 +37,6 @@ psutil>=5.9.0
 
 # Docker management
 docker>=7.0.0
+
+# Rate limiting (imported by app.main and app.middleware.rate_limiter)
+slowapi>=0.1.9

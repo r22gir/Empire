@@ -186,10 +186,13 @@ def ensure_table() -> None:
     and the handler below is narrowed to ``sqlite3.Error`` so any
     programmer error in this module surfaces immediately.
     """
+    from app.db.migration_lock import migration_lock
+
     try:
-        with _connect_raw() as conn:
-            conn.executescript(SCHEMA_DDL)
-            conn.commit()
+        with migration_lock():
+            with _connect_raw() as conn:
+                conn.executescript(SCHEMA_DDL)
+                conn.commit()
     except sqlite3.Error as exc:
         # Only genuine DB conditions are tolerated here. A missing
         # file, locked DB, corrupt page, or permission error all

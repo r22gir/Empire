@@ -48,6 +48,12 @@ class UnifiedMessageStore:
         return conn
 
     def _init_db(self):
+        from app.db.migration_lock import migration_lock
+
+        with migration_lock():
+            self._init_db_locked()
+
+    def _init_db_locked(self):
         conn = self._get_conn()
         conn.execute("""
             CREATE TABLE IF NOT EXISTS unified_messages (

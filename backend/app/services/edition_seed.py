@@ -23,12 +23,18 @@ def seed_path(explicit: Optional[str] = None) -> Path:
 
 
 def _section(text: str, heading: str) -> str:
+    """Body of one ### project. Stops at the next ## or ### heading.
+
+    Portal Campestre 2 is the last ### in the Maxine seed. The Argos
+    section and the day-one questions are ## headings after it, and they
+    must not become part of the project description.
+    """
     pattern = re.compile(rf"^###\s+{re.escape(heading)}.*$", re.M)
     match = pattern.search(text)
     if not match:
         raise ValueError(f"La semilla no trae la sección {heading}")
     rest = text[match.end():]
-    nxt = re.search(r"^###\s+", rest, re.M)
+    nxt = re.search(r"^#{2,3}\s+", rest, re.M)
     return rest[: nxt.start()] if nxt else rest
 
 
@@ -206,13 +212,17 @@ def _register_business(project: dict, project_id: str) -> None:
     amp_businesses._write_profile(project["slug"], profile)
 
 
-def load_maxine_seed(text: str) -> dict:
+def _projects_from_seed(text: str) -> list[dict]:
+    return [
+        _parse_rincon(_section(text, "Rincón de San Jerónimo")),
+        _parse_portal(_section(text, "Portal Campestre 2")),
+    ]
+
+
+def _apply_projects(projects: list[dict]) -> list[dict]:
+    """Create or refresh each project. Lots that already exist are left in place."""
     from app.services.construction_bridge import ensure_phase, ensure_project, insert_lot
 
-    rincon_text = _section(text, "Rincón de San Jerónimo")
-    portal_text = _section(text, "Portal Campestre 2")
-    projects = [_parse_rincon(rincon_text), _parse_portal(portal_text)]
-    fact_count = _store_facts(_facts_from_markdown(text))
     created = []
     for project in projects:
         row = ensure_project(
@@ -243,6 +253,13 @@ def load_maxine_seed(text: str) -> dict:
             _ensure_builder(project["builder"])
         _register_business(project, row["id"])
         created.append({"slug": project["slug"], "id": row["id"], "lots": len(project["lots"])})
+    return created
+
+
+def load_maxine_seed(text: str) -> dict:
+    projects = _projects_from_seed(text)
+    fact_count = _store_facts(_facts_from_markdown(text))
+    created = _apply_projects(projects)
     return {"edition": "maxine", "facts": fact_count, "projects": created, "brand": "GAC"}
 
 
@@ -279,11 +296,31 @@ def load_edition_seed(path: Optional[str] = None) -> dict:
     return result
 
 
+def refresh_seed_projects() -> Optional[dict]:
+    """Rewrite project copy from the seed file without adding lots or facts.
+
+    A data dir that already has seed_loaded.json still picks this up on the
+    next start, so a description that absorbed later sections gets replaced.
+    """
+    if not is_maxine():
+        return None
+    file_path = seed_path()
+    if not file_path.is_file():
+        return None
+    text = file_path.read_text(encoding="utf-8")
+    created = _apply_projects(_projects_from_seed(text))
+    return {"edition": "maxine", "refreshed": True, "projects": created, "brand": "GAC"}
+
+
 def maybe_load_seed() -> Optional[dict]:
-    """First boot of an empty Maxine data dir loads the seed once."""
+    """Load the Maxine seed, then keep project descriptions aligned with the file.
+
+    The marker records the first load. It does not skip the description
+    refresh: the next process start rewrites the existing rows.
+    """
     if not is_maxine():
         return None
     root = require_data_root()
     if (root / "seed_loaded.json").is_file():
-        return None
+        return refresh_seed_projects()
     return load_edition_seed()

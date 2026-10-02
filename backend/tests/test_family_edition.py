@@ -116,6 +116,21 @@ def test_maxine_seed_is_constructionforge_and_public_only(monkeypatch, tmp_path)
     try:
         projects = {row["slug"]: dict(row) for row in conn.execute("SELECT * FROM cf_projects").fetchall()}
         assert set(projects) == {"rincon-de-san-jeronimo", "portal-campestre-2"}
+        leaks = (
+            "Things to ask",
+            "Prices for the Rincón",
+            "Current status of Argos",
+            "Which tools to turn on",
+            "Earlier project:",
+            "parque infantil",
+        )
+        for row in projects.values():
+            description = row["description"] or ""
+            for leak in leaks:
+                assert leak not in description, leak
+        assert "Calle 12" in (projects["portal-campestre-2"]["description"] or "")
+        assert "OCMA" in (projects["rincon-de-san-jeronimo"]["description"] or "")
+        assert "Portal Campestre" not in (projects["rincon-de-san-jeronimo"]["description"] or "")
         portal_lots = conn.execute(
             "SELECT lot_number, status, area_m2, current_price, base_price FROM cf_lots WHERE project_id = ? ORDER BY CAST(lot_number AS INTEGER)",
             (projects["portal-campestre-2"]["id"],),
@@ -156,6 +171,61 @@ def test_maxine_seed_is_constructionforge_and_public_only(monkeypatch, tmp_path)
         assert "tax_id" not in raw
         assert "NIT" not in raw
     assert "GAC" in Path(tmp_path, "businesses", "index.json").read_text(encoding="utf-8")
+    for path in Path(tmp_path, "businesses").rglob("business.json"):
+        description = path.read_text(encoding="utf-8")
+        assert "Things to ask" not in description
+        assert "Prices for the Rincón" not in description
+        assert "Which tools to turn on" not in description
+
+
+def test_maxine_seed_refresh_rewrites_a_polluted_description(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path, "maxine")
+    from app.routers.construction import get_db
+    from app.services.edition_seed import load_edition_seed, maybe_load_seed
+
+    load_edition_seed()
+    polluted = (
+        "Vivienda campestre.\n"
+        "## Earlier project: Argos Campestre\n"
+        "- Plans from 2022.\n"
+        "## Things to ask Camilo on day one\n"
+        "1. Prices for the Rincón units and Portal Campestre types 2 and 3.\n"
+        "2. Current status of Argos Campestre and what he wants Maxine to track.\n"
+        "3. Which tools to turn on (CRM, quotes, lead capture, social posts).\n"
+    )
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE cf_projects SET description = ? WHERE slug = ?",
+            (polluted, "portal-campestre-2"),
+        )
+        conn.commit()
+        before = conn.execute("SELECT COUNT(*) AS n FROM cf_lots").fetchone()["n"]
+    finally:
+        conn.close()
+    assert (tmp_path / "seed_loaded.json").is_file()
+    refreshed = maybe_load_seed()
+    assert refreshed["refreshed"] is True
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT description FROM cf_projects WHERE slug = ?",
+            ("portal-campestre-2",),
+        ).fetchone()
+        description = row["description"]
+        assert "Things to ask" not in description
+        assert "Argos Campestre" not in description
+        assert "Prices for the Rincón" not in description
+        assert "Which tools to turn on" not in description
+        assert "disponibles" in description
+        after = conn.execute("SELECT COUNT(*) AS n FROM cf_lots").fetchone()["n"]
+        assert after == before == 31
+    finally:
+        conn.close()
+    profile = next(Path(tmp_path, "businesses").rglob("portal-campestre-2/business.json"))
+    stored = profile.read_text(encoding="utf-8")
+    assert "Things to ask" not in stored
+    assert "Argos Campestre" not in stored
 
 
 def test_maxine_interview_and_payment_plan_share_construction_rows(monkeypatch, tmp_path):

@@ -116,7 +116,16 @@ def ensure_project(
     try:
         row = conn.execute("SELECT * FROM cf_projects WHERE slug = ?", (slug,)).fetchone()
         if row:
-            return dict(row)
+            conn.execute(
+                """
+                UPDATE cf_projects
+                SET name = ?, description = ?, location = ?
+                WHERE slug = ?
+                """,
+                (name, description or None, location or None, slug),
+            )
+            conn.commit()
+            return dict(conn.execute("SELECT * FROM cf_projects WHERE slug = ?", (slug,)).fetchone())
         pid = str(uuid.uuid4())
         conn.execute(
             """

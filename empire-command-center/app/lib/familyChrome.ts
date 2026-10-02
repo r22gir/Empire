@@ -1,5 +1,6 @@
 export {
   assistantFallback,
+  chatWelcome,
   dailySummaryLabel,
   familyHomeRedirect,
   isFamilyEdition,

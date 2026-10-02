@@ -46,8 +46,18 @@ def get_conn():
 # ── Table Creation ─────────────────────────────────────────────
 
 def create_all_tables(conn: sqlite3.Connection):
-    """Create all unified business tables. Idempotent."""
+    """Create all unified business tables. Idempotent.
 
+    Held under the schema migration lock so two workers cannot run this
+    together on the first start.
+    """
+    from app.db.migration_lock import migration_lock
+
+    with migration_lock():
+        _create_all_tables_locked(conn)
+
+
+def _create_all_tables_locked(conn: sqlite3.Connection):
     # D48 STEP 2: the chain tables (customers, invoices, jobs, payments) are
     # defined in init_db.SCHEMA_SQL, not here. Execute that first so any DB
     # built by this function — notably the test DB in tests/conftest.py —

@@ -1,6 +1,8 @@
 """Family-edition chrome, login redirect, WhatsApp gate, Maxine unit, presentation layout."""
 from __future__ import annotations
 
+import fcntl
+import os
 import subprocess
 from pathlib import Path
 
@@ -12,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_family_chrome_runs_on_node_without_strip_types():
     script = """
-import { familyHomeRedirect, navGroupLabel, presentationChrome, searchPlaceholder } from './empire-command-center/app/lib/familyChrome.mjs';
+import { chatWelcome, familyHomeRedirect, navGroupLabel, presentationChrome, searchPlaceholder } from './empire-command-center/app/lib/familyChrome.mjs';
 if (familyHomeRedirect('amp', '/', false) !== '/login') throw new Error('amp home');
 if (familyHomeRedirect('maxine', '/', false) !== '/login') throw new Error('maxine home');
 if (familyHomeRedirect('amp', '/', true) !== null) throw new Error('session');
@@ -34,6 +36,14 @@ if (navGroupLabel('maxine', 'business', 'BUSINESS') !== 'Negocio') throw new Err
 if (navGroupLabel('workroom', 'command', 'COMMAND') !== 'COMMAND') throw new Error('workroom nav');
 if (searchPlaceholder('amp') !== 'Buscar cualquier cosa...') throw new Error('search es');
 if (searchPlaceholder('workroom') !== 'Search anything...') throw new Error('search en');
+const maxineHello = chatWelcome('maxine', 'Maxine');
+if (!maxineHello.startsWith('¡Hola! Soy **Maxine**')) throw new Error(maxineHello);
+if (maxineHello.includes("I'm **MAX**")) throw new Error('maxine english');
+const maxeHello = chatWelcome('amp', 'Max-e');
+if (!maxeHello.includes('**Max-e**')) throw new Error(maxeHello);
+if (!maxeHello.includes('Consejo:')) throw new Error(maxeHello);
+const workroomHello = chatWelcome('workroom', 'MAX');
+if (!workroomHello.includes("Hello! I'm **MAX**, your Empire AI Assistant.")) throw new Error(workroomHello);
 process.stdout.write('ok');
 """
     result = subprocess.run(
@@ -138,3 +148,55 @@ def test_whatsapp_webhook_skips_the_access_gate(monkeypatch, tmp_path):
     assert body["reason"] == "Firma inválida"
     assert body.get("code") != "sin_acceso"
     assert "sha256=dead" not in posted.text
+
+
+def test_chat_screen_uses_the_edition_greeting():
+    hook = (ROOT / "empire-command-center" / "app" / "hooks" / "useChat.ts").read_text(encoding="utf-8")
+    assert "chatWelcome" in hook
+    assert "Hello! I'm **MAX**" not in hook
+    assert "slowapi>=" in (ROOT / "backend" / "requirements.txt").read_text(encoding="utf-8")
+
+
+def test_edition_env_run_sources_a_file_and_execs(tmp_path):
+    script = ROOT / "scripts" / "edition_env_run.sh"
+    assert os.access(script, os.X_OK)
+    env_file = tmp_path / "edition.env"
+    env_file.write_text("EMPIRE_EDITION=maxine\nDEMO_MARKER=campestre\n", encoding="utf-8")
+    result = subprocess.run(
+        [str(script), str(env_file), "python3", "-c", "import os; print(os.environ['EMPIRE_EDITION'])"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == "maxine"
+    assert "DEMO_MARKER" not in result.stdout
+    assert "campestre" not in result.stdout
+    missing = subprocess.run(
+        [str(script), str(tmp_path / "missing.env"), "true"],
+        capture_output=True,
+        text=True,
+    )
+    assert missing.returncode == 2
+
+
+def test_schema_migration_lock_blocks_a_second_holder(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMPIRE_WORKER_LOCK", str(tmp_path / "empire_primary_worker.lock"))
+    from app.db.migration_lock import migration_lock, migration_lock_path
+
+    with migration_lock():
+        fd = open(migration_lock_path(), "a")
+        try:
+            try:
+                fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                blocked = False
+            except OSError:
+                blocked = True
+            assert blocked
+        finally:
+            fd.close()
+    main = (ROOT / "backend" / "app" / "main.py").read_text(encoding="utf-8")
+    start = main.index("async def start_background_services")
+    secondary = main.index("Secondary worker", start)
+    assert main.index("_migrate_unified_business()", start) < secondary
+    assert "with migration_lock()" in (ROOT / "backend" / "app" / "db" / "init_db.py").read_text(encoding="utf-8")
+    assert "with migration_lock()" in (ROOT / "backend" / "app" / "db" / "unified_business_migration.py").read_text(encoding="utf-8")

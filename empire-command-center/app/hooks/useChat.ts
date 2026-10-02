@@ -2,13 +2,18 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Message, ToolResult } from '../lib/types';
 import { API } from '../lib/api';
+import { useAssistantName } from '../lib/assistant';
+import { editionFromEnv } from '../lib/edition';
+import { chatWelcome } from '../lib/familyChrome';
 
-const WELCOME: Message = {
-  id: 'welcome',
-  role: 'assistant',
-  content: "Hello! I'm **MAX**, your Empire AI Assistant.\n\n_Tip: Ctrl+V to paste images · Shift+Enter for newlines_",
-  timestamp: '',
-};
+function welcomeMessage(assistantName: string): Message {
+  return {
+    id: 'welcome',
+    role: 'assistant',
+    content: chatWelcome(editionFromEnv(), assistantName),
+    timestamp: '',
+  };
+}
 
 function formatContextPack(data: any): string {
   const parts: string[] = [];
@@ -22,7 +27,9 @@ function formatContextPack(data: any): string {
 }
 
 export function useChat() {
-  const [messages, setMessages] = useState<Message[]>([WELCOME]);
+  const assistantName = useAssistantName();
+  const welcomeRef = useRef<Message>(welcomeMessage(assistantName));
+  const [messages, setMessages] = useState<Message[]>(() => [welcomeMessage(assistantName)]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingSteps, setStreamingSteps] = useState<string[]>([]);
@@ -30,15 +37,19 @@ export function useChat() {
   const abortRef = useRef<AbortController | null>(null);
   const chatIdRef = useRef<string | null>(null);
   const streamingRef = useRef(false);
-  const messagesRef = useRef<Message[]>([WELCOME]);
+  const messagesRef = useRef<Message[]>(welcomeRef.current ? [welcomeRef.current] : []);
   const contextPackRef = useRef<string>('');
 
-  // Set welcome timestamp on client only (avoids hydration mismatch)
+  // Edition name can arrive after the first paint. Replace only the greeting.
   useEffect(() => {
+    const next = welcomeMessage(assistantName);
     const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setMessages(prev => prev.map(m => m.id === 'welcome' && !m.timestamp ? { ...m, timestamp: ts } : m));
-    messagesRef.current = messagesRef.current.map(m => m.id === 'welcome' && !m.timestamp ? { ...m, timestamp: ts } : m);
-  }, []);
+    next.timestamp = ts;
+    welcomeRef.current = next;
+    const apply = (prev: Message[]) => prev.map(m => m.id === 'welcome' ? { ...next, timestamp: m.timestamp || ts } : m);
+    setMessages(apply);
+    messagesRef.current = apply(messagesRef.current);
+  }, [assistantName]);
 
   useEffect(() => {
     fetch(API + '/memory/context-pack')
@@ -80,7 +91,7 @@ export function useChat() {
   }, [updateMessages]);
 
   const loadMessages = useCallback((msgs: Message[], chatId: string | null) => {
-    const next = msgs.length > 0 ? msgs : [WELCOME];
+    const next = msgs.length > 0 ? msgs : [welcomeRef.current];
     setMessages(next);
     messagesRef.current = next;
     chatIdRef.current = chatId;

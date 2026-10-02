@@ -68,6 +68,13 @@ REPLAY_TURNS = 3    # how many recent turns get full replay in the next request
 
 def ensure_table() -> None:
     """Create chat_session_turns and prune beyond RETAIN_TURNS per conversation."""
+    from app.db.migration_lock import migration_lock
+
+    with migration_lock():
+        _ensure_table_locked()
+
+
+def _ensure_table_locked() -> None:
     with _connect() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS chat_session_turns (

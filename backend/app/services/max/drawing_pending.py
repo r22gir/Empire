@@ -51,6 +51,13 @@ def _connect() -> sqlite3.Connection:
 
 def ensure_table() -> None:
     """Create pending_drawing_jobs + sweep rows older than TTL_HOURS."""
+    from app.db.migration_lock import migration_lock
+
+    with migration_lock():
+        _ensure_table_locked()
+
+
+def _ensure_table_locked() -> None:
     with _connect() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS pending_drawing_jobs (

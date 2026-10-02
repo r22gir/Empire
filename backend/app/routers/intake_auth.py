@@ -63,6 +63,13 @@ def get_db():
 
 
 def init_db():
+    from app.db.migration_lock import migration_lock
+
+    with migration_lock():
+        _init_db_locked()
+
+
+def _init_db_locked():
     conn = get_db()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS intake_users (

@@ -285,10 +285,13 @@ try:
 except ImportError:
     pass
 
-# Create measurement table (avoid create_all due to JSONB in other models)
+# Create measurement table (avoid create_all due to JSONB in other models).
+# Both workers import this module; the schema lock serializes the CREATE.
 try:
     from app.database import engine
-    ImageMeasurement.__table__.create(bind=engine, checkfirst=True)
+    from app.db.migration_lock import migration_lock
+    with migration_lock():
+        ImageMeasurement.__table__.create(bind=engine, checkfirst=True)
 except Exception as e:
     print(f"✗ Measurement table init: {e}")
 
@@ -406,6 +409,28 @@ async def api_voice_transcribe(audio: UploadFile = FileParam(...), language: str
 _worker_lock_file = None  # keep reference so the lock is held for process lifetime
 
 
+def _migrate_unified_business() -> None:
+    """Create unified tables before either worker serves traffic.
+
+    Both workers call this. The schema lock inside ``create_all_tables``
+    (and the one held around the seed) makes the second worker wait.
+    """
+    from app.db.migration_lock import migration_lock
+
+    try:
+        from app.db.unified_business_migration import get_conn, create_all_tables, seed_chart_of_accounts
+        with migration_lock():
+            _mconn = get_conn()
+            try:
+                create_all_tables(_mconn)
+                seed_chart_of_accounts(_mconn)
+            finally:
+                _mconn.close()
+        print("✓ Unified Business tables: ready")
+    except Exception as _e:
+        print(f"✗ Unified Business migration: {_e}")
+
+
 def _acquire_primary_worker_lock() -> bool:
     """Try to become the primary worker by acquiring an exclusive file lock.
 
@@ -442,6 +467,10 @@ async def start_background_services():
 
     is_primary = _acquire_primary_worker_lock()
 
+    # Schema first, on every worker. create_all_tables holds the migration
+    # lock, so the second worker waits instead of racing the first start.
+    _migrate_unified_business()
+
     try:
         from app.services.max.startup_health import write_startup_health_record
         record = write_startup_health_record()
@@ -473,17 +502,6 @@ async def start_background_services():
         return
 
     print("★ Primary worker — starting singleton background services")
-
-    # Unified Business System — ensure tables exist
-    try:
-        from app.db.unified_business_migration import get_conn, create_all_tables, seed_chart_of_accounts
-        _mconn = get_conn()
-        create_all_tables(_mconn)
-        seed_chart_of_accounts(_mconn)
-        _mconn.close()
-        print("✓ Unified Business tables: ready")
-    except Exception as _e:
-        print(f"✗ Unified Business migration: {_e}")
 
     # Telegram Bot — webhook mode (avoids Conflict error from polling)
     try:

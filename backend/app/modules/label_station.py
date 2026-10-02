@@ -55,6 +55,13 @@ def _conn() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    from app.db.migration_lock import migration_lock
+
+    with migration_lock():
+        _init_db_locked()
+
+
+def _init_db_locked() -> None:
     with _conn() as c:
         c.executescript(
             """
