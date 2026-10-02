@@ -1071,6 +1071,11 @@ class AIRouter:
         name = getattr(requested, "value", requested)
         canon = self._legacy_canonical(requested)
         err = self.last_provider_errors.get(canon) or self.last_provider_errors.get(str(name)) or "unknown error"
+        if "minimax" in str(name).lower() or canon == "minimax":
+            from app.services.max.minimax_retry import user_message_for_minimax
+            friendly = user_message_for_minimax(str(err))
+            if friendly:
+                return friendly
         return (
             f"Requested provider '{name}' failed and fallback is disabled "
             f"(MAX_ALLOW_FALLBACK=false), so no other provider was called. "
@@ -1139,20 +1144,28 @@ class AIRouter:
 
             error_text = self.last_provider_errors.get(provider) or self.last_provider_errors.get("grok" if provider == "xai" else provider)
             if self._is_circuit_break_error(error_text):
+                content = (
+                    f"Selected provider '{provider}' failed with a circuit-break error ({error_text or 'auth/quota'}) "
+                    "so routing stopped without fallback. Fix provider auth/quota or switch provider."
+                )
+                if provider == "minimax":
+                    from app.services.max.minimax_retry import user_message_for_minimax
+                    content = user_message_for_minimax(error_text) or content
                 return AIResponse(
-                    content=(
-                        f"Selected provider '{provider}' failed with a circuit-break error ({error_text or 'auth/quota'}) "
-                        "so routing stopped without fallback. Fix provider auth/quota or switch provider."
-                    ),
+                    content=content,
                     model_used=provider,
                     fallback_used=fallback,
                 )
             if not state.fallback_enabled:
+                content = (
+                    f"Selected provider '{provider}' failed and fallback is disabled. "
+                    "No other provider was called."
+                )
+                if provider == "minimax":
+                    from app.services.max.minimax_retry import user_message_for_minimax
+                    content = user_message_for_minimax(error_text) or content
                 return AIResponse(
-                    content=(
-                        f"Selected provider '{provider}' failed and fallback is disabled. "
-                        "No other provider was called."
-                    ),
+                    content=content,
                     model_used=provider,
                     fallback_used=False,
                 )
@@ -2119,51 +2132,74 @@ class AIRouter:
         return 120.0
 
     async def _minimax_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
-        """Chat via MiniMax M1 API."""
+        """Chat via MiniMax M1 API. Overloaded and connect failures are retried."""
+        from app.services.max.minimax_retry import request_with_retry
+
         api_messages = self._prepare_openai_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
-            resp = await client.post(
-                f"{self.minimax_base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
-                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens}
-            )
-            if resp.status_code != 200:
-                raise Exception(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
-            self._record_provider_success("minimax")
-            return self._sanitize_minimax_content(resp.json()["choices"][0]["message"]["content"])
+
+        async def once():
+            async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
+                return await client.post(
+                    f"{self.minimax_base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
+                    json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens}
+                )
+
+        resp = await request_with_retry(once)
+        if resp.status_code != 200:
+            raise Exception(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
+        self._record_provider_success("minimax")
+        return self._sanitize_minimax_content(resp.json()["choices"][0]["message"]["content"])
 
     async def _minimax_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
-        """Stream chat via MiniMax M1 API."""
+        """Stream chat via MiniMax M1 API. The open is retried; a started body is not."""
+        import asyncio
+        import random
+        from app.services.max.minimax_retry import ATTEMPTS, WAIT_SECONDS, _jitter, is_connect_failure, is_retryable_status
+
         api_messages = self._prepare_openai_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
-            async with client.stream(
-                "POST",
-                f"{self.minimax_base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
-                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens, "stream": True}
-            ) as response:
-                if response.status_code != 200:
-                    error_body = await response.aread()
-                    raise Exception(f"MiniMax HTTP {response.status_code}: {error_body.decode()[:200]}")
-                self._record_provider_success("minimax")
-                collected = []
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:].strip()
-                    if data_str == "[DONE]":
+        rng = random.Random()
+        for attempt in range(ATTEMPTS):
+            try:
+                async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{self.minimax_base_url}/chat/completions",
+                        headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
+                        json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens, "stream": True}
+                    ) as response:
+                        if is_retryable_status(response.status_code) and attempt < ATTEMPTS - 1:
+                            await response.aread()
+                            await asyncio.sleep(_jitter(WAIT_SECONDS[attempt], rng))
+                            continue
+                        if response.status_code != 200:
+                            error_body = await response.aread()
+                            raise Exception(f"MiniMax HTTP {response.status_code}: {error_body.decode()[:200]}")
+                        self._record_provider_success("minimax")
+                        collected = []
+                        async for line in response.aiter_lines():
+                            if not line.startswith("data: "):
+                                continue
+                            data_str = line[6:].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                data = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
+                            delta = data.get("choices", [{}])[0].get("delta", {})
+                            text = delta.get("content", "")
+                            if text:
+                                collected.append(text)
+                        cleaned = self._sanitize_minimax_content("".join(collected))
+                        if cleaned:
+                            yield cleaned
                         return
-                    try:
-                        data = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    delta = data.get("choices", [{}])[0].get("delta", {})
-                    text = delta.get("content", "")
-                    if text:
-                        collected.append(text)
-                cleaned = self._sanitize_minimax_content("".join(collected))
-                if cleaned:
-                    yield cleaned
+            except Exception as exc:
+                if is_connect_failure(exc) and attempt < ATTEMPTS - 1:
+                    await asyncio.sleep(_jitter(WAIT_SECONDS[attempt], rng))
+                    continue
+                raise
 
     # ── OpenClaw ──────────────────────────────────────────────────────
 

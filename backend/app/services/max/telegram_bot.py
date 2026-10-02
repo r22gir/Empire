@@ -252,6 +252,8 @@ class TelegramBot:
             logger.warning("Telegram not configured, message not sent")
             return False
         target_chat = chat_id or self.founder_chat_id
+        from app.services.max.telegram_text import sanitize_telegram_text
+        text = sanitize_telegram_text(text)
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 payload: Dict[str, Any] = {"chat_id": target_chat, "text": text, "parse_mode": parse_mode}
@@ -1315,6 +1317,8 @@ class TelegramBot:
         except ImportError:
             logger.error("python-telegram-bot not installed. Run: pip install python-telegram-bot")
             return
+        from app.services.max.telegram_text import install_outbound_sanitizer
+        install_outbound_sanitizer()
 
 
         # Build and run the bot — increase timeouts for reliability
@@ -1443,6 +1447,8 @@ class TelegramBot:
         """
         from telegram.request import HTTPXRequest
         from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+        from app.services.max.telegram_text import install_outbound_sanitizer
+        install_outbound_sanitizer()
 
         self._webhook_ready = asyncio.Event()
 

@@ -95,23 +95,28 @@ class LocalLLM:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                self._minimax_url,
-                headers={
-                    "Authorization": f"Bearer {self._minimax_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self._minimax_model,
-                    "messages": messages,
-                    "max_tokens": max_tokens,
-                },
-                timeout=30.0,
-            )
-            if resp.status_code != 200:
-                raise Exception(f"MiniMax HTTP {resp.status_code} model={self._minimax_model}: {resp.text[:200]}")
-            return resp.json()["choices"][0]["message"]["content"]
+        from app.services.max.minimax_retry import request_with_retry
+
+        async def once():
+            async with httpx.AsyncClient() as client:
+                return await client.post(
+                    self._minimax_url,
+                    headers={
+                        "Authorization": f"Bearer {self._minimax_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self._minimax_model,
+                        "messages": messages,
+                        "max_tokens": max_tokens,
+                    },
+                    timeout=30.0,
+                )
+
+        resp = await request_with_retry(once)
+        if resp.status_code != 200:
+            raise Exception(f"MiniMax HTTP {resp.status_code} model={self._minimax_model}: {resp.text[:200]}")
+        return resp.json()["choices"][0]["message"]["content"]
 
     async def _grok_generate(self, prompt: str, system: str = "", max_tokens: int = 500) -> str:
         """Call xAI Grok API for brain operations — ONLY when MAX_DISABLE_XAI=false."""

@@ -6,9 +6,10 @@
 <title>MAX Avatar</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
-  #avatar, #simli-face { width: 100%; height: 100%; }
-  #simli-face { display: none; object-fit: cover; object-position: center 20%; background: #111; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; display: flex; flex-direction: column; }
+  #frame { flex: 1; min-height: 0; position: relative; }
+  #avatar, #simli-face { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #simli-face { display: none; object-fit: contain; object-position: center center; background: transparent; }
   #loading {
     position: absolute; inset: 0;
     display: flex; align-items: center; justify-content: center;
@@ -21,10 +22,10 @@
     text-align: center; padding: 20px;
   }
   #badge {
-    position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5;
-    font: 11px/1.35 sans-serif; color: #f4e7b3;
-    background: rgba(20, 16, 8, 0.82); border: 1px solid rgba(184, 150, 12, 0.45);
-    border-radius: 6px; padding: 6px 8px;
+    position: static; flex: 0 0 auto; z-index: 5;
+    font: 11px/1.35 sans-serif; color: #f4e7b3; text-align: center;
+    background: rgba(20, 16, 8, 0.82); border-top: 1px solid rgba(184, 150, 12, 0.45);
+    padding: 4px 8px;
   }
 </style>
 <script type="importmap">
@@ -37,8 +38,10 @@
 </script>
 </head>
 <body>
+<div id="frame">
 <div id="avatar"></div>
 <video id="simli-face" autoplay playsinline muted></video>
+</div>
 <div id="loading">Loading avatar...</div>
 <div id="error"></div>
 <div id="badge" hidden></div>

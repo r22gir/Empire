@@ -610,7 +610,7 @@ export default function CommandCenter() {
           }}
         />
 
-        <div className="flex-1 flex flex-col overflow-y-auto bg-[var(--chat-bg)]">
+        <div className="flex-1 flex flex-col overflow-y-auto min-h-0 bg-[var(--chat-bg)]">
           {renderCenterContent()}
         </div>
 

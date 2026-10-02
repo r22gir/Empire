@@ -227,7 +227,7 @@ async def avatar_listen(request: Request, file: UploadFile = FileParam(...), mod
 
         # Forward to chat
         chat_req = ChatRequest(message=transcript, voice=_is_voiced(mode), mode=mode)
-        chat_resp = await avatar_chat(chat_req)
+        chat_resp = await avatar_chat(chat_req, request)
 
         return {
             "transcript": transcript,
