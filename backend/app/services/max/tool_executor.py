@@ -688,7 +688,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             if not pin:
                 return ToolResult(
                     tool=tool_name, success=False,
-                    error=f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed."
+                    error=(
+                        f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed. "
+                        f"The Chat PIN card collects it. Do not ask the founder to type the PIN into the chat."
+                    ),
                 )
             if str(pin) != FOUNDER_PIN:
                 logger.warning(f"Invalid PIN attempt for dangerous tool '{tool_name}'")
@@ -5550,7 +5553,7 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
   ⚠️ ONLY use this tool when the founder EXPLICITLY asks for a "presentation", "report", "briefing", or "research document". Do NOT auto-generate presentations for casual conversation topics, analogies, or keywords mentioned in passing. If unsure, ask: "Would you like me to create a presentation about X?"
 
 ### Shell Execution
-- **shell_execute** — ⚠️ **PIN-GATED. Founder PIN required via portal approval flow.** As of 2026-08-20 there is no working unlock surface on this lane (H62); calls without a PIN return an honest refusal, not a silent fallback. Per DOCTRINE rule 31, PIN approval never travels through chat or email — the model must NOT ask for a PIN in chat. **For inspect-only status / freshness / commit-divergence questions, use `empire_runtime_truth_check` instead — it does not require a PIN and returns the same kind of information.** When reachable, executes a safe, allowlisted shell command. Blocked patterns are rejected.
+- **shell_execute** — ⚠️ **PIN-GATED. Founder PIN required.** Chat shows a masked PIN card. That card posts the PIN only to founder-PIN verification and then resumes this exact call. The PIN is never part of the chat message, history, or logs. The model must NOT ask the founder to type the PIN into the chat. **For inspect-only status / freshness / commit-divergence questions, use `empire_runtime_truth_check` instead — it does not require a PIN and returns the same kind of information.** When reachable, executes a safe, allowlisted shell command. Blocked patterns are rejected.
   `{"tool": "shell_execute", "command": "git status"}`
   `{"tool": "shell_execute", "command": "df -h"}`
   Allowed commands: ls, cat, head, tail, wc, echo, sort, uniq, tee, touch, mkdir, cp, mv, df, du, free, ps, uptime, date, whoami, hostname, pwd, find, grep, python3, sqlite3, git (all operations), curl, wget, pip, pip3, npm, npx, sudo systemctl, systemctl (status/restart/start/stop/is-active), journalctl, ollama list/ps, docker ps/images, chmod 600.
@@ -5599,7 +5602,7 @@ Then after seeing results, use the quote_id:
 ```
 
 ### Development Tools (Atlas / Orion)
-- **file_read** — Read a file with optional line range. `{{"tool": "file_read", "path": "backend/app/main.py", "line_start": 1, "line_end": 50}}`
+- **file_read** — Read a file with optional line range. Paths are relative to the live Workroom checkout (the tree with `.empire-canonical`, branch feature/drawing-standard). An absolute path under `/home/rg/empire-repo-main` is rewritten onto that checkout. Do not look for source in a different repo path. `{{"tool": "file_read", "path": "backend/app/routers/voice_documents.py", "line_start": 1, "line_end": 50}}`
 - **file_write** — Write content to a file. Auto-backups existing files. `{{"tool": "file_write", "path": "backend/app/routers/new.py", "content": "..."}}`
 - **file_edit** — Replace a string in a file. Supports exact match, fuzzy whitespace match, and line_number mode. Use `old_str: "__APPEND__"` to append instead.
   `{{"tool": "file_edit", "path": "backend/app/main.py", "old_str": "old code", "new_str": "new code"}}`
@@ -5653,9 +5656,10 @@ def _file_read(params: dict, desk: Optional[str] = None) -> ToolResult:
         CanonicalRootError,
     )
     try:
-        if not os.path.isabs(path):
-            # Path is relative — resolve under canonical repo.
-            path = str(resolve_path_under_canonical_root(path))
+        # Absolute historical paths (/home/rg/empire-repo-main/...) are
+        # rewritten onto the live checkout inside the resolver. Open
+        # that path, not the path the model typed.
+        path = str(resolve_path_under_canonical_root(path))
     except CanonicalRootError as exc:
         log_execution("file_read", params, str(exc), desk=desk, success=False)
         return ToolResult(tool="file_read", success=False, error=str(exc))
@@ -5717,8 +5721,7 @@ def _file_write(params: dict, desk: Optional[str] = None) -> ToolResult:
         CanonicalRootError,
     )
     try:
-        if not os.path.isabs(path):
-            path = resolve_path_under_canonical_root(path)
+        path = str(resolve_path_under_canonical_root(path))
     except CanonicalRootError as exc:
         log_execution("file_write", params, str(exc), desk=desk, success=False)
         return ToolResult(tool="file_write", success=False, error=str(exc))
@@ -5813,8 +5816,15 @@ def _file_edit(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not path:
         return ToolResult(tool="file_edit", success=False, error="path and old_str are required")
 
-    if not os.path.isabs(path):
-        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+    from app.services.drawing.canonical_path import (
+        resolve_path_under_canonical_root,
+        CanonicalRootError,
+    )
+    try:
+        path = str(resolve_path_under_canonical_root(path))
+    except CanonicalRootError as exc:
+        log_execution("file_edit", params, str(exc), desk=desk, success=False)
+        return ToolResult(tool="file_edit", success=False, error=str(exc))
 
     ok, reason = validate_path(path)
     if not ok:
@@ -5930,8 +5940,15 @@ def _file_append(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not content:
         return ToolResult(tool="file_append", success=False, error="content is required")
 
-    if not os.path.isabs(path):
-        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+    from app.services.drawing.canonical_path import (
+        resolve_path_under_canonical_root,
+        CanonicalRootError,
+    )
+    try:
+        path = str(resolve_path_under_canonical_root(path))
+    except CanonicalRootError as exc:
+        log_execution("file_append", params, str(exc), desk=desk, success=False)
+        return ToolResult(tool="file_append", success=False, error=str(exc))
 
     ok, reason = validate_path(path)
     if not ok:

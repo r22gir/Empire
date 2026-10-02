@@ -667,7 +667,16 @@ def generate_review_queue(
 
 # ── Review-queue persistence (read-only: just a snapshot) ────────────
 
-REVIEW_QUEUE_PATH = "/home/rg/empire-repo-main/backend/data/journey_review_queue.json"
+def _live_review_queue_path() -> str:
+    """Snapshot lives in the Workroom checkout, not /home/rg/empire-repo-main."""
+    try:
+        from app.services.drawing.canonical_path import resolve_canonical_root
+        return str(resolve_canonical_root() / "backend" / "data" / "journey_review_queue.json")
+    except Exception:
+        return str(Path(__file__).resolve().parents[4] / "backend" / "data" / "journey_review_queue.json")
+
+
+REVIEW_QUEUE_PATH = _live_review_queue_path()
 
 
 def write_review_queue_snapshot(

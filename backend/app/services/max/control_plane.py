@@ -65,8 +65,12 @@ MAX_IDENTITY = {
 # ---------------------------------------------------------------------------
 
 def _repo_root() -> Path:
-    """The /home/rg/empire-repo-main worktree."""
-    return Path(__file__).resolve().parents[4]
+    """Live Workroom checkout (feature/drawing-standard), by canonical marker."""
+    try:
+        from app.services.drawing.canonical_path import resolve_canonical_root
+        return resolve_canonical_root()
+    except Exception:
+        return Path(__file__).resolve().parents[4]
 
 
 def _run(cmd: list[str], timeout: int = 5) -> str:

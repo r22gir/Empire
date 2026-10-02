@@ -4310,6 +4310,18 @@ async def chat_stream(request: ChatRequest):
                     progress_line = format_tool_progress_message(entry)
                     _stream_step_lines.append(progress_line)
                     yield f"data: {_safe_dumps(_tool_progress_event(entry))}\n\n"
+                    from app.services.max.restricted_tool_resume import (
+                        needs_founder_pin_card,
+                        stash_restricted_call,
+                    )
+                    if needs_founder_pin_card(str(entry.get("error") or "")):
+                        resume_id = stash_restricted_call(
+                            tool_call=tc,
+                            desk=request.desk,
+                            founder=founder,
+                            channel=request.channel,
+                        )
+                        yield f"data: {_safe_dumps({'type': 'pin_required', 'resume_id': resume_id, 'tool': entry.get('tool') or tc.get('tool') or 'tool'})}\n\n"
                     if entry.get("success"):
                         yield f"data: {_safe_dumps({'type': 'tool_result', **entry})}\n\n"
 
@@ -5998,6 +6010,8 @@ async def verify_pin(request: VerifyPinRequest):
     """Verify founder PIN without performing any action. Used by Code Mode toggle."""
     import os
     # H62 FIX (2026-08-22): empty default — pre-fix this was "7777" (privilege-escalation literal). HOTFIX 4.2 only fixed tool_executor.py.
+    from app.services.max.restricted_tool_resume import founder_pin_matches
+
     founder_pin = os.getenv("FOUNDER_PIN", "")
     if not founder_pin:
         logger.critical(
@@ -6005,8 +6019,34 @@ async def verify_pin(request: VerifyPinRequest):
             "operator configures the systemd drop-in. Pre-fix this silently "
             "defaulted to a privilege-escalation literal. (H62 FIX, 2026-08-22)"
         )
-    if not founder_pin or str(request.pin) != founder_pin:
+    if not founder_pin_matches(request.pin):
         raise HTTPException(status_code=403, detail="Invalid PIN")
+
+
+class ResumeRestrictedRequest(BaseModel):
+    resume_id: str
+    pin: str
+
+
+@router.post("/resume-restricted-tool")
+async def resume_restricted_tool(body: ResumeRestrictedRequest):
+    """Re-run a PIN-gated tool after the Chat PIN card verified the PIN.
+
+    The PIN is read from this body only. It is not stored on the chat
+    message and is not written to logs.
+    """
+    from app.services.max.restricted_tool_resume import resume_restricted_tool as _resume
+
+    outcome = _resume(body.resume_id, body.pin)
+    status = outcome.get("status")
+    if status == "invalid_pin":
+        raise HTTPException(status_code=403, detail="Invalid PIN")
+    if status == "missing":
+        raise HTTPException(
+            status_code=404,
+            detail="That approval expired. Ask Max to run the tool again.",
+        )
+    return outcome
 
 
 # ── TTS (Text-to-Speech) ─────────────────────────────────────────────

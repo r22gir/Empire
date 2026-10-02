@@ -19,6 +19,13 @@ export interface QualityBadge {
   validation_time_ms?: number;
 }
 
+export interface PinPrompt {
+  resumeId: string;
+  tool: string;
+  status: 'needed' | 'submitting' | 'done' | 'error';
+  detail?: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -27,6 +34,7 @@ export interface Message {
   model?: string;
   latency?: string;
   toolResults?: ToolResult[];
+  pinPrompts?: PinPrompt[];
   quality?: QualityBadge;
   metadata?: {
     registry_version: string;

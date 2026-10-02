@@ -27,7 +27,7 @@ FIX covers four items per the directive:
       remap 'length'/'long' back to 'width' (long-edge = front).
 
   (d) All drawing output paths flow through canonical_drawings_dir
-      which always lands at ~/empire-repo-main/backend/data/drawings/.
+      which lands in the live Workroom checkout's backend/data/drawings/.
       The stale ~/empire-repo/ path is forbidden and triggers a
       RuntimeError if anyone tries to bypass.
 """
@@ -296,19 +296,18 @@ class TestCanonicalDrawingsPath:
     not the stale fork."""
 
     def test_canonical_root_is_active_repo(self):
-        """When MAX_DRAWINGS_OUTPUT_DIR is unset, canonical_drawings_dir
-        resolves to ~/empire-repo-main/backend/data/drawings/."""
+        """When MAX_DRAWINGS_OUTPUT_DIR is unset, drawings land in the
+        live Workroom checkout (the marker root), not empire-repo-main."""
         from app.services.drawing import canonical_path
+        from app.services.drawing.canonical_path import resolve_canonical_root
         # The autouse fixture set MAX_DRAWINGS_OUTPUT_DIR to tmp_path,
         # so unset it for this assertion.
         prev = os.environ.pop(canonical_path._ENV_OVERRIDE)
         try:
             result = canonical_path.canonical_drawings_dir()
-            assert str(result).endswith(
-                "empire-repo-main/backend/data/drawings"
-            ), (
-                f"unresolved canonical root must live under "
-                f"empire-repo-main; got {result}"
+            expected = resolve_canonical_root() / "backend" / "data" / "drawings"
+            assert result == expected, (
+                f"drawings must land in the live checkout; got {result}"
             )
         finally:
             if prev is not None:

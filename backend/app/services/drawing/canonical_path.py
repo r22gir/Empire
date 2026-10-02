@@ -75,7 +75,9 @@ def resolve_canonical_root(start: os.PathLike | str | None = None) -> Path:
     The marker is a file containing the canonical token. Its presence
     is the single source of truth — NOT the string `~/empire-repo-main/`.
     A different clone location with the same marker file is equally
-    canonical.
+    canonical. The live tree is this checkout (Workroom, branch
+    feature/drawing-standard). `/home/rg/empire-repo-main` is only a
+    historical alias and is rewritten onto this root.
 
     Used by:
       - file_read / file_write (relative paths resolved against this root)
@@ -121,11 +123,22 @@ def resolve_canonical_root(start: os.PathLike | str | None = None) -> Path:
     )
 
 
-# The canonical output dir lives under the active repo's data tree.
+def _default_drawings_dir() -> Path:
+    """Drawings land in the live Workroom checkout, not a historical path.
+
+    The historical default `~/empire-repo-main/backend/data/drawings`
+    is not the live tree when this code runs from another checkout of
+    feature/drawing-standard. The marker root is the live tree.
+    """
+    try:
+        return resolve_canonical_root() / "backend" / "data" / "drawings"
+    except CanonicalRootError:
+        return Path(__file__).resolve().parents[4] / "backend" / "data" / "drawings"
+
+
+# The canonical output dir lives under the live checkout's data tree.
 # Tests can override via MAX_DRAWINGS_OUTPUT_DIR (e.g. to a tmp_path).
-_DEFAULT_CANON_DIR = (
-    Path.home() / "empire-repo-main" / "backend" / "data" / "drawings"
-)
+_DEFAULT_CANON_DIR = _default_drawings_dir()
 
 # Path prefixes that MUST NOT be used as the resolved output root. The
 # stale fork is the canonical example — but anything that doesn't live
@@ -152,6 +165,41 @@ def _is_stale_fork_root(candidate: Path) -> bool:
     return False
 
 
+def historical_checkout_roots() -> list[Path]:
+    """Absolute prefixes Max still tries that are not the live tree.
+
+    `/home/rg/empire-repo` (the stale fork) is intentionally absent:
+    those paths stay refused. `empire-repo-main` is the historical
+    checkout name; file tools rewrite it onto the marker root.
+    """
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for root in (Path("/home/rg/empire-repo-main"), Path.home() / "empire-repo-main"):
+        key = os.path.normpath(str(root))
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(Path(key))
+    return roots
+
+
+def _rewrite_historical_checkout(candidate: Path, canonical: Path) -> Path:
+    """Map `/home/rg/empire-repo-main/...` onto the live Workroom checkout."""
+    if not candidate.is_absolute():
+        return candidate
+    norm = Path(os.path.normpath(str(candidate)))
+    canonical_norm = Path(os.path.normpath(str(canonical)))
+    for root in historical_checkout_roots():
+        try:
+            rel = norm.relative_to(root)
+        except ValueError:
+            continue
+        if root == canonical_norm:
+            return candidate
+        return canonical / rel
+    return candidate
+
+
 def resolve_path_under_canonical_root(
     relative_or_absolute: os.PathLike | str,
     start: os.PathLike | str | None = None,
@@ -162,6 +210,8 @@ def resolve_path_under_canonical_root(
       - absolute path → resolve canonical repo, verify the absolute
         path is INSIDE the canonical repo, return the resolved
         absolute path. Refuse if it escapes (via .. or symlinks).
+        Paths under `/home/rg/empire-repo-main` or `~/empire-repo-main`
+        are rewritten onto this checkout first (historical alias).
       - relative path → resolve against canonical root, return
         absolute path under canonical repo.
       - canonical repo missing the `.empire-canonical` marker →
@@ -190,6 +240,7 @@ def resolve_path_under_canonical_root(
         )
 
     candidate = Path(relative_or_absolute).expanduser()
+    candidate = _rewrite_historical_checkout(candidate, canonical)
     if not candidate.is_absolute():
         candidate = (canonical / candidate).resolve()
     else:
@@ -224,7 +275,7 @@ def canonical_drawings_dir() -> Path:
 
     Resolution order:
       1. $MAX_DRAWINGS_OUTPUT_DIR (if set) — checked for staleness.
-      2. ~/empire-repo-main/backend/data/drawings/ — the active repo.
+      2. <live Workroom checkout>/backend/data/drawings/ — the marker root.
 
     Returns the path with mkdir(parents=True, exist_ok=True) applied.
     Raises RuntimeError if either source resolves to a known stale

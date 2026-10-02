@@ -10,6 +10,7 @@ import ContinuityPanel from '../ContinuityPanel';
 import ViewPdfControl from '../ViewPdfControl';
 import ChatChartBlock from '../ChatChartBlock';
 import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../lib/chatContent';
+import FounderPinCard from '../chat/FounderPinCard';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -63,9 +64,10 @@ interface Props {
   setOnMessageComplete?: (cb: ((msg: Message) => void) | null) => void;
   onLoadChat?: (chatId: string) => void;
   onNewChat?: () => void;
+  onSubmitPin?: (messageId: string, resumeId: string, pin: string) => Promise<void> | void;
 }
 
-export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat }: Props) {
+export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat, onSubmitPin }: Props) {
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
@@ -880,6 +882,14 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               }
               return null;
             })}
+            {msg.pinPrompts?.map(prompt => (
+              <FounderPinCard
+                key={prompt.resumeId}
+                prompt={prompt}
+                disabled={isStreaming}
+                onSubmit={(resumeId, pin) => onSubmitPin?.(msg.id, resumeId, pin)}
+              />
+            ))}
           </div>
         ))}
 
@@ -1276,6 +1286,8 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
           {/* Send button */}
           <button
+            type="button"
+            aria-label="Send message"
             onClick={handleSend}
             disabled={isStreaming}
             style={{
