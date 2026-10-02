@@ -3027,12 +3027,27 @@ def _build_line_items_html(line_items: list) -> str:
                 <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em;font-weight:600">${item.get('total', 0) or item.get('amount', 0) or (item.get('unit_price', 0) or item.get('rate', 0)) * item.get('quantity', 1):,.2f}</td>
             </tr>"""
         html += f"""<tr><td colspan="4" style="padding:6px 8px;text-align:right;font-size:0.82em;color:#666">
-            Room Subtotal</td>
+            {room_name} Subtotal</td>
             <td style="padding:6px 8px;text-align:right;font-weight:700;font-size:0.9em;border-bottom:2px solid #eee">
             ${room_total:,.2f}</td></tr>"""
 
     html += "</tbody></table></div>"
     return html
+
+
+def _flat_quote_lines_html(line_items: list) -> str:
+    """Flat quote table. Rate and amount use thousands separators."""
+    items_html = ""
+    for item in line_items or []:
+        items_html += f"""<tr>
+                <td style="padding:8px;border-bottom:1px solid #eee">{item['description']}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;text-align:center">{item['quantity']} {item['unit']}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;text-align:right">${item['rate']:,.2f}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;text-align:right">${item['amount']:,.2f}</td>
+            </tr>"""
+    return f"""<table><thead><tr>
+            <th>Description</th><th>Qty</th><th>Rate</th><th style="text-align:right">Amount</th>
+        </tr></thead><tbody>{items_html}</tbody></table>"""
 
 
 def _discount_html(quote: dict) -> str:
@@ -3155,17 +3170,7 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
     if rooms:
         body_html = _build_rooms_html(rooms, has_design_proposals=bool(design_proposals))
     else:
-        items_html = ""
-        for item in quote.get("line_items", []):
-            items_html += f"""<tr>
-                <td style="padding:8px;border-bottom:1px solid #eee">{item['description']}</td>
-                <td style="padding:8px;border-bottom:1px solid #eee;text-align:center">{item['quantity']} {item['unit']}</td>
-                <td style="padding:8px;border-bottom:1px solid #eee;text-align:right">${item['rate']:.2f}</td>
-                <td style="padding:8px;border-bottom:1px solid #eee;text-align:right">${item['amount']:.2f}</td>
-            </tr>"""
-        body_html = f"""<table><thead><tr>
-            <th>Description</th><th>Qty</th><th>Rate</th><th style="text-align:right">Amount</th>
-        </tr></thead><tbody>{items_html}</tbody></table>"""
+        body_html = _flat_quote_lines_html(quote.get("line_items", []))
 
     try:
         from app.services.drawing.idea_drawing import quote_idea_html
