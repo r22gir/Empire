@@ -32,6 +32,22 @@ from .token_tracker import token_tracker
 
 logger = logging.getLogger("max.tts")
 
+
+def _minimax_language_boost(language: Optional[str]) -> str:
+    code = (language or "").lower()
+    if code.startswith("es"):
+        return "Spanish"
+    if code.startswith("en"):
+        return "English"
+    return "auto"
+
+
+def _xai_language(language: Optional[str]) -> str:
+    code = (language or "").lower()
+    if code.startswith("es"):
+        return "es"
+    return "en"
+
 # MAX voice config — one voice everywhere
 # Available xAI voices: ara, rex, sal, eve, leo
 TTS_VOICE = "rex"
@@ -88,6 +104,7 @@ class TTSService:
         text: str,
         voice: str,
         output_format: str,
+        language: Optional[str] = None,
     ) -> Optional[Path]:
         """Call MiniMax TTS, write audio to a temp file, return the path.
 
@@ -115,7 +132,7 @@ class TTSService:
                         "text": clean_text,
                         "stream": False,
                         "output_format": "hex",
-                        "language_boost": "auto",
+                        "language_boost": _minimax_language_boost(language),
                         "voice_setting": {"voice_id": voice, "speed": 1.0, "vol": 1.0, "pitch": 0},
                         "audio_setting": {
                             "sample_rate": 32000,
@@ -175,6 +192,7 @@ class TTSService:
         text: str,
         voice: str,
         output_format: str,
+        language: Optional[str] = None,
     ) -> Optional[Path]:
         """Call xAI Grok TTS, write audio to a temp file, return the path.
 
@@ -197,7 +215,7 @@ class TTSService:
                     json={
                         "text": clean_text,
                         "voice_id": voice,
-                        "language": "en",
+                        "language": _xai_language(language),
                     },
                 )
             if resp.status_code != 200:
@@ -227,6 +245,7 @@ class TTSService:
         text: str,
         voice: Optional[str] = None,
         output_format: str = "mp3",
+        language: Optional[str] = None,
     ) -> Optional[Path]:
         """Convert text to speech audio file. MiniMax primary, xAI fallback.
 
@@ -249,7 +268,7 @@ class TTSService:
 
         # Primary attempt: MiniMax
         if self.is_minimax_configured:
-            result = await self._synthesize_minimax(text, minimax_voice, output_format)
+            result = await self._synthesize_minimax(text, minimax_voice, output_format, language)
             if result is not None:
                 self.last_status = "ok"
                 self.last_error = ""
@@ -259,7 +278,7 @@ class TTSService:
 
         # Fallback attempt: xAI
         if self.is_xai_configured:
-            result = await self._synthesize_xai(text, xai_voice, output_format)
+            result = await self._synthesize_xai(text, xai_voice, output_format, language)
             if result is not None:
                 self.last_status = "ok"
                 self.last_error = ""

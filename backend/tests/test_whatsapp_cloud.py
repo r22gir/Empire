@@ -66,6 +66,7 @@ def test_status_is_off_until_env_is_complete(monkeypatch):
 
 def test_owner_text_voice_photo_and_confirmed_pdf(monkeypatch, tmp_path):
     _ready(monkeypatch, tmp_path, "maxine")
+    monkeypatch.setenv("WHATSAPP_REPLY_MODE", "text")
     from app.services import whatsapp_cloud as wa
     from app.services.instance_files import photo_timeline
     from app.services.voice_doc.store import get_draft
@@ -140,6 +141,113 @@ def test_owner_text_voice_photo_and_confirmed_pdf(monkeypatch, tmp_path):
 
     again = wa.handle_webhook(send, _sign(send))
     assert again["processed"] == 0
+
+
+def _graph(calls):
+    def fake(method, url, token="", body=None, headers=None):
+        calls.append({"method": method, "url": url, "token": token, "body": body or b"", "headers": headers or {}})
+        assert token == "test-token"
+        payload = body or b""
+        if method == "POST" and url.endswith("/media"):
+            if b"audio/ogg" in payload:
+                assert b"OggS" in payload
+                return 200, b'{"id":"media-voice"}'
+            return 200, b'{"id":"media-pdf"}'
+        if url.endswith("/messages"):
+            return 200, b'{"messages":[{"id":"wamid.out"}]}'
+        raise AssertionError(url)
+
+    return fake
+
+
+def test_default_reply_is_ogg_voice_plus_summary(monkeypatch, tmp_path):
+    _ready(monkeypatch, tmp_path, "amp")
+    monkeypatch.delenv("WHATSAPP_REPLY_MODE", raising=False)
+    from app.services import whatsapp_cloud as wa
+
+    calls = []
+    spoken = []
+
+    def synth(text, language):
+        spoken.append((text, language))
+        return b"OggS" + b"o" * 80
+
+    monkeypatch.setattr(wa, "graph_request", _graph(calls))
+    wa.remember_inbound("573001112233", int(time.time()))
+    full = ("El borrador de la cotización ya está listo y falta tu confirmación. " * 8).strip()
+    sent = wa.send_reply("573001112233", full, now=int(time.time()), synthesize=synth)
+    assert wa.reply_mode() == "voice_text"
+    assert sent["voice"] is True
+    assert sent["fallback"] is False
+    assert sent["language"] == "es-CO"
+    assert spoken == [(full, "es-CO")]
+    audio = [call for call in calls if b'"type": "audio"' in call["body"]]
+    texts = [call for call in calls if b'"type": "text"' in call["body"]]
+    assert len(audio) == 1
+    assert b'"voice": true' in audio[0]["body"]
+    assert len(texts) == 1
+    assert len(texts[0]["body"]) < len(full)
+    assert "cotizaci" in texts[0]["body"].decode("utf-8")
+    monkeypatch.setenv("EMPIRE_EDITION", "workroom")
+    assert wa.reply_language() == "en"
+
+
+def test_text_mode_and_match_follow_the_inbound_kind(monkeypatch, tmp_path):
+    _ready(monkeypatch, tmp_path, "maxine")
+    from app.services import whatsapp_cloud as wa
+
+    calls = []
+    monkeypatch.setattr(wa, "graph_request", _graph(calls))
+    now = int(time.time())
+    wa.remember_inbound("573001112233", now)
+    monkeypatch.setenv("WHATSAPP_REPLY_MODE", "text")
+
+    def unused(_text, _language):
+        raise AssertionError("text mode must not call TTS")
+
+    quiet = wa.send_reply("573001112233", "Solo texto.", now=now, synthesize=unused)
+    assert quiet["voice"] is False
+    assert quiet["fallback"] is False
+    assert b'"type": "audio"' not in calls[-1]["body"]
+    assert "Solo texto." in calls[-1]["body"].decode("utf-8")
+
+    monkeypatch.setenv("WHATSAPP_REPLY_MODE", "match")
+    calls.clear()
+    typed = wa.send_reply("573001112233", "Respuesta escrita.", now=now, inbound_kind="text", synthesize=unused)
+    assert typed["voice"] is False
+    assert calls and b'"type": "text"' in calls[-1]["body"]
+
+    def synth(text, language):
+        assert language == "es-CO"
+        assert text == "Respuesta hablada."
+        return b"OggS" + b"v" * 80
+
+    heard = wa.send_reply("573001112233", "Respuesta hablada.", now=now, inbound_kind="audio", synthesize=synth)
+    assert heard["voice"] is True
+    assert any(b'"type": "audio"' in call["body"] for call in calls)
+
+
+def test_tts_failure_falls_back_to_text_with_a_note(monkeypatch, tmp_path):
+    _ready(monkeypatch, tmp_path, "amp")
+    monkeypatch.setenv("WHATSAPP_REPLY_MODE", "voice_text")
+    from app.services import whatsapp_cloud as wa
+
+    calls = []
+    monkeypatch.setattr(wa, "graph_request", _graph(calls))
+    now = int(time.time())
+    wa.remember_inbound("573001112233", now)
+
+    def broken(_text, _language):
+        return None
+
+    sent = wa.send_reply("573001112233", "El detalle completo del borrador.", now=now, synthesize=broken)
+    assert sent["voice"] is False
+    assert sent["fallback"] is True
+    body = b"".join(call["body"] for call in calls)
+    assert b'"type": "audio"' not in body
+    assert "nota de voz" in body.decode("utf-8")
+    assert "El detalle completo del borrador." in body.decode("utf-8")
+    assert "test-token" not in body.decode("utf-8")
 
 
 def test_rejects_bad_signature_strangers_and_other_numbers(monkeypatch, tmp_path):

@@ -28,12 +28,14 @@ Set these on the instance. Do not commit them.
 | `WHATSAPP_VERIFY_TOKEN` | Matches `hub.verify_token` on the handshake |
 | `WHATSAPP_OWNER_NUMBERS` | Comma-separated owner numbers. Required before the channel answers |
 | `WHATSAPP_APPROVED_TEMPLATES` | Optional comma-separated template names already approved in Meta |
+| `WHATSAPP_REPLY_MODE` | `voice_text` (default), `text`, or `match` |
 
 If any of the first four is missing, inbound webhooks return 503 and the UI shows the channel off.
 
 ### Behavior
 
 - Text and voice notes use the same Spanish voice-to-document borrador. Voice is downloaded from Meta and transcribed. Nothing is emailed.
+- Replies follow `WHATSAPP_REPLY_MODE`. `voice_text` (the default) sends an OGG/Opus voice note in the edition language — Spanish `es-CO` for Max-e and Maxine — and a short text summary of the same reply. `text` sends text only. `match` uses the voice note when the owner sent audio, and text when they wrote. If speech synthesis fails, the reply is text only and says so. PDF documents stay attachments.
 - A PDF is sent back as a WhatsApp document only after the owner writes a confirmation such as `envía el borrador` or `send the draft`.
 - Photos are saved on the project timeline. A caption like `proyecto Portal lote 12 etapa cimentacion` sets the project, lot, and stage.
 - Session replies are allowed for 24 hours after the owner's last message. Outside that window the only outbound path is a name listed in `WHATSAPP_APPROVED_TEMPLATES`.
@@ -42,6 +44,7 @@ If any of the first four is missing, inbound webhooks return 503 and the UI show
 ### Files to copy onto `feature/drawing-standard`
 
 - `backend/app/services/whatsapp_cloud.py`
+- `backend/app/services/max/tts_service.py` (language argument for es-CO / English)
 - `backend/app/routers/whatsapp.py`
 - `backend/app/main.py` (the `load_router` line for `app.routers.whatsapp`)
 - `backend/app/services/max/hermes_phase3.py` (live WhatsApp status instead of the placeholder)
@@ -89,12 +92,14 @@ Estas variables viven en la instancia. No se commitean.
 | `WHATSAPP_VERIFY_TOKEN` | Coincide con `hub.verify_token` |
 | `WHATSAPP_OWNER_NUMBERS` | Números del dueño, separados por coma. Sin esto el canal no contesta |
 | `WHATSAPP_APPROVED_TEMPLATES` | Opcional. Nombres de plantillas ya aprobadas en Meta |
+| `WHATSAPP_REPLY_MODE` | `voice_text` (predeterminado), `text` o `match` |
 
 Si falta alguna de las cuatro primeras, el webhook responde 503 y la interfaz muestra el canal apagado.
 
 ### Comportamiento
 
 - El texto y las notas de voz entran al mismo borrador de voz a documento. La nota se descarga de Meta y se transcribe. No se envía correo.
+- Las respuestas siguen `WHATSAPP_REPLY_MODE`. `voice_text`, el valor predeterminado, manda una nota de voz OGG/Opus en el idioma de la edición — español `es-CO` en Max-e y Maxine — y un texto corto con el mismo contenido resumido. `text` manda solo texto. `match` usa la nota de voz si el dueño envió audio, y texto si escribió. Si la síntesis de voz falla, sale solo el texto y lo dice. Los documentos siguen como PDF.
 - El PDF vuelve como documento de WhatsApp solo después de que el dueño escriba una confirmación, por ejemplo `envía el borrador` o `send the draft`.
 - Las fotos quedan en la línea de tiempo del proyecto. Un pie como `proyecto Portal lote 12 etapa cimentacion` fija proyecto, lote y etapa.
 - Las respuestas de sesión caben en las 24 horas siguientes al último mensaje del dueño. Fuera de esa ventana solo sale una plantilla cuyo nombre esté en `WHATSAPP_APPROVED_TEMPLATES`.

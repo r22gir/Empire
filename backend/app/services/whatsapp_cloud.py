@@ -68,6 +68,31 @@ def approved_templates() -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
+def reply_mode() -> str:
+    mode = os.getenv("WHATSAPP_REPLY_MODE", "voice_text").strip().lower()
+    if mode in {"voice_text", "text", "match"}:
+        return mode
+    return "voice_text"
+
+
+def reply_language() -> str:
+    """Max-e and Maxine speak es-CO. Workroom stays English unless configured."""
+    try:
+        from app.edition import default_locale, is_family_edition
+
+        if is_family_edition():
+            return "es-CO"
+        locale = default_locale()
+    except Exception:
+        locale = os.getenv("EMPIRE_DEFAULT_LOCALE", "en")
+    code = (locale or "en").lower()
+    if code.startswith("es"):
+        return "es-CO"
+    if code.startswith("en"):
+        return "en"
+    return code
+
+
 def missing_config() -> list[str]:
     return [name for name in REQUIRED_ENV if not _present(name)]
 
@@ -110,6 +135,8 @@ def channel_status() -> dict:
         "service_window_hours": 24,
         "webhook_path": "/api/v1/whatsapp/webhook",
         "documents_auto_send": False,
+        "reply_mode": reply_mode(),
+        "reply_language": reply_language(),
         "reason_es": reason_es,
         "reason_en": reason_en,
         "reason": reason_es,
@@ -290,6 +317,182 @@ def send_session_text(wa_id: str, text: str, *, now: int | None = None) -> dict:
     return {"sent": True, "id": ((result.get("messages") or [{}])[0].get("id")), "kind": "text"}
 
 
+def summarize_reply(text: str, limit: int = 240) -> str:
+    compact = " ".join((text or "").split())
+    if len(compact) <= limit:
+        return compact
+    cut = compact[:limit]
+    pause = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "))
+    if pause >= 80:
+        return cut[: pause + 1]
+    space = cut.rfind(" ")
+    if space > 40:
+        return cut[:space] + "…"
+    return cut + "…"
+
+
+def _voice_failed_note(language: str) -> str:
+    if (language or "").lower().startswith("es"):
+        return "No pude generar la nota de voz. Sigue el texto."
+    return "I could not make the voice note. The text follows."
+
+
+def _wants_voice(mode: str, inbound_kind: str) -> bool:
+    if mode == "voice_text":
+        return True
+    if mode == "match" and inbound_kind in {"audio", "voice"}:
+        return True
+    return False
+
+
+def _as_ogg_opus(data: bytes) -> bytes | None:
+    if data.startswith(b"OggS") and len(data) >= 64:
+        return data
+    import shutil
+    import subprocess
+    import tempfile
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg or not data:
+        return None
+    src = Path(tempfile.mktemp(suffix=".audio"))
+    dest = Path(tempfile.mktemp(suffix=".ogg"))
+    try:
+        src.write_bytes(data)
+        done = subprocess.run(
+            [ffmpeg, "-y", "-i", str(src), "-c:a", "libopus", "-f", "ogg", str(dest)],
+            capture_output=True,
+            timeout=30,
+        )
+        if done.returncode != 0 or not dest.is_file():
+            return None
+        encoded = dest.read_bytes()
+        if encoded.startswith(b"OggS"):
+            return encoded
+        return None
+    except Exception:
+        return None
+    finally:
+        src.unlink(missing_ok=True)
+        dest.unlink(missing_ok=True)
+
+
+def _default_synthesize(text: str, language: str) -> bytes | None:
+    try:
+        import asyncio
+
+        from app.services.max.tts_service import tts_service
+    except Exception:
+        return None
+
+    async def _go() -> bytes | None:
+        path = await tts_service.synthesize(text, output_format="opus", language=language)
+        if path is None:
+            return None
+        try:
+            return Path(path).read_bytes()
+        finally:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    try:
+        raw = asyncio.run(_go())
+    except RuntimeError:
+        return None
+    except Exception:
+        return None
+    if not raw:
+        return None
+    return _as_ogg_opus(raw)
+
+
+def _upload_audio(data: bytes) -> str:
+    token = _token()
+    boundary = "wa" + uuid.uuid4().hex
+    body = b"".join([
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"messaging_product\"\r\n\r\nwhatsapp\r\n".encode("utf-8"),
+        (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"nota.ogg\"\r\n"
+            "Content-Type: audio/ogg; codecs=opus\r\n\r\n"
+        ).encode("utf-8"),
+        data,
+        f"\r\n--{boundary}--".encode("utf-8"),
+    ])
+    _status, raw = graph_request(
+        "POST",
+        f"{GRAPH}/{_phone_id()}/media",
+        token=token,
+        body=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise WhatsAppError("Meta no recibió la nota de voz") from None
+    media_id = parsed.get("id") if isinstance(parsed, dict) else None
+    if not media_id:
+        raise WhatsAppError("Meta no recibió la nota de voz")
+    return media_id
+
+
+def _send_audio(number: str, media_id: str) -> dict:
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": number,
+        "type": "audio",
+        "audio": {"id": media_id, "voice": True},
+    }
+    result = _graph_json("POST", f"{GRAPH}/{_phone_id()}/messages", payload, _token())
+    return {"sent": True, "id": ((result.get("messages") or [{}])[0].get("id")), "kind": "audio"}
+
+
+def send_reply(wa_id: str, text: str, *, now: int | None = None, inbound_kind: str = "text", synthesize=None) -> dict:
+    """Voice note plus a short text copy, unless this instance asks for text only."""
+    language = reply_language()
+    mode = reply_mode()
+    number = _digits(wa_id)
+    if number not in owner_numbers():
+        return {"sent": False, "voice": False, "fallback": False, "mode": mode, "language": language, "reason": "Ese número no está en la lista del dueño."}
+    if not within_service_window(number, now):
+        return {"sent": False, "voice": False, "fallback": False, "mode": mode, "language": language, "reason": "Fuera de la ventana de 24 horas. Solo una plantilla aprobada puede salir."}
+    use_voice = _wants_voice(mode, inbound_kind)
+    voice_sent = False
+    if use_voice:
+        maker = synthesize or _default_synthesize
+        try:
+            audio = maker(text, language)
+        except Exception:
+            audio = None
+        if audio:
+            audio = _as_ogg_opus(audio)
+        if audio:
+            try:
+                media_id = _upload_audio(audio)
+                _send_audio(_digits(wa_id), media_id)
+                voice_sent = True
+            except WhatsAppError:
+                voice_sent = False
+    if voice_sent:
+        body = summarize_reply(text)
+    elif use_voice:
+        body = _voice_failed_note(language) + "\n\n" + text
+    else:
+        body = text
+    delivered = send_session_text(wa_id, body, now=now)
+    return {
+        "sent": bool(delivered.get("sent")),
+        "voice": voice_sent,
+        "fallback": bool(use_voice and not voice_sent),
+        "mode": mode,
+        "language": language,
+        "kind": "voice_text" if voice_sent else "text",
+        "reason": delivered.get("reason"),
+    }
+
+
 def send_template(wa_id: str, template_name: str, *, language: str = "es") -> dict:
     number = _digits(wa_id)
     if number not in owner_numbers():
@@ -405,7 +608,7 @@ def _default_transcribe(path: Path) -> str:
     return stt_service.transcribe_sync(path, language=None)
 
 
-def _reply_pipeline(wa_id: str, transcript: str, *, now: int) -> dict:
+def _reply_pipeline(wa_id: str, transcript: str, *, now: int, inbound_kind: str = "text", synthesize=None) -> dict:
     from app.services.voice_doc import format_session_reply, ingest_transcript
     from app.services.voice_doc.extract import choice_from_text
     from app.services.voice_doc.store import latest_draft_for_channel
@@ -414,22 +617,21 @@ def _reply_pipeline(wa_id: str, transcript: str, *, now: int) -> dict:
         draft = latest_draft_for_channel("whatsapp")
         if not draft:
             text = "No hay un borrador para enviar. Dicta el documento y di listo."
-            send_session_text(wa_id, text, now=now)
+            send_reply(wa_id, text, now=now, inbound_kind=inbound_kind, synthesize=synthesize)
             return {"handled": True, "document": False, "reply": text}
         delivered = send_draft_document(wa_id, draft, now=now)
         text = "Envié el PDF por este chat. No se envió correo. Sigue marcado BORRADOR."
         if not delivered.get("sent"):
             text = delivered.get("reason") or "No envié el PDF."
-        else:
-            send_session_text(wa_id, text, now=now)
+        send_reply(wa_id, text, now=now, inbound_kind=inbound_kind, synthesize=synthesize)
         return {"handled": True, "document": bool(delivered.get("document")), "reply": text, "draft_id": draft.get("id")}
     view = ingest_transcript(transcript, channel="whatsapp", edition=edition_label(), choice_id=choice_from_text(transcript))
     reply = format_session_reply(view)
-    send_session_text(wa_id, reply, now=now)
+    send_reply(wa_id, reply, now=now, inbound_kind=inbound_kind, synthesize=synthesize)
     return {"handled": True, "document": False, "reply": reply, "draft_id": (view.get("draft") or {}).get("id")}
 
 
-def handle_webhook(body: bytes, signature: str, *, transcribe=None) -> dict:
+def handle_webhook(body: bytes, signature: str, *, transcribe=None, synthesize=None) -> dict:
     if not configured():
         return {"ok": False, "http_status": 503, "status": channel_status()["status"], "processed": 0}
     if not verify_signature(body, signature):
@@ -461,7 +663,7 @@ def handle_webhook(body: bytes, signature: str, *, transcribe=None) -> dict:
                 remember_inbound(sender, timestamp)
                 kind = message.get("type")
                 if kind == "text":
-                    last = _reply_pipeline(sender, ((message.get("text") or {}).get("body") or ""), now=timestamp)
+                    last = _reply_pipeline(sender, ((message.get("text") or {}).get("body") or ""), now=timestamp, inbound_kind="text", synthesize=synthesize)
                     processed += 1
                 elif kind in {"audio", "voice"}:
                     media = message.get("audio") or message.get("voice") or {}
@@ -476,10 +678,10 @@ def handle_webhook(body: bytes, signature: str, *, transcribe=None) -> dict:
                     finally:
                         path.unlink(missing_ok=True)
                     if not transcript or str(transcript).startswith("["):
-                        send_session_text(sender, "No pude transcribir la nota.", now=timestamp)
+                        send_reply(sender, "No pude transcribir la nota.", now=timestamp, inbound_kind=kind, synthesize=synthesize)
                         last = {"handled": False, "document": False}
                     else:
-                        last = _reply_pipeline(sender, str(transcript), now=timestamp)
+                        last = _reply_pipeline(sender, str(transcript), now=timestamp, inbound_kind=kind, synthesize=synthesize)
                     processed += 1
                 elif kind == "image":
                     media = message.get("image") or {}
@@ -495,10 +697,10 @@ def handle_webhook(body: bytes, signature: str, *, transcribe=None) -> dict:
                         stage=stage,
                         source="whatsapp",
                     )
-                    send_session_text(sender, f"Foto guardada en {project}. Lote {lot or '—'} · etapa {stage or '—'}.", now=timestamp)
+                    send_reply(sender, f"Foto guardada en {project}. Lote {lot or '—'} · etapa {stage or '—'}.", now=timestamp, inbound_kind="image", synthesize=synthesize)
                     processed += 1
                 else:
-                    send_session_text(sender, "Puedo leer texto, notas de voz y fotos.", now=timestamp)
+                    send_reply(sender, "Puedo leer texto, notas de voz y fotos.", now=timestamp, inbound_kind=kind or "text", synthesize=synthesize)
                     processed += 1
                 if message_id:
                     _mark_seen(message_id)
