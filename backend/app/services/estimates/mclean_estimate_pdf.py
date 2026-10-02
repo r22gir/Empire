@@ -988,30 +988,92 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
     return buf.getvalue()
 
 
-def _qty_with_unit(it: Dict[str, Any]) -> str:
-    """Qty plus its unit, such as '12.5 yd' or '3 widths'."""
+_QTY_UNIT_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(widths?|yards?|yds?|each|ea|pieces?|pcs?)\b",
+    re.I,
+)
+_DESC_FONT = 8.0
+_DESC_LEADING = 13.0
+_ROW_GAP = 6.0
+
+
+def _canon_unit(unit: str, qty: float | None) -> str:
+    u = (unit or "").strip().lower().rstrip(".")
+    if u in {"width", "widths"}:
+        return "width" if qty == 1 else "widths"
+    if u in {"yd", "yds", "yard", "yards"}:
+        return "yd"
+    if u in {"ea", "each"}:
+        return "ea"
+    if u in {"pc", "pcs", "piece", "pieces"}:
+        return "pc" if qty == 1 else "pcs"
+    return (unit or "").strip()
+
+
+def _parsed_unit(description: str, qty: float | None) -> str:
+    """Unit written on the line, such as '8 widths' or '32 yd'."""
+    text = description or ""
+    chosen = ""
+    for match in _QTY_UNIT_RE.finditer(text):
+        word = match.group(2)
+        if qty is None:
+            chosen = word
+            continue
+        try:
+            if abs(float(match.group(1)) - float(qty)) < 0.02:
+                return _canon_unit(word, qty)
+        except ValueError:
+            continue
+    if chosen:
+        return _canon_unit(chosen, qty)
+    low = text.lower()
+    if "per width" in low:
+        return "width" if qty == 1 else "widths"
+    if "per yard" in low or "per yd" in low:
+        return "yd"
+    return ""
+
+
+def _qty_number(it: Dict[str, Any]) -> tuple[float | None, str]:
     raw_qty = it.get("quantity")
-    unit = str(it.get("unit") or "").strip()
     if raw_qty in (None, "") and it.get("yards_needed") not in (None, "", 0, 0.0):
         raw_qty = it.get("yards_needed")
-        unit = unit or "yd"
     if raw_qty in (None, ""):
-        return unit
+        return None, ""
     try:
         qty = float(raw_qty)
     except (TypeError, ValueError):
-        return f"{raw_qty} {unit}".strip()
+        return None, str(raw_qty)
     text = str(int(qty)) if qty.is_integer() else f"{qty:g}"
-    unit_l = unit.lower()
-    if unit_l in {"yd", "yard", "yards", "yds"}:
-        shown = "yd"
-    elif unit_l in {"width", "widths"}:
-        shown = "width" if qty == 1 else "widths"
-    elif unit_l in {"", "ea", "each"}:
-        shown = ""
+    return qty, text
+
+
+def _qty_with_unit(it: Dict[str, Any]) -> str:
+    """Qty plus the line's unit. Generic 'ea' yields to widths/yd in the description."""
+    qty, text = _qty_number(it)
+    field = str(it.get("unit") or it.get("uom") or "").strip()
+    field_unit = _canon_unit(field, qty) if field else ""
+    parsed = _parsed_unit(str(it.get("description") or ""), qty)
+    if parsed and parsed != "ea" and field_unit in {"", "ea"}:
+        shown = parsed
+    elif field_unit:
+        shown = field_unit
     else:
-        shown = unit
+        shown = parsed
+    if not text:
+        return shown
     return f"{text} {shown}".strip()
+
+
+def _rate_text(it: Dict[str, Any]) -> str:
+    """$0 lines are marked RATE NEEDED. That marker is not a section."""
+    rate = _line_rate(it)
+    amount = _line_amount_value(it)
+    if (rate is None or abs(rate) < 0.005) and abs(amount) < 0.005:
+        return "RATE NEEDED"
+    if rate is None:
+        return ""
+    return _money(rate)
 
 
 def _line_rate(it: Dict[str, Any]) -> float | None:
@@ -1045,6 +1107,20 @@ def _explicit_extra_line(it: Dict[str, Any]) -> bool:
     return False
 
 
+def _is_rate_marker(text: str) -> bool:
+    """'Rate needed' is a missing-price flag, not a section or room."""
+    low = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+    return low in {
+        "rate needed",
+        "rates needed",
+        "estimate",
+        "estimate rate needed",
+        "tbd",
+        "open tbd",
+        "extra tbd",
+    }
+
+
 def _header_section_name(it: Dict[str, Any]) -> str:
     desc = (it.get("description") or "").strip()
     for prefix in ("SECTION —", "SECTION -", "§"):
@@ -1054,14 +1130,50 @@ def _header_section_name(it: Dict[str, Any]) -> str:
     return desc or "Section"
 
 
-def group_estimate_sections(items: List[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
-    """Keep each line in the section it belongs to.
+def _phase_heading(description: str) -> str:
+    """'Phase 1 — Downstairs Living Room: Remove…' → the phase/room."""
+    desc = (description or "").strip()
+    if ":" not in desc:
+        return ""
+    head = desc.split(":", 1)[0].strip()
+    if not head or head == desc or _is_rate_marker(head) or len(head) > 90:
+        return ""
+    return head
 
-    Priced yardage and width lines stay with their section. They are not
-    moved into Extra work, and they are not dropped.
+
+def _line_section_name(it: Dict[str, Any], header: str | None) -> str:
+    """Section for one line.
+
+    A real section, room, or phase wins. Fabric and materials use their
+    category. An open SECTION header applies only when this line does not
+    name its own. 'Rate needed' is never a section.
+    """
+    for key in ("section", "section_name", "room"):
+        raw = it.get(key)
+        if isinstance(raw, str) and raw.strip() and not _is_rate_marker(raw):
+            return raw.strip()
+    phase = _phase_heading(str(it.get("description") or ""))
+    if phase:
+        return phase
+    if header and not _is_rate_marker(header):
+        return header
+    if _explicit_extra_line(it):
+        return "Extra work"
+    cat = str(it.get("category") or "").strip()
+    if cat and not _is_rate_marker(cat) and cat.lower() not in {"com_fabric", "manual_line", "note"}:
+        return cat.replace("_", " ").title()
+    return "Quoted"
+
+
+def group_estimate_sections(items: List[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
+    """Group by each line's phase, room, or real section.
+
+    'Rate needed' never becomes a section. A $0 line stays with its phase
+    and is marked on that row. Subtotals are the sum of that section only.
     """
     sections: List[Tuple[str, List[Dict[str, Any]]]] = []
     current: str | None = None
+    header: str | None = None
     bucket: List[Dict[str, Any]] = []
 
     def flush() -> None:
@@ -1080,26 +1192,11 @@ def group_estimate_sections(items: List[Dict[str, Any]]) -> List[Tuple[str, List
             continue
         if _is_section_row(it):
             flush()
-            current = _header_section_name(it)
+            named = _header_section_name(it)
+            header = None if _is_rate_marker(named) else named
+            current = header
             continue
-        explicit = ""
-        for key in ("section", "section_name"):
-            raw = it.get(key)
-            if isinstance(raw, str) and raw.strip():
-                explicit = raw.strip()
-                break
-        if explicit:
-            name = explicit
-        elif _explicit_extra_line(it):
-            name = "Extra work"
-        elif current:
-            name = current
-        else:
-            cat = str(it.get("category") or "").strip()
-            if cat and cat.lower() not in {"com_fabric", "open_tbd", "extra_tbd", "tbd"}:
-                name = cat.replace("_", " ").title()
-            else:
-                name = "Quoted"
+        name = _line_section_name(it, header)
         if bucket and name != (current or "Quoted"):
             flush()
         current = name
@@ -1108,21 +1205,46 @@ def group_estimate_sections(items: List[Dict[str, Any]]) -> List[Tuple[str, List
     return sections
 
 
+def _description_max_width() -> float:
+    """Description column stops short of the right-aligned qty."""
+    qty_x = PW - MARGIN_R - 200
+    return max(220.0, qty_x - 88 - MARGIN_L)
+
+
+def _wrap_to_width(text: str, font: str, size: float, max_width: float) -> List[str]:
+    words = (text or "").split()
+    if not words:
+        return []
+    lines: List[str] = []
+    current = ""
+    for word in words:
+        trial = word if not current else f"{current} {word}"
+        if current and pdfmetrics.stringWidth(trial, font, size) > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = trial
+    if current:
+        lines.append(current)
+    return lines
+
+
 def _description_lines(it: Dict[str, Any]) -> List[str]:
-    raw = (it.get("description") or "Item").strip()
-    first = raw.split("\n")[0].strip() or "Item"
-    lines = _wrap(first, 52) or ["Item"]
+    _serif, sans, _sans_b, _mono = _ensure_body_fonts()
+    raw = " ".join((it.get("description") or "Item").split()) or "Item"
+    lines = _wrap_to_width(raw, sans, _DESC_FONT, _description_max_width()) or ["Item"]
     dim = quote_item_dimension_text(it)
     if dim and all(dim not in line for line in lines):
         lines.append(dim)
     fabric = it.get("fabric_name")
     if fabric:
         lines.append(f"Fabric: {fabric}")
-    return lines[:4]
+    return lines
 
 
 def _line_block_height(it: Dict[str, Any]) -> float:
-    return 12 + 11 * (len(_description_lines(it)) - 1) + 8
+    """Row height grows with every wrapped description line."""
+    return _DESC_LEADING * len(_description_lines(it)) + _ROW_GAP
 
 
 def _estimate_note_lines(quote: Dict[str, Any]) -> List[str]:
@@ -1263,18 +1385,17 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
             elif kind == "line":
                 it = op[1]
                 desc_lines = _description_lines(it)
-                rate = _line_rate(it)
-                c.setFont(sans, 8)
-                c.setFillColor(DK)
-                c.drawString(MARGIN_L, y, desc_lines[0][:64])
-                c.drawRightString(qty_x, y, _qty_with_unit(it))
-                c.drawRightString(rate_x, y, _money(rate) if rate is not None else "")
-                c.drawRightString(amount_x, y, _money(_line_amount_value(it)))
-                for extra in desc_lines[1:]:
-                    y -= 11
-                    c.setFillColor(DETAIL)
-                    c.drawString(MARGIN_L, y, extra[:70])
-                y -= 8
+                c.setFont(sans, _DESC_FONT)
+                for i, line in enumerate(desc_lines):
+                    c.setFillColor(DK if i == 0 else DETAIL)
+                    c.drawString(MARGIN_L, y, line)
+                    if i == 0:
+                        c.setFillColor(DK)
+                        c.drawRightString(qty_x, y, _qty_with_unit(it))
+                        c.drawRightString(rate_x, y, _rate_text(it))
+                        c.drawRightString(amount_x, y, _money(_line_amount_value(it)))
+                    y -= _DESC_LEADING
+                y -= _ROW_GAP
             elif kind == "subtotal":
                 y = _draw_band_subtotal(
                     c, y, f"SUBTOTAL — {op[1]}"[:80], _money(op[2]), sans_b, sans,

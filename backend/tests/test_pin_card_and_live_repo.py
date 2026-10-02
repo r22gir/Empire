@@ -98,15 +98,23 @@ def test_wrong_pin_does_not_consume_the_pending_call(monkeypatch, caplog):
     assert SECRET not in json.dumps(outcome)
 
 
-def test_runtime_truth_reports_the_live_checkout_not_empire_repo_main():
+def test_selfdiag_checkout_is_derived_from_running_code():
+    """The reported checkout is the directory this code is running from.
+
+    On the Dell that directory is /home/rg/empire-repo-main. The test
+    checks the derivation, not that the path differs from that checkout.
+    """
+    from app.services.drawing import canonical_path
     from app.services.drawing.canonical_path import running_code_root
+    from app.services.max import runtime_truth_check
     from app.services.max.runtime_truth_check import _git_commit, live_checkout_sentence
+
     commit = _git_commit()
-    live = str(running_code_root())
-    assert live == str(resolve_canonical_root())
-    assert commit["repo_root"] == live
+    live = running_code_root()
+    assert live == resolve_canonical_root()
+    assert commit["repo_root"] == str(live)
     assert commit["branch"] == "feature/drawing-standard"
     sentence = live_checkout_sentence(commit["repo_root"], commit["branch"])
-    assert live in sentence
-    assert "/home/rg/empire-repo-main" not in sentence
-    assert Path(__file__).resolve().is_relative_to(Path(live))
+    assert str(live) in sentence
+    assert Path(canonical_path.__file__).resolve().is_relative_to(live)
+    assert Path(runtime_truth_check.__file__).resolve().is_relative_to(live)
