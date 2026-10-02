@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["socialforge"])
 
+from app.routers.account_hub import router as account_hub_router  # noqa: E402
+
+router.include_router(account_hub_router)
+
 DATA_DIR = os.path.expanduser("~/empire-repo/backend/data/socialforge")
 POSTS_DIR = os.path.join(DATA_DIR, "posts")
 CAMPAIGNS_DIR = os.path.join(DATA_DIR, "campaigns")
