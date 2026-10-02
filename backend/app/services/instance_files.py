@@ -98,12 +98,19 @@ def connection_status(user_id: str) -> dict:
     if (user_id or "").strip():
         path = token_path(user_id)
         connected = path.is_file()
+    configured = oauth_configured()
     return {
-        "configured": oauth_configured(),
-        "connected": connected,
+        "configured": configured,
+        "enabled": configured,
+        "connected": connected if configured else False,
         "uses_shared_founder_account": False,
         "working_copy": str(working_root()),
-        "archive": "google_drive_per_user" if connected else "not_connected",
+        "archive": "google_drive_per_user" if configured and connected else "not_connected",
+        "reason": (
+            ""
+            if configured
+            else "Google Drive y Photos están apagados hasta que existan GOOGLE_OAUTH_CLIENT_ID y GOOGLE_OAUTH_CLIENT_SECRET. No uso otra cuenta."
+        ),
     }
 
 
@@ -402,6 +409,16 @@ def nightly_export() -> dict:
             rows.append(path.read_text(encoding="utf-8"))
         snap.write_text("\n".join(rows), encoding="utf-8")
         copied.append("businesses.json")
+    if not oauth_configured():
+        return {
+            "day": day,
+            "working_copy": str(export_dir),
+            "files": copied,
+            "uploads": [],
+            "enabled": False,
+            "reason": "La exportación nocturna a Drive está apagada hasta que existan las credenciales de Google.",
+            "uses_shared_founder_account": False,
+        }
     uploads = []
     for user_id in connected_users():
         folder = drive_path(business="export", project="nightly", client=user_id, day=day)
@@ -432,6 +449,7 @@ def nightly_export() -> dict:
         "working_copy": str(export_dir),
         "files": copied,
         "uploads": uploads,
+        "enabled": True,
         "uses_shared_founder_account": False,
     }
 
@@ -499,6 +517,8 @@ def photo_timeline(project: str) -> list[dict]:
 def picker_session(user_id: str, opener) -> dict:
     """`opener(url, token)` performs the Photos Picker call. Tests pass a fake."""
     status = connection_status(user_id)
+    if not status["enabled"]:
+        return {"ok": False, "enabled": False, "reason": status["reason"]}
     if not status["connected"]:
         return {"ok": False, "reason": "Conecta la cuenta de Google de este usuario. No hay una cuenta compartida."}
     token = json.loads(token_path(user_id).read_text(encoding="utf-8"))

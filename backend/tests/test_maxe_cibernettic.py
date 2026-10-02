@@ -98,6 +98,25 @@ def test_currency_and_business_are_choices_when_unsaid(monkeypatch, tmp_path):
     assert picked["options"]["kind"] == "billing"
 
 
+def test_drive_stays_off_until_google_credentials_exist(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    from app.services import instance_files as files
+
+    status = files.connection_status("juan@example.com")
+    assert status["enabled"] is False
+    assert "GOOGLE_OAUTH_CLIENT_ID" in status["reason"]
+    files.remember_user("juan@example.com")
+    files.token_path("juan@example.com").write_text('{"access_token":"stale"}', encoding="utf-8")
+    (tmp_path / "construction.db").write_bytes(b"sqlite")
+    exported = files.nightly_export()
+    assert exported["enabled"] is False
+    assert exported["uploads"] == []
+    assert exported["files"] == ["construction.db"]
+    picker = files.picker_session("juan@example.com", lambda *_: {"id": "nope"})
+    assert picker["ok"] is False
+    assert picker["enabled"] is False
+
+
 def test_drive_is_per_user_and_photos_are_picked_only(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     from app.services import instance_files as files

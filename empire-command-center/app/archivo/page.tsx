@@ -1,14 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { API } from '../lib/api';
 import ProjectPhotos from '../components/voice/ProjectPhotos';
 
 export default function ArchivoPage() {
   const [userId, setUserId] = useState('');
   const [status, setStatus] = useState('');
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch(`${API}/files/drive/status`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setEnabled(Boolean(data.enabled));
+        if (!data.enabled && data.reason) setStatus(data.reason);
+      })
+      .catch(() => {});
+  }, []);
 
   async function connect() {
+    if (enabled === false) return;
     const res = await fetch(`${API}/files/drive/connect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -31,7 +44,9 @@ export default function ArchivoPage() {
         Correo de este usuario
         <input value={userId} onChange={(event) => setUserId(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 4, padding: 8 }} />
       </label>
-      <button type="button" onClick={connect} style={{ marginTop: 8 }}>Conectar mi Google Drive</button>
+      <button type="button" onClick={connect} disabled={enabled === false} style={{ marginTop: 8 }}>
+        {enabled === false ? 'Drive apagado hasta tener credenciales' : 'Conectar mi Google Drive'}
+      </button>
       <h2>Fotos de obra o de proyecto</h2>
       <ProjectPhotos />
       {status ? <p>{status}</p> : null}
