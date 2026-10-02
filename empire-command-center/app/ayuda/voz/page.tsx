@@ -25,6 +25,9 @@ export default function ComoUsarLaVoz() {
       <p style={{ fontSize: 14, color: '#444' }}>
         En Maxine puedes separar un lote: “separar el lote 12 para Juan Pérez, cuota inicial 30%, saldo en 24 meses”. El precio tiene que decirlo tú. El estado del lote pasa a reservado, separado o vendido solo cuando lo confirmas.
       </p>
+      <p style={{ fontSize: 14, color: '#444' }}>
+        Max-e tiene dos empresas. En AMP dictas cursos, programas y membresías. En Cibernettic dictas propuestas, cotizaciones, SLA, NDA, tratamiento de datos, órdenes de trabajo y facturas en pesos o dólares. Si no se entiende cuál empresa es, Max-e pregunta. Las plantillas legales salen en blanco, marcadas BORRADOR, hasta que las reemplazas por las tuyas.
+      </p>
       <Link href="/" style={{ color: '#b8960c', fontWeight: 700 }}>Volver al centro de mando</Link>
     </main>
   );

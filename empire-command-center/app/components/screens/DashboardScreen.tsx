@@ -4,6 +4,7 @@ import { useAssistantName } from '../../lib/assistant';
 import { useEdition } from '../../lib/edition';
 import UsageCard from '../UsageCard';
 import VoiceHelpCard from '../voice/VoiceHelpCard';
+import MaxeBusinesses from '../voice/MaxeBusinesses';
 import { API } from '../../lib/api';
 import { BusinessTab } from '../../lib/types';
 import { Zap, Megaphone, Headphones, Users, Shield, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
@@ -38,6 +39,7 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
         </div>
       </div>
       {family ? <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}><UsageCard /><VoiceHelpCard /></div> : null}
+      {edition === 'amp' ? <MaxeBusinesses /> : null}
 
       {/* KPI Cards - Owner / Platform overview (no business data) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 mb-4">

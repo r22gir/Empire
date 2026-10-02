@@ -21,6 +21,13 @@ LEGAL_SLOTS = (
     {"key": "anexo_plan_pagos", "title": "Anexo plan de pagos"},
 )
 
+IT_LEGAL_SLOTS = (
+    {"key": "nda", "title": "Acuerdo de confidencialidad"},
+    {"key": "tratamiento_datos", "title": "Acuerdo de tratamiento de datos (Ley 1581 habeas data)"},
+    {"key": "sla", "title": "Contrato de servicios / SLA"},
+    {"key": "sow", "title": "Orden de trabajo"},
+)
+
 COMPANY_PLACEHOLDERS = {"empresa", "razon_social", "nit", "representante", "notaria"}
 
 _FACT_TO_PLACEHOLDER = {
@@ -55,6 +62,29 @@ def skeleton_body(title: str) -> str:
         "Notaría: {{notaria}}\n\n"
         "{{contenido_abogado}}\n"
     )
+
+
+def it_skeleton_body(title: str) -> str:
+    return (
+        f"{WATERMARK}\n\n"
+        f"{title}\n\n"
+        "Plantilla vacía. Aquí no hay cláusulas. "
+        "Quien suba el documento y lo marque aprobado por abogado escribe el texto.\n\n"
+        "Cliente: {{cliente}}\n"
+        "Servicio: {{servicio}}\n"
+        "Cobro: {{cobro}}\n"
+        "Moneda: {{moneda}}\n"
+        "Precio: {{precio}}\n"
+        "Fecha: {{fecha}}\n"
+        "Empresa: {{empresa}}\n"
+        "NIT: {{nit}}\n"
+        "Representante: {{representante}}\n\n"
+        "{{contenido_abogado}}\n"
+    )
+
+
+def _all_slots() -> tuple:
+    return LEGAL_SLOTS + IT_LEGAL_SLOTS
 
 
 def public_company_values() -> dict:
@@ -134,10 +164,16 @@ def _template_db():
 
 
 def _slot(key: str) -> dict:
-    for slot in LEGAL_SLOTS:
+    for slot in _all_slots():
         if slot["key"] == key:
             return slot
     raise KeyError(key)
+
+
+def _default_body(slot: dict) -> str:
+    if any(slot["key"] == item["key"] for item in IT_LEGAL_SLOTS):
+        return it_skeleton_body(slot["title"])
+    return skeleton_body(slot["title"])
 
 
 def list_slots() -> list[dict]:
@@ -255,7 +291,7 @@ def render_slot(slot: str, values: dict | None = None) -> dict:
     finally:
         conn.close()
     approved = bool(row["approved_by_lawyer"]) if row else False
-    source = row["body"] if row and row["body"] else skeleton_body(meta["title"])
+    source = row["body"] if row and row["body"] else _default_body(meta)
     if not approved and WATERMARK not in source:
         source = f"{WATERMARK}\n\n{source}"
     filled = fill_placeholders(source, values, force_watermark=not approved)
@@ -270,6 +306,10 @@ def render_slot(slot: str, values: dict | None = None) -> dict:
 
 def render_package_attachments(values: dict | None = None) -> list[dict]:
     return [render_slot(slot["key"], values) for slot in LEGAL_SLOTS]
+
+
+def render_it_attachments(values: dict | None = None) -> list[dict]:
+    return [render_slot(slot["key"], values) for slot in IT_LEGAL_SLOTS]
 
 
 def attachment_manifest(attachments: list[dict]) -> str:

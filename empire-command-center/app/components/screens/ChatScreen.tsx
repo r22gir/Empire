@@ -424,6 +424,13 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       const res = await fetch(API + '/files/upload', { method: 'POST', body: fd });
       const data = await res.json();
       if (data.status === 'success') setAttachedImage(data.filename);
+      if (file.type.startsWith('image/')) {
+        const photo = new FormData();
+        photo.append('file', file);
+        photo.append('project', 'chat');
+        photo.append('source', 'chat');
+        fetch(`${API}/photos/intake`, { method: 'POST', body: photo }).catch(() => {});
+      }
     } catch { /* silent */ }
   };
 

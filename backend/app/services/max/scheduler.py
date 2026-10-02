@@ -74,10 +74,25 @@ class MaxScheduler:
             name="Expire Stale Crypto Payments",
         )
 
+        self.scheduler.add_job(
+            self.nightly_drive_export,
+            CronTrigger(hour=2, minute=15),
+            id="nightly_drive_export",
+            name="Nightly Drive Export",
+        )
+
         self.scheduler.start()
         jobs = self.scheduler.get_jobs()
         for job in jobs:
             logger.info(f"Scheduled: {job.name} → next run: {job.next_run_time}")
+
+    async def nightly_drive_export(self):
+        """Export this instance's working copy. Upload only with each user's own token."""
+        try:
+            from app.services.instance_files import nightly_export
+            nightly_export()
+        except Exception:
+            logger.exception("Nightly Drive export failed")
 
     async def send_daily_brief(self):
         """Compile and send morning brief via Telegram."""

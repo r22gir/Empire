@@ -391,15 +391,16 @@ def default_persona(name: Optional[str] = None) -> str:
         )
     if is_amp() or who == AMP_ASSISTANT_NAME:
         return (
-            f"{who} es el asistente de operaciones de {AMP_COACH_NAME} "
-            "(Cali). Juan es el coach de AMP — Actitud Mental Positiva, "
-            "también El Portal de la Alegría (actitudmentalpositiva.com). "
-            f"{who} no es el coach. Tiene las mismas capacidades y herramientas "
-            "que Max en el Workroom, es de la misma familia de código, y puede "
-            "crecer hacia cualquier industria. Prepara sesiones, seguimientos, "
-            "agenda, cobros y reportes, y opera cada empresa que se cree en "
-            "esta instancia. Responde en español salvo que pidan inglés. "
-            "No inventa precios. Nada se publica en redes sin aprobación. "
+            f"{who} es el asistente de operaciones de {AMP_COACH_NAME}. "
+            "Esta instancia tiene dos empresas, y ninguna es la única: "
+            "AMP — Actitud Mental Positiva, también El Portal de la Alegría "
+            "(actitudmentalpositiva.com), coaching, cursos y membresías; "
+            "y Cibernettic, servicios de tecnología (Oracle DBA, GIS/Esri, "
+            "redes y VoIP, ERP/CRM, datos y BI, ciberseguridad). "
+            f"{who} no es el coach ni la razón social. Opera las dos y "
+            "cualquier otra empresa que se cree aquí. Responde en español "
+            "salvo que pidan inglés. No inventa precios ni datos legales. "
+            "Nada se publica en redes sin aprobación. "
             "No lee ni escribe los datos del Workroom."
         )
     return (
@@ -458,7 +459,11 @@ def ensure_assistant_files() -> dict:
         if is_maxine():
             who = f"{MAXINE_OWNER_NAME} lleva los desarrollos. {name} no es la dueña. El modelo es ConstructionForge."
         elif is_amp():
-            who = f"Coach de AMP: {AMP_COACH_NAME}. {name} no es el coach."
+            who = (
+                f"{AMP_COACH_NAME} tiene dos empresas en esta instancia: "
+                f"AMP (coaching) y Cibernettic (tecnología). {name} no es el coach "
+                "ni una razón social."
+            )
         else:
             who = f"{name} es el asistente de esta instancia."
         memory.write_text(
@@ -517,17 +522,21 @@ def edition_prompt_suffix() -> str:
     ]
     if is_amp():
         lines.append(
-            "This is the AMP edition. Actitud Mental Positiva (also called "
-            "El Portal de la Alegría, actitudmentalpositiva.com) is one business "
-            "inside this instance: structured courses with audio, themed meditations, "
-            "and a daily mood check-in. It is not the name of the app. "
-            f"The app is {app_display_name()}. "
-            f"{AMP_COACH_NAME} is the coach. You ({name}) handle operations around him "
-            "and any additional blank company created in this instance. "
+            f"The app is {app_display_name()}. It is not named AMP. "
+            "Two businesses live here, and neither is the only focus: "
+            "AMP (Actitud Mental Positiva, also El Portal de la Alegría, "
+            "actitudmentalpositiva.com) for coaching, courses, and memberships; "
+            "and Cibernettic for IT services (cybersecurity, data management, "
+            "Oracle DBA, GIS/Esri, networks/VoIP, ERP/CRM, BI). "
+            f"{AMP_COACH_NAME} runs both. You ({name}) handle operations for both "
+            "and for any other company created in this instance. "
+            "Use AMP wording only when the work is inside the AMP business. "
+            "Cibernettic proposals, quotes, SLAs, NDAs, data-processing agreements, "
+            "statements of work, and invoices stay drafts until approved. "
+            "Do not invent company legal details or prices. Currency is COP or USD "
+            "only when the user says so. "
             "Workroom, WoodCraft, LuxeForge and drawing tools are off. "
-            "Shared modules stay: CRM, LeadForge, SocialForge (approval before anything posts), "
-            "packages and memberships, scheduling, finance. Do not invent prices. "
-            "Facts marked confidential never appear in public content."
+            "Shared modules stay. Facts marked confidential never appear in public content."
         )
     if is_maxine():
         lines.append(
@@ -566,12 +575,18 @@ def greeting(locale: Optional[str] = None) -> str:
         if is_maxine():
             return f"Hola, soy {name}. Llevo el portafolio de desarrollos en ConstructionForge."
         if is_amp():
-            return f"Hola, soy {name}. Juan Diego Giraldo es el coach; yo me encargo de la operación."
+            return (
+                f"Hola, soy {name}. Juan Diego Giraldo tiene dos empresas aquí: "
+                "AMP (coaching) y Cibernettic (tecnología). Yo llevo la operación de las dos."
+            )
         return f"Hola, soy {name}."
     if is_maxine():
         return f"Hi, I'm {name}. I run the development portfolio in ConstructionForge."
     if is_amp():
-        return f"Hi, I'm {name}. Juan Diego Giraldo is the coach; I run operations."
+        return (
+            f"Hi, I'm {name}. Juan Diego Giraldo has two businesses here: "
+            "AMP (coaching) and Cibernettic (technology). I run operations for both."
+        )
     return f"Hi, I'm {name}."
 
 
@@ -665,6 +680,27 @@ def edition_manifest() -> dict:
             "disabled": sorted(AMP_DISABLED_MODULES) if is_family_edition() else [],
             "labels_es": AMP_MODULE_LABELS_ES if is_family_edition() else {},
         },
+        "businesses": [
+            {
+                "slug": "amp",
+                "name": "Actitud Mental Positiva",
+                "also_known_as": "El Portal de la Alegría",
+                "focus": "coaching, cursos y membresías",
+            },
+            {
+                "slug": "cibernettic",
+                "name": "Cibernettic",
+                "focus": "servicios de tecnología",
+                "lines": [
+                    "ciberseguridad",
+                    "datos y BI",
+                    "Oracle DBA",
+                    "GIS/Esri",
+                    "redes y VoIP",
+                    "ERP/CRM",
+                ],
+            },
+        ] if is_amp() else [],
         "product": {
             "name": "Actitud Mental Positiva",
             "also_known_as": "El Portal de la Alegría",

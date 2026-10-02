@@ -138,7 +138,7 @@ export default function CommandCenter() {
           return;
         }
         if (data.edition !== 'amp') return;
-        setActiveProduct((current) => (AMP_HIDDEN_NAV.has(current) ? 'amp' : current));
+        setActiveProduct((current) => (AMP_HIDDEN_NAV.has(current) ? 'owner' : current));
       })
       .catch(() => {});
     return () => {

@@ -15,6 +15,11 @@ DOC_TYPES = (
     "contract",
     "payment_plan",
     "meeting_notes",
+    "proposal",
+    "sla",
+    "sow",
+    "nda",
+    "dpa",
     "general",
 )
 
@@ -25,8 +30,15 @@ DOC_LABELS = {
     "contract": "Contrato",
     "payment_plan": "Plan de pagos",
     "meeting_notes": "Notas de reunión",
+    "proposal": "Propuesta de servicios",
+    "sla": "Contrato de servicios / SLA",
+    "sow": "Orden de trabajo",
+    "nda": "Acuerdo de confidencialidad",
+    "dpa": "Acuerdo de tratamiento de datos",
     "general": "Documento",
 }
+
+IT_DOCS = {"proposal", "sla", "sow", "nda", "dpa"}
 
 _LISTO = re.compile(r"\b(listo|lista|ya esta|cerrar borrador|terminar borrador)\b", re.I)
 _LOT = re.compile(r"\blote\s+([A-Za-z]?\d+)\b", re.I)
@@ -136,7 +148,72 @@ def extract_fields(transcript: str) -> dict:
         fields["product_name"] = product.group(2).strip(" .")
     if "separ" in folded:
         fields["intent_reservation"] = True
+    if re.search(r"\b(usd|dolares|dolar|us\$)\b", folded):
+        fields["currency"] = "USD"
+    elif re.search(r"\b(cop|pesos)\b", folded):
+        fields["currency"] = "COP"
+    hours = re.search(r"(\d+)\s+horas?\b", folded)
+    if hours:
+        fields["hours"] = int(hours.group(1))
+    rate = re.search(r"(\d+(?:[.,]\d+)?)\s+(?:dolares|dolar|usd|pesos|cop)?\s*(?:la|por)\s+hora", folded)
+    if rate:
+        fields["hourly_rate"] = float(rate.group(1).replace(",", "."))
+        fields["billing"] = "hours"
+    if "mensual" in folded or "retainer" in folded or "mes a mes" in folded:
+        fields["billing"] = "retainer"
+    elif "proyecto cerrado" in folded or "por proyecto" in folded:
+        fields["billing"] = "project"
+    fields["service_line"] = _service_line(folded)
+    fields["business"] = _business(folded)
+    if fields.get("hours") and fields.get("hourly_rate") and not fields.get("price"):
+        fields["price"] = _money(fields["hours"] * fields["hourly_rate"], fields.get("currency") or "COP")
     return fields
+
+
+def _money(value: float, currency: str):
+    if currency == "USD":
+        return round(float(value), 2)
+    from app.services.voice_doc.plans import cop_round
+    return cop_round(value)
+
+
+def _service_line(folded: str) -> Optional[str]:
+    checks = (
+        ("audit", ("auditor", "audit")),
+        ("assessment", ("evaluacion", "assessment", "diagnostico")),
+        ("managed", ("servicio administrado", "managed", "mesa de ayuda")),
+        ("dba", ("oracle", "dba", "base de datos")),
+        ("backup", ("backup", "respaldo", "disaster", "recuperacion")),
+        ("network", ("voip", "redes", "telefonia")),
+        ("bi", ("business intelligence", "tablero", "analisis de datos")),
+        ("gis", ("gis", "esri", "arcgis")),
+        ("erp", ("erp", "crm")),
+        ("cyber", ("cibersegur", "cyber")),
+    )
+    for key, words in checks:
+        if any(word in folded for word in words):
+            return key
+    return None
+
+
+def _business(folded: str) -> Optional[str]:
+    it = bool(
+        re.search(r"\b(cibernettic|oracle|dba|gis|esri|voip|sla|nda)\b", folded)
+        or any(word in folded for word in ("cibersegur", "base de datos", "auditor", "respaldo", "backup", "habeas", "business intelligence"))
+    )
+    amp = bool(
+        re.search(r"\b(curso|coaching|taller)\b", folded)
+        or "membres" in folded
+        or "actitud mental" in folded
+        or "portal de la alegria" in folded
+    )
+    if it and amp:
+        return None
+    if it:
+        return "cibernettic"
+    if amp:
+        return "amp"
+    return None
 
 
 def propose_doc_type(transcript: str, fields: dict, edition: str = "") -> str:
@@ -145,6 +222,16 @@ def propose_doc_type(transcript: str, fields: dict, edition: str = "") -> str:
     reservation = fields.get("lot_number") or fields.get("intent_reservation")
     if reservation and edition != "amp":
         return "reservation"
+    if "nda" in folded or "confidencialidad" in folded:
+        return "nda"
+    if "tratamiento de datos" in folded or "habeas" in folded:
+        return "dpa"
+    if "orden de trabajo" in folded or "statement of work" in folded or re.search(r"\bsow\b", folded):
+        return "sow"
+    if re.search(r"\bsla\b", folded) or "contrato de servicio" in folded:
+        return "sla"
+    if "propuesta" in folded:
+        return "proposal"
     if "factura" in folded or "invoice" in folded:
         return "invoice"
     if "contrato" in folded:
@@ -186,7 +273,11 @@ _QUESTIONS = {
     "price": "¿Cuál es el precio en pesos? No uso un valor que no me hayas dicho.",
     "cuota_inicial_pct": "¿Qué porcentaje de cuota inicial quieres?",
     "installments": "¿En cuántos meses queda el saldo?",
-    "product_name": "¿Cómo se llama el programa, curso o membresía?",
+    "product_name": "¿Cómo se llama el programa, curso, membresía o servicio?",
+    "business": "¿Esto es de AMP (coaching) o de Cibernettic (tecnología)?",
+    "billing": "¿El servicio se cobra por horas, por mensualidad o por proyecto?",
+    "currency": "¿La cifra es en pesos (COP) o en dólares (USD)?",
+    "service_line": "¿Qué servicio es: auditoría, evaluación, servicio administrado, base de datos, respaldos, red/VoIP o BI?",
     "house_type": "¿Casa tipo T1, T2 o T3?",
     "finishes": "¿Con acabados o sin acabados?",
     "option": "Elige una de las opciones para seguir.",
@@ -203,7 +294,7 @@ def missing_fields(doc_type: str, fields: dict) -> list[str]:
         needed.append("buyer_name")
     if doc_type == "reservation" and not fields.get("lot_number"):
         needed.append("lot_number")
-    if doc_type in {"reservation", "payment_plan", "quote", "invoice", "contract"} and not fields.get("price"):
+    if doc_type in {"reservation", "payment_plan", "quote", "invoice", "contract", "proposal", "sla", "sow"} and not fields.get("price"):
         needed.append("price")
     if doc_type in {"reservation", "payment_plan"}:
         if not fields.get("cuota_inicial_pct") and doc_type == "reservation":
@@ -212,6 +303,16 @@ def missing_fields(doc_type: str, fields: dict) -> list[str]:
             needed.append("installments")
     if doc_type in {"quote", "invoice", "contract"} and fields.get("product_kind") and not fields.get("product_name"):
         needed.append("product_name")
+    if fields.get("business") == "cibernettic" or doc_type in IT_DOCS:
+        if not fields.get("service_line") and doc_type in {"quote", "proposal", "invoice", "sla", "sow"}:
+            needed.append("service_line")
+        if not fields.get("billing") and doc_type in {"quote", "proposal", "invoice", "sla", "sow"}:
+            needed.append("billing")
+        if not fields.get("currency") and doc_type in {"quote", "proposal", "invoice", "sla", "sow"}:
+            needed.append("currency")
+    if fields.get("edition") == "amp" and not fields.get("business") and doc_type not in {"general", "meeting_notes", "reservation"}:
+        if "business" not in needed:
+            needed.append("business")
     if fields.get("mentions_house") and not fields.get("house_type"):
         needed.append("house_type")
     if fields.get("mentions_house") and fields.get("house_type") and not fields.get("finishes"):
@@ -228,6 +329,20 @@ def looks_like_draft_followup(text: str) -> bool:
 
 def choice_from_text(text: str) -> Optional[str]:
     folded = _fold(text)
+    if re.search(r"\bcibernettic\b", folded):
+        return "business_cibernettic"
+    if re.search(r"\bamp\b", folded) or "coaching" in folded:
+        return "business_amp"
+    if "por horas" in folded:
+        return "billing_hours"
+    if "mensual" in folded:
+        return "billing_retainer"
+    if "por proyecto" in folded:
+        return "billing_project"
+    if re.search(r"\busd\b", folded) or "dolar" in folded:
+        return "currency_usd"
+    if re.search(r"\bcop\b", folded) or "pesos" in folded:
+        return "currency_cop"
     if re.search(r"\bplan\s+a\b", folded):
         return "plan_a"
     if re.search(r"\bplan\s+b\b", folded):

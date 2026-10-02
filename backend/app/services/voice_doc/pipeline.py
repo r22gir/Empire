@@ -23,6 +23,26 @@ from app.services.voice_doc.store import (
 from app.services.voice_doc.templates import render_package_attachments
 
 
+def _archive_working_copy(draft: dict, session: dict) -> None:
+    try:
+        from app.services.instance_files import archive_draft
+        from app.services.voice_doc.store import render_draft_pdf
+
+        pdf = render_draft_pdf(draft["payload"], [draft["payload"].get("transcript") or ""])
+        fields = session.get("fields") or {}
+        archive_draft(
+            draft_id=draft["id"],
+            filename=f"{draft['id']}.pdf",
+            data=pdf,
+            business=fields.get("business") or session.get("edition") or "general",
+            client=fields.get("buyer_name") or "",
+            project=fields.get("service_line") or fields.get("lot_number") or "",
+            edition=session.get("edition"),
+        )
+    except Exception:
+        return
+
+
 def edition_name() -> str:
     try:
         from app.edition import edition_name as current
@@ -42,10 +62,36 @@ def _choice_patch(choice_id: str) -> dict:
         return {"selected_plan": choice}
     if choice in {"12", "24", "36"}:
         return {"installments": int(choice)}
+    if choice == "business_amp":
+        return {"business": "amp"}
+    if choice == "business_cibernettic":
+        return {"business": "cibernettic"}
+    if choice == "billing_hours":
+        return {"billing": "hours"}
+    if choice == "billing_retainer":
+        return {"billing": "retainer"}
+    if choice == "billing_project":
+        return {"billing": "project"}
+    if choice == "currency_cop":
+        return {"currency": "COP"}
+    if choice == "currency_usd":
+        return {"currency": "USD"}
     return {}
 
 
 def build_options(doc_type: str, fields: dict) -> dict | None:
+    if (
+        fields.get("edition") == "amp"
+        and not fields.get("business")
+        and doc_type not in {"general", "meeting_notes", "reservation"}
+    ):
+        return {
+            "kind": "business",
+            "choices": [
+                {"id": "business_amp", "label": "AMP · coaching, cursos y membresías"},
+                {"id": "business_cibernettic", "label": "Cibernettic · servicios de tecnología"},
+            ],
+        }
     if fields.get("mentions_house") and not fields.get("house_type"):
         return {
             "kind": "house_type",
@@ -82,6 +128,24 @@ def build_options(doc_type: str, fields: dict) -> dict | None:
                     "schedule": plan,
                 }
                 for plan in plans
+            ],
+        }
+    it_doc = fields.get("business") == "cibernettic" or doc_type in {"proposal", "sla", "sow", "nda", "dpa"}
+    if it_doc and doc_type in {"quote", "proposal", "invoice", "sla", "sow"} and not fields.get("billing"):
+        return {
+            "kind": "billing",
+            "choices": [
+                {"id": "billing_hours", "label": "Por horas"},
+                {"id": "billing_retainer", "label": "Mensualidad"},
+                {"id": "billing_project", "label": "Proyecto cerrado"},
+            ],
+        }
+    if it_doc and doc_type in {"quote", "proposal", "invoice", "sla", "sow"} and not fields.get("currency"):
+        return {
+            "kind": "currency",
+            "choices": [
+                {"id": "currency_cop", "label": "Pesos (COP)"},
+                {"id": "currency_usd", "label": "Dólares (USD)"},
             ],
         }
     if plan_doc and not fields.get("installments"):
@@ -126,6 +190,17 @@ def _payload(session: dict, options, missing, schedule) -> dict:
         from app.services.voice_doc.deals import placeholder_values
 
         attachments = render_package_attachments(placeholder_values(fields, schedule))
+    elif fields.get("business") == "cibernettic" or session["doc_type"] in {"proposal", "sla", "sow", "nda", "dpa"}:
+        from app.services.voice_doc.templates import render_it_attachments
+
+        attachments = render_it_attachments({
+            "cliente": fields.get("buyer_name") or "",
+            "servicio": fields.get("service_line") or "",
+            "moneda": fields.get("currency") or "",
+            "precio": fields.get("price") or "",
+            "fecha": "",
+            "contenido_abogado": "",
+        })
     return {
         "doc_type": session["doc_type"],
         "label": DOC_LABELS.get(session["doc_type"], "Documento"),
@@ -188,6 +263,7 @@ def _apply_transcript(session: dict, transcript: str, language: str | None) -> d
     extracted = extract_fields(transcript)
     if language:
         extracted["language"] = language
+    extracted["edition"] = session.get("edition") or ""
     session["fields"] = merge_fields(session["fields"], extracted)
     inferred = propose_doc_type(transcript, session["fields"], session["edition"])
     if session["doc_type"] in {None, "", "general"} or inferred != "general":
@@ -212,6 +288,7 @@ def _close(session: dict) -> dict:
     payload["transcript"] = "\n".join(notes)
     html = render_draft_html(payload, notes)
     draft = save_draft(session["id"], session["doc_type"], payload, html)
+    _archive_working_copy(draft, session)
     session["status"] = "ready"
     save_session(session)
     view = _view(get_session(session["id"]), draft)

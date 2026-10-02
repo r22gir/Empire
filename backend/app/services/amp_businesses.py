@@ -349,7 +349,7 @@ def list_businesses() -> list[dict]:
     if not is_family_edition():
         return []
     if is_amp():
-        ensure_default_business()
+        ensure_maxe_businesses()
     return list(_load_registry()["businesses"])
 
 
@@ -422,6 +422,68 @@ def ensure_default_business() -> dict:
     registry["businesses"].append(profile)
     _save_registry(registry)
     return profile
+
+
+CIBERNETTIC_SERVICES = (
+    ("Evaluaciones y auditorías", "Revisión de seguridad o de una plataforma. El precio lo pone quien cotiza."),
+    ("Servicios administrados", "Operación continua. Puede ser por horas o por mensualidad."),
+    ("Administración de bases de datos", "Oracle y otras bases. Incluye operación, no un precio de lista."),
+    ("Respaldos y recuperación", "Backups y recuperación ante desastre."),
+    ("Redes y VoIP", "Redes y telefonía IP."),
+    ("GIS / Esri", "Mapas, geodatabases y análisis espacial."),
+    ("ERP / CRM", "Sistemas de gestión e integración."),
+    ("Datos y BI", "Análisis, tableros y proyectos de inteligencia de negocios."),
+)
+
+
+def ensure_cibernettic_business() -> dict:
+    """IT company beside AMP. No legal entity data is stored."""
+    registry = _load_registry()
+    for row in registry["businesses"]:
+        if row["slug"] == "cibernettic":
+            return row
+    profile = {
+        "slug": "cibernettic",
+        "name": "Cibernettic",
+        "industry": "servicios de tecnología",
+        "description": (
+            "Empresa de tecnología de Juan Diego Giraldo. Oficios: Oracle DBA, "
+            "GIS/Esri, redes y VoIP, ERP/CRM, análisis de datos y BI, y "
+            "ciberseguridad. Más de 20 años de oficio. Esta ficha no guarda "
+            "NIT, representante legal, escritura ni dirección de notaría."
+        ),
+        "template": None,
+        "locale": "es",
+        "currency_options": ["COP", "USD"],
+        "billing_options": ["hours", "retainer", "project"],
+        "modules": list(SHARED_MODULES),
+        "industry_modules": [],
+        "assistant": assistant_name(),
+        "created_at": _now(),
+    }
+    conn = _connect("cibernettic")
+    _seed_fields(conn, [
+        ("empresa", "Empresa"),
+        ("contacto", "Contacto"),
+        ("servicio", "Servicio"),
+        ("alcance", "Alcance"),
+        ("moneda", "Moneda"),
+        ("notas", "Notas"),
+    ])
+    _seed_categories(conn, CIBERNETTIC_SERVICES)
+    conn.commit()
+    conn.close()
+    _write_profile("cibernettic", profile)
+    registry["businesses"].append(profile)
+    _save_registry(registry)
+    return profile
+
+
+def ensure_maxe_businesses() -> list[dict]:
+    """AMP coaching and Cibernettic IT. Neither one is the whole instance."""
+    if not is_amp():
+        return []
+    return [ensure_default_business(), ensure_cibernettic_business()]
 
 
 def _normalize_modules(modules: Optional[list]) -> list[str]:

@@ -331,7 +331,12 @@ def render_draft_html(payload: dict, notes: list[str]) -> str:
         if fields.get(key):
             lines.append(f"<tr><th>{escape(label)}</th><td>{escape(str(fields[key]))}</td></tr>")
     if fields.get("price"):
-        lines.append(f"<tr><th>Precio</th><td>{escape(format_cop(int(fields['price'])))} COP</td></tr>")
+        currency = fields.get("currency") or "COP"
+        if currency == "USD":
+            amount = f"{fields['price']} USD"
+        else:
+            amount = f"{format_cop(int(float(fields['price'])))} COP"
+        lines.append(f"<tr><th>Precio</th><td>{escape(amount)}</td></tr>")
     schedule_html = ""
     if schedule.get("installments"):
         rows = "".join(

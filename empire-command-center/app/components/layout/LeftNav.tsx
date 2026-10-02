@@ -95,6 +95,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'support', name: 'SupportForge', icon: <Headphones size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
       { id: 'ship', name: 'ShipForge', icon: <Truck size={16} />, status: 'active', color: '#2563eb', kind: 'product' },
       { id: 'amp', name: 'AMP', icon: <Sun size={16} />, status: 'active', color: '#f59e0b', kind: 'product' },
+      { id: 'cibernettic', name: 'Cibernettic', icon: <Server size={16} />, status: 'active', color: '#2563eb', kind: 'product' },
       { id: 'nueva-empresa', name: 'Nueva empresa', icon: <Building2 size={16} />, status: 'active', color: '#D4A030', kind: 'product' },
       { id: 'archive', name: 'ArchiveForge', icon: <Archive size={16} />, status: 'active', color: '#06b6d4', kind: 'product' },
       { id: 'transcript', name: 'TranscriptForge', icon: <FileAudio size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
@@ -172,6 +173,10 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
       window.location.href = '/amp/empresas';
       return;
     }
+    if (item.id === 'cibernettic') {
+      window.location.href = '/amp/empresas/cibernettic';
+      return;
+    }
     if (item.kind === 'daily-summary') {
       setShowDashboard(s => !s);
       if (isMobile) setMobileOpen(false);
@@ -200,6 +205,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
   // Helper: count visible items per group (active + dev + planned).
   const visibleGroups = NAV_GROUPS.map((group) => {
     let items = group.items.filter((item) => {
+      if (item.id === 'cibernettic' && !ampEdition) return false;
       if (maxineEdition) return !MAXINE_HIDDEN_NAV.has(item.id);
       if (ampEdition) return !AMP_HIDDEN_NAV.has(item.id);
       return item.id !== 'nueva-empresa';

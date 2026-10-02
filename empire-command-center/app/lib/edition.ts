@@ -21,11 +21,13 @@ export const MAXINE_NAV_LABELS: Record<string, string> = {
 };
 
 export const AMP_NAV_LABELS: Record<string, string> = {
+  owner: 'Centro de mando',
   amp: 'AMP',
+  cibernettic: 'Cibernettic',
   crm: 'Coachees',
   lead: 'Ingreso',
   social: 'SocialForge',
-  'nueva-empresa': 'Nueva empresa',
+  'nueva-empresa': 'Empresas',
 };
 
 export function editionFromEnv(): string {
@@ -38,11 +40,10 @@ export function isFamilyEdition(edition: string = editionFromEnv()): boolean {
   return FAMILY.has((edition || '').trim().toLowerCase());
 }
 
-/** Maxine opens on the ConstructionForge portfolio. Max-e keeps AMP. */
+/** Maxine opens on the ConstructionForge portfolio. Max-e opens the command center, not one business. */
 export function homeProductForEdition(edition: string = editionFromEnv()): 'construction' | 'amp' | 'owner' {
   const name = (edition || '').trim().toLowerCase();
   if (name === 'maxine') return 'construction';
-  if (name === 'amp') return 'amp';
   return 'owner';
 }
 
