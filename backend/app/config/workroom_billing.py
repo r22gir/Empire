@@ -24,6 +24,41 @@ VALID_BILLED_BY = frozenset({BILLED_BY_EMPIRE, BILLED_BY_NELMA})
 _NELMA_NAME = "Nelma's Workroom"
 _NELMA_ADDRESS = "5124 Frolich Lane, Hyattsville, MD 20781"
 
+# Public landing page. Client estimates, invoices, and presentations
+# must not show the operator app or other internal hosts.
+PUBLIC_CLIENT_HOST = "workroom.empirebox.store"
+PUBLIC_CLIENT_ORIGIN = f"https://{PUBLIC_CLIENT_HOST}"
+_INTERNAL_CLIENT_HOSTS = (
+    "studio.empirebox.store",
+    "api.empirebox.store",
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+)
+
+
+def _is_internal_client_url(value: str) -> bool:
+    lowered = (value or "").strip().lower()
+    return any(host in lowered for host in _INTERNAL_CLIENT_HOSTS)
+
+
+def client_facing_website(raw: str | None) -> str:
+    """Host shown on client documents. Internal app links become the public site."""
+    text = (raw or "").strip()
+    if not text or _is_internal_client_url(text):
+        return PUBLIC_CLIENT_HOST
+    return text.replace("https://", "").replace("http://", "").rstrip("/")
+
+
+def client_facing_origin(raw: str | None = None) -> str:
+    """Absolute public origin for a client link. Internal hosts are replaced."""
+    text = (raw or "").strip()
+    if not text or _is_internal_client_url(text):
+        return PUBLIC_CLIENT_ORIGIN
+    if text.startswith("http://") or text.startswith("https://"):
+        return text.rstrip("/")
+    return "https://" + text.rstrip("/")
+
 
 def _env(name: str, default: str) -> str:
     raw = os.environ.get(name)
@@ -76,8 +111,7 @@ def _load_business_json() -> dict:
 def _contact_from_config(data: dict) -> tuple[str, str, str, str]:
     phone = data.get("business_phone") or "(703) 213-6484"
     email = data.get("business_email") or "workroom@empirebox.store"
-    raw_site = data.get("business_website") or "empirebox.store"
-    website = raw_site.replace("https://", "").replace("http://", "").rstrip("/")
+    website = client_facing_website(data.get("business_website"))
     tagline = data.get("business_tagline") or "Custom Window Treatments & Upholstery"
     return phone, email, website, tagline
 

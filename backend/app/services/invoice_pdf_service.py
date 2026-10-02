@@ -7,7 +7,7 @@ from html import escape
 from pathlib import Path
 from typing import Optional
 
-from app.config.workroom_billing import get_workroom_billing
+from app.config.workroom_billing import client_facing_website, get_workroom_billing
 
 JOB_DEPOSIT_SCHEDULE_NOTE = (
     "50% deposit due to begin work. Balance due on completion."
@@ -136,7 +136,7 @@ def resolve_invoice_branding(invoice: dict, is_woodcraft: bool) -> dict:
             "phone": cfg.get("business_phone", ""),
             "email": cfg.get("business_email", ""),
             "address": cfg.get("business_address", ""),
-            "website": cfg.get("business_website", ""),
+            "website": client_facing_website(cfg.get("business_website", "")),
             "accent": "#d4a636",
             "header_bg": "#3d2e1a",
         }

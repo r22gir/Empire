@@ -87,7 +87,8 @@ async def create_presentation(req: CreatePresentationRequest):
     conn.commit()
     conn.close()
 
-    base_url = os.getenv("CC_PUBLIC_URL", "https://studio.empirebox.store")
+    from app.config.workroom_billing import client_facing_origin
+    base_url = client_facing_origin(os.getenv("CC_PUBLIC_URL"))
     return {
         "share_id": share_id,
         "share_url": f"{base_url}/presentation/{share_id}",

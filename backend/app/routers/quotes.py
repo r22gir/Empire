@@ -1506,13 +1506,14 @@ async def send_quote(quote_id: str, body: Optional[SendQuoteRequest] = None):
                             "total": w.get("total", w.get("price", 0)),
                         })
 
+            from app.config.workroom_billing import client_facing_origin
             html_body = render_quote_sent({
                 "customer_name": quote.get("customer_name", "Valued Customer"),
                 "quote_number": quote.get("quote_number", ""),
                 "project_description": quote.get("project_description", quote.get("project_name", "")),
                 "line_items": line_items,
                 "total": quote.get("total", 0),
-                "quote_url": f"https://studio.empirebox.store/quote/{quote_id}",
+                "quote_url": f"{client_facing_origin()}/quote/{quote_id}",
             })
 
             from app.config.workroom_billing import get_workroom_billing

@@ -120,7 +120,7 @@ Based on your room, we've prepared 3 options:
 • Pro: ${proposal_pdf.get('pro', '—')}
 • Empire: ${proposal_pdf.get('empire', '—')}
 
-Reply to this email or book a free consultation at studio.empirebox.store/intake.
+Reply to this email or book a free consultation at {get_workroom_billing().website}.
 
 — {get_workroom_billing().name}""",
                         "attachment_url": proposal_pdf,
