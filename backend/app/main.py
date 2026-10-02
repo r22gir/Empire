@@ -443,6 +443,42 @@ async def start_background_services():
     except Exception as e:
         print(f"✗ Desk Scheduler: {e}")
 
+    # SocialForge publisher. Draft-only until a founder turns on auto-publish.
+    async def _social_publish_loop():
+        while True:
+            try:
+                from app.services.accounts.publisher import run_publish_tick
+                from app.services.accounts.store import connect as accounts_connect
+                from app.services.accounts.vault import VaultNotConfigured, require_vault
+                import httpx
+
+                def _transport(method, url, **kwargs):
+                    with httpx.Client(timeout=30) as client:
+                        response = client.request(method, url, **kwargs)
+                        try:
+                            return response.json()
+                        except Exception:
+                            return {"error": response.text[:200]}
+
+                conn = accounts_connect()
+                try:
+                    try:
+                        vault = require_vault()
+                    except VaultNotConfigured:
+                        vault = None
+                    run_publish_tick(conn, vault, _transport)
+                finally:
+                    conn.close()
+            except Exception as loop_error:
+                print(f"✗ SocialForge publish tick: {loop_error}")
+            await asyncio.sleep(60)
+
+    try:
+        asyncio.create_task(_social_publish_loop())
+        print("✓ SocialForge publisher: draft-only until auto-publish is enabled")
+    except Exception as e:
+        print(f"✗ SocialForge publisher: {e}")
+
     # MAX Autonomous Scheduler (daily briefs, task checks, reports)
     try:
         from app.services.max.scheduler import max_scheduler
