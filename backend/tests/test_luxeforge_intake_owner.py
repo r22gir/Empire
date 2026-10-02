@@ -105,12 +105,16 @@ def test_submit_shows_in_workroom_quotes_with_fabric_and_photos(monkeypatch, tmp
 
     saved = client.put(
         f"/api/v1/fabrics/intake-project/{project_id}/fabrics",
+        headers=auth,
         json={"fabrics": [{
             "scope": "item",
             "room_name": "Living Room",
             "item_name": "Drapery",
             "fabric_preference": "picked_out",
             "fabric_name": "Cuaderno",
+            "fabric_code": "V639",
+            "fabric_width": 54,
+            "supplier_url": "https://supplier.example/cuaderno",
             "client_notes": "ivory ground",
             "swatch_photo_path": f"/intake_uploads/{project_id}/swatch.heic",
             "swatch_files": [
@@ -152,6 +156,10 @@ def test_submit_shows_in_workroom_quotes_with_fabric_and_photos(monkeypatch, tmp
     assert "Cuaderno" in descriptions
     assert "ivory ground" in descriptions
     assert all(item["category"] == "intake_pending" for item in full["line_items"])
+    fabric_line = next(item for item in full["line_items"] if item.get("fabric_name") == "Cuaderno")
+    assert fabric_line["fabric_code"] == "V639"
+    assert float(fabric_line["fabric_width"]) == 54
+    assert fabric_line["supplier_url"] == "https://supplier.example/cuaderno"
     originals = {photo.get("original_name") for photo in (full["photos"] or [])}
     assert "room.jpg" in originals or photo_name in {photo.get("filename") for photo in full["photos"]}
     assert any(str(photo.get("filename", "")).endswith("swatch.heic") or photo.get("original_name") == "IMG.HEIC" for photo in full["photos"])
@@ -222,6 +230,7 @@ def test_fabric_files_save_with_the_item(monkeypatch, tmp_path):
     _auth, _email, project_id = _designer(monkeypatch, mock_handoff=True)
     saved = client.put(
         f"/api/v1/fabrics/intake-project/{project_id}/fabrics",
+        headers=_auth,
         json={"fabrics": [{
             "scope": "item",
             "room_name": "Living Room",
@@ -241,6 +250,7 @@ def test_fabric_files_save_with_the_item(monkeypatch, tmp_path):
     assert body[0]["swatch_files"][0]["original_name"] == "IMG.HEIC"
     again = client.put(
         f"/api/v1/fabrics/intake-project/{project_id}/fabrics",
+        headers=_auth,
         json={"fabrics": [{
             "scope": "item",
             "item_name": "Drapery",
@@ -252,6 +262,66 @@ def test_fabric_files_save_with_the_item(monkeypatch, tmp_path):
     assert again.status_code == 200
     assert len(again.json()) == 1
     assert again.json()[0]["fabric_preference"] == "com"
+
+
+def test_fabric_edits_require_the_intake_session(monkeypatch, tmp_path):
+    _configure_files(monkeypatch, tmp_path)
+    auth, _email, project_id = _designer(monkeypatch, mock_handoff=True)
+    path = f"/api/v1/fabrics/intake-project/{project_id}/fabrics"
+    body = {"fabrics": [{
+        "scope": "item",
+        "fabric_preference": "picked_out",
+        "fabric_name": "Cuaderno",
+        "fabric_code": "V639",
+        "fabric_width": 54,
+        "supplier_url": "https://supplier.example/cuaderno",
+    }]}
+
+    assert client.put(path, json=body).status_code == 401
+    public = TestClient(app, base_url="https://luxe.empirebox.store").put(path, json=body)
+    assert public.status_code == 401
+    assert public.json().get("error") != "luxe_public_edge_denied"
+
+    other_id = str(uuid.uuid4())
+    conn = intake_auth.get_db()
+    conn.execute(
+        """INSERT INTO intake_users
+           (id, name, email, phone, password_hash, company, role, business)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (other_id, "Other Designer", f"other-{uuid.uuid4().hex[:6]}@example.com", "", "hash", "", "client", "workroom"),
+    )
+    conn.commit()
+    conn.close()
+    other = {"Authorization": f"Bearer {intake_auth.create_token(other_id, 'other@example.com')}"}
+    assert client.put(path, headers=other, json=body).status_code == 404
+
+    saved = client.put(path, headers=auth, json=body)
+    assert saved.status_code == 200, saved.text
+    added = client.post(path, headers=auth, json={
+        "scope": "item",
+        "fabric_preference": "com",
+        "fabric_name": "Second",
+        "fabric_code": "X1",
+    })
+    assert added.status_code == 200, added.text
+    fabric_id = added.json()["id"]
+    edited = client.put(f"{path}/{fabric_id}", headers=auth, json={
+        "scope": "item",
+        "fabric_preference": "com",
+        "fabric_name": "Renamed",
+    })
+    assert edited.status_code == 200, edited.text
+    removed = client.delete(f"{path}/{fabric_id}", headers=auth)
+    assert removed.status_code == 200, removed.text
+
+    conn = intake_auth.get_db()
+    conn.execute("UPDATE intake_projects SET status = 'submitted' WHERE id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+    late = client.put(path, headers=auth, json=body)
+    assert late.status_code == 409
+    assert client.get(path, headers=auth).status_code == 200
+    assert client.get(path).status_code == 401
 
 
 def test_owner_notice_is_only_the_workroom_mailbox(monkeypatch):

@@ -606,6 +606,45 @@ def _quote_to_dict(row) -> dict:
     return d
 
 
+def _ensure_supplier_url_column(conn) -> None:
+    """Intake fabric lines carry the supplier link next to name, code, and width."""
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(quote_line_items)").fetchall()}
+    except Exception:
+        return
+    if "supplier_url" not in cols:
+        try:
+            conn.execute("ALTER TABLE quote_line_items ADD COLUMN supplier_url TEXT")
+        except Exception:
+            pass
+
+
+def _store_line_fabric_fields(conn, quote_id: str, line_number: int, line: dict) -> None:
+    """Copy structured fabric fields onto a line. Window width is left alone."""
+    if not isinstance(line, dict):
+        return
+    name = line.get("fabric_name")
+    code = line.get("fabric_code")
+    width = line.get("fabric_width")
+    supplier = line.get("supplier_url") or line.get("supplier_link")
+    if name in (None, "") and code in (None, "") and width in (None, "") and supplier in (None, ""):
+        return
+    _ensure_supplier_url_column(conn)
+    if width not in (None, ""):
+        try:
+            width = float(width)
+        except (TypeError, ValueError):
+            width = None
+    else:
+        width = None
+    conn.execute(
+        """UPDATE quote_line_items
+           SET fabric_name = ?, fabric_code = ?, fabric_width = ?, supplier_url = ?
+           WHERE quote_id = ? AND line_number = ?""",
+        (name or "", code or "", width, supplier or "", quote_id, line_number),
+    )
+
+
 def _ensure_idea_diagram_column(conn) -> None:
     """Additive column for idea-diagram metadata. Safe on already-migrated DBs."""
     try:
@@ -922,6 +961,7 @@ def create_quote(data: dict) -> dict:
                 idea["drawing_svg"],
                 idea["idea_diagram_json"],
             ))
+            _store_line_fabric_fields(conn, quote_id, idx + 1, li)
 
         _recalculate_totals(conn, quote_id, 'api')
         _audit_log(conn, 'quote', quote_id, 'created', None, None, quote_number, 'api')
@@ -1026,6 +1066,7 @@ def update_quote(quote_id: str, data: dict) -> dict:
                     pricing["business_unit"],
                     pricing["computed_json"],
                 ))
+                _store_line_fabric_fields(conn, quote_id, idx + 1, li)
             _audit_log(conn, "quote", quote_id, "updated", "line_items", None,
                        f"{len(items)} items", "api")
 

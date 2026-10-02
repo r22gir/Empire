@@ -3,7 +3,7 @@ Fabric Library CRUD router.
 Dual-mode: owner endpoints (full data) + client-safe endpoints (no pricing/supplier).
 Yardage calculator included.
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import Optional, List
 import json
@@ -481,16 +481,48 @@ except Exception as e:
     logger.warning(f"intake_fabrics table init: {e}")
 
 
+# Writes stay open only for the designer who owns the project, and only
+# while it is still a draft. A bare intake UUID is not a credential.
+_EDITABLE_INTAKE_STATUSES = {"", "draft", "new", "in-progress", "in_progress"}
+
+
+def _intake_editor(intake_id: str, request: Request, *, write: bool):
+    from app.routers.intake_auth import decode_token, get_db as intake_db
+
+    header = request.headers.get("authorization") or ""
+    token = header.split(" ", 1)[1].strip() if header.lower().startswith("bearer ") else ""
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    payload = decode_token(token)
+    user_id = str(payload.get("sub") or "")
+    conn = intake_db()
+    try:
+        row = conn.execute(
+            "SELECT user_id, status FROM intake_projects WHERE id = ? AND deleted_at IS NULL",
+            (intake_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or str(row["user_id"] or "") != user_id:
+        raise HTTPException(404, "Project not found")
+    status = str(row["status"] or "").strip().lower()
+    if write and status not in _EDITABLE_INTAKE_STATUSES:
+        raise HTTPException(409, "This intake is already submitted")
+    return row
+
+
 @router.post("/intake-project/{intake_id}/fabrics")
-async def save_intake_fabric(intake_id: str, payload: IntakeFabricCreate):
+async def save_intake_fabric(intake_id: str, payload: IntakeFabricCreate, request: Request):
     """Save fabric info for an intake project (room or item level)."""
+    _intake_editor(intake_id, request, write=True)
     with get_db() as conn:
         return _insert_intake_fabric(conn, intake_id, payload)
 
 
 @router.get("/intake-project/{intake_id}/fabrics")
-async def get_intake_fabrics(intake_id: str):
+async def get_intake_fabrics(intake_id: str, request: Request):
     """Get all fabric info for an intake project."""
+    _intake_editor(intake_id, request, write=False)
     with get_db() as conn:
         rows = conn.execute(
             "SELECT * FROM intake_fabrics WHERE intake_id = ? ORDER BY id", (intake_id,)
@@ -499,8 +531,9 @@ async def get_intake_fabrics(intake_id: str):
 
 
 @router.put("/intake-project/{intake_id}/fabrics/{fabric_id}")
-async def update_intake_fabric(intake_id: str, fabric_id: int, payload: IntakeFabricCreate):
+async def update_intake_fabric(intake_id: str, fabric_id: int, payload: IntakeFabricCreate, request: Request):
     """Update a fabric entry."""
+    _intake_editor(intake_id, request, write=True)
     with get_db() as conn:
         existing = conn.execute(
             "SELECT id FROM intake_fabrics WHERE id = ? AND intake_id = ?", (fabric_id, intake_id)
@@ -532,12 +565,13 @@ class IntakeFabricBatch(BaseModel):
 
 
 @router.put("/intake-project/{intake_id}/fabrics")
-async def replace_intake_fabrics(intake_id: str, payload: IntakeFabricBatch):
+async def replace_intake_fabrics(intake_id: str, payload: IntakeFabricBatch, request: Request):
     """Replace the fabric rows for one project.
 
     The designer wizard saves on each step and again on submit. Replacing
     the set keeps one row per item instead of appending a duplicate.
     """
+    _intake_editor(intake_id, request, write=True)
     saved = []
     with get_db() as conn:
         conn.execute("DELETE FROM intake_fabrics WHERE intake_id = ?", (intake_id,))
@@ -547,8 +581,9 @@ async def replace_intake_fabrics(intake_id: str, payload: IntakeFabricBatch):
 
 
 @router.delete("/intake-project/{intake_id}/fabrics/{fabric_id}")
-async def delete_intake_fabric(intake_id: str, fabric_id: int):
+async def delete_intake_fabric(intake_id: str, fabric_id: int, request: Request):
     """Remove a fabric entry."""
+    _intake_editor(intake_id, request, write=True)
     with get_db() as conn:
         result = conn.execute(
             "DELETE FROM intake_fabrics WHERE id = ? AND intake_id = ?", (fabric_id, intake_id)

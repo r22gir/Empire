@@ -8,7 +8,7 @@ import {
 import IntakeNav from '../../../components/intake/IntakeNav';
 import PhotoUploader from '../../../components/intake/PhotoUploader';
 import FabricInfoSection, { FabricInfo } from '../../../components/intake/FabricInfoSection';
-import { intakeFetch, getToken } from '../../../lib/intake-auth';
+import { intakeFetch, getToken, intakeAuthHeaders } from '../../../lib/intake-auth';
 import { isImageFile, fileKindLabel, formatFileSize } from '../../../lib/fileKind';
 
 import { API, API_BASE } from '../../../lib/api';
@@ -45,7 +45,9 @@ export default function ProjectDetail() {
 
   const loadFabrics = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics`);
+      const res = await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics`, {
+        headers: intakeAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setFabricEntries(Array.isArray(data) ? data : []);
@@ -144,7 +146,7 @@ export default function ProjectDetail() {
       };
       await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: intakeAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       });
       setShowAddFabric(false);
@@ -156,7 +158,10 @@ export default function ProjectDetail() {
 
   const removeFabric = async (id: number) => {
     try {
-      await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics/${id}`, { method: 'DELETE' });
+      await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics/${id}`, {
+        method: 'DELETE',
+        headers: intakeAuthHeaders(),
+      });
       await loadFabrics();
     } catch { /* best effort */ }
   };

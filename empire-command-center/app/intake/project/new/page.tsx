@@ -6,7 +6,7 @@ import IntakeNav from '../../../components/intake/IntakeNav';
 import PhotoUploader from '../../../components/intake/PhotoUploader';
 import MeasurementInput, { Measurement } from '../../../components/intake/MeasurementInput';
 import FabricInfoSection, { FabricInfo } from '../../../components/intake/FabricInfoSection';
-import { intakeFetch, getToken } from '../../../lib/intake-auth';
+import { intakeFetch, getToken, intakeAuthHeaders } from '../../../lib/intake-auth';
 
 import { API, API_BASE } from '../../../lib/api';
 
@@ -133,7 +133,7 @@ export default function NewProject() {
       }));
     const res = await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${pid}/fabrics`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: intakeAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ fabrics }),
     });
     if (!res.ok) {

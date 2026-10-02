@@ -129,14 +129,24 @@ def _quote_items(project: dict, fabrics: list[dict]) -> list[dict]:
                 names.append(str(swatch["original_name"]))
         if names:
             description = f"{description} · files: {', '.join(names)}"
+        width = fabric.get("fabric_width")
+        try:
+            width = float(width) if width not in (None, "") else None
+        except (TypeError, ValueError):
+            width = None
         items.append({
             "description": description[:500],
+            "room": room,
             "quantity": 1,
             "unit": "ea",
             "rate": 0,
             "unit_price": 0,
             "amount": 0,
             "category": "intake_pending",
+            "fabric_name": fabric.get("fabric_name") or "",
+            "fabric_code": fabric.get("fabric_code") or "",
+            "fabric_width": width,
+            "supplier_url": fabric.get("supplier_url") or fabric.get("supplier_link") or "",
         })
     if not items:
         items.append({
