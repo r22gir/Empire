@@ -46,6 +46,8 @@ def test_usage_cap_warns_then_soft_blocks_heavy_only(monkeypatch, tmp_path):
     assert summary["level"] == "warn"
     assert summary["cap_percent"] == 20
     assert "20" in summary["message"]
+    assert "20%" in summary["limit_note_es"]
+    assert "MiniMax" in summary["limit_note_es"]
     assert enforce_usage_cap(text="hola") is None
 
     record_usage(input_tokens=50, output_tokens=0, model="MiniMax-M3")
@@ -85,6 +87,34 @@ def test_session_cookie_opens_amp_me_without_second_login(monkeypatch, tmp_path)
     me = client.get("/api/v1/amp/me")
     assert me.status_code == 200
     assert me.json()["email"] == "owner@example.com"
+
+
+def test_usage_page_is_owner_only_and_states_the_twenty_percent_cap(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", "1000")
+    from app.services.amp_allowlist import add_entry
+    from app.services.instance_usage import record_usage
+
+    record_usage(input_tokens=10, output_tokens=5, cost_usd=0.01)
+    client = _client()
+    assert client.get("/api/v1/edition/usage").status_code == 403
+    add_entry(email="member@example.com", role="member")
+    _cookie(client, "member@example.com")
+    assert client.get("/api/v1/edition/usage").status_code == 403
+    _cookie(client, "owner@example.com")
+    body = client.get("/api/v1/edition/usage")
+    assert body.status_code == 200
+    payload = body.json()
+    assert payload["month"]["input_tokens"] == 10
+    assert payload["month"]["output_tokens"] == 5
+    assert payload["month"]["cost_usd"] == 0.01
+    assert payload["cap_percent"] == 20
+    assert payload["limit_note_es"] == "Tu uso está limitado al 20% del uso total de MiniMax."
+    card = (Path(__file__).resolve().parents[2] / "empire-command-center" / "app" / "components" / "UsageCard.tsx").read_text(encoding="utf-8")
+    page = (Path(__file__).resolve().parents[2] / "empire-command-center" / "app" / "uso" / "page.tsx").read_text(encoding="utf-8")
+    assert "limitado al" in card
+    assert "20%" in page
+    assert "solo para el dueño" in page
 
 
 def test_confidential_facts_stay_out_of_generated_notes(monkeypatch, tmp_path):

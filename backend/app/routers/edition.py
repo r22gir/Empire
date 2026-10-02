@@ -158,7 +158,11 @@ async def logout():
 
 
 @router.get("/edition/usage")
-async def get_usage():
+async def get_usage(request: Request):
+    """Owner-only meter: tokens, estimated cost, and the monthly cap."""
+    if not is_family_edition():
+        raise HTTPException(404, "El tope de uso es de las ediciones familiares")
+    _require_admin(request)
     from app.services.instance_usage import usage_summary
     return usage_summary()
 

@@ -223,6 +223,10 @@ def usage_summary() -> dict:
         "ratio": None,
         "level": "ok",
         "message": "",
+        "limit_note_es": (
+            f"Tu uso está limitado al {pct:g}% del uso total de MiniMax."
+            if is_family_edition() else ""
+        ),
     }
     conn = _connect()
     if conn is None:
