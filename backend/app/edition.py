@@ -732,6 +732,14 @@ def edition_manifest() -> dict:
             } if is_maxine() else None
         ),
         "data_root_configured": data_root_or_none() is not None,
+        "simli": {
+            "face_env": (
+                "SIMLI_FACE_ID_MAX_E" if is_amp()
+                else "SIMLI_FACE_ID_MAXINE" if is_maxine()
+                else "SIMLI_FACE_ID"
+            ),
+            "fallback": "current_avatar",
+        },
     }
     return manifest
 

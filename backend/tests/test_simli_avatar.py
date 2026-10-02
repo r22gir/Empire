@@ -207,6 +207,29 @@ def test_default_face_ids_when_env_unset(monkeypatch):
     }
 
 
+def test_edition_manifest_names_the_face_env_and_keeps_the_current_avatar(monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "maxine")
+    monkeypatch.delenv("SIMLI_FACE_ID_MAXINE", raising=False)
+    from app.edition import edition_manifest
+
+    manifest = edition_manifest()
+    assert manifest["simli"]["face_env"] == "SIMLI_FACE_ID_MAXINE"
+    assert manifest["simli"]["fallback"] == "current_avatar"
+    face, source = simli._face_id("maxine")
+    assert source == "default"
+    assert face == simli.DEFAULT_FACE_IDS["maxine"]
+    monkeypatch.setenv("SIMLI_FACE_ID_MAXINE", "face-from-env")
+    face, source = simli._face_id("maxine")
+    assert face == "face-from-env"
+    assert source == "SIMLI_FACE_ID_MAXINE"
+    assert "face-from-env" not in json.dumps(edition_manifest()["simli"])
+
+    monkeypatch.setenv("EMPIRE_EDITION", "amp")
+    monkeypatch.delenv("SIMLI_FACE_ID_MAX_E", raising=False)
+    assert edition_manifest()["simli"]["face_env"] == "SIMLI_FACE_ID_MAX_E"
+    assert simli._face_id("amp")[0] == simli.DEFAULT_FACE_IDS["max_e"]
+
+
 def test_per_edition_face_env(monkeypatch):
     monkeypatch.setenv("SIMLI_FACE_ID_MAXINE", "test-face-maxine")
     monkeypatch.setenv("SIMLI_FACE_ID_MAX_E", "test-face-maxe")
