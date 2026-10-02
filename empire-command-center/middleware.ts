@@ -19,7 +19,7 @@ const LUXE_PUBLIC_HOSTS = new Set([
   "test-luxe.empirebox.store",
 ]);
 const LUXE_BLOCKED_EXACT = new Set(["/api/v1/intake/reset-password"]);
-const LUXE_BLOCKED_PREFIXES = ["/api/v1/intake/admin", "/api/v1/intake/owner"];
+const LUXE_BLOCKED_PREFIXES = ["/api/v1/intake/admin"];
 const LUXE_PUBLIC_POST_EXACT = new Set([
   "/api/v1/intake/signup",
   "/api/v1/intake/login",

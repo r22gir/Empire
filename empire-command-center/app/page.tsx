@@ -198,13 +198,6 @@ export default function CommandCenter() {
       const productParam = params.get('product');
       const sectionParam = params.get('section');
       // Tailscale / on-box Command Center. Do not depend on studio.empirebox.store.
-      if (productParam === 'lead' || productParam === 'crm') {
-        pendingDeepLinkScreen.current = null;
-        setActiveProduct(productParam);
-        setActiveScreen('dashboard');
-        setActiveSection(sectionParam);
-        return;
-      }
       if (productParam === 'workroom' || productParam === 'woodcraft') {
         pendingDeepLinkScreen.current = null;
         setActiveProduct('workroom');

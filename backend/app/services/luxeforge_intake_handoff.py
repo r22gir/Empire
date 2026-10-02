@@ -2,7 +2,9 @@
 
 The designer portal stores the project in ``intake_projects``. On submit this
 module also writes the shared Workroom path: one ForgeCRM customer, one
-LeadForge lead, and one Workroom quote draft. The quote is not sent.
+LeadForge lead, and one Workroom quote draft in ``quotes_v2``. Fabric details
+and photos are attached to that draft. The quote is not sent, and it is not
+flagged as a test quote, so it stays in the normal Quotes list.
 
 The only email is an internal notice to the workroom mailbox. The customer's
 address is never the recipient, and this module does not create a customer draft.
@@ -21,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 OWNER_NOTICE_EMAIL = "workroom@empirebox.store"
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".heic", ".heif"}
+_ANALYSIS_START = "--- owner photo notes ---"
+_ANALYSIS_END = "--- end owner photo notes ---"
 
 
 def job_type_for_treatment(treatment: Optional[str]) -> str:
@@ -110,6 +114,30 @@ def _quote_items(project: dict, fabrics: list[dict]) -> list[dict]:
             # Not a catalog category. A $0 draft must not be priced or sent.
             "category": "intake_pending",
         })
+    for fabric in fabrics:
+        pref = fabric.get("fabric_preference") or "unspecified"
+        name = fabric.get("fabric_name") or fabric.get("item_name") or "Fabric"
+        room = fabric.get("room_name") or ""
+        description = f"Fabric ({pref}): {name}"
+        if room:
+            description = f"{room} — {description}"
+        if fabric.get("client_notes"):
+            description = f"{description} — {fabric['client_notes']}"
+        names = []
+        for swatch in _loads(fabric.get("swatch_files"), []):
+            if isinstance(swatch, dict) and swatch.get("original_name"):
+                names.append(str(swatch["original_name"]))
+        if names:
+            description = f"{description} · files: {', '.join(names)}"
+        items.append({
+            "description": description[:500],
+            "quantity": 1,
+            "unit": "ea",
+            "rate": 0,
+            "unit_price": 0,
+            "amount": 0,
+            "category": "intake_pending",
+        })
     if not items:
         items.append({
             "description": "Scope pending — LuxeForge intake, not priced",
@@ -121,6 +149,245 @@ def _quote_items(project: dict, fabrics: list[dict]) -> list[dict]:
             "category": "intake_pending",
         })
     return items
+
+
+def _disk_name(entry: dict) -> str:
+    filename = str(entry.get("filename") or "").strip()
+    if filename:
+        return os.path.basename(filename.replace("\\", "/"))
+    path = str(entry.get("path") or "").split("?", 1)[0].strip()
+    if path:
+        return os.path.basename(path.replace("\\", "/"))
+    return ""
+
+
+def _collect_files(project: dict, fabrics: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    seen: set[str] = set()
+
+    def add(entry: Any, kind: str) -> None:
+        if not isinstance(entry, dict):
+            return
+        name = _disk_name(entry)
+        path = str(entry.get("path") or "").strip()
+        key = name or path
+        if not key or key in seen:
+            return
+        seen.add(key)
+        rows.append({
+            "filename": name,
+            "path": path,
+            "original_name": entry.get("original_name") or name or kind,
+            "content_type": entry.get("content_type"),
+            "uploaded_at": entry.get("uploaded_at") or "",
+            "kind": kind,
+        })
+
+    for item in _loads(project.get("photos"), []):
+        add(item, "photo")
+    for item in _loads(project.get("scans"), []):
+        add(item, "scan")
+    for fabric in fabrics:
+        if fabric.get("swatch_photo_path"):
+            add({
+                "path": fabric.get("swatch_photo_path"),
+                "original_name": fabric.get("fabric_name") or "swatch",
+            }, "swatch")
+        for item in _loads(fabric.get("swatch_files"), []):
+            add(item, "swatch")
+    return rows
+
+
+def _file_note_lines(project: dict, fabrics: list[dict]) -> list[str]:
+    project_id = str(project.get("id") or "")
+    lines = []
+    for entry in _collect_files(project, fabrics):
+        loc = entry["path"]
+        if not loc and entry["filename"] and project_id:
+            loc = f"/intake_uploads/{project_id}/{entry['filename']}"
+        label = str(entry["original_name"] or entry["filename"] or entry["kind"])
+        lines.append(f"{entry['kind']}: {label}" + (f" {loc}" if loc else ""))
+    return lines
+
+
+def _useful_analysis(records: Any) -> list[dict]:
+    loaded = _loads(records, [])
+    if not isinstance(loaded, list):
+        return []
+    useful = []
+    for rec in loaded:
+        if isinstance(rec, dict) and (rec.get("overall_notes") or rec.get("items")):
+            useful.append(rec)
+    return useful
+
+
+def _merge_analysis_notes(existing: str, records: Any) -> str:
+    """Replace the owner-only analysis section. The designer portal never reads this."""
+    text = existing or ""
+    if _ANALYSIS_START in text and _ANALYSIS_END in text:
+        pre, rest = text.split(_ANALYSIS_START, 1)
+        _section, post = rest.split(_ANALYSIS_END, 1)
+        text = (pre.rstrip() + "\n\n" + post.lstrip()).strip()
+    lines = []
+    for rec in _useful_analysis(records):
+        name = rec.get("filename") or "photo"
+        notes = str(rec.get("overall_notes") or "").strip()
+        line = f"- {name}"
+        if notes:
+            line += f": {notes}"
+        lines.append(line)
+        if rec.get("items"):
+            lines.append("  " + json.dumps(rec["items"], default=str)[:800])
+    if not lines:
+        return text
+    section = (
+        f"{_ANALYSIS_START}\n"
+        "Owner only. Not shown to the designer.\n"
+        + "\n".join(lines)
+        + f"\n{_ANALYSIS_END}"
+    )
+    return (text + "\n\n" + section).strip() if text else section
+
+
+def _fresh_photo_analysis(project: dict) -> Any:
+    project_id = project.get("id")
+    if not project_id:
+        return project.get("photo_analysis")
+    try:
+        from app.routers import intake_auth
+
+        conn = intake_auth.get_db()
+        try:
+            row = conn.execute(
+                "SELECT photo_analysis FROM intake_projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row and row["photo_analysis"]:
+            return row["photo_analysis"]
+    except Exception:
+        logger.exception("Could not read photo analysis for %s", project_id)
+    return project.get("photo_analysis")
+
+
+def _quote_notes(project: dict, fabrics: list[dict], analysis: Any) -> str:
+    summary = _summary(project, fabrics)
+    notes = (
+        f"Draft from LuxeForge {project.get('intake_code') or ''}. "
+        "Not priced and not sent to the customer.\n\n"
+        + summary
+    )
+    file_lines = _file_note_lines(project, fabrics)
+    if file_lines:
+        notes += "\n\nFiles:\n" + "\n".join(f"- {line}" for line in file_lines)
+    return _merge_analysis_notes(notes, analysis)[:8000]
+
+
+def attach_intake_files_to_quote(quote_id: str, project: dict, fabrics: list[dict]) -> list[dict]:
+    """Copy intake images onto the quote so Quote Review can show them.
+
+    Image bytes land in the quote photo folder and in ``photos_json``.
+    Other files stay on their intake paths and are named in the quote notes.
+    """
+    import shutil
+    from pathlib import Path
+
+    from app.routers import intake_auth
+
+    project_id = str(project.get("id") or "")
+    uploads = Path(intake_auth.UPLOADS_DIR) / project_id
+    dest_dir = Path(intake_auth.PHOTOS_DIR) / "quote" / str(quote_id)
+    photos: list[dict] = []
+    for entry in _collect_files(project, fabrics):
+        src_name = entry["filename"]
+        if not src_name or not _is_image(src_name, entry.get("content_type")):
+            continue
+        src = uploads / src_name
+        if not src.is_file():
+            logger.warning("Intake file missing for quote %s: %s", quote_id, src)
+            continue
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_name = f"intake_{src_name}"
+        dest_path = dest_dir / dest_name
+        shutil.copy2(src, dest_path)
+        meta = {
+            "original_name": entry["original_name"],
+            "source": "intake",
+            "size": dest_path.stat().st_size,
+            "content_type": entry.get("content_type") or "",
+            "uploaded_at": entry.get("uploaded_at") or "",
+            "entity_type": "quote",
+            "entity_id": quote_id,
+            "intake_project_id": project_id,
+            "kind": entry["kind"],
+        }
+        (dest_dir / f"{dest_name}.meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        url = f"/api/v1/photos/serve/quote/{quote_id}/{dest_name}"
+        photos.append({
+            "filename": dest_name,
+            "path": url,
+            "url": url,
+            "original_name": entry["original_name"],
+            "source": "intake",
+            "uploaded_at": entry.get("uploaded_at") or "",
+        })
+    if photos:
+        from app.services.quote_service import update_quote
+
+        update_quote(quote_id, {"photos": photos})
+    return photos
+
+
+def _push_analysis_to_linked_quote(project_id: str) -> None:
+    from app.routers import intake_auth
+    from app.services.quote_service import get_quote, update_quote
+
+    conn = intake_auth.get_db()
+    try:
+        row = conn.execute(
+            "SELECT quote_id, photo_analysis FROM intake_projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not row["quote_id"]:
+        return
+    quote = get_quote(row["quote_id"])
+    if not quote:
+        return
+    notes = _merge_analysis_notes(quote.get("notes") or "", row["photo_analysis"])
+    if notes != (quote.get("notes") or ""):
+        update_quote(row["quote_id"], {"notes": notes[:8000]})
+
+
+def _remember_handoff(project_id: str, lead_id: Any, customer_id: Any, quote_id: Any, quote_number: Any) -> None:
+    if not project_id:
+        return
+    from app.routers import intake_auth
+
+    conn = intake_auth.get_db()
+    try:
+        conn.execute(
+            """UPDATE intake_projects
+               SET lead_id = COALESCE(?, lead_id),
+                   customer_id = COALESCE(?, customer_id),
+                   quote_id = COALESCE(?, quote_id),
+                   quote_number = COALESCE(?, quote_number),
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (lead_id, customer_id, quote_id, quote_number, project_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _keep_quote_visible(quote_id: str) -> None:
+    """A designer intake is a real draft. The Quotes list hides is_test=1."""
+    from app.services.quote_service import set_quote_test_flag
+
+    set_quote_test_flag(quote_id, False, changed_by="luxeforge_intake")
 
 
 def _vision_configured() -> bool:
@@ -184,6 +451,10 @@ def store_owner_photo_analysis(project_id: str, record: dict) -> None:
         conn.commit()
     finally:
         conn.close()
+    try:
+        _push_analysis_to_linked_quote(project_id)
+    except Exception:
+        logger.exception("Could not copy photo analysis onto the quote for %s", project_id)
 
 
 def run_owner_photo_analysis(project_id: str, content: bytes, filename: str, content_type: Optional[str]) -> dict:
@@ -228,7 +499,9 @@ async def send_owner_intake_notice(*, project: dict, user: dict, lead_id: Any, q
         f"&lt;{html.escape(customer_note)}&gt;</p>"
         f"<p>LeadForge #{html.escape(str(lead_id or '—'))} · "
         f"Quote {html.escape(str(quote_number or quote_id or '—'))}</p>"
-        "<p>Open Command Center → Workroom → LuxeForge Intakes.</p>"
+        "<p>Open Command Center → Workroom → Quotes. "
+        "The draft is in that list, with the fabric details and photos. "
+        "It has not been sent.</p>"
     )
     sent = await send_email(to, subject, body)
     return {"to": to, "sent": bool(sent), "customer_emailed": False}
@@ -271,8 +544,8 @@ async def handoff_submitted_intake(project: dict, user: dict, fabrics: Optional[
             photo_notes=project.get("notes"),
         ),
     )
-    # Invalid designer email must not block the project row. The owner list
-    # still shows the intake; the lead write is reported as an error.
+    # Invalid designer email must not block the project row. The Workroom
+    # quote draft is still created; the lead write is reported as an error.
     lead_id = customer_id = None
     lead_error = None
     if "@" not in email or email.lower() == OWNER_NOTICE_EMAIL:
@@ -293,20 +566,16 @@ async def handoff_submitted_intake(project: dict, user: dict, fabrics: Optional[
     try:
         from app.services.quote_service import create_quote
 
+        analysis = _fresh_photo_analysis(project)
         quote = create_quote({
             "customer_name": user.get("name") or project.get("name") or "Intake client",
             "customer_email": email,
             "customer_phone": user.get("phone") or "",
             "customer_address": project.get("address") or "",
-            "customer_id": customer_id,
             "business_unit": "workroom",
             "project_name": project.get("name") or "LuxeForge intake",
             "project_description": summary[:2000],
-            "notes": (
-                f"Draft from LuxeForge {project.get('intake_code') or ''}. "
-                "Not priced and not sent to the customer.\n\n"
-                + summary
-            )[:8000],
+            "notes": _quote_notes(project, fabrics, analysis),
             "pricing_mode": "flat",
             "terms": "Draft from designer intake. Not sent.",
             "valid_days": 30,
@@ -318,6 +587,18 @@ async def handoff_submitted_intake(project: dict, user: dict, fabrics: Optional[
     except Exception as exc:
         quote_error = str(exc)
         logger.exception("LuxeForge quote handoff failed for %s", project.get("id"))
+
+    if quote_id:
+        try:
+            _keep_quote_visible(quote_id)
+            attach_intake_files_to_quote(quote_id, project, fabrics)
+            if customer_id:
+                from app.services.quote_service import update_quote
+                update_quote(quote_id, {"customer_id": customer_id})
+            _remember_handoff(project.get("id"), lead_id, customer_id, quote_id, quote_number)
+            _push_analysis_to_linked_quote(str(project.get("id") or ""))
+        except Exception:
+            logger.exception("LuxeForge quote attachments failed for %s", project.get("id"))
 
     notice = await send_owner_intake_notice(
         project=project,

@@ -584,7 +584,8 @@ async def submit_project(request: Request, project_id: str, user=Depends(get_cur
     conn.close()
 
     # CRM lead + Workroom quote draft + owner mailbox notice. A failure here
-    # must not undo the designer's submit; the owner list still shows the row.
+    # must not undo the designer's submit. The draft, when created, is what
+    # shows in Workroom → Quotes.
     if row:
         try:
             from app.services.luxeforge_intake_handoff import handoff_submitted_intake
@@ -817,71 +818,6 @@ async def upload_scan(
         "content_type": file.content_type,
         "total_scans": len(scans),
     }
-
-
-def _owner_submission(row: dict) -> dict:
-    project_id = row["id"]
-    photos = json.loads(row.get("photos") or "[]")
-    scans = json.loads(row.get("scans") or "[]")
-    rooms = json.loads(row.get("rooms") or "[]")
-    measurements = json.loads(row.get("measurements") or "[]")
-    analysis_raw = row.get("photo_analysis") or "[]"
-    try:
-        analysis = json.loads(analysis_raw) if isinstance(analysis_raw, str) else analysis_raw
-    except json.JSONDecodeError:
-        analysis = []
-    return {
-        "id": project_id,
-        "intake_code": row.get("intake_code"),
-        "name": row.get("name"),
-        "address": row.get("address"),
-        "status": row.get("status"),
-        "treatment": row.get("treatment"),
-        "style": row.get("style"),
-        "scope": row.get("scope"),
-        "notes": row.get("notes"),
-        "rooms": rooms,
-        "photos": photos,
-        "scans": scans,
-        "measurements": measurements,
-        "photo_analysis": analysis if isinstance(analysis, list) else [],
-        "created_at": row.get("created_at"),
-        "updated_at": row.get("updated_at"),
-        "contact": {
-            "name": row.get("user_name"),
-            "email": row.get("user_email"),
-            "phone": row.get("user_phone"),
-            "company": row.get("user_company"),
-            "role": row.get("user_role"),
-        },
-        "fabrics": _load_project_fabrics(project_id),
-        "lead_id": row.get("lead_id"),
-        "customer_id": row.get("customer_id"),
-        "quote_id": row.get("quote_id"),
-        "quote_number": row.get("quote_number"),
-    }
-
-
-@limiter.limit("30/minute")
-@router.get("/owner/submissions")
-async def owner_list_submissions(request: Request):
-    """Command Center list of LuxeForge intakes.
-
-    Studio and the tailnet can read this the same way they read Workroom
-    quotes. The public Luxe hostname cannot: the edge blocks this prefix.
-    Photo analysis is included here and stripped from the designer portal.
-    """
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT p.*, u.name as user_name, u.email as user_email,
-               u.phone as user_phone, u.company as user_company, u.role as user_role
-        FROM intake_projects p
-        LEFT JOIN intake_users u ON p.user_id = u.id
-        WHERE p.deleted_at IS NULL
-        ORDER BY p.updated_at DESC
-    """).fetchall()
-    conn.close()
-    return {"submissions": [_owner_submission(dict(r)) for r in rows]}
 
 
 # ── Admin endpoints (for Command Center) ─────────────────────
