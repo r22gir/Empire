@@ -227,6 +227,9 @@ load_router("app.routers.custom_shapes", "/api/v1", ["custom-shapes"])
 # Drawing Studio — architectural bench drawings (SVG + PDF)
 load_router("app.routers.drawings", "/api/v1", ["drawings"])
 
+# Voice notes → draft quote / drawing (same pipeline as Telegram voice)
+load_router("app.routers.voice_documents", "/api/v1", ["voice-documents"])
+
 # Fabric Library
 load_router("app.routers.fabrics", "/api/v1/fabrics", ["fabrics"])
 

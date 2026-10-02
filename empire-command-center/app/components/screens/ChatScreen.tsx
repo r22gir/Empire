@@ -79,6 +79,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [aiStatus, setAiStatus] = useState<string>(''); // Thinking/tool status for all messages
   const [maxStatus, setMaxStatus] = useState<any>(null);
   const [recordingTimer, setRecordingTimer] = useState(0);
+  const [voiceDraft, setVoiceDraft] = useState<any>(null);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [quickQuoteNotice, setQuickQuoteNotice] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -90,6 +91,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const voiceModeRef = useRef(false);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const voiceSessionRef = useRef<string>('');
+  const voiceDestinationRef = useRef<'chat' | 'document'>('document');
+  const voiceReleaseRef = useRef(false);
 
   useEffect(() => {
     msgsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -199,9 +203,67 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     }
   }, []);
 
-  // Start recording for voice mode (returns promise that resolves with transcript)
-  const startVoiceCapture = useCallback(() => {
+  const submitVoiceDocument = useCallback(async (transcript: string) => {
+    setVoiceStatus('📋 Building draft...');
+    try {
+      const res = await fetch(`${API}/voice/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript,
+          session_id: voiceSessionRef.current || '',
+          channel: 'cc',
+          edition: 'workroom',
+        }),
+      });
+      const data = await res.json();
+      if (data.session_id) voiceSessionRef.current = data.session_id;
+      if (data.handled) {
+        setVoiceDraft(data);
+        setVoiceStatus(data.sent ? '' : 'Draft only — nothing sent');
+      } else if (data.transcript || transcript) {
+        const text = data.transcript || transcript;
+        setInput(prev => prev + (prev ? ' ' : '') + text);
+        setVoiceStatus('✅ Review, then tap Send');
+        setTimeout(() => setVoiceStatus(prev => prev === '✅ Review, then tap Send' ? '' : prev), 5000);
+      } else {
+        setVoiceStatus('');
+      }
+    } catch (err) {
+      console.warn('Voice document draft failed:', err);
+      setInput(prev => prev + (prev ? ' ' : '') + transcript);
+      setVoiceStatus('❌ Draft failed — transcript kept in the box');
+      setTimeout(() => setVoiceStatus(''), 4000);
+    }
+  }, []);
+
+  const finishVoiceDraft = useCallback(() => {
+    submitVoiceDocument('done');
+  }, [submitVoiceDocument]);
+
+  const chooseVoiceOption = useCallback(async (optionId: string, choiceId: string) => {
+    const sessionId = voiceSessionRef.current;
+    if (!sessionId) return;
+    setVoiceStatus('📋 Updating draft...');
+    try {
+      const res = await fetch(`${API}/voice/documents/${sessionId}/choose`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ option_id: optionId, choice_id: choiceId }),
+      });
+      const data = await res.json();
+      setVoiceDraft(data);
+      setVoiceStatus('Draft only — nothing sent');
+    } catch {
+      setVoiceStatus('❌ Could not apply that choice');
+    }
+  }, []);
+
+  // Start recording. Hold-to-talk uses destination "document".
+  const startVoiceCapture = useCallback((destination: 'chat' | 'document' = 'document') => {
     if (mediaRecorderRef.current?.state === 'recording') return;
+    voiceDestinationRef.current = destination;
+    voiceReleaseRef.current = false;
     navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
       const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
       const chunks: Blob[] = [];
@@ -220,15 +282,15 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           setVoiceStatus('🔄 Transcribing...');
           const res = await fetch(`${API}/voice/transcribe`, { method: 'POST', body: fd });
           const data = await res.json();
-          if (data.text && voiceModeRef.current) {
-            // In voice mode: auto-send the transcript
+          if (data.text && voiceDestinationRef.current === 'document') {
+            submitVoiceDocument(data.text);
+          } else if (data.text && voiceModeRef.current) {
             onSend(data.text);
             setVoiceStatus('');
           } else if (data.text) {
             setInput(prev => prev + (prev ? ' ' : '') + data.text);
             setVoiceStatus('✅ Review, then tap Send');
             textareaRef.current?.focus();
-            // Clear status after 5 seconds
             setTimeout(() => setVoiceStatus(prev => prev === '✅ Review, then tap Send' ? '' : prev), 5000);
           } else {
             setVoiceStatus('');
@@ -241,9 +303,10 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         setRecording(false);
       };
       recorder.start();
+      if (voiceReleaseRef.current) recorder.stop();
       mediaRecorderRef.current = recorder;
       setRecording(true);
-      setVoiceStatus('🔴 Listening... tap to stop');
+      setVoiceStatus('🔴 Hold to talk... release to transcribe');
       // Start timer
       setRecordingTimer(0);
       recordingTimerRef.current = setInterval(() => setRecordingTimer(t => t + 1), 1000);
@@ -251,7 +314,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       setVoiceStatus('❌ Microphone access denied');
       setTimeout(() => setVoiceStatus(''), 3000);
     });
-  }, [onSend]);
+  }, [onSend, submitVoiceDocument]);
 
   // Register message complete callback for voice auto-play
   useEffect(() => {
@@ -263,7 +326,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         playTTSWithCallback(msg.content, () => {
           if (voiceModeRef.current) {
             // Start listening again for continuous voice loop
-            startVoiceCapture();
+            startVoiceCapture('chat');
           }
         });
       });
@@ -278,7 +341,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !inputFocused && !e.repeat && document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
         e.preventDefault();
-        if (!recording) startVoiceCapture();
+        if (!recording) startVoiceCapture(voiceModeRef.current ? 'chat' : 'document');
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -432,14 +495,6 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const selfHealLabel = maxStatus?.self_heal?.full_autonomous_repair_verified
     ? 'Self-heal autonomous'
     : 'Self-heal guided';
-
-  const toggleRecording = useCallback(async () => {
-    if (recording) {
-      mediaRecorderRef.current?.stop();
-      return;
-    }
-    startVoiceCapture();
-  }, [recording, startVoiceCapture]);
 
   const playTTS = async (text: string) => {
     playTTSWithCallback(text);
@@ -1015,6 +1070,78 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           </div>
         )}
 
+        {voiceDraft && (
+          <div style={{
+            marginBottom: 10, padding: '12px 14px', borderRadius: 12,
+            background: '#fff', border: '1px solid var(--border)',
+            maxHeight: 280, overflow: 'auto',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+              <strong style={{ fontSize: 13 }}>
+                {voiceDraft.quote_number ? `Draft ${voiceDraft.quote_number}` : 'Voice draft'}
+                {' · '}{voiceDraft.sent ? 'sent' : 'not sent'}
+              </strong>
+              <span style={{ fontSize: 11, color: 'var(--dim)' }}>{voiceDraft.client_brand}</span>
+            </div>
+            {voiceDraft.latest_transcript && (
+              <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--dim)' }}>
+                Transcript: {voiceDraft.latest_transcript}
+              </p>
+            )}
+            {(voiceDraft.line_items || []).map((item: any, idx: number) => (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '2px 0' }}>
+                <span>{item.description}</span>
+                <span>${Number(item.amount || 0).toFixed(2)}</span>
+              </div>
+            ))}
+            {voiceDraft.total != null && (
+              <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4 }}>Total ${Number(voiceDraft.total).toFixed(2)}</div>
+            )}
+            {voiceDraft.drawing?.fabrication?.usable_seat_in != null && (
+              <p style={{ margin: '6px 0 0', fontSize: 12 }}>
+                Drawing attached. Usable seat {voiceDraft.drawing.fabrication.usable_seat_in}&quot; · cushion {voiceDraft.drawing.fabrication.seat_cushion_thickness_in}&quot; · overhang {voiceDraft.drawing.fabrication.overhang_in}&quot;
+                {voiceDraft.drawing.fabrication.vertical_back ? ' · back vertical' : ' · back raked'}
+              </p>
+            )}
+            {(voiceDraft.missing || []).length > 0 && (
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12 }}>
+                {voiceDraft.missing.map((row: any) => <li key={row.id}>{row.label}</li>)}
+              </ul>
+            )}
+            {(voiceDraft.options || []).map((opt: any) => (
+              <div key={opt.id} style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{opt.prompt}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                  {(opt.choices || []).map((choice: any) => (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      onClick={() => chooseVoiceOption(opt.id, choice.id)}
+                      style={{
+                        fontSize: 12, padding: '4px 8px', borderRadius: 8,
+                        border: '1px solid var(--border)', background: 'var(--card-bg)', cursor: 'pointer',
+                      }}
+                    >
+                      {choice.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button type="button" onClick={finishVoiceDraft} style={{
+                fontSize: 12, padding: '6px 10px', borderRadius: 8, border: 'none',
+                background: 'var(--text)', color: '#fff', cursor: 'pointer',
+              }}>
+                Done
+              </button>
+              <span style={{ fontSize: 11, color: 'var(--dim)', alignSelf: 'center' }}>
+                Draft stays here until you confirm a send.
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Voice Mode banner */}
         {voiceMode && (
           <div style={{
@@ -1116,8 +1243,22 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
           {/* Mic button — primary, next to send */}
           <button
-            onClick={toggleRecording}
-            title={recording ? 'Tap to stop recording' : 'Tap to record voice'}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              voiceReleaseRef.current = false;
+              try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+              if (!recording) startVoiceCapture('document');
+            }}
+            onPointerUp={() => {
+              voiceReleaseRef.current = true;
+              if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+            }}
+            onPointerCancel={() => {
+              voiceReleaseRef.current = true;
+              if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+            }}
+            type="button"
+            title={recording ? 'Release to transcribe' : 'Hold to talk a quote or drawing'}
             style={{
               width: 44, height: 44, borderRadius: 12,
               background: recording ? '#ef4444' : 'var(--card-bg)',
@@ -1127,6 +1268,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               flexShrink: 0, transition: 'all 0.2s',
               animation: recording ? 'pulse 1.5s infinite' : 'none',
               position: 'relative',
+              touchAction: 'none',
             }}
           >
             {recording ? <MicOff size={18} /> : <Mic size={18} />}

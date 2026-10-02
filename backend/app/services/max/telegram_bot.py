@@ -1038,8 +1038,22 @@ class TelegramBot:
 
             await update.message.reply_html(f"📝 <b>Transcript:</b>\n<i>{transcript}</i>")
 
-            await update.message.reply_chat_action("typing")
             voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
+            try:
+                from app.services.voice_documents.pipeline import ingest_telegram_voice_transcript
+                draft = ingest_telegram_voice_transcript(transcript, voice_chat_id or "")
+            except Exception as draft_err:
+                logger.warning("voice document pipeline skipped: %s", draft_err)
+                draft = {"handled": False}
+            if draft.get("handled"):
+                reply = (draft.get("reply_text") or "Draft updated. Not sent.")[:4000]
+                await update.message.reply_text(reply)
+                _auto_save_exchange_to_memory(
+                    transcript, reply, source="telegram", chat_id=voice_chat_id or "",
+                )
+                return
+
+            await update.message.reply_chat_action("typing")
             html_response, plain_text, _ = await self._chat_with_max(
                 transcript,
                 chat_id=voice_chat_id,
