@@ -201,6 +201,11 @@ def _payload(session: dict, options, missing, schedule) -> dict:
             "fecha": "",
             "contenido_abogado": "",
         })
+    service_drafts = []
+    if fields.get("business") == "cibernettic":
+        from app.services.voice_doc.cibernettic_drafts import drafts_for_detected_line
+
+        service_drafts = drafts_for_detected_line(fields.get("service_line"))
     return {
         "doc_type": session["doc_type"],
         "label": DOC_LABELS.get(session["doc_type"], "Documento"),
@@ -212,6 +217,7 @@ def _payload(session: dict, options, missing, schedule) -> dict:
         "missing": missing,
         "question": follow_up_question(missing),
         "attachments": attachments,
+        "service_drafts": service_drafts,
         "sent": False,
         "auto_send": False,
         "watermark": "DRAFT",
