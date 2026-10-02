@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BusinessTab, ScreenMode, EcosystemProduct } from './lib/types';
-import { AMP_HIDDEN_NAV, editionFromEnv } from './lib/edition';
+import { AMP_HIDDEN_NAV, editionFromEnv, homeProductForEdition } from './lib/edition';
 import { API_BASE } from './lib/api';
 import { useChat } from './hooks/useChat';
 import { useSystemData } from './hooks/useSystemData';
@@ -116,7 +116,7 @@ const PRODUCT_DEEP_LINKS: Partial<Record<string, EcosystemProduct>> = {
 
 export default function CommandCenter() {
   const [activeProduct, setActiveProduct] = useState<EcosystemProduct>(
-    editionFromEnv() === 'amp' ? 'amp' : 'owner'
+    homeProductForEdition(editionFromEnv())
   );
   const [activeScreen, setActiveScreen] = useState<ScreenMode>('chat');
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -130,7 +130,14 @@ export default function CommandCenter() {
     fetch(`${API_BASE}/api/v1/edition`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (cancelled || data?.edition !== 'amp') return;
+        if (cancelled || !data?.edition) return;
+        if (data.edition === 'maxine' || data.app?.primary === 'construction') {
+          setActiveProduct((current) => (
+            current === 'owner' || current === 'amp' || AMP_HIDDEN_NAV.has(current) ? 'construction' : current
+          ));
+          return;
+        }
+        if (data.edition !== 'amp') return;
         setActiveProduct((current) => (AMP_HIDDEN_NAV.has(current) ? 'amp' : current));
       })
       .catch(() => {});

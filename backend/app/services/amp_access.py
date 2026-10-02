@@ -203,10 +203,10 @@ def session_email(token: str) -> Optional[str]:
 
 
 def _challenges_path() -> Path:
-    from app.edition import amp_app_dir, assert_under_root, is_amp
+    from app.edition import amp_app_dir, assert_under_root, is_family_edition
 
     path = amp_app_dir() / "login_challenges.json"
-    if is_amp():
+    if is_family_edition():
         assert_under_root(path)
     return path
 
@@ -224,10 +224,10 @@ def _load_challenges() -> dict:
 
 
 def _save_challenges(data: dict) -> None:
-    from app.edition import assert_under_root, is_amp
+    from app.edition import assert_under_root, is_family_edition
 
     path = _challenges_path()
-    if is_amp():
+    if is_family_edition():
         assert_under_root(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"

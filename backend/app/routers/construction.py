@@ -17,17 +17,40 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/construction", tags=["construction"])
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+def resolve_db_path() -> str:
+    """Workroom keeps EMPIRE_TASK_DB. A family instance uses its own file.
+
+    Maxine's projects, lots, buyers, sales, and payments live here — the
+    same database the rest of her instance reads and writes.
+    """
+    explicit = os.getenv("CONSTRUCTION_DB", "").strip()
+    if explicit:
+        return os.path.expanduser(explicit)
+    try:
+        from app.edition import data_root_or_none, is_family_edition
+
+        if is_family_edition():
+            root = data_root_or_none()
+            if root is not None:
+                return str(root / "construction.db")
+    except Exception:
+        logger.debug("construction db path fallback", exc_info=True)
+    return os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
 
 
 # ── Database helpers ─────────────────────────────────────────────────
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    path = resolve_db_path()
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    _ensure_schema(conn)
     return conn
 
 
@@ -51,8 +74,7 @@ def rows_to_list(rows):
 
 # ── Table init ───────────────────────────────────────────────────────
 
-def init_db():
-    conn = get_db()
+def _ensure_schema(conn):
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS cf_projects (
             id TEXT PRIMARY KEY,
@@ -243,12 +265,11 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_cf_infrastructure_project ON cf_infrastructure(project_id);
         CREATE INDEX IF NOT EXISTS idx_cf_materials_project ON cf_materials(project_id);
     """)
+
+
+def init_db():
+    conn = get_db()
     conn.close()
-    logger.info("ConstructionForge tables initialized")
-
-
-# Run on import
-init_db()
 
 
 # ── Pydantic schemas ─────────────────────────────────────────────────
@@ -537,6 +558,17 @@ def list_projects(status: Optional[str] = None):
         return {"projects": rows_to_list(rows)}
     finally:
         conn.close()
+
+
+@router.get("/portfolio")
+def portfolio():
+    """All projects with lot status, pipeline, payments due, and progress.
+
+    This is Maxine's home. Counts come from stored rows only.
+    """
+    from app.services.construction_bridge import portfolio_summary
+
+    return portfolio_summary()
 
 
 @router.post("/projects", status_code=201)

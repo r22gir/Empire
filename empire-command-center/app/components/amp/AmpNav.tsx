@@ -2,12 +2,16 @@
 import { Flame, LogOut, User } from 'lucide-react';
 import { clearAmpToken } from '../../lib/amp-auth';
 import { useRouter } from 'next/navigation';
+import { useAssistantName } from '../../lib/assistant';
+import { API } from '../../lib/api';
 
 export default function AmpNav({ user }: { user?: { name: string } | null }) {
   const router = useRouter();
+  const assistant = useAssistantName();
   const handleLogout = () => {
     clearAmpToken();
-    router.push('/amp');
+    fetch(`${API}/amp/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+    router.push('/login');
   };
 
   return (
@@ -17,8 +21,8 @@ export default function AmpNav({ user }: { user?: { name: string } | null }) {
           <div style={{ width: 28, height: 28, borderRadius: 8, background: '#D4A030', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Flame size={14} color="#fff" />
           </div>
-          <span style={{ fontWeight: 700, fontSize: 14, color: '#FFF9F0', letterSpacing: 2 }}>AMP</span>
-          <span style={{ fontSize: 9, color: '#9B9590', fontWeight: 500, letterSpacing: 1 }}>Actitud Mental Positiva</span>
+          <span style={{ fontWeight: 700, fontSize: 14, color: '#FFF9F0' }}>{assistant}</span>
+          <span style={{ fontSize: 9, color: '#9B9590', fontWeight: 500, letterSpacing: 1 }}>Centro de mando</span>
         </a>
         {user && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

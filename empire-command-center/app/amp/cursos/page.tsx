@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAmpToken, ampFetch } from '../../lib/amp-auth';
+import { ampFetch } from '../../lib/amp-auth';
 import AmpNav from '../../components/amp/AmpNav';
 import {
   BookOpen, Clock, Star, ChevronRight, Lock, Flame, Search,
@@ -22,7 +22,6 @@ export default function CursosPage() {
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    if (!getAmpToken()) { router.push('/amp/login'); return; }
     Promise.all([
       ampFetch('/me'),
       ampFetch('/courses'),
@@ -32,7 +31,7 @@ export default function CursosPage() {
       setCourses(c);
       setProgress(p);
       setLoading(false);
-    }).catch(() => router.push('/amp/login'));
+    }).catch(() => router.push('/login'));
   }, [router]);
 
   const getCoursePct = (courseId: string, lessonCount: number) => {

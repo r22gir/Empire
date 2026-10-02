@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.edition import allowlist_path, assert_under_root, is_amp
+from app.edition import allowlist_path, assert_under_root, is_family_edition
 
 
 def _owner_email() -> str:
@@ -43,7 +43,7 @@ def _empty() -> dict:
 
 def load_allowlist() -> dict:
     path = allowlist_path()
-    if is_amp():
+    if is_family_edition():
         assert_under_root(path)
     if not path.exists():
         data = _empty()
@@ -60,7 +60,7 @@ def load_allowlist() -> dict:
 
 def save_allowlist(data: dict) -> None:
     path = allowlist_path()
-    if is_amp():
+    if is_family_edition():
         assert_under_root(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAmpToken, ampFetch } from '../../lib/amp-auth';
+import { ampFetch } from '../../lib/amp-auth';
 import AmpNav from '../../components/amp/AmpNav';
 import {
   Flame, Sun, Heart, Brain, Crown, BookOpen, Smile, Play, Pause,
@@ -91,7 +91,6 @@ export default function AmpDashboard() {
   const todayLesson = MICRO_LESSONS[dayOfYear % MICRO_LESSONS.length];
 
   useEffect(() => {
-    if (!getAmpToken()) { router.push('/amp/login'); return; }
     Promise.all([
       ampFetch('/me'),
       ampFetch('/content?type=affirmation&limit=100').catch(() => []),
@@ -116,7 +115,7 @@ export default function AmpDashboard() {
         setProgressStats({ lessons: progress.length, courses: completedCourses });
       }
       setLoading(false);
-    }).catch(() => router.push('/amp/login'));
+    }).catch(() => router.push('/login'));
   }, [router]);
 
   const searchContent = async () => {

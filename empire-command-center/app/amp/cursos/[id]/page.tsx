@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { getAmpToken, ampFetch } from '../../../lib/amp-auth';
+import { ampFetch } from '../../../lib/amp-auth';
 import AmpNav from '../../../components/amp/AmpNav';
 import {
   BookOpen, Clock, ChevronLeft, CheckCircle, Circle, Play,
@@ -27,7 +27,6 @@ export default function CoursePlayerPage() {
   const [marking, setMarking] = useState(false);
 
   useEffect(() => {
-    if (!getAmpToken()) { router.push('/amp/login'); return; }
     Promise.all([
       ampFetch('/me'),
       ampFetch(`/courses/${courseId}`),
@@ -42,7 +41,7 @@ export default function CoursePlayerPage() {
       const firstIncomplete = c.lessons?.find((l: any) => !completedIds.has(l.id));
       if (firstIncomplete) setActiveLesson(firstIncomplete);
       else if (c.lessons?.length) setActiveLesson(c.lessons[0]);
-    }).catch(() => router.push('/amp/login'));
+    }).catch(() => router.push('/login'));
   }, [router, courseId]);
 
   const completedIds = new Set(progress.filter(p => p.course_id === courseId).map(p => p.lesson_id));

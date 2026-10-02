@@ -1,6 +1,8 @@
 import { API } from './api';
+
 const AMP_API = `${API}/amp`;
 
+/** Old localStorage JWT. The session cookie is the login that counts. */
 export function getAmpToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('amp_token');
@@ -16,12 +18,15 @@ export function clearAmpToken() {
 
 export async function ampFetch<T = any>(path: string, opts?: RequestInit): Promise<T> {
   const token = getAmpToken();
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...opts?.headers as Record<string, string> };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${AMP_API}${path}`, { ...opts, headers });
-  if (res.status === 401) {
+  const headers: Record<string, string> = {
+    ...(opts?.body ? { 'Content-Type': 'application/json' } : {}),
+    ...(opts?.headers as Record<string, string> | undefined),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${AMP_API}${path}`, { ...opts, headers, credentials: 'include' });
+  if (res.status === 401 || res.status === 403) {
     clearAmpToken();
-    if (typeof window !== 'undefined') window.location.href = '/amp/login';
+    if (typeof window !== 'undefined') window.location.href = '/login';
     throw new Error('Unauthorized');
   }
   if (!res.ok) {
@@ -29,24 +34,6 @@ export async function ampFetch<T = any>(path: string, opts?: RequestInit): Promi
     throw new Error(err.detail || `Error ${res.status}`);
   }
   return res.json();
-}
-
-export async function ampSignup(data: { name: string; email: string; password: string }) {
-  const res = await ampFetch<{ token: string; user: any }>('/signup', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-  setAmpToken(res.token);
-  return res;
-}
-
-export async function ampLogin(email: string, password: string) {
-  const res = await ampFetch<{ token: string; user: any }>('/login', {
-    method: 'POST',
-    body: JSON.stringify({ email, password }),
-  });
-  setAmpToken(res.token);
-  return res;
 }
 
 export async function getAmpMe() {

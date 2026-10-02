@@ -14,7 +14,7 @@
 # Workroom service (port 8000) as part of bringing AMP up.
 
 [Unit]
-Description=EmpireBox AMP edition (Actitud Mental Positiva, Max-e)
+Description=EmpireBox Max-e command center (AMP edition)
 After=network.target
 
 [Service]

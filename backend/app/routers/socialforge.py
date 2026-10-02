@@ -186,12 +186,12 @@ async def update_post(post_id: str, data: PostUpdate):
     post = _load_one(_posts_dir(), post_id)
     if not post:
         raise HTTPException(404, "Post not found")
-    from app.edition import coerce_social_status, is_amp
+    from app.edition import coerce_social_status, is_family_edition
     for field, val in data.model_dump(exclude_none=True).items():
         post[field] = val
-    if is_amp() and data.status:
+    if is_family_edition() and data.status:
         post["status"] = coerce_social_status(data.status)
-    if data.status == "posted" and not is_amp() and not post.get("posted_at"):
+    if data.status == "posted" and not is_family_edition() and not post.get("posted_at"):
         post["posted_at"] = datetime.utcnow().isoformat()
     post["updated_at"] = datetime.utcnow().isoformat()
     _save(_posts_dir(), post_id, post)
@@ -262,7 +262,19 @@ async def generate_content(data: AIContentRequest):
         "educational": "Informative, helpful tips, value-driven",
     }
 
-    prompt = (
+    from app.edition import assistant_name, is_family_edition
+    from app.services.edition_facts import guard_public_text, public_facts_block
+    if is_family_edition():
+        who = assistant_name()
+        prompt = (
+            f"Escribe un post de {data.platform} en español para {who}. "
+            "Usa solo los hechos públicos. No incluyas datos confidenciales, "
+            "precios que no estén en esos hechos, ni datos legales que no estén escritos.\n\n"
+            f"{public_facts_block()}\n\n"
+            f"Tema: {data.topic}\n"
+        )
+    else:
+        prompt = (
         f"Write a {data.platform} post for Empire Workroom, a premium custom window treatment "
         f"business in Washington DC. We specialize in drapery, shades, blinds, upholstery, and bedding.\n\n"
         f"Topic: {data.topic}\n"
@@ -276,20 +288,28 @@ async def generate_content(data: AIContentRequest):
     prompt += "3. Best day/time to post\n4. Suggested image/visual description\n"
 
     try:
+        system = (
+            f"You are {assistant_name() if is_family_edition() else 'Nova'}. "
+            "Public content may use only public facts. Never repeat a confidential value."
+            if is_family_edition()
+            else (
+                "You are Nova, the AI social media manager for Empire Workroom. "
+                "Create engaging, platform-optimized content that drives engagement. "
+                "Target audience: homeowners, interior designers, real estate stagers."
+            )
+        )
         response = await ai_router.chat(
             messages=[AIMessage(role="user", content=prompt)],
             desk="marketing",
-            system_prompt=(
-                f"You are Nova, the AI social media manager for Empire Workroom. "
-                f"Create engaging, platform-optimized content that drives engagement. "
-                f"Target audience: homeowners, interior designers, real estate stagers."
-            ),
+            source="generate",
+            system_prompt=system,
         )
+        content = guard_public_text(response.content) if is_family_edition() else response.content
         return {
             "platform": data.platform,
             "topic": data.topic,
             "style": data.style,
-            "generated_content": response.content,
+            "generated_content": content,
             "generated_at": datetime.utcnow().isoformat(),
         }
     except Exception as e:
@@ -324,12 +344,15 @@ async def approve_post(post_id: str):
 @router.post("/post/instagram")
 async def api_post_to_instagram(data: InstagramPostRequest):
     """Publish a post to Instagram via Graph API."""
-    from app.edition import is_amp
-    if is_amp():
+    from app.edition import is_family_edition
+    from app.services.edition_facts import contains_confidential
+    if is_family_edition():
         raise HTTPException(
             403,
             "Sin aprobación. Nada se publica hasta que se apruebe el contenido.",
         )
+    if contains_confidential(data.caption):
+        raise HTTPException(403, "Ese texto incluye datos confidenciales. No se publica.")
     result = await post_to_instagram(caption=data.caption, image_url=data.image_url)
     if not result["posted"]:
         raise HTTPException(400, result.get("error", "Instagram post failed"))
@@ -339,12 +362,15 @@ async def api_post_to_instagram(data: InstagramPostRequest):
 @router.post("/post/facebook")
 async def api_post_to_facebook(data: FacebookPostRequest):
     """Publish a post to Facebook Page via Graph API."""
-    from app.edition import is_amp
-    if is_amp():
+    from app.edition import is_family_edition
+    from app.services.edition_facts import contains_confidential
+    if is_family_edition():
         raise HTTPException(
             403,
             "Sin aprobación. Nada se publica hasta que se apruebe el contenido.",
         )
+    if contains_confidential(data.message):
+        raise HTTPException(403, "Ese texto incluye datos confidenciales. No se publica.")
     result = await post_to_facebook(message=data.message, link=data.link)
     if not result["posted"]:
         raise HTTPException(400, result.get("error", "Facebook post failed"))

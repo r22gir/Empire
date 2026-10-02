@@ -29,8 +29,8 @@ class UnifiedMessageStore:
     def _resolved_db_path(self) -> Path:
         """AMP keeps conversation history under its own data root."""
         try:
-            from app.edition import is_amp, assistant_brain_dir
-            if is_amp():
+            from app.edition import is_family_edition, assistant_brain_dir
+            if is_family_edition():
                 return assistant_brain_dir() / "unified_messages.db"
         except Exception:
             pass

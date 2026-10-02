@@ -1,10 +1,17 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { useAssistantName } from '../../lib/assistant';
+import { useEdition } from '../../lib/edition';
+import UsageCard from '../UsageCard';
 import { API } from '../../lib/api';
 import { BusinessTab } from '../../lib/types';
 import { Zap, Megaphone, Headphones, Users, Shield, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
 
 export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab }) {
+  const assistant = useAssistantName();
+  const edition = useEdition();
+  const family = edition === 'amp' || edition === 'maxine';
+  const heading = family ? `${assistant} · Centro de mando` : 'Empire Command Center';
   const [accuracy, setAccuracy] = useState<any>(null);
   const [accuracyLoading, setAccuracyLoading] = useState(true);
 
@@ -23,10 +30,13 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
           <Zap size={20} className="text-[#b8960c]" />
         </div>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Empire Command Center</h1>
-          <p style={{ fontSize: 13, color: '#aaa', margin: 0 }} suppressHydrationWarning>All Businesses Overview · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>{heading}</h1>
+          <p style={{ fontSize: 13, color: '#aaa', margin: 0 }} suppressHydrationWarning>
+            {family ? 'Centro de mando' : 'All Businesses Overview'} · {new Date().toLocaleDateString(family ? 'es-CO' : 'en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+          </p>
         </div>
       </div>
+      {family ? <div style={{ marginTop: 12, maxWidth: 420 }}><UsageCard /></div> : null}
 
       {/* KPI Cards - Owner / Platform overview (no business data) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 mb-4">

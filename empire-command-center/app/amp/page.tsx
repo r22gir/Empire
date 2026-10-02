@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAssistantName } from '../lib/assistant';
 import {
   Flame, Heart, Brain, Shield, Users, Star, BookOpen, Calendar,
   Sparkles, ArrowRight, Play, Video, MessageCircle, Instagram,
@@ -111,6 +112,7 @@ const TAG_COLORS: Record<string, string> = {
 
 export default function AmpLanding() {
   const router = useRouter();
+  const assistant = useAssistantName();
   const [expandedTeam, setExpandedTeam] = useState<number | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
 
@@ -123,13 +125,14 @@ export default function AmpLanding() {
       <nav style={{ background: '#2D2A26', position: 'sticky', top: 0, zIndex: 50 }}>
         <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 56 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <img src={AMP_LOGO} alt="AMP Logo" style={{ height: 36, width: 'auto', objectFit: 'contain' }} />
+            <img src={AMP_LOGO} alt="AMP" style={{ height: 36, width: 'auto', objectFit: 'contain' }} />
+            <span style={{ color: '#FFF9F0', fontSize: 13, fontWeight: 700 }}>{assistant} · Centro de mando</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
             {['Inicio', 'Galeria', 'Equipo', 'Talleres', 'Servicios', 'Blog', 'Valores'].map(item => (
               <a key={item} href={`#${item.toLowerCase()}`} style={{ color: '#9B9590', fontSize: 12, fontWeight: 600, textDecoration: 'none', letterSpacing: 0.5 }}>{item}</a>
             ))}
-            <button onClick={() => router.push('/amp/login')}
+            <button onClick={() => router.push('/login')}
               style={{ background: '#D4A030', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
               Ingresar
             </button>
@@ -160,7 +163,7 @@ export default function AmpLanding() {
             Descubre tu maximo potencial a traves de contenido de crecimiento personal de alta calidad.
           </p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button onClick={() => router.push('/amp/signup')}
+            <button onClick={() => router.push('/login')}
               style={{ background: '#D4A030', color: '#fff', border: 'none', borderRadius: 12, padding: '14px 32px', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 4px 20px rgba(212,160,48,0.3)' }}>
               Comienza Gratis <ArrowRight size={16} />
             </button>
@@ -449,11 +452,11 @@ export default function AmpLanding() {
             diario de gratitud y retos de crecimiento personal.
           </p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button onClick={() => router.push('/amp/signup')}
+            <button onClick={() => router.push('/login')}
               style={{ background: '#fff', color: '#D4A030', border: 'none', borderRadius: 12, padding: '14px 36px', fontSize: 15, fontWeight: 800, cursor: 'pointer' }}>
               Crear Cuenta Gratis
             </button>
-            <button onClick={() => router.push('/amp/login')}
+            <button onClick={() => router.push('/login')}
               style={{ background: 'transparent', color: '#fff', border: '2px solid rgba(255,255,255,0.5)', borderRadius: 12, padding: '14px 36px', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
               Ya Tengo Cuenta
             </button>

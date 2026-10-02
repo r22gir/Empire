@@ -1,10 +1,14 @@
-# AMP edition (Actitud Mental Positiva)
+# AMP edition (Max-e)
 
-Same codebase as Empire Workroom. Separate process, separate data, separate assistant.
+Same codebase as Empire Workroom and as Maxine. Separate process, separate data, separate assistant.
+
+The app is **Max-e · Centro de mando** (`ASSISTANT_NAME` / `EDITION_DISPLAY_NAME`). It is a personal command center, not a business name.
 
 Juan Diego Giraldo (Cali) is the AMP coach. The assistant in this instance is **Max-e**, not Max. Max-e has his own name, persona, memory, conversation history, and settings under the AMP data root. He is the same family of code and tools, and he can run any extra company Juan creates. He is not the coach.
 
-The product is [actitudmentalpositiva.com](https://actitudmentalpositiva.com), also called **El Portal de la Alegría**: structured multi-week courses with audio, plus themed guided meditations and a daily mood check-in.
+One business inside this instance is [actitudmentalpositiva.com](https://actitudmentalpositiva.com), also called **El Portal de la Alegría**: structured multi-week courses with audio, plus themed guided meditations and a daily mood check-in. That name stays on the course content. It is not the browser title or the login header.
+
+There is one login (`/login`, `amp_session`). `/amp/login` and `/amp/signup` redirect there. Usage is capped at 20% of measured EmpireBox usage (`docs/INSTANCE_USAGE_CAP.md`). The model is MiniMax M3.
 
 ## Run it on the Dell
 

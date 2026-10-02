@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { API_BASE } from '../../../lib/api';
 import { useTranslation } from '../../../lib/i18n';
 import { useAssistantName } from '../../../lib/assistant';
+import { useEdition } from '../../../lib/edition';
 
 type Template = { id: string; label: string; description: string };
 type Item = { name: string; kind: 'servicio' | 'producto'; price: string };
@@ -31,6 +32,9 @@ type Answers = {
   team_mode: 'solo' | 'equipo';
   roles: string[];
   modules: Record<string, boolean>;
+  fact_visibility: Record<string, 'public' | 'confidential'>;
+  phase_name: string;
+  lots: { lot_number: string; status: string; area_m2: string; price: string }[];
 };
 
 const MODULES = [
@@ -75,6 +79,7 @@ const STEPS = [
   { id: 'dinero', es: 'Dinero', en: 'Money' },
   { id: 'equipo', es: 'Equipo', en: 'Team' },
   { id: 'herramientas', es: 'Herramientas', en: 'Tools' },
+  { id: 'confirmar', es: 'Confirmar datos', en: 'Confirm facts' },
   { id: 'revision', es: 'Revisión', en: 'Review' },
 ];
 
@@ -102,6 +107,9 @@ function emptyAnswers(): Answers {
     team_mode: 'solo',
     roles: [],
     modules: Object.fromEntries(MODULES.map((mod) => [mod.id, false])),
+    fact_visibility: {},
+    phase_name: '',
+    lots: [],
   };
 }
 
@@ -139,7 +147,40 @@ function fromServer(raw: Partial<Answers> | undefined): Answers {
     roles: Array.isArray(raw.roles) ? raw.roles : [],
     modules: { ...base.modules, ...(raw.modules || {}) },
     charges_iva: Boolean(raw.charges_iva),
+    fact_visibility: { ...base.fact_visibility, ...(raw.fact_visibility || {}) },
+    phase_name: raw.phase_name || '',
+    lots: Array.isArray(raw.lots)
+      ? raw.lots.map((lot) => ({
+          lot_number: lot.lot_number || '',
+          status: lot.status || 'available',
+          area_m2: lot.area_m2 == null || String(lot.area_m2) === '' ? '' : String(lot.area_m2),
+          price: lot.price == null || String(lot.price) === '' ? '' : String(lot.price),
+        }))
+      : [],
   };
+}
+
+function confirmRows(answers: Answers): { key: string; label: string; value: string }[] {
+  const rows: { key: string; label: string; value: string }[] = [];
+  const push = (key: string, label: string, value: string) => {
+    const text = (value || '').trim();
+    if (!text) return;
+    rows.push({ key, label, value: text });
+  };
+  push('legal_name', 'Nombre legal', answers.legal_name);
+  push('trade_name', 'Nombre comercial', answers.trade_name);
+  push('city', 'Ciudad', answers.city);
+  push('email', 'Correo', answers.email);
+  push('phone', 'Teléfono', answers.phone);
+  push('website', 'Sitio web', answers.website);
+  push('tax_id', 'NIT', answers.tax_id);
+  push('industry_description', 'Actividad', answers.industry_description);
+  push('customer_who', 'Clientes', answers.customer_who);
+  push('first_customer', 'Primer cliente', answers.first_customer.name);
+  answers.items.forEach((item) => {
+    if (item.name.trim() && item.price.trim()) push(`price:${item.name.trim()}`, `Precio de ${item.name.trim()}`, item.price.trim());
+  });
+  return rows;
 }
 
 function toPayload(answers: Answers) {
@@ -180,6 +221,7 @@ export default function EntrevistaPage() {
   const router = useRouter();
   const { locale, setLocale } = useTranslation();
   const assistant = useAssistantName();
+  const constructionShell = useEdition() === 'maxine';
   const es = locale !== 'en';
   const t = (spanish: string, english: string) => (es ? spanish : english);
   const [step, setStep] = useState(0);
@@ -361,7 +403,7 @@ export default function EntrevistaPage() {
           {es ? 'EN' : 'ES'}
         </button>
       </div>
-      <p style={{ letterSpacing: 1, color: '#D4A030', fontWeight: 800, fontSize: 12, margin: '16px 0 4px' }}>EL PORTAL DE LA ALEGRÍA</p>
+      <p style={{ letterSpacing: 1, color: '#D4A030', fontWeight: 800, fontSize: 12, margin: '16px 0 4px' }}>{assistant.toUpperCase()} · CENTRO DE MANDO</p>
       <h1 style={{ fontFamily: 'Playfair Display, serif', fontSize: 32, margin: '0 0 8px' }}>{t('Entrevista de la empresa', 'Company interview')}</h1>
       <p style={{ color: '#5C5650', marginTop: 0 }}>{t(`Paso ${step + 1} de ${STEPS.length}`, `Step ${step + 1} of ${STEPS.length}`)} · {es ? STEPS[step].es : STEPS[step].en}</p>
       <div role="progressbar" aria-valuenow={step + 1} aria-valuemin={1} aria-valuemax={STEPS.length} aria-label={t('Progreso de la entrevista', 'Interview progress')} style={{ height: 8, borderRadius: 99, background: '#F0E6D8', overflow: 'hidden' }}>
@@ -482,6 +524,44 @@ export default function EntrevistaPage() {
                   </div>
                 </div>
               ))}
+              {constructionShell && (
+                <div style={{ marginTop: 20 }}>
+                  <h3 style={{ fontSize: 16 }}>{t('Etapa y lotes', 'Phase and lots')}</h3>
+                  <p style={{ color: '#5C5650' }}>{t('Solo guarda el área o el precio si tú los escribes. Si los dejas vacíos, quedan sin definir.', 'Area and price are saved only if you type them. Empty stays unset.')}</p>
+                  <label>{t('Nombre de la etapa', 'Phase name')}
+                    <input value={answers.phase_name} onChange={(e) => setAnswers({ ...answers, phase_name: e.target.value })} style={inputStyle} />
+                  </label>
+                  {answers.lots.map((lot, index) => (
+                    <div key={index} style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+                      <input aria-label={t('Número de lote', 'Lot number')} value={lot.lot_number} onChange={(e) => {
+                        const lots = answers.lots.map((row, i) => i === index ? { ...row, lot_number: e.target.value } : row);
+                        setAnswers({ ...answers, lots });
+                      }} placeholder={t('Número', 'Number')} style={inputStyle} />
+                      <select aria-label={t('Estado del lote', 'Lot status')} value={lot.status} onChange={(e) => {
+                        const lots = answers.lots.map((row, i) => i === index ? { ...row, status: e.target.value } : row);
+                        setAnswers({ ...answers, lots });
+                      }} style={inputStyle}>
+                        <option value="available">{t('Disponible', 'Available')}</option>
+                        <option value="reserved">{t('Separado', 'Reserved')}</option>
+                        <option value="sold">{t('Vendido', 'Sold')}</option>
+                        <option value="under_construction">{t('En obra', 'Under construction')}</option>
+                        <option value="consultar">{t('Consultar', 'Ask')}</option>
+                      </select>
+                      <input aria-label={t('Área m²', 'Area m²')} value={lot.area_m2} onChange={(e) => {
+                        const lots = answers.lots.map((row, i) => i === index ? { ...row, area_m2: e.target.value } : row);
+                        setAnswers({ ...answers, lots });
+                      }} placeholder={t('Área m², si la tienes', 'Area m², if you have it')} style={inputStyle} />
+                      <input aria-label={t('Precio del lote', 'Lot price')} value={lot.price} onChange={(e) => {
+                        const lots = answers.lots.map((row, i) => i === index ? { ...row, price: e.target.value } : row);
+                        setAnswers({ ...answers, lots });
+                      }} placeholder={t('Precio, si ya lo tienes', 'Price, if you have it')} style={inputStyle} />
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setAnswers({ ...answers, lots: [...answers.lots, { lot_number: '', status: 'available', area_m2: '', price: '' }] })} style={{ marginTop: 12, background: 'transparent', border: '1px dashed #D4A030', color: '#2D2A26', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', minHeight: 44 }}>
+                    {t('Agregar lote', 'Add lot')}
+                  </button>
+                </div>
+              )}
               {answers.items.length < 8 && (
                 <button type="button" onClick={() => setAnswers({ ...answers, items: [...answers.items, { name: '', kind: 'servicio', price: '' }] })} style={{ marginTop: 12, background: 'transparent', border: '1px dashed #D4A030', color: '#2D2A26', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', minHeight: 44 }}>
                   {t('Agregar otro', 'Add another')}
@@ -593,6 +673,28 @@ export default function EntrevistaPage() {
             </>
           )}
           {step === 8 && (
+            <>
+              <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('Confirmar datos', 'Confirm facts')}</h2>
+              <p style={{ color: '#5C5650' }}>{t('Cada dato queda confidencial hasta que lo marques como Publicar. Lo confidencial no entra en redes ni en contenido público.', 'Each fact stays confidential until you mark it Publicar. Confidential facts stay out of social posts and public content.')}</p>
+              {confirmRows(answers).map((row) => {
+                const visibility = answers.fact_visibility[row.key] || 'confidential';
+                return (
+                  <div key={row.key} style={{ borderTop: '1px solid #F0E6D8', padding: '12px 0' }}>
+                    <strong>{row.label}</strong>
+                    <p style={{ margin: '4px 0 8px', color: '#5C5650' }}>{row.value}</p>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {(['confidential', 'public'] as const).map((option) => (
+                        <button key={option} type="button" onClick={() => setAnswers({ ...answers, fact_visibility: { ...answers.fact_visibility, [row.key]: option } })} style={{ borderRadius: 999, border: 'none', background: visibility === option ? '#D4A030' : '#F3EDE3', color: visibility === option ? '#fff' : '#2D2A26', padding: '8px 14px', fontWeight: 700, cursor: 'pointer', minHeight: 40 }}>
+                          {option === 'public' ? t('Publicar', 'Publish') : t('Confidencial', 'Confidential')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+          {step === 9 && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('Revisa antes de crear la empresa', 'Review before creating the company')}</h2>
               {[

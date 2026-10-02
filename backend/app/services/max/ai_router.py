@@ -916,6 +916,13 @@ class AIRouter:
         try:
             input_text = " ".join(m.content for m in messages if m.content)
             token_tracker.log_chat(model, input_text, response, feature=feature, business=business, source="ai_router", tenant_id=tenant_id)
+            from app.services.instance_usage import record_usage
+            record_usage(
+                input_tokens=token_tracker.estimate_tokens(input_text),
+                output_tokens=token_tracker.estimate_tokens(response),
+                model=model or "MiniMax-M3",
+                kind=feature or "chat",
+            )
         except Exception as e:
             logger.debug(f"Cost logging failed: {e}")
 
@@ -1170,6 +1177,25 @@ class AIRouter:
         )
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
+        user_text = "\n".join((m.content or "") for m in (messages or []) if getattr(m, "role", "") != "system")
+        try:
+            from app.edition import is_family_edition
+            from app.services.instance_usage import enforce_usage_cap
+            if is_family_edition():
+                # These editions stay on MiniMax M3 via the routing state.
+                model = None
+            refusal = enforce_usage_cap(
+                kind="chat",
+                text=user_text,
+                desk=desk,
+                tools=bool(tools),
+                source=source,
+                image=bool(image_filename),
+            )
+            if refusal:
+                return AIResponse(content=refusal, model_used="usage-cap", fallback_used=False)
+        except Exception:
+            logger.debug("usage cap check skipped", exc_info=True)
         # Per-desk model routing: if no explicit model requested and desk has a preferred model, use it
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]

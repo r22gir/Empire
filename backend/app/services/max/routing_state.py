@@ -356,16 +356,32 @@ def _apply_env_overrides(state: RoutingState) -> RoutingState:
     return state
 
 
+def _force_family_minimax(state: RoutingState) -> RoutingState:
+    """Family editions speak through MiniMax M3. Other providers stay off."""
+    try:
+        from app.edition import is_family_edition
+    except Exception:
+        return state
+    if not is_family_edition():
+        return state
+    state.selected_provider = "minimax"
+    state.selected_model = (os.getenv("MINIMAX_MODEL", "") or "").strip() or "MiniMax-M3"
+    state.fallback_enabled = False
+    state.last_switch_reason = "family_edition_minimax_m3"
+    state.updated_by = "edition"
+    return state
+
+
 def load_routing_state() -> RoutingState:
     path = _state_path()
     default = _default_state()
     if not path.exists():
-        return _apply_env_overrides(default)
+        return _force_family_minimax(_apply_env_overrides(default))
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return _apply_env_overrides(default)
-    return _apply_env_overrides(_normalize_loaded_state(payload, default))
+        return _force_family_minimax(_apply_env_overrides(default))
+    return _force_family_minimax(_apply_env_overrides(_normalize_loaded_state(payload, default)))
 
 
 def save_routing_state(state: RoutingState) -> RoutingState:

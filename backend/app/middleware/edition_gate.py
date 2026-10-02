@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from app.edition import (
     access_exempt,
     disabled_module_for_path,
-    is_amp,
+    is_family_edition,
     reset_active_business,
     set_active_business,
     sin_acceso_body,
@@ -34,7 +34,7 @@ def _drop_cached_headers(request) -> None:
 
 
 async def amp_access_middleware(request, call_next):
-    if not is_amp():
+    if not is_family_edition():
         return await call_next(request)
 
     email, via = resolve_request_email(request.scope)
@@ -48,7 +48,7 @@ async def amp_access_middleware(request, call_next):
         return JSONResponse(
             status_code=403,
             content={
-                "detail": "Módulo no disponible en la edición AMP.",
+                "detail": "Módulo no disponible en esta edición.",
                 "module": blocked,
             },
         )

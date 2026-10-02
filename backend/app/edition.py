@@ -18,14 +18,52 @@ from typing import Iterable, Optional
 
 WORKROOM_EDITION = "workroom"
 AMP_EDITION = "amp"
+MAXINE_EDITION = "maxine"
+# Personal instances that share one codebase: Spanish, own data dir,
+# allowlist, usage cap, MiniMax M3. The edition id stays the instance name.
+FAMILY_EDITIONS = frozenset({AMP_EDITION, MAXINE_EDITION})
 
 # Workroom display stays "Max" when ASSISTANT_NAME is unset.
 # business.json still says "MAX" for older prompt callers; the identity
 # helper below is what new code and the AMP instance use.
 WORKROOM_ASSISTANT_NAME = "Max"
 AMP_ASSISTANT_NAME = "Max-e"
+MAXINE_ASSISTANT_NAME = "Maxine"
 
 AMP_COACH_NAME = "Juan Diego Giraldo"
+MAXINE_OWNER_NAME = "Camilo Giraldo"
+
+# Display defaults. Ports and hosts are deploy notes, not runtime binds.
+EDITION_PROFILES = {
+    "workroom": {
+        "assistant_default": WORKROOM_ASSISTANT_NAME,
+        "locale": "en",
+        "primary": "workroom",
+        "host": "studio.empirebox.store",
+        "backend_port": 8000,
+        "frontend_port": 3005,
+    },
+    "amp": {
+        "assistant_default": AMP_ASSISTANT_NAME,
+        "locale": "es",
+        "primary": "amp",
+        "host": "amp.empirebox.store",
+        "backend_port": 8011,
+        "frontend_port": 3011,
+        "data_dir": "/data/amp",
+    },
+    "maxine": {
+        "assistant_default": MAXINE_ASSISTANT_NAME,
+        "locale": "es",
+        "primary": "construction",
+        "host": "maxine.empirebox.store",
+        "backend_port": 8012,
+        "frontend_port": 3012,
+        "data_dir": "/data/maxine",
+        "seed": "deploy/seeds/maxine-seed.md",
+        "model": "constructionforge",
+    },
+}
 
 # Hidden in the AMP edition. Shared base modules stay available.
 AMP_DISABLED_MODULES = frozenset({
@@ -109,9 +147,38 @@ def is_amp() -> bool:
     return edition_name() == AMP_EDITION
 
 
+def is_maxine() -> bool:
+    return edition_name() == MAXINE_EDITION
+
+
+def is_family_edition() -> bool:
+    """A personal instance (Max-e, Maxine, …), not the Workroom."""
+    return edition_name() in FAMILY_EDITIONS
+
+
+def edition_profile() -> dict:
+    return dict(EDITION_PROFILES.get(edition_name()) or EDITION_PROFILES["workroom"])
+
+
+def primary_shell() -> str:
+    """What opens first. Maxine is ConstructionForge. Max-e keeps AMP. Workroom stays the owner's desk."""
+    profile = edition_profile()
+    return str(profile.get("primary") or "workroom")
+
+
+def app_display_name() -> str:
+    """Browser tab and chrome. The assistant name, not a business inside the instance."""
+    raw = os.getenv("EDITION_DISPLAY_NAME", "").strip()
+    if raw:
+        return raw
+    if is_family_edition():
+        return f"{assistant_name()} · Centro de mando"
+    return "Empire Command Center"
+
+
 def default_locale() -> str:
-    """AMP is Spanish-first. Workroom stays English unless configured."""
-    if is_amp():
+    """Family editions are Spanish-first. Workroom stays English unless configured."""
+    if is_family_edition():
         return os.getenv("EMPIRE_DEFAULT_LOCALE", "es").strip().lower() or "es"
     return os.getenv("EMPIRE_DEFAULT_LOCALE", "en").strip().lower() or "en"
 
@@ -120,14 +187,14 @@ def assistant_name() -> str:
     """Per-instance display name.
 
     Unset on Workroom → Max. The AMP env sets ASSISTANT_NAME=Max-e.
-    If the edition is AMP and the variable was left empty, Max-e is still
-    the name so this instance cannot speak as the Workroom assistant.
+    If a family edition leaves the variable empty, the profile default is
+    used so this instance cannot speak as the Workroom assistant.
     """
     raw = os.getenv("ASSISTANT_NAME", "").strip()
     if raw:
         return raw
-    if is_amp():
-        return AMP_ASSISTANT_NAME
+    if is_family_edition():
+        return str(edition_profile().get("assistant_default") or AMP_ASSISTANT_NAME)
     return WORKROOM_ASSISTANT_NAME
 
 
@@ -137,7 +204,7 @@ def prompt_identity_name() -> str:
     Workroom keeps the historical business.json value ("MAX") when
     ASSISTANT_NAME is unset, so the Workroom prompt does not change.
     """
-    if os.getenv("ASSISTANT_NAME", "").strip() or is_amp():
+    if os.getenv("ASSISTANT_NAME", "").strip() or is_family_edition():
         return assistant_name()
     try:
         from app.config.business_config import biz
@@ -147,13 +214,13 @@ def prompt_identity_name() -> str:
 
 
 def module_enabled(module_id: str) -> bool:
-    if not is_amp():
+    if not is_family_edition():
         return True
     return module_id.strip().lower() not in AMP_DISABLED_MODULES
 
 
 def disabled_module_for_path(path: str) -> Optional[str]:
-    if not is_amp():
+    if not is_family_edition():
         return None
     clean = path.split("?", 1)[0]
     for prefix in AMP_DISABLED_PREFIXES:
@@ -173,8 +240,8 @@ def require_data_root() -> Path:
     root = data_root_or_none()
     if root is None:
         raise EditionPathError(
-            "EMPIRE_EDITION=amp requiere EMPIRE_DATA_DIR "
-            "(la instancia AMP no usa los datos del Workroom)"
+            "Esta edición requiere EMPIRE_DATA_DIR "
+            "(la instancia no usa los datos del Workroom)"
         )
     root.mkdir(parents=True, exist_ok=True)
     return root
@@ -226,7 +293,7 @@ def amp_app_dir() -> Path:
     The AMP instance uses EMPIRE_DATA_DIR/amp. Workroom keeps the
     historical directory next to amp.db and does not follow EMPIRE_DATA_DIR.
     """
-    if is_amp():
+    if is_family_edition():
         root = require_data_root()
         path = root / "amp"
         path.mkdir(parents=True, exist_ok=True)
@@ -237,7 +304,7 @@ def amp_app_dir() -> Path:
 
 
 def amp_sqlite_path() -> Path:
-    if is_amp():
+    if is_family_edition():
         return amp_app_dir() / "amp.db"
     path = _legacy_amp_db()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -255,7 +322,7 @@ def allowlist_path() -> Path:
 
 
 def log_dir() -> Path:
-    if is_amp():
+    if is_family_edition():
         path = require_data_root() / "logs"
     else:
         from app.services.data_paths import data_root
@@ -272,8 +339,8 @@ def assistant_home() -> Path:
     directory is only the storage root when the edition is AMP or
     ASSISTANT_NAME is set and EMPIRE_DATA_DIR is set.
     """
-    if is_amp() or (os.getenv("ASSISTANT_NAME", "").strip() and data_root_or_none()):
-        root = require_data_root() if is_amp() else data_root_or_none()
+    if is_family_edition() or (os.getenv("ASSISTANT_NAME", "").strip() and data_root_or_none()):
+        root = require_data_root() if is_family_edition() else data_root_or_none()
         assert root is not None
         path = root / "assistant"
         path.mkdir(parents=True, exist_ok=True)
@@ -282,7 +349,7 @@ def assistant_home() -> Path:
 
 
 def assistant_memory_path() -> Path:
-    if not is_amp() and not os.getenv("ASSISTANT_NAME", "").strip():
+    if not is_family_edition() and not os.getenv("ASSISTANT_NAME", "").strip():
         env = os.getenv("MAX_MEMORY_PATH", "").strip()
         if env:
             return Path(env).expanduser()
@@ -309,6 +376,19 @@ def assistant_brain_dir() -> Path:
 
 def default_persona(name: Optional[str] = None) -> str:
     who = name or assistant_name()
+    if is_maxine() or who == MAXINE_ASSISTANT_NAME:
+        return (
+            f"{who} es la asistente de {MAXINE_OWNER_NAME} para desarrollos "
+            "inmobiliarios, construcción y ventas en Cartago y Zaragoza "
+            "(Valle del Cauca). La marca comercial de las ventas es GAC. "
+            f"{who} no es la dueña. Su centro de mando es ConstructionForge: "
+            "proyectos, etapas, lotes, compradores, planes de pago en COP y "
+            "avance de obra son un solo registro. Responde en español salvo "
+            "que pidan inglés. No inventa precios, áreas ni datos legales. "
+            "Lo marcado confidencial no entra en contenido público. "
+            "Nada se publica en redes sin aprobación. "
+            "No lee ni escribe los datos del Workroom."
+        )
     if is_amp() or who == AMP_ASSISTANT_NAME:
         return (
             f"{who} es el asistente de operaciones de {AMP_COACH_NAME} "
@@ -334,7 +414,7 @@ def assistant_settings() -> dict:
     Workroom without ASSISTANT_NAME does not create a second settings file.
     """
     name = assistant_name()
-    if not is_amp() and not os.getenv("ASSISTANT_NAME", "").strip():
+    if not is_family_edition() and not os.getenv("ASSISTANT_NAME", "").strip():
         return {
             "name": name,
             "persona": default_persona(name),
@@ -352,8 +432,12 @@ def assistant_settings() -> dict:
     data.setdefault("name", name)
     data.setdefault("persona", default_persona(data["name"]))
     data.setdefault("locale", default_locale())
-    data.setdefault("coach_name", AMP_COACH_NAME if is_amp() else None)
-    data.setdefault("coach_role", "AMP coach" if is_amp() else None)
+    if is_maxine():
+        data.setdefault("owner_name", MAXINE_OWNER_NAME)
+        data.setdefault("owner_role", "desarrollos inmobiliarios")
+    else:
+        data.setdefault("coach_name", AMP_COACH_NAME if is_amp() else None)
+        data.setdefault("coach_role", "AMP coach" if is_amp() else None)
     data.setdefault("separate_from_workroom", True)
     data["name"] = name
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -371,11 +455,16 @@ def ensure_assistant_files() -> dict:
     if not memory.exists():
         memory.parent.mkdir(parents=True, exist_ok=True)
         name = settings["name"]
-        coach = AMP_COACH_NAME
+        if is_maxine():
+            who = f"{MAXINE_OWNER_NAME} lleva los desarrollos. {name} no es la dueña. El modelo es ConstructionForge."
+        elif is_amp():
+            who = f"Coach de AMP: {AMP_COACH_NAME}. {name} no es el coach."
+        else:
+            who = f"{name} es el asistente de esta instancia."
         memory.write_text(
             f"# Memoria de {name}\n\n"
             f"{name} es un asistente propio de esta instancia, separado del Max del Workroom.\n"
-            f"Coach de AMP: {coach}. {name} no es el coach.\n"
+            f"{who}\n"
             "Memoria, historial y ajustes viven solo bajo el directorio de datos de esta instancia.\n",
             encoding="utf-8",
         )
@@ -397,7 +486,7 @@ def ensure_assistant_files() -> dict:
         conn.commit()
         conn.close()
     log_path = log_dir() / "amp.log"
-    if is_amp():
+    if is_family_edition():
         log_path.write_text(f"{assistant_name()} listo\n", encoding="utf-8")
         assert_under_root(log_path)
     for path in (memory, history, assistant_settings_path()):
@@ -415,7 +504,7 @@ def ensure_assistant_files() -> dict:
 
 def edition_prompt_suffix() -> str:
     """Extra identity block. Empty on Workroom so the cached prompt stays put."""
-    if not (os.getenv("ASSISTANT_NAME", "").strip() or is_amp()):
+    if not (os.getenv("ASSISTANT_NAME", "").strip() or is_family_edition()):
         return ""
     name = assistant_name()
     locale = default_locale()
@@ -428,15 +517,36 @@ def edition_prompt_suffix() -> str:
     ]
     if is_amp():
         lines.append(
-            "This is the AMP edition (actitudmentalpositiva.com / El Portal de la Alegría): "
-            "a fusion of structured multi-week courses with audio, and themed guided "
-            "meditations plus a daily mood check-in. "
+            "This is the AMP edition. Actitud Mental Positiva (also called "
+            "El Portal de la Alegría, actitudmentalpositiva.com) is one business "
+            "inside this instance: structured courses with audio, themed meditations, "
+            "and a daily mood check-in. It is not the name of the app. "
+            f"The app is {app_display_name()}. "
             f"{AMP_COACH_NAME} is the coach. You ({name}) handle operations around him "
             "and any additional blank company created in this instance. "
             "Workroom, WoodCraft, LuxeForge and drawing tools are off. "
             "Shared modules stay: CRM, LeadForge, SocialForge (approval before anything posts), "
-            "packages and memberships, scheduling, finance. Do not invent prices."
+            "packages and memberships, scheduling, finance. Do not invent prices. "
+            "Facts marked confidential never appear in public content."
         )
+    if is_maxine():
+        lines.append(
+            "This instance is based on ConstructionForge. That is the only project, "
+            "lot, buyer, quote, and payment model. Do not keep a parallel list. "
+            f"The app is {app_display_name()}. "
+            f"{MAXINE_OWNER_NAME} runs real estate, construction, and development. "
+            "The public sales brand is GAC. Do not invent legal or company details, "
+            "prices, or per-lot areas. Facts marked confidential never appear in "
+            "public posts or shared outputs. Shared Empire modules stay available "
+            "and must read and write the same ConstructionForge records."
+        )
+        try:
+            from app.services.construction_bridge import public_portfolio_text
+            portfolio = public_portfolio_text()
+            if portfolio:
+                lines.append(portfolio)
+        except Exception:
+            pass
     return "\n".join(lines) + "\n"
 
 
@@ -453,9 +563,13 @@ def greeting(locale: Optional[str] = None) -> str:
     name = assistant_name()
     lang = (locale or default_locale()).lower()
     if lang.startswith("es"):
+        if is_maxine():
+            return f"Hola, soy {name}. Llevo el portafolio de desarrollos en ConstructionForge."
         if is_amp():
             return f"Hola, soy {name}. Juan Diego Giraldo es el coach; yo me encargo de la operación."
         return f"Hola, soy {name}."
+    if is_maxine():
+        return f"Hi, I'm {name}. I run the development portfolio in ConstructionForge."
     if is_amp():
         return f"Hi, I'm {name}. Juan Diego Giraldo is the coach; I run operations."
     return f"Hi, I'm {name}."
@@ -463,14 +577,14 @@ def greeting(locale: Optional[str] = None) -> str:
 
 def resolve_socialforge_root() -> Path:
     """Where SocialForge JSON lives. Workroom keeps the legacy path."""
-    if is_amp():
+    if is_family_edition():
         return active_business_root() / "socialforge"
     return Path(os.path.expanduser("~/empire-repo/backend/data/socialforge"))
 
 
 def socialforge_storage_dir() -> Path:
     path = resolve_socialforge_root()
-    if is_amp():
+    if is_family_edition():
         path = assert_under_root(path)
     path.mkdir(parents=True, exist_ok=True)
     (path / "posts").mkdir(parents=True, exist_ok=True)
@@ -480,13 +594,13 @@ def socialforge_storage_dir() -> Path:
 
 def social_publish_allowed(status: Optional[str]) -> bool:
     """AMP: nothing goes out until a post is explicitly approved."""
-    if not is_amp():
+    if not is_family_edition():
         return True
     return (status or "").strip().lower() == "approved"
 
 
 def coerce_social_status(requested: Optional[str]) -> str:
-    if not is_amp():
+    if not is_family_edition():
         return requested or "draft"
     status = (requested or "pending_approval").strip().lower()
     if status in {"posted", "published", "scheduled", "approved"}:
@@ -503,7 +617,7 @@ def apply_amp_process_paths() -> None:
     process at the Workroom database, brain, or memory file.
     No-op unless EMPIRE_EDITION=amp.
     """
-    if not is_amp():
+    if not is_family_edition():
         return
     root = data_root_or_none()
     if root is None:
@@ -515,8 +629,11 @@ def apply_amp_process_paths() -> None:
     os.environ["DATABASE_URL"] = f"sqlite:///{root / 'empirebox.db'}"
     os.environ["EMPIRE_TASK_DB"] = str(root / "empire.db")
     os.environ["EMPIRE_LOG_DIR"] = str(root / "logs")
-    os.environ.setdefault("ASSISTANT_NAME", AMP_ASSISTANT_NAME)
+    os.environ.setdefault("ASSISTANT_NAME", str(edition_profile().get("assistant_default") or AMP_ASSISTANT_NAME))
     os.environ.setdefault("EMPIRE_DEFAULT_LOCALE", "es")
+    os.environ["MAX_SELECTED_PROVIDER"] = "minimax"
+    os.environ["MAX_SELECTED_MODEL"] = os.getenv("MINIMAX_MODEL", "").strip() or "MiniMax-M3"
+    os.environ.setdefault("INSTANCE_USAGE_CAP_PCT", "20")
     (root / "assistant" / "brain").mkdir(parents=True, exist_ok=True)
     (root / "logs").mkdir(parents=True, exist_ok=True)
 
@@ -526,18 +643,27 @@ def edition_manifest() -> dict:
     manifest = {
         "edition": edition_name(),
         "default_locale": default_locale(),
-        "locales": ["es", "en"] if is_amp() else ["en", "es"],
+        "locales": ["es", "en"] if is_family_edition() else ["en", "es"],
+        "app": {
+            "title": app_display_name(),
+            "kind": "personal_agent_command_center" if is_family_edition() else "workroom",
+            "primary": primary_shell(),
+        },
+        "profile": edition_profile(),
         "assistant": {
             "name": name,
             "persona": default_persona(name),
             "greeting_es": greeting("es"),
             "greeting_en": greeting("en"),
-            "separate_from_workroom": bool(is_amp() or os.getenv("ASSISTANT_NAME", "").strip()),
+            "separate_from_workroom": bool(is_family_edition() or os.getenv("ASSISTANT_NAME", "").strip()),
         },
         "modules": {
-            "enabled": sorted(AMP_SHARED_MODULES) if is_amp() else ["*"],
-            "disabled": sorted(AMP_DISABLED_MODULES) if is_amp() else [],
-            "labels_es": AMP_MODULE_LABELS_ES if is_amp() else {},
+            "enabled": (
+                sorted(list(AMP_SHARED_MODULES) + (["construction"] if is_maxine() else []))
+                if is_family_edition() else ["*"]
+            ),
+            "disabled": sorted(AMP_DISABLED_MODULES) if is_family_edition() else [],
+            "labels_es": AMP_MODULE_LABELS_ES if is_family_edition() else {},
         },
         "product": {
             "name": "Actitud Mental Positiva",
@@ -545,8 +671,16 @@ def edition_manifest() -> dict:
             "site": "https://actitudmentalpositiva.com",
             "coach": AMP_COACH_NAME,
             "coach_is_assistant": False,
+            "role": "business_inside_instance",
             "model": "Cursos estructurados con audio y meditaciones guiadas por tema, más registro diario de ánimo",
-        } if is_amp() else None,
+        } if is_amp() else (
+            {
+                "name": "GAC",
+                "kind": "marca comercial",
+                "model": "constructionforge",
+                "note": "Marca de ventas. Esta ficha no guarda datos legales de la sociedad.",
+            } if is_maxine() else None
+        ),
         "data_root_configured": data_root_or_none() is not None,
     }
     return manifest

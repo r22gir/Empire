@@ -303,8 +303,8 @@ class MaxScheduler:
             #   3. ~/empire-repo/max/memory.md (legacy fallback during
             #      stale-fork retirement)
             memory_file = None
-            from app.edition import is_amp, assistant_memory_path, default_persona, assistant_name
-            if is_amp():
+            from app.edition import is_family_edition, assistant_memory_path, default_persona, assistant_name
+            if is_family_edition():
                 # AMP instance memory is its own file. Never read or write
                 # the Workroom max/memory.md from this process.
                 memory_file = assistant_memory_path()
@@ -314,7 +314,7 @@ class MaxScheduler:
                         f"# Memoria de {assistant_name()}\n\n{default_persona()}\n",
                         encoding="utf-8",
                     )
-            env_path = os.getenv("MAX_MEMORY_PATH") if not is_amp() else None
+            env_path = os.getenv("MAX_MEMORY_PATH") if not is_family_edition() else None
             if memory_file is None and env_path:
                 memory_file = Path(env_path)
             elif memory_file is None:

@@ -13,7 +13,7 @@ from app.edition import (
     edition_manifest,
     ensure_assistant_files,
     greeting,
-    is_amp,
+    is_family_edition,
 )
 from app.services import amp_access, amp_allowlist, amp_businesses
 
@@ -43,6 +43,22 @@ class ContactCreate(BaseModel):
 class InterviewBody(BaseModel):
     step: int = 0
     answers: dict = Field(default_factory=dict)
+
+
+class FactVisibilityBody(BaseModel):
+    items: list[dict] = Field(default_factory=list)
+
+
+class PaymentPlanBody(BaseModel):
+    amount: float
+    currency: str = "COP"
+    buyer_name: str
+    buyer_email: str = ""
+    buyer_phone: str = ""
+    lot_id: Optional[str] = None
+    lot_number: Optional[str] = None
+    installments: int = 1
+    notes: str = ""
 
 
 def _caller(request: Request) -> tuple[Optional[str], Optional[str]]:
@@ -89,7 +105,7 @@ async def request_login(body: LoginRequestBody):
 
     Does not send mail unless SMTP is configured, and never returns the code.
     """
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "El acceso por correo solo aplica a la edición AMP")
     try:
         amp_access.jwt_secret()
@@ -101,7 +117,7 @@ async def request_login(body: LoginRequestBody):
 
 @router.post("/amp/auth/verify")
 async def verify_login(body: LoginVerifyBody):
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "El acceso por correo solo aplica a la edición AMP")
     email = amp_access.redeem_code(body.email, body.code)
     if not email:
@@ -113,7 +129,7 @@ async def verify_login(body: LoginVerifyBody):
 
 @router.get("/amp/auth/magic")
 async def magic_login(token: str = ""):
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "El acceso por correo solo aplica a la edición AMP")
     email = amp_access.redeem_magic_token(token)
     if not email:
@@ -136,11 +152,52 @@ async def logout():
     return response
 
 
+@router.get("/edition/usage")
+async def get_usage():
+    from app.services.instance_usage import usage_summary
+    return usage_summary()
+
+
+@router.get("/facts")
+async def get_facts(request: Request):
+    if not is_family_edition():
+        raise HTTPException(404, "Los datos confirmados solo aplican a esta edición")
+    _amp_email(request)
+    from app.services.edition_facts import list_facts
+    return {"facts": list_facts()}
+
+
+@router.put("/facts/visibility")
+async def put_fact_visibility(body: FactVisibilityBody, request: Request):
+    if not is_family_edition():
+        raise HTTPException(404, "Los datos confirmados solo aplican a esta edición")
+    _amp_email(request)
+    from app.services.edition_facts import set_visibilities
+    return {"facts": set_visibilities(body.items)}
+
+
+@router.post("/edition/seed")
+async def post_seed(request: Request):
+    if not is_family_edition():
+        raise HTTPException(404, "La semilla solo aplica a esta edición")
+    _require_admin(request)
+    from app.services.edition_seed import load_edition_seed
+    try:
+        return load_edition_seed()
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/edition")
 async def get_edition():
     payload = edition_manifest()
     payload["greeting"] = greeting()
-    if is_amp():
+    if is_family_edition():
+        try:
+            from app.services.edition_seed import maybe_load_seed
+            maybe_load_seed()
+        except Exception:
+            pass
         try:
             files = ensure_assistant_files()
             payload["assistant"]["memory_path"] = files["memory_path"]
@@ -153,7 +210,7 @@ async def get_edition():
 
 @router.get("/amp/allowlist")
 async def get_allowlist(request: Request):
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "Allowlist solo aplica a la edición AMP")
     _require_admin(request)
     return {"entries": amp_allowlist.list_entries()}
@@ -161,7 +218,7 @@ async def get_allowlist(request: Request):
 
 @router.post("/amp/allowlist")
 async def post_allowlist(body: AllowlistBody, request: Request):
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "Allowlist solo aplica a la edición AMP")
     _require_admin(request)
     try:
@@ -173,7 +230,7 @@ async def post_allowlist(body: AllowlistBody, request: Request):
 
 @router.delete("/amp/allowlist")
 async def delete_allowlist(request: Request, email: Optional[str] = None, username: Optional[str] = None):
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "Allowlist solo aplica a la edición AMP")
     _require_admin(request)
     try:
@@ -185,7 +242,7 @@ async def delete_allowlist(request: Request, email: Optional[str] = None, userna
 
 @router.get("/businesses/templates")
 async def get_templates():
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "Plantillas solo aplican a la edición AMP")
     return {"templates": amp_businesses.list_templates()}
 
@@ -193,7 +250,7 @@ async def get_templates():
 @router.get("/businesses/interview")
 async def get_interview(request: Request):
     """Resume this user's company interview. Empty when they have not started."""
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "La entrevista solo aplica a la edición AMP")
     try:
         return amp_businesses.get_interview_draft(_amp_email(request))
@@ -203,7 +260,7 @@ async def get_interview(request: Request):
 
 @router.put("/businesses/interview")
 async def put_interview(body: InterviewBody, request: Request):
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "La entrevista solo aplica a la edición AMP")
     try:
         return amp_businesses.save_interview_draft(
@@ -216,7 +273,7 @@ async def put_interview(body: InterviewBody, request: Request):
 @router.post("/businesses/interview/finish")
 async def post_interview_finish(body: InterviewBody, request: Request):
     """Create the company from the interview and clear the draft."""
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "La entrevista solo aplica a la edición AMP")
     try:
         return amp_businesses.finish_interview(
@@ -228,14 +285,14 @@ async def post_interview_finish(body: InterviewBody, request: Request):
 
 @router.get("/businesses")
 async def get_businesses():
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "Empresas solo aplican a la edición AMP")
     return {"businesses": amp_businesses.list_businesses()}
 
 
 @router.post("/businesses")
 async def post_business(body: BusinessCreate):
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "Nueva empresa solo aplica a la edición AMP")
     try:
         created = amp_businesses.create_business(
@@ -251,7 +308,7 @@ async def post_business(body: BusinessCreate):
 
 @router.get("/businesses/{slug}")
 async def get_business(slug: str):
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "Empresas solo aplican a la edición AMP")
     try:
         return amp_businesses.workspace_summary(slug)
@@ -261,7 +318,7 @@ async def get_business(slug: str):
 
 @router.post("/businesses/{slug}/contacts")
 async def post_contact(slug: str, body: ContactCreate):
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "CRM de empresa solo aplica a la edición AMP")
     try:
         return amp_businesses.add_contact(
@@ -273,7 +330,7 @@ async def post_contact(slug: str, body: ContactCreate):
 
 @router.get("/businesses/{slug}/contacts")
 async def get_contacts(slug: str):
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "CRM de empresa solo aplica a la edición AMP")
     try:
         return {"contacts": amp_businesses.list_contacts(slug)}
@@ -281,10 +338,34 @@ async def get_contacts(slug: str):
         raise HTTPException(404, str(exc)) from exc
 
 
+@router.post("/businesses/{slug}/plan-de-pagos")
+async def post_payment_plan(slug: str, body: PaymentPlanBody, request: Request):
+    """Quote / payment plan written as ConstructionForge sales and payments."""
+    if not is_family_edition():
+        raise HTTPException(404, "El plan de pagos solo aplica a esta edición")
+    _amp_email(request)
+    from app.services.construction_bridge import create_payment_plan
+    try:
+        return create_payment_plan(
+            amount=body.amount,
+            currency=body.currency or "COP",
+            buyer_name=body.buyer_name,
+            buyer_email=body.buyer_email,
+            buyer_phone=body.buyer_phone,
+            lot_id=body.lot_id,
+            lot_number=body.lot_number,
+            project_slug=slug,
+            installments=body.installments,
+            notes=body.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/businesses/{slug}/nota")
 async def post_note(slug: str, title: str = "Nota"):
     """Generated document signed by this instance's assistant (Max-e)."""
-    if not is_amp():
+    if not is_family_edition():
         raise HTTPException(404, "Documentos solo aplican a la edición AMP")
     try:
         path = amp_businesses.write_generated_note(

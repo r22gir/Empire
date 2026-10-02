@@ -44,7 +44,11 @@ def list_contacts(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    """List contacts with optional filters."""
+    """List contacts with optional filters. Maxine reads ConstructionForge buyers."""
+    from app.edition import is_maxine
+    if is_maxine():
+        from app.services.construction_bridge import list_contacts_from_buyers
+        return list_contacts_from_buyers()
     clauses = []
     params = []
 
@@ -77,7 +81,11 @@ def list_contacts(
 
 @router.post("/")
 def create_contact(contact: ContactCreate):
-    """Create a new contact."""
+    """Create a new contact. Maxine writes a ConstructionForge buyer."""
+    from app.edition import is_maxine
+    if is_maxine():
+        from app.services.construction_bridge import contact_as_buyer
+        return contact_as_buyer(contact.model_dump())
     valid_types = ("client", "contractor", "vendor", "other")
     if contact.type not in valid_types:
         raise HTTPException(status_code=400, detail=f"type must be one of {valid_types}")

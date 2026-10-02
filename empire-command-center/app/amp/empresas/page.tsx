@@ -146,7 +146,7 @@ function EmpresasPage() {
   return (
     <main style={{ maxWidth: 720, margin: '0 auto', padding: '24px 16px 64px', fontFamily: 'Nunito, sans-serif', color: '#2D2A26', background: '#FFF9F0', minHeight: '100vh', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12 }}>
-        <p style={{ margin: 0, letterSpacing: 1, color: '#D4A030', fontWeight: 700, fontSize: 12 }}>EL PORTAL DE LA ALEGRÍA</p>
+        <p style={{ margin: 0, letterSpacing: 1, color: '#D4A030', fontWeight: 700, fontSize: 12 }}>{assistant} · CENTRO DE MANDO</p>
         <button type="button" onClick={() => setLocale(locale === 'es' ? 'en' : 'es')} style={{ border: '1px solid #e5e2dc', background: '#fff', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', minHeight: 36 }}>
           {locale === 'es' ? 'EN' : 'ES'}
         </button>

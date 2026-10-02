@@ -412,7 +412,11 @@ def list_leads(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    """List leads with filters."""
+    """List leads with filters. Maxine reads ConstructionForge buyers."""
+    from app.edition import is_maxine
+    if is_maxine():
+        from app.services.construction_bridge import list_leads_from_buyers
+        return list_leads_from_buyers()
     clauses, params = [], []
     if business_unit:
         clauses.append("business_unit = ?"); params.append(business_unit)
@@ -485,7 +489,11 @@ def _attach_workroom_lead_to_crm(lead_d: dict) -> Optional[dict]:
 
 @router.post("/")
 def create_lead(lead: LeadCreate):
-    """Create a new lead. Workroom emails upsert one ForgeCRM contact."""
+    """Create a new lead. Maxine writes a ConstructionForge buyer, not a second list."""
+    from app.edition import is_maxine
+    if is_maxine():
+        from app.services.construction_bridge import lead_to_buyer
+        return lead_to_buyer(lead.model_dump())
     crm = _attach_workroom_lead_to_crm(lead.model_dump())
     with _db() as conn:
         cur = conn.execute(

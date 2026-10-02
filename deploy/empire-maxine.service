@@ -1,0 +1,29 @@
+# systemd --user unit for the Maxine edition.
+#
+# This does not start anything by itself. On the server:
+#
+#   mkdir -p /data/maxine
+#   cp deploy/empire-maxine.env.example /home/rg/empire-maxine.env
+#   # edit /home/rg/empire-maxine.env locally; do not commit it
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/empire-maxine.service ~/.config/systemd/user/empire-maxine.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now empire-maxine.service
+#
+# Do not point this unit at the Workroom or AMP .env.
+# Do not restart those services as part of bringing Maxine up.
+
+[Unit]
+Description=EmpireBox Maxine edition (ConstructionForge command center)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/rg/empire-repo/backend
+EnvironmentFile=/home/rg/empire-maxine.env
+ExecStart=/home/rg/empire-repo/backend/venv/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8012 --timeout-keep-alive 65
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

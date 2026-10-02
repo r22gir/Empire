@@ -9,7 +9,9 @@ export const WORKROOM_ASSISTANT_LABEL = 'MAX';
 export function assistantNameFromEnv(): string {
   const fromEnv = process.env.NEXT_PUBLIC_ASSISTANT_NAME?.trim();
   if (fromEnv) return fromEnv;
-  if ((process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').toLowerCase() === 'amp') return 'Max-e';
+  const edition = (process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').toLowerCase();
+  if (edition === 'amp') return 'Max-e';
+  if (edition === 'maxine') return 'Maxine';
   return WORKROOM_ASSISTANT_LABEL;
 }
 

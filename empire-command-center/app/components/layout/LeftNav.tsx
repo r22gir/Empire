@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { EcosystemProduct, ScreenMode } from '../../lib/types';
-import { AMP_HIDDEN_NAV, AMP_NAV_LABELS, useEdition } from '../../lib/edition';
+import { AMP_HIDDEN_NAV, AMP_NAV_LABELS, MAXINE_HIDDEN_NAV, MAXINE_NAV_LABELS, useEdition } from '../../lib/edition';
 import RightPanel from './RightPanel';
 import {
   Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
@@ -140,6 +140,7 @@ interface Props {
 export default function LeftNav({ activeProduct, activeScreen, onProductChange, onScreenChange, dashboardProps }: Props) {
   const edition = useEdition();
   const ampEdition = edition === 'amp';
+  const maxineEdition = edition === 'maxine';
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -197,12 +198,29 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
   const isCollapsed = isMobile ? false : collapsed; // On mobile overlay, always show expanded
 
   // Helper: count visible items per group (active + dev + planned).
-  const visibleGroups = NAV_GROUPS.map((group) => ({
-    ...group,
-    items: group.items
-      .filter((item) => (ampEdition ? !AMP_HIDDEN_NAV.has(item.id) : item.id !== 'nueva-empresa'))
-      .map((item) => (ampEdition && AMP_NAV_LABELS[item.id] ? { ...item, name: AMP_NAV_LABELS[item.id] } : item)),
-  })).filter((group) => group.items.length > 0);
+  const visibleGroups = NAV_GROUPS.map((group) => {
+    let items = group.items.filter((item) => {
+      if (maxineEdition) return !MAXINE_HIDDEN_NAV.has(item.id);
+      if (ampEdition) return !AMP_HIDDEN_NAV.has(item.id);
+      return item.id !== 'nueva-empresa';
+    });
+    if (maxineEdition && group.key === 'command') {
+      const portfolio = NAV_GROUPS.flatMap((g) => g.items).find((item) => item.id === 'construction');
+      items = items.filter((item) => item.id !== 'construction');
+      if (portfolio) items = [{ ...portfolio, name: MAXINE_NAV_LABELS.construction }, ...items];
+    }
+    if (maxineEdition && group.key === 'business') {
+      items = items.filter((item) => item.id !== 'construction');
+    }
+    return {
+      ...group,
+      items: items.map((item) => {
+        if (maxineEdition && MAXINE_NAV_LABELS[item.id]) return { ...item, name: MAXINE_NAV_LABELS[item.id] };
+        if (ampEdition && AMP_NAV_LABELS[item.id]) return { ...item, name: AMP_NAV_LABELS[item.id] };
+        return item;
+      }),
+    };
+  }).filter((group) => group.items.length > 0);
 
   const groupCount = (g: NavGroup) => g.items.length;
 

@@ -601,7 +601,14 @@ def _apply_selected_proposal_or_tier(quote: dict, selection) -> bool:
 
 @router.post("")
 async def create_quote(payload: QuoteCreate):
-    """Create a new quote/estimate."""
+    """Create a new quote/estimate. Maxine writes a ConstructionForge sale."""
+    from app.edition import is_maxine
+    if is_maxine():
+        from app.services.construction_bridge import quote_payload_to_sale
+        try:
+            return quote_payload_to_sale(payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     quote_id = str(uuid.uuid4())[:8]
     now = datetime.utcnow().isoformat()
 
@@ -705,6 +712,10 @@ async def list_quotes(
 ):
     """List quotes with pagination.  When summary=true (default) strips
     heavy tier/item data to keep the response small for list views."""
+    from app.edition import is_maxine
+    if is_maxine():
+        from app.services.construction_bridge import list_quotes_from_sales
+        return list_quotes_from_sales()
     quotes = []
     for fname in os.listdir(QUOTES_DIR):
         if not fname.endswith(".json") or fname.startswith("_") or "_verification" in fname:

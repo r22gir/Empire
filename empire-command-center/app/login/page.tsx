@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { Flame, Mail, KeyRound, ArrowRight } from 'lucide-react';
+import { useAssistantName } from '../lib/assistant';
+import { isFamilyEdition } from '../lib/edition';
 
 export default function AmpEditionLogin() {
   const [email, setEmail] = useState('');
@@ -11,6 +13,9 @@ export default function AmpEditionLogin() {
   const [ready, setReady] = useState(false);
   const [sending, setSending] = useState(false);
   const [entering, setEntering] = useState(false);
+  const assistant = useAssistantName();
+  const family = isFamilyEdition();
+  const title = family ? `${assistant} · Centro de mando` : 'Empire Command Center';
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -58,7 +63,7 @@ export default function AmpEditionLogin() {
         setError(body.detail || 'Código inválido o vencido.');
         return;
       }
-      window.location.href = '/amp/empresas';
+      window.location.href = '/';
     } catch {
       setError('No se pudo conectar con el servidor.');
     } finally {
@@ -73,13 +78,13 @@ export default function AmpEditionLogin() {
           <div style={{ width: 48, height: 48, borderRadius: 14, background: '#D4A030', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
             <Flame size={24} color="#fff" />
           </div>
-          <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 26, color: '#FFF9F0', margin: '0 0 6px' }}>Acceso a AMP</h1>
-          <p style={{ fontSize: 14, color: '#C8C2BA', margin: 0 }}>El Portal de la Alegría. Solo cuentas autorizadas.</p>
+          <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 26, color: '#FFF9F0', margin: '0 0 6px' }}>{family ? `Hola, soy ${assistant}` : 'Sign in'}</h1>
+          <p style={{ fontSize: 14, color: '#C8C2BA', margin: 0 }}>{title}. Solo cuentas autorizadas.</p>
         </div>
         <div style={{ background: '#fff', borderRadius: 16, padding: 28, boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
           {ready && (
             <div style={{ background: '#f3faf4', color: '#24663a', borderRadius: 8, padding: '10px 12px', fontSize: 13, marginBottom: 16 }}>
-              Sesión iniciada. <a href="/amp/empresas" style={{ color: '#D4A030', fontWeight: 700 }}>Entrar al portal</a>
+              Sesión iniciada. <a href="/" style={{ color: '#D4A030', fontWeight: 700 }}>Entrar al centro de mando</a>
             </div>
           )}
           {error && <div style={{ background: '#fef2f2', color: '#dc2626', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 16 }}>{error}</div>}

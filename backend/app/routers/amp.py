@@ -2,7 +2,7 @@
 AMP — Actitud Mental Positiva. Personal development platform.
 User accounts, mood tracking, journal, affirmations, course progress.
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -160,7 +160,34 @@ def create_token(user_id: str, email: str) -> str:
     )
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def ensure_session_user(email: str) -> dict:
+    """The allowlisted session is enough. No second AMP password."""
+    import secrets
+    conn = get_db()
+    try:
+        user = conn.execute("SELECT * FROM amp_users WHERE email = ?", (email,)).fetchone()
+        if user:
+            return dict(user)
+        uid = str(uuid.uuid4())
+        name = email.split("@", 1)[0] or "Cuenta"
+        conn.execute(
+            "INSERT INTO amp_users (id, name, email, password_hash) VALUES (?,?,?,?)",
+            (uid, name, email, pwd_context.hash(secrets.token_urlsafe(24))),
+        )
+        conn.commit()
+        user = conn.execute("SELECT * FROM amp_users WHERE id = ?", (uid,)).fetchone()
+        return dict(user)
+    finally:
+        conn.close()
+
+
+async def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    email = getattr(request.state, "amp_email", None)
+    if email:
+        return ensure_session_user(email)
     if not credentials:
         raise HTTPException(401, "Not authenticated")
     try:
@@ -789,13 +816,13 @@ async def create_content(req: ContentCreate):
 @router.post("/audio")
 async def upload_audio(file: UploadFile = File(...)):
     """Store an audio file under the AMP data root and return a stream URL."""
-    from app.edition import amp_audio_dir, assert_under_root, is_amp, require_data_root
+    from app.edition import amp_audio_dir, assert_under_root, is_family_edition, require_data_root
     folder = amp_audio_dir()
-    if is_amp():
+    if is_family_edition():
         folder = assert_under_root(folder, require_data_root())
     stored = f"{uuid.uuid4().hex[:12]}-{_safe_audio_name(file.filename or 'audio.mp3')}"
     dest = folder / stored
-    if is_amp():
+    if is_family_edition():
         dest = assert_under_root(dest, require_data_root())
     data = await file.read()
     dest.write_bytes(data)
@@ -809,12 +836,12 @@ async def upload_audio(file: UploadFile = File(...)):
 
 @router.get("/audio/{filename}")
 async def stream_audio(filename: str):
-    from app.edition import amp_audio_dir, assert_under_root, is_amp, require_data_root
+    from app.edition import amp_audio_dir, assert_under_root, is_family_edition, require_data_root
     safe = _safe_audio_name(filename)
     if safe != filename:
         raise HTTPException(400, "Nombre de archivo inválido")
     path = amp_audio_dir() / safe
-    if is_amp():
+    if is_family_edition():
         path = assert_under_root(path, require_data_root())
     if not path.is_file():
         raise HTTPException(404, "Audio no encontrado")

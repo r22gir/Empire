@@ -100,7 +100,7 @@ export default function EmpresaPage() {
 
   return (
     <main style={{ maxWidth: 720, margin: '0 auto', padding: '24px 16px 64px', fontFamily: 'Nunito, sans-serif', color: '#2D2A26', background: '#FFF9F0', minHeight: '100vh' }}>
-      <p style={{ margin: '0 0 12px', letterSpacing: 1, color: '#D4A030', fontWeight: 700, fontSize: 12 }}>EL PORTAL DE LA ALEGRÍA</p>
+      <p style={{ margin: '0 0 12px', letterSpacing: 1, color: '#D4A030', fontWeight: 700, fontSize: 12 }}>{assistant} · CENTRO DE MANDO</p>
       <a href="/amp/empresas" style={{ color: '#9B9590', fontSize: 14 }}>← Empresas</a>
       {error && (
         <p role="alert" style={{ color: '#9b2c2c' }}>

@@ -27,6 +27,8 @@ from app.edition import (
     assistant_name,
     business_dir,
     is_amp,
+    is_family_edition,
+    is_maxine,
     require_data_root,
 )
 
@@ -41,7 +43,7 @@ INTERVIEW_MODULES = (
     "leadforge",
     "courses",
 )
-INTERVIEW_LAST_STEP = 8
+INTERVIEW_LAST_STEP = 9
 BLANK_TEMPLATES = {"", "blank", "en_blanco", "none"}
 PAYMENT_METHODS = ("efectivo", "transferencia", "tarjeta", "nequi", "daviplata", "pse")
 # Static API paths under /businesses. Never use these as company slugs.
@@ -69,6 +71,9 @@ _EXTRA_KEYS = {
     "starter_items",
     "interview",
     "setup",
+    "cf_project_id",
+    "brand",
+    "model",
 }
 
 # Optional starters matched to Juan's background. Categories and CRM
@@ -341,9 +346,10 @@ def list_templates() -> list[dict]:
 
 
 def list_businesses() -> list[dict]:
-    if not is_amp():
+    if not is_family_edition():
         return []
-    ensure_default_business()
+    if is_amp():
+        ensure_default_business()
     return list(_load_registry()["businesses"])
 
 
@@ -444,8 +450,8 @@ def create_business(
     ``modules is None`` keeps the shared base (configuración rápida).
     An explicit list, including an empty one, stores only those tools.
     """
-    if not is_amp():
-        raise RuntimeError("Nueva empresa solo existe en la edición AMP")
+    if not is_family_edition():
+        raise RuntimeError("Nueva empresa solo existe en esta edición")
     cleaned = (name or "").strip()
     if not cleaned:
         raise ValueError("El nombre de la empresa es obligatorio")
@@ -454,7 +460,8 @@ def create_business(
         template_id = None
     if template_id and template_id not in TEMPLATES:
         raise ValueError("Plantilla desconocida")
-    ensure_default_business()
+    if is_amp():
+        ensure_default_business()
     registry = _load_registry()
     slug = safe_slug(cleaned)
     taken = {row["slug"] for row in registry["businesses"]}
@@ -504,6 +511,9 @@ def create_business(
     _write_profile(slug, stored)
     registry["businesses"].append(profile)
     _save_registry(registry)
+    if is_maxine():
+        from app.services.construction_bridge import attach_project
+        stored = attach_project(stored, extra if isinstance(extra, dict) else None)
     return stored
 
 
@@ -668,6 +678,9 @@ def empty_interview_answers() -> dict:
         "team_mode": "solo",
         "roles": [],
         "modules": {key: False for key in INTERVIEW_MODULES},
+        "fact_visibility": {},
+        "phase_name": "",
+        "lots": [],
     }
 
 
@@ -707,7 +720,54 @@ def sanitize_interview_answers(raw: Optional[dict]) -> dict:
     base["items"] = _sanitize_items(raw.get("items"))
     base["first_customer"] = _customer(raw.get("first_customer"))
     base["modules"] = _modules_map(raw.get("modules"))
+    base["fact_visibility"] = _visibility_map(raw.get("fact_visibility"))
+    base["phase_name"] = _clip(raw.get("phase_name"), 80)
+    base["lots"] = _sanitize_lots(raw.get("lots"))
     return base
+
+
+def _visibility_map(raw) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for key, value in list(raw.items())[:80]:
+        key_s = _clip(key, 80)
+        vis = _clip(value, 20).lower()
+        if key_s and vis in {"public", "confidential"}:
+            out[key_s] = vis
+    return out
+
+
+def _sanitize_lots(raw) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    statuses = {"available", "reserved", "sold", "under_construction", "delivered", "hold", "consultar"}
+    lots = []
+    for row in raw[:40]:
+        if not isinstance(row, dict):
+            continue
+        number = _clip(row.get("lot_number"), 40)
+        if not number:
+            continue
+        status = _clip(row.get("status"), 40).lower() or "available"
+        if status not in statuses:
+            status = "available"
+        lots.append({
+            "lot_number": number,
+            "status": status,
+            "area_m2": _optional_number(row.get("area_m2")),
+            "price": _price_or_none(row.get("price")),
+        })
+    return lots
+
+
+def _optional_number(value):
+    if value is None or value == "":
+        return None
+    try:
+        return float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
 
 
 def _interview_email(email: str) -> str:
@@ -735,11 +795,14 @@ def _step(value) -> int:
 
 
 def _empty_draft(email: str) -> dict:
+    answers = empty_interview_answers()
+    from app.services.edition_facts import confirm_items_for_answers
     return {
         "email": email,
         "status": "empty",
         "step": 0,
-        "answers": empty_interview_answers(),
+        "answers": answers,
+        "confirm_items": confirm_items_for_answers(answers),
         "updated_at": None,
         "assistant": assistant_name(),
     }
@@ -789,11 +852,13 @@ def get_interview_draft(email: str) -> dict:
     if not data:
         return _empty_draft(owner)
     answers = sanitize_interview_answers(data.get("answers"))
+    from app.services.edition_facts import confirm_items_for_answers
     return {
         "email": owner,
         "status": "draft",
         "step": _step(data.get("step")),
         "answers": answers,
+        "confirm_items": confirm_items_for_answers(answers),
         "updated_at": data.get("updated_at"),
         "assistant": assistant_name(),
     }
@@ -918,6 +983,11 @@ def finish_interview(email: str, *, step: int = INTERVIEW_LAST_STEP, answers: Op
             phone=customer.get("phone") or "",
         )
     created["contacts"] = list_contacts(created["slug"])
+    from app.services.edition_facts import persist_interview_facts
+    persist_interview_facts(clean)
+    if is_maxine():
+        from app.services.construction_bridge import materialize_from_interview
+        created = materialize_from_interview(created, clean)
     clear_interview_draft(owner)
     save_step = _step(step)
     created["interview_step"] = save_step
@@ -927,6 +997,17 @@ def finish_interview(email: str, *, step: int = INTERVIEW_LAST_STEP, answers: Op
 def add_contact(slug: str, *, name: str, email: str = "", phone: str = "", fields: Optional[dict] = None) -> dict:
     if get_business(slug) is None:
         raise ValueError("Empresa no encontrada")
+    if is_maxine():
+        from app.services.construction_bridge import upsert_buyer
+        buyer = upsert_buyer(name=name, email=email, phone=phone, project_id=None, notes="")
+        return {
+            "id": buyer["id"],
+            "name": name.strip(),
+            "email": email or "",
+            "phone": phone or "",
+            "fields_json": "{}",
+            "model": "constructionforge",
+        }
     row = {
         "id": str(uuid.uuid4()),
         "name": name.strip(),
@@ -947,6 +1028,9 @@ def add_contact(slug: str, *, name: str, email: str = "", phone: str = "", field
 def list_contacts(slug: str) -> list[dict]:
     if get_business(slug) is None:
         raise ValueError("Empresa no encontrada")
+    if is_maxine():
+        from app.services.construction_bridge import buyers_as_contacts
+        return buyers_as_contacts(slug)
     conn = _connect(slug)
     rows = conn.execute("SELECT * FROM crm_contacts ORDER BY created_at").fetchall()
     conn.close()
@@ -981,12 +1065,17 @@ def write_generated_note(slug: str, title: str, body: str) -> Path:
     """A generated document signed by this instance's assistant."""
     if get_business(slug) is None:
         raise ValueError("Empresa no encontrada")
+    from app.services.edition_facts import guard_public_text, public_facts_block
+
     name = assistant_name()
     path = business_dir(slug) / "generated" / f"{safe_slug(title) or 'nota'}.md"
     path = assert_under_root(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    safe_body = guard_public_text(body)
+    public = public_facts_block()
+    extra = f"\n{public}\n" if public else ""
     path.write_text(
-        f"# {title}\n\nPreparado por {name}.\n\n{body}\n",
+        f"# {title}\n\nPreparado por {name}.\n\n{safe_body}\n{extra}",
         encoding="utf-8",
     )
     return path

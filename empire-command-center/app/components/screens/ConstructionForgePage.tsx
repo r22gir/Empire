@@ -10,6 +10,9 @@ import {
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import ViewPdfControl from '../ViewPdfControl';
+import UsageCard from '../UsageCard';
+import { useAssistantName } from '../../lib/assistant';
+import { useEdition } from '../../lib/edition';
 
 const CF_API = `${API}/construction`;
 
@@ -37,22 +40,35 @@ const LOT_STATUS_COLORS: Record<string, string> = {
   under_construction: '#8b5cf6',
   delivered: '#6b7280',
   hold: '#dc2626',
+  consultar: '#d97706',
 };
 
-interface CfProject { id: number; name: string; slug: string; location: string; total_lots: number; status: string; currency: string; }
+const LOT_STATUS_ES: Record<string, string> = {
+  available: 'Disponible',
+  reserved: 'Separado',
+  sold: 'Vendido',
+  under_construction: 'En construcción',
+  delivered: 'Entregado',
+  hold: 'Retenido',
+  consultar: 'Consultar',
+};
+
+interface CfProject { id: string | number; name: string; slug: string; location: string; total_lots: number; status: string; currency: string; }
 
 interface CfLot { id: number; lot_number: string; block: string; area_m2: number; current_price: number; status: string; phase_id: number; }
 
 interface ConstructionForgePageProps { initialSection?: string; }
 
-function getValidProjectId(project: CfProject | null): number | null {
-  const id = project?.id ?? null;
-  return typeof id === 'number' && Number.isFinite(id) && id > 0 ? id : null;
+function getValidProjectId(project: { id?: string | number } | null): string {
+  if (project?.id === undefined || project?.id === null || project.id === '') return '';
+  return String(project.id);
 }
 
 export default function ConstructionForgePage({ initialSection }: ConstructionForgePageProps) {
   const [section, setSection] = useState<Section>((initialSection as Section) || 'dashboard');
   const { t, locale } = useTranslation('construction');
+  const assistant = useAssistantName();
+  const maxine = useEdition() === 'maxine';
 
   useEffect(() => {
     if (initialSection) setSection(initialSection as Section);
@@ -84,10 +100,10 @@ export default function ConstructionForgePage({ initialSection }: ConstructionFo
       <div style={{ width: 200, borderRight: '1px solid #e5e2dc', padding: '16px 0', flexShrink: 0, overflowY: 'auto' }}>
         <div style={{ padding: '0 16px 12px', borderBottom: '1px solid #e5e2dc', marginBottom: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#b8960c', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Building2 size={16} /> ConstructionForge
+            <Building2 size={16} /> {maxine ? `${assistant}` : 'ConstructionForge'}
           </div>
           <div style={{ fontSize: 10, color: '#999', marginTop: 2 }}>
-            {locale === 'es' ? 'Gestión de Desarrollo Inmobiliario' : 'Real Estate Development'}
+            {maxine ? 'Centro de mando · Portafolio' : (locale === 'es' ? 'Gestión de Desarrollo Inmobiliario' : 'Real Estate Development')}
           </div>
         </div>
         {NAV_SECTIONS.map(nav => (
@@ -107,7 +123,8 @@ export default function ConstructionForgePage({ initialSection }: ConstructionFo
 
       {/* Main Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+          {maxine ? <UsageCard /> : null}
           <ViewPdfControl mode="print" title="ConstructionForge has no project PDF on this screen. This prints the current view." />
         </div>
         {renderContent()}
@@ -145,14 +162,16 @@ function DashboardSection() {
   const [project, setProject] = useState<CfProject | null>(null);
   const [dashboard, setDashboard] = useState<any>(null);
   const [projects, setProjects] = useState<CfProject[]>([]);
+  const [portfolio, setPortfolio] = useState<any[]>([]);
 
   useEffect(() => {
     fetch(`${CF_API}/projects`).then(r => r.json()).then(data => {
       const list = data.projects || data || [];
       setProjects(list);
-      const firstValid = list.find((p: CfProject) => Number.isFinite(p.id) && p.id > 0) || null;
+      const firstValid = list.find((p: CfProject) => getValidProjectId(p)) || null;
       if (firstValid) setProject(firstValid);
     }).catch(() => {});
+    fetch(`${CF_API}/portfolio`).then(r => r.json()).then(data => setPortfolio(data.projects || [])).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -174,15 +193,33 @@ function DashboardSection() {
         title={locale === 'es' ? 'Tablero Ejecutivo' : 'Executive Dashboard'}
         subtitle={project?.name || ''}
         action={projects.length > 1 ? (
-          <select value={project?.id || ''} onChange={e => {
-            const nextId = Number(e.target.value);
-            setProject(projects.find(p => p.id === nextId) || null);
+          <select value={getValidProjectId(project)} onChange={e => {
+            const nextId = e.target.value;
+            setProject(projects.find(p => getValidProjectId(p) === nextId) || null);
           }}
             style={{ fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid #e5e2dc' }}>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         ) : undefined}
       />
+      {portfolio.length > 0 && (
+        <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+          {portfolio.map((card: any) => (
+            <button key={card.id} type="button" onClick={() => setProject(projects.find(p => String(p.id) === String(card.id)) || project)}
+              style={{ textAlign: 'left', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 12, cursor: 'pointer' }}>
+              <strong>{card.name}</strong>
+              <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{card.location} · {card.lot_count} lotes</div>
+              <div style={{ fontSize: 12, color: '#444', marginTop: 4 }}>
+                {Object.entries(card.lots_by_status || {}).map(([status, count]) => `${locale === 'es' ? (LOT_STATUS_ES[status] || status) : status}: ${count}`).join(' · ') || (locale === 'es' ? 'Sin lotes' : 'No lots')}
+              </div>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                {locale === 'es' ? 'Pagos por cobrar' : 'Payments due'}: {card.payments_due ?? 0}
+                {card.construction_progress != null ? ` · ${locale === 'es' ? 'Avance' : 'Progress'} ${card.construction_progress}%` : ''}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
         <KpiCard label={locale === 'es' ? 'Lotes Disponibles' : 'Available Lots'} value={d.available_lots ?? '—'} color="#16a34a" />
         <KpiCard label={locale === 'es' ? 'Lotes Vendidos' : 'Lots Sold'} value={d.sold_lots ?? '—'} color="#2563eb" />
@@ -209,10 +246,7 @@ function DashboardSection() {
           {Object.entries(LOT_STATUS_COLORS).map(([status, color]) => (
             <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <div style={{ width: 8, height: 8, borderRadius: 2, background: color }} />
-              {locale === 'es' ? {
-                available: 'Disponible', reserved: 'Separado', sold: 'Vendido',
-                under_construction: 'En Construcción', delivered: 'Entregado', hold: 'Retenido'
-              }[status] : status.replace('_', ' ')}
+              {locale === 'es' ? (LOT_STATUS_ES[status] || status) : status.replace('_', ' ')}
             </div>
           ))}
         </div>
