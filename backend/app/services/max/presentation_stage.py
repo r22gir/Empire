@@ -26,6 +26,7 @@ PRESENTATION_DIRECTIVE = (
     "- Never send email, invoices, or client documents. Drafts stay drafts until the founder confirms.\n"
     "- Client-facing quotes, invoices, proposals, and drawings use Empire Workroom branding. "
     "Do not put the founder's name on them.\n"
+    "- The spoken line is plain speech: no markdown, and no client name unless the founder asked who it is.\n"
 )
 
 _PRESENT_RE = re.compile(r"\bpresent\b", re.I)
@@ -55,12 +56,66 @@ def wants_revenue(message: str | None) -> bool:
     return bool(_REVENUE_RE.search(message or ""))
 
 
-def spoken_text(text: str | None, *, limit: int = SPOKEN_LIMIT) -> str:
-    """Two sentences, no chart or diagram source, for TTS."""
-    cleaned = _FENCE_RE.sub(" ", text or "")
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_ASKED_NAME_RE = re.compile(
+    r"\b(client name|customer name|who is the client|who is the customer|their name)\b",
+    re.I,
+)
+_NAME_KEYS = {"customer_name", "client_name", "client", "customer"}
+_SKIP_NAMES = {"empire workroom", "max", "max ai", "the client"}
+
+
+def strip_spoken_markdown(text: str) -> str:
+    """Plain speech. Asterisks, headings, and backticks are not spoken."""
+    cleaned = _MD_LINK_RE.sub(r"\1", text or "")
+    cleaned = re.sub(r"`([^`]*)`", r"\1", cleaned)
+    cleaned = re.sub(r"[*_#~]+", " ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def client_names_in_tools(tool_results: list | None) -> list[str]:
+    found: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in _NAME_KEYS and isinstance(value, str):
+                    name = value.strip()
+                    if len(name) >= 3 and name.lower() not in _SKIP_NAMES:
+                        found.append(name)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(tool_results or [])
+    unique: list[str] = []
+    for name in sorted(set(found), key=len, reverse=True):
+        if name not in unique:
+            unique.append(name)
+    return unique
+
+
+def spoken_text(
+    text: str | None,
+    *,
+    limit: int = SPOKEN_LIMIT,
+    message: str | None = None,
+    tool_results: list | None = None,
+) -> str:
+    """Two sentences, no chart source and no markdown, for TTS."""
+    cleaned = strip_spoken_markdown(_FENCE_RE.sub(" ", text or ""))
     if not cleaned:
         return ""
+    if not _ASKED_NAME_RE.search(message or ""):
+        user = (message or "").lower()
+        for name in client_names_in_tools(tool_results):
+            if name.lower() in user:
+                continue
+            cleaned = re.sub(rf"\b{re.escape(name)}\b", "the client", cleaned, flags=re.I)
+    cleaned = re.sub(r"\brafael\b", "the founder", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
     parts = [part.strip() for part in _SENTENCE_RE.findall(cleaned) if part.strip()]
     spoken = " ".join(parts[:2]) if parts else cleaned
     if len(spoken) > limit:
@@ -294,7 +349,9 @@ def artifacts_from_turn(
     for source in diagrams_in_text(response):
         artifacts.append(_artifact("diagram", "Diagram", "The diagram is on screen.", {"source": source}, len(artifacts) + 1))
     if wants_revenue(message) and not any(item["kind"] == "chart" for item in artifacts):
-        artifacts.append(revenue_artifact(list(revenue_rows or [])))
+        tool_rows = chart_rows_from_tool_results(tool_results)
+        rows = tool_rows if tool_rows else list(revenue_rows or [])
+        artifacts.append(revenue_artifact(rows))
     return artifacts[:8]
 
 
@@ -327,7 +384,7 @@ def package_turn(
     if slides:
         spoken = f"I'll walk through {len(slides)} slides. {slides[0]['narration']}"
     else:
-        spoken = spoken_text(response)
+        spoken = spoken_text(response, message=message, tool_results=tool_results)
         if not spoken and artifacts:
             spoken = artifacts[0].get("narration") or "It's on screen."
         elif not spoken:
@@ -340,26 +397,35 @@ def package_turn(
     }
 
 
-def read_revenue_rows() -> list[dict]:
-    """Real payment totals by month. Empty when the table is missing. Never invented."""
-    try:
-        from app.db.database import get_db
+_REVENUE_SQL = (
+    (
+        "payments_v2",
+        """SELECT substr(COALESCE(payment_date, created_at, ''), 1, 7) AS month,
+                  COALESCE(SUM(amount), 0) AS total
+           FROM payments_v2
+           WHERE lower(COALESCE(payment_type, 'payment')) != 'refund'
+             AND lower(COALESCE(status, 'completed')) NOT IN ('failed', 'cancelled', 'refunded')
+           GROUP BY month
+           HAVING month != ''
+           ORDER BY month DESC
+           LIMIT 6""",
+    ),
+    (
+        "payments",
+        """SELECT substr(COALESCE(paid_at, created_at, ''), 1, 7) AS month,
+                  COALESCE(SUM(amount), 0) AS total
+           FROM payments
+           GROUP BY month
+           HAVING month != ''
+           ORDER BY month DESC
+           LIMIT 6""",
+    ),
+)
 
-        with get_db() as conn:
-            rows = conn.execute(
-                """SELECT substr(COALESCE(paid_at, created_at, ''), 1, 7) AS month,
-                          COALESCE(SUM(amount), 0) AS total
-                   FROM payments
-                   GROUP BY month
-                   HAVING month != ''
-                   ORDER BY month DESC
-                   LIMIT 6"""
-            ).fetchall()
-    except Exception:
-        logger.info("revenue chart: payments table unavailable")
-        return []
+
+def _parse_month_rows(rows) -> list[dict]:
     parsed = []
-    for row in reversed(list(rows)):
+    for row in reversed(list(rows or [])):
         if hasattr(row, "keys"):
             label, total = row["month"], row["total"]
         else:
@@ -372,6 +438,96 @@ def read_revenue_rows() -> list[dict]:
             continue
         parsed.append({"label": str(label), "value": amount})
     return parsed
+
+
+def read_revenue_rows() -> list[dict]:
+    """Monthly totals from the same payments Max reads.
+
+    payments_v2 is the canonical ledger (finance dashboard and Stripe).
+    The legacy payments table is only used when v2 has no rows.
+    Empty when neither table is available. Never invented.
+    """
+    try:
+        from app.db.database import get_db
+
+        with get_db() as conn:
+            for _name, sql in _REVENUE_SQL:
+                try:
+                    parsed = _parse_month_rows(conn.execute(sql).fetchall())
+                except Exception:
+                    continue
+                if parsed:
+                    return parsed
+    except Exception:
+        logger.info("revenue chart: payments table unavailable")
+    return []
+
+
+_AMOUNT_KEYS = ("total", "amount", "sum", "revenue", "value", "total_revenue")
+_LABEL_KEYS = ("month", "period", "label", "payment_date", "date")
+
+
+def _as_amount(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        return float(str(value).replace(",", "").replace("$", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _row_amount(row: dict) -> Optional[float]:
+    for key in _AMOUNT_KEYS:
+        amount = _as_amount(row.get(key)) if key in row else None
+        if amount is not None:
+            return amount
+    for key, value in row.items():
+        lowered = str(key).lower()
+        if any(token in lowered for token in ("total", "amount", "sum", "revenue")):
+            amount = _as_amount(value)
+            if amount is not None:
+                return amount
+    return None
+
+
+def chart_rows_from_tool_results(tool_results: list | None) -> list[dict]:
+    """Money rows the model already fetched. The chart uses these, not a second query."""
+    found: list[dict] = []
+    for entry in tool_results or []:
+        if not isinstance(entry, dict) or entry.get("success") is False:
+            continue
+        result = entry.get("result")
+        rows = None
+        if isinstance(result, dict):
+            if isinstance(result.get("rows"), list):
+                rows = result["rows"]
+            elif isinstance(result.get("by_period"), list):
+                rows = result["by_period"]
+        if not rows:
+            continue
+        sample = [row for row in rows if isinstance(row, dict)]
+        if not sample:
+            continue
+        dated = any(key in sample[0] for key in ("month", "period", "payment_date", "date"))
+        aggregate = len(sample) == 1 and _row_amount(sample[0]) is not None and "description" not in sample[0]
+        if not dated and not aggregate:
+            continue
+        parsed = []
+        for index, row in enumerate(sample, 1):
+            amount = _row_amount(row)
+            if amount is None:
+                continue
+            label = ""
+            for key in _LABEL_KEYS:
+                if row.get(key):
+                    label = str(row[key])
+                    if key in {"payment_date", "date"} and len(label) >= 7:
+                        label = label[:7]
+                    break
+            parsed.append({"label": label or ("Revenue" if aggregate else f"Row {index}"), "value": amount})
+        if parsed:
+            found = parsed
+    return found
 
 
 def revenue_artifact(rows: list[dict] | None = None) -> dict:

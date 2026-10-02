@@ -114,6 +114,104 @@ def test_presentation_http_uses_the_same_tailscale_rule(monkeypatch):
     assert spoofed.status_code == 401
 
 
+def _proxy_wrapped_app():
+    """Same middleware uvicorn installs: trusted loopback, X-Forwarded-For rewrites the peer."""
+    from fastapi import FastAPI, Request, WebSocket
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    from app.routers.simli_avatar import router as simli_router
+
+    inner = FastAPI()
+    inner.include_router(simli_router, prefix="/api/v1")
+
+    @inner.get("/who")
+    def who(request: Request):
+        return {"peer": request.client.host if request.client else ""}
+
+    @inner.websocket("/ws")
+    async def ws_endpoint(websocket: WebSocket):
+        ok, via, user = vl.authorize_websocket(websocket)
+        if not ok:
+            await websocket.close(code=4401)
+            return
+        await websocket.accept()
+        await websocket.send_json({"via": via, "user": user})
+
+    return ProxyHeadersMiddleware(inner, trusted_hosts="127.0.0.1")
+
+
+def test_proxy_headers_rewrite_peer_before_the_app_sees_it():
+    from fastapi.testclient import TestClient
+
+    client = TestClient(_proxy_wrapped_app(), client=("127.0.0.1", 9))
+    seen = client.get("/who", headers={"x-forwarded-for": "100.110.233.75"})
+    assert seen.status_code == 200
+    assert seen.json()["peer"] == "100.110.233.75"
+    ignored = TestClient(_proxy_wrapped_app(), client=("10.0.0.8", 9))
+    stayed = ignored.get("/who", headers={"x-forwarded-for": "100.110.233.75"})
+    assert stayed.json()["peer"] == "10.0.0.8"
+
+
+def test_rewritten_tailscale_peer_needs_the_next_stamp(monkeypatch):
+    from fastapi.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "founder@example.com")
+    monkeypatch.setenv("EMPIRE_PROXY_AUTH_SECRET", "hop-secret")
+    client = TestClient(_proxy_wrapped_app(), client=("127.0.0.1", 9))
+    rewritten = {"x-forwarded-for": "100.110.233.75"}
+    trusted = {
+        **rewritten,
+        "x-empire-proxy-secret": "hop-secret",
+        "x-empire-tailscale-verified": "1",
+        "tailscale-user-login": "founder@example.com",
+    }
+    who = client.get("/who", headers=trusted)
+    assert who.json()["peer"] == "100.110.233.75"
+    assert client.get("/api/v1/avatar/simli/status", headers=trusted).status_code == 200
+
+    spoofed = {
+        **rewritten,
+        "x-empire-proxy-secret": "hop-secret",
+        "tailscale-user-login": "founder@example.com",
+    }
+    assert client.get("/api/v1/avatar/simli/status", headers=spoofed).status_code == 401
+
+    restored = {**rewritten, "x-empire-proxy-secret": "hop-secret"}
+    assert client.get("/api/v1/avatar/simli/status", headers=restored).status_code == 200
+
+    cloudflare = {**restored, "cf-ray": "abc"}
+    assert client.get("/api/v1/avatar/simli/status", headers=cloudflare).status_code == 401
+
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "")
+    assert client.get("/api/v1/avatar/simli/status", headers=trusted).status_code == 401
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "founder@example.com")
+
+    wrong = {**trusted, "x-empire-proxy-secret": "nope"}
+    assert client.get("/api/v1/avatar/simli/status", headers=wrong).status_code == 401
+    missing = {k: v for k, v in trusted.items() if k != "x-empire-proxy-secret"}
+    assert client.get("/api/v1/avatar/simli/status", headers=missing).status_code == 401
+
+    lan = TestClient(_proxy_wrapped_app(), client=("10.0.0.8", 9))
+    injected = {
+        "x-forwarded-for": "127.0.0.1",
+        "x-empire-proxy-secret": "spoofed",
+        "x-empire-tailscale-verified": "1",
+        "tailscale-user-login": "founder@example.com",
+    }
+    assert lan.get("/who", headers=injected).json()["peer"] == "10.0.0.8"
+    assert lan.get("/api/v1/avatar/simli/status", headers=injected).status_code == 401
+
+    with client.websocket_connect("/ws", headers=trusted) as socket:
+        assert socket.receive_json()["via"] == "tailscale"
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws", headers=spoofed):
+            pass
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws", headers=restored):
+            pass
+
+
 def test_access_jwt_valid_accepted_wrong_aud_rejected(monkeypatch):
     pem, jwk = _keypair()
     monkeypatch.setitem(vl._jwks_cache, "keys", {"keys": [jwk]})

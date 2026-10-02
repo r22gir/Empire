@@ -12,7 +12,7 @@ router = APIRouter()
 def _require_avatar_access(request: Request) -> None:
     from app.services.max.voice_live import authorize_websocket
 
-    ok, via, _user = authorize_websocket(request)
+    ok, via, _user = authorize_websocket(request, surface="http")
     if not ok:
         raise HTTPException(status_code=401, detail="unauthorized")
 

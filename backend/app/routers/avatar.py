@@ -92,7 +92,7 @@ def _require_avatar_access(request: Request) -> None:
     """Same gate as /avatar/live. Presentation HTTP uses it too."""
     from app.services.max.voice_live import authorize_websocket
 
-    ok, via, _user = authorize_websocket(request)
+    ok, via, _user = authorize_websocket(request, surface="http")
     if not ok:
         logger.warning("avatar access rejected (%s)", via)
         raise HTTPException(status_code=401, detail="unauthorized")

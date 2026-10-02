@@ -1008,23 +1008,70 @@ def tailscale_allowed_logins() -> set[str]:
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
 
+def _normalize_peer(host: str) -> str:
+    host = (host or "").strip().lower()
+    if host.startswith("::ffff:"):
+        host = host[7:]
+    return host
+
+
 def _peer_host(ws) -> str:
     client = getattr(ws, "client", None)
-    return str(getattr(client, "host", "") or "")
+    return _normalize_peer(str(getattr(client, "host", "") or ""))
 
 
-def authorize_websocket(ws) -> tuple[bool, str, str]:
+def proxy_secret_ok(headers) -> bool:
+    """True when Next stamped this hop with EMPIRE_PROXY_AUTH_SECRET.
+
+    The header is set only inside the Next server, from the socket peer, and
+    any client-supplied value is overwritten first. A missing env denies.
+    """
+    import hmac
+    expected = os.getenv("EMPIRE_PROXY_AUTH_SECRET") or ""
+    if not expected:
+        return False
+    got = (headers.get("x-empire-proxy-secret") or "").strip()
+    if len(got) != len(expected):
+        return False
+    return hmac.compare_digest(got, expected)
+
+
+def _tailscale_hop_trusted(headers, peer: str) -> bool:
+    """Tailscale-User-Login is real only from a loopback socket or from Next.
+
+    uvicorn --proxy-headers (the default) replaces the loopback peer with
+    X-Forwarded-For, so the raw 127.0.0.1 is gone by the time we run. Next
+    records that its own socket was loopback by setting
+    x-empire-tailscale-verified together with the shared secret.
+    """
+    if peer in ("127.0.0.1", "::1"):
+        return True
+    verified = (headers.get("x-empire-tailscale-verified") or "").strip() == "1"
+    return verified and proxy_secret_ok(headers)
+
+
+def _cloudflare_proxied(headers) -> bool:
+    return any(headers.get(name) for name in ("cf-ray", "cf-connecting-ip"))
+
+
+def authorize_websocket(ws, *, surface: str = "live") -> tuple[bool, str, str]:
     """Who may open Live Voice and the other Presentation Mode avatar routes.
 
     * Cloudflare Access JWT (header or CF_Authorization cookie) is checked
-      first, including on loopback. That path is unchanged.
+      first, including on loopback. That path is unchanged. A Cloudflare
+      tunnel request without a valid JWT stays denied.
     * Direct local connection (loopback peer, no proxy headers, no Tailscale
       identity header): allowed. That is the Command Center on this box.
-    * `tailscale serve` on this machine: the TCP peer is 127.0.0.1 or ::1 and
-      the proxy sets Tailscale-User-Login. Accept only when that login is in
-      TAILSCALE_ALLOWED_LOGINS. An empty allowlist denies. The same header
-      from any other peer is ignored and the request is denied, because a
-      remote client can spoof it.
+    * `tailscale serve` reaches Next from 127.0.0.1. Next keeps
+      Tailscale-User-Login only in that case, stamps a shared secret, and
+      forwards to uvicorn. Accept the login when that stamp is present and
+      the login is in TAILSCALE_ALLOWED_LOGINS. An empty allowlist denies.
+      The same header without the stamp, or from any other peer, is denied.
+    * HTTP avatar and Simli routes (surface="http") are also allowed when
+      Next's secret matches and this is not a Cloudflare tunnel request.
+      Those routes had no auth before the Tailscale gate, so plain HTTP on
+      the LAN or the Tailscale IP (Next on :3005, no serve identity) keeps
+      working. Live Voice does not use that path.
     """
     headers = ws.headers
     host = (headers.get("host") or "").split(":")[0].lower()
@@ -1037,13 +1084,15 @@ def authorize_websocket(ws) -> tuple[bool, str, str]:
     login = (headers.get("tailscale-user-login") or "").strip()
     if login:
         # Identity header present: decide here. Do not fall through to the
-        # open loopback allowance, and do not trust the header off-box.
-        if peer not in ("127.0.0.1", "::1"):
+        # open loopback or local-proxy allowance.
+        if not _tailscale_hop_trusted(headers, peer):
             return False, "tailscale header from non-loopback", ""
         allowed = tailscale_allowed_logins()
         if login.lower() not in allowed:
             return False, "tailscale login not allowed", ""
         return True, "tailscale", login
+    if surface == "http" and proxy_secret_ok(headers) and not _cloudflare_proxied(headers):
+        return True, "local-proxy", ""
     proxied = any(headers.get(h) for h in _PROXY_HEADERS)
     if not proxied and peer in ("127.0.0.1", "::1", "localhost"):
         return True, "loopback", ""

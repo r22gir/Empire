@@ -308,5 +308,6 @@ def test_avatar_html_edition_and_placeholder_contract():
         / "max"
         / "page.tsx"
     ).read_text(encoding="utf-8")
-    assert "MaxAvatarFrame" in page
+    assert "redirect" in page
+    assert "/?screen=presentation" in page
     assert 'src="/avatar.html"' not in page

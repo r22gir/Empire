@@ -2547,6 +2547,9 @@ async def _chat_with_max_service(
     # this body — which reads request.channel / request.chat_id
     # extensively — sees the declared channel, not the body field.
     import time as _time_mod
+    # Avatar and other in-process callers omit the timer. None crashes latency math.
+    if _chat_start is None:
+        _chat_start = _time_mod.time()
 
     # Option E (D45 commit 3): spoof-detection warning. The body
     # channel is dead weight under Option A; ANY caller claiming
