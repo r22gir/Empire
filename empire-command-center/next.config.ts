@@ -29,6 +29,17 @@ const BACKEND_UPSTREAM = empireUpstream();
 const VISION_PROXY_TIMEOUT_MS = 180_000;
 const VISION_PROXY_BODY_LIMIT = "200mb";
 
+// Mirrors next.config.js. Skips local virtualenvs (pdf_venv and others)
+// so file tracing does not walk symlink trees under docs/.
+// Globs must not start with "..". Turbopack rejects a prefix that leaves
+// the project root. These still match a local pdf_venv (and other venvs).
+const VENV_TRACE_EXCLUDES = [
+  "**/pdf_venv/**",
+  "**/.venv/**",
+  "**/venv/**",
+  "**/*venv*/**",
+];
+
 const nextConfig: NextConfig = {
   experimental: {
     proxyTimeout: VISION_PROXY_TIMEOUT_MS,
@@ -73,6 +84,11 @@ const nextConfig: NextConfig = {
   },
   // Force unique chunk URLs on every build so phones never use stale JS
   generateBuildId: async () => `build-${BUILD_TIMESTAMP}`,
+  outputFileTracingExcludes: {
+    "*": VENV_TRACE_EXCLUDES,
+    "/api/docs/read": VENV_TRACE_EXCLUDES,
+    "/api/docs/serve": VENV_TRACE_EXCLUDES,
+  },
 };
 
 export default nextConfig;

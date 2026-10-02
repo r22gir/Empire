@@ -67,7 +67,7 @@ export default function AmpEditionLogin() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #2D2A26, #3d3530)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+    <div data-amp-page style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #2D2A26, #3d3530)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div style={{ width: '100%', maxWidth: 440 }}>
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div style={{ width: 48, height: 48, borderRadius: 14, background: '#D4A030', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>

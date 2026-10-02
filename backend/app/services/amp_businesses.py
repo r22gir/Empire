@@ -10,6 +10,7 @@ invented: every price field is null.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -30,6 +31,45 @@ from app.edition import (
 )
 
 SHARED_MODULES = [m for m in AMP_SHARED_MODULES if m != "amp"]
+
+# Tools the EasyStep-style interview can turn on. All stay off unless chosen.
+INTERVIEW_MODULES = (
+    "crm",
+    "quotes",
+    "invoices",
+    "socialforge",
+    "leadforge",
+    "courses",
+)
+INTERVIEW_LAST_STEP = 8
+BLANK_TEMPLATES = {"", "blank", "en_blanco", "none"}
+PAYMENT_METHODS = ("efectivo", "transferencia", "tarjeta", "nequi", "daviplata", "pse")
+# Static API paths under /businesses. Never use these as company slugs.
+RESERVED_SLUGS = {"templates", "interview"}
+_MODULE_ORDER = list(SHARED_MODULES) + [m for m in INTERVIEW_MODULES if m not in SHARED_MODULES]
+_ALLOWED_MODULES = set(_MODULE_ORDER)
+_EXTRA_KEYS = {
+    "legal_name",
+    "trade_name",
+    "country",
+    "city",
+    "contact_email",
+    "contact_phone",
+    "website",
+    "currency",
+    "fiscal_year_start",
+    "tax_id",
+    "charges_iva",
+    "payment_methods",
+    "customer_type",
+    "customer_who",
+    "team_mode",
+    "roles",
+    "sells",
+    "starter_items",
+    "interview",
+    "setup",
+}
 
 # Optional starters matched to Juan's background. Categories and CRM
 # fields only — price is always null.
@@ -378,20 +418,40 @@ def ensure_default_business() -> dict:
     return profile
 
 
+def _normalize_modules(modules: Optional[list]) -> list[str]:
+    """Keep known module ids, in a stable order. Unknown ids are dropped."""
+    if not modules:
+        return []
+    wanted = set()
+    for item in modules:
+        key = str(item).strip().lower()
+        if key in _ALLOWED_MODULES:
+            wanted.add(key)
+    return [key for key in _MODULE_ORDER if key in wanted]
+
+
 def create_business(
     *,
     name: str,
     industry: str = "",
     description: str = "",
     template: Optional[str] = None,
+    modules: Optional[list] = None,
+    extra: Optional[dict] = None,
 ) -> dict:
-    """Nueva empresa. Blank unless a known template id is passed."""
+    """Nueva empresa. Blank unless a known template id is passed.
+
+    ``modules is None`` keeps the shared base (configuración rápida).
+    An explicit list, including an empty one, stores only those tools.
+    """
     if not is_amp():
         raise RuntimeError("Nueva empresa solo existe en la edición AMP")
     cleaned = (name or "").strip()
     if not cleaned:
         raise ValueError("El nombre de la empresa es obligatorio")
     template_id = (template or "").strip().lower() or None
+    if template_id in BLANK_TEMPLATES:
+        template_id = None
     if template_id and template_id not in TEMPLATES:
         raise ValueError("Plantilla desconocida")
     ensure_default_business()
@@ -400,7 +460,7 @@ def create_business(
     taken = {row["slug"] for row in registry["businesses"]}
     base = slug
     n = 2
-    while slug in taken:
+    while slug in taken or slug in RESERVED_SLUGS:
         slug = f"{base}-{n}"
         n += 1
     profile = {
@@ -410,7 +470,7 @@ def create_business(
         "description": (description or "").strip(),
         "template": template_id,
         "locale": "es",
-        "modules": list(SHARED_MODULES),
+        "modules": list(SHARED_MODULES) if modules is None else _normalize_modules(modules),
         "industry_modules": [],
         "assistant": assistant_name(),
         "created_at": _now(),
@@ -430,6 +490,10 @@ def create_business(
     _seed_categories(conn, categories)
     conn.commit()
     conn.close()
+    if extra:
+        for key, value in extra.items():
+            if key in _EXTRA_KEYS:
+                profile[key] = value
     stored = {
         **profile,
         "crm_fields": [{"key": k, "label": label} for k, label in fields],
@@ -441,6 +505,423 @@ def create_business(
     registry["businesses"].append(profile)
     _save_registry(registry)
     return stored
+
+
+def _clip(value, limit: int) -> str:
+    return str(value or "").replace("\x00", "").strip()[:limit]
+
+
+def _as_bool(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "si", "sí", "yes", "on"}
+    return bool(value)
+
+
+def _price_or_none(value):
+    """A price the owner typed. Missing or invalid stays unset — never invented."""
+    if value is None or value is False:
+        return None
+    if isinstance(value, str):
+        text = value.strip().replace(" ", "").replace("$", "")
+        if not text:
+            return None
+        if text.count(",") == 1 and text.count(".") == 0:
+            text = text.replace(",", ".")
+        elif text.count(".") > 1:
+            text = text.replace(".", "")
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+    else:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+    if number < 0 or number > 1_000_000_000_000:
+        return None
+    if number.is_integer():
+        return int(number)
+    return round(number, 2)
+
+
+def _json_price(value):
+    if value is None:
+        return None
+    return _price_or_none(value)
+
+
+def _choice(value, allowed: set[str], default: str) -> str:
+    key = _clip(value, 24).lower()
+    return key if key in allowed else default
+
+
+def _fiscal_year_start(value) -> str:
+    digits = "".join(ch for ch in _clip(value, 10) if ch.isdigit())
+    if not digits:
+        return "01-01"
+    month = int(digits[:2]) if len(digits) >= 2 else int(digits)
+    if 1 <= month <= 12:
+        return f"{month:02d}-01"
+    return "01-01"
+
+
+def _template_id(value) -> str:
+    key = _clip(value, 40).lower()
+    if key in BLANK_TEMPLATES or key not in TEMPLATES:
+        return ""
+    return key
+
+
+def _payment_methods(raw) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    allowed = set(PAYMENT_METHODS)
+    out: list[str] = []
+    for item in raw[:12]:
+        key = _clip(item, 40).lower()
+        if key in allowed and key not in out:
+            out.append(key)
+    return out
+
+
+def _roles(raw) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw[:12]:
+        role = _clip(item, 80)
+        if role and role not in out:
+            out.append(role)
+    return out
+
+
+def _customer(raw) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    return {
+        "name": _clip(raw.get("name"), 160),
+        "email": _clip(raw.get("email"), 160),
+        "phone": _clip(raw.get("phone"), 40),
+    }
+
+
+def _modules_map(raw) -> dict:
+    base = {key: False for key in INTERVIEW_MODULES}
+    if isinstance(raw, dict):
+        for key in INTERVIEW_MODULES:
+            if key in raw:
+                base[key] = _as_bool(raw.get(key))
+    elif isinstance(raw, list):
+        chosen = {str(item).strip().lower() for item in raw}
+        for key in INTERVIEW_MODULES:
+            base[key] = key in chosen
+    return base
+
+
+def _sanitize_items(raw) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    kinds = {
+        "service": "servicio",
+        "product": "producto",
+        "servicio": "servicio",
+        "producto": "producto",
+    }
+    items = []
+    for row in raw[:8]:
+        if not isinstance(row, dict):
+            continue
+        name = _clip(row.get("name"), 160)
+        if not name:
+            continue
+        kind = kinds.get(_clip(row.get("kind"), 20).lower(), "servicio")
+        items.append({
+            "name": name,
+            "kind": kind,
+            "price": _price_or_none(row.get("price")),
+            "description": _clip(row.get("description"), 400),
+        })
+    return items
+
+
+def empty_interview_answers() -> dict:
+    return {
+        "legal_name": "",
+        "trade_name": "",
+        "country": "Colombia",
+        "city": "",
+        "email": "",
+        "phone": "",
+        "website": "",
+        "template": "",
+        "industry_description": "",
+        "sells": "ambos",
+        "items": [],
+        "customer_who": "",
+        "customer_type": "b2b",
+        "first_customer": {"name": "", "email": "", "phone": ""},
+        "currency": "COP",
+        "fiscal_year_start": "01-01",
+        "tax_id": "",
+        "charges_iva": False,
+        "payment_methods": [],
+        "team_mode": "solo",
+        "roles": [],
+        "modules": {key: False for key in INTERVIEW_MODULES},
+    }
+
+
+def sanitize_interview_answers(raw: Optional[dict]) -> dict:
+    """Keep a known shape. Defaults: Colombia, COP, tools off."""
+    base = empty_interview_answers()
+    raw = raw if isinstance(raw, dict) else {}
+    text_limits = {
+        "legal_name": 200,
+        "trade_name": 200,
+        "city": 80,
+        "email": 160,
+        "phone": 40,
+        "website": 200,
+        "industry_description": 2000,
+        "customer_who": 1000,
+        "tax_id": 40,
+    }
+    for key, limit in text_limits.items():
+        if key in raw:
+            base[key] = _clip(raw.get(key), limit)
+    if "country" in raw:
+        base["country"] = _clip(raw.get("country"), 80) or "Colombia"
+    if not base["country"]:
+        base["country"] = "Colombia"
+    base["template"] = _template_id(raw.get("template"))
+    base["sells"] = _choice(raw.get("sells"), {"servicios", "productos", "ambos"}, "ambos")
+    base["customer_type"] = _choice(raw.get("customer_type"), {"b2b", "b2c", "ambos"}, "b2b")
+    base["team_mode"] = _choice(raw.get("team_mode"), {"solo", "equipo"}, "solo")
+    base["currency"] = _clip(raw.get("currency"), 8).upper()
+    if base["currency"] not in {"COP", "USD"}:
+        base["currency"] = "COP"
+    base["fiscal_year_start"] = _fiscal_year_start(raw.get("fiscal_year_start"))
+    base["charges_iva"] = _as_bool(raw.get("charges_iva"))
+    base["payment_methods"] = _payment_methods(raw.get("payment_methods"))
+    base["roles"] = _roles(raw.get("roles"))
+    base["items"] = _sanitize_items(raw.get("items"))
+    base["first_customer"] = _customer(raw.get("first_customer"))
+    base["modules"] = _modules_map(raw.get("modules"))
+    return base
+
+
+def _interview_email(email: str) -> str:
+    cleaned = (email or "").strip().lower()
+    if "@" not in cleaned or len(cleaned) > 200 or "/" in cleaned or "\\" in cleaned:
+        raise ValueError("Se necesita una sesión para la entrevista")
+    return cleaned
+
+
+def _drafts_dir() -> Path:
+    return assert_under_root(require_data_root() / "businesses" / "interview-drafts")
+
+
+def _draft_path(email: str) -> Path:
+    digest = hashlib.sha256(email.encode("utf-8")).hexdigest()[:12]
+    return assert_under_root(_drafts_dir() / f"{safe_slug(email)}-{digest}.json")
+
+
+def _step(value) -> int:
+    try:
+        step = int(value)
+    except (TypeError, ValueError):
+        step = 0
+    return max(0, min(step, INTERVIEW_LAST_STEP))
+
+
+def _empty_draft(email: str) -> dict:
+    return {
+        "email": email,
+        "status": "empty",
+        "step": 0,
+        "answers": empty_interview_answers(),
+        "updated_at": None,
+        "assistant": assistant_name(),
+    }
+
+
+def _read_draft_file(email: str) -> Optional[dict]:
+    path = _draft_path(email)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _merge_answers(current: dict, incoming: Optional[dict]) -> dict:
+    merged = empty_interview_answers()
+    if isinstance(current, dict):
+        merged.update(current)
+    incoming = incoming if isinstance(incoming, dict) else {}
+    modules = _modules_map(merged.get("modules"))
+    if isinstance(incoming.get("modules"), dict):
+        for key, value in incoming["modules"].items():
+            if key in modules:
+                modules[key] = _as_bool(value)
+    customer = _customer(merged.get("first_customer"))
+    if isinstance(incoming.get("first_customer"), dict):
+        customer.update(_customer(incoming.get("first_customer")))
+        # _customer clips; also keep keys the patch set to empty on purpose.
+        for key in ("name", "email", "phone"):
+            if key in incoming["first_customer"]:
+                customer[key] = _clip(incoming["first_customer"].get(key), 160 if key != "phone" else 40)
+    rest = {key: value for key, value in incoming.items() if key not in {"modules", "first_customer"}}
+    merged.update(rest)
+    merged["modules"] = modules
+    merged["first_customer"] = customer
+    return sanitize_interview_answers(merged)
+
+
+def get_interview_draft(email: str) -> dict:
+    """The caller's draft. A missing file is an empty interview, not an error."""
+    owner = _interview_email(email)
+    data = _read_draft_file(owner)
+    if not data:
+        return _empty_draft(owner)
+    answers = sanitize_interview_answers(data.get("answers"))
+    return {
+        "email": owner,
+        "status": "draft",
+        "step": _step(data.get("step")),
+        "answers": answers,
+        "updated_at": data.get("updated_at"),
+        "assistant": assistant_name(),
+    }
+
+
+def save_interview_draft(email: str, *, step: int = 0, answers: Optional[dict] = None) -> dict:
+    """Merge and store a half-done interview for this user."""
+    owner = _interview_email(email)
+    current = get_interview_draft(owner)
+    payload = {
+        "email": owner,
+        "status": "draft",
+        "step": _step(step),
+        "answers": _merge_answers(current.get("answers") or {}, answers),
+        "updated_at": _now(),
+        "assistant": assistant_name(),
+    }
+    path = _draft_path(owner)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return payload
+
+
+def clear_interview_draft(email: str) -> None:
+    path = _draft_path(_interview_email(email))
+    if path.is_file():
+        path.unlink()
+
+
+def _reject_unknown_template(raw: Optional[dict]) -> None:
+    if not isinstance(raw, dict) or "template" not in raw:
+        return
+    key = _clip(raw.get("template"), 40).lower()
+    if key and key not in BLANK_TEMPLATES and key not in TEMPLATES:
+        raise ValueError("Plantilla desconocida")
+
+
+def _category_dict(row) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"],
+        "price": _json_price(row["price"]),
+    }
+
+
+def _add_starter_items(slug: str, items: list[dict]) -> list[dict]:
+    conn = _connect(slug)
+    for item in items:
+        conn.execute(
+            "INSERT INTO service_categories (id, name, description, price) VALUES (?,?,?,?)",
+            (
+                str(uuid.uuid4()),
+                item["name"],
+                item.get("description") or item.get("kind") or "",
+                item.get("price"),
+            ),
+        )
+    conn.commit()
+    rows = conn.execute("SELECT id, name, description, price FROM service_categories").fetchall()
+    conn.close()
+    categories = [_category_dict(row) for row in rows]
+    path = assert_under_root(business_dir(slug) / "business.json")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["service_categories"] = [
+        {"name": row["name"], "description": row["description"], "price": row["price"]}
+        for row in categories
+    ]
+    _write_profile(slug, data)
+    return categories
+
+
+def finish_interview(email: str, *, step: int = INTERVIEW_LAST_STEP, answers: Optional[dict] = None) -> dict:
+    """Create the company from the saved draft plus this screen's answers."""
+    owner = _interview_email(email)
+    current = get_interview_draft(owner)
+    _reject_unknown_template(answers if isinstance(answers, dict) else None)
+    # Also reject a bad template that was only saved on the draft.
+    draft_answers = current.get("answers") if isinstance(current.get("answers"), dict) else {}
+    if isinstance(answers, dict) and "template" not in answers:
+        _reject_unknown_template(draft_answers)
+    clean = _merge_answers(draft_answers, answers)
+    if not clean["legal_name"]:
+        raise ValueError("El nombre legal de la empresa es obligatorio")
+    enabled = [key for key in INTERVIEW_MODULES if clean["modules"].get(key)]
+    created = create_business(
+        name=clean["legal_name"],
+        industry="",
+        description=clean["industry_description"],
+        template=clean["template"] or None,
+        modules=enabled,
+        extra={
+            "legal_name": clean["legal_name"],
+            "trade_name": clean["trade_name"],
+            "country": clean["country"],
+            "city": clean["city"],
+            "contact_email": clean["email"],
+            "contact_phone": clean["phone"],
+            "website": clean["website"],
+            "currency": clean["currency"],
+            "fiscal_year_start": clean["fiscal_year_start"],
+            "tax_id": clean["tax_id"],
+            "charges_iva": clean["charges_iva"],
+            "payment_methods": clean["payment_methods"],
+            "customer_type": clean["customer_type"],
+            "customer_who": clean["customer_who"],
+            "team_mode": clean["team_mode"],
+            "roles": clean["roles"],
+            "sells": clean["sells"],
+            "starter_items": clean["items"],
+            "interview": clean,
+            "setup": "entrevista",
+        },
+    )
+    created["service_categories"] = _add_starter_items(created["slug"], clean["items"])
+    customer = clean["first_customer"]
+    if customer.get("name"):
+        add_contact(
+            created["slug"],
+            name=customer["name"],
+            email=customer.get("email") or "",
+            phone=customer.get("phone") or "",
+        )
+    created["contacts"] = list_contacts(created["slug"])
+    clear_interview_draft(owner)
+    save_step = _step(step)
+    created["interview_step"] = save_step
+    return created
 
 
 def add_contact(slug: str, *, name: str, email: str = "", phone: str = "", fields: Optional[dict] = None) -> dict:

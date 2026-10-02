@@ -739,3 +739,198 @@ def test_workroom_api_base_and_lock_stay_default(monkeypatch, tmp_path):
 
     monkeypatch.setenv("EMPIRE_WORKER_LOCK", str(tmp_path / "custom.lock"))
     assert primary_worker_lock_path() == tmp_path / "custom.lock"
+
+
+def test_interview_draft_save_and_resume(monkeypatch, tmp_path):
+    """A half-done interview is stored per verified user and resumes."""
+    client = _client(monkeypatch, tmp_path)
+    denied = client.get("/api/v1/businesses/interview")
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "sin_acceso"
+    denied_put = client.put(
+        "/api/v1/businesses/interview",
+        json={"step": 1, "answers": {"legal_name": "No"}},
+    )
+    assert denied_put.status_code == 403
+
+    first = client.put(
+        "/api/v1/businesses/interview",
+        headers=_owner(),
+        json={
+            "step": 2,
+            "answers": {
+                "legal_name": "Andes Datos SAS",
+                "city": "Medellín",
+                "modules": {"crm": True},
+            },
+        },
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["status"] == "draft"
+    assert first.json()["step"] == 2
+    assert first.json()["answers"]["legal_name"] == "Andes Datos SAS"
+    assert first.json()["answers"]["country"] == "Colombia"
+    assert first.json()["answers"]["currency"] == "COP"
+    assert first.json()["answers"]["modules"]["crm"] is True
+    assert first.json()["answers"]["modules"]["socialforge"] is False
+    assert first.json()["assistant"] == "Max-e"
+
+    # A later screen merges. It does not wipe the earlier answers.
+    second = client.put(
+        "/api/v1/businesses/interview",
+        headers=_owner(),
+        json={"step": 5, "answers": {"currency": "USD", "modules": {"leadforge": True}}},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["step"] == 5
+    assert second.json()["answers"]["legal_name"] == "Andes Datos SAS"
+    assert second.json()["answers"]["city"] == "Medellín"
+    assert second.json()["answers"]["currency"] == "USD"
+    assert second.json()["answers"]["modules"]["crm"] is True
+    assert second.json()["answers"]["modules"]["leadforge"] is True
+
+    resumed = client.get("/api/v1/businesses/interview", headers=_owner())
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "draft"
+    assert resumed.json()["step"] == 5
+    assert resumed.json()["answers"]["legal_name"] == "Andes Datos SAS"
+
+    # Identity headers do not switch the draft. The session does.
+    spoofed = client.get(
+        "/api/v1/businesses/interview",
+        headers={**_owner(), "X-User-Email": "otra@example.com"},
+    )
+    assert spoofed.status_code == 200
+    assert spoofed.json()["answers"]["legal_name"] == "Andes Datos SAS"
+
+    from app.services import amp_allowlist
+    amp_allowlist.add_entry(email="otra@example.com", role="member")
+    other = client.get("/api/v1/businesses/interview", headers=_session("otra@example.com"))
+    assert other.status_code == 200
+    assert other.json()["status"] == "empty"
+    assert other.json()["step"] == 0
+    assert other.json()["answers"]["legal_name"] == ""
+
+    drafts = list((tmp_path / "businesses" / "interview-drafts").glob("*.json"))
+    assert len(drafts) == 1
+    assert "owner-example-com" in drafts[0].name
+    assert str(tmp_path) in str(drafts[0].resolve())
+
+
+def test_interview_finish_creates_company_and_clears_draft(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    denied = client.post(
+        "/api/v1/businesses/interview/finish",
+        json={"answers": {"legal_name": "Fuera"}},
+    )
+    assert denied.status_code == 403
+
+    saved = client.put(
+        "/api/v1/businesses/interview",
+        headers=_owner(),
+        json={
+            "step": 3,
+            "answers": {
+                "legal_name": "Andes Datos SAS",
+                "trade_name": "Andes Datos",
+                "city": "Medellín",
+                "country": "Colombia",
+                "email": "hola@andesdatos.co",
+                "phone": "3000000000",
+                "website": "https://andesdatos.co",
+                "template": "datos_bi",
+                "industry_description": "Tableros para pymes",
+            },
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    missing = client.post(
+        "/api/v1/businesses/interview/finish",
+        headers=_owner(),
+        json={"step": 8, "answers": {"legal_name": "  "}},
+    )
+    assert missing.status_code == 400
+
+    unknown = client.post(
+        "/api/v1/businesses/interview/finish",
+        headers=_owner(),
+        json={"answers": {"legal_name": "Andes Datos SAS", "template": "no-existe"}},
+    )
+    assert unknown.status_code == 400
+
+    finished = client.post(
+        "/api/v1/businesses/interview/finish",
+        headers=_owner(),
+        json={
+            "step": 8,
+            "answers": {
+                "sells": "servicios",
+                "items": [
+                    {"name": "Acompañamiento mensual", "kind": "servicio", "price": 1500000},
+                ],
+                "customer_who": "Pymes de retail",
+                "customer_type": "b2b",
+                "first_customer": {"name": "Ana Ruiz", "email": "ana@cliente.co", "phone": "3010000000"},
+                "currency": "COP",
+                "fiscal_year_start": "01-01",
+                "tax_id": "900123456",
+                "charges_iva": True,
+                "payment_methods": ["transferencia", "pse"],
+                "team_mode": "solo",
+                "modules": {"crm": True, "leadforge": True, "workroom": True},
+            },
+        },
+    )
+    assert finished.status_code == 200, finished.text
+    body = finished.json()
+    assert body["legal_name"] == "Andes Datos SAS"
+    assert body["trade_name"] == "Andes Datos"
+    assert body["city"] == "Medellín"
+    assert body["country"] == "Colombia"
+    assert body["currency"] == "COP"
+    assert body["fiscal_year_start"] == "01-01"
+    assert body["tax_id"] == "900123456"
+    assert body["charges_iva"] is True
+    assert body["payment_methods"] == ["transferencia", "pse"]
+    assert body["customer_type"] == "b2b"
+    assert body["setup"] == "entrevista"
+    assert body["assistant"] == "Max-e"
+    assert body["template"] == "datos_bi"
+    assert body["industry_modules"] == []
+    # Only the tools they turned on. workroom is not an AMP module.
+    assert body["modules"] == ["crm", "leadforge"]
+    for hidden in ("socialforge", "quotes", "invoices", "courses", "workroom", "max"):
+        assert hidden not in body["modules"]
+    prices = {row["name"]: row["price"] for row in body["service_categories"]}
+    assert prices["Diagnóstico de datos"] is None
+    assert prices["Acompañamiento mensual"] == 1500000
+    assert any(row["name"] == "Ana Ruiz" and row["email"] == "ana@cliente.co" for row in body["contacts"])
+
+    cleared = client.get("/api/v1/businesses/interview", headers=_owner())
+    assert cleared.json()["status"] == "empty"
+    assert cleared.json()["answers"]["legal_name"] == ""
+    assert list((tmp_path / "businesses" / "interview-drafts").glob("*.json")) == []
+
+    fetched = client.get(f"/api/v1/businesses/{body['slug']}", headers=_owner())
+    assert fetched.status_code == 200
+    stored = fetched.json()
+    assert stored["currency"] == "COP"
+    assert stored["city"] == "Medellín"
+    assert stored["charges_iva"] is True
+    assert stored["interview"]["industry_description"] == "Tableros para pymes"
+    fetched_prices = {row["name"]: row["price"] for row in stored["service_categories"]}
+    assert fetched_prices["Acompañamiento mensual"] == 1500000
+    assert fetched_prices["Diagnóstico de datos"] is None
+
+    # Tools stay off when the interview does not choose them.
+    plain = client.post(
+        "/api/v1/businesses/interview/finish",
+        headers=_owner(),
+        json={"answers": {"legal_name": "Sin Herramientas SAS", "currency": "EUR"}},
+    )
+    assert plain.status_code == 200, plain.text
+    assert plain.json()["modules"] == []
+    assert plain.json()["currency"] == "COP"
+    assert plain.json()["country"] == "Colombia"
+    assert plain.json()["slug"] != body["slug"]

@@ -16,6 +16,17 @@ test('rewrite proxy waits well past the 30s socket-hang-up default', () => {
   assert.ok(config.experimental.proxyTimeout >= 120_000);
 });
 
+test('docs tracing skips local virtualenvs under docs/', () => {
+  const excludes = config.outputFileTracingExcludes || {};
+  const patterns = [
+    ...(excludes['*'] || []),
+    ...(excludes['/api/docs/read'] || []),
+  ];
+  const joined = patterns.join('\n');
+  assert.match(joined, /pdf_venv/);
+  assert.match(joined, /venv/);
+});
+
 test('cloned request body accepts a multi-MB phone JPEG base64', () => {
   // 20MB file cap in PhotoAnalysisPanel becomes ~27MB of base64.
   assert.ok(sizeBytes(config.experimental.proxyClientMaxBodySize) >= 32 * 1024 * 1024);

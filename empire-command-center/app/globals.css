@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@600;700&display=swap');
 @import "tailwindcss";
 
 :root {
@@ -804,6 +804,14 @@ body:has([data-empirebox-page]) {
    scroll on iPhone. Scoped by [data-platform-page] so the operator
    Command Center shell is unaffected. */
 body:has([data-platform-page]) {
+  overflow: auto;
+  height: auto;
+}
+
+/* AMP edition pages (/amp/* via app/amp/layout.tsx, and the AMP /login
+   page). The operator Command Center never renders [data-amp-page], so
+   it keeps height:100vh / overflow:hidden. */
+body:has([data-amp-page]) {
   overflow: auto;
   height: auto;
 }

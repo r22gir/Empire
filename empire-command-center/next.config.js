@@ -21,6 +21,19 @@ const BACKEND_UPSTREAM = empireUpstream();
 const VISION_PROXY_TIMEOUT_MS = 180_000;
 const VISION_PROXY_BODY_LIMIT = '200mb';
 
+// Keep Turbopack/NFT from copying local virtualenvs when a route's file
+// trace reaches outside this app. docs/reports/pdf_venv/bin/python is a
+// symlink that crashes `next build`. Do not delete those trees.
+// Globs must not start with ".." — Turbopack rejects a prefix that leaves
+// the project root. These still match docs/reports/pdf_venv when a trace
+// reaches it, including the python symlink that crashes the build.
+const VENV_TRACE_EXCLUDES = [
+  '**/pdf_venv/**',
+  '**/.venv/**',
+  '**/venv/**',
+  '**/*venv*/**',
+];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
@@ -61,6 +74,11 @@ const nextConfig = {
     ];
   },
   generateBuildId: async () => `build-${BUILD_TIMESTAMP}`,
+  outputFileTracingExcludes: {
+    '*': VENV_TRACE_EXCLUDES,
+    '/api/docs/read': VENV_TRACE_EXCLUDES,
+    '/api/docs/serve': VENV_TRACE_EXCLUDES,
+  },
 };
 
 module.exports = nextConfig;

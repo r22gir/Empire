@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+import { empireRepoRoot } from '../repo-root';
 
-const REPO_ROOT = path.resolve(process.cwd(), '..');
+const REPO_ROOT = empireRepoRoot();
 const HOME = process.env.HOME || '/home/rg';
 
 function resolveDocPath(docPath: string): string {

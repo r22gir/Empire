@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -40,10 +40,22 @@ class ContactCreate(BaseModel):
     fields: Optional[dict] = None
 
 
+class InterviewBody(BaseModel):
+    step: int = 0
+    answers: dict = Field(default_factory=dict)
+
+
 def _caller(request: Request) -> tuple[Optional[str], Optional[str]]:
     """Verified AMP identity only. Client identity headers are ignored."""
     email = getattr(request.state, "amp_email", None)
     return email, None
+
+
+def _amp_email(request: Request) -> str:
+    email = getattr(request.state, "amp_email", None)
+    if not email:
+        raise HTTPException(status_code=403, detail="Sin acceso. Entra con tu correo autorizado.")
+    return email
 
 
 def _require_admin(request: Request) -> None:
@@ -176,6 +188,42 @@ async def get_templates():
     if not is_amp():
         raise HTTPException(404, "Plantillas solo aplican a la edición AMP")
     return {"templates": amp_businesses.list_templates()}
+
+
+@router.get("/businesses/interview")
+async def get_interview(request: Request):
+    """Resume this user's company interview. Empty when they have not started."""
+    if not is_amp():
+        raise HTTPException(404, "La entrevista solo aplica a la edición AMP")
+    try:
+        return amp_businesses.get_interview_draft(_amp_email(request))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.put("/businesses/interview")
+async def put_interview(body: InterviewBody, request: Request):
+    if not is_amp():
+        raise HTTPException(404, "La entrevista solo aplica a la edición AMP")
+    try:
+        return amp_businesses.save_interview_draft(
+            _amp_email(request), step=body.step, answers=body.answers
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/businesses/interview/finish")
+async def post_interview_finish(body: InterviewBody, request: Request):
+    """Create the company from the interview and clear the draft."""
+    if not is_amp():
+        raise HTTPException(404, "La entrevista solo aplica a la edición AMP")
+    try:
+        return amp_businesses.finish_interview(
+            _amp_email(request), step=body.step, answers=body.answers
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/businesses")
