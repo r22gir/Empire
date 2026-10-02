@@ -858,20 +858,10 @@ def _step(value) -> int:
     return max(0, min(step, INTERVIEW_LAST_STEP))
 
 
-def _argos_catalog() -> dict:
-    if not is_maxine():
-        return {}
-    from app.services.edition_seed import argos_campestre_items
-    return {
-        "public": argos_campestre_items("public"),
-        "all": argos_campestre_items("all"),
-    }
-
-
 def _empty_draft(email: str) -> dict:
     answers = empty_interview_answers()
     from app.services.edition_facts import confirm_items_for_answers
-    payload = {
+    return {
         "email": email,
         "status": "empty",
         "step": 0,
@@ -880,10 +870,6 @@ def _empty_draft(email: str) -> dict:
         "updated_at": None,
         "assistant": assistant_name(),
     }
-    catalog = _argos_catalog()
-    if catalog:
-        payload["argos_catalog"] = catalog
-    return payload
 
 
 def _read_draft_file(email: str) -> Optional[dict]:
@@ -940,9 +926,6 @@ def get_interview_draft(email: str) -> dict:
         "updated_at": data.get("updated_at"),
         "assistant": assistant_name(),
     }
-    catalog = _argos_catalog()
-    if catalog:
-        payload["argos_catalog"] = catalog
     return payload
 
 
@@ -961,6 +944,9 @@ def save_interview_draft(email: str, *, step: int = 0, answers: Optional[dict] =
     path = _draft_path(owner)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if is_maxine():
+        from app.services.argos_review import sync_argos_consent
+        payload["argos_review"] = sync_argos_consent(payload["answers"])
     return payload
 
 
@@ -1068,8 +1054,8 @@ def finish_interview(email: str, *, step: int = INTERVIEW_LAST_STEP, answers: Op
     from app.services.edition_facts import persist_interview_facts
     persist_interview_facts(clean)
     if is_maxine():
-        from app.services.edition_seed import apply_argos_consent
-        created["argos_loaded"] = [row["key"] for row in apply_argos_consent(clean)]
+        from app.services.argos_review import sync_argos_consent
+        created["argos_review"] = sync_argos_consent(clean)
     if is_maxine():
         from app.services.construction_bridge import materialize_from_interview
         created = materialize_from_interview(created, clean)

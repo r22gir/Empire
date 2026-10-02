@@ -14,6 +14,7 @@ from app.edition import (
     ensure_assistant_files,
     greeting,
     is_family_edition,
+    is_maxine,
 )
 from app.services import amp_access, amp_allowlist, amp_businesses
 
@@ -43,6 +44,10 @@ class ContactCreate(BaseModel):
 class InterviewBody(BaseModel):
     step: int = 0
     answers: dict = Field(default_factory=dict)
+
+
+class ArgosDecisionBody(BaseModel):
+    visibility: str = ""
 
 
 class FactVisibilityBody(BaseModel):
@@ -266,6 +271,28 @@ async def put_interview(body: InterviewBody, request: Request):
         return amp_businesses.save_interview_draft(
             _amp_email(request), step=body.step, answers=body.answers
         )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/businesses/argos-review")
+async def get_argos_review(request: Request):
+    """Camilo's queue. Pending pieces are not facts yet."""
+    if not is_maxine():
+        raise HTTPException(404, "La cola de Argos solo existe en Maxine")
+    _amp_email(request)
+    from app.services.argos_review import review_state
+    return review_state()
+
+
+@router.post("/businesses/argos-review/{item_id}")
+async def post_argos_decision(item_id: str, body: ArgosDecisionBody, request: Request):
+    if not is_maxine():
+        raise HTTPException(404, "La cola de Argos solo existe en Maxine")
+    _amp_email(request)
+    from app.services.argos_review import decide_item
+    try:
+        return decide_item(item_id, body.visibility)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

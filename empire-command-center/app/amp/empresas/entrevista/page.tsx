@@ -7,7 +7,7 @@ import { API_BASE } from '../../../lib/api';
 import { useTranslation } from '../../../lib/i18n';
 import { useAssistantName } from '../../../lib/assistant';
 import { useEdition } from '../../../lib/edition';
-import { ARGOS_OPTIONS, interviewSteps, welcomeCopy } from '../../../lib/interviewWelcome';
+import { ARGOS_OPTIONS, ARGOS_QUESTION, interviewSteps, welcomeCopy } from '../../../lib/interviewWelcome';
 
 type Template = { id: string; label: string; description: string };
 type Item = { name: string; kind: 'servicio' | 'producto'; price: string };
@@ -73,7 +73,10 @@ const MONTHS = [
   ['12-01', 'Diciembre', 'December'],
 ] as const;
 
-type ArgosItem = { key: string; label: string; value: string; text: string };
+function asConsent(id: string): Answers['argos_consent'] {
+  if (id === 'all' || id === 'public' || id === 'later') return id;
+  return '';
+}
 
 function emptyAnswers(): Answers {
   return {
@@ -211,6 +214,77 @@ const cardStyle: React.CSSProperties = {
   marginTop: 16,
 };
 
+type ReviewItem = { id: string; title: string; text: string; visibility: string; status: string };
+type ReviewState = { active?: boolean; task?: { title?: string; owner_name?: string } | null; items?: ReviewItem[] };
+
+function ArgosReviewQueue({ visible, nonce, es }: { visible: boolean; nonce: number; es: boolean }) {
+  const [state, setState] = useState<ReviewState | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    fetch(`${API_BASE}/api/v1/businesses/argos-review`, { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data) => { if (!cancelled) setState(data); })
+      .catch(() => { if (!cancelled) setError(es ? 'No pude abrir la cola.' : 'Could not open the queue.'); });
+    return () => { cancelled = true; };
+  }, [visible, nonce, es]);
+
+  async function decide(id: string, visibility: 'public' | 'confidential') {
+    setError('');
+    const res = await fetch(`${API_BASE}/api/v1/businesses/argos-review/${id}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visibility }),
+    });
+    if (!res.ok) {
+      setError(es ? 'No pude guardar esa decisión.' : 'Could not save that decision.');
+      return;
+    }
+    const data = await res.json().catch(() => null);
+    setState((prev) => {
+      if (!prev?.items) return prev;
+      return {
+        ...prev,
+        items: prev.items.map((item) => item.id === id ? { ...item, ...(data?.item || {}), visibility, status: 'approved' } : item),
+      };
+    });
+  }
+
+  if (!visible) return null;
+  const pending = (state?.items || []).filter((item) => item.status !== 'approved');
+  const approved = (state?.items || []).filter((item) => item.status === 'approved');
+  return (
+    <div style={{ marginTop: 16, background: '#FFF9F0', borderRadius: 12, padding: 12 }}>
+      <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>{es ? 'Cola de revisión' : 'Review queue'}</h3>
+      <p style={{ color: '#5C5650', lineHeight: 1.5, marginTop: 0 }}>
+        {es
+          ? 'Rafael tiene la tarea «Importación Argos pendiente». Cuando llegue un correo, un archivo o un plano, aparece aquí. Entra Confidencial y no se usa ni se muestra hasta que tú lo apruebes.'
+          : 'Rafael has the task “Importación Argos pendiente”. When an email, file, or plan arrives, it shows up here. It stays confidential and is not used or shown until you approve it.'}
+      </p>
+      {state?.task?.title && <p style={{ fontWeight: 800, margin: '8px 0' }}>{state.task.title} · {state.task.owner_name || 'Rafael'}</p>}
+      {pending.length === 0 && <p style={{ color: '#5C5650' }}>{es ? 'Todavía no hay piezas en la cola.' : 'Nothing is in the queue yet.'}</p>}
+      {pending.map((item) => (
+        <div key={item.id} style={{ borderTop: '1px solid #F0E6D8', padding: '12px 0' }}>
+          <strong>{item.title}</strong>
+          <p style={{ margin: '4px 0 8px', color: '#5C5650' }}>{item.text}</p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={() => decide(item.id, 'confidential')} style={{ borderRadius: 999, border: 'none', background: '#F3EDE3', color: '#2D2A26', padding: '8px 14px', fontWeight: 700, cursor: 'pointer', minHeight: 40 }}>{es ? 'Confidencial' : 'Confidential'}</button>
+            <button type="button" onClick={() => decide(item.id, 'public')} style={{ borderRadius: 999, border: 'none', background: '#F3EDE3', color: '#2D2A26', padding: '8px 14px', fontWeight: 700, cursor: 'pointer', minHeight: 40 }}>{es ? 'Publicar' : 'Publish'}</button>
+          </div>
+        </div>
+      ))}
+      {approved.length > 0 && <p style={{ color: '#5C5650' }}>{es ? `${approved.length} aprobada(s). Lo confidencial no entra en contenido público.` : `${approved.length} approved. Confidential pieces stay out of public content.`}</p>}
+      {error && <p role="alert" style={{ color: '#9b2c2c' }}>{error}</p>}
+    </div>
+  );
+}
+
 export default function EntrevistaPage() {
   const router = useRouter();
   const { locale, setLocale } = useTranslation();
@@ -227,7 +301,7 @@ export default function EntrevistaPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [resumed, setResumed] = useState(false);
-  const [argosCatalog, setArgosCatalog] = useState<{ public: ArgosItem[]; all: ArgosItem[] }>({ public: [], all: [] });
+  const [reviewNonce, setReviewNonce] = useState(0);
   const steps = interviewSteps(constructionShell ? 'maxine' : 'amp');
   const welcome = welcomeCopy(constructionShell ? 'maxine' : 'amp');
   const last = steps.length - 1;
@@ -252,12 +326,6 @@ export default function EntrevistaPage() {
       if (draftRes.ok) {
         const draft = await draftRes.json();
         setAnswers(fromServer(draft.answers));
-        if (draft.argos_catalog) {
-          setArgosCatalog({
-            public: Array.isArray(draft.argos_catalog.public) ? draft.argos_catalog.public : [],
-            all: Array.isArray(draft.argos_catalog.all) ? draft.argos_catalog.all : [],
-          });
-        }
         if (draft.status === 'draft') {
           const savedStep = typeof draft.step === 'number' ? draft.step : 0;
           setStep(savedStep);
@@ -400,12 +468,6 @@ export default function EntrevistaPage() {
     const row = steps.find((item) => item.id === id);
     return row ? (es ? row.es : row.en) : id;
   };
-  const argosRows: ArgosItem[] = answers.argos_consent === 'all'
-    ? argosCatalog.all
-    : answers.argos_consent === 'public'
-      ? argosCatalog.public
-      : [];
-
   const progress = Math.round((step / last) * 100);
 
   return (
@@ -473,19 +535,25 @@ export default function EntrevistaPage() {
           )}
           {currentId === 'argos' && (
             <>
-              <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('¿Cargo la información de Argos Campestre que Rafael ya tiene?', 'Should I load the Argos Campestre information Rafael already has?')}</h2>
-              <p style={{ color: '#5C5650', lineHeight: 1.5 }}>{t('Queda Confidencial hasta que la apruebes en Confirmar datos. No invento precios ni datos legales.', 'It stays confidential until you approve it on Confirm facts. I do not invent prices or legal details.')}</p>
+              <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{es ? ARGOS_QUESTION.es : ARGOS_QUESTION.en}</h2>
+              <p style={{ color: '#5C5650', lineHeight: 1.5 }}>{t('No cargo datos legales de la sociedad ni un NIT. Si dices que sí, cada pieza queda Confidencial hasta que tú la apruebes.', 'I do not load legal company details or a tax ID. If you say yes, each piece stays confidential until you approve it.')}</p>
               <div style={{ display: 'grid', gap: 8 }}>
                 {ARGOS_OPTIONS.map((option) => {
                   const selected = answers.argos_consent === option.id;
+                  const consent = asConsent(option.id);
                   return (
-                    <button key={option.id} type="button" onClick={() => setAnswers({ ...answers, argos_consent: option.id === 'all' || option.id === 'public' || option.id === 'later' ? option.id : '' })} style={{ textAlign: 'left', borderRadius: 12, border: selected ? '2px solid #D4A030' : '1px solid #E7E0D6', background: selected ? '#FFF9F0' : '#fff', padding: 12, cursor: 'pointer', minHeight: 48 }}>
+                    <button key={option.id} type="button" onClick={() => {
+                      const next = { ...answers, argos_consent: consent };
+                      setAnswers(next);
+                      persist(step, next).then((ok) => { if (ok) setReviewNonce((n) => n + 1); });
+                    }} style={{ textAlign: 'left', borderRadius: 12, border: selected ? '2px solid #D4A030' : '1px solid #E7E0D6', background: selected ? '#FFF9F0' : '#fff', padding: 12, cursor: 'pointer', minHeight: 48 }}>
                       <strong>{es ? option.es : option.en}</strong>
                       <div style={{ color: '#5C5650', fontSize: 14, marginTop: 4 }}>{es ? option.detailEs : option.detailEn}</div>
                     </button>
                   );
                 })}
               </div>
+              <ArgosReviewQueue visible={answers.argos_consent === 'all'} nonce={reviewNonce} es={es} />
             </>
           )}
           {currentId === 'empresa' && (
@@ -710,7 +778,7 @@ export default function EntrevistaPage() {
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('Confirmar datos', 'Confirm facts')}</h2>
               <p style={{ color: '#5C5650' }}>{t('Cada dato queda confidencial hasta que lo marques como Publicar. Lo confidencial no entra en redes ni en contenido público.', 'Each fact stays confidential until you mark it Publicar. Confidential facts stay out of social posts and public content.')}</p>
-              {[...confirmRows(answers), ...argosRows.map((item) => ({ key: item.key, label: item.label, value: item.value }))].map((row) => {
+              {confirmRows(answers).map((row) => {
                 const visibility = answers.fact_visibility[row.key] || 'confidential';
                 return (
                   <div key={row.key} style={{ borderTop: '1px solid #F0E6D8', padding: '12px 0' }}>
@@ -751,6 +819,7 @@ export default function EntrevistaPage() {
                   <p style={{ margin: '4px 0 0', color: '#5C5650' }}>{section.body}</p>
                 </div>
               ))}
+              {answers.argos_consent === 'all' && <ArgosReviewQueue visible nonce={reviewNonce} es={es} />}
               <p style={{ marginTop: 16, lineHeight: 1.5 }}>
                 {t('Cuando termines, mira cómo entrar desde el celular, la tableta o el computador.', 'When you finish, see how to open this on a phone, tablet, or computer.')}{' '}
                 <Link href="/ayuda/dispositivos" style={{ color: '#D4A030', fontWeight: 800 }}>Cómo conectarte desde tus dispositivos</Link>

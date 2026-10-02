@@ -19,27 +19,32 @@ const OFFER = {
 
 const ARGOS_STEP = { id: 'argos', es: 'Argos Campestre', en: 'Argos Campestre' };
 
+export const ARGOS_QUESTION = {
+  es: '¿Quieres que Rafael cargue toda la información relacionada con Argos Campestre que tiene (correos y archivos 2021–2024, planos) para que yo la revise contigo?',
+  en: 'Do you want Rafael to load all the Argos Campestre information he has (emails and files from 2021–2024, plans) so I can review it with you?',
+};
+
 export const ARGOS_OPTIONS = [
   {
     id: 'all',
     es: 'Sí, cargar todo',
     en: 'Yes, load all of it',
-    detailEs: 'El lugar, los planos de 2022–2023 y la marca. Queda Confidencial hasta que lo apruebes.',
-    detailEn: 'The place, the 2022–2023 plans, and the brand. It stays confidential until you approve it.',
+    detailEs: 'Creo la tarea «Importación Argos pendiente» para Rafael y te muestro la cola de revisión. Cada pieza entra Confidencial y no se usa ni se muestra hasta que tú la apruebes.',
+    detailEn: 'I create the task “Importación Argos pendiente” for Rafael and show you the review queue. Each piece stays confidential and is not used or shown until you approve it.',
   },
   {
     id: 'public',
     es: 'Solo lo público',
     en: 'Only what is public',
-    detailEs: 'Solo la descripción pública del proyecto. También queda Confidencial hasta que la apruebes.',
-    detailEn: 'Only the public description of the project. That stays confidential until you approve it too.',
+    detailEs: 'Dejo solo la semilla pública. No cargo correos, archivos ni planos.',
+    detailEn: 'I keep only the public seed. I do not load emails, files, or plans.',
   },
   {
     id: 'later',
     es: 'Ahora no',
     en: 'Not now',
-    detailEs: 'No cargo nada de Argos Campestre en esta entrevista.',
-    detailEn: 'I will not load Argos Campestre in this interview.',
+    detailEs: 'No cargo nada de eso ahora.',
+    detailEn: 'I will not load any of that now.',
   },
 ];
 
@@ -69,10 +74,10 @@ export function welcomeCopy(edition) {
     introEn: 'This interview walks through your company from start to finish, one question per screen. You can go back, save, and continue later. Nothing is created until the review.',
     sections,
     argosNoteEs: kind === 'maxine'
-      ? 'También te voy a preguntar si quieres que Rafael cargue la información de Argos Campestre que ya tiene. Todo eso queda Confidencial hasta que tú lo apruebes.'
+      ? 'También te voy a preguntar si quieres que Rafael cargue los correos, archivos 2021–2024 y planos de Argos Campestre. Nada de eso se usa ni se muestra hasta que tú lo apruebes. Queda Confidencial.'
       : '',
     argosNoteEn: kind === 'maxine'
-      ? 'I will also ask whether you want Rafael to load the Argos Campestre information he already has. All of that stays confidential until you approve it.'
+      ? 'I will also ask whether you want Rafael to load the Argos Campestre emails, 2021–2024 files, and plans. None of that is used or shown until you approve it. It stays confidential.'
       : '',
   };
 }

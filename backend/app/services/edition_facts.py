@@ -63,6 +63,13 @@ def delete_facts(keys) -> None:
     _save([row for row in _load() if row.get("key") not in wanted])
 
 
+def delete_facts_by_source(source: str) -> None:
+    source = (source or "").strip()
+    if not source:
+        return
+    _save([row for row in _load() if row.get("source") != source])
+
+
 def public_facts() -> list[dict]:
     return [row for row in _load() if row.get("visibility") == PUBLIC]
 
