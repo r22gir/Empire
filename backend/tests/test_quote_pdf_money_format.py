@@ -71,3 +71,70 @@ def test_cost_breakdown_subtotal_uses_the_group_name(monkeypatch, tmp_path):
     assert "$2,400.00" in html
     assert "$185.00" in html
     assert "Room Subtotal" not in html.replace("Living Room Subtotal", "")
+
+
+def _grouped_quote(**extra) -> dict:
+    quote = {
+        "notes": "Sidemark: Nehal Elrefai. Widths are estimates.",
+        "line_items": [
+            {
+                "description": "White lining",
+                "quantity": 32,
+                "unit": "yd",
+                "rate": 10.5,
+                "amount": 336,
+                "category": "lining",
+                "room": "Living Room",
+            },
+            {
+                "description": "Blackout",
+                "quantity": 14,
+                "unit": "yd",
+                "rate": 12,
+                "amount": 168,
+                "category": "fabric",
+                "area": "Materials",
+            },
+        ],
+    }
+    quote.update(extra)
+    return quote
+
+
+def test_breakdown_quote_omits_the_top_line_table(monkeypatch, tmp_path):
+    quotes = _quotes(monkeypatch, tmp_path)
+    html = quotes.quote_pdf_work_html(quotes.quote_pdf_line_sections(_grouped_quote()))
+    assert "Itemized Cost Breakdown" in html
+    assert "Living Room Subtotal" in html
+    assert "Materials Subtotal" in html
+    assert "<th>Rate</th>" not in html
+    assert html.index("Sidemark: Nehal Elrefai") < html.index("Itemized Cost Breakdown")
+    assert html.index("Itemized Cost Breakdown") < html.index("Living Room Subtotal")
+
+
+def test_quote_without_breakdown_keeps_the_top_line_table(monkeypatch, tmp_path):
+    quotes = _quotes(monkeypatch, tmp_path)
+    html = quotes.quote_pdf_work_html(quotes.quote_pdf_line_sections({
+        "notes": "Confirm access.",
+        "line_items": [{
+            "description": "Install",
+            "quantity": 1,
+            "unit": "ea",
+            "rate": 1200,
+            "amount": 1200,
+        }],
+    }))
+    assert "<th>Rate</th>" in html
+    assert "$1,200.00" in html
+    assert "Itemized Cost Breakdown" not in html
+    assert html.index("Confirm access.") < html.index("<th>Rate</th>")
+
+
+def test_show_flat_line_table_override_keeps_both(monkeypatch, tmp_path):
+    quotes = _quotes(monkeypatch, tmp_path)
+    html = quotes.quote_pdf_work_html(
+        quotes.quote_pdf_line_sections(_grouped_quote(show_flat_line_table=True))
+    )
+    assert "<th>Rate</th>" in html
+    assert "Itemized Cost Breakdown" in html
+    assert html.index("<th>Rate</th>") < html.index("Itemized Cost Breakdown")
