@@ -7,7 +7,8 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
-  #avatar { width: 100%; height: 100%; }
+  #avatar, #simli-face { width: 100%; height: 100%; }
+  #simli-face { display: none; object-fit: cover; object-position: center 20%; background: #111; }
   #loading {
     position: absolute; inset: 0;
     display: flex; align-items: center; justify-content: center;
@@ -18,6 +19,12 @@
     align-items: center; justify-content: center;
     color: #ef4444; font-family: sans-serif; font-size: 13px;
     text-align: center; padding: 20px;
+  }
+  #badge {
+    position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5;
+    font: 11px/1.35 sans-serif; color: #f4e7b3;
+    background: rgba(20, 16, 8, 0.82); border: 1px solid rgba(184, 150, 12, 0.45);
+    border-radius: 6px; padding: 6px 8px;
   }
 </style>
 <script type="importmap">
@@ -31,35 +38,124 @@
 </head>
 <body>
 <div id="avatar"></div>
+<video id="simli-face" autoplay playsinline muted></video>
 <div id="loading">Loading avatar...</div>
 <div id="error"></div>
+<div id="badge" hidden></div>
 
 <script type="module">
 import { TalkingHead } from '/talkinghead/talkinghead.mjs';
+import { mp3Base64ToPcm16, pcm16FromFloat, startSimliFace } from '/simli-face.js';
+
+const params = new URLSearchParams(location.search);
+const edition = (params.get('edition') || 'workroom').toLowerCase().replace('-', '_');
+const EDITION_GLB = {
+  workroom: { url: '/avatars/workroom.glb', body: 'M' },
+  max_e: { url: '/avatars/max-e.glb', body: 'M' },
+  maxine: { url: '/avatars/maxine.glb', body: 'F' },
+};
+const PLACEHOLDER = {
+  url: '/max-avatar.glb',
+  body: 'M',
+  note: "Placeholder. This is TalkingHead's female brunette sample (CC BY-NC 4.0, non-commercial), loaded with body M. Edition GLB files are not installed yet.",
+};
 
 const container = document.getElementById('avatar');
+const face = document.getElementById('simli-face');
 const loading = document.getElementById('loading');
 const errorDiv = document.getElementById('error');
+const badge = document.getElementById('badge');
 let head = null;
+let simli = null;
+let renderer = 'talkinghead';
+
+function tellParent(extra) {
+  window.parent.postMessage({ type: 'avatar-status', edition, renderer, ...extra }, '*');
+}
+
+function showBadge(text) {
+  badge.hidden = !text;
+  badge.textContent = text || '';
+}
+
+async function resolveModel() {
+  const spec = EDITION_GLB[edition] || EDITION_GLB.workroom;
+  try {
+    const res = await fetch(spec.url, { method: 'GET' });
+    if (res.ok) return { url: spec.url, body: spec.body, placeholder: false };
+  } catch { /* missing file */ }
+  return { ...PLACEHOLDER, placeholder: true };
+}
+
+async function initTalkingHead(model) {
+  loading.textContent = 'Initializing TalkingHead...';
+  head = new TalkingHead(container, {
+    cameraView: 'upper',
+    cameraRotateEnable: false,
+  });
+  loading.textContent = model.placeholder
+    ? 'Loading placeholder avatar...'
+    : 'Loading edition avatar...';
+  await head.showAvatar({
+    url: model.url,
+    body: model.body,
+    avatarMood: 'neutral',
+    lipsyncLang: 'en',
+  });
+  if (model.placeholder) showBadge(PLACEHOLDER.note);
+  else showBadge('');
+}
 
 async function init() {
+  const model = await resolveModel();
+  let fallbackReason = 'Simli is unset. TalkingHead is the avatar.';
   try {
-    loading.textContent = 'Initializing TalkingHead...';
-    head = new TalkingHead(container, {
-      cameraView: 'upper',
-      cameraRotateEnable: false,
+    simli = await startSimliFace({
+      edition,
+      video: face,
+      onStatus: (status) => {
+        if (status && status.reason) fallbackReason = status.reason;
+        tellParent({
+          success: true,
+          placeholder: model.placeholder,
+          placeholderNote: model.placeholder ? PLACEHOLDER.note : '',
+          simli: status,
+          reason: status.reason || fallbackReason,
+        });
+      },
     });
-
-    loading.textContent = 'Loading avatar model (4.7MB)...';
-    await head.showAvatar({
-      url: '/max-avatar.glb',
-      body: 'M',
-      avatarMood: 'neutral',
-      lipsyncLang: 'en',
+  } catch (err) {
+    simli = null;
+    fallbackReason = 'Simli did not connect. TalkingHead is the avatar.';
+    tellParent({
+      success: true,
+      placeholder: model.placeholder,
+      placeholderNote: model.placeholder ? PLACEHOLDER.note : '',
+      reason: fallbackReason,
     });
-
+  }
+  if (simli) {
+    renderer = 'simli';
+    container.style.display = 'none';
+    face.style.display = 'block';
     loading.style.display = 'none';
-    window.parent.postMessage({ type: 'avatar-loaded', success: true }, '*');
+    showBadge('Simli face only. ' + (model.placeholder ? PLACEHOLDER.note : ''));
+    tellParent({ success: true, renderer: 'simli', placeholder: model.placeholder, placeholderNote: model.placeholder ? PLACEHOLDER.note : '' });
+    window.parent.postMessage({ type: 'avatar-loaded', success: true, renderer: 'simli' }, '*');
+    return;
+  }
+  try {
+    await initTalkingHead(model);
+    renderer = 'talkinghead';
+    loading.style.display = 'none';
+    tellParent({
+      success: true,
+      renderer: 'talkinghead',
+      placeholder: !!model.placeholder,
+      placeholderNote: model.placeholder ? PLACEHOLDER.note : '',
+      reason: fallbackReason,
+    });
+    window.parent.postMessage({ type: 'avatar-loaded', success: true, renderer: 'talkinghead' }, '*');
   } catch (e) {
     console.error('Avatar init failed:', e);
     loading.style.display = 'none';
@@ -69,50 +165,55 @@ async function init() {
   }
 }
 
-// Timeout fallback — if stuck loading for 15s, show what stage it's at
 setTimeout(() => {
   if (loading.style.display !== 'none') {
     loading.innerHTML = loading.textContent + '<br><small style="color:#888;font-size:11px">Taking longer than expected — check browser console (F12) for errors</small>';
   }
 }, 15000);
 
-// Listen for commands from parent (Command Center)
+async function feedSimliPcm(int16) {
+  if (simli && int16 && int16.length) simli.sendPcm16(int16);
+}
+
 window.addEventListener('message', async (event) => {
+  const data = event.data || {};
+  if (data.type === 'live-pcm' && data.pcm) {
+    let view = null;
+    if (data.pcm instanceof ArrayBuffer) view = new Int16Array(data.pcm);
+    else if (ArrayBuffer.isView(data.pcm)) {
+      view = new Int16Array(data.pcm.buffer, data.pcm.byteOffset, Math.floor(data.pcm.byteLength / 2));
+    }
+    if (!view) return;
+    const floats = new Float32Array(view.length);
+    for (let i = 0; i < view.length; i++) floats[i] = view[i] / 32768;
+    await feedSimliPcm(pcm16FromFloat(floats, data.sampleRate || 24000));
+    return;
+  }
+  if (data.type === 'speak-audio' && data.audio && simli) {
+    try {
+      await feedSimliPcm(await mp3Base64ToPcm16(data.audio));
+    } catch (e) {
+      console.error('Simli audio feed failed:', e);
+    }
+    return;
+  }
   if (!head) return;
-  const { type, text, audio, mood } = event.data || {};
-
-  if (type === 'speak-text' && text) {
-    try {
-      await head.speakText(text);
-    } catch (e) {
-      console.error('speakText failed:', e);
-    }
+  if (data.type === 'speak-text' && data.text) {
+    try { await head.speakText(data.text); } catch (e) { console.error('speakText failed:', e); }
   }
-
-  if (type === 'speak-audio' && audio) {
-    try {
-      await head.speakAudio(audio);
-    } catch (e) {
-      console.error('speakAudio failed:', e);
-    }
+  if (data.type === 'speak-audio' && data.audio) {
+    try { await head.speakAudio(data.audio); } catch (e) { console.error('speakAudio failed:', e); }
   }
-
-  if (type === 'set-mood' && mood) {
-    try {
-      head.setMood(mood);
-    } catch (e) {
-      console.error('setMood failed:', e);
-    }
+  if (data.type === 'set-mood' && data.mood) {
+    try { head.setMood(data.mood); } catch (e) { console.error('setMood failed:', e); }
   }
-
-  if (type === 'stop-speaking') {
-    try {
-      head.stopSpeaking();
-    } catch (e) {
-      console.error('stopSpeaking failed:', e);
-    }
+  if (data.type === 'stop-speaking') {
+    try { head.stopSpeaking(); } catch (e) { console.error('stopSpeaking failed:', e); }
+    if (simli) simli.stop('tts');
   }
 });
+
+window.addEventListener('pagehide', () => { if (simli) simli.stop('pagehide'); });
 
 init();
 </script>

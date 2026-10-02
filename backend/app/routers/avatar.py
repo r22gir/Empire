@@ -209,6 +209,16 @@ async def avatar_status():
     from app.services.max.tts_service import tts_service
     from app.services.max.stt_service import stt_service
 
+    try:
+        from app.services.max.simli_avatar import simli_status
+        simli = simli_status("workroom")
+    except Exception as exc:
+        simli = {
+            "enabled": False,
+            "renderer": "talkinghead",
+            "status": "disabled",
+            "reason": f"Simli status unavailable ({type(exc).__name__}). TalkingHead is the avatar.",
+        }
     return {
         "avatar_ready": True,
         "tts_service": "grok" if tts_service.is_configured else "none",
@@ -218,6 +228,7 @@ async def avatar_status():
         "desks_active": 13,
         "quality_engine": True,
         "live_voice": _live_voice_status(),
+        "simli": simli,
     }
 
 
