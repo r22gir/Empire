@@ -206,6 +206,7 @@ def test_next_middleware_mentions_the_same_gate():
         "test-luxe.empirebox.store",
         "/api/v1/intake/reset-password",
         "/api/v1/intake/admin",
+        "/api/v1/intake/owner",
         "/api/v1/intake/signup",
         "/api/v1/fabrics/intake-project/",
         "/api/v1/photos/upload",

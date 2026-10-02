@@ -492,14 +492,28 @@ export default function ProjectDetail() {
                       <ExternalLink size={10} /> Open supplier page
                     </a>
                   )}
-                  {f.swatch_photo_path && (
-                    <img
-                      src={f.swatch_photo_path.startsWith('http') ? f.swatch_photo_path : `${API_BASE}${f.swatch_photo_path}`}
-                      alt="Swatch"
-                      className="mt-2 rounded-[8px] border border-[#ece8e0]"
-                      style={{ width: 80, height: 80, objectFit: 'cover' }}
-                    />
-                  )}
+                  {(() => {
+                    const files = Array.isArray(f.swatch_files) ? f.swatch_files : [];
+                    const thumbs = files.length
+                      ? files
+                      : (f.swatch_photo_path ? [{ path: f.swatch_photo_path, original_name: 'Swatch' }] : []);
+                    if (!thumbs.length) return null;
+                    return (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {thumbs.map((file: { path?: string; original_name?: string }, n: number) => {
+                          const path = file.path || '';
+                          const src = path.startsWith('http') ? path : `${API_BASE}${path}`;
+                          const name = file.original_name || 'Swatch';
+                          const image = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff)$/i.test(name) || /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(path);
+                          return image ? (
+                            <img key={n} src={src} alt={name} className="rounded-[8px] border border-[#ece8e0]" style={{ width: 80, height: 80, objectFit: 'cover' }} />
+                          ) : (
+                            <a key={n} href={src} className="text-[11px] font-semibold text-[#b8960c]">{name}</a>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                   {f.client_notes && (
                     <p className="mt-1.5 text-[11px] text-[#888] italic">{f.client_notes}</p>
                   )}

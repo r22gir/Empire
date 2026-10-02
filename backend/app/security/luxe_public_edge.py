@@ -43,6 +43,8 @@ _BLOCKED_EXACT = frozenset(
 # these dumps stay on Tailscale / the Access-protected studio host.
 _BLOCKED_PREFIXES = (
     "/api/v1/intake/admin",
+    # Owner list of every submission, including photo analysis.
+    "/api/v1/intake/owner",
 )
 
 # Anonymous capture posts. Route handlers add their own slowapi limits.
@@ -115,6 +117,7 @@ SENSITIVE_ANONYMOUS_PATHS = (
     ("POST", "/api/v1/intake/reset-password"),
     ("GET", "/api/v1/intake/admin/projects"),
     ("GET", "/api/v1/intake/admin/users"),
+    ("GET", "/api/v1/intake/owner/submissions"),
     ("GET", "/api/v1/fabrics"),
     ("GET", "/api/v1/photos/quote/example"),
     ("GET", "/docs"),

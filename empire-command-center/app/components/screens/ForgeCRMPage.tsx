@@ -2,12 +2,13 @@
 
 import { useState, useEffect, lazy, Suspense } from 'react';
 import {
-  Users, Search, Plus, BarChart3, Target, FileText, Phone, Mail,
+  Users, Search, Plus, BarChart3, Target, FileText, Phone, Mail, Gem,
   Loader2, Crown, TrendingUp, UserPlus, DollarSign, Activity, BookOpen, CreditCard,
 } from 'lucide-react';
 import { API } from '../../lib/api';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
+import LuxeForgeIntakes from './LuxeForgeIntakes';
 
 const CustomerList = lazy(() => import('../business/crm/CustomerList'));
 const CustomerDetail = lazy(() => import('../business/crm/CustomerDetail'));
@@ -20,6 +21,7 @@ const Loading = () => (
 
 const NAV = [
   { id: 'customers', label: 'All Customers', icon: <Users size={16} /> },
+  { id: 'intakes', label: 'LuxeForge Intakes', icon: <Gem size={16} /> },
   { id: 'pipeline', label: 'Pipeline', icon: <Target size={16} /> },
   { id: 'add', label: 'Add Customer', icon: <UserPlus size={16} /> },
   { id: 'stats', label: 'Stats', icon: <BarChart3 size={16} /> },
@@ -91,6 +93,13 @@ export default function ForgeCRMPage() {
           <Suspense fallback={<Loading />}>
             <CustomerList onSelectCustomer={(id) => setSelectedCustomerId(id)} business="woodcraft" />
           </Suspense>
+        );
+
+      case 'intakes':
+        return (
+          <LuxeForgeIntakes
+            onOpenCustomer={(id) => { setSelectedCustomerId(id); setSection('customers'); }}
+          />
         );
 
       case 'pipeline':

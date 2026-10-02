@@ -116,6 +116,19 @@ def init_db():
             conn.execute(f"ALTER TABLE {table} ADD COLUMN business TEXT")
         except Exception:
             pass
+    # Owner handoff columns. Existing databases keep their rows; duplicate
+    # column errors mean the migration already ran.
+    for column, decl in (
+        ("lead_id", "INTEGER"),
+        ("customer_id", "TEXT"),
+        ("quote_id", "TEXT"),
+        ("quote_number", "TEXT"),
+        ("photo_analysis", "TEXT"),
+    ):
+        try:
+            conn.execute(f"ALTER TABLE intake_projects ADD COLUMN {column} {decl}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -157,6 +170,44 @@ async def require_intake_admin(user=Depends(get_current_user)):
     if role not in INTAKE_ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+# AI photo notes are for the owner list only. The designer portal must not
+# receive them, even though the column lives on the same project row.
+_CLIENT_HIDDEN_FIELDS = ("photo_analysis",)
+
+
+def _project_for_client(project: dict) -> dict:
+    for key in _CLIENT_HIDDEN_FIELDS:
+        project.pop(key, None)
+    return project
+
+
+def _load_project_fabrics(project_id: str) -> list:
+    """Fabric rows live in the task DB the fabrics router writes."""
+    try:
+        from app.db.database import get_db as task_db
+        with task_db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM intake_fabrics WHERE intake_id = ? ORDER BY id",
+                (project_id,),
+            ).fetchall()
+    except Exception as exc:
+        logger.warning("Could not read intake fabrics for %s: %s", project_id, exc)
+        return []
+    fabrics = []
+    for row in rows:
+        item = dict(row)
+        raw = item.get("swatch_files")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                item["swatch_files"] = json.loads(raw)
+            except json.JSONDecodeError:
+                item["swatch_files"] = []
+        elif raw in (None, ""):
+            item["swatch_files"] = []
+        fabrics.append(item)
+    return fabrics
 
 
 def _next_intake_code() -> str:
@@ -462,7 +513,7 @@ async def list_projects(request: Request, user=Depends(get_current_user)):
         d["scans"] = json.loads(d.get("scans") or "[]")
         d["measurements"] = json.loads(d.get("measurements") or "[]")
         d["messages"] = json.loads(d.get("messages") or "[]")
-        projects.append(d)
+        projects.append(_project_for_client(d))
     return {"projects": projects, "total": len(projects)}
 
 
@@ -482,7 +533,7 @@ async def get_project(request: Request, project_id: str, user=Depends(get_curren
     d["scans"] = json.loads(d.get("scans") or "[]")
     d["measurements"] = json.loads(d.get("measurements") or "[]")
     d["messages"] = json.loads(d.get("messages") or "[]")
-    return d
+    return _project_for_client(d)
 
 
 @limiter.limit("10/minute")
@@ -532,8 +583,35 @@ async def submit_project(request: Request, project_id: str, user=Depends(get_cur
     conn.commit()
     conn.close()
 
-    # Fire desk event: new project submitted
+    # CRM lead + Workroom quote draft + owner mailbox notice. A failure here
+    # must not undo the designer's submit; the owner list still shows the row.
     if row:
+        try:
+            from app.services.luxeforge_intake_handoff import handoff_submitted_intake
+            project = dict(row)
+            handoff = await handoff_submitted_intake(project, user, _load_project_fabrics(project_id))
+            conn2 = get_db()
+            conn2.execute(
+                """UPDATE intake_projects
+                   SET lead_id = COALESCE(?, lead_id),
+                       customer_id = COALESCE(?, customer_id),
+                       quote_id = COALESCE(?, quote_id),
+                       quote_number = COALESCE(?, quote_number),
+                       updated_at = datetime('now')
+                   WHERE id = ?""",
+                (
+                    handoff.get("lead_id"),
+                    handoff.get("customer_id"),
+                    handoff.get("quote_id"),
+                    handoff.get("quote_number"),
+                    project_id,
+                ),
+            )
+            conn2.commit()
+            conn2.close()
+        except Exception as e:
+            logger.warning(f"LuxeForge owner handoff failed: {e}")
+
         try:
             import asyncio
             from app.services.max.desks.desk_scheduler import desk_scheduler
@@ -652,17 +730,35 @@ async def upload_photo(
     conn.commit()
     conn.close()
 
+    saved = photos[-1]
+    # Owner-only. The upload response stays a file record; analysis is not
+    # returned to the designer.
+    try:
+        from app.services.luxeforge_intake_handoff import schedule_owner_photo_analysis
+        schedule_owner_photo_analysis(
+            project_id, content, file.filename or filename, file.content_type,
+        )
+    except Exception as e:
+        logger.warning(f"Owner photo analysis schedule failed: {e}")
+
     # Fire desk event: new photo uploaded
     try:
         import asyncio
         from app.services.max.desks.desk_scheduler import desk_scheduler
         asyncio.create_task(desk_scheduler.on_photo_uploaded(
-            project_id, {"original_name": file.filename, "path": photos[-1]["path"]}
+            project_id, {"original_name": file.filename, "path": saved["path"]}
         ))
     except Exception as e:
         logger.warning(f"Photo event trigger failed: {e}")
 
-    return {"filename": filename, "total_photos": len(photos)}
+    return {
+        "filename": filename,
+        "path": saved["path"],
+        "original_name": file.filename,
+        "size": len(content),
+        "content_type": file.content_type,
+        "total_photos": len(photos),
+    }
 
 
 @limiter.limit("10/minute")
@@ -712,7 +808,80 @@ async def upload_scan(
     conn.commit()
     conn.close()
 
-    return {"filename": filename, "total_scans": len(scans)}
+    saved = scans[-1]
+    return {
+        "filename": filename,
+        "path": saved["path"],
+        "original_name": file.filename,
+        "size": len(content),
+        "content_type": file.content_type,
+        "total_scans": len(scans),
+    }
+
+
+def _owner_submission(row: dict) -> dict:
+    project_id = row["id"]
+    photos = json.loads(row.get("photos") or "[]")
+    scans = json.loads(row.get("scans") or "[]")
+    rooms = json.loads(row.get("rooms") or "[]")
+    measurements = json.loads(row.get("measurements") or "[]")
+    analysis_raw = row.get("photo_analysis") or "[]"
+    try:
+        analysis = json.loads(analysis_raw) if isinstance(analysis_raw, str) else analysis_raw
+    except json.JSONDecodeError:
+        analysis = []
+    return {
+        "id": project_id,
+        "intake_code": row.get("intake_code"),
+        "name": row.get("name"),
+        "address": row.get("address"),
+        "status": row.get("status"),
+        "treatment": row.get("treatment"),
+        "style": row.get("style"),
+        "scope": row.get("scope"),
+        "notes": row.get("notes"),
+        "rooms": rooms,
+        "photos": photos,
+        "scans": scans,
+        "measurements": measurements,
+        "photo_analysis": analysis if isinstance(analysis, list) else [],
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "contact": {
+            "name": row.get("user_name"),
+            "email": row.get("user_email"),
+            "phone": row.get("user_phone"),
+            "company": row.get("user_company"),
+            "role": row.get("user_role"),
+        },
+        "fabrics": _load_project_fabrics(project_id),
+        "lead_id": row.get("lead_id"),
+        "customer_id": row.get("customer_id"),
+        "quote_id": row.get("quote_id"),
+        "quote_number": row.get("quote_number"),
+    }
+
+
+@limiter.limit("30/minute")
+@router.get("/owner/submissions")
+async def owner_list_submissions(request: Request):
+    """Command Center list of LuxeForge intakes.
+
+    Studio and the tailnet can read this the same way they read Workroom
+    quotes. The public Luxe hostname cannot: the edge blocks this prefix.
+    Photo analysis is included here and stripped from the designer portal.
+    """
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT p.*, u.name as user_name, u.email as user_email,
+               u.phone as user_phone, u.company as user_company, u.role as user_role
+        FROM intake_projects p
+        LEFT JOIN intake_users u ON p.user_id = u.id
+        WHERE p.deleted_at IS NULL
+        ORDER BY p.updated_at DESC
+    """).fetchall()
+    conn.close()
+    return {"submissions": [_owner_submission(dict(r)) for r in rows]}
 
 
 # ── Admin endpoints (for Command Center) ─────────────────────

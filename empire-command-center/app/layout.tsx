@@ -1,11 +1,19 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import { I18nWrapper } from "./components/I18nWrapper";
+import { COMMAND_CENTER_DOCUMENT_TITLE, documentTitleForHost } from "./lib/luxeDocumentTitle";
 
-export const metadata: Metadata = {
-  title: "Empire Command Center",
-  description: "Empire AI-Powered Business Command Center",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const headerList = await headers();
+  const title = documentTitleForHost(headerList.get("host"));
+  return {
+    title,
+    description: title === COMMAND_CENTER_DOCUMENT_TITLE
+      ? "Empire AI-Powered Business Command Center"
+      : "Empire Workroom designer intake",
+  };
+}
 
 export const viewport: Viewport = {
   width: 'device-width',

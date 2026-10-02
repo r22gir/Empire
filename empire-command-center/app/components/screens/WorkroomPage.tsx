@@ -2,7 +2,7 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { API } from '../../lib/api';
 import {
-  Scissors, DollarSign, ClipboardList, TrendingUp, Calendar, Users, Inbox,
+  Scissors, DollarSign, ClipboardList, TrendingUp, Calendar, Users, Inbox, Gem,
   Package, FileText, Receipt, BarChart3, Truck, Headphones, Loader2, Zap, Camera, Lightbulb, Eye, ArrowLeft, Plus,
   CheckCircle2, Circle, Clock, Flag, Filter, Search, Sparkles, Send, X, Check, CreditCard, Ruler, Trash2
 } from 'lucide-react';
@@ -12,6 +12,7 @@ import { QuickQuotePanel, QuotePhasePipeline } from '../business/quotes/QuotePip
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
 import YardageCalculator from '../business/quotes/YardageCalculator';
+import LuxeForgeIntakes from './LuxeForgeIntakes';
 
 // Lazy-load business modules (they'll be created by the build agents)
 const FinanceDashboard = lazy(() => import('../business/finance/FinanceDashboard'));
@@ -28,6 +29,7 @@ const TemplateModule = lazy(() => import('../business/templates/TemplateModule')
 
 const NAV_SECTIONS = [
   { id: 'overview', label: 'Overview', icon: Scissors },
+  { id: 'intakes', label: 'LuxeForge Intakes', icon: Gem },
   { id: 'creations', label: 'Creations', icon: Lightbulb },
   { id: 'quotes', label: 'Quotes', icon: ClipboardList },
   { id: 'finance', label: 'Finance', icon: DollarSign },
@@ -65,6 +67,15 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
     if (initialSection === 'quick-quote') setSection('quotes');
     else if (initialSection) setSection(initialSection as Section);
   }, [initialSection]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const quote = new URLSearchParams(window.location.search).get('quote');
+    if (quote) {
+      setInitialQuoteId(quote);
+      setSection('quotes');
+    }
+  }, []);
 
   useEffect(() => {
     fetch(API + '/quotes-v2?limit=100&business_unit=workroom').then(r => r.json()).then(data => {
@@ -110,6 +121,13 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
         );
       case 'quotes':
         return <QuotesSection key={navKey} quotes={quotes} initialQuoteId={initialQuoteId} onClearInitial={() => setInitialQuoteId(null)} startQuickQuote={openQuickQuote} />;
+      case 'intakes':
+        return (
+          <LuxeForgeIntakes
+            onOpenQuote={(id) => { setInitialQuoteId(id); setSection('quotes'); }}
+            onOpenCustomer={(id) => setSelectedCustomer(id)}
+          />
+        );
       case 'inventory':
         return <Suspense fallback={<Loading />}><InventorySection /></Suspense>;
       case 'jobs':
