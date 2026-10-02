@@ -739,6 +739,8 @@ _B1_TYPE_BY_STYLE_HINT = (
     ("inverted box",      "inverted_box_pleat"),
     ("goblet pleat",      "goblet_pleat"),
     ("butterfly pleat",   "butterfly_pleat"),
+    ("ripple fold",       "ripplefold"),
+    ("ripple-fold",       "ripplefold"),
     ("ripplefold",        "ripplefold"),
     ("rod-pocket",        "rod_pocket"),
     ("rod pocket",        "rod_pocket"),
@@ -1368,6 +1370,16 @@ def _compute_missing_template_keys(
     return list(missing)
 
 
+def enrich_b1_message_dims(message: str, b1_product_type: str | None, dims: dict) -> dict:
+    """Style-specific words that are not generic width/height aliases."""
+    if b1_product_type == "ripplefold":
+        from app.services.drawing.templates.ripplefold_spec import (
+            enrich_ripplefold_message,
+        )
+        return enrich_ripplefold_message(message, dims)
+    return dict(dims or {})
+
+
 def build_drawing_handoff(message: str, *, image_filename: str | None = None) -> DrawingHandoff:
     if not is_drawing_intent(message):
         # Even when the message is not a drawing intent, classify it for
@@ -1400,6 +1412,7 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
         dimensions, b1_product_type
     )
     translated_dims = _enrich_ul_banquette_dims(message, translated_dims)
+    translated_dims = enrich_b1_message_dims(message, b1_product_type, translated_dims)
     missing_template_keys = _compute_missing_template_keys(
         translated_dims, b1_product_type
     )

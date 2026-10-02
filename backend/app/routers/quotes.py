@@ -1688,6 +1688,13 @@ def _detect_hardware_color(hardware_name: str, explicit_color: str = "") -> tupl
 
 def _build_window_drawing(w: dict) -> str:
     """Generate an inline SVG dimensional drawing for a single window from its specs."""
+    treatment_token = str(w.get("treatmentType") or "")
+    treatment_token = treatment_token.lower().replace("_", "").replace("-", "").replace(" ", "")
+    if treatment_token == "ripplefold":
+        from app.services.drawing.templates.ripplefold_render import (
+            build_ripplefold_quote_svg,
+        )
+        return build_ripplefold_quote_svg(w)
     name = w.get("name", "Window")
     w_in = w.get("width", 48)
     h_in = w.get("height", 60)

@@ -3197,6 +3197,10 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
       dims         — dict of width/height/drop/thickness/etc. The
                      required keys depend on product_type and are
                      surfaced via validate_spec() (a missing-dim list).
+                     Ripplefold also takes string dims: carrier
+                     (92141), control (center / one-way), masters
+                     (butt / overlap), coverage_align, layer. Mount
+                     and ceiling are omitted when unknown.
 
     Optional params:
       client_name, site_address, material, date — title-block rows.
@@ -3310,15 +3314,25 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
 
     _NON_NUMERIC_DIM_KEYS = frozenset({
         "shape", "panel_style", "mount", "construction", "fabric_mode",
+        "control", "draw", "draw_direction", "masters", "master",
+        "carrier", "carrier_no", "carrier_number", "align",
+        "coverage_align", "track_align", "layer", "fabric_layer",
+        "mount_type", "fabric",
     })
+    cleaned_dims: dict = {}
+    for key, value in dims.items():
+        if value is None:
+            continue
+        name = str(key)
+        if name in _NON_NUMERIC_DIM_KEYS:
+            cleaned_dims[name] = str(value).strip()
+        else:
+            cleaned_dims[name] = float(value)
     spec = {
         "product_type": product_type,
         "family": catalog_family,
         "style": catalog_style,
-        "dims": {
-            str(k): float(v) for k, v in dims.items()
-            if v is not None and k not in _NON_NUMERIC_DIM_KEYS
-        },
+        "dims": cleaned_dims,
         "client_name":  params.get("client_name", ""),
         "site_address": params.get("site_address", ""),
         "material":     params.get("material", ""),

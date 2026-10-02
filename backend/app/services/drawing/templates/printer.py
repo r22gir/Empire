@@ -344,6 +344,14 @@ def render_spec_to_bytes(result: GeometryFamilyResult, spec: dict) -> bytes:
             render_drapery,
         )
         pdf_bytes = render_drapery(spec)
+        # Ripplefold is its own sheet (elevation + top view + spec).
+        # The pinch-pleat B2 gates measure a side section and a
+        # stacked pair, and would reject this drawing.
+        token = str(
+            spec.get("product_type") or result.product_type or ""
+        ).lower().replace("_", "").replace("-", "").replace(" ", "")
+        if token == "ripplefold":
+            return pdf_bytes
     else:
         # Non-vector families: keep the B1 textual preview so existing
         # tests + the live chat path keep producing a PDF for every

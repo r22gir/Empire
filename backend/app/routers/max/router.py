@@ -379,8 +379,17 @@ def _db_query_cap_reached(message: str | None, tool_results: list[Any] | None) -
     return count >= _DRAWING_DB_QUERY_CAP
 
 
+_TEXT_DRAWING_DIMS = frozenset({
+    "shape", "panel_style", "mount", "construction", "fabric_mode",
+    "control", "draw", "draw_direction", "masters", "master",
+    "carrier", "carrier_no", "carrier_number", "align",
+    "coverage_align", "track_align", "layer", "fabric_layer",
+    "mount_type", "fabric",
+})
+
+
 def _dims_for_render_shop(handoff) -> tuple[dict, str, str]:
-    numeric: dict[str, float] = {}
+    numeric: dict = {}
     shape = ""
     construction = ""
     for k, v in (getattr(handoff, "translated_dims", None) or {}).items():
@@ -391,6 +400,9 @@ def _dims_for_render_shop(handoff) -> tuple[dict, str, str]:
             continue
         if k in ("construction", "fabric_mode"):
             construction = str(v).strip()
+            continue
+        if k in _TEXT_DRAWING_DIMS:
+            numeric[k] = str(v).strip()
             continue
         try:
             numeric[k] = float(str(v).rstrip('"').rstrip("ft").strip())
@@ -2876,6 +2888,8 @@ async def _chat_with_max_service(
             b1 = continuation_ctx["b1_product_type"]
             dims = _extract_dimensions(request.message, item_type=b1)
             translated = _translate_dims_for_b1_product(dims, b1)
+            from app.services.max.drawing_intent import enrich_b1_message_dims
+            translated = enrich_b1_message_dims(request.message, b1, translated)
             still_missing = _compute_missing_template_keys(translated, b1)
             handoff = _SN(
                 is_drawing_intent=True,
@@ -3904,6 +3918,8 @@ async def chat_stream(request: ChatRequest):
             b1 = continuation_ctx["b1_product_type"]
             dims = _extract_dimensions(request.message, item_type=b1)
             translated = _translate_dims_for_b1_product(dims, b1)
+            from app.services.max.drawing_intent import enrich_b1_message_dims
+            translated = enrich_b1_message_dims(request.message, b1, translated)
             still_missing = _compute_missing_template_keys(translated, b1)
             handoff = _SN(
                 is_drawing_intent=True,
