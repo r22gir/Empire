@@ -11,6 +11,19 @@ import ViewPdfControl from '../ViewPdfControl';
 import ChatChartBlock from '../ChatChartBlock';
 import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../lib/chatContent';
 import FounderPinCard from '../chat/FounderPinCard';
+import { useTranslation } from '../../lib/i18n';
+import {
+  HOLD_ARM_MS,
+  HOLD_LONGER_HINT,
+  TRANSCRIBE_FAILED_HINT,
+  clipTooShort,
+  filenameForMime,
+  pointerDownAction,
+  recorderFormat,
+  shouldStopOnPointerUp,
+  sttLanguage,
+  transcriptIsFailure,
+} from '../../lib/voiceCapture';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -96,6 +109,30 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const voiceSessionRef = useRef<string>('');
   const voiceDestinationRef = useRef<'chat' | 'document'>('document');
   const voiceReleaseRef = useRef(false);
+  const recordingRef = useRef(false);
+  const touchMicRef = useRef(false);
+  const holdArmedRef = useRef(false);
+  const holdArmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordStartedAtRef = useRef(0);
+  const captureEpochRef = useRef(0);
+  const micPointerRef = useRef<number | null>(null);
+  const spaceCaptureRef = useRef(false);
+  const [micToast, setMicToast] = useState<string | null>(null);
+  const micToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { locale } = useTranslation();
+  const localeRef = useRef(locale);
+  useEffect(() => { localeRef.current = locale; }, [locale]);
+  useEffect(() => { recordingRef.current = recording; }, [recording]);
+  useEffect(() => {
+    const coarse = window.matchMedia('(pointer: coarse)').matches;
+    touchMicRef.current = coarse || navigator.maxTouchPoints > 0;
+  }, []);
+
+  const showMicToast = useCallback((message: string) => {
+    setMicToast(message);
+    if (micToastTimerRef.current) clearTimeout(micToastTimerRef.current);
+    micToastTimerRef.current = setTimeout(() => setMicToast(null), 3500);
+  }, []);
 
   useEffect(() => {
     msgsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -261,29 +298,87 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     }
   }, []);
 
-  // Start recording. Hold-to-talk uses destination "document".
+  const clearHoldArm = useCallback(() => {
+    if (holdArmTimerRef.current) {
+      clearTimeout(holdArmTimerRef.current);
+      holdArmTimerRef.current = null;
+    }
+  }, []);
+
+  const stopVoiceCapture = useCallback(() => {
+    clearHoldArm();
+    const live = mediaRecorderRef.current?.state === 'recording';
+    if (live) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    captureEpochRef.current += 1;
+    const elapsed = recordStartedAtRef.current ? Date.now() - recordStartedAtRef.current : 0;
+    if (!recordStartedAtRef.current || clipTooShort(elapsed)) {
+      showMicToast(HOLD_LONGER_HINT);
+    }
+    recordingRef.current = false;
+    setRecording(false);
+  }, [clearHoldArm, showMicToast]);
+
+  // Tap-to-start / tap-to-stop on touch. Hold-to-talk stays available
+  // once the press lasts past HOLD_ARM_MS, and for a mouse or spacebar.
   const startVoiceCapture = useCallback((destination: 'chat' | 'document' = 'document') => {
     if (mediaRecorderRef.current?.state === 'recording') return;
     voiceDestinationRef.current = destination;
-    voiceReleaseRef.current = false;
+    const epoch = captureEpochRef.current;
     navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      if (epoch !== captureEpochRef.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+      const format = recorderFormat(
+        navigator.userAgent,
+        (mime) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mime),
+      );
+      let recorder: MediaRecorder;
+      try {
+        recorder = new MediaRecorder(stream, { mimeType: format.mimeType });
+      } catch {
+        try {
+          recorder = new MediaRecorder(stream, { mimeType: 'audio/mp4' });
+        } catch {
+          recorder = new MediaRecorder(stream);
+        }
+      }
       const chunks: Blob[] = [];
-      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-        // Stop timer
         if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
         setRecordingTimer(0);
+        recordingRef.current = false;
+        setRecording(false);
 
-        setVoiceStatus('📤 Sending audio...');
-        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const elapsed = recordStartedAtRef.current ? Date.now() - recordStartedAtRef.current : 0;
+        const mimeType = recorder.mimeType || format.mimeType;
+        const blob = new Blob(chunks, { type: mimeType });
+        if (clipTooShort(elapsed) || blob.size < 256) {
+          showMicToast(HOLD_LONGER_HINT);
+          setVoiceStatus('');
+          return;
+        }
+
         const fd = new FormData();
-        fd.append('audio', blob, 'recording.webm');
+        fd.append('audio', blob, filenameForMime(mimeType));
+        const lang = sttLanguage(localeRef.current);
+        const url = lang
+          ? `${API}/voice/transcribe?language=${encodeURIComponent(lang)}`
+          : `${API}/voice/transcribe`;
         try {
           setVoiceStatus('🔄 Transcribing...');
-          const res = await fetch(`${API}/voice/transcribe`, { method: 'POST', body: fd });
-          const data = await res.json();
+          const res = await fetch(url, { method: 'POST', body: fd });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || transcriptIsFailure(data.text)) {
+            showMicToast(TRANSCRIBE_FAILED_HINT);
+            setVoiceStatus('');
+            return;
+          }
           if (data.text && voiceDestinationRef.current === 'document') {
             submitVoiceDocument(data.text);
           } else if (data.text && voiceModeRef.current) {
@@ -299,24 +394,35 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           }
         } catch (err) {
           console.warn('STT transcription failed:', err);
-          setVoiceStatus('❌ Transcription failed');
-          setTimeout(() => setVoiceStatus(''), 3000);
+          showMicToast(TRANSCRIBE_FAILED_HINT);
+          setVoiceStatus('');
         }
-        setRecording(false);
       };
-      recorder.start();
-      if (voiceReleaseRef.current) recorder.stop();
+      try {
+        recorder.start(250);
+      } catch {
+        recorder.start();
+      }
+      recordStartedAtRef.current = Date.now();
       mediaRecorderRef.current = recorder;
+      recordingRef.current = true;
       setRecording(true);
-      setVoiceStatus('🔴 Hold to talk... release to transcribe');
-      // Start timer
+      const touchTap = touchMicRef.current && !holdArmedRef.current;
+      if (voiceReleaseRef.current && !touchTap) {
+        recorder.stop();
+        return;
+      }
+      setVoiceStatus(touchMicRef.current && !holdArmedRef.current
+        ? '🔴 Tap to stop'
+        : '🔴 Release to transcribe');
       setRecordingTimer(0);
       recordingTimerRef.current = setInterval(() => setRecordingTimer(t => t + 1), 1000);
     }).catch(() => {
-      setVoiceStatus('❌ Microphone access denied');
-      setTimeout(() => setVoiceStatus(''), 3000);
+      recordingRef.current = false;
+      setRecording(false);
+      showMicToast('Microphone access denied');
     });
-  }, [onSend, submitVoiceDocument]);
+  }, [onSend, showMicToast, submitVoiceDocument]);
 
   // Register message complete callback for voice auto-play
   useEffect(() => {
@@ -343,19 +449,27 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !inputFocused && !e.repeat && document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
         e.preventDefault();
-        if (!recording) startVoiceCapture(voiceModeRef.current ? 'chat' : 'document');
+        if (!recordingRef.current && mediaRecorderRef.current?.state !== 'recording') {
+          spaceCaptureRef.current = true;
+          voiceReleaseRef.current = false;
+          holdArmedRef.current = true;
+          startVoiceCapture(voiceModeRef.current ? 'chat' : 'document');
+        }
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && recording && !inputFocused && document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
-        e.preventDefault();
-        mediaRecorderRef.current?.stop();
-      }
+      if (e.code !== 'Space' || !spaceCaptureRef.current) return;
+      if (document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'INPUT') return;
+      e.preventDefault();
+      spaceCaptureRef.current = false;
+      voiceReleaseRef.current = true;
+      if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+      else stopVoiceCapture();
     };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [recording, inputFocused, startVoiceCapture]);
+  }, [inputFocused, startVoiceCapture, stopVoiceCapture]);
 
   // Stop TTS when voice mode turned off
   const toggleVoiceMode = useCallback(() => {
@@ -1251,24 +1365,90 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             />
           </div>
 
-          {/* Mic button — primary, next to send */}
+          {micToast && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                position: 'absolute',
+                left: 12,
+                right: 12,
+                bottom: '100%',
+                marginBottom: 8,
+                padding: '10px 14px',
+                borderRadius: 12,
+                background: '#1a1a1a',
+                color: '#fff',
+                fontSize: 14,
+                fontWeight: 600,
+                textAlign: 'center',
+                zIndex: 5,
+                pointerEvents: 'none',
+              }}
+            >
+              {micToast}
+            </div>
+          )}
+
+          {/* Mic button — tap to start / tap to stop on touch. Hold is optional. */}
           <button
-            onPointerDown={(e) => {
-              e.preventDefault();
-              voiceReleaseRef.current = false;
-              try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-              if (!recording) startVoiceCapture('document');
-            }}
-            onPointerUp={() => {
-              voiceReleaseRef.current = true;
-              if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
-            }}
-            onPointerCancel={() => {
-              voiceReleaseRef.current = true;
-              if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
-            }}
             type="button"
-            title={recording ? 'Release to transcribe' : 'Hold to talk a quote or drawing'}
+            aria-label={recording ? 'Stop recording' : 'Start recording'}
+            onContextMenu={(e) => e.preventDefault()}
+            onPointerDown={(e) => {
+              if (e.pointerType === 'mouse' && e.button !== 0) return;
+              e.preventDefault();
+              const touch = e.pointerType === 'touch' || (e.pointerType !== 'mouse' && touchMicRef.current);
+              touchMicRef.current = touch || touchMicRef.current;
+              const action = pointerDownAction({
+                touchDevice: touch,
+                alreadyRecording: recordingRef.current || mediaRecorderRef.current?.state === 'recording',
+              });
+              if (action === 'stop') {
+                stopVoiceCapture();
+                return;
+              }
+              if (action === 'ignore') return;
+              micPointerRef.current = e.pointerId;
+              voiceReleaseRef.current = false;
+              holdArmedRef.current = !touch;
+              clearHoldArm();
+              if (touch) {
+                holdArmTimerRef.current = setTimeout(() => {
+                  // A tap already lifted. Do not arm hold-to-talk after the finger is up.
+                  if (voiceReleaseRef.current) return;
+                  holdArmedRef.current = true;
+                  setVoiceStatus('🔴 Release to transcribe');
+                }, HOLD_ARM_MS);
+              }
+              try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+              startVoiceCapture(voiceModeRef.current ? 'chat' : 'document');
+            }}
+            onPointerUp={(e) => {
+              if (micPointerRef.current === null || e.pointerId !== micPointerRef.current) return;
+              micPointerRef.current = null;
+              const touch = e.pointerType === 'touch' || (e.pointerType !== 'mouse' && touchMicRef.current);
+              voiceReleaseRef.current = true;
+              if (!shouldStopOnPointerUp({ touchDevice: touch, holdArmed: holdArmedRef.current })) {
+                clearHoldArm();
+                holdArmedRef.current = false;
+                return;
+              }
+              stopVoiceCapture();
+            }}
+            onPointerCancel={(e) => {
+              if (micPointerRef.current === null || e.pointerId !== micPointerRef.current) return;
+              micPointerRef.current = null;
+              const touch = e.pointerType === 'touch' || (e.pointerType !== 'mouse' && touchMicRef.current);
+              voiceReleaseRef.current = true;
+              if (!shouldStopOnPointerUp({ touchDevice: touch, holdArmed: holdArmedRef.current })) {
+                clearHoldArm();
+                holdArmedRef.current = false;
+                return;
+              }
+              stopVoiceCapture();
+            }}
+            title={recording ? (touchMicRef.current ? 'Tap to stop' : 'Release to transcribe') : 'Tap to talk'}
             style={{
               width: 44, height: 44, borderRadius: 12,
               background: recording ? '#ef4444' : 'var(--card-bg)',
@@ -1279,6 +1459,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               animation: recording ? 'pulse 1.5s infinite' : 'none',
               position: 'relative',
               touchAction: 'none',
+              WebkitTouchCallout: 'none',
+              WebkitUserSelect: 'none',
+              userSelect: 'none',
             }}
           >
             {recording ? <MicOff size={18} /> : <Mic size={18} />}
