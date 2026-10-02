@@ -1,8 +1,9 @@
 """Simli face renderer. Self-contained; feature/amp-edition copies this module as-is.
 
 The API key stays on the server. The browser receives a short-lived session
-token only. When SIMLI_API_KEY or the edition face id is unset, status says
-so and the UI keeps TalkingHead.
+token only. Each edition has a non-secret default face id. SIMLI_FACE_ID
+(and the per-edition SIMLI_FACE_ID_* names) override that default. When
+SIMLI_API_KEY is unset, status says so and the UI keeps TalkingHead.
 
 Public API (keep identical across editions):
     simli_status, create_session, record_usage, usage_card,
@@ -31,6 +32,13 @@ AUDIO_FORMAT = "pcm16"
 SAMPLE_RATE = 16000
 
 EDITIONS = ("workroom", "max_e", "maxine")
+
+# Non-secret face ids. Env overrides the edition it names; these are the fallback.
+DEFAULT_FACE_IDS = {
+    "workroom": "7e74d6e7-d559-4394-bd56-4923a3ab75ad",
+    "max_e": "dd10cb5a-d31d-4f12-b69f-6db3383c006e",
+    "maxine": "cace3ef7-a4c4-425d-a8cf-a5358eb0c427",
+}
 
 # GLB files are added later. Until a file exists, TalkingHead uses the
 # brunette sample shipped at /max-avatar.glb with body M.
@@ -66,7 +74,7 @@ def _public_dir() -> Path:
 
 def normalize_edition(edition: str | None) -> str:
     key = (edition or "workroom").strip().lower().replace("-", "_")
-    if key in {"maxe", "max_e"}:
+    if key in {"maxe", "max_e", "amp"}:
         return "max_e"
     if key in EDITIONS:
         return key
@@ -79,16 +87,14 @@ def face_env_name(edition: str | None) -> str:
 
 
 def _face_id(edition: str | None) -> tuple[str, str]:
-    """Return (face id, env name that supplied it). Empty id if unset."""
+    """Return (face id, source). Source is the env name, or "default"."""
     key = normalize_edition(edition)
-    if key == "workroom":
-        for name in ("SIMLI_FACE_ID_WORKROOM", "SIMLI_FACE_ID"):
-            value = (os.getenv(name) or "").strip()
-            if value:
-                return value, name
-        return "", "SIMLI_FACE_ID"
-    name = f"SIMLI_FACE_ID_{key.upper()}"
-    return (os.getenv(name) or "").strip(), name
+    names = ("SIMLI_FACE_ID_WORKROOM", "SIMLI_FACE_ID") if key == "workroom" else (f"SIMLI_FACE_ID_{key.upper()}",)
+    for name in names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value, name
+    return DEFAULT_FACE_IDS[key], "default"
 
 
 def _api_key() -> str:

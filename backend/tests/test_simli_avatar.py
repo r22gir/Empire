@@ -64,12 +64,12 @@ def test_unset_falls_back_without_http():
     assert status["status"] == "disabled"
     assert status["renderer"] == "talkinghead"
     assert status["fallback"] == "talkinghead"
-    assert "SIMLI_API_KEY" in status["missing"]
-    assert "SIMLI_FACE_ID" in status["missing"]
+    assert status["missing"] == ["SIMLI_API_KEY"]
     assert "TalkingHead" in status["reason"]
     assert status["max_session_length"] == 600
     assert status["max_idle_time"] == 60
-    assert status["face_id_set"] is False
+    assert status["face_id_set"] is True
+    assert status["face_env"] == "default"
     assert status["talkinghead_placeholder"]["license"] == "CC BY-NC 4.0"
     assert status["talkinghead_placeholder"]["body"] == "M"
     assert status["talkinghead_placeholder"]["commercial_use"] is False
@@ -148,6 +148,35 @@ def test_missing_token_falls_back(monkeypatch):
     assert result["renderer"] == "talkinghead"
     assert "session token" in result["reason"]
     _no_secret(result)
+
+
+def test_default_face_ids_when_env_unset(monkeypatch):
+    monkeypatch.setenv("SIMLI_API_KEY", FAKE_KEY)
+    seen = {}
+
+    def post(_url, body, _headers):
+        seen.setdefault("faces", []).append(body["faceId"])
+        return _Resp({"session_token": FAKE_TOKEN})
+
+    def get(_url, _headers):
+        return _Resp({})
+
+    for edition in ("workroom", "amp", "maxine"):
+        result = asyncio.run(simli.create_session(edition, http_post=post, http_get=get))
+        assert result["enabled"] is True
+        assert result["face_env"] == "default"
+        _no_secret(result)
+    assert seen["faces"] == [
+        simli.DEFAULT_FACE_IDS["workroom"],
+        simli.DEFAULT_FACE_IDS["max_e"],
+        simli.DEFAULT_FACE_IDS["maxine"],
+    ]
+    assert simli.normalize_edition("amp") == "max_e"
+    assert simli.DEFAULT_FACE_IDS == {
+        "workroom": "7e74d6e7-d559-4394-bd56-4923a3ab75ad",
+        "max_e": "dd10cb5a-d31d-4f12-b69f-6db3383c006e",
+        "maxine": "cace3ef7-a4c4-425d-a8cf-a5358eb0c427",
+    }
 
 
 def test_per_edition_face_env(monkeypatch):

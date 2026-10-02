@@ -7,11 +7,19 @@ Simli (simli.com) renders only the face. Max's brain does not move. TTS audio an
 | Variable | Role |
 | --- | --- |
 | `SIMLI_API_KEY` | Server only. Used to mint a session token. Never sent to the browser. |
-| `SIMLI_FACE_ID` | Workroom Max face. |
-| `SIMLI_FACE_ID_MAX_E` | Max-e face. |
-| `SIMLI_FACE_ID_MAXINE` | Maxine face. |
+| `SIMLI_FACE_ID` | Optional override for the workroom Max face. |
+| `SIMLI_FACE_ID_MAX_E` | Optional override for the amp / Max-e face. |
+| `SIMLI_FACE_ID_MAXINE` | Optional override for the Maxine face. |
 
-`SIMLI_FACE_ID_WORKROOM` is accepted as an alias for the workroom face. If the key or that edition's face id is unset, status is `disabled`, the renderer is `talkinghead`, and `missing` lists the names. Values are not included.
+Built-in face ids (not secrets; env wins when set):
+
+| Edition | Face |
+| --- | --- |
+| workroom / Max | `7e74d6e7-d559-4394-bd56-4923a3ab75ad` |
+| amp / Max-e (`max_e`) | `dd10cb5a-d31d-4f12-b69f-6db3383c006e` |
+| maxine / Maxine | `cace3ef7-a4c4-425d-a8cf-a5358eb0c427` |
+
+`SIMLI_FACE_ID_WORKROOM` is accepted as an alias for the workroom face. If the API key is unset, status is `disabled`, the renderer is `talkinghead`, and `missing` lists `SIMLI_API_KEY`. Face id values are not included in status.
 
 Session limits are fixed in the module: `maxSessionLength` 600 seconds, `maxIdleTime` 60 seconds.
 
