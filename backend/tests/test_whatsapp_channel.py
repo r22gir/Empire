@@ -47,6 +47,9 @@ class _GraphResponse:
 def _isolated(monkeypatch, tmp_path):
     for name in REQUIRED_ENV:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("WHATSAPP_REPLY_MODE", raising=False)
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.setattr(wa, "_state_path", lambda: tmp_path / "wa-state.json")
     monkeypatch.setenv("VOICE_DOC_SESSIONS_PATH", str(tmp_path / "voice-sessions.json"))
     monkeypatch.setenv("EMPIRE_BOX_MEMORY_DIR", str(tmp_path / "memory"))
@@ -104,6 +107,7 @@ def test_status_is_disabled_and_honest_when_unset():
     assert status["status"] == "disabled"
     assert status["missing"] == list(REQUIRED_ENV)
     assert status["drafts_require_explicit_confirm"] is True
+    assert status["reply_mode"] == "voice_text"
     assert status["autonomous_messaging_allowed"] is False
     blob = json.dumps(status)
     assert FAKE_TOKEN not in blob
@@ -299,8 +303,10 @@ def test_photo_builds_a_draft_quote_and_does_not_send(monkeypatch):
         _analyze,
     )
     import asyncio
+    monkeypatch.setattr(wa, "founder_documents", lambda pipeline: ([], ""))
     reply = asyncio.run(wa.default_photo_handler(b"\xff\xd8\xff", "image/jpeg", "living room", _founder()))
-    assert "Not sent" in reply
+    reply_text = reply["text"] if isinstance(reply, dict) else reply
+    assert "Not sent" in reply_text
     assert mail == []
     from app.db.database import get_db
     with get_db() as conn:
@@ -310,7 +316,7 @@ def test_photo_builds_a_draft_quote_and_does_not_send(monkeypatch):
     assert row[1] == "draft"
     assert "not sent" in (row[2] or "")
     assert "Rafael" not in (row[3] or "")
-    assert row[0] in reply
+    assert row[0] in reply_text
 
 
 def test_quote_text_stays_on_the_draft_and_send_it_does_not_send(monkeypatch):
@@ -329,13 +335,19 @@ def test_quote_text_stays_on_the_draft_and_send_it_does_not_send(monkeypatch):
         raise AssertionError("quote text must stay on the draft")
 
     monkeypatch.setattr(wa, "max_chat", _chat)
+    monkeypatch.setattr(wa, "founder_documents", lambda pipeline: ([], ""))
     import asyncio
+
+    def _shown(reply):
+        return reply["text"] if isinstance(reply, dict) else reply
+
     first = asyncio.run(wa.default_text_handler(
         "Quote for Maggie. Straight bench 48 inches long.",
         _founder(),
     ))
-    assert "Not sent" in first or "not emailed" in first.lower()
-    second = asyncio.run(wa.default_text_handler("send it", _founder()))
+    shown = _shown(first)
+    assert "Not sent" in shown or "not emailed" in shown.lower()
+    second = _shown(asyncio.run(wa.default_text_handler("send it", _founder())))
     assert mail == []
     assert "blocked" in second.lower() or "not emailed" in second.lower() or "not sent" in second.lower()
 
@@ -386,6 +398,192 @@ def test_outbound_window_and_explicit_confirm(monkeypatch):
     })
     assert blocked.status_code == 403
     assert "24 hour" in blocked.json()["detail"]
+
+
+def _long_reply() -> str:
+    lines = ["Draft EST-9. Not sent."]
+    lines.extend(f"Item {i}: ${i}.00" for i in range(1, 12))
+    lines.append("Total: $66.00")
+    return "\n".join(lines)
+
+
+def test_voice_text_sends_ogg_voice_note_and_summary(monkeypatch):
+    _enable(monkeypatch)
+    monkeypatch.setenv("WHATSAPP_REPLY_MODE", "voice_text")
+    founder = _founder()
+    note_customer_window(founder)
+    spoken = []
+    uploads = []
+    posts = []
+
+    async def _synth(text):
+        spoken.append(text)
+        return b"OggS" + b"\x00" * 80
+
+    def _upload(url, data, mime, filename, headers):
+        uploads.append({"mime": mime, "filename": filename, "data": data, "auth": headers.get("Authorization", "")[:7]})
+        assert FAKE_TOKEN not in json.dumps({"mime": mime, "filename": filename})
+        return {"id": f"media-{len(uploads)}"}
+
+    def _post(url, body, headers):
+        posts.append(body)
+        assert FAKE_TOKEN not in json.dumps(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    import asyncio
+    full = _long_reply()
+    result = asyncio.run(reply_in_window(
+        founder, full, http_post=_post, http_upload=_upload, synthesize=_synth,
+    ))
+    assert result["voice_sent"] is True
+    assert result["voice_fallback"] == ""
+    assert result["draft_sent"] is False
+    assert spoken == [full]
+    assert uploads[0]["mime"] == "audio/ogg"
+    assert uploads[0]["data"].startswith(b"OggS")
+    assert posts[0]["type"] == "audio"
+    assert posts[0]["audio"]["voice"] is True
+    assert posts[1]["type"] == "text"
+    summary = posts[1]["text"]["body"]
+    assert "Total: $66.00" in summary
+    assert "Not sent" in summary
+    assert len(summary) < len(full)
+    assert "Voice note unavailable" not in summary
+
+
+def test_tts_failure_falls_back_to_text_with_a_note(monkeypatch):
+    _enable(monkeypatch)
+    founder = _founder()
+    note_customer_window(founder)
+    uploads = []
+    posts = []
+
+    async def _synth(text):
+        return None
+
+    def _upload(url, data, mime, filename, headers):
+        uploads.append(mime)
+        return {"id": "should-not"}
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    import asyncio
+    full = _long_reply()
+    result = asyncio.run(reply_in_window(
+        founder, full, http_post=_post, http_upload=_upload, synthesize=_synth,
+    ))
+    assert result["voice_sent"] is False
+    assert result["voice_fallback"]
+    assert uploads == []
+    assert [row["type"] for row in posts] == ["text"]
+    body = posts[0]["text"]["body"]
+    assert body.startswith("Voice note unavailable")
+    assert "Text only." in body
+    assert "Total: $66.00" in body
+
+
+def test_text_mode_and_match_skip_voice_unless_the_note_was_voice(monkeypatch):
+    _enable(monkeypatch)
+    founder = _founder()
+    note_customer_window(founder)
+    posts = []
+
+    async def _synth(text):
+        raise AssertionError("text mode must not call TTS")
+
+    def _post(url, body, headers):
+        posts.append(body["type"])
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    import asyncio
+    monkeypatch.setenv("WHATSAPP_REPLY_MODE", "text")
+    text_only = asyncio.run(reply_in_window(
+        founder, "Draft ready. Not sent.", http_post=_post, synthesize=_synth,
+    ))
+    assert text_only["voice_sent"] is False
+    assert posts == ["text"]
+
+    monkeypatch.setenv("WHATSAPP_REPLY_MODE", "match")
+    asyncio.run(reply_in_window(
+        founder, "hello from chat", http_post=_post, synthesize=_synth, inbound_type="text",
+    ))
+    assert posts == ["text", "text"]
+
+    async def _voice_synth(text):
+        return b"OggSvoice"
+
+    def _upload(url, data, mime, filename, headers):
+        return {"id": "media-voice"}
+
+    asyncio.run(reply_in_window(
+        founder,
+        "heard you",
+        http_post=_post,
+        http_upload=_upload,
+        synthesize=_voice_synth,
+        inbound_type="audio",
+        inbound_voice=True,
+    ))
+    assert posts[-2:] == ["audio", "text"]
+
+
+def test_documents_upload_as_pdf(monkeypatch):
+    _enable(monkeypatch)
+    monkeypatch.setenv("WHATSAPP_REPLY_MODE", "text")
+    founder = _founder()
+    note_customer_window(founder)
+    uploads = []
+    posts = []
+
+    def _upload(url, data, mime, filename, headers):
+        uploads.append({"mime": mime, "filename": filename, "data": data})
+        return {"id": "media-pdf"}
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.doc"}]})
+
+    import asyncio
+    result = asyncio.run(reply_in_window(
+        founder,
+        "Draft EST-2. Not sent.",
+        http_post=_post,
+        http_upload=_upload,
+        documents=[{"filename": "EST-2.pdf", "data": b"%PDF-1.4 draft"}],
+    ))
+    assert result["draft_sent"] is False
+    assert uploads[0]["mime"] == "application/pdf"
+    assert uploads[0]["filename"] == "EST-2.pdf"
+    assert uploads[0]["data"].startswith(b"%PDF")
+    assert posts[1]["type"] == "document"
+    assert posts[1]["document"]["filename"] == "EST-2.pdf"
+    assert posts[1]["document"]["caption"] == "Draft. Not sent."
+
+
+def test_founder_documents_use_the_quote_pdf_service(monkeypatch):
+    def _pdf(quote_id):
+        assert quote_id == "q-1"
+        return b"%PDF-1.4 quote"
+
+    def _drawing(drawings, output_path):
+        Path(output_path).write_bytes(b"%PDF-1.4 drawing")
+        return output_path
+
+    monkeypatch.setattr("app.services.quote_pdf_service.generate_quote_pdf", _pdf)
+    monkeypatch.setattr("app.services.vision.bench_renderer.drawings_to_pdf", _drawing)
+    docs, note = wa.founder_documents({
+        "handled": True,
+        "quote_id": "q-1",
+        "quote_number": "EST-3",
+        "drawing": {"svg": "<svg></svg>"},
+    })
+    kinds = {row["kind"] for row in docs}
+    assert kinds == {"quote", "drawing"}
+    assert all(row["data"].startswith(b"%PDF") for row in docs)
+    assert note == ""
+    assert all(row["filename"].endswith(".pdf") for row in docs)
 
 
 def test_route_is_loaded_on_the_app():

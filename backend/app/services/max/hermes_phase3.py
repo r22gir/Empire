@@ -175,6 +175,7 @@ def _whatsapp_channel_view() -> dict[str, Any]:
         "allowlist": "founder_numbers_only",
         "missing": list(live.get("missing") or []),
         "reason": live.get("reason") or "WhatsApp is disabled.",
+        "reply_mode": live.get("reply_mode") or "voice_text",
     }
 
 

@@ -22,6 +22,7 @@ Why this design:
 """
 import os
 import logging
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -285,6 +286,34 @@ class TTSService:
         """Generate voice note for Telegram (mp3 — Telegram accepts it as voice)."""
         return await self.synthesize(text, output_format="mp3")
 
+    async def synthesize_for_whatsapp(self, text: str) -> Optional[Path]:
+        """Voice note for WhatsApp: existing TTS, then OGG/Opus.
+
+        WhatsApp voice messages accept audio/ogg with the Opus codec.
+        Returns None when synthesis or the encode step fails. Callers
+        send text instead and say so.
+        """
+        audio_path = await self.synthesize(text, output_format="mp3")
+        if audio_path is None:
+            return None
+        ogg_path = encode_ogg_opus(audio_path)
+        if ogg_path is None:
+            self.last_status = "failed"
+            self.last_error = "could not encode OGG/Opus"
+            try:
+                audio_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return None
+        if ogg_path != audio_path:
+            try:
+                audio_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        self.last_status = "ok"
+        self.last_error = ""
+        return ogg_path
+
     async def synthesize_for_web(self, text: str) -> Optional[bytes]:
         """Generate audio bytes for web playback (mp3 format)."""
         # Reuse synthesize() for the audio file, then read the bytes.
@@ -329,6 +358,39 @@ class TTSService:
                 },
             },
         }
+
+
+def encode_ogg_opus(source: Path) -> Optional[Path]:
+    """Transcode an audio file to OGG/Opus. None when ffmpeg cannot do it."""
+    src = Path(source)
+    if not src.is_file():
+        return None
+    try:
+        header = src.read_bytes()[:4]
+    except OSError:
+        return None
+    if src.suffix.lower() == ".ogg" and header == b"OggS":
+        return src
+    dest = src.with_suffix(".ogg")
+    if dest == src:
+        dest = src.with_name(src.stem + "-opus.ogg")
+    cmd = [
+        "ffmpeg", "-y", "-i", str(src),
+        "-c:a", "libopus", "-b:a", "32k", "-ar", "48000", "-ac", "1",
+        "-application", "voip", "-f", "ogg", str(dest),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0 or not dest.is_file():
+        return None
+    try:
+        if dest.read_bytes()[:4] != b"OggS" or dest.stat().st_size < 50:
+            return None
+    except OSError:
+        return None
+    return dest
 
 
 # Singleton

@@ -33,9 +33,23 @@ Only the founder numbers on file. Today that is the workroom phone in `backend/a
 - Other text goes to Max chat. Text that is a quote, a “done”, or a follow-up on an open WhatsApp draft stays on that draft instead of starting a second chat turn.
 - Saying “send it” records the request and does not email or WhatsApp the client document.
 
+## Reply style
+
+`WHATSAPP_REPLY_MODE` is per instance. Unset means `voice_text`.
+
+| Mode | What Rafael hears and reads |
+| --- | --- |
+| `voice_text` | A voice note plus a text summary of the same reply. This is the default. |
+| `text` | The reply as text only. |
+| `match` | Voice note plus summary when he sent a voice note. Text only when he sent text or a photo. |
+
+The voice note uses the existing TTS service, encoded as OGG/Opus, and is uploaded as WhatsApp audio with `voice: true`. The text message is a short summary (a short reply is left whole). If TTS or the OGG encode fails, Max sends the full text and starts it with “Voice note unavailable (TTS failed). Text only.”
+
+Quote and drawing PDFs go out as document messages on that same reply. They are drafts back to the founder. They are not emailed.
+
 ## Outbound
 
-- A session text reply is allowed only inside 24 hours of that founder’s last inbound message, and only to an allowlisted number. The webhook uses this for the acknowledgement back to Rafael.
+- A session reply is allowed only inside 24 hours of that founder’s last inbound message, and only to an allowlisted number. The webhook uses this for the acknowledgement back to Rafael.
 - Outside that window the only send is an already-approved template, and only through `POST /api/v1/whatsapp/send` with `confirmed: true` and `template_name`.
 - `confirmed: false` is refused. The inbound webhook never calls the send route and never calls the mailer.
 

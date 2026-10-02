@@ -12,7 +12,7 @@ stays disabled and status says so. This module never logs those values.
 Public API (keep identical across editions):
     channel_status, verify_signature, subscription_challenge, parse_inbound,
     founder_allowlist, is_allowlisted, note_customer_window,
-    customer_window_open, reply_in_window, send_template, process_webhook
+    customer_window_open, reply_mode, reply_in_window, send_template, process_webhook
 """
 from __future__ import annotations
 
@@ -43,6 +43,9 @@ REQUIRED_ENV = (
 GRAPH_VERSION = "v21.0"
 GRAPH_ROOT = f"https://graph.facebook.com/{GRAPH_VERSION}"
 WINDOW_HOURS = 24
+ENV_REPLY_MODE = "WHATSAPP_REPLY_MODE"
+REPLY_MODES = ("voice_text", "text", "match")
+VOICE_FALLBACK_NOTE = "Voice note unavailable (TTS failed). Text only."
 
 _lock = threading.Lock()
 
@@ -101,7 +104,49 @@ def channel_status() -> dict[str, Any]:
         "autonomous_messaging_allowed": False,
         "interface_point": "whatsapp_cloud_api",
         "graph_version": GRAPH_VERSION,
+        "reply_mode": reply_mode(),
     }
+
+
+def reply_mode() -> str:
+    """voice_text (default), text, or match. Anything else stays voice_text."""
+    raw = (os.getenv(ENV_REPLY_MODE) or "voice_text").strip().lower().replace("-", "_")
+    if raw in REPLY_MODES:
+        return raw
+    return "voice_text"
+
+
+def wants_voice(mode: str | None = None, *, inbound_type: str = "", inbound_voice: bool = False) -> bool:
+    chosen = mode or reply_mode()
+    if chosen == "text":
+        return False
+    if chosen == "match":
+        return inbound_voice or (inbound_type or "") == "audio"
+    return True
+
+
+def summarize_reply(text: str) -> str:
+    """Short text twin of a voice note. Short replies stay whole."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if len(raw) <= 400 and len(lines) <= 6:
+        return raw
+    picked: list[str] = []
+    for line in lines:
+        low = line.lower()
+        if not picked:
+            picked.append(line)
+            continue
+        if any(token in low for token in ("total", "not sent", "not emailed", "missing", "draft")):
+            picked.append(line)
+    if len(picked) == 1 and len(lines) > 1:
+        picked.append(lines[1])
+    summary = "\n".join(picked[:8])
+    if len(summary) > 500:
+        summary = summary[:497].rstrip() + "..."
+    return summary
 
 
 def _eq(left: str, right: str) -> bool:
@@ -354,15 +399,182 @@ async def _post_graph(body: dict, http_post: Optional[Callable[..., Any]] = None
     return payload if isinstance(payload, dict) else {"ok": True}
 
 
+def _media_url() -> str:
+    phone_id = _secret(ENV_PHONE_NUMBER_ID)
+    return f"{GRAPH_ROOT}/{phone_id}/media"
+
+
+async def upload_media(
+    data: bytes,
+    mime: str,
+    filename: str,
+    *,
+    http_upload: Optional[Callable[..., Any]] = None,
+) -> str:
+    """Upload one media file. Returns the Graph media id. Never logs the token."""
+    _require_enabled()
+    if not data:
+        raise WhatsAppSendBlocked("empty media")
+    url = _media_url()
+    headers = {"Authorization": f"Bearer {_secret(ENV_ACCESS_TOKEN)}"}
+    if http_upload is None:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                url,
+                headers=headers,
+                data={"messaging_product": "whatsapp"},
+                files={"file": (filename, data, mime)},
+            )
+        status = response.status_code
+        try:
+            payload = response.json()
+        except Exception:
+            payload = {}
+    else:
+        response = http_upload(url, data, mime, filename, headers)
+        if hasattr(response, "__await__"):
+            response = await response
+        status = getattr(response, "status_code", 200)
+        payload = response.json() if hasattr(response, "json") else (response or {})
+        if hasattr(payload, "__await__"):
+            payload = await payload
+    if status >= 400 or not isinstance(payload, dict) or not payload.get("id"):
+        logger.warning("WhatsApp media upload failed status=%s", status)
+        raise WhatsAppSendBlocked(f"WhatsApp media upload failed ({status})")
+    return str(payload["id"])
+
+
+def _pdf_filename(name: str) -> str:
+    base = Path(name or "document.pdf").name.replace(" ", "_")
+    if not base.lower().endswith(".pdf"):
+        base = f"{base}.pdf"
+    return base[:80] or "document.pdf"
+
+
+async def _voice_ogg(
+    text: str,
+    synthesize: Optional[Callable[..., Any]],
+) -> tuple[bytes, str]:
+    """Return OGG/Opus bytes, or empty bytes and a short reason."""
+    try:
+        if synthesize is None:
+            from app.services.max.tts_service import tts_service
+
+            path = await tts_service.synthesize_for_whatsapp(text)
+            if path is None:
+                reason = (tts_service.last_error or "TTS failed").split("\n")[0][:180]
+                return b"", reason or "TTS failed"
+            data = Path(path).read_bytes()
+            try:
+                Path(path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        else:
+            produced = synthesize(text)
+            if hasattr(produced, "__await__"):
+                produced = await produced
+            if isinstance(produced, Path):
+                data = produced.read_bytes()
+            else:
+                data = bytes(produced or b"")
+    except Exception:
+        logger.warning("WhatsApp TTS failed", exc_info=True)
+        return b"", "TTS failed"
+    if not data.startswith(b"OggS"):
+        return b"", "audio was not OGG/Opus"
+    return data, ""
+
+
+def founder_documents(pipeline: dict | None) -> tuple[list[dict[str, Any]], str]:
+    """Quote and drawing PDFs for the founder. Failures stay in the note."""
+    if not pipeline or not pipeline.get("handled"):
+        return [], ""
+    docs: list[dict[str, Any]] = []
+    notes: list[str] = []
+    quote_id = str(pipeline.get("quote_id") or "").strip()
+    if quote_id:
+        try:
+            from app.services.quote_pdf_service import generate_quote_pdf
+
+            data = generate_quote_pdf(quote_id)
+            if not data:
+                raise RuntimeError("empty pdf")
+            number = pipeline.get("quote_number") or "quote"
+            docs.append({
+                "filename": _pdf_filename(f"{number}.pdf"),
+                "data": data,
+                "mime": "application/pdf",
+                "kind": "quote",
+            })
+        except Exception:
+            logger.warning("WhatsApp quote PDF skipped", exc_info=True)
+            notes.append("Quote PDF was not attached.")
+    drawing = pipeline.get("drawing") or {}
+    if isinstance(drawing, dict):
+        pdf_path = str(drawing.get("pdf_path") or (drawing.get("persist") or {}).get("pdf_path") or "")
+        svg = drawing.get("svg") or ""
+        try:
+            if pdf_path and Path(pdf_path).is_file() and pdf_path.lower().endswith(".pdf"):
+                docs.append({
+                    "filename": _pdf_filename(Path(pdf_path).name),
+                    "data": Path(pdf_path).read_bytes(),
+                    "mime": "application/pdf",
+                    "kind": "drawing",
+                })
+            elif svg:
+                from app.services.vision.bench_renderer import drawings_to_pdf
+
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:
+                    dest = Path(handle.name)
+                drawings_to_pdf([{"svg": svg, "title": "Drawing"}], str(dest))
+                docs.append({
+                    "filename": "drawing.pdf",
+                    "data": dest.read_bytes(),
+                    "mime": "application/pdf",
+                    "kind": "drawing",
+                })
+                dest.unlink(missing_ok=True)
+        except Exception:
+            logger.warning("WhatsApp drawing PDF skipped", exc_info=True)
+            notes.append("Drawing PDF was not attached.")
+    return docs, " ".join(notes)
+
+
+def _split_reply(reply: Any) -> tuple[str, list]:
+    if isinstance(reply, dict):
+        return str(reply.get("text") or ""), list(reply.get("documents") or [])
+    return str(reply or ""), []
+
+
+def _outbound(text: str, pipeline: dict | None = None):
+    documents, note = founder_documents(pipeline)
+    body = (text or "").strip()
+    if note:
+        body = f"{body}\n{note}".strip()
+    if documents:
+        return {"text": body, "documents": documents}
+    return body
+
+
 async def reply_in_window(
     to: str,
     text: str,
     *,
     http_post: Optional[Callable[..., Any]] = None,
+    http_upload: Optional[Callable[..., Any]] = None,
+    inbound_type: str = "",
+    inbound_voice: bool = False,
+    documents: Optional[list[dict[str, Any]]] = None,
+    synthesize: Optional[Callable[..., Any]] = None,
 ) -> dict[str, Any]:
-    """Session reply to an allowlisted founder number inside the 24h window.
+    """Session reply inside the 24h window.
 
-    This is the channel acknowledgement, not delivery of a client draft.
+    voice_text sends an OGG/Opus voice note plus a text summary.
+    text sends the words only. match follows the inbound message.
+    A TTS failure sends the full text and says the voice note was skipped.
+    PDFs ride along as document messages. This does not email a client.
     """
     _require_enabled()
     if not is_allowlisted(to):
@@ -371,15 +583,86 @@ async def reply_in_window(
         raise WhatsAppSendBlocked(
             "outside the 24 hour window; an approved template and explicit confirm are required"
         )
-    body = {
+    mode = reply_mode()
+    number = normalize_msisdn(to)
+    original = (text or "").strip()
+    voice_sent = False
+    voice_fallback = ""
+    graph: dict[str, Any] = {}
+    if wants_voice(mode, inbound_type=inbound_type, inbound_voice=inbound_voice) and original:
+        audio, reason = await _voice_ogg(original, synthesize)
+        if audio:
+            try:
+                media_id = await upload_media(
+                    audio, "audio/ogg", "voice.ogg", http_upload=http_upload,
+                )
+                graph = await _post_graph({
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": number,
+                    "type": "audio",
+                    "audio": {"id": media_id, "voice": True},
+                }, http_post=http_post)
+                voice_sent = True
+            except WhatsAppSendBlocked:
+                voice_fallback = VOICE_FALLBACK_NOTE
+        else:
+            voice_fallback = VOICE_FALLBACK_NOTE
+            if reason and reason not in voice_fallback:
+                logger.info("WhatsApp voice fallback: %s", reason[:120])
+    if voice_sent:
+        shown = summarize_reply(original)
+    else:
+        shown = original
+        if voice_fallback:
+            shown = f"{voice_fallback}\n{shown}".strip()
+    text_graph = await _post_graph({
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
-        "to": normalize_msisdn(to),
+        "to": number,
         "type": "text",
-        "text": {"preview_url": False, "body": (text or "")[:4096]},
+        "text": {"preview_url": False, "body": shown[:4096]},
+    }, http_post=http_post)
+    if not graph:
+        graph = text_graph
+    attached: list[dict[str, str]] = []
+    for doc in documents or []:
+        if not isinstance(doc, dict):
+            continue
+        payload = doc.get("data") or b""
+        if isinstance(payload, str):
+            payload = payload.encode()
+        if not payload:
+            continue
+        filename = _pdf_filename(str(doc.get("filename") or "document.pdf"))
+        try:
+            media_id = await upload_media(
+                bytes(payload), "application/pdf", filename, http_upload=http_upload,
+            )
+            await _post_graph({
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": number,
+                "type": "document",
+                "document": {
+                    "id": media_id,
+                    "filename": filename,
+                    "caption": "Draft. Not sent.",
+                },
+            }, http_post=http_post)
+            attached.append({"filename": filename, "media_id": media_id})
+        except WhatsAppSendBlocked:
+            logger.warning("WhatsApp PDF attach failed for %s", filename)
+    return {
+        "sent": True,
+        "kind": "session",
+        "draft_sent": False,
+        "reply_mode": mode,
+        "voice_sent": voice_sent,
+        "voice_fallback": voice_fallback,
+        "documents": attached,
+        "graph": _public_graph(graph),
     }
-    result = await _post_graph(body, http_post=http_post)
-    return {"sent": True, "kind": "session", "draft_sent": False, "graph": _public_graph(result)}
 
 
 async def send_template(
@@ -512,7 +795,7 @@ async def default_text_handler(text: str, wa_id: str) -> str:
                 edition_id="workroom",
             )
             if result.get("handled"):
-                return result.get("reply_text") or "Draft updated. Not sent."
+                return _outbound(result.get("reply_text") or "Draft updated. Not sent.", result)
     except Exception:
         logger.warning("WhatsApp text document route failed", exc_info=True)
     try:
@@ -539,7 +822,7 @@ async def default_voice_handler(audio: bytes, mime: str, wa_id: str) -> str:
             edition_id="workroom",
         )
         if result.get("handled"):
-            return result.get("reply_text") or "Draft updated. Not sent."
+            return _outbound(result.get("reply_text") or "Draft updated. Not sent.", result)
         transcript = (result.get("transcript") or result.get("transcript_raw") or "").strip()
         if transcript:
             return await default_text_handler(transcript, wa_id)
@@ -595,7 +878,11 @@ async def default_photo_handler(image: bytes, mime: str, caption: str, wa_id: st
             except (TypeError, ValueError):
                 shown = ""
             parts.append(f"{line.get('description')}: {shown}".rstrip())
-        return "\n".join(parts)
+        return _outbound("\n".join(parts), {
+            "handled": True,
+            "quote_id": quote.get("id"),
+            "quote_number": number,
+        })
     except Exception:
         logger.warning("WhatsApp photo quote failed", exc_info=True)
         return "Photo analysis failed. Nothing sent."
@@ -610,6 +897,7 @@ async def process_webhook(
     photo_handler: Optional[Callable[[bytes, str, str, str], Awaitable[str]]] = None,
     http_get: Optional[Callable[..., Any]] = None,
     http_post: Optional[Callable[..., Any]] = None,
+    http_upload: Optional[Callable[..., Any]] = None,
 ) -> dict[str, Any]:
     """Verify, route, and reply inside the window. Does not send client drafts."""
     status = channel_status()
@@ -680,12 +968,25 @@ async def process_webhook(
         except Exception:
             logger.warning("WhatsApp inbound handler failed", exc_info=True)
             reply = "That message failed. Nothing sent."
+        reply_text, documents = _split_reply(reply)
         reply_sent = False
         reply_error = ""
-        if reply:
+        voice_sent = False
+        voice_fallback = ""
+        if reply_text or documents:
             try:
-                await reply_in_window(sender, reply, http_post=http_post)
+                delivered = await reply_in_window(
+                    sender,
+                    reply_text,
+                    http_post=http_post,
+                    http_upload=http_upload,
+                    inbound_type=message["type"],
+                    inbound_voice=bool(message.get("voice")),
+                    documents=documents,
+                )
                 reply_sent = True
+                voice_sent = bool(delivered.get("voice_sent"))
+                voice_fallback = delivered.get("voice_fallback") or ""
             except WhatsAppSendBlocked as exc:
                 reply_error = str(exc)
         results.append({
@@ -696,6 +997,8 @@ async def process_webhook(
             "sent": False,
             "reply_sent": reply_sent,
             "reply_error": reply_error,
+            "voice_sent": voice_sent,
+            "voice_fallback": voice_fallback,
         })
     return {
         "accepted": True,
