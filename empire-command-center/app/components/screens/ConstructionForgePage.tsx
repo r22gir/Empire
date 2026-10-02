@@ -13,6 +13,8 @@ import ViewPdfControl from '../ViewPdfControl';
 import UsageCard from '../UsageCard';
 import VoiceHelpCard from '../voice/VoiceHelpCard';
 import ReservationForm from '../voice/ReservationForm';
+import ArchivoCard from '../voice/ArchivoCard';
+import ProjectPhotos from '../voice/ProjectPhotos';
 import { useAssistantName } from '../../lib/assistant';
 import { useEdition } from '../../lib/edition';
 
@@ -232,6 +234,7 @@ function DashboardSection() {
       {maxine ? (
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-start' }}>
           <VoiceHelpCard />
+          <ArchivoCard />
         </div>
       ) : null}
       {maxine ? <ReservationForm /> : null}
@@ -470,11 +473,14 @@ function PaymentsSection() {
 
 function ProgressSection() {
   const { locale } = useTranslation('construction');
+  const maxine = useEdition() === 'maxine';
   return (
     <div>
       <SectionHeader title={locale === 'es' ? 'Avance de Obra' : 'Construction Progress'}
         subtitle={locale === 'es' ? 'Seguimiento por lote y etapa de construcción' : 'Track by lot and construction phase'} />
-      <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>{locale === 'es' ? 'Selecciona un proyecto para ver el avance.' : 'Select a project to see progress.'}</div>
+      {maxine ? <ProjectPhotos /> : (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>{locale === 'es' ? 'Selecciona un proyecto para ver el avance.' : 'Select a project to see progress.'}</div>
+      )}
     </div>
   );
 }

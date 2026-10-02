@@ -7,14 +7,18 @@ from pydantic import BaseModel
 from app.services.instance_files import (
     FileArchiveError,
     connection_status,
+    exchange_auth_code,
+    fetch_picked_items,
     import_picked,
     nightly_export,
     oauth_finish,
     oauth_start,
+    open_picker,
     photo_timeline,
     picker_session,
     remember_user,
     save_photo,
+    stored_redirect_uri,
 )
 
 router = APIRouter(tags=["instance-files"])
@@ -62,8 +66,8 @@ def drive_connect(body: ConnectBody):
 
 @router.post("/files/drive/finish")
 def drive_finish(body: FinishBody):
-    def _exchange(_code: str) -> dict:
-        raise FileArchiveError("El canje del código con Google no está configurado en este proceso")
+    def _exchange(code: str) -> dict:
+        return exchange_auth_code(code, stored_redirect_uri(body.user_id))
 
     try:
         return oauth_finish(body.user_id, body.code, body.state, _exchange)
@@ -98,19 +102,16 @@ def photos_timeline(project: str):
 
 @router.post("/photos/picker/session")
 def photos_picker(body: PickerBody):
-    def _opener(_url: str, _token: str) -> dict:
-        raise FileArchiveError("El selector de Google Photos no está llamado en este proceso")
-
     try:
-        return picker_session(body.user_id, _opener)
+        return picker_session(body.user_id, open_picker)
     except FileArchiveError as exc:
         _fail(exc)
 
 
 @router.post("/photos/picker/import")
 def photos_import(body: ImportBody):
-    def _fetch(session_id: str, _token: str):
-        raise FileArchiveError("Sin elementos elegidos en el selector")
+    def _fetch(session_id: str, token: str):
+        return fetch_picked_items(session_id, token)
 
     try:
         items = import_picked(

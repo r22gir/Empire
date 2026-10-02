@@ -1,6 +1,7 @@
 """Max-e has two businesses. Cibernettic documents stay drafts. Drive is per user."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -122,10 +123,17 @@ def test_drive_is_per_user_and_photos_are_picked_only(monkeypatch, tmp_path):
     assert str(tmp_path) in str(token)
     assert "gmail" not in str(token).lower()
     files.remember_user("juan@example.com")
+    (tmp_path / "construction.db").write_bytes(b"sqlite")
+
+    def _offline(*_args, **_kwargs):
+        raise files.FileArchiveError("No hay red hacia Google para este usuario")
+
+    monkeypatch.setattr(files, "google_request", _offline)
     exported = files.nightly_export()
     assert exported["uses_shared_founder_account"] is False
     assert Path(exported["working_copy"]).is_dir()
     assert exported["uploads"][0]["uploaded"] is False
+    assert exported["uploads"][0]["drive_path"].startswith("Max-e/")
 
     files.save_photo(data=b"a", filename="cimentacion.jpg", project="Portal", lot="12", stage="cimentacion", source="upload")
     files.save_photo(data=b"b", filename="techo.jpg", project="Portal", lot="12", stage="techo", source="chat")
@@ -148,3 +156,102 @@ def test_drive_is_per_user_and_photos_are_picked_only(monkeypatch, tmp_path):
     assert saved[0]["source"] == "google_photos_picker"
     refused = files.picker_session("nadie@example.com", lambda *_: {"id": "x"})
     assert refused["ok"] is False
+
+
+def _connect_user(files, user_id: str):
+    started = files.oauth_start(user_id, "https://example.test/archivo")
+    files.oauth_finish(
+        user_id,
+        "code",
+        started["state"],
+        lambda _code: {"access_token": "user-token", "refresh_token": "user-refresh"},
+    )
+    files.remember_user(user_id)
+
+
+def test_both_editions_upload_to_their_own_drive_folder(monkeypatch, tmp_path):
+    from app.services import instance_files as files
+    from app.services.voice_doc.pipeline import ingest_transcript
+
+    calls = []
+
+    def _fake(method, url, token="", body=None, headers=None):
+        calls.append({"method": method, "url": url, "token": token, "body": body or b""})
+        assert "gmail" not in url.lower()
+        assert token in {"", "user-token"}
+        if "oauth2.googleapis.com/token" in url:
+            return 200, b'{"access_token":"user-token","refresh_token":"user-refresh"}'
+        if "uploadType=multipart" in url:
+            return 200, b'{"id":"file-1","name":"construction.db"}'
+        if method == "GET" and "drive/v3/files" in url:
+            return 200, b'{"files":[]}'
+        if method == "POST" and url.endswith("/drive/v3/files"):
+            return 200, b'{"id":"fld-1"}'
+        if "photospicker.googleapis.com/v1/mediaItems" in url:
+            assert "sessionId=sess-1" in url
+            assert "albums" not in url
+            return 200, json.dumps({
+                "mediaItems": [{
+                    "id": "picked",
+                    "mediaFile": {"baseUrl": "https://photos.example/picked", "filename": "obra.jpg"},
+                }],
+            }).encode()
+        if url == "https://photos.example/picked":
+            return 200, b"jpeg"
+        if url == files.PICKER_SESSION_URL:
+            return 200, b'{"id":"sess-1","pickerUri":"https://photos.google.com/picker/sess-1"}'
+        raise AssertionError(url)
+
+    for edition, folder in (("amp", "Max-e"), ("maxine", "Maxine")):
+        root = tmp_path / edition
+        root.mkdir()
+        monkeypatch.setenv("EMPIRE_EDITION", edition)
+        monkeypatch.setenv("EMPIRE_DATA_DIR", str(root))
+        monkeypatch.setenv("CONSTRUCTION_DB", str(root / "construction.db"))
+        monkeypatch.setenv("VOICE_DRAFTS_DB", str(root / "voice_drafts.db"))
+        monkeypatch.setenv("PHOTOS_DB", str(root / "photos.db"))
+        monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client")
+        monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "secret")
+        monkeypatch.setattr(files, "google_request", _fake)
+        calls.clear()
+        assert files.drive_path(business="obra", project="Portal", client="Camilo").startswith(f"{folder}/obra/Portal/Camilo/")
+        _connect_user(files, "owner@example.com")
+        (root / "construction.db").write_bytes(b"sqlite")
+        exported = files.nightly_export()
+        assert exported["uploads"][0]["uploaded"] is True
+        assert exported["uploads"][0]["drive_path"].startswith(f"{folder}/")
+        assert exported["uses_shared_founder_account"] is False
+        bodies = b"".join(call["body"] if isinstance(call["body"], bytes) else b"" for call in calls)
+        assert folder.encode() in bodies
+        assert b"client_secret" not in bodies
+        opened = files.picker_session("owner@example.com", files.open_picker)
+        assert opened["ok"] is True
+        assert opened["picked_only"] is True
+        picked = files.import_picked(
+            user_id="owner@example.com",
+            session_id="sess-1",
+            project="Portal",
+            lot="12",
+            stage="cimentacion",
+            fetch_items=files.fetch_picked_items,
+        )
+        assert len(picked) == 1
+        assert picked[0]["source"] == "google_photos_picker"
+        urls = [call["url"] for call in calls]
+        assert any(call.startswith(files.PICKER_ITEMS_URL) for call in urls)
+        assert not any("library" in call for call in urls)
+
+    exchanged = files.exchange_auth_code("auth-code", "https://example.test/archivo")
+    assert exchanged["access_token"] == "user-token"
+    token_call = calls[-1]
+    assert token_call["url"] == "https://oauth2.googleapis.com/token"
+    assert b"client_secret" in token_call["body"]
+    assert token_call["token"] == ""
+
+    monkeypatch.setenv("EMPIRE_EDITION", "maxine")
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path / "maxine"))
+    note = ingest_transcript("Notas de la visita de hoy. listo", channel="web", edition="maxine")
+    assert note["draft"]["sent"] is False
+    copies = list((tmp_path / "maxine" / "working").rglob("*.pdf"))
+    assert copies
+    assert any("Maxine" in str(path) for path in copies)
