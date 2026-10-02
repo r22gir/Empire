@@ -5610,6 +5610,7 @@ Then after seeing results, use the quote_id:
 - **env_set** — Add or update an env variable in .env. `{{"tool": "env_set", "name": "MY_KEY", "value": "my_value"}}`
 - **db_query** — Run a read-only SQLite query on empire.db (SELECT only).
   `{{"tool": "db_query", "query": "SELECT COUNT(*) as cnt FROM customers"}}`
+  Revenue schema: payments_v2 columns are amount, payment_date, created_at, payment_type, status, invoice_id, stripe_session_id, payment_method. Legacy payments columns are amount, payment_date, created_at, method, invoice_id, reference, notes — there is NO status column and NO paid_at column. Stripe deposits are on invoices: amount_paid, total, status, payment_status, paid_at, stripe_checkout_session_id. Never select status from legacy payments.
 - **git_ops** — Git operations. `{{"tool": "git_ops", "command": "status|diff|add|commit|push|log", "args": "optional args"}}`
 - **service_manager** — Manage Empire services. `{{"tool": "service_manager", "command": "status|restart|logs|start|stop", "service": "backend|cc|openclaw|ollama|recoveryforge|relistapp|all"}}`
 - **package_manager** — Install packages or build. `{{"tool": "package_manager", "command": "pip_install|npm_install|npm_build|pip_list|npm_list", "package": "...", "project_dir": "..."}}`
@@ -6081,7 +6082,29 @@ def _db_query(params: dict, desk: Optional[str] = None) -> ToolResult:
         # string check. The keyword scan above is now belt-and-braces.
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
         conn.row_factory = sqlite3.Row
-        cursor = conn.execute(query)
+        try:
+            cursor = conn.execute(query)
+        except sqlite3.OperationalError as exc:
+            from app.services.max.presentation_stage import (
+                REVENUE_SCHEMA_HINT,
+                sql_retry_without_missing_column,
+            )
+            retried = sql_retry_without_missing_column(query, str(exc))
+            if not retried:
+                conn.close()
+                return ToolResult(
+                    tool="db_query", success=False,
+                    error=f"{exc}. {REVENUE_SCHEMA_HINT}",
+                )
+            try:
+                cursor = conn.execute(retried)
+            except sqlite3.OperationalError as retry_exc:
+                conn.close()
+                return ToolResult(
+                    tool="db_query", success=False,
+                    error=f"{retry_exc}. {REVENUE_SCHEMA_HINT}",
+                )
+            query = retried
         rows = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
         data = [dict(r) for r in rows[:100]]  # Cap at 100 rows
