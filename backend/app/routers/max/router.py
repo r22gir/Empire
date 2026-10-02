@@ -776,6 +776,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     channel: Optional[str] = None  # "telegram", "web", etc.
     chat_id: Optional[str] = None  # Telegram chat ID for founder detection
+    presentation: bool = False  # Presentation Mode: short speech, detail on the stage
 
 
 class RoutingStateUpdateRequest(BaseModel):
@@ -2983,6 +2984,9 @@ async def _chat_with_max_service(
         # Append channel-specific directives
         if request.channel == "telegram" and enriched_prompt:
             enriched_prompt += TELEGRAM_DIRECTIVE
+        if getattr(request, "presentation", False) and enriched_prompt:
+            from app.services.max.presentation_stage import PRESENTATION_DIRECTIVE
+            enriched_prompt += PRESENTATION_DIRECTIVE
         _freshness = freshness_directive(request.message)
         if _freshness:
             enriched_prompt = (enriched_prompt or "") + "\n\n" + _freshness

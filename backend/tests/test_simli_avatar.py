@@ -243,7 +243,7 @@ def test_router_status_session_and_usage(monkeypatch):
     monkeypatch.setattr(tracker.token_tracker, "log_usage", lambda **_k: None)
     app = FastAPI()
     app.include_router(simli_router.router, prefix="/api/v1")
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 9))
 
     status = client.get("/api/v1/avatar/simli/status", params={"edition": "workroom"})
     assert status.status_code == 200

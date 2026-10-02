@@ -71,6 +71,7 @@ VOICE_READ_ONLY_TOOLS = (
     "get_tasks", "get_desk_status", "get_services_health", "get_system_stats",
     "check_email", "list_job_images", "search_conversations", "get_weather",
     "list_quotes_awaiting_review", "show_quote_for_review",
+    "get_revenue_chart",
 )
 QUEUE_TOOL = "queue_for_founder_approval"
 VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL,))
@@ -243,6 +244,10 @@ _FALLBACK_TOOL_SCHEMAS = {
     "get_weather": {
         "description": "Current weather (Open-Meteo). Default city Washington DC. Read-only.",
         "parameters": _obj({"city": {"type": "string", "description": "City (default Washington DC)"}}),
+    },
+    "get_revenue_chart": {
+        "description": "Read-only revenue totals by month from recorded payments. Use for 'last month's revenue' or 'this week's numbers'. Returns a chart. Never invents amounts. Does not send anything.",
+        "parameters": _obj({}),
     },
     "list_quotes_awaiting_review": {
         "description": "Quotes waiting for Rafael's review/approval (founder_review, plus legacy proposal quotes). Test quotes are hidden. Read-only — you cannot approve or reject from voice.",
@@ -422,6 +427,9 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
     if name == QUEUE_TOOL:
         return queue_for_founder_approval(call.get("action", ""), call.get("details", ""),
                                           call_id=call_id, conversation_id=conversation_id)
+    if name == "get_revenue_chart":
+        from app.services.max.presentation_stage import revenue_tool_result
+        return revenue_tool_result()
     from app.services.max.tool_executor import TOOL_REGISTRY, execute_tool
     if name not in TOOL_REGISTRY:
         return {"success": False, "error": f"Tool '{name}' is not registered."}
@@ -535,6 +543,7 @@ class LiveCall:
         self.instructions_meta: dict[str, Any] = {}
         self._assistant_partial: dict[str, list[str]] = {}
         self._assistant_final: set[str] = set()
+        self.last_user_text = ""
         self.transcript = None
         try:
             from app.services.max.voice_transcript import VoiceTranscript
@@ -692,6 +701,7 @@ class LiveCall:
             await self.send_client_json({"type": "speech_stopped"})
             return
         if etype == "conversation.item.input_audio_transcription.completed":
+            self.last_user_text = str(event.get("transcript") or "")
             self._record("add_user", event.get("transcript", ""), event.get("item_id"))
             await self.send_client_json({"type": "transcript", "role": "user",
                                          "text": event.get("transcript", ""), "final": True,
@@ -793,7 +803,12 @@ class LiveCall:
         logger.info("voice_live[%s]: tool %s ok=%s in %dms", self.call_id, name, ok,
                     int((time.monotonic() - started) * 1000))
         self._record("add_tool", name, args, ok, _tool_note(name, data))
-        await self.send_client_json({"type": "tool", "name": name, "status": "done", "ok": ok})
+        from app.services.max.presentation_stage import stage_event
+        stage = stage_event(name, data if isinstance(data, dict) else {}, self.last_user_text)
+        await self.send_client_json({
+            "type": "tool", "name": name, "status": "done", "ok": ok,
+            "artifacts": stage["artifacts"], "slides": stage["slides"],
+        })
         return call_id, _tool_output_text(data)
 
     async def heartbeat(self) -> None:
@@ -987,13 +1002,29 @@ def verify_access_jwt(token: str) -> tuple[bool, str, str]:
         return False, f"invalid access token ({type(exc).__name__})", ""
 
 
-def authorize_websocket(ws) -> tuple[bool, str, str]:
-    """Same trust model as the Command Center: Cloudflare Access at the edge.
+def tailscale_allowed_logins() -> set[str]:
+    """Comma-separated TAILSCALE_ALLOWED_LOGINS. Empty means nobody."""
+    raw = os.getenv("TAILSCALE_ALLOWED_LOGINS") or ""
+    return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
-    * Via the tunnel (proxy headers present): require a valid Access JWT
-      (Cf-Access-Jwt-Assertion header or CF_Authorization cookie).
-    * Direct local connection (loopback peer, no proxy headers): allowed —
-      that is the Command Center on this box and the local test harness.
+
+def _peer_host(ws) -> str:
+    client = getattr(ws, "client", None)
+    return str(getattr(client, "host", "") or "")
+
+
+def authorize_websocket(ws) -> tuple[bool, str, str]:
+    """Who may open Live Voice and the other Presentation Mode avatar routes.
+
+    * Cloudflare Access JWT (header or CF_Authorization cookie) is checked
+      first, including on loopback. That path is unchanged.
+    * Direct local connection (loopback peer, no proxy headers, no Tailscale
+      identity header): allowed. That is the Command Center on this box.
+    * `tailscale serve` on this machine: the TCP peer is 127.0.0.1 or ::1 and
+      the proxy sets Tailscale-User-Login. Accept only when that login is in
+      TAILSCALE_ALLOWED_LOGINS. An empty allowlist denies. The same header
+      from any other peer is ignored and the request is denied, because a
+      remote client can spoof it.
     """
     headers = ws.headers
     host = (headers.get("host") or "").split(":")[0].lower()
@@ -1002,8 +1033,18 @@ def authorize_websocket(ws) -> tuple[bool, str, str]:
     token = headers.get("cf-access-jwt-assertion") or ws.cookies.get("CF_Authorization")
     if token:
         return verify_access_jwt(token)
+    peer = _peer_host(ws)
+    login = (headers.get("tailscale-user-login") or "").strip()
+    if login:
+        # Identity header present: decide here. Do not fall through to the
+        # open loopback allowance, and do not trust the header off-box.
+        if peer not in ("127.0.0.1", "::1"):
+            return False, "tailscale header from non-loopback", ""
+        allowed = tailscale_allowed_logins()
+        if login.lower() not in allowed:
+            return False, "tailscale login not allowed", ""
+        return True, "tailscale", login
     proxied = any(headers.get(h) for h in _PROXY_HEADERS)
-    peer = getattr(ws.client, "host", "") if ws.client else ""
     if not proxied and peer in ("127.0.0.1", "::1", "localhost"):
         return True, "loopback", ""
     return False, "Cloudflare Access token required", ""

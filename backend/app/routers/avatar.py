@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File as FileParam, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File as FileParam, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 logger = logging.getLogger("max.avatar")
@@ -51,6 +51,10 @@ class ChatResponse(BaseModel):
     emotion: str = "neutral"
     desk: str = "general"
     model_used: str = "none"
+    spoken: Optional[str] = None
+    tool_results: Optional[list] = None
+    artifacts: Optional[list] = None
+    slides: Optional[list] = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -84,10 +88,21 @@ EMOTION_MAP = {
 }
 
 
+def _require_avatar_access(request: Request) -> None:
+    """Same gate as /avatar/live. Presentation HTTP uses it too."""
+    from app.services.max.voice_live import authorize_websocket
+
+    ok, via, _user = authorize_websocket(request)
+    if not ok:
+        logger.warning("avatar access rejected (%s)", via)
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
 # ── Endpoints ────────────────────────────────────────────────────────
 
 @router.post("/speak", response_model=SpeakResponse)
-async def avatar_speak(req: SpeakRequest):
+async def avatar_speak(req: SpeakRequest, request: Request):
+    _require_avatar_access(request)
     """Generate speech for avatar. Only 'full' mode calls TTS (costs money)."""
     from app.services.max.token_tracker import token_tracker
 
@@ -126,51 +141,74 @@ async def avatar_speak(req: SpeakRequest):
     )
 
 
+async def _max_chat(message: str, *, presentation: bool = False):
+    """Same tool, memory, and model path as Command Center /max/chat.
+
+    canonical_channel stays web_cc and canonical_founder stays True so
+    presentation is the founder talking to Max, not a second brain.
+    """
+    from app.routers.max.router import ChatRequest as MaxChatRequest
+    from app.routers.max.router import _chat_with_max_service
+
+    request = MaxChatRequest(message=message, channel="web_cc", presentation=presentation)
+    return await _chat_with_max_service(
+        request,
+        canonical_channel="web_cc",
+        canonical_chat_id=None,
+        canonical_founder=True,
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
-async def avatar_chat(req: ChatRequest):
-    """Chat with MAX via avatar. Routes through AI router with cost tracking."""
-    from app.services.max.ai_router import ai_router, AIMessage
+async def avatar_chat(req: ChatRequest, request: Request):
+    """Chat with MAX via avatar. Same tools as /max/chat; the stage gets the detail."""
+    _require_avatar_access(request)
+    from app.services.max.presentation_stage import package_turn
     from app.services.max.token_tracker import token_tracker
 
-    messages = [AIMessage(role="user", content=req.message)]
-    ai_resp = await ai_router.chat(messages)
-
-    response_text = ai_resp.content
-    model_used = ai_resp.model_used
+    max_resp = await _max_chat(req.message, presentation=True)
+    response_text = max_resp.response or ""
+    model_used = max_resp.model_used or "none"
+    packed = package_turn(req.message, response_text, max_resp.tool_results or [])
+    spoken = packed["spoken"] or "It's on screen."
 
     audio_b64 = None
     timestamps = None
 
-    # Only generate TTS in full mode with voice=True
-    if req.voice and _is_voiced(req.mode):
+    # Only generate TTS in full mode with voice=True. Speak the short line.
+    if req.voice and _is_voiced(req.mode) and spoken:
         from app.services.max.tts_service import tts_service
-        audio_bytes = await tts_service.synthesize_for_web(response_text[:500])
+        audio_bytes = await tts_service.synthesize_for_web(spoken[:500])
         if audio_bytes:
             audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-            timestamps = _estimate_word_timestamps(response_text[:500], audio_bytes)
+            timestamps = _estimate_word_timestamps(spoken[:500], audio_bytes)
 
-    # Log avatar interaction
     sub_channel = "tts" if audio_b64 else "text"
     token_tracker.log_usage(
         model=f"avatar-{sub_channel}", provider="local" if sub_channel == "text" else "cloud",
-        input_tokens=len(req.message) // 4, output_tokens=len(response_text) // 4,
+        input_tokens=len(req.message) // 4, output_tokens=len(spoken) // 4,
         endpoint="avatar/chat", feature="avatar",
         business="general", source="avatar_router",
     )
 
     return ChatResponse(
         response=response_text,
+        spoken=spoken,
         audio=audio_b64,
         timestamps=timestamps,
         emotion="neutral",
         desk="general",
         model_used=model_used,
+        tool_results=packed["tool_results"],
+        artifacts=packed["artifacts"],
+        slides=packed["slides"],
     )
 
 
 @router.post("/listen")
-async def avatar_listen(file: UploadFile = FileParam(...), mode: str = "text"):
+async def avatar_listen(request: Request, file: UploadFile = FileParam(...), mode: str = "text"):
     """Transcribe audio and forward to avatar chat."""
+    _require_avatar_access(request)
     from app.services.max.stt_service import stt_service
     from pathlib import Path as _Path
 
@@ -194,18 +232,23 @@ async def avatar_listen(file: UploadFile = FileParam(...), mode: str = "text"):
         return {
             "transcript": transcript,
             "response": chat_resp.response,
+            "spoken": chat_resp.spoken,
             "audio": chat_resp.audio,
             "timestamps": chat_resp.timestamps,
             "emotion": chat_resp.emotion,
             "model_used": chat_resp.model_used,
+            "tool_results": chat_resp.tool_results,
+            "artifacts": chat_resp.artifacts,
+            "slides": chat_resp.slides,
         }
     finally:
         tmp_path.unlink(missing_ok=True)
 
 
 @router.get("/status")
-async def avatar_status():
+async def avatar_status(request: Request):
     """Return avatar system status."""
+    _require_avatar_access(request)
     from app.services.max.tts_service import tts_service
     from app.services.max.stt_service import stt_service
 
@@ -245,7 +288,9 @@ async def avatar_live(websocket: WebSocket):
     """Live back-and-forth voice with MAX (xAI Grok realtime), /api/v1/avatar/live.
 
     Auth mirrors the Command Center: Cloudflare Access JWT when proxied through
-    the tunnel, loopback otherwise. The xAI key never leaves the server.
+    the tunnel, loopback otherwise, and tailscale serve when the peer is
+    loopback and Tailscale-User-Login is on TAILSCALE_ALLOWED_LOGINS.
+    The xAI key never leaves the server.
     """
     from app.services.max.voice_live import authorize_websocket, handle_live_call
 

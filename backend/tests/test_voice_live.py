@@ -50,6 +50,70 @@ def test_loopback_allowed_proxied_denied_public_host_denied():
     assert vl.authorize_websocket(_WS(peer="10.0.0.5"))[0] is False
 
 
+def test_tailscale_serve_allowlist(monkeypatch):
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "founder@example.com, second@example.com")
+    ok, via, user = vl.authorize_websocket(_WS(
+        {"Tailscale-User-Login": "Founder@example.com"}, peer="127.0.0.1",
+    ))
+    assert (ok, via, user) == (True, "tailscale", "Founder@example.com")
+    ok, via, user = vl.authorize_websocket(_WS(
+        {"tailscale-user-login": "second@example.com", "x-forwarded-for": "100.1.2.3"},
+        peer="::1",
+    ))
+    assert (ok, via) == (True, "tailscale")
+
+    ok, via, _user = vl.authorize_websocket(_WS(peer="127.0.0.1"))
+    assert ok is True and via == "loopback"
+    ok, via, _user = vl.authorize_websocket(_WS(
+        {"x-forwarded-for": "100.1.2.3"}, peer="127.0.0.1",
+    ))
+    assert ok is False
+
+    ok, via, _user = vl.authorize_websocket(_WS(
+        {"tailscale-user-login": "stranger@example.com"}, peer="127.0.0.1",
+    ))
+    assert ok is False and via == "tailscale login not allowed"
+
+    ok, via, _user = vl.authorize_websocket(_WS(
+        {"tailscale-user-login": "founder@example.com", "x-forwarded-for": "100.1.2.3"},
+        peer="100.64.0.8",
+    ))
+    assert ok is False and via == "tailscale header from non-loopback"
+
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "")
+    ok, via, _user = vl.authorize_websocket(_WS(
+        {"tailscale-user-login": "founder@example.com"}, peer="127.0.0.1",
+    ))
+    assert ok is False and via == "tailscale login not allowed"
+    monkeypatch.delenv("TAILSCALE_ALLOWED_LOGINS", raising=False)
+    ok, _, _ = vl.authorize_websocket(_WS(
+        {"tailscale-user-login": "founder@example.com"}, peer="::1",
+    ))
+    assert ok is False
+
+
+def test_presentation_http_uses_the_same_tailscale_rule(monkeypatch):
+    from pathlib import Path
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.simli_avatar import router as simli_router
+
+    avatar_src = (Path(__file__).resolve().parents[1] / "app" / "routers" / "avatar.py").read_text(encoding="utf-8")
+    for needle in ("async def avatar_chat", "async def avatar_listen", "async def avatar_speak", "async def avatar_status"):
+        assert "_require_avatar_access(request)" in avatar_src.split(needle, 1)[1][:400]
+
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "founder@example.com")
+    app = FastAPI()
+    app.include_router(simli_router, prefix="/api/v1")
+    allowed = TestClient(app, client=("127.0.0.1", 9))
+    denied = TestClient(app, client=("100.64.0.8", 9))
+    ok = allowed.get("/api/v1/avatar/simli/status", headers={"Tailscale-User-Login": "founder@example.com"})
+    assert ok.status_code == 200
+    spoofed = denied.get("/api/v1/avatar/simli/status", headers={"Tailscale-User-Login": "founder@example.com"})
+    assert spoofed.status_code == 401
+
+
 def test_access_jwt_valid_accepted_wrong_aud_rejected(monkeypatch):
     pem, jwk = _keypair()
     monkeypatch.setitem(vl._jwks_cache, "keys", {"keys": [jwk]})
