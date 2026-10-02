@@ -11,6 +11,7 @@ import ViewPdfControl from '../ViewPdfControl';
 import ChatChartBlock from '../ChatChartBlock';
 import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../lib/chatContent';
 import { useAssistantName } from '../../lib/assistant';
+import VoiceDraftPanel, { VoiceDraftView } from '../voice/VoiceDraftPanel';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -90,6 +91,8 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const fileInputRef = useRef<HTMLInputElement>(null);
   const codePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceModeRef = useRef(false);
+  const draftSessionRef = useRef<string | null>(null);
+  const [voiceDraft, setVoiceDraft] = useState<VoiceDraftView | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -220,18 +223,33 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         fd.append('audio', blob, 'recording.webm');
         try {
           setVoiceStatus('🔄 Transcribing...');
-          const res = await fetch(`${API}/voice/transcribe`, { method: 'POST', body: fd });
+          const res = await fetch(`${API}/voice/transcribe?language=auto`, { method: 'POST', body: fd });
           const data = await res.json();
           if (data.text && voiceModeRef.current) {
-            // In voice mode: auto-send the transcript
+            // Continuous voice mode keeps the conversation loop.
             onSend(data.text);
             setVoiceStatus('');
           } else if (data.text) {
-            setInput(prev => prev + (prev ? ' ' : '') + data.text);
-            setVoiceStatus('✅ Review, then tap Send');
-            textareaRef.current?.focus();
-            // Clear status after 5 seconds
-            setTimeout(() => setVoiceStatus(prev => prev === '✅ Review, then tap Send' ? '' : prev), 5000);
+            setVoiceStatus('Revisa la transcripción');
+            try {
+              const ingested = await fetch(`${API}/voice/documents/ingest`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  transcript: data.text,
+                  session_id: draftSessionRef.current,
+                  channel: 'web',
+                  language: data.language === 'auto' ? null : data.language,
+                }),
+              });
+              const session = await ingested.json();
+              if (session.session_id) draftSessionRef.current = session.session_id;
+              if (session.status === 'ready') draftSessionRef.current = null;
+              setVoiceDraft(session);
+            } catch (ingestErr) {
+              console.warn('Voice draft ingest failed:', ingestErr);
+              setInput(prev => prev + (prev ? ' ' : '') + data.text);
+            }
           } else {
             setVoiceStatus('');
           }
@@ -1051,6 +1069,11 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           </div>
         )}
 
+        <VoiceDraftPanel view={voiceDraft} onChange={(next) => {
+          setVoiceDraft(next);
+          if (next.session_id) draftSessionRef.current = next.status === 'ready' ? null : next.session_id;
+        }} />
+
         {/* Input row: [Attach] [More] [Input] [Mic] [Send] */}
         <div style={{
           display: 'flex',
@@ -1118,8 +1141,18 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
           {/* Mic button — primary, next to send */}
           <button
-            onClick={toggleRecording}
-            title={recording ? 'Tap to stop recording' : 'Tap to record voice'}
+            onPointerDown={(event) => {
+              if (voiceModeRef.current) return;
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              if (!recording) startVoiceCapture();
+            }}
+            onPointerUp={() => {
+              if (voiceModeRef.current) return;
+              if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+            }}
+            onClick={() => { if (voiceModeRef.current) toggleRecording(); }}
+            title={recording ? 'Suelta para transcribir' : 'Mantén para hablar'}
             style={{
               width: 44, height: 44, borderRadius: 12,
               background: recording ? '#ef4444' : 'var(--card-bg)',

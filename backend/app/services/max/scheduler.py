@@ -138,6 +138,19 @@ class MaxScheduler:
             if disk.percent > 90:
                 brief += f"\n⚠️ Disk usage high ({disk.percent}%)"
 
+            try:
+                from app.edition import is_maxine
+
+                if is_maxine():
+                    from app.services.voice_doc.deals import overdue_brief_text
+
+                    overdue = overdue_brief_text()
+                    if overdue:
+                        import html as _html
+                        brief += "\n\n" + _html.escape(overdue)
+            except Exception:
+                logger.debug("Maxine overdue payments were not added to the brief", exc_info=True)
+
             # Log to notifications
             from app.routers.notifications import notify_founder
             notify_founder("MAX", "system_alert", "Morning Brief", brief, "low")

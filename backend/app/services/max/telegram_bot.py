@@ -920,6 +920,19 @@ class TelegramBot:
             except Exception as ac_err:
                 logger.warning(f"Access control intercept error: {ac_err}")
 
+        try:
+            from app.services.voice_doc import format_session_reply, ingest_transcript
+            from app.services.voice_doc.extract import choice_from_text, looks_like_draft_followup
+            from app.services.voice_doc.pipeline import edition_name
+            from app.services.voice_doc.store import open_session
+
+            if looks_like_draft_followup(text) and open_session("telegram", edition_name()):
+                view = ingest_transcript(text, channel="telegram", choice_id=choice_from_text(text))
+                await update.message.reply_text(format_session_reply(view))
+                return
+        except Exception as draft_err:
+            logger.warning(f"Voice draft follow-up skipped: {draft_err}")
+
         # v6.0 — unified sanitizer check
         from app.services.max.security.sanitizer import sanitizer as _sanitizer
         sec = _sanitizer.check(text, channel="telegram", session_id=str(update.effective_chat.id))
@@ -1038,6 +1051,16 @@ class TelegramBot:
                 return
 
             await update.message.reply_html(f"📝 <b>Transcript:</b>\n<i>{transcript}</i>")
+
+            try:
+                from app.services.voice_doc import format_session_reply, ingest_transcript
+
+                view = ingest_transcript(transcript, channel="telegram")
+                if view.get("handled") or view.get("draft"):
+                    await update.message.reply_text(format_session_reply(view))
+                    return
+            except Exception as draft_err:
+                logger.warning(f"Voice draft pipeline skipped: {draft_err}")
 
             await update.message.reply_chat_action("typing")
             voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None

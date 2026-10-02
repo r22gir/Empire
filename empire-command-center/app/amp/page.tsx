@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAssistantName } from '../lib/assistant';
+import VoiceHelpCard from '../components/voice/VoiceHelpCard';
 import {
   Flame, Heart, Brain, Shield, Users, Star, BookOpen, Calendar,
   Sparkles, ArrowRight, Play, Video, MessageCircle, Instagram,
@@ -139,6 +140,9 @@ export default function AmpLanding() {
           </div>
         </div>
       </nav>
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '16px 20px 0' }}>
+        <VoiceHelpCard />
+      </div>
 
       {/* Hero */}
       <section id="inicio" style={{

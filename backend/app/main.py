@@ -246,6 +246,9 @@ load_router("app.routers.apostapp_public", "/api/v1", ["apostapp-public"])
 # ConstructionForge — Colombian real estate land development
 load_router("app.routers.construction", "/api/v1", ["construction"])
 
+# Voice notes → borrador (quote, invoice, contract, plan de pagos). Never auto-sends.
+load_router("app.routers.voice_documents", "/api/v1", ["voice-documents"])
+
 # StoreFrontForge — Retail store management / POS
 load_router("app.routers.storefront", "/api/v1", ["storefront"])
 
@@ -343,7 +346,12 @@ async def health():
 from fastapi import UploadFile, File as FileParam
 
 async def _do_transcribe(upload: UploadFile, language: str = "en"):
-    """Shared transcription logic for both /api/transcribe and /api/v1/voice/transcribe."""
+    """Shared transcription logic for both /api/transcribe and /api/v1/voice/transcribe.
+
+    language=auto (or empty) lets Whisper detect the language. The document
+    pipeline still writes locale es-CO. The default query stays en so older
+    callers are unchanged.
+    """
     from app.services.max.stt_service import stt_service
     from fastapi import HTTPException as _HTTPException
     import tempfile
@@ -359,8 +367,15 @@ async def _do_transcribe(upload: UploadFile, language: str = "en"):
         tmp_path = _Path(tmp.name)
 
     try:
-        transcript = await stt_service.transcribe(tmp_path, language=language)
-        return {"text": transcript, "language": language, "filename": upload.filename}
+        lang = (language or "").strip().lower()
+        whisper_language = None if lang in {"", "auto", "detect"} else lang
+        transcript = await stt_service.transcribe(tmp_path, language=whisper_language)
+        return {
+            "text": transcript,
+            "language": whisper_language or "auto",
+            "locale": "es-CO",
+            "filename": upload.filename,
+        }
     finally:
         tmp_path.unlink(missing_ok=True)
 

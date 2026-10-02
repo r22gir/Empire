@@ -11,6 +11,8 @@ import {
 import ProductDocs from '../business/docs/ProductDocs';
 import ViewPdfControl from '../ViewPdfControl';
 import UsageCard from '../UsageCard';
+import VoiceHelpCard from '../voice/VoiceHelpCard';
+import ReservationForm from '../voice/ReservationForm';
 import { useAssistantName } from '../../lib/assistant';
 import { useEdition } from '../../lib/edition';
 
@@ -36,7 +38,10 @@ type Section = typeof NAV_SECTIONS[number]['id'];
 const LOT_STATUS_COLORS: Record<string, string> = {
   available: '#16a34a',
   reserved: '#eab308',
+  reservado: '#eab308',
+  separado: '#d97706',
   sold: '#2563eb',
+  vendido: '#2563eb',
   under_construction: '#8b5cf6',
   delivered: '#6b7280',
   hold: '#dc2626',
@@ -45,8 +50,11 @@ const LOT_STATUS_COLORS: Record<string, string> = {
 
 const LOT_STATUS_ES: Record<string, string> = {
   available: 'Disponible',
-  reserved: 'Separado',
+  reserved: 'Reservado',
+  reservado: 'Reservado',
+  separado: 'Separado',
   sold: 'Vendido',
+  vendido: 'Vendido',
   under_construction: 'En construcción',
   delivered: 'Entregado',
   hold: 'Retenido',
@@ -159,6 +167,7 @@ function KpiCard({ label, value, sub, color }: { label: string; value: string | 
 
 function DashboardSection() {
   const { locale } = useTranslation('construction');
+  const maxine = useEdition() === 'maxine';
   const [project, setProject] = useState<CfProject | null>(null);
   const [dashboard, setDashboard] = useState<any>(null);
   const [projects, setProjects] = useState<CfProject[]>([]);
@@ -220,6 +229,12 @@ function DashboardSection() {
           ))}
         </div>
       )}
+      {maxine ? (
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-start' }}>
+          <VoiceHelpCard />
+        </div>
+      ) : null}
+      {maxine ? <ReservationForm /> : null}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
         <KpiCard label={locale === 'es' ? 'Lotes Disponibles' : 'Available Lots'} value={d.available_lots ?? '—'} color="#16a34a" />
         <KpiCard label={locale === 'es' ? 'Lotes Vendidos' : 'Lots Sold'} value={d.sold_lots ?? '—'} color="#2563eb" />
