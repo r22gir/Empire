@@ -485,10 +485,26 @@ def _tool_output_text(data: dict[str, Any]) -> str:
 
 # ── Session config ──────────────────────────────────────────────────
 
+def _with_edition_language(text: str) -> str:
+    """Family editions speak Spanish (es-CO) on the existing voice brain."""
+    try:
+        from app.edition import speech_language
+
+        lang = speech_language()
+    except Exception:
+        return text
+    if not str(lang).startswith("es") or "es-CO" in (text or ""):
+        return text
+    return (text or "") + (
+        "\n\n# Language\n"
+        "Speak Spanish from Colombia (es-CO) unless the person switches language."
+    )
+
+
 def session_update_event(instructions: Optional[str] = None) -> dict[str, Any]:
     session: dict[str, Any] = {
         "voice": voice_name(),
-        "instructions": instructions or build_instructions(),
+        "instructions": _with_edition_language(instructions if instructions is not None else build_instructions()),
         "turn_detection": {
             "type": "server_vad",
             "threshold": float(os.getenv("MAX_VOICE_VAD_THRESHOLD", "0.5")),

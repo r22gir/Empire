@@ -30,6 +30,8 @@ If neither baseline is set, calls are still stored and the cap is not enforced. 
 
 `EMPIRE_DATA_DIR/usage/usage.db`, table `llm_usage`: UTC day, UTC month, model, input tokens, output tokens, estimated USD. Day and month totals are sums of that table. The cap period is the calendar month. The day figure is informational.
 
+Simli avatar sessions write into the same table (`provider=simli`, `model=simli-avatar`, `kind=avatar`). Output tokens are the capped session seconds. There is no separate Simli price; the estimator above turns those seconds into the USD figure the cap already uses.
+
 `GET /api/v1/edition/usage` returns both periods, the allowance, the ratio, and `level`:
 
 | ratio | level | behavior |

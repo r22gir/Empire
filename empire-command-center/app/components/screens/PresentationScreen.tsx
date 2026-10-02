@@ -5,6 +5,7 @@ import { Mic, MicOff, Send, Monitor, Square, MessageSquare, Sparkles, Wifi, Wifi
 import InlineDrawing from '../InlineDrawing';
 
 import { API } from '../../lib/api';
+import { simliFaceEdition, useEdition } from '../../lib/edition';
 import LiveVoiceCall from '../LiveVoiceCall';
 
 type PresentationMode = 'presentation' | 'compact' | 'text';
@@ -21,9 +22,10 @@ interface ChatMessage {
 }
 
 // ── TalkingHead Avatar Component (iframe-loaded) ────────────────────────
-function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef }: { mode: PresentationMode; isSpeaking: boolean; isThinking: boolean; iframeRef: React.RefObject<HTMLIFrameElement | null> }) {
+function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition }: { mode: PresentationMode; isSpeaking: boolean; isThinking: boolean; iframeRef: React.RefObject<HTMLIFrameElement | null>; faceEdition: string }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [avatarLine, setAvatarLine] = useState('');
 
   // Listen for messages from avatar iframe
   useEffect(() => {
@@ -37,6 +39,14 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef }: { mode: Presen
         } else {
           setError('placeholder');
         }
+      }
+      if (event.data?.type === 'avatar-status') {
+        const renderer = event.data.renderer === 'simli' ? 'Simli face only' : 'TalkingHead';
+        const flag = event.data.placeholder
+          ? (event.data.placeholderNote || "Placeholder. TalkingHead female brunette sample (CC BY-NC 4.0, non-commercial), loaded with body M.")
+          : '';
+        setAvatarLine([renderer, event.data.reason, flag].filter(Boolean).join(' · '));
+        if (event.data.success !== false) setLoaded(true);
       }
     };
     window.addEventListener('message', handler);
@@ -136,7 +146,8 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef }: { mode: Presen
       ) : (
         <iframe
           ref={iframeRef}
-          src="/avatar.html"
+          src={`/avatar.html?edition=${faceEdition}`}
+          title="MAX avatar"
           style={{
             width: '100%', height: '100%',
             border: 'none',
@@ -154,6 +165,18 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef }: { mode: Presen
           color: '#b8960c', fontSize: 12, opacity: 0.6,
         }}>
           Loading avatar...
+        </div>
+      )}
+
+      {avatarLine && (
+        <div style={{
+          position: 'absolute', left: 12, right: 12, bottom: 8, zIndex: 12,
+          fontSize: 11, lineHeight: 1.35, color: '#f4e7b3',
+          background: 'rgba(20, 16, 8, 0.82)',
+          border: '1px solid rgba(184, 150, 12, 0.45)',
+          borderRadius: 6, padding: '6px 8px',
+        }}>
+          {avatarLine}
         </div>
       )}
 
@@ -263,6 +286,10 @@ export default function PresentationScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [sessionCost, setSessionCost] = useState(0);
   const [connected, setConnected] = useState(false);
+  const [simliCard, setSimliCard] = useState<{ minutes?: number; simli_enabled?: boolean; reason?: string } | null>(null);
+  const [avatarPlaceholder, setAvatarPlaceholder] = useState(false);
+  const edition = useEdition();
+  const faceEdition = simliFaceEdition(edition);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -300,6 +327,44 @@ export default function PresentationScreen() {
     check();
     const iv = setInterval(check, 15000);
     return () => clearInterval(iv);
+  }, []);
+
+  // Simli minutes for the usage card. Unset Simli stays an honest TalkingHead line.
+  useEffect(() => {
+    let stop = false;
+    const load = async () => {
+      try {
+        const resp = await fetch(`${API}/avatar/simli/usage?edition=${encodeURIComponent(faceEdition)}`, { signal: AbortSignal.timeout(3000) });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!stop) setSimliCard(data);
+      } catch { /* leave the last card */ }
+    };
+    load();
+    const iv = setInterval(load, 20000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [faceEdition]);
+
+  // xAI live-voice PCM (assistant only) and the placeholder flag from the iframe.
+  useEffect(() => {
+    const onStatus = (event: MessageEvent) => {
+      if (event.data?.type !== 'avatar-status') return;
+      setAvatarPlaceholder(!!event.data.placeholder);
+    };
+    const onPcm = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      if (!detail.pcm) return;
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: 'live-pcm', sampleRate: detail.sampleRate || 24000, pcm: detail.pcm },
+        '*',
+      );
+    };
+    window.addEventListener('message', onStatus);
+    window.addEventListener('max-live-pcm', onPcm);
+    return () => {
+      window.removeEventListener('message', onStatus);
+      window.removeEventListener('max-live-pcm', onPcm);
+    };
   }, []);
 
   // Auto-scroll
@@ -581,7 +646,7 @@ export default function PresentationScreen() {
       {/* Main content — stack vertically on mobile via CSS */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Avatar panel (presentation mode only) */}
-        <AvatarPanel mode={mode} isSpeaking={isSpeaking} isThinking={isLoading} iframeRef={iframeRef} />
+        <AvatarPanel mode={mode} isSpeaking={isSpeaking} isThinking={isLoading} iframeRef={iframeRef} faceEdition={faceEdition} />
 
         {/* Chat panel */}
         <div style={{
@@ -766,9 +831,17 @@ export default function PresentationScreen() {
           <span>18 desks</span>
           <span>Grok TTS Rex</span>
           <span>Quality engine active</span>
+          {avatarPlaceholder && <span>Placeholder brunette (CC BY-NC 4.0, body M)</span>}
         </div>
-        <span style={{ fontWeight: 600, color: sessionCost > 0 ? '#b8960c' : '#999' }}>
-          ${sessionCost.toFixed(3)} session
+        <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span title={simliCard?.reason || 'Simli is unset. TalkingHead is the avatar.'}>
+            {simliCard?.simli_enabled
+              ? `Simli ${(Number(simliCard.minutes) || 0).toFixed(2)} min`
+              : 'Simli off — TalkingHead'}
+          </span>
+          <span style={{ fontWeight: 600, color: sessionCost > 0 ? '#b8960c' : '#999' }}>
+            ${sessionCost.toFixed(3)} session
+          </span>
         </span>
       </div>
 

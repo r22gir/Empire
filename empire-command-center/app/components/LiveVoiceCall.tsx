@@ -156,7 +156,14 @@ export function useLiveVoice() {
     // Attach handlers immediately: the server can answer (ready / error) before
     // the mic permission prompt and AudioWorklet load finish.
     ws.onmessage = (ev: MessageEvent) => {
-      if (ev.data instanceof ArrayBuffer) { playPcm(ev.data); return; }
+      if (ev.data instanceof ArrayBuffer) {
+        const copy = ev.data.slice(0);
+        playPcm(ev.data);
+        window.dispatchEvent(new CustomEvent('max-live-pcm', {
+          detail: { pcm: copy, sampleRate: SAMPLE_RATE },
+        }));
+        return;
+      }
       let msg: any;
       try { msg = JSON.parse(ev.data); } catch { return; }
       switch (msg.type) {

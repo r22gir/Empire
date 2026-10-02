@@ -313,7 +313,16 @@ class TTSService:
             self.last_status = "failed"
             self.last_error = "empty text"
             return None
-        audio_path = await self.synthesize(text, output_format="mp3")
+        language = None
+        try:
+            from app.edition import speech_language
+
+            lang = speech_language()
+            if lang.startswith("es"):
+                language = lang
+        except Exception:
+            language = None
+        audio_path = await self.synthesize(text, output_format="mp3", language=language)
         if audio_path is None:
             return None
         try:

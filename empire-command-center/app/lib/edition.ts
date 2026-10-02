@@ -49,6 +49,14 @@ export function homeProductForEdition(edition: string = editionFromEnv()): 'cons
   return 'owner';
 }
 
+/** Simli and TalkingHead edition key. amp is Max-e. */
+export function simliFaceEdition(edition: string = editionFromEnv()): 'workroom' | 'max_e' | 'maxine' {
+  const key = (edition || 'workroom').trim().toLowerCase().replace(/-/g, '_');
+  if (key === 'amp' || key === 'maxe' || key === 'max_e') return 'max_e';
+  if (key === 'maxine') return 'maxine';
+  return 'workroom';
+}
+
 export function useEdition(): string {
   const [edition, setEdition] = useState(editionFromEnv);
 

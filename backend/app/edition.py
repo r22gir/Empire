@@ -183,6 +183,16 @@ def default_locale() -> str:
     return os.getenv("EMPIRE_DEFAULT_LOCALE", "en").strip().lower() or "en"
 
 
+def speech_language() -> str:
+    """Language tag for TTS and live voice. Family Spanish is es-CO."""
+    loc = default_locale()
+    if loc.startswith("es"):
+        return "es-CO"
+    if loc.startswith("en"):
+        return "en"
+    return loc or "en"
+
+
 def assistant_name() -> str:
     """Per-instance display name.
 
