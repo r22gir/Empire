@@ -112,9 +112,11 @@ export async function startSimliFace({ edition, video, base, onStatus }) {
       ? session.ice_servers
       : [{ urls: 'stun:stun.l.google.com:19302' }],
   });
+  // Simli expects both m-lines (same as the official simli-client P2P transport).
+  pc.addTransceiver('audio', { direction: 'recvonly' });
   pc.addTransceiver('video', { direction: 'recvonly' });
   pc.ontrack = (event) => {
-    if (video && event.streams && event.streams[0]) {
+    if (event.track.kind === 'video' && video && event.streams && event.streams[0]) {
       video.srcObject = event.streams[0];
       video.play().catch(() => {});
     }
@@ -133,7 +135,7 @@ export async function startSimliFace({ edition, video, base, onStatus }) {
       });
     }
   });
-  const wsUrl = `${session.webrtc_url}?session_token=${encodeURIComponent(session.session_token)}`;
+  const wsUrl = `${session.webrtc_url}?session_token=${encodeURIComponent(session.session_token)}&enableSFU=true`;
   const ws = new WebSocket(wsUrl);
   ws.binaryType = 'arraybuffer';
   const started = Date.now();
@@ -163,6 +165,12 @@ export async function startSimliFace({ edition, video, base, onStatus }) {
   });
   ws.onmessage = async (event) => {
     if (typeof event.data !== 'string') return;
+    const first = event.data.trim().split(' ')[0].toUpperCase();
+    if (first === 'STOP' || first === 'ERROR' || first === 'ERROR:' || first === 'CLOSING' || first === 'RATE') {
+      console.warn('Simli:', event.data.slice(0, 200));
+      stop('simli');
+      return;
+    }
     let msg;
     try { msg = JSON.parse(event.data); } catch { return; }
     if ((msg.type === 'answer' || msg.sdp) && msg.sdp) {

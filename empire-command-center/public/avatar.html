@@ -115,10 +115,12 @@ async function init() {
       video: face,
       onStatus: (status) => {
         if (status && status.reason) fallbackReason = status.reason;
+        // The TalkingHead placeholder note only applies when TalkingHead renders.
+        const th = !(status && status.renderer === 'simli');
         tellParent({
           success: true,
-          placeholder: model.placeholder,
-          placeholderNote: model.placeholder ? PLACEHOLDER.note : '',
+          placeholder: th && model.placeholder,
+          placeholderNote: th && model.placeholder ? PLACEHOLDER.note : '',
           simli: status,
           reason: status.reason || fallbackReason,
         });
@@ -139,8 +141,8 @@ async function init() {
     container.style.display = 'none';
     face.style.display = 'block';
     loading.style.display = 'none';
-    showBadge('Simli face only. ' + (model.placeholder ? PLACEHOLDER.note : ''));
-    tellParent({ success: true, renderer: 'simli', placeholder: model.placeholder, placeholderNote: model.placeholder ? PLACEHOLDER.note : '' });
+    showBadge('');
+    tellParent({ success: true, renderer: 'simli', placeholder: false, placeholderNote: '' });
     window.parent.postMessage({ type: 'avatar-loaded', success: true, renderer: 'simli' }, '*');
     return;
   }
