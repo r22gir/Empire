@@ -84,7 +84,21 @@ def test_live_voice_stage_event_carries_the_same_artifact():
     assert event["artifacts"][0]["payload"]["quote_number"] == "Q-9"
 
 
-def test_chart_and_speech_use_the_same_revenue_rows():
+def _pin_october_2026(monkeypatch):
+    from datetime import date
+
+    import app.services.max.presentation_stage as stage
+
+    class _Clock:
+        @staticmethod
+        def today():
+            return date(2026, 10, 2)
+
+    monkeypatch.setattr(stage, "date_cls", _Clock)
+
+
+def test_chart_and_speech_use_the_same_revenue_rows(monkeypatch):
+    _pin_october_2026(monkeypatch)
     packed = package_turn(
         "show me last month's revenue",
         'September was **$1.00**.\nchart {"type":"bar","title":"Revenue","labels":["2026-09"],"data":[1]}\n✅ Verified',
@@ -99,7 +113,7 @@ def test_chart_and_speech_use_the_same_revenue_rows():
     assert chart["kind"] == "chart"
     assert chart["payload"]["data"] == [4576.31]
     assert chart["payload"]["labels"] == ["2026-09"]
-    assert packed["spoken"] == "Revenue is $4,576.31."
+    assert packed["spoken"] == "Last month, September, revenue was $4,576.31."
     assert "chart" not in packed["spoken"].lower()
     assert "{" not in packed["spoken"]
     assert "Verified" not in packed["spoken"]
@@ -166,6 +180,42 @@ def test_chart_and_speech_use_the_same_revenue_rows():
         revenue_reader=lambda: [],
     )
     assert quotes["artifacts"][0]["payload"]["empty"] is True
+
+
+def test_named_period_leads_with_that_figure_not_the_chart_total(monkeypatch):
+    _pin_october_2026(monkeypatch)
+    rows = [
+        {"label": "2026-03", "value": 100.0},
+        {"label": "2026-09", "value": 4577.31},
+    ]
+    packed = package_turn(
+        "show me last month's revenue",
+        "Revenue is $4,677.31.",
+        [],
+        revenue_reader=lambda: rows,
+    )
+    assert packed["spoken"] == "Last month, September, revenue was $4,577.31. The chart also shows March."
+    assert "$4,677.31" not in packed["spoken"]
+    assert "2026-09" not in packed["spoken"]
+    assert packed["artifacts"][0]["payload"]["labels"] == ["2026-03", "2026-09"]
+    assert packed["artifacts"][0]["payload"]["data"] == [100.0, 4577.31]
+    assert packed["artifacts"][0]["narration"] == packed["spoken"]
+
+    year = package_turn(
+        "show me this year's revenue",
+        "",
+        [],
+        revenue_reader=lambda: rows,
+    )
+    assert year["spoken"] == "This year, revenue was $4,677.31."
+
+    quarter = package_turn(
+        "what was Q3 revenue",
+        "",
+        [],
+        revenue_reader=lambda: rows,
+    )
+    assert quarter["spoken"] == "In the third quarter, revenue was $4,577.31. The chart also shows March."
 
 
 def test_spoken_line_drops_inline_chart_json_emoji_and_badges():

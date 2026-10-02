@@ -5,9 +5,12 @@ Client-facing artifacts use Empire Workroom branding and drop the founder's name
 """
 from __future__ import annotations
 
+import calendar
 import json
 import logging
 import re
+from datetime import date as date_cls
+from datetime import timedelta
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger("max.presentation_stage")
@@ -455,7 +458,7 @@ def artifacts_from_turn(
     if wants_revenue(message):
         # The stage chart is the canonical ledger, not a second query the model wrote.
         artifacts = [item for item in artifacts if item.get("kind") != "chart"]
-        artifacts.append(revenue_artifact(list(revenue_rows or [])))
+        artifacts.append(revenue_artifact(list(revenue_rows or []), message=message))
     return artifacts[:8]
 
 
@@ -492,7 +495,7 @@ def package_turn(
             {"label": str(label), "value": float(value)}
             for label, value in zip(payload.get("labels") or [], payload.get("data") or [])
         ]
-        row_spoken = spoken_from_revenue_rows(chart_rows)
+        row_spoken = spoken_from_revenue_rows(chart_rows, message=message)
         spoken = f"I'll walk through {len(slides)} slides. {row_spoken}" if slides else row_spoken
     elif slides:
         spoken = f"I'll walk through {len(slides)} slides. {slides[0]['narration']}"
@@ -510,17 +513,141 @@ def package_turn(
     }
 
 
-def spoken_from_revenue_rows(rows: list[dict] | None) -> str:
-    """One or two sentences from the same rows the chart draws."""
+def _money(value: float) -> str:
+    return f"${float(value):,.2f}"
+
+
+def _year_month(label: str) -> tuple[int, int] | None:
+    match = re.match(r"(\d{4})-(\d{2})", str(label or ""))
+    if not match:
+        return None
+    year, month = int(match.group(1)), int(match.group(2))
+    if not 1 <= month <= 12:
+        return None
+    return year, month
+
+
+def _month_name(label: str) -> str:
+    parsed = _year_month(label)
+    if not parsed:
+        return str(label or "")
+    return calendar.month_name[parsed[1]]
+
+
+def _year_in_text(text: str) -> int | None:
+    match = re.search(r"\b(20\d{2})\b", text or "")
+    return int(match.group(1)) if match else None
+
+
+def asked_revenue_period(message: str | None, today: date_cls | None = None) -> dict | None:
+    """The window the founder named, if any. Chart context can be wider."""
+    text = message or ""
+    today = today or date_cls.today()
+    quarter_match = re.search(r"\bq([1-4])\b", text, re.I)
+    named_quarter = re.search(r"\b(first|second|third|fourth)\s+quarter\b", text, re.I)
+    if quarter_match or named_quarter:
+        names = {"first": 1, "second": 2, "third": 3, "fourth": 4}
+        quarter = int(quarter_match.group(1)) if quarter_match else names[named_quarter.group(1).lower()]
+        return {"kind": "quarter", "quarter": quarter, "year": _year_in_text(text) or today.year}
+    if re.search(r"\bthis quarter\b", text, re.I):
+        return {"kind": "quarter", "quarter": (today.month - 1) // 3 + 1, "year": today.year}
+    if re.search(r"\blast quarter\b", text, re.I):
+        quarter = (today.month - 1) // 3 + 1
+        if quarter == 1:
+            return {"kind": "quarter", "quarter": 4, "year": today.year - 1}
+        return {"kind": "quarter", "quarter": quarter - 1, "year": today.year}
+    if re.search(r"\b(last|previous)\s+month\b", text, re.I):
+        previous = today.replace(day=1) - timedelta(days=1)
+        return {"kind": "month", "year": previous.year, "month": previous.month, "phrase": "Last month"}
+    if re.search(r"\bthis month\b", text, re.I):
+        return {"kind": "month", "year": today.year, "month": today.month, "phrase": "This month"}
+    if re.search(r"\b(last|previous)\s+year\b", text, re.I):
+        return {"kind": "year", "year": today.year - 1, "phrase": "Last year"}
+    if re.search(r"\b(this year|year to date|ytd)\b", text, re.I):
+        return {"kind": "year", "year": today.year, "phrase": "This year"}
+    for month in range(1, 13):
+        if re.search(rf"\b{calendar.month_name[month]}\b", text, re.I):
+            return {"kind": "month", "year": _year_in_text(text) or today.year, "month": month, "phrase": calendar.month_name[month]}
+    return None
+
+
+def _row_in_period(row: dict, period: dict) -> bool:
+    parsed = _year_month(str(row.get("label") or ""))
+    if not parsed:
+        return False
+    year, month = parsed
+    if period["kind"] == "month":
+        return year == period["year"] and month == period["month"]
+    if period["kind"] == "year":
+        return year == period["year"]
+    quarter = (month - 1) // 3 + 1
+    return year == period["year"] and quarter == period["quarter"]
+
+
+def _period_lead(period: dict, amount: float | None) -> str:
+    if period["kind"] == "month":
+        name = calendar.month_name[period["month"]]
+        phrase = period.get("phrase") or name
+        if amount is None:
+            if phrase == "Last month":
+                return f"Last month, {name}, I don't have a payment row."
+            if phrase == "This month":
+                return f"This month, {name}, I don't have a payment row."
+            return f"In {name}, I don't have a payment row."
+        money = _money(amount)
+        if phrase == "Last month":
+            return f"Last month, {name}, revenue was {money}."
+        if phrase == "This month":
+            return f"This month, {name}, revenue was {money}."
+        return f"{name} revenue was {money}."
+    if period["kind"] == "year":
+        phrase = period.get("phrase") or str(period["year"])
+        if amount is None:
+            return f"{phrase}, I don't have a payment row."
+        return f"{phrase}, revenue was {_money(amount)}."
+    ordinal = ("first", "second", "third", "fourth")[period["quarter"] - 1]
+    if amount is None:
+        return f"In the {ordinal} quarter, I don't have a payment row."
+    return f"In the {ordinal} quarter, revenue was {_money(amount)}."
+
+
+def _extra_months_sentence(rows: list[dict]) -> str:
+    names: list[str] = []
+    for row in rows:
+        name = _month_name(str(row.get("label") or ""))
+        if name and name not in names:
+            names.append(name)
+    if not names:
+        return ""
+    if len(names) == 1:
+        return f"The chart also shows {names[0]}."
+    if len(names) == 2:
+        return f"The chart also shows {names[0]} and {names[1]}."
+    return "The chart also shows earlier months."
+
+
+def spoken_from_revenue_rows(rows: list[dict] | None, *, message: str | None = None) -> str:
+    """One or two sentences from the same rows the chart draws.
+
+    A named window (last month, this year, Q3) is spoken first. Other bars
+    on the chart are context, not the lead number.
+    """
     data = list(rows or [])
     if not data:
         return "I don't have payment rows for that window, so I won't invent a total."
+    period = asked_revenue_period(message)
+    if period:
+        matched = [row for row in data if _row_in_period(row, period)]
+        others = [row for row in data if not _row_in_period(row, period)]
+        amount = sum(float(row["value"]) for row in matched) if matched else None
+        lead = _period_lead(period, amount)
+        extra = _extra_months_sentence(others)
+        return f"{lead} {extra}".strip() if extra else lead
     total = sum(float(row["value"]) for row in data)
-    money = f"${total:,.2f}"
     if len(data) == 1:
-        return f"Revenue is {money}."
+        return f"Revenue is {_money(total)}."
     latest = data[-1]
-    return f"Revenue is {money}. {latest['label']} is ${float(latest['value']):,.2f}."
+    return f"Revenue is {_money(total)}. {_month_name(str(latest['label']))} is {_money(float(latest['value']))}."
 
 
 def _table_columns(conn, table: str) -> set[str]:
@@ -653,7 +780,7 @@ def read_revenue_rows() -> list[dict]:
     return [{"label": month, "value": totals[month]} for month in sorted(totals)[-6:]]
 
 
-def revenue_artifact(rows: list[dict] | None = None) -> dict:
+def revenue_artifact(rows: list[dict] | None = None, *, message: str | None = None) -> dict:
     data = list(rows if rows is not None else read_revenue_rows())
     if not data:
         return _artifact(
@@ -670,7 +797,7 @@ def revenue_artifact(rows: list[dict] | None = None) -> dict:
         "data": [row["value"] for row in data],
         "empty": False,
     }
-    return _artifact("chart", "Revenue", spoken_from_revenue_rows(data), chart, 1)
+    return _artifact("chart", "Revenue", spoken_from_revenue_rows(data, message=message), chart, 1)
 
 
 def revenue_tool_result() -> dict[str, Any]:
