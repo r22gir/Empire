@@ -351,49 +351,26 @@ async def health():
 # ── STT endpoint (top-level for frontend compatibility) ──
 from fastapi import UploadFile, File as FileParam
 
-async def _do_transcribe(upload: UploadFile, language: str = "en"):
+async def _do_transcribe(upload: UploadFile, language: str | None = None):
     """Shared transcription logic for both /api/transcribe and /api/v1/voice/transcribe.
 
-    language=auto (or empty) lets Whisper detect the language. The document
-    pipeline still writes locale es-CO. The default query stays en so older
-    callers are unchanged.
+    Language is optional. Omit it and Whisper auto-detects. A Spanish UI
+    sends language=es. A failure is a non-2xx response, never a 200 whose
+    text can be sent to the model.
     """
-    from app.services.max.stt_service import stt_service
-    from fastapi import HTTPException as _HTTPException
-    import tempfile
-    from pathlib import Path as _Path
+    from app.services.max.stt_http import transcribe_upload
 
-    if not stt_service.is_configured:
-        raise _HTTPException(status_code=503, detail="STT not configured — GROQ_API_KEY missing")
-
-    suffix = _Path(upload.filename or "audio.webm").suffix or ".webm"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await upload.read()
-        tmp.write(content)
-        tmp_path = _Path(tmp.name)
-
-    try:
-        lang = (language or "").strip().lower()
-        whisper_language = None if lang in {"", "auto", "detect"} else lang
-        transcript = await stt_service.transcribe(tmp_path, language=whisper_language)
-        return {
-            "text": transcript,
-            "language": whisper_language or "auto",
-            "locale": "es-CO",
-            "filename": upload.filename,
-        }
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    return await transcribe_upload(upload, language)
 
 
 @app.post("/api/transcribe")
-async def api_transcribe(file: UploadFile = FileParam(...), language: str = "en"):
+async def api_transcribe(file: UploadFile = FileParam(...), language: str | None = None):
     """Transcribe uploaded audio via Groq Whisper (legacy endpoint, accepts 'file' field)."""
     return await _do_transcribe(file, language)
 
 
 @app.post("/api/v1/voice/transcribe")
-async def api_voice_transcribe(audio: UploadFile = FileParam(...), language: str = "en"):
+async def api_voice_transcribe(audio: UploadFile = FileParam(...), language: str | None = None):
     """Transcribe uploaded audio via Groq Whisper. Accepts 'audio' field name."""
     return await _do_transcribe(audio, language)
 
