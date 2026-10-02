@@ -56,6 +56,13 @@ def list_facts() -> list[dict]:
     return _load()
 
 
+def delete_facts(keys) -> None:
+    wanted = {str(key) for key in keys or []}
+    if not wanted:
+        return
+    _save([row for row in _load() if row.get("key") not in wanted])
+
+
 def public_facts() -> list[dict]:
     return [row for row in _load() if row.get("visibility") == PUBLIC]
 

@@ -43,7 +43,7 @@ INTERVIEW_MODULES = (
     "leadforge",
     "courses",
 )
-INTERVIEW_LAST_STEP = 9
+INTERVIEW_LAST_STEP = 10
 BLANK_TEMPLATES = {"", "blank", "en_blanco", "none"}
 PAYMENT_METHODS = ("efectivo", "transferencia", "tarjeta", "nequi", "daviplata", "pse")
 # Static API paths under /businesses. Never use these as company slugs.
@@ -743,6 +743,7 @@ def empty_interview_answers() -> dict:
         "fact_visibility": {},
         "phase_name": "",
         "lots": [],
+        "argos_consent": "",
     }
 
 
@@ -785,6 +786,7 @@ def sanitize_interview_answers(raw: Optional[dict]) -> dict:
     base["fact_visibility"] = _visibility_map(raw.get("fact_visibility"))
     base["phase_name"] = _clip(raw.get("phase_name"), 80)
     base["lots"] = _sanitize_lots(raw.get("lots"))
+    base["argos_consent"] = _choice(raw.get("argos_consent"), {"all", "public", "later"}, "")
     return base
 
 
@@ -856,10 +858,20 @@ def _step(value) -> int:
     return max(0, min(step, INTERVIEW_LAST_STEP))
 
 
+def _argos_catalog() -> dict:
+    if not is_maxine():
+        return {}
+    from app.services.edition_seed import argos_campestre_items
+    return {
+        "public": argos_campestre_items("public"),
+        "all": argos_campestre_items("all"),
+    }
+
+
 def _empty_draft(email: str) -> dict:
     answers = empty_interview_answers()
     from app.services.edition_facts import confirm_items_for_answers
-    return {
+    payload = {
         "email": email,
         "status": "empty",
         "step": 0,
@@ -868,6 +880,10 @@ def _empty_draft(email: str) -> dict:
         "updated_at": None,
         "assistant": assistant_name(),
     }
+    catalog = _argos_catalog()
+    if catalog:
+        payload["argos_catalog"] = catalog
+    return payload
 
 
 def _read_draft_file(email: str) -> Optional[dict]:
@@ -915,7 +931,7 @@ def get_interview_draft(email: str) -> dict:
         return _empty_draft(owner)
     answers = sanitize_interview_answers(data.get("answers"))
     from app.services.edition_facts import confirm_items_for_answers
-    return {
+    payload = {
         "email": owner,
         "status": "draft",
         "step": _step(data.get("step")),
@@ -924,6 +940,10 @@ def get_interview_draft(email: str) -> dict:
         "updated_at": data.get("updated_at"),
         "assistant": assistant_name(),
     }
+    catalog = _argos_catalog()
+    if catalog:
+        payload["argos_catalog"] = catalog
+    return payload
 
 
 def save_interview_draft(email: str, *, step: int = 0, answers: Optional[dict] = None) -> dict:
@@ -1047,6 +1067,9 @@ def finish_interview(email: str, *, step: int = INTERVIEW_LAST_STEP, answers: Op
     created["contacts"] = list_contacts(created["slug"])
     from app.services.edition_facts import persist_interview_facts
     persist_interview_facts(clean)
+    if is_maxine():
+        from app.services.edition_seed import apply_argos_consent
+        created["argos_loaded"] = [row["key"] for row in apply_argos_consent(clean)]
     if is_maxine():
         from app.services.construction_bridge import materialize_from_interview
         created = materialize_from_interview(created, clean)

@@ -7,6 +7,7 @@ import { API_BASE } from '../../../lib/api';
 import { useTranslation } from '../../../lib/i18n';
 import { useAssistantName } from '../../../lib/assistant';
 import { useEdition } from '../../../lib/edition';
+import { ARGOS_OPTIONS, interviewSteps, welcomeCopy } from '../../../lib/interviewWelcome';
 
 type Template = { id: string; label: string; description: string };
 type Item = { name: string; kind: 'servicio' | 'producto'; price: string };
@@ -36,6 +37,7 @@ type Answers = {
   fact_visibility: Record<string, 'public' | 'confidential'>;
   phase_name: string;
   lots: { lot_number: string; status: string; area_m2: string; price: string }[];
+  argos_consent: '' | 'all' | 'public' | 'later';
 };
 
 const MODULES = [
@@ -71,18 +73,7 @@ const MONTHS = [
   ['12-01', 'Diciembre', 'December'],
 ] as const;
 
-const STEPS = [
-  { id: 'bienvenida', es: 'Bienvenida', en: 'Welcome' },
-  { id: 'empresa', es: 'Tu empresa', en: 'Your company' },
-  { id: 'industria', es: 'Industria', en: 'Industry' },
-  { id: 'oferta', es: 'Qué vendes', en: 'What you sell' },
-  { id: 'clientes', es: 'Clientes', en: 'Customers' },
-  { id: 'dinero', es: 'Dinero', en: 'Money' },
-  { id: 'equipo', es: 'Equipo', en: 'Team' },
-  { id: 'herramientas', es: 'Herramientas', en: 'Tools' },
-  { id: 'confirmar', es: 'Confirmar datos', en: 'Confirm facts' },
-  { id: 'revision', es: 'Revisión', en: 'Review' },
-];
+type ArgosItem = { key: string; label: string; value: string; text: string };
 
 function emptyAnswers(): Answers {
   return {
@@ -111,6 +102,7 @@ function emptyAnswers(): Answers {
     fact_visibility: {},
     phase_name: '',
     lots: [],
+    argos_consent: '',
   };
 }
 
@@ -150,6 +142,7 @@ function fromServer(raw: Partial<Answers> | undefined): Answers {
     charges_iva: Boolean(raw.charges_iva),
     fact_visibility: { ...base.fact_visibility, ...(raw.fact_visibility || {}) },
     phase_name: raw.phase_name || '',
+    argos_consent: raw.argos_consent === 'all' || raw.argos_consent === 'public' || raw.argos_consent === 'later' ? raw.argos_consent : '',
     lots: Array.isArray(raw.lots)
       ? raw.lots.map((lot) => ({
           lot_number: lot.lot_number || '',
@@ -234,7 +227,11 @@ export default function EntrevistaPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [resumed, setResumed] = useState(false);
-  const last = STEPS.length - 1;
+  const [argosCatalog, setArgosCatalog] = useState<{ public: ArgosItem[]; all: ArgosItem[] }>({ public: [], all: [] });
+  const steps = interviewSteps(constructionShell ? 'maxine' : 'amp');
+  const welcome = welcomeCopy(constructionShell ? 'maxine' : 'amp');
+  const last = steps.length - 1;
+  const currentId = steps[Math.min(step, last)]?.id || 'bienvenida';
 
   useEffect(() => {
     let cancelled = false;
@@ -255,6 +252,12 @@ export default function EntrevistaPage() {
       if (draftRes.ok) {
         const draft = await draftRes.json();
         setAnswers(fromServer(draft.answers));
+        if (draft.argos_catalog) {
+          setArgosCatalog({
+            public: Array.isArray(draft.argos_catalog.public) ? draft.argos_catalog.public : [],
+            all: Array.isArray(draft.argos_catalog.all) ? draft.argos_catalog.all : [],
+          });
+        }
         if (draft.status === 'draft') {
           const savedStep = typeof draft.step === 'number' ? draft.step : 0;
           setStep(savedStep);
@@ -311,8 +314,12 @@ export default function EntrevistaPage() {
   }
 
   function validate(): boolean {
-    if (step === 1 && !answers.legal_name.trim()) {
+    if (currentId === 'empresa' && !answers.legal_name.trim()) {
       setError(t('Escribe el nombre legal para seguir.', 'Enter the legal name to continue.'));
+      return false;
+    }
+    if (currentId === 'argos' && !answers.argos_consent) {
+      setError(t('Elige si cargo Argos Campestre.', 'Choose whether I load Argos Campestre.'));
       return false;
     }
     setError('');
@@ -353,7 +360,7 @@ export default function EntrevistaPage() {
   async function finish() {
     if (!answers.legal_name.trim()) {
       setError(t('Escribe el nombre legal antes de crear la empresa.', 'Enter the legal name before creating the company.'));
-      setStep(1);
+      setStep(Math.max(steps.findIndex((item) => item.id === 'empresa'), 0));
       return;
     }
     setBusy(true);
@@ -390,9 +397,14 @@ export default function EntrevistaPage() {
   }
 
   const label = (id: string) => {
-    const row = STEPS.find((item) => item.id === id);
+    const row = steps.find((item) => item.id === id);
     return row ? (es ? row.es : row.en) : id;
   };
+  const argosRows: ArgosItem[] = answers.argos_consent === 'all'
+    ? argosCatalog.all
+    : answers.argos_consent === 'public'
+      ? argosCatalog.public
+      : [];
 
   const progress = Math.round((step / last) * 100);
 
@@ -406,12 +418,12 @@ export default function EntrevistaPage() {
       </div>
       <p style={{ letterSpacing: 1, color: '#D4A030', fontWeight: 800, fontSize: 12, margin: '16px 0 4px' }}>{assistant.toUpperCase()} · CENTRO DE MANDO</p>
       <h1 style={{ fontFamily: 'Playfair Display, serif', fontSize: 32, margin: '0 0 8px' }}>{t('Entrevista de la empresa', 'Company interview')}</h1>
-      <p style={{ color: '#5C5650', marginTop: 0 }}>{t(`Paso ${step + 1} de ${STEPS.length}`, `Step ${step + 1} of ${STEPS.length}`)} · {es ? STEPS[step].es : STEPS[step].en}</p>
-      <div role="progressbar" aria-valuenow={step + 1} aria-valuemin={1} aria-valuemax={STEPS.length} aria-label={t('Progreso de la entrevista', 'Interview progress')} style={{ height: 8, borderRadius: 99, background: '#F0E6D8', overflow: 'hidden' }}>
+      <p style={{ color: '#5C5650', marginTop: 0 }}>{t(`Paso ${Math.min(step, last) + 1} de ${steps.length}`, `Step ${Math.min(step, last) + 1} of ${steps.length}`)} · {es ? steps[Math.min(step, last)].es : steps[Math.min(step, last)].en}</p>
+      <div role="progressbar" aria-valuenow={Math.min(step, last) + 1} aria-valuemin={1} aria-valuemax={steps.length} aria-label={t('Progreso de la entrevista', 'Interview progress')} style={{ height: 8, borderRadius: 99, background: '#F0E6D8', overflow: 'hidden' }}>
         <div style={{ width: `${progress}%`, height: '100%', background: '#D4A030' }} />
       </div>
       <ol style={{ display: 'flex', gap: 8, listStyle: 'none', padding: 0, margin: '12px 0 0', overflowX: 'auto' }}>
-        {STEPS.map((item, index) => (
+        {steps.map((item, index) => (
           <li key={item.id}>
             <button
               type="button"
@@ -444,18 +456,39 @@ export default function EntrevistaPage() {
       {error && <p role="alert" style={{ color: '#9b2c2c' }}>{error} {error.toLowerCase().includes('acceso') || error.toLowerCase().includes('access') ? <a href="/login" style={{ color: '#D4A030', fontWeight: 800 }}>{t('Iniciar sesión', 'Sign in')}</a> : null}</p>}
       {loading ? <p>{t('Cargando tu entrevista…', 'Loading your interview…')}</p> : (
         <section style={cardStyle}>
-          {step === 0 && (
+          {currentId === 'bienvenida' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 28, marginTop: 0 }}>{t(`Hola, soy ${assistant}.`, `Hi, I'm ${assistant}.`)}</h2>
-              <p style={{ lineHeight: 1.6, fontSize: 17 }}>
-                {t(
-                  'Voy a hacerte una pregunta por pantalla para dejar tu empresa lista. Puedes volver atrás, guardar y seguir después. Nada queda creado hasta que lo confirmes en la revisión.',
-                  'I will ask one question per screen so your company is ready. You can go back, save, and continue later. Nothing is created until you confirm it on the review screen.',
-                )}
-              </p>
+              <p style={{ lineHeight: 1.6, fontSize: 17 }}>{es ? welcome.introEs : welcome.introEn}</p>
+              <p style={{ fontWeight: 800, marginBottom: 8 }}>{t('Vamos a pasar por:', 'We will cover:')}</p>
+              <ol style={{ lineHeight: 1.6, paddingLeft: 20, marginTop: 0 }}>
+                {welcome.sections.map((section) => (
+                  <li key={section.es}>{es ? section.es : section.en}</li>
+                ))}
+              </ol>
+              {welcome.argosNoteEs && (
+                <p style={{ lineHeight: 1.6, fontSize: 17 }}>{es ? welcome.argosNoteEs : welcome.argosNoteEn}</p>
+              )}
             </>
           )}
-          {step === 1 && (
+          {currentId === 'argos' && (
+            <>
+              <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('¿Cargo la información de Argos Campestre que Rafael ya tiene?', 'Should I load the Argos Campestre information Rafael already has?')}</h2>
+              <p style={{ color: '#5C5650', lineHeight: 1.5 }}>{t('Queda Confidencial hasta que la apruebes en Confirmar datos. No invento precios ni datos legales.', 'It stays confidential until you approve it on Confirm facts. I do not invent prices or legal details.')}</p>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {ARGOS_OPTIONS.map((option) => {
+                  const selected = answers.argos_consent === option.id;
+                  return (
+                    <button key={option.id} type="button" onClick={() => setAnswers({ ...answers, argos_consent: option.id === 'all' || option.id === 'public' || option.id === 'later' ? option.id : '' })} style={{ textAlign: 'left', borderRadius: 12, border: selected ? '2px solid #D4A030' : '1px solid #E7E0D6', background: selected ? '#FFF9F0' : '#fff', padding: 12, cursor: 'pointer', minHeight: 48 }}>
+                      <strong>{es ? option.es : option.en}</strong>
+                      <div style={{ color: '#5C5650', fontSize: 14, marginTop: 4 }}>{es ? option.detailEs : option.detailEn}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          {currentId === 'empresa' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('¿Cómo se llama tu empresa?', 'What is your company called?')}</h2>
               <label>{t('Nombre legal', 'Legal name')}
@@ -481,7 +514,7 @@ export default function EntrevistaPage() {
               </label>
             </>
           )}
-          {step === 2 && (
+          {currentId === 'industria' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('¿A qué te dedicas?', 'What do you do?')}</h2>
               <p style={{ color: '#5C5650' }}>{t('Elige una plantilla o empieza en blanco. El precio no se inventa.', 'Pick a template or start blank. Prices are never invented.')}</p>
@@ -502,7 +535,7 @@ export default function EntrevistaPage() {
               </label>
             </>
           )}
-          {step === 3 && (
+          {currentId === 'oferta' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('¿Qué vendes?', 'What do you sell?')}</h2>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -570,7 +603,7 @@ export default function EntrevistaPage() {
               )}
             </>
           )}
-          {step === 4 && (
+          {currentId === 'clientes' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('¿Quiénes son tus clientes?', 'Who are your customers?')}</h2>
               <textarea value={answers.customer_who} onChange={(e) => setAnswers({ ...answers, customer_who: e.target.value })} rows={3} placeholder={t('Por ejemplo, pymes de tu ciudad', 'For example, local small businesses')} style={inputStyle} />
@@ -588,7 +621,7 @@ export default function EntrevistaPage() {
               <input aria-label={t('Teléfono del cliente', 'Customer phone')} value={answers.first_customer.phone} onChange={(e) => setAnswers({ ...answers, first_customer: { ...answers.first_customer, phone: e.target.value } })} placeholder={t('Teléfono', 'Phone')} style={inputStyle} />
             </>
           )}
-          {step === 5 && (
+          {currentId === 'dinero' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('¿Cómo manejas el dinero?', 'How do you handle money?')}</h2>
               <label>{t('Moneda', 'Currency')}
@@ -627,7 +660,7 @@ export default function EntrevistaPage() {
               </div>
             </>
           )}
-          {step === 6 && (
+          {currentId === 'equipo' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('¿Trabajas solo o con equipo?', 'Do you work alone or with a team?')}</h2>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -659,7 +692,7 @@ export default function EntrevistaPage() {
               )}
             </>
           )}
-          {step === 7 && (
+          {currentId === 'herramientas' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('¿Qué herramientas enciendo?', 'Which tools should I turn on?')}</h2>
               <p style={{ color: '#5C5650' }}>{t('Todas quedan apagadas hasta que tú las elijas.', 'They all stay off until you choose them.')}</p>
@@ -673,11 +706,11 @@ export default function EntrevistaPage() {
               </div>
             </>
           )}
-          {step === 8 && (
+          {currentId === 'confirmar' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('Confirmar datos', 'Confirm facts')}</h2>
               <p style={{ color: '#5C5650' }}>{t('Cada dato queda confidencial hasta que lo marques como Publicar. Lo confidencial no entra en redes ni en contenido público.', 'Each fact stays confidential until you mark it Publicar. Confidential facts stay out of social posts and public content.')}</p>
-              {confirmRows(answers).map((row) => {
+              {[...confirmRows(answers), ...argosRows.map((item) => ({ key: item.key, label: item.label, value: item.value }))].map((row) => {
                 const visibility = answers.fact_visibility[row.key] || 'confidential';
                 return (
                   <div key={row.key} style={{ borderTop: '1px solid #F0E6D8', padding: '12px 0' }}>
@@ -695,22 +728,23 @@ export default function EntrevistaPage() {
               })}
             </>
           )}
-          {step === 9 && (
+          {currentId === 'revision' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('Revisa antes de crear la empresa', 'Review before creating the company')}</h2>
               {[
-                { index: 1, title: label('empresa'), body: [answers.legal_name, answers.trade_name, answers.city, answers.country, answers.email, answers.phone, answers.website].filter(Boolean).join(' · ') || t('Sin datos', 'No details') },
-                { index: 2, title: label('industria'), body: [answers.template || t('En blanco', 'Blank'), answers.industry_description].filter(Boolean).join(' — ') },
-                { index: 3, title: label('oferta'), body: answers.items.filter((item) => item.name.trim()).map((item) => `${item.name}${item.price ? ` (${item.price})` : ''}`).join(', ') || t('Sin ítems', 'No items') },
-                { index: 4, title: label('clientes'), body: [answers.customer_type.toUpperCase(), answers.customer_who, answers.first_customer.name].filter(Boolean).join(' · ') },
-                { index: 5, title: label('dinero'), body: [answers.currency, answers.fiscal_year_start, answers.tax_id && `NIT ${answers.tax_id}`, answers.charges_iva ? 'IVA' : t('Sin IVA', 'No IVA'), answers.payment_methods.join(', ')].filter(Boolean).join(' · ') },
-                { index: 6, title: label('equipo'), body: answers.team_mode === 'equipo' ? `${t('Con equipo', 'With a team')}: ${answers.roles.join(', ') || t('sin roles', 'no roles')}` : t('Solo', 'Solo') },
-                { index: 7, title: label('herramientas'), body: MODULES.filter((mod) => answers.modules[mod.id]).map((mod) => (es ? mod.es : mod.en)).join(' · ') || t('Ninguna encendida', 'None turned on') },
+                ...(constructionShell ? [{ id: 'argos', title: label('argos'), body: ARGOS_OPTIONS.find((option) => option.id === answers.argos_consent)?.[es ? 'es' : 'en'] || t('Sin elegir', 'Not chosen') }] : []),
+                { id: 'empresa', title: label('empresa'), body: [answers.legal_name, answers.trade_name, answers.city, answers.country, answers.email, answers.phone, answers.website].filter(Boolean).join(' · ') || t('Sin datos', 'No details') },
+                { id: 'industria', title: label('industria'), body: [answers.template || t('En blanco', 'Blank'), answers.industry_description].filter(Boolean).join(' — ') },
+                { id: 'oferta', title: label('oferta'), body: answers.items.filter((item) => item.name.trim()).map((item) => `${item.name}${item.price ? ` (${item.price})` : ''}`).join(', ') || t('Sin ítems', 'No items') },
+                { id: 'clientes', title: label('clientes'), body: [answers.customer_type.toUpperCase(), answers.customer_who, answers.first_customer.name].filter(Boolean).join(' · ') },
+                { id: 'dinero', title: label('dinero'), body: [answers.currency, answers.fiscal_year_start, answers.tax_id && `NIT ${answers.tax_id}`, answers.charges_iva ? 'IVA' : t('Sin IVA', 'No IVA'), answers.payment_methods.join(', ')].filter(Boolean).join(' · ') },
+                { id: 'equipo', title: label('equipo'), body: answers.team_mode === 'equipo' ? `${t('Con equipo', 'With a team')}: ${answers.roles.join(', ') || t('sin roles', 'no roles')}` : t('Solo', 'Solo') },
+                { id: 'herramientas', title: label('herramientas'), body: MODULES.filter((mod) => answers.modules[mod.id]).map((mod) => (es ? mod.es : mod.en)).join(' · ') || t('Ninguna encendida', 'None turned on') },
               ].map((section) => (
-                <div key={section.index} style={{ borderTop: '1px solid #F0E6D8', padding: '12px 0' }}>
+                <div key={section.id} style={{ borderTop: '1px solid #F0E6D8', padding: '12px 0' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
                     <strong>{section.title}</strong>
-                    <button type="button" onClick={() => { setStep(section.index); scrollTop(); }} style={{ border: 'none', background: 'transparent', color: '#D4A030', fontWeight: 800, cursor: 'pointer', minHeight: 44 }}>
+                    <button type="button" onClick={() => { setStep(Math.max(steps.findIndex((item) => item.id === section.id), 0)); scrollTop(); }} style={{ border: 'none', background: 'transparent', color: '#D4A030', fontWeight: 800, cursor: 'pointer', minHeight: 44 }}>
                       {t('Editar', 'Edit')}
                     </button>
                   </div>
@@ -736,7 +770,7 @@ export default function EntrevistaPage() {
         </button>
         {step < last ? (
           <button type="button" onClick={onNext} disabled={busy || loading} style={{ flex: '1 1 140px', minHeight: 48, borderRadius: 12, border: 'none', background: '#D4A030', color: '#fff', fontWeight: 800, cursor: 'pointer' }}>
-            {step === 0 ? t('Empezar', 'Start') : t('Siguiente', 'Next')}
+            {currentId === 'bienvenida' ? t('Empezar', 'Start') : t('Siguiente', 'Next')}
           </button>
         ) : (
           <button type="button" onClick={finish} disabled={busy || loading} style={{ flex: '1 1 180px', minHeight: 48, borderRadius: 12, border: 'none', background: '#2D2A26', color: '#fff', fontWeight: 800, cursor: 'pointer' }}>

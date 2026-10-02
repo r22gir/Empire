@@ -39,12 +39,25 @@ def _euro_number(raw: str) -> float:
 
 
 def _facts_from_markdown(text: str) -> list[dict]:
-    """Public lines, except the day-one question list which stays confidential."""
+    """Public lines, except the day-one question list which stays confidential.
+
+    Argos Campestre is not loaded here. Maxine asks first, and those lines
+    stay confidential until Camilo approves them.
+    """
     facts = []
     confidential = False
+    skipping_argos = False
     index = 0
     for line in text.splitlines():
         stripped = line.strip()
+        if stripped.startswith("## Earlier project: Argos Campestre"):
+            skipping_argos = True
+            continue
+        if skipping_argos:
+            if stripped.startswith("## "):
+                skipping_argos = False
+            else:
+                continue
         if stripped.startswith("## Things to ask"):
             confidential = True
             continue
@@ -191,6 +204,113 @@ def _register_business(project: dict, project_id: str) -> None:
         registry["businesses"].append(profile)
     amp_businesses._save_registry(registry)
     amp_businesses._write_profile(project["slug"], profile)
+
+
+# Spanish lines Camilo can approve. Each one must match a bullet in the seed.
+# A new bullet raises instead of being copied or invented.
+_ARGOS_KNOWN = (
+    (
+        "lugar",
+        "public",
+        ("Limonar", "Santa Ana"),
+        "Argos Campestre: desarrollo de lotes campestres junto a la Urbanización El Limonar, en Cartago, cerca del centro y del aeropuerto Santa Ana.",
+    ),
+    (
+        "planos",
+        "internal",
+        ("170", "300", "parque infantil"),
+        "Planos 2022–2023: lotes Tipo 1 de unos 170 m² y Tipo 2 de unos 300 m², con zonas de reserva y amenidades (parque infantil, cicloruta, zona camping, salón social, sendero ecológico, huerta orgánica, zona de hamacas, parque lineal).",
+    ),
+    (
+        "marca",
+        "internal",
+        ("Lato", "#208D63", "#ECA400"),
+        "Marca: logo de árbol, fuente Lato, verdes #208D63 y #051B12, acento #ECA400.",
+    ),
+)
+
+
+def _argos_bullets(text: str) -> list[str]:
+    match = re.search(r"^## Earlier project: Argos Campestre.*$", text, re.M)
+    if not match:
+        raise ValueError("La semilla no trae Argos Campestre")
+    rest = text[match.end():]
+    nxt = re.search(r"^## ", rest, re.M)
+    section = rest[: nxt.start()] if nxt else rest
+    bullets = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            bullets.append(stripped[2:].strip())
+    if not bullets:
+        raise ValueError("Argos Campestre no trae líneas")
+    return bullets
+
+
+def argos_campestre_items(scope: str, text: Optional[str] = None) -> list[dict]:
+    """Facts for the consent screen. ``public`` is the place description. ``all`` adds the plans and the brand."""
+    if scope not in {"public", "all"}:
+        return []
+    if text is None:
+        file_path = seed_path()
+        if not file_path.is_file():
+            raise FileNotFoundError(f"No está el archivo de semilla: {file_path}")
+        text = file_path.read_text(encoding="utf-8")
+    items = []
+    used = set()
+    for bullet in _argos_bullets(text):
+        match = None
+        for key, kind, needles, spanish in _ARGOS_KNOWN:
+            if all(needle in bullet for needle in needles):
+                match = (key, kind, spanish)
+                break
+        if match is None:
+            raise ValueError("Hay una línea de Argos Campestre que no reconozco. No la copio.")
+        key, kind, spanish = match
+        if key in used:
+            raise ValueError("Línea de Argos Campestre repetida")
+        used.add(key)
+        if scope == "public" and kind != "public":
+            continue
+        items.append({
+            "key": f"argos:{key}",
+            "label": "Argos Campestre",
+            "value": spanish,
+            "text": spanish,
+            "visibility": "confidential",
+            "source": "argos",
+        })
+    if "lugar" not in used:
+        raise ValueError("La sección de Argos Campestre no trae la descripción del lugar")
+    if scope == "all" and used != {"lugar", "planos", "marca"}:
+        raise ValueError("La sección de Argos Campestre no trae las tres líneas conocidas")
+    return items
+
+
+def apply_argos_consent(answers: Optional[dict]) -> list[dict]:
+    """Write the chosen Argos lines as confidential unless he marked one Publicar."""
+    if not is_maxine():
+        return []
+    from app.services.edition_facts import delete_facts, upsert_fact
+
+    answers = answers if isinstance(answers, dict) else {}
+    choice = (answers.get("argos_consent") or "").strip().lower()
+    delete_facts({"argos:lugar", "argos:planos", "argos:marca"})
+    if choice not in {"all", "public"}:
+        return []
+    flags = answers.get("fact_visibility") if isinstance(answers.get("fact_visibility"), dict) else {}
+    saved = []
+    for item in argos_campestre_items(choice):
+        visibility = "public" if flags.get(item["key"]) == "public" else "confidential"
+        saved.append(upsert_fact(
+            key=item["key"],
+            text=item["text"],
+            value=item["value"],
+            label=item["label"],
+            visibility=visibility,
+            source="argos",
+        ))
+    return saved
 
 
 def load_maxine_seed(text: str) -> dict:

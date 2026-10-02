@@ -65,6 +65,6 @@ def test_route_renders_only_the_signed_in_edition():
         assert "/ayuda/dispositivos" in text or "/ayuda" in text
     assert "/ayuda/dispositivos" in menu
     assert "/ayuda/dispositivos" in card
-    last = wizard.split("step === 9", 1)[1]
-    assert 'href="/ayuda/dispositivos"' in last.split("step ===", 1)[0]
+    last = wizard.split("currentId === 'revision'", 1)[1]
+    assert 'href="/ayuda/dispositivos"' in last.split("currentId ===", 1)[0]
     assert "window.location.href = '/ayuda'" in nav
