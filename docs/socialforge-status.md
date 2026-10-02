@@ -1,108 +1,54 @@
-# SocialForge Status Report
+# SocialForge and MarketForge status
 
-**Date:** 2026-03-18
-**Overall:** UI complete, scheduling works, publishing blocked by missing OAuth
+SocialForge is the owner of every online account (social, marketplace, email, directories, Canva, and domain email) for each business. The account hub is `GET /api/v1/socialforge/accounts/hub`.
 
----
+Nothing auto-publishes. A post stays a draft, or is marked `held`, until the founder turns on that account's `auto-publish` toggle and the publisher is not paused.
 
-## Account Inventory
+OAuth providers stay at `needs_keys` until the env keys below are set. eBay, Amazon, and the other non-Etsy marketplaces report `needs_keys` or `not_connected`. They do not return a success URL.
 
-16 accounts tracked across 6 platform categories:
+## What is real
 
-| Platform | Accounts | Status | Notes |
-|----------|----------|--------|-------|
-| Instagram | Multiple | `not_started` | API token exists in `.env` but not wired to OAuth consent flow |
-| Facebook | Multiple | `not_started` | Page token exists in `.env` but not wired to OAuth consent flow |
-| X (Twitter) | Multiple | `not_started` | No API credentials configured |
-| TikTok | Multiple | `not_started` | No API credentials configured |
-| LinkedIn | Multiple | `not_started` | No API credentials configured |
-| Google Business | Multiple | `not_started` | No API credentials configured |
+- Account hub for Workroom and WoodCraft, with status, owner (`socialforge`), and last sync.
+- Fernet vault (`EMPIRE_VAULT_KEY`). It refuses to start without a valid key. Plaintext `social_accounts.access_token` values are sealed and the column is replaced with `vault:<id>`. API responses do not include tokens.
+- Founder PIN (`X-Founder-Pin`) for migration, OAuth start, auto-publish, and the pause switch.
+- Meta (Facebook and Instagram Graph), Pinterest, and LinkedIn authorize URLs and token refresh requests. The callback seals the token.
+- Publisher tick for Facebook and Instagram, with retry (3 attempts), per-post status, and a pause switch.
+- Etsy Open API v3: PKCE connect, shop token sealed in the vault, listing create forced to `draft`, listings and orders read with GET.
 
-All 16 accounts are at `not_started` status. No account has ever published a post through the system.
+## Register these redirect URIs
 
----
+Public base defaults to `https://studio.empirebox.store`. Override with `EMPIRE_PUBLIC_BASE_URL`. The URI registered at each provider must match that base plus the path.
 
-## What Works
+| Provider | Redirect URI |
+|----------|----------------|
+| Meta (Facebook Login, used for Facebook and Instagram) | `https://studio.empirebox.store/api/v1/socialforge/oauth/meta/callback` |
+| Pinterest | `https://studio.empirebox.store/api/v1/socialforge/oauth/pinterest/callback` |
+| LinkedIn | `https://studio.empirebox.store/api/v1/socialforge/oauth/linkedin/callback` |
+| Etsy | `https://studio.empirebox.store/api/v1/marketforge/oauth/etsy/callback` |
 
-- **Account tracking UI** — All 16 accounts display in the SocialForge dashboard with platform icons, names, and status indicators
-- **Post scheduling interface** — Create a post with text, select target accounts, pick a date/time, save to schedule
-- **AI content guide generation** — Ask MAX to generate a content plan for a platform/business and it returns a structured guide with post ideas, hashtags, and timing recommendations
-- **Dashboard metrics** — Shows account counts, scheduled post counts, and status breakdown (all zeros currently)
+## Env keys
 
-## What Is Missing
+| Key | Used for |
+|-----|----------|
+| `EMPIRE_VAULT_KEY` | Fernet key. The vault will not start without it. |
+| `EMPIRE_PUBLIC_BASE_URL` | Optional. Defaults to `https://studio.empirebox.store`. |
+| `META_APP_ID` | Meta app id |
+| `META_APP_SECRET` | Meta app secret |
+| `PINTEREST_APP_ID` | Pinterest app id |
+| `PINTEREST_APP_SECRET` | Pinterest app secret |
+| `LINKEDIN_CLIENT_ID` | LinkedIn client id |
+| `LINKEDIN_CLIENT_SECRET` | LinkedIn client secret |
+| `ETSY_CLIENT_ID` | Etsy keystring. PKCE does not use a client secret. |
+| `FOUNDER_PIN` | Founder gate for connect, vault migration, and publish controls |
 
-### 1. OAuth Consent Flows
-No OAuth implementation exists for any platform. Users cannot authorize Empire to post on their behalf. This is the primary blocker.
+Meta scopes requested: `pages_show_list`, `pages_manage_posts`, `pages_read_engagement`, `instagram_basic`, `instagram_content_publish`, `business_management`.
 
-**Required for each platform:**
-- Instagram: Facebook/Meta Business OAuth 2.0 flow
-- Facebook: Facebook Login with `pages_manage_posts` permission
-- X: OAuth 2.0 with PKCE (v2 API)
-- TikTok: TikTok Login Kit OAuth
-- LinkedIn: LinkedIn OAuth 2.0 with `w_member_social` scope
-- Google Business: Google OAuth 2.0 with Business Profile API scope
+Pinterest scopes: `boards:read`, `pins:read`, `pins:write`.
 
-### 2. Token Storage and Refresh
-- No secure token storage beyond the raw `.env` values
-- No token refresh logic for expired OAuth tokens
-- No token validation before attempting to post
+LinkedIn scopes: `openid`, `profile`, `w_member_social`.
 
-### 3. Auto-Publishing
-- Scheduled posts are saved but never actually sent to any platform API
-- No background worker/cron job to check for due posts and publish them
-- No retry logic for failed posts
-- No rate limiting per platform
+Etsy scopes: `listings_r`, `listings_w`, `transactions_r`, `shops_r`.
 
-### 4. Post API Integration
-- No code calls Instagram Graph API to create media
-- No code calls Facebook Pages API to create posts
-- No code calls X API v2 to create tweets
-- No code calls TikTok Content Posting API
-- No code calls LinkedIn UGC Post API
+## Still not connected
 
----
-
-## API Credentials Audit
-
-| Platform | Key in .env | Wired to OAuth | Wired to Post API |
-|----------|-------------|----------------|-------------------|
-| Instagram | YES (INSTAGRAM_*) | NO | NO |
-| Facebook | YES (FACEBOOK_*) | NO | NO |
-| X | NO | NO | NO |
-| TikTok | NO | NO | NO |
-| LinkedIn | NO | NO | NO |
-| Google Business | NO | NO | NO |
-
----
-
-## What's Needed to Ship
-
-### Phase 1: One Platform (Instagram)
-1. Implement Meta OAuth 2.0 consent flow with callback URL
-2. Store access token and refresh token in DB (encrypted)
-3. Build token refresh background job
-4. Implement Instagram Graph API `POST /me/media` and `POST /me/media_publish`
-5. Build scheduler worker that checks for due posts every 60 seconds
-6. Add post status tracking (scheduled -> publishing -> published / failed)
-
-### Phase 2: Expand to Remaining Platforms
-7. Facebook Pages API integration (shares Meta OAuth)
-8. X OAuth 2.0 + tweet creation
-9. TikTok Login Kit + content posting
-10. LinkedIn OAuth + UGC posts
-11. Google Business Profile API
-
-### Phase 3: Analytics
-12. Pull engagement metrics per post per platform
-13. Aggregate dashboard with reach, clicks, engagement rate
-14. AI-powered recommendations based on performance data
-
----
-
-## Estimated Effort
-
-| Phase | Effort | Dependency |
-|-------|--------|------------|
-| Phase 1 (Instagram) | 2-3 sessions | Meta developer app approval |
-| Phase 2 (All platforms) | 4-5 sessions | API keys for each platform |
-| Phase 3 (Analytics) | 2-3 sessions | Phase 1+2 complete |
+TikTok, X, Google Business, Houzz, Thumbtack, Yelp, Nextdoor, Canva, domain email, business email, eBay, Amazon, Facebook Marketplace, and Craigslist are listed in the hub and stay `not_connected` or `needs_keys`. There is no publisher for them and no fake OAuth success.
