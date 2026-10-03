@@ -6,27 +6,27 @@ const config: Config = {
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
-        gold: { DEFAULT: "#D4A030", light: "#F5E6C8", dark: "#B8860B", deep: "#8B6914" },
-        sunrise: { DEFAULT: "#FF8C42", light: "#FFD4B0", dark: "#E67320" },
-        earth: { DEFAULT: "#8B6F47", light: "#D4C4A8", dark: "#6B5230" },
-        sage: { DEFAULT: "#7CB98B", light: "#E8F5EC", dark: "#5A9A6A" },
-        lavender: { DEFAULT: "#9B8EC4", light: "#EDE8F5", dark: "#7B6EA4" },
-        warmwhite: "#FFF9F0",
-        cream: "#FEF7EC",
-        sand: "#F5EDE0",
+        gold: { DEFAULT: "#E0A526", light: "#FFE3B3", dark: "#B8860B", deep: "#8B6914" },
+        sunrise: { DEFAULT: "#F28C6B", light: "#FAD4C0", dark: "#E67320" },
+        sage: { DEFAULT: "#7E9F84", light: "#E4EDE6", dark: "#5A7A60" },
+        cream: "#FFF9F1",
+        surface: { DEFAULT: "#FFFFFF", dark: "#1E1B3A" },
+        night: { DEFAULT: "#14122B", card: "#1E1B3A", border: "#2E2A54" },
+        ink: { DEFAULT: "#2B2622", soft: "#6B625A", muted: "#8C837A" },
       },
       fontFamily: {
-        serif: ["Playfair Display", "Georgia", "serif"],
-        sans: ["Nunito", "system-ui", "sans-serif"],
+        serif: ["var(--font-fraunces)", "Playfair Display", "Georgia", "serif"],
+        sans: ["var(--font-inter)", "Nunito", "system-ui", "sans-serif"],
       },
       animation: {
         "fade-up": "fadeUp 0.6s ease-out forwards",
-        "float": "float 3s ease-in-out infinite",
-        "flicker": "flicker 1.5s ease-in-out infinite",
-        "shimmer": "shimmer 3s linear infinite",
+        "float": "float 4s ease-in-out infinite",
+        "pulse-slow": "pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+        "breathe": "breathe 6s cubic-bezier(0.22, 1, 0.36, 1) infinite",
       },
       keyframes: {
         fadeUp: {
@@ -37,13 +37,9 @@ const config: Config = {
           "0%, 100%": { transform: "translateY(0)" },
           "50%": { transform: "translateY(-6px)" },
         },
-        flicker: {
-          "0%, 100%": { opacity: "1", transform: "scale(1)" },
-          "50%": { opacity: "0.8", transform: "scale(1.1)" },
-        },
-        shimmer: {
-          "0%": { backgroundPosition: "0% center" },
-          "100%": { backgroundPosition: "200% center" },
+        breathe: {
+          "0%, 100%": { transform: "scale(1)" },
+          "50%": { transform: "scale(1.08)" },
         },
       },
     },
