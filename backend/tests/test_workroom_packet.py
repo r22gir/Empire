@@ -15,6 +15,7 @@ from app.services.estimates.workroom_packet import (
 from app.services.pricing.workroom_rules import (
     install_price,
     panel_widths,
+    reload_rules,
     reset_rules,
     set_rule,
     sheer_widths,
@@ -50,6 +51,32 @@ def test_rules_are_editable_and_reset():
     finally:
         reset_rules()
     assert install_price(72)["amount"] == 145
+
+
+def test_workroom_rules_persist_to_sqlite(isolated_empire_db):
+    import sqlite3
+
+    reset_rules()
+    try:
+        set_rule("install_per_window", 200.0)
+        set_rule("baton_each", 40.0)
+        reloaded = reload_rules()
+        assert reloaded["install_per_window"] == 200.0
+        assert reloaded["baton_each"] == 40.0
+        assert install_price(72)["amount"] == 200.0
+
+        conn = sqlite3.connect(isolated_empire_db)
+        rows = {
+            row[0]: row[1]
+            for row in conn.execute(
+                "SELECT rule_key, value FROM workroom_pricing_rules ORDER BY rule_key"
+            ).fetchall()
+        }
+        conn.close()
+        assert rows["install_per_window"] == 200.0
+        assert rows["baton_each"] == 40.0
+    finally:
+        reset_rules()
 
 
 def test_sample_packet_matches_reference_totals():

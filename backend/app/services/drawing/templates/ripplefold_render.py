@@ -73,7 +73,7 @@ def _spec_rows(job: RipplefoldJob) -> list[tuple[str, str]]:
         stack = format_inches(job.stack)
     control = {"center": "CENTER DRAW", "one-way": "ONE-WAY"}.get(job.control or "", "NOT GIVEN")
     masters = (job.masters or "NOT GIVEN").upper()
-    return [
+    rows = [
         ("WINDOW", format_inches(job.window_width)),
         ("HEIGHT", format_inches(job.window_height)),
         ("COVERAGE", f"{format_inches(job.coverage_width)}  {job.layer.upper()}"),
@@ -97,6 +97,7 @@ def _spec_rows(job: RipplefoldJob) -> list[tuple[str, str]]:
         if job.side_widths is not None:
             rows.append(("SIDE WIDTHS", format_inches(job.side_widths).replace('"', "") + " EACH"))
         rows.append(("SIDES", "STATIONARY DRAPERY"))
+    return rows
 
 
 def _dim_h(c, x0, x1, y, label, font) -> None:

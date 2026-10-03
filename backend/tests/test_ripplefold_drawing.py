@@ -143,6 +143,24 @@ def test_layered_sheet_names_both_fabrics():
     assert "PINCH" not in text
 
 
+def test_layered_spec_table_includes_side_panels():
+    from app.services.drawing.templates.drapery_render import render_drapery
+    from app.services.drawing.templates.ripplefold_render import _spec_rows
+    from app.services.drawing.templates.ripplefold_spec import resolve_ripplefold
+
+    job = resolve_ripplefold(_case(layer="sheer behind drapery", side_panels=2, side_widths=42))
+    labels = [label for label, _value in _spec_rows(job)]
+    assert labels[-3:] == ["SIDE PANELS", "SIDE WIDTHS", "SIDES"]
+
+    pdf = render_drapery(
+        _case(layer="sheer behind drapery", side_panels=2, side_widths=42),
+    )
+    text = _pdf_text(pdf)
+    assert "SIDE PANELS" in text
+    assert "SIDE WIDTHS" in text
+    assert "STATIONARY DRAPERY" in text
+
+
 def test_stationary_side_panels_span_track_to_hem():
     from app.services.drawing.templates import ripplefold_render as rr
 

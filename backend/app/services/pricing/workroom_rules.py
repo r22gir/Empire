@@ -8,11 +8,16 @@ unless the founder sets a flat rate for the section. Re-line widths are
 rounded up to the next half width, per panel. Sheers use that same
 width count on the coverage, then half of it because the fabric is
 double width, rounded up to the half width again.
+
+Edits from ``POST /pricing/workroom/rules`` persist in SQLite
+(``workroom_pricing_rules``); missing keys fall back to ``DEFAULT_RULES``.
 """
 from __future__ import annotations
 
+import logging
 import math
 
+logger = logging.getLogger(__name__)
 
 DEFAULT_RULES: dict[str, float] = {
     "install_per_window": 145.0,
@@ -34,23 +39,108 @@ DEFAULT_RULES: dict[str, float] = {
 }
 
 _RULES: dict[str, float] = dict(DEFAULT_RULES)
+_LOADED_FROM_DB = False
+
+
+def _ensure_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workroom_pricing_rules (
+            rule_key TEXT PRIMARY KEY NOT NULL,
+            value REAL NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+
+
+def _load_from_db() -> None:
+    global _LOADED_FROM_DB
+    from app.db.database import get_db
+
+    merged = dict(DEFAULT_RULES)
+    try:
+        with get_db() as conn:
+            _ensure_table(conn)
+            rows = conn.execute(
+                "SELECT rule_key, value FROM workroom_pricing_rules"
+            ).fetchall()
+            for row in rows:
+                key = row["rule_key"]
+                if key in DEFAULT_RULES:
+                    merged[key] = float(row["value"])
+    except Exception:
+        logger.debug("workroom rules: could not load from DB", exc_info=True)
+    _RULES.clear()
+    _RULES.update(merged)
+    _LOADED_FROM_DB = True
+
+
+def _ensure_loaded() -> None:
+    if not _LOADED_FROM_DB:
+        _load_from_db()
+
+
+def _persist_rule(key: str, value: float) -> None:
+    from app.db.database import get_db
+
+    with get_db() as conn:
+        _ensure_table(conn)
+        conn.execute(
+            """
+            INSERT INTO workroom_pricing_rules (rule_key, value, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(rule_key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, float(value)),
+        )
+
+
+def _clear_persisted() -> None:
+    from app.db.database import get_db
+
+    with get_db() as conn:
+        _ensure_table(conn)
+        conn.execute("DELETE FROM workroom_pricing_rules")
 
 
 def rules() -> dict[str, float]:
+    _ensure_loaded()
     return dict(_RULES)
+
+
+def reload_rules() -> dict[str, float]:
+    """Re-read persisted rules from SQLite (for tests and worker reload)."""
+    global _LOADED_FROM_DB
+    _LOADED_FROM_DB = False
+    _ensure_loaded()
+    return rules()
 
 
 def reset_rules() -> dict[str, float]:
     _RULES.clear()
     _RULES.update(DEFAULT_RULES)
+    try:
+        _clear_persisted()
+    except Exception:
+        logger.debug("workroom rules: could not clear persisted rules", exc_info=True)
+    global _LOADED_FROM_DB
+    _LOADED_FROM_DB = True
     return rules()
 
 
 def set_rule(key: str, value: float) -> dict[str, float]:
+    _ensure_loaded()
     if key not in DEFAULT_RULES:
         known = ", ".join(sorted(DEFAULT_RULES))
         raise KeyError(f"Unknown workroom rule '{key}'. Known: {known}")
     _RULES[key] = float(value)
+    try:
+        _persist_rule(key, float(value))
+    except Exception:
+        logger.debug("workroom rules: could not persist %s", key, exc_info=True)
     return rules()
 
 
@@ -61,6 +151,7 @@ def apply_rules(updates: dict) -> dict[str, float]:
 
 
 def rule(key: str) -> float:
+    _ensure_loaded()
     return float(_RULES[key])
 
 
