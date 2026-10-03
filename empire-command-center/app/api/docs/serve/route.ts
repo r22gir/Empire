@@ -88,6 +88,11 @@ function firstExisting(docPath: string): { resolved: string | null; denied: bool
 }
 
 export async function GET(req: NextRequest) {
+  // DATA ISOLATION (2026-10-03): family editions never read host files here.
+  const _edition = (process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').trim().toLowerCase();
+  if (_edition === 'amp' || _edition === 'maxine' || process.env.EMPIRE_DOCS_ROUTES_DISABLED === '1') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
   const docPath = req.nextUrl.searchParams.get('path');
   const probe = req.nextUrl.searchParams.get('probe') === '1';
   if (!docPath) {
