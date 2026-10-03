@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
@@ -7,7 +7,7 @@ import { COURSES, PILLAR_CONFIG } from '../../lib/data';
 import type { Pillar } from '../../lib/data';
 import { BookOpen, Users, Star, Lock, ChevronLeft, Check, Clock, ArrowRight } from 'lucide-react';
 
-export default function RetosPage() {
+function RetosContent() {
   const searchParams = useSearchParams();
   const courseId = searchParams.get('id');
   const [filter, setFilter] = useState<'all' | Pillar>('all');
@@ -216,5 +216,13 @@ export default function RetosPage() {
       </main>
       <Footer />
     </div>
+  );
+}
+
+export default function RetosPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-warmwhite flex items-center justify-center text-sm font-semibold text-[#5C5650]">Cargando retos...</div>}>
+      <RetosContent />
+    </Suspense>
   );
 }
