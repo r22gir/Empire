@@ -68,6 +68,7 @@ import LiveVoiceCall from './components/LiveVoiceCall';
 import './theme/cyber.css';
 import './theme/cyber-shell.css';
 import './theme/cyber-layout.css';
+import './theme/cyber-pages.css';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));

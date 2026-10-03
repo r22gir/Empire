@@ -79,9 +79,9 @@ export default function ConstructionForgePage({ initialSection }: ConstructionFo
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%', background: '#faf9f7' }}>
+    <div className="cy-module" style={{ display: 'flex', height: '100%', background: '#faf9f7' }}>
       {/* Sidebar */}
-      <div style={{ width: 200, borderRight: '1px solid #e5e2dc', padding: '16px 0', flexShrink: 0, overflowY: 'auto' }}>
+      <div className="cy-module-nav" style={{ width: 200, borderRight: '1px solid #e5e2dc', padding: '16px 0', flexShrink: 0, overflowY: 'auto' }}>
         <div style={{ padding: '0 16px 12px', borderBottom: '1px solid #e5e2dc', marginBottom: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#b8960c', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Building2 size={16} /> ConstructionForge
@@ -106,7 +106,7 @@ export default function ConstructionForgePage({ initialSection }: ConstructionFo
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+      <div className="cy-module-main" style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
           <ViewPdfControl mode="print" title="ConstructionForge has no project PDF on this screen. This prints the current view." />
         </div>

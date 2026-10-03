@@ -70,8 +70,8 @@ export default function LeadForgePage({ initialSection }: LeadForgePageProps) {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%', background: '#faf9f7' }}>
-      <div style={{ width: 200, borderRight: '1px solid #e5e2dc', padding: '16px 0', flexShrink: 0, overflowY: 'auto' }}>
+    <div className="cy-module" style={{ display: 'flex', height: '100%', background: '#faf9f7' }}>
+      <div className="cy-module-nav" style={{ width: 200, borderRight: '1px solid #e5e2dc', padding: '16px 0', flexShrink: 0, overflowY: 'auto' }}>
         <div style={{ padding: '0 16px 12px', borderBottom: '1px solid #e5e2dc', marginBottom: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Crosshair size={16} /> LeadForge
@@ -89,7 +89,7 @@ export default function LeadForgePage({ initialSection }: LeadForgePageProps) {
           </button>
         ))}
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>{renderContent()}</div>
+      <div className="cy-module-main" style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>{renderContent()}</div>
     </div>
   );
 }

@@ -1350,6 +1350,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           {/* Text input */}
           <div style={{
             flex: 1,
+            minWidth: 0,
             background: codeMode ? '#fdf8eb' : voiceMode ? '#f5f0ff' : '#fff',
             border: `1.5px solid ${codeMode ? '#b8960c' : voiceMode ? '#7c3aed' : inputFocused ? 'var(--gold)' : 'var(--border)'}`,
             borderRadius: 14,

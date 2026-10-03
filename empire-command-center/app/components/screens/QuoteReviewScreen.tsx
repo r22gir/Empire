@@ -956,7 +956,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                     <div key={`${diagram.label}-${index}`} style={{ marginBottom: 12, padding: 10, border: '1px solid #ece8e0', borderRadius: 8, background: '#fff' }}>
                       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{diagram.label}</div>
                       {diagram.svg ? (
-                        <div style={{ maxWidth: 720 }} dangerouslySetInnerHTML={{ __html: diagram.svg }} />
+                        <div className="cy-keep-light cy-paper" style={{ maxWidth: 720 }} dangerouslySetInnerHTML={{ __html: diagram.svg }} />
                       ) : (
                         <p style={{ margin: 0, fontSize: 12, color: '#8a5a00' }}>{diagram.note || 'Idea diagram unavailable. The quote totals are unchanged.'}</p>
                       )}
