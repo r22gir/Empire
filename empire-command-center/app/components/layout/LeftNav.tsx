@@ -11,7 +11,7 @@ import {
   ChevronDown, ChevronRight,
 } from 'lucide-react';
 
-interface NavItem {
+export interface NavItem {
   id: string;
   name: string;
   icon: React.ReactNode;
@@ -22,7 +22,7 @@ interface NavItem {
   kind?: 'product' | 'screen' | 'daily-summary';
 }
 
-interface NavGroup {
+export interface NavGroup {
   key: string;
   label: string;
   defaultExpanded: boolean;
@@ -37,7 +37,8 @@ interface NavGroup {
 // "Daily Summary" replaces the loose Dashboard toggle below the
 // divider — it is now a 4th item inside Command.
 // ------------------------------------------------------------------
-const NAV_GROUPS: NavGroup[] = [
+// Exported so /preview/cockpit can mirror the real menu (same items, same order).
+export const NAV_GROUPS: NavGroup[] = [
   {
     key: 'command',
     label: 'Command',

@@ -112,6 +112,29 @@ const PRODUCT_DEEP_LINKS: Partial<Record<string, EcosystemProduct>> = {
   llcfactory: 'llc',
 };
 
+// Generic deep links used by /preview/cockpit (hexagon menu): every left-nav
+// product can be opened with /?product=<id>[&screen=<screen>][&section=<s>]
+// and the screen-only items with /?screen=<screen>. Same landing screen as a
+// click on that item in LeftNav (see handleProductChange below).
+const NAV_PRODUCT_IDS = new Set<string>([
+  'owner', 'workroom', 'craft', 'social', 'platform', 'openclaw', 'vendorops', 'recovery', 'luxe',
+  'hardware', 'system', 'tokens', 'max-continuity', 'market', 'contractor', 'support', 'lead', 'ship',
+  'crm', 'relist', 'llc', 'apost', 'assist', 'pay', 'amp', 'vetforge', 'petforge', 'vision',
+  'max-avatar', 'dev', 'drawings', 'construction', 'storefront', 'archive', 'transcript',
+]);
+const NAV_SCREEN_IDS = new Set<string>([
+  'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
+  'report', 'desks', 'memory-bank', 'telegram', 'docs', 'research',
+]);
+function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
+  if (product === 'owner') return 'chat';
+  if (product === 'max-avatar') return 'presentation';
+  if (product === 'tokens') return 'costs';
+  if (product === 'system') return 'report';
+  if (product === 'dev') return 'dev';
+  return 'dashboard';
+}
+
 export default function CommandCenter() {
   const [activeProduct, setActiveProduct] = useState<EcosystemProduct>('owner');
   const [activeScreen, setActiveScreen] = useState<ScreenMode>('chat');
@@ -210,6 +233,24 @@ export default function CommandCenter() {
         setActiveProduct('craft');
         setActiveScreen('dashboard');
         setActiveSection(sectionParam);
+        return;
+      }
+      // Generic product deep link (/preview/cockpit hexagon menu).
+      if (productParam && NAV_PRODUCT_IDS.has(productParam)) {
+        const p = productParam as EcosystemProduct;
+        const screenParam = params.get('screen');
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct(p);
+        setActiveScreen(screenParam && NAV_SCREEN_IDS.has(screenParam) ? (screenParam as ScreenMode) : defaultScreenForProduct(p));
+        setActiveSection(sectionParam);
+        return;
+      }
+      // Generic screen-only deep link (e.g. /?screen=business-profile, /?screen=jobs).
+      const screenOnly = params.get('screen');
+      if (screenOnly && NAV_SCREEN_IDS.has(screenOnly)) {
+        pendingDeepLinkScreen.current = null;
+        setActiveScreen(screenOnly as ScreenMode);
+        setActiveSection(null);
         return;
       }
       const candidate = params.get('screen') || window.location.hash.replace(/^#/, '');
@@ -388,6 +429,23 @@ export default function CommandCenter() {
   const handleSendMessage = useCallback((msg: string, imageFilename?: string | null) => {
     chat.sendMessage(msg, imageFilename);
   }, [chat]);
+
+  // /preview/cockpit "Ask Max anything": /?product=owner&ask=<text> opens Max
+  // chat and sends that question once. The param is stripped right away so a
+  // reload never re-sends it.
+  const askHandled = useRef(false);
+  useEffect(() => {
+    if (askHandled.current) return;
+    const url = new URL(window.location.href);
+    const ask = (url.searchParams.get('ask') || '').trim();
+    if (!ask) return;
+    askHandled.current = true;
+    url.searchParams.delete('ask');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    setActiveProduct('owner');
+    setActiveScreen('chat');
+    handleSendMessage(ask.slice(0, 2000));
+  }, [handleSendMessage]);
 
   // Auto-save chat after every assistant message
   useEffect(() => {
