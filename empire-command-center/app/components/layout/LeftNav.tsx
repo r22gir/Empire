@@ -201,9 +201,9 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
           className="fixed bottom-20 left-3 z-[110] flex items-center justify-center"
           style={{
             width: 48, height: 48, borderRadius: 14,
-            background: '#b8960c', color: '#fff',
-            boxShadow: '0 4px 16px rgba(184,150,12,0.4)',
-            border: 'none', cursor: 'pointer',
+            background: 'rgba(0, 20, 30, 0.92)', color: 'var(--cy-cyan, #00e5ff)',
+            boxShadow: '0 0 18px rgba(0, 229, 255, 0.45)',
+            border: '1px solid var(--cy-cyan, #00e5ff)', cursor: 'pointer',
           }}
           aria-label="Open menu"
         >
@@ -222,7 +222,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
       {/* Nav panel */}
       {showNav && (
         <nav
-          className={`bg-[var(--panel)] border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto ${
+          className={`cy-nav bg-[var(--panel)] border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto ${
             isMobile ? 'fixed inset-y-0 left-0 z-[101] shadow-2xl' : ''
           }`}
           style={{
@@ -279,7 +279,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
                         ? <ChevronDown size={11} className="text-[#999] shrink-0" />
                         : <ChevronRight size={11} className="text-[#999] shrink-0" />
                       }
-                      <span style={{ fontSize: 10, fontWeight: 700, color: '#666', letterSpacing: 1, textTransform: 'uppercase' }}>
+                      <span className="cy-nav-group" style={{ fontSize: 10, fontWeight: 700, color: '#666', letterSpacing: 1, textTransform: 'uppercase' }}>
                         {group.label}
                       </span>
                       <span style={{ fontSize: 9, color: '#aaa', background: '#f0ede8', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>
@@ -305,37 +305,21 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
                         <button
                           key={item.id}
                           onClick={() => handleNavClick(item)}
-                          className="w-full text-left flex items-center gap-2.5 cursor-pointer transition-all"
-                          style={{
-                            padding: '8px 10px',
-                            borderRadius: 10,
-                            fontSize: 12.5,
-                            minHeight: 36,
-                            border: isActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
-                            background: isActive ? '#fdf8eb' : 'transparent',
-                            fontWeight: isActive ? 600 : 400,
-                            boxShadow: isActive ? '0 1px 4px rgba(184,150,12,0.08)' : 'none',
-                          }}
-                          onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; } }}
-                          onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
+                          className={`cy-tab cy-nav-item${isActive ? ' is-active' : ''}${item.status === 'planned' && !isActive ? ' is-planned' : ''}`}
+                          aria-current={isActive ? 'page' : undefined}
+                          title={item.name}
                         >
-                          <span className="shrink-0" style={{ color: isActive ? '#b8960c' : item.color, opacity: isActive ? 1 : 0.7 }}>
+                          <span className="cy-tab-ico" style={{ color: isActive ? 'var(--cy-cyan)' : item.color, opacity: isActive ? 1 : 0.85 }}>
                             {item.icon}
                           </span>
-                          <span className="flex-1 truncate" style={{ color: isActive ? '#96750a' : '#666' }}>{item.name}</span>
+                          <span className="cy-tab-label">{item.name}</span>
                           {item.kind === 'daily-summary' ? (
-                            <span style={{ fontSize: 7, color: showDashboard ? '#b8960c' : '#9ca3af', fontWeight: 700, background: showDashboard ? '#fdf8eb' : '#f3f4f6', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>
-                              {showDashboard ? 'ON' : 'OFF'}
-                            </span>
+                            <span className={`cy-tab-badge${showDashboard ? ' is-on' : ''}`}>{showDashboard ? 'ON' : 'OFF'}</span>
                           ) : (
-                            <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: isActive ? '#b8960c' : statusDot }} />
+                            <span className="cy-nav-dot" style={{ background: isActive ? 'var(--cy-cyan)' : statusDot }} />
                           )}
-                          {item.status === 'dev' && !isActive && (
-                            <span style={{ fontSize: 7, color: '#d97706', fontWeight: 700, background: '#fffbeb', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>DEV</span>
-                          )}
-                          {item.status === 'planned' && !isActive && (
-                            <span style={{ fontSize: 7, color: '#9ca3af', fontWeight: 700, background: '#f3f4f6', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>SOON</span>
-                          )}
+                          {item.status === 'dev' && !isActive && <span className="cy-tab-badge">DEV</span>}
+                          {item.status === 'planned' && !isActive && <span className="cy-tab-badge is-muted">SOON</span>}
                         </button>
                       );
                     })}

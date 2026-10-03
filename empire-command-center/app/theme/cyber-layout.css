@@ -1,0 +1,42 @@
+/* Cyber skin — shared layout pieces of the classic Command Center shell
+   (TopBar, LeftNav, BottomBar, page area). Hand-written; loaded after the
+   generated cyber-shell.css. Visual only. */
+
+/* ---------- top bar ---------- */
+.cy-shell > header, .cy-shell header.h-\[56px\] {
+  background: linear-gradient(180deg, rgba(0, 20, 30, 0.96), rgba(2, 10, 16, 0.94)) !important;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.3) !important;
+  box-shadow: 0 1px 0 rgba(0, 229, 255, 0.08), 0 6px 24px rgba(0, 229, 255, 0.06);
+}
+.cy-shell .cy-logo { font-family: var(--cy-mono); letter-spacing: 0.24em !important; color: #eaffff !important; text-shadow: 0 0 12px rgba(0, 229, 255, 0.65); }
+.cy-shell .cy-logo .text-\[var\(--gold\)\] { color: var(--cy-cyan) !important; }
+.cy-shell .cy-logo-ring { border-color: rgba(0, 229, 255, 0.45) !important; color: var(--cy-cyan) !important; text-shadow: none;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); }
+.cy-shell .cy-logo:hover .cy-logo-ring, .cy-shell .cy-logo:focus-visible .cy-logo-ring { background: rgba(0, 229, 255, 0.15); }
+.cy-shell header button[aria-label="Back"] { font-family: var(--cy-mono); letter-spacing: 0.12em; text-transform: uppercase; }
+.cy-shell header button[aria-label="Back"]:hover { background: rgba(0, 229, 255, 0.1) !important; border-color: rgba(0, 229, 255, 0.4) !important; color: var(--cy-cyan) !important; }
+
+/* ---------- left nav: angular neon tabs ---------- */
+.cy-shell .cy-nav {
+  background: linear-gradient(180deg, rgba(1, 10, 16, 0.97), rgba(1, 6, 10, 0.97)) !important;
+  border-right: 1px solid rgba(0, 229, 255, 0.22) !important;
+  box-shadow: inset -1px 0 0 rgba(0, 229, 255, 0.05);
+}
+.cy-shell .cy-nav-group { font-family: var(--cy-mono); color: var(--cy-cyan) !important; letter-spacing: 0.2em !important; opacity: 0.85; }
+.cy-shell .cy-nav > div > button[aria-expanded]:hover { background: rgba(0, 229, 255, 0.07) !important; }
+.cy-shell .cy-nav-item { min-height: 34px; padding: 0 10px 0 12px; font-size: 10.5px; letter-spacing: 0.08em; gap: 9px; }
+.cy-shell .cy-nav-item .cy-tab-ico svg { width: 14px; height: 14px; }
+.cy-shell .cy-nav-item.is-planned { opacity: 0.55; }
+.cy-nav-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 6px currentColor; }
+.cy-tab-badge.is-on { color: var(--cy-cyan); }
+.cy-tab-badge.is-muted { color: var(--cy-muted); }
+
+/* ---------- bottom status bar ---------- */
+.cy-shell .bg-\[\#1a1a1a\].border-t, .cy-shell [class*="border-t"][class*="bg-[#1a1a1a]"] { background: #000 !important; border-top-color: rgba(0, 229, 255, 0.3) !important; }
+
+/* ---------- page area ---------- */
+.cy-shell main, .cy-shell [data-cy-page] { background: transparent; }
+.cy-shell .cy-page-pad { padding: 16px; }
+@media (max-width: 767px) {
+  .cy-shell .cy-nav-item { min-height: 40px; font-size: 11px; }
+}

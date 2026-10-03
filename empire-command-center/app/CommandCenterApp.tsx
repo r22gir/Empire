@@ -65,6 +65,9 @@ import ProductDocs from './components/business/docs/ProductDocs';
 import TasksScreen from './components/screens/TasksScreen';
 import PresentationScreen from './components/screens/PresentationScreen';
 import LiveVoiceCall from './components/LiveVoiceCall';
+import './theme/cyber.css';
+import './theme/cyber-shell.css';
+import './theme/cyber-layout.css';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));
@@ -624,7 +627,7 @@ export default function CommandCenter() {
   };
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="cy-shell h-screen flex flex-col">
       {clientView && (
         <div className="bg-[#16a34a] text-white text-center py-2 text-xs font-bold tracking-widest flex items-center justify-center gap-3 shadow-[0_2px_8px_rgba(22,163,74,0.3)]">
           <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
