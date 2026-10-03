@@ -1,36 +1,40 @@
 # Actitud Mental Positiva (AMP) — El Portal de la Alegría
 ### Sitio Web Público & Plataforma Digital — Juan Diego Giraldo
 
-Bienvenido al nuevo portal público y plataforma web de **Actitud Mental Positiva (AMP)**, "El Portal de la Alegría", diseñado con estándares visuales inspirados en Calm, Headspace y Mindvalley, 100% en español, mobile-first y accesible (WCAG 2.2 AA).
+Portal público y plataforma web de **Actitud Mental Positiva (AMP)**, "El Portal de la Alegría", diseñado con los más altos estándares visuales inspirados en **Mindvalley**, **Calm**, **Headspace** e **Insight Timer**, 100% en español, mobile-first y accesible (WCAG 2.2 AA).
 
 ---
 
-## 🌟 Arquitectura y Características
+## 🌟 Arquitectura y Experiencia Visual Premium
 
-1. **Sistema de Diseño**:
-   - Paleta cromática: `gold` (#E0A526), `sunrise` (#F28C6B), `sage` (#7E9F84), `night` (#14122B), `cream` (#FFF9F1).
-   - Tipografía: **Fraunces** (titulares humanistas y cálidos) + **Inter** (cuerpo de texto legible).
-   - Modo Claro y Modo Oscuro con detección automática del sistema y selector manual.
-   - Animaciones suaves de respiración (`breathe-orb`), gradientes fluidos y microinteracciones.
-2. **Navegación Móvil y de Escritorio**:
-   - Barra de navegación superior fija en escritorio con accesos directos y llamada a la acción.
-   - Barra de navegación inferior tipo aplicación móvil nativa (`MobileBottomNav`) en pantallas pequeñas.
-   - Sin bloqueos de scroll (`100vh traps` o `overflow: hidden` descontrolado).
-3. **Reproductor de Audio Global y Persistente (`GlobalAudioPlayer`)**:
-   - Mantiene la reproducción continua mientras el usuario navega entre cualquier página del sitio.
-   - Controles de reproducción, retroceso/adelanto de 15 segundos, barra de progreso (scrubber), selector de velocidad (`0.75x`, `1x`, `1.25x`, `1.5x`).
-   - Modo barra inferior compacta, minimizado (pill flotante) y modal expandido inmersivo con visualizador de respiración y transcripción.
-   - Integración nativa con **MediaSession API** para control desde la pantalla de bloqueo en iOS y Android.
-4. **Páginas Públicas**:
-   - `/` (**Inicio**): Hero inmersivo, valor diferencial, los 3 pilares (Mentalidad, Bienestar, Liderazgo), check-in emocional instantáneo, meditaciones destacadas, perfiles de coaches, testimonios y llamada a membresía.
-   - `/conocenos` (**Conócenos**): Biografías completas, filosofía y credenciales de Juan Diego Giraldo, Andrea Silva, Dericielo Jiménez y Lina Valencia Triviño.
-   - `/servicios` (**Servicios**): Sesiones 1:1, talleres grupales, membresía y bienestar corporativo.
-   - `/biblioteca` (**Biblioteca de Audio**): Explorador temático (Ansiedad, Sueño, Gratitud, Autoestima, Duelo, Liderazgo), filtro por duración y coach, con reproducción directa.
-   - `/blog` y `/blog/[slug]` (**Blog**): Artículos reflexivos y guías de vida con meditaciones sugeridas.
-   - `/agenda` (**Agenda & Encuentros**): Reserva de sesiones con selector de coach e integración con Cal.com / Google Calendar.
-   - `/membresia` (**Membresía**): Planes Gratuito y Premium ($9.99/mes o $79.99/año con 7 días de prueba), listado de beneficios y pasarela Stripe Checkout en modo prueba.
-   - `/animo` (**¿Cómo te sientes hoy?**): Registro diario de estado de ánimo conectado al API de AMP (`/api/v1/amp/moods`), notas reflexivas, historial en calendario y recomendaciones personalizadas.
-   - `/onboarding` (**Diagnóstico Inicial & Registro**): Cuestionario de 3 pasos, creación de cuenta vía AMP Auth (`/api/v1/amp/signup`) e inyección automática del prospecto al CRM LeadForge (`/api/v1/leads/`).
+1. **Sistema de Diseño de Nivel Internacional**:
+   - **Paleta cromática**: `gold` (#E0A526), `sunrise` (#F28C6B), `sage` (#7E9F84), `night` (#0E0C1C / #17142E), `cream` (#FFFDF9 / #FDF8F0).
+   - **Tipografía**: **Fraunces** (titulares humanistas, editoriales y cálidos) + **Inter** (cuerpo de texto con legibilidad óptima y escala tipográfica refinada).
+   - **Glassmorphism & Profundidad**: Encabezados translúcidos con desenfoque de fondo (`backdrop-filter`), tarjetas con borde sutil y sombras multicapa.
+   - **Modo Claro y Modo Oscuro** con detección automática del sistema operativo y selector manual sin parpadeos.
+   - **Animaciones sutiles**: Orbe de respiración pulsante (`breathe-orb`), gradientes en movimiento y respeto estricto a `prefers-reduced-motion`.
+2. **Hero Cinematográfico Full-Bleed**:
+   - Fondo inmersivo fotográfico de amanecer y naturaleza con velo de gradiente para contraste y legibilidad.
+   - Check-in emocional interactivo inmediato ("¿Cómo te sientes hoy?") sin registro previo que recomienda la práctica adecuada al instante.
+   - Franja de validación social y credibilidad con avales metodológicos (Mindvalley Alumni, ICF Coaches, Podcast Positivo).
+3. **Diseño Centrado en Maestros (Teacher-Forward - Estilo Mindvalley)**:
+   - Tarjetas de retratos grandes para los cuatro guías principales: **Juan Diego Giraldo**, **Andrea Silva**, **Dericielo Jiménez** y **Lina Valencia Triviño**.
+   - Tarjetas de **Programas y Retos de 21 Días** con arte de portada temático, nombre del mentor, nivel, lecciones y semanas de duración.
+4. **Reproductor de Audio Global y Persistente (`GlobalAudioPlayer`)**:
+   - **Persistencia total**: Sigue sonando ininterrumpidamente mientras el usuario navega entre cualquier página del sitio.
+   - **Archivos de audio reales locales**: Pistas sonoras binaurales generadas en frecuencias Solfeggio (174Hz, 285Hz, 528Hz armónico) alojadas en `/public/audio/` para reproducción inmediata sin URLs rotas.
+   - **Modo Inmersivo a Pantalla Completa**: Fondo difuminado con la temática, orbe de respiración consciente, transcripción accesible completa, selector de velocidad (`0.75x`, `1x`, `1.25x`, `1.5x`), saltos de 15 segundos y barra de avance interactiva.
+   - **MediaSession API**: Permite pausar, reanudar y controlar desde la pantalla de bloqueo en iPhone, Android o Apple Watch.
+5. **Biblioteca al Estilo Calm / Headspace**:
+   - Mosaicos fotográficos inmersivos para cada ambiente temático (*Ansiedad & Calma, Sueño Profundo, Gratitud & Dicha, Amor Propio, Duelo & Sanación, Liderazgo & Enfoque*).
+   - Filtros dinámicos por temática, duración y coach, con tarjetas de audio que muestran duración, categoría y botón de escucha inmediata.
+6. **Módulo de Membresía & Comparador**:
+   - Tabla comparativa de beneficios detallada entre el plan Gratuito y Premium Alegría ($9.99/mes o $79.99/año con 7 días de prueba gratis).
+   - Conexión con Stripe Checkout en modo prueba (`/api/v1/payments/create-checkout-session`).
+7. **Navegación Móvil y Accesibilidad**:
+   - Barra de navegación inferior móvil (`MobileBottomNav`) con sensación de app nativa.
+   - Banner persistente de llamado a la acción (*sticky CTA*) en móviles.
+   - Scroll nativo y fluido sin bloqueos (`no overflow-hidden / 100vh traps`).
 
 ---
 
@@ -50,7 +54,7 @@ npm install
 Crea un archivo `.env.local` en la raíz de `amp/` con las siguientes claves:
 
 ```bash
-# URL del backend de APIs (AMP y LeadForge)
+# URL del backend de APIs (AMP y LeadForge CRM)
 NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 
 # URL de reserva de citas (Cal.com o Google Calendar)
@@ -118,22 +122,22 @@ server {
 
 ## 📝 Lista de Elementos Reemplazables para Juan Diego Giraldo (Checklist)
 
-Los siguientes elementos cuentan actualmente con marcadores de posición (*placeholders*) claramente señalizados y deben ser provistos o actualizados para el lanzamiento final:
+Los siguientes recursos multimedia cuentan actualmente con sustitutos profesionales de muestra (stock con licencia libre y audios sintéticos calibrados) listos para ser reemplazados por los materiales definitivos de Juan Diego:
 
-- [ ] **Fotografías Oficiales de Coaches** (`src/lib/amp-content.ts` y `/public/coaches/`):
-  - **Juan Diego Giraldo**: Fotografía en alta resolución para el hero y ficha de coach.
-  - **Andrea Silva**: Fotografía profesional orientada a crianza y familia.
-  - **Dericielo Jiménez**: Fotografía profesional orientada a amor propio y duelo.
-  - **Lina Valencia Triviño**: Fotografía profesional orientada a resiliencia y liderazgo.
-- [ ] **Video / Imagen de Fondo del Hero** (`src/app/page.tsx`):
-  - Video relajante de naturaleza o animación sutil en bucle (mp4/webm) o fotografía de amanecer en alta resolución.
-- [ ] **Audios de Meditaciones Reales** (`src/lib/amp-content.ts`):
-  - Cargar los archivos de audio definitivos (.mp3 o .m4a) en un bucket S3 o CDN y reemplazar las URLs de muestra en la constante `SAMPLE_TRACKS`.
-- [ ] **Enlaces de Agenda Cal.com / Google Calendar** (`src/app/agenda/page.tsx` y `.env.local`):
-  - Configurar las cuentas individuales de Cal.com de Juan Diego, Andrea, Dericielo y Lina o configurar `NEXT_PUBLIC_CALCOM_URL`.
+- [ ] **Fotografías Oficiales de Coaches** (`public/coaches/` y `src/lib/amp-content.ts`):
+  - **Juan Diego Giraldo** (`public/coaches/juan-diego.jpg`): Retrato oficial de alta resolución en estudio o entorno natural.
+  - **Andrea Silva** (`public/coaches/andrea-silva.jpg`): Fotografía profesional orientada a crianza y familia.
+  - **Dericielo Jiménez** (`public/coaches/dericielo-jimenez.jpg`): Fotografía profesional orientada a sanación y amor propio.
+  - **Lina Valencia Triviño** (`public/coaches/lina-valencia.jpg`): Fotografía profesional orientada a transiciones y duelo.
+- [ ] **Video / Fotografía Principal del Hero** (`public/hero/sunrise-hero.jpg`):
+  - Clip de video en bucle (mp4/webm de ~15 segundos en baja tasa de bits) o fotografía panorámica de Juan Diego en una cumbre o amanecer.
+- [ ] **Audios Definitivos de Meditaciones** (`public/audio/` y `src/lib/amp-content.ts`):
+  - Actualmente el reproductor incluye 6 pistas de ambiente binaural estéreo en frecuencias curativas para probar la reproducción en vivo. Para producción, subir las grabaciones de voz guiadas oficiales (.mp3 / .m4a) y actualizar la constante `SAMPLE_TRACKS`.
+- [ ] **Portadas de Cursos y Programas** (`public/programs/`):
+  - Portadas gráficas personalizadas para *Mentalidad Invencible*, *Crianza con Amor*, *Sanación del Niño Interior* y *Trascendiendo el Duelo*.
+- [ ] **Enlaces de Agendamiento Cal.com** (`src/app/agenda/page.tsx` y variable `NEXT_PUBLIC_CALCOM_URL`):
+  - Vincular las cuentas reales de Cal.com de cada coach.
 - [ ] **Stripe en Modo Real (Live)** (`.env.local`):
-  - Crear los dos productos de suscripción en el Dashboard de Stripe (Membresía Mensual $9.99 USD y Anual $79.99 USD) e insertar los Price IDs reales (`price_...`).
+  - Cargar los Price IDs reales creados en el panel de Stripe de Juan Diego (`STRIPE_PRICE_MONTHLY` y `STRIPE_PRICE_ANNUAL`).
 - [ ] **Testimonios Reales** (`src/app/page.tsx`):
-  - Sustituir los testimonios de muestra por historias y citas reales de clientes y miembros de la comunidad AMP.
-- [ ] **Redes Sociales y Enlaces de Contacto** (`src/components/SiteFooter.tsx`):
-  - Confirmar enlaces a Instagram, YouTube, Spotify y número de WhatsApp de soporte.
+  - Reemplazar los testimonios de muestra con historias reales de miembros de la comunidad AMP.

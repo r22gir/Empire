@@ -124,37 +124,37 @@ export default function AnimoPage() {
   const nextMonth = () => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1));
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-10 md:py-14">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 md:py-20">
       {/* ── HEADER ── */}
-      <div className="text-center max-w-2xl mx-auto mb-10">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#E0A526]/15 border border-[#E0A526]/30 text-xs font-bold uppercase tracking-wider text-[#B8860B] dark:text-[#F2C14E] mb-3">
+      <div className="text-center max-w-2xl mx-auto mb-14">
+        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#E0A526]/15 border border-[#E0A526]/30 text-xs font-bold uppercase tracking-wider text-[#C68C14] dark:text-[#F2C14E] mb-3">
           <Sparkles size={14} /> Ritual Diario de Consciencia
         </div>
-        <h1 className="font-serif text-3xl sm:text-4xl font-bold text-[#2B2622] dark:text-[#F4EFE8] mb-3">
+        <h1 className="font-serif text-3xl sm:text-5xl font-bold text-[#1E1A17] dark:text-[#F6F3EE] mb-4">
           ¿Cómo te sientes hoy?
         </h1>
-        <p className="text-sm text-[#6B625A] dark:text-[#B9B2C9] leading-relaxed">
+        <p className="text-sm sm:text-base text-[#5C544D] dark:text-[#B4ACC5] leading-relaxed">
           Haz una pausa de 10 segundos. Nombra tu emoción y recibe al instante la meditación que armonizará tu frecuencia interior.
         </p>
       </div>
 
       {/* ── INTERACTIVE MOOD SELECTOR CARD ── */}
-      <div className="bg-white dark:bg-[#1E1B3A] p-6 sm:p-8 rounded-3xl border border-[#F0E6D8] dark:border-[#2E2A54] shadow-sm mb-12">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="glass-card p-6 sm:p-10 rounded-3xl border border-[#EFE6D8] dark:border-[#2B254E] shadow-xl mb-14">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 mb-8">
           {MOODS.map((m) => {
             const isSelected = selectedTodayMood?.key === m.key;
             return (
               <button
                 key={m.key}
                 onClick={() => handleLogMood(m)}
-                className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-2 ${
+                className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-2.5 ${
                   isSelected
-                    ? 'border-[#E0A526] bg-[#E0A526]/10 shadow-sm scale-105'
-                    : 'border-[#F0E6D8] dark:border-[#2E2A54] bg-[#FFF9F1] dark:bg-[#14122B] hover:border-[#E0A526] hover:bg-black/5'
+                    ? 'border-[#E0A526] bg-[#E0A526]/15 shadow-md scale-105 ring-2 ring-[#E0A526]/20'
+                    : 'border-[#EFE6D8] dark:border-[#2B254E] bg-white/70 dark:bg-white/5 hover:border-[#E0A526] hover:bg-black/5'
                 }`}
               >
                 <span className="text-3xl">{m.emoji}</span>
-                <span className="text-xs font-bold text-[#2B2622] dark:text-[#F4EFE8]">
+                <span className="text-xs font-bold text-[#1E1A17] dark:text-[#F6F3EE]">
                   {m.label}
                 </span>
               </button>
@@ -163,8 +163,8 @@ export default function AnimoPage() {
         </div>
 
         {/* Optional Reflection Note */}
-        <div className="space-y-2 mb-6">
-          <label className="text-xs font-bold text-[#2B2622] dark:text-[#F4EFE8] flex items-center gap-1.5">
+        <div className="space-y-2 mb-8">
+          <label className="text-xs font-bold text-[#1E1A17] dark:text-[#F6F3EE] flex items-center gap-1.5">
             <PenLine size={14} className="text-[#E0A526]" /> Nota de reflexión breve (opcional):
           </label>
           <input
@@ -172,80 +172,102 @@ export default function AnimoPage() {
             placeholder="¿Qué pensamiento o situación resalta en ti en este instante?"
             value={todayNote}
             onChange={(e) => setTodayNote(e.target.value)}
-            className="w-full px-4 py-2.5 rounded-2xl bg-[#FFF9F1] dark:bg-[#14122B] border border-[#F0E6D8] dark:border-[#2E2A54] text-xs text-[#2B2622] dark:text-[#F4EFE8] focus:outline-none focus:border-[#E0A526]"
+            className="w-full px-4 py-3 rounded-2xl bg-[#FFFDF9] dark:bg-[#0E0C1C] border border-[#EFE6D8] dark:border-[#2B254E] text-xs text-[#1E1A17] dark:text-[#F6F3EE] focus:outline-none focus:border-[#E0A526]"
           />
         </div>
 
         {/* Saved confirmation & recommended track */}
         {savedToday && recommendedTrack && (
-          <div className="p-6 rounded-2xl bg-[#E4EDE6]/50 dark:bg-[#14122B] border border-[#7E9F84]/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-up">
+          <div className="p-6 rounded-2xl bg-[#7E9F84]/15 border border-[#7E9F84]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-up">
             <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#7E9F84] text-white">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#7E9F84] text-white">
                   ✓ Registro Guardado
                 </span>
                 <span className="text-xs font-semibold text-[#5A7A60] dark:text-[#9DBFA2]">
-                  Práctica recomendada para tu estado:
+                  Práctica recomendada para tu momento:
                 </span>
               </div>
-              <h4 className="font-serif font-bold text-lg text-[#2B2622] dark:text-[#F4EFE8]">
+              <h4 className="font-serif font-bold text-lg text-[#1E1A17] dark:text-[#F6F3EE]">
                 {recommendedTrack.title} ({recommendedTrack.durationLabel})
               </h4>
-              <p className="text-xs text-[#6B625A] dark:text-[#B9B2C9]">
+              <p className="text-xs text-[#5C544D] dark:text-[#B4ACC5]">
                 Guía: {recommendedTrack.coach} · Tema: {recommendedTrack.theme}
               </p>
             </div>
 
             <button
               onClick={() => playTrack(recommendedTrack)}
-              className="px-6 py-3 rounded-full bg-[#E0A526] hover:bg-[#B8860B] text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 shadow shrink-0"
+              className="w-full sm:w-auto px-6 py-3 rounded-full bg-gradient-to-r from-[#E0A526] to-[#F28C6B] text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md hover:scale-105 active:scale-95 transition-all"
             >
-              <Play size={14} className="fill-white" /> Escuchar Ahora
+              <Play size={14} className="fill-current" /> Escuchar Ahora
             </button>
           </div>
         )}
       </div>
 
-      {/* ── CALENDAR VIEW OF MOODS ── */}
-      <div className="bg-white dark:bg-[#1E1B3A] p-6 sm:p-8 rounded-3xl border border-[#F0E6D8] dark:border-[#2E2A54] shadow-sm mb-12">
+      {/* ── CALENDAR VIEW (MONTHLY EMOTIONAL JOURNEY) ── */}
+      <div className="glass-card p-6 sm:p-8 rounded-3xl border border-[#EFE6D8] dark:border-[#2B254E] shadow-md">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="font-serif text-xl font-bold text-[#2B2622] dark:text-[#F4EFE8] flex items-center gap-2 capitalize">
-            <Calendar size={18} className="text-[#E0A526]" /> {monthName}
-          </h3>
-          <div className="flex gap-2">
-            <button onClick={prevMonth} className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-[#6B625A] dark:text-[#B9B2C9]">
+          <div className="flex items-center gap-2">
+            <Calendar size={18} className="text-[#E0A526]" />
+            <h3 className="font-serif font-bold text-lg text-[#1E1A17] dark:text-[#F6F3EE] capitalize">
+              {monthName}
+            </h3>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={prevMonth}
+              className="p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-[#5C544D] dark:text-[#B4ACC5]"
+              aria-label="Mes anterior"
+            >
               <ChevronLeft size={18} />
             </button>
-            <button onClick={nextMonth} className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-[#6B625A] dark:text-[#B9B2C9]">
+            <button
+              onClick={nextMonth}
+              className="p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-[#5C544D] dark:text-[#B4ACC5]"
+              aria-label="Mes siguiente"
+            >
               <ChevronRight size={18} />
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-7 gap-2 mb-2 text-center text-xs font-bold text-[#6B625A] dark:text-[#B9B2C9]">
-          {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map(d => (
-            <div key={d}>{d}</div>
+        {/* Days of week header */}
+        <div className="grid grid-cols-7 gap-2 text-center text-xs font-bold text-[#5C544D] dark:text-[#B4ACC5] mb-2">
+          {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map(day => (
+            <div key={day} className="py-1">{day}</div>
           ))}
         </div>
 
+        {/* Calendar grid */}
         <div className="grid grid-cols-7 gap-2">
           {Array.from({ length: firstDayOfWeek }).map((_, i) => (
-            <div key={`empty-${i}`} className="aspect-square" />
+            <div key={`empty-${i}`} className="h-12 rounded-xl bg-transparent" />
           ))}
 
-          {calendarDays.map((d) => (
-            <div
-              key={d.day}
-              className="aspect-square rounded-2xl bg-[#FFF9F1] dark:bg-[#14122B] border border-[#F0E6D8] dark:border-[#2E2A54] flex flex-col items-center justify-center p-1"
-            >
-              <span className="text-[10px] text-[#6B625A] dark:text-[#B9B2C9] mb-0.5">{d.day}</span>
-              {d.mood ? (
-                <span className="text-xl">{d.mood}</span>
-              ) : (
-                <span className="text-[10px] text-gray-300 dark:text-gray-600">•</span>
-              )}
-            </div>
-          ))}
+          {calendarDays.map((item) => {
+            const isToday = item.date === todayStr;
+            return (
+              <div
+                key={item.day}
+                className={`h-12 sm:h-14 rounded-2xl border flex flex-col items-center justify-center relative p-1 transition-all ${
+                  isToday
+                    ? 'border-[#E0A526] bg-[#E0A526]/10 font-bold'
+                    : 'border-black/5 dark:border-white/5 bg-white/40 dark:bg-white/5'
+                }`}
+              >
+                <span className="text-[10px] text-[#5C544D] dark:text-[#B4ACC5] absolute top-1 left-2">
+                  {item.day}
+                </span>
+                {item.mood ? (
+                  <span className="text-xl animate-fade-up">{item.mood}</span>
+                ) : (
+                  <span className="text-[10px] text-gray-300 dark:text-gray-700">•</span>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

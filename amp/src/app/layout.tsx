@@ -8,7 +8,7 @@ import GlobalAudioPlayer from "@/components/GlobalAudioPlayer";
 import MobileBottomNav from "@/components/MobileBottomNav";
 
 export const metadata: Metadata = {
-  title: "AMP — El Portal de la Alegría | Actitud Mental Positiva",
+  title: "AMP — El Portal de la Alegría | Actitud Mental Positiva · Juan Diego Giraldo",
   description: "Transforma tu mente, transforma tu vida. El nuevo portal en español de Actitud Mental Positiva: meditaciones guiadas, check-in diario de ánimo, coaching y membresía.",
   keywords: [
     "actitud mental positiva",
@@ -39,11 +39,11 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es" className="scroll-smooth">
-      <body className="antialiased min-h-screen flex flex-col bg-[#FFF9F1] dark:bg-[#14122B] text-[#2B2622] dark:text-[#F4EFE8] transition-colors">
+      <body className="antialiased min-h-screen flex flex-col bg-[#FFFDF9] dark:bg-[#0E0C1C] text-[#1E1A17] dark:text-[#F6F3EE] transition-colors duration-300">
         <ThemeProvider>
           <AudioProvider>
             <SiteHeader />
-            <main className="flex-1 pb-16 md:pb-20">
+            <main className="flex-1 pb-20 md:pb-24">
               {children}
             </main>
             <SiteFooter />
