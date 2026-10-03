@@ -18,7 +18,7 @@
 
 /* ---------- left nav: angular neon tabs ---------- */
 .cy-shell .cy-nav {
-  background: linear-gradient(180deg, rgba(1, 10, 16, 0.97), rgba(1, 6, 10, 0.97)) !important;
+  background: linear-gradient(180deg, #010a10, #01060a) !important;
   border-right: 1px solid rgba(0, 229, 255, 0.22) !important;
   box-shadow: inset -1px 0 0 rgba(0, 229, 255, 0.05);
 }
