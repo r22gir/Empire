@@ -115,6 +115,9 @@ class RipplefoldJob:
     mount_height: float | None
     layer: str
     layered: bool
+    side_panels: int = 0
+    side_widths: float | None = None
+    fabric_image: str | None = None
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -273,6 +276,15 @@ def resolve_ripplefold(spec: dict) -> RipplefoldJob:
     ceiling = _inches(dims.get("ceiling_height", dims.get("ceiling")))
     mount_height = _inches(dims.get("mount_height"))
     layer = _norm_layer(_text(dims, "layer", "fabric_layer"), dims.get("layered"))
+    side_panels = 0
+    raw_sides = dims.get("side_panels")
+    if raw_sides not in (None, ""):
+        try:
+            side_panels = max(0, int(float(raw_sides)))
+        except (TypeError, ValueError):
+            side_panels = 0
+    side_widths = _inches(dims.get("side_widths", dims.get("widths_per_panel")))
+    fabric_image = _text(dims, "fabric_image", "fabric_crop")
     if track_equals:
         notes.append("track length not given; track equals coverage")
     return RipplefoldJob(
@@ -298,6 +310,9 @@ def resolve_ripplefold(spec: dict) -> RipplefoldJob:
         mount_height=mount_height,
         layer=layer,
         layered=layer == "sheer behind drapery",
+        side_panels=side_panels,
+        side_widths=side_widths,
+        fabric_image=fabric_image,
         notes=notes,
     )
 

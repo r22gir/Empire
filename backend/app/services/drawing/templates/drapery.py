@@ -61,6 +61,7 @@ _RIPPLEFOLD_DIMS = {
     "stack", "stack_width", "stackback",
     "mount", "mount_type", "ceiling_height", "ceiling", "mount_height",
     "layer", "fabric_layer", "layered",
+    "side_panels", "side_widths", "widths_per_panel", "fabric_image", "fabric_crop",
 }
 
 

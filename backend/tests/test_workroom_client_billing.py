@@ -44,7 +44,10 @@ def test_client_docs_replace_internal_app_links():
 def test_nelmas_billing_option():
     b = get_workroom_billing(BILLED_BY_NELMA)
     assert b.name == "Nelma's Workroom"
-    assert "Frolich Lane" in b.address
+    assert "Frolich" in b.address
+    assert b.phone == "(703) 623-9203"
+    assert b.email == "workroom@empirebox.store"
+    assert b.website == PUBLIC_CLIENT_HOST
     assert billed_by_for_storage(BILLED_BY_NELMA) == BILLED_BY_NELMA
 
 

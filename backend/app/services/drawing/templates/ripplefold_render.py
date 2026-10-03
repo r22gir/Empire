@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import math
 from datetime import date
+from pathlib import Path
 from xml.sax.saxutils import escape
 
 from reportlab.lib.colors import HexColor
@@ -91,6 +92,11 @@ def _spec_rows(job: RipplefoldJob) -> list[tuple[str, str]]:
         ("MOUNT HEIGHT", _not_given(job.mount_height, inches=True)),
         ("LAYER", job.layer.upper()),
     ]
+    if job.side_panels:
+        rows.append(("SIDE PANELS", str(job.side_panels)))
+        if job.side_widths is not None:
+            rows.append(("SIDE WIDTHS", format_inches(job.side_widths).replace('"', "") + " EACH"))
+        rows.append(("SIDES", "STATIONARY DRAPERY"))
 
 
 def _dim_h(c, x0, x1, y, label, font) -> None:
@@ -162,6 +168,27 @@ def _elevation_folds(c, x0, x1, y0, y1, spacing_pt, color, width) -> None:
         x += spacing_pt
 
 
+def _paint_fabric(c, x, y, w, h, image: str | None, font) -> None:
+    """Stationary drapery panel. Uses the fabric photo when one was given."""
+    if w < 2 or h < 2:
+        return
+    path = Path(image) if image else None
+    if path and path.is_file():
+        c.saveState()
+        clip = c.beginPath()
+        clip.rect(x, y, w, h)
+        c.clipPath(clip, stroke=0, fill=0)
+        c.drawImage(str(path), x, y, w, h, preserveAspectRatio=True, anchor="c", mask="auto")
+        c.restoreState()
+    else:
+        c.setFillColor(HexColor("#c4b49a"))
+        c.rect(x, y, w, h, fill=1, stroke=0)
+        _elevation_folds(c, x, x + w, y + 1, y + h - 1, max(w / 4, 4), HexColor("#8c7358"), 0.6)
+    c.setFillColor(INK)
+    c.setFont(font, 5.5)
+    c.drawCentredString(x + w / 2.0, y + 8, "STATIONARY")
+
+
 def _draw_elevation(c, job: RipplefoldJob, font, font_b) -> None:
     c.setFillColor(INK)
     c.setFont(font_b, 9)
@@ -203,6 +230,16 @@ def _draw_elevation(c, job: RipplefoldJob, font, font_b) -> None:
         c.rect(x0, oy, max(x1 - x0, 1), win_h, fill=1, stroke=0)
         ink = HexColor("#7f92a3") if job.layer == "sheer" and not job.layered else INK
         _elevation_folds(c, x0, x1, oy + 2, oy + win_h - 2, spacing * scale, ink, 0.8)
+        if job.side_panels and job.offset and job.offset > 0.5:
+            _paint_fabric(c, ox, oy, max(x0 - ox, 1), win_h, job.fabric_image, font)
+            right_w = ox + win_w - x1
+            _paint_fabric(c, x1, oy, max(right_w, 1), win_h, job.fabric_image, font)
+            c.setFillColor(INK)
+            c.setFont(font, 6)
+            label = "DRAPERY  ·  RIPPLEFOLD SHEER  ·  DRAPERY"
+            if job.side_widths is not None:
+                label += f"  ·  {format_inches(job.side_widths).replace(chr(34), '')} WIDTHS"
+            c.drawString(ox, oy - 52, label[:70])
         c.setStrokeColor(INK)
         c.setLineWidth(1.4)
         c.line(x0, oy + win_h, x1, oy + win_h)
@@ -257,6 +294,13 @@ def _draw_top(c, job: RipplefoldJob, font, font_b) -> None:
         return
 
     x0, x1 = placed
+    if job.side_panels and job.offset and job.offset > 0.5:
+        c.setFillColor(HexColor("#c4b49a"))
+        c.rect(ox, track_y - 10, max(x0 - ox, 1), 8, fill=1, stroke=0)
+        c.rect(x1, track_y - 10, max(ox + win_w - x1, 1), 8, fill=1, stroke=0)
+        c.setFillColor(INK)
+        c.setFont(font, 5)
+        c.drawString(ox, track_y - 18, "DRAPERY")
     layers = [("SHEER", HexColor("#9eb0c2"), track_y)] if job.layered else []
     face = HexColor("#7f92a3") if job.layer == "sheer" and not job.layered else INK
     layers.append((job.layer.upper(), face, track_y - (14 if job.layered else 0)))
@@ -335,9 +379,9 @@ def render_ripplefold_pdf(spec: dict) -> bytes:
     project = str(spec.get("project") or spec.get("site_address") or "DRAPERY")
     render_chrome_bands(
         c,
-        sheet_no=1,
-        total=1,
-        right_title="RIPPLEFOLD",
+        sheet_no=int(spec.get("sheet_no") or 1),
+        total=int(spec.get("sheet_total") or 1),
+        right_title=str(spec.get("sheet_title") or "RIPPLEFOLD"),
         client=client,
         project=project,
         rev="A",

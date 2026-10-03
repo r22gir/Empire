@@ -5401,6 +5401,55 @@ def _deposit_pay_link(params: dict, desk: Optional[str] = None) -> ToolResult:
     })
 
 
+@tool("draft_estimate_and_presentation")
+def _draft_estimate_and_presentation(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Draft an estimate and a presentation from openings. Never sends."""
+    from app.services.estimates.workroom_packet import draft_packet
+
+    openings = params.get("openings")
+    if not isinstance(openings, list) or not openings:
+        return ToolResult(
+            tool="draft_estimate_and_presentation",
+            success=False,
+            error="openings are required. Nothing was sent.",
+        )
+    spec = {
+        "openings": openings,
+        "billed_by": params.get("billed_by"),
+        "prepared_for": params.get("prepared_for") or {},
+        "project": params.get("project") or {},
+        "notes": params.get("notes") or "",
+        "date": params.get("date"),
+        "quote_number": params.get("quote_number"),
+        "tax_rate": params.get("tax_rate") or 0,
+    }
+    try:
+        drafted = draft_packet(spec, save_quote=bool(params.get("save_quote", True)))
+    except Exception as exc:
+        return ToolResult(
+            tool="draft_estimate_and_presentation",
+            success=False,
+            error=f"draft failed: {exc}. Nothing was sent.",
+        )
+    quote = drafted.get("quote") or {}
+    return ToolResult(
+        tool="draft_estimate_and_presentation",
+        success=True,
+        result={
+            "status": "draft",
+            "sent": False,
+            "quote_id": quote.get("id"),
+            "quote_number": quote.get("quote_number") or drafted["packet"]["quote_number"],
+            "project_address": (drafted["packet"].get("project") or {}).get("address"),
+            "total": drafted["packet"]["total"],
+            "deposit": drafted["packet"]["deposit"],
+            "payment_line": drafted["packet"]["payment_line"],
+            "estimate_bytes": len(drafted["estimate_pdf"]),
+            "presentation_bytes": len(drafted["presentation_pdf"]),
+        },
+    )
+
+
 # ── TOOL DOCUMENTATION (for system prompt) ─────────────────────────
 
 TOOLS_DOC = """## Available Tools (__TOOL_COUNT__ total)
@@ -5436,6 +5485,8 @@ If a tool call fails with "Unknown tool", check the name against this list.
 - **deposit_pay_link** — Workroom or WoodCraft quote only. Creates (or reuses) a deposit invoice on the finance router and a Stripe Checkout link on the payments router. Client name/email/phone/address are copied from the quote. A second call returns the same invoice and the same open link. payment_status stays `link_ready` until Stripe reports paid — do not tell the founder the deposit is collected when status is not `paid`.
   `{"tool": "deposit_pay_link", "quote_id": "abc123"}`
 - **create_quick_quote** — DEPRECATED. Legacy JSON store (`/home/rg/empire-data/quotes/*.json`). Does NOT use the pricing engine. Returns `store: "json_legacy"`, `engine: "qis"`, `deprecation_notice`. Will be retired in sprint 1d. **Do NOT pick this tool for new quotes — use `create_engine_quote` instead.**
+- **draft_estimate_and_presentation** — Draft only. Builds the header-B estimate and the landscape presentation from `openings` (width, height, panels, optional sheers, install_flat, photos). Saves a draft quote. Never emails, never creates a Square link. The deposit line stays `Pay deposit online: [Square payment link]`.
+  `{"tool": "draft_estimate_and_presentation", "billed_by": "nelmas_workroom", "project": {"address": "9408 Old Courthouse Rd"}, "openings": [{"room": "Living Room", "width": 160, "height": 119.75, "panels": 2}]}`
 - **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.**
   `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4, "packs": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`
   Categories (from PRICING_SPECS in `backend/app/data/product_catalog.py`): `drapery`, `roman_shade`, `valance`, `cornice`, `fabric_only`, `hardware_rod_1_1_8`, `hardware_ripplefold_track`, `hardware_rings`, `hardware_brackets`, `labor`, `pillow`, `cover`. NEW (D38 / H77): `com_fabric` (the one permitted $0 line — pass `customer_supplied: true` with `fabric_name` and `quantity`), `hardware_rod_set` ($325 flat for 4-8 ft, founder supplies `override_price` beyond), `hardware_ripplefold_set` ($250 flat for 4-8 ft, founder supplies `override_price` beyond), `installation` (pass `treatment: roman_shade` $95/each or `treatment: drapery` $145 for first 8 ft), `manual_line` (pass-through: `description` + `unit_price` + `quantity`). PricingInputError → HTTP 400 (never silent fallback for catalog items).

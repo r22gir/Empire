@@ -837,11 +837,25 @@ def get_quote_by_number(quote_number: str) -> dict | None:
         return _align_flat_financials(q)
 
 
+def ensure_project_address_schema(conn) -> None:
+    """Additive project/site address on quotes_v2. Does not rewrite rows."""
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(quotes_v2)").fetchall()}
+    except Exception:
+        return
+    if "project_address" not in cols:
+        try:
+            conn.execute("ALTER TABLE quotes_v2 ADD COLUMN project_address TEXT")
+        except Exception:
+            pass
+
+
 def create_quote(data: dict) -> dict:
     from app.config.workroom_billing import billed_by_for_storage, ensure_billed_by_schema
 
     with get_db() as conn:
         ensure_billed_by_schema(conn)
+        ensure_project_address_schema(conn)
         import uuid
         quote_id = str(uuid.uuid4())[:8]
         billed_by = billed_by_for_storage(data.get("billed_by"))
@@ -905,6 +919,12 @@ def create_quote(data: dict) -> dict:
             conn.execute(
                 "UPDATE quotes_v2 SET billed_by = ? WHERE id = ?",
                 (billed_by, quote_id),
+            )
+        project_address = (data.get("project_address") or "").strip()
+        if project_address:
+            conn.execute(
+                "UPDATE quotes_v2 SET project_address = ? WHERE id = ?",
+                (project_address, quote_id),
             )
 
         _ensure_idea_diagram_column(conn)
@@ -973,13 +993,14 @@ def create_quote(data: dict) -> dict:
 
 def update_quote(quote_id: str, data: dict) -> dict:
     with get_db() as conn:
+        ensure_project_address_schema(conn)
         existing = conn.execute("SELECT * FROM quotes_v2 WHERE id = ?", (quote_id,)).fetchone()
         if not existing:
             return None
 
         updatable = [
             'customer_name', 'customer_email', 'customer_phone', 'customer_address',
-            'business_unit', 'project_name', 'project_description',
+            'business_unit', 'project_name', 'project_description', 'project_address',
             # HOTFIX 4.1 (2026-07-16): 'status' was REMOVED from this
             # whitelist so PATCH can never silently set a customer-side
             # status (e.g. status='accepted') and bypass the founder
