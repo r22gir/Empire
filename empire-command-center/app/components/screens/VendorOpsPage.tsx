@@ -496,9 +496,9 @@ export default function VendorOpsPage() {
               <option value="pro">Pro</option>
             </select>
             <div className="mt-2 text-xs text-slate-600">{currentPlan?.positioning || 'Loading plan truth from VendorOps.'}</div>
-            <div className="mt-2 text-xs font-semibold text-slate-700">
+            {!FAMILY_EDITION && <div className="mt-2 text-xs font-semibold text-slate-700">
               Billing: {activation?.billing_status || 'loading'} · Checkout: {activation?.checkout_status || 'loading'}
-            </div>
+            </div>}
             {activation?.completed_at && <div className="mt-1 text-xs text-emerald-700">Completed: {shortDate(activation.completed_at)}</div>}
           </div>
         </header>
@@ -793,9 +793,9 @@ function FeatureLocks({ tier, status }: { tier: Tier; status: VendorStatus | nul
           </div>
         ))}
       </div>
-      <div className="mt-3 text-xs text-slate-500">
+      {!FAMILY_EDITION && <div className="mt-3 text-xs text-slate-500">
         Credential policy: {status?.credential_policy || 'Loading from VendorOps status.'}
-      </div>
+      </div>}
     </div>
   );
 }
