@@ -218,9 +218,10 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
   return (
     <header className="h-[56px] bg-[var(--panel)] border-b border-[var(--border)] flex items-center justify-between px-3 md:px-6 shrink-0 z-50">
       {/* Logo */}
-      <div className="text-[16px] font-bold tracking-[3px] text-[var(--text)]">
-        <span className="text-[var(--gold)]">E</span>MPIRE
-      </div>
+      <a href="/" className="cy-logo flex items-center gap-2 no-underline text-[16px] font-bold tracking-[3px] text-[var(--text)]" title="Command Ring home" aria-label="Empire — Command Ring home">
+        <span><span className="text-[var(--gold)]">E</span>MPIRE</span>
+        <span className="cy-logo-ring hidden md:inline text-[9px] tracking-[2px] font-mono text-[var(--muted)] border border-[var(--border)] px-1.5 py-[2px]">◎ RING</span>
+      </a>
 
       {/* N2: Global Back button. Always visible per Founder spec.
           - Desktop: text label "← Back"

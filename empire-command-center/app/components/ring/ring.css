@@ -110,11 +110,12 @@
 .rg-seg:focus { outline: none; }
 .rg-spin { transform-origin: 300px 300px; animation: rg-spin 40s linear infinite; }
 .rg-spin-rev { transform-origin: 300px 300px; animation: rg-spin 26s linear infinite reverse; }
-.rg-label { position: absolute; transform: translate(-50%, -50%); text-align: center; pointer-events: none; width: 25%; overflow-wrap: anywhere; }
+.rg-label { position: absolute; transform: translate(-50%, -50%); text-align: center; pointer-events: none; width: 23%; }
+.rg-label.is-long b { font-size: clamp(7px, 0.8vw, 9.5px); letter-spacing: 0.03em; }
 .rg-label i { display: flex; justify-content: center; margin-bottom: 3px; }
-.rg-label b { display: block; font: 700 clamp(8px, 1vw, 11px)/1.15 var(--rg-mono); letter-spacing: 0.12em; color: #eaffff; text-transform: uppercase; }
+.rg-label b { display: block; font: 700 clamp(8px, 0.95vw, 11px)/1.15 var(--rg-mono); letter-spacing: 0.1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #eaffff; text-transform: uppercase; }
 .rg-label strong { display: block; font: 800 clamp(14px, 2vw, 24px)/1.1 var(--rg-mono); margin-top: 2px; font-variant-numeric: tabular-nums; }
-.rg-label small { display: block; font: 500 clamp(7px, 0.8vw, 9px)/1.25 var(--rg-mono); color: var(--rg-muted); margin-top: 1px; }
+.rg-label small { display: block; font: 500 clamp(8px, 0.8vw, 10px)/1.25 var(--rg-mono); color: var(--rg-muted); margin-top: 2px; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rg-core { position: absolute; left: 50%; top: 50%; width: 38%; aspect-ratio: 1; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; justify-content: center; text-decoration: none; }
 .rg-orb { width: 72%; aspect-ratio: 1; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   background: radial-gradient(circle at 40% 35%, rgba(190, 250, 255, 0.95), rgba(0, 229, 255, 0.55) 22%, rgba(0, 90, 140, 0.55) 52%, rgba(2, 10, 20, 0.95) 75%);
