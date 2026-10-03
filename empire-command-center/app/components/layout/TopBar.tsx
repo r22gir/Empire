@@ -241,11 +241,13 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
           }}
           onMouseEnter={e => { if (canGoBack) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; e.currentTarget.style.color = '#1a1a1a'; } }}
           onMouseLeave={e => { if (canGoBack) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.color = '#666'; } }}
-          title={canGoBack ? 'Back to previous screen' : 'No previous screen — clicking returns to Owner’s Desk'}
-          aria-label="Back"
+          title={(edition === 'maxine' || edition === 'amp')
+            ? (canGoBack ? 'Volver a la pantalla anterior' : 'No hay pantalla anterior — vuelve al Centro de mando')
+            : (canGoBack ? 'Back to previous screen' : 'No previous screen — clicking returns to Owner’s Desk')}
+          aria-label={(edition === 'maxine' || edition === 'amp') ? 'Volver' : 'Back'}
         >
           <ArrowLeft size={14} />
-          <span className="hidden sm:inline">Back</span>
+          <span className="hidden sm:inline">{(edition === 'maxine' || edition === 'amp') ? 'Volver' : 'Back'}</span>
         </button>
       )}
 

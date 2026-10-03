@@ -744,8 +744,27 @@ def edition_manifest() -> dict:
     return manifest
 
 
+import re as _re
+
+_PUBLIC_SALES_PREFIX = "/api/v1/public/ventas/"
+_PUBLIC_SALES_LEAD = _re.compile(r"^/api/v1/public/ventas/projects/[a-z0-9-]{1,80}/lead$")
+
+
+def public_sales_exempt(method: str, path: str) -> bool:
+    """Maxine's public sales site: read-only project data plus one lead form."""
+    clean = path.split("?", 1)[0]
+    verb = method.upper()
+    if ".." in clean or "//" in clean:
+        return False
+    if verb in ("GET", "HEAD") and clean.startswith(_PUBLIC_SALES_PREFIX):
+        return True
+    return verb == "POST" and bool(_PUBLIC_SALES_LEAD.match(clean))
+
+
 def access_exempt(method: str, path: str) -> bool:
     clean = path.split("?", 1)[0]
+    if public_sales_exempt(method, clean):
+        return True
     for allowed_method, allowed_path in _ALLOWLIST_EXEMPT:
         if method.upper() == allowed_method and clean == allowed_path:
             return True

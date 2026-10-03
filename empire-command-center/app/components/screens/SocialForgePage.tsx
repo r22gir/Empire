@@ -75,6 +75,17 @@ const NAV_TABS: { id: Tab; label: string; icon: any }[] = [
   { id: 'docs', label: 'Docs', icon: BookOpen },
 ];
 
+const NAV_TABS_ES: Record<Tab, string> = {
+  dashboard: 'Panel',
+  calendar: 'Calendario',
+  compose: 'Redactar',
+  analytics: 'Analítica',
+  accounts: 'Cuentas',
+  setup: 'Asistente de configuración',
+  payments: 'Pagos',
+  docs: 'Guía',
+};
+
 // ============ MAIN COMPONENT ============
 
 export default function SocialForgePage() {
@@ -392,7 +403,7 @@ export default function SocialForgePage() {
             </div>
             <div>
               <h1 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>SocialForge</h1>
-              <p style={{ fontSize: 13, color: '#aaa', margin: 0 }}>AI-Powered Social Media Manager</p>
+              <p style={{ fontSize: 13, color: '#aaa', margin: 0 }}>{sfEdition === 'maxine' || sfEdition === 'amp' ? 'Gestor de redes sociales con IA' : 'AI-Powered Social Media Manager'}</p>
             </div>
           </div>
           <button onClick={loadData} className="text-[#aaa] hover:text-[#ec4899] transition-colors">
@@ -409,7 +420,7 @@ export default function SocialForgePage() {
               className={`filter-tab ${tab === t.id ? 'active' : ''}`}
               style={tab === t.id ? { background: '#ec4899', borderColor: '#ec4899' } : {}}
             >
-              <t.icon size={14} style={{ marginRight: 4 }} /> {t.label}
+              <t.icon size={14} style={{ marginRight: 4 }} /> {sfEdition === 'maxine' || sfEdition === 'amp' ? NAV_TABS_ES[t.id] : t.label}
             </button>
           ))}
         </div>

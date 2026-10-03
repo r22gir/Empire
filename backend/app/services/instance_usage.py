@@ -259,9 +259,8 @@ def usage_summary() -> dict:
     elif is_family_edition():
         level = "unconfigured"
         message = (
-            "El uso se está registrando. Falta la base del mes "
-            "(EMPIRE_USAGE_BASELINE_MONTHLY_USD o EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS) "
-            "para aplicar el tope."
+            "El uso se está registrando. El tope mensual se activará "
+            "cuando se configure la base del mes."
         )
     empty.update({
         "day": day,

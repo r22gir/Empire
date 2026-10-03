@@ -140,6 +140,10 @@ load_router("app.routers.preorders", "/preorders", ["preorders"])
 load_router("app.routers.auth", "/auth", ["auth"])
 load_router("app.routers.users", "/users", ["users"])
 load_router("app.routers.listings", "/listings", ["listings"])
+# Same routers under /api/v1: the tunnel and the Next rewrite only forward /api/v1.
+load_router("app.routers.shipping", "/api/v1/shipping", ["shipping"])
+load_router("app.routers.listings", "/api/v1/listings", ["listings"])
+load_router("app.routers.preorders", "/api/v1/preorders", ["preorders"])
 load_router("app.routers.relistapp", "/api/v1", ["relistapp"])
 # ArchiveForge — Photo-first intake for collectible print/media (V1: LIFE Magazine)
 load_router("app.routers.archiveforge", "/api/v1", ["archiveforge"])
@@ -246,6 +250,7 @@ load_router("app.routers.apostapp_public", "/api/v1", ["apostapp-public"])
 
 # ConstructionForge — Colombian real estate land development
 load_router("app.routers.construction", "/api/v1", ["construction"])
+load_router("app.routers.public_sales", "/api/v1", ["public-sales"])
 
 # Voice notes → borrador (quote, invoice, contract, plan de pagos). Never auto-sends.
 load_router("app.routers.voice_documents", "/api/v1", ["voice-documents"])

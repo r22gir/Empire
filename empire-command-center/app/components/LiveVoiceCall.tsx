@@ -14,6 +14,15 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API } from '../lib/api';
+import { useAssistantName } from '../lib/assistant';
+
+const FAMILY_EDITION = ['amp', 'maxine'].includes((process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').trim().toLowerCase());
+const LIVE_STATUS_ES: Record<string, string> = {
+  'Connecting…': 'Conectando…',
+  'Live — just talk': 'En vivo — habla con normalidad',
+  'Listening…': 'Escuchando…',
+  'Thinking…': 'Pensando…',
+};
 
 type CallState = 'idle' | 'connecting' | 'live' | 'ending' | 'error';
 type Line = { id: string; role: 'user' | 'assistant' | 'system'; text: string; final: boolean };
@@ -297,6 +306,11 @@ export function useLiveVoice() {
 export default function LiveVoiceCall({ variant = 'floating' }: { variant?: 'floating' | 'inline' }) {
   const v = useLiveVoice();
   const active = v.state === 'connecting' || v.state === 'live' || v.state === 'ending';
+  const assistant = useAssistantName();
+  const who = FAMILY_EDITION ? assistant : 'Max';
+  const statusText = FAMILY_EDITION
+    ? (LIVE_STATUS_ES[v.status] || (v.status.startsWith('Looking up') ? 'Buscando…' : v.status))
+    : v.status;
   const [open, setOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -325,17 +339,19 @@ export default function LiveVoiceCall({ variant = 'floating' }: { variant?: 'flo
           boxShadow: '0 10px 30px rgba(0,0,0,0.5)', fontSize: 14,
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-            <strong style={{ color: '#d4af37' }}>Max · Live voice</strong>
+            <strong style={{ color: '#d4af37' }}>{FAMILY_EDITION ? `${who} · Voz en vivo` : 'Max · Live voice'}</strong>
             <span style={{ fontVariantNumeric: 'tabular-nums', color: (v.remaining ?? 999) <= 30 ? '#f87171' : '#aaa' }}>
-              {v.remaining !== null ? `${fmt(v.remaining)} left` : `cap ${fmt(v.cap)}`}
+              {v.remaining !== null ? (FAMILY_EDITION ? `quedan ${fmt(v.remaining)}` : `${fmt(v.remaining)} left`) : (FAMILY_EDITION ? `máx. ${fmt(v.cap)}` : `cap ${fmt(v.cap)}`)}
             </span>
-            {!active && <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: 'none', border: 'none', color: '#aaa', fontSize: 18, cursor: 'pointer' }}>×</button>}
+            {!active && <button onClick={() => setOpen(false)} aria-label={FAMILY_EDITION ? 'Cerrar' : 'Close'} style={{ background: 'none', border: 'none', color: '#aaa', fontSize: 18, cursor: 'pointer' }}>×</button>}
           </div>
           <div style={{ fontSize: 12, color: v.error ? '#f87171' : '#9ca3af' }}>
-            {v.error || (active ? `${v.status}${v.speaking ? ' · Max speaking' : ''}` : 'Tap the mic to start a live call (10-min cap).')}
+            {v.error || (active
+              ? `${statusText}${v.speaking ? (FAMILY_EDITION ? ` · ${who} está hablando` : ' · Max speaking') : ''}`
+              : (FAMILY_EDITION ? 'Toca el micrófono para empezar una llamada en vivo (máximo 10 minutos).' : 'Tap the mic to start a live call (10-min cap).'))}
           </div>
           <div ref={scrollRef} style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, minHeight: 60 }}>
-            {v.lines.length === 0 && <div style={{ color: '#6b7280', fontSize: 12 }}>Transcript appears here.</div>}
+            {v.lines.length === 0 && <div style={{ color: '#6b7280', fontSize: 12 }}>{FAMILY_EDITION ? 'Aquí aparece la transcripción.' : 'Transcript appears here.'}</div>}
             {v.lines.map(l => (
               <div key={l.id} style={{
                 alignSelf: l.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '88%',
@@ -347,7 +363,8 @@ export default function LiveVoiceCall({ variant = 'floating' }: { variant?: 'flo
           </div>
         </div>
       )}
-      <button onClick={onTap} style={btnStyle} aria-label={active ? 'End live call with Max' : 'Start live call with Max'} title={active ? 'End call' : 'Talk to Max (live)'}>
+      <button onClick={onTap} style={btnStyle} aria-label={FAMILY_EDITION ? (active ? `Terminar la llamada con ${who}` : `Empezar llamada en vivo con ${who}`) : (active ? 'End live call with Max' : 'Start live call with Max')}
+        title={FAMILY_EDITION ? (active ? 'Terminar llamada' : `Hablar con ${who} (en vivo)`) : (active ? 'End call' : 'Talk to Max (live)')}>
         {active ? '■' : '🎙️'}
       </button>
     </div>

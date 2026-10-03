@@ -2,7 +2,7 @@
 Pricing Engine API Router
 Drapery yardage, roman shade, upholstery, and full price calculations.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 import logging
 
 from app.services.pricing_engine import (
@@ -26,7 +26,19 @@ from app.services.pricing.rate_cards import component_rates
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/pricing", tags=["pricing"])
+def _workroom_only() -> None:
+    """Workroom/Woodcraft rate tables are not part of the family editions."""
+    try:
+        from app.edition import is_family_edition
+
+        family = bool(is_family_edition())
+    except Exception:
+        family = False
+    if family:
+        raise HTTPException(404, "No disponible en esta edición.")
+
+
+router = APIRouter(prefix="/pricing", tags=["pricing"], dependencies=[Depends(_workroom_only)])
 
 
 @router.get("/canonical/status")

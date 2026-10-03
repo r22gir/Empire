@@ -4,7 +4,7 @@ Workroom (Rafael's main build) returns ``None`` everywhere here, so its
 drapery LeadForge, SocialForge and campaign templates stay exactly as they
 are. The family editions get their own trade:
 
-* maxine (Camilo): real estate, GAC sales of Portal Campestre 2 / Argos
+* maxine (Camilo): real estate, GAC sales of Portal Campestre 2 / Rincón de San Jerónimo
   Campestre lots in Cartago / Zaragoza, Valle del Cauca.
 * amp (Juan Diego): AMP coaching (Spanish personal development) and
   Cibernettic IT (cybersecurity, DBA, networks/VoIP, BI, SLAs).
@@ -38,7 +38,7 @@ _MAXINE = {
     "business_units": [
         {
             "value": "gac",
-            "label": "GAC · Portal Campestre 2 / Argos Campestre",
+            "label": "GAC · Portal Campestre 2 y Rincón de San Jerónimo",
             "default_location": "Cartago / Zaragoza, Valle del Cauca, Colombia",
             "default_target": "compradores_lotes",
             "targets": [
