@@ -84,7 +84,7 @@ export default function AgendaPage() {
             </div>
             <div className="flex items-center gap-2.5">
               <ShieldCheck size={16} className="text-[#7E9F84] shrink-0" />
-              <span>Confidencialidad absoluta ética ICF</span>
+              <span>Confidencialidad absoluta y ética profesional garantizada</span>
             </div>
           </div>
 

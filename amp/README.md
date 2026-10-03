@@ -14,9 +14,9 @@ Portal público y plataforma web de **Actitud Mental Positiva (AMP)**, "El Porta
    - **Modo Claro y Modo Oscuro** con detección automática del sistema operativo y selector manual sin parpadeos.
    - **Animaciones sutiles**: Orbe de respiración pulsante (`breathe-orb`), gradientes en movimiento y respeto estricto a `prefers-reduced-motion`.
 2. **Hero Cinematográfico Full-Bleed**:
-   - Fondo inmersivo fotográfico de amanecer y naturaleza con velo de gradiente para contraste y legibilidad.
+   - Fondo inmersivo fotográfico de amanecer y naturaleza con velo de gradiente y scrim reforzado para contraste y legibilidad accesible (WCAG AA) en móvil y escritorio.
    - Check-in emocional interactivo inmediato ("¿Cómo te sientes hoy?") sin registro previo que recomienda la práctica adecuada al instante.
-   - Franja de validación social y credibilidad con avales metodológicos (Mindvalley Alumni, ICF Coaches, Podcast Positivo).
+   - Franja neutral de credibilidad delimitada con placeholders claros para avales o medios reales de Juan Diego.
 3. **Diseño Centrado en Maestros (Teacher-Forward - Estilo Mindvalley)**:
    - Tarjetas de retratos grandes para los cuatro guías principales: **Juan Diego Giraldo**, **Andrea Silva**, **Dericielo Jiménez** y **Lina Valencia Triviño**.
    - Tarjetas de **Programas y Retos de 21 Días** con arte de portada temático, nombre del mentor, nivel, lecciones y semanas de duración.
@@ -120,24 +120,28 @@ server {
 
 ---
 
-## 📝 Lista de Elementos Reemplazables para Juan Diego Giraldo (Checklist)
+## 📝 Lista de Elementos Reemplazables para Juan Diego Giraldo (Checklist de Placeholders)
 
-Los siguientes recursos multimedia cuentan actualmente con sustitutos profesionales de muestra (stock con licencia libre y audios sintéticos calibrados) listos para ser reemplazados por los materiales definitivos de Juan Diego:
+Los siguientes recursos y textos cuentan actualmente con sustitutos de muestra (placeholders claramente rotulados, stock libre de derechos y tonos sonoros sintéticos calibrados) para que Juan Diego y su equipo los reemplacen con material propio:
 
-- [ ] **Fotografías Oficiales de Coaches** (`public/coaches/` y `src/lib/amp-content.ts`):
-  - **Juan Diego Giraldo** (`public/coaches/juan-diego.jpg`): Retrato oficial de alta resolución en estudio o entorno natural.
+- [ ] **Audios de Meditación y Frecuencias** (`public/audio/*.wav` y `src/lib/amp-content.ts`):
+  - **Aviso importante**: Los archivos actuales en `/public/audio/` (`respiracion-ansiedad.wav`, `gratitud-matutina.wav`, `lider-interior.wav`, `sanar-duelo.wav`, `merezco-prosperidad.wav`, `sueno-profundo.wav`) son **tonos ambientales sintéticos de muestra** (frecuencias Solfeggio 174Hz, 285Hz, 528Hz con envolvente senoidal y ruido rosa) generados para que el reproductor web funcione en vivo. **Deben ser sustituidos por las grabaciones de voz y meditaciones guiadas oficiales grabadas por Juan Diego y sus mentores** (.mp3 / .m4a / .wav).
+- [ ] **Fotografías de Coaches / Mentores** (`public/coaches/` y `src/lib/amp-content.ts`):
+  - **Juan Diego Giraldo** (`public/coaches/juan-diego.jpg`): Retrato de alta resolución en estudio o entorno natural.
   - **Andrea Silva** (`public/coaches/andrea-silva.jpg`): Fotografía profesional orientada a crianza y familia.
   - **Dericielo Jiménez** (`public/coaches/dericielo-jimenez.jpg`): Fotografía profesional orientada a sanación y amor propio.
   - **Lina Valencia Triviño** (`public/coaches/lina-valencia.jpg`): Fotografía profesional orientada a transiciones y duelo.
 - [ ] **Video / Fotografía Principal del Hero** (`public/hero/sunrise-hero.jpg`):
-  - Clip de video en bucle (mp4/webm de ~15 segundos en baja tasa de bits) o fotografía panorámica de Juan Diego en una cumbre o amanecer.
-- [ ] **Audios Definitivos de Meditaciones** (`public/audio/` y `src/lib/amp-content.ts`):
-  - Actualmente el reproductor incluye 6 pistas de ambiente binaural estéreo en frecuencias curativas para probar la reproducción en vivo. Para producción, subir las grabaciones de voz guiadas oficiales (.mp3 / .m4a) y actualizar la constante `SAMPLE_TRACKS`.
+  - Clip de video en bucle (mp4/webm de ~15 segundos en baja tasa de bits con poster fallback) o fotografía panorámica de Juan Diego en una cumbre o amanecer.
 - [ ] **Portadas de Cursos y Programas** (`public/programs/`):
   - Portadas gráficas personalizadas para *Mentalidad Invencible*, *Crianza con Amor*, *Sanación del Niño Interior* y *Trascendiendo el Duelo*.
+- [ ] **Avales y Logos de Prensa / Credibilidad** (`src/app/page.tsx` - sección `PRESS_LOGOS`):
+  - Reemplazar los 4 bloques neutrales `[Enfoque Metodológico]`, `[Acompañamiento]`, `[Espacio Sonoro]` y `[Comunidad]` por los medios, podcasts, certificaciones o métricas comunitarias verificadas de Juan Diego.
+- [ ] **Testimonios Reales de Clientes / Alumnos** (`src/app/page.tsx`):
+  - Sustituir los 3 placeholders `[Testimonio real de Juan a confirmar]` por citas textuales, nombres, fotos reales y perfiles de participantes de los programas de Juan Diego.
+- [ ] **Biografías y Credenciales de Mentores** (`src/lib/amp-content.ts`):
+  - Validar y ratificar las certificaciones y acreditaciones formales de cada mentora invitada.
 - [ ] **Enlaces de Agendamiento Cal.com** (`src/app/agenda/page.tsx` y variable `NEXT_PUBLIC_CALCOM_URL`):
-  - Vincular las cuentas reales de Cal.com de cada coach.
+  - Vincular las cuentas reales de Cal.com / Google Calendar de cada coach.
 - [ ] **Stripe en Modo Real (Live)** (`.env.local`):
   - Cargar los Price IDs reales creados en el panel de Stripe de Juan Diego (`STRIPE_PRICE_MONTHLY` y `STRIPE_PRICE_ANNUAL`).
-- [ ] **Testimonios Reales** (`src/app/page.tsx`):
-  - Reemplazar los testimonios de muestra con historias reales de miembros de la comunidad AMP.

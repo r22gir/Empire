@@ -18,10 +18,10 @@ const MOOD_OPTIONS = [
 ];
 
 const PRESS_LOGOS = [
-  { name: 'Mindvalley Alumni', desc: 'Metodología Consciente' },
-  { name: 'ICF Coaches', desc: 'Estándar Internacional' },
-  { name: 'Podcast Positivo', desc: '+150 Episodios' },
-  { name: 'Comunidad Hispana', desc: '14 Países' },
+  { name: '[Enfoque Metodológico]', desc: '[Dato a confirmar]' },
+  { name: '[Acompañamiento]', desc: '[Estándar a confirmar]' },
+  { name: '[Espacio Sonoro]', desc: '[Contenido a confirmar]' },
+  { name: '[Comunidad]', desc: '[Métrica a confirmar]' },
 ];
 
 export default function HomePage() {
@@ -41,15 +41,15 @@ export default function HomePage() {
     <div className="flex flex-col min-h-screen">
       {/* ── 1. FULL-BLEED CINEMATIC HERO (Mindvalley / Calm style) ── */}
       <section className="relative overflow-hidden pt-12 pb-24 md:pt-20 md:pb-32 border-b border-[#EFE6D8] dark:border-[#2B254E]">
-        {/* Cinematic Background Layer with Overlay */}
+        {/* Cinematic Background Layer with Overlay & Strong Scrim */}
         <div className="absolute inset-0 -z-20 overflow-hidden">
           <div
             className="w-full h-full bg-cover bg-center transition-transform duration-1000 scale-105"
             style={{ backgroundImage: `url('/hero/sunrise-hero.jpg')` }}
           />
-          {/* Multi-layered gradient veil for text legibility and brand warmth */}
-          <div className="absolute inset-0 bg-[#FFFDF9]/90 dark:bg-[#0E0C1C]/92 md:bg-gradient-to-b md:from-[#FFFDF9]/92 md:via-[#FFFDF9]/85 md:to-[#FFFDF9] md:dark:from-[#0E0C1C]/92 md:dark:via-[#0E0C1C]/88 md:dark:to-[#0E0C1C]" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#E0A526]/15 via-transparent to-[#F28C6B]/20" />
+          {/* Multi-layered gradient scrim ensuring robust WCAG AA contrast (4.5:1+) for text on mobile & desktop */}
+          <div className="absolute inset-0 bg-[#FFFDF9]/95 dark:bg-[#0A0817]/95 sm:bg-[#FFFDF9]/90 sm:dark:bg-[#0E0C1C]/92 md:bg-gradient-to-b md:from-[#FFFDF9]/94 md:via-[#FFFDF9]/88 md:to-[#FFFDF9] md:dark:from-[#0A0817]/96 md:dark:via-[#0E0C1C]/92 md:dark:to-[#0E0C1C]" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#E0A526]/10 via-transparent to-[#F28C6B]/15" />
         </div>
 
         {/* Ambient floating orbs */}
@@ -58,16 +58,16 @@ export default function HomePage() {
 
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
           {/* Eyebrow badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/80 dark:bg-white/10 backdrop-blur-md border border-[#E0A526]/30 text-xs font-bold uppercase tracking-wider text-[#C68C14] dark:text-[#F2C14E] shadow-sm mb-6 animate-fade-up">
-            <Sparkles size={14} /> El Portal de la Alegría · Actitud Mental Positiva
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#8E5600]/10 dark:bg-[#1A1633]/90 backdrop-blur-md border border-[#8E5600]/30 text-xs font-black uppercase tracking-wider text-[#734300] dark:text-[#F6D06F] shadow-sm mb-6 animate-fade-up">
+            <Sparkles size={14} className="text-[#8E5600] dark:text-[#F6D06F]" /> El Portal de la Alegría · Actitud Mental Positiva
           </div>
 
-          <h1 className="font-serif text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-[#1E1A17] dark:text-[#F6F3EE] leading-[1.1] mb-6 max-w-4xl mx-auto">
+          <h1 className="font-serif text-4xl sm:text-6xl md:text-7xl font-black tracking-tight text-[#16120E] dark:text-[#FFFFFF] leading-[1.15] mb-6 max-w-4xl mx-auto">
             Transforma tu mente, <br className="hidden sm:inline" />
-            <span className="gradient-text">un día a la vez.</span>
+            <span className="text-[#8E4400] dark:text-[#F8B338]">un día a la vez.</span>
           </h1>
 
-          <p className="text-lg sm:text-xl md:text-2xl text-[#5C544D] dark:text-[#B4ACC5] max-w-3xl mx-auto leading-relaxed mb-10 font-normal">
+          <p className="text-lg sm:text-xl md:text-2xl text-[#2B231D] dark:text-[#E2DCED] font-medium max-w-3xl mx-auto leading-relaxed mb-10">
             La profundidad transformadora del coaching de vida y la serenidad diaria de la meditación guiada en español. Sin algoritmos fríos: guiado por mentores reales que caminan a tu lado.
           </p>
 
@@ -163,15 +163,15 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ── 2. SOCIAL PROOF & CREDIBILITY BAND ── */}
+      {/* ── 2. SOCIAL PROOF & CREDIBILITY BAND (PLACEHOLDER) ── */}
       <section className="py-10 bg-[#FDF8F0] dark:bg-[#141129] border-b border-[#EFE6D8] dark:border-[#2B254E]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <p className="text-center text-xs font-bold uppercase tracking-widest text-[#5C544D] dark:text-[#B4ACC5] mb-6">
-            Comunidad & Metodología Avalada en Toda Hispanoamérica
+            [Espacio reservado para avales, medios o hitos comunitarios confirmados por Juan]
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
             {PRESS_LOGOS.map((item, idx) => (
-              <div key={idx} className="p-3">
+              <div key={idx} className="p-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-[#E0A526]/30">
                 <div className="font-serif font-bold text-base md:text-lg text-[#1E1A17] dark:text-[#F6F3EE]">
                   {item.name}
                 </div>
@@ -188,7 +188,7 @@ export default function HomePage() {
       <section className="py-20 md:py-28 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-3xl mx-auto mb-16">
           <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#E0A526]/15 border border-[#E0A526]/30 text-xs font-bold uppercase tracking-wider text-[#C68C14] dark:text-[#F2C14E] mb-3">
-            <Users size={14} /> Equipo de Guías Oficiales
+            <Users size={14} /> Equipo de Guías y Mentores
           </div>
           <h2 className="font-serif text-3xl sm:text-5xl font-bold text-[#1E1A17] dark:text-[#F6F3EE] mb-4">
             Aprende con Mentores con Experiencia Real de Vida
@@ -208,7 +208,7 @@ export default function HomePage() {
               <div className="relative aspect-[4/5] overflow-hidden bg-gray-100 dark:bg-gray-800">
                 <img
                   src={coach.photoLocal}
-                  alt={`Fotografía oficial de ${coach.name}`}
+                  alt={`Retrato de ${coach.name}`}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
@@ -375,54 +375,59 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ── 6. TESTIMONIOS CON AVATARES & HISTORIAS REALES ── */}
+      {/* ── 6. TESTIMONIOS (PLACEHOLDER PARA CASOS REALES DE JUAN) ── */}
       <section className="py-20 bg-[#FDF8F0] dark:bg-[#120F26] border-t border-[#EFE6D8] dark:border-[#2B254E]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-2xl mx-auto mb-16">
             <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#E0A526]/15 border border-[#E0A526]/30 text-xs font-bold uppercase tracking-wider text-[#C68C14] dark:text-[#F2C14E] mb-3">
-              <Star size={14} /> Transformación Comprobada
+              <Star size={14} /> Espacio de Testimonios
             </div>
             <h2 className="font-serif text-3xl sm:text-4xl font-bold text-[#1E1A17] dark:text-[#F6F3EE] mb-3">
-              Voces de Quienes Ya Viven con Alegría
+              Historias de Transformación
             </h2>
             <p className="text-sm text-[#5C544D] dark:text-[#B4ACC5]">
-              Personas y líderes que han integrado las micro-prácticas diarias de AMP en su rutina.
+              [Sección de testimonios en maqueta — a sustituir por testimonios y citas reales proporcionadas por Juan Diego y sus clientes]
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
               {
-                quote: "El acompañamiento de Juan Diego me permitió desarmar el miedo al fracaso en mi empresa y liderar a mi equipo desde la calma y la convicción.",
-                author: "Carlos E. Restrepo",
-                role: "Empresario & Emprendedor",
-                city: "Medellín, Colombia",
+                quote: "[Testimonio real de Juan a confirmar: experiencia de coaching en liderazgo personal y claridad de propósito].",
+                author: "[Nombre de alumno / cliente]",
+                role: "[Profesión / Emprendimiento]",
+                city: "[Ciudad]",
                 avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80",
               },
               {
-                quote: "Los talleres de crianza con Andrea salvaron la relación con mis dos hijos adolescentes. Pasamos de las discusiones diarias a escucharnos con genuino amor.",
-                author: "Marcela Domínguez",
-                role: "Madre de familia y docente",
-                city: "Bogotá, Colombia",
+                quote: "[Testimonio real de acompañamiento a confirmar: experiencia con talleres y herramientas para la familia].",
+                author: "[Nombre de alumna / cliente]",
+                role: "[Rol familiar / Docencia]",
+                city: "[Ciudad]",
                 avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80",
               },
               {
-                quote: "Tras mi separación sentí que no quedaba nada de mí. Las sesiones y audios de sanación de Dericielo me devolvieron la sonrisa y el amor propio.",
-                author: "Patricia Henao",
-                role: "Arquitecta",
-                city: "Miami, FL",
+                quote: "[Testimonio real de proceso emocional a confirmar: experiencia en sesiones de sanación y reconstrucción personal].",
+                author: "[Nombre de alumna / cliente]",
+                role: "[Profesión / Actividad]",
+                city: "[Ciudad]",
                 avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80",
               },
             ].map((t, idx) => (
               <div
                 key={idx}
-                className="glass-card rounded-3xl p-6 sm:p-8 border border-[#EFE6D8] dark:border-[#2B254E] flex flex-col justify-between shadow-md"
+                className="glass-card rounded-3xl p-6 sm:p-8 border border-dashed border-[#E0A526]/40 dark:border-[#2B254E] flex flex-col justify-between shadow-md"
               >
                 <div>
-                  <div className="flex gap-1 text-[#E0A526] mb-4">
-                    {[...Array(5)].map((_, i) => (
-                      <Star key={i} size={16} className="fill-current" />
-                    ))}
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex gap-1 text-[#E0A526]">
+                      {[...Array(5)].map((_, i) => (
+                        <Star key={i} size={16} className="fill-current" />
+                      ))}
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#E0A526]/10 text-[#C68C14] dark:text-[#F2C14E]">
+                      Placeholder
+                    </span>
                   </div>
                   <p className="text-sm text-[#5C544D] dark:text-[#B4ACC5] leading-relaxed italic mb-6">
                     &ldquo;{t.quote}&rdquo;
@@ -433,7 +438,7 @@ export default function HomePage() {
                   <img
                     src={t.avatar}
                     alt={t.author}
-                    className="w-11 h-11 rounded-full object-cover ring-2 ring-[#E0A526]/30"
+                    className="w-11 h-11 rounded-full object-cover ring-2 ring-[#E0A526]/30 opacity-75"
                   />
                   <div>
                     <p className="text-sm font-bold text-[#1E1A17] dark:text-[#F6F3EE]">

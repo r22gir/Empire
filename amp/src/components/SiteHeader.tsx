@@ -33,14 +33,9 @@ export default function SiteHeader() {
             <Sparkles size={20} className="animate-pulse-slow" />
           </div>
           <div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-serif font-extrabold text-xl md:text-2xl text-[#1E1A17] dark:text-[#F6F3EE] tracking-tight block leading-tight">
-                AMP
-              </span>
-              <span className="inline-block px-1.5 py-0.5 text-[9px] font-bold tracking-widest uppercase rounded bg-[#E0A526]/20 text-[#C68C14] dark:text-[#F2C14E]">
-                Edición Oficial
-              </span>
-            </div>
+            <span className="font-serif font-extrabold text-xl md:text-2xl text-[#1E1A17] dark:text-[#F6F3EE] tracking-tight block leading-tight">
+              AMP
+            </span>
             <span className="text-[10px] uppercase font-bold tracking-widest text-[#E0A526] block leading-none mt-0.5">
               El Portal de la Alegría
             </span>
