@@ -17,6 +17,26 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/construction", tags=["construction"])
 
+# Lot statuses the UI can switch between. "consultar" = price on request.
+LOT_STATUSES = ("available", "reserved", "sold", "consultar", "under_construction", "delivered", "hold")
+SALE_STATUSES = ("pending", "signed", "in_progress", "completed", "cancelled")
+# Lot is sellable while it is not yet sold/built/delivered.
+SELLABLE_LOT_STATUSES = ("available", "reserved", "consultar")
+
+
+def _check_lot_status(status: str) -> str:
+    value = (status or "").strip().lower()
+    if value not in LOT_STATUSES:
+        raise HTTPException(400, f"Estado de lote no válido: '{status}'. Usa uno de: {', '.join(LOT_STATUSES)}")
+    return value
+
+
+def _check_sale_status(status: str) -> str:
+    value = (status or "").strip().lower()
+    if value not in SALE_STATUSES:
+        raise HTTPException(400, f"Etapa de venta no válida: '{status}'. Usa una de: {', '.join(SALE_STATUSES)}")
+    return value
+
 
 def resolve_db_path() -> str:
     """Workroom keeps EMPIRE_TASK_DB. A family instance uses its own file.
@@ -347,11 +367,13 @@ class BulkLotCreate(BaseModel):
     block: Optional[str] = None
     start_number: int = 1
     count: int
+    prefix: Optional[str] = None
     area_m2: Optional[float] = None
     frontage_m: Optional[float] = None
     depth_m: Optional[float] = None
     base_price: float = 0
     current_price: float = 0
+    status: str = "available"
 
 class BuyerCreate(BaseModel):
     first_name: str
@@ -428,6 +450,9 @@ class PaymentCreate(BaseModel):
 
 class PaymentUpdate(BaseModel):
     status: Optional[str] = None
+    amount: Optional[float] = None
+    due_date: Optional[str] = None
+    installment_number: Optional[int] = None
     payment_date: Optional[str] = None
     payment_method: Optional[str] = None
     receipt_number: Optional[str] = None
@@ -678,8 +703,26 @@ def project_dashboard(project_id: str):
 
         phases = conn.execute("SELECT * FROM cf_phases WHERE project_id = ? ORDER BY phase_number", (project_id,)).fetchall()
 
+        lot_rows = conn.execute(
+            "SELECT id, lot_number, block, area_m2, current_price, status FROM cf_lots WHERE project_id = ? ORDER BY block, lot_number",
+            (project_id,),
+        ).fetchall()
+
         return {
             "project": row_to_dict(proj),
+            # Flat fields for the dashboard cards. The nested "lots" dict stays
+            # for older callers; the flat lot array is "lot_list".
+            "total_lots": total_lots,
+            "available_lots": lot_summary.get("available", 0),
+            "reserved_lots": lot_summary.get("reserved", 0),
+            "sold_lots": lot_summary.get("sold", 0) + lot_summary.get("delivered", 0),
+            "consultar_lots": lot_summary.get("consultar", 0),
+            "under_construction_lots": lot_summary.get("under_construction", 0),
+            "revenue_collected": payments_received,
+            "revenue_pending": payments_pending,
+            "revenue_contracted": total_revenue,
+            "construction_progress": round(avg_progress, 1),
+            "lot_list": rows_to_list(lot_rows),
             "lots": {"total": total_lots, "by_status": lot_summary},
             "sales": {"summary": sales_summary, "total_revenue": total_revenue},
             "payments": {
@@ -778,15 +821,21 @@ def create_lot(project_id: str, body: LotCreate):
     try:
         if not conn.execute("SELECT 1 FROM cf_projects WHERE id = ?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
+        status = _check_lot_status(body.status)
+        lot_number = (body.lot_number or "").strip()
+        if not lot_number:
+            raise HTTPException(400, "Indica el número del lote")
+        if conn.execute("SELECT 1 FROM cf_lots WHERE project_id = ? AND lot_number = ?", (project_id, lot_number)).fetchone():
+            raise HTTPException(409, f"El lote {lot_number} ya existe en este proyecto")
         features_json = json.dumps(body.features or [])
         conn.execute("""
             INSERT INTO cf_lots (id, project_id, phase_id, lot_number, block, area_m2,
                                  frontage_m, depth_m, orientation, features, base_price,
                                  current_price, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (lid, project_id, body.phase_id, body.lot_number, body.block,
+        """, (lid, project_id, body.phase_id, lot_number, body.block,
               body.area_m2, body.frontage_m, body.depth_m, body.orientation,
-              features_json, body.base_price, body.current_price, body.status))
+              features_json, body.base_price, body.current_price, status))
         conn.commit()
         row = conn.execute("SELECT * FROM cf_lots WHERE id = ?", (lid,)).fetchone()
         return row_to_dict(row)
@@ -819,12 +868,13 @@ def update_lot_status(lot_id: str, body: LotStatusUpdate):
         if not row:
             raise HTTPException(404, "Lot not found")
 
-        updates = {"status": body.status, "updated_at": datetime.utcnow().isoformat()}
-        if body.status == "reserved":
+        new_status = _check_lot_status(body.status)
+        updates = {"status": new_status, "updated_at": datetime.utcnow().isoformat()}
+        if new_status == "reserved":
             updates["reserved_at"] = datetime.utcnow().isoformat()
             if body.reserved_by:
                 updates["reserved_by"] = body.reserved_by
-        elif body.status == "sold":
+        elif new_status == "sold":
             updates["sold_at"] = datetime.utcnow().isoformat()
             if body.reserved_by:
                 updates["sold_to"] = body.reserved_by
@@ -838,26 +888,60 @@ def update_lot_status(lot_id: str, body: LotStatusUpdate):
         conn.close()
 
 
-@router.post("/lots/bulk", status_code=201)
-def bulk_create_lots(project_id: str, body: BulkLotCreate):
+def _bulk_create(project_id: str, body: BulkLotCreate) -> dict:
+    if body.count < 1 or body.count > 500:
+        raise HTTPException(400, "La cantidad debe estar entre 1 y 500")
+    status = _check_lot_status(body.status)
     conn = get_db()
     try:
         if not conn.execute("SELECT 1 FROM cf_projects WHERE id = ?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
-        created = []
+        created, skipped = [], []
+        prefix = (body.prefix or "").strip()
         for i in range(body.count):
+            lot_num = f"{prefix}{body.start_number + i}"
+            # Never duplicate an existing lot number in the same project.
+            if conn.execute("SELECT 1 FROM cf_lots WHERE project_id = ? AND lot_number = ?", (project_id, lot_num)).fetchone():
+                skipped.append(lot_num)
+                continue
             lid = str(uuid.uuid4())
-            lot_num = str(body.start_number + i)
             conn.execute("""
                 INSERT INTO cf_lots (id, project_id, phase_id, lot_number, block, area_m2,
                                      frontage_m, depth_m, base_price, current_price, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (lid, project_id, body.phase_id, lot_num, body.block,
                   body.area_m2, body.frontage_m, body.depth_m,
-                  body.base_price, body.current_price))
+                  body.base_price, body.current_price, status))
             created.append(lid)
         conn.commit()
-        return {"created": len(created), "lot_ids": created}
+        return {"created": len(created), "lot_ids": created, "skipped_existing": skipped}
+    finally:
+        conn.close()
+
+
+@router.post("/lots/bulk", status_code=201)
+def bulk_create_lots(project_id: str, body: BulkLotCreate):
+    return _bulk_create(project_id, body)
+
+
+@router.post("/projects/{project_id}/lots/bulk", status_code=201)
+def bulk_create_project_lots(project_id: str, body: BulkLotCreate):
+    return _bulk_create(project_id, body)
+
+
+@router.delete("/lots/{lot_id}")
+def delete_lot(lot_id: str):
+    conn = get_db()
+    try:
+        if not conn.execute("SELECT 1 FROM cf_lots WHERE id = ?", (lot_id,)).fetchone():
+            raise HTTPException(404, "Lot not found")
+        if conn.execute("SELECT 1 FROM cf_sales WHERE lot_id = ?", (lot_id,)).fetchone():
+            raise HTTPException(409, "El lote tiene ventas registradas. Elimina o cancela la venta primero.")
+        if conn.execute("SELECT 1 FROM cf_construction WHERE lot_id = ?", (lot_id,)).fetchone():
+            raise HTTPException(409, "El lote tiene avance de obra registrado.")
+        conn.execute("DELETE FROM cf_lots WHERE id = ?", (lot_id,))
+        conn.commit()
+        return {"deleted": lot_id}
     finally:
         conn.close()
 
@@ -966,6 +1050,24 @@ def update_buyer(buyer_id: str, body: BuyerUpdate):
         conn.close()
 
 
+@router.delete("/buyers/{buyer_id}")
+def delete_buyer(buyer_id: str):
+    conn = get_db()
+    try:
+        if not conn.execute("SELECT 1 FROM cf_buyers WHERE id = ?", (buyer_id,)).fetchone():
+            raise HTTPException(404, "Buyer not found")
+        if conn.execute("SELECT 1 FROM cf_sales WHERE buyer_id = ?", (buyer_id,)).fetchone():
+            raise HTTPException(409, "El comprador tiene ventas registradas. Elimina la venta primero.")
+        conn.execute("DELETE FROM cf_payments WHERE buyer_id = ? AND sale_id NOT IN (SELECT id FROM cf_sales)", (buyer_id,))
+        conn.execute("UPDATE cf_lots SET reserved_by = NULL WHERE reserved_by = ?", (buyer_id,))
+        conn.execute("UPDATE cf_lots SET sold_to = NULL WHERE sold_to = ?", (buyer_id,))
+        conn.execute("DELETE FROM cf_buyers WHERE id = ?", (buyer_id,))
+        conn.commit()
+        return {"deleted": buyer_id}
+    finally:
+        conn.close()
+
+
 # ═════════════════════════════════════════════════════════════════════
 # SALES
 # ═════════════════════════════════════════════════════════════════════
@@ -981,8 +1083,9 @@ def create_sale(body: SaleCreate):
             raise HTTPException(404, "Lot not found")
         if not conn.execute("SELECT 1 FROM cf_buyers WHERE id = ?", (body.buyer_id,)).fetchone():
             raise HTTPException(404, "Buyer not found")
-        if lot["status"] not in ("available", "reserved"):
-            raise HTTPException(400, f"Lot status is '{lot['status']}', cannot sell")
+        if lot["status"] not in SELLABLE_LOT_STATUSES:
+            raise HTTPException(400, f"El lote está '{lot['status']}' y no se puede vender")
+        sale_status = _check_sale_status(body.status)
 
         payment_plan_json = json.dumps(body.payment_plan or {})
         dp_received = 1 if body.down_payment_received else 0
@@ -995,14 +1098,21 @@ def create_sale(body: SaleCreate):
         """, (sid, body.lot_id, body.buyer_id, body.agent_id, body.sale_price,
               body.currency, payment_plan_json, body.contract_type, body.contract_date,
               body.contract_document, body.down_payment, dp_received,
-              body.status, body.notes))
+              sale_status, body.notes))
 
-        # Update lot status
-        conn.execute("""
-            UPDATE cf_lots SET status = 'sold', sold_at = ?, sold_to = ?, updated_at = ?
-            WHERE id = ?
-        """, (datetime.utcnow().isoformat(), body.buyer_id,
-              datetime.utcnow().isoformat(), body.lot_id))
+        # Update lot status: a pending sale (separación) reserves the lot,
+        # a signed / in-progress / completed sale marks it sold.
+        now = datetime.utcnow().isoformat()
+        if sale_status == "pending":
+            conn.execute("""
+                UPDATE cf_lots SET status = 'reserved', reserved_at = ?, reserved_by = ?, updated_at = ?
+                WHERE id = ?
+            """, (now, body.buyer_id, now, body.lot_id))
+        elif sale_status != "cancelled":
+            conn.execute("""
+                UPDATE cf_lots SET status = 'sold', sold_at = ?, sold_to = ?, updated_at = ?
+                WHERE id = ?
+            """, (now, body.buyer_id, now, body.lot_id))
 
         conn.commit()
         row = conn.execute("SELECT * FROM cf_sales WHERE id = ?", (sid,)).fetchone()
@@ -1032,17 +1142,70 @@ def get_sale(sale_id: str):
 
 @router.put("/sales/{sale_id}")
 def update_sale(sale_id: str, body: SaleUpdate):
+    if body.status is not None:
+        body.status = _check_sale_status(body.status)
     set_clause, vals = _build_update(body, {"updated_at": datetime.utcnow().isoformat()})
     if not set_clause:
         raise HTTPException(400, "No fields to update")
     conn = get_db()
     try:
         conn.execute(f"UPDATE cf_sales SET {set_clause} WHERE id = ?", vals + [sale_id])
-        conn.commit()
         row = conn.execute("SELECT * FROM cf_sales WHERE id = ?", (sale_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Sale not found")
+        if body.status is not None:
+            _sync_lot_for_sale(conn, row)
+        conn.commit()
         return row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def _sync_lot_for_sale(conn, sale_row) -> None:
+    """Keep the lot status in line with the sale stage."""
+    now = datetime.utcnow().isoformat()
+    status = sale_row["status"]
+    lot_id, buyer_id = sale_row["lot_id"], sale_row["buyer_id"]
+    if status == "cancelled":
+        conn.execute("""
+            UPDATE cf_lots SET status = 'available', reserved_by = NULL, reserved_at = NULL,
+                   sold_to = NULL, sold_at = NULL, updated_at = ?
+            WHERE id = ? AND status IN ('reserved', 'sold') AND (sold_to = ? OR reserved_by = ? OR (sold_to IS NULL AND reserved_by IS NULL))
+        """, (now, lot_id, buyer_id, buyer_id))
+    elif status == "pending":
+        conn.execute("""
+            UPDATE cf_lots SET status = 'reserved', reserved_by = ?, reserved_at = COALESCE(reserved_at, ?), updated_at = ?
+            WHERE id = ? AND status IN ('available', 'consultar', 'reserved', 'sold')
+        """, (buyer_id, now, now, lot_id))
+    else:
+        conn.execute("""
+            UPDATE cf_lots SET status = 'sold', sold_to = ?, sold_at = COALESCE(sold_at, ?), updated_at = ?
+            WHERE id = ? AND status IN ('available', 'consultar', 'reserved', 'sold')
+        """, (buyer_id, now, now, lot_id))
+
+
+@router.delete("/sales/{sale_id}")
+def delete_sale(sale_id: str):
+    """Remove a sale and its payments, and free the lot it held."""
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM cf_sales WHERE id = ?", (sale_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Sale not found")
+        payments = conn.execute("DELETE FROM cf_payments WHERE sale_id = ?", (sale_id,)).rowcount
+        conn.execute("DELETE FROM cf_sales WHERE id = ?", (sale_id,))
+        others = conn.execute(
+            "SELECT 1 FROM cf_sales WHERE lot_id = ? AND status != 'cancelled'", (row["lot_id"],)
+        ).fetchone()
+        if not others:
+            now = datetime.utcnow().isoformat()
+            conn.execute("""
+                UPDATE cf_lots SET status = 'available', reserved_by = NULL, reserved_at = NULL,
+                       sold_to = NULL, sold_at = NULL, updated_at = ?
+                WHERE id = ? AND status IN ('reserved', 'sold') AND (sold_to = ? OR reserved_by = ?)
+            """, (now, row["lot_id"], row["buyer_id"], row["buyer_id"]))
+        conn.commit()
+        return {"deleted": sale_id, "payments_deleted": payments}
     finally:
         conn.close()
 
@@ -1064,6 +1227,7 @@ def sales_pipeline(project_id: str):
         pipeline = {"pending": [], "signed": [], "in_progress": [], "completed": [], "cancelled": []}
         for r in rows_to_list(rows):
             status = r.get("status", "pending")
+            r["buyer_name"] = " ".join(x for x in (r.get("first_name"), r.get("last_name")) if x).strip()
             pipeline.setdefault(status, []).append(r)
 
         totals = conn.execute("""
@@ -1142,6 +1306,59 @@ def update_payment(payment_id: str, body: PaymentUpdate):
         conn.close()
 
 
+@router.delete("/payments/{payment_id}")
+def delete_payment(payment_id: str):
+    conn = get_db()
+    try:
+        if not conn.execute("SELECT 1 FROM cf_payments WHERE id = ?", (payment_id,)).fetchone():
+            raise HTTPException(404, "Payment not found")
+        conn.execute("DELETE FROM cf_payments WHERE id = ?", (payment_id,))
+        conn.commit()
+        return {"deleted": payment_id}
+    finally:
+        conn.close()
+
+
+@router.get("/projects/{project_id}/payments")
+def project_payments(project_id: str, status: Optional[str] = None):
+    """Every payment in the project, with buyer and lot. Read-only."""
+    conn = get_db()
+    try:
+        query = """
+            SELECT p.*, s.lot_id, s.sale_price, s.status AS sale_status, l.lot_number, l.block,
+                   b.first_name, b.last_name, b.phone, b.whatsapp
+            FROM cf_payments p
+            JOIN cf_sales s ON p.sale_id = s.id
+            JOIN cf_lots l ON s.lot_id = l.id
+            LEFT JOIN cf_buyers b ON p.buyer_id = b.id
+            WHERE l.project_id = ?
+        """
+        params: list = [project_id]
+        if status:
+            query += " AND p.status = ?"
+            params.append(status)
+        query += " ORDER BY COALESCE(p.due_date, p.payment_date, p.created_at), p.installment_number"
+        rows = rows_to_list(conn.execute(query, params).fetchall())
+        today = date.today().isoformat()
+        for r in rows:
+            r["buyer_name"] = " ".join(x for x in (r.get("first_name"), r.get("last_name")) if x).strip()
+            r["is_overdue"] = bool(
+                r.get("status") == "overdue"
+                or (r.get("status") == "pending" and r.get("due_date") and str(r["due_date"])[:10] < today)
+            )
+        received = sum(r["amount"] or 0 for r in rows if r.get("status") == "received")
+        pending = sum(r["amount"] or 0 for r in rows if r.get("status") in ("pending", "overdue"))
+        return {
+            "payments": rows,
+            "count": len(rows),
+            "total_received": received,
+            "total_pending": pending,
+            "overdue_count": sum(1 for r in rows if r["is_overdue"]),
+        }
+    finally:
+        conn.close()
+
+
 @router.get("/projects/{project_id}/payments/overdue")
 def overdue_payments(project_id: str):
     conn = get_db()
@@ -1170,7 +1387,11 @@ def overdue_payments(project_id: str):
             """, (project_id,))
             conn.commit()
 
-        return {"overdue": rows_to_list(rows), "count": len(rows)}
+        overdue = rows_to_list(rows)
+        for r in overdue:
+            r["buyer_name"] = " ".join(x for x in (r.get("first_name"), r.get("last_name")) if x).strip()
+        # "payments" mirrors "overdue" for callers that read that key.
+        return {"overdue": overdue, "payments": overdue, "count": len(overdue)}
     finally:
         conn.close()
 

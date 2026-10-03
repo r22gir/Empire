@@ -493,11 +493,16 @@ export default function CommandCenter() {
         case 'contractor': return <ContractorForgePage />;
         case 'lead': return <LeadForgePage initialSection={activeSection || undefined} />;
         case 'market': return <MarketForgePage />;
-        case 'pay': return <EmpirePayPage />;
+        case 'pay':
+          // Maxine: 'Planes de pago' is the ConstructionForge payment plan, not EmpirePay.
+          if (editionFromEnv() === 'maxine') return <ConstructionForgePage initialSection="plans" />;
+          return <EmpirePayPage />;
         case 'ship': return <ShipForgePage />;
         case 'amp':
           return <Suspense fallback={<Loading />}><AmpLanding /></Suspense>;
         case 'crm':
+          // Maxine: 'Compradores' are ConstructionForge buyers.
+          if (editionFromEnv() === 'maxine') return <ConstructionForgePage initialSection="buyers" />;
           return <ForgeCRMPage />;
         case 'apost':
           return <ApostAppPage onNavigate={(product, screen, section) => {

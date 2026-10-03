@@ -283,11 +283,24 @@ DMV_INDICATORS = [
 # ── Scoring ──────────────────────────────────────────────────────────────
 
 
+def _family_trade_profile():
+    """Maxine / Max-e trade profile. None on Workroom (drapery scoring stays)."""
+    try:
+        from app.services.leadforge.trade_profile import trade_profile
+
+        return trade_profile()
+    except Exception:
+        return None
+
+
 def _score_prospect(raw: dict, search_location: str) -> dict:
     """
     Score a raw prospect dict and return it with all score breakdown fields.
     Score range: 0-100.
     """
+    prof = _family_trade_profile()
+    if prof:
+        return _score_prospect_family(raw, search_location, prof)
     name_lower = (raw.get("name") or raw.get("business_name") or "").lower()
     cats_str = " ".join(raw.get("categories") or []).lower()
     desc_lower = (raw.get("description") or "").lower()
@@ -442,6 +455,100 @@ def _score_prospect(raw: dict, search_location: str) -> dict:
         "recommended_angle": angle,
         "outreach_priority": priority,
         "card_summary": card_summary,
+    }
+
+
+def _score_prospect_family(raw: dict, search_location: str, prof: dict) -> dict:
+    """Family edition scoring: same 0-100 scale, the edition's own trade terms.
+
+    Drapery fit columns stay 0; trade fit tags go in matched_keywords.
+    """
+    name_lower = (raw.get("name") or raw.get("business_name") or "").lower()
+    cats_str = " ".join(raw.get("categories") or []).lower()
+    desc_lower = (raw.get("description") or "").lower()
+    combined = f"{name_lower} {cats_str} {desc_lower}"
+
+    rating = float(raw.get("rating") or 0)
+    rating_points = round((rating / 5.0) * 40, 2) if rating > 0 else 0
+    reviews = int(raw.get("review_count") or 0)
+    review_points = round(min(30, (math.log10(min(reviews, 500) + 1) / math.log10(501)) * 30), 2) if reviews > 0 else 0
+
+    relevance_points = 0.0
+    matched = []
+    for kw, pts in (prof.get("relevance_keywords") or {}).items():
+        if kw in combined:
+            relevance_points += pts
+            matched.append(kw)
+    relevance_points = round(min(20, relevance_points), 2)
+
+    loc_combined = f"{combined} {(raw.get('location') or '').lower()} {(raw.get('address') or '').lower()} {(raw.get('city') or '').lower()} {(raw.get('state') or '').lower()}"
+    proximity_points = 0.0
+    for ind in prof.get("proximity") or []:
+        if ind in loc_combined or ind in (search_location or "").lower():
+            proximity_points = 10.0
+            break
+
+    keyword_bonus = round(min(10, sum(2.5 for t in (prof.get("keyword_terms") or []) if t in combined)), 2)
+    source = (raw.get("source") or "").lower()
+    source_bonus = {"google": 5, "google_places": 5, "yelp": 4, "brave": 2}.get(source, 1)
+    total = round(min(100, rating_points + review_points + relevance_points + proximity_points + keyword_bonus + source_bonus))
+
+    has_phone = 1 if raw.get("phone") else 0
+    has_website = 1 if raw.get("website") else 0
+    has_address = 1 if (raw.get("address") or raw.get("city")) else 0
+    has_reviews = 1 if reviews > 0 else 0
+    confidence = (has_phone + has_website + has_address + has_reviews) * 25
+
+    tags = [t for t in prof.get("fit_tags") or [] if any(k in combined for k in t["keywords"])]
+    units = []
+    for t in tags:
+        u = t.get("unit") or prof.get("default_unit")
+        if u and u not in units:
+            units.append(u)
+    first = tags[0]["key"] if tags else None
+    client_type = (prof.get("client_types") or {}).get(first, prof.get("default_client_type", "")) if first else prof.get("default_client_type", "")
+    angle = (prof.get("angles") or {}).get(first) if first else None
+
+    if raw.get("email"):
+        best_contact = "email"
+    elif raw.get("phone"):
+        best_contact = "phone"
+    elif raw.get("website"):
+        best_contact = "website_form"
+    else:
+        best_contact = "social"
+
+    card_parts = [raw.get("business_name") or raw.get("name") or "Sin nombre"]
+    if raw.get("city"):
+        card_parts.append(raw["city"])
+    if rating > 0:
+        card_parts.append(f"{rating}★")
+    if reviews > 0:
+        card_parts.append(f"{reviews} reseñas")
+
+    return {
+        **raw,
+        "score": total,
+        "rating_points": rating_points,
+        "review_points": review_points,
+        "relevance_points": relevance_points,
+        "proximity_points": proximity_points,
+        "keyword_bonus": keyword_bonus,
+        "source_bonus": source_bonus,
+        "confidence_score": confidence,
+        "has_phone": has_phone,
+        "has_website": has_website,
+        "has_address": has_address,
+        "has_reviews": has_reviews,
+        "matched_keywords": matched + [f"fit:{t['key']}" for t in tags],
+        **{k: 0 for k in FIT_RULES},
+        "recommended_units": units or [prof.get("default_unit")],
+        "client_type": client_type,
+        "outreach_ready": 1 if confidence >= 50 and total >= 30 else 0,
+        "best_contact_method": best_contact,
+        "recommended_angle": angle or prof.get("default_angle", ""),
+        "outreach_priority": "high" if total >= 70 else "medium" if total >= 40 else "low",
+        "card_summary": " | ".join(card_parts),
     }
 
 
@@ -732,6 +839,9 @@ TARGET_QUERIES = {
 
 
 def _build_query(target_type: str) -> str:
+    prof = _family_trade_profile()
+    if prof:
+        return (prof.get("target_queries") or {}).get(target_type.lower(), target_type)
     return TARGET_QUERIES.get(target_type.lower(), target_type)
 
 

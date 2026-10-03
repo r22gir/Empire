@@ -14,6 +14,46 @@ import WorkroomLeadForm from '../workroom/WorkroomLeadForm';
 
 const LF_API = `${API}/leads`;
 
+/** Edition trade defaults. Workroom answers {family:false} and keeps its drapery screen. */
+interface TradeUnit { value: string; label: string; default_location?: string; default_target?: string; targets?: { value: string; label: string }[]; }
+interface TradeProfile { family: boolean; edition?: string; title?: string; subtitle?: string; default_unit?: string; business_units?: TradeUnit[]; fit_tags?: { key: string; label: string; keywords?: string[] }[]; }
+
+let tradeProfileCache: TradeProfile | null = null;
+
+function useTradeProfile(): TradeProfile | null {
+  const [profile, setProfile] = useState<TradeProfile | null>(tradeProfileCache);
+  useEffect(() => {
+    if (tradeProfileCache) return;
+    let cancelled = false;
+    fetch(`${LF_API}/leadforge/trade-profile`).then(r => (r.ok ? r.json() : { family: false })).then((d: TradeProfile) => {
+      tradeProfileCache = d && typeof d === 'object' ? d : { family: false };
+      if (!cancelled) setProfile(tradeProfileCache);
+    }).catch(() => { if (!cancelled) setProfile({ family: false }); });
+    return () => { cancelled = true; };
+  }, []);
+  return profile;
+}
+
+/** Family editions: hide Workroom-only tools and speak Spanish. */
+const FAMILY_NAV_LABELS: Record<string, string> = {
+  dashboard: 'Tablero', pipeline: 'Embudo', finder: 'Buscar prospectos', campaigns: 'Campañas',
+  followups: 'Seguimientos', activity: 'Actividad', reports: 'Reportes', docs: 'Docs',
+};
+
+function familyFitTags(p: any, profile: TradeProfile | null): string[] {
+  const tags = profile?.fit_tags || [];
+  let keys: string[] = [];
+  try {
+    const mk = Array.isArray(p.matched_keywords) ? p.matched_keywords : JSON.parse(p.matched_keywords || '[]');
+    keys = (Array.isArray(mk) ? mk : []).filter((k: any) => typeof k === 'string' && k.startsWith('fit:')).map((k: string) => k.slice(4));
+  } catch { keys = []; }
+  if (keys.length === 0) {
+    const text = `${p.name || ''} ${p.business_name || ''} ${p.category || ''} ${p.description || ''} ${p.snippet || ''}`.toLowerCase();
+    keys = tags.filter(t => (t.keywords || []).some(k => text.includes(k))).map(t => t.key);
+  }
+  return keys.map(k => tags.find(t => t.key === k)?.label || k);
+}
+
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   { id: 'intake', label: 'Workroom Intake', icon: Mail },
@@ -51,13 +91,17 @@ interface LeadForgePageProps { initialSection?: string; }
 export default function LeadForgePage({ initialSection }: LeadForgePageProps) {
   const [section, setSection] = useState<Section>((initialSection as Section) || 'dashboard');
   const { t } = useTranslation('leads');
+  const trade = useTradeProfile();
+  const family = !!trade?.family;
+  const nav = family ? NAV.filter(n => n.id !== 'intake') : NAV;
 
   useEffect(() => { if (initialSection) setSection(initialSection as Section); }, [initialSection]);
+  useEffect(() => { if (family && section === 'intake') setSection('dashboard'); }, [family, section]);
 
   const renderContent = () => {
     switch (section) {
       case 'dashboard': return <DashboardSection />;
-      case 'intake': return <WorkroomIntakeSection />;
+      case 'intake': return family ? <DashboardSection /> : <WorkroomIntakeSection />;
       case 'pipeline': return <PipelineSection />;
       case 'finder': return <ProspectFinderSection />;
       case 'campaigns': return <CampaignsSection />;
@@ -70,26 +114,39 @@ export default function LeadForgePage({ initialSection }: LeadForgePageProps) {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%', background: '#faf9f7' }}>
-      <div style={{ width: 200, borderRight: '1px solid #e5e2dc', padding: '16px 0', flexShrink: 0, overflowY: 'auto' }}>
-        <div style={{ padding: '0 16px 12px', borderBottom: '1px solid #e5e2dc', marginBottom: 8 }}>
+    <div className={family ? 'lf-root lf-family' : 'lf-root'} style={{ display: 'flex', height: '100%', background: '#faf9f7' }}>
+      {family ? (
+        <style>{`
+          @media (max-width: 820px) {
+            .lf-family { flex-direction: column; height: auto !important; min-height: 100%; }
+            .lf-family > .lf-side { width: 100% !important; display: flex; overflow-x: auto; overflow-y: hidden !important; white-space: nowrap; border-right: none !important; border-bottom: 1px solid #e5e2dc; padding: 6px 0 !important; }
+            .lf-family > .lf-side > .lf-brand { display: none; }
+            .lf-family > .lf-side > button { width: auto !important; flex-shrink: 0; }
+            .lf-family > .lf-main { overflow: visible !important; padding: 12px !important; }
+            .lf-family .lf-main > div > div[style*="gap: 16"] { flex-direction: column; }
+            .lf-family .lf-main > div > div[style*="gap: 16"] > div { width: 100% !important; position: static !important; max-height: none !important; }
+          }
+        `}</style>
+      ) : null}
+      <div className="lf-side" style={{ width: 200, borderRight: '1px solid #e5e2dc', padding: '16px 0', flexShrink: 0, overflowY: 'auto' }}>
+        <div className="lf-brand" style={{ padding: '0 16px 12px', borderBottom: '1px solid #e5e2dc', marginBottom: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Crosshair size={16} /> LeadForge
+            <Crosshair size={16} /> {family ? (trade?.title || 'Prospectos') : 'LeadForge'}
           </div>
-          <div style={{ fontSize: 10, color: '#999', marginTop: 2 }}>AI-Powered Client Acquisition</div>
+          <div style={{ fontSize: 10, color: '#999', marginTop: 2 }}>{family ? (trade?.subtitle || 'Captación de clientes') : 'AI-Powered Client Acquisition'}</div>
         </div>
-        {NAV.map(n => (
+        {nav.map(n => (
           <button key={n.id} onClick={() => setSection(n.id)} style={{
             display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 16px',
             border: 'none', cursor: 'pointer', background: section === n.id ? '#fef2f2' : 'transparent',
             color: section === n.id ? '#dc2626' : '#666', fontWeight: section === n.id ? 600 : 400,
             fontSize: 12, textAlign: 'left',
           }}>
-            <n.icon size={14} /> {n.label}
+            <n.icon size={14} /> {family ? (FAMILY_NAV_LABELS[n.id] || n.label) : n.label}
           </button>
         ))}
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>{renderContent()}</div>
+      <div className="lf-main" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '20px 24px' }}>{renderContent()}</div>
     </div>
   );
 }
@@ -116,6 +173,7 @@ function Kpi({ label, value, color }: { label: string; value: string | number; c
 }
 
 function DashboardSection() {
+  const family = !!useTradeProfile()?.family;
   const [leads, setLeads] = useState<any[]>([]);
   useEffect(() => { fetch(`${LF_API}`).then(r => r.json()).then(d => setLeads(d.leads || d || [])).catch(() => {}); }, []);
   const hot = leads.filter((l: any) => l.temperature === 'hot').length;
@@ -125,26 +183,26 @@ function DashboardSection() {
 
   return (
     <div>
-      <SH title="LeadForge Dashboard" subtitle="Your AI-powered sales command center" />
+      <SH title={family ? 'Tablero de prospectos' : 'LeadForge Dashboard'} subtitle={family ? 'Tu centro de captación de clientes' : 'Your AI-powered sales command center'} />
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <Kpi label="Hot Leads" value={hot} color="#dc2626" />
-        <Kpi label="Pipeline Value" value={`$${pipeline.toLocaleString()}`} color="#b8960c" />
-        <Kpi label="Win Rate" value={`${winRate}%`} color="#16a34a" />
-        <Kpi label="Total Leads" value={leads.length} color="#2563eb" />
+        <Kpi label={family ? 'Prospectos calientes' : 'Hot Leads'} value={hot} color="#dc2626" />
+        <Kpi label={family ? 'Valor en embudo' : 'Pipeline Value'} value={`$${pipeline.toLocaleString()}`} color="#b8960c" />
+        <Kpi label={family ? 'Tasa de cierre' : 'Win Rate'} value={`${winRate}%`} color="#16a34a" />
+        <Kpi label={family ? 'Total prospectos' : 'Total Leads'} value={leads.length} color="#2563eb" />
       </div>
       {/* AI Recommendation Banner */}
       <div style={{ background: 'linear-gradient(135deg, #fdf8eb, #fff7ed)', border: '1px solid #f5d89a', borderRadius: 10, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
         <Zap size={18} style={{ color: '#b8960c' }} />
         <div style={{ fontSize: 12 }}>
-          <span style={{ fontWeight: 600, color: '#b8960c' }}>MAX AI:</span>{' '}
-          <span style={{ color: '#666' }}>Click "Prospect Finder" to discover potential clients in your area using AI-powered web search.</span>
+          <span style={{ fontWeight: 600, color: '#b8960c' }}>{family ? 'Asistente:' : 'MAX AI:'}</span>{' '}
+          <span style={{ color: '#666' }}>{family ? 'Usa “Buscar prospectos” para encontrar clientes potenciales en tu zona.' : 'Click "Prospect Finder" to discover potential clients in your area using AI-powered web search.'}</span>
         </div>
       </div>
       {/* Recent activity */}
       <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 16 }}>
-        <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Today's Actions</h3>
+        <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{family ? 'Acciones de hoy' : "Today's Actions"}</h3>
         {leads.length === 0 ? (
-          <div style={{ fontSize: 12, color: '#999', padding: 16, textAlign: 'center' }}>No leads yet. Use Prospect Finder to start discovering clients.</div>
+          <div style={{ fontSize: 12, color: '#999', padding: 16, textAlign: 'center' }}>{family ? 'Aún no hay prospectos. Usa “Buscar prospectos” para empezar.' : 'No leads yet. Use Prospect Finder to start discovering clients.'}</div>
         ) : (
           <div style={{ fontSize: 12 }}>
             {leads.filter((l: any) => l.status === 'new').length > 0 && (
@@ -177,6 +235,7 @@ function WorkroomIntakeSection() {
 }
 
 function PipelineSection() {
+  const family = !!useTradeProfile()?.family;
   const [leads, setLeads] = useState<any[]>([]);
   const [quoteState, setQuoteState] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -209,8 +268,8 @@ function PipelineSection() {
 
   return (
     <div>
-      <SH title="Sales Pipeline" subtitle="Drag leads through your sales funnel"
-        action={<button style={{ fontSize: 12, padding: '6px 14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}><Plus size={12} /> Add Lead</button>} />
+      <SH title={family ? 'Embudo de ventas' : 'Sales Pipeline'} subtitle={family ? 'Mueve tus prospectos por el embudo' : 'Drag leads through your sales funnel'}
+        action={<button style={{ fontSize: 12, padding: '6px 14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}><Plus size={12} /> {family ? 'Agregar' : 'Add Lead'}</button>} />
       <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 12 }}>
         {COLS.map(col => {
           const cards = Array.isArray(leads) ? leads.filter((l: any) => l.status === col.key) : (leads as any)[col.key] || [];
@@ -233,7 +292,7 @@ function PipelineSection() {
                   <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>
                     Source: {lead.source || '—'}{lead.utm_campaign ? ` · ${lead.utm_campaign}` : ''}
                   </div>
-                  {lead.business_unit === 'workroom' && (
+                  {!family && lead.business_unit === 'workroom' && (
                     quoteState[lead.id] && quoteState[lead.id] !== 'failed' ? (
                       <div style={{ fontSize: 9, color: '#16a34a', fontWeight: 600, marginTop: 4 }}>Quote {quoteState[lead.id]}</div>
                     ) : (
@@ -258,9 +317,26 @@ function PipelineSection() {
 }
 
 function ProspectFinderSection() {
+  const trade = useTradeProfile();
+  const family = !!trade?.family;
+  const units = trade?.business_units || [];
   const [bizUnit, setBizUnit] = useState('workroom');
   const [location, setLocation] = useState('DMV');
   const [target, setTarget] = useState('interior designers');
+  const unit = units.find(u => u.value === bizUnit);
+  // Family editions start on their own trade, never the Workroom drapery defaults.
+  useEffect(() => {
+    if (!family || units.length === 0) return;
+    const first = units.find(u => u.value === trade?.default_unit) || units[0];
+    setBizUnit(first.value);
+    setLocation(first.default_location || '');
+    setTarget(first.default_target || first.targets?.[0]?.value || '');
+  }, [family, trade]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickUnit = (value: string) => {
+    setBizUnit(value);
+    const u = units.find(x => x.value === value);
+    if (family && u) { setLocation(u.default_location || ''); setTarget(u.default_target || u.targets?.[0]?.value || ''); }
+  };
   const [searching, setSearching] = useState(false);
   const [prospects, setProspects] = useState<any[]>([]);
   const [searchMeta, setSearchMeta] = useState<any>(null);
@@ -313,29 +389,39 @@ function ProspectFinderSection() {
 
   return (
     <div>
-      <SH title="Prospect Finder" subtitle={`${prospects.length} prospects in database`} />
+      <SH title={family ? 'Buscar prospectos' : 'Prospect Finder'} subtitle={family ? `${prospects.length} prospectos guardados` : `${prospects.length} prospects in database`} />
       <div style={{ background: 'linear-gradient(135deg, #fef2f2, #fff)', border: '1px solid #fca5a5', borderRadius: 10, padding: 16, marginBottom: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', marginBottom: 10 }}>
-          <Crosshair size={14} style={{ verticalAlign: 'text-bottom' }} /> THE WEAPON — Real Prospect Discovery (Brave + Google + Yelp)
+          <Crosshair size={14} style={{ verticalAlign: 'text-bottom' }} /> {family ? 'Búsqueda de prospectos reales (Brave + Google + Yelp)' : 'THE WEAPON — Real Prospect Discovery (Brave + Google + Yelp)'}
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
           <div style={{ flex: 1, minWidth: 150 }}>
-            <label style={{ fontSize: 10, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Business Unit</label>
-            <select value={bizUnit} onChange={e => setBizUnit(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12 }}>
-              <option value="workroom">Empire Workroom (Drapery)</option>
-              <option value="woodcraft">WoodCraft (Custom Woodwork)</option>
-              <option value="empire_saas">Empire Box (SaaS)</option>
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>{family ? 'Negocio' : 'Business Unit'}</label>
+            <select aria-label={family ? 'Negocio' : 'Business Unit'} value={bizUnit} onChange={e => pickUnit(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12 }}>
+              {family ? units.map(u => <option key={u.value} value={u.value}>{u.label}</option>) : (
+                <>
+                  <option value="workroom">Empire Workroom (Drapery)</option>
+                  <option value="woodcraft">WoodCraft (Custom Woodwork)</option>
+                  <option value="empire_saas">Empire Box (SaaS)</option>
+                </>
+              )}
             </select>
           </div>
           <div style={{ flex: 1, minWidth: 150 }}>
-            <label style={{ fontSize: 10, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Location</label>
-            <input value={location} onChange={e => setLocation(e.target.value)} placeholder="DMV, Washington DC, nationwide..."
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>{family ? 'Ubicación' : 'Location'}</label>
+            <input aria-label={family ? 'Ubicación' : 'Location'} value={location} onChange={e => setLocation(e.target.value)} placeholder={family ? (unit?.default_location || 'Ciudad, región, país') : 'DMV, Washington DC, nationwide...'}
               style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12 }} />
           </div>
           <div style={{ flex: 1, minWidth: 150 }}>
-            <label style={{ fontSize: 10, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Target Type</label>
-            <input value={target} onChange={e => setTarget(e.target.value)} placeholder="interior designers, contractors..."
-              style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12 }} />
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>{family ? 'Público objetivo' : 'Target Type'}</label>
+            {family && unit?.targets?.length ? (
+              <select aria-label="Público objetivo" value={target} onChange={e => setTarget(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12 }}>
+                {unit.targets.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            ) : (
+              <input value={target} onChange={e => setTarget(e.target.value)} placeholder={family ? 'Tipo de cliente' : 'interior designers, contractors...'}
+                style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12 }} />
+            )}
           </div>
         </div>
         <button onClick={findProspects} disabled={searching} style={{
@@ -343,7 +429,7 @@ function ProspectFinderSection() {
           fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
         }}>
           {searching ? <Loader2 size={14} className="animate-spin" /> : <Crosshair size={14} />}
-          {searching ? 'Searching...' : 'Find Prospects'}
+          {searching ? (family ? 'Buscando…' : 'Searching...') : (family ? 'Buscar prospectos' : 'Find Prospects')}
         </button>
         {searchMeta && (
           <div style={{ marginTop: 8, fontSize: 10, color: '#888' }}>
@@ -353,8 +439,8 @@ function ProspectFinderSection() {
         )}
       </div>
       {/* Empty / Loading states */}
-      {loading && <div style={{ textAlign: 'center', padding: 30, color: '#999' }}>Loading prospects...</div>}
-      {!loading && prospects.length === 0 && <div style={{ textAlign: 'center', padding: 30, color: '#999' }}>No prospects yet — run a search above</div>}
+      {loading && <div style={{ textAlign: 'center', padding: 30, color: '#999' }}>{family ? 'Cargando prospectos…' : 'Loading prospects...'}</div>}
+      {!loading && prospects.length === 0 && <div style={{ textAlign: 'center', padding: 30, color: '#999' }}>{family ? 'Aún no hay prospectos. Haz una búsqueda arriba.' : 'No prospects yet — run a search above'}</div>}
 
       {/* Prospect table */}
       {prospects.length > 0 && (
@@ -374,7 +460,7 @@ function ProspectFinderSection() {
                 </tr></thead>
                 <tbody>{prospects.map((p: any) => {
                   const inPipeline = pipelineStatus[p.id] === 'added' || pipelineStatus[p.id] === 'already_in_pipeline';
-                  const fitTags = ['designer_fit', 'upholstery_fit', 'millwork_fit', 'cabinetry_fit', 'hospitality_fit', 'restaurant_fit', 'gc_fit']
+                  const fitTags = family ? familyFitTags(p, trade) : ['designer_fit', 'upholstery_fit', 'millwork_fit', 'cabinetry_fit', 'hospitality_fit', 'restaurant_fit', 'gc_fit']
                     .filter(t => p[t]).map(t => t.replace('_fit', ''));
                   const srcColor = p.source === 'google_places' ? { bg: '#dbeafe', color: '#2563eb' } :
                                    p.source === 'brave' ? { bg: '#fed7aa', color: '#c2410c' } :
@@ -442,7 +528,7 @@ function ProspectFinderSection() {
               <div style={{ marginBottom: 12 }}>
                 <div style={{ fontSize: 10, fontWeight: 600, color: '#888', marginBottom: 4 }}>FIT TAGS</div>
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                  {['designer', 'upholstery', 'millwork', 'cabinetry', 'hospitality', 'restaurant', 'gc'].filter(t => selected[t + '_fit']).map(t =>
+                  {(family ? familyFitTags(selected, trade) : ['designer', 'upholstery', 'millwork', 'cabinetry', 'hospitality', 'restaurant', 'gc'].filter(t => selected[t + '_fit'])).map(t =>
                     <span key={t} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#fdf8eb', color: '#b8960c', fontWeight: 600 }}>{t}</span>
                   )}
                 </div>
@@ -640,6 +726,8 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
 }
 
 function CampaignsSection() {
+  const family = !!useTradeProfile()?.family;
+  const [loaded, setLoaded] = useState(false);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
   const [enrolling, setEnrolling] = useState(false);
@@ -648,7 +736,7 @@ function CampaignsSection() {
   const fetchCampaigns = () => {
     fetch(`${LF_API}/leadforge/campaigns`).then(r => r.json()).then(d => {
       setCampaigns(d.campaigns || d || []);
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setLoaded(true));
   };
   useEffect(() => { fetchCampaigns(); }, []);
 
@@ -707,18 +795,18 @@ function CampaignsSection() {
 
   return (
     <div>
-      <SH title="Outreach Campaigns" subtitle={`${campaigns.length} campaigns`}
+      <SH title={family ? 'Campañas de contacto' : 'Outreach Campaigns'} subtitle={family ? `${campaigns.length} campañas` : `${campaigns.length} campaigns`}
         action={
           <div style={{ display: 'flex', gap: 6 }}>
             <button onClick={executeCampaigns} disabled={executing}
               style={{ fontSize: 11, padding: '6px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
-              {executing ? 'Running...' : 'Execute Due Steps'}
+              {executing ? (family ? 'Ejecutando…' : 'Running...') : (family ? 'Ejecutar pasos pendientes' : 'Execute Due Steps')}
             </button>
           </div>
         } />
 
       {campaigns.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Loading campaigns...</div>
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>{family ? (loaded ? 'Aún no hay campañas.' : 'Cargando campañas…') : 'Loading campaigns...'}</div>
       ) : (
         <div style={{ display: 'flex', gap: 16 }}>
           {/* Campaign list */}
@@ -730,19 +818,21 @@ function CampaignsSection() {
                   style={{ background: '#fff', border: selectedCampaign?.id === c.id ? '2px solid #dc2626' : '1px solid #e5e2dc', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{c.name}</div>
-                    <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 9, fontWeight: 600, background: sc.bg, color: sc.color }}>{(c.status || 'draft').toUpperCase()}</span>
+                    <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 9, fontWeight: 600, background: sc.bg, color: sc.color }}>{family ? ({ draft: 'BORRADOR', active: 'ACTIVA', paused: 'PAUSADA', completed: 'TERMINADA' } as Record<string, string>)[c.status || 'draft'] || String(c.status).toUpperCase() : (c.status || 'draft').toUpperCase()}</span>
                   </div>
                   <div style={{ fontSize: 10, color: '#888' }}>
-                    {c.prospects_count || 0} enrolled · {c.sent_count || 0} sent · {c.responded_count || 0} responded · Reply: {c.reply_rate || 0}%
+                    {family
+                      ? `${c.prospects_count || 0} inscritos · ${c.sent_count || 0} enviados · ${c.responded_count || 0} respondieron · Respuesta: ${c.reply_rate || 0}%`
+                      : <>{c.prospects_count || 0} enrolled · {c.sent_count || 0} sent · {c.responded_count || 0} responded · Reply: {c.reply_rate || 0}%</>}
                   </div>
                   <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
                     {c.status === 'draft' && (
                       <button onClick={e => { e.stopPropagation(); activateCampaign(c.id); }}
-                        style={{ fontSize: 9, padding: '2px 8px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Activate</button>
+                        style={{ fontSize: 9, padding: '2px 8px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>{family ? 'Activar' : 'Activate'}</button>
                     )}
                     <button onClick={e => { e.stopPropagation(); enrollTop(c.id, 10); }} disabled={enrolling}
                       style={{ fontSize: 9, padding: '2px 8px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-                      {enrolling ? '...' : 'Enroll Top 10'}
+                      {enrolling ? '...' : (family ? 'Inscribir top 10' : 'Enroll Top 10')}
                     </button>
                   </div>
                 </div>
@@ -808,6 +898,7 @@ function CampaignsSection() {
 }
 
 function FollowupsSection() {
+  const family = !!useTradeProfile()?.family;
   const [followups, setFollowups] = useState<any>({});
   useEffect(() => {
     fetch(`${LF_API}/leadforge/campaigns/followups`).then(r => r.json()).then(setFollowups).catch(() => {});
@@ -817,7 +908,7 @@ function FollowupsSection() {
   const upcoming = followups.upcoming_7_days || [];
   return (
     <div>
-      <SH title="Follow-up Queue" subtitle={`${due.length} due today, ${overdue.length} overdue, ${upcoming.length} upcoming`} />
+      <SH title={family ? 'Seguimientos' : 'Follow-up Queue'} subtitle={family ? `${due.length} para hoy, ${overdue.length} vencidos, ${upcoming.length} próximos` : `${due.length} due today, ${overdue.length} overdue, ${upcoming.length} upcoming`} />
       {overdue.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', marginBottom: 6 }}>⚠️ Overdue ({overdue.length})</div>
@@ -851,26 +942,43 @@ function FollowupsSection() {
         </div>
       )}
       {due.length === 0 && overdue.length === 0 && upcoming.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>No follow-ups scheduled. Activate a campaign and enroll prospects to start.</div>
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>{family ? 'No hay seguimientos programados. Activa una campaña e inscribe prospectos.' : 'No follow-ups scheduled. Activate a campaign and enroll prospects to start.'}</div>
       )}
     </div>
   );
 }
 
 function ActivitySection() {
+  const trade = useTradeProfile();
+  const family = !!trade?.family;
   const [activity, setActivity] = useState<any[]>([]);
   useEffect(() => {
-    fetch(`${LF_API}/leadforge/campaigns/1/activity`).then(r => r.json()).then(d => setActivity(d.activity || d || [])).catch(() => {});
-  }, []);
+    if (!trade) return;
+    if (!trade.family) {
+      fetch(`${LF_API}/leadforge/campaigns/1/activity`).then(r => r.json()).then(d => setActivity(d.activity || d || [])).catch(() => {});
+      return;
+    }
+    // Family editions: campaign ids are their own, never assume id 1.
+    fetch(`${LF_API}/leadforge/campaigns`).then(r => r.json()).then(async d => {
+      const list: any[] = Array.isArray(d?.campaigns) ? d.campaigns : Array.isArray(d) ? d : [];
+      const all: any[] = [];
+      for (const c of list.slice(0, 10)) {
+        const res = await fetch(`${LF_API}/leadforge/campaigns/${c.id}/activity`).then(r => r.json()).catch(() => ({}));
+        (Array.isArray(res?.activity) ? res.activity : Array.isArray(res) ? res : []).forEach((a: any) => all.push(a));
+      }
+      all.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+      setActivity(all.slice(0, 100));
+    }).catch(() => setActivity([]));
+  }, [trade]);
   const ICONS: Record<string, string> = {
     enrolled: '✅', email_sent: '📧', email_drafted: '📧', call_script_ready: '📞',
     linkedin_drafted: '💼', status_changed: '🔄', error: '⚠️', skipped: '⏭️',
   };
   return (
     <div>
-      <SH title="Activity Feed" subtitle={`${activity.length} recent activities`} />
+      <SH title={family ? 'Actividad' : 'Activity Feed'} subtitle={family ? `${activity.length} actividades recientes` : `${activity.length} recent activities`} />
       {activity.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Activity will appear here after campaigns execute.</div>
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>{family ? 'La actividad aparecerá aquí cuando se ejecuten las campañas.' : 'Activity will appear here after campaigns execute.'}</div>
       ) : (
         <div>
           {activity.map((a: any) => (
@@ -892,9 +1000,10 @@ function ActivitySection() {
 }
 
 function ReportsSection() {
+  const family = !!useTradeProfile()?.family;
   return (
     <div>
-      <SH title="Lead Reports" subtitle="Conversion funnel, source analysis, revenue" />
+      <SH title={family ? 'Reportes de prospectos' : 'Lead Reports'} subtitle={family ? 'Embudo de conversión, fuentes, ingresos' : 'Conversion funnel, source analysis, revenue'} />
       <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
         {[
           { label: 'Conversion Funnel', icon: TrendingUp, desc: 'Lead-to-close pipeline' },

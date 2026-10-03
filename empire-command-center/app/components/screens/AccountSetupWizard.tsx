@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { API } from '../../lib/api';
+import { isFamilyEdition } from '../../lib/edition';
 import {
   CheckCircle, Clock, AlertTriangle, ExternalLink, Copy, RefreshCw,
   Facebook, Globe, Camera, Link, Shield
@@ -37,13 +38,26 @@ interface WizardStep {
 }
 
 export default function AccountSetupWizard() {
-  const [business, setBusiness] = useState('workroom');
+  const family = isFamilyEdition();
+  const [business, setBusiness] = useState(family ? '' : 'workroom');
+  const [familyBusinesses, setFamilyBusinesses] = useState<{ business_key: string; business_name: string }[]>([]);
+
+  // Family editions: their own business profiles, never the Workroom/WoodCraft ones.
+  useEffect(() => {
+    if (!family) return;
+    fetch(`${API}/business-profiles`).then(r => r.json()).then(d => {
+      const list = (Array.isArray(d) ? d : []).filter((b: any) => b && b.business_key && !['workroom', 'woodcraft'].includes(b.business_key));
+      setFamilyBusinesses(list);
+      if (list.length) setBusiness(prev => prev || list[0].business_key);
+    }).catch(() => setFamilyBusinesses([]));
+  }, [family]);
   const [wizard, setWizard] = useState<{ business: any; steps: WizardStep[]; completed: number; total: number } | null>(null);
   const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
   const [verifying, setVerifying] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!business) { setWizard(null); return; }
     fetch(`${API}/socialforge/setup-wizard/${business}`).then(r => r.json()).then(setWizard).catch(() => setWizard(null));
   }, [business]);
 
@@ -81,8 +95,12 @@ export default function AccountSetupWizard() {
         </div>
         <select value={business} onChange={e => setBusiness(e.target.value)}
           style={{ fontSize: 12, padding: '6px 12px', border: '1px solid #e5e2dc', borderRadius: 6 }}>
-          <option value="workroom">Empire Workroom</option>
-          <option value="woodcraft">Empire WoodCraft</option>
+          {family ? familyBusinesses.map(b => <option key={b.business_key} value={b.business_key}>{b.business_name}</option>) : (
+            <>
+              <option value="workroom">Empire Workroom</option>
+              <option value="woodcraft">Empire WoodCraft</option>
+            </>
+          )}
         </select>
       </div>
 

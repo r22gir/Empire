@@ -710,6 +710,11 @@ def create_activity(lead_id: int, act: ActivityCreate):
 @router.post("/{lead_id}/workroom-quote")
 async def create_lead_workroom_quote(lead_id: int):
     """Open a Workroom quote prefilled from this lead. Repeat calls return the same draft."""
+    from app.edition import is_family_edition
+
+    if is_family_edition():
+        # Family editions have no Workroom; quotes live in their own modules.
+        raise HTTPException(404, "Módulo no disponible en esta edición.")
     from app.services.workroom_lead_intake import create_workroom_quote
 
     return await create_workroom_quote(lead_id)
@@ -1421,6 +1426,18 @@ class ProspectSearchRequest(_BM):
     business_unit: str = "workroom"
     location: str = "DMV"
     target_type: str = "interior designers"
+
+@router.get("/leadforge/trade-profile")
+def leadforge_trade_profile():
+    """Edition trade defaults for the LeadForge screen.
+
+    Workroom answers {"family": false} and the screen keeps its drapery
+    defaults. Maxine / Max-e get their own business units, targets and tags.
+    """
+    from app.services.leadforge.trade_profile import public_profile
+
+    return public_profile()
+
 
 @router.post("/leadforge/prospects/search")
 async def search_prospects(req: ProspectSearchRequest):

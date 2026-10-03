@@ -207,9 +207,29 @@ def _init_tables():
 
         conn.commit()
 
-        # Seed business profiles if empty
+        # Seed business profiles if empty. Family editions (Maxine / Max-e)
+        # seed their own businesses, never the Workroom / WoodCraft rows.
         existing = conn.execute("SELECT COUNT(*) FROM business_profiles").fetchone()[0]
-        if existing == 0:
+        family_seed = None
+        try:
+            from app.services.leadforge.trade_profile import trade_profile
+
+            _prof = trade_profile()
+            if _prof:
+                family_seed = _prof["social"].get("business_profiles") or []
+        except Exception:
+            family_seed = None
+        if family_seed is not None:
+            for bp in family_seed:
+                conn.execute(
+                    """INSERT OR IGNORE INTO business_profiles
+                           (business_key, business_name, tagline, bio_short, category, city, state)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (bp["business_key"], bp["business_name"], bp.get("tagline"), bp.get("bio_short"),
+                     bp.get("category"), bp.get("city"), bp.get("state")),
+                )
+            conn.commit()
+        elif existing == 0:
             conn.execute("""
                 INSERT INTO business_profiles
                     (business_key, business_name, tagline, bio_short, category, email, phone, address, city, state, zip, website, social_handles)

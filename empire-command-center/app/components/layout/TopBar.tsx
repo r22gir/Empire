@@ -418,8 +418,11 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
         </button>
 
         {/* Avatar */}
-        <div className="w-[36px] h-[36px] rounded-[12px] bg-[var(--gold)] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer">
-          RG
+        <div
+          className="w-[36px] h-[36px] rounded-[12px] bg-[var(--gold)] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer"
+          title={edition === 'maxine' ? 'Camilo Giraldo' : edition === 'amp' ? 'Juan Diego Giraldo' : undefined}
+        >
+          {edition === 'maxine' ? 'CG' : edition === 'amp' ? 'JG' : 'RG'}
         </div>
       </div>
     </header>

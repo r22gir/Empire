@@ -6,6 +6,7 @@ import {
   Loader2, Crown, TrendingUp, UserPlus, DollarSign, Activity, BookOpen, CreditCard,
 } from 'lucide-react';
 import { API } from '../../lib/api';
+import { isFamilyEdition } from '../../lib/edition';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
 
@@ -89,7 +90,7 @@ export default function ForgeCRMPage() {
       case 'customers':
         return (
           <Suspense fallback={<Loading />}>
-            <CustomerList onSelectCustomer={(id) => setSelectedCustomerId(id)} business="woodcraft" />
+            <CustomerList onSelectCustomer={(id) => setSelectedCustomerId(id)} business={isFamilyEdition() ? undefined : 'woodcraft'} />
           </Suspense>
         );
 

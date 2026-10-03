@@ -12,6 +12,13 @@ import {
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
 import AccountSetupWizard from './AccountSetupWizard';
+import { useEdition } from '../../lib/edition';
+
+/** Hashtag hint per edition; Workroom keeps its drapery hint. */
+const HASHTAG_HINT: Record<string, string> = {
+  maxine: '#LotesCampestres #Cartago #Zaragoza #ValleDelCauca #InversiónInmobiliaria',
+  amp: '#AMP #CrecimientoPersonal #Coaching #Cibernettic #Ciberseguridad',
+};
 
 const SF_API = `${API}/socialforge`;
 
@@ -84,6 +91,7 @@ export default function SocialForgePage() {
   // Compose state
   const [composeText, setComposeText] = useState('');
   const [composeHashtags, setComposeHashtags] = useState('');
+  const sfEdition = useEdition();
   const [composePlatforms, setComposePlatforms] = useState<string[]>(['instagram']);
   const [composeScheduleDate, setComposeScheduleDate] = useState('');
   const [composeScheduleTime, setComposeScheduleTime] = useState('');
@@ -459,7 +467,7 @@ export default function SocialForgePage() {
                       }}>
                         <div className="flex items-center gap-2 mb-2">
                           <Icon size={16} style={{ color: plat?.color }} />
-                          <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{plat?.label}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{plat?.label || acc.displayName}</span>
                           {acc.connected && <CheckCircle size={12} style={{ color: '#16a34a' }} />}
                         </div>
                         <div style={{ fontSize: 11, color: '#777' }}>{acc.handle}</div>
@@ -742,7 +750,7 @@ export default function SocialForgePage() {
                   rows={2}
                   style={{ width: '100%', padding: '10px 14px', fontSize: 13, border: '1px solid #ece8e0', borderRadius: 12, outline: 'none', resize: 'none' }}
                   className="focus:border-[#ec4899]"
-                  placeholder="#CustomDrapes #InteriorDesign #LuxuryLiving #HomeDecor"
+                  placeholder={HASHTAG_HINT[sfEdition] || '#CustomDrapes #InteriorDesign #LuxuryLiving #HomeDecor'}
                 />
               </div>
 
