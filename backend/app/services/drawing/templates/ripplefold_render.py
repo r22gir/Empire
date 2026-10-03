@@ -169,24 +169,46 @@ def _elevation_folds(c, x0, x1, y0, y1, spacing_pt, color, width) -> None:
 
 
 def _paint_fabric(c, x, y, w, h, image: str | None, font) -> None:
-    """Stationary drapery panel. Uses the fabric photo when one was given."""
+    """Stationary drapery panel from track (top of bbox) to hem (bottom)."""
     if w < 2 or h < 2:
         return
+    hem_y, track_y = y, y + h
     path = Path(image) if image else None
     if path and path.is_file():
         c.saveState()
         clip = c.beginPath()
         clip.rect(x, y, w, h)
         c.clipPath(clip, stroke=0, fill=0)
-        c.drawImage(str(path), x, y, w, h, preserveAspectRatio=True, anchor="c", mask="auto")
+        try:
+            from PIL import Image as PILImage
+
+            with PILImage.open(str(path)) as im:
+                iw, ih = im.size
+            if iw > 0 and ih > 0:
+                scale = max(w / iw, h / ih)
+                dw, dh = iw * scale, ih * scale
+                cx, cy = x + w / 2.0, y + h / 2.0
+                c.drawImage(
+                    str(path),
+                    cx - dw / 2.0,
+                    cy - dh / 2.0,
+                    dw,
+                    dh,
+                    mask="auto",
+                )
+            else:
+                c.drawImage(str(path), x, y, w, h, preserveAspectRatio=False, mask="auto")
+        except Exception:
+            c.drawImage(str(path), x, y, w, h, preserveAspectRatio=False, mask="auto")
         c.restoreState()
     else:
         c.setFillColor(HexColor("#c4b49a"))
         c.rect(x, y, w, h, fill=1, stroke=0)
-        _elevation_folds(c, x, x + w, y + 1, y + h - 1, max(w / 4, 4), HexColor("#8c7358"), 0.6)
+    fold_spacing = max(w / 4.0, 4.0)
+    _elevation_folds(c, x, x + w, hem_y, track_y, fold_spacing, HexColor("#8c7358"), 0.6)
     c.setFillColor(INK)
     c.setFont(font, 5.5)
-    c.drawCentredString(x + w / 2.0, y + 8, "STATIONARY")
+    c.drawCentredString(x + w / 2.0, track_y - 8, "STATIONARY")
 
 
 def _draw_elevation(c, job: RipplefoldJob, font, font_b) -> None:
@@ -218,22 +240,26 @@ def _draw_elevation(c, job: RipplefoldJob, font, font_b) -> None:
 
     placed = _span(job, ox, scale)
     spacing = job.carrier_spacing or 2.125
+    layered_sides = bool(job.side_panels and job.offset and job.offset > 0.5)
+    fold_bottom = oy
+    fold_top = oy + win_h
     if placed:
         x0, x1 = placed
+        if layered_sides:
+            _paint_fabric(c, ox, oy, max(x0 - ox, 1), win_h, job.fabric_image, font)
+            right_w = ox + win_w - x1
+            _paint_fabric(c, x1, oy, max(right_w, 1), win_h, job.fabric_image, font)
         if job.layered:
             c.setFillColor(HexColor("#eef3f8"))
             c.rect(x0, oy, x1 - x0, win_h, fill=1, stroke=0)
-            _elevation_folds(c, x0, x1, oy + 2, oy + win_h - 2,
+            _elevation_folds(c, x0, x1, fold_bottom, fold_top,
                              spacing * scale, HexColor("#9eb0c2"), 0.6)
         wash = HexColor("#f3efe6") if job.layer == "sheer" and not job.layered else HexColor("#e7dcc8")
         c.setFillColor(wash, alpha=0.72 if job.layered else 1)
         c.rect(x0, oy, max(x1 - x0, 1), win_h, fill=1, stroke=0)
         ink = HexColor("#7f92a3") if job.layer == "sheer" and not job.layered else INK
-        _elevation_folds(c, x0, x1, oy + 2, oy + win_h - 2, spacing * scale, ink, 0.8)
-        if job.side_panels and job.offset and job.offset > 0.5:
-            _paint_fabric(c, ox, oy, max(x0 - ox, 1), win_h, job.fabric_image, font)
-            right_w = ox + win_w - x1
-            _paint_fabric(c, x1, oy, max(right_w, 1), win_h, job.fabric_image, font)
+        _elevation_folds(c, x0, x1, fold_bottom, fold_top, spacing * scale, ink, 0.8)
+        if layered_sides:
             c.setFillColor(INK)
             c.setFont(font, 6)
             label = "DRAPERY  ·  RIPPLEFOLD SHEER  ·  DRAPERY"
@@ -242,7 +268,10 @@ def _draw_elevation(c, job: RipplefoldJob, font, font_b) -> None:
             c.drawString(ox, oy - 52, label[:70])
         c.setStrokeColor(INK)
         c.setLineWidth(1.4)
-        c.line(x0, oy + win_h, x1, oy + win_h)
+        if layered_sides:
+            c.line(ox, fold_top, ox + win_w, fold_top)
+        else:
+            c.line(x0, fold_top, x1, fold_top)
         _dim_h(c, x0, x1, oy - 12, format_inches(job.coverage_width), font)
         if job.offset and job.offset > 0.05:
             _dim_h(c, ox, x0, oy - 26, format_inches(job.offset), font)

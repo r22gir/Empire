@@ -143,6 +143,136 @@ def test_layered_sheet_names_both_fabrics():
     assert "PINCH" not in text
 
 
+def test_stationary_side_panels_span_track_to_hem():
+    from app.services.drawing.templates import ripplefold_render as rr
+
+    fold_ranges: list[tuple[float, float]] = []
+
+    def _capture_folds(_c, _x0, _x1, y0, y1, *_rest):
+        fold_ranges.append((y0, y1))
+
+    original = rr._elevation_folds
+    rr._elevation_folds = _capture_folds
+    try:
+
+        class _Canvas:
+            def saveState(self):
+                return None
+
+            def restoreState(self):
+                return None
+
+            def beginPath(self):
+                return self
+
+            def rect(self, *_args, **_kwargs):
+                return None
+
+            def clipPath(self, *_args, **_kwargs):
+                return None
+
+            def drawImage(self, *_args, **_kwargs):
+                return None
+
+            def setFillColor(self, *_args, **_kwargs):
+                return None
+
+            def setFont(self, *_args, **_kwargs):
+                return None
+
+            def drawCentredString(self, *_args, **_kwargs):
+                return None
+
+        hem, track = 20.0, 120.0
+        rr._paint_fabric(_Canvas(), 10.0, hem, 40.0, track - hem, None, "Helvetica")
+    finally:
+        rr._elevation_folds = original
+
+    assert fold_ranges, "side panel should draw full-height folds"
+    y0, y1 = fold_ranges[0]
+    assert y0 == hem and y1 == track
+
+
+def test_layered_side_panels_match_sheer_fold_height():
+    from app.services.drawing.templates import ripplefold_render as rr
+    from app.services.drawing.templates.ripplefold_spec import resolve_ripplefold
+
+    job = resolve_ripplefold(_case(
+        side_panels=2,
+        side_widths=3.5,
+    ))
+    sheer_ranges: list[tuple[float, float]] = []
+    original = rr._elevation_folds
+
+    def _capture(_c, _x0, _x1, y0, y1, *_rest):
+        sheer_ranges.append((y0, y1))
+
+    rr._elevation_folds = _capture
+    try:
+
+        class _Canvas:
+            def setFillColor(self, *_a, **_k):
+                return None
+
+            def setFont(self, *_a, **_k):
+                return None
+
+            def drawString(self, *_a, **_k):
+                return None
+
+            def setStrokeColor(self, *_a, **_k):
+                return None
+
+            def setLineWidth(self, *_a, **_k):
+                return None
+
+            def rect(self, *_a, **_k):
+                return None
+
+            def line(self, *_a, **_k):
+                return None
+
+            def roundRect(self, *_a, **_k):
+                return None
+
+            def saveState(self):
+                return None
+
+            def restoreState(self):
+                return None
+
+            def translate(self, *_a, **_k):
+                return None
+
+            def rotate(self, *_a, **_k):
+                return None
+
+            def beginPath(self):
+                return self
+
+            def clipPath(self, *_a, **_k):
+                return None
+
+            def drawImage(self, *_a, **_k):
+                return None
+
+            def drawCentredString(self, *_a, **_k):
+                return None
+
+            def drawPath(self, *_a, **_k):
+                return None
+
+        rr._draw_elevation(_Canvas(), job, "Helvetica", "Helvetica-Bold")
+    finally:
+        rr._elevation_folds = original
+
+    assert len(sheer_ranges) >= 1
+    y0, y1 = sheer_ranges[0]
+    for low, high in sheer_ranges:
+        assert low == y0 and high == y1
+    assert y1 > y0
+
+
 def test_quote_card_uses_ripplefold_not_a_pinch_pair():
     from app.routers.quotes import _build_window_drawing
 
