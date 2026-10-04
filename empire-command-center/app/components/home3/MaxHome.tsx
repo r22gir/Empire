@@ -31,6 +31,8 @@ const ICONS: Record<string, ReactNode> = {
 };
 const icon = (k?: string) => ICONS[k || ''] || ICONS.search;
 
+// a question (or anything long) is sent to Max as typed instead of being saved as an interest
+const looksLikeQuestion = (t: string) => { const s = t.trim(); return /[?¿]/.test(s) || s.split(/\s+/).length > 6 || s.length > 60; };
 const askHref = (q: string) => `/?product=owner&ask=${encodeURIComponent(q.slice(0, 2000))}`;
 
 function navHref(item: NavItem): string {
@@ -140,7 +142,7 @@ function Research({ items, save, ready }: { items: HomeItem[]; save: (k: HomeKin
                 <div key={i.id} className="v3-card mh-icard">
                   <div className="t"><span className="gl">{icon(i.icon)}</span><b>{i.name}</b>
                     {edit && <button type="button" className="v3-ib x" onClick={() => remove(i.id)} aria-label={`Remove ${i.name}`}><X size={12} /></button>}</div>
-                  <a href={askHref(`Research the latest on ${i.name} for me and summarize what matters.`)} className="go">Ask {EDITION.assistantName} <ArrowRight size={11} /></a>
+                  <a href={askHref(i.name)} className="go">Ask {EDITION.assistantName} <ArrowRight size={11} /></a>
                 </div>
               ))}
             </div>
@@ -148,9 +150,12 @@ function Research({ items, save, ready }: { items: HomeItem[]; save: (k: HomeKin
           {(edit || items.length === 0) && (
             <div className="mh-iadd">
               {items.length === 0 && <Empty title="No interests yet">Add the topics you want {EDITION.assistantName} to watch for you. They are saved to your profile.</Empty>}
-              <form onSubmit={e => { e.preventDefault(); add(name); }} className="mh-addrow">
-                <input className="v3-input" value={name} onChange={e => setName(e.target.value)} placeholder="Add a topic, e.g. Solar storage" aria-label="New interest" maxLength={80} />
-                <button type="submit" className="v3-btn pri sm" disabled={!name.trim()}><Plus size={12} /> Add</button>
+              {/* A question goes to Max exactly as typed (no wrapper); a short topic is saved as an interest. */}
+              <form onSubmit={e => { e.preventDefault(); if (looksLikeQuestion(name)) window.location.href = askHref(name.trim()); else add(name); }} className="mh-addrow">
+                <input className="v3-input" value={name} onChange={e => setName(e.target.value)} placeholder={`Add a topic, or ask ${EDITION.assistantName}`} aria-label="New interest or question" maxLength={2000} />
+                {looksLikeQuestion(name)
+                  ? <button type="submit" className="v3-btn pri sm"><ArrowRight size={12} /> Ask</button>
+                  : <button type="submit" className="v3-btn pri sm" disabled={!name.trim()}><Plus size={12} /> Add</button>}
               </form>
               {sugg.length > 0 && <div className="mh-chips">{sugg.map(s => <button key={s.name} type="button" className="v3-chip" onClick={() => add(s.name, s.icon)}><Plus size={11} /> {s.name}</button>)}</div>}
             </div>
