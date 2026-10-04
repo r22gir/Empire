@@ -1,0 +1,90 @@
+/* v3 shell: dark top band, left launcher rail, businesses sheet, phone tab bar.
+   Used by the Max home (/) and the Command Center module pages. */
+
+/* ---------- top band ---------- */
+.v3-band { position: fixed; left: 0; right: 0; top: 0; height: var(--v-band-h); background: var(--v-band); border-bottom: 1px solid var(--v-rule);
+  display: flex; align-items: center; padding: 0 22px 0 0; color: var(--v-bandtx); z-index: 60; }
+.v3-band .logo { width: var(--v-rail-w); display: flex; justify-content: center; flex: none; text-decoration: none; }
+.v3-mono-e { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--v-rule); display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-playfair, 'Playfair Display'), Georgia, serif; font-size: 17px; color: var(--v-acc); font-style: italic; }
+.v3-wm { font-family: var(--font-playfair, 'Playfair Display'), Georgia, serif; font-size: 17px; letter-spacing: 0.36em; font-weight: 500; margin-left: 4px; color: var(--v-bandtx); text-decoration: none; white-space: nowrap; }
+.v3-tabs { display: flex; gap: 4px; margin-left: 44px; }
+.v3-tabs a, .v3-tabs button { height: 30px; padding: 0 13px; border-radius: 7px; display: flex; align-items: center; font: 400 12.5px/1 var(--v-sans);
+  color: var(--v-bandmut); background: transparent; border: 0; cursor: pointer; text-decoration: none; }
+.v3-tabs a:hover, .v3-tabs button:hover { color: var(--v-bandtx); }
+.v3-tabs .on { color: var(--v-bandtx); background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.v3-band .br { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--v-bandmut); }
+.v3-band .br .d b { color: var(--v-bandtx); font-weight: 500; }
+.v3-band .icon-btn { width: 32px; height: 32px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: var(--v-bandmut);
+  border: 1px solid transparent; background: transparent; position: relative; cursor: pointer; text-decoration: none; }
+.v3-band .icon-btn:hover { color: var(--v-bandtx); border-color: var(--v-bandline); }
+.v3-band .icon-btn .badge { position: absolute; top: 3px; right: 3px; min-width: 14px; height: 14px; border-radius: 7px; background: var(--v-acc); color: var(--v-onacc);
+  font: 700 8.5px/14px var(--v-mono); text-align: center; padding: 0 3px; }
+.v3-maxpill { height: 32px; display: flex; align-items: center; gap: 9px; padding: 0 13px 0 6px; border: 1px solid var(--v-rule); border-radius: 8px;
+  font: 500 12.5px/1 var(--v-sans); color: var(--v-bandtx); text-decoration: none; white-space: nowrap; }
+.v3-maxpill .em { width: 21px; height: 21px; border-radius: 50%; border: 1px solid var(--v-acc); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.v3-av { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, #3a3f44, #24282c); color: #f2ede2; display: flex; align-items: center;
+  justify-content: center; font: 600 11px/1 var(--v-sans); letter-spacing: 0.04em; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); flex: none; }
+/* theme toggle inside the band */
+.v3-band .th-segs { border-color: var(--v-bandline) !important; background: transparent !important; }
+.v3-band .th-seg { color: var(--v-bandmut) !important; background: transparent !important; box-shadow: none !important; }
+.v3-band .th-seg.is-on { background: var(--v-acc) !important; color: var(--v-onacc) !important; }
+.v3-band .th-compact { border-color: var(--v-bandline) !important; background: transparent !important; }
+
+/* ---------- launcher rail ---------- */
+.v3-rail { position: fixed; left: 0; top: var(--v-band-h); bottom: 0; width: var(--v-rail-w); background: var(--v-band); border-right: 1px solid var(--v-bandline);
+  display: flex; flex-direction: column; align-items: center; padding: 14px 0 12px; z-index: 55; color: var(--v-bandmut); overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
+.v3-rail::-webkit-scrollbar { display: none; }
+.v3-ri { width: 62px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0 5px; border-radius: 10px; color: var(--v-bandmut);
+  position: relative; text-decoration: none; background: transparent; border: 0; cursor: pointer; flex: none; font-family: var(--v-sans); }
+.v3-ri .g { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.025); }
+.v3-ri span { font-size: 9.5px; letter-spacing: 0.01em; white-space: nowrap; }
+.v3-rail .v3-ri:hover { color: var(--v-bandtx); }
+.v3-ri:hover .g { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.16); }
+.v3-rail .v3-ri.on { color: var(--v-bandtx); }
+.v3-ri.on .g { border-color: var(--v-acc); background: rgba(255, 255, 255, 0.04); }
+.v3-ri b { position: absolute; top: 4px; right: 11px; width: 6px; height: 6px; border-radius: 50%; background: var(--v-acc); }
+.v3-rsep { width: 30px; height: 1px; background: var(--v-bandline); margin: 8px 0 6px; flex: none; }
+.v3-rlab { font: 500 8px/1 var(--v-mono); letter-spacing: 0.16em; color: #6b6f72; margin-bottom: 4px; flex: none; }
+.v3-rail .grow { margin-top: auto; padding-top: 8px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+
+/* ---------- businesses / all modules sheet ---------- */
+.v3-sheet-back { position: fixed; inset: 0; background: rgba(5, 8, 12, 0.45); z-index: 120; }
+.v3-sheet { position: fixed; z-index: 121; left: calc(var(--v-rail-w) + 8px); top: calc(var(--v-band-h) + 10px); width: min(760px, calc(100vw - var(--v-rail-w) - 24px));
+  max-height: calc(100vh - var(--v-band-h) - 24px); overflow-y: auto; background: var(--v-solid); border: 1px solid var(--v-gedge); border-radius: 16px;
+  box-shadow: var(--v-shadow); padding: 18px 20px 20px; color: var(--v-ink); font-family: var(--v-sans); }
+.v3-sheet .hd { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.v3-sheet .hd h2 { font-size: 22px; margin: 0; }
+.v3-sheet .grp { margin-top: 12px; }
+.v3-sheet .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-top: 7px; }
+.v3-mod { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--v-line2); background: transparent; color: var(--v-ink);
+  font: 500 12.5px/1.2 var(--v-sans); text-align: left; cursor: pointer; text-decoration: none; min-width: 0; }
+.v3-mod:hover { border-color: var(--v-acc); background: var(--v-hover); }
+.v3-mod .gl { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--v-chip); color: var(--v-accink); flex: none; }
+.v3-mod .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-mod .st { margin-left: auto; font: 500 8.5px/1 var(--v-mono); letter-spacing: 0.1em; color: var(--v-mut); text-transform: uppercase; }
+.v3-mod.on { border-color: var(--v-acc); }
+
+/* ---------- phone tab bar ---------- */
+.v3-tabbar { display: none; }
+@media (max-width: 760px) {
+  .v3 { --v-band-h: 50px; }
+  .v3-rail { display: none; }
+  .v3-tabs, .v3-band .br .d, .v3-band .hide-sm { display: none; }
+  .v3-band { padding: 0 12px 0 14px; }
+  .v3-band .logo { display: none; }
+  .v3-wm { font-size: 16px; letter-spacing: 0.34em; margin-left: 0; }
+  .v3-band .br { gap: 8px; }
+  .v3-maxpill { padding: 0; width: 32px; justify-content: center; border-radius: 50%; }
+  .v3-maxpill .lbl { display: none; }
+  .v3-maxpill .em { border: 0; }
+  .v3-tabbar { display: flex; position: fixed; z-index: 58; left: 0; right: 0; bottom: 0; height: calc(64px + env(safe-area-inset-bottom)); padding: 7px 4px env(safe-area-inset-bottom);
+    background: var(--v-glass2); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); border-top: 1px solid var(--v-gedge); justify-content: space-around; }
+  .v3-tb { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 68px; font: 400 10px/1 var(--v-sans); color: var(--v-mut); position: relative;
+    background: transparent; border: 0; text-decoration: none; cursor: pointer; padding: 2px 0; }
+  .v3-tb.on { color: var(--v-ink); font-weight: 600; }
+  .v3-tb .bd { position: absolute; top: -4px; right: 14px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--v-acc); color: var(--v-onacc);
+    font: 700 9.5px/16px var(--v-mono); text-align: center; padding: 0 4px; }
+  .v3-sheet { left: 8px; right: 8px; width: auto; top: auto; bottom: calc(72px + env(safe-area-inset-bottom)); max-height: 72vh; }
+  .v3-sheet .grid { grid-template-columns: 1fr 1fr; }
+}

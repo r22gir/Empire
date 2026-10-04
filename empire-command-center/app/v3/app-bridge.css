@@ -1,0 +1,99 @@
+/* ==========================================================================
+   Design system v3 bridge for the Command Center shell (.cy-shell.v3).
+   Loaded after the cyber + calm layers. Puts the shell on the v3 band + rail
+   and maps the old cyber variables onto the v3 palette so module pages pick up
+   the same colors. Gold keeps the gold-docs theme; only typography is added.
+   Client-facing previews marked .cy-keep-light are never touched.
+   ========================================================================== */
+
+/* ---------- band (TopBar) inside the app: in-flow, not fixed ---------- */
+.cy-shell > header.v3-band.app { position: relative; inset: auto; flex: none; height: var(--v-band-h); z-index: 50;
+  background: var(--v-band) !important; border-bottom: 1px solid var(--v-rule) !important; box-shadow: none !important; }
+.v3-band.app .v3-back { margin-left: 22px; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 7px; border: 1px solid transparent;
+  background: transparent !important; color: var(--v-bandmut) !important; font: 500 12px/1 var(--v-sans) !important; letter-spacing: 0 !important; text-transform: none !important; cursor: pointer; }
+.v3-band.app .v3-back:hover { color: var(--v-bandtx) !important; border-color: var(--v-bandline) !important; }
+.v3-band.app .v3-back.is-off { opacity: 0.5; }
+.v3-band.app .v3-search { margin-left: 14px; display: flex; align-items: center; gap: 10px; width: 300px; height: 32px; padding: 0 8px 0 12px; border-radius: 8px;
+  border: 1px solid var(--v-bandline); background: rgba(255, 255, 255, 0.03); color: var(--v-bandmut); font: 400 12.5px/1 var(--v-sans); cursor: pointer; }
+.v3-band.app .v3-search:hover { border-color: var(--v-rule); color: var(--v-bandtx); }
+.v3-band.app .v3-search kbd { margin-left: auto; font: 500 10px/1 var(--v-mono); border: 1px solid var(--v-bandline); border-radius: 4px; padding: 3px 5px; color: var(--v-bandmut); }
+.v3-band.app .v3-modelbtn { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--v-bandline);
+  background: transparent; color: var(--v-bandtx); font: 500 11px/1 var(--v-mono); cursor: pointer; white-space: nowrap; max-width: 260px; }
+.v3-band.app .v3-modelbtn:hover { border-color: var(--v-rule); }
+.v3-band.app .v3-modelbtn .mdl { overflow: hidden; text-overflow: ellipsis; color: var(--v-bandmut); }
+.v3-band.app .v3-modelbtn .chev { color: var(--v-bandmut); flex: none; }
+/* dropdowns that live inside the band keep the page palette (not band text) */
+.v3-band.app .br > div > div.absolute { color: var(--text); font-family: var(--v-sans); }
+.v3-band.app select, .v3-band.app .br > div:not(.relative) button:not(.th-seg) { color: var(--v-bandtx); }
+@media (max-width: 1100px) { .v3-band.app .v3-search { width: 200px; } }
+@media (max-width: 900px) { .v3-band.app .v3-search { display: none; } .v3-band.app .v3-modelbtn .prov { display: none; } }
+@media (max-width: 767px) {
+  .v3-band.app { padding: 0 10px 0 12px; }
+  .v3-band.app .logo { display: none; }
+  .v3-band.app .v3-back { margin-left: 6px; padding: 0 6px; }
+  .v3-band.app .v3-back .lbl { display: none; }
+  .v3-band.app .v3-wm { font-size: 14px; letter-spacing: 0.28em; }
+  .v3-band.app .v3-modelbtn { max-width: 120px; padding: 0 7px; }
+  .v3-band.app .br { gap: 6px; }
+}
+@media (max-width: 420px) { .v3-band.app .v3-av, .v3-band.app .hide-sm { display: none; } }
+
+/* ---------- rail inside the app: in-flow column ---------- */
+.v3-rail.static { position: relative; inset: auto; top: auto; bottom: auto; left: auto; height: auto; align-self: stretch; flex: none; z-index: 5; }
+.v3-dash { width: 320px; flex: none; overflow-y: auto; background: var(--v-solid); border-right: 1px solid var(--v-line); padding: 14px 14px 20px; color: var(--v-ink); }
+.v3-dash-m { overflow-y: auto; }
+.v3-fab { position: fixed; left: 12px; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 110; width: 48px; height: 48px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center; background: var(--v-band); color: var(--v-acc); border: 1px solid var(--v-rule);
+  box-shadow: 0 10px 24px -10px rgba(0, 0, 0, 0.6); cursor: pointer; }
+.cy-shell.v3 .v3-sheet { color: var(--v-ink); }
+@media (max-width: 767px) { .cy-shell.v3 .v3-sheet { bottom: calc(76px + env(safe-area-inset-bottom)); } }
+
+/* ---------- Dark: cyber variables -> v3 palette ---------- */
+html:not([data-theme="gold"]) body:has(.cy-shell.v3) { background: #0b0f14; }
+html:not([data-theme="gold"]) .cy-shell.v3 {
+  --cy-bg: #0b0f14; --cy-bg-2: #0e131a; --cy-cyan: #22d3ee; --cy-cyan-soft: rgba(34, 211, 238, 0.5); --cy-cyan-dim: rgba(34, 211, 238, 0.12);
+  --cy-mag: #f08a7a; --cy-mag-text: #f4a597; --cy-mag-dim: rgba(240, 138, 122, 0.12); --cy-amber: #f2b45a; --cy-amber-dim: rgba(242, 180, 90, 0.12);
+  --cy-teal: #5fc79a; --cy-teal-dim: rgba(95, 199, 154, 0.12); --cy-blue: #7cb3f0; --cy-blue-dim: rgba(124, 179, 240, 0.12); --cy-violet: #b9a3f5;
+  --cy-text: #e6edf3; --cy-text-strong: #f4f7fa; --cy-text-2: #c4ced8; --cy-muted: #8b96a3; --cy-faint: #6b7682;
+  --cy-panel: rgba(19, 25, 33, 0.62); --cy-panel-solid: #121821; --cy-panel-2: rgba(22, 29, 38, 0.86); --cy-hover: rgba(255, 255, 255, 0.05);
+  --cy-line: rgba(255, 255, 255, 0.09); --cy-line-strong: rgba(34, 211, 238, 0.45); --cy-glow: 0 0 0 1px rgba(255, 255, 255, 0.06); --cy-glow-mag: 0 0 0 1px rgba(240, 138, 122, 0.3);
+  --cy-sans: var(--v-sans); --cy-num: var(--v-mono);
+  --bg: #0b0f14; --panel: #10161d; --hover: rgba(255, 255, 255, 0.05); --card-bg: rgba(22, 29, 38, 0.78);
+  --border: rgba(255, 255, 255, 0.09); --border-h: rgba(255, 255, 255, 0.18); --text: #e6edf3; --text-secondary: #c4ced8;
+  --dim: #8b96a3; --muted: #8b96a3; --faint: #6b7682; --gold: #22d3ee; --gold-light: rgba(34, 211, 238, 0.12); --gold-border: rgba(34, 211, 238, 0.5);
+  --green: #5fc79a; --green-bg: rgba(95, 199, 154, 0.12); --blue: #7cb3f0; --blue-bg: rgba(124, 179, 240, 0.12);
+  --red: #f08a7a; --red-bg: rgba(240, 138, 122, 0.12); --orange: #f2b45a; --orange-bg: rgba(242, 180, 90, 0.12); --purple: #b9a3f5; --purple-bg: rgba(185, 163, 245, 0.12);
+  --radius: 10px; --radius-sm: 8px; --radius-lg: 14px;
+  background: radial-gradient(900px 560px at 30% -10%, rgba(34, 211, 238, 0.08), transparent 70%), radial-gradient(800px 600px at 100% 30%, rgba(56, 120, 190, 0.07), transparent 70%), #0b0f14;
+  font-family: var(--v-sans);
+}
+html:not([data-theme="gold"]) .cy-shell.v3 * { scrollbar-color: rgba(255, 255, 255, 0.16) transparent; }
+html:not([data-theme="gold"]) .cy-shell.v3 ::selection { background: rgba(34, 211, 238, 0.3); }
+/* glass cards, tables, forms (overrides the generated cyber skin) */
+html:not([data-theme="gold"]) .cy-shell.v3 .empire-card:not(.cy-keep-light, .cy-keep-light *, svg *) { background: rgba(22, 29, 38, 0.72) !important; border-color: rgba(255, 255, 255, 0.08) !important; border-radius: 12px !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .empire-card:not(.cy-keep-light, .cy-keep-light *, svg *):hover { border-color: rgba(255, 255, 255, 0.16) !important; box-shadow: none !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .empire-card.active:not(.cy-keep-light, .cy-keep-light *, svg *) { border-color: #22d3ee !important; box-shadow: none !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .kpi-value { text-shadow: none !important; font-family: var(--v-mono); }
+html:not([data-theme="gold"]) .cy-shell.v3 :is(.kpi-label, .section-label) { color: #8b96a3 !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .empire-table th, html:not([data-theme="gold"]) .cy-shell.v3 table:not(.cy-keep-light, .cy-keep-light *) th { color: #8b96a3 !important; background: transparent !important; border-bottom-color: rgba(255, 255, 255, 0.1) !important; font-family: var(--v-mono); letter-spacing: 0.1em; }
+html:not([data-theme="gold"]) .cy-shell.v3 .empire-table td, html:not([data-theme="gold"]) .cy-shell.v3 table:not(.cy-keep-light, .cy-keep-light *) td { border-bottom-color: rgba(255, 255, 255, 0.06) !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .empire-table tr:hover td { background: rgba(255, 255, 255, 0.04) !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .filter-tab { border-radius: 7px !important; color: #8b96a3 !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .filter-tab:hover { color: #e6edf3 !important; border-color: rgba(255, 255, 255, 0.2) !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .filter-tab.active { background: rgba(34, 211, 238, 0.12) !important; color: #22d3ee !important; border-color: rgba(34, 211, 238, 0.6) !important; box-shadow: none !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .chat-bubble-user { background: rgba(34, 211, 238, 0.1) !important; color: #e6edf3 !important; border-color: rgba(34, 211, 238, 0.28) !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .chat-bubble-assistant { background: rgba(22, 29, 38, 0.78) !important; color: #e6edf3 !important; border-color: rgba(255, 255, 255, 0.08) !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 :is(input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file], [type=submit], [type=button]), select, textarea):not(.cy-keep-light, .cy-keep-light *, svg *),
+html:not([data-theme="gold"]) .cy-shell.v3 .form-input { background-color: rgba(255, 255, 255, 0.04) !important; color: #e6edf3 !important; border-color: rgba(255, 255, 255, 0.1) !important; caret-color: #22d3ee; }
+html:not([data-theme="gold"]) .cy-shell.v3 :is(input, select, textarea):not(.cy-keep-light, .cy-keep-light *, svg *):focus,
+html:not([data-theme="gold"]) .cy-shell.v3 .form-input:focus { border-color: #22d3ee !important; box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.14) !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 :is(input, textarea)::placeholder { color: #6b7682 !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 select option { background: #121821; color: #e6edf3; }
+html:not([data-theme="gold"]) .cy-shell.v3 input:is([type=checkbox], [type=radio], [type=range]) { accent-color: #22d3ee; }
+html:not([data-theme="gold"]) .cy-shell.v3 :is(code, pre):not(.cy-keep-light, .cy-keep-light *, svg *) { background: rgba(255, 255, 255, 0.05) !important; color: #c4ced8 !important; border-color: rgba(255, 255, 255, 0.08) !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .cy-nav-dot { box-shadow: none; }
+
+/* ---------- typography (both themes): Inter body, display headings, no glow ---------- */
+.cy-shell.v3 :is(h1, h2, h3):not(.cy-keep-light, .cy-keep-light *, svg *) { text-shadow: none !important; }
+.cy-shell.v3 :is(h1, h2):not(.cy-keep-light, .cy-keep-light *, svg *, .v3-band *) { font-family: var(--v-display) !important; font-weight: var(--v-dispw); letter-spacing: var(--v-track); }
+html[data-theme="gold"] .cy-shell.v3 { font-family: var(--v-sans); }
