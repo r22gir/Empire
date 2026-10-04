@@ -29,6 +29,13 @@ REPO_URL = os.getenv("MAX_IMPROVE_REPO", "https://github.com/r22gir/Empire")
 BASE_REF = os.getenv("MAX_IMPROVE_BASE_REF", "main")
 SPEC_DIR = Path(os.getenv("MAX_IMPROVE_SPEC_DIR", str(Path.home() / "empire-data" / "improvements")))
 RISKS = ("low", "medium", "high")
+API = "https://api.cursor.com"
+# Rafael's defaults (Oct 4, 2026): Muse Spark 1.3 at medium effort; Gemini 3.8 Flash for small fixes.
+# If the API refuses a model, the launch retries with the account default (no "model" field).
+DEFAULT_MODEL = os.getenv("MAX_IMPROVE_MODEL", "muse-spark-1.3")
+DEFAULT_PARAMS = [{"id": "effort", "value": os.getenv("MAX_IMPROVE_EFFORT", "medium")}]
+SMALL_MODEL = os.getenv("MAX_IMPROVE_SMALL_MODEL", "gemini-3.8-flash")
+SMALL_PARAMS = [{"id": "reasoning_effort", "value": os.getenv("MAX_IMPROVE_SMALL_EFFORT", "medium")}]
 STATUSES = ("proposed", "awaiting_build", "building", "pr_open", "merge_approved", "rejected", "build_failed", "done")
 
 
@@ -42,6 +49,10 @@ def _ensure(conn):
         spec_path TEXT, agent_id TEXT, agent_url TEXT, branch TEXT, pr_url TEXT, preview_url TEXT,
         build_note TEXT, created_at TEXT DEFAULT (datetime('now','localtime')),
         approved_at TEXT, merge_approved_at TEXT, decided_by TEXT)""")
+    have = {r[1] for r in conn.execute("PRAGMA table_info(max_improvements)")}
+    for col in ("model", "run_id"):
+        if col not in have:
+            conn.execute(f"ALTER TABLE max_improvements ADD COLUMN {col} TEXT")
 
 
 def _row(r) -> dict:
@@ -93,6 +104,8 @@ def list_requests(status: Optional[str] = None) -> dict:
             rows = conn.execute("SELECT * FROM max_improvements ORDER BY id DESC LIMIT 200").fetchall()
     return {"items": [_row(r) for r in rows], "cursor_configured": cursor_configured(),
             "repo": REPO_URL, "base_ref": BASE_REF,
+            "models": {"default": f"{DEFAULT_MODEL} ({DEFAULT_PARAMS[0]['value']})",
+                       "small_fix": f"{SMALL_MODEL} ({SMALL_PARAMS[0]['value']})"},
             "policy": "Max writes requests only. Build starts on Rafael's tap. Merge/deploy needs a second tap "
                       "and is done by a human. Max never edits his own code or deploys."}
 
@@ -114,8 +127,8 @@ def build_prompt(req: dict) -> str:
                                            "- Existing tests pass; add a test for the new behaviour.")
     return f"""# Empire improvement IMP-{req['id']}: {req['title']}
 
-Repository: {REPO_URL} (base: {BASE_REF}). Work on a NEW branch `max-improve/imp-{req['id']}-{_slug(req['title'])}`
-and open a pull request. Do not merge. Do not deploy. Do not push to {BASE_REF}.
+Repository: {REPO_URL} (base: {BASE_REF}). Work on a NEW branch (never {BASE_REF}) and open a pull request
+titled "IMP-{req['id']:04d}: {req['title']}". Do not merge. Do not deploy. Do not push to {BASE_REF}.
 
 ## Problem
 {req['problem']}
@@ -152,18 +165,45 @@ def write_spec(req: dict) -> str:
     return str(path)
 
 
+def is_small_fix(req: dict) -> bool:
+    """Small fix = low risk and touches at most two modules -> the faster model."""
+    return req.get("risk") == "low" and len(req.get("affected_modules") or []) <= 2
+
+
+def pick_model(req: dict) -> dict:
+    if is_small_fix(req):
+        return {"id": SMALL_MODEL, "params": SMALL_PARAMS}
+    return {"id": DEFAULT_MODEL, "params": DEFAULT_PARAMS}
+
+
+def _auth():
+    return (os.environ["CURSOR_API_KEY"], "")
+
+
 def _launch_cursor_agent(req: dict) -> dict:
+    """POST /v1/agents. Only called from approve_build (Rafael's tap). Never merges; the agent opens a PR."""
     import httpx
+    model = pick_model(req)
     body = {"prompt": {"text": build_prompt(req)},
+            "name": f"IMP-{req['id']:04d} {req['title']}"[:100],
             "repos": [{"url": REPO_URL, "startingRef": BASE_REF}],
-            "autoCreatePR": True}
-    r = httpx.post("https://api.cursor.com/v1/agents", json=body, auth=(os.environ["CURSOR_API_KEY"], ""), timeout=30)
+            "workOnCurrentBranch": False,   # new cursor/... branch, never the base branch
+            "autoCreatePR": True,
+            "model": model}
+    r = httpx.post(f"{API}/v1/agents", json=body, auth=_auth(), timeout=60)
+    used = model["id"]
+    if r.status_code in (400, 404, 422) and "model" in r.text.lower():
+        body.pop("model")  # account default
+        r = httpx.post(f"{API}/v1/agents", json=body, auth=_auth(), timeout=60)
+        used = "account default"
     if r.status_code >= 400:
         raise RuntimeError(f"Cursor API HTTP {r.status_code}: {r.text[:300]}")
-    a = (r.json() or {}).get("agent") or r.json()
-    repo0 = (a.get("repos") or [{}])[0] if isinstance(a.get("repos"), list) else {}
-    return {"agent_id": a.get("id"), "agent_url": a.get("url") or (f"https://cursor.com/agents?id={a.get('id')}" if a.get("id") else None),
-            "branch": a.get("branchName") or repo0.get("branchName"), "pr_url": repo0.get("prUrl")}
+    j = r.json() or {}
+    a = j.get("agent") or j
+    run = j.get("run") or {}
+    return {"agent_id": a.get("id"), "run_id": run.get("id") or a.get("latestRunId"),
+            "agent_url": a.get("url") or (f"https://cursor.com/agents/{a.get('id')}" if a.get("id") else None),
+            "model": used}
 
 
 def approve_build(req_id: int, *, confirm: bool, by: str = "rafael") -> dict:
@@ -175,13 +215,27 @@ def approve_build(req_id: int, *, confirm: bool, by: str = "rafael") -> dict:
         raise LookupError("not found")
     if req["status"] not in ("proposed", "awaiting_build", "build_failed"):
         raise ValueError(f"request is {req['status']}")
-    spec = write_spec(req)
+    # Claim the request atomically so a double tap can never launch two agents.
+    with growth._db() as conn:
+        _ensure(conn)
+        cur = conn.execute("UPDATE max_improvements SET status='building', build_note='starting' WHERE id=? "
+                           "AND status IN ('proposed','awaiting_build','build_failed')", (req_id,))
+        if cur.rowcount != 1:
+            raise ValueError("request is already being built")
+    try:
+        spec = write_spec(req)
+    except Exception as e:
+        with growth._db() as conn:
+            conn.execute("UPDATE max_improvements SET status='build_failed', build_note=? WHERE id=?",
+                         (f"Could not write spec: {e}"[:500], req_id))
+        raise
     upd = {"spec_path": spec, "approved_at": datetime.now().isoformat(timespec="seconds"), "decided_by": by}
     if cursor_configured():
         try:
             upd.update(_launch_cursor_agent(req))
-            upd["status"] = "pr_open" if upd.get("pr_url") else "building"
-            upd["build_note"] = "Cursor cloud agent started; it opens a PR on its own branch."
+            upd["status"] = "building"
+            upd["build_note"] = (f"Cursor cloud agent started on {REPO_URL} (model: {upd.get('model')}). "
+                                 "It opens a PR on its own branch; nothing merges without your second tap.")
         except Exception as e:
             upd["status"] = "build_failed"
             upd["build_note"] = str(e)[:500]
@@ -202,15 +256,30 @@ def refresh_build(req_id: int) -> dict:
         return req or {}
     import httpx
     try:
-        r = httpx.get(f"https://api.cursor.com/v1/agents/{req['agent_id']}", auth=(os.environ["CURSOR_API_KEY"], ""), timeout=20)
-        a = (r.json() or {}).get("agent") or r.json()
-        repo0 = (a.get("repos") or [{}])[0] if isinstance(a.get("repos"), list) else {}
-        pr = repo0.get("prUrl") or (a.get("target") or {}).get("prUrl")
-        upd = {"build_note": f"agent status: {a.get('status')}"}
+        r = httpx.get(f"{API}/v1/agents/{req['agent_id']}", auth=_auth(), timeout=20)
+        r.raise_for_status()
+        a = r.json() or {}
+        run_id = a.get("latestRunId") or req.get("run_id")
+        run = {}
+        if run_id:
+            rr = httpx.get(f"{API}/v1/agents/{req['agent_id']}/runs/{run_id}", auth=_auth(), timeout=20)
+            if rr.status_code == 200:
+                run = rr.json() or {}
+        branches = ((run.get("git") or {}).get("branches")) or []
+        pr = next((b.get("prUrl") for b in branches if b.get("prUrl")), None)
+        branch = next((b.get("branch") for b in branches if b.get("branch")), None)
+        rs = str(run.get("status") or a.get("status") or "").upper()
+        upd = {"build_note": f"agent {a.get('status')}, run {run.get('status') or '?'}", "run_id": run_id}
+        if branch:
+            upd["branch"] = branch
         if pr:
-            upd.update({"pr_url": pr, "status": "pr_open"})
-        if str(a.get("status", "")).upper() in ("ERROR", "FAILED"):
+            upd.update({"pr_url": pr, "status": "pr_open",
+                        "build_note": "PR is open. Review it (and the preview), then tap Approve merge. Max does not merge."})
+        elif rs in ("ERROR", "FAILED", "CANCELLED", "EXPIRED"):
             upd["status"] = "build_failed"
+            upd["build_note"] = f"Cloud agent run {rs.lower()}: {(run.get('result') or '')[:300]}"
+        elif rs == "FINISHED":
+            upd["build_note"] = "Agent finished without a PR link yet. Open the agent to check, or Build again."
         with growth._db() as conn:
             conn.execute(f"UPDATE max_improvements SET {', '.join(k + '=?' for k in upd)} WHERE id=?", (*upd.values(), req_id))
     except Exception as e:

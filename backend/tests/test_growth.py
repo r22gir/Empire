@@ -262,3 +262,84 @@ def test_improvement_loop_needs_two_taps_and_never_builds_without_key(g):
     v = voice_live.run_voice_tool("request_improvement", {"title": "Voice ask", "problem": "p", "proposed_change": "c"})
     assert v["success"] and v["result"]["executed"] is False
     assert "request_improvement" in [t["name"] for t in voice_live.realtime_tool_definitions()]
+
+
+def test_improvement_with_key_launches_cloud_agent_only_on_tap(g, monkeypatch):
+    """With CURSOR_API_KEY: nothing is launched on create; Rafael's tap launches one agent (model per Rafael's
+    defaults); a double tap cannot launch twice; the PR still needs the second tap, which only records approval."""
+    imp, c = g["imp"], g["client"]
+    import httpx
+    monkeypatch.setenv("CURSOR_API_KEY", "test-not-a-real-key")
+    calls = []
+
+    class Resp:
+        def __init__(self, code, data): self.status_code, self._d, self.text = code, data, str(data)
+        def json(self): return self._d
+        def raise_for_status(self):
+            if self.status_code >= 400: raise RuntimeError(self.status_code)
+
+    def fake_post(url, json=None, auth=None, timeout=None):
+        calls.append(("POST", url, json))
+        assert url.endswith("/v1/agents") and json["autoCreatePR"] is True and json["workOnCurrentBranch"] is False
+        assert json["repos"][0]["url"] == "https://github.com/r22gir/Empire"
+        assert "Do not merge" in json["prompt"]["text"] and "max/memory.md" in json["prompt"]["text"]
+        return Resp(200, {"agent": {"id": "bc-1", "url": "https://cursor.com/agents/bc-1", "latestRunId": "run-1"},
+                          "run": {"id": "run-1", "status": "CREATING"}})
+
+    def fake_get(url, auth=None, timeout=None):
+        calls.append(("GET", url, None))
+        if url.endswith("/runs/run-1"):
+            return Resp(200, {"id": "run-1", "status": "FINISHED", "git": {"branches": [
+                {"repoUrl": "github.com/r22gir/Empire", "branch": "cursor/imp-1", "prUrl": "https://github.com/r22gir/Empire/pull/9"}]}})
+        return Resp(200, {"id": "bc-1", "status": "IDLE", "latestRunId": "run-1"})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    big = imp.create_request("Queue bulk actions", "p", "c", ["a.py", "b.py", "c.tsx"], "medium")
+    small = imp.create_request("Fix label", "p", "c", ["a.tsx"], "low")
+    assert calls == []  # creating a request never launches anything
+    assert imp.list_requests()["cursor_configured"] is True
+    assert c.post(f"/api/v1/growth/improvements/{big['id']}/approve", json={}).status_code == 403
+    assert calls == []
+
+    a = c.post(f"/api/v1/growth/improvements/{big['id']}/approve", json={"confirm": True}).json()
+    assert a["status"] == "building" and a["agent_id"] == "bc-1" and a["model"] == "muse-spark-1.3"
+    assert calls[-1][2]["model"] == {"id": "muse-spark-1.3", "params": [{"id": "effort", "value": "medium"}]}
+    n = len(calls)
+    assert c.post(f"/api/v1/growth/improvements/{big['id']}/approve", json={"confirm": True}).status_code in (400, 409)
+    assert len(calls) == n  # double tap: no second agent
+
+    s = imp.approve_build(small["id"], confirm=True)
+    assert calls[-1][2]["model"]["id"] == "gemini-3.8-flash" and s["model"] == "gemini-3.8-flash"
+
+    assert c.post(f"/api/v1/growth/improvements/{big['id']}/approve-merge", json={"confirm": True}).status_code == 400
+    r = c.post(f"/api/v1/growth/improvements/{big['id']}/refresh").json()
+    assert r["status"] == "pr_open" and r["pr_url"].endswith("/pull/9") and r["branch"] == "cursor/imp-1"
+    posts_before = len([x for x in calls if x[0] == "POST"])
+    m = c.post(f"/api/v1/growth/improvements/{big['id']}/approve-merge", json={"confirm": True}).json()
+    assert m["status"] == "merge_approved"
+    assert len([x for x in calls if x[0] == "POST"]) == posts_before  # approving merge calls nothing (no merge, no deploy)
+
+
+def test_improvement_model_refused_falls_back_to_account_default(g, monkeypatch):
+    imp = g["imp"]
+    import httpx
+    monkeypatch.setenv("CURSOR_API_KEY", "test-not-a-real-key")
+    bodies = []
+
+    class Resp:
+        def __init__(self, code, data): self.status_code, self._d, self.text = code, data, str(data)
+        def json(self): return self._d
+
+    def fake_post(url, json=None, auth=None, timeout=None):
+        bodies.append(dict(json))
+        if "model" in json:
+            return Resp(400, {"code": "validation_error", "message": "unknown model"})
+        return Resp(200, {"agent": {"id": "bc-2", "url": "u"}, "run": {"id": "run-2"}})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    r = imp.create_request("X", "p", "c", ["a", "b", "c"], "high")
+    out = imp.approve_build(r["id"], confirm=True)
+    assert out["status"] == "building" and out["model"] == "account default"
+    assert "model" in bodies[0] and "model" not in bodies[1]

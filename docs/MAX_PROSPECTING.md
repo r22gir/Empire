@@ -112,6 +112,6 @@ with systemd user timers in `deploy/systemd/`.
    1,000 free calls / month; hard cap 1,500 calls = $10 / month at about $0.02 per call. Batch runs and Max stay in the free
    tier; only an explicit `allow_paid` run may use the paid 500. Calls are counted in `google_api_usage` before each call.
    `LEADFORGE_PLACE_DETAILS=0` turns it off.
-7. **Max improves Max**: see `docs/max/MAX_IMPROVES_MAX.md`.
+7. **Max improves Max**: see `docs/max/MAX_IMPROVES_MAX.md` (Cursor cloud agent on r22gir/Empire after Rafael's tap; PR needs a second tap).
 
 Workroom phone documents follow `docs/workroom/PHONE_DOC_FORMAT.md`.

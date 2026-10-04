@@ -10,10 +10,15 @@ studio page **System → Improvements** (`/?product=improvements`).
    `title`, `problem`, `proposed_change`, `affected_modules`, `risk` (low / medium / high), optional `acceptance`.
    On voice the same tool is allowlisted (it only writes the request). Status: `proposed`.
 3. **Rafael taps Approve build** on the Improvements page (`POST .../{id}/approve` with `confirm: true`).
-   * If `CURSOR_API_KEY` is set on the Dell: a Cursor cloud agent starts on `https://github.com/r22gir/Empire`
-     (base `main`, override with `MAX_IMPROVE_REPO` / `MAX_IMPROVE_BASE_REF`) with `autoCreatePR: true`.
-     It works on its own branch (`max-improve/imp-<id>-<slug>`) and opens a PR. Status `building`, then `pr_open`
-     ("Check for PR" polls the agent read-only).
+   * If `CURSOR_API_KEY` is set on the Dell (it is, since Oct 4, 2026): a Cursor cloud agent starts on
+     `https://github.com/r22gir/Empire` (base `main`, override with `MAX_IMPROVE_REPO` / `MAX_IMPROVE_BASE_REF`)
+     via `POST /v1/agents` with `autoCreatePR: true` and `workOnCurrentBranch: false`, so it works on its own
+     `cursor/...` branch and opens a PR. Status `building`, then `pr_open` ("Check for PR" polls the agent and
+     its latest run read-only). A double tap cannot start two agents (the request is claimed atomically).
+   * Model (Rafael's defaults): **Muse Spark 1.3, effort medium**. Small fixes (risk low and at most two
+     affected modules) use **Gemini 3.8 Flash, reasoning effort medium**. If the API refuses a model the launch
+     retries with the account default. Overrides: `MAX_IMPROVE_MODEL`, `MAX_IMPROVE_EFFORT`,
+     `MAX_IMPROVE_SMALL_MODEL`, `MAX_IMPROVE_SMALL_EFFORT`.
    * If there is no key: a ready-to-run spec file is written to `~/empire-data/improvements/IMP-<id>-<slug>.md`
      and the status is `awaiting_build`. Paste the spec into a Cursor cloud agent, then save the PR / preview link
      on the card (status becomes `pr_open`).
@@ -34,9 +39,8 @@ studio page **System → Improvements** (`/?product=improvements`).
 `proposed` → `awaiting_build` (no key) or `building` → `pr_open` → `merge_approved` (→ `done` when merged).
 Also `rejected` and `build_failed` (the build note says why; Approve again retries).
 
-## Blocked today
+## Key
 
-No `CURSOR_API_KEY` on the Dell (Oct 4, 2026), so approved requests stop at `awaiting_build` with a spec file.
-Add a Cloud Agents API key (Cursor dashboard → Cloud Agents → API keys) to
-`~/.config/empirebox/empire-backend.env` as `CURSOR_API_KEY=...` and restart `empire-backend.service`
-to turn on automatic PRs.
+`CURSOR_API_KEY` (Cloud Agents API key "Empire Max Improvements", owner rafa22) lives in
+`~/.config/empirebox/empire-backend.env` on the Dell (chmod 600). Never print it. Without the key, approved
+requests stop at `awaiting_build` with a spec file instead.

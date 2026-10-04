@@ -46,7 +46,7 @@ function Req({ r, onChange }: { r: any; onChange: () => void }) {
       </div>
       <div><div style={{ ...muted, fontWeight: 700 }}>Problem</div><div style={{ fontSize: 14, whiteSpace: 'pre-wrap' }}>{r.problem}</div></div>
       <div><div style={{ ...muted, fontWeight: 700 }}>Proposed change</div><div style={{ fontSize: 14, whiteSpace: 'pre-wrap' }}>{r.proposed_change}</div></div>
-      {r.build_note && <div style={{ ...muted }}>{r.build_note}</div>}
+      {r.build_note && <div style={{ ...muted }}>{r.build_note}{r.branch ? ` · branch: ${r.branch}` : ''}</div>}
       {(r.pr_url || r.preview_url || r.agent_url) && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {r.pr_url && <a href={r.pr_url} target="_blank" rel="noreferrer" style={ghost}><GitPullRequest size={15} /> Open PR</a>}
@@ -102,7 +102,7 @@ export default function ImprovementsPage() {
         right={<button onClick={() => setOpen(!open)} style={btn('#1d4ed8')}><Plus size={15} /> New request</button>} />
       <div style={{ ...card, marginBottom: 14, display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
         <Lightbulb size={16} />
-        {data.cursor_configured ? <span>Builds run as a Cursor cloud agent on <b>{data.repo}</b> and open a PR.</span>
+        {data.cursor_configured ? <span>Approve build starts a Cursor cloud agent on <b>{data.repo}</b> ({data.models?.default}; small fixes {data.models?.small_fix}). It opens a PR on its own branch. Nothing merges until you tap Approve merge.</span>
           : <span>No Cursor API key on the Dell yet. Approving writes a ready-to-run spec file and marks it <b>awaiting build</b>.</span>}
       </div>
       {open && (
