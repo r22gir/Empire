@@ -171,7 +171,6 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
                 >
                   <span className="cy-tab-ico"><Icon size={15} /></span>
                   <span className="cy-tab-label">{nav.label}</span>
-                  {ni % 5 === 2 && <span className="cy-glitch" style={{ animationDelay: `${(ni * 1.3) % 7}s` }} aria-hidden />}
                 </button>
               );
             })}
@@ -216,13 +215,14 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
   };
 
   // Build activity feed from quotes + jobs
-  const activities: { text: string; time: string; color: string; icon: React.ReactNode }[] = [];
+  const activities: { text: string; time: string; color: string; icon: React.ReactNode; open: () => void; label: string }[] = [];
   quotes.slice(0, 5).forEach(q => {
     activities.push({
       text: `Quote ${q.quote_number || 'Q'} ${q.status === 'accepted' ? 'accepted by' : q.status === 'sent' ? 'sent to' : 'created for'} ${q.customer_name || 'Customer'} — $${(q.total || 0).toLocaleString()}`,
       time: q.created_at || q.updated_at || '',
       color: q.status === 'accepted' ? '#16a34a' : q.status === 'sent' ? '#2563eb' : '#b8960c',
       icon: <ClipboardList size={14} />,
+      open: () => onSelectQuote?.(q.id), label: `Open quote ${q.quote_number || ''}`,
     });
   });
   jobs.slice(0, 3).forEach(j => {
@@ -231,6 +231,7 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
       time: j.updated_at || j.created_at || '',
       color: j.status === 'completed' ? '#16a34a' : j.status === 'in_progress' ? '#d97706' : '#777',
       icon: <Calendar size={14} />,
+      open: () => (j.quote_id ? onSelectQuote?.(j.quote_id) : onNavigate('jobs')), label: j.quote_id ? `Open the quote for ${j.title || 'this job'}` : `Open job board for ${j.title || 'this job'}`,
     });
   });
   activities.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
@@ -325,13 +326,13 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
         <HudPanel i={4} title="Recent activity" icon={<TrendingUp size={14} />} style={{ minHeight: 280 }}>
           <div className="cy-list">
             {activities.slice(0, 6).map((a, i) => (
-              <div key={i} className="cy-row">
+              <button type="button" key={i} className="cy-row" onClick={a.open} aria-label={a.label} title={a.label}>
                 <span className="cy-row-ico" style={{ color: a.color }}>{a.icon}</span>
                 <div className="cy-row-main">
                   <div className="cy-row-title" style={{ whiteSpace: 'normal' }}>{a.text}</div>
                   {a.time && <div className="cy-row-sub" suppressHydrationWarning>{new Date(a.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>}
                 </div>
-              </div>
+              </button>
             ))}
             {activities.length === 0 && <div className="cy-nodata">SIN DATOS · NO DATA<span>No recent quote or job activity</span></div>}
           </div>
@@ -360,9 +361,9 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
       <div className="cy-grid2">
         <HudPanel i={6} title="Inventory" icon={<Package size={14} />}>
           <div className="cy-hexrow" style={{ justifyContent: 'space-around', marginBottom: 10 }}>
-            <HexTile label="Items" value={inventory ? Number(inventory.total_items || 0) : null} tone="teal" />
-            <HexTile label="Low stock" value={inventory ? lowStock : null} tone={lowStock > 0 ? 'amber' : 'muted'} />
-            <div className="cy-hex t-cyan"><b style={{ fontSize: 15 }}>{inventory ? <CountUp value={Number(inventory.total_value || 0)} format={n => fmtMoney(n)} /> : '—'}</b><span>Value</span></div>
+            <HexTile label="Items" value={inventory ? Number(inventory.total_items || 0) : null} tone="teal" onClick={() => onNavigate('inventory')} />
+            <HexTile label="Low stock" value={inventory ? lowStock : null} tone={lowStock > 0 ? 'amber' : 'muted'} onClick={() => onNavigate('inventory')} />
+            <div className="cy-hex t-cyan" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => onNavigate('inventory')} onKeyDown={e => { if (e.key === 'Enter') onNavigate('inventory'); }}><b style={{ fontSize: 15 }}>{inventory ? <CountUp value={Number(inventory.total_value || 0)} format={n => fmtMoney(n)} /> : '—'}</b><span>Value</span></div>
           </div>
           <button type="button" className={`cy-btn${lowStock > 0 ? ' is-pulse' : ''}`} style={{ width: '100%' }} onClick={() => onNavigate('inventory')}>
             {lowStock > 0 ? `${lowStock} items need reorder` : 'View all inventory'}

@@ -5,9 +5,18 @@ import { formatInches } from '../../lib/formatInches';
 import { Quote } from '../../lib/types';
 import { compressImageDataUrl, visionAbortSignal, visionTimeoutMessage } from '../../lib/visionImage';
 import { linesFromAnalyzedItems, quoteLineDescriptions } from '../../lib/photoQuote';
-import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2, ShieldCheck, X } from 'lucide-react';
+import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2, ShieldCheck, X, ArrowLeft } from 'lucide-react';
 import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
 import DepositPayLinkButton from '../business/finance/DepositPayLink';
+import JobHeader from '../docs/JobHeader';
+import DocActionBar from '../docs/DocActionBar';
+import DocsTab, { useQuoteDocs } from '../docs/DocsTab';
+import { moveToRoom } from '../docs/QuoteRooms';
+import QuoteDocument from '../docs/QuoteDocument';
+import DocViewer from '../docs/DocViewer';
+import { orderByRoom } from '../docs/DocPaper';
+import { openRecord } from '../docs/recordBus';
+import { openDocViewer } from '../docs/viewerBus';
 import { HudHeader, GaugeRow, RadialGauge, MaxStrip, fmtMoney, daysSince, type HudChip, type MaxSuggestion } from '../cyber/hud';
 
 interface UploadedPhoto {
@@ -41,6 +50,7 @@ interface AnalysisResult {
 interface Props {
   quoteId?: string;
   onOpenBuilder?: () => void;
+  onBack?: () => void;
 }
 
 /** Amount shown on Quote Review. Server rate is the unit price; amount is qty × rate. */
@@ -54,7 +64,7 @@ function lineItemAmount(item: { quantity?: number; rate?: number; amount?: numbe
   return Number.isFinite(stored) ? stored : extended;
 }
 
-export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
+export default function QuoteReviewScreen({ quoteId, onOpenBuilder, onBack }: Props) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [selected, setSelected] = useState<number>(1);
   const [loading, setLoading] = useState(false);
@@ -66,6 +76,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null);
+  const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
   const [editItems, setEditItems] = useState<any[]>([]);
   const [editNotes, setEditNotes] = useState('');
   const [editTerms, setEditTerms] = useState('');
@@ -74,6 +85,10 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [editDiscountAmt, setEditDiscountAmt] = useState(0);
   const [editDiscountType, setEditDiscountType] = useState<'dollar' | 'percent'>('dollar');
   const [dirty, setDirty] = useState(false);
+  const [tab, setTab] = useState<'document' | 'pdf' | 'details' | 'docs'>('document');
+  const [editMode, setEditMode] = useState(false);
+  const [pdfSource, setPdfSource] = useState<'live' | 'final'>('live');
+  const quoteDocs = useQuoteDocs(quoteId);
   // HOTFIX 4.1 — Approve PIN gate. The "Confirm Selection" button now
   // opens a PIN modal that calls POST /quotes-v2/{id}/approve with
   // founder_pin instead of bypassing straight to status='accepted'.
@@ -165,6 +180,19 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     setDirty(true);
   };
 
+  // Rooms (4B): move a line into another room ('' = Job-wide) / add a line to a room.
+  const moveItemToRoom = (idx: number, room: string) => {
+    setEditItems(prev => moveToRoom(prev, idx, room));
+    setDirty(true);
+  };
+  const addItemToRoom = (room: string) => {
+    setEditItems(prev => {
+      const blank = { description: '', quantity: 1, unit: 'ea', rate: 0, amount: 0, category: 'labor', room };
+      return moveToRoom([...prev, blank], prev.length, room);
+    });
+    setDirty(true);
+  };
+
   const saveQuote = async () => {
     if (!quote) return;
     setSaving(true);
@@ -173,7 +201,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          line_items: editItems,
+          line_items: orderByRoom(editItems), // room order = the sections the client PDF prints
           subtotal: computedSubtotal,
           tax_rate: editTaxRate / 100,
           tax_amount: computedTax,
@@ -397,9 +425,15 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       };
     })
     .filter(Boolean);
+  const quoteLocked = ['sent', 'accepted', 'in_production', 'completed'].includes(String(quote?.status || ''));
+  const quoteFinalDoc = (() => {
+    const g = quoteDocs.data?.groups.find(x => x.type === 'estimate' && x.final.jobFolder && !x.final.generated);
+    return g ? g.final : null;
+  })();
   const showProposalSelector = derivedTierProposals.length > 0
     && editItems.length === 0
     && ((quote as any)?.selected_proposal === null || (quote as any)?.selected_proposal === undefined);
+  useEffect(() => { if (showProposalSelector) setTab(t => (t === 'document' ? 'details' : t)); }, [showProposalSelector]);
   const activeProposal = derivedTierProposals[selected] || derivedTierProposals[(quote as any)?.selected_proposal ?? 0] || null;
   const activeQuoteTotal = quote?.total ?? activeProposal?.total ?? 0;
 
@@ -435,27 +469,8 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
 
   const handleAction = async (action: string) => {
     if (action === 'pdf') {
-      showFeedback('Generating PDF...');
-      try {
-        const res = await fetch(`${API}/quotes-v2/${quote.id}/pdf`);
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-          showFeedback(err.error || 'PDF generation failed');
-          return;
-        }
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = `${quote.quote_number || quote.id}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-        showFeedback('PDF downloaded!');
-      } catch {
-        showFeedback('PDF generation failed');
-      }
+      // Opens the shared in-page viewer (preview, print, download, share) instead of forcing a download.
+      openDocViewer({ src: `/api/v1/quotes-v2/${quote.id}/pdf`, title: `${quote.quote_number || 'Quote'} estimate`, filename: `${quote.quote_number || quote.id}.pdf`, kind: 'pdf' });
     } else if (action === 'telegram') {
       showFeedback('Sending to Telegram...');
       try {
@@ -547,9 +562,11 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
 
   const handleCreateInvoice = async () => {
     if (!quote?.id) return;
+    if (!window.confirm(`Create a DRAFT invoice from ${quote.quote_number || 'this quote'}?\n\nIt carries over the line items (with rooms), client and deposit. Nothing is sent to the client.`)) return;
     setCreatingInvoice(true);
     try {
-      const res = await fetch(`${API}/finance/invoices/from-quote/${quote.id}`, {
+      // canonical quote -> invoice conversion (lifecycle_service.create_invoice_from_quote)
+      const res = await fetch(`${API}/quotes-v2/${quote.id}/to-invoice`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -562,8 +579,9 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       const data = await res.json();
       const inv = data.invoice || data;
       const invNum = inv.invoice_number || inv.id || 'Created';
-      setInvoiceNumber(invNum);
-      showFeedback(`Invoice ${invNum} created — $${(inv.total || 0).toFixed(2)}`);
+      setInvoiceNumber(invNum); if (inv.id) setCreatedInvoiceId(inv.id);
+      showFeedback(`Draft invoice ${invNum} created — $${(inv.total || 0).toFixed(2)}`);
+      if (inv.id) setTimeout(() => openRecord({ type: 'invoice', id: inv.id }), 600);
     } catch {
       showFeedback('Failed to create invoice');
     }
@@ -589,12 +607,70 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
 
   return (
     <div className="cy-qr flex-1 w-full">
+      {onBack && <button type="button" className="dh-act" style={{ marginBottom: 8 }} onClick={onBack}><ArrowLeft size={15} /> Back</button>}
+      <JobHeader quote={quote.id} refreshKey={(quote as any).updated_at} />
       <HudHeader
         icon={<FileText size={20} />}
         title={<><span className="cy-mono">{quote.quote_number}</span> · Quote Review</>}
         subtitle={<span suppressHydrationWarning>{quote.customer_name} · Created {quote.created_at ? new Date(quote.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Today'}</span>}
         chips={hudChips}
       />
+      <DocActionBar
+        doc={{ src: `/api/v1/quotes-v2/${quote.id}/pdf`, title: `${quote.quote_number || 'Quote'} estimate`, filename: `${quote.quote_number || quote.id}.pdf`, kind: 'pdf', v: (quote as any).updated_at || null }}
+        sticky loading={saving}
+        versionsCount={quoteDocs.data ? quoteDocs.data.groups.filter(g => g.type === 'estimate').reduce((t, g) => t + 1 + g.older.length, 0) + 1 : undefined}
+        onVersions={() => setTab('docs')}
+        clientPhone={(quote as any).customer_phone} clientEmail={(quote as any).customer_email}
+        shareText={`Estimate ${quote.quote_number || ''}${quote.customer_name ? ` for ${quote.customer_name}` : ''}`}
+        className="cy-qr-docbar" spacer="none"
+      />
+      <div className="dh dh-tabs" role="tablist" style={{ margin: '10px 0 14px', overflowX: 'auto' }}>
+        <button type="button" role="tab" data-tab="document" aria-selected={tab === 'document'} className={`dh-tab${tab === 'document' ? ' is-active' : ''}`} onClick={() => setTab('document')}><FileText size={15} /> Document</button>
+        <button type="button" role="tab" data-tab="pdf" aria-selected={tab === 'pdf'} className={`dh-tab${tab === 'pdf' ? ' is-active' : ''}`} onClick={() => setTab('pdf')}><Printer size={15} /> Actual PDF</button>
+        <button type="button" role="tab" data-tab="details" aria-selected={tab === 'details'} className={`dh-tab${tab === 'details' ? ' is-active' : ''}`} onClick={() => setTab('details')}><Receipt size={15} /> Details</button>
+        <button type="button" role="tab" data-tab="docs" aria-selected={tab === 'docs'} className={`dh-tab${tab === 'docs' ? ' is-active' : ''}`} onClick={() => setTab('docs')}>
+          <FileText size={15} /> Docs{quoteDocs.data ? <span className="dh-act-count">{quoteDocs.data.groups.reduce((t, g) => t + (g.type === 'photo' ? 1 + g.older.length : 1), 0)}</span> : null}
+        </button>
+      </div>
+      {tab === 'docs' ? (
+        <div style={{ marginBottom: 20 }}><DocsTab quote={quote.id} /></div>
+      ) : tab === 'document' ? (
+        <div style={{ marginBottom: 24 }}>
+          <QuoteDocument
+            quote={quote} items={editItems} amountOf={lineItemAmount}
+            editable={!quoteLocked} locked={quoteLocked} lockReason={quoteLocked ? 'Sent and accepted quotes cannot be edited (Sprint 1c). Revise it in QuoteBuilder as a new version.' : undefined}
+            editMode={editMode} setEditMode={setEditMode}
+            dirty={dirty} saving={saving} onSave={saveQuote} onDiscard={() => { setQuote(q => (q ? { ...q } : q)); setEditMode(false); }}
+            onChange={updateItem} onRemove={removeItem} onMove={moveItemToRoom} onAdd={addItemToRoom}
+            totals={{ subtotal: computedSubtotal, discount: computedDiscount, tax: computedTax, total: computedTotal, deposit: computedDeposit }}
+            discountAmt={editDiscountAmt} setDiscountAmt={n => { setEditDiscountAmt(n); setDirty(true); }}
+            discountType={editDiscountType} toggleDiscountType={() => { setEditDiscountType(editDiscountType === 'dollar' ? 'percent' : 'dollar'); setDirty(true); }}
+            taxRate={editTaxRate} setTaxRate={n => { setEditTaxRate(n); setDirty(true); }}
+            depositPct={editDepositPct} setDepositPct={n => { setEditDepositPct(n); setDirty(true); }}
+            notes={editNotes} setNotes={v => { setEditNotes(v); setDirty(true); }} terms={editTerms} setTerms={v => { setEditTerms(v); setDirty(true); }}
+            photos={uploadedPhotos.filter(ph => ph.path).map((ph, pi) => ({ url: `${API_BASE}${ph.path}`, label: `Photo ${pi + 1}` }))}
+            onShowPdf={() => setTab('pdf')}
+            onConvert={invoiceNumber && createdInvoiceId ? () => openRecord({ type: 'invoice', id: createdInvoiceId }) : handleCreateInvoice}
+            convertLabel={invoiceNumber ? `Open ${invoiceNumber}` : 'Convert to invoice'}
+            convertDisabledReason={invoiceNumber ? null : ['draft', 'founder_review'].includes(quote.status) ? 'Approve & send the quote first (founder PIN), then convert' : null}
+            converting={creatingInvoice}
+            extraTools={onOpenBuilder ? <button type="button" className="dh-act" onClick={onOpenBuilder}><ExternalLink size={15} /> QuoteBuilder</button> : null}
+          />
+        </div>
+      ) : tab === 'pdf' ? (
+        <div style={{ marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {quoteFinalDoc && (
+            <div className="dh dh-actionbar" role="group" aria-label="Which PDF">
+              <button type="button" className={`dh-chip${pdfSource === 'live' ? ' is-on' : ''}`} onClick={() => setPdfSource('live')}>Live quote PDF (current lines)</button>
+              <button type="button" className={`dh-chip${pdfSource === 'final' ? ' is-on' : ''}`} onClick={() => setPdfSource('final')}>Saved FINAL · {quoteFinalDoc.version}</button>
+            </div>
+          )}
+          {dirty && <div className="dh dh-empty" style={{ padding: 8, textAlign: 'left' }}>You have unsaved edits on the Document tab. The PDF shows the last saved version.</div>}
+          <DocViewer mode="embed" initial={pdfSource === 'final' && quoteFinalDoc
+            ? { id: quoteFinalDoc.id, title: quoteFinalDoc.title, kind: 'pdf' }
+            : { src: `/api/v1/quotes-v2/${quote.id}/pdf`, title: `${quote.quote_number || 'Quote'} estimate`, kind: 'pdf', v: (quote as any).updated_at || null }} />
+        </div>
+      ) : (<>
       <GaugeRow>
         <RadialGauge i={0} label={dirty ? 'Total (editing)' : 'Quote total'} value={Number(hudTotal) || 0} format={n => fmtMoney(n, true)} tone="cyan" fraction={null} icon={<Receipt size={20} />}
           sub={`subtotal ${fmtMoney(computedSubtotal, true)}`} />
@@ -762,196 +838,16 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         <QuoteVerificationPanel quoteId={quote.id} />
       </div>
 
-      {/* Editable line items */}
+      {/* Line items are edited on the Document tab (WYSIWYG page) */}
       {!showProposalSelector ? (
         <div className="mb-5">
-          <div className="flex items-center justify-between mb-3">
-            <div className="cy-qr-title">Line Items</div>
-            <div className="flex items-center gap-2">
-              {dirty && (
-                <button onClick={saveQuote} disabled={saving} className="cy-btn is-primary is-pulse is-sm">
-                  {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  {saving ? 'Saving...' : 'Save Changes'}
-                </button>
-              )}
-              <button onClick={addItem} className="cy-btn is-teal is-sm">
-                <Plus size={12} /> Add Line
-              </button>
+          <div className="empire-card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <div className="cy-qr-title">Line items</div>
+              <div style={{ fontSize: 12.5, color: 'var(--cy-text-2, #a9c7d3)' }}>{editItems.length} lines · {fmtMoney(computedTotal, true)}. Edit them directly on the document page, grouped by room.</div>
             </div>
+            <button type="button" className="cy-btn is-primary" onClick={() => { setTab('document'); setEditMode(!quoteLocked); }}><FileText size={14} /> Open document editor</button>
           </div>
-          <div className="empire-card" style={{ padding: 16 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #e5e0d8' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: '#777', fontSize: 11, textTransform: 'uppercase' }}>Description</th>
-                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11, width: 80 }}>Qty</th>
-                  <th style={{ textAlign: 'center', padding: '6px 8px', color: '#777', fontSize: 11, width: 60 }}>Unit</th>
-                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11, width: 90 }}>Rate</th>
-                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11, width: 100 }}>Amount</th>
-                  <th style={{ width: 36 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {editItems.map((item: any, i: number) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #f0ece4' }}>
-                    <td style={{ padding: '4px 8px' }}>
-                      <input type="text" value={item.description || ''}
-                        onChange={e => updateItem(i, 'description', e.target.value)}
-                        style={{ width: '100%', fontSize: 12, padding: '6px 8px', border: '1px solid #ece8e0', borderRadius: 6, background: '#faf9f7', color: '#333' }} />
-                      {/* HOTFIX 5: per-row "Founder override" badge when
-                          price_overridden=1. The server's _item_to_dict
-                          now aliases rate/amount to final_price when
-                          overridden, so the editable inputs already
-                          show $1,933.33 — this badge makes the override
-                          state explicit so the founder doesn't accidentally
-                          edit and lose the override on a Save that goes
-                          through a path we haven't audited. */}
-                      {item.price_overridden ? (
-                        <span
-                          title={`Found set final price: $${(item.final_price ?? item.rate ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} (original unit_price was $${item.unit_price ?? 0}).`}
-                          style={{
-                            display: 'inline-block', marginTop: 4,
-                            fontSize: 10, fontWeight: 600, color: '#7c5a00',
-                            background: '#fcf3cf', border: '1px solid #e0b700',
-                            borderRadius: 4, padding: '1px 6px',
-                            textTransform: 'uppercase', letterSpacing: '0.5px',
-                          }}
-                        >
-                          Founder override
-                        </span>
-                      ) : null}
-                    </td>
-                    <td style={{ padding: '4px 4px' }}>
-                      <input type="number" step="0.1" value={item.quantity ?? ''}
-                        onChange={e => updateItem(i, 'quantity', parseFloat(e.target.value) || 0)}
-                        style={{ width: '100%', textAlign: 'right', fontSize: 12, padding: '6px 6px', border: '1px solid #ece8e0', borderRadius: 6, background: '#faf9f7' }} />
-                    </td>
-                    <td style={{ padding: '4px 4px' }}>
-                      <select value={item.unit || 'ea'}
-                        onChange={e => { updateItem(i, 'unit', e.target.value); }}
-                        style={{ width: '100%', fontSize: 11, padding: '6px 2px', border: '1px solid #ece8e0', borderRadius: 6, background: '#faf9f7', color: '#555' }}>
-                        <option value="sqft">sqft</option>
-                        <option value="ea">ea</option>
-                        <option value="yd">yd</option>
-                        <option value="hr">hr</option>
-                        <option value="lf">lf</option>
-                      </select>
-                    </td>
-                    <td style={{ padding: '4px 4px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center' }}>
-                        <span style={{ fontSize: 11, color: '#888', marginRight: 2 }}>$</span>
-                        <input type="number" step="0.01" value={item.rate ?? ''}
-                          onChange={e => updateItem(i, 'rate', parseFloat(e.target.value) || 0)}
-                          style={{ width: '100%', textAlign: 'right', fontSize: 12, padding: '6px 6px', border: '1px solid #ece8e0', borderRadius: 6, background: '#faf9f7' }} />
-                      </div>
-                    </td>
-                    <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 600, color: '#1a1a1a', fontSize: 12 }}>
-                      ${lineItemAmount(item).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                    <td style={{ padding: '4px 4px', textAlign: 'center' }}>
-                      <button onClick={() => removeItem(i)} className="cursor-pointer"
-                        style={{ border: 'none', background: 'none', color: '#ccc', padding: 4 }}
-                        onMouseEnter={e => (e.currentTarget.style.color = '#dc2626')}
-                        onMouseLeave={e => (e.currentTarget.style.color = '#ccc')}>
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td colSpan={4} style={{ padding: '10px 8px', textAlign: 'right', color: '#666', fontSize: 12 }}>Subtotal</td>
-                  <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 600, fontSize: 13, color: '#1a1a1a' }}>
-                    ${computedSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                  <td></td>
-                </tr>
-                <tr>
-                  <td colSpan={3} style={{ padding: '4px 8px', textAlign: 'right', color: '#16a34a', fontSize: 12 }}>Discount</td>
-                  <td style={{ padding: '4px 4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}>
-                      <input type="number" step="0.01" min="0" value={editDiscountAmt || ''}
-                        onChange={e => { setEditDiscountAmt(parseFloat(e.target.value) || 0); setDirty(true); }}
-                        style={{ width: 50, textAlign: 'right', fontSize: 11, padding: '4px 4px', border: '1px solid #ece8e0', borderRadius: 4, background: '#faf9f7' }}
-                        placeholder="0" />
-                      <button onClick={() => { setEditDiscountType(editDiscountType === 'dollar' ? 'percent' : 'dollar'); setDirty(true); }}
-                        style={{ fontSize: 11, color: '#16a34a', background: 'none', border: '1px solid #ece8e0', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', fontWeight: 600 }}
-                        title={`Toggle discount type (currently ${editDiscountType})`}>
-                        {editDiscountType === 'dollar' ? '$' : '%'}
-                      </button>
-                    </div>
-                  </td>
-                  <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 12, color: '#16a34a' }}>
-                    {computedDiscount > 0 ? `-$${computedDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
-                  </td>
-                  <td></td>
-                </tr>
-                <tr>
-                  <td colSpan={3} style={{ padding: '4px 8px', textAlign: 'right', color: '#666', fontSize: 12 }}>Tax</td>
-                  <td style={{ padding: '4px 4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}>
-                      <input type="number" step="0.1" value={editTaxRate}
-                        onChange={e => { setEditTaxRate(parseFloat(e.target.value) || 0); setDirty(true); }}
-                        style={{ width: 50, textAlign: 'right', fontSize: 11, padding: '4px 4px', border: '1px solid #ece8e0', borderRadius: 4, background: '#faf9f7' }} />
-                      <span style={{ fontSize: 11, color: '#888' }}>%</span>
-                    </div>
-                  </td>
-                  <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 12, color: '#666' }}>
-                    ${computedTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                  <td></td>
-                </tr>
-                <tr style={{ borderTop: '2px solid #b8960c' }}>
-                  <td colSpan={4} style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 15 }}>
-                    Total
-                    <span
-                      title="HOTFIX 5: total is read from quotes_v2.total (canonical server value), not client-side recompute. The client-computed value would silently double-count when a line item's price_overridden=1."
-                      style={{
-                        marginLeft: 8, fontSize: 10, fontWeight: 500, color: '#888',
-                        background: '#fef9e7', border: '1px solid #f1c40f', borderRadius: 4, padding: '1px 6px',
-                      }}
-                    >
-                      canonical
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 18, color: '#b8960c' }}>
-                    {/* HOTFIX 5: previously this read computedTotal (a
-                        client-side recompute that ignored price_overridden
-                        and rendered $3,600 instead of the canonical $2,900
-                        for the Maggie O'Neil EST-2026-110 quote). The
-                        server's _recalculate_totals honors final_price
-                        when price_overridden=1, so quotes_v2.total is the
-                        authoritative total. We display the canonical
-                        total and only flip to computedTotal while the
-                        user has unsaved edits (so they see what their
-                        in-progress change will look like). */}
-                    ${(
-                      dirty
-                        ? computedTotal
-                        : (quote as any).total ?? computedTotal
-                    ).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                  <td></td>
-                </tr>
-                <tr>
-                  <td colSpan={3} style={{ padding: '6px 8px', textAlign: 'right', color: '#666', fontSize: 12 }}>Deposit</td>
-                  <td style={{ padding: '4px 4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}>
-                      <input type="number" step="1" value={editDepositPct}
-                        onChange={e => { setEditDepositPct(parseFloat(e.target.value) || 0); setDirty(true); }}
-                        style={{ width: 45, textAlign: 'right', fontSize: 11, padding: '4px 4px', border: '1px solid #ece8e0', borderRadius: 4, background: '#faf9f7' }} />
-                      <span style={{ fontSize: 11, color: '#888' }}>%</span>
-                    </div>
-                  </td>
-                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: '#16a34a', fontSize: 13 }}>
-                    ${computedDeposit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-
             {(() => {
               const collect = (item: any) => {
                 const idea = item?.idea_diagram;
@@ -991,35 +887,6 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                 </div>
               );
             })()}
-
-            {/* Editable notes */}
-            <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#777', marginBottom: 4 }}>Notes</div>
-              <textarea value={editNotes}
-                onChange={e => { setEditNotes(e.target.value); setDirty(true); }}
-                rows={3}
-                style={{ width: '100%', fontSize: 12, padding: '8px 10px', border: '1px solid #ece8e0', borderRadius: 8, background: '#faf9f7', color: '#444', lineHeight: 1.5, resize: 'vertical' }} />
-            </div>
-
-            {/* Editable terms */}
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#777', marginBottom: 4 }}>Terms & Conditions</div>
-              <textarea value={editTerms}
-                onChange={e => { setEditTerms(e.target.value); setDirty(true); }}
-                rows={2}
-                style={{ width: '100%', fontSize: 12, padding: '8px 10px', border: '1px solid #ece8e0', borderRadius: 8, background: '#faf9f7', color: '#444', lineHeight: 1.5, resize: 'vertical' }} />
-            </div>
-
-            {/* Save bar at bottom when dirty */}
-            {dirty && (
-              <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
-                <button onClick={saveQuote} disabled={saving} className="cy-btn is-primary is-pulse">
-                  {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                  {saving ? 'Saving...' : 'Save Quote'}
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       ) : (
       <>
@@ -1147,13 +1014,13 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         <ActionBtn icon={<ExternalLink size={16} />} label="QuoteBuilder" onClick={() => {
           if (onOpenBuilder) { onOpenBuilder(); }
         }} />
-        <ActionBtn icon={<FileText size={16} />} label="Download PDF" onClick={() => handleAction('pdf')} />
         <ActionBtn icon={<Send size={16} />} label="Telegram" onClick={() => handleAction('telegram')} />
-        <ActionBtn icon={<Mail size={16} />} label="Email" onClick={() => handleAction('email')} />
         <ActionBtn icon={<Video size={16} />} label="Call" onClick={() => handleAction('video')} />
-        <ActionBtn icon={<Printer size={16} />} label="Print" onClick={() => handleAction('print')} />
       </div>
 
+      </>)}
+
+      <div className="dh-sticky-spacer" aria-hidden />
       {/* HOTFIX 4.1 — PIN modal for founder approve-and-send.
           Replaces the bypass 'Confirm Selection' button. Modal is
           closed by default; opens via handleAction('approve_send').
