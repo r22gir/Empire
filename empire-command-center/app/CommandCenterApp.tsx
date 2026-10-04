@@ -54,6 +54,7 @@ import VendorOpsPage from './components/screens/VendorOpsPage';
 import DevPanel from './components/screens/DevPanel';
 import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
 import MaxContinuityScreen from './components/screens/MaxContinuityScreen';
+import ImprovementsPage from './components/growth/ImprovementsPage';
 import JobsScreen from './components/screens/JobsScreen';
 import InvoiceScreen from './components/screens/InvoiceScreen';
 import FinalDocsScreen from './components/docs/FinalDocsScreen';
@@ -101,6 +102,7 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
   system: 'max',
   tokens: 'max',
   'max-continuity': 'max',
+  improvements: 'max',
   vision: 'max',
   drawings: 'workroom',
   construction: 'max',
@@ -130,7 +132,7 @@ const NAV_PRODUCT_IDS = new Set<string>([
   'owner', 'workroom', 'craft', 'social', 'platform', 'openclaw', 'vendorops', 'recovery', 'luxe',
   'hardware', 'system', 'tokens', 'max-continuity', 'market', 'contractor', 'support', 'lead', 'ship',
   'crm', 'relist', 'llc', 'apost', 'assist', 'pay', 'amp', 'vetforge', 'petforge', 'vision',
-  'max-avatar', 'dev', 'drawings', 'construction', 'storefront', 'archive', 'transcript',
+  'max-avatar', 'dev', 'drawings', 'construction', 'storefront', 'archive', 'transcript', 'improvements',
 ]);
 const NAV_SCREEN_IDS = new Set<string>([
   'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
@@ -589,6 +591,8 @@ export default function CommandCenter() {
           return <OpenClawTasksPage />;
         case 'max-continuity':
           return <MaxContinuityScreen />;
+        case 'improvements':
+          return <ImprovementsPage />;
         case 'vendorops':
           return <VendorOpsPage />;
         case 'hardware':

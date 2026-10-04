@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import WorkroomLeadForm from '../workroom/WorkroomLeadForm';
+import ApprovalsQueue from '../growth/ApprovalsQueue';
+import RoiDashboard from '../growth/RoiDashboard';
 
 const LF_API = `${API}/leads`;
 
@@ -21,6 +23,8 @@ const NAV = [
   { id: 'finder', label: 'Prospect Finder', icon: Crosshair },
   { id: 'campaigns', label: 'Campaigns', icon: Send },
   { id: 'followups', label: 'Follow-ups', icon: Clock },
+  { id: 'approvals', label: 'Approvals', icon: CheckCircle },
+  { id: 'roi', label: 'ROI', icon: DollarSign },
   { id: 'activity', label: 'Activity Feed', icon: Activity },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'docs', label: 'Docs', icon: BarChart3 },
@@ -67,6 +71,8 @@ export default function LeadForgePage({ initialSection }: LeadForgePageProps) {
       case 'finder': return <ProspectFinderSection />;
       case 'campaigns': return <CampaignsSection />;
       case 'followups': return <FollowupsSection />;
+      case 'approvals': return <ApprovalsQueue />;
+      case 'roi': return <RoiDashboard />;
       case 'activity': return <ActivitySection />;
       case 'reports': return <ReportsSection />;
       case 'docs': return <ProductDocs product="leadforge" />;

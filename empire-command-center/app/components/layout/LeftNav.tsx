@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { EcosystemProduct, ScreenMode } from '../../lib/types';
 import RightPanel from './RightPanel';
 import {
-  Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
+  Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server, Lightbulb,
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
@@ -110,6 +110,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'platform', name: 'PlatformForge', icon: <Server size={16} />, status: 'active', color: '#2563eb', kind: 'product' },
       { id: 'openclaw', name: 'OpenClaw', icon: <Bot size={16} />, status: 'active', color: '#f59e0b', kind: 'product' },
       { id: 'max-continuity', name: 'MAX Continuity', icon: <ShieldCheck size={16} />, status: 'active', color: '#0d9488', kind: 'product' },
+      { id: 'improvements', name: 'Improvements', icon: <Lightbulb size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
       { id: 'system', name: 'System', icon: <Activity size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
       { id: 'tokens', name: 'Tokens & Costs', icon: <Coins size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
       { id: 'hardware', name: 'Hardware', icon: <Cpu size={16} />, status: 'dev', color: '#d97706', kind: 'product' },
