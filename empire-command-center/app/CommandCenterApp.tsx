@@ -76,6 +76,8 @@ import './theme/cyber-layout.css';
 import './theme/cyber-pages.css';
 import './theme/cyber-hud.css';
 import './theme/cyber-calm.css';
+// Design system v3 bridge: maps the shell onto the v3 tokens (Dark #0b0f14 + cyan / Gold cream + Playfair).
+import './v3/app-bridge.css';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));
@@ -707,7 +709,7 @@ export default function CommandCenter() {
   };
 
   return (
-    <div className="cy-shell h-screen flex flex-col">
+    <div className="cy-shell v3 h-screen flex flex-col">
       {clientView && (
         <div className="bg-[#16a34a] text-white text-center py-2 text-xs font-bold tracking-widest flex items-center justify-center gap-3 shadow-[0_2px_8px_rgba(22,163,74,0.3)]">
           <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
@@ -735,7 +737,7 @@ export default function CommandCenter() {
 
       <ActiveJobBanner />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden v3-body">
         <LeftNav
           activeProduct={activeProduct}
           activeScreen={activeScreen}
