@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import sqlite3
 import time
 import uuid
@@ -20,6 +21,7 @@ from pathlib import Path
 
 GRAPH = "https://graph.facebook.com/v21.0"
 WINDOW_SECONDS = 24 * 60 * 60
+CREDENTIALS_FILE_NAME = "whatsapp_credentials.json"
 REQUIRED_ENV = (
     "WHATSAPP_ACCESS_TOKEN",
     "WHATSAPP_PHONE_NUMBER_ID",
@@ -36,6 +38,174 @@ class WhatsAppError(Exception):
     pass
 
 
+def _credentials_file_path() -> Path | None:
+    """Path to this edition's stored WhatsApp credentials file.
+    Lives strictly under the instance's own data directory.
+    """
+    try:
+        from app.edition import data_root_or_none
+        root = data_root_or_none()
+    except Exception:
+        root = None
+    if root is None:
+        raw = os.getenv("EMPIRE_DATA_DIR", "").strip()
+        if raw:
+            root = Path(raw).expanduser().resolve()
+    if root is None:
+        raw_state = os.getenv("WHATSAPP_STATE_DB", "").strip()
+        if raw_state:
+            root = Path(raw_state).expanduser().resolve().parent
+    if root is None:
+        root = Path(os.path.expanduser("~/empire-data"))
+    return root / CREDENTIALS_FILE_NAME
+
+
+def load_stored_credentials() -> dict:
+    """Load credentials stored in the edition's data directory (mode 0600)."""
+    path = _credentials_file_path()
+    if not path or not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def save_stored_credentials(
+    *,
+    phone_number_id: str,
+    access_token: str,
+    app_secret: str,
+    verify_token: str = "",
+    owner_numbers: list[str] | str | None = None,
+) -> dict:
+    """Store credentials only in this edition's data directory with mode 0600.
+    Generates a secure verify_token if not provided or existing.
+    Never returns secrets in the returned dictionary.
+    """
+    path = _credentials_file_path()
+    if not path:
+        raise WhatsAppError("No se pudo determinar el directorio de datos de la edición")
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing = load_stored_credentials()
+    clean_verify = (verify_token or "").strip()
+    if not clean_verify:
+        clean_verify = existing.get("verify_token") or secrets.token_urlsafe(32)
+
+    # Normalize owner numbers
+    owners: list[str] = []
+    if isinstance(owner_numbers, list):
+        for item in owner_numbers:
+            d = _digits(str(item))
+            if d and d not in owners:
+                owners.append(d)
+    elif isinstance(owner_numbers, str):
+        for part in owner_numbers.split(","):
+            d = _digits(part)
+            if d and d not in owners:
+                owners.append(d)
+    elif "owner_numbers" in existing:
+        owners = existing.get("owner_numbers") or []
+
+    data = {
+        "phone_number_id": (phone_number_id or "").strip() or existing.get("phone_number_id", ""),
+        "access_token": (access_token or "").strip() or existing.get("access_token", ""),
+        "app_secret": (app_secret or "").strip() or existing.get("app_secret", ""),
+        "verify_token": clean_verify,
+        "owner_numbers": owners,
+        "updated_at": int(time.time()),
+    }
+
+    # Write file securely with mode 0600
+    tmp_path = path.with_suffix(".tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    mode = 0o600
+    fd = os.open(str(tmp_path), flags, mode)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
+    os.replace(str(tmp_path), str(path))
+    try:
+        os.chmod(str(path), 0o600)
+    except Exception:
+        pass
+
+    return get_credentials_safe()
+
+
+def get_credentials_safe() -> dict:
+    """Safe view of credentials. Secrets (token, app_secret) are NEVER returned.
+    Only flags, last4 digits, owner numbers, verify_token (for Meta webhook setup),
+    and webhook callback URL are returned.
+    """
+    phone_id = get_config_value("WHATSAPP_PHONE_NUMBER_ID")
+    token = get_config_value("WHATSAPP_ACCESS_TOKEN")
+    secret = get_config_value("WHATSAPP_APP_SECRET")
+    verify = get_config_value("WHATSAPP_VERIFY_TOKEN")
+    owners = owner_numbers()
+
+    return {
+        "phone_number_id_set": bool(phone_id),
+        "phone_number_id_last4": phone_id[-4:] if len(phone_id) >= 4 else "",
+        "access_token_set": bool(token),
+        "app_secret_set": bool(secret),
+        "verify_token": verify,
+        "owner_numbers": owners,
+        "webhook_url": webhook_callback_url(),
+        "configured": bool(phone_id and token and secret and verify),
+    }
+
+
+def webhook_callback_url() -> str:
+    """Constructs the full public webhook URL for this edition."""
+    base = os.getenv("WHATSAPP_WEBHOOK_BASE_URL", "").strip().rstrip("/")
+    if not base:
+        ed = edition_label()
+        if ed == "amp":
+            base = "https://wa-amp.empirebox.store"
+        elif ed == "maxine":
+            base = "https://wa-maxine.empirebox.store"
+        else:
+            try:
+                from app.edition import edition_profile
+                prof = edition_profile()
+                host = prof.get("host") or "studio.empirebox.store"
+                base = f"https://{host}"
+            except Exception:
+                base = "https://studio.empirebox.store"
+    return f"{base}/api/v1/whatsapp/webhook"
+
+
+def get_config_value(name: str) -> str:
+    """Read config with priority:
+    1. Process environment variable (override)
+    2. Stored edition credentials file
+    """
+    val = os.getenv(name, "").strip()
+    if val:
+        return val
+    stored = load_stored_credentials()
+    key_map = {
+        "WHATSAPP_ACCESS_TOKEN": "access_token",
+        "WHATSAPP_PHONE_NUMBER_ID": "phone_number_id",
+        "WHATSAPP_APP_SECRET": "app_secret",
+        "WHATSAPP_VERIFY_TOKEN": "verify_token",
+    }
+    file_key = key_map.get(name)
+    if file_key and stored.get(file_key):
+        return str(stored[file_key]).strip()
+    return ""
+
+
 def edition_label() -> str:
     try:
         from app.edition import edition_name
@@ -46,7 +216,7 @@ def edition_label() -> str:
 
 
 def _present(name: str) -> bool:
-    return bool(os.getenv(name, "").strip())
+    return bool(get_config_value(name))
 
 
 def _digits(value: str) -> str:
@@ -55,11 +225,25 @@ def _digits(value: str) -> str:
 
 def owner_numbers() -> list[str]:
     raw = os.getenv("WHATSAPP_OWNER_NUMBERS", "")
-    found = []
-    for part in raw.split(","):
-        number = _digits(part)
-        if number and number not in found:
-            found.append(number)
+    found: list[str] = []
+    if raw.strip():
+        for part in raw.split(","):
+            number = _digits(part)
+            if number and number not in found:
+                found.append(number)
+    if not found:
+        stored = load_stored_credentials()
+        stored_owners = stored.get("owner_numbers")
+        if isinstance(stored_owners, list):
+            for part in stored_owners:
+                number = _digits(str(part))
+                if number and number not in found:
+                    found.append(number)
+        elif isinstance(stored_owners, str):
+            for part in stored_owners.split(","):
+                number = _digits(part)
+                if number and number not in found:
+                    found.append(number)
     return found
 
 
@@ -121,7 +305,7 @@ def channel_status() -> dict:
     else:
         reason_es = "WhatsApp responde solo a los números del dueño, dentro de las 24 horas. El PDF sale después de confirmar en el chat."
         reason_en = "WhatsApp replies only to the owner's numbers, inside 24 hours. The PDF is sent after a chat confirmation."
-    phone_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    phone_id = get_config_value("WHATSAPP_PHONE_NUMBER_ID")
     return {
         "enabled": enabled,
         "configured": not missing,
@@ -134,6 +318,8 @@ def channel_status() -> dict:
         "approved_templates": approved_templates(),
         "service_window_hours": 24,
         "webhook_path": "/api/v1/whatsapp/webhook",
+        "webhook_url": webhook_callback_url(),
+        "webhook_verified": webhook_verified_time() is not None,
         "documents_auto_send": False,
         "reply_mode": reply_mode(),
         "reply_language": reply_language(),
@@ -144,7 +330,7 @@ def channel_status() -> dict:
 
 
 def verify_signature(body: bytes, header: str) -> bool:
-    secret = os.getenv("WHATSAPP_APP_SECRET", "").strip()
+    secret = get_config_value("WHATSAPP_APP_SECRET")
     if not secret or not header:
         return False
     digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
@@ -153,11 +339,12 @@ def verify_signature(body: bytes, header: str) -> bool:
 
 
 def verify_handshake(mode: str, token: str, challenge: str) -> str | None:
-    expected = os.getenv("WHATSAPP_VERIFY_TOKEN", "").strip()
+    expected = get_config_value("WHATSAPP_VERIFY_TOKEN")
     if not expected or mode != "subscribe" or not challenge:
         return None
     if not hmac.compare_digest(expected, token or ""):
         return None
+    record_handshake_success()
     return challenge
 
 
@@ -200,9 +387,87 @@ def _db():
             kind TEXT,
             created_at INTEGER
         );
+        CREATE TABLE IF NOT EXISTS wa_handshake (
+            id INTEGER PRIMARY KEY,
+            last_verified INTEGER
+        );
         """
     )
     return conn
+
+
+def record_handshake_success() -> None:
+    conn = _db()
+    try:
+        conn.execute(
+            """
+            INSERT INTO wa_handshake (id, last_verified) VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET last_verified = excluded.last_verified
+            """,
+            (int(time.time()),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def webhook_verified_time() -> int | None:
+    conn = _db()
+    try:
+        row = conn.execute("SELECT last_verified FROM wa_handshake WHERE id = 1").fetchone()
+        return int(row["last_verified"]) if row and row["last_verified"] else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def test_connection(*, phone_number_id: str = "", access_token: str = "") -> dict:
+    """Read-only test calling Meta Graph API.
+    Calls GET https://graph.facebook.com/v21.0/{phone_number_id}?fields=display_phone_number,verified_name
+    Never sends any WhatsApp message.
+    """
+    pid = (phone_number_id or get_config_value("WHATSAPP_PHONE_NUMBER_ID")).strip()
+    token = (access_token or get_config_value("WHATSAPP_ACCESS_TOKEN")).strip()
+
+    if not pid:
+        return {"ok": False, "error": "Falta el identificador de número de teléfono (Phone Number ID)."}
+    if not token:
+        return {"ok": False, "error": "Falta el token de acceso (Access Token)."}
+
+    url = f"{GRAPH}/{pid}?fields=display_phone_number,verified_name,code_verification_status,quality_rating"
+    try:
+        import urllib.request
+        import urllib.error
+
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"}, method="GET")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            last_handshake = webhook_verified_time()
+            return {
+                "ok": True,
+                "phone_number_id": pid,
+                "display_phone_number": data.get("display_phone_number", ""),
+                "verified_name": data.get("verified_name", ""),
+                "code_verification_status": data.get("code_verification_status", ""),
+                "quality_rating": data.get("quality_rating", ""),
+                "webhook_verified": last_handshake is not None,
+                "last_webhook_verified_at": last_handshake,
+            }
+    except urllib.error.HTTPError as exc:
+        err_msg = f"Meta respondió con error {exc.code}."
+        try:
+            err_body = json.loads(exc.read().decode("utf-8"))
+            if isinstance(err_body, dict) and "error" in err_body:
+                meta_err = err_body["error"]
+                err_msg = meta_err.get("message") or err_msg
+        except Exception:
+            pass
+        return {"ok": False, "error": err_msg}
+    except urllib.error.URLError:
+        return {"ok": False, "error": "No se pudo conectar con Meta (error de red o sin conexión)."}
+    except Exception as exc:
+        return {"ok": False, "error": f"Error inesperado al probar conexión: {str(exc)}"}
 
 
 def remember_inbound(wa_id: str, timestamp: int) -> None:
@@ -286,14 +551,14 @@ def _graph_json(method: str, url: str, payload: dict | None, token: str) -> dict
 
 
 def _token() -> str:
-    token = os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
+    token = get_config_value("WHATSAPP_ACCESS_TOKEN")
     if not token:
         raise WhatsAppError("WhatsApp está apagado")
     return token
 
 
 def _phone_id() -> str:
-    phone_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    phone_id = get_config_value("WHATSAPP_PHONE_NUMBER_ID")
     if not phone_id:
         raise WhatsAppError("Falta WHATSAPP_PHONE_NUMBER_ID")
     return phone_id
@@ -640,7 +905,7 @@ def handle_webhook(body: bytes, signature: str, *, transcribe=None, synthesize=N
         payload = json.loads(body.decode("utf-8"))
     except json.JSONDecodeError:
         return {"ok": False, "http_status": 400, "processed": 0}
-    expected_phone = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    expected_phone = get_config_value("WHATSAPP_PHONE_NUMBER_ID")
     processed = 0
     ignored = 0
     last: dict = {}

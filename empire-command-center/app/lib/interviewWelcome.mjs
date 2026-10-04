@@ -3,6 +3,7 @@
 const SHARED = [
   { id: 'bienvenida', es: 'Bienvenida', en: 'Welcome' },
   { id: 'empresa', es: 'Tu empresa', en: 'Your company' },
+  { id: 'whatsapp', es: 'Conectar WhatsApp', en: 'Connect WhatsApp' },
   { id: 'industria', es: 'Industria', en: 'Industry' },
   { id: 'clientes', es: 'Clientes', en: 'Customers' },
   { id: 'dinero', es: 'Dinero', en: 'Money' },
@@ -57,8 +58,10 @@ function family(edition) {
 
 export function interviewSteps(edition) {
   const kind = family(edition);
-  const offerAt = 3;
   const steps = SHARED.slice();
+  // Place offer step after industria
+  const industriaIndex = steps.findIndex((s) => s.id === 'industria');
+  const offerAt = industriaIndex >= 0 ? industriaIndex + 1 : 4;
   steps.splice(offerAt, 0, OFFER[kind]);
   if (kind === 'maxine') steps.splice(1, 0, ARGOS_STEP);
   return steps;

@@ -217,6 +217,631 @@ const cardStyle: React.CSSProperties = {
 type ReviewItem = { id: string; title: string; text: string; visibility: string; status: string };
 type ReviewState = { active?: boolean; task?: { title?: string; owner_name?: string } | null; items?: ReviewItem[] };
 
+type WhatsAppCreds = {
+  phone_number_id_set?: boolean;
+  phone_number_id_last4?: string;
+  access_token_set?: boolean;
+  app_secret_set?: boolean;
+  verify_token?: string;
+  owner_numbers?: string[];
+  webhook_url?: string;
+  configured?: boolean;
+};
+
+type WhatsAppTestResult = {
+  ok: boolean;
+  display_phone_number?: string;
+  verified_name?: string;
+  code_verification_status?: string;
+  quality_rating?: string;
+  webhook_verified?: boolean;
+  error?: string;
+};
+
+function WhatsAppSetupStep({
+  es,
+  t,
+  onConfigured,
+  onSkip,
+}: {
+  es: boolean;
+  t: (spanish: string, english: string) => string;
+  onConfigured: () => void;
+  onSkip: () => void;
+}) {
+  const [hasKeysChoice, setHasKeysChoice] = useState<'yes' | 'no' | null>(null);
+  const [phoneId, setPhoneId] = useState('');
+  const [token, setToken] = useState('');
+  const [secret, setSecret] = useState('');
+  const [ownersInput, setOwnersInput] = useState('');
+  const [customVerify, setCustomVerify] = useState('');
+  const [creds, setCreds] = useState<WhatsAppCreds | null>(null);
+  const [testResult, setTestResult] = useState<WhatsAppTestResult | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const webhookUrl = creds?.webhook_url || `${API_BASE}/api/v1/whatsapp/webhook`;
+  const verifyToken = creds?.verify_token || customVerify || 'generando...';
+
+  const copyToClipboard = (text: string, key: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2500);
+    }
+  };
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/v1/whatsapp/credentials`, { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: WhatsAppCreds | null) => {
+        if (data) {
+          setCreds(data);
+          if (data.owner_numbers && data.owner_numbers.length > 0) {
+            setOwnersInput(data.owner_numbers.join(', '));
+          }
+          if (data.verify_token) {
+            setCustomVerify(data.verify_token);
+          }
+          if (data.configured) {
+            setHasKeysChoice('yes');
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleTestConnection = async () => {
+    setTesting(true);
+    setMsg(null);
+    setTestResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/whatsapp/test`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone_number_id: phoneId.trim() || undefined,
+          access_token: token.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      setTestResult(data);
+      if (data.ok) {
+        setMsg({
+          type: 'ok',
+          text: es
+            ? `Conexión exitosa con Meta: ${data.verified_name || 'Nombre verificado'} (${data.display_phone_number || 'Número ok'}).`
+            : `Connection successful: ${data.verified_name || 'Verified name'} (${data.display_phone_number || 'Phone ok'}).`,
+        });
+      } else {
+        setMsg({
+          type: 'err',
+          text: data.error || (es ? 'Error al probar conexión.' : 'Connection test failed.'),
+        });
+      }
+    } catch {
+      setMsg({
+        type: 'err',
+        text: es ? 'No se pudo conectar con el servidor.' : 'Could not contact server.',
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleSaveCredentials = async () => {
+    setSaving(true);
+    setMsg(null);
+    const ownerList = ownersInput
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/whatsapp/credentials`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone_number_id: phoneId.trim(),
+          access_token: token.trim(),
+          app_secret: secret.trim(),
+          verify_token: customVerify.trim() || undefined,
+          owner_numbers: ownerList,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setCreds(data.credentials);
+        setMsg({
+          type: 'ok',
+          text: es ? 'Credenciales guardadas con seguridad en esta edición.' : 'Credentials saved securely.',
+        });
+        onConfigured();
+      } else {
+        setMsg({
+          type: 'err',
+          text: data.detail || (es ? 'No se pudieron guardar las credenciales.' : 'Could not save credentials.'),
+        });
+      }
+    } catch {
+      setMsg({
+        type: 'err',
+        text: es ? 'Error al conectar con el servidor.' : 'Error contacting server.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>
+        {t('Conectar WhatsApp', 'Connect WhatsApp')}
+      </h2>
+      <p style={{ color: '#5C5650', lineHeight: 1.6 }}>
+        {t(
+          'Recibe notas de voz, crea borradores de documentos y recibe los PDFs directamente en tu chat de WhatsApp.',
+          'Receive voice notes, generate draft documents, and get PDFs right into your own WhatsApp chat.'
+        )}
+      </p>
+
+      {/* Voice calls notice */}
+      <div
+        style={{
+          background: '#FDF8EB',
+          border: '1px solid #EFE0B9',
+          borderRadius: 12,
+          padding: '12px 16px',
+          marginBottom: 18,
+          fontSize: 13,
+          color: '#7C5E10',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        }}
+      >
+        <span style={{ fontSize: 18 }}>📞</span>
+        <div>
+          <strong>{t('Llamadas de voz:', 'Voice calls:')}</strong>{' '}
+          {t(
+            'Las llamadas en tiempo real por WhatsApp están en preparación (Fase 2). Por ahora interactúas por mensajes, notas de voz y documentos PDF.',
+            'Real-time voice calls via WhatsApp are coming in Phase 2. For now, you interact via text, voice notes, and PDF documents.'
+          )}
+        </div>
+      </div>
+
+      {/* Ask if they already have keys */}
+      {hasKeysChoice === null && (
+        <div style={{ marginTop: 16 }}>
+          <p style={{ fontWeight: 700, fontSize: 16, color: '#2D2A26', marginBottom: 12 }}>
+            {t(
+              '¿Ya tienes una cuenta de Meta for Developers con el producto WhatsApp configurado?',
+              'Do you already have a Meta for Developers account with WhatsApp configured?'
+            )}
+          </p>
+          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+            <button
+              type="button"
+              onClick={() => setHasKeysChoice('yes')}
+              style={{
+                textAlign: 'left',
+                borderRadius: 12,
+                border: '2px solid #D4A030',
+                background: '#FFF9F0',
+                padding: '16px',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontWeight: 800, fontSize: 15, color: '#2D2A26' }}>
+                {t('Sí, ya tengo mis credenciales', 'Yes, I have my credentials')}
+              </div>
+              <div style={{ fontSize: 13, color: '#5C5650', marginTop: 4 }}>
+                {t('Tengo el Phone Number ID, Access Token y App Secret listos.', 'I have Phone Number ID, Access Token, and App Secret ready.')}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setHasKeysChoice('no')}
+              style={{
+                textAlign: 'left',
+                borderRadius: 12,
+                border: '1px solid #E7E0D6',
+                background: '#fff',
+                padding: '16px',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontWeight: 800, fontSize: 15, color: '#2D2A26' }}>
+                {t('No, guíame paso a paso', 'No, walk me through step-by-step')}
+              </div>
+              <div style={{ fontSize: 13, color: '#5C5650', marginTop: 4 }}>
+                {t('Acompáñame para crearlo con mi propio Facebook en Meta.', 'Show me the friendly numbered tutorial with my own Facebook login.')}
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Guided Walkthrough when No */}
+      {hasKeysChoice === 'no' && (
+        <div style={{ marginTop: 16, background: '#fff', border: '1px solid #E7E0D6', borderRadius: 16, padding: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 18, color: '#2D2A26' }}>
+              {t('Guía paso a paso: Tu cuenta de WhatsApp Cloud API', 'Step-by-step guide: Your WhatsApp Cloud API account')}
+            </h3>
+            <button
+              type="button"
+              onClick={() => setHasKeysChoice('yes')}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: '#D4A030',
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              {t('Ir directo al formulario →', 'Skip to form →')}
+            </button>
+          </div>
+
+          <div
+            style={{
+              background: '#FFF3CD',
+              border: '1px solid #FFE69C',
+              borderRadius: 8,
+              padding: '10px 14px',
+              fontSize: 13,
+              color: '#856404',
+              marginBottom: 16,
+            }}
+          >
+            ⚠️ <strong>{t('Aviso importante:', 'Important note:')}</strong>{' '}
+            {t(
+              'Inicia sesión en Meta con TU PROPIA cuenta de Facebook (no la de Rafael). Realiza estos pasos en el navegador donde tienes tu sesión abierta.',
+              'Sign in to Meta using YOUR OWN Facebook account (not Rafael’s). Complete these steps in the browser where you are logged in.'
+            )}
+          </div>
+
+          <ol style={{ paddingLeft: 20, color: '#4A4640', fontSize: 14, lineHeight: 1.6 }}>
+            <li style={{ marginBottom: 12 }}>
+              <strong>{t('Crear cuenta en Meta for Developers:', 'Create a Meta for Developers account:')}</strong>{' '}
+              {t(
+                'Entra a developers.facebook.com con tu usuario personal de Facebook y regístrate como desarrollador.',
+                'Go to developers.facebook.com with your personal Facebook login and register as a developer.'
+              )}
+            </li>
+            <li style={{ marginBottom: 12 }}>
+              <strong>{t('Crear aplicación de tipo Negocios (Business):', 'Create a Business-type app:')}</strong>{' '}
+              {t(
+                'En "Mis apps", haz clic en "Crear app", selecciona el tipo "Negocios" (Business), ponle el nombre de tu empresa y crea la app.',
+                'In "My apps", click "Create App", select "Business" type, name it after your business, and create it.'
+              )}
+            </li>
+            <li style={{ marginBottom: 12 }}>
+              <strong>{t('Agregar el producto WhatsApp:', 'Add the WhatsApp product:')}</strong>{' '}
+              {t(
+                'En el panel de la app, busca "WhatsApp" en la lista de productos y haz clic en "Configurar" (Set up).',
+                'In the app dashboard, find "WhatsApp" and click "Set up".'
+              )}
+            </li>
+            <li style={{ marginBottom: 12 }}>
+              <strong>{t('Usar el número de prueba gratuito de Meta:', 'Use Meta’s free test number first:')}</strong>{' '}
+              {t(
+                'Meta te asigna un número de prueba gratuito de inmediato. En la sección "Para" (To), agrega tu número personal de WhatsApp y confirma el código SMS de 6 dígitos que Meta te enviará.',
+                'Meta assigns you a free test phone number immediately. In the "To" field, add your personal WhatsApp number and verify the 6-digit code Meta sends you.'
+              )}
+            </li>
+            <li style={{ marginBottom: 12 }}>
+              <strong>{t('Copiar identificadores y claves:', 'Copy identifiers and keys:')}</strong>{' '}
+              {t(
+                'En la misma pantalla verás el "Identificador de número de teléfono" (Phone Number ID) y el "Token de acceso temporal" (dura 24 horas). Cópialos.',
+                'On that screen, copy the "Phone Number ID" and the "Temporary Access Token" (lasts 24h).'
+              )}
+            </li>
+            <li style={{ marginBottom: 12 }}>
+              <strong>{t('Copiar el App Secret:', 'Copy the App Secret:')}</strong>{' '}
+              {t(
+                'Ve a Configuración de la app > Básica (Settings > Basic) y copia la "Clave secreta de la app" (App Secret).',
+                'Go to App Settings > Basic and copy the "App Secret".'
+              )}
+            </li>
+            <li style={{ marginBottom: 12 }}>
+              <strong>{t('Paso permanente a futuro:', 'Future permanent step:')}</strong>{' '}
+              {t(
+                'Más adelante, puedes vincular una SIM física exclusiva de tu negocio y generar un token de usuario del sistema (permanente) en Meta Business Manager.',
+                'Later on, you can link a dedicated real SIM number and generate a permanent System User token in Meta Business Manager.'
+              )}
+            </li>
+          </ol>
+
+          <div style={{ marginTop: 14 }}>
+            <button
+              type="button"
+              onClick={() => setHasKeysChoice('yes')}
+              style={{
+                borderRadius: 10,
+                border: 'none',
+                background: '#D4A030',
+                color: '#fff',
+                padding: '10px 18px',
+                fontWeight: 700,
+                fontSize: 14,
+                cursor: 'pointer',
+              }}
+            >
+              {t('Ya tengo los datos, ingresar credenciales →', 'I have the details, enter credentials →')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Credentials form & Webhook setup */}
+      {hasKeysChoice === 'yes' && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ background: '#fff', border: '1px solid #E7E0D6', borderRadius: 16, padding: 18 }}>
+            <h3 style={{ margin: '0 0 14px', fontSize: 18, color: '#2D2A26' }}>
+              {t('Credenciales de WhatsApp Cloud API', 'WhatsApp Cloud API Credentials')}
+            </h3>
+
+            {/* Phone Number ID */}
+            <label style={{ display: 'block', marginBottom: 12, fontSize: 14, fontWeight: 700 }}>
+              {t('Identificador del número de teléfono (Phone Number ID)', 'Phone Number ID')}
+              <input
+                value={phoneId}
+                onChange={(e) => setPhoneId(e.target.value)}
+                placeholder={creds?.phone_number_id_last4 ? `••••${creds.phone_number_id_last4}` : '108234567890123'}
+                style={inputStyle}
+              />
+              <span style={{ fontSize: 12, fontWeight: 400, color: '#777' }}>
+                {t('Número de ~15 dígitos provisto en la consola de WhatsApp en Meta.', '~15-digit number from Meta WhatsApp console.')}
+              </span>
+            </label>
+
+            {/* Access Token */}
+            <label style={{ display: 'block', marginBottom: 12, fontSize: 14, fontWeight: 700 }}>
+              {t('Token de acceso (Access Token)', 'Access Token')}
+              <input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder={creds?.access_token_set ? '•••••••••••••••••••• (ya configurado)' : 'EAAB...'}
+                style={inputStyle}
+              />
+              <span style={{ fontSize: 12, fontWeight: 400, color: '#777' }}>
+                {t('Token temporal (24h) o de usuario del sistema (permanente). Se almacena con modo 0600.', 'Temporary (24h) or System User token. Stored with mode 0600.')}
+              </span>
+            </label>
+
+            {/* App Secret */}
+            <label style={{ display: 'block', marginBottom: 12, fontSize: 14, fontWeight: 700 }}>
+              {t('Clave secreta de la app (App Secret)', 'App Secret')}
+              <input
+                type="password"
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                placeholder={creds?.app_secret_set ? '•••••••••••••••• (ya configurado)' : 'a1b2c3d4...'}
+                style={inputStyle}
+              />
+              <span style={{ fontSize: 12, fontWeight: 400, color: '#777' }}>
+                {t('De Configuración básica en Meta Developers. Se usa para verificar la firma de seguridad.', 'From Meta Developers Basic Settings. Used to verify webhook signature.')}
+              </span>
+            </label>
+
+            {/* Owner Allowlist Phone Numbers */}
+            <label style={{ display: 'block', marginBottom: 12, fontSize: 14, fontWeight: 700 }}>
+              {t('Tu número de WhatsApp (dueño autorizado)', 'Your WhatsApp number (authorized owner)')}
+              <input
+                value={ownersInput}
+                onChange={(e) => setOwnersInput(e.target.value)}
+                placeholder="+57 300 123 4567"
+                style={inputStyle}
+              />
+              <span style={{ fontSize: 12, fontWeight: 400, color: '#777' }}>
+                {t(
+                  'El canal SOLO responde a tu número. Los mensajes de números no autorizados se descartan sin responder.',
+                  'The channel ONLY replies to your number. Unauthorized senders are silently ignored.'
+                )}
+              </span>
+            </label>
+
+            {/* Webhook Configuration in Meta */}
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #F0E6D8' }}>
+              <h4 style={{ margin: '0 0 8px', fontSize: 16, color: '#2D2A26' }}>
+                {t('Configuración del Webhook en Meta', 'Webhook Configuration in Meta')}
+              </h4>
+              <p style={{ fontSize: 13, color: '#5C5650', marginTop: 0 }}>
+                {t(
+                  'Copia esta URL y token de verificación y pégalos en Meta Developers > WhatsApp > Configuración > Webhook:',
+                  'Copy this URL and verify token and paste them into Meta Developers > WhatsApp > Configuration > Webhook:'
+                )}
+              </p>
+
+              {/* Webhook URL */}
+              <div style={{ marginBottom: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#555' }}>
+                  {t('URL de devolución de llamada (Callback URL)', 'Callback URL')}:
+                </span>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <input
+                    readOnly
+                    value={webhookUrl}
+                    style={{ ...inputStyle, marginTop: 0, background: '#F8F6F2', fontSize: 13 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(webhookUrl, 'url')}
+                    style={{
+                      borderRadius: 10,
+                      border: '1px solid #E7E0D6',
+                      background: copiedKey === 'url' ? '#16A34A' : '#fff',
+                      color: copiedKey === 'url' ? '#fff' : '#2D2A26',
+                      padding: '8px 14px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      minHeight: 40,
+                    }}
+                  >
+                    {copiedKey === 'url' ? t('¡Copiado!', 'Copied!') : t('Copiar', 'Copy')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Verify Token */}
+              <div style={{ marginBottom: 12 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#555' }}>
+                  {t('Token de verificación (Verify Token)', 'Verify Token')}:
+                </span>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <input
+                    readOnly
+                    value={verifyToken}
+                    style={{ ...inputStyle, marginTop: 0, background: '#F8F6F2', fontSize: 13 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(verifyToken, 'token')}
+                    style={{
+                      borderRadius: 10,
+                      border: '1px solid #E7E0D6',
+                      background: copiedKey === 'token' ? '#16A34A' : '#fff',
+                      color: copiedKey === 'token' ? '#fff' : '#2D2A26',
+                      padding: '8px 14px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      minHeight: 40,
+                    }}
+                  >
+                    {copiedKey === 'token' ? t('¡Copiado!', 'Copied!') : t('Copiar', 'Copy')}
+                  </button>
+                </div>
+                <span style={{ fontSize: 12, color: '#888' }}>
+                  {t('Recuerda suscribir el campo "messages" en Meta.', 'Remember to subscribe to the "messages" field in Meta.')}
+                </span>
+              </div>
+            </div>
+
+            {/* Test Connection Button & Status */}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 16 }}>
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={testing || (!phoneId && !creds?.phone_number_id_set)}
+                style={{
+                  borderRadius: 10,
+                  border: '1px solid #D4A030',
+                  background: '#FFF9F0',
+                  color: '#9E6D08',
+                  padding: '10px 16px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  minHeight: 44,
+                }}
+              >
+                {testing ? t('Probando...', 'Testing...') : t('🔍 Probar conexión', '🔍 Test connection')}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveCredentials}
+                disabled={saving || (!phoneId && !creds?.phone_number_id_set)}
+                style={{
+                  borderRadius: 10,
+                  border: 'none',
+                  background: '#D4A030',
+                  color: '#fff',
+                  padding: '10px 20px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  minHeight: 44,
+                }}
+              >
+                {saving ? t('Guardando...', 'Saving...') : t('Guardar credenciales', 'Save credentials')}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setHasKeysChoice('no')}
+                style={{
+                  borderRadius: 10,
+                  border: '1px solid #E7E0D6',
+                  background: 'transparent',
+                  color: '#666',
+                  padding: '10px 14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  minHeight: 44,
+                }}
+              >
+                {t('Ver tutorial de nuevo', 'View tutorial again')}
+              </button>
+            </div>
+
+            {/* Feedback / Results */}
+            {msg && (
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  background: msg.type === 'ok' ? '#ECFDF5' : '#FEF2F2',
+                  color: msg.type === 'ok' ? '#065F46' : '#991B1B',
+                  border: `1px solid ${msg.type === 'ok' ? '#A7F3D0' : '#FECACA'}`,
+                }}
+              >
+                {msg.text}
+              </div>
+            )}
+
+            {testResult && testResult.ok && (
+              <div style={{ marginTop: 12, padding: 12, background: '#F0FDF4', borderRadius: 10, border: '1px solid #BBF7D0', fontSize: 13 }}>
+                <div style={{ fontWeight: 700, color: '#166534', marginBottom: 4 }}>
+                  ✓ {t('Llamada a Meta Graph API completada sin enviar mensajes:', 'Meta Graph API call verified without sending messages:')}
+                </div>
+                <div><strong>{t('Número:', 'Phone:')}</strong> {testResult.display_phone_number || '—'}</div>
+                <div><strong>{t('Nombre en Meta:', 'Meta Name:')}</strong> {testResult.verified_name || '—'}</div>
+                <div>
+                  <strong>{t('Estado del Webhook:', 'Webhook status:')}</strong>{' '}
+                  {testResult.webhook_verified
+                    ? t('✓ Apretón de manos de Meta recibido exitosamente.', '✓ Meta handshake verified successfully.')
+                    : t('Pendiente de handshake con Meta (pega la URL y el Token en Meta y pulsa "Verificar y guardar").', 'Pending handshake with Meta (paste URL and Token in Meta and click "Verify and save").')}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Skip for now option */}
+      <div style={{ marginTop: 24, textAlign: 'center' }}>
+        <button
+          type="button"
+          onClick={onSkip}
+          style={{
+            border: 'none',
+            background: 'transparent',
+            color: '#777',
+            textDecoration: 'underline',
+            fontSize: 14,
+            cursor: 'pointer',
+            padding: '8px 16px',
+          }}
+        >
+          {t('Omitir por ahora (puedes configurarlo más tarde en el Centro de Mando)', 'Skip for now (you can set it up later from the Command Center)')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ArgosReviewQueue({ visible, nonce, es }: { visible: boolean; nonce: number; es: boolean }) {
   const [state, setState] = useState<ReviewState | null>(null);
   const [error, setError] = useState('');
@@ -582,6 +1207,32 @@ export default function EntrevistaPage() {
               </label>
             </>
           )}
+          {currentId === 'whatsapp' && (
+            <WhatsAppSetupStep
+              es={es}
+              t={t}
+              onConfigured={() => {
+                const next = Math.min(step + 1, last);
+                persist(next, answers).then((ok) => {
+                  if (ok) {
+                    setStep(next);
+                    setReached((current) => Math.max(current, next));
+                    scrollTop();
+                  }
+                });
+              }}
+              onSkip={() => {
+                const next = Math.min(step + 1, last);
+                persist(next, answers).then((ok) => {
+                  if (ok) {
+                    setStep(next);
+                    setReached((current) => Math.max(current, next));
+                    scrollTop();
+                  }
+                });
+              }}
+            />
+          )}
           {currentId === 'industria' && (
             <>
               <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 26, marginTop: 0 }}>{t('¿A qué te dedicas?', 'What do you do?')}</h2>
@@ -802,6 +1453,7 @@ export default function EntrevistaPage() {
               {[
                 ...(constructionShell ? [{ id: 'argos', title: label('argos'), body: ARGOS_OPTIONS.find((option) => option.id === answers.argos_consent)?.[es ? 'es' : 'en'] || t('Sin elegir', 'Not chosen') }] : []),
                 { id: 'empresa', title: label('empresa'), body: [answers.legal_name, answers.trade_name, answers.city, answers.country, answers.email, answers.phone, answers.website].filter(Boolean).join(' · ') || t('Sin datos', 'No details') },
+                { id: 'whatsapp', title: label('whatsapp'), body: t('Configurado o gestionable desde el Centro de Mando', 'Configured or manageable from Command Center') },
                 { id: 'industria', title: label('industria'), body: [answers.template || t('En blanco', 'Blank'), answers.industry_description].filter(Boolean).join(' — ') },
                 { id: 'oferta', title: label('oferta'), body: answers.items.filter((item) => item.name.trim()).map((item) => `${item.name}${item.price ? ` (${item.price})` : ''}`).join(', ') || t('Sin ítems', 'No items') },
                 { id: 'clientes', title: label('clientes'), body: [answers.customer_type.toUpperCase(), answers.customer_who, answers.first_customer.name].filter(Boolean).join(' · ') },
