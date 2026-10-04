@@ -175,3 +175,14 @@ select.cy-input option { background: var(--cy-panel-solid); color: var(--cy-text
 @media (prefers-reduced-motion: reduce) {
   .cy-tab, .cy-btn, .cy-card, .cy-input { transition: none; }
 }
+
+/* tick marks + glitch accent on every angular tab (matches the ring menu) */
+.cy-tab::after { content: ''; position: absolute; left: 4px; top: 9px; bottom: 9px; width: 3px; z-index: 1;
+  background: repeating-linear-gradient(180deg, rgba(0, 229, 255, 0.7) 0 1px, transparent 1px 4px); opacity: 0.7; pointer-events: none; }
+.cy-tab.is-active::after, .cy-tab[aria-current="page"]::after { background: repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0 1px, transparent 1px 4px); }
+.cy-glitch { position: absolute; right: 14px; top: 50%; width: 18px; height: 2px; z-index: 1; pointer-events: none; background: var(--cy-mag); box-shadow: 6px 3px 0 var(--cy-cyan);
+  opacity: 0; animation: cy-glitch 7s steps(1) infinite; }
+.cy-tabgroup { display: flex; align-items: center; gap: 6px; font: 700 8.5px/1 var(--cy-mono); letter-spacing: 0.26em; color: var(--cy-muted); text-transform: uppercase; }
+.cy-tabgroup::after { content: ''; flex: 1; height: 1px; background: repeating-linear-gradient(90deg, var(--cy-line) 0 4px, transparent 4px 7px); }
+@keyframes cy-glitch { 0%, 91%, 100% { opacity: 0; transform: translate(0, -50%); } 92% { opacity: 1; transform: translate(-3px, -50%); } 94% { opacity: .6; transform: translate(2px, -40%); } 96% { opacity: 1; transform: translate(0, -60%); } }
+@media (prefers-reduced-motion: reduce) { .cy-glitch { animation: none; } }
