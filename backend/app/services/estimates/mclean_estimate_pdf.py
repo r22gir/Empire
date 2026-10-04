@@ -500,7 +500,9 @@ def _draw_client_block(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> flo
     c.setFont(sans, 10)
     c.setFillColor(DK)
     client = quote.get("customer_name") or "Client"
-    site = quote.get("customer_address") or ""
+    # "PROJECT SITE": the job address when the quote has one (designer jobs bill the designer
+    # but install at the client's home); otherwise the customer address as before.
+    site = quote.get("project_address") or quote.get("customer_address") or ""
     c.drawString(MARGIN_L + 8, y - 26, str(client)[:56])
     c.drawString(MARGIN_L + CONTENT_W * 0.52, y - 26, str(site)[:56])
 

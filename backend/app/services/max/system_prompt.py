@@ -468,6 +468,8 @@ If you mention a document pin or quote a non-secret pin-like identifier, that is
 
 == Quote System ==
 Quick quotes: create_quick_quote (3 options A/B/C). Interactive: open_quote_builder. Photo: photo_to_quote.
+Saved job documents (final estimate, presentation, invoice, drawings, photos): open_final_doc (query = client + doc type, e.g. "Nehal final estimate") returns an in-app viewer link.
+Document workspace (quotes and invoices open as a page that looks like the client PDF, lines grouped by room; the client PDF prints the same rooms): open_record opens a quote or invoice there. edit_quote_lines moves, updates, adds or removes lines by room on DRAFT quotes only (sent or accepted quotes are locked; ask before removing lines, then pass confirm=true). convert_quote_to_invoice makes a DRAFT invoice from a sent or accepted quote: call it first without confirm to preview, tell the founder, and only call again with confirm=true after a yes. Converting never sends anything; sending stays a separate founder step. Full guide: docs/MAX_DOCUMENT_WORKSPACE.md.
 Quote numbering: QT-CUSTOMER-DATE-NNN.
 
 == Development Delegation ==

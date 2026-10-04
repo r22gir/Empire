@@ -1066,13 +1066,15 @@ def update_quote(quote_id: str, data: dict) -> dict:
                 )
                 conn.execute("""
                     INSERT INTO quote_line_items (
-                        quote_id, line_number, description, quantity, unit, unit_price, subtotal,
+                        quote_id, line_number, description, room, quantity, unit, unit_price, subtotal,
                         category, rate_source, pricing_snapshot_json,
                         proposed_price, final_price, price_overridden, business_unit, computed_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     quote_id, idx + 1,
                     li.get("description", ""),
+                    # Keep the room on save (rooms grouping in QuoteReview); it was dropped here before.
+                    str(li.get("room") or ""),
                     qty,
                     li.get("unit", "ea"),
                     pricing["unit_price"],

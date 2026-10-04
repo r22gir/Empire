@@ -567,6 +567,18 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "gmail": "check_email",
             "read_email": "check_email",
             "inbox": "check_email",
+            "find_document": "open_final_doc",
+            "show_document": "open_final_doc",
+            "open_document": "open_final_doc",
+            "find_final_doc": "open_final_doc",
+            "show_final_doc": "open_final_doc",
+            "open_quote": "open_record",
+            "open_invoice": "open_record",
+            "show_quote": "open_record",
+            "show_invoice": "open_record",
+            "edit_quote_line": "edit_quote_lines",
+            "move_quote_line": "edit_quote_lines",
+            "quote_to_invoice": "convert_quote_to_invoice",
             "find_quotes": "search_quotes",
             "list_quotes": "search_quotes",
             "search_quote": "search_quotes",
@@ -1104,6 +1116,45 @@ def _open_quote_builder(params: dict, desk: Optional[str] = None) -> ToolResult:
     })
 
 
+@tool("open_final_doc")
+def _open_final_doc(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Find a saved job document (final estimate, presentation, invoice, drawing, photos)
+    via the Final Docs hub index and return an in-app viewer link. Read-only: nothing is
+    sent, moved or made public; the link needs the normal Empire sign-in."""
+    q = str(params.get("query") or params.get("q") or params.get("request") or "").strip()
+    extra = " ".join(str(params.get(k) or "").strip() for k in ("client", "customer_name", "quote_number", "job_number", "doc_type", "type"))
+    q = " ".join(x for x in (q, extra.strip()) if x).strip()
+    if not q:
+        return ToolResult(tool="open_final_doc", success=False, error="Say which document, e.g. \"Nehal's final estimate\".")
+    base = os.environ.get("EMPIRE_PORTAL_INTERNAL_URL", "http://localhost:3005").rstrip("/")
+    try:
+        r = httpx.get(f"{base}/api/v1/docs-hub/resolve", params={"q": q}, timeout=20.0)
+        data = r.json()
+    except Exception as e:  # portal down or slow
+        return ToolResult(tool="open_final_doc", success=False, error=f"Docs hub unavailable: {e}")
+    if not data.get("found") or not data.get("doc"):
+        return ToolResult(tool="open_final_doc", success=False,
+                          error=f"No saved document matched \"{q}\". Try the client name plus estimate, presentation, invoice, drawing or photos.")
+    doc = data["doc"]
+    return ToolResult(tool="open_final_doc", success=True, result={
+        "action": "open_doc",
+        "doc_id": doc.get("id"),
+        "title": doc.get("title"),
+        "type": doc.get("type"),
+        "version": doc.get("version"),
+        "is_final": doc.get("isFinal"),
+        "client": doc.get("client") or doc.get("designer"),
+        "quote_number": doc.get("quoteNumber"),
+        "modified": doc.get("modified"),
+        "viewer_url": doc.get("viewer_url"),
+        "alternatives": [
+            {"title": a.get("title"), "version": a.get("version"), "type": a.get("type"), "viewer_url": a.get("viewer_url"), "doc_id": a.get("id")}
+            for a in (data.get("alternatives") or [])[:4]
+        ],
+        "message": f"{doc.get('title')} ({doc.get('version')}{', FINAL' if doc.get('isFinal') else ''}) is ready in the viewer: {doc.get('viewer_url')}",
+    })
+
+
 # ── PRICING TABLES ────────────────────────────────────────────────
 
 # Fabric cost per yard by grade
@@ -1376,6 +1427,339 @@ def _qis_tiers_to_design_proposals(qis_tiers: dict, rooms: list) -> list:
             "selected": False,
         })
     return proposals
+
+
+# ── Document workspace (quote / invoice WYSIWYG pages) ─────────────────────
+# Rafael 2026-10-04: quotes and invoices are edited directly on a page that looks like
+# the client PDF (Document tab), grouped by room. These tools let Max open that page,
+# edit quote lines by room, and convert a quote to a DRAFT invoice (preview first).
+# Knowledge doc: docs/MAX_DOCUMENT_WORKSPACE.md
+
+def _ws_record_url(rtype: str, rid: str) -> str:
+    return f"/?screen={'invoice' if rtype == 'invoice' else 'quote'}&id={rid}"
+
+
+def _ws_find_quote(params: dict) -> Optional[dict]:
+    """Resolve a quotes_v2 row from quote_id / quote_number / query (client, project)."""
+    qid = str(params.get("quote_id") or params.get("id") or "").strip()
+    qnum = str(params.get("quote_number") or params.get("number") or "").strip()
+    query = str(params.get("query") or params.get("client") or params.get("customer_name") or "").strip()
+    with get_db() as conn:
+        if qid:
+            r = conn.execute("SELECT * FROM quotes_v2 WHERE id = ?", (qid,)).fetchone()
+            if r:
+                return dict_row(r)
+            qnum = qnum or qid
+        if qnum:
+            r = conn.execute("SELECT * FROM quotes_v2 WHERE UPPER(quote_number) = UPPER(?) ORDER BY updated_at DESC LIMIT 1", (qnum,)).fetchone()
+            if r:
+                return dict_row(r)
+        if query:
+            terms = [t for t in re.split(r"[\s,]+", query.lower()) if len(t) > 1 and t not in {"quote", "estimate", "the", "for", "open", "show", "s"}]
+            rows = dict_rows(conn.execute(
+                "SELECT * FROM quotes_v2 WHERE COALESCE(status,'') NOT IN ('cancelled','archived') ORDER BY updated_at DESC LIMIT 400").fetchall())
+            def score(row):
+                hay = " ".join(str(row.get(k) or "") for k in ("customer_name", "project_name", "quote_number", "customer_email", "project_address", "notes")).lower()
+                return sum(1 for t in terms if t in hay)
+            best = max(rows, key=score, default=None) if terms else None
+            if best and score(best) == len(terms):
+                return best
+    return None
+
+
+def _ws_find_invoice(params: dict) -> Optional[dict]:
+    iid = str(params.get("invoice_id") or params.get("id") or "").strip()
+    inum = str(params.get("invoice_number") or params.get("number") or "").strip()
+    query = str(params.get("query") or params.get("client") or "").strip()
+    with get_db() as conn:
+        if iid:
+            r = conn.execute("SELECT id, invoice_number, client_name, status, total, balance_due, quote_id FROM invoices WHERE id = ?", (iid,)).fetchone()
+            if r:
+                return dict_row(r)
+            inum = inum or iid
+        if inum:
+            r = conn.execute("SELECT id, invoice_number, client_name, status, total, balance_due, quote_id FROM invoices WHERE UPPER(invoice_number) = UPPER(?) LIMIT 1", (inum,)).fetchone()
+            if r:
+                return dict_row(r)
+        if query:
+            terms = [t for t in re.split(r"[\s,]+", query.lower()) if len(t) > 1 and t not in {"invoice", "the", "for", "open", "show"}]
+            rows = dict_rows(conn.execute("SELECT id, invoice_number, client_name, status, total, balance_due, quote_id, notes FROM invoices WHERE COALESCE(status,'') != 'cancelled' ORDER BY created_at DESC LIMIT 400").fetchall())
+            def score(row):
+                hay = " ".join(str(row.get(k) or "") for k in ("client_name", "invoice_number", "notes")).lower()
+                return sum(1 for t in terms if t in hay)
+            best = max(rows, key=score, default=None) if terms else None
+            if best and score(best) == len(terms):
+                best.pop("notes", None)
+                return best
+    return None
+
+
+@tool("open_record")
+def _open_record(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Open a quote or invoice in the document workspace (the page that looks like the
+    client PDF, with Document / Actual PDF / Docs tabs). Read-only."""
+    rtype = str(params.get("type") or "").lower().strip()
+    if not rtype:
+        rtype = "invoice" if (params.get("invoice_id") or params.get("invoice_number") or str(params.get("number") or "").upper().startswith("INV")) else "quote"
+    if rtype not in ("quote", "invoice", "estimate"):
+        return ToolResult(tool="open_record", success=False, error="type must be quote or invoice")
+    if rtype == "invoice":
+        inv = _ws_find_invoice(params)
+        if not inv:
+            return ToolResult(tool="open_record", success=False, error="No invoice matched. Give the invoice number (INV-2026-…) or client name.")
+        return ToolResult(tool="open_record", success=True, result={
+            "action": "open_record", "type": "invoice", "id": inv["id"], "number": inv.get("invoice_number"),
+            "client": inv.get("client_name"), "status": inv.get("status"), "total": inv.get("total"), "balance_due": inv.get("balance_due"),
+            "editable": inv.get("status") == "draft", "url": _ws_record_url("invoice", inv["id"]),
+            "message": f"Opened {inv.get('invoice_number')} ({inv.get('status')}). " + ("Draft: lines can be edited on the page." if inv.get("status") == "draft" else "Read-only (only draft invoices are editable)."),
+        })
+    q = _ws_find_quote(params)
+    if not q:
+        return ToolResult(tool="open_record", success=False, error="No quote matched. Give the quote number (EST-2026-…) or client / project name.")
+    locked = q.get("status") in ("sent", "accepted", "in_production", "completed")
+    return ToolResult(tool="open_record", success=True, result={
+        "action": "open_record", "type": "quote", "id": q["id"], "number": q.get("quote_number"),
+        "client": q.get("customer_name"), "project": q.get("project_name"), "status": q.get("status"), "total": q.get("total"),
+        "editable": not locked, "url": _ws_record_url("quote", q["id"]),
+        "message": f"Opened {q.get('quote_number')} for {q.get('customer_name') or 'client'} on the Document tab." + (" It is locked (status " + str(q.get('status')) + ")." if locked else " Click a line to edit; lines are grouped by room."),
+    })
+
+
+def _ws_quote_lines(conn, quote_id: str) -> list:
+    return dict_rows(conn.execute(
+        "SELECT id, line_number, description, room, quantity, unit, unit_price, subtotal FROM quote_line_items WHERE quote_id = ? ORDER BY line_number, id",
+        (quote_id,)).fetchall())
+
+
+def _ws_renumber_by_room(conn, quote_id: str) -> None:
+    """Keep line_number in room order (rooms by first appearance, job-wide last), which is
+    the section order the client PDF prints. Only line_number changes."""
+    rows = _ws_quote_lines(conn, quote_id)
+    order, groups = [], {}
+    for r in rows:
+        k = (r.get("room") or "").strip()
+        if k not in groups:
+            groups[k] = []
+            if k:
+                order.append(k)
+        groups[k].append(r)
+    seq = [r for k in order for r in groups[k]] + groups.get("", [])
+    for n, r in enumerate(seq, start=1):
+        if r["line_number"] != n:
+            conn.execute("UPDATE quote_line_items SET line_number = ? WHERE id = ? AND quote_id = ?", (n, r["id"], quote_id))
+
+
+def _ws_room_match(rooms: list, wanted: str, current: str = "") -> str:
+    """Map a spoken room ('living room') onto the quote's room strings, which look like
+    'LIVING ROOM — 1. Installation'. Exact match wins; otherwise keep the line's own part
+    (moving '... — 4. Materials' to 'office' lands in 'OFFICE — 4. Materials'); a room with a
+    single part maps to it; else returns '' with an error via ValueError listing the parts."""
+    w = (wanted or "").strip()
+    if not w or w.lower() in ("job-wide", "job wide", "jobwide", "none"):
+        return ""
+    exact = [r for r in rooms if r.lower() == w.lower()]
+    if exact:
+        return exact[0]
+    top = lambda r: r.split(" — ")[0].strip().lower()
+    part = lambda r: r.split(" — ", 1)[1].strip() if " — " in r else ""
+    family = [r for r in rooms if top(r) == top(w) or top(r) == w.lower()]
+    if not family:
+        return w.upper() if w == w.lower() else w  # new room
+    cur_part = part(current or "")
+    if cur_part:
+        same = [r for r in family if part(r).lower() == cur_part.lower()]
+        if same:
+            return same[0]
+    if len(family) == 1:
+        return family[0]
+    plain = [r for r in family if not part(r)]
+    if plain and len(family) == len(plain):
+        return plain[0]
+    raise ValueError(f"'{w}' has several parts: " + ", ".join(part(r) or "(none)" for r in family) + ". Say which part (room: '" + family[0] + "').")
+
+
+@tool("edit_quote_lines")
+def _edit_quote_lines(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Edit quote line items by room on a draft quote (same data the Document tab edits).
+    operations: [{op: move|update|add|remove, line (line_number) | item_id, room, description,
+    quantity, unit, unit_price}]. Sent/accepted quotes are locked. remove needs confirm=true."""
+    from app.services import quote_service as qs
+    q = _ws_find_quote(params)
+    if not q:
+        return ToolResult(tool="edit_quote_lines", success=False, error="Quote not found (give quote_id or EST number)")
+    if q.get("status") in qs.IMMUTABLE_STATUSES:
+        return ToolResult(tool="edit_quote_lines", success=False,
+                          error=f"{q.get('quote_number')} is {q.get('status')}; lines are locked after send. Revise it as a new version in QuoteBuilder.")
+    ops = params.get("operations") or params.get("ops") or []
+    if isinstance(ops, str):
+        try:
+            ops = json.loads(ops)
+        except Exception:
+            return ToolResult(tool="edit_quote_lines", success=False, error="operations must be a JSON list")
+    if isinstance(ops, dict):
+        ops = [ops]
+    if not ops and params.get("op"):
+        ops = [params]
+    if not ops:
+        return ToolResult(tool="edit_quote_lines", success=False, error="No operations given")
+    confirm = str(params.get("confirm") or "").lower() in ("1", "true", "yes")
+    qid = q["id"]
+    before_total = q.get("total")
+    done, errors = [], []
+    with get_db() as conn:
+        lines = _ws_quote_lines(conn, qid)
+    rooms = sorted({(l.get("room") or "").strip() for l in lines if (l.get("room") or "").strip()})
+    if any(str(o.get("op", "")).lower() in ("remove", "delete") for o in ops) and not confirm:
+        targets = []
+        for o in ops:
+            if str(o.get("op", "")).lower() in ("remove", "delete"):
+                ln = next((l for l in lines if (o.get("item_id") and l["id"] == int(o["item_id"])) or (o.get("line") is not None and l["line_number"] == int(o["line"]))), None)
+                targets.append(f"line {ln['line_number']}: {ln['description'][:70]} (${ln['subtotal']})" if ln else f"unknown line {o}")
+        return ToolResult(tool="edit_quote_lines", success=True, result={
+            "needs_confirmation": True, "quote_number": q.get("quote_number"), "would_remove": targets,
+            "message": "Removing lines needs confirmation. Ask the founder, then call again with confirm=true.",
+        })
+
+    def find_line(o):
+        if o.get("item_id") is not None:
+            return next((l for l in lines if l["id"] == int(o["item_id"])), None)
+        if o.get("line") is not None or o.get("line_number") is not None:
+            n = int(o.get("line") if o.get("line") is not None else o.get("line_number"))
+            return next((l for l in lines if l["line_number"] == n), None)
+        if o.get("match"):
+            m = str(o["match"]).lower()
+            hits = [l for l in lines if m in (l.get("description") or "").lower()]
+            return hits[0] if len(hits) == 1 else None
+        return None
+
+    for o in ops:
+        op = str(o.get("op") or "").lower()
+        try:
+            if op == "add":
+                room = _ws_room_match(rooms, o.get("room") or "")
+                data = {"description": o.get("description") or "New line", "room": room,
+                        "quantity": float(o.get("quantity") or 1), "unit": o.get("unit") or "ea",
+                        "unit_price": float(o.get("unit_price") or o.get("rate") or 0)}
+                data["subtotal"] = round(data["quantity"] * data["unit_price"], 2)
+                qs.add_line_item(qid, data)
+                done.append(f"added '{data['description'][:60]}' to {room or 'Job-wide'}")
+                continue
+            ln = find_line(o)
+            if not ln:
+                errors.append(f"{op}: line not found ({ {k: v for k, v in o.items() if k != 'op'} })")
+                continue
+            if op == "move":
+                room = _ws_room_match(rooms, o.get("room") or o.get("to") or "", ln.get("room") or "")
+                with get_db() as conn:
+                    qs._check_immutable(conn, qid, "line-item move")
+                    conn.execute("UPDATE quote_line_items SET room = ?, updated_at = ? WHERE id = ? AND quote_id = ?",
+                                 (room, datetime.now().isoformat(), ln["id"], qid))
+                done.append(f"moved line {ln['line_number']} to {room or 'Job-wide'}")
+            elif op in ("update", "edit", "set"):
+                data = {}
+                for k in ("description", "quantity", "unit", "unit_price"):
+                    if o.get(k) is not None:
+                        data[k] = o[k]
+                if o.get("rate") is not None:
+                    data["unit_price"] = o["rate"]
+                if o.get("room") is not None:
+                    data["room"] = _ws_room_match(rooms, o["room"], ln.get("room") or "")
+                if not data:
+                    errors.append(f"update line {ln['line_number']}: nothing to change")
+                    continue
+                qty = float(data.get("quantity", ln["quantity"] or 1))
+                rate = float(data.get("unit_price", ln["unit_price"] or 0))
+                data["subtotal"] = round(qty * rate, 2)
+                qs.update_line_item(qid, ln["id"], data)
+                note = ""
+                if "quantity" in data or "unit_price" in data:
+                    # quote totals sum final_price; update_line_item only touches subtotal,
+                    # so carry the new price into final_price unless the founder overrode it.
+                    with get_db() as conn:
+                        cur = conn.execute("UPDATE quote_line_items SET final_price = ?, proposed_price = ? WHERE id = ? AND quote_id = ? AND COALESCE(price_overridden, 0) = 0",
+                                           (data["subtotal"], data["subtotal"], ln["id"], qid))
+                        if cur.rowcount == 0:
+                            note = " (price override kept; total unchanged for this line)"
+                        qs._recalculate_totals(conn, qid, "max")
+                done.append(f"updated line {ln['line_number']} ({', '.join(k for k in data if k != 'subtotal')}){note}")
+            elif op in ("remove", "delete"):
+                qs.delete_line_item(qid, ln["id"])
+                done.append(f"removed line {ln['line_number']}: {ln['description'][:60]}")
+            else:
+                errors.append(f"unknown op '{op}'")
+        except Exception as e:
+            errors.append(f"{op}: {type(e).__name__}: {e}")
+    with get_db() as conn:
+        _ws_renumber_by_room(conn, qid)
+        row = dict_row(conn.execute("SELECT total, subtotal, updated_at FROM quotes_v2 WHERE id = ?", (qid,)).fetchone())
+        new_lines = _ws_quote_lines(conn, qid)
+    by_room = {}
+    for l in new_lines:
+        k = (l.get("room") or "").strip() or "Job-wide"
+        by_room[k] = round(by_room.get(k, 0) + float(l.get("subtotal") or 0), 2)
+    return ToolResult(tool="edit_quote_lines", success=bool(done), result={
+        "action": "open_record", "type": "quote", "id": qid, "number": q.get("quote_number"),
+        "url": _ws_record_url("quote", qid), "changes": done, "errors": errors,
+        "total_before": before_total, "total_after": row.get("total"), "room_subtotals": by_room,
+        "message": f"{q.get('quote_number')}: {len(done)} change(s); total {before_total} -> {row.get('total')}. Nothing was sent.",
+    }, error="; ".join(errors) if errors and not done else None)
+
+
+@tool("convert_quote_to_invoice")
+def _convert_quote_to_invoice(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Quote -> DRAFT invoice (items with rooms, client, deposit carried over) via the
+    canonical POST /quotes-v2/{id}/to-invoice. Without confirm=true it only previews.
+    Never sends anything to the client."""
+    q = _ws_find_quote(params)
+    if not q:
+        return ToolResult(tool="convert_quote_to_invoice", success=False, error="Quote not found (give quote_id or EST number)")
+    qid = q["id"]
+    with get_db() as conn:
+        existing = dict_rows(conn.execute("SELECT id, invoice_number, status, total FROM invoices WHERE quote_id = ? AND COALESCE(status,'') != 'cancelled'", (qid,)).fetchall())
+        lines = _ws_quote_lines(conn, qid)
+    if existing:
+        e = existing[0]
+        return ToolResult(tool="convert_quote_to_invoice", success=True, result={
+            "action": "open_record", "type": "invoice", "id": e["id"], "url": _ws_record_url("invoice", e["id"]),
+            "already_exists": True, "message": f"{q.get('quote_number')} already has invoice {e['invoice_number']} ({e['status']}, ${e['total']}). Opened it instead of creating a duplicate.",
+        })
+    status = q.get("status")
+    allowed = status in ("sent", "accepted", "in_production", "completed")
+    rooms = []
+    for l in lines:
+        k = (l.get("room") or "").strip() or "Job-wide"
+        if k not in rooms:
+            rooms.append(k)
+    preview = {"quote_number": q.get("quote_number"), "client": q.get("customer_name"), "status": status,
+               "total": q.get("total"), "deposit_percent": q.get("deposit_percent"), "deposit_required": q.get("deposit_required"), "lines": len(lines), "rooms": rooms}
+    if not allowed:
+        return ToolResult(tool="convert_quote_to_invoice", success=False, result=preview,
+                          error=f"{q.get('quote_number')} is '{status}'. Only sent or accepted quotes convert; it needs founder approval (PIN) and send first.")
+    confirm = str(params.get("confirm") or "").lower() in ("1", "true", "yes")
+    if not confirm:
+        return ToolResult(tool="convert_quote_to_invoice", success=True, result={
+            **preview, "needs_confirmation": True,
+            "message": f"Ready to create a DRAFT invoice from {q.get('quote_number')} ({len(lines)} lines in {len(rooms)} room(s), total ${q.get('total')}). Nothing is sent. Confirm to create it.",
+        })
+    try:
+        r = httpx.post(f"http://localhost:8000/api/v1/quotes-v2/{qid}/to-invoice", timeout=30.0)
+    except Exception as e:
+        return ToolResult(tool="convert_quote_to_invoice", success=False, error=f"{type(e).__name__}: {e}")
+    if r.status_code != 200:
+        detail = r.text[:200]
+        try:
+            detail = r.json().get("detail", detail)
+        except Exception:
+            pass
+        return ToolResult(tool="convert_quote_to_invoice", success=False, error=f"Conversion refused ({r.status_code}): {detail}")
+    data = r.json()
+    inv = data.get("invoice") or data
+    iid = inv.get("id") or data.get("invoice_id")
+    return ToolResult(tool="convert_quote_to_invoice", success=True, result={
+        "action": "open_record", "type": "invoice", "id": iid, "url": _ws_record_url("invoice", iid) if iid else None,
+        "invoice_number": inv.get("invoice_number"), "status": inv.get("status", "draft"), "total": inv.get("total"),
+        "message": f"Draft invoice {inv.get('invoice_number')} created from {q.get('quote_number')}. It has NOT been sent. Review it on the invoice page before sending.",
+    })
 
 
 @tool("create_quick_quote")
@@ -5519,6 +5903,14 @@ State machine: `draft → founder_review → sent → accepted → in_production
 - **select_proposal** — Select a design proposal (A/B/C) on a quote to finalize the total and convert to a formal estimate.
   `{"tool": "select_proposal", "quote_id": "abc123", "option": "B"}`
   After selection, the quote gets real totals and can be sent via Telegram or email.
+- **open_final_doc** — Find a saved job document (final estimate, presentation, invoice, drawings, photos) and open it in the in-app viewer. Use for "show me Nehal's final estimate", "open the EST-2026-297 presentation", "Dahlia invoice". Returns viewer_url (needs normal Empire sign-in; never public). Read-only.
+  `{"tool": "open_final_doc", "query": "Nehal final estimate"}`
+- **open_record** — Open a quote or invoice in the document workspace (a page that looks like the client PDF; Document / Actual PDF / Docs tabs). Read-only. Use for "open Nehal's quote", "show INV-2026-123".
+  `{"tool": "open_record", "type": "quote", "quote_number": "EST-2026-297"}` or `{"tool": "open_record", "type": "invoice", "invoice_number": "INV-2026-123"}` or `{"tool": "open_record", "type": "quote", "query": "Dahlia Nehal"}`
+- **edit_quote_lines** — Edit a DRAFT quote's lines by room (move / update / add / remove). Sent or accepted quotes are locked. remove needs confirm=true after the founder agrees. Returns new total and room subtotals.
+  `{"tool": "edit_quote_lines", "quote_number": "EST-2026-297", "operations": [{"op": "move", "line": 15, "room": "living room"}, {"op": "update", "line": 3, "quantity": 2}, {"op": "add", "room": "OFFICE", "description": "Install", "quantity": 1, "unit_price": 150}]}`
+- **convert_quote_to_invoice** — Make a DRAFT invoice from a sent/accepted quote (lines with rooms, client, deposit carried over). First call WITHOUT confirm to get the preview, tell the founder, and only call with confirm=true after they say yes. Never sends anything.
+  `{"tool": "convert_quote_to_invoice", "quote_number": "EST-2026-297"}` then `{"tool": "convert_quote_to_invoice", "quote_number": "EST-2026-297", "confirm": true}`
 - **open_quote_builder** — Open the QuoteBuilder right here in the dashboard (ALWAYS use this instead of linking to WorkroomForge). Pre-fills customer info AND rooms/windows from the conversation.
   `{"tool": "open_quote_builder", "customer_name": "...", "customer_email": "...", "customer_phone": "...", "customer_address": "...", "project_name": "...", "rooms": [{"name": "Living Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "roman-shade", "fabricColor": "ivory", "liningType": "standard", "hardwareType": "cassette", "motorization": "none", "mountType": "wall"}], "upholstery": []}]}`
   treatmentType options: ripplefold, pinch-pleat, rod-pocket, grommet, roman-shade, roller-shade — USE THE ONE THE CUSTOMER ASKED FOR
