@@ -73,6 +73,8 @@ TOOL_LEVELS = {
     "prospect_draft_outreach": 1, "prospect_daily_brief": 1, "prospect_segments": 1,
     "prospect_social_targets": 1, "pipeline_followups": 1, "set_followup": 1, "reactivation_list": 1,
     "module_catalog": 1, "module_call": 1, "socialforge_draft_post": 1,
+    "approval_queue": 1, "draft_followup": 1, "reconcile_deposits": 1, "roi_report": 1,
+    "social_proof_drafts": 1, "place_details_enrich": 1, "request_improvement": 1, "improvements_list": 1,
     "send_telegram": 1, "send_email": 1, "send_quote_telegram": 1,
     "send_quote_email": 1, "run_desk_task": 1, "submit_desk_task": 1,
     # Sprint 1c — approval gate workflow:

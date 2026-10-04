@@ -233,10 +233,146 @@ def _socialforge_draft_post(params: dict, desk: Optional[str] = None) -> ToolRes
             r = c.post(f"{_API}/api/v1/socialforge/posts", json=body)
         if r.status_code >= 400:
             return ToolResult(tool="socialforge_draft_post", success=False, error=f"HTTP {r.status_code} {r.text[:200]}")
+        post = r.json()
+        queue_id = None
+        try:
+            from app.services.leadforge import growth
+            queue_id = growth.enqueue(channel="social", kind="social_post", source="socialforge", source_ref=post.get("id"),
+                                      body=f"{content}\n\n{body['hashtags']}".strip(), media_urls=[body["media_url"]] if body.get("media_url") else [],
+                                      title=f"{body['platform'].title()} post draft", created_by="max")["id"]
+        except Exception:
+            pass
         return ToolResult(tool="socialforge_draft_post", success=True,
-                          result={"post": r.json(), "send_policy": "Draft only. Not posted. Rafael publishes from SocialForge."})
+                          result={"post": post, "approval_queue_id": queue_id,
+                                  "send_policy": "Draft only. Not posted. It is in the Approvals queue; Rafael copies and posts."})
     except Exception as e:
         return _err("socialforge_draft_post", e)
+
+
+# ── Growth: approval queue, deposits, ROI, social proof, Place Details, improvements ──
+
+@tool("approval_queue")
+def _approval_queue(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Read the one approval queue (every draft waiting for Rafael's tap). Read-only."""
+    try:
+        from app.services.leadforge import growth
+        q = growth.list_queue(params.get("status") or "pending", int(params.get("limit") or 50))
+        items = [{k: i.get(k) for k in ("id", "kind", "channel", "title", "to_name", "to_address", "subject", "status", "created_at")}
+                 for i in q["items"]]
+        return ToolResult(tool="approval_queue", success=True,
+                          result={"items": items, "counts": q["counts"], "policy": q["policy"],
+                                  "how_rafael_approves": "Studio → LeadForge → Approvals. Max cannot approve or send."})
+    except Exception as e:
+        return _err("approval_queue", e)
+
+
+@tool("draft_followup")
+def _draft_followup(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Put a follow-up / reactivation message in the approval queue (email, sms or instagram). Never sends."""
+    try:
+        from app.services.leadforge import growth
+        body = (params.get("body") or params.get("message") or "").strip()
+        if not body:
+            return ToolResult(tool="draft_followup", success=False, error="body required (write the message)")
+        lead_id = params.get("lead_id")
+        to_name, to_addr = params.get("to_name") or "", params.get("to_address") or params.get("to") or ""
+        channel = (params.get("channel") or "email").lower()
+        if lead_id and not to_addr:
+            with growth._db() as conn:
+                r = conn.execute("SELECT * FROM lf_leads WHERE id=?", (int(lead_id),)).fetchone()
+            if r:
+                to_name = to_name or " ".join(x for x in (r["first_name"], r["last_name"]) if x) or (r["company"] or "")
+                to_addr = (r["email"] if channel == "email" else r["phone"] if channel == "sms" else "") or ""
+        item = growth.enqueue(channel=channel, kind="followup", body=body, source="max_followup",
+                              title=params.get("title") or f"Follow-up to {to_name or to_addr or 'contact'}",
+                              to_name=to_name, to_address=to_addr, subject=params.get("subject") or "",
+                              lead_id=int(lead_id) if lead_id else None, customer_id=params.get("customer_id"))
+        return ToolResult(tool="draft_followup", success=True,
+                          result={"approval_queue_id": item["id"], "channel": item["channel"], "to": to_addr or None,
+                                  "missing_address": not to_addr, "send_policy": _DRAFT_POLICY + " It is in the Approvals queue."})
+    except Exception as e:
+        return _err("draft_followup", e)
+
+
+@tool("reconcile_deposits")
+def _reconcile_deposits(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Mark leads won for every paid deposit/invoice (idempotent). Internal data only."""
+    try:
+        from app.services.leadforge import growth
+        return ToolResult(tool="reconcile_deposits", success=True, result=growth.reconcile_paid_deposits())
+    except Exception as e:
+        return _err("reconcile_deposits", e)
+
+
+@tool("roi_report")
+def _roi_report(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Lead source -> quotes -> paid invoices, with manual spend per channel. Read-only."""
+    try:
+        from app.services.leadforge import growth
+        return ToolResult(tool="roi_report", success=True, result=growth.roi_report(int(params.get("months") or 12)))
+    except Exception as e:
+        return _err("roi_report", e)
+
+
+@tool("social_proof_drafts")
+def _social_proof_drafts(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Finished job -> before/after SocialForge post drafts (+ approval queue). {job_id} or {scan: true}. Never posts."""
+    try:
+        from app.services.leadforge import growth
+        if params.get("job_id"):
+            res = growth.social_proof_for_job(str(params["job_id"]), bool(params.get("force")))
+        else:
+            res = growth.scan_completed_jobs(int(params.get("days") or 30))
+        return ToolResult(tool="social_proof_drafts", success=True, result=res)
+    except Exception as e:
+        return _err("social_proof_drafts", e)
+
+
+@tool("place_details_enrich")
+def _place_details_enrich(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Google Place Details (website + phone) for Google prospects. Max stays inside the free 1,000 calls/month."""
+    try:
+        from app.services.leadforge import place_details
+        ids = _ids(params)
+        res = place_details.enrich(int(params.get("limit") or 25), ids or None, allow_paid=False)
+        res.pop("results", None) if len(res.get("results") or []) > 30 else None
+        return ToolResult(tool="place_details_enrich", success=res.get("status") not in ("needs_key",), result=res,
+                          error="GOOGLE_PLACES_API_KEY not configured" if res.get("status") == "needs_key" else None)
+    except Exception as e:
+        return _err("place_details_enrich", e)
+
+
+@tool("request_improvement")
+def _request_improvement(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Write a structured change request for Rafael (Improvements page). Max never edits code or deploys."""
+    try:
+        from app.services.max import improvements as imp
+        req = imp.create_request(
+            title=params.get("title") or "", problem=params.get("problem") or "",
+            proposed_change=params.get("proposed_change") or params.get("change") or "",
+            affected_modules=params.get("affected_modules") or [], risk=params.get("risk") or "medium",
+            acceptance=params.get("acceptance") or "", requested_via=params.get("requested_via") or "chat",
+            requested_text=params.get("requested_text") or "")
+        return ToolResult(tool="request_improvement", success=True, result={
+            "id": req["id"], "title": req["title"], "status": req["status"], "risk": req["risk"],
+            "next_step": "Rafael reviews it in Studio → Improvements and taps Approve to start the build. "
+                         "Nothing is built, merged or deployed before that, and merge needs a second approval."})
+    except Exception as e:
+        return _err("request_improvement", e)
+
+
+@tool("improvements_list")
+def _improvements_list(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Read the Improvements queue (status, PR / preview links). Read-only."""
+    try:
+        from app.services.max import improvements as imp
+        data = imp.list_requests(params.get("status"))
+        items = [{k: i.get(k) for k in ("id", "title", "status", "risk", "pr_url", "preview_url", "spec_path", "next_step")}
+                 for i in data["items"][:30]]
+        return ToolResult(tool="improvements_list", success=True,
+                          result={"items": items, "cursor_configured": data["cursor_configured"], "policy": data["policy"]})
+    except Exception as e:
+        return _err("improvements_list", e)
 
 
 # ── Module bridge: every backend module, read-only ───────────────────────
@@ -336,6 +472,14 @@ ACQUISITION_TOOLS_DOC = """
 - **set_followup** `{"tool": "set_followup", "lead_id": 8, "in_days": 3, "action": "Call about samples"}`
 - **reactivation_list** past paying clients + designers gone quiet, suggested text `{"tool": "reactivation_list", "months_quiet": 6}`
 - **socialforge_draft_post** save a social-proof post as a DRAFT (never published) `{"tool": "socialforge_draft_post", "platform": "instagram", "content": "...", "media_url": "..."}`
+- **approval_queue** read the one queue of drafts waiting for Rafael's tap (Max cannot approve)
+- **draft_followup** put a follow-up / reactivation message in the queue `{"tool": "draft_followup", "lead_id": 12, "channel": "email", "subject": "...", "body": "..."}`
+- **reconcile_deposits** mark leads won for paid deposits (idempotent)
+- **roi_report** lead source → quotes → paid invoices, with manual spend per channel
+- **social_proof_drafts** finished job → before/after SocialForge drafts `{"job_id": "..."}` or `{"scan": true}`
+- **place_details_enrich** Google website + phone for Google prospects (free tier only for Max)
+- **request_improvement** write a change request (title, problem, proposed_change, affected_modules, risk, acceptance) for the Improvements page. Use when Rafael asks for a system improvement. Max never edits his own code, never builds, merges or deploys.
+- **improvements_list** read the Improvements queue and PR / preview links
 - **module_catalog** / **module_call** read-only access to every backend module (live OpenAPI) `{"tool": "module_call", "path": "/socialforge/dashboard"}`
 Never send. Show Rafael the draft and wait for an explicit yes; sending stays the existing founder-gated step.
 """

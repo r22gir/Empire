@@ -199,7 +199,19 @@ def draft_outreach(prospect_id: int, channel: str = "email", save: bool = True) 
                    VALUES (?,?,?,?,?,?, 'draft')""",
                 (prospect_id, msg["channel"], msg["to_name"], msg["to_address"], msg["subject"], msg["body"]))
             draft_id = cur.lastrowid
-    return {"status": "draft", "draft_id": draft_id, "prospect_id": prospect_id, **msg,
+    queue_id = None
+    if save and draft_id:
+        try:  # every draft lands in the one approval queue (Rafael taps to send / copy)
+            from app.services.leadforge import growth
+            q = growth.enqueue(channel=msg["channel"], body=msg["body"], source="prospect_draft",
+                               source_ref=str(draft_id), title=f"{msg['channel'].replace('_', ' ').title()} to {p.get('display_name') or p.get('name')}",
+                               to_name=msg.get("to_name") or "", to_address=msg.get("to_address") or "",
+                               subject=msg.get("subject") or "", prospect_id=prospect_id,
+                               open_url=(p.get("instagram") or "") if msg["channel"] != "email" else "")
+            queue_id = q["id"]
+        except Exception:
+            queue_id = None
+    return {"status": "draft", "draft_id": draft_id, "approval_queue_id": queue_id, "prospect_id": prospect_id, **msg,
             "missing_address": not msg["to_address"],
             "send_policy": "Draft only. Nothing is sent. Ask Rafael before any send; sending is a separate, manual step."}
 

@@ -227,7 +227,8 @@ def test_access_jwt_valid_accepted_wrong_aud_rejected(monkeypatch):
 def test_session_exposes_only_read_only_tools_and_voice_flag(monkeypatch):
     ev = vl.session_update_event()
     names = [t["name"] for t in ev["session"]["tools"]]
-    assert names == list(vl.VOICE_READ_ONLY_TOOLS) + ["queue_for_founder_approval"]
+    # request_improvement only writes a change request; builds need Rafael's tap (Oct 4, 2026)
+    assert names == list(vl.VOICE_READ_ONLY_TOOLS) + ["queue_for_founder_approval", "request_improvement"]
     for must in ("get_tasks", "get_desk_status", "get_services_health", "get_system_stats", "check_email",
                  "list_job_images", "search_conversations", "get_weather", "list_quotes_awaiting_review",
                  "show_quote_for_review"):

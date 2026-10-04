@@ -1213,6 +1213,15 @@ def get_job(job_id: str):
         return {"job": job}
 
 
+def _growth_hook(name: str, *args):
+    """Growth hooks (deposit paid -> lead won, finished job -> social-proof drafts). Never raises."""
+    try:
+        from app.services.leadforge import growth
+        return getattr(growth, name)(*args)
+    except Exception as exc:  # the job/payment action already succeeded
+        return {"status": "error", "error": str(exc)}
+
+
 @router.put("/jobs/{job_id}")
 def update_job(job_id: str, update: JobUpdateSchema):
     """Update job fields."""
@@ -1254,7 +1263,10 @@ def update_job(job_id: str, update: JobUpdateSchema):
 
         _add_event(conn, job_id, "updated", f"Job updated: {', '.join(data.keys())}", "system")
 
-        return {"job": _enrich_job(dict_row(row))}
+        result = {"job": _enrich_job(dict_row(row))}
+    if data.get("status") == "completed":
+        result["social_proof"] = _growth_hook("on_job_completed", job_id)
+    return result
 
 
 @router.patch("/jobs/{job_id}/status")
@@ -1311,7 +1323,10 @@ def change_job_status(job_id: str, body: StatusChange):
                WHERE j.id = ?""",
             (job_id,),
         ).fetchone()
-        return {"job": _enrich_job(dict_row(updated))}
+        result = {"job": _enrich_job(dict_row(updated))}
+    if new_stage == "completed":
+        result["social_proof"] = _growth_hook("on_job_completed", job_id)
+    return result
 
 
 @router.get("/jobs/{job_id}/timeline")
@@ -1923,11 +1938,13 @@ def record_payment(invoice_id: str, payment: PaymentRecord):
             ),
         )
 
-        return {
+        result = {
             "invoice": _enrich_invoice(dict_row(updated)),
             "payment": pay,
             "message": f"Payment of ${payment.amount:,.2f} recorded. Balance: ${max(new_balance, 0):,.2f}",
         }
+    result["lead_won"] = _growth_hook("on_invoice_paid", invoice_id, "manual_payment")
+    return result
 
 
 @router.get("/invoices/{invoice_id}/payments")

@@ -74,7 +74,8 @@ VOICE_READ_ONLY_TOOLS = (
     "get_revenue_chart",
 )
 QUEUE_TOOL = "queue_for_founder_approval"
-VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL,))
+IMPROVE_TOOL = "request_improvement"  # writes a change request only; builds need Rafael's tap in the studio
+VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL))
 READ_ONLY_TOOLS = VOICE_READ_ONLY_TOOLS  # backwards-compatible name
 # Explicitly named so logs/tests are clear; the allowlist above is what enforces.
 VOICE_DENIED_EXAMPLES = frozenset({
@@ -264,6 +265,16 @@ _FALLBACK_TOOL_SCHEMAS = {
             "details": {"type": "string", "description": "Everything needed to do it later: who, what, which quote/customer, wording"},
         }, ["action"]),
     },
+    IMPROVE_TOOL: {
+        "description": "When Rafael asks for a SYSTEM improvement (a new feature, a fix, a change to how Empire or Max works), write ONE structured change request to the Improvements page. Builds nothing; Rafael approves it in the studio, and merge/deploy needs a second approval. Tell him it is on the Improvements page waiting for his tap.",
+        "parameters": _obj({
+            "title": {"type": "string", "description": "Short name of the change"},
+            "problem": {"type": "string", "description": "What is wrong or missing today, in Rafael's words"},
+            "proposed_change": {"type": "string", "description": "What to build or change, concretely"},
+            "affected_modules": {"type": "array", "items": {"type": "string"}, "description": "e.g. LeadForge, Quotes, Max"},
+            "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+        }, ["title", "problem", "proposed_change"]),
+    },
 }
 
 _QUOTE_KEEP = ("id", "quote_number", "status", "customer_name", "project_name", "project_description",
@@ -349,7 +360,7 @@ def realtime_tool_definitions() -> list[dict[str, Any]]:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("voice_live: canonical tool schemas unavailable: %s", exc)
     out = []
-    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL,):
+    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL):
         fn = canonical.get(name) or _FALLBACK_TOOL_SCHEMAS[name]
         out.append({
             "type": "function",
@@ -427,6 +438,19 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
     if name == QUEUE_TOOL:
         return queue_for_founder_approval(call.get("action", ""), call.get("details", ""),
                                           call_id=call_id, conversation_id=conversation_id)
+    if name == IMPROVE_TOOL:
+        try:
+            from app.services.max import improvements
+            req = improvements.create_request(
+                title=call.get("title", ""), problem=call.get("problem", ""),
+                proposed_change=call.get("proposed_change", ""), affected_modules=call.get("affected_modules") or [],
+                risk=call.get("risk") or "medium", requested_via="voice",
+                requested_text=f"voice call {call_id or '-'} / conversation {conversation_id or '-'}")
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        return {"success": True, "tool": IMPROVE_TOOL, "result": {
+            "id": req["id"], "title": req["title"], "status": req["status"], "executed": False,
+            "note": "On the Improvements page waiting for Rafael's Approve tap. Nothing was built or deployed."}}
     if name == "get_revenue_chart":
         from app.services.max.presentation_stage import revenue_tool_result
         return revenue_tool_result()
