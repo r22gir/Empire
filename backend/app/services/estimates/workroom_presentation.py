@@ -123,7 +123,8 @@ def render_opening_sheet(packet: dict, opening: dict, sheet_no: int, total: int)
         f"{format_inches(cloth['fabric_in'])} ÷ {opening['panels']} = "
         f"{format_inches(cloth['fabric_in'] / opening['panels'])} per panel ÷ "
         f"{format_inches(rule('fabric_width_in'))} = {_w(cloth['per_panel'])} widths"
-        f"  ·  {opening['yards']:.1f} yd lining + {opening['yards']:.1f} yd bump"
+        + (f"  ·  {opening['yards']:.1f} yd lining + {opening['yards']:.1f} yd bump" if opening.get("bump", True)
+           else f"  ·  {opening['yards']:.1f} yd lining (no bump)")
     )
     c.drawString(28, 182, math[:110])
 

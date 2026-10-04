@@ -171,3 +171,29 @@ def test_chat_tool_drafts_and_does_not_send():
 def test_phrase_is_recognized():
     assert wants_packet("make the estimate and presentation for job 297")
     assert not wants_packet("draw a ripplefold shop drawing")
+
+
+def test_reline_without_bump_option():
+    """Rafael 10/4/2026: 'Re-line with lining (no bump)' at $125/width, lining only, same width count."""
+    from app.services.estimates.workroom_packet import price_opening
+    reset_rules()
+    std = price_opening({"room": "Living Room", "width": 160, "height": 119.75, "panels": 2})
+    nob = price_opening({"room": "Living Room", "width": 160, "height": 119.75, "panels": 2, "bump": False})
+    alt = price_opening({"room": "Living Room", "width": 160, "height": 119.75, "panels": 2, "reline_type": "no bump"})
+
+    def rows(op):
+        return [r for g in op["groups"] for r in g["lines"]]
+
+    std_reline = next(r for r in rows(std) if r["description"].startswith("Re-line"))
+    nob_reline = next(r for r in rows(nob) if r["description"].startswith("Re-line"))
+    assert std_reline["description"].startswith("Re-line with lining and bump")
+    assert std_reline["rate"] == 150.0 and std_reline["quantity"] == 7
+    assert nob_reline["description"].startswith("Re-line with lining (no bump)")
+    assert nob_reline["rate"] == 125.0 and nob_reline["quantity"] == std_reline["quantity"] == 7
+    assert nob_reline["amount"] == 875.0
+    assert any(r["description"].startswith("Bump interlining") for r in rows(std))
+    assert not any("Bump" in r["description"] for r in rows(nob))
+    assert any(r["description"].startswith("Lining ·") for r in rows(nob))
+    assert nob["bump"] is False and std["bump"] is True
+    assert [r["description"] for r in rows(alt)] == [r["description"] for r in rows(nob)]
+    assert round(std["subtotal"] - nob["subtotal"], 2) == round(25 * 7 + std["yards"] * 12.95, 2)

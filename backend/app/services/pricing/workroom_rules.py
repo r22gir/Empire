@@ -5,7 +5,11 @@ unless the founder sets a flat rate for the section. Re-line widths are
 
     (window width × 2 + 11.5") / panels / 48
 
-rounded up to the next half width, per panel. Sheers use that same
+rounded up to the next half width, per panel. Re-line labor is
+``reline_per_width`` ($150, lining and bump) or ``reline_no_bump_per_width``
+($125, "Re-line with lining (no bump)": lining only, no bump material); both
+count widths the same way (per 48" finished panel width at 100% fullness).
+Sheers use that same
 width count on the coverage, then half of it because the fabric is
 double width, rounded up to the half width again.
 
@@ -24,6 +28,7 @@ DEFAULT_RULES: dict[str, float] = {
     "install_included_ft": 8.0,
     "install_overage_per_ft": 20.0,
     "reline_per_width": 150.0,
+    "reline_no_bump_per_width": 125.0,  # Rafael 10/4/2026: lining only, no bump
     "lining_removal_per_panel": 95.0,
     "lining_per_yard": 10.50,
     "bump_per_yard": 12.95,
