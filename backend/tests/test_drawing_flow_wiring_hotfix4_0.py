@@ -304,11 +304,17 @@ class TestCanonicalDrawingsPath:
         # so unset it for this assertion.
         prev = os.environ.pop(canonical_path._ENV_OVERRIDE)
         try:
-            result = canonical_path.canonical_drawings_dir()
             expected = resolve_canonical_root() / "backend" / "data" / "drawings"
-            assert result == expected, (
-                f"drawings must land in the live checkout; got {result}"
+            # Resolution itself (pure, no writes) targets the live checkout.
+            assert canonical_path._default_drawings_dir() == expected, (
+                f"drawings must land in the live checkout; got "
+                f"{canonical_path._default_drawings_dir()}"
             )
+            # The live-data firewall (tests/conftest.py) points the captured
+            # module default at a temp mirror, so the call (which mkdirs)
+            # never touches the live tree; it must still use that default.
+            result = canonical_path.canonical_drawings_dir()
+            assert result == Path(canonical_path._DEFAULT_CANON_DIR), result
         finally:
             if prev is not None:
                 os.environ[canonical_path._ENV_OVERRIDE] = prev
