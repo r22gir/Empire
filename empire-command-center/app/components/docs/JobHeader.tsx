@@ -1,7 +1,8 @@
 'use client';
 /** Sticky job header for quote / invoice / job / doc pages: who, where, money, next step, Call / Map / WhatsApp. */
 import { useEffect, useState } from 'react';
-import { Phone, MapPin, MessageCircle, ArrowRight } from 'lucide-react';
+import { Phone, MapPin, MessageCircle, ArrowRight, Briefcase } from 'lucide-react';
+import { jobHubHref } from '../jobhub/href';
 import type { JobContext } from '../../lib/docs-hub/types';
 import { DOCS_API } from '../../lib/docs-hub/types';
 import './docs.css';
@@ -25,7 +26,7 @@ export function useJobContext(opts: { quote?: string | null; job?: string | null
   return ctx;
 }
 
-export default function JobHeader({ quote, job, invoice, context, refreshKey, className = '' }: { quote?: string | null; job?: string | null; invoice?: string | null; context?: JobContext | null; refreshKey?: unknown; className?: string }) {
+export default function JobHeader({ quote, job, invoice, context, refreshKey, className = '', hubLink = true }: { quote?: string | null; job?: string | null; invoice?: string | null; context?: JobContext | null; refreshKey?: unknown; className?: string; hubLink?: boolean }) {
   const fetched = useJobContext(context ? {} : { quote, job, invoice }, refreshKey);
   const c = context || fetched;
   if (!c) return null;
@@ -58,6 +59,7 @@ export default function JobHeader({ quote, job, invoice, context, refreshKey, cl
         <a href={tel ? `tel:${tel}` : undefined} aria-disabled={!tel} aria-label="Call client"><Phone size={14} /> Call</a>
         <a href={c.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}` : undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!c.address} aria-label="Open address in Maps"><MapPin size={14} /> Map</a>
         <a href={tel ? `https://wa.me/${waDigits(c.phone)}` : undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!tel} aria-label="WhatsApp client"><MessageCircle size={14} /> WhatsApp</a>
+        {hubLink && (c.jobId || c.quoteId) && <a href={jobHubHref({ job: c.jobId, quote: c.quoteId })} aria-label="Open the job hub"><Briefcase size={14} /> Job hub</a>}
       </div>
       {c.nextStep && <div className="dh-next"><ArrowRight size={14} style={{ color: '#00e5ff' }} /> <span>Next step: <b>{c.nextStep}</b></span></div>}
     </header>

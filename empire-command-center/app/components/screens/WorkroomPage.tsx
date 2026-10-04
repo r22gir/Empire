@@ -4,7 +4,7 @@ import { API } from '../../lib/api';
 import {
   Scissors, DollarSign, ClipboardList, TrendingUp, Calendar, Users, Inbox,
   Package, FileText, Receipt, BarChart3, Truck, Headphones, Loader2, Zap, Camera, Lightbulb, Eye, ArrowLeft, Plus,
-  CheckCircle2, Circle, Clock, Flag, Filter, Search, Sparkles, Send, X, Check, CreditCard, Ruler, Trash2
+  CheckCircle2, Circle, Clock, Flag, Filter, Search, Sparkles, Send, X, Check, CreditCard, Ruler, Trash2, Briefcase
 } from 'lucide-react';
 import QuoteActions from '../business/quotes/QuoteActions';
 import QuickQuoteBuilder from '../business/quotes/QuickQuoteBuilder';
@@ -26,9 +26,11 @@ const InventorySection = lazy(() => import('../business/inventory/InventorySecti
 const QuoteReviewScreen = lazy(() => import('./QuoteReviewScreen'));
 const QuoteBuilderScreen = lazy(() => import('./QuoteBuilderScreen'));
 const TemplateModule = lazy(() => import('../business/templates/TemplateModule'));
+const JobHub = lazy(() => import('../jobhub/JobHub'));
 
 const NAV_SECTIONS = [
   { id: 'overview', label: 'Overview', icon: Scissors },
+  { id: 'jobhub', label: 'Job hub', icon: Briefcase },
   { id: 'creations', label: 'Creations', icon: Lightbulb },
   { id: 'quotes', label: 'Quotes', icon: ClipboardList },
   { id: 'finance', label: 'Finance', icon: DollarSign },
@@ -113,6 +115,8 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
         return <QuotesSection key={navKey} quotes={quotes} initialQuoteId={initialQuoteId} onClearInitial={() => setInitialQuoteId(null)} startQuickQuote={openQuickQuote} />;
       case 'inventory':
         return <Suspense fallback={<Loading />}><InventorySection /></Suspense>;
+      case 'jobhub':
+        return <Suspense fallback={<Loading />}><JobHub /></Suspense>;
       case 'jobs':
         return <Suspense fallback={<Loading />}><JobBoard /></Suspense>;
       case 'templates':
