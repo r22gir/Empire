@@ -9,6 +9,7 @@ import {
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
   ChevronDown, ChevronRight,
+  FileStack,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -49,6 +50,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04', kind: 'product' },
       // Daily Summary is the inline Dashboard panel (rightPanel) — toggled, not navigated.
       { id: 'daily-summary', name: 'Daily Summary', icon: <LayoutDashboard size={16} />, status: 'active', color: '#7c3aed', kind: 'daily-summary' },
+      // Final Docs hub: latest final estimate / presentation / invoice / drawings / photos per job.
+      { id: 'final-docs', name: 'Final Docs', icon: <FileStack size={16} />, status: 'active', color: '#00e5ff', screen: 'final-docs' as ScreenMode, kind: 'screen' },
     ],
   },
   {
@@ -255,7 +258,6 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
                 <span className="cy-tab-ico"><Crown size={14} /></span>
                 <span className="cy-tab-label">Command Ring</span>
                 <span className="cy-tab-badge">HOME</span>
-                <span className="cy-glitch" style={{ animationDelay: '2.4s' }} aria-hidden />
               </a>
             </>
           )}
@@ -308,7 +310,6 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
                           )}
                           {item.status === 'dev' && !isActive && <span className="cy-tab-badge">DEV</span>}
                           {item.status === 'planned' && !isActive && <span className="cy-tab-badge is-muted">SOON</span>}
-                          {ii % 4 === 1 && <span className="cy-glitch" style={{ animationDelay: `${(ii * 1.7) % 7}s` }} aria-hidden />}
                         </button>
                       );
                     })}

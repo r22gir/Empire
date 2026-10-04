@@ -1,4 +1,6 @@
 'use client';
+import MaxDocCard from '../docs/MaxDocCard';
+import MaxRecordCard from '../docs/MaxRecordCard';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X, Copy, Check } from 'lucide-react';
 import ChatHistoryPanel from '../ChatHistoryPanel';
@@ -966,6 +968,12 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                     onSend={onSend}
                   />
                 );
+              }
+              if (tr.tool === 'open_final_doc' && tr.success && tr.result?.viewer_url) {
+                return <MaxDocCard key={j} result={tr.result} />;
+              }
+              if (['open_record', 'edit_quote_lines', 'convert_quote_to_invoice'].includes(tr.tool) && tr.result && (tr.result.id || tr.result.needs_confirmation)) {
+                return <MaxRecordCard key={j} tool={tr.tool} result={tr.result} />;
               }
               if (tr.tool === 'sketch_to_drawing' && tr.success && tr.result?.svg) {
                 return <InlineDrawing key={j} result={tr.result} />;

@@ -1,6 +1,8 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { API } from '../../lib/api';
+import JobHeader from '../docs/JobHeader';
+import DocsTab from '../docs/DocsTab';
 import { useJob, Job } from '../../hooks/useJob';
 import {
   Briefcase, Plus, Search, Filter, ChevronRight, Clock, User,
@@ -153,6 +155,7 @@ export default function JobsScreen({ business }: JobsScreenProps) {
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>{selected.job_number || `JOB-${selected.id}`}</h3>
             <button onClick={() => setSelected(null)} style={{ background: '#f5f3ef', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>Close</button>
           </div>
+          <JobHeader job={String(selected.id)} quote={selected.quote_id || null} className="is-panel" />
 
           {/* Client info */}
           <div style={{ background: '#fdf8eb', borderRadius: 8, padding: 12, marginBottom: 12, fontSize: 12 }}>
@@ -190,6 +193,12 @@ export default function JobsScreen({ business }: JobsScreenProps) {
                 <div style={{ fontWeight: 700, color: '#16a34a' }}>${(selected.paid_amount || 0).toLocaleString()}</div>
               </div>
             </div>
+          </div>
+
+          {/* Documents (Final Docs hub) */}
+          <div style={{ marginBottom: 12 }}>
+            <span style={{ fontSize: 10, fontWeight: 600, color: '#888' }}>DOCUMENTS</span>
+            <div style={{ marginTop: 6 }}><DocsTab job={String(selected.id)} quote={selected.quote_id || null} /></div>
           </div>
 
           {/* Actions */}

@@ -56,6 +56,10 @@ import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
 import MaxContinuityScreen from './components/screens/MaxContinuityScreen';
 import JobsScreen from './components/screens/JobsScreen';
 import InvoiceScreen from './components/screens/InvoiceScreen';
+import FinalDocsScreen from './components/docs/FinalDocsScreen';
+import DocViewerHost from './components/docs/DocViewerHost';
+import InvoiceDocScreen from './components/docs/InvoiceDocScreen';
+import { OPEN_RECORD_EVENT, type RecordRef } from './components/docs/recordBus';
 import ConstructionForgePage from './components/screens/ConstructionForgePage';
 import StoreFrontForgePage from './components/screens/StoreFrontForgePage';
 import TranscriptForgePage from './components/screens/TranscriptForgePage';
@@ -70,6 +74,7 @@ import './theme/cyber-shell.css';
 import './theme/cyber-layout.css';
 import './theme/cyber-pages.css';
 import './theme/cyber-hud.css';
+import './theme/cyber-calm.css';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));
@@ -129,7 +134,7 @@ const NAV_PRODUCT_IDS = new Set<string>([
 ]);
 const NAV_SCREEN_IDS = new Set<string>([
   'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
-  'report', 'desks', 'memory-bank', 'telegram', 'docs', 'research',
+  'report', 'desks', 'memory-bank', 'telegram', 'docs', 'research', 'final-docs', 'invoice',
 ]);
 function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
   if (product === 'owner') return 'chat';
@@ -254,6 +259,10 @@ export default function CommandCenter() {
       const screenOnly = params.get('screen');
       if (screenOnly && NAV_SCREEN_IDS.has(screenOnly)) {
         pendingDeepLinkScreen.current = null;
+        // click-and-go record links: /?screen=quote&id=… and /?screen=invoice&id=…
+        const recId = params.get('id');
+        if (screenOnly === 'quote' && recId) setActiveQuoteId(recId);
+        if (screenOnly === 'invoice' && recId) setActiveInvoiceId(recId);
         setActiveScreen(screenOnly as ScreenMode);
         setActiveSection(null);
         return;
@@ -335,6 +344,30 @@ export default function CommandCenter() {
   }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
   const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
+  const [activeInvoiceId, setActiveInvoiceId] = useState<string | null>(null);
+
+  // Click-and-go host: openRecord() from any list, tile or Max card lands on that record's document screen.
+  useEffect(() => {
+    (window as any).__empireRecordHost = true;
+    const on = (e: Event) => {
+      const r = (e as CustomEvent<RecordRef>).detail;
+      if (!r?.id) return;
+      pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
+      if (r.type === 'quote' || (r.type === 'job' && r.quoteId)) {
+        setActiveQuoteId(r.type === 'job' ? (r.quoteId as string) : r.id); setActiveSection(null); setActiveScreen('quote');
+      } else if (r.type === 'invoice') {
+        setActiveInvoiceId(r.id); setActiveSection(null); setActiveScreen('invoice');
+      } else if (r.type === 'invoice-edit') {
+        (window as any).__empireFocusInvoice = r.id;
+        setActiveProduct('workroom'); setActiveScreen('dashboard'); setActiveSection('invoices');
+      } else if (r.type === 'job') {
+        setActiveSection(null); setActiveScreen('jobs');
+      }
+      try { window.scrollTo(0, 0); } catch { /* ignore */ }
+    };
+    window.addEventListener(OPEN_RECORD_EVENT, on);
+    return () => { (window as any).__empireRecordHost = false; window.removeEventListener(OPEN_RECORD_EVENT, on); };
+  }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
   const handleScreenChange = useCallback((screen: ScreenMode | string, id?: string) => {
     pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
@@ -426,6 +459,7 @@ export default function CommandCenter() {
       settings: 'business-profile',
       jobs: 'jobs',
       invoices: 'invoices',
+      'final-docs': 'final-docs',
     };
     setActiveSection(null);
     setActiveScreen(moduleScreenMap[module] || 'dashboard');
@@ -614,9 +648,11 @@ export default function CommandCenter() {
         />
       );
     }
-    if (activeScreen === 'quote') return <QuoteReviewScreen quoteId={activeQuoteId ?? undefined} />;
+    if (activeScreen === 'quote') return <QuoteReviewScreen quoteId={activeQuoteId ?? undefined} onBack={navigationHistory.current.length > 0 ? handleBack : undefined} />;
+    if (activeScreen === 'invoice') return <InvoiceDocScreen invoiceId={activeInvoiceId} onBack={navigationHistory.current.length > 0 ? handleBack : undefined} />;
     if (activeScreen === 'jobs') return <JobsScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : undefined} />;
     if (activeScreen === 'invoices') return <InvoiceScreen />;
+    if (activeScreen === 'final-docs') return <FinalDocsScreen />;
     if (activeScreen === 'docs') return <DocumentScreen />;
     if (activeScreen === 'product-docs') return (
       <div style={{ padding: '24px 28px', maxWidth: 900, margin: '0 auto' }}>
@@ -689,6 +725,8 @@ export default function CommandCenter() {
       <div className="hidden md:block">
         <BottomBar services={sys.services} />
       </div>
+
+      <DocViewerHost />
 
       <QuickSwitch
         open={showQuickSwitch}
