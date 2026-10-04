@@ -237,70 +237,58 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
               if (isMobile) setMobileOpen(false);
               else setCollapsed(!collapsed);
             }}
-            className="flex items-center justify-center cursor-pointer hover:bg-[#f0ede8] transition-colors"
-            style={{
-              width: isCollapsed ? 36 : '100%',
-              height: 36,
-              borderRadius: 8,
-              border: 'none',
-              background: 'transparent',
-              color: '#999',
-              marginBottom: 8,
-              alignSelf: isCollapsed ? 'center' : 'flex-end',
-            }}
+            className="cy-nav-toggle"
+            style={{ width: isCollapsed ? 36 : '100%', alignSelf: isCollapsed ? 'center' : 'flex-end' }}
             title={isMobile ? 'Close menu' : (collapsed ? 'Expand sidebar' : 'Collapse sidebar')}
+            aria-label={isMobile ? 'Close menu' : (collapsed ? 'Expand sidebar' : 'Collapse sidebar')}
           >
             {isMobile ? <X size={18} /> : (collapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />)}
           </button>
 
+          {!isCollapsed && (
+            <>
+              <div className="cy-nav-brand">
+                <b>EMPIRE</b>
+                <small>AI COMMAND · MODULES</small>
+              </div>
+              <a href="/" className="cy-tab cy-nav-item cy-nav-home" title="Back to the Command Ring home">
+                <span className="cy-tab-ico"><Crown size={14} /></span>
+                <span className="cy-tab-label">Command Ring</span>
+                <span className="cy-tab-badge">HOME</span>
+                <span className="cy-glitch" style={{ animationDelay: '2.4s' }} aria-hidden />
+              </a>
+            </>
+          )}
+
           {/* Groups */}
-          {NAV_GROUPS.map((group, gi) => {
+          {NAV_GROUPS.map((group) => {
             const isOpen = expandedGroup === group.key;
             return (
-              <div key={group.key} style={{ marginTop: gi === 0 ? 0 : 4 }}>
-                {gi > 0 && !isCollapsed && <div className="h-px bg-[var(--border)] my-1.5" />}
+              <div key={group.key} className="cy-nav-groupwrap">
                 {/* Group header — clickable to expand/collapse. Hidden entirely in icon-only mode. */}
                 {!isCollapsed && (
                   <button
                     onClick={() => toggleGroup(group.key)}
-                    className="w-full flex items-center justify-between gap-1.5 cursor-pointer hover:bg-[#f5f3ef] transition-colors"
-                    style={{
-                      padding: '7px 8px',
-                      borderRadius: 8,
-                      background: 'transparent',
-                      border: 'none',
-                      marginBottom: isOpen ? 4 : 0,
-                    }}
+                    className="cy-tabgroup cy-nav-grouphead"
                     title={isOpen ? `Collapse ${group.label}` : `Expand ${group.label}`}
                     aria-expanded={isOpen}
                   >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      {isOpen
-                        ? <ChevronDown size={11} className="text-[#999] shrink-0" />
-                        : <ChevronRight size={11} className="text-[#999] shrink-0" />
-                      }
-                      <span className="cy-nav-group" style={{ fontSize: 10, fontWeight: 700, color: '#666', letterSpacing: 1, textTransform: 'uppercase' }}>
-                        {group.label}
-                      </span>
-                      <span style={{ fontSize: 9, color: '#aaa', background: '#f0ede8', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>
-                        {groupCount(group)}
-                      </span>
-                    </div>
+                    {isOpen ? <ChevronDown size={10} className="shrink-0" /> : <ChevronRight size={10} className="shrink-0" />}
+                    <span className="cy-nav-group">{group.label}</span>
+                    <span className="cy-nav-count">{groupCount(group)}</span>
                   </button>
                 )}
 
                 {/* Items — only when group is expanded AND not in icon-only mode. */}
                 {isOpen && !isCollapsed && (
-                  <div className="flex flex-col" style={{ gap: 3 }}>
-                    {group.items.map(item => {
+                  <div className="cy-nav-items">
+                    {group.items.map((item, ii) => {
                       const isActive =
                         item.kind === 'daily-summary'
                           ? showDashboard
                           : (item.screen ? activeScreen === item.screen : activeProduct === item.id);
                       const statusDot = item.status === 'active' ? '#22c55e'
-                        : item.status === 'dev' ? '#f59e0b'
-                        : '#d1d5db';
-
+                        : item.status === 'dev' ? '#f59e0b' : '#d1d5db';
                       return (
                         <button
                           key={item.id}
@@ -320,6 +308,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
                           )}
                           {item.status === 'dev' && !isActive && <span className="cy-tab-badge">DEV</span>}
                           {item.status === 'planned' && !isActive && <span className="cy-tab-badge is-muted">SOON</span>}
+                          {ii % 4 === 1 && <span className="cy-glitch" style={{ animationDelay: `${(ii * 1.7) % 7}s` }} aria-hidden />}
                         </button>
                       );
                     })}

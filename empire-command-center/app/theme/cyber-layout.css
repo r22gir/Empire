@@ -40,3 +40,21 @@
 @media (max-width: 767px) {
   .cy-shell .cy-nav-item { min-height: 40px; font-size: 11px; }
 }
+
+/* ---------- left nav rebuilt like the ring menu ---------- */
+.cy-shell .cy-nav { gap: 0; }
+.cy-shell .cy-nav-toggle { display: flex; align-items: center; justify-content: center; height: 30px; margin-bottom: 6px; border: 0; background: transparent;
+  color: var(--cy-muted); cursor: pointer; }
+.cy-shell .cy-nav-toggle:hover, .cy-shell .cy-nav-toggle:focus-visible { color: var(--cy-cyan); background: rgba(0, 229, 255, 0.08); outline: none; }
+.cy-shell .cy-nav-brand { padding: 0 4px 8px; margin-bottom: 8px; border-bottom: 1px solid rgba(0, 229, 255, 0.22); }
+.cy-shell .cy-nav-brand b { display: block; font: 800 18px/1 var(--cy-mono); letter-spacing: 0.24em; color: #eaffff; text-shadow: 0 0 14px rgba(0, 229, 255, 0.7); }
+.cy-shell .cy-nav-brand small { display: block; margin-top: 4px; font: 600 8.5px/1.4 var(--cy-mono); letter-spacing: 0.2em; color: var(--cy-cyan); }
+.cy-shell .cy-nav-home { margin-bottom: 6px; text-decoration: none; }
+.cy-shell .cy-nav-groupwrap { display: flex; flex-direction: column; }
+.cy-shell .cy-nav-grouphead { width: 100%; margin: 10px 0 6px; padding: 2px 2px; border: 0; background: transparent; cursor: pointer; text-align: left; }
+.cy-shell .cy-nav-grouphead:hover, .cy-shell .cy-nav-grouphead:focus-visible { color: var(--cy-cyan); outline: none; }
+.cy-shell .cy-nav-grouphead[aria-expanded="true"] { color: var(--cy-cyan); }
+.cy-shell .cy-nav-group { font: inherit !important; color: inherit !important; letter-spacing: inherit !important; opacity: 1 !important; }
+.cy-shell .cy-nav-count { order: 3; font: 700 8px/1 var(--cy-mono); color: var(--cy-faint); letter-spacing: 0.1em; }
+.cy-shell .cy-nav-grouphead::after { order: 2; }
+.cy-shell .cy-nav-items { display: flex; flex-direction: column; gap: 5px; padding-left: 2px; }
