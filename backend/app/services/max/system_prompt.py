@@ -519,6 +519,13 @@ Begin every new session by stating the configured founder email and checking Ope
 
 {_get_tools_doc()}{dynamic_sections}"""
 
+    # Chat reply format + Chief e awareness (services/max/chat_style.py).
+    try:
+        from .chat_style import render_chat_style_section
+        result += render_chat_style_section()
+    except Exception:
+        pass
+
     # Cache for 5 minutes
     _prompt_cache["prompt"] = result
     _prompt_cache["expires"] = time.time() + _CACHE_TTL

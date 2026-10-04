@@ -111,7 +111,11 @@ def grounding_directive(message: str | None = None) -> str:
         "Do not invent dates, sources, or citations. Quote concrete figures that appear in "
         "the page text (ratings, prices, cleaning methods, dimensions) when the question "
         "asks for them. Do not leave an empty heading or a colon introduction with no items "
-        "under it. Do not offer to open, read, or fetch the articles — that lookup is already done."
+        "under it. Do not offer to open, read, or fetch the articles — that lookup is already done. "
+        "Keep it short: lead with the direct answer in 1-2 sentences, keep `Verified` and "
+        "`Max's inference` to a few bullets each, stay under about 200 words before the Sources "
+        "list unless the user asked for a detailed report, and write each source as one line: "
+        "`N. Title — site (date)`."
         + recommend
     )
 
