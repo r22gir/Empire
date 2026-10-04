@@ -66,6 +66,7 @@ def _dict(row) -> Optional[dict]:
     for k in (
         "expanded_locations", "providers_attempted", "providers_succeeded",
         "providers_failed", "categories", "matched_keywords", "recommended_units",
+        "enrichment_pages",
     ):
         if k in d and isinstance(d[k], str):
             try:
@@ -77,6 +78,96 @@ def _dict(row) -> Optional[dict]:
 
 def _dicts(rows) -> list:
     return [_dict(r) for r in rows]
+
+
+# ── Display helpers (who is this business?) ──────────────────────────────
+
+DIRECTORY_DOMAINS = (
+    "yelp.", "houzz.", "facebook.", "instagram.", "linkedin.", "angi.", "angieslist.",
+    "thumbtack.", "bbb.org", "homeadvisor.", "porch.com", "nextdoor.", "yellowpages.",
+    "mapquest.", "tripadvisor.", "pinterest.", "youtube.", "reddit.", "manta.com",
+    "chamberofcommerce.", "buildzoom.", "expertise.com", "google.", "bing.",
+)
+
+_GENERIC_PLACE_TYPES = {"establishment", "point_of_interest", "store", "premise"}
+
+
+def is_directory_url(url: Optional[str]) -> bool:
+    host = (urlparse(url or "").netloc or "").lower()
+    if not host:
+        return False
+    return any(d in host for d in DIRECTORY_DOMAINS)
+
+
+def clean_display_name(name: Optional[str], source: Optional[str] = None) -> str:
+    """Web-search results use the page title as the name. Keep the business part."""
+    n = (name or "").strip()
+    if not n:
+        return "—"
+    if source == "brave":
+        for sep in (" | ", " - ", " – ", " — ", " :: "):
+            if sep in n:
+                head = n.split(sep)[0].strip()
+                if len(head) >= 3:
+                    n = head
+                    break
+    return n[:80]
+
+
+def display_city(p: dict) -> Optional[str]:
+    """Real city for the row. Google rows used to store the street in `city`."""
+    addr = p.get("address") or ""
+    parts = [x.strip() for x in addr.split(",") if x.strip()]
+    if p.get("source") == "google_places" and len(parts) >= 3:
+        city = parts[-3]
+        st = (parts[-2].split() or [""])[0]
+        return f"{city}, {st}".strip(", ")
+    loc = (p.get("location") or "").strip()
+    if loc:
+        bits = loc.split()
+        if len(bits) >= 2 and len(bits[-1]) == 2 and bits[-1].isupper():
+            return f"{' '.join(bits[:-1])}, {bits[-1]}"
+        return loc
+    city = p.get("city")
+    return city or None
+
+
+def maps_url(p: dict) -> Optional[str]:
+    """Free Google Maps link: place_id when we have one, else a name+address search."""
+    from urllib.parse import quote_plus
+    name = clean_display_name(p.get("name") or p.get("business_name"), p.get("source"))
+    q = " ".join(x for x in (name, p.get("address") or display_city(p) or "") if x and x != "—")
+    if not q:
+        return None
+    url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(q)}"
+    if p.get("source") == "google_places" and p.get("external_id"):
+        url += f"&query_place_id={quote_plus(str(p['external_id']))}"
+    return url
+
+
+def display_category(p: dict) -> Optional[str]:
+    cats = p.get("categories") or []
+    if isinstance(cats, str):
+        try:
+            cats = json.loads(cats)
+        except Exception:
+            cats = [cats]
+    nice = [str(c).replace("_", " ") for c in cats if c and str(c) not in _GENERIC_PLACE_TYPES]
+    if nice:
+        return ", ".join(nice[:3])
+    return (p.get("client_type") or None)
+
+
+def decorate_prospect(p: Optional[dict]) -> Optional[dict]:
+    if not p:
+        return p
+    p["display_name"] = clean_display_name(p.get("name") or p.get("business_name"), p.get("source"))
+    p["display_city"] = display_city(p)
+    p["maps_url"] = maps_url(p)
+    p["category"] = display_category(p)
+    p["is_directory_page"] = bool(p.get("source") == "brave" and is_directory_url(p.get("website")))
+    p["has_contact"] = bool(p.get("contact_name") or p.get("contact_email") or p.get("email"))
+    return p
 
 
 # ── Table creation (runs on import) ─────────────────────────────────────
@@ -152,6 +243,19 @@ CREATE TABLE IF NOT EXISTS prospects (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS prospect_outreach_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prospect_id INTEGER NOT NULL REFERENCES prospects(id) ON DELETE CASCADE,
+    channel TEXT NOT NULL DEFAULT 'email',
+    to_name TEXT,
+    to_address TEXT,
+    subject TEXT,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_by TEXT DEFAULT 'max',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS prospect_pipeline (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     prospect_id INTEGER NOT NULL UNIQUE REFERENCES prospects(id) ON DELETE CASCADE,
@@ -165,10 +269,34 @@ CREATE TABLE IF NOT EXISTS prospect_pipeline (
 """
 
 
+# Free contact lookup results (contact_enrich.py). Nullable, safe to re-run.
+_ENRICH_COLUMNS = {
+    "contact_name": "TEXT",
+    "contact_title": "TEXT",
+    "contact_email": "TEXT",
+    "contact_phone": "TEXT",
+    "instagram": "TEXT",
+    "facebook": "TEXT",
+    "linkedin": "TEXT",
+    "enrichment_status": "TEXT",
+    "enrichment_pages": "TEXT",
+    "enrichment_note": "TEXT",
+    "enriched_at": "TEXT",
+}
+
+
+def _migrate_enrichment_columns(conn):
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(prospects)").fetchall()}
+    for name, decl in _ENRICH_COLUMNS.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE prospects ADD COLUMN {name} {decl}")
+
+
 def _init_tables():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with _db() as conn:
         conn.executescript(_SCHEMA)
+        _migrate_enrichment_columns(conn)
 
 
 try:
@@ -603,7 +731,7 @@ async def _search_brave(query: str, location: str, count: int = 20) -> List[dict
             "name": title,
             "business_name": title,
             "address": None,
-            "city": location.split(",")[0].split()[-1] if "," in location else location.split()[-2] if len(location.split()) > 1 else location,
+            "city": location.split(",")[0].strip() if "," in location else " ".join(location.split()[:-1]) if len(location.split()) > 1 else location,
             "state": location.split()[-1] if len(location.split()) > 1 else None,
             "zip": None,
             "phone": phone,
@@ -642,7 +770,7 @@ async def _search_google_places(query: str, location: str) -> List[dict]:
 
     for place in (data.get("results") or []):
         addr_parts = (place.get("formatted_address") or "").split(",")
-        city = addr_parts[0].strip() if len(addr_parts) > 1 else None
+        city = addr_parts[-3].strip() if len(addr_parts) >= 3 else (addr_parts[0].strip() if len(addr_parts) > 1 else None)
         state_zip = addr_parts[-2].strip() if len(addr_parts) > 2 else None
         state = state_zip.split()[0] if state_zip else None
         zipcode = state_zip.split()[1] if state_zip and len(state_zip.split()) > 1 else None
@@ -1055,7 +1183,7 @@ def get_prospects(
             f"SELECT * FROM prospects{where} ORDER BY score DESC LIMIT ? OFFSET ?",
             params,
         ).fetchall()
-        return _dicts(rows)
+        return [decorate_prospect(d) for d in _dicts(rows)]
 
 
 def get_prospect(prospect_id: int) -> Optional[dict]:
@@ -1064,15 +1192,18 @@ def get_prospect(prospect_id: int) -> Optional[dict]:
         row = conn.execute(
             "SELECT * FROM prospects WHERE id = ?", (prospect_id,)
         ).fetchone()
-        return _dict(row)
+        return decorate_prospect(_dict(row))
 
 
 def get_pipeline(status: str = None, limit: int = 50) -> List[dict]:
     """Fetch pipeline entries with prospect details."""
     if status:
         query = """
-            SELECT pp.*, p.name, p.business_name, p.score, p.card_summary,
-                   p.outreach_priority, p.best_contact_method
+            SELECT pp.id, pp.prospect_id, COALESCE(pp.status, 'new') AS status, pp.notes,
+                   pp.next_action, pp.assigned_unit, pp.created_at, pp.updated_at,
+                   p.name, p.business_name, p.score, p.card_summary,
+                   p.outreach_priority, p.best_contact_method, p.phone, p.website,
+                   p.contact_name, p.contact_email, p.instagram
             FROM prospect_pipeline pp
             JOIN prospects p ON pp.prospect_id = p.id
             WHERE pp.status = ?
@@ -1081,8 +1212,11 @@ def get_pipeline(status: str = None, limit: int = 50) -> List[dict]:
         params = (status, limit)
     else:
         query = """
-            SELECT pp.*, p.name, p.business_name, p.score, p.card_summary,
-                   p.outreach_priority, p.best_contact_method
+            SELECT pp.id, pp.prospect_id, COALESCE(pp.status, 'new') AS status, pp.notes,
+                   pp.next_action, pp.assigned_unit, pp.created_at, pp.updated_at,
+                   p.name, p.business_name, p.score, p.card_summary,
+                   p.outreach_priority, p.best_contact_method, p.phone, p.website,
+                   p.contact_name, p.contact_email, p.instagram
             FROM prospect_pipeline pp
             JOIN prospects p ON pp.prospect_id = p.id
             ORDER BY p.score DESC LIMIT ?

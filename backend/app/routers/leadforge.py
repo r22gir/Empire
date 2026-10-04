@@ -195,6 +195,7 @@ _LEAD_INTAKE_COLUMNS = {
     "intake_payload": "TEXT",
     "campaign": "TEXT",
     "quote_id": "TEXT",
+    "prospect_id": "INTEGER",  # Prospect Finder -> lead link (prospect_ops.promote_to_lead)
 }
 
 
@@ -588,7 +589,7 @@ def intake_lead_contract():
     return intake_contract()
 
 
-@router.get("/{lead_id}")
+@router.get("/{lead_id:int}")
 def get_lead(lead_id: int):
     """Get a single lead."""
     with _db() as conn:
@@ -598,7 +599,7 @@ def get_lead(lead_id: int):
     return {"lead": _dict(row)}
 
 
-@router.put("/{lead_id}")
+@router.put("/{lead_id:int}")
 def update_lead(lead_id: int, update: LeadUpdate):
     """Full update a lead."""
     data = update.model_dump(exclude_none=True)
@@ -620,7 +621,7 @@ def update_lead(lead_id: int, update: LeadUpdate):
     return {"lead": _dict(row)}
 
 
-@router.patch("/{lead_id}/status")
+@router.patch("/{lead_id:int}/status")
 def update_lead_status(lead_id: int, body: StatusUpdate):
     """Update lead status."""
     valid = ('new', 'contacted', 'responded', 'qualified',
@@ -638,7 +639,7 @@ def update_lead_status(lead_id: int, body: StatusUpdate):
     return {"lead": _dict(row)}
 
 
-@router.patch("/{lead_id}/score")
+@router.patch("/{lead_id:int}/score")
 def update_lead_score(lead_id: int, body: ScoreUpdate):
     """Update lead score."""
     with _db() as conn:
@@ -656,7 +657,7 @@ def update_lead_score(lead_id: int, body: ScoreUpdate):
 
 # ── Activities ────────────────────────────────────────────────────────
 
-@router.get("/{lead_id}/activities")
+@router.get("/{lead_id:int}/activities")
 def list_activities(lead_id: int):
     """List activities for a lead."""
     with _db() as conn:
@@ -669,7 +670,7 @@ def list_activities(lead_id: int):
     return {"activities": _dicts(rows)}
 
 
-@router.post("/{lead_id}/activities")
+@router.post("/{lead_id:int}/activities")
 def create_activity(lead_id: int, act: ActivityCreate):
     """Log an activity for a lead."""
     with _db() as conn:
@@ -699,7 +700,7 @@ def create_activity(lead_id: int, act: ActivityCreate):
 
 # ── LeadForge → ForgeCRM Promotion (Sprint 1d Item 4) ─────────────
 
-@router.post("/{lead_id}/workroom-quote")
+@router.post("/{lead_id:int}/workroom-quote")
 async def create_lead_workroom_quote(lead_id: int):
     """Open a Workroom quote prefilled from this lead. Repeat calls return the same draft."""
     from app.services.workroom_lead_intake import create_workroom_quote
@@ -707,7 +708,7 @@ async def create_lead_workroom_quote(lead_id: int):
     return await create_workroom_quote(lead_id)
 
 
-@router.post("/{lead_id}/promote")
+@router.post("/{lead_id:int}/promote")
 def promote_lead_to_forgecrm(lead_id: int):
     """Sprint 1d Item 4: promote a LeadForge lead to ForgeCRM customer.
 
@@ -752,7 +753,8 @@ def promote_lead_to_forgecrm(lead_id: int):
                 }
 
         # ── Build customer fields ──
-        name = " ".join(filter(None, [lead_d.get("first_name"), lead_d.get("last_name")])).strip() or None
+        name = (" ".join(filter(None, [lead_d.get("first_name"), lead_d.get("last_name")])).strip()
+                or (lead_d.get("company") or "").strip() or None)
         email = (lead_d.get("email") or "").strip() or None
         phone_raw = (lead_d.get("phone") or "").strip() or None
         # FIX 3: phone normalization — digits only, used for dedupe (not stored)
@@ -1453,12 +1455,133 @@ def get_prospect_detail(prospect_id: int):
 
 @router.post("/leadforge/prospects/{prospect_id}/pipeline")
 def add_prospect_to_pipeline(prospect_id: int, assigned_unit: Optional[str] = None):
-    """Add prospect to pipeline (duplicate-safe)."""
-    from app.services.leadforge.prospect_engine import add_to_pipeline
-    return add_to_pipeline(prospect_id, assigned_unit)
+    """Add prospect to pipeline (duplicate-safe) and create/link its LeadForge lead."""
+    from app.services.leadforge.prospect_ops import promote_to_lead
+    out = promote_to_lead(prospect_id, business_unit=assigned_unit)
+    if out.get("status") == "error":
+        raise HTTPException(404, out.get("error") or "Prospect not found")
+    return out
+
+
+class EnrichBatch(_BM):
+    prospect_ids: Optional[List[int]] = None
+    top_n: int = 10
+    min_score: int = 0
+    force: bool = False
+    discover_websites: bool = False
+
+
+@router.post("/leadforge/prospects/{prospect_id}/enrich")
+async def enrich_one_prospect(prospect_id: int, force: bool = False, discover_websites: bool = True):
+    """Free contact lookup on the prospect's own website (robots.txt respected, rate limited)."""
+    from app.services.leadforge.contact_enrich import enrich_prospects
+    from app.services.leadforge.prospect_engine import get_prospect
+    if not get_prospect(prospect_id):
+        raise HTTPException(404, "Prospect not found")
+    res = await enrich_prospects([prospect_id], force=force, discover_websites=discover_websites)
+    return {**res, "prospect": get_prospect(prospect_id)}
+
+
+@router.post("/leadforge/prospects/enrich")
+async def enrich_prospect_batch(body: EnrichBatch):
+    """Free contact lookup for given ids, or the top N by score (max 25 per call)."""
+    from app.services.leadforge.contact_enrich import enrich_prospects
+    from app.services.leadforge.prospect_ops import top_prospects
+    ids = body.prospect_ids or [p["id"] for p in top_prospects(limit=body.top_n, min_score=body.min_score)
+                                if not p.get("is_directory_page")]
+    return await enrich_prospects(ids, force=body.force, discover_websites=body.discover_websites)
+
+
+class DraftRequest(_BM):
+    channel: str = "email"  # email | instagram_dm
+
+
+@router.post("/leadforge/prospects/{prospect_id}/drafts")
+def draft_prospect_outreach(prospect_id: int, body: DraftRequest):
+    """Save an outreach DRAFT (email or Instagram DM). Never sends."""
+    from app.services.leadforge.prospect_ops import draft_outreach
+    out = draft_outreach(prospect_id, channel=body.channel)
+    if out.get("status") == "error":
+        raise HTTPException(404, out["error"])
+    return out
+
+
+@router.get("/leadforge/prospects/{prospect_id}/drafts")
+def list_prospect_drafts(prospect_id: int):
+    from app.services.leadforge.prospect_ops import list_drafts
+    return {"drafts": list_drafts(prospect_id)}
+
+
+@router.get("/leadforge/brief")
+def prospect_daily_brief(limit: int = Query(7, ge=5, le=10), days: int = Query(1, ge=1, le=30)):
+    """Daily prospect brief: top new prospects with who / why / suggested first message."""
+    from app.services.leadforge.prospect_ops import daily_brief
+    return daily_brief(limit=limit, days=days)
+
+
+@router.get("/leadforge/segments")
+def prospect_segments(in_pipeline_only: bool = False):
+    """Segment counts other modules (SocialForge, campaigns) can target."""
+    from app.services.leadforge.prospect_ops import segments
+    return segments(in_pipeline_only=in_pipeline_only)
+
+
+@router.get("/leadforge/segments/{name}")
+def prospect_segment_members(name: str, in_pipeline_only: bool = False, limit: int = Query(200, ge=1, le=500)):
+    from app.services.leadforge.prospect_ops import segment_members
+    out = segment_members(name, in_pipeline_only=in_pipeline_only, limit=limit)
+    if out.get("error"):
+        raise HTTPException(400, out["error"])
+    return out
+
+
+@router.get("/leadforge/social-targets")
+def prospect_social_targets(limit: int = Query(100, ge=1, le=500)):
+    """Prospects with Instagram / Facebook / LinkedIn links found by the free lookup."""
+    from app.services.leadforge.prospect_ops import social_targets
+    return social_targets(limit=limit)
+
+
+# ── Follow-up reminders, reactivation, referral sources (acquisition.py) ──
+
+class FollowupSet(_BM):
+    when: Optional[str] = None      # YYYY-MM-DD
+    in_days: Optional[int] = None   # or relative
+    action: Optional[str] = None
+
+
+@router.get("/followups/due")
+def pipeline_followups_due(days_ahead: int = Query(7, ge=0, le=60), stale_days: int = Query(5, ge=1, le=90)):
+    """Pipeline reminders: overdue / today / upcoming lead follow-ups, never-contacted leads, sent quotes waiting."""
+    from app.services.leadforge.acquisition import followups_due
+    return followups_due(days_ahead=days_ahead, stale_days=stale_days)
+
+
+@router.post("/{lead_id:int}/followup")
+def set_lead_followup(lead_id: int, body: FollowupSet):
+    """Set a follow-up reminder (next_action + next_action_date) on a pipeline lead."""
+    from app.services.leadforge.acquisition import set_followup
+    out = set_followup(lead_id, when=body.when, in_days=body.in_days, action=body.action)
+    if out.get("error"):
+        raise HTTPException(404 if "not found" in out["error"] else 400, out["error"])
+    return out
+
+
+@router.get("/reactivation")
+def reactivation(months_quiet: int = Query(6, ge=1, le=60), limit: int = Query(25, ge=1, le=200),
+                 include_designers: bool = True):
+    """Past paying clients, accepted-quote clients and designers gone quiet, with suggested (draft) messages."""
+    from app.services.leadforge.acquisition import reactivation_list
+    return reactivation_list(months_quiet=months_quiet, limit=limit, include_designers=include_designers)
+
+
+@router.get("/reports/referral-sources")
+def referral_sources_report():
+    from app.services.leadforge.acquisition import referral_sources
+    return referral_sources()
 
 @router.get("/leadforge/prospect-pipeline")
-def list_pipeline(status: Optional[str] = None, limit: int = 50):
+def list_pipeline(status: Optional[str] = None, limit: int = Query(50, ge=1, le=1000)):
     """List prospect pipeline entries."""
     from app.services.leadforge.prospect_engine import get_pipeline
     return get_pipeline(status=status, limit=limit)

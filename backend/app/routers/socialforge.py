@@ -667,3 +667,14 @@ async def ai_setup_guide(data: AIContentRequest):
         }
     except Exception as e:
         raise HTTPException(500, f"AI guide generation failed: {e}")
+
+
+# ── LeadForge feed (read-only) ─────────────────────────────────────────────
+# Social profiles found by LeadForge's free contact lookup (prospect websites
+# linking to Instagram / Facebook / LinkedIn). Use as an engage/follow list.
+# DMs stay drafts (LeadForge prospect drafts); nothing is posted or sent here.
+
+@router.get("/prospect-targets")
+async def leadforge_prospect_targets(limit: int = 100):
+    from app.services.leadforge.prospect_ops import social_targets
+    return social_targets(limit=max(1, min(int(limit), 500)))

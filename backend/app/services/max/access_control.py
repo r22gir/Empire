@@ -68,6 +68,11 @@ TOOL_LEVELS = {
     "search_images": 1, "open_quote_builder": 1, "select_proposal": 1,
     "open_final_doc": 1,
     "open_record": 1, "edit_quote_lines": 1, "convert_quote_to_invoice": 1,
+    # Client acquisition (draft-only; docs/MAX_PROSPECTING.md)
+    "prospect_search": 1, "prospect_enrich": 1, "prospect_rank": 1, "prospect_add_to_pipeline": 1,
+    "prospect_draft_outreach": 1, "prospect_daily_brief": 1, "prospect_segments": 1,
+    "prospect_social_targets": 1, "pipeline_followups": 1, "set_followup": 1, "reactivation_list": 1,
+    "module_catalog": 1, "module_call": 1, "socialforge_draft_post": 1,
     "send_telegram": 1, "send_email": 1, "send_quote_telegram": 1,
     "send_quote_email": 1, "run_desk_task": 1, "submit_desk_task": 1,
     # Sprint 1c — approval gate workflow:

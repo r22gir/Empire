@@ -7672,5 +7672,17 @@ def _max_room_redesign(params: dict, desk: Optional[str] = None) -> ToolResult:
 # registered, so its header count used to be a hand-maintained literal that
 # went stale ("43 total" while 67 handlers were registered). Resolve it here,
 # after all registrations, from the live registry.
+# Client-acquisition tools (LeadForge/SocialForge/pipeline, draft-only) + read-only
+# module bridge. Registered from their own module: docs/MAX_PROSPECTING.md.
+try:
+    import importlib as _importlib, sys as _sys
+    _acq_name = "app.services.max.tools_acquisition"
+    # reload on module reload so the handlers register into the fresh TOOL_REGISTRY
+    _tools_acquisition = (_importlib.reload(_sys.modules[_acq_name]) if _acq_name in _sys.modules
+                          else _importlib.import_module(_acq_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_acquisition.ACQUISITION_TOOLS_DOC
+except Exception as _acq_err:  # never take Max down over an optional tool pack
+    logger.error(f"tools_acquisition not loaded: {_acq_err}")
+
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))
