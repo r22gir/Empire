@@ -742,6 +742,7 @@ load_router("app.routers.contacts", "/api/v1", ["contacts"])
 # LeadForge — Lead generation & sales machine
 load_router("app.routers.leadforge", "/api/v1", ["leadforge"])
 load_router("app.routers.growth", "/api/v1", ["growth"])  # approval queue, ROI, social proof, improvements
+load_router("app.routers.home_center", "/api/v1", ["home-center"])  # Max home: research interests + growth lists (per user)
 try:
     from app.routers.leadforge import intake_alias_router
     app.include_router(intake_alias_router, prefix="/api/v1", tags=["leadforge"])
