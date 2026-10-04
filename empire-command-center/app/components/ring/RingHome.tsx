@@ -27,6 +27,7 @@ import {
   AlertTriangle, FileText, CloudSun, UsersRound, Sparkles, Zap, Receipt, CalendarClock, Mic, Radar,
 } from 'lucide-react';
 import './ring.css';
+import ThemeToggle from '../ThemeToggle';
 
 /* ------------------------------------------------------------------ data */
 
@@ -476,6 +477,7 @@ export default function RingPreview() {
               <div><h1>EMPIRE · COMMAND CENTER</h1><small>LIVE BACKEND DATA · {loadedAt ? `SYNCED ${loadedAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` : 'SYNCING…'}</small></div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <ThemeToggle variant="ring" />
               <a href="/classic?product=owner" className="rg-btn">MAX CHAT</a>
               <a href="/classic" className="rg-btn"><ArrowLeft size={13} /> CLASSIC VIEW</a>
             </div>

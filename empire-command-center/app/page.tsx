@@ -12,6 +12,6 @@ type SP = Record<string, string | string[] | undefined>;
 
 export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
-  const deepLink = Object.keys(sp).some(k => !k.startsWith('utm_') && k !== '_v' && k !== 'fbclid' && k !== 'gclid');
+  const deepLink = Object.keys(sp).some(k => !k.startsWith('utm_') && k !== '_v' && k !== 'theme' && k !== 'fbclid' && k !== 'gclid');
   return deepLink ? <CommandCenterApp /> : <RingHome />;
 }

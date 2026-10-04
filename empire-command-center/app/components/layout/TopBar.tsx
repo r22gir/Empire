@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Bell, ChevronDown, Check, ArrowLeft } from 'lucide-react';
 import { API } from '../../lib/api';
 import LanguageSwitcher from '../LanguageSwitcher';
+import ThemeToggle from '../ThemeToggle';
 
 type ProviderRow = {
   id: string;
@@ -311,6 +312,9 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
             </div>
           )}
         </div>
+
+        {/* Dark / Gold theme (per device) */}
+        <ThemeToggle />
 
         {/* Language Switcher */}
         <LanguageSwitcher />
