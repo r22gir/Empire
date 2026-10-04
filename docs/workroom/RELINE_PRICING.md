@@ -5,6 +5,20 @@ editable in Pricing Studio (`GET/POST /api/v1/pricing/workroom/rules`). Line ite
 `backend/app/services/estimates/workroom_packet.py` (`price_opening`), which Max calls through the
 `draft_estimate_and_presentation` tool.
 
+## Material sell rates (Rafael, 10/4/2026)
+
+| Material | Rule key | Sell rate |
+|---|---|---|
+| Lining | `lining_per_yard` | **$10.50 / yd** |
+| Napped lining / interlining (bump) | `bump_per_yard` | **$12.50 / yd** |
+
+Always use the workroom's own sell rates. **Never use supplier list prices** for materials: supplier
+lists exclude freight. The same rates are used by the catalog engine (`PRICING_SPECS["drapery"]["linings"]`:
+`regular` / `batiste_118` $10.50, `interlining` / `napped_interlining` $12.50), the legacy quote engine
+(`pricing_tables.LINING`, `pricing_engine`) and Max's quick estimate (`LINING_RATES`). Blackout, thermal and
+premiere satin rates are unchanged. Existing quotes keep the prices they were sent with; only new drafts
+use these rates.
+
 ## Width count (same for every re-line option)
 
     (window width x 2 + 11.5") / panels / 48"  -> rounded up to the next half width, per panel
@@ -16,7 +30,7 @@ i.e. per 48" finished panel width at 100% fullness. Example: 160" window, 2 pane
 
 | Option (wording on the estimate) | Labor rule | Labor | Materials |
 |---|---|---|---|
-| **Re-line with lining and bump** (default) | `reline_per_width` | $150 / width | Lining yd x $10.50 + Bump interlining yd x $12.95 |
+| **Re-line with lining and bump** (default) | `reline_per_width` | $150 / width | Lining yd x $10.50 + Bump (napped interlining) yd x $12.50 |
 | **Re-line with lining (no bump)** | `reline_no_bump_per_width` | $125 / width | Lining yd x $10.50 only, no bump material |
 
 Lining yards = widths x (finished length + 16" hem allowance) / 36, to 0.1 yd.

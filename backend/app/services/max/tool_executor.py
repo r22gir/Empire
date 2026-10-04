@@ -1165,9 +1165,10 @@ FABRIC_GRADES = {
     "D": {"label": "Luxury", "per_yard": 120},
 }
 
-# Lining cost per yard
+# Lining SELL rate per yard. Workroom rates (Rafael 10/4/2026): lining $10.50, napped lining (interlining)
+# $12.50. Never use supplier list prices (they exclude freight).
 LINING_RATES = {
-    "none": 0, "standard": 8, "blackout": 14, "thermal": 12, "interlining": 18,
+    "none": 0, "standard": 10.50, "blackout": 14, "thermal": 12, "interlining": 12.50,
 }
 
 # Treatment-specific: fullness multiplier, labor hours per panel, fabric_width (inches)

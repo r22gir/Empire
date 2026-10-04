@@ -30,8 +30,10 @@ DEFAULT_RULES: dict[str, float] = {
     "reline_per_width": 150.0,
     "reline_no_bump_per_width": 125.0,  # Rafael 10/4/2026: lining only, no bump
     "lining_removal_per_panel": 95.0,
-    "lining_per_yard": 10.50,
-    "bump_per_yard": 12.95,
+    # Workroom SELL rates per yard (Rafael 10/4/2026). Always the workroom's own rates, never supplier
+    # list prices (those exclude freight).
+    "lining_per_yard": 10.50,           # lining
+    "bump_per_yard": 12.50,             # napped lining / interlining (bump)
     "baton_each": 34.95,
     "ripplefold_carrier_cost": 0.75,
     "ripplefold_carrier_each": 1.50,

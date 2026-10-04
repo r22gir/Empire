@@ -82,13 +82,14 @@ def test_workroom_rules_persist_to_sqlite(isolated_empire_db):
 def test_sample_packet_matches_reference_totals():
     reset_rules()
     packet = build_packet(sample_phase1())
-    assert packet["total"] == 4759.96
-    assert packet["deposit"] == 2379.98
+    # Bump (napped interlining) is $12.50/yd since Rafael 10/4/2026 (was $12.95): new drafts only.
+    assert packet["total"] == 4736.20
+    assert packet["deposit"] == 2368.10
     assert packet["payment_line"] == "Pay deposit online: [Square payment link]"
     assert packet["sent"] is False
     assert packet["status"] == "draft"
     living = packet["rooms"][0]
-    assert living["subtotal"] == 2585.98
+    assert living["subtotal"] == 2574.10
     assert [group["name"] for group in living["groups"]] == [
         "Installation", "Preparation", "Construction", "Materials",
     ]
@@ -121,8 +122,8 @@ def test_estimate_header_b_and_presentation(tmp_path):
     assert "1. Installation" in est
     assert "4. Materials" in est
     assert "Subtotal" in est
-    assert "$4,759.96" in est
-    assert "$2,379.98" in est
+    assert "$4,736.20" in est
+    assert "$2,368.10" in est
     assert "[Square payment link]" in est
     assert "Rafael" not in est and "Rafael" not in pres
     assert "studio.empirebox.store" not in est
@@ -160,7 +161,7 @@ def test_chat_tool_drafts_and_does_not_send():
     assert result.result["sent"] is False
     assert result.result["status"] == "draft"
     assert result.result["project_address"] == "9408 Old Courthouse Rd, Tysons, VA"
-    assert result.result["total"] == 4759.96
+    assert result.result["total"] == 4736.20
     from app.services.quote_service import get_quote
     quote = get_quote(result.result["quote_id"])
     assert quote["status"] == "draft"
@@ -196,4 +197,18 @@ def test_reline_without_bump_option():
     assert any(r["description"].startswith("Lining ·") for r in rows(nob))
     assert nob["bump"] is False and std["bump"] is True
     assert [r["description"] for r in rows(alt)] == [r["description"] for r in rows(nob)]
-    assert round(std["subtotal"] - nob["subtotal"], 2) == round(25 * 7 + std["yards"] * 12.95, 2)
+    assert round(std["subtotal"] - nob["subtotal"], 2) == round(25 * 7 + std["yards"] * 12.50, 2)
+
+
+def test_workroom_lining_sell_rates_rafael_2026_10_04():
+    """Lining $10.50/yd and napped lining (interlining/bump) $12.50/yd everywhere a lining rate lives."""
+    from app.services.pricing.workroom_rules import DEFAULT_RULES
+    from app.data.product_catalog import PRICING_SPECS
+    from app.services.quote_engine.pricing_tables import LINING
+    from app.services.max.tool_executor import LINING_RATES
+    assert DEFAULT_RULES["lining_per_yard"] == 10.50 and DEFAULT_RULES["bump_per_yard"] == 12.50
+    lin = PRICING_SPECS["drapery"]["linings"]
+    assert lin["regular"] == 10.50 and lin["interlining"] == 12.50 and lin["napped_interlining"] == 12.50
+    assert lin["blackout"] == 12.95  # unchanged
+    assert LINING["standard"]["add_per_yard"] == 10.50 and LINING["interlining"]["add_per_yard"] == 12.50
+    assert LINING_RATES["standard"] == 10.50 and LINING_RATES["interlining"] == 12.50
