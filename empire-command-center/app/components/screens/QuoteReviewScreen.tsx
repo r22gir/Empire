@@ -8,6 +8,7 @@ import { linesFromAnalyzedItems, quoteLineDescriptions } from '../../lib/photoQu
 import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2, ShieldCheck, X } from 'lucide-react';
 import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
 import DepositPayLinkButton from '../business/finance/DepositPayLink';
+import { HudHeader, GaugeRow, RadialGauge, MaxStrip, fmtMoney, daysSince, type HudChip, type MaxSuggestion } from '../cyber/hud';
 
 interface UploadedPhoto {
   filename: string;
@@ -569,17 +570,42 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     setCreatingInvoice(false);
   };
 
+  // HUD header data — all read from the loaded quote / current edit state.
+  const hudTotal = dirty ? computedTotal : ((quote as any).total ?? computedTotal);
+  const hudStatus = String(quote.status || 'draft');
+  const hudAge = daysSince((quote as any).sent_at || (quote as any).updated_at || quote.created_at);
+  const hudChips: HudChip[] = [
+    { label: hudStatus.replace(/_/g, ' '), tone: hudStatus === 'accepted' ? 'teal' : hudStatus === 'sent' ? 'blue' : hudStatus === 'draft' ? 'muted' : 'amber', live: hudStatus === 'sent' },
+    ...((quote as any).intake_code ? [{ label: `Intake ${(quote as any).intake_code}`, tone: 'violet' as const }] : []),
+    ...((quote as any).business_unit ? [{ label: String((quote as any).business_unit), tone: 'cyan' as const }] : []),
+    ...(dirty ? [{ label: 'Unsaved changes', tone: 'mag' as const, live: true }] : []),
+  ];
+  const hudSugg: MaxSuggestion[] = [];
+  if (dirty) hudSugg.push({ id: 'save', tone: 'mag', title: 'Save your edits', text: `Line items changed — new total ${fmtMoney(computedTotal, true)} is not saved yet.`, actionLabel: saving ? 'Saving…' : 'Save quote', onAction: () => { if (!saving) saveQuote(); }, source: 'local edits' });
+  if (['draft', 'founder_review'].includes(hudStatus)) hudSugg.push({ id: 'approve', tone: 'cyan', title: 'Ready to send?', text: `${quote.quote_number} for ${quote.customer_name || 'this customer'} is still ${hudStatus.replace(/_/g, ' ')} at ${fmtMoney(hudTotal || 0, true)}. Approve with your PIN to mark it sent.`, actionLabel: 'Approve & Send', onAction: () => handleAction('approve_send'), source: `status ${hudStatus}` });
+  if (hudStatus === 'sent' && hudAge != null && hudAge >= 7) hudSugg.push({ id: 'chase', tone: 'amber', title: 'Follow up', text: `Sent ${hudAge} days ago with no decision. Email ${quote.customer_name || 'the customer'} a reminder.`, actionLabel: 'Email customer', onAction: () => handleAction('email'), source: 'sent_at' });
+  if (hudStatus === 'accepted' && !invoiceNumber) hudSugg.push({ id: 'inv', tone: 'teal', title: 'Accepted — bill it', text: `Create the invoice for ${fmtMoney(hudTotal || 0, true)}.`, actionLabel: creatingInvoice ? 'Creating…' : 'Create invoice', onAction: () => { if (!creatingInvoice) handleCreateInvoice(); }, source: 'status accepted' });
+  if (uploadedPhotos.length === 0) hudSugg.push({ id: 'photos', tone: 'violet', title: 'No photos yet', text: 'Add room photos so Max can measure windows and suggest line items.', actionLabel: 'Add photos', onAction: () => fileInputRef.current?.click(), source: 'photos' });
+
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-6 max-w-[850px] mx-auto w-full">
-      <div className="flex items-center gap-3 mb-1">
-        <div className="w-10 h-10 rounded-xl bg-[#fdf8eb] flex items-center justify-center">
-          <FileText size={20} className="text-[#b8960c]" />
-        </div>
-        <div>
-          <h1 className="text-lg font-bold text-[#1a1a1a]">{quote.quote_number} · Quote Review</h1>
-          <p className="text-xs text-[#777]">{quote.customer_name} · Created {quote.created_at || 'Today'}</p>
-        </div>
-      </div>
+    <div className="cy-qr flex-1 w-full">
+      <HudHeader
+        icon={<FileText size={20} />}
+        title={<><span className="cy-mono">{quote.quote_number}</span> · Quote Review</>}
+        subtitle={<span suppressHydrationWarning>{quote.customer_name} · Created {quote.created_at ? new Date(quote.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Today'}</span>}
+        chips={hudChips}
+      />
+      <GaugeRow>
+        <RadialGauge i={0} label={dirty ? 'Total (editing)' : 'Quote total'} value={Number(hudTotal) || 0} format={n => fmtMoney(n, true)} tone="cyan" fraction={null} icon={<Receipt size={20} />}
+          sub={`subtotal ${fmtMoney(computedSubtotal, true)}`} />
+        <RadialGauge i={1} label="Deposit" value={computedDeposit} format={n => fmtMoney(n, true)} tone="teal" fraction={editDepositPct / 100}
+          sub={`${editDepositPct}% of edited total`} />
+        <RadialGauge i={2} label="Line items" value={editItems.length} tone="violet" fraction={null} icon={<FileText size={20} />}
+          sub={dirty ? 'edited · unsaved' : 'saved'} />
+        <RadialGauge i={3} label="Photos" value={uploadedPhotos.length} tone={uploadedPhotos.length ? 'amber' : 'muted'} fraction={null} icon={<Camera size={20} />}
+          sub={uploadedPhotos.length ? `${uploadedPhotos.filter(ph => ph.analysis).length} analyzed` : 'none yet'} onClick={() => fileInputRef.current?.click()} />
+      </GaugeRow>
+      <MaxStrip items={hudSugg.slice(0, 3)} empty="This quote has nothing pending." />
 
       {/* Hidden file inputs */}
       <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/heic,image/webp" multiple
@@ -740,18 +766,15 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       {!showProposalSelector ? (
         <div className="mb-5">
           <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-bold text-[#1a1a1a]">Line Items</div>
+            <div className="cy-qr-title">Line Items</div>
             <div className="flex items-center gap-2">
               {dirty && (
-                <button onClick={saveQuote} disabled={saving}
-                  className="flex items-center gap-1.5 cursor-pointer"
-                  style={{ padding: '6px 14px', borderRadius: 8, background: '#b8960c', color: '#fff', border: 'none', fontSize: 12, fontWeight: 700 }}>
+                <button onClick={saveQuote} disabled={saving} className="cy-btn is-primary is-pulse is-sm">
                   {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                   {saving ? 'Saving...' : 'Save Changes'}
                 </button>
               )}
-              <button onClick={addItem} className="flex items-center gap-1 cursor-pointer"
-                style={{ padding: '6px 12px', borderRadius: 8, background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', fontSize: 11, fontWeight: 600 }}>
+              <button onClick={addItem} className="cy-btn is-teal is-sm">
                 <Plus size={12} /> Add Line
               </button>
             </div>
@@ -990,9 +1013,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
             {/* Save bar at bottom when dirty */}
             {dirty && (
               <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
-                <button onClick={saveQuote} disabled={saving}
-                  className="flex items-center gap-2 cursor-pointer"
-                  style={{ padding: '10px 24px', borderRadius: 10, background: '#b8960c', color: '#fff', border: 'none', fontSize: 13, fontWeight: 700, boxShadow: '0 2px 8px rgba(184,150,12,0.3)' }}>
+                <button onClick={saveQuote} disabled={saving} className="cy-btn is-primary is-pulse">
                   {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                   {saving ? 'Saving...' : 'Save Quote'}
                 </button>
@@ -1002,7 +1023,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         </div>
       ) : (
       <>
-      <div className="text-sm font-bold mb-3 text-[#1a1a1a]">Select a Proposal</div>
+      <div className="cy-qr-title mb-3">Select a Proposal</div>
       <div className="flex gap-3 mb-5">
         {tiers.map((t, i) => {
           const p = derivedTierProposals[i];
@@ -1058,8 +1079,8 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       {actionFeedback && (
         <div style={{
           position: 'fixed', bottom: 24, right: 24, zIndex: 999,
-          padding: '10px 20px', borderRadius: 12, background: '#1a1a1a', color: '#fff',
-          fontSize: 13, fontWeight: 600, boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+          padding: '10px 20px', background: 'rgba(3,14,22,0.95)', color: '#d9f8ff', border: '1px solid rgba(0,229,255,0.5)',
+          fontSize: 13, fontWeight: 600, boxShadow: '0 0 22px rgba(0,229,255,0.35)', fontFamily: 'var(--cy-mono, monospace)',
           animation: 'fadeIn 0.2s ease',
         }}>
           {actionFeedback}
@@ -1097,8 +1118,8 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
             <button
               onClick={handleCreateInvoice}
               disabled={creatingInvoice}
-              className="w-full flex items-center justify-center gap-2 text-white text-[13px] font-bold cursor-pointer hover:bg-[#a08509] shadow-[0_2px_8px_rgba(184,150,12,0.25)] transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-              style={{ height: 44, padding: '0 20px', borderRadius: 12, background: '#b8960c', border: '2px solid #a08509' }}
+              className="cy-btn is-teal is-pulse"
+              style={{ width: '100%', minHeight: 44 }}
             >
               {creatingInvoice ? <Loader2 size={18} className="animate-spin" /> : <Receipt size={18} />}
               {creatingInvoice ? 'Creating Invoice...' : 'Create Invoice'}
@@ -1107,18 +1128,18 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         </div>
       )}
 
-      <div className="flex gap-2.5 flex-wrap">
+      <div className="cy-qr-actions flex gap-2.5 flex-wrap">
         <button onClick={() => handleAction('confirm')}
-          className="flex-1 flex items-center justify-center gap-2 bg-[#b8960c] text-white border-2 border-[#a08509] text-[13px] font-bold cursor-pointer hover:bg-[#a08509] shadow-[0_2px_8px_rgba(184,150,12,0.25)] transition-all active:scale-[0.98]"
-          style={{ height: 44, padding: '0 20px', borderRadius: 12 }}
+          className="cy-btn is-primary"
+          style={{ flex: '1 1 160px', minHeight: 44 }}
           title="Save the selected tier/proposal. Does NOT change the quote status.">
           <Check size={18} /> Save Tier
         </button>
         {quote &&
           ['draft', 'founder_review'].includes(quote.status) && (
           <button onClick={() => handleAction('approve_send')}
-            className="flex items-center justify-center gap-2 bg-[#16a34a] text-white border-2 border-[#15803d] text-[13px] font-bold cursor-pointer hover:bg-[#15803d] shadow-[0_2px_8px_rgba(22,163,74,0.25)] transition-all active:scale-[0.98]"
-            style={{ height: 44, padding: '0 20px', borderRadius: 12 }}
+            className="cy-btn is-teal is-pulse"
+            style={{ minHeight: 44 }}
             title="Move draft/founder_review -> sent. Requires PIN via modal.">
             <ShieldCheck size={18} /> Approve &amp; Send
           </button>
@@ -1260,16 +1281,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
 
 function ActionBtn({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick?: () => void }) {
   return (
-    <button onClick={onClick}
-      className="flex items-center gap-1.5 font-bold text-[#555] cursor-pointer hover:bg-[#fdf8eb] hover:border-[#b8960c] hover:text-[#b8960c] transition-all active:scale-[0.97]"
-      style={{
-        height: 44,
-        padding: '0 16px',
-        borderRadius: 12,
-        border: '1.5px solid #ece8e0',
-        background: '#faf9f7',
-        fontSize: 12,
-      }}>
+    <button type="button" onClick={onClick} className="cy-btn" style={{ minHeight: 44 }}>
       {icon} {label}
     </button>
   );
