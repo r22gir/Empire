@@ -31,6 +31,10 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  /** Uploaded image filename sent with this user turn (/files/upload). */
+  image?: string;
+  /** Archived copy from the Max session journal (/max/sessions/attachment/...). */
+  imageUrl?: string;
   model?: string;
   latency?: string;
   toolResults?: ToolResult[];

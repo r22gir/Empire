@@ -493,7 +493,11 @@ export default function CommandCenter() {
     const msgs = chat.messages.filter(m => m.id !== 'welcome');
     if (msgs.length >= 2 && msgs[msgs.length - 1]?.role === 'assistant') {
       const chatId = (chat as any).chatId;
-      const payload = msgs.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp }));
+      const payload = msgs.map(m => ({
+        role: m.role, content: m.content, timestamp: m.timestamp,
+        ...(m.image ? { image: m.image } : {}),
+        ...(m.imageUrl ? { imageUrl: m.imageUrl } : {}),
+      }));
       if (chatId) {
         fetch(API + `/chats/${chatId}`, {
           method: 'PUT',
@@ -511,6 +515,38 @@ export default function CommandCenter() {
   }, [chat.messages]);
 
   const handleLoadChat = useCallback(async (chatId: string) => {
+    // "session:<conversation_id>" = full Max session from the session
+    // journal (studio, Telegram, voice), images included. Loading it keeps
+    // the same conversation_id, so the chat can be continued.
+    if (chatId.startsWith('session:')) {
+      const conversationId = chatId.slice('session:'.length);
+      try {
+        const res = await fetch(API + `/max/sessions/${encodeURIComponent(conversationId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const msgs = (data.turns || [])
+            .filter((t: any) => t.role === 'user' || t.role === 'assistant')
+            .map((t: any, i: number) => {
+              const img = (t.attachments || []).find((a: any) => a.sha256);
+              const when = t.created_at ? new Date(t.created_at) : null;
+              return {
+                id: `session-${i}`,
+                role: t.role,
+                content: t.content || (img ? '' : '(empty)'),
+                timestamp: when ? when.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
+                model: t.model || undefined,
+                imageUrl: img ? `${API}/max/sessions/attachment/${String(img.sha256).slice(0, 24)}` : undefined,
+                toolResults: (t.tool_calls || []).length
+                  ? t.tool_calls.map((c: any) => ({ tool: c.tool, success: !!c.success, result: c.summary, error: c.error || undefined }))
+                  : undefined,
+              };
+            });
+          chat.loadMessages(msgs, conversationId);
+          setActiveScreen('chat');
+        }
+      } catch { /* silent */ }
+      return;
+    }
     try {
       const res = await fetch(API + `/chats/${chatId}`);
       if (res.ok) {
@@ -521,6 +557,8 @@ export default function CommandCenter() {
           content: m.content,
           timestamp: m.timestamp || '',
           model: m.model,
+          image: m.image || m.image_filename || undefined,
+          imageUrl: m.imageUrl || undefined,
         }));
         chat.loadMessages(msgs, chatId);
         setActiveScreen('chat');

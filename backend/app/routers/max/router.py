@@ -2543,6 +2543,77 @@ async def _chat_with_max_service(
     _chat_start: Optional[float] = None,
     _response_id: str = "",
 ) -> ChatResponse:
+    """Journaling wrapper around the shared chat core (max-sessions 2026-10-04).
+
+    Every caller (/chat, Telegram in-process, avatar, WhatsApp) goes
+    through here, so every exchange — including early returns, refusals
+    and exceptions — lands in the session journal with the image copied.
+    Best-effort: journal failures never change the response.
+    """
+    from datetime import datetime as _jdt, timezone as _jtz
+    _j_start = _jdt.now(_jtz.utc)
+    _j_message = request.message
+    _j_image = request.image_filename
+    _j_raw_channel = request.channel
+    _j_conv = request.conversation_id
+    _j_channel = canonical_channel if canonical_channel in ("telegram", "whatsapp") else (_j_raw_channel or canonical_channel)
+    try:
+        resp = await _chat_with_max_service_impl(
+            request,
+            canonical_channel=canonical_channel,
+            canonical_chat_id=canonical_chat_id,
+            canonical_founder=canonical_founder,
+            background_tasks=background_tasks,
+            _chat_start=_chat_start,
+            _response_id=_response_id,
+        )
+    except Exception as _j_exc:
+        _journal_service_exchange(_j_conv, _j_channel, _j_message, _j_image, _j_start,
+                                  text=f"[error] {type(_j_exc).__name__}: {str(_j_exc)[:300]}",
+                                  tool_results=None, model=None, status="error",
+                                  raw_channel=_j_raw_channel, presentation=request.presentation)
+        raise
+    _journal_service_exchange(
+        _j_conv, _j_channel, _j_message, _j_image, _j_start,
+        text=getattr(resp, "response", None) if not isinstance(resp, dict) else resp.get("response"),
+        tool_results=getattr(resp, "tool_results", None) if not isinstance(resp, dict) else resp.get("tool_results"),
+        model=getattr(resp, "model_used", None) if not isinstance(resp, dict) else resp.get("model_used"),
+        status="ok", raw_channel=_j_raw_channel, presentation=request.presentation,
+    )
+    return resp
+
+
+def _journal_service_exchange(conv_id, channel, message, image_filename, started_at, *, text, tool_results,
+                              model, status, raw_channel=None, presentation=False) -> None:
+    try:
+        from app.services.max.session_journal import record_exchange
+        record_exchange(
+            conversation_id=conv_id or f"studio-{uuid.uuid4().hex[:12]}",
+            channel=channel,
+            user_text=message,
+            assistant_text=text or "",
+            image_filename=image_filename,
+            tool_results=tool_results,
+            model=model,
+            started_at=started_at,
+            endpoint="/max/chat" if channel not in ("telegram", "whatsapp") else f"{channel}:in-process",
+            status=status,
+            user_metadata={"raw_channel": raw_channel, "presentation": bool(presentation)},
+        )
+    except Exception as exc:
+        logger.debug(f"[session_journal] /chat journal failed: {exc}")
+
+
+async def _chat_with_max_service_impl(
+    request: ChatRequest,
+    *,
+    canonical_channel: str,
+    canonical_chat_id: Optional[str],
+    canonical_founder: bool,
+    background_tasks: Optional[BackgroundTasks] = None,
+    _chat_start: Optional[float] = None,
+    _response_id: str = "",
+) -> ChatResponse:
     """D45 commit 2 — shared chat core for /chat (HTTP) and the Telegram
     in-process path.
 
@@ -3777,7 +3848,28 @@ async def _chat_with_max_service(
 
 @router.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
-    """SSE streaming endpoint for MAX chat with brain context."""
+    """SSE streaming endpoint for MAX chat with brain context.
+
+    max-sessions 2026-10-04: every response path (including guardrail
+    refusals and early returns) is wrapped so the exchange is journaled
+    with what the founder actually saw, the tool summaries and a copy of
+    any attached image. The stream itself is passed through unchanged.
+    """
+    from datetime import datetime as _jdt, timezone as _jtz
+    _j_start = _jdt.now(_jtz.utc)
+    _j_req = request.model_copy() if hasattr(request, "model_copy") else request.copy()
+    resp = await _chat_stream_impl(request)
+    try:
+        if isinstance(resp, StreamingResponse):
+            from app.services.max.session_journal import journal_stream
+            resp.body_iterator = journal_stream(resp.body_iterator, request=_j_req, started_at=_j_start)
+    except Exception as exc:
+        logger.debug(f"[session_journal] stream wrap failed: {exc}")
+    return resp
+
+
+async def _chat_stream_impl(request: ChatRequest):
+    """SSE streaming endpoint body (see chat_stream)."""
     msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
     founder = is_founder_message(msg_ctx)
     if founder:
@@ -6712,3 +6804,10 @@ async def get_memory_status_endpoint():
     """
     from app.services.max.control_plane import get_memory_status
     return get_memory_status()
+
+
+# max-sessions 2026-10-04 — session log + daily export endpoints
+# (/max/sessions, /max/sessions/{id}, /max/sessions/attachment/{sha},
+#  POST /max/sessions/export?date=YYYY-MM-DD). See app/routers/max/sessions.py.
+from app.routers.max.sessions import router as _sessions_router  # noqa: E402
+router.include_router(_sessions_router)

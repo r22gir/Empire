@@ -813,8 +813,20 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               const { cleanContent, toolCalls } = msg.role === 'assistant'
                 ? parseToolBlocks(msg.content)
                 : { cleanContent: msg.content, toolCalls: [] };
+              const msgImage = msg.imageUrl
+                || (msg.image ? `${API}/files/view/images/${encodeURIComponent(msg.image)}` : '');
               return (
                 <>
+                  {msgImage && (
+                    <a href={msgImage} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 6, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
+                      <img
+                        src={msgImage}
+                        alt={msg.image || 'attached image'}
+                        loading="lazy"
+                        style={{ maxWidth: 240, maxHeight: 240, borderRadius: 10, border: '1px solid var(--border)', objectFit: 'cover' }}
+                      />
+                    </a>
+                  )}
                   {cleanContent && (
                     <div style={{
                       padding: '14px 18px',

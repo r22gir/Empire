@@ -100,6 +100,7 @@ export function useChat() {
       role: 'user',
       content: input,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      ...(imageFilename ? { image: imageFilename } : {}),
     };
     const current = messagesRef.current;
     const newMsgs = [...current, userMsg];
