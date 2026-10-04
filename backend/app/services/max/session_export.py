@@ -149,6 +149,7 @@ def load_journal(day: date, data_dir: Path) -> list[dict]:
             "status": r.get("status") or "ok",
             "latency_ms": r.get("latency_ms"),
             "endpoint": r.get("endpoint"),
+            "metadata": r.get("metadata") if isinstance(r.get("metadata"), dict) else {},
             "ts": ts,
         })
     return turns
@@ -241,6 +242,20 @@ def merge_sources(journal: list[dict], legacy: list[dict]) -> dict[str, list[dic
     for sid in sessions:
         sessions[sid].sort(key=lambda t: (t["ts"] or datetime.min.replace(tzinfo=timezone.utc)))
     return sessions
+
+
+def traffic_exclusion(turns: list[dict]) -> Optional[str]:
+    """Why a session is not Rafael's, or None. Automated/test tags come from
+    the journal (client address, user agent, test client) or, for older or
+    legacy rows, from the prompt rule (e.g. the Continuity audit button)."""
+    users = [{"text": t["text"], "metadata": t.get("metadata") or {}} for t in turns
+             if t["role"] == "user" and (t["text"] or "").strip()]
+    tag = sj.session_traffic(users)
+    if tag["traffic"] != "real":
+        return f"{tag['traffic']}:{'+'.join(tag['reasons']) or 'tagged'}"
+    if is_suspected_test(turns):
+        return "suspected_test_traffic"
+    return None
 
 
 def is_suspected_test(turns: list[dict]) -> bool:
@@ -382,8 +397,9 @@ def export_day(day: date | str, *, out_root: Optional[Path] = None, data_dir: Op
         "counts": {}, "session_index": [], "excluded_sessions": [],
     }
     for sid, turns in sorted(sessions.items(), key=lambda kv: kv[1][0]["ts"] or datetime.min.replace(tzinfo=timezone.utc)):
-        if not include_tests and is_suspected_test(turns):
-            summary["excluded_sessions"].append({"session": sid, "reason": "suspected_test_traffic",
+        reason = None if include_tests else traffic_exclusion(turns)
+        if reason:
+            summary["excluded_sessions"].append({"session": sid, "reason": reason,
                                                  "turns": len(turns), "first_text": sj._short(next((t["text"] for t in turns if t["role"] == "user"), ""), 80)})
             continue
         channel = next((t["channel"] for t in turns if t["channel"]), "studio")
@@ -436,6 +452,10 @@ def export_day(day: date | str, *, out_root: Optional[Path] = None, data_dir: Op
                                          "tool_calls": n_tools, **{f"{k}_count": len(v) for k, v in flags.items()}})
     summary["counts"] = {k: len(summary[k]) for k in ("tool_errors", "refusals", "cant_replies", "repeats", "corrections")}
     summary["counts"]["excluded_sessions"] = len(summary["excluded_sessions"])
+    by_reason: dict[str, int] = {}
+    for e in summary["excluded_sessions"]:
+        by_reason[e["reason"]] = by_reason.get(e["reason"], 0) + 1
+    summary["counts"]["excluded_by_reason"] = by_reason
     (tmp_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str, ensure_ascii=False))
     if day_dir.exists():
         shutil.rmtree(day_dir)

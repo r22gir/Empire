@@ -111,7 +111,17 @@ except ImportError:
     access_controller = None
 
 logger = logging.getLogger("max.api")
-router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
+try:  # max-sessions: tag automated/test chats in the session journal
+    from fastapi import Depends as _Depends, Request as _Request
+
+    async def _journal_capture_client(request: _Request) -> None:
+        from app.services.max.session_journal import capture_client
+        await capture_client(request)
+
+    _ROUTER_DEPS = [_Depends(_journal_capture_client)]
+except Exception:  # pragma: no cover
+    _ROUTER_DEPS = []
+router = APIRouter(prefix="/max", tags=["MAX AI Assistant"], dependencies=_ROUTER_DEPS)
 
 
 def _safe_dumps(obj, **kwargs):

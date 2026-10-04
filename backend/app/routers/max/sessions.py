@@ -55,9 +55,12 @@ async def export_sessions(date_: Optional[str] = Query(None, alias="date"), incl
 
 
 @router.get("")
-async def list_sessions(days: int = 7, limit: int = 100):
+async def list_sessions(days: int = 7, limit: int = 100, include_automated: bool = False):
+    """Rafael's sessions; automated/test traffic (Continuity audit button,
+    scripts/headless browsers on the server, test clients) is hidden unless
+    include_automated=true. Nothing is deleted."""
     from app.services.max.session_journal import list_sessions as _ls
-    return {"sessions": _ls(days=days, limit=limit)}
+    return {"sessions": _ls(days=days, limit=limit, include_automated=include_automated)}
 
 
 @router.get("/attachment/{sha}")

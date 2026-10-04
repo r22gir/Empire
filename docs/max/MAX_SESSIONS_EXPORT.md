@@ -29,7 +29,28 @@ Hooks:
   wrapper journals the reply or the exception.
 - Live voice: `VoiceTranscript._write` mirrors every user/Max line, tool call and
   call start/end/summary into the journal.
-- Under pytest the journal is off unless `EMPIRE_MAX_JOURNAL_DB` is set.
+- Under pytest the journal is off unless `EMPIRE_MAX_JOURNAL_DB` is set. The test conftest
+  always forces it to a temp DB (see `docs/TEST_ISOLATION.md`).
+
+## Traffic tags: Rafael vs automated/test (2026-10-04)
+
+No rows are ever dropped. Each exchange is *tagged*. The user row's `metadata_json` gets
+`traffic` (`real` | `automated` | `test`), `reasons`, and, for HTTP calls, `client`
+(`ip`, `forwarded_for`, `user_agent`). The `/max` router captures the caller through a
+FastAPI dependency. A turn counts as automated when any of these holds:
+
+- `continuity_audit_prompt`: the text is the Studio Continuity panel's "Run audit"
+  command, `what continuity packet is loaded`.
+- `local_host_client`: the client address is the server itself (loopback, or EmpireDell's
+  own LAN/Tailscale address, e.g. 100.110.233.75). That means scripts and headless browsers
+  on the Dell, not Rafael's phone or laptop.
+- `automated_user_agent`: the user agent is HeadlessChrome, Playwright, curl,
+  python-requests/httpx, node-fetch and similar.
+
+The turn is tagged `test` when the client is a test client (`testclient`).
+
+A session is left out of "Rafael's sessions" only when **every** user turn is
+automated/test. Older rows that have no tag are judged by the prompt rule.
 
 ## Daily export
 
@@ -45,9 +66,11 @@ Hooks:
 
 Sources: journal first. For older dates, or turns from before the journal existed,
 `unified_messages` is used and referenced images are found in the upload dirs and
-archived. Sessions where *every* user line is a verbatim string from
-`backend/tests` are treated as test traffic and listed under `excluded_sessions`
-(`--include-tests` keeps them).
+archived. Two kinds of session go under `excluded_sessions`, each with a `reason`
+(`counts.excluded_by_reason` totals them), and `--include-tests` keeps both:
+automated/test sessions (traffic tags above, e.g. `automated:continuity_audit_prompt`),
+and sessions where every user line is a verbatim string from `backend/tests`
+(`suspected_test_traffic`).
 
 Run it for a date:
 
@@ -62,7 +85,8 @@ Nightly: `max-sessions-export.timer` (user unit, copies in `systemd/`) runs at
 
 ## API
 
-- `GET  /api/v1/max/sessions?days=7`: recent journaled sessions
+- `GET  /api/v1/max/sessions?days=7`: Rafael's recent journaled sessions, each with `traffic`.
+  Automated/test sessions are hidden unless you pass `&include_automated=true`.
 - `GET  /api/v1/max/sessions/{conversation_id}`: full turns, images as URLs
 - `GET  /api/v1/max/sessions/attachment/{sha24}`: archived image/file
 - `POST /api/v1/max/sessions/export?date=YYYY-MM-DD`: write the export (403 in a family edition)

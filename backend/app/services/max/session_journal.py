@@ -302,6 +302,104 @@ def archive_attachment(filename: Optional[str], *, kind: str = "image", source: 
     return rec
 
 
+# ── traffic classification (Rafael vs automated / test) ──────────────────
+# Rows are never dropped; each exchange is tagged so the daily export and the
+# LOG tab can leave automated/test traffic out of "Rafael's sessions".
+AUTOMATED_PROMPTS = frozenset({
+    # Studio ContinuityPanel "Run audit" button posts this verbatim.
+    "what continuity packet is loaded",
+})
+_AUTOMATED_UA = re.compile(
+    r"headlesschrome|playwright|puppeteer|selenium|webdriver|python-requests|python-httpx|httpx/|aiohttp|"
+    r"python-urllib|curl/|wget/|node-fetch|undici|axios/|go-http-client|okhttp|testclient|pytest",
+    re.I,
+)
+_LOCAL_IPS = frozenset({"127.0.0.1", "::1", "localhost", "0.0.0.0", "127.0.1.1"})
+_own_ips_cache: Optional[frozenset] = None
+
+try:
+    from contextvars import ContextVar
+    _CURRENT_CLIENT: "ContextVar[Optional[dict]]" = ContextVar("max_journal_client", default=None)
+except Exception:  # pragma: no cover
+    _CURRENT_CLIENT = None
+
+
+def own_host_ips() -> frozenset:
+    """Loopback plus this machine's own LAN / Tailscale addresses. A chat
+    whose client address is one of these came from a script or headless
+    browser on the server itself, not from Rafael's phone or laptop."""
+    global _own_ips_cache
+    if _own_ips_cache is None:
+        ips = set(_LOCAL_IPS)
+        try:
+            import psutil
+            for addrs in psutil.net_if_addrs().values():
+                for a in addrs:
+                    if a.address and a.family.name in ("AF_INET", "AF_INET6"):
+                        ips.add(a.address.split("%")[0])
+        except Exception:
+            pass
+        _own_ips_cache = frozenset(ips)
+    return _own_ips_cache
+
+
+def client_info(request: Any) -> dict:
+    try:
+        headers = getattr(request, "headers", {}) or {}
+        client = getattr(request, "client", None)
+        return {
+            "ip": getattr(client, "host", None),
+            "forwarded_for": (headers.get("x-forwarded-for") or "")[:120] or None,
+            "user_agent": (headers.get("user-agent") or "")[:160] or None,
+        }
+    except Exception:
+        return {}
+
+
+try:
+    from starlette.requests import Request as _HTTPRequest
+except Exception:  # pragma: no cover
+    _HTTPRequest = Any  # type: ignore[misc,assignment]
+
+
+async def capture_client(request: _HTTPRequest) -> None:
+    """FastAPI dependency on the /max router: remember who is calling so the
+    journal can tag automated traffic. Async on purpose (same task as the
+    endpoint, so the context variable is visible to it)."""
+    if _CURRENT_CLIENT is not None:
+        _CURRENT_CLIENT.set(client_info(request))
+
+
+def current_client() -> Optional[dict]:
+    return _CURRENT_CLIENT.get() if _CURRENT_CLIENT is not None else None
+
+
+def _norm_prompt(text: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower()).rstrip(" ?.!")
+
+
+def classify_traffic(user_text: Optional[str], client: Optional[dict] = None) -> dict:
+    """{"traffic": "real" | "automated" | "test", "reasons": [...]}"""
+    reasons: list[str] = []
+    test = False
+    client = client or {}
+    ip = str(client.get("ip") or "").split("%")[0]
+    if ip.startswith("::ffff:"):
+        ip = ip[7:]
+    ua = str(client.get("user_agent") or "")
+    if ip == "testclient" or "testclient" in ua.lower():
+        test = True
+        reasons.append("test_client")
+    if _norm_prompt(user_text) in AUTOMATED_PROMPTS:
+        reasons.append("continuity_audit_prompt")
+    if ua and _AUTOMATED_UA.search(ua):
+        reasons.append("automated_user_agent")
+    if ip and ip in own_host_ips():
+        reasons.append("local_host_client")
+    label = "test" if test else ("automated" if reasons else "real")
+    return {"traffic": label, "reasons": reasons}
+
+
 # ── writes ───────────────────────────────────────────────────────────────
 def record_turn(
     conversation_id: Optional[str],
@@ -370,8 +468,11 @@ def record_exchange(
     user_metadata: Optional[dict] = None,
     assistant_metadata: Optional[dict] = None,
     extra_attachments: Optional[list[dict]] = None,
+    client: Optional[dict] = None,
 ) -> Optional[str]:
-    """Record one user→Max exchange (two rows sharing exchange_uid)."""
+    """Record one user→Max exchange (two rows sharing exchange_uid).
+    The user row's metadata carries ``traffic`` (real/automated/test),
+    ``reasons`` and, for HTTP calls, ``client`` (ip, forwarded_for, user_agent)."""
     if not is_enabled():
         return None
     try:
@@ -385,6 +486,12 @@ def record_exchange(
                 attachments.append(rec)
         attachments.extend(extra_attachments or [])
         latency = int((end - start).total_seconds() * 1000) if started_at else None
+        client = client if client is not None else current_client()
+        tag = classify_traffic(user_text, client)
+        user_metadata = {**(user_metadata or {}), **tag}
+        if client:
+            user_metadata["client"] = client
+        assistant_metadata = {**(assistant_metadata or {}), "traffic": tag["traffic"]}
         record_turn(conversation_id, channel, "user", user_text, attachments=attachments, endpoint=endpoint,
                     created_at=start, exchange_uid=exchange_uid, input_channel=channel, metadata=user_metadata)
         record_turn(conversation_id, channel, "assistant", assistant_text, model=model,
@@ -515,7 +622,57 @@ def turns_for_date(local_date: str, *, db_path: Optional[Path] = None, edition_n
     return [_row(r) for r in rows]
 
 
-def list_sessions(days: int = 7, limit: int = 100, *, db_path: Optional[Path] = None) -> list[dict]:
+def session_traffic(user_rows: Iterable[dict]) -> dict:
+    """A session is automated/test when EVERY user turn is (by its stored tag,
+    or for older untagged rows by the prompt rule)."""
+    labels, reasons = [], []
+    for r in user_rows:
+        md = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+        if not md and r.get("metadata_json"):
+            try:
+                md = json.loads(r["metadata_json"]) or {}
+            except Exception:
+                md = {}
+        tag = md.get("traffic")
+        if tag in (None, "real"):
+            fresh = classify_traffic(r.get("content") if "content" in r else r.get("text"), md.get("client"))
+            tag, rs = fresh["traffic"], fresh["reasons"]
+        else:
+            rs = md.get("reasons") or []
+        labels.append(tag)
+        reasons.extend(rs)
+    if labels and all(l != "real" for l in labels):
+        return {"traffic": "test" if "test" in labels else "automated", "reasons": sorted(set(reasons))}
+    return {"traffic": "real", "reasons": []}
+
+
+def list_sessions(days: int = 7, limit: int = 100, *, db_path: Optional[Path] = None,
+                  include_automated: bool = False) -> list[dict]:
+    """Recent sessions (newest first), each tagged with ``traffic``.
+    Automated/test sessions are left out unless ``include_automated``."""
+    rows = _list_sessions_raw(days, limit if include_automated else 500, db_path=db_path)
+    if not rows:
+        return []
+    path = Path(db_path) if db_path else journal_db_path()
+    conn = _connect(path)
+    try:
+        out = []
+        for r in rows:
+            users = [dict(u) for u in conn.execute(
+                "SELECT content, metadata_json FROM max_session_turns WHERE conversation_id = ? AND role = 'user' "
+                "AND edition = 'main' ORDER BY id LIMIT 200", (r["conversation_id"],)).fetchall()]
+            tag = session_traffic(users)
+            if tag["traffic"] != "real" and not include_automated:
+                continue
+            out.append({**r, "traffic": tag["traffic"], "traffic_reasons": tag["reasons"]})
+            if len(out) >= max(1, min(int(limit), 500)):
+                break
+    finally:
+        conn.close()
+    return out
+
+
+def _list_sessions_raw(days: int = 7, limit: int = 100, *, db_path: Optional[Path] = None) -> list[dict]:
     path = Path(db_path) if db_path else journal_db_path()
     if not path.exists():
         return []

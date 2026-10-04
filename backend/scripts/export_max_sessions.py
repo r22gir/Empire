@@ -8,6 +8,13 @@
 
 Writes ~/empire-data/max-sessions/YYYY-MM-DD/ (per-session .jsonl + .md,
 images/, summary.json). Main studio only — refuses inside a family edition.
+
+Automated/test traffic is not counted as Rafael's: sessions whose every user
+turn is tagged automated/test (Continuity panel audit prompt, scripts or
+headless browsers on the server itself, test clients; see
+session_journal.classify_traffic) or is a verbatim test-suite string are
+listed under summary.json "excluded_sessions" with a reason. Nothing is
+deleted; --include-tests exports them too.
 Reads local SQLite files only; makes no network calls.
 
 The max package __init__ pulls in the AI router and Telegram bot, so this

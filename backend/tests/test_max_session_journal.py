@@ -126,3 +126,71 @@ def test_family_edition_refused(env, monkeypatch, tmp_path):
     monkeypatch.delenv("EMPIRE_EDITION")
     with pytest.raises(se.FamilyEditionError):
         se.export_day("2026-10-04", out_root=tmp_path / "o", data_dir=Path("/data/maxine"))
+
+
+# ── traffic tagging (automated / test chats are kept but not counted as Rafael's) ──
+
+def test_classify_traffic_rules():
+    from app.services.max import session_journal as sj
+    assert sj.classify_traffic("price the Willard drapes", {"ip": "50.202.56.37", "user_agent": "Mozilla/5.0 (iPhone)"})["traffic"] == "real"
+    a = sj.classify_traffic("What continuity packet is loaded?", {"ip": "50.202.56.37"})
+    assert a["traffic"] == "automated" and "continuity_audit_prompt" in a["reasons"]
+    assert sj.classify_traffic("hello", {"ip": "127.0.0.1"})["reasons"] == ["local_host_client"]
+    assert "automated_user_agent" in sj.classify_traffic("hello", {"ip": "100.102.84.127", "user_agent": "Mozilla/5.0 HeadlessChrome/147"})["reasons"]
+    assert sj.classify_traffic("hello", {"ip": "testclient", "user_agent": "testclient"})["traffic"] == "test"
+    assert sj.classify_traffic("hello", None)["traffic"] == "real"
+
+
+def test_exchange_tagged_with_client_and_listing_hides_automated(env):
+    from app.services.max import session_journal as sj
+    sj.record_exchange(conversation_id="real-1", channel="web", user_text="price the Willard drapes",
+                       assistant_text="ok", client={"ip": "100.102.84.127", "user_agent": "Mozilla/5.0 (iPhone)"})
+    sj.record_exchange(conversation_id="audit-1", channel="web", user_text="what continuity packet is loaded",
+                       assistant_text="Continuity audit completed.", client={"ip": "50.202.56.37"})
+    sj.record_exchange(conversation_id="local-1", channel="web", user_text="is openclaw online",
+                       assistant_text="yes", client={"ip": "127.0.0.1", "user_agent": "node-fetch"})
+    u = sj.get_session("audit-1")[0]
+    assert u["metadata"]["traffic"] == "automated" and u["metadata"]["client"]["ip"] == "50.202.56.37"
+    assert sj.get_session("real-1")[0]["metadata"]["traffic"] == "real"
+    assert [s["conversation_id"] for s in sj.list_sessions()] == ["real-1"]
+    every = {s["conversation_id"]: s["traffic"] for s in sj.list_sessions(include_automated=True)}
+    assert every == {"real-1": "real", "audit-1": "automated", "local-1": "automated"}
+
+
+def test_export_excludes_automated_sessions_but_keeps_rows(env, tmp_path):
+    from app.services.max import session_journal as sj
+    from app.services.max import session_export as se
+    sj.record_exchange(conversation_id="real-2", channel="web", user_text="draft the Osteria quote",
+                       assistant_text="Drafted.", client={"ip": "50.202.56.37", "user_agent": "Mozilla/5.0"})
+    # an older, untagged row (recorded before tagging existed) is caught by the prompt rule
+    sj.record_turn("audit-old", "web", "user", "what continuity packet is loaded")
+    sj.record_turn("audit-old", "web", "assistant", "Continuity audit completed.")
+    today = sj.to_local(datetime.now(timezone.utc)).date()
+    out = tmp_path / "out"
+    summary = se.export_day(today, out_root=out, data_dir=env)
+    ids = [s["session_id"] for s in summary["session_index"]]
+    assert ids == ["real-2"]
+    reasons = {e["session"]: e["reason"] for e in summary["excluded_sessions"]}
+    assert reasons["audit-old"].startswith("automated:") and "continuity_audit_prompt" in reasons["audit-old"]
+    assert summary["counts"]["excluded_by_reason"]
+    assert len(sj.get_session("audit-old")) == 2  # nothing deleted
+    full = se.export_day(today, out_root=tmp_path / "out2", data_dir=env, include_tests=True)
+    assert {"real-2", "audit-old"} <= {s["session_id"] for s in full["session_index"]}
+
+
+def test_max_router_captures_client_for_journal(env):
+    from fastapi import FastAPI, APIRouter, Depends, Request
+    from fastapi.testclient import TestClient
+    from app.services.max import session_journal as sj
+    r = APIRouter(dependencies=[Depends(sj.capture_client)])
+
+    @r.post("/x")
+    async def x():
+        sj.record_exchange(conversation_id="via-http", channel="web", user_text="hi", assistant_text="hey")
+        return {"ok": True}
+
+    app = FastAPI()
+    app.include_router(r)
+    assert TestClient(app).post("/x").json() == {"ok": True}
+    md = sj.get_session("via-http")[0]["metadata"]
+    assert md["client"]["ip"] == "testclient" and md["traffic"] == "test"
