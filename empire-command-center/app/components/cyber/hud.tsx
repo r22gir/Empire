@@ -7,6 +7,7 @@
  */
 import '../../theme/cyber.css';
 import '../../theme/cyber-hud.css';
+import '../../theme/cyber-calm.css';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 export type Tone = 'cyan' | 'teal' | 'amber' | 'mag' | 'violet' | 'blue' | 'muted';

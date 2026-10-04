@@ -189,7 +189,6 @@ function CyberMenu({ sysLine }: { sysLine: ReactNode }) {
                   <span className="rg-tab-ico" style={{ color: item.color }}>{sizedIcon(item.icon, 15)}</span>
                   <span className="rg-tab-name">{item.name}</span>
                   {item.status !== 'active' && <span className="rg-tab-st">{item.status}</span>}
-                  {n % 5 === 2 && <span className="rg-glitch" style={{ animationDelay: `${(n * 1.3) % 7}s` }} />}
                 </a>
               );
             })}
@@ -417,12 +416,12 @@ export default function RingPreview() {
       const list: any[] = od.overdue_invoices || [];
       const oldest = [...list].sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))[0];
       out.push({ key: 'overdue', tone: 'urgent', icon: <AlertTriangle size={14} />, title: 'Invoice recovery', action: 'REVIEW',
-        detail: `${num(od.count)} overdue invoice${num(od.count) === 1 ? '' : 's'} totaling ${money(num(od.total_outstanding))}${oldest ? ` · oldest ${oldest.invoice_number || ''} due ${oldest.due_date || '?'}` : ''}.`, href: '/classic?screen=invoices', src: 'payments/overdue' });
+        detail: `${num(od.count)} overdue invoice${num(od.count) === 1 ? '' : 's'} totaling ${money(num(od.total_outstanding))}${oldest ? ` · oldest ${oldest.invoice_number || ''} due ${oldest.due_date || '?'}` : ''}.`, href: oldest?.id ? `/?screen=invoice&id=${encodeURIComponent(oldest.id)}` : '/classic?screen=invoices', src: 'payments/overdue' });
     }
     if (staleQuotes && staleQuotes.length) {
       const o = [...staleQuotes].sort((a, b) => (ageDays(b.sent_at || b.updated_at) ?? 0) - (ageDays(a.sent_at || a.updated_at) ?? 0))[0];
       out.push({ key: 'stale', tone: 'warn', icon: <Zap size={14} />, title: 'Quote follow-up', action: 'FOLLOW UP',
-        detail: `${staleQuotes.length} sent quote${staleQuotes.length === 1 ? '' : 's'} with no answer in 7+ days (${money(staleQuotes.reduce((a, q) => a + num(q.total), 0))}). Oldest: ${o.quote_number || ''} ${o.customer_name || ''}.`, href: '/classic?product=workroom&section=quotes', src: 'quotes-v2' });
+        detail: `${staleQuotes.length} sent quote${staleQuotes.length === 1 ? '' : 's'} with no answer in 7+ days (${money(staleQuotes.reduce((a, q) => a + num(q.total), 0))}). Oldest: ${o.quote_number || ''} ${o.customer_name || ''}.`, href: o.id ? `/?screen=quote&id=${encodeURIComponent(o.id)}` : '/classic?product=workroom&section=quotes', src: 'quotes-v2' });
     }
     const da = ok('dailyActions');
     if (da && Array.isArray(da.actions)) {
@@ -430,7 +429,7 @@ export default function RingPreview() {
       da.actions.forEach((a: any) => { const t = String(a.type || 'action'); (byType[t] = byType[t] || []).push(a); });
       Object.entries(byType).forEach(([t, list]) => {
         const f = list[0];
-        const href = f.entity_type === 'invoice' ? '/classic?screen=invoices' : f.entity_type === 'quote' ? '/classic?product=workroom&section=quotes' : f.entity_type === 'job' ? '/classic?product=workroom&section=jobs' : f.entity_type === 'lead' ? '/classic?product=lead' : '/classic?product=owner&screen=dashboard';
+        const href = f.entity_id && (f.entity_type === 'invoice' || f.entity_type === 'quote') ? `/?screen=${f.entity_type}&id=${encodeURIComponent(f.entity_id)}` : f.entity_type === 'invoice' ? '/classic?screen=invoices' : f.entity_type === 'quote' ? '/classic?product=workroom&section=quotes' : f.entity_type === 'job' ? '/classic?product=workroom&section=jobs' : f.entity_type === 'lead' ? '/classic?product=lead' : '/classic?product=owner&screen=dashboard';
         out.push({ key: `da-${t}`, tone: 'info', icon: t === 'send_reminder' ? <Receipt size={14} /> : <FileText size={14} />,
           title: t === 'send_quote' ? 'Quotes ready to send' : t === 'send_reminder' ? 'Payment reminders' : titleCase(t),
           action: t === 'send_quote' ? 'OPEN QUOTES' : 'OPEN',
@@ -446,7 +445,7 @@ export default function RingPreview() {
         const t = v.includes('T') ? parseDate(v) : null;
         out.push({ key: `up-${j.id}-${f}`, tone: d === today ? 'urgent' : 'info', icon: <CalendarClock size={14} />, action: 'OPEN JOB',
           title: `${f === 'install_date' ? 'Install' : f === 'site_visit_date' ? 'Site visit' : 'Scheduled'} ${when}${t ? ` ${t.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}`,
-          detail: `${j.job_number || ''} ${j.title || j.client_name || ''}`.trim(), href: j.business_unit === 'woodcraft' ? '/classic?product=craft&section=jobs' : '/classic?product=workroom&section=jobs', src: 'jobs' });
+          detail: `${j.job_number || ''} ${j.title || j.client_name || ''}`.trim(), href: j.quote_id ? `/?screen=quote&id=${encodeURIComponent(j.quote_id)}` : j.business_unit === 'woodcraft' ? '/classic?product=craft&section=jobs' : '/classic?product=workroom&section=jobs', src: 'jobs' });
       });
     }
     const fq = ok('followups'), sl = ok('staleLeads');
@@ -493,6 +492,11 @@ export default function RingPreview() {
                 <>
                   <div className="rg-big"><CountMoney value={num(od.total_outstanding)} reduced={reduced} /></div>
                   <div className="rg-sub">{num(od.count)} invoice{num(od.count) === 1 ? '' : 's'} past due</div>
+                  {(od.overdue_invoices || []).slice().sort((a: any, b: any) => num(b.days_overdue) - num(a.days_overdue)).slice(0, 3).map((inv: any) => (
+                    <a key={inv.id} href={`/?screen=invoice&id=${encodeURIComponent(inv.id)}`} className="rg-kv rg-rowlink" title={`Open ${inv.invoice_number || 'invoice'}`}>
+                      <span>{inv.invoice_number || 'Invoice'}{inv.client_name || inv.customer_name ? ` · ${String(inv.client_name || inv.customer_name).slice(0, 22)}` : ''}</span><b>{num(inv.days_overdue)}d</b>
+                    </a>
+                  ))}
                   <a href="/?screen=invoices" className="rg-link">{num(od.count) ? 'ACTION RECOMMENDED' : 'VIEW INVOICES'} <ArrowRight size={11} /></a>
                   <div className="rg-src" style={{ marginTop: 6 }}>payments/overdue · sent/partial invoices past due date</div>
                 </>
@@ -506,6 +510,11 @@ export default function RingPreview() {
                   <div className="rg-big"><CountInt value={awaiting.length} reduced={reduced} /></div>
                   <div className="rg-kv"><span>Total</span><b>{money(awaiting.reduce((a, q) => a + num(q.total), 0))}</b></div>
                   <div className="rg-kv"><span>7+ days, no answer</span><b>{staleQuotes!.length}</b></div>
+                  {awaiting.slice().sort((a: any, b: any) => (ageDays(b.sent_at || b.updated_at) ?? 0) - (ageDays(a.sent_at || a.updated_at) ?? 0)).slice(0, 3).map((q: any) => (
+                    <a key={q.id} href={`/?screen=quote&id=${encodeURIComponent(q.id)}`} className="rg-kv rg-rowlink" title={`Open ${q.quote_number || 'quote'}`}>
+                      <span>{q.quote_number || 'Quote'}{q.customer_name ? ` · ${String(q.customer_name).slice(0, 20)}` : ''}</span><b>{money(num(q.total))}</b>
+                    </a>
+                  ))}
                   <a href="/?product=workroom&section=quotes" className="rg-link">VIEW ALL <ArrowRight size={11} /></a>
                   <div className="rg-src" style={{ marginTop: 6 }}>quotes-v2 · status sent / proposal</div>
                 </>
@@ -528,6 +537,7 @@ export default function RingPreview() {
                   <div className="rg-kv" style={{ marginTop: 6 }}><span style={{ color: 'var(--rg-cyan)' }}>IN (payments)</span><b>{flow.hasIn ? money(flow.totalIn) : 'SIN DATOS'}</b></div>
                   <div className="rg-kv"><span style={{ color: 'var(--rg-mag)' }}>OUT (expenses)</span><b>{flow.hasOut ? money(flow.totalOut) : 'SIN DATOS'}</b></div>
                   <div className="rg-kv"><span>NET</span><b>{flow.hasIn && flow.hasOut ? `${flow.totalIn - flow.totalOut >= 0 ? '+' : ''}${money(flow.totalIn - flow.totalOut)}` : 'SIN DATOS'}</b></div>
+                  <a href="/?screen=invoices" className="rg-link">VIEW PAYMENTS <ArrowRight size={11} /></a>
                   <div className="rg-src" style={{ marginTop: 4 }}>finance/payments · finance/expenses (recorded expenses only)</div>
                 </>
               )}
@@ -548,6 +558,7 @@ export default function RingPreview() {
                       </>
                     );
                   })()}
+                  <a href={install.job.quote_id ? `/?screen=quote&id=${encodeURIComponent(install.job.quote_id)}` : '/?product=workroom&section=jobs'} className="rg-link">OPEN {install.job.quote_id ? 'JOB QUOTE' : 'JOB'} <ArrowRight size={11} /></a>
                   <div className="rg-src" style={{ marginTop: 4 }}>open-meteo · Washington, DC area</div>
                 </>
               )}
@@ -562,6 +573,7 @@ export default function RingPreview() {
                   <div className="rg-sub" style={{ marginTop: 4, color: overdueCount ? 'var(--rg-mag)' : 'var(--rg-teal)' }}>
                     {overdueCount ? `${money(num(od.total_outstanding))} of it overdue` : 'Nothing overdue'} · collected this month {money(num(fin.revenue?.mtd))}
                   </div>
+                  <a href="/?screen=invoices" className="rg-link" style={{ alignSelf: 'center' }}>OPEN INVOICES <ArrowRight size={11} /></a>
                   <div className="rg-src" style={{ marginTop: 4 }}>finance/dashboard · payments/overdue</div>
                 </>
               )}
@@ -570,7 +582,7 @@ export default function RingPreview() {
             <section className="rg-hud rg-a-team">
               <div className="rg-h"><h2><UsersRound size={14} /> Team status</h2></div>
               <NoData why="No crew / presence source in the backend (no on-site, in-office or offline data)" />
-              {mh && <div className="rg-kv" style={{ marginTop: 8 }}><span>AI desks online (Max, not people)</span><b>{num(mh.desks_online)}</b></div>}
+              {mh && <a href="/?screen=desks" className="rg-kv rg-rowlink" style={{ marginTop: 8 }} title="Open AI desks"><span>AI desks online (Max, not people)</span><b>{num(mh.desks_online)}</b></a>}
             </section>
           </div>
         </main>
