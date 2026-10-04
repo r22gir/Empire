@@ -709,6 +709,18 @@ async def get_system_prompt_with_brain(
     if live_context:
         base_prompt += f"\n\n## Live Brain Context\n{live_context}"
 
+    # Chief e brief (2026-10-04): nightly cross-business founder context from
+    # Chief e, Rafael's main edition ONLY (no-op for AMP/Max-e and Maxine, or
+    # when the file is missing). Capped and cached by mtime in the loader.
+    try:
+        from app.services.max.chief_e_brief import render_chief_e_section
+
+        chief_e = render_chief_e_section()
+        if chief_e:
+            base_prompt += f"\n\n{chief_e}"
+    except Exception as e:
+        logger.debug(f"Chief e brief unavailable: {e}")
+
     try:
         from app.services.max.brain.context_builder import ContextBuilder
 
