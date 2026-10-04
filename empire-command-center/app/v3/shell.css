@@ -35,7 +35,7 @@
 .v3-rail { position: fixed; left: 0; top: var(--v-band-h); bottom: 0; width: var(--v-rail-w); background: var(--v-band); border-right: 1px solid var(--v-bandline);
   display: flex; flex-direction: column; align-items: center; padding: 14px 0 12px; z-index: 55; color: var(--v-bandmut); overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
 .v3-rail::-webkit-scrollbar { display: none; }
-.v3-ri { width: 62px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0 5px; border-radius: 10px; color: var(--v-bandmut);
+.v3-ri { width: 62px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 0 4px; border-radius: 10px; color: var(--v-bandmut);
   position: relative; text-decoration: none; background: transparent; border: 0; cursor: pointer; flex: none; font-family: var(--v-sans); }
 .v3-ri .g { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.025); }
 .v3-ri span { font-size: 9.5px; letter-spacing: 0.01em; white-space: nowrap; }
@@ -45,7 +45,7 @@
 .v3-ri.on .g { border-color: var(--v-acc); background: rgba(255, 255, 255, 0.04); }
 .v3-ri b { position: absolute; top: 4px; right: 11px; width: 6px; height: 6px; border-radius: 50%; background: var(--v-acc); }
 .v3-rsep { width: 30px; height: 1px; background: var(--v-bandline); margin: 8px 0 6px; flex: none; }
-.v3-rlab { font: 500 8px/1 var(--v-mono); letter-spacing: 0.16em; color: #6b6f72; margin-bottom: 4px; flex: none; }
+.v3-rlab { font: 500 8px/1 var(--v-mono); letter-spacing: 0.16em; color: var(--v-bandmut); margin-bottom: 4px; flex: none; }
 .v3-rail .grow { margin-top: auto; padding-top: 8px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
 
 /* ---------- businesses / all modules sheet ---------- */

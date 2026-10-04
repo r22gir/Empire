@@ -1,3 +1,3 @@
 'use client';
-// /preview/ring now renders the same component as the home page (/).
+// /preview/ring: the previous home (module ring), kept for reference. "/" is now the Max home (components/home3).
 export { default } from '../../components/ring/RingHome';
