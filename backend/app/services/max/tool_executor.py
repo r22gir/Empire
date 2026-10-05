@@ -58,6 +58,21 @@ MAX_PER_BLOCK_ERRORS = 16
 DEFAULT_EMAIL_CC = ("rafa22giraldo@gmail.com",)
 DEFAULT_REPLY_TO = "max@empirebox.store"
 
+
+def _merge_standing_email_cc(to: str, cc) -> list[str]:
+    """Merge DEFAULT_EMAIL_CC into cc (deduped, case-insensitive)."""
+    cc_list: list[str] = []
+    if cc:
+        cc_list = [a.strip() for a in str(cc).split(",") if a.strip()]
+    seen = {(to or "").lower()}
+    for a in cc_list:
+        seen.add(a.lower())
+    for default_cc in DEFAULT_EMAIL_CC:
+        if default_cc.lower() not in seen:
+            cc_list.append(default_cc)
+            seen.add(default_cc.lower())
+    return cc_list
+
 # ── Dangerous Tool PIN Gate ───────────────────────────────────────
 # db_query removed 2026-08-31 (D52, founder ruling). It is read-only at the
 # connection level (mode=ro URI) and cannot write regardless of the SQL.
@@ -3146,8 +3161,12 @@ def _check_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         gmail_error = str(e)
 
     reauth = any(m in (gmail_error or "").lower() for m in ("invalid_grant", "expired or revoked", "token not found"))
-    gmail_status = ("Gmail OAuth token is expired or revoked (invalid_grant): Rafael needs to re-run Gmail auth for the backend"
-                    if reauth else f"Gmail read failed: {gmail_error}")
+    gmail_status = (
+        "Gmail OAuth token is expired or revoked (invalid_grant): inbox READ (check_email) needs "
+        "Rafael to re-run backend/gmail_auth.py against ~/.config/empirebox/gmail/. "
+        "Outbound send_email still uses SMTP and is separate — do not refuse send because of this."
+        if reauth else f"Gmail read failed: {gmail_error}"
+    )
     # Fallback: inbound mail store (webhook intake), read-only.
     store_hits: list = []
     try:
@@ -3232,16 +3251,7 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     # standing address. Merge DEFAULT_EMAIL_CC with any user-supplied
     # cc (deduped, case-insensitive). This is enforced in the tool,
     # NOT in the prompt, so the model cannot forget it.
-    cc_list: list[str] = []
-    if cc:
-        cc_list = [a.strip() for a in str(cc).split(",") if a.strip()]
-    seen = {to.lower()}
-    for a in cc_list:
-        seen.add(a.lower())
-    for default_cc in DEFAULT_EMAIL_CC:
-        if default_cc.lower() not in seen:
-            cc_list.append(default_cc)
-            seen.add(default_cc.lower())
+    cc_list = _merge_standing_email_cc(to, cc)
     if cc_list:
         cc_authorized = [
             (a, authorize_email_recipient(a))
@@ -3426,12 +3436,23 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "If you have any questions, please don't hesitate to reach out."
             )
 
+        # Standing CC (same policy as send_email)
+        cc_list = _merge_standing_email_cc(to, params.get("cc"))
+        if cc_list:
+            bad = [a for a in cc_list if not authorize_email_recipient(a)["recipient_authorized"]]
+            if bad:
+                return ToolResult(
+                    tool="send_quote_email", success=False,
+                    error=f"recipient_not_in_whitelist: cc contains non-allowlisted address(es)",
+                )
         sent = svc.send(
             to=to,
             subject=subject,
             body_text=body_text,
             recipient_name=customer,
             attachments=pdf_paths,
+            cc=", ".join(cc_list) if cc_list else None,
+            reply_to=DEFAULT_REPLY_TO,
         )
         if not sent:
             return ToolResult(
@@ -3443,6 +3464,9 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         ]
         return ToolResult(tool="send_quote_email", success=True, result={
             "sent_to": to,
+            "cc": cc_list,
+            "reply_to": DEFAULT_REPLY_TO,
+            "message_id": getattr(svc, "last_message_id", None),
             "quote_id": primary.get("id", quote_ids[0]),
             "quote_ids": [q.get("id", qid) for q, qid in zip(quotes, quote_ids)],
             "quote_number": quote_number,

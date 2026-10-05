@@ -7,8 +7,11 @@ import sys
 from pathlib import Path
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-CREDS_FILE = Path(__file__).resolve().parents[0] / "credentials.json"
-TOKEN_FILE = Path(__file__).resolve().parents[0] / "token.json"
+# Prefer the live systemd paths (~/.config/empirebox/gmail/); fall back to
+# backend/ for local one-off runs.
+_DEFAULT_DIR = Path.home() / ".config" / "empirebox" / "gmail"
+CREDS_FILE = Path(os.environ.get("GMAIL_CREDENTIALS_PATH") or (_DEFAULT_DIR / "credentials.json"))
+TOKEN_FILE = Path(os.environ.get("GMAIL_TOKEN_PATH") or (_DEFAULT_DIR / "token.json"))
 
 
 def main():
@@ -62,7 +65,7 @@ def main():
 
     print("INSTRUCTIONS FOR THE FOUNDER:")
     print("=" * 60)
-    print("1. Open the URL below in a web browser on THIS machine")
+    print("1. Open the AUTH URL below in a browser (on EmpireDell or via SSH -L port-forward)")
     print("   (EmpireDell) or a machine with SSH port-forwarding set up.")
     print("")
     print("2. If you're accessing EmpireDell remotely via Cloudflare Tunnel,")
