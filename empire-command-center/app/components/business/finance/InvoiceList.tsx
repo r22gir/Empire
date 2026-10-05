@@ -3,10 +3,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { FileText, Plus, X, AlertCircle } from 'lucide-react';
 import { API } from '../../../lib/api';
+import { openDocViewer } from '../../docs/viewerBus';
 import DataTable, { Column } from '../shared/DataTable';
 import SearchBar from '../shared/SearchBar';
 import StatusBadge from '../shared/StatusBadge';
 import EmptyState from '../shared/EmptyState';
+import { openRecord } from '../../docs/recordBus';
 
 interface Invoice {
   id: string;
@@ -399,6 +401,13 @@ export default function InvoiceList() {
     }
   }, [expanded, fetchDetail]);
 
+  // "Payments & status" from the invoice document page lands here with that invoice expanded.
+  useEffect(() => {
+    const w = window as any;
+    const id = w.__empireFocusInvoice;
+    if (id && invoices.some(i => i.id === id)) { setExpanded(id); w.__empireFocusInvoice = null; }
+  }, [invoices]);
+
   const handleComposeSaved = (invoiceId?: string) => {
     setShowComposer(false);
     fetchInvoices();
@@ -564,7 +573,7 @@ export default function InvoiceList() {
             columns={columns}
             data={invoices}
             loading={loading}
-            onRowClick={(row) => setExpanded(expanded === row.id ? null : row.id)}
+            onRowClick={(row) => openRecord({ type: 'invoice', id: row.id })}
             emptyMessage="No invoices match your filters."
           />
         )}
@@ -617,10 +626,10 @@ export default function InvoiceList() {
                       {actionBusy === 'send' ? 'Sending...' : 'Mark Sent'}
                     </button>
                     <button
-                      onClick={() => window.open(`${API}/finance/invoices/${inv.id}/pdf`, '_blank')}
+                      onClick={() => openDocViewer({ src: `/api/v1/finance/invoices/${inv.id}/pdf`, title: `${inv.invoice_number || 'Invoice'}`, filename: `${inv.invoice_number || inv.id}.pdf`, kind: 'pdf' })}
                       className="px-3 py-2 text-xs font-bold text-[#555] bg-white border border-[#ece8e0] hover:bg-[#f5f3ef] rounded-xl transition-colors cursor-pointer"
                     >
-                      Invoice PDF
+                      Preview invoice
                     </button>
                     {(inv.business_unit === 'workroom' || inv.business_unit === 'woodcraft' || !inv.business_unit) && inv.payment_status !== 'paid' && inv.status !== 'paid' && (
                       <button

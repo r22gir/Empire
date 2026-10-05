@@ -49,6 +49,21 @@ DRAPERY_PRODUCT_TYPES = list(_DEFAULT_PANEL_WIDTHS.keys())
 DRAPERY_REQUIRED = ["width", "height"]
 DRAPERY_OPTIONAL = ["returns", "stacking"]
 
+# Ripplefold keys the sheet understands. They are not pinch-pleat extras,
+# and returns are not part of the job.
+_RIPPLEFOLD_DIMS = {
+    "width", "height", "window_width", "window_height",
+    "coverage_width", "coverage", "track_length", "track",
+    "coverage_align", "align", "track_align", "coverage_offset", "offset",
+    "fullness", "fullness_pct", "fullness_percent",
+    "carrier", "carrier_no", "carrier_number", "carrier_spacing", "spacing",
+    "control", "draw", "draw_direction", "masters", "master",
+    "stack", "stack_width", "stackback",
+    "mount", "mount_type", "ceiling_height", "ceiling", "mount_height",
+    "layer", "fabric_layer", "layered",
+    "side_panels", "side_widths", "widths_per_panel", "fabric_image", "fabric_crop",
+}
+
 
 class DraperyTemplate(FamilyTemplate):
     family = "Drapery"
@@ -62,6 +77,13 @@ class DraperyTemplate(FamilyTemplate):
             return MissingFieldsResult(missing_required=["product_type"])
         missing_req = [d for d in DRAPERY_REQUIRED
                        if d not in dims or dims[d] is None]
+        if product_type == "ripplefold":
+            extras = [d for d in dims if d not in _RIPPLEFOLD_DIMS]
+            return MissingFieldsResult(
+                missing_required=missing_req,
+                missing_optional=[],
+                extra_dims=extras,
+            )
         missing_opt = [d for d in DRAPERY_OPTIONAL
                        if d not in dims or dims[d] is None]
         # 'extra_dims' is everything in dims that the family doesn't
@@ -77,6 +99,8 @@ class DraperyTemplate(FamilyTemplate):
     def assumptions(self, spec: Dict) -> List[str]:
         dims = spec.get("dims", {}) or {}
         product_type = spec.get("product_type", "—")
+        if product_type == "ripplefold":
+            return self._ripplefold_assumptions(spec)
         # Rule 1: every inferred value must surface here.
         out: List[str] = [
             f"Panel width: ASSUMED {format_inches(_DEFAULT_PANEL_WIDTHS.get(product_type, 24))} "
@@ -92,6 +116,8 @@ class DraperyTemplate(FamilyTemplate):
         return out
 
     def geometry(self, spec: Dict) -> GeometryResult:
+        if spec.get("product_type") == "ripplefold":
+            return self._ripplefold_geometry(spec)
         dims = spec["dims"]
         width = float(dims["width"])
         height = float(dims["height"])
@@ -145,6 +171,8 @@ class DraperyTemplate(FamilyTemplate):
         )
 
     def layout_math(self, spec: Dict) -> List[MathLine]:
+        if spec.get("product_type") == "ripplefold":
+            return self._ripplefold_math(spec)
         dims = spec["dims"]
         width = float(dims["width"])
         returns = float(dims.get("returns", 3.0))
@@ -178,6 +206,8 @@ class DraperyTemplate(FamilyTemplate):
         ]
 
     def title_block(self, spec: Dict) -> Dict[str, str]:
+        if spec.get("product_type") == "ripplefold":
+            return self._ripplefold_title(spec)
         dims = spec["dims"]
         product_type = spec.get("product_type", "—")
         return {
@@ -193,6 +223,133 @@ class DraperyTemplate(FamilyTemplate):
             ),
             "FULLNESS": self._fullness_label(spec),
             "PLEATS": f'{self._pleat_count(spec)} panels',
+        }
+
+    def _ripplefold_job(self, spec: Dict):
+        from app.services.drawing.templates.ripplefold_spec import resolve_ripplefold
+        return resolve_ripplefold(spec)
+
+    def _ripplefold_assumptions(self, spec: Dict) -> List[str]:
+        try:
+            job = self._ripplefold_job(spec)
+        except ValueError:
+            return ["Window width and height are required."]
+        out: List[str] = []
+        if job.track_equals_coverage:
+            out.append("Track length: NOT GIVEN — track drawn equal to coverage.")
+        if job.align is None:
+            out.append("Coverage position: NOT GIVEN — track is not centered.")
+        if job.stack_source == "kirsch chart" and job.stack is not None:
+            out.append(
+                f"Stack: {format_inches(job.stack)} from the Kirsch butt-master "
+                f"chart at {job.carriers_per_panel} snaps."
+            )
+        if not out:
+            out.append("No inferred dimensions. Mount and ceiling stay blank unless given.")
+        return out
+
+    def _ripplefold_geometry(self, spec: Dict) -> GeometryResult:
+        job = self._ripplefold_job(spec)
+        w, h = job.window_width, job.window_height
+        points = [
+            GeometryPoint("win_bl", 0.0, 0.0, "elevation"),
+            GeometryPoint("win_br", w, 0.0, "elevation"),
+            GeometryPoint("win_tl", 0.0, h, "elevation"),
+            GeometryPoint("win_tr", w, h, "elevation"),
+        ]
+        edges = [
+            GeometryEdge("win_bl", "win_br", "elevation"),
+            GeometryEdge("win_br", "win_tr", "elevation"),
+            GeometryEdge("win_tr", "win_tl", "elevation"),
+            GeometryEdge("win_tl", "win_bl", "elevation"),
+        ]
+        if job.offset is not None:
+            x0 = job.offset
+            x1 = job.offset + job.coverage_width
+            points.extend([
+                GeometryPoint("track_l", x0, 0.0, "plan"),
+                GeometryPoint("track_r", x1, 0.0, "plan"),
+            ])
+            edges.append(GeometryEdge("track_l", "track_r", "plan", weight="detail", label="track"))
+        return GeometryResult(
+            points=points, edges=edges, bbox=(0.0, 0.0, w, h),
+            views=["elevation", "plan"],
+        )
+
+    def _ripplefold_math(self, spec: Dict) -> List[MathLine]:
+        from app.services.drawing.templates.ripplefold_spec import (
+            _CHART_BASE, _SPACING, chart_coverage,
+        )
+        job = self._ripplefold_job(spec)
+        lines = [
+            MathLine(
+                label="Window width",
+                target_in=job.window_width,
+                segments=[(1, job.window_width)],
+                gaps=[],
+                total=job.window_width,
+                note="FLUSH",
+            ),
+            MathLine(
+                label="Window height",
+                target_in=job.window_height,
+                segments=[(1, job.window_height)],
+                gaps=[],
+                total=job.window_height,
+                note="Single length.",
+            ),
+        ]
+        if job.offset is not None:
+            right = job.window_width - job.offset - job.coverage_width
+            gaps = []
+            if job.offset or right:
+                gaps = [(1, job.offset), (1, right)]
+            lines.append(MathLine(
+                label="Coverage placement",
+                target_in=job.window_width,
+                segments=[(1, job.coverage_width)],
+                gaps=gaps,
+                total=job.offset + job.coverage_width + right,
+                note="FLUSH BOTH ENDS",
+            ))
+        if job.carriers_per_panel and job.fullness and job.masters:
+            snaps = job.carriers_per_panel
+            covered = chart_coverage(snaps, job.fullness, job.masters)
+            base = _CHART_BASE[job.masters][job.fullness]
+            spacing = _SPACING[job.fullness]
+            if snaps > 8:
+                segments = [(snaps - 8, spacing)]
+                gaps = [(1, base)]
+            else:
+                segments = [(1, base)]
+                gaps = []
+            lines.append(MathLine(
+                label="Kirsch chart coverage",
+                target_in=covered,
+                segments=segments,
+                gaps=gaps,
+                total=covered,
+                note=f"{snaps} snaps",
+            ))
+        return lines
+
+    def _ripplefold_title(self, spec: Dict) -> Dict[str, str]:
+        job = self._ripplefold_job(spec)
+        return {
+            "ITEM": "RIPPLEFOLD",
+            "DIMENSIONS": (
+                f"{format_inches(job.window_width)} W × "
+                f"{format_inches(job.window_height)} H"
+            ),
+            "COVERAGE": format_inches(job.coverage_width),
+            "TRACK": format_inches(job.track_length),
+            "FULLNESS": f"{job.fullness}%" if job.fullness else "NOT GIVEN",
+            "CARRIERS": str(job.carrier_count) if job.carrier_count else "NOT GIVEN",
+            "MOUNT": job.mount or "NOT GIVEN",
+            "CEILING": (
+                format_inches(job.ceiling_height) if job.ceiling_height is not None
+                else "NOT GIVEN"
+            ),
         }
 
     @staticmethod

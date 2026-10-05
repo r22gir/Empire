@@ -1,6 +1,8 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { API } from '../../lib/api';
+import { openDocViewer } from '../docs/viewerBus';
+import { openRecord } from '../docs/recordBus';
 import {
   FileText, Plus, Search, DollarSign, Send, Download, AlertTriangle,
   CheckCircle, Clock, CreditCard, Eye, Filter
@@ -97,7 +99,9 @@ export default function InvoiceScreen() {
           <tbody>{filtered.map((inv: any) => {
             const sc = STATUS_CONFIG[inv.status || inv.payment_status] || STATUS_CONFIG.draft;
             return (
-              <tr key={inv.id} style={{ borderBottom: '1px solid #f0ede6' }}>
+              <tr key={inv.id} style={{ borderBottom: '1px solid #f0ede6', cursor: 'pointer' }} tabIndex={0} title={`Open ${inv.invoice_number || 'invoice'}`}
+                onClick={e => { if ((e.target as HTMLElement).closest('button')) return; openRecord({ type: 'invoice', id: inv.id }); }}
+                onKeyDown={e => { if (e.key === 'Enter') openRecord({ type: 'invoice', id: inv.id }); }}>
                 <td style={{ padding: 8, fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>{inv.invoice_number}</td>
                 <td style={{ padding: 8, fontWeight: 500 }}>{inv.customer_name || inv.client_name || '—'}</td>
                 <td style={{ padding: 8, fontWeight: 600 }}>${(inv.total || 0).toFixed(2)}</td>
@@ -111,14 +115,14 @@ export default function InvoiceScreen() {
                 <td style={{ padding: 8, color: '#888', fontSize: 11 }}>{(inv.invoice_date || inv.created_at)?.slice(0, 10)}</td>
                 <td style={{ padding: 8 }}>
                   <div style={{ display: 'flex', gap: 4 }}>
-                    <button title="Download PDF" style={{ padding: 4, background: '#f5f3ef', border: 'none', borderRadius: 4, cursor: 'pointer' }}
-                      onClick={() => window.open(`${API}/finance/invoices/${inv.id}/pdf`, '_blank')}>
+                    <button title="Preview PDF" aria-label={`Preview ${inv.invoice_number || 'invoice'} PDF`} style={{ padding: 4, background: '#f5f3ef', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                      onClick={() => openDocViewer({ src: `/api/v1/finance/invoices/${inv.id}/pdf`, title: `${inv.invoice_number || 'Invoice'}`, filename: `${inv.invoice_number || inv.id}.pdf`, kind: 'pdf' })}>
                       <Download size={12} />
                     </button>
-                    <button title="Send to Client" style={{ padding: 4, background: '#f5f3ef', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                    <button title="Send to Client (opens the invoice manager; nothing sends until you confirm there)" style={{ padding: 4, background: '#f5f3ef', border: 'none', borderRadius: 4, cursor: 'pointer' }} onClick={() => openRecord({ type: 'invoice-edit', id: inv.id })}>
                       <Send size={12} />
                     </button>
-                    <button title="Record Payment" style={{ padding: 4, background: '#f0fdf4', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                    <button title="Record Payment" style={{ padding: 4, background: '#f0fdf4', border: 'none', borderRadius: 4, cursor: 'pointer' }} onClick={() => openRecord({ type: 'invoice-edit', id: inv.id })}>
                       <CreditCard size={12} style={{ color: '#16a34a' }} />
                     </button>
                   </div>

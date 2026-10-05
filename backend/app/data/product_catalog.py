@@ -1127,6 +1127,8 @@ PRICING_SPECS = {
             "batiste_118": 10.50,                    # D38 / H77 — NEW
             "blackout": 12.95,                       # unchanged
             "premiere_satin": 9.95,                  # unchanged
+            "interlining": 12.50,                    # napped lining / bump, Rafael 10/4/2026
+            "napped_interlining": 12.50,             # alias of interlining
         },
     },
     "roman_shade": {

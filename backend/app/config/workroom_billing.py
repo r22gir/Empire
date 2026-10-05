@@ -22,7 +22,44 @@ BILLED_BY_NELMA = "nelmas_workroom"
 VALID_BILLED_BY = frozenset({BILLED_BY_EMPIRE, BILLED_BY_NELMA})
 
 _NELMA_NAME = "Nelma's Workroom"
-_NELMA_ADDRESS = "5124 Frolich Lane, Hyattsville, MD 20781"
+_NELMA_PHONE = "(703) 623-9203"
+_EMPIRE_PHONE = "(703) 213-6484"
+_SHARED_EMAIL = "workroom@empirebox.store"
+
+# Public landing page. Client estimates, invoices, and presentations
+# must not show the operator app or other internal hosts.
+PUBLIC_CLIENT_HOST = "workroom.empirebox.store"
+PUBLIC_CLIENT_ORIGIN = f"https://{PUBLIC_CLIENT_HOST}"
+_INTERNAL_CLIENT_HOSTS = (
+    "studio.empirebox.store",
+    "api.empirebox.store",
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+)
+
+
+def _is_internal_client_url(value: str) -> bool:
+    lowered = (value or "").strip().lower()
+    return any(host in lowered for host in _INTERNAL_CLIENT_HOSTS)
+
+
+def client_facing_website(raw: str | None) -> str:
+    """Host shown on client documents. Internal app links become the public site."""
+    text = (raw or "").strip()
+    if not text or _is_internal_client_url(text):
+        return PUBLIC_CLIENT_HOST
+    return text.replace("https://", "").replace("http://", "").rstrip("/")
+
+
+def client_facing_origin(raw: str | None = None) -> str:
+    """Absolute public origin for a client link. Internal hosts are replaced."""
+    text = (raw or "").strip()
+    if not text or _is_internal_client_url(text):
+        return PUBLIC_CLIENT_ORIGIN
+    if text.startswith("http://") or text.startswith("https://"):
+        return text.rstrip("/")
+    return "https://" + text.rstrip("/")
 
 
 def _env(name: str, default: str) -> str:
@@ -74,10 +111,9 @@ def _load_business_json() -> dict:
 
 
 def _contact_from_config(data: dict) -> tuple[str, str, str, str]:
-    phone = data.get("business_phone") or "(703) 213-6484"
-    email = data.get("business_email") or "workroom@empirebox.store"
-    raw_site = data.get("business_website") or "empirebox.store"
-    website = raw_site.replace("https://", "").replace("http://", "").rstrip("/")
+    phone = data.get("business_phone") or _EMPIRE_PHONE
+    email = data.get("business_email") or _SHARED_EMAIL
+    website = client_facing_website(data.get("business_website"))
     tagline = data.get("business_tagline") or "Custom Window Treatments & Upholstery"
     return phone, email, website, tagline
 
@@ -132,22 +168,25 @@ def founder_requests_nelmas_billing(text: str) -> bool:
 def resolve_billing(billed_by: Optional[str] = None) -> WorkroomBilling:
     key = normalize_billed_by(billed_by)
     data = _load_business_json()
-    phone, email, website, tagline = _contact_from_config(data)
+    _phone, email, website, tagline = _contact_from_config(data)
+    email = _SHARED_EMAIL
+    address = _env(
+        "BILLING_ENTITY_ADDRESS",
+        data.get("business_address") or "5124 Frolich Ln, Hyattsville, MD 20781",
+    )
     if key == BILLED_BY_NELMA:
         return WorkroomBilling(
             billed_by=BILLED_BY_NELMA,
             name=_NELMA_NAME,
-            address=_NELMA_ADDRESS,
-            phone=phone,
+            address=address,
+            phone=_NELMA_PHONE,
             email=email,
             website=website,
             tagline=tagline,
         )
     empire_name = _env("BILLING_ENTITY", data.get("business_name") or "Empire Workroom")
-    empire_address = _env(
-        "BILLING_ENTITY_ADDRESS",
-        data.get("business_address") or "5124 Frolich Ln, Hyattsville, MD 20781",
-    )
+    empire_address = address
+    phone = _EMPIRE_PHONE
     return WorkroomBilling(
         billed_by=BILLED_BY_EMPIRE,
         name=empire_name,

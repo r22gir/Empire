@@ -58,7 +58,18 @@ logger = logging.getLogger("max.journey_linkage")
 # the app does. If a different DB path is configured (env var), we
 # honor it.
 DEFAULT_DB_PATH = os.getenv("EMPIRE_TASK_DB", str(Path.home() / "empire-data" / "empire.db"))
-BACKFILL_AUDIT_PATH = "/home/rg/empire-repo-main/backend/data/journey_backfill_audit.json"
+
+
+def _live_data_file(name: str) -> str:
+    """JSON artifacts live in the Workroom checkout, not empire-repo-main."""
+    try:
+        from app.services.drawing.canonical_path import resolve_canonical_root
+        return str(resolve_canonical_root() / "backend" / "data" / name)
+    except Exception:
+        return str(Path(__file__).resolve().parents[4] / "backend" / "data" / name)
+
+
+BACKFILL_AUDIT_PATH = _live_data_file("journey_backfill_audit.json")
 
 
 def _resolve_db_path() -> str:

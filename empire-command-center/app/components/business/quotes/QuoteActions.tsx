@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { CheckCircle, Mail, FileDown, FileText, Hammer, X, Loader2, Trash2 } from 'lucide-react';
 import { API } from '../../../lib/api';
+import { openDocViewer } from '../../docs/viewerBus';
 import DepositPayLinkButton from '../finance/DepositPayLink';
 
 interface QuoteActionsProps {
@@ -28,6 +29,11 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
   }, []);
 
   const handleAction = useCallback(async (action: string, url: string, method: string = 'POST', body?: any) => {
+    if (action === 'pdf') {
+      // Shared in-page viewer (preview / print / download / share) instead of a forced download.
+      openDocViewer({ src: `/api/v1${url}`, title: 'Quote PDF', filename: `quote-${quoteId}.pdf`, kind: 'pdf' });
+      return;
+    }
     setLoadingAction(action);
     try {
       const res = await fetch(`${API}${url}`, {

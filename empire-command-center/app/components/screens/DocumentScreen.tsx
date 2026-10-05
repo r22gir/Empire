@@ -9,7 +9,9 @@ export default function DocumentScreen() {
 
   useEffect(() => {
     fetch(API + '/files').then(r => r.json()).then(data => {
-      setFiles(data.files || data || []);
+      // /files can answer 404 {detail}; only keep a real list (an object here crashed the screen on .slice)
+      const list = Array.isArray(data?.files) ? data.files : Array.isArray(data) ? data : [];
+      setFiles(list);
     }).catch(() => {});
   }, []);
 

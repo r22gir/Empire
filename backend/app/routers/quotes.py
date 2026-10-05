@@ -118,6 +118,7 @@ class QuoteCreate(BaseModel):
     utm_term: Optional[str] = None
     rooms: Optional[list] = None           # Full room/window/upholstery hierarchy
     pricing_mode: Optional[str] = None     # "flat" = skip tier engine, use line_items as-is
+    show_flat_line_table: Optional[bool] = None  # True keeps the page-1 qty/rate table beside a breakdown
     ai_outlines: Optional[list] = None     # AI outline analysis results
     ai_mockups: Optional[list] = None      # AI mockup proposal results
     max_analysis: Optional[str] = None     # MAX's professional analysis text
@@ -150,6 +151,7 @@ class QuoteUpdate(BaseModel):
     photos: Optional[list] = None
     rooms: Optional[list] = None
     pricing_mode: Optional[str] = None     # "flat" = skip tier engine
+    show_flat_line_table: Optional[bool] = None  # True keeps the page-1 qty/rate table beside a breakdown
     ai_outlines: Optional[list] = None
     ai_mockups: Optional[list] = None
     max_analysis: Optional[str] = None
@@ -1516,13 +1518,14 @@ async def send_quote(quote_id: str, body: Optional[SendQuoteRequest] = None):
                             "total": w.get("total", w.get("price", 0)),
                         })
 
+            from app.config.workroom_billing import client_facing_origin
             html_body = render_quote_sent({
                 "customer_name": quote.get("customer_name", "Valued Customer"),
                 "quote_number": quote.get("quote_number", ""),
                 "project_description": quote.get("project_description", quote.get("project_name", "")),
                 "line_items": line_items,
                 "total": quote.get("total", 0),
-                "quote_url": f"https://studio.empirebox.store/quote/{quote_id}",
+                "quote_url": f"{client_facing_origin()}/quote/{quote_id}",
             })
 
             from app.config.workroom_billing import get_workroom_billing
@@ -1697,6 +1700,13 @@ def _detect_hardware_color(hardware_name: str, explicit_color: str = "") -> tupl
 
 def _build_window_drawing(w: dict) -> str:
     """Generate an inline SVG dimensional drawing for a single window from its specs."""
+    treatment_token = str(w.get("treatmentType") or "")
+    treatment_token = treatment_token.lower().replace("_", "").replace("-", "").replace(" ", "")
+    if treatment_token == "ripplefold":
+        from app.services.drawing.templates.ripplefold_render import (
+            build_ripplefold_quote_svg,
+        )
+        return build_ripplefold_quote_svg(w)
     name = w.get("name", "Window")
     w_in = w.get("width", 48)
     h_in = w.get("height", 60)
@@ -3039,12 +3049,83 @@ def _build_line_items_html(line_items: list) -> str:
                 <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em;font-weight:600">${item.get('total', 0) or item.get('amount', 0) or (item.get('unit_price', 0) or item.get('rate', 0)) * item.get('quantity', 1):,.2f}</td>
             </tr>"""
         html += f"""<tr><td colspan="4" style="padding:6px 8px;text-align:right;font-size:0.82em;color:#666">
-            Room Subtotal</td>
+            {room_name} Subtotal</td>
             <td style="padding:6px 8px;text-align:right;font-weight:700;font-size:0.9em;border-bottom:2px solid #eee">
             ${room_total:,.2f}</td></tr>"""
 
     html += "</tbody></table></div>"
     return html
+
+
+def _flat_quote_lines_html(line_items: list) -> str:
+    """Flat quote table. Rate and amount use thousands separators."""
+    items_html = ""
+    for item in line_items or []:
+        items_html += f"""<tr>
+                <td style="padding:8px;border-bottom:1px solid #eee">{item['description']}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;text-align:center">{item['quantity']} {item['unit']}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;text-align:right">${item['rate']:,.2f}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;text-align:right">${item['amount']:,.2f}</td>
+            </tr>"""
+    return f"""<table><thead><tr>
+            <th>Description</th><th>Qty</th><th>Rate</th><th style="text-align:right">Amount</th>
+        </tr></thead><tbody>{items_html}</tbody></table>"""
+
+
+def quote_pdf_line_sections(
+    quote: dict,
+    *,
+    rooms: list | None = None,
+    design_proposals: list | None = None,
+    proposal_selected: bool = False,
+) -> dict:
+    """Choose the line tables for a flat quote or estimate PDF.
+
+    A quote with an itemized breakdown (grouped by room or section) does
+    not also print the Description/Qty/Rate/Amount table. That table stays
+    for quotes with no breakdown. ``show_flat_line_table`` true forces it.
+    """
+    rooms = list(quote.get("rooms") or []) if rooms is None else rooms
+    proposals = list(quote.get("design_proposals") or []) if design_proposals is None else design_proposals
+    items = list(quote.get("line_items") or [])
+    room_items_priced = any(
+        it.get("rate") or it.get("unit")
+        for room in rooms
+        for it in (room.get("items") or [])
+    )
+    show_breakdown = (not proposals or proposal_selected) and not room_items_priced
+    breakdown_html = _build_line_items_html(items) if show_breakdown else ""
+    has_breakdown = bool(breakdown_html.strip())
+    force_flat = quote.get("show_flat_line_table") is True
+    if rooms:
+        details_html = _build_rooms_html(rooms, has_design_proposals=bool(proposals))
+        shows_flat = False
+    elif force_flat or not has_breakdown:
+        details_html = _flat_quote_lines_html(items)
+        shows_flat = True
+    else:
+        details_html = ""
+        shows_flat = False
+    notes = quote.get("notes") or ""
+    notes_html = (
+        f"<div style='margin-top:10px;padding:12px 16px;background:#f8f8f8;border-radius:8px;font-size:0.88em;color:#666'><strong>Notes:</strong> {notes}</div>"
+        if notes else ""
+    )
+    return {
+        "notes_html": notes_html,
+        "details_html": details_html,
+        "breakdown_html": breakdown_html,
+        "shows_flat_line_table": shows_flat,
+    }
+
+
+def quote_pdf_work_html(sections: dict) -> str:
+    """Sidemark/notes, then the one line table, in client reading order."""
+    return (
+        f"{sections.get('notes_html', '')}\n"
+        f"{sections.get('details_html', '')}\n"
+        f"{sections.get('breakdown_html', '')}"
+    )
 
 
 def _discount_html(quote: dict) -> str:
@@ -3163,22 +3244,6 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 
     design_proposals = quote.get("design_proposals") or []
 
-    # Build room-level content or fallback to flat line items
-    if rooms:
-        body_html = _build_rooms_html(rooms, has_design_proposals=bool(design_proposals))
-    else:
-        items_html = ""
-        for item in quote.get("line_items", []):
-            items_html += f"""<tr>
-                <td style="padding:8px;border-bottom:1px solid #eee">{item['description']}</td>
-                <td style="padding:8px;border-bottom:1px solid #eee;text-align:center">{item['quantity']} {item['unit']}</td>
-                <td style="padding:8px;border-bottom:1px solid #eee;text-align:right">${item['rate']:.2f}</td>
-                <td style="padding:8px;border-bottom:1px solid #eee;text-align:right">${item['amount']:.2f}</td>
-            </tr>"""
-        body_html = f"""<table><thead><tr>
-            <th>Description</th><th>Qty</th><th>Rate</th><th style="text-align:right">Amount</th>
-        </tr></thead><tbody>{items_html}</tbody></table>"""
-
     try:
         from app.services.drawing.idea_drawing import quote_idea_html
         idea_diagrams_html = quote_idea_html(quote)
@@ -3224,6 +3289,13 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
                     pass
             break
     proposals_html = _build_design_proposals_html(design_proposals, original_photo)
+    line_sections = quote_pdf_line_sections(
+        quote,
+        rooms=rooms,
+        design_proposals=design_proposals,
+        proposal_selected=proposal_selected,
+    )
+    work_html = quote_pdf_work_html(line_sections)
 
     # MAX's Analysis summary — collect all AI notes into one fun section
     max_notes = []
@@ -3366,17 +3438,14 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 <!-- ═══ MAX ANALYSIS ═══ -->
 {max_analysis_html}
 
-<!-- ═══ QUOTE DETAILS ═══ -->
-{body_html}
+<!-- ═══ NOTES, THEN ONE LINE TABLE ═══ -->
+{work_html}
 
 <!-- ═══ IDEA DIAGRAMS ═══ -->
 {idea_diagrams_html}
 
 <!-- ═══ DESIGN OPTIONS (3-TIER) ═══ -->
 {proposals_html}
-
-<!-- ═══ ITEMIZED COST BREAKDOWN ═══ -->
-{_build_line_items_html(quote.get("line_items", [])) if (not design_proposals or proposal_selected) and not any(it.get("rate") or it.get("unit") for r in rooms for it in r.get("items", [])) else ""}
 
 <!-- ═══ TOTALS ═══ -->
 {f'''<table style="margin-top:16px"><tbody>
@@ -3408,7 +3477,6 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
   <p style="margin:0 0 8px;font-size:0.78em;text-transform:uppercase;letter-spacing:0.5px;color:#999;font-weight:600">Terms &amp; Conditions</p>
   <p style="margin:0;font-size:0.88em;color:#555;line-height:1.6">{quote["terms"]}</p>
 </div>''' if quote.get('terms') else ""}
-{f"<div style='margin-top:10px;padding:12px 16px;background:#f8f8f8;border-radius:8px;font-size:0.88em;color:#666'><strong>Notes:</strong> {quote['notes']}</div>" if quote.get('notes') else ""}
 
 <!-- ═══ ACCEPTANCE / SIGNATURE ═══ -->
 <div style="margin-top:36px;padding:24px 20px;border:2px solid #b8960c;border-radius:10px;page-break-inside:avoid">

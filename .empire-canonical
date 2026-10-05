@@ -1,8 +1,10 @@
 EmpireBox canonical root marker.
 
 This file proves the surrounding directory is the ACTIVE canonical
-repo (~/empire-repo-main). Read by canonical_path.resolve_canonical_root()
-to refuse paths that resolve to anywhere else.
+repo: the live Workroom checkout of branch feature/drawing-standard.
+The historical path ~/empire-repo-main is not a second tree. Read by
+canonical_path.resolve_canonical_root() to refuse paths that resolve
+to anywhere else.
 
 The stale fork (~/empire-repo/) MUST NOT have this file. If it ever
 gains one through a botched clone, canonical_path.resolve_canonical_root()

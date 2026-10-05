@@ -319,7 +319,7 @@ export default function ConstructionForgePage({ initialSection }: ConstructionFo
   };
 
   return (
-    <div className="cf-root">
+    <div className="cf-root cy-module">
       <style>{`
         .cf-root { display: flex; flex: 1; height: 100%; min-height: 0; background: #faf9f7; }
         .cf-side { width: 200px; border-right: 1px solid #e5e2dc; padding: 16px 0; flex-shrink: 0; overflow-y: auto; }
@@ -340,7 +340,7 @@ export default function ConstructionForgePage({ initialSection }: ConstructionFo
         }
       `}</style>
       {/* Sidebar */}
-      <nav className="cf-side" aria-label="Portafolio">
+      <nav className="cf-side cy-module-nav" aria-label="Portafolio">
         <div className="cf-brand" style={{ padding: '0 16px 12px', borderBottom: '1px solid #e5e2dc', marginBottom: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#b8960c', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Building2 size={16} /> {maxine ? `${assistant}` : 'ConstructionForge'}
@@ -363,7 +363,7 @@ export default function ConstructionForgePage({ initialSection }: ConstructionFo
       </nav>
 
       {/* Main Content */}
-      <div className="cf-main">
+      <div className="cf-main cy-module-main">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
           {projectScoped ? (
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#666', flexWrap: 'wrap' }}>

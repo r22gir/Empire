@@ -382,12 +382,32 @@ def should_run_whats_new_summary(message: str | None) -> bool:
     return any(signal in text for signal in WHATS_NEW_SIGNALS)
 
 
+def _live_repo_root() -> str | None:
+    """Checkout that contains this file. No hardcoded checkout path."""
+    try:
+        from app.services.drawing.canonical_path import running_code_root
+        return str(running_code_root())
+    except Exception:
+        return None
+
+
+def live_checkout_sentence(repo_root: str | None, branch: str | None) -> str:
+    """Self-diagnosis line. Names only the directory this code runs from."""
+    root = repo_root or _live_repo_root() or "(unresolved)"
+    branch_name = branch or "feature/drawing-standard"
+    return (
+        f"- Live Workroom checkout: {root} branch {branch_name}. "
+        "This is the directory the running backend code is in."
+    )
+
+
 def _git_recent_commits(count: int = 5) -> list[dict[str, str]]:
     """Get recent git commits — used for bounded what's new summary."""
     try:
         proc = subprocess.run(
             ["git", "log", f"--oneline", f"-{count}"],
             capture_output=True, text=True, timeout=5,
+            cwd=_live_repo_root(),
         )
         if proc.returncode != 0:
             return []
@@ -430,9 +450,9 @@ def _port_open(host: str, port: int, timeout: float = 1.0) -> bool:
         return False
 
 
-def _run(cmd: list[str], timeout: int = 5) -> dict[str, Any]:
+def _run(cmd: list[str], timeout: int = 5, cwd: str | None = None) -> dict[str, Any]:
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
         return {
             "ok": proc.returncode == 0,
             "returncode": proc.returncode,
@@ -444,13 +464,15 @@ def _run(cmd: list[str], timeout: int = 5) -> dict[str, Any]:
 
 
 def _git_commit() -> dict[str, Any]:
-    short = _run(["git", "rev-parse", "--short", "HEAD"])
-    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
-    message = _run(["git", "log", "--oneline", "-1"])
+    repo = _live_repo_root()
+    short = _run(["git", "rev-parse", "--short", "HEAD"], cwd=repo)
+    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
+    message = _run(["git", "log", "--oneline", "-1"], cwd=repo)
     return {
         "hash": short.get("stdout", ""),
         "branch": branch.get("stdout", ""),
         "message": message.get("stdout", ""),
+        "repo_root": repo or "",
     }
 
 
@@ -672,6 +694,7 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     can report which is up/down without confusion.
     """
     commit = _git_commit()
+    repo_root = commit.get("repo_root") or _live_repo_root() or ""
     registry_info = {}
     startup_health = None
     try:
@@ -746,6 +769,7 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         "mode": "inspect_only",
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "current_commit": commit,
+        "repo_root": repo_root,
         "registry": registry_info,
         "startup_health": startup_health,
         "openclaw_gate": openclaw_gate,
@@ -1502,6 +1526,7 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
     lines = [
         "Runtime truth check completed.",
         f"- Mode: {result.get('mode')} ({result.get('repair_capability')})",
+        live_checkout_sentence(result.get("repo_root"), commit.get("branch")),
         f"- Current repo commit: {commit.get('hash')} ({commit.get('message')})",
         f"- Registry: version={(result.get('registry') or {}).get('registry_version')} loaded_at={(result.get('registry') or {}).get('loaded_at')} last_error={(result.get('registry') or {}).get('last_error')}",
         f"- OpenClaw gate: state={openclaw_gate.get('state')} allowed={openclaw_gate.get('allowed')} reason={openclaw_gate.get('reason')}",

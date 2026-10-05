@@ -7,7 +7,8 @@ import { API_BASE } from './api';
 export const AMP_HIDDEN_NAV = new Set([
   'workroom', 'craft', 'luxe', 'drawings',
   // Empire internals (host stats, endpoints, git/build info, infra) stay off family sites.
-  'platform', 'system', 'hardware', 'openclaw', 'recovery', 'dev', 'max-continuity',
+  // Improvements (Cursor builds on the Empire repo) and the System rail stay main-only.
+  'platform', 'system', 'hardware', 'openclaw', 'recovery', 'dev', 'max-continuity', 'improvements',
 ]);
 
 /** Maxine's shell hides the same workroom tools, and the AMP product is not her home. */

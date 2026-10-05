@@ -209,6 +209,11 @@ export function useLiveVoice() {
         }
         case 'tool':
           setStatus(msg.status === 'running' ? `Looking up (${String(msg.name).replace(/_/g, ' ')})…` : 'Live — just talk');
+          if (msg.status === 'done' && (msg.artifacts || msg.slides)) {
+            window.dispatchEvent(new CustomEvent('max-stage-artifacts', {
+              detail: { artifacts: msg.artifacts || [], slides: msg.slides || [] },
+            }));
+          }
           break;
         case 'response_done':
           setStatus('Live — just talk');

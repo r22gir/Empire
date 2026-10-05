@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { familyHomeRedirect } from "./app/lib/familyChrome.mjs";
 import { workroomHostDecision } from "./app/lib/workroomHost";
+import { applyTailscaleHeaderPolicy } from "./app/lib/tailscaleProxy";
+
+function continueWith(request: NextRequest) {
+  return NextResponse.next({
+    request: { headers: applyTailscaleHeaderPolicy(request.headers) },
+  });
+}
 
 // Public Luxe hostnames. Keep this allowlist in sync with
 // backend/app/security/luxe_public_edge.py. Cloudflare currently tunnels
@@ -150,7 +157,7 @@ export function middleware(request: NextRequest) {
       });
     }
 
-    return NextResponse.next();
+    return continueWith(request);
   }
 
   // --- WORKROOM showroom host: public Style B landing (read-only) ---
@@ -178,7 +185,7 @@ export function middleware(request: NextRequest) {
     });
   }
   if (workroom.action === "next") {
-    return NextResponse.next();
+    return continueWith(request);
   }
 
   // --- LUXE bucket: HARD-SCOPED to intake ---
@@ -210,7 +217,7 @@ export function middleware(request: NextRequest) {
       url.search = "";
       return NextResponse.redirect(url);
     }
-    return NextResponse.next();
+    return continueWith(request);
   }
 
   // --- FORGE block: operator platform infrastructure surface ---
@@ -225,5 +232,5 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  return familyResponse(NextResponse.next());
+  return familyResponse(continueWith(request));
 }

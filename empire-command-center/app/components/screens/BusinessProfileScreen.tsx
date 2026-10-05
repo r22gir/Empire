@@ -115,7 +115,7 @@ export default function BusinessProfileScreen() {
   const pct = Math.round((filled / total) * 100);
 
   return (
-    <div className="flex-1 overflow-y-auto" style={{ background: '#f5f2ed', padding: '24px 36px' }}>
+    <div className="cy-tw-spacing flex-1 overflow-y-auto" style={{ background: '#f5f2ed', padding: '24px 36px' }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">

@@ -8,7 +8,7 @@ import {
 import IntakeNav from '../../../components/intake/IntakeNav';
 import PhotoUploader from '../../../components/intake/PhotoUploader';
 import FabricInfoSection, { FabricInfo } from '../../../components/intake/FabricInfoSection';
-import { intakeFetch, getToken } from '../../../lib/intake-auth';
+import { intakeFetch, getToken, intakeAuthHeaders } from '../../../lib/intake-auth';
 import { isImageFile, fileKindLabel, formatFileSize } from '../../../lib/fileKind';
 
 import { API, API_BASE } from '../../../lib/api';
@@ -45,7 +45,9 @@ export default function ProjectDetail() {
 
   const loadFabrics = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics`);
+      const res = await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics`, {
+        headers: intakeAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setFabricEntries(Array.isArray(data) ? data : []);
@@ -144,7 +146,7 @@ export default function ProjectDetail() {
       };
       await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: intakeAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       });
       setShowAddFabric(false);
@@ -156,7 +158,10 @@ export default function ProjectDetail() {
 
   const removeFabric = async (id: number) => {
     try {
-      await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics/${id}`, { method: 'DELETE' });
+      await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics/${id}`, {
+        method: 'DELETE',
+        headers: intakeAuthHeaders(),
+      });
       await loadFabrics();
     } catch { /* best effort */ }
   };
@@ -492,14 +497,28 @@ export default function ProjectDetail() {
                       <ExternalLink size={10} /> Open supplier page
                     </a>
                   )}
-                  {f.swatch_photo_path && (
-                    <img
-                      src={f.swatch_photo_path.startsWith('http') ? f.swatch_photo_path : `${API_BASE}${f.swatch_photo_path}`}
-                      alt="Swatch"
-                      className="mt-2 rounded-[8px] border border-[#ece8e0]"
-                      style={{ width: 80, height: 80, objectFit: 'cover' }}
-                    />
-                  )}
+                  {(() => {
+                    const files = Array.isArray(f.swatch_files) ? f.swatch_files : [];
+                    const thumbs = files.length
+                      ? files
+                      : (f.swatch_photo_path ? [{ path: f.swatch_photo_path, original_name: 'Swatch' }] : []);
+                    if (!thumbs.length) return null;
+                    return (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {thumbs.map((file: { path?: string; original_name?: string }, n: number) => {
+                          const path = file.path || '';
+                          const src = path.startsWith('http') ? path : `${API_BASE}${path}`;
+                          const name = file.original_name || 'Swatch';
+                          const image = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff)$/i.test(name) || /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(path);
+                          return image ? (
+                            <img key={n} src={src} alt={name} className="rounded-[8px] border border-[#ece8e0]" style={{ width: 80, height: 80, objectFit: 'cover' }} />
+                          ) : (
+                            <a key={n} href={src} className="text-[11px] font-semibold text-[#b8960c]">{name}</a>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                   {f.client_notes && (
                     <p className="mt-1.5 text-[11px] text-[#888] italic">{f.client_notes}</p>
                   )}

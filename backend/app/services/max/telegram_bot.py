@@ -253,6 +253,8 @@ class TelegramBot:
             logger.warning("Telegram not configured, message not sent")
             return False
         target_chat = chat_id or self.founder_chat_id
+        from app.services.max.telegram_text import sanitize_telegram_text
+        text = sanitize_telegram_text(text)
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 payload: Dict[str, Any] = {"chat_id": target_chat, "text": text, "parse_mode": parse_mode}
@@ -1052,18 +1054,22 @@ class TelegramBot:
 
             await update.message.reply_html(f"📝 <b>Transcript:</b>\n<i>{transcript}</i>")
 
+            voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
             try:
-                from app.services.voice_doc import format_session_reply, ingest_transcript
-
-                view = ingest_transcript(transcript, channel="telegram")
-                if view.get("handled") or view.get("draft"):
-                    await update.message.reply_text(format_session_reply(view))
-                    return
+                from app.services.voice_documents.pipeline import ingest_telegram_voice_transcript
+                draft = ingest_telegram_voice_transcript(transcript, voice_chat_id or "")
             except Exception as draft_err:
-                logger.warning(f"Voice draft pipeline skipped: {draft_err}")
+                logger.warning("voice document pipeline skipped: %s", draft_err)
+                draft = {"handled": False}
+            if draft.get("handled"):
+                reply = (draft.get("reply_text") or "Draft updated. Not sent.")[:4000]
+                await update.message.reply_text(reply)
+                _auto_save_exchange_to_memory(
+                    transcript, reply, source="telegram", chat_id=voice_chat_id or "",
+                )
+                return
 
             await update.message.reply_chat_action("typing")
-            voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
             html_response, plain_text, _ = await self._chat_with_max(
                 transcript,
                 chat_id=voice_chat_id,
@@ -1325,6 +1331,8 @@ class TelegramBot:
         except ImportError:
             logger.error("python-telegram-bot not installed. Run: pip install python-telegram-bot")
             return
+        from app.services.max.telegram_text import install_outbound_sanitizer
+        install_outbound_sanitizer()
 
 
         # Build and run the bot — increase timeouts for reliability
@@ -1453,6 +1461,8 @@ class TelegramBot:
         """
         from telegram.request import HTTPXRequest
         from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+        from app.services.max.telegram_text import install_outbound_sanitizer
+        install_outbound_sanitizer()
 
         self._webhook_ready = asyncio.Event()
 

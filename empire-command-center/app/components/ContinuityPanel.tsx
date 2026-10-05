@@ -90,8 +90,10 @@ function ContinuityPanelInner({ mode = 'full', onOpenContinuity }: ContinuityPan
     setLastCheckedAt(checkedAtLabel());
   };
 
+  // Status only on mount. The continuity audit is a real Max chat turn (it is journaled),
+  // so it runs only when the user taps "Run Continuity Audit", never on page load.
   useEffect(() => {
-    load().catch(() => {});
+    load(false).catch(() => {});
   }, []);
 
   const auditResult = audit?.tool_results?.[0]?.result || {};

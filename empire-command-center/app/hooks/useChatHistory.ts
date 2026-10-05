@@ -10,7 +10,7 @@ export function useChatHistory() {
   const fetchConversations = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(API + '/chats/list');
+      const res = await fetch(API + '/chats/list?limit=200');
       if (res.ok) {
         const data = await res.json();
         const convs = (data.chats || data || []).map((c: any) => ({

@@ -1,6 +1,8 @@
 'use client';
+import MaxDocCard from '../docs/MaxDocCard';
+import MaxRecordCard from '../docs/MaxRecordCard';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X, Copy, Check } from 'lucide-react';
+import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X, Copy, Check, ExternalLink } from 'lucide-react';
 import ChatHistoryPanel from '../ChatHistoryPanel';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
@@ -9,10 +11,15 @@ import InlineDrawing from '../InlineDrawing';
 import ContinuityPanel from '../ContinuityPanel';
 import ViewPdfControl from '../ViewPdfControl';
 import ChatChartBlock from '../ChatChartBlock';
+import ChatMarkdown from '../chat/ChatMarkdown';
+import '../chat/chat.css';
+import { chiefEHref } from '../../lib/chiefE';
 import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../lib/chatContent';
 import { useAssistantName } from '../../lib/assistant';
 import VoiceDraftPanel, { VoiceDraftView } from '../voice/VoiceDraftPanel';
+import FounderPinCard from '../chat/FounderPinCard';
 import { useTranslation } from '../../lib/i18n';
+import { composerLooksLikePin } from '../../lib/founderPin';
 import {
   HOLD_ARM_MS,
   clipTooShort,
@@ -89,9 +96,11 @@ interface Props {
   setOnMessageComplete?: (cb: ((msg: Message) => void) | null) => void;
   onLoadChat?: (chatId: string) => void;
   onNewChat?: () => void;
+  onSubmitPin?: (messageId: string, resumeId: string, pin: string) => Promise<void> | void;
+  onCancelPin?: (messageId: string, resumeId: string) => void;
 }
 
-export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat }: Props) {
+export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat, onSubmitPin, onCancelPin }: Props) {
   const assistantName = useAssistantName();
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
@@ -503,6 +512,14 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
   const handleSend = () => {
     if (!input.trim() && !attachedImage) return;
+    const pinCardOpen = messages.some(msg =>
+      msg.pinPrompts?.some(prompt => prompt.status === 'needed' || prompt.status === 'error' || prompt.status === 'submitting'),
+    );
+    if (pinCardOpen && composerLooksLikePin(input)) {
+      setInput('');
+      showMicToast('Use the PIN card. It is not sent in the chat.');
+      return;
+    }
     if (codeMode) {
       submitCodeTask(input.trim());
       setInput('');
@@ -637,6 +654,16 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         }}>
           {assistantName}
         </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <a
+          className="cm-chiefe-btn"
+          href={chiefEHref([...messages].reverse().find(m => m.role === 'user')?.content)}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open Chief e (Grok Bot) with your last question"
+        >
+          <ExternalLink size={13} /> Ask Chief e
+        </a>
         <button
           onClick={() => setHistoryOpen(prev => !prev)}
           title="Chat History"
@@ -653,6 +680,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         >
           <Clock size={16} />
         </button>
+        </div>
         {voiceMode && (
           <span style={{
             fontSize: 11,
@@ -789,7 +817,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       }}
       className="sm:!px-9 sm:!py-6 pb-10 md:!pb-6">
         {messages.map((msg, i) => (
-          <div key={msg.id || i} style={{
+          <div key={msg.id || i} className="cm-msg" style={{
             marginBottom: 16,
             maxWidth: '90%',
             marginLeft: msg.role === 'user' ? 'auto' : undefined,
@@ -799,26 +827,25 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               const { cleanContent, toolCalls } = msg.role === 'assistant'
                 ? parseToolBlocks(msg.content)
                 : { cleanContent: msg.content, toolCalls: [] };
+              const msgImage = msg.imageUrl
+                || (msg.image ? `${API}/files/view/images/${encodeURIComponent(msg.image)}` : '');
               return (
                 <>
+                  {msgImage && (
+                    <a href={msgImage} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 6, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
+                      <img
+                        src={msgImage}
+                        alt={msg.image || 'attached image'}
+                        loading="lazy"
+                        style={{ maxWidth: 240, maxHeight: 240, borderRadius: 10, border: '1px solid var(--border)', objectFit: 'cover' }}
+                      />
+                    </a>
+                  )}
                   {cleanContent && (
-                    <div style={{
-                      padding: '14px 18px',
-                      fontSize: 14,
-                      lineHeight: 1.65,
-                      whiteSpace: 'pre-wrap',
-                      ...(msg.role === 'user' ? {
-                        background: 'var(--text)',
-                        color: '#fff',
-                        borderRadius: '14px 14px 6px 14px',
-                      } : {
-                        background: '#fff',
-                        color: 'var(--text)',
-                        border: '1px solid var(--border)',
-                        borderRadius: '14px 14px 14px 6px',
-                      }),
-                    }}>
-                      {renderContent(cleanContent, onScreenChange)}
+                    <div className={`cm-bubble ${msg.role === 'user' ? 'is-user chat-bubble-user' : 'is-assistant chat-bubble-assistant'}`}>
+                      {msg.role === 'user'
+                        ? cleanContent
+                        : renderContent(cleanContent, onScreenChange, [...messages.slice(0, i)].reverse().find(m => m.role === 'user')?.content)}
                     </div>
                   )}
                   {/* Inline tool call cards (from message content) */}
@@ -867,9 +894,8 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                 </>
               );
             })()}
-            <div style={{
+            <div className="cm-meta" style={{
               fontSize: 10,
-              color: 'var(--muted)',
               marginTop: 4,
               fontFamily: "'Inter', monospace",
               display: 'flex',
@@ -955,6 +981,12 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                   />
                 );
               }
+              if (tr.tool === 'open_final_doc' && tr.success && tr.result?.viewer_url) {
+                return <MaxDocCard key={j} result={tr.result} />;
+              }
+              if (['open_record', 'edit_quote_lines', 'convert_quote_to_invoice'].includes(tr.tool) && tr.result && (tr.result.id || tr.result.needs_confirmation)) {
+                return <MaxRecordCard key={j} tool={tr.tool} result={tr.result} />;
+              }
               if (tr.tool === 'sketch_to_drawing' && tr.success && tr.result?.svg) {
                 return <InlineDrawing key={j} result={tr.result} />;
               }
@@ -994,6 +1026,15 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               }
               return null;
             })}
+            {msg.pinPrompts?.filter(prompt => prompt.status !== 'cancelled').map(prompt => (
+              <FounderPinCard
+                key={prompt.resumeId}
+                prompt={prompt}
+                disabled={isStreaming}
+                onSubmit={(resumeId, pin) => onSubmitPin?.(msg.id, resumeId, pin)}
+                onCancel={(resumeId) => onCancelPin?.(msg.id, resumeId)}
+              />
+            ))}
           </div>
         ))}
 
@@ -1098,18 +1139,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                 ))}
               </div>
             )}
-            <div style={{
-              padding: '14px 18px',
-              fontSize: 14,
-              lineHeight: 1.65,
-              whiteSpace: 'pre-wrap',
-              background: '#fff',
-              color: 'var(--text)',
-              border: '1px solid var(--border)',
-              borderRadius: '14px 14px 14px 6px',
-            }}>
+            <div className="cm-msg"><div className="cm-bubble is-assistant chat-bubble-assistant">
               {streamingContent ? renderContent(streamingContent, onScreenChange) : (streamingSteps.length ? '' : '...')}
-            </div>
+            </div></div>
             <div style={{
               fontSize: 10,
               color: 'var(--muted)',
@@ -1278,6 +1310,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           {/* Text input */}
           <div style={{
             flex: 1,
+            minWidth: 0,
             background: codeMode ? '#fdf8eb' : voiceMode ? '#f5f0ff' : '#fff',
             border: `1.5px solid ${codeMode ? '#b8960c' : voiceMode ? '#7c3aed' : inputFocused ? 'var(--gold)' : 'var(--border)'}`,
             borderRadius: 14,
@@ -1407,6 +1440,8 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
           {/* Send button */}
           <button
+            type="button"
+            aria-label="Send message"
             onClick={handleSend}
             disabled={isStreaming}
             style={{
@@ -1549,84 +1584,33 @@ function StatusChip({ label, tone }: { label: string; tone: 'ok' | 'warn' | 'dar
   );
 }
 
-function renderContent(content: string, onScreenChange?: (s: string, id?: string) => void) {
+function renderContent(content: string, onScreenChange?: (s: string, id?: string) => void, question = '') {
+  // Quote numbers resolve to their canonical id via /quotes-v2/by-number/{qn}.
+  // Stay silent on a miss: never fall back to "first row of the list" (HOTFIX 4b).
+  const openQuoteNumber = (quoteNumber: string) => {
+    fetch(`${API}/quotes-v2/by-number/${encodeURIComponent(quoteNumber)}`)
+      .then(r => {
+        if (r.status === 404) throw new Error(`Quote ${quoteNumber} not found`);
+        if (!r.ok) throw new Error(`Resolver returned ${r.status}`);
+        return r.json();
+      })
+      .then((q: any) => { if (q && q.id) onScreenChange?.('quote', q.id); })
+      // eslint-disable-next-line no-console
+      .catch(err => console.error(`[quote-link] failed to resolve ${quoteNumber}:`, err));
+  };
   const segments = splitChatContent(content);
   return segments.map((segment, segIndex) => {
     if (segment.kind === 'chart') {
       return <ChatChartBlock key={`chart-${segIndex}`} chart={segment.chart} />;
     }
-    const text = segment.text;
     return (
-      <span key={`text-${segIndex}`}>
-        {text.split('\n').map((line, i, lines) => {
-    // Bold
-    let processed = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    // Italic
-    processed = processed.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    // Detect QuoteBuilder / quote references and make them clickable
-    const hasQuoteRef = /QuoteBuilder|quote.*interface/i.test(processed);
-    if (hasQuoteRef && onScreenChange) {
-      processed = processed.replace(
-        /(QuoteBuilder\s*interface|QuoteBuilder)/gi,
-        '<a class="quote-link" data-link-type="builder" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">$1</a>'
-      );
-    }
-    // Detect quote numbers like EST-2026-027 and make clickable. The
-    // data-quote-number attr lets the click handler resolve the visible
-    // badge to its canonical id via /quotes-v2/by-number/{qn}. Without
-    // this, a click routed to screen='quote' with NO id and the
-    // QuoteReviewScreen silently fell back to the first row of the list
-    // (HOTFIX 4b defect).
-    processed = processed.replace(
-      /(EST-\d{4}-\d{3})/g,
-      (match: string) =>
-        `<a class="quote-link" data-link-type="quote-number" data-quote-number="${match}" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${match}</a>`
-    );
-    const html = processed + (i < lines.length - 1 ? '<br/>' : '');
-    return (
-      <span
-        key={i}
-        dangerouslySetInnerHTML={{ __html: html }}
-        onClick={(e) => {
-          const target = e.target as HTMLElement;
-          if (!target.classList.contains('quote-link')) return;
-          const linkType = target.getAttribute('data-link-type');
-          if (linkType === 'quote-number') {
-            const quoteNumber = target.getAttribute('data-quote-number');
-            if (!quoteNumber) return;
-            // Resolve the visible "EST-2026-110" to its canonical id.
-            // Stay silent on miss — never fall back to "first row of
-            // the list" again; that's the exact bug we're fixing.
-            fetch(`${API}/quotes-v2/by-number/${encodeURIComponent(quoteNumber)}`)
-              .then(r => {
-                if (r.status === 404) {
-                  throw new Error(`Quote ${quoteNumber} not found`);
-                }
-                if (!r.ok) throw new Error(`Resolver returned ${r.status}`);
-                return r.json();
-              })
-              .then((q: any) => {
-                if (q && q.id) onScreenChange?.('quote', q.id);
-              })
-              .catch(err => {
-                // Visible in dev console only — don't navigate. The user
-                // remains on chat and can re-ask MAX to surface the
-                // quote id explicitly.
-                // eslint-disable-next-line no-console
-                console.error(`[quote-link] failed to resolve ${quoteNumber}:`, err);
-              });
-            return;
-          }
-          if (linkType === 'builder') {
-            onScreenChange?.('quote');
-            return;
-          }
-          onScreenChange?.('quote');
-        }}
+      <ChatMarkdown
+        key={`text-${segIndex}`}
+        text={segment.text}
+        question={question}
+        onQuoteNumber={openQuoteNumber}
+        onBuilder={() => onScreenChange?.('quote')}
       />
-    );
-        })}
-      </span>
     );
   });
 }

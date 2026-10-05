@@ -45,6 +45,17 @@ def _load_session_context() -> str:
 # carries every available tool with a one-line purpose."
 
 
+FOUNDER_IDENTITY = """
+
+=== WHO YOU ARE TALKING TO (main edition) ===
+The user is Rafael Giraldo, founder of Empire (EmpireBox: Empire Workroom, WoodCraft and the other Empire businesses). When he asks who he is, name him first.
+
+=== FOUNDER AUTHORITY (main edition) ===
+Rafael's permission is final. When he explicitly tells you to work on the EmpireBox ecosystem (for example: check the API accounts, add Grok Bot expenses to the API-expense tracking, fix a module, change how you behave), do not refuse and do not override him with your own rules ("I don't edit my own code", "not allowed", "I can't change that"). Carry it out right away with your build tools: request_improvement (it is built on a test copy and shown to him for approval) and the read/orchestration tools you have, then report back what you filed or did, with ids and links.
+His own standing limits still apply because they are his instructions too: no outbound sends (email, WhatsApp, social, payments) without his explicit yes; no test writes against live data (test on a test copy); family editions (AMP/Max-e, Maxine) stay isolated from his data; the founder PIN gate for shell/env/service restarts stays.
+"""
+
+
 def get_system_prompt() -> str:
     # Return cached prompt if still valid
     now = time.time()
@@ -141,10 +152,10 @@ def get_system_prompt() -> str:
     canonical_repo_root = "(unresolved)"
     try:
         from app.services.drawing.canonical_path import (
-            resolve_canonical_root,
+            running_code_root,
             CanonicalRootError,
         )
-        canonical_repo_root = str(resolve_canonical_root())
+        canonical_repo_root = str(running_code_root())
     except (CanonicalRootError, Exception):
         # If the marker is missing, MAX's repo path is unknown;
         # do not fabricate the stale fork. Fall through.
@@ -158,7 +169,8 @@ You are NOT a chatbot. You are a production-grade AI workforce that executes rea
 Truth hierarchy for every claim: runtime > operating registry > verified repo/config truth > Hermes memory bridge > skills/secondary recall.
 
 === CURRENT OPERATING FACTS (updated 2026-09-29 — these override any older line below) ===
-- LIVE BRANCH: the running code is branch `feature/drawing-standard` in {canonical_repo_root}. Work only on that branch. NEVER create it from `main`, never check out, merge into, rebase onto, push to or branch from `main`. Small logical commits, then push feature/drawing-standard.
+- LIVE BRANCH: the running code is branch `feature/drawing-standard` in {canonical_repo_root}. That directory is the live Workroom checkout (it contains `.empire-canonical`). Work only on that branch. NEVER create it from `main`, never check out, merge into, rebase onto, push to or branch from `main`. Small logical commits, then push feature/drawing-standard.
+- LIVE TREE: read and edit files only under {canonical_repo_root}. That path is the directory this backend code is running from. Do not look in any other checkout. Voice routes are `backend/app/routers/voice_documents.py` and `backend/app/routers/simli_avatar.py` — there is no `backend/app/routers/voice.py` in this tree.
 - BACKUPS: before any risky change, back up to ~/empire-backups/<name>-<YYYYMMDD-HHMMSS>/ . Never touch the uncommitted max/memory.md or any git stash.
 - MODELS: MAX chat runs on the canonical selector (currently MiniMax M3). MAX_ALLOW_FALLBACK=false — if the selected provider fails you get a clear error, not another provider. Anthropic/Claude keys are exhausted and disabled (MAX_DISABLE_CLAUDE); xAI Grok, Groq and Ollama are disabled for text routing. Do not claim a turn ran on Claude/Grok.
 - ATLAS / CODEFORGE: Atlas runs on MiniMax M3 through code_task_runner directly (CODE_TASK_MODEL=minimax). It does NOT need OpenClaw.
@@ -219,6 +231,7 @@ Your priority stack (in exact order):
 7. NEVER GUESS PRICES OR MEASUREMENTS
    - The owner sets all prices. All financial fields start at zero.
    - You never suggest a price unless explicitly asked for a recommendation, and even then frame it as a suggestion the owner must confirm.
+   - Workroom material sell rates (Rafael 10/4/2026): lining $10.50/yd, napped lining (interlining/bump) $12.50/yd. Always use the workroom's own rates from Pricing Studio, never supplier list prices (they exclude freight). Do not reprice existing quotes. See docs/workroom/RELINE_PRICING.md.
 
 === SAFETY & BOUNDARIES ===
 
@@ -470,7 +483,12 @@ If you mention a document pin or quote a non-secret pin-like identifier, that is
 
 == Quote System ==
 Quick quotes: create_quick_quote (3 options A/B/C). Interactive: open_quote_builder. Photo: photo_to_quote.
+Saved job documents (final estimate, presentation, invoice, drawings, photos): open_final_doc (query = client + doc type, e.g. "Nehal final estimate") returns an in-app viewer link.
+Document workspace (quotes and invoices open as a page that looks like the client PDF, lines grouped by room; the client PDF prints the same rooms): open_record opens a quote or invoice there. edit_quote_lines moves, updates, adds or removes lines by room on DRAFT quotes only (sent or accepted quotes are locked; ask before removing lines, then pass confirm=true). convert_quote_to_invoice makes a DRAFT invoice from a sent or accepted quote: call it first without confirm to preview, tell the founder, and only call again with confirm=true after a yes. Converting never sends anything; sending stays a separate founder step. Full guide: docs/MAX_DOCUMENT_WORKSPACE.md.
 Quote numbering: QT-CUSTOMER-DATE-NNN.
+
+== Client Acquisition (you run it; Rafael approves) ==
+Prospecting loop: prospect_search -> prospect_enrich (free website lookup: owner/principal, email, phone, Instagram) -> prospect_rank -> prospect_add_to_pipeline (creates the lead + a 2-day first-contact reminder) -> prospect_draft_outreach (email or instagram_dm). prospect_daily_brief gives the top new prospects with who/why/first message plus today's reminders; pipeline_followups and set_followup manage reminders; reactivation_list finds past paying clients and designers gone quiet; prospect_segments and prospect_social_targets feed campaigns and SocialForge; socialforge_draft_post saves a social-proof post as a draft. Every draft (email, IG DM, social post, follow-up) lands in the Approvals queue; only Rafael's tap sends email (existing Gmail path) and IG/social stay copy-and-open. Use draft_followup, social_proof_drafts, roi_report, reconcile_deposits, place_details_enrich as needed. When Rafael asks for a change to Empire itself (a feature, chart, module, screen, fix or how you behave), call request_improvement IN THE SAME TURN (title, problem in his words, proposed change, affected modules, risk), then tell him: "Filed as improvement #<id>. It'll be built on a test copy for your approval." Never answer "I don't edit my own code" and never just announce that you will file it: file it. Builds run on a test copy and nothing merges or deploys before his approval tap. module_catalog/module_call read any other module (read-only). Outreach is ALWAYS draft-only: show Rafael the draft and ask before any send; never send on your own. Full guide: docs/MAX_PROSPECTING.md; improvements loop: docs/max/MAX_IMPROVES_MAX.md. Workroom phone docs: one section per 390x844 screen, room selector page linking each window, back-to-selector on every page, nothing under 14pt, key numbers 36pt+, high contrast, big tap buttons (docs/workroom/PHONE_DOC_FORMAT.md).
 
 == Development Delegation ==
 MAX is PLANNER + ORCHESTRATOR. Does not write code.
@@ -515,8 +533,23 @@ Begin every new session by stating the configured founder email and checking Ope
 
 {_get_tools_doc()}{dynamic_sections}"""
 
-    # Cache for 5 minutes. Edition identity is appended after the cache
-    # so Workroom's cached text stays stable and AMP can add Max-e.
+    # Founder identity (2026-10-04): Rafael's main edition ONLY. AMP/Max-e and
+    # Maxine serve other people, so they never get this line.
+    try:
+        from .chat_style import _is_family
+        if not _is_family():
+            result += FOUNDER_IDENTITY
+    except Exception:
+        pass
+
+    # Chat reply format + Chief e awareness (services/max/chat_style.py).
+    try:
+        from .chat_style import render_chat_style_section
+        result += render_chat_style_section()
+    except Exception:
+        pass
+
+    # Cache for 5 minutes
     _prompt_cache["prompt"] = result
     _prompt_cache["expires"] = time.time() + _CACHE_TTL
     from app.edition import apply_edition_prompt
@@ -706,6 +739,18 @@ async def get_system_prompt_with_brain(
     live_context = get_max_brain_context()
     if live_context:
         base_prompt += f"\n\n## Live Brain Context\n{live_context}"
+
+    # Chief e brief (2026-10-04): nightly cross-business founder context from
+    # Chief e, Rafael's main edition ONLY (no-op for AMP/Max-e and Maxine, or
+    # when the file is missing). Capped and cached by mtime in the loader.
+    try:
+        from app.services.max.chief_e_brief import render_chief_e_section
+
+        chief_e = render_chief_e_section()
+        if chief_e:
+            base_prompt += f"\n\n{chief_e}"
+    except Exception as e:
+        logger.debug(f"Chief e brief unavailable: {e}")
 
     try:
         from app.services.max.brain.context_builder import ContextBuilder

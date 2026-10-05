@@ -460,11 +460,18 @@ def generate_email_reply_draft(
 
     try:
         with httpx.Client(timeout=_DRY_RUN_MAX_CHAT_TIMEOUT) as client:
-            api_resp = client.post(
-                f"{base_url}/chat/completions",
-                json=payload,
-                headers=headers,
-            )
+            def _post():
+                return client.post(
+                    f"{base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                )
+
+            if provider_key == "minimax":
+                from app.services.max.minimax_retry import request_with_retry_sync
+                api_resp = request_with_retry_sync(_post)
+            else:
+                api_resp = _post()
             if api_resp.status_code == 200:
                 data = api_resp.json()
                 result["max_response_text"] = (
@@ -475,14 +482,30 @@ def generate_email_reply_draft(
                 result["fallback_used"] = False  # primary provider worked
             else:
                 result["response_state"] = DRY_RUN_STATE_BLOCKED
-                result["error"] = f"Provider '{provider_key}' returned status {api_resp.status_code}"
+                detail = f"Provider '{provider_key}' returned status {api_resp.status_code}"
+                if provider_key == "minimax":
+                    from app.services.max.minimax_retry import user_message_for_minimax
+                    detail = user_message_for_minimax(f"HTTP {api_resp.status_code}") or detail
+                result["error"] = detail
+    except httpx.ConnectTimeout:
+        if provider_key == "minimax":
+            from app.services.max.minimax_retry import BUSY_MESSAGE
+            result["response_state"] = DRY_RUN_STATE_BLOCKED
+            result["error"] = BUSY_MESSAGE
+        else:
+            result["response_state"] = DRY_RUN_STATE_TIMEOUT
+            result["error"] = f"Provider '{provider_key}' timed out after {_DRY_RUN_MAX_CHAT_TIMEOUT}s"
     except httpx.TimeoutException:
         result["response_state"] = DRY_RUN_STATE_TIMEOUT
         result["error"] = f"Provider '{provider_key}' timed out after {_DRY_RUN_MAX_CHAT_TIMEOUT}s"
     except Exception as exc:
         logger.error(f"Email reply draft generation failed: {exc}")
         result["response_state"] = DRY_RUN_STATE_BLOCKED
-        result["error"] = str(exc)
+        if provider_key == "minimax":
+            from app.services.max.minimax_retry import user_message_for_minimax
+            result["error"] = user_message_for_minimax(str(exc)) or str(exc)
+        else:
+            result["error"] = str(exc)
 
     # 6. Build draft subject (Re: prefix)
     draft_subject = subject or "(no subject)"

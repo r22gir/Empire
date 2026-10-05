@@ -23,6 +23,7 @@ from app.services.pricing import (
 )
 from app.services.pricing.quote_sync import studio_calculate
 from app.services.pricing.rate_cards import component_rates
+from app.services.pricing.workroom_rules import apply_rules, rules as workroom_rules
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,22 @@ async def canonical_pricing_status():
         "manual_override_requires_reason": True,
         "unknown_category_fallback": False,
     }
+
+
+@router.get("/workroom/rules")
+async def get_workroom_rules():
+    """Pricing Studio defaults for install, re-line, lining, and hardware."""
+    return {"rules": workroom_rules()}
+
+
+@router.post("/workroom/rules")
+async def update_workroom_rules(body: dict):
+    """Edit one or more workroom rules. Unknown keys are refused."""
+    try:
+        updated = apply_rules(body.get("rules") or body)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    return {"rules": updated}
 
 
 @router.post("/workroom/calculate")

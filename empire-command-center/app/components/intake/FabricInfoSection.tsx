@@ -1,6 +1,17 @@
 'use client';
-import { useState } from 'react';
-import { Camera, ChevronDown, ChevronUp, Link2, X } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Camera, ChevronDown, ChevronUp, Link2, Upload, X } from 'lucide-react';
+import { intakeUpload } from '../../lib/intake-auth';
+import { FABRIC_MAX_BYTES, fabricTooLarge, fabricUploadKind } from '../../lib/fabricUpload';
+import { isImageFile } from '../../lib/fileKind';
+import { API_BASE } from '../../lib/api';
+
+export interface FabricFile {
+  path: string;
+  original_name?: string;
+  size?: number;
+  content_type?: string;
+}
 
 export interface FabricInfo {
   id?: number;
@@ -13,6 +24,7 @@ export interface FabricInfo {
   fabric_code?: string;
   supplier_url?: string;
   swatch_photo_path?: string;
+  swatch_files?: FabricFile[];
   vertical_repeat?: number;
   horizontal_repeat?: number;
   fabric_width?: number;
@@ -32,8 +44,6 @@ const MATERIAL_TYPES = [
   'Upholstery', 'Marine Vinyl', 'Velvet', 'Linen', 'Outdoor', 'Leather', 'Other',
 ];
 
-import { API_BASE } from '../../lib/api';
-
 interface Props {
   fabric: FabricInfo;
   onChange: (fabric: FabricInfo) => void;
@@ -41,11 +51,22 @@ interface Props {
   onRemove?: () => void;
   label?: string;
   projectId?: string;
+  ensureProject?: () => Promise<string>;
 }
 
-export default function FabricInfoSection({ fabric, onChange, onUploadPhoto, onRemove, label, projectId }: Props) {
+function fileUrl(path: string): string {
+  if (path.startsWith('http') || path.startsWith('blob:')) return path;
+  return `${API_BASE}${path}`;
+}
+
+export default function FabricInfoSection({ fabric, onChange, onUploadPhoto, onRemove, label, projectId, ensureProject }: Props) {
   const [showDetails, setShowDetails] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const libraryRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const fabricRef = useRef(fabric);
+  fabricRef.current = fabric;
 
   const hasDetails = fabric.fabric_preference === 'picked_out' || fabric.fabric_preference === 'com';
   const isCom = fabric.fabric_preference === 'com';
@@ -54,36 +75,62 @@ export default function FabricInfoSection({ fabric, onChange, onUploadPhoto, onR
     onChange({ ...fabric, [field]: value });
   };
 
-  const handlePhotoUpload = async () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = async (e: any) => {
-      const file = e.target?.files?.[0];
-      if (!file) return;
-      setUploading(true);
-      try {
-        if (onUploadPhoto) {
-          const path = await onUploadPhoto(file);
-          if (path) update('swatch_photo_path', path);
-        } else if (projectId) {
-          const fd = new FormData();
-          fd.append('files', file);
-          fd.append('entity_type', 'intake');
-          fd.append('entity_id', projectId);
-          fd.append('source', 'client_fabric');
-          const res = await fetch(`${API_BASE}/api/v1/photos/upload`, { method: 'POST', body: fd });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.photos?.[0]?.path) {
-              update('swatch_photo_path', data.photos[0].path);
-            }
-          }
-        }
-      } catch { /* best effort */ }
-      setUploading(false);
+  const rememberFiles = (next: FabricFile[]) => {
+    const current = fabricRef.current;
+    const firstImage = next.find(file => isImageFile(file.original_name || file.path));
+    onChange({
+      ...current,
+      swatch_files: next,
+      swatch_photo_path: firstImage?.path || next[0]?.path || '',
+    });
+  };
+
+  const uploadOne = async (file: File, pid: string): Promise<FabricFile> => {
+    if (onUploadPhoto) {
+      const path = await onUploadPhoto(file);
+      if (!path) throw new Error('Upload did not return a file');
+      return { path, original_name: file.name, size: file.size, content_type: file.type };
+    }
+    const kind = fabricUploadKind(file);
+    const saved = await intakeUpload(`/projects/${pid}/${kind}`, file);
+    const path = saved.path || (saved.filename ? `/intake_uploads/${pid}/${saved.filename}` : '');
+    if (!path) throw new Error('Upload did not return a file');
+    return {
+      path,
+      original_name: saved.original_name || file.name,
+      size: saved.size || file.size,
+      content_type: saved.content_type || file.type,
     };
-    input.click();
+  };
+
+  const handleFiles = async (list: FileList | null) => {
+    const files = Array.from(list || []);
+    if (!files.length) return;
+    setUploadError(null);
+    const oversized = files.find(fabricTooLarge);
+    if (oversized) {
+      setUploadError(`${oversized.name} is over ${Math.round(FABRIC_MAX_BYTES / (1024 * 1024))} MB.`);
+      return;
+    }
+    setUploading(true);
+    try {
+      let pid = projectId || '';
+      if (!onUploadPhoto) {
+        if (!pid && ensureProject) pid = await ensureProject();
+        if (!pid) throw new Error('Enter a project name, then add the fabric photo.');
+      }
+      const stored = [...(fabricRef.current.swatch_files || [])];
+      for (const file of files) {
+        stored.push(await uploadOne(file, pid));
+        rememberFiles(stored);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      setUploadError(message);
+    }
+    setUploading(false);
+    if (libraryRef.current) libraryRef.current.value = '';
+    if (cameraRef.current) cameraRef.current.value = '';
   };
 
   return (
@@ -172,17 +219,19 @@ export default function FabricInfoSection({ fabric, onChange, onUploadPhoto, onR
             <p className="text-[9px] text-[#bbb] mt-0.5">Paste the URL from the fabric supplier&apos;s website</p>
           </div>
 
-          {/* Photo upload */}
+          {/* Photo upload. Real file inputs stay in the form so iOS Safari
+              opens the camera and the photo library. A script-built input
+              does not. */}
           <div>
             <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.3px] mb-1">
               Upload a photo of your fabric
             </label>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch gap-2">
               <button
                 type="button"
-                onClick={handlePhotoUpload}
+                onClick={() => cameraRef.current?.click()}
                 disabled={uploading}
-                className="flex items-center gap-2 cursor-pointer transition-colors"
+                className="flex items-center justify-center gap-2 cursor-pointer transition-colors"
                 style={{
                   padding: '10px 16px', borderRadius: 8, border: '1px solid #ece8e0',
                   background: uploading ? '#f5f2ed' : '#fff', fontSize: 12, fontWeight: 600,
@@ -190,26 +239,73 @@ export default function FabricInfoSection({ fabric, onChange, onUploadPhoto, onR
                 }}
               >
                 <Camera size={16} />
-                {uploading ? 'Uploading...' : 'Take Photo or Upload'}
+                {uploading ? 'Uploading...' : 'Take Photo'}
               </button>
-              {fabric.swatch_photo_path && (
-                <div className="flex items-center gap-1.5">
-                  <img
-                    src={fabric.swatch_photo_path.startsWith('http') ? fabric.swatch_photo_path : `${API_BASE}${fabric.swatch_photo_path}`}
-                    alt="Swatch"
-                    style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: '1px solid #ece8e0' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => update('swatch_photo_path', '')}
-                    className="text-[#ccc] hover:text-[#dc2626] cursor-pointer"
-                    style={{ background: 'none', border: 'none', padding: 0 }}
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={() => libraryRef.current?.click()}
+                disabled={uploading}
+                className="flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                style={{
+                  padding: '10px 16px', borderRadius: 8, border: '1px solid #ece8e0',
+                  background: '#fff', fontSize: 12, fontWeight: 600,
+                  color: '#666', minHeight: 44,
+                }}
+              >
+                <Upload size={16} />
+                Upload
+              </button>
             </div>
+            <input
+              ref={cameraRef}
+              type="file"
+              accept="image/*,.heic,.heif,.jpg,.jpeg,.png"
+              multiple
+              onChange={e => handleFiles(e.target.files)}
+              className="hidden"
+            />
+            <input
+              ref={libraryRef}
+              type="file"
+              multiple
+              onChange={e => handleFiles(e.target.files)}
+              className="hidden"
+            />
+            {uploadError && (
+              <p className="text-[11px] text-[#dc2626] mt-1.5">{uploadError}</p>
+            )}
+            {(fabric.swatch_files && fabric.swatch_files.length > 0) && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {fabric.swatch_files.map((file, index) => {
+                  const name = file.original_name || file.path;
+                  const image = isImageFile(name);
+                  return (
+                    <div key={`${file.path}-${index}`} className="flex items-center gap-1.5">
+                      {image ? (
+                        <img
+                          src={fileUrl(file.path)}
+                          alt={name}
+                          style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: '1px solid #ece8e0' }}
+                        />
+                      ) : (
+                        <a href={fileUrl(file.path)} target="_blank" rel="noopener noreferrer" className="text-[10px] font-semibold text-[#b8960c] max-w-[120px] truncate">
+                          {name}
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => rememberFiles((fabric.swatch_files || []).filter((_, i) => i !== index))}
+                        className="text-[#ccc] hover:text-[#dc2626] cursor-pointer"
+                        style={{ background: 'none', border: 'none', padding: 0 }}
+                        aria-label="Remove file"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* COM yards */}
