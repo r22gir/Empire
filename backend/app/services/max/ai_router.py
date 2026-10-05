@@ -1232,7 +1232,8 @@ class AIRouter:
                 last = messages[-1]
                 messages = list(messages)
                 messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content)
-                local_attachment_answer = f"MAX read the attached file. Extracted context:\n{attachment_text[:1500]}"
+                from app.services.max.attachment_quote_compare import build_attachment_local_answer
+                local_attachment_answer = build_attachment_local_answer(image_filename, attachment_text)
             if image_path:
                 messages, vision_error, _vision_result = await self._prepend_mmx_vision_context(messages, image_path, image_filename)
                 if vision_error:
@@ -1448,7 +1449,8 @@ class AIRouter:
                 last = messages[-1]
                 messages = list(messages)
                 messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content)
-                local_attachment_answer = f"MAX read the attached file. Extracted context:\n{attachment_text[:1500]}"
+                from app.services.max.attachment_quote_compare import build_attachment_local_answer
+                local_attachment_answer = build_attachment_local_answer(image_filename, attachment_text)
             if image_path:
                 messages, vision_error, _vision_result = await self._prepend_mmx_vision_context(messages, image_path, image_filename)
                 if vision_error:

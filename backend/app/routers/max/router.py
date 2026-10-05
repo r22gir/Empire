@@ -37,6 +37,7 @@ from app.services.max.tool_result_normalizer import (
     normalize_tool_results,
 )
 from app.services.max.runtime_truth_enforcer import (
+    attachment_proofs_from_session,
     enforce_runtime_truth_response,
     runtime_truth_failure_message,
     runtime_truth_failures,
@@ -1950,7 +1951,69 @@ def _apply_gpu_safety_output_guardrail(message: str | None, response_text: str) 
     return response_text
 
 
-def _apply_truth_guardrails(message: str | None, response_text: str, tool_results: list[Any] | None) -> str:
+
+def _with_attachment_reader_proof(
+    tool_results: list[Any] | None,
+    *,
+    conversation_id: str | None = None,
+    model_used: str | None = None,
+    image_filename: str | None = None,
+    response_text: str | None = None,
+) -> list[Any]:
+    """Ensure attachment-reader turns count as structured proof for the claim guard.
+
+    The upload reader returns model_used=attachment-reader with an empty tool
+    loop; follow-ups may claim "I read" without re-running. Inject a success
+    receipt for this turn and merge recent session attachment proofs.
+    """
+    merged: list[Any] = list(tool_results or [])
+    mu = (model_used or "").strip().lower()
+    already = any(
+        isinstance(e, dict)
+        and str(e.get("tool") or "") in ("attachment_reader", "attachment-reader")
+        for e in merged
+    )
+    if not already and mu in ("attachment-reader", "attachment_reader"):
+        merged.append(
+            {
+                "tool": "attachment_reader",
+                "success": True,
+                "result": {
+                    "filename": image_filename,
+                    "source": "attachment-reader",
+                    "chars": len(response_text or ""),
+                },
+            }
+        )
+    for proof in attachment_proofs_from_session(conversation_id):
+        tool = str(proof.get("tool") or "")
+        fn = (proof.get("result") or {}).get("filename") if isinstance(proof.get("result"), dict) else None
+        dup = any(
+            isinstance(e, dict)
+            and str(e.get("tool") or "") == tool
+            and (
+                not fn
+                or (
+                    isinstance(e.get("result"), dict)
+                    and e.get("result", {}).get("filename") == fn
+                )
+            )
+            for e in merged
+        )
+        if not dup:
+            merged.append(proof)
+    return merged
+
+
+def _apply_truth_guardrails(
+    message: str | None,
+    response_text: str,
+    tool_results: list[Any] | None,
+    *,
+    conversation_id: str | None = None,
+    model_used: str | None = None,
+    image_filename: str | None = None,
+) -> str:
     # HOTFIX 2026-07-15 (HOTFIX 3): enforce_runtime_truth_response now
     # returns tuple[str, list[str]] (failures, warnings) per 0aa5e67.
     # Unpack here so this wrapper's -> str contract holds; downstream
@@ -1960,6 +2023,13 @@ def _apply_truth_guardrails(message: str | None, response_text: str, tool_result
     # follow-up). Symptom seen in production: chat response ended with
     # "expected string or bytes-like object, got 'tuple'" originating
     # from regex/string fns that received a tuple-typed final_content.
+    tool_results = _with_attachment_reader_proof(
+        tool_results,
+        conversation_id=conversation_id,
+        model_used=model_used,
+        image_filename=image_filename,
+        response_text=response_text,
+    )
     enforced, warnings = enforce_runtime_truth_response(message, response_text, tool_results)
     for w in warnings:
         logger.warning(f"theater-detector: {w}")
@@ -3274,6 +3344,13 @@ async def _chat_with_max_service_impl(
 
         # Multi-turn tool loop: execute tools, feed results back, allow follow-up tools (max 3 rounds)
         tool_results_list = list(_finance_prefetch_entries)
+        tool_results_list = _with_attachment_reader_proof(
+            tool_results_list,
+            conversation_id=request.conversation_id,
+            model_used=getattr(response, "model_used", None),
+            image_filename=request.image_filename,
+            response_text=getattr(response, "content", None),
+        )
         if _pre_search_entry:
             tool_results_list.append(_pre_search_entry)
         tool_results_list.extend(_research_page_entries)
@@ -3603,7 +3680,12 @@ async def _chat_with_max_service_impl(
             logger.info(f"Quality engine fixed {qr.fixed_count} issues in {chat_channel.value} response")
             final_content = qr.cleaned
 
-        final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
+        final_content = _apply_truth_guardrails(
+            request.message, final_content, tool_results_list,
+            conversation_id=request.conversation_id,
+            model_used=getattr(response, "model_used", None),
+            image_filename=request.image_filename,
+        )
 
         # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
         # D52 H80: receipt suppression. tools_used_names feeds the
@@ -3875,6 +3957,9 @@ async def _chat_with_max_service_impl(
             request.message,
             final_content,
             tool_results_list,
+            conversation_id=request.conversation_id,
+            model_used=getattr(response, "model_used", None),
+            image_filename=request.image_filename,
         )
         if _final_truth_guarded != final_content:
             logger.warning(
@@ -4383,6 +4468,13 @@ async def _chat_stream_impl(request: ChatRequest):
 
             # Multi-turn tool loop: execute tools, allow follow-up tools (max 3 rounds)
             tool_results_list = list(_stream_finance_entries)
+            tool_results_list = _with_attachment_reader_proof(
+                tool_results_list,
+                conversation_id=request.conversation_id,
+                model_used=model_used,
+                image_filename=request.image_filename,
+                response_text=None,
+            )
             if _stream_pre_search_entry:
                 tool_results_list.append(_stream_pre_search_entry)
             tool_results_list.extend(_stream_page_entries)
@@ -4684,7 +4776,12 @@ async def _chat_stream_impl(request: ChatRequest):
                 except Exception as _complete_err:
                     logger.warning("[stream] completeness recovery failed: %s", _complete_err)
             full_response = repair_reply_structure(full_response)
-            truth_checked_response = _apply_truth_guardrails(request.message, full_response, tool_results_list)
+            truth_checked_response = _apply_truth_guardrails(
+                request.message, full_response, tool_results_list,
+                conversation_id=request.conversation_id,
+                model_used=model_used,
+                image_filename=request.image_filename,
+            )
             if truth_checked_response != full_response:
                 full_response = truth_checked_response
             full_response = repair_reply_structure(strip_tool_blocks(_sanitize_internal_leakage_text(full_response)))
@@ -4882,6 +4979,9 @@ async def _chat_stream_impl(request: ChatRequest):
                 request.message,
                 full_response,
                 tool_results_list,
+                conversation_id=request.conversation_id,
+                model_used=model_used,
+                image_filename=request.image_filename,
             )
             if _stream_final_truth_guarded != full_response:
                 logger.warning(

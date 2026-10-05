@@ -353,6 +353,28 @@ def _desks_online_truth_intent(text: str) -> bool:
     return any(m in text for m in truth_markers)
 
 
+def _shortcut_word_count(text: str) -> int:
+    return len([w for w in (text or "").split() if w])
+
+
+def _is_short_exact_shortcut(message: str | None, signals: list[str], *, max_words: int = 6) -> bool:
+    """True only for short, exact-match shortcut phrases.
+
+    Substring matching on long multi-part questions (e.g. "Research what's new
+    in … solar … and 3 things") stole the turn for changelog replies. Require
+    the whole normalized message (minus trailing ?!.) to equal a signal, and
+    cap length at max_words.
+    """
+    text = _normalize_intent_text(message)
+    if not text:
+        return False
+    if _shortcut_word_count(text) > max_words:
+        return False
+    cleaned = text.rstrip("?.! ").strip()
+    allowed = {s.rstrip("?.! ").strip() for s in signals}
+    return cleaned in allowed
+
+
 def should_force_runtime_truth_check(message: str, *, code_mode: bool = False) -> bool:
     """Hard-intercept gate for /chat and /chat/stream.
 
@@ -365,7 +387,8 @@ def should_force_runtime_truth_check(message: str, *, code_mode: bool = False) -
     text = _normalize_intent_text(message)
     if not text:
         return False
-    if any(s in text for s in EXPLICIT_RUNTIME_TRUTH_SIGNALS):
+    # Short exact match only — substring steals long multi-part questions.
+    if _is_short_exact_shortcut(message, EXPLICIT_RUNTIME_TRUTH_SIGNALS, max_words=8):
         return True
     if _desks_online_truth_intent(text):
         return True
@@ -379,7 +402,7 @@ def should_run_whats_new_summary(message: str | None) -> bool:
     text = _normalize_intent_text(message)
     if should_run_runtime_truth_check(text):
         return False
-    return any(signal in text for signal in WHATS_NEW_SIGNALS)
+    return _is_short_exact_shortcut(message, WHATS_NEW_SIGNALS, max_words=6)
 
 
 def _live_repo_root() -> str | None:

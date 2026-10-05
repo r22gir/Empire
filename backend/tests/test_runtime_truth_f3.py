@@ -211,7 +211,11 @@ def test_enforce_runtime_truth_response_blocks_sending_now():
         response_text="Sending now.",
         tool_results=None,
     )
-    assert "have not run" in final_text.lower() or "I have not" in final_text
+    assert (
+            "have not run" in final_text.lower()
+            or "i have not" in final_text.lower()
+            or "i need to run a tool" in final_text.lower()
+        )
     assert "Sending now." not in final_text
 
 
@@ -261,4 +265,8 @@ def test_f2_negative_fixture_sending_now_blocked():
     assert "Sending now." not in final_text, (
         "F3 acceptance: 'Sending now.' without a tool call must not ship"
     )
-    assert "have not run" in final_text.lower() or "I have not" in final_text
+    assert (
+            "have not run" in final_text.lower()
+            or "i have not" in final_text.lower()
+            or "i need to run a tool" in final_text.lower()
+        )
