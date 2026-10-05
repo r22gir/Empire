@@ -268,10 +268,9 @@ class AIRouter:
         else:
             self.primary_model = AIModel.OLLAMA
         self.system_prompt = get_system_prompt()
+        # Family editions: only this edition's EMPIRE_DATA_DIR uploads tree.
         self.upload_dirs = [
             data_root() / "uploads",
-            Path.home() / "empire-repo" / "backend" / "data" / "uploads",
-            Path.home() / "empire-repo" / "uploads",
         ]
         self.upload_dir = self.upload_dirs[0]
         providers = []
@@ -626,6 +625,7 @@ class AIRouter:
 
     AUDIO_EXTS = {'.m4a', '.mp3', '.wav', '.ogg', '.flac', '.wma', '.aac'}
     TEXT_EXTS = {'.txt', '.md', '.csv', '.json'}
+    OFFICE_EXTS = {'.docx', '.doc'}
     CODE_EXTS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.sh', '.yaml', '.yml'}
 
     def _find_file(self, filename: str) -> Optional[Path]:
@@ -681,6 +681,29 @@ class AIRouter:
             pass
         return "[Could not extract PDF text — pdftotext not available]"
 
+    def _is_office_doc(self, path: Path) -> bool:
+        return path.suffix.lower() in self.OFFICE_EXTS
+
+    def _read_docx(self, path: Path, max_chars: int = 50000) -> str:
+        """Extract text from a .docx (and best-effort .doc) file."""
+        try:
+            import docx  # python-docx
+            document = docx.Document(str(path))
+            parts = [p.text for p in document.paragraphs if (p.text or "").strip()]
+            for table in document.tables:
+                for row in table.rows:
+                    cells = [c.text.strip() for c in row.cells if c.text and c.text.strip()]
+                    if cells:
+                        parts.append(" | ".join(cells))
+            text = "\n".join(parts).strip()
+            if not text:
+                return "[Could not extract text from document — file appears empty]"
+            if len(text) > max_chars:
+                text = text[:max_chars] + f"\n\n[Truncated — showing first {max_chars} chars]"
+            return text
+        except Exception as e:
+            return f"[Could not read document: {e}]"
+
     def _process_attachment(self, filename: str) -> Tuple[Optional[Path], Optional[str]]:
         """Process an attached file. Returns (image_path, attachment_text).
         For images: returns the path for vision API.
@@ -697,11 +720,17 @@ class AIRouter:
         elif self._is_pdf(path):
             text = self._read_pdf(path)
             return None, f"[Contents of {filename}]\n{text}"
+        elif self._is_office_doc(path):
+            text = self._read_docx(path)
+            return None, f"[Contents of {filename}]\n{text}"
         elif self._is_readable_text(path):
             text = self._read_text_file(path)
             return None, f"[Contents of {filename}]\n{text}"
         else:
-            return None, f"[Unsupported file type: {path.suffix}]"
+            return None, (
+                f"[I couldn't read that file ({filename}). "
+                f"Unsupported or unreadable type: {path.suffix or 'unknown'}]"
+            )
 
     async def _prepend_local_vision_triage(self, messages: List[AIMessage], image_path: Optional[Path]) -> List[AIMessage]:
         """Run lightweight local Ollama vision triage before cloud escalation."""
