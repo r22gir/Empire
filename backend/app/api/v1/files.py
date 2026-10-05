@@ -21,7 +21,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 def get_category(filename: str) -> str:
     ext = filename.lower().split('.')[-1] if '.' in filename else ''
-    if ext in ['pdf', 'txt', 'md', 'doc', 'docx', 'csv', 'json']:
+    if ext in ['pdf', 'txt', 'md', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'json']:
         return 'documents'
     elif ext in ['py', 'js', 'ts', 'tsx', 'jsx', 'html', 'css', 'sh', 'yaml', 'yml']:
         return 'code'

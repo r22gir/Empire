@@ -2498,18 +2498,59 @@ def _stream_immediate_response(response: ChatResponse, conversation_id: str | No
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
-def _image_upload_path(image_filename: str | None) -> Path | None:
+_IMAGE_ATTACHMENT_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".heic", ".heif", ".bmp"}
+_DOCUMENT_ATTACHMENT_EXTS = {
+    ".pdf", ".txt", ".md", ".csv", ".json",
+    ".doc", ".docx", ".xls", ".xlsx",
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".sh", ".yaml", ".yml",
+}
+_UPLOAD_CATEGORIES = ("images", "documents", "audio", "other", "code")
+
+
+def _attachment_upload_path(image_filename: str | None) -> Path | None:
+    """Resolve an uploaded chat attachment across image/document/audio/code dirs.
+
+    Chat still sends every attachment as ``image_filename``; PDFs and other
+    non-images land under uploads/documents (see /files/upload), so the old
+    images-only lookup falsely returned IMAGE_NOT_AVAILABLE.
+    """
     if not image_filename:
         return None
     safe = Path(image_filename).name
-    candidates = [
-        data_root() / "uploads" / "images" / safe,
-        data_root() / "uploads" / safe,
-        Path.home() / "empire-repo" / "backend" / "data" / "uploads" / "images" / safe,
-        Path.home() / "empire-repo" / "uploads" / "images" / safe,
-        Path.home() / "empire-repo" / "backend" / "data" / "uploads" / safe,
+    roots = [
+        data_root() / "uploads",
+        Path.home() / "empire-repo" / "backend" / "data" / "uploads",
+        Path.home() / "empire-repo" / "uploads",
     ]
+    candidates: list[Path] = []
+    for root in roots:
+        for cat in _UPLOAD_CATEGORIES:
+            candidates.append(root / cat / safe)
+        candidates.append(root / safe)
     return next((path for path in candidates if path.exists() and path.is_file()), None)
+
+
+def _image_upload_path(image_filename: str | None) -> Path | None:
+    """Backward-compatible alias — resolves any attachment category."""
+    return _attachment_upload_path(image_filename)
+
+
+def _attachment_looks_like_image(filename: str | None) -> bool:
+    if not filename:
+        return False
+    return Path(filename).suffix.lower() in _IMAGE_ATTACHMENT_EXTS
+
+
+def _unavailable_attachment_response(filename: str | None) -> tuple[str, str, str]:
+    """Return (message, model_used, skill_used) for a missing attachment."""
+    safe = Path(filename or "attachment").name
+    if _attachment_looks_like_image(filename):
+        return "IMAGE_NOT_AVAILABLE", "image-availability-check", "image_availability_check"
+    return (
+        f"I couldn't read that file ({safe}). It may be missing, empty, or in a format I can't parse yet.",
+        "attachment-availability-check",
+        "attachment_availability_check",
+    )
 
 
 def _explicit_no_drawing_router(message: str | None) -> bool:
@@ -2913,13 +2954,14 @@ async def _chat_with_max_service_impl(
             metadata=_response_metadata(request.channel, skill_used="inventory_ambiguity_gate"),
         )
 
-    if request.image_filename and _image_upload_path(request.image_filename) is None:
+    if request.image_filename and _attachment_upload_path(request.image_filename) is None:
+        _unavail_msg, _unavail_model, _unavail_skill = _unavailable_attachment_response(request.image_filename)
         return ChatResponse(
-            response="IMAGE_NOT_AVAILABLE",
-            model_used="image-availability-check",
+            response=_unavail_msg,
+            model_used=_unavail_model,
             fallback_used=False,
             tool_results=[],
-            metadata=_response_metadata(request.channel, skill_used="image_availability_check"),
+            metadata=_response_metadata(request.channel, skill_used=_unavail_skill),
         )
 
     # Sprint 1d Phase A Fix #3 — clear any stale handoff state at the start
@@ -4034,10 +4076,11 @@ async def _chat_stream_impl(request: ChatRequest):
 
         return StreamingResponse(clarification_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    if request.image_filename and _image_upload_path(request.image_filename) is None:
+    if request.image_filename and _attachment_upload_path(request.image_filename) is None:
+        _unavail_msg, _unavail_model, _unavail_skill = _unavailable_attachment_response(request.image_filename)
         async def image_unavailable_gen():
-            yield f"data: {_safe_dumps({'type': 'text', 'content': 'IMAGE_NOT_AVAILABLE'})}\n\n"
-            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'image-availability-check', 'metadata': _response_metadata(request.channel, skill_used='image_availability_check')})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'text', 'content': _unavail_msg})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': _unavail_model, 'metadata': _response_metadata(request.channel, skill_used=_unavail_skill)})}\n\n"
         return StreamingResponse(image_unavailable_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     # H57 FIX M-bM-^@M-^T stream door: also release pending on non-continuation
