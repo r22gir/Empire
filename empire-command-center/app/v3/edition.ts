@@ -181,8 +181,6 @@ const ES: Record<string, string> = {
   'No research feed connected': 'Sin feed de investigación conectado',
   'Ask {name} to research': 'Pídele a {name} que investigue',
   "{name} doesn't invent headlines. Ask for a briefing and the sourced answer opens in chat.": '{name} no inventa titulares. Pide un resumen y la respuesta con fuentes se abre en el chat.',
-  'None yet.': 'Nada todavía.',
-  'to research': 'que investigue',
   'New interest or question': 'Nuevo interés o pregunta',
   // job hub
   'Jobs': 'Trabajos', 'Job': 'Trabajo', 'Back': 'Volver', 'Documents': 'Documentos', 'Photos': 'Fotos', 'Timeline': 'Historial',
