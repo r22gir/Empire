@@ -58,7 +58,9 @@ Quote and drawing PDFs go out as document messages on that same reply. They are 
 Copy these without changing the function names or the routes:
 
 - `backend/app/services/max/whatsapp_channel.py`
+- `backend/app/services/max/whatsapp_calling.py`
 - `backend/app/routers/whatsapp.py`
 - this file
+- `docs/WHATSAPP_CHANNEL.md`
 
 `hermes_phase3.py` only reports `channel_status()`. The default handlers call Workroom voice, Photo Analyzer, and Max chat; another edition can pass its own handlers into `process_webhook` without forking the webhook, signature, allowlist, window, or confirm gate.

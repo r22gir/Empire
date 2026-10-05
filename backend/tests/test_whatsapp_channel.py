@@ -593,3 +593,230 @@ def test_route_is_loaded_on_the_app():
     assert "/whatsapp/webhook" in paths
     assert "/whatsapp/status" in paths
     assert "/whatsapp/send" in paths
+
+
+def _call_payload(call_event: dict) -> bytes:
+    body = {
+        "object": "whatsapp_business_account",
+        "entry": [{
+            "changes": [{
+                "field": "calls",
+                "value": {
+                    "calls": [call_event]
+                },
+            }]
+        }],
+    }
+    return json.dumps(body).encode()
+
+
+def test_calling_feature_flag_and_status(monkeypatch):
+    _enable(monkeypatch)
+    monkeypatch.delenv("WHATSAPP_CALLING_ENABLED", raising=False)
+    status = channel_status()
+    assert status["calling_enabled"] is False
+
+    monkeypatch.setenv("WHATSAPP_CALLING_ENABLED", "1")
+    status = channel_status()
+    assert status["calling_enabled"] is True
+
+
+def test_call_rejected_for_non_allowlisted(monkeypatch):
+    _enable(monkeypatch)
+    monkeypatch.setenv("WHATSAPP_CALLING_ENABLED", "1")
+    client = _client()
+
+    calls_sent = []
+    def _mock_post(url, body, headers):
+        calls_sent.append({"url": url, "body": body})
+        return _GraphResponse({"success": True})
+
+    monkeypatch.setattr("app.services.max.whatsapp_channel._post_graph", _mock_post)
+
+    payload = _call_payload({
+        "id": "call-123",
+        "from": "19999999999",  # not on allowlist
+        "event": "connect",
+        "session": {"sdp_type": "offer", "sdp": "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 5004 RTP/AVP 111\r\na=rtpmap:111 opus/48000/2\r\n"},
+    })
+
+    res = client.post(
+        "/api/v1/whatsapp/webhook",
+        content=payload,
+        headers={"x-hub-signature-256": _sign(payload), "Content-Type": "application/json"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["accepted"] is True
+    call_res = next(r for r in data["results"] if r.get("call_id") == "call-123")
+    assert call_res["action"] == "rejected"
+    assert call_res["reason"] == "not_allowlisted"
+
+
+def test_call_rejected_when_calling_disabled(monkeypatch):
+    _enable(monkeypatch)
+    monkeypatch.setenv("WHATSAPP_CALLING_ENABLED", "0")
+    client = _client()
+
+    calls_sent = []
+    def _mock_post(url, body, headers):
+        calls_sent.append({"url": url, "body": body})
+        return _GraphResponse({"success": True})
+
+    monkeypatch.setattr("app.services.max.whatsapp_channel._post_graph", _mock_post)
+
+    payload = _call_payload({
+        "id": "call-disabled",
+        "from": _founder(),
+        "event": "connect",
+        "session": {"sdp_type": "offer", "sdp": "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 5004 RTP/AVP 111\r\na=rtpmap:111 opus/48000/2\r\n"},
+    })
+
+    res = client.post(
+        "/api/v1/whatsapp/webhook",
+        content=payload,
+        headers={"x-hub-signature-256": _sign(payload), "Content-Type": "application/json"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    call_res = next(r for r in data["results"] if r.get("call_id") == "call-disabled")
+    assert call_res["action"] == "rejected"
+    assert call_res["reason"] == "calling_disabled"
+
+
+def test_call_connect_and_terminate_allowlisted(monkeypatch):
+    _enable(monkeypatch)
+    monkeypatch.setenv("WHATSAPP_CALLING_ENABLED", "1")
+    monkeypatch.setenv("XAI_API_KEY", "test-xai-key")
+    client = _client()
+
+    posted_calls = []
+    async def _mock_post_calls(url, body, headers):
+        posted_calls.append({"url": url, "body": body})
+        return _GraphResponse({"success": True})
+
+    class MockUpstreamWS:
+        def __init__(self):
+            self.sent = []
+        async def send(self, msg):
+            self.sent.append(msg)
+        async def close(self):
+            pass
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            # End iteration
+            raise StopAsyncIteration
+
+    mock_upstream = MockUpstreamWS()
+
+    # Mock xAI websockets.connect in whatsapp_calling
+    async def _mock_connect(*args, **kwargs):
+        return mock_upstream
+
+    import websockets
+    monkeypatch.setattr(websockets, "connect", _mock_connect)
+
+    import httpx
+    orig_post = httpx.AsyncClient.post
+    async def _mock_client_post(self, url, *args, **kwargs):
+        if "/calls" in str(url):
+            body = kwargs.get("json", {})
+            posted_calls.append({"url": str(url), "body": body})
+            return _GraphResponse({"success": True})
+        return await orig_post(self, url, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", _mock_client_post)
+
+    valid_offer_sdp = (
+        "v=0\r\n"
+        "o=- 1495799811084970 1 IN IP4 127.0.0.1\r\n"
+        "s=-\r\n"
+        "t=0 0\r\n"
+        "m=audio 9 RTP/SAVPF 111\r\n"
+        "c=IN IP4 127.0.0.1\r\n"
+        "a=rtcp:9 IN IP4 127.0.0.1\r\n"
+        "a=ice-ufrag:testufrag\r\n"
+        "a=ice-pwd:testpasswordtestpassword\r\n"
+        "a=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00\r\n"
+        "a=setup:actpass\r\n"
+        "a=mid:0\r\n"
+        "a=sendrecv\r\n"
+        "a=rtpmap:111 opus/48000/2\r\n"
+        "a=rtcp-mux\r\n"
+    )
+
+    payload = _call_payload({
+        "id": "call-ok-1",
+        "from": _founder(),
+        "event": "connect",
+        "session": {"sdp_type": "offer", "sdp": valid_offer_sdp},
+    })
+
+    res = client.post(
+        "/api/v1/whatsapp/webhook",
+        content=payload,
+        headers={"x-hub-signature-256": _sign(payload), "Content-Type": "application/json"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    call_res = next(r for r in data["results"] if r.get("call_id") == "call-ok-1")
+    assert call_res["action"] == "accepted"
+    assert "sdp_answer" in call_res
+    assert "v=0" in call_res["sdp_answer"]
+
+    # Verify Graph calls were made: pre_accept then accept
+    actions = [p["body"].get("action") for p in posted_calls]
+    assert "pre_accept" in actions
+    assert "accept" in actions
+
+    # Now terminate call via webhook
+    term_payload = _call_payload({
+        "id": "call-ok-1",
+        "from": _founder(),
+        "event": "terminate",
+    })
+    res_term = client.post(
+        "/api/v1/whatsapp/webhook",
+        content=term_payload,
+        headers={"x-hub-signature-256": _sign(term_payload), "Content-Type": "application/json"},
+    )
+    assert res_term.status_code == 200
+    term_data = res_term.json()
+    term_res = next(r for r in term_data["results"] if r.get("call_id") == "call-ok-1")
+    assert term_res["action"] == "terminated"
+
+
+@pytest.mark.asyncio
+async def test_mid_call_documents_send_pdf(monkeypatch):
+    _enable(monkeypatch)
+    from app.services.max.whatsapp_calling import WhatsAppVoiceCall
+
+    uploaded = []
+    def _mock_upload(data, mime, filename, http_upload=None):
+        uploaded.append({"filename": filename, "mime": mime, "data": data})
+        return "media-doc-123"
+
+    posted = []
+    async def _mock_post(body, http_post=None):
+        posted.append(body)
+        return {"messages": [{"id": "wamid.doc1"}]}
+
+    monkeypatch.setattr("app.services.max.whatsapp_channel.upload_media", _mock_upload)
+    monkeypatch.setattr("app.services.max.whatsapp_channel._post_graph", _mock_post)
+    monkeypatch.setattr("app.services.quote_pdf_service.generate_quote_pdf", lambda qid: b"%PDF-1.4 quote")
+
+    call = WhatsAppVoiceCall("call-doc-test", _founder())
+    await call._check_and_send_mid_call_documents("get_quote", {
+        "success": True,
+        "result": {"id": "quote-999", "quote_number": "EST-2026-999"}
+    })
+
+    assert len(uploaded) == 1
+    assert uploaded[0]["filename"] == "EST-2026-999.pdf"
+    assert uploaded[0]["data"] == b"%PDF-1.4 quote"
+    assert len(posted) == 1
+    assert posted[0]["type"] == "document"
+    assert posted[0]["document"]["caption"] == "Draft quote from live voice call. Not sent to client."
+
+
