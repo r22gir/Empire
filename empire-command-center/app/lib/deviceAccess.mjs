@@ -37,6 +37,7 @@ export function renderDeviceAccessPage(edition) {
     : '<p>Si prefieres una red privada, Rafael puede compartirte solo el Dell por Tailscale, limitado a tu propio Max. Instala Tailscale, acepta la invitación y usa el enlace privado que te envíe.</p>';
 
   const html = `<main style="max-width:720px;margin:0 auto;padding:32px 20px;font-family:Inter,sans-serif;color:#1a1a1a">
+<nav aria-label="Navegación de ayuda" style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:24px;font-size:14px"><a href="/ayuda" style="color:#b8960c;font-weight:700">← Volver a Ayuda</a><a href="/" style="color:#444;font-weight:600">Centro de mando</a></nav>
 <p style="font-size:12px;letter-spacing:0.4px;color:#b8960c;font-weight:700;margin:0">CENTRO DE MANDO</p>
 <h1 style="font-size:32px;margin:8px 0">Cómo conectarte desde tus dispositivos</h1>
 <p style="font-size:16px;line-height:1.5">${intro}</p>

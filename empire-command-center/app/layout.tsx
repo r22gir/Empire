@@ -4,11 +4,13 @@ import { I18nWrapper } from "./components/I18nWrapper";
 import { appDescriptionFromEnv, appTitleFromEnv } from "./lib/appIdentity";
 
 const edition = (process.env.NEXT_PUBLIC_EMPIRE_EDITION || "").trim().toLowerCase();
-const htmlLang = edition === "amp" || edition === "maxine" ? "es" : "en";
+const isFamilyEdition = edition === "amp" || edition === "maxine";
+const htmlLang = isFamilyEdition ? "es" : "en";
 
 export const metadata: Metadata = {
   title: appTitleFromEnv(),
   description: appDescriptionFromEnv(),
+  robots: { index: false, follow: false, noarchive: true },
 };
 
 export const viewport: Viewport = {
@@ -26,6 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta httpEquiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
         <meta httpEquiv="Pragma" content="no-cache" />
         <meta httpEquiv="Expires" content="0" />
+        <meta name="robots" content="noindex, nofollow, noarchive" />
         <script dangerouslySetInnerHTML={{ __html: `
           if('serviceWorker' in navigator){navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(w){w.unregister()})});}
           if('caches' in window){caches.keys().then(function(n){n.forEach(function(k){caches.delete(k)})});}

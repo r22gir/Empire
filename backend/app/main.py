@@ -28,7 +28,7 @@ _preserved_edition_env = {key: os.environ[key] for key in _EDITION_ENV_KEYS if k
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 os.environ.update(_preserved_edition_env)
 
-from app.edition import apply_amp_process_paths
+from app.edition import apply_amp_process_paths, is_family_edition
 apply_amp_process_paths()
 
 from fastapi import FastAPI, Request
@@ -102,6 +102,8 @@ async def no_cache_middleware(request: Request, call_next):
     response.headers["Expires"] = "0"
     response.headers["Surrogate-Control"] = "no-store"
     response.headers["CDN-Cache-Control"] = "no-store"
+    if is_family_edition():
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
     return response
 
 # Helper to safely load routers

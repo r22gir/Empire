@@ -92,6 +92,27 @@ AMP_DISABLED_PREFIXES = (
     "/api/v1/workroom-capture",
     "/api/luxeforge",
     "/workroom",
+    # Empire internals: docs, git/build info, host stats, infra control.
+    "/api/v1/dev",
+    "/api/v1/system",
+    "/api/v1/docs",
+    "/api/v1/documentation",
+    "/api/v1/docs-registry",
+    "/api/v1/max/control-plane",
+    "/api/v1/max/system-report",
+    "/api/v1/max/tool-registry",
+    "/api/v1/max/orchestration",
+    "/api/v1/max/pipeline",
+    "/api/v1/max/runtime-truth",
+    "/api/v1/recovery-core",
+    "/api/v1/transcriptforge/incidents",
+    "/api/v1/channels/status",
+    "/api/v1/orchestration",
+    "/api/v1/docker",
+    "/api/v1/ollama",
+    "/api/v1/openclaw",
+    "/api/v1/maintenance",
+    "/api/v1/qr",
 )
 
 # Shared base, mapped to coaching on the AMP business and reused as-is

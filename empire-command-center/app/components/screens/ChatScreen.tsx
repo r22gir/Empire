@@ -55,12 +55,24 @@ function hasStreamingToolBlock(content: string): boolean {
   return !closingMatch;
 }
 
+function transcriptRequestsDocument(text: string): boolean {
+  const normalized = text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  const documentObject = /\b(documento|cotizacion|presupuesto|propuesta|factura|quote|proposal|invoice|draft)\b/.test(normalized);
+  const creationIntent = /\b(hazme|haz|crea|crear|genera|generar|prepara|preparar|elabora|elaborar|arma|armar|dame|necesito|quiero|make|create|generate|prepare|write)\b/.test(normalized);
+  return documentObject && creationIntent;
+}
+
 const QUICK_ACTIONS = [
   { label: 'Quick Quote', icon: ClipboardList, action: 'quick-quote', highlight: true },
   { label: 'Mail', icon: Mail, action: 'briefing' },
   { label: 'Tasks', icon: CheckSquare, action: 'tasks' },
   { label: 'Research', icon: Search, action: 'research' },
   { label: 'Documents', icon: FileText, action: 'documents' },
+  { label: 'Documento por voz', icon: FileText, action: 'voice-document' },
   { label: 'Calendar', icon: Calendar, action: 'calendar' },
 ];
 
@@ -89,6 +101,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [codeMode, setCodeMode] = useState(false);
   const [codeTask, setCodeTask] = useState<any>(null);
   const [voiceMode, setVoiceMode] = useState(false);
+  const [voiceDocumentMode, setVoiceDocumentMode] = useState(false);
   const [ttsPlaying, setTtsPlaying] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<string>(''); // Recording/uploading/transcribing status
   const [aiStatus, setAiStatus] = useState<string>(''); // Thinking/tool status for all messages
@@ -103,6 +116,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const fileInputRef = useRef<HTMLInputElement>(null);
   const codePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceModeRef = useRef(false);
+  const voiceDocumentModeRef = useRef(false);
   const draftSessionRef = useRef<string | null>(null);
   const [voiceDraft, setVoiceDraft] = useState<VoiceDraftView | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -149,8 +163,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     return () => clearInterval(interval);
   }, []);
 
-  // Keep voiceMode ref in sync
+  // Keep voice routing refs in sync. Normal mic dictation goes to chat.
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
+  useEffect(() => { voiceDocumentModeRef.current = voiceDocumentMode; }, [voiceDocumentMode]);
 
   // AI status pipeline — detect tool calls in streaming content
   const TOOL_STATUS_MAP: Record<string, string> = {
@@ -320,11 +335,8 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             setVoiceStatus('');
             return;
           }
-          if (data.text && voiceModeRef.current) {
-            onSend(data.text);
-            setVoiceStatus('');
-          } else if (data.text) {
-            setVoiceStatus('Revisa la transcripción');
+          if (data.text && (voiceDocumentModeRef.current || transcriptRequestsDocument(data.text))) {
+            setVoiceStatus('Preparando documento...');
             try {
               const ingested = await fetch(`${API}/voice/documents/ingest`, {
                 method: 'POST',
@@ -342,8 +354,13 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               setVoiceDraft(session);
             } catch (ingestErr) {
               console.warn('Voice draft ingest failed:', ingestErr);
-              setInput(prev => prev + (prev ? ' ' : '') + data.text);
+              onSend(data.text);
+              setVoiceStatus('');
             }
+          } else if (data.text) {
+            // Mic dictation is a normal chat message unless document intent/mode was explicit.
+            onSend(data.text);
+            setVoiceStatus('');
           } else {
             setVoiceStatus('');
           }
@@ -525,6 +542,14 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       case 'tasks': onSend('Show my tasks for today'); break;
       case 'research': onScreenChange?.('research'); break;
       case 'documents': onScreenChange?.('docs'); break;
+      case 'voice-document':
+        setVoiceDocumentMode(prev => {
+          const next = !prev;
+          voiceDocumentModeRef.current = next;
+          setVoiceStatus(next ? '📋 Documento por voz activado' : 'Chat por voz activado');
+          return next;
+        });
+        break;
       case 'calendar': onSend('Show my calendar for today'); break;
       default: break;
     }
@@ -1156,6 +1181,22 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             >
               x
             </button>
+          </div>
+        )}
+
+        {/* Voice document mode is opt-in; ordinary mic dictation stays chat. */}
+        {voiceDocumentMode && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            padding: '7px 12px', borderRadius: 10, marginBottom: 8,
+            background: '#fffaf0', border: '1px solid #e5c76b',
+          }}>
+            <FileText size={14} style={{ color: '#b8960c' }} />
+            <span style={{ color: '#8a6a00', fontSize: 12, fontWeight: 600 }}>Documento por voz ON</span>
+            <button type="button" onClick={() => { voiceDocumentModeRef.current = false; setVoiceDocumentMode(false); setVoiceStatus('Chat por voz activado'); }} style={{
+              background: 'none', border: 'none', color: '#8a6a00', cursor: 'pointer',
+              fontSize: 12, fontWeight: 600, textDecoration: 'underline',
+            }}>Desactivar</button>
           </div>
         )}
 

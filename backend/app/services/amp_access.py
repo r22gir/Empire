@@ -38,7 +38,31 @@ SESSION_PURPOSE = "amp_access"
 LOGIN_PURPOSE = "amp_login"
 LOGIN_TTL_MINUTES = 15
 SESSION_TTL_HOURS = 12
+OWNER_SESSION_TTL_DAYS = max(1, int(os.getenv("AMP_OWNER_SESSION_TTL_DAYS", "365") or "365"))
 MAX_CODE_ATTEMPTS = 5
+
+
+def open_access_enabled() -> bool:
+    """Temporary family-site mode; disabled unless explicitly enabled."""
+    raw = os.getenv("AMP_OPEN_ACCESS", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def open_access_owner_email() -> str:
+    """Resolve the configured owner from the existing allowlist, without bypassing role checks."""
+    from app.services import amp_allowlist
+
+    for entry in amp_allowlist.list_entries():
+        if str(entry.get("role") or "").strip().lower() != "owner":
+            continue
+        email = _norm_email(str(entry.get("email") or ""))
+        if email:
+            return email
+    return _norm_email(
+        os.getenv("AMP_OWNER_EMAIL", "").strip()
+        or os.getenv("FOUNDER_EMAIL", "").strip()
+        or "empirebox2026@gmail.com"
+    )
 
 # Headers a browser (or anyone) can set. Never treat these as identity.
 CLIENT_IDENTITY_HEADERS = frozenset({
@@ -179,15 +203,26 @@ def _decode(token: str, audience: str) -> Optional[dict]:
     return claims
 
 
-def create_session_token(email: str, *, ttl_hours: int = SESSION_TTL_HOURS) -> str:
+def _is_owner(email: str) -> bool:
+    from app.services import amp_allowlist
+
+    return amp_allowlist.entry_role(email=email) == "owner"
+
+
+def session_ttl_hours(email: str) -> int:
+    return OWNER_SESSION_TTL_DAYS * 24 if _is_owner(email) else SESSION_TTL_HOURS
+
+
+def create_session_token(email: str, *, ttl_hours: Optional[int] = None) -> str:
     email_n = _norm_email(email)
+    ttl = session_ttl_hours(email_n) if ttl_hours is None else ttl_hours
     now = datetime.now(timezone.utc)
     payload = {
         "email": email_n,
         "purpose": SESSION_PURPOSE,
         "aud": SESSION_AUDIENCE,
         "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(hours=ttl_hours)).timestamp()),
+        "exp": int((now + timedelta(hours=ttl)).timestamp()),
     }
     return _encode(payload)
 
@@ -439,14 +474,15 @@ def request_login_email(email: str) -> bool:
 
 
 def apply_session_cookie(response, email: str) -> str:
-    token = create_session_token(email)
+    ttl_hours = session_ttl_hours(email)
+    token = create_session_token(email, ttl_hours=ttl_hours)
     response.set_cookie(
         key=SESSION_COOKIE,
         value=token,
         httponly=True,
         secure=cookie_secure(),
         samesite="lax",
-        max_age=SESSION_TTL_HOURS * 3600,
+        max_age=ttl_hours * 3600,
         path="/",
     )
     return token
@@ -494,6 +530,9 @@ def resolve_request_email(scope) -> tuple[Optional[str], str]:
     session is not consulted (the allowlist check still applies). An invalid
     or absent Access token falls through to the AMP session.
     """
+    if open_access_enabled():
+        return open_access_owner_email(), "open_access"
+
     cf_token = header_value(scope, "cf-access-jwt-assertion") or cookie_value(scope, "CF_Authorization")
     if cf_token:
         ok, email = verify_cloudflare_access_jwt(cf_token)

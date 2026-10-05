@@ -622,7 +622,7 @@ export default function CommandCenter() {
 
       <ActiveJobBanner />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         <LeftNav
           activeProduct={activeProduct}
           activeScreen={activeScreen}
@@ -640,7 +640,7 @@ export default function CommandCenter() {
           }}
         />
 
-        <div className="flex-1 flex flex-col overflow-y-auto bg-[var(--chat-bg)]">
+        <div className="flex-1 min-h-0 flex flex-col overflow-y-auto bg-[var(--chat-bg)]">
           {renderCenterContent()}
         </div>
 

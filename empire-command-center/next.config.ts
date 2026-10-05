@@ -40,7 +40,26 @@ const VENV_TRACE_EXCLUDES = [
   "**/*venv*/**",
 ];
 
+// Mirrors next.config.js: family editions get the empty docs registry.
+const FAMILY_EDITION = ["amp", "maxine"].includes(
+  String(process.env.NEXT_PUBLIC_EMPIRE_EDITION || process.env.EMPIRE_EDITION || "").trim().toLowerCase(),
+);
+
 const nextConfig: NextConfig = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  webpack(config: any, { webpack }: any) {
+    if (FAMILY_EDITION) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const path = require("path");
+      const familyRegistry = path.join(__dirname, "app/lib/docs-registry.family.ts");
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(/[\\/]lib[\\/]docs-registry(\.ts)?$/, (res: { request: string }) => {
+          res.request = familyRegistry;
+        }),
+      );
+    }
+    return config;
+  },
   experimental: {
     proxyTimeout: VISION_PROXY_TIMEOUT_MS,
     proxyClientMaxBodySize: VISION_PROXY_BODY_LIMIT,
