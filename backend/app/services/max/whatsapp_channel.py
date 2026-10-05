@@ -105,6 +105,7 @@ def channel_status() -> dict[str, Any]:
         "interface_point": "whatsapp_cloud_api",
         "graph_version": GRAPH_VERSION,
         "reply_mode": reply_mode(),
+        "calling_enabled": bool((os.getenv("WHATSAPP_CALLING_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")),
     }
 
 
@@ -358,6 +359,47 @@ def parse_inbound(payload: dict | None) -> list[dict[str, Any]]:
                         item["voice"] = bool(media.get("voice"))
                 found.append(item)
     return found
+
+
+def parse_inbound_calls(payload: dict | None) -> list[dict[str, Any]]:
+    """Flatten a Cloud API webhook into inbound call events."""
+    if not isinstance(payload, dict):
+        return []
+    if payload.get("object") not in (None, "whatsapp_business_account"):
+        return []
+    calls: list[dict[str, Any]] = []
+    for entry in payload.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        for change in entry.get("changes") or []:
+            field = change.get("field")
+            value = (change or {}).get("value") or {}
+            if not isinstance(value, dict):
+                continue
+            # Meta may send calls under changes with field == 'calls' or value having 'calls'
+            raw_calls = value.get("calls") or []
+            if not isinstance(raw_calls, list) and isinstance(raw_calls, dict):
+                raw_calls = [raw_calls]
+            for call_ev in raw_calls:
+                if not isinstance(call_ev, dict):
+                    continue
+                call_id = str(call_ev.get("id") or call_ev.get("call_id") or "")
+                caller = str(call_ev.get("from") or "")
+                event = str(call_ev.get("event") or "")
+                session = call_ev.get("session") or {}
+                sdp = ""
+                if isinstance(session, dict):
+                    sdp = session.get("sdp") or ""
+                calls.append({
+                    "call_id": call_id,
+                    "from": caller,
+                    "event": event,
+                    "sdp": sdp,
+                    "timestamp": call_ev.get("timestamp"),
+                    "raw": call_ev,
+                })
+    return calls
+
 
 
 def _require_enabled() -> None:
@@ -1000,6 +1042,39 @@ async def process_webhook(
             "voice_sent": voice_sent,
             "voice_fallback": voice_fallback,
         })
+    # Check for calls field events (connect, terminate, status)
+    calls = parse_inbound_calls(payload if isinstance(payload, dict) else {})
+    if calls:
+        from app.services.max.whatsapp_calling import (
+            handle_call_connect,
+            handle_call_terminate,
+        )
+        for call_item in calls:
+            c_id = call_item["call_id"]
+            c_from = call_item["from"]
+            c_event = call_item["event"]
+            c_res: dict[str, Any] = {
+                "call_id": c_id,
+                "type": "call",
+                "event": c_event,
+                "from": c_from,
+            }
+            if c_event == "connect":
+                res = await handle_call_connect(
+                    c_id,
+                    c_from,
+                    call_item["sdp"],
+                    http_post=http_post,
+                )
+                c_res.update(res)
+            elif c_event == "terminate":
+                res = await handle_call_terminate(c_id, reason="webhook_terminate")
+                c_res.update(res)
+            else:
+                # status or other call event (e.g., ringing)
+                c_res["action"] = "noted"
+            results.append(c_res)
+
     return {
         "accepted": True,
         "http_status": 200,
