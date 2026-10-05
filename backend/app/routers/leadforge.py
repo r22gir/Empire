@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 # ── DB Setup ──────────────────────────────────────────────────────────
 
+from app.db.database import resolve_task_db_path
+
 DB_PATH = resolve_task_db_path()
 
 
@@ -1641,7 +1643,6 @@ def list_providers():
 # ── Campaign Endpoints ──────────────────────────────────────────────────
 
 from app.services.leadforge import campaign_service as cs
-from app.db.database import resolve_task_db_path
 
 
 class CampaignCreate(BaseModel):
