@@ -75,8 +75,11 @@ import './theme/cyber-layout.css';
 import './theme/cyber-pages.css';
 import './theme/cyber-hud.css';
 import './theme/cyber-calm.css';
+// Design system v3: Dark palette for classic module pages (generated), the shell bridge, then module internals.
+import './v3/modules.generated.css';
 // Design system v3 bridge: maps the shell onto the v3 tokens (Dark #0b0f14 + cyan / Gold cream + Playfair).
 import './v3/app-bridge.css';
+import './v3/modules.css';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));

@@ -1,0 +1,210 @@
+/* ==========================================================================
+   Design system v3: module internals (both themes).
+   Restyles the HUD primitives from theme/cyber*.css (stage, plate header,
+   gauges, hex tiles, Max strip, glass panels, rows, HUD tables, pills, buttons,
+   inputs, angular tabs / module side menus, quote-review console) onto the v3
+   tokens (--v-*), so module pages match the v3 shell: soft glass cards,
+   rounded corners, no clip-path cuts, no glow, no grid/scanlines, Inter body,
+   display headings, mono only for figures. Loaded LAST.
+   Client-facing previews (.cy-keep-light) are never touched.
+   ========================================================================== */
+:root .cy-shell.v3 {
+  --m-card: var(--v-glass2); --m-card2: var(--v-chip); --m-line: var(--v-line); --m-r: 14px; --m-rs: 9px;
+}
+html[data-theme="gold"] .cy-shell.v3 { --m-card: rgba(252, 250, 245, 0.86); }
+
+/* ---------- stage ---------- */
+:root .cy-shell.v3 .cy-stage { background: transparent !important; color: var(--v-ink); }
+:root .cy-shell.v3 :is(.cy-stage-floor, .cy-stage-scan, .cy-floor, .cy-scan, .cy-glitch) { display: none !important; }
+:root .cy-shell.v3 .cy-stage-inner { max-width: 1240px; gap: 18px; padding: 22px 26px 72px; }
+:root .cy-shell.v3 .cy-fade { animation-duration: .35s; }
+
+/* ---------- page head (plate) ---------- */
+:root .cy-shell.v3 .cy-plate { clip-path: none !important; background: transparent !important; padding: 2px 0 !important; gap: 14px; box-shadow: none !important; border: 0 !important; }
+:root .cy-shell.v3 .cy-plate::before, :root .cy-shell.v3 .cy-plate::after { display: none !important; }
+:root .cy-shell.v3 .cy-plate-ico { clip-path: none !important; border-radius: 12px !important; width: 42px; height: 42px; background: var(--v-acc-soft) !important; border: 1px solid var(--v-line) !important; color: var(--v-accink) !important; box-shadow: none !important; }
+:root .cy-shell.v3 .cy-plate h1 { font: var(--v-dispw) 28px/1.1 var(--v-display) !important; letter-spacing: var(--v-track) !important; text-transform: none !important; color: var(--v-ink) !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-plate small { font: 400 13px/1.4 var(--v-sans) !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--v-mut) !important; opacity: 1 !important; margin-top: 4px; }
+
+/* ---------- chips / pills / counts ---------- */
+:root .cy-shell.v3 .cy-chip { clip-path: none !important; border-radius: 999px !important; padding: 4px 10px !important; background: var(--v-chip) !important; border: 1px solid var(--v-line) !important; color: var(--v-ink2) !important;
+  font: 500 11px/1.2 var(--v-sans) !important; letter-spacing: 0 !important; text-transform: none !important; box-shadow: none !important; }
+:root .cy-shell.v3 .cy-chip i { box-shadow: none !important; animation: none !important; background: var(--v-acc); }
+:root .cy-shell.v3 .cy-chip.t-teal i { background: var(--v-green); } :root .cy-shell.v3 .cy-chip.t-amber i { background: var(--v-amber); }
+:root .cy-shell.v3 .cy-chip.t-mag i { background: var(--v-red); } :root .cy-shell.v3 .cy-chip.t-violet i { background: var(--v-violet); } :root .cy-shell.v3 .cy-chip.t-muted i { background: var(--v-mut); }
+:root .cy-shell.v3 :is(.cy-spill, .cy-pill) { clip-path: none !important; border-radius: 999px !important; padding: 3px 9px !important; font: 500 10.5px/1.2 var(--v-sans) !important; letter-spacing: .01em !important; text-transform: none !important;
+  background: color-mix(in srgb, var(--p, var(--v-acc)) 12%, transparent) !important; color: var(--v-ink2) !important; border: 1px solid color-mix(in srgb, var(--p, var(--v-acc)) 35%, transparent) !important; box-shadow: none !important; }
+:root .cy-shell.v3 .cy-spill::before { box-shadow: none !important; background: var(--p, var(--v-acc)) !important; }
+:root .cy-shell.v3 .cy-spill { --p: var(--v-acc); } :root .cy-shell.v3 .cy-spill.t-teal { --p: var(--v-green); } :root .cy-shell.v3 .cy-spill.t-amber { --p: var(--v-amber); }
+:root .cy-shell.v3 .cy-spill.t-mag { --p: var(--v-red); } :root .cy-shell.v3 .cy-spill.t-violet { --p: var(--v-violet); } :root .cy-shell.v3 .cy-spill.t-muted { --p: var(--v-mut); }
+:root .cy-shell.v3 .cy-count { border-radius: 9px !important; border: 0 !important; background: var(--v-acc-soft) !important; color: var(--v-accink) !important; font-family: var(--v-mono) !important; }
+:root .cy-shell.v3 .cy-btn.is-active .cy-count { background: var(--v-acc) !important; color: var(--v-onacc) !important; }
+
+/* ---------- gauges -> stat cards with a clean ring ---------- */
+:root .cy-shell.v3 .cy-gauges { gap: 14px; }
+:root .cy-shell.v3 .cy-gauge { --g: var(--v-acc); clip-path: none !important; border-radius: var(--m-r) !important; background: var(--m-card) !important; border: 1px solid var(--v-gedge) !important; box-shadow: var(--v-shadow) !important; padding: 14px 16px !important; }
+:root .cy-shell.v3 .cy-gauge::before, :root .cy-shell.v3 .cy-gauge::after { display: none !important; }
+:root .cy-shell.v3 button.cy-gauge:hover, :root .cy-shell.v3 button.cy-gauge:focus-visible { border-color: var(--v-rule) !important; box-shadow: var(--v-shadow) !important; transform: none !important; }
+:root .cy-shell.v3 .cy-gauge.t-teal { --g: var(--v-green); } :root .cy-shell.v3 .cy-gauge.t-amber { --g: var(--v-amber); } :root .cy-shell.v3 .cy-gauge.t-mag { --g: var(--v-red); }
+:root .cy-shell.v3 .cy-gauge.t-violet { --g: var(--v-violet); } :root .cy-shell.v3 .cy-gauge.t-blue { --g: var(--v-blue); }
+:root .cy-shell.v3 .cy-gauge-ring { width: 64px !important; height: 64px !important; }
+:root .cy-shell.v3 .cy-gauge-track { stroke: var(--v-line) !important; stroke-width: 5 !important; }
+:root .cy-shell.v3 .cy-gauge-ticks { display: none !important; }
+:root .cy-shell.v3 .cy-gauge-arc { stroke: var(--g) !important; stroke-width: 5 !important; stroke-linecap: round !important; filter: none !important; }
+:root .cy-shell.v3 .cy-gauge-arc.is-idle { animation: none !important; opacity: .35 !important; }
+:root .cy-shell.v3 .cy-gauge-ring b { font: 600 11.5px/1 var(--v-mono) !important; color: var(--v-ink) !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-gauge-ring .cy-gauge-ico { color: var(--g) !important; }
+:root .cy-shell.v3 .cy-gauge-ring .cy-gauge-ico svg { width: 22px !important; height: 22px !important; filter: none !important; }
+:root .cy-shell.v3 .cy-gauge-ring .cy-gauge-ico::before { display: none !important; }
+:root .cy-shell.v3 .cy-gauge-label { font: 500 10px/1.2 var(--v-mono) !important; letter-spacing: .12em !important; text-transform: uppercase !important; color: var(--v-mut) !important; }
+:root .cy-shell.v3 .cy-gauge-value { font: 500 26px/1.1 var(--v-display) !important; letter-spacing: var(--v-track) !important; color: var(--v-ink) !important; text-shadow: none !important; margin-top: 4px; }
+:root .cy-shell.v3 .cy-gauge-sub { font: 400 12px/1.4 var(--v-sans) !important; color: var(--v-mut) !important; }
+
+/* ---------- hex tiles -> rounded stat tiles ---------- */
+:root .cy-shell.v3 .cy-hexrow { gap: 12px; }
+:root .cy-shell.v3 .cy-hex { --g: var(--v-acc); clip-path: none !important; width: 132px !important; height: auto !important; padding: 14px 12px !important; border-radius: var(--m-r) !important; align-items: flex-start !important; gap: 6px !important;
+  background: var(--m-card) !important; border: 1px solid var(--v-gedge) !important; box-shadow: none !important; filter: none !important; }
+:root .cy-shell.v3 .cy-hex::before { display: none !important; }
+:root .cy-shell.v3 button.cy-hex:hover, :root .cy-shell.v3 button.cy-hex:focus-visible { background: var(--v-hover) !important; border-color: var(--v-rule) !important; filter: none !important; }
+:root .cy-shell.v3 .cy-hex b { font: 500 26px/1 var(--v-display) !important; color: var(--v-ink) !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-hex > span { font: 500 10px/1.2 var(--v-mono) !important; letter-spacing: .1em !important; color: var(--v-mut) !important; padding: 0 !important; text-align: left !important; display: flex; align-items: center; gap: 6px; }
+:root .cy-shell.v3 .cy-hex > span::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--g); flex: none; }
+:root .cy-shell.v3 .cy-hex.t-teal { --g: var(--v-green); } :root .cy-shell.v3 .cy-hex.t-amber { --g: var(--v-amber); } :root .cy-shell.v3 .cy-hex.t-mag { --g: var(--v-red); } :root .cy-shell.v3 .cy-hex.t-violet { --g: var(--v-violet); } :root .cy-shell.v3 .cy-hex.t-muted { --g: var(--v-mut); }
+
+/* ---------- Max suggestion strip ---------- */
+:root .cy-shell.v3 .cy-maxstrip { clip-path: none !important; border-radius: var(--m-r) !important; background: var(--m-card) !important; border: 1px solid var(--v-gedge) !important; box-shadow: var(--v-shadow) !important; padding: 12px !important; }
+:root .cy-shell.v3 .cy-maxstrip::before, :root .cy-shell.v3 .cy-maxstrip::after { display: none !important; }
+:root .cy-shell.v3 .cy-orb { background: radial-gradient(circle at 35% 30%, var(--v-o1), var(--v-o2) 35%, var(--v-o3) 70%, var(--v-o4)) !important; box-shadow: none !important; color: transparent !important; border: 0 !important; animation: none !important; }
+:root .cy-shell.v3 .cy-maxstrip-orb small { font: 500 9px/1 var(--v-mono) !important; color: var(--v-mut) !important; letter-spacing: .12em !important; }
+:root .cy-shell.v3 .cy-sugg { clip-path: none !important; border-radius: 11px !important; background: var(--v-chip) !important; border: 1px solid var(--v-line) !important; border-left: 3px solid var(--v-acc) !important; box-shadow: none !important; }
+:root .cy-shell.v3 .cy-sugg.t-mag { border-left-color: var(--v-red) !important; } :root .cy-shell.v3 .cy-sugg.t-amber { border-left-color: var(--v-amber) !important; }
+:root .cy-shell.v3 .cy-sugg.t-teal { border-left-color: var(--v-green) !important; } :root .cy-shell.v3 .cy-sugg.t-violet { border-left-color: var(--v-violet) !important; }
+:root .cy-shell.v3 .cy-sugg h4 { font: 600 13px/1.3 var(--v-sans) !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--v-ink) !important; }
+:root .cy-shell.v3 .cy-sugg p { font: 400 12.5px/1.45 var(--v-sans) !important; color: var(--v-ink2) !important; }
+:root .cy-shell.v3 :is(.cy-sugg-src, .cy-src) { font: 400 10.5px/1.3 var(--v-mono) !important; color: var(--v-mut) !important; }
+:root .cy-shell.v3 .cy-maxstrip-empty { font: 400 12.5px/1.4 var(--v-sans) !important; letter-spacing: 0 !important; color: var(--v-mut) !important; }
+
+/* ---------- panels / cards / lists ---------- */
+:root .cy-shell.v3 :is(.cy-panel, .cy-panel.cy-glass) { clip-path: none !important; border-radius: var(--m-r) !important; background: var(--m-card) !important; border: 1px solid var(--v-gedge) !important; box-shadow: var(--v-shadow) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); padding: 16px 18px !important; color: var(--v-ink); }
+:root .cy-shell.v3 :is(.cy-hud, .cy-panel.cy-glass.cy-hud)::before, :root .cy-shell.v3 :is(.cy-hud, .cy-panel.cy-glass.cy-hud)::after { display: none !important; }
+:root .cy-shell.v3 :is(.cy-panel, .cy-card).is-alert { background: color-mix(in srgb, var(--v-red) 7%, var(--m-card)) !important; border-color: color-mix(in srgb, var(--v-red) 35%, transparent) !important; }
+:root .cy-shell.v3 .cy-panel.cy-glass > .cy-panel-head { border-bottom: 1px solid var(--v-line2) !important; padding-bottom: 10px; margin-bottom: 10px; }
+:root .cy-shell.v3 .cy-panel-title { font: var(--v-dispw) 19px/1.2 var(--v-display) !important; letter-spacing: var(--v-track) !important; text-transform: none !important; color: var(--v-ink) !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-panel-title svg { color: var(--v-accink); }
+:root .cy-shell.v3 .is-alert .cy-panel-title { color: var(--v-red) !important; }
+:root .cy-shell.v3 .cy-card { clip-path: none !important; border-radius: 12px !important; background: var(--m-card) !important; border: 1px solid var(--v-gedge) !important; box-shadow: none !important; }
+:root .cy-shell.v3 :is(a, button).cy-card:hover, :root .cy-shell.v3 .cy-card.is-active { border-color: var(--v-rule) !important; box-shadow: none !important; }
+:root .cy-shell.v3 .cy-kpi { font: 500 28px/1.05 var(--v-display) !important; color: var(--v-ink) !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-kpi-label { font: 500 10px/1.2 var(--v-mono) !important; letter-spacing: .12em !important; color: var(--v-mut) !important; }
+:root .cy-shell.v3 .cy-row { clip-path: none !important; border-radius: 10px !important; border: 1px solid transparent !important; background: transparent !important; box-shadow: none !important; color: var(--v-ink); }
+:root .cy-shell.v3 .cy-row::before, :root .cy-shell.v3 .cy-row::after { display: none !important; }
+:root .cy-shell.v3 .cy-row:hover, :root .cy-shell.v3 .cy-row:focus-visible { background: var(--v-hover) !important; border-color: var(--v-line) !important; box-shadow: none !important; }
+:root .cy-shell.v3 .cy-row-ico { color: var(--v-accink) !important; }
+:root .cy-shell.v3 .cy-row-title { font: 500 13.5px/1.35 var(--v-sans) !important; color: var(--v-ink) !important; }
+:root .cy-shell.v3 .cy-row-sub { font: 400 11.5px/1.35 var(--v-sans) !important; color: var(--v-mut) !important; letter-spacing: 0 !important; }
+:root .cy-shell.v3 .cy-money { font: 500 13.5px/1.1 var(--v-mono) !important; color: var(--v-ink) !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-kv { border-bottom: 1px solid var(--v-line2) !important; font: 400 13px/1.35 var(--v-sans) !important; color: var(--v-ink2) !important; }
+:root .cy-shell.v3 .cy-kv b { color: var(--v-ink) !important; font-weight: 600 !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-sect { font: 500 10px/1 var(--v-mono) !important; letter-spacing: .14em !important; color: var(--v-mut) !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-sect::after { background: var(--v-line) !important; height: 1px; }
+:root .cy-shell.v3 .cy-nodata { color: var(--v-mut) !important; font-family: var(--v-sans) !important; letter-spacing: 0 !important; text-transform: none !important; }
+
+/* ---------- HUD tables ---------- */
+:root .cy-shell.v3 .cy-hudtable { font: 400 13px/1.4 var(--v-sans) !important; color: var(--v-ink); }
+:root .cy-shell.v3 .cy-hudtable th { font: 500 10px/1.2 var(--v-mono) !important; letter-spacing: .12em !important; color: var(--v-mut) !important; background: var(--v-solid) !important; border-bottom: 1px solid var(--v-line) !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-hudtable td { border-bottom: 1px solid var(--v-line2) !important; }
+:root .cy-shell.v3 .cy-hudtable tbody tr { animation: none !important; }
+:root .cy-shell.v3 .cy-hudtable tbody tr:hover td { background: var(--v-hover) !important; }
+:root .cy-shell.v3 .cy-hudtable tbody tr:hover td:first-child, :root .cy-shell.v3 .cy-hudtable tr.is-selected td:first-child { box-shadow: inset 2px 0 0 var(--v-acc) !important; }
+:root .cy-shell.v3 .cy-hudtable tr.is-selected td { background: var(--v-acc-soft) !important; }
+:root .cy-shell.v3 .cy-hudtable tr.cy-trow-detail td { background: var(--v-chip) !important; }
+:root .cy-shell.v3 .cy-hudtable .is-id { font: 500 12.5px/1.2 var(--v-mono) !important; color: var(--v-ink) !important; }
+:root .cy-shell.v3 .cy-hudtable .is-date { font: 400 11.5px/1.2 var(--v-mono) !important; color: var(--v-mut) !important; }
+:root .cy-shell.v3 .cy-hudtable .is-cust { color: var(--v-ink2) !important; }
+:root .cy-shell.v3 .cy-hudtable .cy-rowactions :is(button, a) { clip-path: none !important; border-radius: 8px !important; background: var(--v-chip) !important; border: 1px solid var(--v-line) !important; color: var(--v-ink2) !important; box-shadow: none !important; }
+:root .cy-shell.v3 .cy-hudtable .cy-rowactions :is(button, a):hover { background: var(--v-hover) !important; border-color: var(--v-rule) !important; color: var(--v-ink) !important; }
+
+/* ---------- buttons ---------- */
+:root .cy-shell.v3 .cy-btn { clip-path: none !important; border-radius: 9px !important; min-height: 34px; padding: 8px 14px !important; font: 500 12.5px/1 var(--v-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+  background: var(--v-chip) !important; border: 1px solid var(--v-line) !important; color: var(--v-ink) !important; box-shadow: none !important; animation: none !important; }
+:root .cy-shell.v3 .cy-btn:hover, :root .cy-shell.v3 .cy-btn:focus-visible { background: var(--v-hover) !important; border-color: var(--v-rule) !important; box-shadow: none !important; }
+:root .cy-shell.v3 .cy-btn svg { color: var(--v-accink); }
+:root .cy-shell.v3 .cy-btn.is-primary { background: var(--v-acc) !important; border-color: var(--v-acc) !important; color: var(--v-onacc) !important; }
+:root .cy-shell.v3 .cy-btn.is-primary svg { color: inherit; }
+:root .cy-shell.v3 .cy-btn.is-primary:hover { filter: brightness(1.08); }
+:root .cy-shell.v3 .cy-btn.is-danger { color: var(--v-red) !important; border-color: color-mix(in srgb, var(--v-red) 40%, transparent) !important; background: var(--v-red-soft) !important; }
+:root .cy-shell.v3 .cy-btn.is-teal { color: var(--v-green) !important; border-color: color-mix(in srgb, var(--v-green) 40%, transparent) !important; background: var(--v-green-soft) !important; }
+:root .cy-shell.v3 .cy-btn.is-violet { color: var(--v-violet) !important; border-color: color-mix(in srgb, var(--v-violet) 40%, transparent) !important; background: transparent !important; }
+:root .cy-shell.v3 .cy-btn.is-ghost { border-color: transparent !important; background: transparent !important; color: var(--v-ink2) !important; }
+:root .cy-shell.v3 .cy-btn.is-active { background: var(--v-acc-soft) !important; color: var(--v-accink) !important; border-color: var(--v-rule) !important; }
+:root .cy-shell.v3 .cy-btn.is-sm { min-height: 28px; padding: 6px 10px !important; font-size: 11.5px !important; }
+:root .cy-shell.v3 .cy-backbtn { clip-path: none !important; border-radius: 9px !important; background: var(--v-chip) !important; border: 1px solid var(--v-line) !important; color: var(--v-ink2) !important;
+  font: 500 12.5px/1 var(--v-sans) !important; letter-spacing: 0 !important; text-transform: none !important; box-shadow: none !important; }
+:root .cy-shell.v3 .cy-backbtn:hover { color: var(--v-ink) !important; border-color: var(--v-rule) !important; }
+:root .cy-shell.v3 .cy-seg { clip-path: none !important; border-radius: 10px !important; background: var(--v-chip) !important; border: 1px solid var(--v-line) !important; }
+:root .cy-shell.v3 .cy-seg > * { border-radius: 7px !important; clip-path: none !important; }
+:root .cy-shell.v3 button[aria-label="Send message"] { clip-path: none !important; border-radius: 12px !important; background: var(--v-acc) !important; color: var(--v-onacc) !important; box-shadow: none !important; }
+
+/* ---------- inputs ---------- */
+:root .cy-shell.v3 .cy-label { font: 500 10px/1.2 var(--v-mono) !important; letter-spacing: .12em !important; color: var(--v-mut) !important; }
+:root .cy-shell.v3 .cy-input, :root .cy-shell.v3 .cy-search .cy-input { border-radius: 10px !important; background: var(--v-input) !important; border: 1px solid var(--v-line) !important; color: var(--v-ink) !important;
+  font: 400 13px/1.4 var(--v-sans) !important; letter-spacing: 0 !important; box-shadow: none !important; clip-path: none !important; }
+:root .cy-shell.v3 .cy-input:focus { border-color: var(--v-acc) !important; box-shadow: 0 0 0 3px var(--v-acc-soft) !important; }
+:root .cy-shell.v3 .cy-check { accent-color: var(--v-acc); }
+
+/* ---------- tabs: module side menus + horizontal strips ---------- */
+:root .cy-shell.v3 .cy-subnav { background: var(--v-solid) !important; border-color: var(--v-line) !important; box-shadow: none !important; }
+html:not([data-theme="gold"]) .cy-shell.v3 .cy-subnav { background: rgba(14, 19, 26, 0.92) !important; }
+:root .cy-shell.v3 .cy-subnav-brand { border-bottom: 1px solid var(--v-line2) !important; }
+:root .cy-shell.v3 .cy-subnav-brand b { font: var(--v-dispw) 17px/1.15 var(--v-display) !important; letter-spacing: var(--v-track) !important; text-transform: none !important; color: var(--v-ink) !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-subnav-brand small { font: 400 11px/1.3 var(--v-sans) !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--v-mut) !important; opacity: 1 !important; }
+:root .cy-shell.v3 .cy-subnav-brand :is(svg, .cy-plate-ico) { color: var(--v-accink) !important; }
+:root .cy-shell.v3 .cy-tab { clip-path: none !important; border-radius: 10px !important; background: transparent !important; color: var(--v-ink2) !important; text-shadow: none !important; box-shadow: none !important;
+  font: 500 13px/1.1 var(--v-sans) !important; letter-spacing: 0 !important; text-transform: none !important; min-height: 36px; border: 1px solid transparent !important; }
+:root .cy-shell.v3 .cy-tab::before, :root .cy-shell.v3 .cy-tab::after { display: none !important; }
+:root .cy-shell.v3 .cy-tab:hover, :root .cy-shell.v3 .cy-tab:focus-visible { background: var(--v-hover) !important; color: var(--v-ink) !important; }
+:root .cy-shell.v3 :is(.cy-tab.is-active, .cy-tab[aria-current="page"]) { background: var(--v-acc-soft) !important; color: var(--v-ink) !important; border-color: color-mix(in srgb, var(--v-acc) 35%, transparent) !important; box-shadow: none !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-tab-ico, :root .cy-shell.v3 .cy-tab svg { color: var(--v-mut) !important; stroke: currentColor !important; }
+:root .cy-shell.v3 :is(.cy-tab.is-active, .cy-tab[aria-current="page"]) :is(.cy-tab-ico, svg) { color: var(--v-accink) !important; }
+:root .cy-shell.v3 .cy-tab.is-alert { background: var(--v-red-soft) !important; }
+:root .cy-shell.v3 .cy-tab-badge { color: var(--v-amber) !important; font: 500 10px/1 var(--v-mono) !important; }
+:root .cy-shell.v3 .cy-tabgroup::after { display: none !important; }
+:root .cy-shell.v3 .cy-module-nav > button { clip-path: none !important; border-radius: 10px !important; }
+
+/* ---------- quote review console ---------- */
+:root .cy-shell.v3 .cy-qr .empire-card:not(.cy-keep-light, .cy-keep-light *) { clip-path: none !important; border-radius: var(--m-r) !important; background: var(--m-card) !important; border: 1px solid var(--v-gedge) !important; box-shadow: var(--v-shadow) !important; }
+:root .cy-shell.v3 .cy-qr .empire-card:not(.cy-keep-light, .cy-keep-light *)::before, :root .cy-shell.v3 .cy-qr .empire-card:not(.cy-keep-light, .cy-keep-light *)::after { display: none !important; }
+:root .cy-shell.v3 .cy-qr .empire-card table th { font: 500 10px/1.2 var(--v-mono) !important; letter-spacing: .12em !important; color: var(--v-mut) !important; }
+:root .cy-shell.v3 .cy-qr .empire-card table thead tr { border-bottom: 1px solid var(--v-line) !important; }
+:root .cy-shell.v3 .cy-qr .empire-card table tbody tr { border-bottom: 1px solid var(--v-line2) !important; }
+:root .cy-shell.v3 .cy-qr .empire-card table tbody tr:hover { background: var(--v-hover) !important; box-shadow: none !important; }
+:root .cy-shell.v3 .cy-qr .empire-card table td:nth-last-child(2) { color: var(--v-ink) !important; }
+:root .cy-shell.v3 .cy-qr :is(input:not([type="checkbox"], [type="radio"], [type="file"]), textarea, select) { border-radius: 9px !important; clip-path: none !important; }
+:root .cy-shell.v3 .cy-qr-title { font: 500 10.5px/1.2 var(--v-mono) !important; letter-spacing: .14em !important; color: var(--v-mut) !important; text-shadow: none !important; }
+:root .cy-shell.v3 .cy-qr-title::before { background: var(--v-acc) !important; box-shadow: none !important; width: 12px !important; height: 2px; border-radius: 2px; }
+:root .cy-shell.v3 .cy-qr-actions { border: 1px solid var(--v-line) !important; border-radius: var(--m-r) !important; background: var(--v-chip) !important; }
+
+/* ---------- generic Tailwind pieces in module pages (both themes) ---------- */
+:root .cy-shell.v3 .v3-body :is(.rounded, .rounded-sm):not(.cy-keep-light, .cy-keep-light *, svg *) { border-radius: 8px; }
+:root .cy-shell.v3 .v3-body .empire-card:not(.cy-keep-light, .cy-keep-light *, svg *) { border-radius: var(--m-r) !important; }
+:root .cy-shell.v3 .status-pill { border-radius: 999px !important; letter-spacing: 0 !important; }
+:root .cy-shell.v3 .filter-tab { border-radius: 9px !important; }
+:root .cy-shell.v3 .kpi-value { text-shadow: none !important; }
+:root .cy-shell.v3 .cy-hex b * { font: inherit !important; color: inherit !important; }
+
+/* ---------- phones: no backdrop blur on module panels (iPhone GPU memory at 3x) ---------- */
+@media (max-width: 767px), (hover: none) {
+  html body .cy-shell.v3 :is(.cy-panel, .cy-glass, .cy-hud, .cy-qr, .cy-modal-backdrop) { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  html body .cy-shell.v3 .cy-modal-backdrop { background: rgba(5, 8, 12, 0.6) !important; }
+}
+
+/* Dark: brand colours that are too dark to read as text on graphite (Poshmark #7f0353). */
+html:not([data-theme="gold"]) .cy-shell.v3 [style*="; color: rgb(127, 3, 83)"] { color: #e879b9 !important; }
+
+/* Gold: brand colours too light for cream (Mercari / Amazon / Etsy figures), dim inline greys, gold bar labels. */
+html[data-theme="gold"] .cy-shell.v3 [style*="; color: rgb(77, 196, 224)"] { color: #1d7489 !important; }
+html[data-theme="gold"] .cy-shell.v3 [style*="; color: rgb(255, 153, 0)"] { color: #9a5800 !important; }
+html[data-theme="gold"] .cy-shell.v3 [style*="; color: rgb(241, 100, 30)"] { color: #a83f0b !important; }
+html[data-theme="gold"] .cy-shell.v3 :is([style*="; color: rgb(170, 170, 170)"], [style*="; color: rgb(153, 153, 153)"], [style*="; color: rgb(187, 187, 187)"], [style^="color: rgb(170, 170, 170)"], [style^="color: rgb(153, 153, 153)"], [style^="color: rgb(187, 187, 187)"]):not(.cy-keep-light, .cy-keep-light *) { color: var(--v-mut) !important; }
+html[data-theme="gold"] .cy-shell.v3 .bg-\[\#b8960c\] > .text-white { color: #2a2104 !important; }

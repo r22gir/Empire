@@ -12,7 +12,7 @@
 .v3-band.app .v3-back { margin-left: 22px; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 7px; border: 1px solid transparent;
   background: transparent !important; color: var(--v-bandmut) !important; font: 500 12px/1 var(--v-sans) !important; letter-spacing: 0 !important; text-transform: none !important; cursor: pointer; }
 .v3-band.app .v3-back:hover { color: var(--v-bandtx) !important; border-color: var(--v-bandline) !important; }
-.v3-band.app .v3-back.is-off { opacity: 0.5; }
+.v3-band.app .v3-back.is-off { opacity: 0.72; }
 .v3-band.app .v3-search { margin-left: 14px; display: flex; align-items: center; gap: 10px; width: 300px; height: 32px; padding: 0 8px 0 12px; border-radius: 8px;
   border: 1px solid var(--v-bandline); background: rgba(255, 255, 255, 0.03); color: var(--v-bandmut); font: 400 12.5px/1 var(--v-sans); cursor: pointer; }
 .v3-band.app .v3-search:hover { border-color: var(--v-rule); color: var(--v-bandtx); }
