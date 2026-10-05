@@ -17,15 +17,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import httpx
+from app.db.database import resolve_task_db_path
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["social-setup"])
 
-DB_PATH = os.getenv(
-    "EMPIRE_TASK_DB",
-    str(Path.home() / "empire-data" / "empire.db"),
-)
+DB_PATH = resolve_task_db_path()
 ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 GRAPH_API = "https://graph.facebook.com/v21.0"
 

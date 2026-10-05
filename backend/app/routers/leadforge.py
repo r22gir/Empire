@@ -22,10 +22,7 @@ logger = logging.getLogger(__name__)
 
 # ── DB Setup ──────────────────────────────────────────────────────────
 
-DB_PATH = os.getenv(
-    "EMPIRE_TASK_DB",
-    str(Path.home() / "empire-data" / "empire.db"),
-)
+DB_PATH = resolve_task_db_path()
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -1644,6 +1641,7 @@ def list_providers():
 # ── Campaign Endpoints ──────────────────────────────────────────────────
 
 from app.services.leadforge import campaign_service as cs
+from app.db.database import resolve_task_db_path
 
 
 class CampaignCreate(BaseModel):

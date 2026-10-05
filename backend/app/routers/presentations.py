@@ -7,10 +7,11 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from app.db.database import resolve_task_db_path
 
 router = APIRouter()
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
+DB_PATH = resolve_task_db_path()
 
 
 def _get_db():

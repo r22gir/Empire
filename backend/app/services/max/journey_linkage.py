@@ -46,6 +46,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from app.db.database import resolve_task_db_path
 
 logger = logging.getLogger("max.journey_linkage")
 
@@ -57,7 +58,7 @@ logger = logging.getLogger("max.journey_linkage")
 # stable across restarts; we resolve it the same way the rest of
 # the app does. If a different DB path is configured (env var), we
 # honor it.
-DEFAULT_DB_PATH = os.getenv("EMPIRE_TASK_DB", str(Path.home() / "empire-data" / "empire.db"))
+DEFAULT_DB_PATH = resolve_task_db_path()
 
 
 def _live_data_file(name: str) -> str:

@@ -18,10 +18,8 @@ from app.db.database import get_db, dict_row
 
 logger = logging.getLogger("max.access_control")
 
-DB_PATH = os.getenv(
-    "EMPIRE_TASK_DB",
-    str(os.path.join(os.path.dirname(__file__), "../../db/empire.db"))
-)
+from app.db.database import resolve_task_db_path
+DB_PATH = resolve_task_db_path()
 
 
 class AccessLevel(IntEnum):

@@ -24,13 +24,11 @@ from datetime import datetime, date, timedelta
 from app.db.database import get_db, dict_row, dict_rows
 from app.services.business_routing import route_to_for_item_type
 from app.services.chain_guard import require_customer, MissingCustomerLink
+from app.db.database import resolve_task_db_path
 
 router = APIRouter(tags=["jobs-unified"])
 
-DB_PATH = os.getenv(
-    "EMPIRE_TASK_DB",
-    str(Path.home() / "empire-data" / "empire.db"),
-)
+DB_PATH = resolve_task_db_path()
 QUOTES_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "quotes"
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 

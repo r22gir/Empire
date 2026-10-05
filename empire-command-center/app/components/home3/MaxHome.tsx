@@ -161,21 +161,21 @@ function Research({ items, save, ready }: { items: HomeItem[]; save: (k: HomeKin
           )}
           {(edit || items.length === 0) && (
             <div className="mh-iadd">
-              {items.length === 0 && <Empty title="No interests yet">Add the topics you want {EDITION.assistantName} to watch for you. They are saved to your profile.</Empty>}
+              {items.length === 0 && <Empty title={T("No interests yet")}>{T("Add the topics you want {name} to watch for you. They are saved to your profile.").replace("{name}", EDITION.assistantName)}</Empty>}
               {/* A question goes to Max exactly as typed (no wrapper); a short topic is saved as an interest. */}
               <form onSubmit={e => { e.preventDefault(); if (looksLikeQuestion(name)) window.location.href = askHref(name.trim()); else add(name); }} className="mh-addrow">
-                <input className="v3-input" value={name} onChange={e => setName(e.target.value)} placeholder={`Add a topic, or ask ${EDITION.assistantName}`} aria-label="New interest or question" maxLength={2000} />
+                <input className="v3-input" value={name} onChange={e => setName(e.target.value)} placeholder={`${T("Add a topic, or ask")} ${EDITION.assistantName}`} aria-label={T("New interest or question")} maxLength={2000} />
                 {looksLikeQuestion(name)
-                  ? <button type="submit" className="v3-btn pri sm"><ArrowRight size={12} /> Ask</button>
-                  : <button type="submit" className="v3-btn pri sm" disabled={!name.trim()}><Plus size={12} /> Add</button>}
+                  ? <button type="submit" className="v3-btn pri sm"><ArrowRight size={12} /> {T("Ask")}</button>
+                  : <button type="submit" className="v3-btn pri sm" disabled={!name.trim()}><Plus size={12} /> {T("Add")}</button>}
               </form>
               {sugg.length > 0 && <div className="mh-chips">{sugg.map(s => <button key={s.name} type="button" className="v3-chip" onClick={() => add(s.name, s.icon)}><Plus size={11} /> {s.name}</button>)}</div>}
             </div>
           )}
           <div className="mh-feed">
-            <Empty title="No research feed connected"
-              action={<a className="v3-btn sm" href={askHref(items.length ? `Research what's new in ${items.map(i => i.name).join(', ')} and give me the 3 things worth my time.` : 'Research a topic for me.')}><Sparkles size={12} /> Ask {EDITION.assistantName} to research</a>}>
-              {EDITION.assistantName} doesn&apos;t invent headlines. Ask for a briefing and the sourced answer opens in chat.
+            <Empty title={T("No research feed connected")}
+              action={<a className="v3-btn sm" href={askHref(items.length ? `Research what's new in ${items.map(i => i.name).join(', ')} and give me the 3 things worth my time.` : 'Research a topic for me.')}><Sparkles size={12} /> {T("Ask {name} to research").replace("{name}", EDITION.assistantName)}</a>}>
+              {T("{name} doesn't invent headlines. Ask for a briefing and the sourced answer opens in chat.").replace("{name}", EDITION.assistantName)}
             </Empty>
           </div>
         </>
@@ -202,7 +202,7 @@ function ListBlock({ kind, label, items, save, unitTotal, placeholder }: { kind:
   return (
     <div className="mh-blk">
       <div className="v3-sec">{label}<button type="button" className="v3-ib" onClick={() => setAdding(a => !a)} aria-label={`Add to ${label}`} aria-expanded={adding}>{adding ? <X size={11} /> : <Plus size={11} />}</button></div>
-      {items.length === 0 && !adding && <div className="mh-mut">None yet. <button type="button" className="mh-link" onClick={() => setAdding(true)}>Add one</button></div>}
+      {items.length === 0 && !adding && <div className="mh-mut">{T("None yet.")} <button type="button" className="mh-link" onClick={() => setAdding(true)}>{T("Add one")}</button></div>}
       {items.map(it => (
         <div key={it.id} className="mh-gi">
           {kind === 'learning' ? <RingProgress value={pct(it)} size={40} /> : null}
@@ -221,7 +221,7 @@ function ListBlock({ kind, label, items, save, unitTotal, placeholder }: { kind:
         <form onSubmit={add} className="mh-addrow">
           <input className="v3-input" value={name} onChange={e => setName(e.target.value)} placeholder={placeholder} aria-label={`New ${label.toLowerCase()} item`} maxLength={80} autoFocus />
           {unitTotal && <input className="v3-input n" value={total} onChange={e => setTotal(e.target.value.replace(/\D/g, ''))} placeholder="steps" aria-label="Number of steps (optional)" inputMode="numeric" />}
-          <button type="submit" className="v3-btn pri sm" disabled={!name.trim()}>Add</button>
+          <button type="submit" className="v3-btn pri sm" disabled={!name.trim()}>{T("Add")}</button>
         </form>
       )}
     </div>
@@ -269,8 +269,8 @@ function Today({ d }: { d: ReturnType<typeof useHomeData> }) {
         <span className="r v3-mono mh-date">{now ? now.toLocaleDateString(LOCALE, { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase() : ''}</span></div>
       <div className="mh-blk">
         <div className="v3-sec">{T("Schedule")}</div>
-        {d.schedule === null ? <div className="mh-mut">{d.errors.jobs ? 'No data' : 'Loading…'}</div>
-          : d.schedule.length === 0 ? <Empty title="No calendar connected">Nothing scheduled on jobs in the next 7 days.</Empty>
+        {d.schedule === null ? <div className="mh-mut">{d.errors.jobs ? T("No data") : T("Loading…")}</div>
+          : d.schedule.length === 0 ? <Empty title={T("No calendar connected")}>{T("Nothing scheduled on jobs in the next 7 days.")}</Empty>
           : <>
             {d.schedule.map(s => (
               <a key={s.key} href={s.href} className="mh-ev">
@@ -278,14 +278,14 @@ function Today({ d }: { d: ReturnType<typeof useHomeData> }) {
                 <span className="b"><b>{s.title}</b><span>{s.detail}</span></span>
               </a>
             ))}
-            <div className="mh-mut sm">From job dates · no calendar connected</div>
+            <div className="mh-mut sm">{T("From job dates · no calendar connected")}</div>
           </>}
       </div>
       <div className="mh-blk">
         <div className="v3-sec">{T("Approvals")} {d.approvals?.length ? <span className="v3-cnt">{d.approvals.length}</span> : null}
-          <a href="/?product=lead&section=approvals" className="mh-link r">Review</a></div>
-        {d.approvals === null ? <div className="mh-mut">{d.errors.approvals ? 'No data' : 'Loading…'}</div>
-          : d.approvals.length === 0 ? <div className="mh-mut">Nothing waiting for approval.</div>
+          <a href="/?product=lead&section=approvals" className="mh-link r">{T("Review")}</a></div>
+        {d.approvals === null ? <div className="mh-mut">{d.errors.approvals ? T("No data") : T("Loading…")}</div>
+          : d.approvals.length === 0 ? <div className="mh-mut">{T("Nothing waiting for approval.")}</div>
           : d.approvals.slice(0, 4).map(a => (
             <a key={a.id} href="/?product=lead&section=approvals" className="mh-ap">
               <span className="b"><span className="v3-kick">{a.channel || a.kind}</span><b>{a.title}</b>{a.to ? <span>{a.to}</span> : null}</span>
@@ -296,8 +296,8 @@ function Today({ d }: { d: ReturnType<typeof useHomeData> }) {
       </div>
       <div className="mh-blk">
         <div className="v3-sec">{T("Reminders")}<a href="/?screen=tasks" className="mh-link r">{T("Tasks")}</a></div>
-        {d.reminders === null ? <div className="mh-mut">{d.errors.tasks ? 'No data' : 'Loading…'}</div>
-          : d.reminders.length === 0 ? <div className="mh-mut">No open tasks.</div>
+        {d.reminders === null ? <div className="mh-mut">{d.errors.tasks ? T("No data") : T("Loading…")}</div>
+          : d.reminders.length === 0 ? <div className="mh-mut">{T("No open tasks.")}</div>
           : d.reminders.map(r => (
             <a key={r.id} href={r.href} className="mh-rm">
               <Bell size={12} strokeWidth={1.6} aria-hidden="true" /><span className="t">{r.title}</span>

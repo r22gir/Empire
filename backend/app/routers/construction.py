@@ -56,7 +56,8 @@ def resolve_db_path() -> str:
                 return str(root / "construction.db")
     except Exception:
         logger.debug("construction db path fallback", exc_info=True)
-    return os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
+    from app.db.database import resolve_task_db_path
+    return resolve_task_db_path()
 
 
 # ── Database helpers ─────────────────────────────────────────────────
