@@ -1085,3 +1085,37 @@ def test_call_answer_is_graph_acceptable(monkeypatch):
     assert controlling is True  # Meta is ICE-lite, we nominate
     problems = wc.answer_problems(answer)
     assert problems in ([], ["no ICE candidates"])  # CI boxes may have no usable interface
+
+def test_call_host_filter_skips_virtual_nics(monkeypatch):
+    """ICE must not advertise virbr/tailscale/ULA — Meta cannot reach them."""
+    from app.services.max import whatsapp_calling as wc
+
+    monkeypatch.delenv("WHATSAPP_ICE_INTERFACES", raising=False)
+    monkeypatch.setattr(wc, "_default_route_interfaces", lambda: ["enp0s25"])
+
+    class _IP:
+        def __init__(self, ip):
+            self.ip = ip
+
+    class _Adapter:
+        def __init__(self, name, ips):
+            self.nice_name = name
+            self.name = name
+            self.ips = [_IP(i) for i in ips]
+
+    fake = [
+        _Adapter("lo", ["127.0.0.1"]),
+        _Adapter("virbr0", ["192.168.122.1"]),
+        _Adapter("tailscale0", ["100.110.233.75"]),
+        _Adapter("enp0s25", ["192.168.1.190"]),
+    ]
+
+    class _ifaddr:
+        @staticmethod
+        def get_adapters():
+            return fake
+
+    import sys
+    monkeypatch.setitem(sys.modules, "ifaddr", _ifaddr)
+    assert wc.filtered_host_addresses(True, False) == ["192.168.1.190"]
+

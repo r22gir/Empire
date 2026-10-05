@@ -64,3 +64,12 @@ Copy these without changing the function names or the routes:
 - `docs/WHATSAPP_CHANNEL.md`
 
 `hermes_phase3.py` only reports `channel_status()`. The default handlers call Workroom voice, Photo Analyzer, and Max chat; another edition can pass its own handlers into `process_webhook` without forking the webhook, signature, allowlist, window, or confirm gate.
+
+## Calling audio / NAT
+
+Signaling (webhooks + Graph pre_accept/accept) can succeed while the call is silent if ICE media UDP cannot hairpin through the router. On a dual-WAN OpenWrt this is common: STUN reports one public IP while return traffic arrives on the other.
+
+Mitigations (pick one):
+1. **Managed TURN** (preferred): set `WHATSAPP_TURN_URL` / `WHATSAPP_TURN_USERNAME` / `WHATSAPP_TURN_CREDENTIAL` (Cloudflare Calls TURN or Twilio). Relay candidates let Meta reach the Dell without port forwards.
+2. **coturn on the Dell**: UDP/TCP 3478 plus a relay UDP range (e.g. 49152-65535) forwarded from the router to 192.168.1.190 — requires a router change Rafael owns.
+3. Pin host candidates with `WHATSAPP_ICE_INTERFACES=enp0s25` (already recommended) so virbr/tailscale are never advertised.

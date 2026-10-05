@@ -37,3 +37,7 @@ psutil>=5.9.0
 
 # Docker management
 docker>=7.0.0
+
+# WhatsApp Calling / WebRTC & Live Voice
+aiortc>=1.9.0
+websockets>=12.0
