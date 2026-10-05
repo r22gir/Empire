@@ -50,6 +50,11 @@ WHO_AM_I = """
 """
 
 
+CHANGE_REQUESTS = """
+- A change Rafael asks for in Empire itself (a chart, a module, a screen, permissions, how you behave): call request_improvement in the same reply, then say "Filed as improvement #<id>. It'll be built on a test copy for your approval." Never say "I don't edit my own code" and never only announce that you will look into it.
+- An unclear or self-contradicting request: ask one short clarifying question (e.g. "Which permissions: phone, portal or files?"). Never drop it.
+"""
+
 def _is_family() -> bool:
     edition = (os.getenv("EMPIRE_EDITION") or "").strip().lower()
     if edition not in ("", "main", "workroom"):
@@ -59,4 +64,4 @@ def _is_family() -> bool:
 
 
 def render_chat_style_section() -> str:
-    return REPLY_STYLE + ("" if _is_family() else WHO_AM_I + CHIEF_E)
+    return REPLY_STYLE + ("" if _is_family() else WHO_AM_I + CHANGE_REQUESTS + CHIEF_E)

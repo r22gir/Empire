@@ -76,6 +76,9 @@ from app.services.max.founder_action_continuation import (
     format_tool_progress_message,
     founder_continuation_system_nudge,
     should_force_founder_action_continuation,
+    ANNOUNCED_ACTION_MAX_ROUNDS,
+    announced_action_nudge,
+    announces_action_without_tool,
 )
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.runtime_truth_check import (
@@ -3313,12 +3316,18 @@ async def _chat_with_max_service_impl(
                 _force_continue, _nudge_tools = should_force_founder_action_continuation(
                     request.message, tool_results_list, _asst_plain,
                 )
+                # Announced-action guard: "Let me pull up..." with no tool call is not an answer.
+                _announce_nudge = None
+                if (not _force_continue and _tool_round < 2
+                        and _founder_continuation_rounds < ANNOUNCED_ACTION_MAX_ROUNDS
+                        and announces_action_without_tool(_asst_plain)):
+                    _force_continue, _announce_nudge = True, announced_action_nudge(_asst_plain)
                 if _force_continue and _founder_continuation_rounds < FOUNDER_CONTINUATION_MAX_ROUNDS:
                     _founder_continuation_rounds += 1
                     loop_messages.append(AIMessage(role="assistant", content=_asst_plain))
                     loop_messages.append(AIMessage(
                         role="system",
-                        content=founder_continuation_system_nudge(_nudge_tools, _asst_plain),
+                        content=_announce_nudge or founder_continuation_system_nudge(_nudge_tools, _asst_plain),
                     ))
                     current_response = await ai_router.chat(
                         loop_messages, model=model, desk=request.desk,
@@ -4336,12 +4345,18 @@ async def _chat_stream_impl(request: ChatRequest):
                     _force_continue, _nudge_tools = should_force_founder_action_continuation(
                         request.message, tool_results_list, _asst_plain,
                     )
+                    # Announced-action guard (see non-streaming path).
+                    _announce_nudge = None
+                    if (not _force_continue and _tool_round < 2
+                            and _founder_continuation_rounds < ANNOUNCED_ACTION_MAX_ROUNDS
+                            and announces_action_without_tool(_asst_plain)):
+                        _force_continue, _announce_nudge = True, announced_action_nudge(_asst_plain)
                     if _force_continue and _founder_continuation_rounds < FOUNDER_CONTINUATION_MAX_ROUNDS:
                         _founder_continuation_rounds += 1
                         loop_messages.append(AIMessage(role="assistant", content=_asst_plain))
                         loop_messages.append(AIMessage(
                             role="system",
-                            content=founder_continuation_system_nudge(_nudge_tools, _asst_plain),
+                            content=_announce_nudge or founder_continuation_system_nudge(_nudge_tools, _asst_plain),
                         ))
                         followup_text = ""
                         _action_followup_iter = ai_router.chat_stream(

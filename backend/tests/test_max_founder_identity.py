@@ -26,3 +26,17 @@ def test_family_editions_never_get_founder_identity(monkeypatch, edition):
     p = _prompt(monkeypatch, edition)
     assert "Rafael Giraldo, founder of Empire" not in p
     monkeypatch.setitem(system_prompt._prompt_cache, "prompt", None)
+
+
+def test_founder_authority_main_only(monkeypatch):
+    p = _prompt(monkeypatch, None)
+    assert "FOUNDER AUTHORITY" in p and "permission is final" in p
+    assert "no outbound sends" in p  # his own standing limits stay
+    for ed in ("amp", "maxine"):
+        assert "FOUNDER AUTHORITY" not in _prompt(monkeypatch, ed)
+
+
+def test_no_own_code_refusal_wording(monkeypatch):
+    p = _prompt(monkeypatch, None)
+    assert "never edit your own code" not in p
+    assert "Never answer \"I don't edit my own code\"" in p

@@ -52,6 +52,7 @@ import base64
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -71,7 +72,7 @@ VOICE_READ_ONLY_TOOLS = (
     "get_tasks", "get_desk_status", "get_services_health", "get_system_stats",
     "check_email", "list_job_images", "search_conversations", "get_weather",
     "list_quotes_awaiting_review", "show_quote_for_review",
-    "get_revenue_chart",
+    "get_revenue_chart", "web_search",
 )
 QUEUE_TOOL = "queue_for_founder_approval"
 IMPROVE_TOOL = "request_improvement"  # writes a change request only; builds need Rafael's tap in the studio
@@ -164,6 +165,58 @@ async def fresh_instructions() -> tuple[str, dict]:
         return build_instructions(), {"fallback": True, "error": type(exc).__name__}
 
 
+# ── Language (2026-10-04) ───────────────────────────────────────────
+_ES_RE = re.compile(r"[áéíóúñ¿¡]|\b(que|qué|quiero|cuál|cuáles|dónde|cómo|hola|gracias|por|favor|el|la|los|las|de|en|un|una|es|está|noticias|necesito|puedes|dime|mis?|sí|también|ahora|hoy|esto|eso|para|con|hay)\b", re.I)
+_EN_RE = re.compile(r"\b(the|what|is|are|my|me|please|can|you|how|where|show|tell|hey|hi|i|need|want|this|that|it|to|of|and|for|with|today|now)\b", re.I)
+
+
+def detect_language(text: str) -> Optional[str]:
+    """'es' / 'en' for a short utterance, None when unclear."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    es, en = len(_ES_RE.findall(t)), len(_EN_RE.findall(t))
+    if es == en:
+        return None
+    return "es" if es > en else "en"
+
+
+def last_call_language(db_path: Optional[str] = None) -> Optional[str]:
+    """Language of Rafael's most recent voice call (from the session journal, read-only)."""
+    try:
+        import sqlite3
+        from app.services.max import session_journal as sj
+        path = str(db_path or sj.journal_db_path())
+        if not os.path.exists(path):
+            return None
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
+        try:
+            row = conn.execute(
+                "SELECT conversation_id FROM max_session_turns WHERE channel='voice' AND role='user' "
+                "AND edition=? ORDER BY id DESC LIMIT 1", (sj.edition(),)).fetchone()
+            if not row:
+                return None
+            texts = [r[0] or "" for r in conn.execute(
+                "SELECT content FROM max_session_turns WHERE conversation_id=? AND role='user' "
+                "ORDER BY id DESC LIMIT 6", (row[0],)).fetchall()]
+        finally:
+            conn.close()
+        return detect_language(" ".join(texts))
+    except Exception as exc:  # never block a call on this
+        logger.debug("voice_live: last call language unavailable (%s)", type(exc).__name__)
+        return None
+
+
+def language_section(last_lang: Optional[str]) -> str:
+    name = {"es": "Spanish", "en": "English"}.get(last_lang or "")
+    fallback = (f"If his first words are unclear, use {name}: his last call was in {name}." if name
+                else "If his first words are unclear, ask in both, briefly: '¿Español o English?'.")
+    return ("\n\n# Language\n"
+            "Your FIRST reply must be in the language of Rafael's first words. " + fallback +
+            " After that, always answer in the language of his latest words. Lookup fillers too: "
+            "'un segundo' in Spanish, 'one sec' in English. Never switch to English while he speaks Spanish.")
+
+
 # ── Tools ───────────────────────────────────────────────────────────
 
 def _obj(props: dict, required: list | None = None) -> dict:
@@ -245,6 +298,10 @@ _FALLBACK_TOOL_SCHEMAS = {
     "get_weather": {
         "description": "Current weather (Open-Meteo). Default city Washington DC. Read-only.",
         "parameters": _obj({"city": {"type": "string", "description": "City (default Washington DC)"}}),
+    },
+    "web_search": {
+        "description": "Read-only web search (DuckDuckGo, Brave fallback) for current news, local events, prices or any public fact. For news, put the topic and place in the query (e.g. 'noticias Cartago Valle del Cauca hoy'). Speak a short summary of the top headlines; never read URLs aloud. Sends nothing.",
+        "parameters": _obj({"query": {"type": "string", "description": "Search query, in the language of the place"}}, ["query"]),
     },
     "get_revenue_chart": {
         "description": "Read-only revenue totals by month from recorded payments. Use for 'last month's revenue' or 'this week's numbers'. Returns a chart. Never invents amounts. Does not send anything.",
@@ -337,6 +394,11 @@ def _compact_for_voice(name: str, data: dict[str, Any]) -> dict[str, Any]:
                              if k in ("type", "role", "content", "summary", "channel", "date", "subject",
                                       "conversation_id", "started_at", "lines")})
         out["result"] = {"query": res.get("query"), "count": res.get("count", len(rows)), "results": rows}
+    elif name == "web_search":
+        hits = [{"title": str(r.get("title") or "")[:160], "snippet": str(r.get("snippet") or r.get("body") or "")[:260],
+                 "site": (str(r.get("url") or r.get("link") or "").split("/")[2:3] or [""])[0]}
+                for r in (res.get("results") or [])[:6] if isinstance(r, dict)]
+        out["result"] = {"query": res.get("query"), "count": len(hits), "results": hits, "source": res.get("source")}
     elif name == "get_tasks":
         tasks = [{k: t.get(k) for k in ("id", "title", "status", "priority", "desk", "due_date", "created_at")}
                  for t in (res.get("tasks") or [])[:15] if isinstance(t, dict)]
@@ -485,6 +547,8 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
         call["limit"] = min(int(call.get("limit") or 8), 20)
     elif name == "get_weather":
         call["city"] = call.get("city") or "Washington DC"
+    elif name == "web_search":
+        call = {"tool": name, "query": str(call.get("query") or "")[:300], "num_results": 6}
     result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
     return _compact_for_voice(name, result.to_dict())
 
@@ -892,6 +956,9 @@ class LiveCall:
             instr_task.cancel()
             return
         instructions, self.instructions_meta = await instr_task
+        _lang = last_call_language()
+        self.instructions_meta["last_call_language"] = _lang
+        instructions += language_section(_lang)
         logger.info("voice_live[%s]: instructions %s chars (~%s tokens, cached=%s, fallback=%s)",
                     self.call_id, len(instructions), len(instructions) // 4,
                     self.instructions_meta.get("cached"), self.instructions_meta.get("fallback", False))

@@ -356,7 +356,8 @@ def _request_improvement(params: dict, desk: Optional[str] = None) -> ToolResult
         return ToolResult(tool="request_improvement", success=True, result={
             "id": req["id"], "title": req["title"], "status": req["status"], "risk": req["risk"],
             "next_step": "Rafael reviews it in Studio → Improvements and taps Approve to start the build. "
-                         "Nothing is built, merged or deployed before that, and merge needs a second approval."})
+                         "Nothing is built, merged or deployed before that, and merge needs a second approval.",
+            "say": f"Filed as improvement #{req['id']}. It'll be built on a test copy for your approval."})
     except Exception as e:
         return _err("request_improvement", e)
 
@@ -478,7 +479,7 @@ ACQUISITION_TOOLS_DOC = """
 - **roi_report** lead source → quotes → paid invoices, with manual spend per channel
 - **social_proof_drafts** finished job → before/after SocialForge drafts `{"job_id": "..."}` or `{"scan": true}`
 - **place_details_enrich** Google website + phone for Google prospects (free tier only for Max)
-- **request_improvement** write a change request (title, problem, proposed_change, affected_modules, risk, acceptance) for the Improvements page. Use when Rafael asks for a system improvement. Max never edits his own code, never builds, merges or deploys.
+- **request_improvement** write a change request (title, problem, proposed_change, affected_modules, risk, acceptance) for the Improvements page. Call it in the SAME turn whenever Rafael asks for a change to Empire (feature, chart, module, screen, fix, behaviour), then say: "Filed as improvement #<id>. It'll be built on a test copy for your approval." Never reply "I don't edit my own code" and never only announce it. The build runs on a test copy after his Approve tap; merge/deploy needs a second approval.
 - **improvements_list** read the Improvements queue and PR / preview links
 - **module_catalog** / **module_call** read-only access to every backend module (live OpenAPI) `{"tool": "module_call", "path": "/socialforge/dashboard"}`
 Never send. Show Rafael the draft and wait for an explicit yes; sending stays the existing founder-gated step.

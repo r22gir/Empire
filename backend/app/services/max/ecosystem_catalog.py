@@ -470,7 +470,7 @@ EMPIRE_CATALOG = {
         "roi_report": {"description": "ROI by channel: leads, quotes, paid invoices, manual spend", "access_level": 1, "category": "data"},
         "social_proof_drafts": {"description": "Finished job -> before/after SocialForge post drafts using job photos; never posts", "access_level": 1, "category": "action"},
         "place_details_enrich": {"description": "Google Place Details website+phone for Google prospects (free tier only for Max; $10/month hard cap)", "access_level": 1, "category": "action"},
-        "request_improvement": {"description": "Write a structured system change request to the Improvements queue; Max never edits code or deploys", "access_level": 1, "category": "action"},
+        "request_improvement": {"description": "Call in the same turn when Rafael asks for a change to Empire: files a change request; it is built on a test copy after his approval (no direct edits or deploys)", "access_level": 1, "category": "action"},
         "improvements_list": {"description": "Read the Improvements queue (status, PR/preview links)", "access_level": 1, "category": "data"},
         "create_task": {"description": "Create a new task for any desk", "access_level": 1, "category": "action"},
         "run_desk_task": {"description": "Delegate a task to the AI desk system for autonomous handling", "access_level": 1, "category": "action"},
