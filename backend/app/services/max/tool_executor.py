@@ -1161,14 +1161,36 @@ def _open_final_doc(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not q:
         return ToolResult(tool="open_final_doc", success=False, error="Say which document, e.g. \"Nehal's final estimate\".")
     base = os.environ.get("EMPIRE_PORTAL_INTERNAL_URL", "http://localhost:3005").rstrip("/")
+    # 2026-10-04: client aliases / addresses / "last 2 docs" / filler words go through the
+    # fuzzy lookup first ("dhalias last 2 updated docs" failed the hub's every-word match).
+    fuzzy = None
+    try:
+        from app.services.max.doc_lookup import find_docs
+        fuzzy = find_docs(q)
+    except Exception as e:
+        logger.debug(f"open_final_doc fuzzy lookup failed: {e}")
+    if fuzzy and fuzzy.get("found") and (fuzzy.get("client") or (fuzzy.get("count") or 1) > 1):
+        return _final_docs_result(fuzzy)
     try:
         r = httpx.get(f"{base}/api/v1/docs-hub/resolve", params={"q": q}, timeout=20.0)
         data = r.json()
     except Exception as e:  # portal down or slow
+        if fuzzy and fuzzy.get("found"):
+            return _final_docs_result(fuzzy)
         return ToolResult(tool="open_final_doc", success=False, error=f"Docs hub unavailable: {e}")
     if not data.get("found") or not data.get("doc"):
+        if fuzzy and fuzzy.get("found"):
+            return _final_docs_result(fuzzy)
+        closest = (fuzzy or {}).get("closest") or []
+        near = "; ".join(
+            f"{c['client']}" + (f" (latest: {c['latest']['title']} {c['latest'].get('version') or ''})".rstrip() if c.get("latest") else "")
+            for c in closest
+        )
         return ToolResult(tool="open_final_doc", success=False,
-                          error=f"No saved document matched \"{q}\". Try the client name plus estimate, presentation, invoice, drawing or photos.")
+                          result={"closest": closest},
+                          error=f"No saved document matched \"{q}\". "
+                                + (f"Closest matches: {near}. " if near else "No close client names either. ")
+                                + "Say so plainly; do not present any document as found.")
     doc = data["doc"]
     return ToolResult(tool="open_final_doc", success=True, result={
         "action": "open_doc",
@@ -1186,6 +1208,30 @@ def _open_final_doc(params: dict, desk: Optional[str] = None) -> ToolResult:
             for a in (data.get("alternatives") or [])[:4]
         ],
         "message": f"{doc.get('title')} ({doc.get('version')}{', FINAL' if doc.get('isFinal') else ''}) is ready in the viewer: {doc.get('viewer_url')}",
+    })
+
+
+def _final_docs_result(found: dict) -> ToolResult:
+    """ToolResult for doc_lookup.find_docs hits (one or several finals)."""
+    docs = found.get("docs") or []
+    first = docs[0]
+    for d in docs:
+        d["viewer_url"] = f"/docs/view?id={d.get('doc_id')}"
+    names = "; ".join(f"{d.get('title')} ({d.get('version') or ''}{', FINAL' if d.get('is_final') else ''})" for d in docs)
+    return ToolResult(tool="open_final_doc", success=True, result={
+        "action": "open_doc",
+        "doc_id": first.get("doc_id"),
+        "title": first.get("title"),
+        "type": first.get("type"),
+        "version": first.get("version"),
+        "is_final": first.get("is_final"),
+        "client": found.get("client") or first.get("client"),
+        "quote_number": first.get("quote_number"),
+        "modified": first.get("modified"),
+        "viewer_url": first.get("viewer_url"),
+        "docs": docs,
+        "matched_client_via": found.get("client_via"),
+        "message": f"{len(docs)} document(s) for {found.get('client') or 'the request'}, newest first: {names}",
     })
 
 

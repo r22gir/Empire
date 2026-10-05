@@ -1,0 +1,10 @@
+{
+  "_note": "Nicknames and job addresses Rafael uses for clients. Read by app/services/max/doc_lookup.py (Final Docs lookup). Add a row per client; aliases are matched fuzzily (typos, possessives).",
+  "clients": [
+    {
+      "name": "Nehal Elrefai",
+      "aliases": ["Dahlia", "Dhalia", "Dalia", "Nehal"],
+      "address": "9408 Old Courthouse Rd"
+    }
+  ]
+}
