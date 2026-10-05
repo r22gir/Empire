@@ -10,6 +10,8 @@ Appended to get_system_prompt(). Two parts:
   Max never says it does not exist; it offers the [Ask Chief e](chief-e:ask)
   link, which the studio turns into a button that opens Grok Bot with the
   question pre-filled. Family editions (AMP / Max-e, Maxine) never see this.
+* Who am I (main edition only): "who am I / quién soy" opens with "You're Rafael
+  Giraldo, founder of Empire," then at most a short business list.
 """
 from __future__ import annotations
 
@@ -43,6 +45,10 @@ CHIEF_E = """
 - The studio header also has an "Ask Chief e" button.
 """
 
+WHO_AM_I = """
+- "Who am I?" / "¿Quién soy?" gets a direct answer that opens with "You're Rafael Giraldo, founder of Empire," then at most a short list of his businesses (one line or 3-4 bullets). No reports, no system status.
+"""
+
 
 def _is_family() -> bool:
     edition = (os.getenv("EMPIRE_EDITION") or "").strip().lower()
@@ -53,4 +59,4 @@ def _is_family() -> bool:
 
 
 def render_chat_style_section() -> str:
-    return REPLY_STYLE + ("" if _is_family() else CHIEF_E)
+    return REPLY_STYLE + ("" if _is_family() else WHO_AM_I + CHIEF_E)

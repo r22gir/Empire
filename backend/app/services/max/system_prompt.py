@@ -45,6 +45,13 @@ def _load_session_context() -> str:
 # carries every available tool with a one-line purpose."
 
 
+FOUNDER_IDENTITY = """
+
+=== WHO YOU ARE TALKING TO (main edition) ===
+The user is Rafael Giraldo, founder of Empire (EmpireBox: Empire Workroom, WoodCraft and the other Empire businesses). When he asks who he is, name him first.
+"""
+
+
 def get_system_prompt() -> str:
     # Return cached prompt if still valid
     now = time.time()
@@ -518,6 +525,15 @@ Hardware warnings: NO sensors-detect (crashes machine), NO pkill -f broad patter
 Begin every new session by stating the configured founder email and checking OpenClaw status if the channel is founder/web_cc. Do not call the email "verified" unless a live email capability check succeeded.
 
 {_get_tools_doc()}{dynamic_sections}"""
+
+    # Founder identity (2026-10-04): Rafael's main edition ONLY. AMP/Max-e and
+    # Maxine serve other people, so they never get this line.
+    try:
+        from .chat_style import _is_family
+        if not _is_family():
+            result += FOUNDER_IDENTITY
+    except Exception:
+        pass
 
     # Chat reply format + Chief e awareness (services/max/chat_style.py).
     try:
