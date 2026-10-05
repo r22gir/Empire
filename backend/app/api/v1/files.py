@@ -131,10 +131,21 @@ async def view_file(category: str, filename: str):
     # Prevent matching other named routes (list, logs, browse, upload, etc.)
     if category in ("list", "logs", "browse", "upload", "upload-from-path", "delete"):
         raise HTTPException(404, "File not found")
-    file_path = UPLOAD_DIR / category / filename
-    if not file_path.exists():
+    safe = Path(filename).name
+    # Chat previews historically always used /files/view/images/<name>, even for
+    # PDFs that /files/upload stored under documents/. Fall back across cats.
+    cats = [category] + [c for c in ("documents", "images", "other", "code", "audio") if c != category]
+    file_path = None
+    used_cat = category
+    for cat in cats:
+        candidate = UPLOAD_DIR / cat / safe
+        if candidate.exists() and candidate.is_file():
+            file_path = candidate
+            used_cat = cat
+            break
+    if file_path is None:
         raise HTTPException(404, "File not found")
-    log_access("view", filename, "founder", f"category={category}")
+    log_access("view", safe, "founder", f"category={used_cat} requested={category}")
     return FileResponse(file_path)
 
 @router.get("/logs")

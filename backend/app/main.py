@@ -94,6 +94,10 @@ load_router("app.routers.max", "/api/v1", ["api-v1"])
 
 # Files API
 load_router("app.api.v1.files", "/api/v1", ["files"])
+# Final Docs hub is implemented as Next.js routes on the portal (:3005).
+# Cloudflare (and api.empirebox.store) send /api/v1/* here, so proxy those
+# paths to the portal. See app.routers.docs_hub_portal_proxy.
+load_router("app.routers.docs_hub_portal_proxy", "/api/v1", ["docs-hub"])
 
 # Chat History API
 
