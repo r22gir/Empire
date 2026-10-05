@@ -14,13 +14,11 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from app.db.database import resolve_task_db_path
 
 # ── DB Setup ────────────────────────────────────────────────────────────
 
-DB_PATH = os.getenv(
-    "EMPIRE_TASK_DB",
-    str(Path.home() / "empire-data" / "empire.db"),
-)
+DB_PATH = resolve_task_db_path()
 
 
 def _get_conn() -> sqlite3.Connection:

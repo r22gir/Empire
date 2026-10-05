@@ -346,22 +346,20 @@ if _is_stale_fork_root(_resolved_default):
 _EMPIRE_DB_ENV_OVERRIDE = "EMPIRE_DB_PATH"
 
 # Canonical default: the active data dir declared in CLAUDE.md.
-_DEFAULT_EMPIRE_DB_PATH = Path.home() / "empire-data" / "empire.db"
-
-
 def canonical_empire_db_path() -> Path:
     """Return the canonical path to empire.db (the canonical data DB).
 
     Resolution order:
       1. $EMPIRE_DB_PATH (if set) — checked for staleness.
-      2. ~/empire-data/empire.db — the canonical data dir.
+      2. resolve_task_db_path() (family-safe; Workroom keeps ~/empire-data).
 
     Returns the path. Raises RuntimeError if the resolved path lives
     under a known stale fork root (~/empire-repo/, ~/empire-repo-main-old/).
     The caller is expected to coerce to str() as needed for sqlite3.connect.
     """
+    from app.db.database import resolve_task_db_path
     override = os.getenv(_EMPIRE_DB_ENV_OVERRIDE)
-    candidate = Path(override) if override else _DEFAULT_EMPIRE_DB_PATH
+    candidate = Path(override) if override else Path(resolve_task_db_path())
 
     if _is_stale_fork_root(candidate):
         logger.critical(

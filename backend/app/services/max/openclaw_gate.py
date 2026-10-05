@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from app.db.database import resolve_task_db_path
 
 
 GATE_TTL_SECONDS = 20
@@ -19,7 +20,7 @@ OPENCLAW_URL = os.getenv("OPENCLAW_URL", "http://localhost:7878").rstrip("/")
 DB_PATH = Path(
     os.getenv(
         "OPENCLAW_DB_PATH",
-        os.getenv("EMPIRE_TASK_DB", str(Path.home() / "empire-data" / "empire.db")),
+        resolve_task_db_path(),
     )
 )
 # HEARTBEAT_PATH default preserved at the legacy location because the live

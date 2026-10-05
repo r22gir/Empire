@@ -34,6 +34,7 @@ from .intake_desk import IntakeDesk
 from .analytics_desk import AnalyticsDesk
 from .quality_desk import QualityDesk
 from .codeforge_desk import CodeForgeDesk
+from app.db.database import resolve_task_db_path
 
 logger = logging.getLogger("max.desks.manager")
 
@@ -150,7 +151,7 @@ class AIDeskManager:
         """Sync DeskTask result back to the SQLite tasks table."""
         try:
             import sqlite3, os
-            db_path = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
+            db_path = resolve_task_db_path()
             conn = sqlite3.connect(db_path)
             state_map = {
                 TaskState.COMPLETED: "done",

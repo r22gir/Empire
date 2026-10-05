@@ -20,8 +20,9 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, date
 from pathlib import Path
 from typing import Optional
+from app.db.database import resolve_task_db_path
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB", str(Path.home() / "empire-data" / "empire.db"))
+DB_PATH = resolve_task_db_path()
 
 
 @contextmanager

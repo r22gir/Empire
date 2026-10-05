@@ -20,13 +20,11 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
+from app.db.database import resolve_task_db_path
 
 # ── Configuration ────────────────────────────────────────────────────────
 
-DB_PATH = os.getenv(
-    "EMPIRE_TASK_DB",
-    str(Path.home() / "empire-data" / "empire.db"),
-)
+DB_PATH = resolve_task_db_path()
 
 # Read at call time, not import time (dotenv may not be loaded yet at import)
 def _get_brave_key(): return os.getenv("BRAVE_API_KEY", "")
