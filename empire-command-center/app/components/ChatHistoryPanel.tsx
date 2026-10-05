@@ -66,7 +66,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
 
   const fetchWebChats = useCallback(async () => {
     try {
-      const res = await fetch(API + '/chats/list');
+      const res = await fetch(API + '/chats/list?limit=200');
       if (res.ok) {
         const data = await res.json();
         setWebChats((data.chats || []).map((c: any) => ({

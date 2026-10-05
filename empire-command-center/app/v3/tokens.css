@@ -130,3 +130,13 @@ html[data-theme="gold"] .v3-backdrop svg { opacity: 0.07; mix-blend-mode: multip
 .v3-empty .v3-btn { margin-top: 9px; }
 
 @media (prefers-reduced-motion: reduce) { .v3 * { animation: none !important; transition: none !important; } }
+
+/* Phones (2026-10-04): the blurred blobs and the full-screen SVG grain are big GPU layers at 3x
+   pixel density on iPhone Safari. Keep the soft gradients, drop the blur filters and the grain. */
+@media (max-width: 767px), (hover: none) {
+  .v3-backdrop svg { display: none; }
+  .v3-backdrop :is(.b1, .b2, .b3) { filter: none; opacity: 0.7; }
+  /* backdrop blur on every panel is the other big cost; panels keep their tinted background */
+  html body :is(.v3-glass, .v3-panel, .mh-col, .v3-tabbar) { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  html body .v3-tabbar { background: var(--v-solid); }
+}

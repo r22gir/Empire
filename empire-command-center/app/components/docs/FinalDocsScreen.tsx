@@ -37,11 +37,21 @@ export default function FinalDocsScreen() {
     const p = new URLSearchParams({ group: '1' });
     if (qd) p.set('q', qd); if (type) p.set('type', type); if (client) p.set('client', client);
     if (refresh) p.set('refresh', '1');
-    fetch(`${DOCS_API}?${p}`).then(r => r.ok ? r.json() : Promise.reject(r.status))
-      .then((d: Resp) => { if (!dead) setData(d); })
-      .catch(() => { if (!dead) setErr('Could not load the document index.'); })
-      .finally(() => { if (!dead) setLoading(false); });
-    return () => { dead = true; };
+    // Retry with backoff (1s, 2s, 4s, 8s, 15s): a portal restart or a slow first scan used to leave
+    // "Could not load the document index" on screen until a manual reload.
+    const DELAYS = [1000, 2000, 4000, 8000, 15000];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = (n: number) => {
+      fetch(`${DOCS_API}?${p}`).then(r => r.ok ? r.json() : Promise.reject(r.status))
+        .then((d: Resp) => { if (!dead) { setData(d); setErr(null); setLoading(false); } })
+        .catch(() => {
+          if (dead) return;
+          if (n < DELAYS.length) { setErr(`Reconnecting to the document index… (try ${n + 2} of ${DELAYS.length + 1})`); timer = setTimeout(() => attempt(n + 1), DELAYS[n]); }
+          else { setErr('Could not load the document index. Tap Rescan to try again.'); setLoading(false); }
+        });
+    };
+    attempt(0);
+    return () => { dead = true; if (timer) clearTimeout(timer); };
   }, [qd, type, client, refresh]);
 
   const clients = useMemo(() => {

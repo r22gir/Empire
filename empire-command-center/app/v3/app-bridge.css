@@ -97,3 +97,6 @@ html:not([data-theme="gold"]) .cy-shell.v3 .cy-nav-dot { box-shadow: none; }
 .cy-shell.v3 :is(h1, h2, h3):not(.cy-keep-light, .cy-keep-light *, svg *) { text-shadow: none !important; }
 .cy-shell.v3 :is(h1, h2):not(.cy-keep-light, .cy-keep-light *, svg *, .v3-band *) { font-family: var(--v-display) !important; font-weight: var(--v-dispw); letter-spacing: var(--v-track); }
 html[data-theme="gold"] .cy-shell.v3 { font-family: var(--v-sans); }
+
+/* v3 has no scan lines: drop the old full-screen fixed scan-line layer (costly on iPhone at 3x). */
+.cy-shell.v3::before { display: none; }

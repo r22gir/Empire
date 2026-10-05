@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { BusinessTab, ScreenMode, EcosystemProduct } from './lib/types';
 import { useChat } from './hooks/useChat';
 import { useSystemData } from './hooks/useSystemData';
-import { useChatHistory } from './hooks/useChatHistory';
 import { API } from './lib/api';
 
 import TopBar from './components/layout/TopBar';
@@ -212,7 +211,8 @@ export default function CommandCenter() {
 
   const chat = useChat();
   const sys = useSystemData();
-  const history = useChatHistory();
+  // (useChatHistory removed 2026-10-04: its result was unused, yet every page load fetched and parsed
+  //  the whole /chats/list (687KB, 2,812 chats). The chat history panel loads its own page when opened.)
 
   // Derive legacy tab from product
   const activeTab: BusinessTab = PRODUCT_TO_TAB[activeProduct] || 'max';
