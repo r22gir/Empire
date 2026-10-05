@@ -1,22 +1,184 @@
 {
   "capabilities": [
-    {"capability_key": "inline_drawing_svg", "display_name": "Display drawings inline in web chat", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "SVG rendered in chat bubble with lightbox. DEFAULT for web channels."},
-    {"capability_key": "drawing_generation", "display_name": "Generate architectural drawings", "enabled": true, "channel_scope": ["web_cc", "web", "telegram"], "notes": "Window, bench, chair, millwork, generic renderers via registry."},
-    {"capability_key": "understand_image", "display_name": "Understand and describe images in detail", "enabled": true, "channel_scope": ["web_cc", "web", "telegram"], "notes": "General-purpose image understanding via xAI Grok Vision (primary) + OpenAI GPT-4o (fallback). Accepts URL, base64, or local file path. Returns structured summary, notable details, confidence, and provider used."},
-    {"capability_key": "quote_creation", "display_name": "Create quotes from photos or specs", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Photo analysis → measurements → quote assembly."},
-    {"capability_key": "code_mode", "display_name": "Execute code tasks and file modifications", "enabled": true, "channel_scope": ["web_cc"], "notes": "Founder-only. No PIN on web_cc."},
-    {"capability_key": "self_heal", "display_name": "Self-diagnose and fix own code", "enabled": true, "channel_scope": ["web_cc"], "notes": "Bounded scope. Cannot touch .env, auth, payments."},
-    {"capability_key": "git_operations", "display_name": "Read git log, status, diffs", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Read always. Write (commit/push) founder-only."},
-    {"capability_key": "email_send", "display_name": "Send emails via SendGrid/SMTP", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Capability exists, but runtime config must be verified. Only claim sent AFTER send_email/send_quote_email returns success."},
-    {"capability_key": "email_read", "display_name": "Read max@empirebox.store inbox via Gmail OAuth", "enabled": true, "channel_scope": ["web_cc", "web", "telegram"], "notes": "Capability exists, but current runtime must prove it. Do not claim inbox access unless check_email or /api/v1/max/gmail/inbox returns success."},
-    {"capability_key": "telegram_send", "display_name": "Send Telegram messages", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Configured/partial until live-tested. Only claim sent AFTER bot API/tool result returns success."},
-    {"capability_key": "pdf_generation", "display_name": "Generate PDF documents", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Generated locally. User downloads via link. NOT auto-attached to chat."},
-    {"capability_key": "fabric_specification", "display_name": "Accept and apply fabric specs", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Fabric name/URL/grade applied to drawings and quotes."},
-    {"capability_key": "client_portal", "display_name": "Generate and manage client portal links", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Secure token links. Client sees quote, photos, production, invoice, pay button."},
-    {"capability_key": "stripe_payments", "display_name": "Process Stripe payments and send reminders", "enabled": true, "channel_scope": ["web_cc"], "notes": "PaymentIntent, payment links, webhook handling, auto-reminders."},
-    {"capability_key": "financial_dashboard", "display_name": "Answer financial queries and show dashboards", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Revenue, P&L, AR aging, category drill-down, job profitability."},
-    {"capability_key": "production_board", "display_name": "Show and manage production board", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Kanban with urgency colors, advance stages, overdue alerts."},
-    {"capability_key": "daily_ops", "display_name": "Show daily action items and quick stats", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Prioritized action list, pipeline stats, production overview."},
-    {"capability_key": "presentation", "display_name": "Generate structured topic reports and presentations", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Topic-based research report via web search + AI. Produces structured JSON: title, sections, charts (ONLY when real data exists), sources, images. Renders to PDF. NOT slides, avatar narration, TTS, email/Telegram delivery. Empire topics and general topics both supported. Charts only from verified web data — no fabricated numbers."}
+    {
+      "capability_key": "inline_drawing_svg",
+      "display_name": "Display drawings inline in web chat",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "web"
+      ],
+      "notes": "SVG rendered in chat bubble with lightbox. DEFAULT for web channels."
+    },
+    {
+      "capability_key": "drawing_generation",
+      "display_name": "Generate architectural drawings",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "web",
+        "telegram"
+      ],
+      "notes": "Window, bench, chair, millwork, generic renderers via registry."
+    },
+    {
+      "capability_key": "understand_image",
+      "display_name": "Understand and describe images in detail",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "web",
+        "telegram"
+      ],
+      "notes": "General-purpose image understanding via xAI Grok Vision (primary) + OpenAI GPT-4o (fallback). Accepts URL, base64, or local file path. Returns structured summary, notable details, confidence, and provider used."
+    },
+    {
+      "capability_key": "quote_creation",
+      "display_name": "Create quotes from photos or specs",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "web"
+      ],
+      "notes": "Photo analysis \u2192 measurements \u2192 quote assembly."
+    },
+    {
+      "capability_key": "code_mode",
+      "display_name": "Execute code tasks and file modifications",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc"
+      ],
+      "notes": "Founder-only. No PIN on web_cc."
+    },
+    {
+      "capability_key": "self_heal",
+      "display_name": "Self-diagnose and fix own code",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc"
+      ],
+      "notes": "Bounded scope. Cannot touch .env, auth, payments."
+    },
+    {
+      "capability_key": "git_operations",
+      "display_name": "Read git log, status, diffs",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "telegram"
+      ],
+      "notes": "Read always. Write (commit/push) founder-only."
+    },
+    {
+      "capability_key": "email_send",
+      "display_name": "Send emails via SendGrid/SMTP",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "web"
+      ],
+      "notes": "Outbound send uses SMTP (configured). Gmail OAuth is inbox READ only. Emails to Rafael (empirebox2026@gmail.com, rafa22giraldo@gmail.com, max@empirebox.store) send immediately when he asks \u2014 no PIN. Only claim sent AFTER send_email/send_quote_email success."
+    },
+    {
+      "capability_key": "email_read",
+      "display_name": "Read max@empirebox.store inbox via Gmail OAuth",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "web",
+        "telegram"
+      ],
+      "notes": "Capability exists, but current runtime must prove it. Do not claim inbox access unless check_email or /api/v1/max/gmail/inbox returns success."
+    },
+    {
+      "capability_key": "telegram_send",
+      "display_name": "Send Telegram messages",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "telegram"
+      ],
+      "notes": "Configured/partial until live-tested. Only claim sent AFTER bot API/tool result returns success."
+    },
+    {
+      "capability_key": "pdf_generation",
+      "display_name": "Generate PDF documents",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "web"
+      ],
+      "notes": "Generated locally. User downloads via link. NOT auto-attached to chat."
+    },
+    {
+      "capability_key": "fabric_specification",
+      "display_name": "Accept and apply fabric specs",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "web"
+      ],
+      "notes": "Fabric name/URL/grade applied to drawings and quotes."
+    },
+    {
+      "capability_key": "client_portal",
+      "display_name": "Generate and manage client portal links",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "telegram"
+      ],
+      "notes": "Secure token links. Client sees quote, photos, production, invoice, pay button."
+    },
+    {
+      "capability_key": "stripe_payments",
+      "display_name": "Process Stripe payments and send reminders",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc"
+      ],
+      "notes": "PaymentIntent, payment links, webhook handling, auto-reminders."
+    },
+    {
+      "capability_key": "financial_dashboard",
+      "display_name": "Answer financial queries and show dashboards",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "telegram"
+      ],
+      "notes": "Revenue, P&L, AR aging, category drill-down, job profitability."
+    },
+    {
+      "capability_key": "production_board",
+      "display_name": "Show and manage production board",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "telegram"
+      ],
+      "notes": "Kanban with urgency colors, advance stages, overdue alerts."
+    },
+    {
+      "capability_key": "daily_ops",
+      "display_name": "Show daily action items and quick stats",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "telegram"
+      ],
+      "notes": "Prioritized action list, pipeline stats, production overview."
+    },
+    {
+      "capability_key": "presentation",
+      "display_name": "Generate structured topic reports and presentations",
+      "enabled": true,
+      "channel_scope": [
+        "web_cc",
+        "web"
+      ],
+      "notes": "Topic-based research report via web search + AI. Produces structured JSON: title, sections, charts (ONLY when real data exists), sources, images. Renders to PDF. NOT slides, avatar narration, TTS, email/Telegram delivery. Empire topics and general topics both supported. Charts only from verified web data \u2014 no fabricated numbers."
+    }
   ]
 }
