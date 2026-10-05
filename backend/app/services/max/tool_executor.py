@@ -677,7 +677,24 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
         # and non-founder alike (H81 Phase 2). HOTFIX 4.2 fail-closed
         # semantics preserved: empty FOUNDER_PIN refuses with
         # CRITICAL log; missing PIN refuses; mismatched PIN refuses.
+        # 2026-10-05: a server-verified founder session (Cloudflare Access
+        # JWT whose email is a FOUNDER_EMAILS entry, main edition only, no
+        # untrusted inbound content earlier in the turn) runs restricted
+        # tools without the PIN. Client flags/channels never set this.
+        _founder_session_ok = False
         if _is_dangerous_call(tool_name, tool_call):
+            try:
+                from app.services.max.founder_session import founder_session_allows
+                _founder_session_ok = founder_session_allows(access_context, founder)
+            except Exception as _fs_err:
+                logger.warning(f"founder_session check failed (gate stays on): {_fs_err}")
+                _founder_session_ok = False
+            if _founder_session_ok:
+                logger.info(
+                    "Founder session verified (Cloudflare Access) — '%s' runs without the PIN",
+                    tool_name,
+                )
+        if _is_dangerous_call(tool_name, tool_call) and not _founder_session_ok:
             if not FOUNDER_PIN:
                 logger.critical(
                     "BLOCKED dangerous tool '%s' invocation: "
@@ -701,8 +718,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                 return ToolResult(
                     tool=tool_name, success=False,
                     error=(
-                        f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed. "
-                        f"The Chat PIN card collects it. Do not ask the founder to type the PIN into the chat."
+                        f"Tool '{tool_name}' was skipped: founder PIN required (no verified founder session for this call). "
+                        f"Continue the answer WITHOUT this tool: use the regular read tools (check_email, file_read, db_query, "
+                        f"search_*, get_services_health). The Chat PIN card collects it if needed; do not ask the founder to type the PIN "
+                        f"into the chat and do not call another restricted tool this turn."
                     ),
                 )
             if str(pin) != FOUNDER_PIN:
@@ -3095,19 +3114,74 @@ async def _generate_pdf_for_quote(quote_id: str) -> str:
 
 @tool("check_email")
 def _check_email(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Check Gmail inbox via OAuth2. Read-only — no delete, no move."""
-    limit = min(int(params.get("limit", 10)), 20)
-    unread_only = params.get("unread_only", True)
+    """Read email. Read-only — no delete, no move, no send.
+
+    2026-10-05: "check email from <name>" → pass from_sender (alias:
+    from / sender / name). With a sender or query the whole Gmail mailbox
+    is searched (read + unread). When Gmail is unavailable the inbound
+    mail store (unified_messages, channel=email) is searched instead and
+    the result says which source answered and what is missing.
+    """
+    try:
+        limit = min(int(params.get("limit", 10) or 10), 20)
+    except Exception:
+        limit = 10
+    from_sender = (params.get("from_sender") or params.get("from") or params.get("sender")
+                   or params.get("name") or "")
+    from_sender = str(from_sender).strip() or None
+    query = (str(params.get("query") or params.get("q") or "").strip() or None)
+    searching = bool(from_sender or query)
+    unread_only = params.get("unread_only", not searching)
     filter_to = params.get("filter_to", None)
 
+    gmail_error = None
     try:
         from app.services.max.gmail_reader import check_inbox
-        result = check_inbox(limit=limit, unread_only=unread_only, filter_to=filter_to)
-        if not result.get("success"):
-            return ToolResult(tool="check_email", success=False, error=result.get("error", "Gmail check failed"))
-        return ToolResult(tool="check_email", success=True, result=result)
+        result = check_inbox(limit=limit, unread_only=unread_only, filter_to=filter_to,
+                             from_sender=from_sender, query=query)
+        if result.get("success"):
+            return ToolResult(tool="check_email", success=True, result=result)
+        gmail_error = result.get("error", "Gmail check failed")
     except Exception as e:
-        return ToolResult(tool="check_email", success=False, error=str(e))
+        gmail_error = str(e)
+
+    reauth = any(m in (gmail_error or "").lower() for m in ("invalid_grant", "expired or revoked", "token not found"))
+    gmail_status = ("Gmail OAuth token is expired or revoked (invalid_grant): Rafael needs to re-run Gmail auth for the backend"
+                    if reauth else f"Gmail read failed: {gmail_error}")
+    # Fallback: inbound mail store (webhook intake), read-only.
+    store_hits: list = []
+    try:
+        import sqlite3
+        from app.services.max.unified_message_store import DB_PATH as _UMS_DB
+        if _UMS_DB.exists():
+            con = sqlite3.connect(f"file:{_UMS_DB}?mode=ro", uri=True)
+            try:
+                sql = ("SELECT sender, recipient, subject, substr(coalesce(extracted_content, content, ''), 1, 300), created_at "
+                       "FROM unified_messages WHERE channel='email' AND direction='inbound'")
+                args: list = []
+                for term in [t for t in (from_sender, query) if t]:
+                    sql += " AND lower(coalesce(sender,'')||' '||coalesce(subject,'')||' '||coalesce(content,'')) LIKE ?"
+                    args.append(f"%{term.lower()}%")
+                sql += " ORDER BY id DESC LIMIT ?"
+                args.append(limit)
+                for row in con.execute(sql, args):
+                    store_hits.append({"from": row[0], "to": row[1], "subject": row[2], "preview": row[3], "date": row[4]})
+            finally:
+                con.close()
+    except Exception as e:
+        logger.debug(f"check_email inbound-store fallback failed: {e}")
+    missing = [gmail_status, "No Outlook/Microsoft 365 inbox reader is connected to Max (Nelma's Outlook cannot be read)."]
+    if store_hits:
+        return ToolResult(tool="check_email", success=True, result={
+            "success": True, "source": "inbound_store", "count": len(store_hits),
+            "emails": store_hits, "from_sender": from_sender, "query": query,
+            "note": "Gmail unavailable; these come from the inbound mail webhook store only.",
+            "missing": missing,
+        })
+    return ToolResult(tool="check_email", success=False, result={"missing": missing, "from_sender": from_sender},
+                      error=(f"Could not read the inbox. {gmail_status}. The inbound mail store has no matching email"
+                             + (f" from '{from_sender}'" if from_sender else "") + ". No Outlook inbox reader is connected. "
+                             "Tell Rafael exactly this; do not try shell_execute."))
 
 
 @tool("send_email")

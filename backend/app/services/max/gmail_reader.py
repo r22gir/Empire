@@ -78,10 +78,18 @@ def _check_inbox_sync(
     limit: int = 10,
     unread_only: bool = True,
     filter_to: Optional[str] = None,
+    from_sender: Optional[str] = None,
+    query: Optional[str] = None,
 ) -> dict:
-    """Internal sync implementation — always run in a thread."""
+    """Internal sync implementation — always run in a thread.
+
+    2026-10-05: ``from_sender`` / ``query`` search the whole mailbox
+    ("check email from Nelma"), read and unread, instead of only unread
+    mail addressed to MAX_EMAIL.
+    """
     limit = min(limit, 20)
-    max_email = filter_to or os.getenv("MAX_EMAIL", "max@empirebox.store")
+    searching = bool((from_sender or "").strip() or (query or "").strip())
+    max_email = filter_to or (None if searching else os.getenv("MAX_EMAIL", "max@empirebox.store"))
 
     # Set socket-level timeout as safety net
     old_timeout = socket.getdefaulttimeout()
@@ -93,6 +101,11 @@ def _check_inbox_sync(
         query_parts = []
         if max_email:
             query_parts.append(f"to:{max_email}")
+        if from_sender and from_sender.strip():
+            sender = from_sender.strip().replace('"', "")
+            query_parts.append(f'from:"{sender}"' if " " in sender else f"from:{sender}")
+        if query and query.strip():
+            query_parts.append(query.strip())
         if unread_only:
             query_parts.append("is:unread")
         query = " ".join(query_parts) if query_parts else None
@@ -134,6 +147,8 @@ def _check_inbox_sync(
             "count": len(emails),
             "unread_total": unread_total,
             "filter": max_email,
+            "query": query,
+            "source": "gmail",
             "emails": emails,
         }
     except Exception as e:
@@ -147,10 +162,12 @@ def check_inbox(
     limit: int = 10,
     unread_only: bool = True,
     filter_to: Optional[str] = None,
+    from_sender: Optional[str] = None,
+    query: Optional[str] = None,
 ) -> dict:
     """Fetch recent emails with a hard 15s timeout. Thread-safe, never blocks event loop."""
     try:
-        future = _executor.submit(_check_inbox_sync, limit, unread_only, filter_to)
+        future = _executor.submit(_check_inbox_sync, limit, unread_only, filter_to, from_sender, query)
         return future.result(timeout=15)
     except FuturesTimeout:
         logger.error("Gmail check timed out after 15s")

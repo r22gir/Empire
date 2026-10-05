@@ -92,19 +92,27 @@ def stash_restricted_call(
     return resume_id
 
 
-def resume_restricted_tool(resume_id: str, pin: str | None) -> dict[str, Any]:
+def resume_restricted_tool(
+    resume_id: str,
+    pin: str | None,
+    founder_session: dict | None = None,
+) -> dict[str, Any]:
     """Verify the founder PIN and re-run the stashed tool call.
 
-    Returns a dict the HTTP layer can send. The PIN is never included.
+    2026-10-05: a server-verified founder session (see founder_session.py)
+    resumes without the PIN. Returns a dict the HTTP layer can send. The
+    PIN is never included.
     """
-    if not os.getenv("FOUNDER_PIN", ""):
-        logger.critical(
-            "FOUNDER_PIN env var is UNSET. Restricted-tool resume refuses "
-            "until it is configured."
-        )
-    if not founder_pin_matches(pin):
-        logger.warning("Restricted-tool resume rejected: invalid PIN")
-        return {"ok": False, "status": "invalid_pin"}
+    session_ok = bool(founder_session and founder_session.get("verified"))
+    if not session_ok:
+        if not os.getenv("FOUNDER_PIN", ""):
+            logger.critical(
+                "FOUNDER_PIN env var is UNSET. Restricted-tool resume refuses "
+                "until it is configured."
+            )
+        if not founder_pin_matches(pin):
+            logger.warning("Restricted-tool resume rejected: invalid PIN")
+            return {"ok": False, "status": "invalid_pin"}
 
     with _LOCK:
         pending = _PENDING.pop(resume_id, None)
@@ -114,11 +122,18 @@ def resume_restricted_tool(resume_id: str, pin: str | None) -> dict[str, Any]:
 
     from app.services.max.tool_executor import execute_tool
 
+    if session_ok:
+        from app.services.max.founder_session import apply_to_access_context
+        ctx = apply_to_access_context({}, founder_session)
+        founder_flag = True
+    else:
+        ctx = {"pin": pin}
+        founder_flag = bool(pending.get("founder"))
     result = execute_tool(
         pending["tool_call"],
         desk=pending.get("desk"),
-        access_context={"pin": pin},
-        founder=bool(pending.get("founder")),
+        access_context=ctx,
+        founder=founder_flag,
         channel=pending.get("channel"),
     )
     secret = str(pin or "")

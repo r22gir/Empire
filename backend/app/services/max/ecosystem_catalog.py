@@ -476,6 +476,7 @@ EMPIRE_CATALOG = {
         "run_desk_task": {"description": "Delegate a task to the AI desk system for autonomous handling", "access_level": 1, "category": "action"},
         "send_telegram": {"description": "Send a text message to founder via Telegram", "access_level": 1, "category": "communication"},
         "send_quote_telegram": {"description": "Generate quote PDF and send via Telegram", "access_level": 1, "category": "communication"},
+        "check_email": {"description": "READ email (Gmail inbox, read-only). For 'check email from <name>' pass from_sender=<name>; searches read+unread mail, falls back to the inbound mail store. Use this, never shell_execute, for any email lookup", "access_level": 1, "category": "communication"},
         "send_email": {"description": "Send email with optional attachments", "access_level": 1, "category": "communication"},
         "send_quote_email": {"description": "Generate quote PDF and email to recipient", "access_level": 1, "category": "communication"},
         "web_search": {"description": "Search the web via DuckDuckGo", "access_level": 1, "category": "research"},

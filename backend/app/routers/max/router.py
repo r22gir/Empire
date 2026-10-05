@@ -2,7 +2,7 @@
 MAX API Router - Endpoints for AI Assistant Manager.
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Response, Query
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Response, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -2518,7 +2518,7 @@ def _explicit_no_drawing_router(message: str | None) -> bool:
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks, http_response: Response):
+async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks, http_response: Response, http_request: Request = None):
     """POST /api/v1/max/chat — non-streaming chat with MAX.
 
     D45 commit 3 (Option A): the handler DECLARES its own canonical
@@ -2549,15 +2549,23 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
     if founder:
         logger.info(f"Founder message detected via chat_id={request.chat_id}")
 
-    resp = await _chat_with_max_service(
-        request,
-        canonical_channel=canonical_channel,
-        canonical_chat_id=canonical_chat_id,
-        canonical_founder=founder,
-        background_tasks=background_tasks,
-        _chat_start=_chat_start,
-        _response_id=_response_id,
-    )
+    # 2026-10-05: server-verified founder session (Cloudflare Access JWT
+    # email in FOUNDER_ACCESS_EMAILS) lets restricted tools run without the PIN.
+    from app.services.max import founder_session as _fs
+    _fs_session = _fs.resolve_founder_session(http_request)
+    _fs_token = _fs.set_current(_fs_session)
+    try:
+        resp = await _chat_with_max_service(
+            request,
+            canonical_channel=canonical_channel,
+            canonical_chat_id=canonical_chat_id,
+            canonical_founder=founder,
+            background_tasks=background_tasks,
+            _chat_start=_chat_start,
+            _response_id=_response_id,
+        )
+    finally:
+        _fs.reset_current(_fs_token)
     http_response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     http_response.headers["Pragma"] = "no-cache"
     return resp
@@ -3214,6 +3222,13 @@ async def _chat_with_max_service_impl(
             logger.info(f"Extracted PIN from chat message for tool authorization")
         elif _extracted_pin and _ac_context is None:
             _ac_context = {"pin": _extracted_pin}
+        try:
+            from app.services.max.founder_session import apply_to_access_context, current_verified
+            _ac_context = apply_to_access_context(_ac_context)
+            if current_verified():
+                founder = True
+        except Exception as _fs_err:
+            logger.debug(f"founder_session apply failed: {_fs_err}")
 
         # Multi-turn tool loop: execute tools, feed results back, allow follow-up tools (max 3 rounds)
         tool_results_list = list(_finance_prefetch_entries)
@@ -3404,6 +3419,12 @@ async def _chat_with_max_service_impl(
                     logger.info(f"[chat] Auto-routing {tool_name} to CodeForge: {title}")
                     tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
+                try:  # pre-fetched web/email content counts as untrusted too
+                    from app.services.max.founder_session import mark_untrusted
+                    for _prev in tool_results_list:
+                        mark_untrusted(_ac_context, (_prev or {}).get("tool") if isinstance(_prev, dict) else None)
+                except Exception:
+                    pass
                 result = await _execute_tool_nonblocking(tc, desk=request.desk, access_context=_ac_context, founder=founder)
                 follow_tc = None
                 if _sketch_error_names_render_shop(result):
@@ -3419,6 +3440,11 @@ async def _chat_with_max_service_impl(
                 entry = _normalize_tool_result_entry(result)
                 round_results.append(entry)
                 tool_results_list.append(entry)
+                try:
+                    from app.services.max.founder_session import mark_untrusted
+                    mark_untrusted(_ac_context, entry.get("tool") or tc.get("tool"))
+                except Exception:
+                    pass
 
             research_entries = await _attach_research_page_reads(
                 request.message, round_results, tool_results_list, _research_read_urls,
@@ -3891,7 +3917,7 @@ async def _chat_with_max_service_impl(
 
 
 @router.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, http_request: Request = None):
     """SSE streaming endpoint for MAX chat with brain context.
 
     max-sessions 2026-10-04: every response path (including guardrail
@@ -3902,7 +3928,14 @@ async def chat_stream(request: ChatRequest):
     from datetime import datetime as _jdt, timezone as _jtz
     _j_start = _jdt.now(_jtz.utc)
     _j_req = request.model_copy() if hasattr(request, "model_copy") else request.copy()
-    resp = await _chat_stream_impl(request)
+    # 2026-10-05: server-verified founder session (Cloudflare Access JWT
+    # email in FOUNDER_ACCESS_EMAILS). Read once while the access context is built.
+    from app.services.max import founder_session as _fs
+    _fs_token = _fs.set_current(_fs.resolve_founder_session(http_request))
+    try:
+        resp = await _chat_stream_impl(request)
+    finally:
+        _fs.reset_current(_fs_token)
     try:
         if isinstance(resp, StreamingResponse):
             from app.services.max.session_journal import journal_stream
@@ -3916,6 +3949,13 @@ async def _chat_stream_impl(request: ChatRequest):
     """SSE streaming endpoint body (see chat_stream)."""
     msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
     founder = is_founder_message(msg_ctx)
+    try:
+        from app.services.max.founder_session import current_verified as _fs_verified
+        if _fs_verified():
+            founder = True
+            msg_ctx = {**msg_ctx, "channel": "web_cc"}
+    except Exception:
+        pass
     if founder:
         logger.info(f"Founder message (stream) detected via chat_id={request.chat_id}")
 
@@ -4226,9 +4266,15 @@ async def _chat_stream_impl(request: ChatRequest):
                 _stream_ac_context = {"user": _stream_ac_user}
         except Exception as _ac_err:
             logger.debug(f"Access control resolve failed (stream): {_ac_err}")
+    try:
+        from app.services.max.founder_session import apply_to_access_context
+        _stream_ac_context = apply_to_access_context(_stream_ac_context)
+    except Exception as _fs_err:
+        logger.debug(f"founder_session apply failed (stream): {_fs_err}")
 
     async def event_generator():
         model_used = "unknown"
+        _pin_card_sent = False  # 2026-10-05: at most ONE PIN card per reply
         full_response = ""
         # Guard: Pre-execute web_search for performative search requests before streaming
         _stream_pre_search_entry = None
@@ -4445,6 +4491,12 @@ async def _chat_stream_impl(request: ChatRequest):
                         logger.info(f"[stream] Auto-routing {tool_name} to CodeForge: {title}")
                         tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
+                    try:  # pre-fetched web/email content counts as untrusted too
+                        from app.services.max.founder_session import mark_untrusted
+                        for _prev in tool_results_list:
+                            mark_untrusted(_stream_ac_context, (_prev or {}).get("tool") if isinstance(_prev, dict) else None)
+                    except Exception:
+                        pass
                     try:
                         result = await asyncio.wait_for(
                             _execute_tool_nonblocking(tc, desk=request.desk, access_context=_stream_ac_context, founder=founder),
@@ -4472,7 +4524,13 @@ async def _chat_stream_impl(request: ChatRequest):
                         needs_founder_pin_card,
                         stash_restricted_call,
                     )
-                    if needs_founder_pin_card(str(entry.get("error") or "")):
+                    try:
+                        from app.services.max.founder_session import mark_untrusted
+                        mark_untrusted(_stream_ac_context, entry.get("tool") or tc.get("tool"))
+                    except Exception:
+                        pass
+                    if not _pin_card_sent and needs_founder_pin_card(str(entry.get("error") or "")):
+                        _pin_card_sent = True
                         resume_id = stash_restricted_call(
                             tool_call=tc,
                             desk=request.desk,
@@ -6169,9 +6227,16 @@ class VerifyPinRequest(BaseModel):
 
 
 @router.post("/verify-pin")
-async def verify_pin(request: VerifyPinRequest):
-    """Verify founder PIN without performing any action. Used by Code Mode toggle."""
+async def verify_pin(request: VerifyPinRequest, http_request: Request = None):
+    """Verify founder PIN without performing any action. Used by Code Mode toggle.
+
+    2026-10-05: a server-verified founder session (Cloudflare Access JWT
+    email in FOUNDER_ACCESS_EMAILS, main edition) passes without the PIN.
+    """
     import os
+    from app.services.max.founder_session import resolve_founder_session
+    if resolve_founder_session(http_request).get("verified"):
+        return {"ok": True, "founder_session": True}
     # H62 FIX (2026-08-22): empty default — pre-fix this was "7777" (privilege-escalation literal). HOTFIX 4.2 only fixed tool_executor.py.
     from app.services.max.restricted_tool_resume import founder_pin_matches
 
@@ -6188,11 +6253,11 @@ async def verify_pin(request: VerifyPinRequest):
 
 class ResumeRestrictedRequest(BaseModel):
     resume_id: str
-    pin: str
+    pin: str = ""
 
 
 @router.post("/resume-restricted-tool")
-async def resume_restricted_tool(body: ResumeRestrictedRequest):
+async def resume_restricted_tool(body: ResumeRestrictedRequest, http_request: Request = None):
     """Re-run a PIN-gated tool after the Chat PIN card verified the PIN.
 
     The PIN is read from this body only. It is not stored on the chat
@@ -6200,7 +6265,9 @@ async def resume_restricted_tool(body: ResumeRestrictedRequest):
     """
     from app.services.max.restricted_tool_resume import resume_restricted_tool as _resume
 
-    outcome = _resume(body.resume_id, body.pin)
+    from app.services.max.founder_session import resolve_founder_session
+    _session = resolve_founder_session(http_request)
+    outcome = _resume(body.resume_id, body.pin, founder_session=_session if _session.get("verified") else None)
     status = outcome.get("status")
     if status == "invalid_pin":
         raise HTTPException(status_code=403, detail="Invalid PIN")
