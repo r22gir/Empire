@@ -228,12 +228,13 @@ def test_session_exposes_only_read_only_tools_and_voice_flag(monkeypatch):
     ev = vl.session_update_event()
     names = [t["name"] for t in ev["session"]["tools"]]
     # request_improvement only writes a change request; builds need Rafael's tap (Oct 4, 2026)
-    assert names == list(vl.VOICE_READ_ONLY_TOOLS) + ["queue_for_founder_approval", "request_improvement"]
+    assert names == list(vl.VOICE_READ_ONLY_TOOLS) + ["queue_for_founder_approval", "request_improvement",
+                                                      "send_email"]
     for must in ("get_tasks", "get_desk_status", "get_services_health", "get_system_stats", "check_email",
                  "list_job_images", "search_conversations", "get_weather", "list_quotes_awaiting_review",
                  "show_quote_for_review"):
         assert must in names
-    for banned in ("send_email", "shell_execute", "file_write", "approve_quote", "deposit_pay_link", "create_task"):
+    for banned in ("shell_execute", "file_write", "approve_quote", "deposit_pay_link", "create_task"):
         assert banned not in names
     assert ev["session"]["turn_detection"]["type"] == "server_vad"
     assert ev["session"]["audio"]["input"]["format"] == {"type": "audio/pcm", "rate": 24000}
@@ -273,7 +274,7 @@ def test_barge_in_cancels_active_response_and_drops_its_audio():
     assert call.interrupts == 1
 
 
-@pytest.mark.parametrize("name", ["send_email", "shell_execute", "file_write", "file_delete", "approve_quote",
+@pytest.mark.parametrize("name", ["shell_execute", "file_write", "file_delete", "approve_quote",
                                   "reject_quote", "deposit_pay_link", "create_task", "bash", "send_mail"])
 def test_voice_allowlist_refuses_writes_server_side(monkeypatch, name):
     import app.services.max.tool_executor as te
@@ -418,3 +419,86 @@ def test_live_call_feeds_transcript_from_events():
     assert got[0] == ("user", "hi", "i1")
     assert got[1] == ("assistant", "Hello", "r1", False)
     assert got[2] == ("assistant", "Long ans", "r2", True)
+
+
+# ── 2026-10-05: voice gets the same self-email rule as text chat ──────
+class _FakeResult:
+    def __init__(self, data):
+        self._d = data
+
+    def to_dict(self):
+        return self._d
+
+
+@pytest.mark.parametrize("to", ["", "me", "empirebox2026@gmail.com", "rafa22giraldo@gmail.com",
+                                "max@empirebox.store", "Rafael <RAFA22GIRALDO@gmail.com>"])
+def test_voice_self_email_sends_immediately_no_pin(monkeypatch, to):
+    import app.services.max.tool_executor as te
+    calls = []
+
+    def fake_execute(call, **kw):
+        calls.append((call, kw))
+        return _FakeResult({"tool": "send_email", "success": True, "result": {"sent_to": call["to"]}})
+
+    monkeypatch.setattr(te, "execute_tool", fake_execute)
+    out = vl.run_voice_tool("send_email", {"to": to, "subject": "Voice test", "body": "dry run"})
+    assert out["success"] is True
+    assert len(calls) == 1
+    call, kw = calls[0]
+    assert call["tool"] == "send_email" and call["subject"] == "Voice test"
+    assert kw.get("founder") is False and kw.get("access_context") is None  # no PIN / confirm session
+    assert "attachments" not in call
+
+
+@pytest.mark.parametrize("args", [
+    {"to": "client@example.com", "subject": "s", "body": "b"},
+    {"to": "empirebox2026@gmail.com", "cc": "client@example.com", "subject": "s", "body": "b"},
+    {"to": "empirebox2026@gmail.com", "cc": ["max@empirebox.store", "vendor@x.com"], "subject": "s", "body": "b"},
+])
+def test_voice_email_to_others_refused_before_executor(monkeypatch, args):
+    import app.services.max.tool_executor as te
+    called = []
+    monkeypatch.setattr(te, "execute_tool", lambda *a, **k: called.append(a))
+    out = vl.run_voice_tool("send_email", args)
+    assert out["success"] is False
+    assert "explicit yes" in out["error"] and "queue_for_founder_approval" in out["error"]
+    assert called == []
+
+
+def test_voice_send_email_schema_is_self_only():
+    defs = {d["name"]: d for d in vl.realtime_tool_definitions()}
+    assert "send_email" in defs
+    desc = defs["send_email"]["description"]
+    assert "empirebox2026@gmail.com" in desc and "refused" in desc
+    assert "attachments" not in defs["send_email"]["parameters"]["properties"]
+
+
+def test_voice_instructions_self_email_rule_and_no_settings_excuse():
+    from app.services.max.voice_brain import VOICE_CAPABILITIES
+    text = VOICE_CAPABILITIES
+    assert "call send_email right away" in text and "No PIN" in text
+    assert "never say you can't send email" in text
+    assert "explicit yes" in text
+    assert "You CANNOT send email" not in text
+    static = vl.build_instructions()
+    assert "send_email" in static
+
+
+def test_voice_self_email_dry_run_through_real_executor(monkeypatch):
+    """Real tool_executor + whitelist path; only the SMTP provider is stubbed."""
+    import app.services.max.email_service as es
+    sent = []
+
+    class FakeSvc:
+        is_configured = True
+        last_message_id = "<dry-run@test>"
+
+        def send(self, **kw):
+            sent.append(kw)
+            return True
+
+    monkeypatch.setattr(es, "EmailService", FakeSvc)
+    out = vl.run_voice_tool("send_email", {"subject": "Voice dry run", "body": "no real send"})
+    assert out["success"] is True, out
+    assert sent and sent[0]["to"] == "empirebox2026@gmail.com"
+    assert out["result"]["message_id"] == "<dry-run@test>"

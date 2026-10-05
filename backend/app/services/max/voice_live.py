@@ -35,11 +35,17 @@ Voice upgrade (2026-09-30, founder-approved)
     plus queue_for_founder_approval, which only files a pending task
     (status 'waiting', tags voice-request / needs-founder-approval) and never
     executes anything. Everything else is refused server-side.
+  * SELF EMAIL (2026-10-05): send_email is allowed in voice ONLY when every
+    recipient (to + cc) is Rafael himself (FOUNDER_SELF_EMAILS). It sends
+    right away, same as text chat. Any other recipient is refused before
+    tool_executor is touched; client email needs Rafael's explicit yes in
+    text chat (or queue_for_founder_approval).
 
 Safety
   * Tools run server-side; anything not in VOICE_TOOL_ALLOWLIST is refused
-    before tool_executor is touched (send_email, shell_execute, file_write,
-    approve/reject, deposit links, deletes ... are all refused).
+    before tool_executor is touched (shell_execute, file_write, approve/reject,
+    deposit links, deletes ... are all refused; send_email only to Rafael's
+    own addresses).
   * Hard cap per call (MAX_VOICE_CALL_CAP_SECONDS, default 600 s) with
     auto-hangup; limited concurrent calls.
   * xAI is used for voice via its own flag (MAX_VOICE_XAI_ENABLED, default
@@ -76,11 +82,12 @@ VOICE_READ_ONLY_TOOLS = (
 )
 QUEUE_TOOL = "queue_for_founder_approval"
 IMPROVE_TOOL = "request_improvement"  # writes a change request only; builds need Rafael's tap in the studio
-VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL))
+SELF_EMAIL_TOOL = "send_email"  # Rafael's own addresses only (server-enforced in run_voice_tool)
+VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL))
 READ_ONLY_TOOLS = VOICE_READ_ONLY_TOOLS  # backwards-compatible name
 # Explicitly named so logs/tests are clear; the allowlist above is what enforces.
 VOICE_DENIED_EXAMPLES = frozenset({
-    "send_email", "send_telegram", "shell_execute", "env_set", "file_write", "file_edit",
+    "send_telegram", "shell_execute", "env_set", "file_write", "file_edit",
     "file_append", "file_delete", "approve_quote", "reject_quote", "deposit_pay_link",
     "create_task", "service_manager", "git_ops", "delete_quote", "delete_contact",
 })
@@ -322,6 +329,18 @@ _FALLBACK_TOOL_SCHEMAS = {
             "details": {"type": "string", "description": "Everything needed to do it later: who, what, which quote/customer, wording"},
         }, ["action"]),
     },
+    SELF_EMAIL_TOOL: {
+        "description": "Email Rafael HIMSELF right now (empirebox2026@gmail.com, rafa22giraldo@gmail.com or "
+                       "max@empirebox.store; leave 'to' empty for his main inbox). Sends immediately via SMTP: no "
+                       "PIN, no second yes. Any other recipient (clients, vendors) is refused: those need his "
+                       "explicit yes in text chat, so offer queue_for_founder_approval instead.",
+        "parameters": _obj({
+            "to": {"type": "string", "description": "One of Rafael's own addresses; empty = empirebox2026@gmail.com"},
+            "subject": {"type": "string", "description": "Email subject"},
+            "body": {"type": "string", "description": "Email body (plain text or simple HTML)"},
+            "cc": {"type": "string", "description": "Optional, Rafael's own addresses only"},
+        }, ["subject", "body"]),
+    },
     IMPROVE_TOOL: {
         "description": "When Rafael asks for a SYSTEM improvement (a new feature, a fix, a change to how Empire or Max works), write ONE structured change request to the Improvements page. Builds nothing; Rafael approves it in the studio, and merge/deploy needs a second approval. Tell him it is on the Improvements page waiting for his tap.",
         "parameters": _obj({
@@ -422,7 +441,7 @@ def realtime_tool_definitions() -> list[dict[str, Any]]:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("voice_live: canonical tool schemas unavailable: %s", exc)
     out = []
-    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL):
+    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL):
         fn = canonical.get(name) or _FALLBACK_TOOL_SCHEMAS[name]
         out.append({
             "type": "function",
@@ -488,15 +507,56 @@ def queue_for_founder_approval(action: str, details: str = "", *, call_id: str =
     }}
 
 
+_SELF_ALIASES = ("", "me", "myself", "owner", "founder", "my email", "rafael", "rafa")
+
+
+def voice_self_email(arguments: dict[str, Any], *, call_id: str = "") -> dict[str, Any]:
+    """send_email from voice: Rafael's own addresses only, sent immediately.
+
+    Same rule as text chat (no PIN / second yes for self-email). Anything
+    addressed to someone else is refused here, before tool_executor runs.
+    Attachments are not taken from voice.
+    """
+    from app.services.max.email_recipient_whitelist import FOUNDER_SELF_EMAILS, is_founder_self_email
+    to = str((arguments or {}).get("to") or "").strip()
+    if to.lower() in _SELF_ALIASES:
+        to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+    cc_raw = (arguments or {}).get("cc") or ""
+    cc = [c.strip() for c in (cc_raw if isinstance(cc_raw, list) else str(cc_raw).split(",")) if str(c).strip()]
+    subject = str((arguments or {}).get("subject") or "").strip()[:200]
+    body = str((arguments or {}).get("body") or "").strip()[:20000]
+    others = [a for a in [to, *cc] if not is_founder_self_email(a)]
+    if others:
+        logger.info("voice_live[%s]: send_email refused for non-self recipient", call_id or "-")
+        return {"success": False, "tool": SELF_EMAIL_TOOL, "error": (
+            "From voice I can only email Rafael's own addresses ("
+            + ", ".join(sorted(FOUNDER_SELF_EMAILS)) + "). Emails to clients or anyone else need his "
+            "explicit yes in text chat. Offer to queue it with queue_for_founder_approval.")}
+    if not subject or not body:
+        return {"success": False, "tool": SELF_EMAIL_TOOL, "error": "subject and body are required"}
+    from app.services.max.tool_executor import execute_tool
+    call = {"tool": "send_email", "to": to, "subject": subject, "body": body}
+    if cc:
+        call["cc"] = ", ".join(cc)
+    result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
+    data = result.to_dict()
+    if not data.get("success"):
+        # Never blame "email settings": report the real send error plainly.
+        logger.warning("voice_live[%s]: self send_email failed: %s", call_id or "-", str(data.get("error"))[:200])
+    return data
+
+
 def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
                    conversation_id: str = "") -> dict[str, Any]:
     """Execute one allowlisted voice tool (sync). Server-side allowlist enforced here."""
     if name not in VOICE_TOOL_ALLOWLIST:
         logger.warning("voice_live[%s]: refused non-allowlisted tool %r", call_id or "-", name)
-        return {"success": False, "error": f"Tool '{name}' is not available in voice mode (read-only tools "
-                                           f"plus queue_for_founder_approval only). Offer to queue it for "
+        return {"success": False, "error": f"Tool '{name}' is not available in voice mode (read-only tools, "
+                                           f"self-email and queue_for_founder_approval only). Offer to queue it for "
                                            f"Rafael's approval instead."}
     call = {k: v for k, v in (arguments or {}).items() if not str(k).startswith("_")}
+    if name == SELF_EMAIL_TOOL:
+        return voice_self_email(call, call_id=call_id)
     if name == QUEUE_TOOL:
         return queue_for_founder_approval(call.get("action", ""), call.get("details", ""),
                                           call_id=call_id, conversation_id=conversation_id)
