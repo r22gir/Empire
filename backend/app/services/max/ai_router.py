@@ -796,7 +796,9 @@ class AIRouter:
             "Transport: mmx_cli\n"
             "Quota bucket: mcp_understand_image\n"
             "Image generation used: false\n"
-            "Instruction: Answer the user directly from the description. Do not narrate your thought process or use self-talk such as Wait, Actually, or Let me.\n"
+            "Instruction: Answer the user directly from the description. The user attached this image to the message below. Base the answer on what it shows: "
+            "first say in one line what you see (for a screenshot: the page and any error or message on it), then answer about that. "
+            "Do not give generic instructions that ignore the image. Do not narrate your thought process or use self-talk such as Wait, Actually, or Let me.\n"
             f"Description:\n{description}\n\n"
         )
         updated = list(messages)

@@ -265,14 +265,40 @@ def test_voice_note_uses_document_pipeline_and_never_sends(monkeypatch):
     ))
     assert seen["audio"] == b"OggS-voice"
 
-    async def _ingest(path, **kwargs):
+    # 2026-10-04: voice notes are transcribed first and routed like text. Dictation of a
+    # new document joins the voice draft ...
+    from app.services.max.stt_service import stt_service
+
+    async def _transcribe(path, language="en"):
+        return seen["transcript"]
+
+    def _ingest(text, **kwargs):
         assert kwargs["channel"] == "whatsapp"
         assert kwargs["session_key"].startswith("whatsapp:")
         return {"handled": True, "sent": False, "reply_text": "Draft updated. Not sent."}
 
-    monkeypatch.setattr("app.services.voice_documents.pipeline.ingest_audio", _ingest)
+    monkeypatch.setattr(stt_service, "transcribe", _transcribe)
+    monkeypatch.setattr("app.services.voice_documents.pipeline.ingest_transcript", _ingest)
+    monkeypatch.setattr("app.services.voice_documents.session.active_session", lambda key: None)
+    seen["transcript"] = "New quote for Marley's, one bench cushion 60 inches by 20 inches"
     direct = asyncio.run(wa.default_voice_handler(b"OggS-voice", "audio/ogg", _founder()))
     assert direct == "Draft updated. Not sent."
+
+    # ... while a greeting or a question about an existing quote goes to Max chat, never intake.
+    chats = []
+
+    async def _chat(text, wa_id):
+        chats.append(text)
+        return "chat reply"
+
+    monkeypatch.setattr(wa, "max_chat", _chat)
+    monkeypatch.setattr("app.services.voice_documents.session.active_session", lambda key: object())
+    monkeypatch.setattr("app.services.max.quick_replies.direct_reply", lambda *a, **k: None)
+    for said in ("Hi", "Can you send me like a voice message, like a status on the last Marley's quote?",
+                 "Send me last quote"):
+        seen["transcript"] = said
+        assert asyncio.run(wa.default_voice_handler(b"OggS-voice", "audio/ogg", _founder())) == "chat reply"
+    assert len(chats) == 3
     assert result["results"][0]["route"] == "voice_document"
     assert result["results"][0]["sent"] is False
     assert posts == ["text"]

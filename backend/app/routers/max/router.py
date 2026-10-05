@@ -2306,6 +2306,23 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
 
 
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
+    # 2026-10-04: greetings, "where are my docs" and existing-quote status answer directly
+    # (no tools, no status dumps, no internal-doc citations). Image messages go to the model.
+    if not request.desk:
+        try:
+            from app.services.max.quick_replies import direct_reply
+            _qr = direct_reply(request.message or "", channel=request.channel or "web",
+                               has_image=bool(request.image_filename))
+        except Exception as _qr_err:
+            logger.debug(f"quick reply skipped: {_qr_err}")
+            _qr = None
+        if _qr:
+            return ChatResponse(
+                response=_qr["text"],
+                model_used=f"quick-reply:{_qr['skill']}",
+                fallback_used=False,
+                metadata=_response_metadata(request.channel, skill_used=_qr["skill"]),
+            )
     if not request.desk and not request.image_filename:
         # Runtime truth / health / boundary questions must route to the live
         # truth check (async handler at line ~2030), not to module knowledge
@@ -2583,6 +2600,14 @@ async def _chat_with_max_service(
                                   tool_results=None, model=None, status="error",
                                   raw_channel=_j_raw_channel, presentation=request.presentation)
         raise
+    try:  # 2026-10-04: internal spec/doc files are never shown to Rafael as sources
+        from app.services.max.quick_replies import scrub_internal_sources
+        if isinstance(resp, dict) and isinstance(resp.get("response"), str):
+            resp["response"] = scrub_internal_sources(resp["response"])
+        elif isinstance(getattr(resp, "response", None), str):
+            resp.response = scrub_internal_sources(resp.response)
+    except Exception:
+        pass
     _journal_service_exchange(
         _j_conv, _j_channel, _j_message, _j_image, _j_start,
         text=getattr(resp, "response", None) if not isinstance(resp, dict) else resp.get("response"),
@@ -4752,6 +4777,11 @@ async def _chat_stream_impl(request: ChatRequest):
             full_response, _stream_step_lines, _ = finalize_founder_action_reply(
                 request.message, tool_results_list, full_response,
             )
+            try:  # 2026-10-04: no internal spec/doc files as sources
+                from app.services.max.quick_replies import scrub_internal_sources
+                full_response = scrub_internal_sources(full_response)
+            except Exception:
+                pass
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
             conversation_tracker.add_message(conv_id, "assistant", full_response)

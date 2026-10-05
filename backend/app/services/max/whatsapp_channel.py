@@ -21,6 +21,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 from datetime import datetime, timedelta, timezone
@@ -775,11 +776,78 @@ async def max_chat(text: str, wa_id: str) -> str:
     return str(reply or "No reply. Nothing sent.")
 
 
+_DICTATION_DETAIL = re.compile(
+    r"\d|\b(?:inch|inches|foot|feet|yard|yards|fabric|cushion|bench|pillow|drape|drapes|drapery|shade|shades|"
+    r"valance|cornice|headboard|upholster\w*|foam|welt|tuft\w*|channel|piping|lining|pleat\w*|ripplefold|track|rod|"
+    r"client|customer|address|deposit|quantity|qty|price|rate|color|colour)\b",
+    re.IGNORECASE,
+)
+_SEND_IT = re.compile(r"^\W*(?:ok[, ]+)?(?:send it|send the quote|email it|email the quote)\W*$", re.IGNORECASE)
+
+
+def _belongs_to_voice_draft(body: str, probe: Any, open_draft: bool) -> bool:
+    """New-document dictation (or a follow-up to the open draft) vs. a normal message.
+
+    2026-10-04: every WhatsApp voice note and, once a draft was open, every text (even "Hi")
+    went into quote intake. Greetings, questions and requests about EXISTING quotes/jobs now
+    go to Max chat; only dictation joins the draft.
+    """
+    from app.services.max.quick_replies import is_greeting, parse_quote_lookup
+
+    t = body.strip()
+    if is_greeting(t) or parse_quote_lookup(t):
+        return False
+    question = bool(re.match(
+        r"^\W*(?:can|could|would|will|do|does|did|is|are|what|what's|whats|where|when|which|who|how|why|"
+        r"show|tell|give|find|check|pull|open|list)\b", t, re.IGNORECASE)) or t.endswith("?")
+    creating = bool(re.search(
+        r"\b(?:new|make|create|start|draft|build|prepare|write up)\b[^.?!]{0,40}\b(?:quote|estimate|invoice|drawing)\b",
+        t, re.IGNORECASE))
+    if question and not creating:
+        return False
+    if open_draft:
+        return bool(probe.done or _SEND_IT.match(t) or probe.document_intent or _DICTATION_DETAIL.search(t))
+    return bool(probe.document_intent or probe.done)
+
+
+async def _quick_whatsapp_reply(body: str):
+    """Greeting / docs / existing-quote status, answered without the model. The quote PDF rides
+    along in this chat with Rafael: a reply to the founder, not an outbound send."""
+    from app.services.max.quick_replies import direct_reply
+
+    hit = direct_reply(body, channel="whatsapp")
+    if not hit:
+        return None
+    text = hit["text"]
+    q = hit.get("quote") or None
+    if q and hit.get("want_pdf"):
+        try:
+            from app.services.quote_pdf_service import generate_quote_pdf
+
+            data = generate_quote_pdf(q.get("id"))
+            if data:
+                text = f"{text}\nPDF below (for you; nothing was sent to the client)."
+                return {"text": text, "documents": [{
+                    "filename": _pdf_filename(f"{q.get('quote_number') or 'quote'}.pdf"),
+                    "data": data, "mime": "application/pdf", "kind": "quote",
+                }]}
+        except Exception:
+            logger.warning("WhatsApp quote lookup PDF skipped", exc_info=True)
+            text = f"{text}\nThe PDF could not be attached right now."
+    return text
+
+
 async def default_text_handler(text: str, wa_id: str) -> str:
-    """Quote-shaped text joins the open voice draft. Everything else is Max chat."""
+    """Dictation joins the open voice draft. Everything else is Max chat."""
     body = (text or "").strip()
     if not body:
         return "Empty message. Nothing sent."
+    try:
+        quick = await _quick_whatsapp_reply(body)
+        if quick:
+            return quick
+    except Exception:
+        logger.warning("WhatsApp quick reply failed", exc_info=True)
     try:
         from app.services.voice_documents.extract import extract_transcript
         from app.services.voice_documents.pipeline import ingest_transcript
@@ -787,7 +855,7 @@ async def default_text_handler(text: str, wa_id: str) -> str:
 
         probe = extract_transcript(body)
         open_draft = active_session(_session_key(wa_id)) is not None
-        if probe.document_intent or probe.done or probe.send_requested or open_draft:
+        if _belongs_to_voice_draft(body, probe, open_draft):
             result = ingest_transcript(
                 body,
                 channel="whatsapp",
@@ -813,17 +881,12 @@ async def default_voice_handler(audio: bytes, mime: str, wa_id: str) -> str:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
             handle.write(audio)
             path = handle.name
-        from app.services.voice_documents.pipeline import ingest_audio
+        # 2026-10-04: transcribe first, then route like a typed message (dictation -> draft,
+        # everything else -> Max chat). The reply goes back as a voice note when the reply
+        # mode follows the inbound message.
+        from app.services.max.stt_service import stt_service
 
-        result = await ingest_audio(
-            path,
-            channel="whatsapp",
-            session_key=_session_key(wa_id),
-            edition_id="workroom",
-        )
-        if result.get("handled"):
-            return _outbound(result.get("reply_text") or "Draft updated. Not sent.", result)
-        transcript = (result.get("transcript") or result.get("transcript_raw") or "").strip()
+        transcript = (await stt_service.transcribe(path, language="en") or "").strip()
         if transcript:
             return await default_text_handler(transcript, wa_id)
         return "No transcript. Nothing sent."
