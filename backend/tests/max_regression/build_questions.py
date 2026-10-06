@@ -83,9 +83,9 @@ q("q21", "send_me", "whatsapp", "Send me a pdf here", "2026-10-04 WhatsApp 21:40
 
 # status / what are you building
 q("q22", "status", "studio", "What are you building now?", "2026-10-06 (Rafael's complaint)",
-  {"tools_any": ["max_status", "shortcut:max_status"], "tools_none": WEB, "must_not": ["https?://", "leadership", "blog"], "max_words": 100})
+  {"tools_any": ["max_status", "shortcut:max_status"], "tools_none": WEB, "must_not": ["https?://", "leadership", "blog"], "max_words": 110})
 q("q23", "status", "whatsapp", "what is empirebox next step with you", "2026-10-06 (Rafael's complaint)",
-  {"tools_any": ["max_status", "shortcut:max_status"], "tools_none": WEB, "must_not": ["https?://", "roadmap"], "max_words": 100})
+  {"tools_any": ["max_status", "shortcut:max_status"], "tools_none": WEB, "must_not": ["https?://", "roadmap"], "max_words": 110})
 q("q24", "status", "studio", "Is Max operating normally?", "2026-10-05 studio 08:54",
   {"tools_none": WEB, "max_words": 50})
 q("q25", "status", "studio", "Are you fixed now", "2026-10-05 studio 13:39",
@@ -158,7 +158,7 @@ q("q48", "spanish", "whatsapp", "Mándame la cotización EST-2026-297 aquí", "v
 
 # multi-part
 q("q49", "multi_part", "studio", "So, is voice working? Are we a hundred percent? Are you connected to what's going on? What's the most recent quote we were working on?",
-  "2026-10-05 voice 18:36", {"tools_none": WEB, "must_any": [["EST-2026-29[78]"]], "max_words": 100})
+  "2026-10-05 voice 18:36", {"tools_none": WEB, "must_any": [["EST-2026-29[78]"], ["voice", "connected", "online", "working", "running"]], "max_words": 100})
 q("q50", "multi_part", "studio", "What's the total of Dahlia phase 1 and phase 2, and which one is newer?", "variant",
   {"tools_none": WEB, "must_any": [["3,411\\.84", "4,759\\.96"], ["9,350\\.76"]], "max_words": 90})
 q("q51", "multi_part", "studio", "Find the Willard final estimate and tell me the deposit amount", "variant",

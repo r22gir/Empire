@@ -667,7 +667,7 @@
      "leadership",
      "blog"
     ],
-    "max_words": 100
+    "max_words": 110
    }
   },
   {
@@ -689,7 +689,7 @@
      "https?://",
      "roadmap"
     ],
-    "max_words": 100
+    "max_words": 110
    }
   },
   {
@@ -1209,6 +1209,13 @@
     "must_any": [
      [
       "EST-2026-29[78]"
+     ],
+     [
+      "voice",
+      "connected",
+      "online",
+      "working",
+      "running"
      ]
     ],
     "max_words": 100

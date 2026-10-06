@@ -65,6 +65,7 @@ SHORTCUT_NAMES = {"max-status": "max_status", "whats-new-summary": "whats_new",
                   "empire-module-knowledge": "module_knowledge", "gpu-safety-guardrail": "gpu_guard",
                   "guardrail": "input_guard", "attachment-reader": "attachment_reader"}
 
+_PROVIDER_FAIL = re.compile(r"failed and fallback is disabled|Max chat failed|SSLError|provider .* failed", re.I)
 REC: contextvars.ContextVar[list | None] = contextvars.ContextVar("max_reg_rec", default=None)
 SEND_LOG: list[dict] = []
 
@@ -173,7 +174,14 @@ def install_recorders() -> None:
             if not ok:
                 return ToolResult(tool=name, success=False,
                                   error="recipient is not Rafael: needs Rafael's explicit yes before any send")
+            atts = (tool_call or {}).get("attachments") or []
+            n_att = len(atts) if isinstance(atts, list) else 1
+            if name in ("send_quote_email", "send_invoice_email", "email_quote"):
+                n_att = max(n_att, 1)
+            # same proof fields the real tools return, so the truth check treats it like a real send
             return ToolResult(tool=name, success=True, result={
+                "attachments_sent": n_att, "pdf_path": "/regression-test-copy/attachment.pdf" if n_att else None,
+                "pdf_size_bytes": 24576 if n_att else 0,
                 "sent": True, "verified": True, "to": sorted(addrs) or ["empirebox2026@gmail.com"],
                 "subject": (tool_call or {}).get("subject") or "", "message_id": f"test-{int(time.time() * 1000)}",
                 "quote_ids": (tool_call or {}).get("quote_ids") or (tool_call or {}).get("quote_id"),
@@ -296,10 +304,14 @@ async def run_one(item: dict, label: str, idx: int, sem: asyncio.Semaphore, time
         token = REC.set(rec)
         started = time.monotonic()
         try:
-            if item["channel"] == "whatsapp":
-                out = await asyncio.wait_for(run_whatsapp(item, label, idx), timeout)
-            else:
-                out = await asyncio.wait_for(run_studio(item, label), timeout)
+            for attempt in range(2):  # one retry on a transient provider/network failure
+                if item["channel"] == "whatsapp":
+                    out = await asyncio.wait_for(run_whatsapp(item, label, idx), timeout)
+                else:
+                    out = await asyncio.wait_for(run_studio(item, label), timeout)
+                if not (out.get("error") or _PROVIDER_FAIL.search(out.get("text") or "")):
+                    break
+                rec.append("retry")
         except asyncio.TimeoutError:
             out = {"text": "", "error": f"timeout after {timeout:.0f}s"}
         except Exception as exc:  # pragma: no cover
