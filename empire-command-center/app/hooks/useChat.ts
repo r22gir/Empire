@@ -11,6 +11,57 @@ const WELCOME: Message = {
   timestamp: '',
 };
 
+// UI-side error notices. They are shown to Rafael but never sent back to Max
+// as history: on 2026-10-06 the old "**Connection error.** Backend may be
+// offline." notice was replayed and the model copied it as its answer.
+// Keep in sync with _UI_ERROR_PREFIXES in backend/app/routers/max/router.py.
+const UI_ERROR_PREFIXES = [
+  '**Connection error.**',
+  '**Connection dropped.**',
+  "**Can't reach the server.**",
+  '**Server error.**',
+];
+const isUiErrorNotice = (m: { role: string; content: string }) =>
+  m.role === 'assistant' && UI_ERROR_PREFIXES.some(p => (m.content || '').trimStart().startsWith(p));
+
+class StreamHttpError extends Error {
+  status: number;
+  constructor(status: number, detail: string) {
+    super(detail);
+    this.name = 'StreamHttpError';
+    this.status = status;
+  }
+}
+
+async function serverIsUp(): Promise<boolean> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const r = await fetch(API + '/system/health', { cache: 'no-store', signal: ctrl.signal });
+    return r.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** Plain-words notice for a failed reply (instead of a blanket "Backend may be offline"). */
+async function describeStreamFailure(e: any): Promise<string> {
+  if (e instanceof StreamHttpError) {
+    return `**Server error.** The server is up, but this request failed (HTTP ${e.status})`
+      + (e.message ? `: ${e.message}` : '.') + ' Please try again.';
+  }
+  const why = e?.message ? ` (error: "${String(e.message).slice(0, 120)}")` : '';
+  if (await serverIsUp()) {
+    return '**Connection dropped.** The server is up, but the connection to this screen was cut before '
+      + "Max's reply arrived" + why + '. This usually happens when the phone pauses Safari (switching apps '
+      + 'or locking the screen) or the network blips. Send it again and keep this screen open until the reply shows.';
+  }
+  return "**Can't reach the server.** The Empire server did not answer" + why
+    + '. Check the internet connection and try again in a minute.';
+}
+
 function formatContextPack(data: any): string {
   const parts: string[] = [];
   if (data.recent_summaries?.length)
@@ -119,7 +170,7 @@ export function useChat() {
     let responseMetadata: any = undefined;
 
     try {
-      const historySlice = newMsgs.slice(-20).map(m => ({ role: m.role, content: m.content }));
+      const historySlice = newMsgs.filter(m => !isUiErrorNotice(m)).slice(-20).map(m => ({ role: m.role, content: m.content }));
       if (contextPackRef.current && historySlice.filter(m => m.role === 'user').length <= 1) {
         historySlice.unshift({ role: 'user', content: contextPackRef.current });
         historySlice.unshift({ role: 'assistant', content: 'Context loaded. Ready.' });
@@ -142,12 +193,22 @@ export function useChat() {
         signal: ctrl.signal,
       });
 
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const raw = await response.text();
+          try { const j = JSON.parse(raw); detail = String(j.detail || j.error || j.message || ''); } catch { detail = raw; }
+        } catch { /* ignore */ }
+        throw new StreamHttpError(response.status, detail.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200));
+      }
       if (!response.body) throw new Error('No response body');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
       const toolResults: ToolResult[] = [];
       const pinPrompts: PinPrompt[] = [];
+      let gotDone = false;
+      let gotError = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -174,18 +235,24 @@ export function useChat() {
             } else if (ev.type === 'tool_result') {
               toolResults.push({ tool: ev.tool || 'unknown', success: ev.success ?? false, result: ev.result, error: ev.error });
             } else if (ev.type === 'done') {
+              gotDone = true;
               modelUsed = ev.model_used || '';
               setStreamingModel(modelUsed);
               if (ev.quality) qualityBadge = ev.quality;
               if (ev.metadata) responseMetadata = ev.metadata;
               if (ev.conversation_id && !chatIdRef.current) chatIdRef.current = ev.conversation_id;
             } else if (ev.type === 'error') {
+              gotError = true;
               accumulated += '\n\n*Error: ' + (ev.content || 'Unknown error') + '*';
               setStreamingContent(accumulated);
             }
           } catch { /* skip */ }
         }
       }
+
+      // The stream closed without Max's "done": the reply was cut off on the way.
+      if (!gotDone && !gotError && !accumulated) throw new Error('the reply stream closed early');
+      if (!gotDone && !gotError) accumulated += "\n\n*[Reply cut off before Max finished. Send it again to get the rest.]*";
 
       const assistantId = (Date.now() + 1).toString();
       if (pinPrompts.length === 0 && asksForFounderPin(accumulated)) {
@@ -221,10 +288,14 @@ export function useChat() {
           }]);
         }
       } else {
+        const notice = await describeStreamFailure(e);
         updateMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
-          role: 'assistant', content: '**Connection error.** Backend may be offline.',
+          role: 'assistant',
+          // keep any partial reply; the notice goes underneath it
+          content: accumulated ? `${accumulated}\n\n${notice.replace(/^\*\*([^*]+)\*\*/, '*$1*')}` : notice,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          model: modelUsed,
         }]);
       }
       setStreamingContent('');
