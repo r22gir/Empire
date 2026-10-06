@@ -511,7 +511,15 @@ def resolve_file(ref: str) -> Optional[str]:
 
 
 def is_shareable(path: str) -> bool:
-    if not path or is_excluded(path):
+    if not path:
+        return False
+    try:  # Gmail/Drive downloads for an explicit share live in a private temp cache
+        from app.services.max.cloud_files import is_cached_share
+        if is_cached_share(path):
+            return True
+    except Exception:
+        pass
+    if is_excluded(path):
         return False
     real = os.path.realpath(path)
     if not os.path.isfile(real):

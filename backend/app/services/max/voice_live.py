@@ -331,11 +331,13 @@ _FALLBACK_TOOL_SCHEMAS = {
         }, ["action"]),
     },
     "find_files": {
-        "description": "Search ALL of Rafael's files on the Dell (jobs, Downloads, Desktop, Documents, Pictures, "
-                       "empire-data, quote PDFs, the backup drive) by file name, client or nickname (Dahlia = Nehal "
+        "description": "Search ALL of Rafael's files: the Dell (jobs, Downloads, Desktop, Documents, Pictures, "
+                       "empire-data, quote PDFs, the backup drive), Gmail attachments and Google Drive, by file "
+                       "name, client or nickname (Dahlia = Nehal "
                        "Elrefai), quote number or words in the name. Returns every match ranked with a file_id. "
                        "Read-only. Never claim a file was found unless this returns it; if nothing matched, say so "
-                       "and name the closest files.",
+                       "and name the closest files. If source_notes says Gmail needs re-auth or Drive is not "
+                       "connected, say that source was not searched.",
         "parameters": _obj({"query": {"type": "string", "description": "e.g. 'Nehal final estimate', 'EST-2026-298'"},
                             "limit": {"type": "integer", "description": "Max results (default 8)"}}, ["query"]),
     },
@@ -440,9 +442,10 @@ def _compact_for_voice(name: str, data: dict[str, Any]) -> dict[str, Any]:
                 for r in (res.get("results") or [])[:6] if isinstance(r, dict)]
         out["result"] = {"query": res.get("query"), "count": len(hits), "results": hits, "source": res.get("source")}
     elif name == "find_files":
-        rows = [{k: m.get(k) for k in ("file_id", "name", "folder", "modified", "size", "is_final", "other_copies")}
+        rows = [{k: m.get(k) for k in ("file_id", "name", "source", "folder", "modified", "size", "is_final", "other_copies")}
                 for m in (res.get("matches") or [])[:8] if isinstance(m, dict)]
         out["result"] = {"total": res.get("total"), "matches": rows, "parsed": res.get("parsed"),
+                         "sources": res.get("sources"), "source_notes": res.get("source_notes"),
                          "closest": [{"file_id": c.get("file_id"), "name": c.get("name")}
                                      for c in (res.get("closest") or [])[:5]]}
     elif name == "open_final_doc":

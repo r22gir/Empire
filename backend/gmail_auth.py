@@ -14,7 +14,26 @@ CREDS_FILE = Path(os.environ.get("GMAIL_CREDENTIALS_PATH") or (_DEFAULT_DIR / "c
 TOKEN_FILE = Path(os.environ.get("GMAIL_TOKEN_PATH") or (_DEFAULT_DIR / "token.json"))
 
 
+def browser_flow(creds_file: Path, token_file: Path, scopes: list[str]):
+    """One-click consent on the Dell: opens the browser, catches the redirect on a
+    local port, saves the token. Requires being at the Dell desktop (or VNC)."""
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), scopes)
+    creds = flow.run_local_server(port=0, open_browser=True, access_type="offline", prompt="consent",
+                                  authorization_prompt_message="Opening Google sign-in in the browser: {url}",
+                                  success_message="Done. You can close this tab.")
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(creds.to_json())
+    os.chmod(token_file, 0o600)
+    print(f"Token saved to {token_file} (scopes: {', '.join(scopes)})")
+    return creds
+
+
 def main():
+    if "--browser" in sys.argv:
+        creds = browser_flow(CREDS_FILE, TOKEN_FILE, SCOPES)
+        _test_connection(creds)
+        return
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
@@ -84,7 +103,10 @@ def main():
     print("=" * 60)
     print("")
 
-    code = input("After approving, paste the 'code=' value from the URL here: ").strip()
+    code = input("After approving, paste the 'code=' value (or the whole http://localhost/?code=... address): ").strip()
+    if "code=" in code:
+        from urllib.parse import parse_qs, urlparse
+        code = parse_qs(urlparse(code).query).get("code", [""])[0]
 
     if not code:
         print("No code provided. Exiting.")

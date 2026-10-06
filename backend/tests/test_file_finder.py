@@ -48,6 +48,7 @@ def home(tmp_path, monkeypatch):
         {"name": "Nehal Elrefai", "aliases": ["Dahlia", "Dhalia", "Dalia", "Nehal"], "address": "9408 Old Courthouse Rd"}]}))
     monkeypatch.setenv("MAX_CLIENT_ALIASES_PATH", str(aliases))
     monkeypatch.setenv("MAX_FILE_FINDER_ROOTS", str(h))
+    monkeypatch.setenv("MAX_CLOUD_FILES_DISABLED", "1")  # no live Google calls from local-search tests
     monkeypatch.setattr(ff, "_excluded_realpaths",
                         lambda: (str(fam), str(h / "empire-maxine"), str(h / ".ssh")))
     ff.INDEX.clear()

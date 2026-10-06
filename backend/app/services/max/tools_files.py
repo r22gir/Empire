@@ -51,14 +51,35 @@ def _find_files(params: dict, desk: Optional[str] = None) -> ToolResult:
     res = ff.find_files(q, limit=limit)
     if res.get("error") and not res.get("found"):
         return ToolResult(tool="find_files", success=False, error=res["error"], result=res)
-    if not res.get("found"):
+    # 2026-10-06: Gmail attachments + Google Drive, merged and ranked with local files.
+    cloud = {"matches": [], "status": {}}
+    if params.get("include_cloud", True) not in (False, "false", "0", 0):
+        try:
+            from app.services.max import cloud_files
+            cloud = cloud_files.search_cloud(q)
+        except Exception as exc:
+            cloud = {"matches": [], "status": {"cloud": {"status": "error", "message": f"cloud search failed: {exc}"}}}
+    for m in res.get("matches") or []:
+        m.setdefault("source", "local")
+    merged = sorted((res.get("matches") or []) + cloud["matches"], key=lambda m: m.get("score", 0), reverse=True)
+    lim = max(1, min(limit, 50))
+    res["total_local"] = res.get("total", 0)
+    res["total"] = res.get("total", 0) + len(cloud["matches"])
+    res["matches"] = merged[:lim]
+    res["found"] = res["total"] > 0
+    res["sources"] = {"local": "ok", **{k: v.get("status") for k, v in cloud["status"].items()}}
+    notes = [v["message"] for v in cloud["status"].values() if v.get("status") != "ok" and v.get("message")]
+    res["source_notes"] = notes
+    note_txt = (" " + " ".join(notes)) if notes else ""
+    if not res["found"]:
         near = "; ".join(c["path"] for c in res.get("closest") or [])
         return ToolResult(tool="find_files", success=False, result=res, error=(
-            f'No file matched "{q}". ' + (f"Closest names: {near}. " if near else "No close names either. ")
-            + "Say so plainly; do not present any file as found."))
+            f'No file matched "{q}" in the places searched. ' + (f"Closest names: {near}. " if near else "No close names either. ")
+            + note_txt.strip() + (" " if note_txt else "")
+            + "Say so plainly, and if a source was not searched, say that instead of claiming the file does not exist."))
     res["message"] = (f"{res['total']} match(es) for \"{q}\", best first"
                       + (f" (showing {len(res['matches'])})" if res['total'] > len(res['matches']) else "")
-                      + ". Use share_file with a file_id to show or send one to Rafael.")
+                      + ". Use share_file with a file_id to show or send one to Rafael." + note_txt)
     if res.get("indexing"):
         res["message"] += " Still indexing: " + ", ".join(res["indexing"]) + " (results there may be missing)."
     return ToolResult(tool="find_files", success=True, result=res)
@@ -112,12 +133,26 @@ def _share_file(params: dict, desk: Optional[str] = None) -> ToolResult:
     if via not in SHARE_VIAS:
         return ToolResult(tool="share_file", success=False, error=f"via must be one of {', '.join(SHARE_VIAS)}")
     path = ff.resolve_file(ref)
+    remote = None
+    if not path:
+        try:
+            from app.services.max import cloud_files
+            remote = cloud_files.get_remote(ref)
+            if remote:
+                path = cloud_files.download_remote(remote)
+        except Exception as exc:
+            msg = str(exc)
+            if remote and cloud_files._is_auth_error(exc):
+                msg = cloud_files.REAUTH_GMAIL if remote["source"] == "gmail" else cloud_files.REAUTH_DRIVE
+            return ToolResult(tool="share_file", success=False, error=f"Could not fetch {ref}: {msg[:300]}")
     if not path:
         return ToolResult(tool="share_file", success=False, error=(
             "That file is not available: run find_files first and pass its file_id. Protected files "
             "(credentials, databases, family-edition data) are never shared."))
     name = os.path.basename(path)
     shown = ff._display_path(path)
+    if remote:
+        shown = ("Gmail attachment" if remote["source"] == "gmail" else "Google Drive") + f": {remote['name']}"
     size = os.path.getsize(path)
     if via == "studio":
         token = ff.share_token(path)
@@ -170,11 +205,14 @@ def _share_file(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 FILE_TOOLS_DOC = """
 ### Rafael's files (read-only search + share to Rafael)
-- **find_files** — Search ALL of Rafael's files on the Dell (home folders: jobs, empire-data, Downloads, Desktop,
-  Documents, Pictures, quote/invoice PDFs, plus mounted drives like the BACKUP1 USB) by file name, client or
+- **find_files** — Search ALL of Rafael's files: the Dell (home folders: jobs, empire-data, Downloads, Desktop,
+  Documents, Pictures, quote/invoice PDFs, mounted drives like the BACKUP1 USB), Gmail attachments in
+  empirebox2026@gmail.com and his Google Drive (read-only), by file name, client or
   nickname (Dahlia = Nehal Elrefai), quote number or words in the name. Returns EVERY match ranked (finals and
   newest first) with a file_id each. Use it whenever he asks for a file, doc, PDF, photo or "find X".
-  Credentials, databases and family-edition (AMP/Maxine) data are never searchable.
+  Credentials, databases and family-edition (AMP/Maxine) data are never searchable. If the result says
+  "Gmail needs re-auth" or Drive is not connected, tell Rafael that source was not searched (do not say the file
+  does not exist) and give him the one command from the note.
   `{"tool": "find_files", "query": "Nehal final estimate"}`
 - **share_file** — Show or send one found file to Rafael: via "studio" (chat link, 24 h), "email" (his own
   addresses only, sent right away) or "whatsapp" (his number). Never to anyone else.
