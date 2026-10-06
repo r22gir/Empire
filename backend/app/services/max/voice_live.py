@@ -78,12 +78,13 @@ VOICE_READ_ONLY_TOOLS = (
     "get_tasks", "get_desk_status", "get_services_health", "get_system_stats",
     "check_email", "list_job_images", "search_conversations", "get_weather",
     "list_quotes_awaiting_review", "show_quote_for_review",
-    "get_revenue_chart", "web_search",
+    "get_revenue_chart", "web_search", "find_files", "open_final_doc",
 )
 QUEUE_TOOL = "queue_for_founder_approval"
 IMPROVE_TOOL = "request_improvement"  # writes a change request only; builds need Rafael's tap in the studio
 SELF_EMAIL_TOOL = "send_email"  # Rafael's own addresses only (server-enforced in run_voice_tool)
-VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL))
+SHARE_TOOL = "share_file"  # found file -> Rafael only (studio link / his email / his WhatsApp); enforced in tools_files
+VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL, SHARE_TOOL))
 READ_ONLY_TOOLS = VOICE_READ_ONLY_TOOLS  # backwards-compatible name
 # Explicitly named so logs/tests are clear; the allowlist above is what enforces.
 VOICE_DENIED_EXAMPLES = frozenset({
@@ -329,6 +330,26 @@ _FALLBACK_TOOL_SCHEMAS = {
             "details": {"type": "string", "description": "Everything needed to do it later: who, what, which quote/customer, wording"},
         }, ["action"]),
     },
+    "find_files": {
+        "description": "Search ALL of Rafael's files on the Dell (jobs, Downloads, Desktop, Documents, Pictures, "
+                       "empire-data, quote PDFs, the backup drive) by file name, client or nickname (Dahlia = Nehal "
+                       "Elrefai), quote number or words in the name. Returns every match ranked with a file_id. "
+                       "Read-only. Never claim a file was found unless this returns it; if nothing matched, say so "
+                       "and name the closest files.",
+        "parameters": _obj({"query": {"type": "string", "description": "e.g. 'Nehal final estimate', 'EST-2026-298'"},
+                            "limit": {"type": "integer", "description": "Max results (default 8)"}}, ["query"]),
+    },
+    "open_final_doc": {
+        "description": "Final Docs for a client (final estimate, presentation, invoice, drawing). Lists every final "
+                       "for the client, e.g. both Nehal phases. Read-only.",
+        "parameters": _obj({"query": {"type": "string", "description": "Client + doc type, e.g. 'Nehal final estimate'"}}, ["query"]),
+    },
+    SHARE_TOOL: {
+        "description": "Send one file found by find_files to Rafael himself: via 'email' (his own address, right "
+                       "away), 'whatsapp' (his number) or 'studio' (link in his chat). Never to anyone else.",
+        "parameters": _obj({"file_id": {"type": "string", "description": "file_id from find_files"},
+                            "via": {"type": "string", "enum": ["email", "whatsapp", "studio"]}}, ["file_id"]),
+    },
     SELF_EMAIL_TOOL: {
         "description": "Email Rafael HIMSELF right now (empirebox2026@gmail.com, rafa22giraldo@gmail.com or "
                        "max@empirebox.store; leave 'to' empty for his main inbox). Sends immediately via SMTP: no "
@@ -418,6 +439,17 @@ def _compact_for_voice(name: str, data: dict[str, Any]) -> dict[str, Any]:
                  "site": (str(r.get("url") or r.get("link") or "").split("/")[2:3] or [""])[0]}
                 for r in (res.get("results") or [])[:6] if isinstance(r, dict)]
         out["result"] = {"query": res.get("query"), "count": len(hits), "results": hits, "source": res.get("source")}
+    elif name == "find_files":
+        rows = [{k: m.get(k) for k in ("file_id", "name", "folder", "modified", "size", "is_final", "other_copies")}
+                for m in (res.get("matches") or [])[:8] if isinstance(m, dict)]
+        out["result"] = {"total": res.get("total"), "matches": rows, "parsed": res.get("parsed"),
+                         "closest": [{"file_id": c.get("file_id"), "name": c.get("name")}
+                                     for c in (res.get("closest") or [])[:5]]}
+    elif name == "open_final_doc":
+        docs = res.get("docs") or [res]
+        out["result"] = {"client": res.get("client"), "docs": [
+            {k: d.get(k) for k in ("title", "version", "type", "quote_number", "modified", "is_final")}
+            for d in docs[:8] if isinstance(d, dict)]}
     elif name == "get_tasks":
         tasks = [{k: t.get(k) for k in ("id", "title", "status", "priority", "desk", "due_date", "created_at")}
                  for t in (res.get("tasks") or [])[:15] if isinstance(t, dict)]
@@ -441,7 +473,7 @@ def realtime_tool_definitions() -> list[dict[str, Any]]:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("voice_live: canonical tool schemas unavailable: %s", exc)
     out = []
-    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL):
+    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL, SHARE_TOOL):
         fn = canonical.get(name) or _FALLBACK_TOOL_SCHEMAS[name]
         out.append({
             "type": "function",
@@ -609,6 +641,10 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
         call["city"] = call.get("city") or "Washington DC"
     elif name == "web_search":
         call = {"tool": name, "query": str(call.get("query") or "")[:300], "num_results": 6}
+    elif name == "find_files":
+        call["limit"] = min(int(call.get("limit") or 8), 20)
+    elif name == SHARE_TOOL:
+        call["via"] = str(call.get("via") or "email")
     result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
     return _compact_for_voice(name, result.to_dict())
 

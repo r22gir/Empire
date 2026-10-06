@@ -583,6 +583,11 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "read_email": "check_email",
             "inbox": "check_email",
             "find_document": "open_final_doc",
+            "find_file": "find_files",
+            "search_files": "find_files",
+            "search_file": "find_files",
+            "locate_file": "find_files",
+            "send_file": "share_file",
             "show_document": "open_final_doc",
             "open_document": "open_final_doc",
             "find_final_doc": "open_final_doc",
@@ -1167,6 +1172,9 @@ def _open_final_doc(params: dict, desk: Optional[str] = None) -> ToolResult:
     try:
         from app.services.max.doc_lookup import find_docs
         fuzzy = find_docs(q)
+        # 2026-10-05: list every final for the client (both Nehal phases), not just the newest.
+        from app.services.max.final_docs_all import expand_finals
+        fuzzy = expand_finals(q, fuzzy)
     except Exception as e:
         logger.debug(f"open_final_doc fuzzy lookup failed: {e}")
     if fuzzy and fuzzy.get("found") and (fuzzy.get("client") or (fuzzy.get("count") or 1) > 1):
@@ -7828,6 +7836,15 @@ try:
     TOOLS_DOC = TOOLS_DOC + _tools_acquisition.ACQUISITION_TOOLS_DOC
 except Exception as _acq_err:  # never take Max down over an optional tool pack
     logger.error(f"tools_acquisition not loaded: {_acq_err}")
+
+# Rafael's file finder (read-only search + share to Rafael only). 2026-10-05.
+try:
+    _files_name = "app.services.max.tools_files"
+    _tools_files = (_importlib.reload(_sys.modules[_files_name]) if _files_name in _sys.modules
+                    else _importlib.import_module(_files_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_files.FILE_TOOLS_DOC
+except Exception as _files_err:  # never take Max down over an optional tool pack
+    logger.error(f"tools_files not loaded: {_files_err}")
 
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))

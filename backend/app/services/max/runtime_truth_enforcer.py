@@ -443,6 +443,10 @@ PROOF_TOOL_EXACT = frozenset({
     "attachment_reader",
     "attachment-reader",
     "file_read",
+    # Rafael file finder (2026-10-05)
+    "find_files",
+    "share_file",
+    "open_final_doc",
 })
 
 

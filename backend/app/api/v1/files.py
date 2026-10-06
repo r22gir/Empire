@@ -88,6 +88,30 @@ async def upload_from_path(req: PathRequest):
     log_access("upload", source.name, "founder", f"from={req.path}")
     return {"status": "success", "filename": save_path.name, "category": category, "size": save_path.stat().st_size}
 
+@router.get("/found")
+async def view_found_file(t: str, download: int = 0):
+    """Serve a file Max found for Rafael (share_file studio link). Read-only.
+
+    The token is HMAC-signed by the backend, expires in 24 h, names one file,
+    and the file is re-checked against the finder rules (no credentials,
+    databases or family-edition data) on every request.
+    """
+    from app.services.max import file_finder as ff
+    real = ff.verify_share_token(t)
+    if not real:
+        raise HTTPException(404, "File not found or link expired")
+    name = Path(real).name
+    log_access("view_found", name, "founder", "share_file link")
+    # Never render active content inline on the Studio origin.
+    risky = Path(real).suffix.lower() in (".html", ".htm", ".xhtml", ".svg", ".xml", ".js", ".mjs")
+    attach = bool(download) or risky
+    resp = FileResponse(real, filename=name,
+                        media_type="application/octet-stream" if risky else None,
+                        content_disposition_type="attachment" if attach else "inline")
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
 @router.get("/browse")
 async def browse_directory(path: str = "~"):
     target = Path(path).expanduser()
