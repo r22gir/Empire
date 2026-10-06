@@ -52,6 +52,7 @@ from app.services.max.drawing_intent import (
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.factual_guard import is_factual_question, enforce_web_search, grounding_directive
+from app.services.max.self_status import answer as self_status_answer, is_self_status_question
 from app.services.max.answer_quality import (
     COMPLETENESS_RECOVERY_INSTRUCTION,
     detect_quality_flags,
@@ -2932,6 +2933,35 @@ async def _chat_with_max_service_impl(
             metadata=metadata,
         )
 
+    # 2026-10-06: "what are you building / what's next" -> real internal state, never web research.
+    if not request.desk and not request.image_filename and is_self_status_question(request.message):
+        _ss = await asyncio.to_thread(self_status_answer, request.message)
+        response_text = _ss["text"]
+        conv_id = request.conversation_id or str(uuid.uuid4())
+        metadata = _response_metadata(request.channel, skill_used="max_status")
+        try:
+            conversation_tracker.add_message(conv_id, "user", request.message)
+            conversation_tracker.add_message(conv_id, "assistant", response_text)
+        except Exception as exc:
+            logger.debug(f"Self-status conversation tracking failed: {exc}")
+        try:
+            from app.services.max.unified_message_store import unified_store
+            unified_store.add_message(conv_id, request.channel or "web", "user", request.message,
+                                      metadata=_ledger_metadata(request.channel, {"source": "max_status_intent"}),
+                                      founder_verified=founder)
+            unified_store.add_message(conv_id, request.channel or "web", "assistant", response_text,
+                                      model="max-status",
+                                      metadata=_ledger_metadata(request.channel, {"source": "max_status_result"}))
+        except Exception as exc:
+            logger.warning(f"Self-status unified message store write failed: {exc}")
+        return ChatResponse(
+            response=response_text,
+            model_used="max-status",
+            fallback_used=False,
+            tool_results=[{"tool": "max_status", "success": True, "result": {"text": response_text}}],
+            metadata=metadata,
+        )
+
     if not request.desk and not request.image_filename and should_run_whats_new_summary(request.message):
         result = await asyncio.to_thread(run_whats_new_summary)
         response_text = format_whats_new_summary(result)
@@ -4127,6 +4157,20 @@ async def _chat_stream_impl(request: ChatRequest):
     gpu_guard = _maybe_handle_gpu_safety_request(request)
     if gpu_guard is not None:
         return _stream_immediate_response(gpu_guard, request.conversation_id)
+
+    if not request.desk and not request.image_filename and is_self_status_question(request.message):
+        async def self_status_gen():
+            conv_id = request.conversation_id or str(uuid.uuid4())
+            _ss = await asyncio.to_thread(self_status_answer, request.message)
+            try:
+                conversation_tracker.add_message(conv_id, "user", request.message)
+                conversation_tracker.add_message(conv_id, "assistant", _ss["text"])
+            except Exception as exc:
+                logger.debug(f"Self-status conversation tracking failed: {exc}")
+            yield f"data: {_safe_dumps({'type': 'text', 'content': _ss['text']})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'max-status', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='max_status')})}\n\n"
+
+        return StreamingResponse(self_status_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     if not request.desk and not request.image_filename and should_run_whats_new_summary(request.message):
         async def whats_new_gen():

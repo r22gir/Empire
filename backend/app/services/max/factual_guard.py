@@ -61,10 +61,40 @@ def _is_chitchat(msg: str) -> bool:
     return any(re.search(pattern, msg, re.I) for pattern in CHITCHAT_PATTERNS)
 
 
+# 2026-10-06: explicit research intent. Questions addressed to Max about himself or
+# "us" (what are you building, what's next with you, what did we ship) never go to
+# the web unless Rafael explicitly asks for research.
+EXPLICIT_RESEARCH_RE = re.compile(
+    r"\b(research|look\s+(?:it\s+)?up|search(?:\s+the\s+web|\s+online|\s+for)?|google|web|online|internet|"
+    r"sources?|cite|citations?|articles?|news|find\s+out)\b", re.I)
+SELF_ADDRESSED_RE = re.compile(
+    r"\b(?:are|were|r)\s+(?:you|u)\b|\b(?:you|u)\s+(?:are|were|building|working|doing|shipping|planning|up\s+to)\b|"
+    r"\b(?:have|did)\s+(?:you|we)\s+(?:built|build|ship|shipped|done|do|finish|finished)\b|"
+    r"\b(?:your|our)\s+(?:plan|plans|queue|status|next|roadmap|work|progress|build|builds|priorities)\b|"
+    r"\b(?:with|for)\s+(?:you|us)\s*\??$|\bnext\s+steps?\b|\bin\s+progress\b", re.I)
+
+
+def has_explicit_research_intent(message: str) -> bool:
+    return bool(EXPLICIT_RESEARCH_RE.search(message or ''))
+
+
+def is_self_addressed(message: str) -> bool:
+    """About Max / EmpireBox's own work rather than a public topic."""
+    try:
+        from app.services.max.self_status import is_self_status_question
+        if is_self_status_question(message):
+            return True
+    except Exception:
+        pass
+    return bool(SELF_ADDRESSED_RE.search(message or ''))
+
+
 def is_factual_question(message: str) -> bool:
     """Return whether a public factual answer needs web grounding."""
     msg = (message or '').lower().strip()
     if not msg or _is_internal_or_pricing(msg) or _is_chitchat(msg):
+        return False
+    if is_self_addressed(message) and not has_explicit_research_intent(message):
         return False
     if any(re.search(p, message, re.I) for p in FACTUAL_PATTERNS):
         return True

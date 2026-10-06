@@ -229,6 +229,8 @@ VOICE_CAPABILITIES = (
     "away. No PIN, no second yes. Outbound send uses SMTP and works; never say you can't send email or "
     "that email settings block it (a Gmail inbox-read token problem does not affect sending). If a send "
     "fails, say the real error in one sentence.\n"
+    "Your own work: for 'what are you building / working on', 'what's next', 'next step with you' or 'status', "
+    "call max_status and say its few lines; never web_search for questions about yourself or EmpireBox.\n"
     "Files: find_files searches ALL of Rafael's files (jobs, Downloads, Desktop, Documents, Pictures, quote "
     "PDFs, backup drive, Gmail attachments, Google Drive) by name, client or nickname (Dahlia = Nehal Elrefai) "
     "or quote number. If it says Gmail needs re-auth or Drive is not connected, say that source was not "

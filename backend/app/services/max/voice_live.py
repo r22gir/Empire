@@ -78,7 +78,7 @@ VOICE_READ_ONLY_TOOLS = (
     "get_tasks", "get_desk_status", "get_services_health", "get_system_stats",
     "check_email", "list_job_images", "search_conversations", "get_weather",
     "list_quotes_awaiting_review", "show_quote_for_review",
-    "get_revenue_chart", "web_search", "find_files", "open_final_doc",
+    "get_revenue_chart", "web_search", "find_files", "open_final_doc", "max_status",
 )
 QUEUE_TOOL = "queue_for_founder_approval"
 IMPROVE_TOOL = "request_improvement"  # writes a change request only; builds need Rafael's tap in the studio
@@ -306,6 +306,13 @@ _FALLBACK_TOOL_SCHEMAS = {
     "get_weather": {
         "description": "Current weather (Open-Meteo). Default city Washington DC. Read-only.",
         "parameters": _obj({"city": {"type": "string", "description": "City (default Washington DC)"}}),
+    },
+    "max_status": {
+        "description": "What you (Max) are building, what shipped recently and what's next or waiting on Rafael, from "
+                       "the real improvements queue, recent commits, tasks and approvals. Use for 'what are you "
+                       "building / working on', 'what's next', 'next step with you', 'status'. Never use web_search "
+                       "for these. Speak the result in a few short sentences; invent nothing.",
+        "parameters": _obj({"question": {"type": "string", "description": "Rafael's question, verbatim"}}),
     },
     "web_search": {
         "description": "Read-only web search (DuckDuckGo, Brave fallback) for current news, local events, prices or any public fact. For news, put the topic and place in the query (e.g. 'noticias Cartago Valle del Cauca hoy'). Speak a short summary of the top headlines; never read URLs aloud. Sends nothing.",

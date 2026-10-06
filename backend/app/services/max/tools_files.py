@@ -205,6 +205,9 @@ def _share_file(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 FILE_TOOLS_DOC = """
 ### Rafael's files (read-only search + share to Rafael)
+- **max_status** — What you (Max) are building, what shipped recently and what's next / waiting on Rafael, from the
+  real improvements queue, recent commits, tasks and approvals. Use for "what are you building / working on",
+  "what's next", "next step with you", "status". Never web_search for these. Params: question.
 - **find_files** — Search ALL of Rafael's files: the Dell (home folders: jobs, empire-data, Downloads, Desktop,
   Documents, Pictures, quote/invoice PDFs, mounted drives like the BACKUP1 USB), Gmail attachments in
   empirebox2026@gmail.com and his Google Drive (read-only), by file name, client or
@@ -225,3 +228,17 @@ try:
     ff.warm_index_async()
 except Exception:
     pass
+
+
+@tool("max_status")
+def _max_status(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """What Max is building / what's next, from the real improvements queue, recent commits, tasks and approvals."""
+    from app.services.max import self_status
+    q = str(params.get("question") or params.get("query") or "what are you building now")
+    try:
+        out = self_status.answer(q)
+    except Exception as exc:
+        return ToolResult(tool="max_status", success=False, error=f"status unavailable: {exc}")
+    return ToolResult(tool="max_status", success=True, result={
+        "text": out["text"],
+        "note": "Say this in a few short lines. No headers, no sources, no invented plans or numbers."})

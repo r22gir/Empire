@@ -66,7 +66,7 @@ TOOL_LEVELS = {
     "web_read": 1, "create_task": 1, "create_contact": 1,
     "create_quick_quote": 1, "create_engine_quote": 1, "photo_to_quote": 1, "present": 1,
     "search_images": 1, "open_quote_builder": 1, "select_proposal": 1,
-    "open_final_doc": 1, "find_files": 1, "share_file": 1,
+    "open_final_doc": 1, "find_files": 1, "share_file": 1, "max_status": 1,
     "open_record": 1, "edit_quote_lines": 1, "convert_quote_to_invoice": 1,
     # Client acquisition (draft-only; docs/MAX_PROSPECTING.md)
     "prospect_search": 1, "prospect_enrich": 1, "prospect_rank": 1, "prospect_add_to_pipeline": 1,

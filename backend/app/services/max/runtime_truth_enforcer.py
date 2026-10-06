@@ -445,6 +445,7 @@ PROOF_TOOL_EXACT = frozenset({
     "file_read",
     # Rafael file finder (2026-10-05)
     "find_files",
+    "max_status",
     "share_file",
     "open_final_doc",
 })
