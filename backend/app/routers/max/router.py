@@ -4088,18 +4088,115 @@ async def chat_stream(request: ChatRequest, http_request: Request = None):
     # 2026-10-05: server-verified founder session (Cloudflare Access JWT
     # email in FOUNDER_ACCESS_EMAILS). Read once while the access context is built.
     from app.services.max import founder_session as _fs
-    _fs_token = _fs.set_current(_fs.resolve_founder_session(http_request))
+    _founder_session = _fs.resolve_founder_session(http_request)
+    # 2026-10-06: the UI's own error placeholder ("**Connection error.**
+    # Backend may be offline.") was sent back as an assistant turn, and the
+    # model copied it as its answer on the next two turns.
+    request.history = _drop_ui_error_turns(request.history)
+
+    async def _prepare():
+        _fs_token = _fs.set_current(_founder_session)
+        try:
+            return await _chat_stream_impl(request)
+        finally:
+            _fs.reset_current(_fs_token)
+
+    resp = StreamingResponse(
+        _keepalive_stream(_prepare),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
     try:
-        resp = await _chat_stream_impl(request)
-    finally:
-        _fs.reset_current(_fs_token)
-    try:
-        if isinstance(resp, StreamingResponse):
-            from app.services.max.session_journal import journal_stream
-            resp.body_iterator = journal_stream(resp.body_iterator, request=_j_req, started_at=_j_start)
+        from app.services.max.session_journal import journal_stream
+        resp.body_iterator = journal_stream(resp.body_iterator, request=_j_req, started_at=_j_start)
     except Exception as exc:
         logger.debug(f"[session_journal] stream wrap failed: {exc}")
     return resp
+
+
+# 2026-10-06 (Marleys screenshot, 2:25 PM): the stream sent NOTHING for ~19 s
+# while the prompt, brain context and image handoff were prepared, because the
+# response headers only went out once _chat_stream_impl returned. On a phone
+# that silent, header-less request is the first thing iOS drops when Safari
+# pauses. Now headers + a heartbeat go out at once and every few seconds
+# until the real stream starts; the answer itself is unchanged.
+_STREAM_PREP_HEARTBEAT_S = 8
+_UI_ERROR_PREFIXES = (
+    "**Connection error.**",      # old UI placeholder
+    "**Connection dropped.**",    # new UI placeholders (useChat.ts)
+    "**Can't reach the server.**",
+    "**Server error.**",
+)
+
+
+def _drop_ui_error_turns(history):
+    """Remove assistant turns that are UI-side error notices, not Max replies."""
+    try:
+        return [
+            h for h in (history or [])
+            if not (
+                isinstance(h, dict)
+                and h.get("role") == "assistant"
+                and str(h.get("content") or "").lstrip().startswith(_UI_ERROR_PREFIXES)
+            )
+        ]
+    except Exception:
+        return history
+
+
+def _sse(event: dict) -> str:
+    return f"data: {_safe_dumps(event)}\n\n"
+
+
+async def _keepalive_stream(prepare):
+    """Send headers + heartbeats immediately, then pass the real stream through.
+
+    Errors are reported to the UI as an ``error`` event in plain words
+    (the UI used to show "Backend may be offline" for any failure).
+    """
+    task = asyncio.ensure_future(prepare())
+
+    def _log_orphan(t):
+        if not t.cancelled() and t.exception() is not None:
+            logger.warning(f"[chat/stream] preparation failed after client left: {t.exception()!r}")
+
+    yield _sse({"type": "heartbeat", "phase": "start"})
+    try:
+        while not task.done():
+            await asyncio.wait({task}, timeout=_STREAM_PREP_HEARTBEAT_S)
+            if not task.done():
+                yield _sse({"type": "heartbeat", "phase": "prepare"})
+    except BaseException:
+        # Client went away mid-preparation: let it finish quietly (same as
+        # before this wrapper existed) instead of leaving half-done writes.
+        task.add_done_callback(_log_orphan)
+        raise
+    try:
+        inner = task.result()
+    except Exception as exc:
+        logger.exception("[chat/stream] preparing the reply failed")
+        yield _sse({
+            "type": "error",
+            "content": f"Max could not start this reply ({type(exc).__name__}). The server is up; please try again.",
+        })
+        yield _sse({"type": "done", "model_used": "error"})
+        return
+    if not isinstance(inner, StreamingResponse):
+        body = getattr(inner, "body", b"") or b""
+        text = body.decode("utf-8", "replace") if isinstance(body, (bytes, bytearray)) else str(body)
+        yield _sse({"type": "error", "content": f"Max returned an unexpected reply: {text[:300]}"})
+        yield _sse({"type": "done", "model_used": "error"})
+        return
+    try:
+        async for chunk in inner.body_iterator:
+            yield chunk
+    except Exception as exc:
+        logger.exception("[chat/stream] reply stream failed mid-way")
+        yield _sse({
+            "type": "error",
+            "content": f"Max stopped mid-reply ({type(exc).__name__}). The server is up; please try again.",
+        })
+        yield _sse({"type": "done", "model_used": "error"})
 
 
 async def _chat_stream_impl(request: ChatRequest):
