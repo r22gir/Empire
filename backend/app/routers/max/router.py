@@ -1829,7 +1829,9 @@ def _should_read_research_pages(question: str | None) -> bool:
     text = question or ""
     if _is_local_finance_readiness_request(text):
         return False
-    return is_factual_question(text) or _is_performative_web_search_request(text)
+    from app.services.max.answer_policy import should_pre_search as _should_pre_search
+    legacy = is_factual_question(text) or _is_performative_web_search_request(text)
+    return _should_pre_search(text, legacy)
 
 
 async def _ground_search_payload(question: str, payload: dict, read_urls: set[str]) -> dict:
@@ -3302,9 +3304,14 @@ async def _chat_with_max_service_impl(
             messages.insert(-1, AIMessage(role="system", content=(
                 finance_system_preamble(include_totals=True) + "\n" + _finance_context
             )))
+        # 2026-10-06: job/client asks must not pre-fire web research (Marley's mockup miss).
+        from app.services.max.answer_policy import should_pre_search as _should_pre_search
+        _legacy_pre = (
+            _is_performative_web_search_request(request.message)
+            or is_factual_question(request.message)
+        )
         if not request.desk and (
-            (_is_performative_web_search_request(request.message)
-             or is_factual_question(request.message))
+            _should_pre_search(request.message, _legacy_pre)
             and not _is_local_finance_readiness_request(request.message)
         ):
             from app.services.max.search_context import build_search_query
@@ -3730,8 +3737,9 @@ async def _chat_with_max_service_impl(
         _local_tools_answered = any(
             n and n not in ("web_search", "web_read") for n in tools_used_names
         )
+        from app.services.max.answer_policy import should_pre_search as _should_pre_search
         if (
-            is_factual_question(request.message)
+            _should_pre_search(request.message, is_factual_question(request.message))
             and not _is_local_finance_readiness_request(request.message)
             and "web_search" not in tools_used_names
             and not _local_tools_answered
@@ -4562,9 +4570,14 @@ async def _chat_stream_impl(request: ChatRequest):
             messages.insert(-1, AIMessage(role="system", content=(
                 finance_system_preamble(include_totals=True) + "\n" + _finance_context
             )))
+        # 2026-10-06: job/client asks must not pre-fire web research (Marley's mockup miss).
+        from app.services.max.answer_policy import should_pre_search as _should_pre_search
+        _legacy_pre = (
+            _is_performative_web_search_request(request.message)
+            or is_factual_question(request.message)
+        )
         if not request.desk and (
-            (_is_performative_web_search_request(request.message)
-             or is_factual_question(request.message))
+            _should_pre_search(request.message, _legacy_pre)
             and not _is_local_finance_readiness_request(request.message)
         ):
             from app.services.max.search_context import build_search_query
