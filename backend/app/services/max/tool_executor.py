@@ -6151,7 +6151,7 @@ State machine: `draft → founder_review → sent → accepted → in_production
 
 IMPORTANT: Always use tools for factual data. NEVER fabricate task lists, weather, system stats, quotes, or customer info. If a tool returns empty results, say so honestly.
 When asked to send a quote PDF to Telegram, use send_quote_telegram with the quote_id.
-When discussing visual topics (fabrics, designs, installations), use search_images to find relevant reference photos.
+When Rafael asks for mockups, diagrams, drawings, or visual reference on a job (Marley's, banquette, basketweave, site photos, comparison boards): call find_files first (jobs/marleys-hyattsville, marleys-hyattsville, site-photos, correct-preview, comparison-*). Share those local PDFs/PNGs. Do NOT call search_images / Unsplash for job visuals, and do not lecture about textile yarn weave (warp/weft) when the job uses Empire's constructed padded-bar basketweave (2 pieces = 1 square, V-set / H-set). Use search_images only when he explicitly asks for public/stock inspiration.
 When you need current info, pricing, or research — use web_search. Do NOT say "I can't access the web."
 When analyzing a photo of windows or furniture, use photo_to_quote to create and deliver the estimate automatically.
 

@@ -33,7 +33,9 @@ EVERGREEN_FACTUAL_PATTERNS = [
     r'\bwhy\s+(?:does|do|is|are|isn\'t|aren\'t)\b',
     r'\b(?:compare|comparison|difference|distinguish|versus|vs\.?|define|meaning|explain)\b',
     r'\bwhich\s+(?:is|are|has|have|should|would|works?)\b',
-    r'\b(best|recommended|advantages?|disadvantages?|pros?\s+and\s+cons?)\b',
+    # "best/recommended" alone matches founder job advice ("best possible solution");
+    # keep only explicit pros/cons / advantages language for public evergreen lookups.
+    r'\b(advantages?|disadvantages?|pros?\s+and\s+cons?)\b',
 ]
 
 # Pure chit-chat should not incur a public web lookup.
@@ -50,6 +52,10 @@ INTERNAL_PATTERNS = (
     'maria', 'david', 'alex', 'kayzark', 'empire', 'workroom', 'craftforge',
     'hermes', 'openclaw', 'max', 'crm', 'job status', 'work order',
     'founder pricing', 'our pricing rule', 'our rate card', 'internal rate',
+    # Job-local construction / client names (2026-10-06): never web-presearch these.
+    'marley', "marley's", 'devon', 'hyattsville', 'banquette', 'basketweave',
+    'basket weave', 'padded bar', 'v-set', 'h-set', 'nelma', 'dahlia', 'nehal',
+    'willard', 'bassett', 'naomi', 'philipp', 'phillip', 'travelers',
 )
 
 
