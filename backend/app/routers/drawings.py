@@ -86,6 +86,133 @@ async def serve_drawing_file(filename: str):
     return FileResponse(file_path, media_type=media_type)
 
 
+class MockupFromSpecRequest(BaseModel):
+    spec: Optional[dict] = None
+    preset: Optional[str] = None  # marleys_u, marleys_l, straight_bench, l_bench, u_bench, chair, wall_unit
+    quote_id: Optional[str] = None
+    job_id: Optional[str] = None
+
+
+@router.post("/drawings/mockup")
+async def generate_mockup_drawing(req: MockupFromSpecRequest):
+    """Parametric mockup generator endpoint.
+    Takes a PieceSpec, a preset name, or quote/job id and returns PDF + PNG preview paths.
+    """
+    from app.services.drawing.mockup_engine.spec import PieceSpec, FootprintSpec, SegmentSpec, BackStyleSpec, CushionSpec, MaterialFinishSpec
+    from app.services.drawing.mockup_engine.presets import (
+        marleys_u_and_l_preset, straight_bench_preset, l_bench_preset,
+        u_bench_preset, single_chair_preset, woodcraft_wall_unit_preset
+    )
+    from app.services.drawing.mockup_engine.generator import render_piece_mockup_pdf, render_pdf_to_png_previews
+    from app.services.drawing.canonical_path import canonical_drawings_dir
+
+    out_dir = canonical_drawings_dir()
+    os.makedirs(out_dir, exist_ok=True)
+
+    piece_spec: Optional[PieceSpec] = None
+
+    if req.spec:
+        piece_spec = PieceSpec(**req.spec)
+    elif req.preset:
+        p = req.preset.lower().strip()
+        if p in ("marleys_u", "marleys_u_bench", "u_channel"):
+            piece_spec = marleys_u_and_l_preset()["u_bench"]
+        elif p in ("marleys_l", "marleys_l_bench", "l_channel"):
+            piece_spec = marleys_u_and_l_preset()["l_bench"]
+        elif p in ("straight", "straight_bench"):
+            piece_spec = straight_bench_preset()
+        elif p in ("l_shape", "l_bench"):
+            piece_spec = l_bench_preset()
+        elif p in ("u_shape", "u_bench"):
+            piece_spec = u_bench_preset()
+        elif p in ("chair", "single_chair"):
+            piece_spec = single_chair_preset()
+        elif p in ("wall_unit", "woodcraft_wall_unit", "casework"):
+            piece_spec = woodcraft_wall_unit_preset()
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown preset: {req.preset}")
+    elif req.quote_id or req.job_id:
+        target_id = req.quote_id or req.job_id
+        from app.services.quote_service import resolve_quote
+        quote = resolve_quote(target_id)
+        if not quote:
+            # Check CraftForge designs
+            from app.routers import craftforge
+            try:
+                design = craftforge._load(craftforge.DESIGNS_DIR, target_id)
+            except Exception:
+                design = None
+
+            if design:
+                piece_spec = woodcraft_wall_unit_preset(from_craftforge_design=design)
+            else:
+                raise HTTPException(status_code=404, detail=f"Quote or Job {target_id} not found")
+        else:
+            # Check if quote has line items with dimensions
+            items = quote.get("line_items", [])
+            quote_num = quote.get("quote_number", target_id)
+            client = quote.get("customer_name", "Client")
+
+            # Extract dimensions from line items or measurements
+            meas = quote.get("measurements") or {}
+            w = meas.get("width")
+            d = meas.get("depth")
+            h = meas.get("height")
+            bh = meas.get("back_height")
+
+            if not w and items:
+                for it in items:
+                    inp = it.get("inputs") or {}
+                    if inp.get("width_in") or inp.get("length_in") or inp.get("width"):
+                        w = inp.get("width_in") or inp.get("length_in") or inp.get("width")
+                        d = inp.get("depth_in") or inp.get("depth", 20.0)
+                        h = inp.get("height_in") or inp.get("height", 18.0)
+                        bh = inp.get("back_height_in") or inp.get("back_height")
+                        break
+
+            if not w:
+                # Omit drawing section rather than printing errors
+                return {
+                    "omitted": True,
+                    "reason": "quote lines lack dimensions",
+                    "quote_id": target_id,
+                }
+
+            piece_spec = straight_bench_preset(
+                length_in=float(w),
+                seat_depth_in=float(d or 20.0),
+                back_height_in=float(bh or 24.0),
+                name=quote.get("project_name") or f"Quote {quote_num} Mockup",
+            )
+            piece_spec.quote_number = quote_num
+            piece_spec.client_name = client
+
+    if not piece_spec:
+        raise HTTPException(status_code=400, detail="Must provide spec, preset, quote_id, or job_id")
+
+    # Generate PDF
+    file_id = uuid.uuid4().hex[:12]
+    clean_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", piece_spec.name.lower()).strip("_")
+    pdf_filename = f"mockup_{clean_name}_{file_id}.pdf"
+    pdf_path = str(out_dir / pdf_filename)
+
+    render_piece_mockup_pdf(piece_spec, pdf_path)
+
+    # Generate PNG previews
+    preview_prefix = str(out_dir / f"preview_{clean_name}_{file_id}")
+    png_previews = render_pdf_to_png_previews(pdf_path, preview_prefix)
+
+    return {
+        "success": True,
+        "pdf_path": pdf_path,
+        "pdf_filename": pdf_filename,
+        "pdf_url": f"/api/v1/drawings/files/{pdf_filename}",
+        "png_previews": png_previews,
+        "png_filenames": [os.path.basename(p) for p in png_previews],
+        "spec": piece_spec.model_dump(),
+    }
+
+
 class BenchRequest(BaseModel):
     """Bench / banquette drawing request.
 

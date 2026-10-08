@@ -3441,6 +3441,26 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
     )
 
 
+@tool("generate_parametric_mockup")
+def _generate_parametric_mockup(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Parametric mockup tool: takes a spec, preset, or quote_id/job_id and returns PDF + PNG previews."""
+    try:
+        import asyncio
+        from app.routers.drawings import generate_mockup_drawing, MockupFromSpecRequest
+
+        req = MockupFromSpecRequest(
+            spec=params.get("spec"),
+            preset=params.get("preset"),
+            quote_id=params.get("quote_id"),
+            job_id=params.get("job_id"),
+        )
+        res = _run_async(generate_mockup_drawing(req))
+        return ToolResult(tool="generate_parametric_mockup", success=True, result=res)
+    except Exception as e:
+        logger.exception("generate_parametric_mockup tool failed")
+        return ToolResult(tool="generate_parametric_mockup", success=False, error=str(e))
+
+
 @tool("sketch_to_drawing")
 def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
     """HOTFIX 4.0 (b) — Draw-from-image ONLY.
@@ -5553,6 +5573,11 @@ State machine: `draft → founder_review → sent → accepted → in_production
   `{"tool": "svg_to_pdf", "svg_content": "<svg>...</svg>", "output_path": "/home/rg/empire-repo/uploads/drawing.pdf"}`
   Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`
   IMPORTANT: Always use this tool to convert SVG drawings to PDF. Do NOT write conversion scripts.
+- **generate_parametric_mockup** — Generate parametric architectural drawings & PNG previews for any furniture, upholstery, or millwork/casework piece.
+  Can take a full `spec`, a `preset` ("marleys_u", "marleys_l", "straight_bench", "l_bench", "u_bench", "chair", "wall_unit"), or a `quote_id`/`job_id`.
+  When quote lines lack dimensions, omits drawing rather than erroring.
+  `{"tool": "generate_parametric_mockup", "preset": "straight_bench"}`
+  `{"tool": "generate_parametric_mockup", "quote_id": "EST-2026-299"}`
 - **sketch_to_drawing** — Generate professional architectural drawings for ANY item type. Auto-classifies input and routes to the correct renderer. Returns a PDF file path.
   **Bench drawings** produce a 4-QUADRANT layout: Plan View + Isometric View + Front Elevation + title block. Workroom letterhead is the default; pass `"business_unit": "woodcraft"` for WoodCraft chrome and a `WC · …` category chip.
   `lf` is linear feet. `width` / `width_in` are inches (a 36" width stays 36"). Omitted `back_height` is 18" and the sheet marks it assumed — a number you pass wins (the old silent 34" default is retired). `panel_style: "flat"` stays flat; `has_back: false` draws no back.
