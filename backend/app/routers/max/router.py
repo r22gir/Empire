@@ -1835,6 +1835,39 @@ def _should_read_research_pages(question: str | None) -> bool:
     return _should_pre_search(text, legacy)
 
 
+
+async def _run_prelookups(request: "ChatRequest", founder: bool) -> tuple[list[dict[str, Any]], str]:
+    """2026-10-07 model-first: a message naming a client / quote / job, a job visual ask, weather or
+    'brief me on today' gets its lookup run BEFORE the model answers (answer_policy.prelookup_calls),
+    so the reply is grounded in real data instead of memory. Read-only tools only."""
+    try:
+        from app.services.max import answer_policy as _ap
+        if request.desk or request.image_filename:
+            return [], ""
+        calls = _ap.prelookup_calls(request.message, request.history, request.channel)
+    except Exception as _pl_err:
+        logger.debug(f"prelookup selection failed: {_pl_err}")
+        return [], ""
+    if not calls:
+        return [], ""
+    entries: list[dict[str, Any]] = []
+    rendered: list[tuple[str, str]] = []
+    for tc in calls:
+        try:
+            res = await asyncio.to_thread(execute_tool, dict(tc), desk=request.desk, founder=founder,
+                                          channel=request.channel)
+        except Exception as _pl_err:
+            logger.warning(f"prelookup {tc.get('tool')} failed: {_pl_err}")
+            continue
+        entries.append(_normalize_tool_result_entry(res))
+        if getattr(res, "success", False) and getattr(res, "result", None) is not None:
+            rendered.append((tc["tool"], "Result:\n" + _safe_dumps(res.result, indent=1, default=str)[:3000]))
+        else:
+            rendered.append((tc["tool"], f"Error: {getattr(res, 'error', 'failed')}"))
+    logger.info(f"[prelookup] ran {[c.get('tool') for c in calls]} for: {(request.message or '')[:80]}")
+    return entries, _ap.prelookup_message(request.message, rendered, request.history)
+
+
 async def _ground_search_payload(question: str, payload: dict, read_urls: set[str]) -> dict:
     """Fetch top pages for a web_search payload off the event loop."""
     from app.services.max.web_research import ground_web_search
@@ -3341,6 +3374,9 @@ async def _chat_with_max_service_impl(
             # no results — do not fabricate…]" block on role="user"; MAX read
             # it as a prompt-injection attempt. The doctrine answer is silence,
             # not a fabricated apology.
+        _prelookup_entries, _prelookup_msg = await _run_prelookups(request, founder)
+        if _prelookup_msg:
+            messages.insert(-1, AIMessage(role="system", content=_prelookup_msg))
 
         response = await asyncio.wait_for(
             ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
@@ -3393,6 +3429,7 @@ async def _chat_with_max_service_impl(
         if _pre_search_entry:
             tool_results_list.append(_pre_search_entry)
         tool_results_list.extend(_research_page_entries)
+        tool_results_list.extend(_prelookup_entries)
         final_content = response.content
         loop_messages = list(messages)
         current_response = response
@@ -4603,6 +4640,9 @@ async def _chat_stream_impl(request: ChatRequest):
                 messages.insert(-1, AIMessage(role="system", content=_stream_grounded["message"]))
             # If web_search returned nothing, append NOTHING. Do not fabricate
             # a "[SYSTEM: ...]" apology — that was the H53 shape in this code path.
+        _stream_prelookup_entries, _stream_prelookup_msg = await _run_prelookups(request, founder)
+        if _stream_prelookup_msg:
+            messages.insert(-1, AIMessage(role="system", content=_stream_prelookup_msg))
         try:
             # Buffer each model turn before publishing it. Tool calls are a
             # model-side protocol, not user-visible text; emitting chunks as
@@ -4635,6 +4675,7 @@ async def _chat_stream_impl(request: ChatRequest):
             if _stream_pre_search_entry:
                 tool_results_list.append(_stream_pre_search_entry)
             tool_results_list.extend(_stream_page_entries)
+            tool_results_list.extend(_stream_prelookup_entries)
             loop_messages = list(messages)
             current_text = full_response
             _seen_send_tool_calls: set[str] = set()

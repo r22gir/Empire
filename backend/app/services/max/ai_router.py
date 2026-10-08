@@ -598,8 +598,11 @@ class AIRouter:
             prefix, visible = cleaned.split("\n\n", 1)
             prefix_l = prefix.lower()
             prefix_lines = [line.strip() for line in prefix.splitlines() if line.strip()]
+            # 2026-10-07: a leading "- " bullet list is an answer (quotes, files, jobs), not self-talk;
+            # only drop it when it actually contains self-talk lines.
             if any(marker in prefix_l for marker in reasoning_markers) or (
                 prefix_lines and all(_is_self_talk_line(line) or line.startswith("-") for line in prefix_lines)
+                and any(_is_self_talk_line(line) for line in prefix_lines)
             ):
                 cleaned = visible.lstrip()
 
@@ -617,7 +620,10 @@ class AIRouter:
             filtered = []
             for paragraph in paragraphs:
                 para_lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
-                if para_lines and all(_is_self_talk_line(line) or line.startswith("-") for line in para_lines):
+                # 2026-10-07: bullet lists were dropped here as "self-talk", which deleted the
+                # quote/file/job lists from replies. Drop only paragraphs that contain self-talk.
+                if para_lines and all(_is_self_talk_line(line) or line.startswith("-") for line in para_lines) \
+                        and any(_is_self_talk_line(line) for line in para_lines):
                     continue
                 filtered.append(paragraph)
             if filtered:

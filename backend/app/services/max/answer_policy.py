@@ -72,6 +72,11 @@ STYLE_DIRECTIVE = """
 - Sending to Rafael himself (his own email, this chat, his WhatsApp) is a reply: do it right away with send_quote_email / send_email / share_file, no PIN, no second yes. Anyone else needs his explicit yes first; draft and ask.
 - Use his context: the Travelers claim is the house at 44 Burns St NE (claim JJN4296); Nelma's Workroom bills some jobs.
 - Reply in the language he wrote in (Spanish or English).
+- Short never means dropping facts: keep the client name, quote numbers (EST-...), totals and file names you looked up. Lists are plain "- " bullets.
+- Voice-message or quick status asks: under 70 words (quote number, client, total, status, next step).
+- "Brief me / today / rundown / what's on my plate": one "- " line per active job from the Chief e brief (Marley's, Dahlia/Nehal, Philipp/Naomi, Willard, the Travelers claim, ...) with its next step, then what waits on his tap. Under 150 words.
+- Job visuals (mockup, drawing, diagram, picture, layout; typos like "mick up drwings"): run find_files, name the actual file and its folder, and share it with share_file when he asks to see or send it. Never describe the design in words instead of the file.
+- Weather: call get_weather (Empire Workroom is in Hyattsville, MD).
 """
 
 
@@ -280,3 +285,122 @@ def clean_reply(text: Optional[str], message: Optional[str] = None) -> str:
     t = re.sub(r"[ \t]+\n", "\n", t)
     t = re.sub(r"\n{3,}", "\n\n", t).strip()
     return t or UNCONFIRMED_TEXT
+
+
+# ── pre-lookups (2026-10-07): named client / quote / job, job visuals, weather, daily brief ──
+# The model sometimes answered from memory (brief) instead of looking up, and dropped the key
+# facts. When a message names one of Rafael's clients, a quote number or a job, the lookup runs
+# BEFORE the model and its result goes into context, so the answer is grounded in real data.
+_CLIENTS = (
+    # (pattern, search_quotes query, find_files query)
+    (re.compile(r"\b(?:dahlia|dalia|nehal|elrefai)\b", re.I), "Dahlia", "Dahlia"),
+    (re.compile(r"\bmarley'?s?\b|\bhyattsville\b|\bdevon\b|\bbasket\s*weave\b|\bbasketweave\b|\bseat\s*backs?\b", re.I),
+     "Marley", "marleys"),
+    (re.compile(r"\b(?:phil+ip+e?|naomi|bassett)\b|\bwall\s+unit\b", re.I), "Naomi", "philipp naomi"),
+    (re.compile(r"\bwillard\b", re.I), "Willard", "Willard"),
+)
+_VISUAL = re.compile(
+    r"\b(?:mock[- ]?ups?|mick[- ]?ups?|mockup|mock|drawings?|drwings?|drawigs?|diagrams?|renders?|renderings?|"
+    r"visuals?|bisual|pictures?|pics?|images?|layouts?|previews?|sketch\w*|basket\s*weave|basketweave)\b", re.I)
+_VISUAL_ASK = re.compile(r"\b(?:show|see|send|share|give|get|pull|mockup|mock|mick|drawing|drwing|visual|bisual|reference)\w*", re.I)
+_DOC = re.compile(
+    r"\b(?:docs?|documents?|pdfs?|files?|addendum|invoices?|led|lighting|spec\w*|photos?|contract|final)\b|\bwall\s+unit\b", re.I)
+_QUOTEY = re.compile(r"\b(?:quotes?|estimates?|cotizaci[oó]n\w*|total|phase|status|latest|last|deposit|price|draft)\b", re.I)
+_WEATHER = re.compile(r"\b(?:weather|forecast|rain\w*|temperature|clima|lluvia)\b", re.I)
+_WEATHER_CITY = re.compile(r"\b(?:in|en|for)\s+([A-Z][A-Za-z.]+(?:[ ,]+[A-Z][A-Za-z.]+)?)")
+_BRIEF = re.compile(
+    r"\b(?:brief\s+me|briefing|rundown|run\s+down|on\s+my\s+plate|today'?s\s+(?:jobs|work|plan|agenda)|"
+    r"(?:what'?s|what\s+is)\s+(?:on\s+)?(?:for\s+)?today|my\s+day|agenda|resumen\s+de\s+hoy)\b", re.I)
+_DOC_WORDS = re.compile(r"\b(?:addendum|led|lighting|mockups?|basketweave|wall\s+unit|invoice|final|drawing|layout|comparison)\b", re.I)
+
+
+def _clients_in(text: str) -> list[tuple[str, str]]:
+    return [(sq, ff) for pat, sq, ff in _CLIENTS if pat.search(text or "")]
+
+
+def _recent_context(history: Any, n: int = 4) -> str:
+    out = []
+    for h in list(history or [])[-n:]:
+        c = h.get("content") if isinstance(h, dict) else getattr(h, "content", "")
+        out.append(str(c or ""))
+    return "\n".join(out)
+
+
+def is_job_visual_request(message: Optional[str], history: Any = None) -> bool:
+    t = message or ""
+    if not _VISUAL.search(t):
+        return False
+    return bool(_VISUAL_ASK.search(t)) and bool(_clients_in(t) or _clients_in(_recent_context(history)) or
+                                                re.search(r"\b(?:job|client|seat\s*back|banquette)\b", t, re.I))
+
+
+def prelookup_calls(message: Optional[str], history: Any = None, channel: Optional[str] = None) -> list[dict]:
+    """Tool calls to run before the model sees the message (model-first mode only)."""
+    if not model_first():
+        return []
+    t = (message or "").strip()
+    if not t or wants_research(t):
+        return []
+    calls: list[dict] = []
+    nums = []
+    for n in _EST.findall(t):
+        if n.upper() not in nums:
+            nums.append(n.upper())
+    for n in nums[:3]:
+        calls.append({"tool": "get_quote", "quote_id": n})
+    clients = _clients_in(t)
+    if is_job_visual_request(t, history):
+        ctx_clients = clients or _clients_in(_recent_context(history))
+        ff = ctx_clients[0][1] if ctx_clients else ""
+        kind = "mockup" if re.search(r"mock|mick|basket", t, re.I) or re.search(r"basket", _recent_context(history), re.I) else "drawing"
+        calls.append({"tool": "find_files", "query": f"{ff} {kind}".strip(), "limit": 10})
+        return calls
+    if _WEATHER.search(t):
+        m = _WEATHER_CITY.search(t)
+        calls.append({"tool": "get_weather", "city": (m.group(1).strip(" ,.") if m else "Hyattsville")})
+        return calls
+    if _BRIEF.search(t):
+        calls += [{"tool": "get_tasks", "limit": 10}, {"tool": "list_quotes_awaiting_review"},
+                  {"tool": "pipeline_followups"}]
+        return calls
+    for sq, ff in clients[:2]:
+        if _DOC.search(t):
+            words = " ".join(dict.fromkeys(w.lower() for w in _DOC_WORDS.findall(t)))
+            calls.append({"tool": "find_files", "query": f"{ff} {words}".strip(), "limit": 10})
+            if _QUOTEY.search(t):
+                calls.append({"tool": "search_quotes", "query": sq})
+        else:
+            calls.append({"tool": "search_quotes", "query": sq})
+    return calls
+
+
+def active_jobs_section(max_chars: int = 3500) -> str:
+    """'Active jobs' section of the Chief e brief (for brief-me asks)."""
+    try:
+        from app.services.max.chief_e_brief import load_chief_e_brief
+        text = load_chief_e_brief() or ""
+    except Exception:
+        return ""
+    m = re.search(r"^##\s*Active jobs[^\n]*\n(.*?)(?=^##\s|\Z)", text, re.S | re.M)
+    return (m.group(1).strip()[:max_chars]) if m else ""
+
+
+def prelookup_message(message: Optional[str], results: list[tuple[str, str]], history: Any = None) -> str:
+    """System note with the pre-lookup results. results: [(tool, rendered result)]."""
+    if not results:
+        return ""
+    parts = ["Looked up before you answer (real results from his data; use them, do not say you still need to look):"]
+    for tool, body in results:
+        parts.append(f"[{tool}] {body}")
+    rules = ["Answer short, but keep the key facts from these results: client name, quote numbers, totals, status, file names."]
+    if is_job_visual_request(message, history):
+        rules.append("This is a job visual request: name the actual file(s) found above (file name and folder) and share the "
+                     "best one with share_file (path = the file path) if he asked to see or send it. Never describe the "
+                     "design in words instead of the file, never use search_images or the web.")
+    if _BRIEF.search(message or ""):
+        jobs = active_jobs_section()
+        if jobs:
+            parts.append("[Chief e brief: active jobs]\n" + jobs)
+        rules.append("List each active job by name with its next step (one '- ' line each), then what waits on his tap.")
+    parts.append(" ".join(rules))
+    return "\n\n".join(parts)
