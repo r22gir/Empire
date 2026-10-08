@@ -188,13 +188,13 @@ MARLEY_HIST = [
 ]
 q("q60", "job_visual", "studio", "Show me a mockup of the Marley's basketweave seat back", "2026-10-07 ship criteria",
   {"tools_any": MOCK_TOOLS, "tools_none": WEB + ["search_images"], "must_any": [MOCK_FILES, MOCK_BUILD],
-   "must_not": MOCK_NOT, "max_words": 130})
+   "must_not_affirm": MOCK_NOT, "max_words": 130})
 q("q61", "job_visual", "studio", "Show me mick up drwings or something for bisual reference", "2026-10-06 22:44 studio (real, typos kept)",
   {"tools_any": MOCK_TOOLS, "tools_none": WEB + ["search_images"], "must_any": [MOCK_FILES],
-   "must_not": MOCK_NOT, "max_words": 130}, history=MARLEY_HIST)
+   "must_not_affirm": MOCK_NOT, "max_words": 130}, history=MARLEY_HIST)
 q("q62", "job_visual", "whatsapp", "Send me the Marley's 4 panel vs 8 panel basketweave mockup", "variant (WhatsApp)",
   {"tools_any": MOCK_TOOLS, "tools_none": WEB + ["search_images"], "must_any": [MOCK_FILES + ["sent", "here"]],
-   "must_not": MOCK_NOT, "max_words": 130})
+   "must_not_affirm": MOCK_NOT, "max_words": 130})
 
 Path(__file__).with_name("questions.json").write_text(json.dumps({
     "version": 1,

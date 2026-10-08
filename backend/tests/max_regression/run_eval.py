@@ -70,6 +70,30 @@ REC: contextvars.ContextVar[list | None] = contextvars.ContextVar("max_reg_rec",
 SEND_LOG: list[dict] = []
 
 
+ATTACH_KEYS = ("attachments", "attachment", "path", "paths", "file", "files", "file_id", "file_ids", "file_path",
+               "file_paths", "filename", "filenames", "document", "documents", "doc", "docs", "pdf", "pdf_path", "url",
+               "urls", "media", "image", "images")
+
+
+def _attachment_refs(tool_call: dict) -> list[str]:
+    """Every attachment the send/share call names, whatever field name the tool uses (2026-10-07)."""
+    out: list[str] = []
+
+    def add(v):
+        if isinstance(v, (list, tuple)):
+            for x in v:
+                add(x)
+        elif isinstance(v, dict):
+            add(v.get("path") or v.get("file") or v.get("file_id") or v.get("url") or v.get("name"))
+        elif v not in (None, "", False):
+            s = str(v).strip()
+            if s and s not in out:
+                out.append(s)
+    for k in ATTACH_KEYS:
+        add(tool_call.get(k))
+    return out
+
+
 def _note(item: str) -> None:
     rec = REC.get()
     if rec is not None:
@@ -174,18 +198,25 @@ def install_recorders() -> None:
             if not ok:
                 return ToolResult(tool=name, success=False,
                                   error="recipient is not Rafael: needs Rafael's explicit yes before any send")
-            atts = (tool_call or {}).get("attachments") or []
-            n_att = len(atts) if isinstance(atts, list) else 1
+            refs = _attachment_refs(tool_call or {})
+            n_att = len(refs)
             if name in ("send_quote_email", "send_invoice_email", "email_quote"):
                 n_att = max(n_att, 1)
+            SEND_LOG[-1]["attachments"] = refs[:5]
             # same proof fields the real tools return, so the truth check treats it like a real send
+            # 2026-10-07: same shape as a real send (real file path, Gmail-style id), so the model
+            # does not spot a stub and second-guess a send that, in production, would have happened.
+            qids = (tool_call or {}).get("quote_ids") or (tool_call or {}).get("quote_id") or []
+            qids = [qids] if isinstance(qids, str) else list(qids or [])
+            pdf = refs[0] if refs else (f"~/empire-data/quotes/pdf/{qids[0]}.pdf" if qids else None)
             return ToolResult(tool=name, success=True, result={
-                "attachments_sent": n_att, "pdf_path": "/regression-test-copy/attachment.pdf" if n_att else None,
-                "pdf_size_bytes": 24576 if n_att else 0,
+                "attachments_sent": n_att, "pdf_path": pdf if n_att else None,
+                "pdf_size_bytes": 184320 if n_att else 0,
                 "sent": True, "verified": True, "to": sorted(addrs) or ["empirebox2026@gmail.com"],
-                "subject": (tool_call or {}).get("subject") or "", "message_id": f"test-{int(time.time() * 1000)}",
+                "subject": (tool_call or {}).get("subject") or (f"Empire Workroom {qids[0]}" if qids else "From Max"),
+                "message_id": f"18{int(time.time() * 1000):x}",
                 "quote_ids": (tool_call or {}).get("quote_ids") or (tool_call or {}).get("quote_id"),
-                "path": (tool_call or {}).get("path") or (tool_call or {}).get("file"),
+                "path": refs[0] if refs else None, "paths": refs or None,
             })
         if name == "request_improvement":
             return ToolResult(tool=name, success=True, result={

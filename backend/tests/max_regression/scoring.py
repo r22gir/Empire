@@ -35,6 +35,20 @@ _SPANISH_HINT = re.compile(
     r"aqu[ií]|ahora|también|sí|no hay|puedo|quieres)\b", re.I)
 
 
+_NEGATION = re.compile(r"\b(?:not|no|never|isn'?t|aren'?t|wasn'?t|don'?t|doesn'?t|won'?t|without|instead\s+of|"
+                       r"rather\s+than|nor|avoid\w*|zero)\b|n't\b", re.I)
+
+
+def affirmative_hit(pattern: str, text: str) -> str:
+    """Sentence where `pattern` appears WITHOUT a negation before it in the same sentence
+    ('it's a yarn weave' fails; 'not a yarn weave' / 'never Unsplash' pass). '' when none (2026-10-07)."""
+    for sent in re.split(r"(?<=[.!?])\s+|\n+", text or ""):
+        for m in re.finditer(pattern, sent, re.I | re.M):
+            if not _NEGATION.search(sent[:m.start()][-60:]):
+                return sent.strip()
+    return ""
+
+
 def words(text: str) -> int:
     return len(re.findall(r"\S+", text or ""))
 
@@ -95,6 +109,11 @@ def score_answer(spec: dict[str, Any], record: dict[str, Any], *, known_quotes: 
         if re.search(pat, text, re.I | re.M):
             grounded = False
             notes.append(f"wrong/invented: /{pat}/")
+    for pat in exp.get("must_not_affirm") or []:
+        hit = affirmative_hit(pat, text)
+        if hit:
+            grounded = False
+            notes.append(f"wrong/invented: /{pat}/ ({hit[:60]!r})")
     if known_quotes is not None:
         bad = sorted({q.upper() for q in _QUOTE_NUM_RE.findall(text)} - known_quotes)
         if bad:

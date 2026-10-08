@@ -56,3 +56,16 @@ def test_gate():
     assert not ok and any("clean" in r for r in reasons)
     assert not gate(base, dict(base))[0]
     assert summarize({"a": {"route": True, "grounded": True, "concise": False, "clean": True, "pass": False}})["pass"] == 0
+
+
+def test_affirmative_rule_and_attachment_refs():
+    from tests.max_regression.scoring import affirmative_hit
+    assert affirmative_hit("yarn", "It is a yarn weave.")
+    assert not affirmative_hit("yarn", "Constructed padded bars, NOT a yarn weave.")
+    assert not affirmative_hit("unsplash", "I never use Unsplash for live jobs.")
+    s = score_answer(QS["q60"], {"text": "MARLEYS_MODULE_MOCKUP.pdf in ~/jobs/marleys-hyattsville: two-piece squares, not yarn.",
+                                 "tools": ["find_files"]})
+    assert s["grounded"], s["notes"]
+    from tests.max_regression.run_eval import _attachment_refs
+    assert _attachment_refs({"file_id": "/x/a.pdf"}) == ["/x/a.pdf"]
+    assert _attachment_refs({"attachments": [{"path": "/x/b.pdf"}], "file": "/x/c.png"}) == ["/x/b.pdf", "/x/c.png"]

@@ -1438,7 +1438,7 @@
       "\\bbars?\\b"
      ]
     ],
-    "must_not": [
+    "must_not_affirm": [
      "unsplash",
      "yarn",
      "\\bwarp\\b",
@@ -1482,7 +1482,7 @@
       "mockup"
      ]
     ],
-    "must_not": [
+    "must_not_affirm": [
      "unsplash",
      "yarn",
      "\\bwarp\\b",
@@ -1538,7 +1538,7 @@
       "here"
      ]
     ],
-    "must_not": [
+    "must_not_affirm": [
      "unsplash",
      "yarn",
      "\\bwarp\\b",
