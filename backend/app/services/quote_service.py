@@ -953,16 +953,18 @@ def create_quote(data: dict) -> dict:
             )
             conn.execute("""
                 INSERT INTO quote_line_items (
-                    quote_id, line_number, item_type, description, quantity, unit, unit_price, subtotal,
+                    quote_id, line_number, item_type, description, room, quantity, unit, unit_price, subtotal,
                     category, rate_source, pricing_snapshot_json,
                     width, height, depth,
                     proposed_price, final_price, price_overridden, business_unit, computed_json,
                     drawing_id, drawing_svg, idea_diagram_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 quote_id, idx + 1,
                 li.get('item_type') or li.get('type') or '',
                 li.get('description', ''),
+                # 2026-10-08: the area (U banquette / L banquette / material) groups the estimate.
+                str(li.get('room') or li.get('area') or ''),
                 qty,
                 li.get('unit', 'ea'),
                 pricing["unit_price"],

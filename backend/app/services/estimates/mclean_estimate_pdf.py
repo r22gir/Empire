@@ -1207,6 +1207,83 @@ def group_estimate_sections(items: List[Dict[str, Any]]) -> List[Tuple[str, List
     return sections
 
 
+# ── 2026-10-08 (Rafael): upholstery estimate format ─────────────────────────────
+# Grouped by area (U banquette, L banquette, material); columns
+# Description | Qty | Unit | Sq ft | Price | Total; subtotal per area, then grand total,
+# deposit, balance; measurements in the sub-text, in fractions (never decimals).
+_SQFT_DESC_RE = re.compile(
+    r"\s*[-–—·,]?\s*(\d+(?:\.\d+)?)\s*(?:sq\.?\s*ft|sf|sqft|ft²)\s*(?:[x×@]|at)\s*\$?\s*(\d+(?:\.\d+)?)"
+    r"(?:\s*/\s*(?:sq\.?\s*ft|sf))?",
+    re.I)
+_SQFT_UNITS = {"sqft", "sq ft", "sq. ft", "sq.ft", "sf", "ft2", "ft²", "square feet", "sq_ft"}
+_DEC_INCH_RE = re.compile(r"(?<![\d.])(\d+\.\d+)\s*(\"|''|”|in\b\.?|inch(?:es)?\b)")
+
+
+def _num(v: Any) -> float | None:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None
+
+
+def _line_sqft(it: Dict[str, Any]) -> Tuple[float | None, float | None]:
+    """(sq ft per item, price per sq ft) for a line priced by area, else (None, None)."""
+    snap = it.get("pricing_snapshot")
+    if isinstance(snap, str):
+        try:
+            import json as _json
+            snap = _json.loads(snap)
+        except Exception:
+            snap = None
+    for src in (it, it.get("inputs") if isinstance(it.get("inputs"), dict) else None,
+                snap if isinstance(snap, dict) else None):
+        if not src:
+            continue
+        sq = next((_num(src.get(k)) for k in ("sq_ft", "sqft", "square_feet") if _num(src.get(k)) is not None), None)
+        pps = next((_num(src.get(k)) for k in ("price_per_sqft", "rate_per_sqft", "price_per_sq_ft")
+                    if _num(src.get(k)) is not None), None)
+        if sq is not None:
+            return sq, pps
+    unit = str(it.get("unit") or "").strip().lower()
+    if unit in _SQFT_UNITS:
+        return _num(it.get("quantity")), _line_rate(it)
+    m = _SQFT_DESC_RE.search(str(it.get("description") or ""))
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    return None, None
+
+
+def inches_to_fractions(text: str) -> str:
+    """'26.75"' -> '26 3/4"' (nearest 1/16). Measurements are never shown as decimals."""
+    from app.services.pricing.dimensions import format_inches
+
+    def _sub(m: "re.Match[str]") -> str:
+        out = format_inches(float(m.group(1)))
+        return out if m.group(2).startswith(('"', "''", "”")) else out.rstrip('"') + " " + m.group(2).strip()
+    return _DEC_INCH_RE.sub(_sub, text or "")
+
+
+def _sqft_layout(sections: List[Tuple[str, List[Dict[str, Any]]]]) -> bool:
+    return any(_line_sqft(it)[0] is not None for _n, lines in sections for it in lines)
+
+
+def _unit_text(it: Dict[str, Any]) -> str:
+    qty, _t = _qty_number(it)
+    unit = str(it.get("unit") or "").strip()
+    if unit.lower() in _SQFT_UNITS:
+        return "ea"
+    return _canon_unit(unit, qty) if unit else "ea"
+
+
+def _qty_text(it: Dict[str, Any]) -> str:
+    unit = str(it.get("unit") or "").strip().lower()
+    if unit in _SQFT_UNITS:
+        return "1"
+    _q, text = _qty_number(it)
+    return text or "1"
+
+
 def _description_max_width() -> float:
     """Description column stops short of the right-aligned qty."""
     qty_x = PW - MARGIN_R - 200
@@ -1231,10 +1308,17 @@ def _wrap_to_width(text: str, font: str, size: float, max_width: float) -> List[
     return lines
 
 
-def _description_lines(it: Dict[str, Any]) -> List[str]:
+def _description_lines(it: Dict[str, Any], max_width: float | None = None) -> List[str]:
     _serif, sans, _sans_b, _mono = _ensure_body_fonts()
-    raw = " ".join((it.get("description") or "Item").split()) or "Item"
-    lines = _wrap_to_width(raw, sans, _DESC_FONT, _description_max_width()) or ["Item"]
+    width = max_width or _description_max_width()
+    raw_desc = str(it.get("description") or "Item")
+    if _line_sqft(it)[0] is not None:
+        raw_desc = _SQFT_DESC_RE.sub("", raw_desc)
+    raw_desc = inches_to_fractions(raw_desc)
+    lines: List[str] = []
+    for part in [p for p in raw_desc.split("\n") if p.strip()] or ["Item"]:
+        lines.extend(_wrap_to_width(" ".join(part.split()), sans, _DESC_FONT, width))
+    lines = lines or ["Item"]
     dim = quote_item_dimension_text(it)
     if dim and all(dim not in line for line in lines):
         lines.append(dim)
@@ -1244,9 +1328,12 @@ def _description_lines(it: Dict[str, Any]) -> List[str]:
     return lines
 
 
+_SQFT_DESC_W = None  # set per render (narrower description column in the sq-ft layout)
+
+
 def _line_block_height(it: Dict[str, Any]) -> float:
     """Row height grows with every wrapped description line."""
-    return _DESC_LEADING * len(_description_lines(it)) + _ROW_GAP
+    return _DESC_LEADING * len(_description_lines(it, _SQFT_DESC_W)) + _ROW_GAP
 
 
 def _estimate_note_lines(quote: Dict[str, Any]) -> List[str]:
@@ -1292,6 +1379,15 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
         return _draw_grouped_client_copy(quote, area_grouping)
 
     sections = group_estimate_sections(items)
+    global _SQFT_DESC_W
+    sqft_mode = _sqft_layout(sections)
+    # Description | Qty | Unit | Sq ft | Price | Total
+    total_x = PW - MARGIN_R
+    price_x = total_x - 92
+    sqft_x = price_x - 72
+    unit_x = sqft_x - 58
+    qty6_x = unit_x - 48
+    _SQFT_DESC_W = (qty6_x - 40 - MARGIN_L) if sqft_mode else None
     notes = _estimate_note_lines(quote)
     section_h = 18.0
     columns_h = 16.0
@@ -1375,6 +1471,38 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
             elif kind == "section":
                 _section_label(c, MARGIN_L, y, str(op[1]), mono)
                 y -= section_h
+            elif kind == "columns" and sqft_mode:
+                c.setFont(sans_b, 7.5)
+                c.setFillColor(GOLD)
+                c.drawString(MARGIN_L, y, "Description")
+                c.drawRightString(qty6_x, y, "Qty")
+                c.drawRightString(unit_x, y, "Unit")
+                c.drawRightString(sqft_x, y, "Sq ft")
+                c.drawRightString(price_x, y, "Price")
+                c.drawRightString(total_x, y, "Total")
+                _hr(c, y - 4, weight=0.7, col=GOLD)
+                y -= columns_h
+            elif kind == "line" and sqft_mode:
+                it = op[1]
+                desc_lines = _description_lines(it, _SQFT_DESC_W)
+                sq, pps = _line_sqft(it)
+                for i, line in enumerate(desc_lines):
+                    c.setFont(sans_b if i == 0 else sans, _DESC_FONT if i == 0 else _DESC_FONT - 0.5)
+                    c.setFillColor(DK if i == 0 else DETAIL)
+                    c.drawString(MARGIN_L + (0 if i == 0 else 8), y, line)
+                    if i == 0:
+                        c.setFont(sans, _DESC_FONT)
+                        c.setFillColor(DK)
+                        c.drawRightString(qty6_x, y, _qty_text(it))
+                        c.drawRightString(unit_x, y, _unit_text(it))
+                        c.drawRightString(sqft_x, y, f"{sq:,.2f}" if sq is not None else "")
+                        if sq is not None and pps is not None:
+                            c.drawRightString(price_x, y, f"{pps:,.2f}")
+                        else:
+                            c.drawRightString(price_x, y, _rate_text(it).replace("$", ""))
+                        c.drawRightString(total_x, y, _money(_line_amount_value(it)))
+                    y -= _DESC_LEADING
+                y -= _ROW_GAP
             elif kind == "columns":
                 c.setFont(sans_b, 7.5)
                 c.setFillColor(GOLD)

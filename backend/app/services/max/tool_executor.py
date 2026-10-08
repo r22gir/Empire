@@ -2331,12 +2331,36 @@ def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult
         qty = li.get("quantity", 1)
         if (qty is None or qty == "") and inputs.get("quantity") is not None:
             qty = inputs.get("quantity")
-        normalized_items.append({
+        item = {
             "category":    li.get("category"),
             "description": description,
             "inputs":      inputs,
             "quantity":    qty if qty is not None else 1,
-        })
+        }
+        # 2026-10-08 (Rafael): estimates grouped by area with Sq ft | Price per sq ft columns.
+        area = li.get("room") or li.get("area") or li.get("section")
+        if isinstance(area, str) and area.strip():
+            item["room"] = area.strip()
+        for k in ("width", "height", "depth", "unit"):
+            if li.get(k) not in (None, ""):
+                item[k] = li.get(k)
+        sq = li.get("sq_ft", li.get("sqft", inputs.get("sq_ft")))
+        pps = li.get("price_per_sqft", li.get("rate_per_sqft", inputs.get("price_per_sqft")))
+        try:
+            sq_f = float(sq) if sq not in (None, "") else None
+            pps_f = float(pps) if pps not in (None, "") else None
+        except (TypeError, ValueError):
+            sq_f = pps_f = None
+        if sq_f is not None:
+            item["pricing_snapshot"] = {"sq_ft": round(sq_f, 2), **({"price_per_sqft": pps_f} if pps_f is not None else {})}
+            if pps_f is not None and not item["category"]:
+                item["category"] = "manual_line"
+            if pps_f is not None and str(item["category"] or "").lower() == "manual_line" \
+                    and inputs.get("unit_price") in (None, ""):
+                inputs["unit_price"] = round(sq_f * pps_f, 2)
+                inputs.setdefault("quantity", item["quantity"])
+                inputs.setdefault("description", description)
+        normalized_items.append(item)
 
     billed_by = params.get("billed_by")
     if not billed_by:
@@ -6086,6 +6110,7 @@ If a tool call fails with "Unknown tool", check the name against this list.
 - **draft_estimate_and_presentation** — Draft only. Builds the header-B estimate and the landscape presentation from `openings` (width, height, panels, optional sheers, install_flat, photos). Saves a draft quote. Never emails, never creates a Square link. The deposit line stays `Pay deposit online: [Square payment link]`. Re-line options per opening: default is "Re-line with lining and bump" ($150/width + lining + bump yardage); pass `"bump": false` for **"Re-line with lining (no bump)"** — lining only, no bump material, labor $125/width (Pricing Studio rule `reline_no_bump_per_width`). Widths are counted the same way for both (per 48" finished panel at 100% fullness). Use the no-bump option only when the founder/client asks for it; never change existing quotes.
   `{"tool": "draft_estimate_and_presentation", "billed_by": "nelmas_workroom", "project": {"address": "9408 Old Courthouse Rd"}, "openings": [{"room": "Living Room", "width": 160, "height": 119.75, "panels": 2}]}`
 - **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.** For drawn pieces (bench, banquette, cushion, back, headboard, panel, pillow) put the real inch dimensions on each line (`width`, `height`, `depth`, or `inputs`) so its idea diagram renders; a line without dimensions simply gets no diagram.
+  Upholstery estimates (Rafael 10/8): group lines by area with `room` ("U banquette", "L banquette", "Material"); for pieces priced by area pass `sq_ft` (per item) and `price_per_sqft` (category "manual_line"; the total is computed); description = piece name, then a second line with the measurements in fractions (e.g. "Seat back — main\n249 3/4\" run · back 26 3/4\" · 12\" channels"). The PDF shows Description | Qty | Unit | Sq ft | Price | Total, a subtotal per area, then grand total, deposit and balance.
   `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4, "packs": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`
   Categories (from PRICING_SPECS in `backend/app/data/product_catalog.py`): `drapery`, `roman_shade`, `valance`, `cornice`, `fabric_only`, `hardware_rod_1_1_8`, `hardware_ripplefold_track`, `hardware_rings`, `hardware_brackets`, `labor`, `pillow`, `cover`. NEW (D38 / H77): `com_fabric` (the one permitted $0 line — pass `customer_supplied: true` with `fabric_name` and `quantity`), `hardware_rod_set` ($325 flat for 4-8 ft, founder supplies `override_price` beyond), `hardware_ripplefold_set` ($250 flat for 4-8 ft, founder supplies `override_price` beyond), `installation` (pass `treatment: roman_shade` $95/each or `treatment: drapery` $145 for first 8 ft), `manual_line` (pass-through: `description` + `unit_price` + `quantity`). PricingInputError → HTTP 400 (never silent fallback for catalog items).
 

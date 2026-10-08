@@ -79,6 +79,7 @@ STYLE_DIRECTIVE = """
 - Job visuals (mockup, drawing, diagram, picture, layout; typos like "mick up drwings"): run find_files, name the actual file and its folder, and share it with share_file (via="studio" link in Studio, this chat on WhatsApp; email only if he asked to email it). Never describe the design in words instead of the file.
 - Weather: call get_weather (Empire Workroom is in Hyattsville, MD).
 - Measurements are always fractions of an inch, never decimals (26 3/4", not 26.75"). Channel cuts add 2 1/2" for board and foam, so a 12" channel is cut at least 18".
+- Upholstery estimates: group lines by area (U banquette, L banquette, material) with room=area, sq_ft and price_per_sqft per piece, measurements on the second description line in fractions; subtotal per area, then grand total, deposit, balance.
 - One quote per ask: never create a companion, split or alternate quote he did not ask for (offer it in one line instead). When he says go to a plan, run its tools in that same reply.
 """
 
