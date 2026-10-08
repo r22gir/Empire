@@ -654,6 +654,45 @@ def _result(
     }
 
 
+_TEXT_DIM = re.compile(
+    r'(?<![\w.])(\d{1,3}(?:\.\d+)?|\d{1,3}\s+\d/\d{1,2})\s*(?:"|”|\'\'|in\b|inch(?:es)?\b)', re.IGNORECASE)
+_TEXT_PAIR = re.compile(
+    r'(?<![\w.])(\d{1,3}(?:\.\d+)?)\s*(?:"|”|in\b)?\s*[x×]\s*(\d{1,3}(?:\.\d+)?)\s*(?:"|”|in\b)', re.IGNORECASE)
+
+
+def dimensions_from_text(text: str, axes: tuple = ("width", "height")) -> dict[str, float]:
+    """Inch dimensions written in a line description ('37.75" x 26.75"', '95.375 in long').
+
+    Only explicit inch values count; sq ft, yards, prices and quantities never do.
+    """
+    t = str(text or "")
+    if not t:
+        return {}
+    pair = _TEXT_PAIR.search(t)
+    if pair:
+        a, b = float(pair.group(1)), float(pair.group(2))
+        if a > 0 and b > 0:
+            return {axes[0]: a, axes[1]: b}
+    vals = []
+    for m in _TEXT_DIM.finditer(t):
+        raw = m.group(1)
+        try:
+            if " " in raw.strip():
+                whole, frac = raw.split()
+                n, d = frac.split("/")
+                v = float(whole) + float(n) / float(d)
+            else:
+                v = float(raw)
+        except Exception:
+            continue
+        if v > 0:
+            vals.append(v)
+    out: dict[str, float] = {}
+    for axis, v in zip(axes, vals):
+        out[axis] = v
+    return out
+
+
 def build_idea_diagram(item: Optional[dict]) -> dict[str, Any]:
     """Build an idea diagram for one quoted item. Never raises."""
     try:
@@ -702,6 +741,8 @@ def _build_idea_diagram(item: dict) -> dict[str, Any]:
             svg=_notice_svg(message),
         )
 
+    if not provided:
+        provided = dimensions_from_text(name, IDEA_CATEGORIES[category]["axes"])
     if not provided:
         label = IDEA_CATEGORIES[category]["label"]
         needed = ", ".join(IDEA_CATEGORIES[category]["axes"])
@@ -842,11 +883,9 @@ def quote_idea_html(quote: dict) -> str:
             f"{body}</div>"
         )
     except Exception as exc:
-        return (
-            '<p style="color:#8a5a00;font-size:0.85em">'
-            f"Idea diagrams unavailable: {_esc(exc)}. The quote totals are unchanged."
-            "</p>"
-        )
+        import logging as _logging
+        _logging.getLogger(__name__).warning("idea diagrams omitted: %s", exc)
+        return ""
 
 
 def _figure_html(diagram: dict, item: dict) -> str:
@@ -856,12 +895,9 @@ def _figure_html(diagram: dict, item: dict) -> str:
     svg = diagram.get("svg") or ""
     label = str(item.get("description") or item.get("name") or item.get("type") or diagram.get("category") or "Item")
     note = diagram.get("note") or ""
-    if "<svg" not in svg:
-        return (
-            '<p style="color:#8a5a00;font-size:0.85em">'
-            f"{_esc(label)}: {_esc(note or 'Idea diagram unavailable.')}"
-            "</p>"
-        )
+    if "<svg" not in svg or (status and status != "attached"):
+        # 2026-10-08 (Rafael): a sheet that cannot be drawn is omitted; never print a notice in a client doc.
+        return ""
     return (
         '<div style="margin:8px 0 14px;page-break-inside:avoid">'
         f'<p style="margin:0 0 4px;font-size:0.78em;color:#667085">{_esc(label)}</p>'
