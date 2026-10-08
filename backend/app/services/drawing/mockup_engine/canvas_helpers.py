@@ -18,9 +18,22 @@ WOOD_DARK = HexColor("#5E3D28")
 
 
 def format_in(val: float) -> str:
-    """Format decimal inches cleanly (e.g. 249.75 -> 249.75", 18.0 -> 18")."""
-    s = f"{val:.3f}".rstrip("0").rstrip(".")
-    return s + '"'
+    """Format decimal inches as fractions (e.g. 249.75 -> 249 3/4", 26.75 -> 26 3/4", 18.0 -> 18")."""
+    if val is None:
+        return ""
+    val_f = float(val)
+    sixteenths = round(val_f * 16)
+    whole = sixteenths // 16
+    rem = sixteenths - whole * 16
+    if rem == 0:
+        return f'{whole}"' if whole else '0"'
+    from math import gcd
+    g = gcd(rem, 16)
+    n = rem // g
+    d = 16 // g
+    if whole:
+        return f'{whole} {n}/{d}"'
+    return f'{n}/{d}"'
 
 
 def draw_chrome(

@@ -4,17 +4,30 @@ from __future__ import annotations
 from typing import List, Tuple, Dict, Any
 
 
-def compute_channels(total_length: float, target_channel_width: float = 12.0) -> Tuple[List[float], float]:
-    """Calculate channel segment widths and end trim/remainder.
+def compute_channels(
+    total_length: float,
+    target_channel_width: float = 12.0,
+    equal_distribution: bool = True,
+) -> Tuple[List[float], float]:
+    """Calculate channel segment widths.
 
-    Returns:
-        (widths_list, end_remainder)
-    If remaining width < 1e-6, returns [target_channel_width] * full, 0.0.
-    Otherwise splits remainder symmetrically between ends:
-        [rem / 2] + [target_channel_width] * full + [rem / 2], rem / 2
+    When equal_distribution is True (standard):
+        Each run gets the nearest whole number of equal channels filling the run,
+        with no leftover end strips:
+        - U left 37 3/4" -> 3 equal channels (~12.58" each)
+        - main 249 3/4" -> 21 equal channels (~11.89" each)
+        - right 48 1/2" -> 4 equal channels (~12.125" each)
+    When equal_distribution is False:
+        Full target_channel_width channels with remainder split symmetrically at ends.
     """
     if target_channel_width <= 0:
         return [total_length], 0.0
+
+    if equal_distribution:
+        n = max(1, int(round(total_length / target_channel_width)))
+        w = total_length / n
+        return [w] * n, 0.0
+
     full = int(total_length // target_channel_width)
     rem = total_length - full * target_channel_width
     if rem < 1e-6:
