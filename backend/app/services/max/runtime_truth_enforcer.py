@@ -1050,8 +1050,7 @@ def runtime_truth_failure_message(failures: list[str]) -> str:
             "truth_guard blocked response: %s", "; ".join(unique)[:500]
         )
     return (
-        "I need to run a tool before I can confirm that. "
-        "Ask me again and I'll pull the live result."
+        "I couldn't confirm that with a live result, so I'm not claiming it."
     )
 
 

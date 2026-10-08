@@ -82,6 +82,7 @@ from app.services.max.founder_action_continuation import (
     ANNOUNCED_ACTION_MAX_ROUNDS,
     announced_action_nudge,
     announces_action_without_tool,
+    go_without_action,
 )
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.runtime_truth_check import (
@@ -3543,8 +3544,9 @@ async def _chat_with_max_service_impl(
                 _announce_nudge = None
                 if (not _force_continue and _tool_round < 2
                         and _founder_continuation_rounds < ANNOUNCED_ACTION_MAX_ROUNDS
-                        and announces_action_without_tool(_asst_plain)):
-                    _force_continue, _announce_nudge = True, announced_action_nudge(_asst_plain)
+                        and (announces_action_without_tool(_asst_plain)
+                             or go_without_action(request.message, request.history, _tool_round, _asst_plain))):
+                    _force_continue, _announce_nudge = True, announced_action_nudge(_asst_plain, request.message)
                 if _force_continue and _founder_continuation_rounds < FOUNDER_CONTINUATION_MAX_ROUNDS:
                     _founder_continuation_rounds += 1
                     loop_messages.append(AIMessage(role="assistant", content=_asst_plain))
@@ -4747,8 +4749,9 @@ async def _chat_stream_impl(request: ChatRequest):
                     _announce_nudge = None
                     if (not _force_continue and _tool_round < 2
                             and _founder_continuation_rounds < ANNOUNCED_ACTION_MAX_ROUNDS
-                            and announces_action_without_tool(_asst_plain)):
-                        _force_continue, _announce_nudge = True, announced_action_nudge(_asst_plain)
+                            and (announces_action_without_tool(_asst_plain)
+                             or go_without_action(request.message, request.history, _tool_round, _asst_plain))):
+                        _force_continue, _announce_nudge = True, announced_action_nudge(_asst_plain, request.message)
                     if _force_continue and _founder_continuation_rounds < FOUNDER_CONTINUATION_MAX_ROUNDS:
                         _founder_continuation_rounds += 1
                         loop_messages.append(AIMessage(role="assistant", content=_asst_plain))

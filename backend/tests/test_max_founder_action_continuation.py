@@ -137,8 +137,10 @@ def test_blocked_email_ends_with_status_not_done(monkeypatch):
     )
     response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
 
-    assert "**Not done**" in response.response
+    # 2026-10-08: plain "Not done: ..." sentence, no Status / Done / To finish template.
+    assert "not done" in response.response.lower()
     assert "whitelist" in response.response.lower() or "blocked" in response.response.lower()
+    assert "**Status**" not in response.response and "To finish" not in response.response
     assert "Now generating" not in response.response
 
 
