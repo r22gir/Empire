@@ -20,7 +20,7 @@ INTERNAL_PATTERNS = [
     r"IMAGE_NOT_AVAILABLE", r"structured proof", r"\bMAX must\b", r"\*\*Status\*\*", r"\*\*Not done\*\*",
     r"\*\*To finish\*\*", r"Run send_quote_email", r"Email MAX is partial", r"Live Lookup summary",
     r"\[SYSTEM", r"tool block", r"```", r"Verified facts", r"Max's inference", r"theater-detector",
-    r"truth[ _]guard", r"runtime check required", r"I need to run a tool before I can confirm", r"couldn't confirm that with a live result",
+    r"truth[ _]guard", r"runtime check required", r"I need to run a tool before I can confirm", r"have not confirmed that with a live result",
     r"^Transcript:", r"Brand: Empire Workroom", r"Send was asked and blocked", r"_tool_block_parse_error",
     r"\{\s*\"tool\"\s*:", r"REDACTED_ENV_NAME", r"empire_runtime_truth_check", r"canonical selector",
     r"Here's what's new:\s*\n\s*- Recent live changes", r"MAX read the attached file\. Extracted context",

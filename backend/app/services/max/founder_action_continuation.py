@@ -59,6 +59,11 @@ _ANNOUNCED_ACTION_RE = re.compile(
 )
 
 
+_CONDITIONAL_RE = re.compile(
+    r"(?i)\b(?:once|when|if|after|as\s+soon\s+as)\s+you\b|\bsay\s+(?:yes|go|the\s+word)\b|"
+    r"\b(?:give|send)\s+me\s+the\s+go-?ahead\b|\bcuando\s+(?:me\s+)?digas\b|\bsi\s+(?:me\s+)?dices\b")
+
+
 def announces_action_without_tool(text: str | None) -> bool:
     """True when the reply announces an imminent action (and is not just asking Rafael)."""
     body = (text or "").strip()
@@ -66,6 +71,8 @@ def announces_action_without_tool(text: str | None) -> bool:
         return False
     if body.rstrip().endswith("?"):
         return False
+    if _CONDITIONAL_RE.search(body):
+        return False  # "I'll send it once you say yes" waits on Rafael; it is not an announcement
     return bool(_ANNOUNCED_ACTION_RE.search(body))
 
 
