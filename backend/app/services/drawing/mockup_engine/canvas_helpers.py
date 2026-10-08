@@ -33,7 +33,10 @@ def draw_chrome(
     total: int,
     company: str = "EMPIRE WORKROOM",
     tagline: str = "CUSTOM UPHOLSTERY & FABRICATION",
-    locale: str = "Hyattsville MD",
+    address: str = "5124 Frolich Ln, Hyattsville, MD 20781",
+    contact_info: str = "(703) 213-6484 · workroom.empirebox.store",
+    client_name: str = "",
+    client_address: str = "",
     doc_kind: str = "ILLUSTRATION",
     quote_tag: str = "EST-2026-000 · NOT SENT",
     footer_text: str = "",
@@ -46,11 +49,11 @@ def draw_chrome(
 
     # Top band
     c.setFillColor(INK)
-    c.rect(0, h - 46, w, 46, stroke=0, fill=1)
+    c.rect(0, h - 48, w, 48, stroke=0, fill=1)
 
     c.setFillColor(WHITE)
     c.setFont("Times-Bold", 17)
-    c.drawString(24, h - 30, company)
+    c.drawString(24, h - 31, company)
 
     # Shift tagline/locale right if company name is long (e.g. WOODCRAFT BY EMPIRE)
     comp_width = c.stringWidth(company, "Times-Bold", 17)
@@ -58,19 +61,30 @@ def draw_chrome(
 
     c.setFillColor(GOLD)
     c.setFont("Helvetica-Bold", 7.5)
-    c.drawString(tagline_x, h - 22, tagline)
+    c.drawString(tagline_x, h - 16, tagline)
 
+    # Empire brand address and contact (pulled from business config)
     c.setFillColor(HexColor("#DDDDDD"))
-    c.setFont("Helvetica", 7.5)
-    c.drawString(tagline_x, h - 34, locale)
+    c.setFont("Helvetica", 6.8)
+    c.drawString(tagline_x, h - 28, address)
+    c.drawString(tagline_x, h - 40, contact_info)
+
+    # Client/job info block (if provided)
+    if client_name:
+        client_str = f"CLIENT: {client_name}"
+        if client_address:
+            client_str += f" · {client_address}"
+        c.setFillColor(HexColor("#C0B298"))
+        c.setFont("Helvetica-Bold", 7.0)
+        c.drawRightString(w - 24, h - 13, client_str)
 
     c.setFillColor(GOLD)
     c.setFont("Helvetica-Bold", 9)
-    c.drawRightString(w - 24, h - 22, doc_kind)
+    c.drawRightString(w - 24, h - 25, doc_kind)
 
     c.setFillColor(WHITE)
     c.setFont("Helvetica-Bold", 7.5)
-    c.drawRightString(w - 24, h - 34, quote_tag)
+    c.drawRightString(w - 24, h - 37, quote_tag)
 
     # Page title / subtitle
     c.setFillColor(INK)
@@ -87,7 +101,7 @@ def draw_chrome(
 
     c.setFillColor(HexColor("#BBBBBB"))
     c.setFont("Helvetica", 7)
-    c.drawString(24, 9, footer_text or f"{company} · drawn from quoted dimensions")
+    c.drawString(24, 9, footer_text or f"{company} · {address} · drawn from quoted dimensions")
     c.drawRightString(w - 24, 9, f"PAGE {page} / {total} · {date_str} · NOT SENT")
 
 
@@ -154,8 +168,9 @@ def draw_legend(
     seat_label: str,
     runs: list[Tuple[str, float]],
     notes: list[str] = None,
+    col_width: float = 180.0,
 ) -> None:
-    """Draw legend and schedule block."""
+    """Draw legend and schedule block with proper column formatting."""
     c.setFont("Helvetica-Bold", 8)
     c.setFillColor(INK)
     c.drawString(lx, ly, "LEGEND")
@@ -182,8 +197,12 @@ def draw_legend(
         c.setFont("Helvetica", 7.5)
         yy = ly - 66
         for k, v in runs:
-            c.drawString(lx, yy, k)
-            c.drawRightString(lx + 120, yy, format_in(v))
+            # Cleanly truncate/fit label within column
+            lbl = k
+            if len(lbl) > 28:
+                lbl = lbl[:26] + ".."
+            c.drawString(lx, yy, lbl)
+            c.drawRightString(lx + col_width, yy, format_in(v))
             yy -= 11
     else:
         yy = ly - 40
@@ -193,4 +212,84 @@ def draw_legend(
         c.setFont("Helvetica", 6.5)
         for n in notes:
             c.drawString(lx, yy - 6, n)
+            yy -= 9
+
+
+def draw_casework_legend(
+    c: canvas.Canvas,
+    lx: float,
+    ly: float,
+    wood_species: str,
+    wood_finish: str,
+    boxes: list,
+    materials: list = None,
+    notes: list[str] = None,
+    col_width: float = 230.0,
+) -> None:
+    """Draw legend and carcass schedule specifically for casework and millwork."""
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColor(INK)
+    c.drawString(lx, ly, "CASEWORK & MILLWORK SPECIFICATION")
+
+    # Wood finish swatch
+    c.setFillColor(WOOD_FILL)
+    c.setStrokeColor(WOOD_DARK)
+    c.setLineWidth(0.5)
+    c.rect(lx, ly - 16, 18, 8, stroke=1, fill=1)
+    c.setFillColor(INK)
+    c.setFont("Helvetica", 7)
+    c.drawString(lx + 24, ly - 15, f"{wood_species} · {wood_finish}")
+
+    # Carcass boxes schedule
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(lx, ly - 40, "CARCASS BOXES & BAYS")
+    c.setFont("Helvetica", 7)
+    yy = ly - 54
+    for b in boxes:
+        b_name = getattr(b, "name", "Bay")
+        b_w = getattr(b, "width_in", 0.0)
+        b_h = getattr(b, "height_in", 0.0)
+        b_d = getattr(b, "depth_in", 0.0)
+        sh = getattr(b, "shelves", 0)
+        dr = getattr(b, "drawers", 0)
+        doors = getattr(b, "doors", 0)
+
+        details = []
+        if dr > 0: details.append(f"{dr} drws")
+        if doors > 0: details.append(f"{doors} drs")
+        if sh > 0: details.append(f"{sh} shlvs")
+        if not details: details.append("open")
+        det_str = ", ".join(details)
+
+        lbl = f"{b_name} ({det_str})"
+        if len(lbl) > 36:
+            lbl = lbl[:34] + ".."
+        dim_str = f"{format_in(b_w)} x {format_in(b_h)} x {format_in(b_d)}"
+
+        c.drawString(lx, yy, lbl)
+        c.drawRightString(lx + col_width, yy, dim_str)
+        yy -= 11
+
+    # Materials / hardware
+    if materials:
+        yy -= 4
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(lx, yy, "PRIMARY MATERIALS")
+        yy -= 11
+        c.setFont("Helvetica", 6.5)
+        for m in materials[:3]:
+            m_name = m.get("name") if isinstance(m, dict) else str(m)
+            m_qty = m.get("quantity", "") if isinstance(m, dict) else ""
+            m_unit = m.get("unit", "") if isinstance(m, dict) else ""
+            c.drawString(lx, yy, f"• {m_name}")
+            if m_qty:
+                c.drawRightString(lx + col_width, yy, f"{m_qty} {m_unit}")
+            yy -= 9
+
+    if notes:
+        yy -= 4
+        c.setFillColor(MUT)
+        c.setFont("Helvetica", 6.5)
+        for n in notes:
+            c.drawString(lx, yy - 4, n)
             yy -= 9

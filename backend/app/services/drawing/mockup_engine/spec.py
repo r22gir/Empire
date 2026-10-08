@@ -103,6 +103,14 @@ class CaseworkSpec(BaseModel):
     materials: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class ArmSpec(BaseModel):
+    """Armrest configuration (for chairs, sofas, club chairs)."""
+    has_arms: bool = False
+    arm_width_in: float = 3.5
+    arm_height_in: float = 24.0  # Height AFF plane
+    arm_style: Literal["straight", "track", "rolled", "flared"] = "track"
+
+
 class PieceSpec(BaseModel):
     """Complete structured parametric specification for any furniture or casework piece."""
     piece_id: Optional[str] = None
@@ -123,10 +131,12 @@ class PieceSpec(BaseModel):
     
     # Metadata
     client_name: str = "Client"
+    client_address: Optional[str] = None
     project_name: str = "Project"
     quote_number: str = "EST-2026-000"
     status: str = "NOT SENT"
     business_unit: Literal["workroom", "woodcraft"] = "workroom"
+    billed_by: Optional[str] = None
     notes: List[str] = Field(default_factory=list)
     
     # Footprint & overall
@@ -135,6 +145,7 @@ class PieceSpec(BaseModel):
     # Upholstery components (for seating, headboard, etc.)
     back: BackStyleSpec = Field(default_factory=BackStyleSpec)
     cushion: CushionSpec = Field(default_factory=CushionSpec)
+    arm: ArmSpec = Field(default_factory=ArmSpec)
     material: MaterialFinishSpec = Field(default_factory=MaterialFinishSpec)
     
     # Casework components (for wall units, credenzas, cabinets)
