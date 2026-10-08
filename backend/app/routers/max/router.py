@@ -925,6 +925,19 @@ def _is_action_tool(tool_call: dict[str, Any]) -> bool:
 _DEDUPE_SEND_TOOLS = {"send_email", "send_quote_email"}
 
 
+def _unrequested_send_error(tool_call: dict[str, Any], request: "ChatRequest") -> str | None:
+    """2026-10-08: find/show/look-up never auto-emails. The model is told (no silent rewrite)."""
+    try:
+        from app.services.max import answer_policy as _ap
+        err = _ap.unrequested_send_error(tool_call, request.message, request.history, request.channel)
+    except Exception as exc:  # never block a real send because the check itself broke
+        logger.debug(f"send-intent check failed: {exc}")
+        return None
+    if err:
+        logger.info(f"[chat] held unrequested {tool_call.get('tool')} for: {(request.message or '')[:80]}")
+    return err
+
+
 def _dedupe_send_tool_calls(tool_calls: list[dict[str, Any]], seen: set[str]) -> list[dict[str, Any]]:
     """Suppress identical outbound-email calls within one chat turn.
 
@@ -3565,6 +3578,12 @@ async def _chat_with_max_service_impl(
                 tc = _coerce_drawing_tool_call(
                     tc, request.message, request.image_filename,
                 )
+                _unasked = _unrequested_send_error(tc, request)
+                if _unasked:
+                    entry = {"tool": tc.get("tool"), "success": False, "error": _unasked}
+                    round_results.append(entry)
+                    tool_results_list.append(entry)
+                    continue
                 if (
                     tc.get("tool") == "db_query"
                     and _db_query_cap_reached(request.message, tool_results_list)
@@ -4773,6 +4792,14 @@ async def _chat_stream_impl(request: ChatRequest):
                     tc = _coerce_drawing_tool_call(
                         tc, request.message, request.image_filename,
                     )
+                    _unasked = _unrequested_send_error(tc, request)
+                    if _unasked:
+                        entry = {"tool": tc.get("tool"), "success": False, "error": _unasked}
+                        round_results.append(entry)
+                        tool_results_list.append(entry)
+                        _stream_step_lines.append(format_tool_progress_message(entry))
+                        yield f"data: {_safe_dumps(_tool_progress_event(entry))}\n\n"
+                        continue
                     if (
                         tc.get("tool") == "db_query"
                         and _db_query_cap_reached(request.message, tool_results_list)

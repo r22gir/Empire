@@ -69,13 +69,14 @@ STYLE_DIRECTIVE = """
 - No markdown headers, no "Verified" / "Max's inference" labels, no "Status / Done / Not done" blocks, no Sources section, unless he asked for research. Never paste tool output, guard messages or internal notes.
 - Ground every fact in a tool result or the context above (Chief e brief, memory, live state). If you did not look it up, look it up with a tool first; if a lookup fails, say so in one sentence.
 - Pick the tool yourself: search_quotes / get_quote for quotes (aliases: Dahlia = Dahlia Design = Nehal Elrefai; Philipp / Phillip / Naomi wall unit = Lauren Bassett / LB Design job), find_files for documents, PDFs, mockups and job visuals (never Unsplash for a live job), max_status for "what are you building / what's next / status", check_email for his inbox, get_services_health for "are you working", request_improvement when he asks to change or fix Empire, web_search only for public facts or when he asks for research, search_images only when he asks for public/stock inspiration.
-- Sending to Rafael himself (his own email, this chat, his WhatsApp) is a reply: do it right away with send_quote_email / send_email / share_file, no PIN, no second yes. Anyone else needs his explicit yes first; draft and ask.
+- Email only when he asks you to send, email or forward something. "Find / show / look up / pull up / what's" is answered here in the chat (in Studio, share_file with via="studio" gives a link); never email it, just offer to.
+- When he does ask to send to himself (his own email, this chat, his WhatsApp), that is a reply: do it right away with send_quote_email / send_email / share_file, no PIN, no second yes. Anyone else needs his explicit yes first; draft and ask.
 - Use his context: the Travelers claim is the house at 44 Burns St NE (claim JJN4296); Nelma's Workroom bills some jobs.
 - Reply in the language he wrote in (Spanish or English).
 - Short never means dropping facts: keep the client name, quote numbers (EST-...), totals and file names you looked up. Lists are plain "- " bullets.
 - Voice-message or quick status asks: under 70 words (quote number, client, total, status, next step).
 - "Brief me / today / rundown / what's on my plate": one "- " line per active job from the Chief e brief (Marley's, Dahlia/Nehal, Philipp/Naomi, Willard, the Travelers claim, ...) with its next step, then what waits on his tap. Under 150 words.
-- Job visuals (mockup, drawing, diagram, picture, layout; typos like "mick up drwings"): run find_files, name the actual file and its folder, and share it with share_file when he asks to see or send it. Never describe the design in words instead of the file.
+- Job visuals (mockup, drawing, diagram, picture, layout; typos like "mick up drwings"): run find_files, name the actual file and its folder, and share it with share_file (via="studio" link in Studio, this chat on WhatsApp; email only if he asked to email it). Never describe the design in words instead of the file.
 - Weather: call get_weather (Empire Workroom is in Hyattsville, MD).
 """
 
@@ -404,3 +405,62 @@ def prelookup_message(message: Optional[str], results: list[tuple[str, str]], hi
         rules.append("List each active job by name with its next step (one '- ' line each), then what waits on his tap.")
     parts.append(" ".join(rules))
     return "\n\n".join(parts)
+
+
+# ── 2026-10-08: no unrequested sends ────────────────────────────────────────────────────────────
+# Rafael: "find / show / look up" must never auto-email. Email (or a WhatsApp push from Studio) only
+# when he asked to send / email / forward, or said yes to Max's offer to send.
+_SEND_ASK = re.compile(
+    r"\b(?:send|sent|resend|e-?mail|mail\s+(?:it|me|them|this|that)|forward|fwd|attach|text\s+me|whats\s?app\s+me|"
+    r"m[aá]nd[ae]|m[aá]ndame|m[aá]ndalo|m[aá]ndamel[oa]s?|env[ií]a|env[ií]ame|env[ií]alo|reenv[ií]a|correo)\b", re.I)
+_VOICE_ONLY = re.compile(r"\bvoice\s*(?:message|note|memo|msg)\b|\baudio\b|\bnota\s+de\s+voz\b", re.I)
+_EMAIL_WORD = re.compile(r"\b(?:e-?mail|correo|pdf|attach|inbox|gmail)\b", re.I)
+_AFFIRM = re.compile(r"^\s*(?:yes|yeah|yep|yup|ok(?:ay)?|sure|go|go ahead|do it|please|send it|si|s[ií]|dale|claro|hazlo|"
+                     r"yes please|please do|ok send|ok go)[\s.!,]*$", re.I)
+_OFFERED_SEND = re.compile(r"\b(?:send|e-?mail|forward|attach|share)\b", re.I)
+EMAIL_SEND_TOOLS = {"send_email", "send_quote_email"}
+
+
+def _last_assistant(history: Any) -> str:
+    for h in reversed(list(history or [])):
+        role = h.get("role") if isinstance(h, dict) else getattr(h, "role", "")
+        if role == "assistant":
+            c = h.get("content") if isinstance(h, dict) else getattr(h, "content", "")
+            return str(c or "")
+    return ""
+
+
+def asked_to_send(message: Optional[str], history: Any = None) -> bool:
+    """True when the latest message asks to send/email/forward (or says yes to an offer to send)."""
+    t = message or ""
+    if _SEND_ASK.search(t):
+        # "send me like a voice message ... status" is a voice-style answer, not an email.
+        if _VOICE_ONLY.search(t) and not _EMAIL_WORD.search(t):
+            return False
+        return True
+    if _AFFIRM.match(t) and _OFFERED_SEND.search(_last_assistant(history)[-600:]):
+        return True
+    return False
+
+
+def unrequested_send_error(tool_call: dict, message: Optional[str], history: Any = None,
+                           channel: Optional[str] = None) -> Optional[str]:
+    """Return an error for an outbound send Rafael did not ask for, else None. Never rewrites the call."""
+    name = str((tool_call or {}).get("tool") or "").strip()
+    if name in EMAIL_SEND_TOOLS:
+        kind = "email"
+    elif name == "share_file":
+        via = str(tool_call.get("via") or tool_call.get("channel") or "studio").strip().lower()
+        if via in ("mail", "gmail", "email"):
+            kind = "email"
+        elif via in ("wa", "whats app", "whatsapp") and (channel or "").lower() != "whatsapp":
+            kind = "WhatsApp message"
+        else:
+            return None  # Studio link, or a file into the WhatsApp chat he is writing from
+    else:
+        return None
+    if asked_to_send(message, history):
+        return None
+    return (f"Not sent: Rafael asked to find/show/look this up, not to send it, so no {kind} went out. "
+            "Answer here with what you found (in Studio use share_file with via=\"studio\" for a link) "
+            "and offer to email it if he wants.")

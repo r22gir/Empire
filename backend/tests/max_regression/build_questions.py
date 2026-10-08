@@ -37,8 +37,8 @@ q("q05", "quote_number", "studio", "pull up EST-2026-083", "variant",
 q("q06", "quote_client", "studio", "What's the latest quote for Dahlia?", "2026-10-04 voice 17:01",
   {"tools_any": QLOOK, "tools_none": WEB, "must_any": [["EST-2026-298"]], "must_not": ["2,430", "twenty-five line items"], "max_words": 80})
 q("q07", "quote_client", "studio", "Can you send me like a voice message, like a status on the last Marley's quote?", "2026-10-04 voice-doc 20:03",
-  {"tools_any": QLOOK, "tools_none": WEB, "must_any": [["EST-2026-29[45]", "EST-2026-27[2-5]", "INV-2026-123"]],
-   "must_not": ["Missing:", "Client name", "What to make"], "max_words": 90})
+  {"tools_any": QLOOK, "tools_none": WEB, "must_any": [["EST-2026-299", "EST-2026-300"]],
+   "must_not": ["Missing:", "Client name", "What to make"], "max_words": 90})  # latest Marley's: EST-2026-299/300 (2026-10-07)
 q("q08", "quote_client", "whatsapp", "Send me last quote", "2026-10-04 voice-doc 20:05",
   {"tools_none": WEB, "must_any": [["EST-2026-29[78]", "which"]], "must_not": ["Missing:", "What to make"], "max_words": 80})
 q("q09", "quote_client", "studio", "Isn't there an accompanying quote, like a sister quote, basically like the phase two part?",
