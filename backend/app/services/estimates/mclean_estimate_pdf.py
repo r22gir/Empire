@@ -426,6 +426,16 @@ def _estimate_bill() -> WorkroomBilling:
     )
 
 
+def _quote_rev(quote: Dict[str, Any]) -> str:
+    """Revision letter: quote.revision / metadata.revision, or notes starting 'Rev B.'; default A."""
+    meta = quote.get("metadata") if isinstance(quote.get("metadata"), dict) else {}
+    for raw in (quote.get("revision"), meta.get("revision")):
+        if isinstance(raw, str) and re.fullmatch(r"[A-Za-z]", raw.strip()):
+            return raw.strip().upper()
+    m = re.match(r"\s*rev(?:ision)?\.?\s+([A-Za-z])\b", str(quote.get("notes") or ""), re.I)
+    return m.group(1).upper() if m else "A"
+
+
 def _paint_page_chrome(c: canvas.Canvas, quote: Dict[str, Any], page: int, pages: int) -> None:
     client, project = _client_project(quote)
     qn = quote.get("quote_number") or quote.get("id") or "ESTIMATE"
@@ -440,7 +450,7 @@ def _paint_page_chrome(c: canvas.Canvas, quote: Dict[str, Any], page: int, pages
         powered_by=bill.chrome_subheader_upper,
         client=client,
         project=project,
-        rev="A",
+        rev=_quote_rev(quote),
         date=created,
         status=_status_banner(quote),
     )

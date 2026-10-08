@@ -72,3 +72,10 @@ def test_plain_fractions_in_replies():
     assert plain_fractions('26¾" back, ½" ply') == '26 3/4" back, 1/2" ply'
     assert format_inches(14.1875) == '14 3/16"'
     assert '32 3/4"' in clean_reply('Cut each channel at 32¾" minimum.')
+
+
+def test_rev_letter_from_notes():
+    from app.services.estimates.mclean_estimate_pdf import _quote_rev
+    assert _quote_rev({"notes": "Rev B. Seat backs: 45 channels"}) == "B"
+    assert _quote_rev({"notes": "Reverse the seams"}) == "A"
+    assert _quote_rev({}) == "A"
