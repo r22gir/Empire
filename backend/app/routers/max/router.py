@@ -999,6 +999,20 @@ def _bundle_send_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, 
     return final
 
 
+def _companion_quote_error(tool_call: dict[str, Any], request: "ChatRequest",
+                           tool_results: list[dict[str, Any]]) -> str | None:
+    """2026-10-08: one quote per ask; a companion/split quote needs Rafael's explicit ask."""
+    try:
+        from app.services.max import answer_policy as _ap
+        err = _ap.unrequested_companion_quote_error(tool_call, request.message, request.history, tool_results)
+    except Exception as exc:
+        logger.debug(f"companion-quote check failed: {exc}")
+        return None
+    if err:
+        logger.info(f"[chat] held companion {tool_call.get('tool')} for: {(request.message or '')[:80]}")
+    return err
+
+
 def _unrequested_send_error(tool_call: dict[str, Any], request: "ChatRequest") -> str | None:
     """2026-10-08: find/show/look-up never auto-emails. The model is told (no silent rewrite)."""
     try:
@@ -3654,7 +3668,7 @@ async def _chat_with_max_service_impl(
                 tc = _coerce_drawing_tool_call(
                     tc, request.message, request.image_filename,
                 )
-                _unasked = _unrequested_send_error(tc, request)
+                _unasked = _unrequested_send_error(tc, request) or _companion_quote_error(tc, request, tool_results_list)
                 if _unasked:
                     entry = {"tool": tc.get("tool"), "success": False, "error": _unasked}
                     round_results.append(entry)
@@ -4870,7 +4884,7 @@ async def _chat_stream_impl(request: ChatRequest):
                     tc = _coerce_drawing_tool_call(
                         tc, request.message, request.image_filename,
                     )
-                    _unasked = _unrequested_send_error(tc, request)
+                    _unasked = _unrequested_send_error(tc, request) or _companion_quote_error(tc, request, tool_results_list)
                     if _unasked:
                         entry = {"tool": tc.get("tool"), "success": False, "error": _unasked}
                         round_results.append(entry)

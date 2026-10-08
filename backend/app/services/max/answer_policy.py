@@ -78,6 +78,7 @@ STYLE_DIRECTIVE = """
 - "Brief me / today / rundown / what's on my plate": one "- " line per active job from the Chief e brief (Marley's, Dahlia/Nehal, Philipp/Naomi, Willard, the Travelers claim, ...) with its next step, then what waits on his tap. Under 150 words.
 - Job visuals (mockup, drawing, diagram, picture, layout; typos like "mick up drwings"): run find_files, name the actual file and its folder, and share it with share_file (via="studio" link in Studio, this chat on WhatsApp; email only if he asked to email it). Never describe the design in words instead of the file.
 - Weather: call get_weather (Empire Workroom is in Hyattsville, MD).
+- One quote per ask: never create a companion, split or alternate quote he did not ask for (offer it in one line instead). When he says go to a plan, run its tools in that same reply.
 """
 
 
@@ -464,3 +465,34 @@ def unrequested_send_error(tool_call: dict, message: Optional[str], history: Any
     return (f"Not sent: Rafael asked to find/show/look this up, not to send it, so no {kind} went out. "
             "Answer here with what you found (in Studio use share_file with via=\"studio\" for a link) "
             "and offer to email it if he wants.")
+
+
+# ── 2026-10-08: no unrequested companion quotes ─────────────────────────────────────────────────
+# EST-2026-300 (U-only copy of EST-2026-299) was created next to the quote Rafael asked for.
+QUOTE_CREATE_TOOLS = {"create_engine_quote", "create_quick_quote", "create_quote", "photo_to_quote", "create_v2_quote"}
+_MULTI_QUOTE_ASK = re.compile(
+    r"\b(?:two|2|three|3|four|4|both|each|separate(?:ly)?|split|another|second|other|option|options|alternat\w*|"
+    r"phases?|per\s+(?:bench|room|piece|area|section)|quotes|estimates|cotizaciones|dos|tres|cada|separad[ao]s?|otra)\b",
+    re.I)
+
+
+def unrequested_companion_quote_error(tool_call: dict, message: Optional[str], history: Any,
+                                      tool_results: Any) -> Optional[str]:
+    """Second quote creation in one turn without Rafael asking for more than one -> error to the model."""
+    name = str((tool_call or {}).get("tool") or "").strip()
+    if name not in QUOTE_CREATE_TOOLS:
+        return None
+    prior = []
+    for e in tool_results or []:
+        if isinstance(e, dict) and e.get("tool") in QUOTE_CREATE_TOOLS and e.get("success"):
+            r = e.get("result") or {}
+            prior.append(str(r.get("quote_number") or r.get("quote_id") or "a quote") if isinstance(r, dict) else "a quote")
+    if not prior:
+        return None
+    t = message or ""
+    if _MULTI_QUOTE_ASK.search(t):
+        return None
+    if _AFFIRM.match(t) and _MULTI_QUOTE_ASK.search(_last_assistant(history)[-800:]):
+        return None
+    return (f"Not created: Rafael asked for one quote and {prior[0]} was already created this turn. "
+            "A companion, split or alternate quote needs his explicit ask; mention it in one line if useful.")
