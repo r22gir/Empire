@@ -6,11 +6,20 @@ from pydantic import BaseModel, Field
 
 
 class SegmentSpec(BaseModel):
-    """A segment or leg of a footprint (e.g. 'left', 'main', 'right', or casework bay)."""
+    """A segment or leg of a footprint (e.g. 'left', 'main', 'right', or casework bay).
+
+    Can be straight or curved arc (specified by radius_in + sweep_deg, or chord_in + rise_in).
+    """
     name: str = "main"
     length_in: float
     depth_in: Optional[float] = None  # if different from piece overall
     label: Optional[str] = None
+    # Curved segment properties
+    is_curved: bool = False
+    radius_in: Optional[float] = None
+    sweep_deg: Optional[float] = None
+    chord_in: Optional[float] = None
+    rise_in: Optional[float] = None
 
 
 class FootprintSpec(BaseModel):
@@ -24,6 +33,9 @@ class FootprintSpec(BaseModel):
     overall_depth_in: Optional[float] = None
     # Thickness of back band in plan (drawing aid only, e.g. 3.0")
     back_thickness_in: float = 3.0
+    # Corner geometry: square or radiused inside corners
+    corner_style: Literal["square", "curved", "miter"] = "square"
+    inside_corner_radius_in: float = 0.0
 
 
 class BackStyleSpec(BaseModel):
@@ -49,6 +61,9 @@ class BackStyleSpec(BaseModel):
     tuft_spacing_y_in: Optional[float] = None
     # Net back height above seat cushion
     net_back_height_in: float = 26.75
+    # Back lean / rake angle (degrees from vertical, default 0.0 vertical)
+    rake_deg: float = 0.0
+    back_lean_in: float = 0.0
 
 
 class CushionSpec(BaseModel):
@@ -58,6 +73,7 @@ class CushionSpec(BaseModel):
     seat_height_in: float = 18.0  # AFF plane
     cushion_thickness_in: float = 4.0  # Nominal cushion thickness
     cushion_width_in: Optional[float] = None  # Split/run cushion width
+    front_overhang_in: float = 1.0  # Cushion overhang past base/platform
 
 
 class MaterialFinishSpec(BaseModel):

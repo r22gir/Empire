@@ -69,11 +69,18 @@ def _default_style_for(item_type: str) -> Optional[str]:
 
 @router.get("/drawings/files/{filename}")
 async def serve_drawing_file(filename: str):
-    """Serve generated drawing files (SVG, PDF)."""
-    base_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
+    """Serve generated drawing files (SVG, PDF, HTML, PNG, GLB)."""
+    from app.services.drawing.canonical_path import canonical_drawings_dir
+    base_dir = canonical_drawings_dir()
     file_path = os.path.join(base_dir, filename)
     if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Drawing file not found")
+        # Fallback to legacy path if present
+        legacy_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
+        legacy_path = os.path.join(legacy_dir, filename)
+        if os.path.exists(legacy_path):
+            file_path = legacy_path
+        else:
+            raise HTTPException(status_code=404, detail="Drawing file not found")
     # Determine media type
     if filename.endswith(".svg"):
         media_type = "image/svg+xml"
@@ -81,6 +88,10 @@ async def serve_drawing_file(filename: str):
         media_type = "application/pdf"
     elif filename.endswith(".png"):
         media_type = "image/png"
+    elif filename.endswith(".html"):
+        media_type = "text/html; charset=utf-8"
+    elif filename.endswith(".glb"):
+        media_type = "model/gltf-binary"
     else:
         media_type = "application/octet-stream"
     return FileResponse(file_path, media_type=media_type)
@@ -88,9 +99,10 @@ async def serve_drawing_file(filename: str):
 
 class MockupFromSpecRequest(BaseModel):
     spec: Optional[dict] = None
-    preset: Optional[str] = None  # marleys_u, marleys_l, straight_bench, l_bench, u_bench, chair, wall_unit
+    preset: Optional[str] = None  # marleys_u, marleys_l, marleys_u_curved, straight_bench, l_bench, u_bench, chair, wall_unit
     quote_id: Optional[str] = None
     job_id: Optional[str] = None
+    format: Optional[str] = "pdf"  # "pdf" (plan + elevation sheets) or "3d" (live HTML viewer + 3D stills + glb)
 
 
 @router.post("/drawings/mockup")
@@ -100,10 +112,11 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
     """
     from app.services.drawing.mockup_engine.spec import PieceSpec, FootprintSpec, SegmentSpec, BackStyleSpec, CushionSpec, MaterialFinishSpec
     from app.services.drawing.mockup_engine.presets import (
-        marleys_u_and_l_preset, straight_bench_preset, l_bench_preset,
+        marleys_u_and_l_preset, marleys_u_with_curved_corners_preset, straight_bench_preset, l_bench_preset,
         u_bench_preset, single_chair_preset, woodcraft_wall_unit_preset
     )
     from app.services.drawing.mockup_engine.generator import render_piece_mockup_pdf, render_pdf_to_png_previews
+    from app.services.drawing.mockup_engine.renderers_3d import render_3d
     from app.services.drawing.canonical_path import canonical_drawings_dir
 
     out_dir = canonical_drawings_dir()
@@ -117,6 +130,8 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
         p = req.preset.lower().strip()
         if p in ("marleys_u", "marleys_u_bench", "u_channel"):
             piece_spec = marleys_u_and_l_preset()["u_bench"]
+        elif p in ("marleys_u_curved", "marleys_u_with_curved_corners", "curved_u"):
+            piece_spec = marleys_u_with_curved_corners_preset()
         elif p in ("marleys_l", "marleys_l_bench", "l_channel"):
             piece_spec = marleys_u_and_l_preset()["l_bench"]
         elif p in ("straight", "straight_bench"):
@@ -190,9 +205,27 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
     if not piece_spec:
         raise HTTPException(status_code=400, detail="Must provide spec, preset, quote_id, or job_id")
 
-    # Generate PDF
     file_id = uuid.uuid4().hex[:12]
     clean_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", piece_spec.name.lower()).strip("_")
+
+    if (req.format or "").lower().strip() == "3d":
+        res_3d = render_3d(piece_spec, str(out_dir), prefix=f"mockup_3d_{clean_name}_{file_id}")
+        return {
+            "success": True,
+            "format": "3d",
+            "html_path": res_3d["html_path"],
+            "html_filename": res_3d["html_filename"],
+            "viewer_url": f"/api/v1/drawings/files/{res_3d['html_filename']}",
+            "stills": res_3d["stills"],
+            "still_filenames": res_3d["still_filenames"],
+            "still_urls": [f"/api/v1/drawings/files/{fn}" for fn in res_3d["still_filenames"]],
+            "glb_path": res_3d["glb_path"],
+            "glb_filename": res_3d["glb_filename"],
+            "glb_url": f"/api/v1/drawings/files/{res_3d['glb_filename']}" if res_3d["glb_filename"] else None,
+            "spec": piece_spec.model_dump(),
+        }
+
+    # Generate PDF
     pdf_filename = f"mockup_{clean_name}_{file_id}.pdf"
     pdf_path = str(out_dir / pdf_filename)
 
@@ -204,6 +237,7 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
 
     return {
         "success": True,
+        "format": "pdf",
         "pdf_path": pdf_path,
         "pdf_filename": pdf_filename,
         "pdf_url": f"/api/v1/drawings/files/{pdf_filename}",

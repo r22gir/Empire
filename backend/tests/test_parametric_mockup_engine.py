@@ -242,3 +242,62 @@ def test_max_tool_execution():
     assert res.result["success"] is True
     assert "pdf_path" in res.result
     assert len(res.result["png_previews"]) >= 1
+
+
+def test_3d_render_and_curved_corners(tmp_path):
+    """Test 3D live model HTML generation, 4 rendered stills, and curved corners preset."""
+    from app.services.drawing.mockup_engine import (
+        render_3d, marleys_u_and_l_preset, marleys_u_with_curved_corners_preset,
+    )
+    
+    # 1. Plain Marley's U Bench 3D
+    u_plain = marleys_u_and_l_preset()["u_bench"]
+    res_plain = render_3d(u_plain, str(tmp_path / "plain_3d"), prefix="plain_u")
+    assert os.path.exists(res_plain["html_path"])
+    assert len(res_plain["stills"]) == 4
+    for st in res_plain["stills"]:
+        assert os.path.exists(st)
+        assert os.path.getsize(st) > 1000
+    assert os.path.exists(res_plain["glb_path"])
+    
+    with open(res_plain["html_path"], "r") as f:
+        html = f.read()
+    assert "EMPIRE WORKROOM" in html
+    assert "MARLEY'S U BENCH" in html
+    assert "Three.js" in html or "three.min.js" in html
+
+    # 2. Marley's U Bench with 24" curved inside corners
+    u_curved = marleys_u_with_curved_corners_preset()
+    assert u_curved.footprint.corner_style == "curved"
+    assert u_curved.footprint.inside_corner_radius_in == 24.0
+    
+    res_curved = render_3d(u_curved, str(tmp_path / "curved_3d"), prefix="curved_u")
+    assert os.path.exists(res_curved["html_path"])
+    assert len(res_curved["stills"]) == 4
+    for st in res_curved["stills"]:
+        assert os.path.exists(st)
+        assert os.path.getsize(st) > 1000
+
+    # 3. Test API endpoint with format="3d"
+    api_res = asyncio.run(generate_mockup_drawing(MockupFromSpecRequest(
+        preset="marleys_u_curved",
+        format="3d",
+    )))
+    assert api_res["success"] is True
+    assert api_res["format"] == "3d"
+    assert os.path.exists(api_res["html_path"])
+    assert len(api_res["stills"]) == 4
+    assert "viewer_url" in api_res
+
+    # 4. Test Max tool with format="3d"
+    max_tool_call = {
+        "tool": "generate_parametric_mockup",
+        "preset": "marleys_u",
+        "format": "3d",
+    }
+    max_res = execute_tool(max_tool_call, founder=True)
+    assert max_res.success is True
+    assert max_res.result["format"] == "3d"
+    assert "viewer_url" in max_res.result
+    assert len(max_res.result["stills"]) == 4
+

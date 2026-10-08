@@ -3443,7 +3443,7 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
 
 @tool("generate_parametric_mockup")
 def _generate_parametric_mockup(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Parametric mockup tool: takes a spec, preset, or quote_id/job_id and returns PDF + PNG previews."""
+    """Parametric mockup tool: takes a spec, preset, or quote_id/job_id and returns PDF + PNG previews or 3D live viewer."""
     try:
         import asyncio
         from app.routers.drawings import generate_mockup_drawing, MockupFromSpecRequest
@@ -3453,6 +3453,7 @@ def _generate_parametric_mockup(params: dict, desk: Optional[str] = None) -> Too
             preset=params.get("preset"),
             quote_id=params.get("quote_id"),
             job_id=params.get("job_id"),
+            format=params.get("format", "pdf"),
         )
         res = _run_async(generate_mockup_drawing(req))
         return ToolResult(tool="generate_parametric_mockup", success=True, result=res)
@@ -5573,9 +5574,14 @@ State machine: `draft → founder_review → sent → accepted → in_production
   `{"tool": "svg_to_pdf", "svg_content": "<svg>...</svg>", "output_path": "/home/rg/empire-repo/uploads/drawing.pdf"}`
   Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`
   IMPORTANT: Always use this tool to convert SVG drawings to PDF. Do NOT write conversion scripts.
-- **generate_parametric_mockup** — Generate parametric architectural drawings & PNG previews for any furniture, upholstery, or millwork/casework piece.
-  Can take a full `spec`, a `preset` ("marleys_u", "marleys_l", "straight_bench", "l_bench", "u_bench", "chair", "wall_unit"), or a `quote_id`/`job_id`.
+- **generate_parametric_mockup** — Generate parametric architectural drawings (plan, front elevations, side sections) or interactive 3D live models with rendered stills for any furniture, upholstery, or millwork/casework piece.
+  Can take a full `spec`, a `preset` ("marleys_u", "marleys_u_curved", "marleys_l", "straight_bench", "l_bench", "u_bench", "chair", "wall_unit"), or a `quote_id`/`job_id`.
+  **When to use 3D vs plan/elevation:**
+  - Pass `"format": "3d"` when the user asks to "show in 3D", "live model", "orbit/rotate", "3D view", or needs perspective/isometric renders of the piece. Returns a live Three.js viewer link (`viewer_url`), 4 rendered stills (`iso`, `front`, `top`, `rear`), and optional `glb_url`.
+  - Pass `"format": "pdf"` (the default) for formal architectural shop drawings, submittal documents, dimensioned plan views, front elevations, and material schedules.
   When quote lines lack dimensions, omits drawing rather than erroring.
+  `{"tool": "generate_parametric_mockup", "preset": "marleys_u", "format": "3d"}`
+  `{"tool": "generate_parametric_mockup", "preset": "marleys_u_curved", "format": "3d"}`
   `{"tool": "generate_parametric_mockup", "preset": "straight_bench"}`
   `{"tool": "generate_parametric_mockup", "quote_id": "EST-2026-299"}`
 - **sketch_to_drawing** — Generate professional architectural drawings for ANY item type. Auto-classifies input and routes to the correct renderer. Returns a PDF file path.
