@@ -27,7 +27,8 @@ from typing import Any, Callable, Optional
 logger = logging.getLogger("max.voice_brain")
 
 CACHE_TTL = 60                # seconds
-MAX_INSTRUCTION_CHARS = 28000  # ~7k tokens hard cap
+MAX_INSTRUCTION_CHARS = 34000  # ~8.5k tokens hard cap (2026-10-06: + Chief e brief)
+VOICE_BRIEF_CHARS = 6000
 SOURCE_TIMEOUT = 6.0           # seconds per source before we give up on it
 
 _cache: dict[str, Any] = {"text": None, "at": 0.0, "meta": None}
@@ -287,14 +288,23 @@ async def _run_async(coro_fn, label: str, meta: dict) -> str:
         return ""
 
 
+def chief_e_brief() -> str:
+    """Chief e's brief (Rafael's rules, pricing, active jobs, claims), same loader text chat uses.
+    Empty for family editions or when the file is missing."""
+    from app.services.max.chief_e_brief import load_chief_e_brief
+    return load_chief_e_brief() or ""
+
+
 def assemble(*, model: str, read_tools: list[str], core: str, snapshot: str,
-             brain: str, memory: str) -> str:
+             brain: str, memory: str, brief: str = "") -> str:
     parts = [
         VOICE_ROLE.format(model=model),
         VOICE_STYLE,
         VOICE_CAPABILITIES.format(read_tools=", ".join(read_tools)),
         VOICE_TRUTH,
     ]
+    if brief:
+        parts.append("# Chief e brief (Rafael's rules, prices, jobs; newest wins)\n" + _clip(brief, VOICE_BRIEF_CHARS))
     if snapshot:
         parts.append("# Live snapshot (loaded at call start)\n" + _clip(snapshot, 4500))
     if core:
@@ -311,14 +321,15 @@ def assemble(*, model: str, read_tools: list[str], core: str, snapshot: str,
 
 async def build_voice_instructions(*, model: str, read_tools: list[str]) -> tuple[str, dict]:
     meta: dict[str, Any] = {}
-    core, snapshot, brain, memory = await asyncio.gather(
+    core, snapshot, brain, memory, brief = await asyncio.gather(
         _run_sync(operating_core, "operating_core", meta),
         _run_sync(live_snapshot, "live_snapshot", meta),
         _run_sync(live_brain_context, "live_brain_context", meta),
         _run_async(memory_context, "memory_context", meta),
+        _run_sync(chief_e_brief, "chief_e_brief", meta),
     )
     text = assemble(model=model, read_tools=read_tools, core=core, snapshot=snapshot,
-                    brain=brain, memory=memory)
+                    brain=brain, memory=memory, brief=brief)
     meta["chars"] = len(text)
     meta["approx_tokens"] = len(text) // 4
     return text, meta

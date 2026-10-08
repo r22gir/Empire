@@ -5,6 +5,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X, Copy, Check, ExternalLink } from 'lucide-react';
 import ChatHistoryPanel from '../ChatHistoryPanel';
 import { Message } from '../../lib/types';
+import { splitForView } from '../../hooks/chatQueue';
 import { API } from '../../lib/api';
 import QuoteCard from '../business/quotes/QuoteCard';
 import InlineDrawing from '../InlineDrawing';
@@ -85,9 +86,13 @@ interface Props {
   onNewChat?: () => void;
   onSubmitPin?: (messageId: string, resumeId: string, pin: string) => Promise<void> | void;
   onCancelPin?: (messageId: string, resumeId: string) => void;
+  /** Remove a message that is still waiting in the queue (2026-10-08). */
+  onCancelQueued?: (messageId: string) => void;
 }
 
-export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat, onSubmitPin, onCancelPin }: Props) {
+export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat, onSubmitPin, onCancelPin, onCancelQueued }: Props) {
+  // 2026-10-08 queueing: messages sent while Max answers show under the live reply, marked queued.
+  const { settled: settledMessages, queued: queuedMessages } = splitForView(messages);
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
@@ -816,7 +821,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         padding: '8px 10px',
       }}
       className="sm:!px-9 sm:!py-6 pb-10 md:!pb-6">
-        {messages.map((msg, i) => (
+        {settledMessages.map((msg, i) => (
           <div key={msg.id || i} className="cm-msg" style={{
             marginBottom: 16,
             maxWidth: '90%',
@@ -845,7 +850,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                     <div className={`cm-bubble ${msg.role === 'user' ? 'is-user chat-bubble-user' : 'is-assistant chat-bubble-assistant'}`}>
                       {msg.role === 'user'
                         ? cleanContent
-                        : renderContent(cleanContent, onScreenChange, [...messages.slice(0, i)].reverse().find(m => m.role === 'user')?.content)}
+                        : renderContent(cleanContent, onScreenChange, [...settledMessages.slice(0, i)].reverse().find(m => m.role === 'user')?.content)}
                     </div>
                   )}
                   {/* Inline tool call cards (from message content) */}
@@ -1171,6 +1176,25 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             </div>
           </div>
         )}
+        {/* Queued messages: sent while Max was answering; they run in order after the current reply */}
+        {queuedMessages.map((msg, k) => (
+          <div key={msg.id} className="cm-msg" data-testid="queued-message" style={{ marginBottom: 12, maxWidth: '90%', marginLeft: 'auto', marginRight: 0 }}>
+            <div className="cm-bubble is-user chat-bubble-user" style={{ opacity: 0.6 }}>{msg.content}</div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, textAlign: 'right', fontFamily: "'Inter', monospace" }}>
+              <span>Queued{queuedMessages.length > 1 ? ` · ${k + 1} of ${queuedMessages.length}` : ''} · Max answers it next</span>
+              {onCancelQueued && (
+                <button
+                  type="button"
+                  onClick={() => onCancelQueued(msg.id)}
+                  aria-label="Remove queued message"
+                  style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 10, fontWeight: 600, padding: 0 }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
         <div ref={msgsEndRef} />
       </div>
 
@@ -1377,7 +1401,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               onKeyDown={handleKeyDown}
               onFocus={() => setInputFocused(true)}
               onBlur={() => setInputFocused(false)}
-              placeholder={codeMode ? 'Code Mode — describe what to build or fix...' : 'Message MAX...'}
+              placeholder={codeMode ? 'Code Mode — describe what to build or fix...' : isStreaming ? 'Max is answering. Type away, it queues...' : 'Message MAX...'}
               rows={1}
               style={{
                 flex: 1, padding: '13px 18px', border: 'none', outline: 'none',
@@ -1495,16 +1519,16 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             type="button"
             aria-label="Send message"
             onClick={handleSend}
-            disabled={isStreaming}
+            title={isStreaming ? 'Max is answering. This message will be queued and answered next.' : 'Send'}
             style={{
               width: 44, height: 44, borderRadius: 12,
               background: 'var(--text)', border: 'none',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: isStreaming ? 'not-allowed' : 'pointer',
+              cursor: 'pointer',
               color: '#fff', flexShrink: 0,
-              opacity: isStreaming ? 0.5 : 1, transition: 'all 0.2s',
+              opacity: 1, transition: 'all 0.2s',
             }}
-            onMouseEnter={e => { if (!isStreaming) e.currentTarget.style.background = 'var(--gold)'; }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--gold)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'var(--text)'; }}
           >
             <ArrowUp size={20} />

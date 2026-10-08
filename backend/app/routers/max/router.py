@@ -53,6 +53,7 @@ from app.services.max.grounding_verifier import verify_web_response, log_to_audi
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.factual_guard import is_factual_question, enforce_web_search, grounding_directive
 from app.services.max.self_status import answer as self_status_answer, is_self_status_question
+from app.services.max import answer_policy  # 2026-10-06 model-first routing (MAX_MODEL_FIRST)
 from app.services.max.answer_quality import (
     COMPLETENESS_RECOVERY_INSTRUCTION,
     detect_quality_flags,
@@ -922,6 +923,19 @@ def _is_action_tool(tool_call: dict[str, Any]) -> bool:
 
 
 _DEDUPE_SEND_TOOLS = {"send_email", "send_quote_email"}
+
+
+def _unrequested_send_error(tool_call: dict[str, Any], request: "ChatRequest") -> str | None:
+    """2026-10-08: find/show/look-up never auto-emails. The model is told (no silent rewrite)."""
+    try:
+        from app.services.max import answer_policy as _ap
+        err = _ap.unrequested_send_error(tool_call, request.message, request.history, request.channel)
+    except Exception as exc:  # never block a real send because the check itself broke
+        logger.debug(f"send-intent check failed: {exc}")
+        return None
+    if err:
+        logger.info(f"[chat] held unrequested {tool_call.get('tool')} for: {(request.message or '')[:80]}")
+    return err
 
 
 def _dedupe_send_tool_calls(tool_calls: list[dict[str, Any]], seen: set[str]) -> list[dict[str, Any]]:
@@ -1834,6 +1848,39 @@ def _should_read_research_pages(question: str | None) -> bool:
     return _should_pre_search(text, legacy)
 
 
+
+async def _run_prelookups(request: "ChatRequest", founder: bool) -> tuple[list[dict[str, Any]], str]:
+    """2026-10-07 model-first: a message naming a client / quote / job, a job visual ask, weather or
+    'brief me on today' gets its lookup run BEFORE the model answers (answer_policy.prelookup_calls),
+    so the reply is grounded in real data instead of memory. Read-only tools only."""
+    try:
+        from app.services.max import answer_policy as _ap
+        if request.desk or request.image_filename:
+            return [], ""
+        calls = _ap.prelookup_calls(request.message, request.history, request.channel)
+    except Exception as _pl_err:
+        logger.debug(f"prelookup selection failed: {_pl_err}")
+        return [], ""
+    if not calls:
+        return [], ""
+    entries: list[dict[str, Any]] = []
+    rendered: list[tuple[str, str]] = []
+    for tc in calls:
+        try:
+            res = await asyncio.to_thread(execute_tool, dict(tc), desk=request.desk, founder=founder,
+                                          channel=request.channel)
+        except Exception as _pl_err:
+            logger.warning(f"prelookup {tc.get('tool')} failed: {_pl_err}")
+            continue
+        entries.append(_normalize_tool_result_entry(res))
+        if getattr(res, "success", False) and getattr(res, "result", None) is not None:
+            rendered.append((tc["tool"], "Result:\n" + _safe_dumps(res.result, indent=1, default=str)[:3000]))
+        else:
+            rendered.append((tc["tool"], f"Error: {getattr(res, 'error', 'failed')}"))
+    logger.info(f"[prelookup] ran {[c.get('tool') for c in calls]} for: {(request.message or '')[:80]}")
+    return entries, _ap.prelookup_message(request.message, rendered, request.history)
+
+
 async def _ground_search_payload(question: str, payload: dict, read_urls: set[str]) -> dict:
     """Fetch top pages for a web_search payload off the event loop."""
     from app.services.max.web_research import ground_web_search
@@ -2033,16 +2080,16 @@ def _apply_truth_guardrails(
         image_filename=image_filename,
         response_text=response_text,
     )
-    enforced, warnings = enforce_runtime_truth_response(message, response_text, tool_results)
+    enforced, warnings = answer_policy.enforce_truth(message, response_text, tool_results)
     for w in warnings:
         logger.warning(f"theater-detector: {w}")
     if enforced != response_text:
         return enforced
 
-    if _is_unverified_email_send_request(message) and not _has_verified_email_send_result(tool_results):
+    if answer_policy.shortcut_allowed("email_send_boundary") and _is_unverified_email_send_request(message) and not _has_verified_email_send_result(tool_results):
         return _email_send_boundary_response(ChatRequest(message=message or "", history=[])).response
 
-    if _is_email_reply_read_request(message):
+    if answer_policy.shortcut_allowed("email_reply_boundary") and _is_email_reply_read_request(message):
         return _email_reply_boundary_response(ChatRequest(message=message or "", history=[])).response
 
     if _mentions_browser_assist(message):
@@ -2410,12 +2457,12 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
         # Skip module knowledge for analysis/priority/opinion questions.
         # Static module docs can't answer "what are the top priorities" or
         # "how does this affect Workroom" — those need the AI model.
-        if not _is_analysis_or_priority_question(request.message):
+        if answer_policy.shortcut_allowed("module_knowledge") and not _is_analysis_or_priority_question(request.message):
             module_response = _empire_module_response(request)
             if module_response is not None:
                 return module_response
 
-        if _is_current_events_request(request.message):
+        if answer_policy.shortcut_allowed("live_lookup") and _is_current_events_request(request.message):
             return _live_lookup_router_response(request)
 
     if not request.image_filename and _is_provider_identity_request(request.message):
@@ -2438,7 +2485,7 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
     if not request.desk and not request.image_filename and _is_hermes_channel_status_request(request.message):
         return _hermes_channel_status_response(request)
 
-    if not request.desk and not request.image_filename and _is_voice_status_request(request.message):
+    if answer_policy.shortcut_allowed("voice_status") and not request.desk and not request.image_filename and _is_voice_status_request(request.message):
         return _voice_status_response(request)
 
     if not request.desk and not request.image_filename and _prefer_archiveforge_over_drawing(request.message) and _is_hermes_prefill_request(request.message):
@@ -2462,13 +2509,13 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
     if not request.desk and not request.image_filename and _is_vendorops_request(request.message):
         return _vendorops_query_response(request)
 
-    if not request.desk and not request.image_filename and _is_gmail_inbox_request(request.message):
+    if answer_policy.shortcut_allowed("gmail_inbox") and not request.desk and not request.image_filename and _is_gmail_inbox_request(request.message):
         return _gmail_inbox_response(request)
 
-    if not request.desk and not request.image_filename and _is_unverified_email_send_request(request.message):
+    if answer_policy.shortcut_allowed("email_send_boundary") and not request.desk and not request.image_filename and _is_unverified_email_send_request(request.message):
         return _email_send_boundary_response(request)
 
-    if not request.desk and not request.image_filename and _is_email_reply_read_request(request.message):
+    if answer_policy.shortcut_allowed("email_reply_boundary") and not request.desk and not request.image_filename and _is_email_reply_read_request(request.message):
         return _email_reply_boundary_response(request)
 
     return None
@@ -2618,7 +2665,8 @@ def _unavailable_attachment_response(filename: str | None) -> tuple[str, str, st
     """Return (message, model_used, skill_used) for a missing attachment."""
     safe = Path(filename or "attachment").name
     if _attachment_looks_like_image(filename):
-        return "IMAGE_NOT_AVAILABLE", "image-availability-check", "image_availability_check"
+        _msg = answer_policy.ATTACHMENT_MISSING_TEXT if answer_policy.model_first() else "IMAGE_NOT_AVAILABLE"
+        return _msg, "image-availability-check", "image_availability_check"
     return (
         f"I couldn't read that file ({safe}). It may be missing, empty, or in a format I can't parse yet.",
         "attachment-availability-check",
@@ -2936,7 +2984,7 @@ async def _chat_with_max_service_impl(
         )
 
     # 2026-10-06: "what are you building / what's next" -> real internal state, never web research.
-    if not request.desk and not request.image_filename and is_self_status_question(request.message):
+    if not request.desk and not request.image_filename and answer_policy.shortcut_allowed("self_status") and is_self_status_question(request.message):
         _ss = await asyncio.to_thread(self_status_answer, request.message)
         response_text = _ss["text"]
         conv_id = request.conversation_id or str(uuid.uuid4())
@@ -2964,7 +3012,7 @@ async def _chat_with_max_service_impl(
             metadata=metadata,
         )
 
-    if not request.desk and not request.image_filename and should_run_whats_new_summary(request.message):
+    if not request.desk and not request.image_filename and answer_policy.shortcut_allowed("whats_new") and should_run_whats_new_summary(request.message):
         result = await asyncio.to_thread(run_whats_new_summary)
         response_text = format_whats_new_summary(result)
         conv_id = request.conversation_id or str(uuid.uuid4())
@@ -3016,7 +3064,7 @@ async def _chat_with_max_service_impl(
             metadata=metadata,
         )
 
-    if not request.desk and not request.image_filename and should_force_runtime_truth_check(request.message):
+    if not request.desk and not request.image_filename and answer_policy.shortcut_allowed("runtime_truth") and should_force_runtime_truth_check(request.message):
         result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
         response_text = (
             format_runtime_truth_check(result.result or {}, request.message)
@@ -3339,6 +3387,9 @@ async def _chat_with_max_service_impl(
             # no results — do not fabricate…]" block on role="user"; MAX read
             # it as a prompt-injection attempt. The doctrine answer is silence,
             # not a fabricated apology.
+        _prelookup_entries, _prelookup_msg = await _run_prelookups(request, founder)
+        if _prelookup_msg:
+            messages.insert(-1, AIMessage(role="system", content=_prelookup_msg))
 
         response = await asyncio.wait_for(
             ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
@@ -3391,6 +3442,7 @@ async def _chat_with_max_service_impl(
         if _pre_search_entry:
             tool_results_list.append(_pre_search_entry)
         tool_results_list.extend(_research_page_entries)
+        tool_results_list.extend(_prelookup_entries)
         final_content = response.content
         loop_messages = list(messages)
         current_response = response
@@ -3526,6 +3578,12 @@ async def _chat_with_max_service_impl(
                 tc = _coerce_drawing_tool_call(
                     tc, request.message, request.image_filename,
                 )
+                _unasked = _unrequested_send_error(tc, request)
+                if _unasked:
+                    entry = {"tool": tc.get("tool"), "success": False, "error": _unasked}
+                    round_results.append(entry)
+                    tool_results_list.append(entry)
+                    continue
                 if (
                     tc.get("tool") == "db_query"
                     and _db_query_cap_reached(request.message, tool_results_list)
@@ -3614,7 +3672,7 @@ async def _chat_with_max_service_impl(
             # (router.py:2969) sees the FULL tool_results_list across all
             # rounds and replaces the final response if any db_query
             # failure made it through, so round 0 is genuinely free.
-            if _tool_round >= 1 and should_halt_after_tool_failure(round_results, user_message=request.message):
+            if _tool_round >= 1 and answer_policy.shortcut_allowed("halt_on_tool_failure") and should_halt_after_tool_failure(round_results, user_message=request.message):
                 _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
                 final_content = runtime_truth_failure_message(_failures)
                 break
@@ -3783,7 +3841,7 @@ async def _chat_with_max_service_impl(
                 final_content = grounded_response.content
 
         # Guard: Structured uncertainty fallback for low-confidence/hypothetical questions
-        if should_defer_uncertain(request.message, tool_results=tool_results_list):
+        if answer_policy.shortcut_allowed("defer_uncertain") and should_defer_uncertain(request.message, tool_results=tool_results_list):
             final_content = uncertainty_fallback(summarize_uncertainty_topic(request.message))
 
         # Guard: GPU safety output fail-safe — replace model output recommending risky commands
@@ -4009,6 +4067,7 @@ async def _chat_with_max_service_impl(
         final_content, _founder_step_lines, _ = finalize_founder_action_reply(
             request.message, tool_results_list, strip_tool_blocks(final_content),
         )
+        final_content = answer_policy.clean_reply(final_content, request.message)
 
         _quality_flags = detect_quality_flags(
             final_content, user_message=request.message, tool_results=normalize_tool_results(tool_results_list)
@@ -4263,7 +4322,7 @@ async def _chat_stream_impl(request: ChatRequest):
     if gpu_guard is not None:
         return _stream_immediate_response(gpu_guard, request.conversation_id)
 
-    if not request.desk and not request.image_filename and is_self_status_question(request.message):
+    if not request.desk and not request.image_filename and answer_policy.shortcut_allowed("self_status") and is_self_status_question(request.message):
         async def self_status_gen():
             conv_id = request.conversation_id or str(uuid.uuid4())
             _ss = await asyncio.to_thread(self_status_answer, request.message)
@@ -4277,7 +4336,7 @@ async def _chat_stream_impl(request: ChatRequest):
 
         return StreamingResponse(self_status_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    if not request.desk and not request.image_filename and should_run_whats_new_summary(request.message):
+    if not request.desk and not request.image_filename and answer_policy.shortcut_allowed("whats_new") and should_run_whats_new_summary(request.message):
         async def whats_new_gen():
             conv_id = request.conversation_id or str(uuid.uuid4())
             result = await asyncio.to_thread(run_whats_new_summary)
@@ -4287,7 +4346,7 @@ async def _chat_stream_impl(request: ChatRequest):
 
         return StreamingResponse(whats_new_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    if not request.desk and not request.image_filename and should_force_runtime_truth_check(request.message):
+    if not request.desk and not request.image_filename and answer_policy.shortcut_allowed("runtime_truth") and should_force_runtime_truth_check(request.message):
         async def runtime_truth_gen():
             conv_id = request.conversation_id or str(uuid.uuid4())
             result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
@@ -4600,6 +4659,9 @@ async def _chat_stream_impl(request: ChatRequest):
                 messages.insert(-1, AIMessage(role="system", content=_stream_grounded["message"]))
             # If web_search returned nothing, append NOTHING. Do not fabricate
             # a "[SYSTEM: ...]" apology — that was the H53 shape in this code path.
+        _stream_prelookup_entries, _stream_prelookup_msg = await _run_prelookups(request, founder)
+        if _stream_prelookup_msg:
+            messages.insert(-1, AIMessage(role="system", content=_stream_prelookup_msg))
         try:
             # Buffer each model turn before publishing it. Tool calls are a
             # model-side protocol, not user-visible text; emitting chunks as
@@ -4632,6 +4694,7 @@ async def _chat_stream_impl(request: ChatRequest):
             if _stream_pre_search_entry:
                 tool_results_list.append(_stream_pre_search_entry)
             tool_results_list.extend(_stream_page_entries)
+            tool_results_list.extend(_stream_prelookup_entries)
             loop_messages = list(messages)
             current_text = full_response
             _seen_send_tool_calls: set[str] = set()
@@ -4729,6 +4792,14 @@ async def _chat_stream_impl(request: ChatRequest):
                     tc = _coerce_drawing_tool_call(
                         tc, request.message, request.image_filename,
                     )
+                    _unasked = _unrequested_send_error(tc, request)
+                    if _unasked:
+                        entry = {"tool": tc.get("tool"), "success": False, "error": _unasked}
+                        round_results.append(entry)
+                        tool_results_list.append(entry)
+                        _stream_step_lines.append(format_tool_progress_message(entry))
+                        yield f"data: {_safe_dumps(_tool_progress_event(entry))}\n\n"
+                        continue
                     if (
                         tc.get("tool") == "db_query"
                         and _db_query_cap_reached(request.message, tool_results_list)
@@ -4839,7 +4910,7 @@ async def _chat_stream_impl(request: ChatRequest):
                         yield f"data: {_safe_dumps({'type': 'tool_result', **research_entry})}\n\n"
 
                 # D52 H80: same round-aware halt as the chat path above.
-                if _tool_round >= 1 and should_halt_after_tool_failure(round_results, user_message=request.message):
+                if _tool_round >= 1 and answer_policy.shortcut_allowed("halt_on_tool_failure") and should_halt_after_tool_failure(round_results, user_message=request.message):
                     _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
                     full_response = runtime_truth_failure_message(_failures)
                     break
@@ -5152,6 +5223,7 @@ async def _chat_stream_impl(request: ChatRequest):
                 full_response = scrub_internal_sources(full_response)
             except Exception:
                 pass
+            full_response = answer_policy.clean_reply(full_response, request.message)
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
             conversation_tracker.add_message(conv_id, "assistant", full_response)

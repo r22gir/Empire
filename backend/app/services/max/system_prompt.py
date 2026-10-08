@@ -764,8 +764,16 @@ async def get_system_prompt_with_brain(
             customer_name=customer_name,
         )
         if brain_context and brain_context.strip():
-            return base_prompt + f"\n\n## Brain Memory Context\n{brain_context}"
+            base_prompt += f"\n\n## Brain Memory Context\n{brain_context}"
     except Exception as e:
         logger.warning(f"Brain context unavailable: {e}")
+
+    # 2026-10-06: short, plain, grounded replies; tool choice guidance (answer_policy).
+    try:
+        from app.services.max import answer_policy
+        if answer_policy.model_first():
+            base_prompt += answer_policy.STYLE_DIRECTIVE
+    except Exception as e:
+        logger.debug(f"answer policy directive unavailable: {e}")
 
     return base_prompt

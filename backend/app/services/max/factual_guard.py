@@ -122,6 +122,17 @@ def undated_source_label(message: str | None) -> str:
 
 def grounding_directive(message: str | None = None) -> str:
     """Prompt contract for numbered citations, Sources, and fact/inference split."""
+    try:  # 2026-10-06: plain answer unless Rafael explicitly asked for research
+        from app.services.max import answer_policy
+        if answer_policy.model_first() and not answer_policy.wants_research(message):
+            return (
+                "The top pages for this question were fetched. Answer from that page text in one to three plain "
+                "sentences with the concrete figure or fact asked for, then one short line naming the source "
+                "site (e.g. 'Source: pentagonmemorial.org'). No headers, no Verified/inference labels, no Sources "
+                "list. Do not invent figures; if the pages do not say, say so."
+            )
+    except Exception:
+        pass
     undated = undated_source_label(message)
     recommend = ""
     if message and re.search(

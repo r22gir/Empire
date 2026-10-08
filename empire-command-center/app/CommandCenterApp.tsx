@@ -681,6 +681,7 @@ export default function CommandCenter() {
           streamingModel={chat.streamingModel}
           onSend={handleSendMessage}
           onStop={chat.stopStreaming}
+          onCancelQueued={chat.cancelQueued}
           onScreenChange={handleScreenChange}
           onProductNavigate={(product, screen = 'dashboard', section) => {
             setActiveProduct(product as EcosystemProduct);

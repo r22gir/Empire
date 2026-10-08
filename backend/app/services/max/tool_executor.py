@@ -2855,6 +2855,9 @@ def _get_weather(params: dict, desk: Optional[str] = None) -> ToolResult:
         "washington, dc": (38.91, -77.04),
         "washington d.c.": (38.91, -77.04),
         "dc": (38.91, -77.04),
+        "hyattsville": (38.96, -76.95),
+        "hyattsville, md": (38.96, -76.95),
+        "hyattsville md": (38.96, -76.95),
     }
 
     coords = CITY_COORDS.get(city.lower(), (34.05, -118.24))
@@ -2866,6 +2869,9 @@ def _get_weather(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "latitude": coords[0],
                 "longitude": coords[1],
                 "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
+                # 2026-10-07: daily forecast so "tomorrow" questions get an answer, not a web search
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+                "forecast_days": 4,
                 "temperature_unit": "fahrenheit",
                 "wind_speed_unit": "mph",
                 "timezone": "auto",
@@ -2892,6 +2898,16 @@ def _get_weather(params: dict, desk: Optional[str] = None) -> ToolResult:
             "humidity_percent": current.get("relative_humidity_2m"),
             "wind_mph": current.get("wind_speed_10m"),
             "conditions": WMO.get(current.get("weather_code", 0), "Unknown"),
+            "forecast": [
+                {"date": d, "high_f": hi, "low_f": lo, "rain_chance_percent": pp, "conditions": WMO.get(wc, "Unknown")}
+                for d, hi, lo, pp, wc in zip(
+                    (data.get("daily") or {}).get("time") or [],
+                    (data.get("daily") or {}).get("temperature_2m_max") or [],
+                    (data.get("daily") or {}).get("temperature_2m_min") or [],
+                    (data.get("daily") or {}).get("precipitation_probability_max") or [],
+                    (data.get("daily") or {}).get("weather_code") or [],
+                )
+            ],
             "source": "Open-Meteo (live)",
         })
     except Exception as e:
