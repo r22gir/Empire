@@ -1294,6 +1294,19 @@ async def default_photo_handler(image: bytes, mime: str, caption: str, wa_id: st
         return "Photo analysis failed. Nothing sent."
 
 
+
+_SENDER_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _sender_lock(sender: str) -> asyncio.Lock:
+    """Per-sender lock so inbound WhatsApp messages are handled one at a time, in arrival order."""
+    key = normalize_msisdn(sender) or str(sender or "")
+    lock = _SENDER_LOCKS.get(key)
+    if lock is None:
+        lock = _SENDER_LOCKS[key] = asyncio.Lock()
+    return lock
+
+
 async def process_webhook(
     raw_body: bytes,
     signature_header: str | None,
@@ -1355,46 +1368,50 @@ async def process_webhook(
             })
             continue
         note_customer_window(sender, message.get("timestamp"))
-        reply = ""
-        route = message["type"]
-        try:
-            if message["type"] == "text":
-                route = "chat"
-                reply = await on_text(message["text"], sender)
-            elif message["type"] == "audio" or message.get("voice"):
-                route = "voice_document"
-                audio, mime = await download_media(message["media_id"], http_get=http_get)
-                reply = await on_voice(audio, mime or message["mime_type"], sender)
-            elif message["type"] == "image":
-                route = "photo_quote"
-                image, mime = await download_media(message["media_id"], http_get=http_get)
-                reply = await on_photo(image, mime or message["mime_type"], message["caption"], sender)
-            else:
-                reply = "That message type is not handled. Nothing sent."
-        except Exception:
-            logger.warning("WhatsApp inbound handler failed", exc_info=True)
-            reply = "That message failed. Nothing sent."
-        reply_text, documents = _split_reply(reply)
-        reply_sent = False
-        reply_error = ""
-        voice_sent = False
-        voice_fallback = ""
-        if reply_text or documents:
+        # 2026-10-08 queueing: one sender's messages are answered in order. A message that
+        # arrives while Max is still on the previous one waits here, then runs with that
+        # reply already in the conversation (WhatsApp itself never locks his keyboard).
+        async with _sender_lock(sender):
+            reply = ""
+            route = message["type"]
             try:
-                delivered = await reply_in_window(
-                    sender,
-                    reply_text,
-                    http_post=http_post,
-                    http_upload=http_upload,
-                    inbound_type=message["type"],
-                    inbound_voice=bool(message.get("voice")),
-                    documents=documents,
-                )
-                reply_sent = True
-                voice_sent = bool(delivered.get("voice_sent"))
-                voice_fallback = delivered.get("voice_fallback") or ""
-            except WhatsAppSendBlocked as exc:
-                reply_error = str(exc)
+                if message["type"] == "text":
+                    route = "chat"
+                    reply = await on_text(message["text"], sender)
+                elif message["type"] == "audio" or message.get("voice"):
+                    route = "voice_document"
+                    audio, mime = await download_media(message["media_id"], http_get=http_get)
+                    reply = await on_voice(audio, mime or message["mime_type"], sender)
+                elif message["type"] == "image":
+                    route = "photo_quote"
+                    image, mime = await download_media(message["media_id"], http_get=http_get)
+                    reply = await on_photo(image, mime or message["mime_type"], message["caption"], sender)
+                else:
+                    reply = "That message type is not handled. Nothing sent."
+            except Exception:
+                logger.warning("WhatsApp inbound handler failed", exc_info=True)
+                reply = "That message failed. Nothing sent."
+            reply_text, documents = _split_reply(reply)
+            reply_sent = False
+            reply_error = ""
+            voice_sent = False
+            voice_fallback = ""
+            if reply_text or documents:
+                try:
+                    delivered = await reply_in_window(
+                        sender,
+                        reply_text,
+                        http_post=http_post,
+                        http_upload=http_upload,
+                        inbound_type=message["type"],
+                        inbound_voice=bool(message.get("voice")),
+                        documents=documents,
+                    )
+                    reply_sent = True
+                    voice_sent = bool(delivered.get("voice_sent"))
+                    voice_fallback = delivered.get("voice_fallback") or ""
+                except WhatsAppSendBlocked as exc:
+                    reply_error = str(exc)
         results.append({
             "message_id": message_id,
             "type": message["type"],

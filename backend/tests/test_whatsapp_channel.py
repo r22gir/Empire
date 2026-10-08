@@ -1119,3 +1119,37 @@ def test_call_host_filter_skips_virtual_nics(monkeypatch):
     monkeypatch.setitem(sys.modules, "ifaddr", _ifaddr)
     assert wc.filtered_host_addresses(True, False) == ["192.168.1.190"]
 
+
+
+def test_messages_sent_while_max_is_answering_queue_in_order(monkeypatch):
+    """2026-10-08 queueing: a second WhatsApp message that lands while Max is still on the
+    first waits, then runs; replies go out in the order he sent them."""
+    _enable(monkeypatch)
+    import asyncio
+    events: list[str] = []
+    posts: list[str] = []
+
+    async def _slow_text(text, wa_id):
+        events.append(f"start:{text}")
+        await asyncio.sleep(0.2 if text == "first" else 0.01)
+        events.append(f"end:{text}")
+        return f"reply to {text}"
+
+    def _post(url, body, headers):
+        posts.append((body.get("text") or {}).get("body", ""))
+        return _GraphResponse({"messages": [{"id": f"wamid.out{len(posts)}"}]})
+
+    raw1 = _payload({"type": "text", "text": {"body": "first"}, "id": "wamid.q1"})
+    raw2 = _payload({"type": "text", "text": {"body": "second"}, "id": "wamid.q2"})
+
+    async def _both():
+        t1 = asyncio.create_task(process_webhook(raw1, _sign(raw1), text_handler=_slow_text, http_post=_post))
+        await asyncio.sleep(0.05)  # second arrives while the first is still being answered
+        t2 = asyncio.create_task(process_webhook(raw2, _sign(raw2), text_handler=_slow_text, http_post=_post))
+        return await asyncio.gather(t1, t2)
+
+    r1, r2 = asyncio.run(_both())
+    assert events == ["start:first", "end:first", "start:second", "end:second"]
+    texts = [p for p in posts if "reply to" in p]
+    assert [t.splitlines()[-1] for t in texts] == ["reply to first", "reply to second"]
+    assert r1["results"][0]["reply_sent"] and r2["results"][0]["reply_sent"]

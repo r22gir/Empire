@@ -1,5 +1,6 @@
 'use client';
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { insertAfter, historyFor, markActive, dropQueued, nextId, type QueuedTurn } from './chatQueue';
 import { Message, PinPrompt, ToolResult } from '../lib/types';
 import { API } from '../lib/api';
 import { asksForFounderPin, redactSecret, toolResultPreview } from '../lib/founderPin';
@@ -84,6 +85,9 @@ export function useChat() {
   const streamingRef = useRef(false);
   const messagesRef = useRef<Message[]>([WELCOME]);
   const contextPackRef = useRef<string>('');
+  // 2026-10-08: messages sent while Max is answering wait here and run in order.
+  const queueRef = useRef<QueuedTurn[]>([]);
+  const [queuedCount, setQueuedCount] = useState(0);
 
   // Set welcome timestamp on client only (avoids hydration mismatch)
   useEffect(() => {
@@ -136,7 +140,20 @@ export function useChat() {
     setMessages(next);
     messagesRef.current = next;
     chatIdRef.current = chatId;
+    // another chat opened: queued messages belonged to the old one
+    queueRef.current = [];
+    setQueuedCount(0);
   }, []);
+
+  const runTurnRef = useRef<((turn: QueuedTurn) => Promise<void>) | null>(null);
+
+  const runNextQueued = useCallback(() => {
+    const next = queueRef.current.shift();
+    setQueuedCount(queueRef.current.length);
+    if (!next || !runTurnRef.current) return;
+    updateMessages(prev => markActive(prev, next.msg.id));
+    void runTurnRef.current({ ...next, msg: { ...next.msg, queued: false } });
+  }, [updateMessages]);
 
   const sendMessage = useCallback(async (
     input: string,
@@ -144,18 +161,37 @@ export function useChat() {
     desk?: string,
     channel?: string,
   ) => {
-    if (!input.trim() || streamingRef.current) return;
-
+    if (!input.trim()) return;
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: nextId(),
       role: 'user',
       content: input,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       ...(imageFilename ? { image: imageFilename } : {}),
     };
-    const current = messagesRef.current;
-    const newMsgs = [...current, userMsg];
-    updateMessages(newMsgs);
+    if (streamingRef.current || queueRef.current.length > 0) {
+      // Max is still answering: never drop or block the message. Show it now, run it next.
+      queueRef.current.push({ msg: { ...userMsg, queued: true }, imageFilename, desk, channel });
+      setQueuedCount(queueRef.current.length);
+      updateMessages(prev => [...prev, { ...userMsg, queued: true }]);
+      return;
+    }
+    updateMessages(prev => [...prev, userMsg]);
+    await runTurnRef.current?.({ msg: userMsg, imageFilename, desk, channel });
+  }, [updateMessages]);
+
+  const cancelQueued = useCallback((id: string) => {
+    queueRef.current = queueRef.current.filter(t => t.msg.id !== id);
+    setQueuedCount(queueRef.current.length);
+    updateMessages(prev => dropQueued(prev, id));
+  }, [updateMessages]);
+
+  const runTurn = useCallback(async ({ msg: userMsg, imageFilename, desk, channel }: QueuedTurn) => {
+    const input = userMsg.content;
+    // conversation as of this turn (later queued messages are not part of it yet)
+    // (messagesRef can lag one render behind the state update that added this turn)
+    const base = messagesRef.current.some(m => m.id === userMsg.id) ? messagesRef.current : [...messagesRef.current, userMsg];
+    const newMsgs = historyFor(base, userMsg.id);
     setIsStreaming(true);
     streamingRef.current = true;
     setStreamingContent('');
@@ -254,7 +290,7 @@ export function useChat() {
       if (!gotDone && !gotError && !accumulated) throw new Error('the reply stream closed early');
       if (!gotDone && !gotError) accumulated += "\n\n*[Reply cut off before Max finished. Send it again to get the rest.]*";
 
-      const assistantId = (Date.now() + 1).toString();
+      const assistantId = nextId();
       if (pinPrompts.length === 0 && asksForFounderPin(accumulated)) {
         pinPrompts.push({
           resumeId: `verify:${assistantId}`,
@@ -273,38 +309,41 @@ export function useChat() {
         quality: qualityBadge,
         metadata: responseMetadata,
       };
-      updateMessages([...newMsgs, assistantMsg]);
+      updateMessages(prev => insertAfter(prev, userMsg.id, assistantMsg));
       setStreamingContent('');
       setStreamingSteps([]);
       if (onMessageCompleteRef.current) onMessageCompleteRef.current(assistantMsg);
     } catch (e: any) {
       if (e.name === 'AbortError') {
         if (accumulated) {
-          updateMessages(prev => [...prev, {
-            id: (Date.now() + 1).toString(),
+          updateMessages(prev => insertAfter(prev, userMsg.id, {
+            id: nextId(),
             role: 'assistant', content: accumulated + '\n\n*[Stopped]*',
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             model: modelUsed,
-          }]);
+          }));
         }
       } else {
         const notice = await describeStreamFailure(e);
-        updateMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
+        updateMessages(prev => insertAfter(prev, userMsg.id, {
+          id: nextId(),
           role: 'assistant',
           // keep any partial reply; the notice goes underneath it
           content: accumulated ? `${accumulated}\n\n${notice.replace(/^\*\*([^*]+)\*\*/, '*$1*')}` : notice,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           model: modelUsed,
-        }]);
+        }));
       }
       setStreamingContent('');
     } finally {
       setIsStreaming(false);
       streamingRef.current = false;
       abortRef.current = null;
+      // next queued message, in order (Stop ends only the current reply)
+      if (queueRef.current.length) setTimeout(runNextQueued, 0);
     }
-  }, [updateMessages]);
+  }, [updateMessages, runNextQueued]);
+  runTurnRef.current = runTurn;
 
   const submitFounderPin = useCallback(async (messageId: string, resumeId: string, pin: string) => {
     const secret = pin;
@@ -397,8 +436,8 @@ export function useChat() {
   }, []);
 
   return {
-    messages, isStreaming, streamingContent, streamingSteps, streamingModel,
-    sendMessage, stopStreaming, loadMessages, setOnMessageComplete, submitFounderPin, cancelFounderPin,
+    messages, isStreaming, streamingContent, streamingSteps, streamingModel, queuedCount,
+    sendMessage, stopStreaming, loadMessages, setOnMessageComplete, submitFounderPin, cancelFounderPin, cancelQueued,
     chatId: chatIdRef.current,
   };
 }

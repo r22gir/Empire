@@ -35,6 +35,8 @@ export interface Message {
   image?: string;
   /** Archived copy from the Max session journal (/max/sessions/attachment/...). */
   imageUrl?: string;
+  /** Sent while Max was still answering; runs after the current turn (2026-10-08). */
+  queued?: boolean;
   model?: string;
   latency?: string;
   toolResults?: ToolResult[];
