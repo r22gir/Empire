@@ -6228,7 +6228,7 @@ Then after seeing results, use the quote_id:
 ```
 
 ### Development Tools (Atlas / Orion)
-- **file_read** — Read a file with optional line range. Paths are relative to the live Workroom checkout: the directory this backend code is running from (the tree with `.empire-canonical`, branch feature/drawing-standard). Do not look for source in a different repo path. `{{"tool": "file_read", "path": "backend/app/routers/voice_documents.py", "line_start": 1, "line_end": 50}}`
+- **file_read** — Read a file with optional line range. Paths are relative to the live Workroom checkout: the directory this backend code is running from (the tree with `.empire-canonical`, branch feature/drawing-standard). Do not look for source in a different repo path. Outside the repo you may read Rafael's own files (an absolute path or a find_files result path: jobs, Downloads, Documents, mounted drives; PDFs come back as text); secrets, databases and Max-e/Maxine data are never readable. `{{"tool": "file_read", "path": "backend/app/routers/voice_documents.py", "line_start": 1, "line_end": 50}}`
 - **file_write** — Write content to a file. Auto-backups existing files. `{{"tool": "file_write", "path": "backend/app/routers/new.py", "content": "..."}}`
 - **file_edit** — Replace a string in a file. Supports exact match, fuzzy whitespace match, and line_number mode. Use `old_str: "__APPEND__"` to append instead.
   `{{"tool": "file_edit", "path": "backend/app/main.py", "old_str": "old code", "new_str": "new code"}}`
@@ -6266,6 +6266,39 @@ import subprocess
 import time as _time
 
 
+_REPO_SECRET_NAME = re.compile(
+    r"(^\.env(\.|$))|(\.env$)|^id_(rsa|dsa|ecdsa|ed25519)|\.(pem|key|p12|pfx|kdbx?|keystore|jks|gpg)$|"
+    r"^\.?netrc$|^\.?pgpass$|client_secret|service[-_]account.*\.json$|credentials?\.json$|token\.json$",
+    re.IGNORECASE)
+
+
+def _founder_readable_file(ref: str) -> Optional[str]:
+    """A file outside the repo that Rafael's Max may read: same gate as find_files/share_file."""
+    ref = str(ref or "").strip()
+    if not ref or ".." in Path(os.path.expanduser(ref)).parts:
+        return None
+    try:
+        from app.services.max import file_finder as _ff
+        return _ff.resolve_file(ref)
+    except Exception:
+        return None
+
+
+def _read_text_lines(path: str) -> list[str]:
+    """Text lines of a file; PDFs via pdftotext. Refuses other binaries (use share_file)."""
+    if path.lower().endswith(".pdf"):
+        out = subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True, timeout=60)
+        if out.returncode != 0:
+            raise ValueError(f"could not extract text from PDF: {out.stderr.decode(errors='replace')[:200]}")
+        return out.stdout.decode("utf-8", errors="replace").splitlines(keepends=True)
+    with open(path, "rb") as fh:
+        head = fh.read(4096)
+    if isinstance(head, (bytes, bytearray)) and b"\x00" in head:
+        raise ValueError("binary file (image/office/archive): share it with share_file instead of reading it")
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        return f.readlines()
+
+
 @tool("file_read")
 def _file_read(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Read a file with optional line range."""
@@ -6281,23 +6314,36 @@ def _file_read(params: dict, desk: Optional[str] = None) -> ToolResult:
         resolve_path_under_canonical_root,
         CanonicalRootError,
     )
+    raw_path = path
+    if _REPO_SECRET_NAME.search(os.path.basename(str(raw_path))):
+        log_execution("file_read", params, "secret file refused", desk=desk, success=False)
+        return ToolResult(tool="file_read", success=False, error=(
+            "That is a secrets file (.env / key / credential); it is never read into chat. "
+            "Use env_get to check which variable names exist."))
     try:
         # Absolute historical paths (/home/rg/empire-repo-main/...) are
         # rewritten onto the live checkout inside the resolver. Open
         # that path, not the path the model typed.
         path = str(resolve_path_under_canonical_root(path))
     except CanonicalRootError as exc:
-        log_execution("file_read", params, str(exc), desk=desk, success=False)
-        return ToolResult(tool="file_read", success=False, error=str(exc))
-
-    ok, reason = validate_path(path)
-    if not ok:
-        log_execution("file_read", params, reason, desk=desk, success=False)
-        return ToolResult(tool="file_read", success=False, error=reason)
+        # 2026-10-08: outside the repo, Rafael's own files (home, jobs, Downloads, Documents,
+        # mounted drives) are readable through the same rules as find_files/share_file:
+        # secrets, databases and Max-e/Maxine family data never, and only on the main edition.
+        wide = _founder_readable_file(raw_path)
+        if not wide:
+            log_execution("file_read", params, str(exc), desk=desk, success=False)
+            return ToolResult(tool="file_read", success=False, error=(
+                f"{exc}. Outside the repo only Rafael's own files can be read (run find_files first); "
+                "secrets, databases and family-edition data are never read."))
+        path = wide
+    else:
+        ok, reason = validate_path(path)
+        if not ok:
+            log_execution("file_read", params, reason, desk=desk, success=False)
+            return ToolResult(tool="file_read", success=False, error=reason)
 
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
+        lines = _read_text_lines(path)
 
         line_start = params.get("line_start")
         line_end = params.get("line_end")
