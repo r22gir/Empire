@@ -89,6 +89,21 @@ def marleys_u_and_l_preset() -> Dict[str, PieceSpec]:
     return {"u_bench": u_spec, "l_bench": l_spec}
 
 
+def marleys_u_with_curved_corners_preset() -> PieceSpec:
+    """Marley's U banquette with 24" inside radius curved corners."""
+    base_u = marleys_u_and_l_preset()["u_bench"]
+    u_curved = base_u.model_copy(deep=True)
+    u_curved.piece_id = "marleys_u_bench_curved_corners"
+    u_curved.name = "Marley's U Bench (24\" Curved Corners)"
+    u_curved.footprint.corner_style = "curved"
+    u_curved.footprint.inside_corner_radius_in = 24.0
+    u_curved.notes = [
+        "Inside corners radiused to 24\" inside radius.",
+        "Vertical channel back fans along corner radial sectors.",
+    ]
+    return u_curved
+
+
 def straight_bench_preset(
     length_in: float = 72.0,
     seat_depth_in: float = 20.0,
