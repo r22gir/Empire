@@ -926,6 +926,79 @@ def _is_action_tool(tool_call: dict[str, Any]) -> bool:
 _DEDUPE_SEND_TOOLS = {"send_email", "send_quote_email"}
 
 
+def _bundle_send_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """2026-10-08 (Rafael): quotes + mockups for one person go out as ONE email.
+
+    send_quote_email calls to the same recipient in one round merge into one call (all quote_ids,
+    all attachments); a share_file by email in that round rides along as an attachment. The merged
+    call carries _bundled_calls so the tool result tells the model what happened (no silent rewrite).
+    """
+    def _to_key(v: Any) -> str:
+        t = str(v or "").strip().lower()
+        if t in ("", "me", "myself", "rafael", "founder", "owner", "my email"):
+            return "__founder__"
+        try:
+            from app.services.max.email_recipient_whitelist import is_founder_self_email
+            if is_founder_self_email(t):
+                return "__founder__"
+        except Exception:
+            pass
+        return t
+
+    def _ids(src: dict[str, Any]) -> list[str]:
+        raw = src.get("quote_ids") or []
+        if isinstance(raw, str):
+            raw = [x for x in re.split(r"[\s,]+", raw) if x]
+        return ([str(src["quote_id"])] if src.get("quote_id") else []) + [str(x) for x in raw]
+
+    quote_calls: dict[str, dict[str, Any]] = {}
+    out: list[dict[str, Any]] = []
+    for tc in tool_calls or []:
+        if str(tc.get("tool") or "") != "send_quote_email":
+            out.append(tc)
+            continue
+        key = _to_key(tc.get("to"))
+        if key not in quote_calls:
+            merged = dict(tc)
+            merged["_bundled_calls"] = 1
+            quote_calls[key] = merged
+            out.append(merged)
+            continue
+        merged = quote_calls[key]
+        ids: list[str] = []
+        for q in _ids(merged) + _ids(tc):
+            if q not in ids:
+                ids.append(q)
+        merged.pop("quote_id", None)
+        merged["quote_ids"] = ids
+        atts = list(merged.get("attachments") or [])
+        for a in (tc.get("attachments") or []):
+            if a not in atts:
+                atts.append(a)
+        if atts:
+            merged["attachments"] = atts
+        merged["_bundled_calls"] = int(merged.get("_bundled_calls") or 1) + 1
+    if not quote_calls:
+        return out
+    final: list[dict[str, Any]] = []
+    for tc in out:
+        if str(tc.get("tool") or "") == "share_file" and str(tc.get("via") or "").lower() in ("email", "mail", "gmail"):
+            target = quote_calls.get(_to_key(tc.get("to")))
+            ref = tc.get("file_id") or tc.get("path") or tc.get("file")
+            if target is not None and ref:
+                atts = list(target.get("attachments") or [])
+                if ref not in atts:
+                    atts.append(ref)
+                target["attachments"] = atts
+                target["_bundled_calls"] = int(target.get("_bundled_calls") or 1) + 1
+                continue
+        final.append(tc)
+    for tc in quote_calls.values():
+        if int(tc.get("_bundled_calls") or 1) <= 1:
+            tc.pop("_bundled_calls", None)
+    return final
+
+
 def _unrequested_send_error(tool_call: dict[str, Any], request: "ChatRequest") -> str | None:
     """2026-10-08: find/show/look-up never auto-emails. The model is told (no silent rewrite)."""
     try:
@@ -3534,6 +3607,7 @@ async def _chat_with_max_service_impl(
             # Also check xAI /v1/responses function_calls format
             if not tool_calls and hasattr(current_response, 'function_calls') and current_response.function_calls:
                 tool_calls = current_response.function_calls
+            tool_calls = _bundle_send_tool_calls(tool_calls)
             tool_calls = _dedupe_send_tool_calls(tool_calls, _seen_send_tool_calls)
             if not tool_calls:
                 _asst_plain = strip_tool_blocks(current_response.content)
@@ -4739,6 +4813,7 @@ async def _chat_stream_impl(request: ChatRequest):
                     } for e in tool_block_errors]
                     round_results = error_entries + round_results
                     tool_results_list = error_entries + tool_results_list
+                tool_calls = _bundle_send_tool_calls(tool_calls)
                 tool_calls = _dedupe_send_tool_calls(tool_calls, _seen_send_tool_calls)
                 if not tool_calls:
                     _asst_plain = strip_tool_blocks(current_text)

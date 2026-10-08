@@ -3419,6 +3419,30 @@ def _normalize_quote_id_list(params: dict) -> list[str]:
     return ids
 
 
+def _resolve_extra_attachments(params: dict) -> tuple[list[str], Optional[str]]:
+    """Mockups / drawings / files to ride in the same quote email. Same gate as share_file."""
+    raw = params.get("attachments") or params.get("files") or params.get("file_ids") or params.get("extra_files") or []
+    if isinstance(raw, (str, dict)):
+        raw = [raw]
+    out: list[str] = []
+    for ref in raw:
+        if isinstance(ref, dict):
+            ref = ref.get("file_id") or ref.get("path") or ref.get("file") or ""
+        ref = str(ref or "").strip()
+        if not ref:
+            continue
+        try:
+            from app.services.max import file_finder as _ff
+            path = _ff.resolve_file(ref)
+        except Exception:
+            path = None
+        if not path:
+            return out, ref
+        if path not in out:
+            out.append(path)
+    return out, None
+
+
 @tool("send_quote_email")
 def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Generate PDF(s) for quote(s) and send in one email to a recipient."""
@@ -3426,7 +3450,9 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         authorize_email_recipient, recipient_whitelist_status,
     )
     quote_ids = _normalize_quote_id_list(params)
-    to = params.get("to", "").strip()
+    to = str(params.get("to", "") or "").strip()
+    if to.lower() in ("me", "myself", "rafael", "founder", "owner", "my email"):
+        to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
     if not quote_ids:
         return ToolResult(tool="send_quote_email", success=False, error="No quote_id provided")
     if not to:
@@ -3447,6 +3473,13 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             ),
             result=verdict_to,
         )
+
+    # 2026-10-08: one email carries every quote PDF plus any mockups/drawings/files Rafael wants with it.
+    extra_paths, bad_ref = _resolve_extra_attachments(params)
+    if bad_ref:
+        return ToolResult(tool="send_quote_email", success=False, error=(
+            f"Attachment not available: {bad_ref}. Run find_files and pass its file_id or path "
+            "(secrets and family-edition files are never attached). Nothing was sent."))
 
     from app.services.quote_service import resolve_quote
 
@@ -3495,6 +3528,15 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         else:
             subject = f"Estimates {', '.join(str(n) for n in all_numbers)} — {customer}"
             attach_lines = [f"- Estimate {n}" for n in all_numbers]
+        if params.get("subject"):
+            subject = str(params.get("subject"))[:200]
+        attach_lines += [f"- {os.path.basename(p)}" for p in extra_paths]
+        all_files = pdf_paths + extra_paths
+        total_size = sum(os.path.getsize(p) for p in all_files if os.path.exists(p))
+        if total_size > 20 * 1024 * 1024:
+            return ToolResult(tool="send_quote_email", success=False, error=(
+                f"Attachments total {total_size // (1024 * 1024)} MB, over the 20 MB email limit. "
+                "Send the quotes now and share the big files as a Studio link. Nothing was sent."))
 
         body_text = params.get("body") or params.get("body_text") or ""
         if not str(body_text).strip():
@@ -3520,7 +3562,7 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             subject=subject,
             body_text=body_text,
             recipient_name=customer,
-            attachments=pdf_paths,
+            attachments=all_files,
             cc=", ".join(cc_list) if cc_list else None,
             reply_to=DEFAULT_REPLY_TO,
         )
@@ -3546,8 +3588,11 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             "pdf_path": pdf_paths[0],
             "pdf_paths": pdf_paths,
             "pdf_size_bytes": pdf_sizes[0] if pdf_sizes else 0,
-            "attachments_sent": len(pdf_paths),
-            "attachment_files": [os.path.basename(p) for p in pdf_paths],
+            "attachments_sent": len(all_files),
+            "attachment_files": [os.path.basename(p) for p in all_files],
+            "extra_attachments": [os.path.basename(p) for p in extra_paths],
+            "one_email": True,
+            **({"bundled_calls": int(params.get("_bundled_calls"))} if params.get("_bundled_calls") else {}),
         })
     except Exception as e:
         return ToolResult(tool="send_quote_email", success=False, error=f"Email send failed: {e}")
@@ -6107,8 +6152,9 @@ State machine: `draft → founder_review → sent → accepted → in_production
 - **send_email** — Send an email with optional file attachments
   `{"tool": "send_email", "to": "client@example.com", "subject": "Your Estimate", "body": "<h2>Hello</h2><p>HTML body here</p>", "attachments": ["/path/to/file.pdf"], "cc": "optional@cc.com"}`
   IMPORTANT: When sending a PDF, you MUST include the file path in the "attachments" array. Without it, the email arrives with no attachment.
-- **send_quote_email** — Generate a quote PDF and email it to the recipient
+- **send_quote_email** — Generate quote PDF(s) and email them in ONE email. Several quotes → `quote_ids: [...]`; mockups, drawings or other files from find_files ride along in the same email with `attachments: [file_id or path, ...]`. Never split one send into several emails.
   `{"tool": "send_quote_email", "quote_id": "abc123", "to": "client@example.com"}`
+  `{"tool": "send_quote_email", "quote_ids": ["EST-2026-299", "EST-2026-300"], "attachments": ["/home/rg/jobs/marleys-hyattsville/x/MOCKUP.pdf"], "to": "me"}`
   Use this after creating/saving a quote to email the PDF directly to a client or the founder.
 - **svg_to_pdf** — Convert SVG content or file to a PDF. Use this instead of writing Python scripts. Returns the PDF file path.
   `{"tool": "svg_to_pdf", "svg_content": "<svg>...</svg>", "output_path": "/home/rg/empire-repo/uploads/drawing.pdf"}`
