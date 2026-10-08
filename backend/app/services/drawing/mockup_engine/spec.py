@@ -31,11 +31,70 @@ class FootprintSpec(BaseModel):
     segments: List[SegmentSpec] = Field(default_factory=list)
     overall_width_in: Optional[float] = None
     overall_depth_in: Optional[float] = None
-    # Thickness of back band in plan (drawing aid only, e.g. 3.0")
-    back_thickness_in: float = 3.0
+    # Thickness of back band in plan (drawing aid only, e.g. 2.0")
+    back_thickness_in: float = 2.0
     # Corner geometry: square or radiused inside corners
     corner_style: Literal["square", "curved", "miter"] = "square"
     inside_corner_radius_in: float = 0.0
+
+    def get_perimeter_vertices(self, num_arc_samples: int = 16) -> List[Tuple[float, float]]:
+        """Return 2D footprint perimeter vertices, including sampled arc points for curved corners."""
+        import math
+        seg_dict = {s.name.lower(): s.length_in for s in self.segments}
+        if self.shape == "u_shape":
+            left_len = seg_dict.get("left", 37.75)
+            main_len = seg_dict.get("main", 249.75)
+            right_len = seg_dict.get("right", 48.5)
+            x_min = -main_len / 2.0
+            x_max = main_len / 2.0
+            r = self.inside_corner_radius_in if self.corner_style == "curved" else 0.0
+
+            verts: List[Tuple[float, float]] = []
+            # Start at front of left leg
+            verts.append((x_min, left_len))
+
+            if r > 0 and r <= min(left_len, main_len / 2.0):
+                verts.append((x_min, r))
+                cx_l, cz_l = x_min + r, r
+                for i in range(1, num_arc_samples):
+                    ang = math.pi + (i / num_arc_samples) * (math.pi / 2.0)
+                    verts.append((cx_l + r * math.cos(ang), cz_l - r * math.sin(ang)))
+                verts.append((x_min + r, 0.0))
+            else:
+                verts.append((x_min, 0.0))
+
+            if r > 0 and r <= min(right_len, main_len / 2.0):
+                verts.append((x_max - r, 0.0))
+                cx_r, cz_r = x_max - r, r
+                for i in range(1, num_arc_samples):
+                    ang = -math.pi / 2.0 + (i / num_arc_samples) * (math.pi / 2.0)
+                    verts.append((cx_r + r * math.cos(ang), cz_r - r * math.sin(ang)))
+                verts.append((x_max, r))
+            else:
+                verts.append((x_max, 0.0))
+
+            # End at front of right leg
+            verts.append((x_max, right_len))
+            return verts
+
+        elif self.shape == "l_shape":
+            short_len = seg_dict.get("short", 95.375)
+            long_len = seg_dict.get("long", 107.75)
+            r = self.inside_corner_radius_in if self.corner_style == "curved" else 0.0
+            verts = [(0.0, long_len)]
+            if r > 0 and r <= min(short_len, long_len):
+                verts.append((0.0, r))
+                for i in range(1, num_arc_samples):
+                    ang = math.pi + (i / num_arc_samples) * (math.pi / 2.0)
+                    verts.append((r + r * math.cos(ang), r + r * math.sin(ang)))
+                verts.append((r, 0.0))
+            else:
+                verts.append((0.0, 0.0))
+            verts.append((short_len, 0.0))
+            return verts
+
+        w = self.overall_width_in or (self.segments[0].length_in if self.segments else 72.0)
+        return [(-w / 2.0, 0.0), (w / 2.0, 0.0)]
 
 
 class BackStyleSpec(BaseModel):

@@ -36,29 +36,32 @@ def extract_pdf_text(pdf_path: str) -> str:
 
 
 def test_channel_math_exact_and_remainders():
-    """Channels must be full channels plus equal end remainders."""
+    """Channels can be equal whole channels or symmetric end remainders."""
+    # Equal distribution (default):
+    # Main run 249.75" with 12" channels -> 21 equal channels
+    widths_eq, end_eq = compute_channels(249.75, 12.0, equal_distribution=True)
+    assert len(widths_eq) == 21
+    assert end_eq == 0.0
+    assert widths_eq[0] == pytest.approx(249.75 / 21, 1e-4)
+    assert sum(widths_eq) == pytest.approx(249.75, 1e-4)
+
+    # Left run 37.75" with 12" channels -> 3 equal channels
+    widths_l_eq, _ = compute_channels(37.75, 12.0, equal_distribution=True)
+    assert len(widths_l_eq) == 3
+
+    # Right run 48.5" with 12" channels -> 4 equal channels
+    widths_r_eq, _ = compute_channels(48.5, 12.0, equal_distribution=True)
+    assert len(widths_r_eq) == 4
+
+    # Remainder split mode (equal_distribution=False):
     # Main run 249.75" with 12" channels
     # 249.75 // 12 = 20 full (240"), remainder 9.75" -> 4.875" each end
-    widths, end = compute_channels(249.75, 12.0)
+    widths, end = compute_channels(249.75, 12.0, equal_distribution=False)
     assert len(widths) == 22  # 20 full + 2 ends
     assert end == 4.875
     assert widths[0] == 4.875
     assert widths[-1] == 4.875
     assert sum(widths) == pytest.approx(249.75, 1e-4)
-
-    # Left run 37.75" with 12" channels
-    # 37.75 // 12 = 3 full (36"), remainder 1.75" -> 0.875" each end
-    widths_l, end_l = compute_channels(37.75, 12.0)
-    assert len(widths_l) == 5
-    assert end_l == 0.875
-    assert sum(widths_l) == pytest.approx(37.75, 1e-4)
-
-    # Right run 48.5" with 12" channels
-    # 48.5 // 12 = 4 full (48"), remainder 0.5" -> 0.25" each end
-    widths_r, end_r = compute_channels(48.5, 12.0)
-    assert len(widths_r) == 6
-    assert end_r == 0.25
-    assert sum(widths_r) == pytest.approx(48.5, 1e-4)
 
     # Exact multiple 36"
     widths_exact, end_exact = compute_channels(36.0, 12.0)
@@ -78,7 +81,9 @@ def test_marleys_u_and_l_reproduction(tmp_path):
     assert seg_u["left"] == 37.75
     assert seg_u["main"] == 249.75
     assert seg_u["right"] == 48.5
-    assert u_spec.cushion.seat_depth_in == 18.0
+    # 18" seat depth = 2" back + 16" seat cushion
+    assert u_spec.footprint.back_thickness_in == 2.0
+    assert u_spec.cushion.seat_depth_in == 16.0
     assert u_spec.back.net_back_height_in == 26.75
     assert u_spec.back.channel_width_in == 12.0
 
@@ -87,11 +92,16 @@ def test_marleys_u_and_l_reproduction(tmp_path):
     assert os.path.exists(u_pdf)
     u_text = extract_pdf_text(u_pdf)
     assert "EMPIRE WORKROOM" in u_text
-    assert "249.75" in u_text
-    assert "37.75" in u_text
-    assert "48.5" in u_text
-    assert "26.75" in u_text
-    assert "20 x 12" in u_text or "20 x 12\"" in u_text or "channels" in u_text
+    # Fraction labels: 249 3/4", 37 3/4", 48 1/2", 26 3/4"
+    assert "249 3/4" in u_text
+    assert "37 3/4" in u_text
+    assert "48 1/2" in u_text
+    assert "26 3/4" in u_text
+    assert "21 equal channels" in u_text or "equal channels" in u_text
+
+    # Verify no decimal inch strings in rendered text (e.g. .75", .5", .375")
+    import re
+    assert re.findall(r"\d+\.\d+\"", u_text) == []
 
     # Test PNG preview generation
     pngs = render_pdf_to_png_previews(u_pdf, str(tmp_path / "u_preview"))
@@ -104,7 +114,8 @@ def test_marleys_u_and_l_reproduction(tmp_path):
     seg_l = {s.name: s.length_in for s in l_spec.footprint.segments}
     assert seg_l["short"] == 95.375
     assert seg_l["long"] == 107.75
-    assert l_spec.cushion.seat_depth_in == 18.0
+    assert l_spec.footprint.back_thickness_in == 2.0
+    assert l_spec.cushion.seat_depth_in == 16.0
     assert l_spec.back.net_back_height_in == 26.75
 
     l_pdf = str(tmp_path / "marleys_l.pdf")
@@ -112,22 +123,29 @@ def test_marleys_u_and_l_reproduction(tmp_path):
     assert os.path.exists(l_pdf)
     l_text = extract_pdf_text(l_pdf)
     assert "EMPIRE WORKROOM" in l_text
-    assert "95.375" in l_text
-    assert "107.75" in l_text
+    assert "95 3/8" in l_text
+    assert "107 3/4" in l_text
+    assert re.findall(r"\d+\.\d+\"", l_text) == []
 
 
 def test_chair_fixture(tmp_path):
-    """Test single chair piece with arms, tufted back, and side section."""
+    """Test single chair piece with arms, tufted back, plan/section agreement, and rake handling."""
     chair_spec = single_chair_preset(
-        width_in=32.0,
-        depth_in=32.0,
+        width_in=34.0,
+        depth_in=30.0,
         seat_height_in=18.0,
         back_height_in=22.0,
+        rake_deg=8.0,
         name="Luxe Club Chair",
         has_arms=True,
         arm_width_in=4.0,
         arm_height_in=24.0,
     )
+    # Check plan vs section seat depth agreement (30" - 4" = 26")
+    assert chair_spec.cushion.seat_depth_in == 26.0
+    assert chair_spec.footprint.overall_depth_in == 30.0
+    assert chair_spec.back.rake_deg == 8.0
+
     pdf_path = str(tmp_path / "chair_mockup.pdf")
     render_piece_mockup_pdf(chair_spec, pdf_path)
     assert os.path.exists(pdf_path)
@@ -136,10 +154,13 @@ def test_chair_fixture(tmp_path):
     assert "LUXE CLUB CHAIR" in text
     assert "SIDE SECTION" in text
     assert "Diamond tufted" in text or "tufted" in text
-    # Ensure it does not say vertical channels for a tufted chair
     assert "12\" vertical channels" not in text
-    assert "32" in text
-    assert "22" in text
+    assert "SEAT · 26\" deep" in text
+    assert "SEAT 26\"" in text
+    assert "RAKE 8°" in text
+    # Ensure no decimal inches in chair PDF
+    import re
+    assert re.findall(r"\d+\.\d+\"", text) == []
 
     pngs = render_pdf_to_png_previews(pdf_path, str(tmp_path / "chair_preview"))
     assert len(pngs) >= 1
@@ -245,7 +266,9 @@ def test_max_tool_execution():
 
 
 def test_3d_render_and_curved_corners(tmp_path):
-    """Test 3D live model HTML generation, 4 rendered stills, and curved corners preset."""
+    """Test 3D live model HTML generation, 4 rendered stills, GLB triangles, and curved corners preset."""
+    import re
+    import trimesh
     from app.services.drawing.mockup_engine import (
         render_3d, marleys_u_and_l_preset, marleys_u_with_curved_corners_preset,
     )
@@ -260,16 +283,30 @@ def test_3d_render_and_curved_corners(tmp_path):
         assert os.path.getsize(st) > 1000
     assert os.path.exists(res_plain["glb_path"])
     
+    # Verify plain GLB has > 1,000 triangles and watertight solids
+    scene_p = trimesh.load(res_plain["glb_path"], file_type="glb")
+    tri_p = sum(len(m.faces) for m in scene_p.geometry.values())
+    assert tri_p > 1000
+
     with open(res_plain["html_path"], "r") as f:
-        html = f.read()
-    assert "EMPIRE WORKROOM" in html
-    assert "MARLEY'S U BENCH" in html
-    assert "Three.js" in html or "three.min.js" in html
+        html_p = f.read()
+    assert "EMPIRE WORKROOM" in html_p
+    assert "MARLEY'S U BENCH" in html_p
+    assert "Three.js" in html_p or "three.min.js" in html_p
+    # Verify no decimal inch strings in rendered HUD labels (e.g. 249 3/4" not 249.75")
+    hud_matches = re.findall(r"\b\d+\.\d+\"", html_p)
+    assert hud_matches == []
 
     # 2. Marley's U Bench with 24" curved inside corners
     u_curved = marleys_u_with_curved_corners_preset()
     assert u_curved.footprint.corner_style == "curved"
     assert u_curved.footprint.inside_corner_radius_in == 24.0
+
+    # Test footprint perimeter geometry differs (arc vertices present)
+    verts_plain = u_plain.footprint.get_perimeter_vertices()
+    verts_curved = u_curved.footprint.get_perimeter_vertices()
+    assert len(verts_curved) > len(verts_plain)
+    assert len(verts_curved) >= 30
     
     res_curved = render_3d(u_curved, str(tmp_path / "curved_3d"), prefix="curved_u")
     assert os.path.exists(res_curved["html_path"])
@@ -277,6 +314,26 @@ def test_3d_render_and_curved_corners(tmp_path):
     for st in res_curved["stills"]:
         assert os.path.exists(st)
         assert os.path.getsize(st) > 1000
+
+    # Verify curved GLB has > 1,000 triangles
+    scene_c = trimesh.load(res_curved["glb_path"], file_type="glb")
+    tri_c = sum(len(m.faces) for m in scene_c.geometry.values())
+    assert tri_c > 1000
+    assert tri_p > 1000
+
+    with open(res_curved["html_path"], "r") as f:
+        html_c = f.read()
+    assert "Curved Corners" in html_c or "24\"" in html_c
+    assert re.findall(r"\b\d+\.\d+\"", html_c) == []
+
+    # Verify plain vs curved still images actually differ visually
+    from PIL import Image
+    import numpy as np
+    img_plain_top = np.array(Image.open(res_plain["stills"][2]))
+    img_curved_top = np.array(Image.open(res_curved["stills"][2]))
+    diff = np.abs(img_plain_top.astype(int) - img_curved_top.astype(int))
+    assert np.max(diff) > 50  # significant pixel difference from curved corner sweep
+    assert np.sum(diff > 10) > 10000
 
     # 3. Test API endpoint with format="3d"
     api_res = asyncio.run(generate_mockup_drawing(MockupFromSpecRequest(

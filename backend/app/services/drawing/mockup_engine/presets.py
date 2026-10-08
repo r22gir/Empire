@@ -27,17 +27,19 @@ def marleys_u_and_l_preset() -> Dict[str, PieceSpec]:
                 SegmentSpec(name="main", length_in=249.75),
                 SegmentSpec(name="right", length_in=48.5),
             ],
-            back_thickness_in=3.0,
+            back_thickness_in=2.0,
         ),
         back=BackStyleSpec(
             style="channel",
             channel_width_in=12.0,
             net_back_height_in=26.75,
+            rake_deg=0.0,
         ),
         cushion=CushionSpec(
-            seat_depth_in=18.0,
+            seat_depth_in=16.0,
             seat_height_in=18.0,
             cushion_thickness_in=4.0,
+            front_overhang_in=1.25,
         ),
         material=MaterialFinishSpec(
             material_type="vinyl",
@@ -65,17 +67,19 @@ def marleys_u_and_l_preset() -> Dict[str, PieceSpec]:
                 SegmentSpec(name="short", length_in=95.375),
                 SegmentSpec(name="long", length_in=107.75),
             ],
-            back_thickness_in=3.0,
+            back_thickness_in=2.0,
         ),
         back=BackStyleSpec(
             style="channel",
             channel_width_in=12.0,
             net_back_height_in=26.75,
+            rake_deg=0.0,
         ),
         cushion=CushionSpec(
-            seat_depth_in=18.0,
+            seat_depth_in=16.0,
             seat_height_in=18.0,
             cushion_thickness_in=4.0,
+            front_overhang_in=1.25,
         ),
         material=MaterialFinishSpec(
             material_type="vinyl",
@@ -209,10 +213,12 @@ def u_bench_preset(
 
 
 def single_chair_preset(
-    width_in: float = 32.0,
-    depth_in: float = 32.0,
+    width_in: float = 34.0,
+    depth_in: float = 30.0,
+    seat_depth_in: Optional[float] = None,
     seat_height_in: float = 18.0,
     back_height_in: float = 22.0,
+    rake_deg: float = 8.0,
     back_style: str = "tufted",
     name: str = "Upholstered Club Chair",
     has_arms: bool = True,
@@ -221,7 +227,13 @@ def single_chair_preset(
     client_name: str = "Private Client",
     client_address: str = "McLean, VA",
 ) -> PieceSpec:
-    """Preset for an upholstered club chair or armchair with arms."""
+    """Preset for an upholstered club chair or armchair with arms.
+    
+    Seat depth defaults to 26" (depth 30" - 4" back thickness), agreeing across plan and section.
+    Back profile includes proper rake angle (default 8 deg).
+    """
+    actual_seat_depth = seat_depth_in if seat_depth_in is not None else (depth_in - 4.0)
+    actual_overall_depth = depth_in if seat_depth_in is None else (actual_seat_depth + 4.0)
     return PieceSpec(
         name=name,
         piece_type="chair",
@@ -233,7 +245,7 @@ def single_chair_preset(
             shape="single",
             segments=[SegmentSpec(name="main", length_in=width_in)],
             overall_width_in=width_in,
-            overall_depth_in=depth_in,
+            overall_depth_in=actual_overall_depth,
             back_thickness_in=4.0,
         ),
         back=BackStyleSpec(
@@ -241,9 +253,10 @@ def single_chair_preset(
             net_back_height_in=back_height_in,
             tuft_spacing_x_in=6.0,
             tuft_spacing_y_in=6.0,
+            rake_deg=rake_deg,
         ),
         cushion=CushionSpec(
-            seat_depth_in=depth_in - 4.0,
+            seat_depth_in=actual_seat_depth,
             seat_height_in=seat_height_in,
             cushion_thickness_in=5.0,
         ),

@@ -308,12 +308,14 @@ def render_elevation_segment(
             xx += cw * s
 
         n_full = sum(1 for cw in widths if abs(cw - target_ch) < 1e-9)
-        note = f'{n_full} x {format_in(target_ch)} channels'
         if end > 0:
+            note = f'{n_full} x {format_in(target_ch)} channels'
             if end >= 3.0:
                 note += f' + {format_in(end)} end channel each side'
             else:
                 note += f' + {format_in(end)} end trim each side'
+        else:
+            note = f'{len(widths)} equal channels ({format_in(widths[0])} each)'
 
     elif pattern in ("tufted", "button_tufted"):
         sp_x = spec.back.tuft_spacing_x_in or 8.0
@@ -478,9 +480,31 @@ def render_side_section(
     c.setStrokeColor(seam_c)
     c.rect(x + th, y + plinth_h, d, cth, stroke=1, fill=1)
 
-    # Backrest (sits above seat cushion plane)
+    # Backrest (sits above seat cushion plane, with rake handling if raked)
     c.setFillColor(back_c)
-    c.rect(x, y + sh, th, bh, stroke=1, fill=1)
+    c.setStrokeColor(seam_c)
+    rake = getattr(spec.back, "rake_deg", 0.0) or 0.0
+    lean_in = getattr(spec.back, "back_lean_in", 0.0) or 0.0
+    if rake > 0:
+        lean_dx = bh * math.tan(math.radians(rake))
+    elif lean_in > 0:
+        lean_dx = lean_in * s
+    else:
+        lean_dx = 0.0
+
+    if lean_dx > 0:
+        p = c.beginPath()
+        p.moveTo(x + th, y + sh)
+        p.lineTo(x + th - lean_dx, y + sh + bh)
+        p.lineTo(x - lean_dx, y + sh + bh)
+        p.lineTo(x, y + sh)
+        p.close()
+        c.drawPath(p, fill=1, stroke=1)
+        c.setFillColor(MUT)
+        c.setFont("Helvetica-Bold", 6.0)
+        c.drawString(x - lean_dx - 2, y + sh + bh + 4, f"RAKE {int(round(rake))}°" if rake > 0 else f"LEAN {format_in(lean_in)}")
+    else:
+        c.rect(x, y + sh, th, bh, stroke=1, fill=1)
 
     # Wall ghost line
     c.setStrokeColor(GRAY_LINE)
@@ -490,7 +514,8 @@ def render_side_section(
 
     dim_h(c, x + th, x + th + d, y - 10, f'SEAT {format_in(spec.cushion.seat_depth_in)}')
     dim_v(c, x + th + d + 8, y, y + sh, f'SEAT H {format_in(spec.cushion.seat_height_in)}', size=6)
-    dim_v(c, x - 10, y + sh, y + sh + bh, f'BACK H {format_in(spec.back.net_back_height_in)}', size=6, right=False)
+    back_dim_x = x - lean_dx - 10 if lean_dx > 0 else x - 10
+    dim_v(c, back_dim_x, y + sh, y + sh + bh, f'BACK H {format_in(spec.back.net_back_height_in)}', size=6, right=False)
 
     c.setFillColor(INK)
     c.setFont("Helvetica-Bold", 7.5)
