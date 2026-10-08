@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional, Dict, Any
 from app.services.drawing.mockup_engine.spec import (
     PieceSpec, FootprintSpec, SegmentSpec, BackStyleSpec, CushionSpec,
-    MaterialFinishSpec, CaseworkSpec, CarcassBoxSpec,
+    MaterialFinishSpec, CaseworkSpec, CarcassBoxSpec, ArmSpec,
 )
 
 
@@ -14,7 +14,8 @@ def marleys_u_and_l_preset() -> Dict[str, PieceSpec]:
         piece_id="marleys_u_bench",
         name="Marley's U Bench",
         piece_type="banquette",
-        client_name="Marley's Hyattsville",
+        client_name="Marley's",
+        client_address="Hyattsville, MD",
         project_name="Marley's channel backs",
         quote_number="EST-2026-299",
         status="NOT SENT",
@@ -52,7 +53,8 @@ def marleys_u_and_l_preset() -> Dict[str, PieceSpec]:
         piece_id="marleys_l_bench",
         name="Marley's L Bench",
         piece_type="banquette",
-        client_name="Marley's Hyattsville",
+        client_name="Marley's",
+        client_address="Hyattsville, MD",
         project_name="Marley's channel backs",
         quote_number="EST-2026-299",
         status="NOT SENT",
@@ -192,17 +194,26 @@ def u_bench_preset(
 
 
 def single_chair_preset(
-    width_in: float = 28.0,
-    depth_in: float = 30.0,
+    width_in: float = 32.0,
+    depth_in: float = 32.0,
     seat_height_in: float = 18.0,
     back_height_in: float = 22.0,
     back_style: str = "tufted",
-    name: str = "Accent Club Chair",
+    name: str = "Upholstered Club Chair",
+    has_arms: bool = True,
+    arm_width_in: float = 4.0,
+    arm_height_in: float = 24.0,
+    client_name: str = "Private Client",
+    client_address: str = "McLean, VA",
 ) -> PieceSpec:
-    """Preset for a single upholstered armchair or dining chair."""
+    """Preset for an upholstered club chair or armchair with arms."""
     return PieceSpec(
         name=name,
         piece_type="chair",
+        client_name=client_name,
+        client_address=client_address,
+        quote_number="EST-2026-312",
+        status="NOT SENT",
         footprint=FootprintSpec(
             shape="single",
             segments=[SegmentSpec(name="main", length_in=width_in)],
@@ -220,6 +231,12 @@ def single_chair_preset(
             seat_depth_in=depth_in - 4.0,
             seat_height_in=seat_height_in,
             cushion_thickness_in=5.0,
+        ),
+        arm=ArmSpec(
+            has_arms=has_arms,
+            arm_width_in=arm_width_in,
+            arm_height_in=arm_height_in,
+            arm_style="track",
         ),
         material=MaterialFinishSpec(
             material_type="fabric",
@@ -245,6 +262,11 @@ def woodcraft_wall_unit_preset(
     Integrates with WoodCraft / CraftForge design data (materials, cuts, boxes) when provided.
     """
     materials_list = []
+    finish = "Natural Hand-Rubbed Oil Satin"
+    client_name = "Private Residence"
+    client_address = "Potomac, MD"
+    quote_number = "WC-2026-108"
+
     if from_craftforge_design:
         cf = from_craftforge_design
         name = cf.get("name") or name
@@ -254,6 +276,13 @@ def woodcraft_wall_unit_preset(
         primary_mat = cf.get("primary_material") or wood_species
         wood_species = primary_mat
         materials_list = cf.get("materials") or []
+        client_name = cf.get("customer_name") or client_name
+        client_address = cf.get("customer_address") or ""
+        quote_number = cf.get("design_number") or quote_number
+
+        # Check line_items / description / notes for finish details
+        if cf.get("style"):
+            finish = f"{cf.get('style').capitalize()} finish"
 
     # Build 3 carcass bays (left bookcases, center TV/bar bay, right bookcases)
     bay_w = total_width_in / 3.0
@@ -298,7 +327,7 @@ def woodcraft_wall_unit_preset(
         toe_kick_height_in=4.0,
         toe_kick_depth_in=3.0,
         wood_species=wood_species,
-        finish="Natural Hand-Rubbed Oil Satin",
+        finish=finish,
         materials=materials_list,
     )
 
@@ -306,6 +335,9 @@ def woodcraft_wall_unit_preset(
         name=name,
         piece_type="wall_unit",
         business_unit="woodcraft",
+        client_name=client_name,
+        client_address=client_address,
+        quote_number=quote_number,
         footprint=FootprintSpec(
             shape="straight",
             overall_width_in=total_width_in,
@@ -318,6 +350,6 @@ def woodcraft_wall_unit_preset(
             color_name="natural wood",
             color_hex="#8B5A2B",
             wood_species=wood_species,
-            wood_finish="Satin oil finish",
+            wood_finish=finish,
         ),
     )

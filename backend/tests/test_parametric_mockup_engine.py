@@ -12,6 +12,7 @@ Asserts:
 """
 import io
 import os
+import uuid
 import asyncio
 from pathlib import Path
 import pytest
@@ -116,13 +117,16 @@ def test_marleys_u_and_l_reproduction(tmp_path):
 
 
 def test_chair_fixture(tmp_path):
-    """Test single chair piece with tufted back and side section."""
+    """Test single chair piece with arms, tufted back, and side section."""
     chair_spec = single_chair_preset(
-        width_in=28.0,
-        depth_in=30.0,
+        width_in=32.0,
+        depth_in=32.0,
         seat_height_in=18.0,
         back_height_in=22.0,
         name="Luxe Club Chair",
+        has_arms=True,
+        arm_width_in=4.0,
+        arm_height_in=24.0,
     )
     pdf_path = str(tmp_path / "chair_mockup.pdf")
     render_piece_mockup_pdf(chair_spec, pdf_path)
@@ -131,7 +135,10 @@ def test_chair_fixture(tmp_path):
     text = extract_pdf_text(pdf_path)
     assert "LUXE CLUB CHAIR" in text
     assert "SIDE SECTION" in text
-    assert "28" in text
+    assert "Diamond tufted" in text or "tufted" in text
+    # Ensure it does not say vertical channels for a tufted chair
+    assert "12\" vertical channels" not in text
+    assert "32" in text
     assert "22" in text
 
     pngs = render_pdf_to_png_previews(pdf_path, str(tmp_path / "chair_preview"))
@@ -139,37 +146,70 @@ def test_chair_fixture(tmp_path):
     assert os.path.exists(pngs[0])
 
 
-def test_woodcraft_wall_unit_fixture(tmp_path):
-    """Test WoodCraft millwork wall unit integrating with casework/materials."""
-    cf_design = {
-        "name": "Custom Walnut Library Wall Unit",
-        "width": 120.0,
-        "height": 90.0,
-        "depth": 22.0,
-        "primary_material": "American Black Walnut",
+def test_woodcraft_project_data_integration_fixture(tmp_path):
+    """Test that WoodCraft integration reads real WoodCraft/CraftForge project data from disk."""
+    import json
+    from app.routers.craftforge import DESIGNS_DIR, _save, _load
+
+    test_design_id = f"test-wall-unit-{uuid.uuid4().hex[:8]}"
+    project_record = {
+        "id": test_design_id,
+        "design_number": "CF-2026-909",
+        "name": "Arlington Library Built-In Wall Unit",
+        "customer_name": "Arlington Residence",
+        "customer_address": "4200 Wilson Blvd, Arlington VA",
+        "category": "furniture",
+        "style": "Modern traditional",
+        "primary_material": "Quarter-Sawn White Oak",
+        "width": 144.0,
+        "height": 96.0,
+        "depth": 24.0,
         "materials": [
-            {"name": "Walnut 3/4 Plywood", "quantity": 8, "cost_per_unit": 120},
-            {"name": "Solid Walnut Face Frames", "quantity": 140, "cost_per_unit": 6.5},
+            {"name": "White Oak Plywood 3/4", "quantity": 12, "unit": "sheet", "cost_per_unit": 135.0},
+            {"name": "White Oak Hardwood 4/4", "quantity": 180, "unit": "bdft", "cost_per_unit": 9.5},
+            {"name": "Blum Soft-Close Slides", "quantity": 6, "unit": "pair", "cost_per_unit": 28.0},
         ],
+        "created_at": "2026-10-08T12:00:00",
+        "status": "draft",
     }
-    unit_spec = woodcraft_wall_unit_preset(from_craftforge_design=cf_design)
-    assert unit_spec.business_unit == "woodcraft"
-    assert unit_spec.casework.overall_width_in == 120.0
-    assert unit_spec.casework.overall_height_in == 90.0
-    assert len(unit_spec.casework.boxes) == 3
 
-    pdf_path = str(tmp_path / "wall_unit_mockup.pdf")
-    render_piece_mockup_pdf(unit_spec, pdf_path)
-    assert os.path.exists(pdf_path)
+    # Save to CraftForge DESIGNS_DIR
+    _save(DESIGNS_DIR, test_design_id, project_record)
 
-    text = extract_pdf_text(pdf_path)
-    assert "WOODCRAFT BY EMPIRE" in text
-    assert "American Black Walnut" in text
-    assert "120" in text
-    assert "90" in text
+    try:
+        # Load through CraftForge read-only method
+        loaded = _load(DESIGNS_DIR, test_design_id)
+        assert loaded["name"] == "Arlington Library Built-In Wall Unit"
 
-    pngs = render_pdf_to_png_previews(pdf_path, str(tmp_path / "wall_unit_preview"))
-    assert len(pngs) == 2
+        # Build spec from loaded WoodCraft record
+        unit_spec = woodcraft_wall_unit_preset(from_craftforge_design=loaded)
+        assert unit_spec.business_unit == "woodcraft"
+        assert unit_spec.client_name == "Arlington Residence"
+        assert unit_spec.client_address == "4200 Wilson Blvd, Arlington VA"
+        assert unit_spec.quote_number == "CF-2026-909"
+        assert unit_spec.casework.overall_width_in == 144.0
+        assert unit_spec.casework.overall_height_in == 96.0
+        assert unit_spec.casework.overall_depth_in == 24.0
+        assert unit_spec.casework.wood_species == "Quarter-Sawn White Oak"
+        assert len(unit_spec.casework.materials) == 3
+
+        # Render PDF & verify casework schedule & plan
+        pdf_path = str(tmp_path / "arlington_wall_unit.pdf")
+        render_piece_mockup_pdf(unit_spec, pdf_path)
+        assert os.path.exists(pdf_path)
+
+        text = extract_pdf_text(pdf_path)
+        assert "WOODCRAFT BY EMPIRE" in text
+        assert "Quarter-Sawn White Oak" in text
+        assert "CASEWORK & MILLWORK SPECIFICATION" in text
+        assert "CARCASS BOXES & BAYS" in text
+        # Verify no upholstery terms in casework legend
+        assert "seat cushion" not in text.lower()
+    finally:
+        # Cleanup fixture file
+        p = os.path.join(DESIGNS_DIR, f"{test_design_id}.json")
+        if os.path.exists(p):
+            os.remove(p)
 
 
 def test_api_endpoint_with_presets():
