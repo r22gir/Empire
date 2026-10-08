@@ -6,6 +6,7 @@ Whole inches stay whole. Fractional inches render as fractions
 from __future__ import annotations
 
 import math
+import re
 
 # Nearest sixteenth, with the common shop fractions as single glyphs.
 _SIXTEENTHS = {
@@ -53,7 +54,30 @@ def format_inches(value, *, with_mark: bool = True) -> str:
     frac = _SIXTEENTHS[sixteenths]
     if whole == 0:
         return f"{sign}{frac}{mark}"
+    if "/" in frac:  # '14 3/16"', never the ambiguous '143/16"'
+        return f"{sign}{whole} {frac}{mark}"
     return f"{sign}{whole}{frac}{mark}"
+
+
+_GLYPH_PLAIN = {"⅛": "1/8", "¼": "1/4", "⅜": "3/8", "½": "1/2", "⅝": "5/8", "¾": "3/4", "⅞": "7/8",
+                "⅓": "1/3", "⅔": "2/3", "⅙": "1/6", "⅚": "5/6", "⅕": "1/5"}
+_GLYPH_RE = re.compile(r"(\d)?[ \u2009\u00a0]?([" + "".join(_GLYPH_PLAIN) + r"])")
+
+
+def plain_fractions(text: str) -> str:
+    """'26¾"' -> '26 3/4"': fractions as plain text (Rafael 2026-10-08), never glyphs."""
+    if not text:
+        return text or ""
+    def _sub(m: "re.Match[str]") -> str:
+        if m.group(1):
+            return m.group(1) + " " + _GLYPH_PLAIN[m.group(2)]
+        return m.group(0)[:-1] + _GLYPH_PLAIN[m.group(2)]  # keep the space before a bare glyph
+    return _GLYPH_RE.sub(_sub, text)
+
+
+def format_inches_plain(value, *, with_mark: bool = True) -> str:
+    """Like format_inches but with plain-text fractions: 26.75 -> '26 3/4"'."""
+    return plain_fractions(format_inches(value, with_mark=with_mark))
 
 
 def _trim_number(value) -> str:

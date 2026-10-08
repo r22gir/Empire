@@ -986,6 +986,15 @@ def _get_desk_status(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── QUOTE TOOLS ────────────────────────────────────────────────────
 
+def _billed_as(billed_by) -> str:
+    """2026-10-08: empty billed_by = Empire Workroom. Nelma's only when explicitly set on the document."""
+    try:
+        from app.config.workroom_billing import normalize_billed_by, BILLED_BY_NELMA
+        return "Nelma's Workroom" if normalize_billed_by(billed_by) == BILLED_BY_NELMA else "Empire Workroom"
+    except Exception:
+        return "Empire Workroom"
+
+
 @tool("search_quotes")
 def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Search canonical quotes by customer, project/site, notes, or date.
@@ -1056,6 +1065,7 @@ def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
             "items_count": q.get("item_count") or 0,
             "source": "canonical",
             "business_unit": q.get("business_unit"),
+            "billed_as": _billed_as(q.get("billed_by")),
         })
     # "last/latest" and "today's" ask for the best current match, so do not
     # let an older duplicate draft outrank the just-updated 293.
@@ -1095,6 +1105,8 @@ def _get_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
             "optional_hardware_total": q.get("optional_hardware_total"),
             "deposit_required": q.get("deposit_required"),
         }
+    q = dict(q)
+    q["billed_as"] = _billed_as(q.get("billed_by"))
     return ToolResult(tool="get_quote", success=True, result=q)
 
 

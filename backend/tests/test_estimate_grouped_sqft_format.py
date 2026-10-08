@@ -34,7 +34,8 @@ def _pdf_text(pdf: bytes) -> str:
 
 
 def test_fractions_helper():
-    assert inches_to_fractions('back 26.75" · run 249.75 in') == 'back 26¾" · run 249¾ in'
+    assert inches_to_fractions('back 26.75" · run 249.75 in') == 'back 26 3/4" · run 249 3/4 in'
+    assert inches_to_fractions('12.1875"') == '12 3/16"'
     assert inches_to_fractions("29.5 yd") == "29.5 yd"  # yards are not inches
 
 
@@ -57,5 +58,17 @@ def test_create_and_render_grouped_sqft_estimate(isolated_empire_db):
     assert f"${u_sub:,.2f}" in text  # U banquette subtotal
     assert "SUBTOTAL" in text.upper() and "TOTAL" in text.upper()
     assert "Deposit" in text and "Balance" in text
-    assert '249¾"' in text and '26¾"' in text  # decimals turned into fractions in the sub-text
+    assert '249 3/4"' in text and '26 3/4"' in text  # decimals turned into plain fractions in the sub-text
     assert "249.75" not in text and "26.75" not in text
+    assert not any(g in text for g in "¼½¾⅛⅜⅝⅞")
+    # totals: area subtotals in the table, then Grand total / Deposit / Balance (no "Quoted / already given")
+    assert "Grand total" in text and "Deposit (50%)" in text and "Balance" in text
+    assert "already given" not in text and "priced / quoted only" not in text
+
+
+def test_plain_fractions_in_replies():
+    from app.services.max.answer_policy import clean_reply
+    from app.services.pricing.dimensions import plain_fractions, format_inches
+    assert plain_fractions('26¾" back, ½" ply') == '26 3/4" back, 1/2" ply'
+    assert format_inches(14.1875) == '14 3/16"'
+    assert '32 3/4"' in clean_reply('Cut each channel at 32¾" minimum.')

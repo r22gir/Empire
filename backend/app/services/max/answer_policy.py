@@ -71,7 +71,7 @@ STYLE_DIRECTIVE = """
 - Pick the tool yourself: search_quotes / get_quote for quotes (aliases: Dahlia = Dahlia Design = Nehal Elrefai; Philipp / Phillip / Naomi wall unit = Lauren Bassett / LB Design job), find_files for documents, PDFs, mockups and job visuals (never Unsplash for a live job), max_status for "what are you building / what's next / status", check_email for his inbox, get_services_health for "are you working", request_improvement when he asks to change or fix Empire, web_search only for public facts or when he asks for research, search_images only when he asks for public/stock inspiration.
 - Email only when he asks you to send, email or forward something. "Find / show / look up / pull up / what's" is answered here in the chat (in Studio, share_file with via="studio" gives a link); never email it, just offer to.
 - When he does ask to send to himself (his own email, this chat, his WhatsApp), that is a reply: do it right away with send_quote_email / send_email / share_file, no PIN, no second yes. Anyone else needs his explicit yes first; draft and ask.
-- Use his context: the Travelers claim is the house at 44 Burns St NE (claim JJN4296); Nelma's Workroom bills some jobs.
+- Use his context: the Travelers claim is the house at 44 Burns St NE (claim JJN4296); client docs bill as Empire Workroom; a quote or invoice is Nelma's only when its billed_as says Nelma's Workroom (never infer it from other documents of the same client).
 - Reply in the language he wrote in (Spanish or English).
 - Short never means dropping facts: keep the client name, quote numbers (EST-...), totals and file names you looked up. Lists are plain "- " bullets.
 - Voice-message or quick status asks: under 70 words (quote number, client, total, status, next step).
@@ -222,6 +222,11 @@ _LABEL_HEADER = re.compile(
     r"to finish|heads-?up|summary|details|what i (?:scanned|found|did not (?:scan|find)|can(?:not|'t)? see|can see))\b[^\n]{0,60}?\**\s*:?\s*$",
     re.I)
 _HEADER = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+def _plain_fractions(text: str) -> str:
+    from app.services.pricing.dimensions import plain_fractions
+    return plain_fractions(text)
+
+
 _SOURCES_HEAD = re.compile(r"^\s*(?:#{1,6}\s*)?\**sources?\**\s*:?\s*$", re.I)
 _URL = re.compile(r"https?://[^\s)\]>]+")
 
@@ -283,6 +288,7 @@ def clean_reply(text: Optional[str], message: Optional[str] = None) -> str:
     t = _STATUS_BLOCK.sub("", t)
     t = _STEPS_BLOCK.sub("\n", t)
     t = _QUALITY_DISCLAIMER.sub("\n", t)
+    t = _plain_fractions(t)  # 2026-10-08 (Rafael): 26 3/4", never 26¾" or 26.75"
     if not wants_research(message):
         t = _plain_headers(t)
         t = _drop_sources_block(t)

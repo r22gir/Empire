@@ -583,9 +583,12 @@ def _draw_totals(
     _hr(c, y, weight=1.0, col=GOLD)
     y -= 18
     panel_x = PW - MARGIN_R - 280
-    panel_h = 88 if has_extra_tbd else 72
+    # 2026-10-08 (Rafael): area subtotals sit in the table; the panel is Grand total, Deposit, Balance.
+    # A subtotal row appears only when unpriced extra work is listed beside it.
+    show_sub = has_extra_tbd or no_extra_client_copy
+    panel_h = 88 if has_extra_tbd else (72 if show_sub else 58)
     if not show_deposit:
-        panel_h = 56 if has_extra_tbd else 44
+        panel_h = 56 if has_extra_tbd else (44 if show_sub else 30)
     c.setFillColor(PANEL)
     c.roundRect(panel_x, y - (panel_h - 16), 280, panel_h, 4, fill=1, stroke=0)
     c.setStrokeColor(GOLD)
@@ -593,19 +596,22 @@ def _draw_totals(
     c.roundRect(panel_x, y - (panel_h - 16), 280, panel_h, 4, fill=0, stroke=1)
 
     row = y - 4
-    c.setFont(sans, 8.5)
-    c.setFillColor(MUTE)
-    quoted_label = "Addendum items" if no_extra_client_copy else "SUBTOTAL — Quoted / already given"
-    c.drawString(panel_x + 12, row, quoted_label)
-    c.setFont(sans_b, 10)
-    c.setFillColor(DK)
-    c.drawRightString(PW - MARGIN_R - 12, row, _money(quoted_subtotal))
+    if show_sub:
+        c.setFont(sans, 8.5)
+        c.setFillColor(MUTE)
+        quoted_label = "Addendum items" if no_extra_client_copy else "Subtotal (priced)"
+        c.drawString(panel_x + 12, row, quoted_label)
+        c.setFont(sans_b, 10)
+        c.setFillColor(DK)
+        c.drawRightString(PW - MARGIN_R - 12, row, _money(quoted_subtotal))
+    else:
+        row += 14  # first row below is the grand total
 
     if has_extra_tbd:
         row -= 14
         c.setFont(sans, 8.5)
         c.setFillColor(MUTE)
-        c.drawString(panel_x + 12, row, "SUBTOTAL — Extra work (not priced)")
+        c.drawString(panel_x + 12, row, "Extra work (not priced)")
         c.setFont(sans_b, 10)
         c.setFillColor(DK)
         c.drawRightString(PW - MARGIN_R - 12, row, "TBD")
@@ -613,7 +619,7 @@ def _draw_totals(
     row -= 14
     c.setFont(sans, 8.5)
     c.setFillColor(MUTE)
-    total_label = "Addendum subtotal" if no_extra_client_copy else "GRAND TOTAL (priced / quoted only)"
+    total_label = "Addendum subtotal" if no_extra_client_copy else "Grand total"
     c.drawString(panel_x + 12, row, total_label)
     c.setFont(sans_b, 12)
     c.setFillColor(DK)
@@ -623,8 +629,7 @@ def _draw_totals(
         row -= 14
         c.setFont(sans, 8)
         c.setFillColor(MUTE)
-        deposit_label = (f"Deposit to begin ({pct:.0f}%)" if client_safe
-                         else f"Deposit to begin ({pct:.0f}% of priced)")
+        deposit_label = f"Deposit ({pct:.0f}%)"
         c.drawString(panel_x + 12, row, deposit_label)
         c.setFont(sans_b, 9)
         c.setFillColor(DK)
@@ -633,7 +638,7 @@ def _draw_totals(
         row -= 12
         c.setFont(sans, 8)
         c.setFillColor(MUTE)
-        c.drawString(panel_x + 12, row, "Balance on completion" if client_safe else "Balance on completion (priced)")
+        c.drawString(panel_x + 12, row, "Balance")
         c.setFont(sans, 8.5)
         c.drawRightString(PW - MARGIN_R - 12, row, _money(balance))
 
@@ -643,7 +648,7 @@ def _draw_totals(
         c.drawString(
             MARGIN_L,
             y - (panel_h - 10),
-            "Extra work is TBD — not included in total due now / deposit. Do not invent prices.",
+            "Extra work is TBD and not included in the grand total or deposit.",
         )
     return y - panel_h - 10
 
@@ -1256,7 +1261,7 @@ def _line_sqft(it: Dict[str, Any]) -> Tuple[float | None, float | None]:
 
 def inches_to_fractions(text: str) -> str:
     """'26.75"' -> '26 3/4"' (nearest 1/16). Measurements are never shown as decimals."""
-    from app.services.pricing.dimensions import format_inches
+    from app.services.pricing.dimensions import format_inches_plain as format_inches
 
     def _sub(m: "re.Match[str]") -> str:
         out = format_inches(float(m.group(1)))
@@ -1319,7 +1324,9 @@ def _description_lines(it: Dict[str, Any], max_width: float | None = None) -> Li
     for part in [p for p in raw_desc.split("\n") if p.strip()] or ["Item"]:
         lines.extend(_wrap_to_width(" ".join(part.split()), sans, _DESC_FONT, width))
     lines = lines or ["Item"]
-    dim = quote_item_dimension_text(it)
+    from app.services.pricing.dimensions import plain_fractions
+    dim = plain_fractions(quote_item_dimension_text(it))
+    lines = [plain_fractions(line) for line in lines]
     if dim and all(dim not in line for line in lines):
         lines.append(dim)
     fabric = it.get("fabric_name")
