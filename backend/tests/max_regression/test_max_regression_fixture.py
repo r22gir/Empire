@@ -9,11 +9,11 @@ QS = {q["id"]: q for q in FIXTURE["questions"]}
 
 
 def test_fixture_shape():
-    assert 40 <= len(QS) <= 60
+    assert 40 <= len(QS) <= 70
     assert len(QS) == len(FIXTURE["questions"])
     kinds = {q["kind"] for q in QS.values()}
     for k in ("quote_number", "quote_client", "send_me", "file_find", "status", "solar", "research",
-              "email_me", "alias", "small_talk", "spanish", "multi_part"):
+              "email_me", "alias", "small_talk", "spanish", "multi_part", "brief", "job_visual"):
         assert k in kinds, k
     for q in QS.values():
         assert q["channel"] in ("studio", "whatsapp")

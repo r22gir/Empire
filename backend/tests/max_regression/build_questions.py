@@ -164,9 +164,41 @@ q("q50", "multi_part", "studio", "What's the total of Dahlia phase 1 and phase 2
 q("q51", "multi_part", "studio", "Find the Willard final estimate and tell me the deposit amount", "variant",
   {"tools_none": WEB, "must_any": [["EST-2026-293", "Willard"], ["4,644"]], "max_words": 90})
 
+# brief me on today (2026-10-07, Rafael's ship criteria): his own jobs/business status, never web
+BRIEF_FACTS = ["Marley", "Devon", "INV-2026-123", "Dahlia", "Nehal", "EST-2026-2\\d\\d", "basketweave", "banquette",
+               "Willard", "Philipp", "Phillip", "Naomi", "solar", "Travelers", "quote", "invoice", "deposit"]
+BRIEF_NOT = ["https?://", "unsplash", "Here's what's new", "Recent live changes"]
+q("q57", "brief", "studio", "brief me on today", "2026-10-07 ship criteria (Chief e brief line 94)",
+  {"tools_none": WEB + ["search_images"], "must_any": [BRIEF_FACTS], "must_not": BRIEF_NOT, "max_words": 170})
+q("q58", "brief", "studio", "Give me a quick rundown of today, what's on my plate?", "variant",
+  {"tools_none": WEB + ["search_images"], "must_any": [BRIEF_FACTS], "must_not": BRIEF_NOT, "max_words": 170})
+q("q59", "brief", "whatsapp", "Morning Max, brief me on today's jobs", "variant (WhatsApp)",
+  {"tools_none": WEB + ["search_images"], "must_any": [BRIEF_FACTS], "must_not": BRIEF_NOT, "max_words": 170})
+
+# Marley's basketweave mockup (2026-10-06 ~10:44 PM miss): local job files, constructed 2-bar padded squares, no stock/web
+MOCK_TOOLS = ["find_files", "open_final_doc", "wa:documents", "share_file", "send_document"]
+MOCK_FILES = ["marleys-hyattsville", "mockups-2piece", "MODULE_MOCKUP", "FULL_UL_LAYOUT", "comparison-4vs8",
+              "correct-preview", "ref-basketweave", "\\.png", "\\.pdf", "mockup"]
+MOCK_BUILD = ["2[- ]piece", "two[- ]piece", "2 pieces", "two pieces", "2 bars", "two bars", "vertical", "horizontal",
+              "padded", "\\bbars?\\b"]
+MOCK_NOT = ["unsplash", "yarn", "\\bwarp\\b", "\\bweft\\b", "stock (?:photo|image)", "images\\.unsplash"]
+MARLEY_HIST = [
+    {"role": "user", "content": "More like the requested design goes back to original request. Best possible solution is a 4 panel basket weave v 8 panel that we had. We can meet you half way at 65 sq ft."},
+    {"role": "assistant", "content": "Got it: Marley's seat backs, 4-panel basketweave at $65/sq ft vs the original 8-panel."},
+]
+q("q60", "job_visual", "studio", "Show me a mockup of the Marley's basketweave seat back", "2026-10-07 ship criteria",
+  {"tools_any": MOCK_TOOLS, "tools_none": WEB + ["search_images"], "must_any": [MOCK_FILES, MOCK_BUILD],
+   "must_not": MOCK_NOT, "max_words": 130})
+q("q61", "job_visual", "studio", "Show me mick up drwings or something for bisual reference", "2026-10-06 22:44 studio (real, typos kept)",
+  {"tools_any": MOCK_TOOLS, "tools_none": WEB + ["search_images"], "must_any": [MOCK_FILES],
+   "must_not": MOCK_NOT, "max_words": 130}, history=MARLEY_HIST)
+q("q62", "job_visual", "whatsapp", "Send me the Marley's 4 panel vs 8 panel basketweave mockup", "variant (WhatsApp)",
+  {"tools_any": MOCK_TOOLS, "tools_none": WEB + ["search_images"], "must_any": [MOCK_FILES + ["sent", "here"]],
+   "must_not": MOCK_NOT, "max_words": 130})
+
 Path(__file__).with_name("questions.json").write_text(json.dumps({
     "version": 1,
     "created": "2026-10-06",
-    "note": "Rafael's real questions from max-sessions 2026-10-04..06 plus close variants. Expected kinds: short, grounded, right tool, no headers. Scored by scoring.py; run with run_eval.py on a test copy only.",
+    "note": "Rafael's real questions from max-sessions 2026-10-04..06 plus close variants; q57-q62 (brief me on today, Marley's basketweave mockup) added 2026-10-07. Expected kinds: short, grounded, right tool, no headers. Scored by scoring.py; run with run_eval.py on a test copy only.",
     "questions": Q}, indent=1, ensure_ascii=False) + "\n")
 print(len(Q), "questions")

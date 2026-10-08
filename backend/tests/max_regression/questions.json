@@ -1,7 +1,7 @@
 {
  "version": 1,
  "created": "2026-10-06",
- "note": "Rafael's real questions from max-sessions 2026-10-04..06 plus close variants. Expected kinds: short, grounded, right tool, no headers. Scored by scoring.py; run with run_eval.py on a test copy only.",
+ "note": "Rafael's real questions from max-sessions 2026-10-04..06 plus close variants; q57-q62 (brief me on today, Marley's basketweave mockup) added 2026-10-07. Expected kinds: short, grounded, right tool, no headers. Scored by scoring.py; run with run_eval.py on a test copy only.",
  "questions": [
   {
    "id": "q01",
@@ -1265,6 +1265,288 @@
      ]
     ],
     "max_words": 90
+   }
+  },
+  {
+   "id": "q57",
+   "kind": "brief",
+   "channel": "studio",
+   "message": "brief me on today",
+   "source": "2026-10-07 ship criteria (Chief e brief line 94)",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "Marley",
+      "Devon",
+      "INV-2026-123",
+      "Dahlia",
+      "Nehal",
+      "EST-2026-2\\d\\d",
+      "basketweave",
+      "banquette",
+      "Willard",
+      "Philipp",
+      "Phillip",
+      "Naomi",
+      "solar",
+      "Travelers",
+      "quote",
+      "invoice",
+      "deposit"
+     ]
+    ],
+    "must_not": [
+     "https?://",
+     "unsplash",
+     "Here's what's new",
+     "Recent live changes"
+    ],
+    "max_words": 170
+   }
+  },
+  {
+   "id": "q58",
+   "kind": "brief",
+   "channel": "studio",
+   "message": "Give me a quick rundown of today, what's on my plate?",
+   "source": "variant",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "Marley",
+      "Devon",
+      "INV-2026-123",
+      "Dahlia",
+      "Nehal",
+      "EST-2026-2\\d\\d",
+      "basketweave",
+      "banquette",
+      "Willard",
+      "Philipp",
+      "Phillip",
+      "Naomi",
+      "solar",
+      "Travelers",
+      "quote",
+      "invoice",
+      "deposit"
+     ]
+    ],
+    "must_not": [
+     "https?://",
+     "unsplash",
+     "Here's what's new",
+     "Recent live changes"
+    ],
+    "max_words": 170
+   }
+  },
+  {
+   "id": "q59",
+   "kind": "brief",
+   "channel": "whatsapp",
+   "message": "Morning Max, brief me on today's jobs",
+   "source": "variant (WhatsApp)",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "Marley",
+      "Devon",
+      "INV-2026-123",
+      "Dahlia",
+      "Nehal",
+      "EST-2026-2\\d\\d",
+      "basketweave",
+      "banquette",
+      "Willard",
+      "Philipp",
+      "Phillip",
+      "Naomi",
+      "solar",
+      "Travelers",
+      "quote",
+      "invoice",
+      "deposit"
+     ]
+    ],
+    "must_not": [
+     "https?://",
+     "unsplash",
+     "Here's what's new",
+     "Recent live changes"
+    ],
+    "max_words": 170
+   }
+  },
+  {
+   "id": "q60",
+   "kind": "job_visual",
+   "channel": "studio",
+   "message": "Show me a mockup of the Marley's basketweave seat back",
+   "source": "2026-10-07 ship criteria",
+   "expect": {
+    "tools_any": [
+     "find_files",
+     "open_final_doc",
+     "wa:documents",
+     "share_file",
+     "send_document"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "marleys-hyattsville",
+      "mockups-2piece",
+      "MODULE_MOCKUP",
+      "FULL_UL_LAYOUT",
+      "comparison-4vs8",
+      "correct-preview",
+      "ref-basketweave",
+      "\\.png",
+      "\\.pdf",
+      "mockup"
+     ],
+     [
+      "2[- ]piece",
+      "two[- ]piece",
+      "2 pieces",
+      "two pieces",
+      "2 bars",
+      "two bars",
+      "vertical",
+      "horizontal",
+      "padded",
+      "\\bbars?\\b"
+     ]
+    ],
+    "must_not": [
+     "unsplash",
+     "yarn",
+     "\\bwarp\\b",
+     "\\bweft\\b",
+     "stock (?:photo|image)",
+     "images\\.unsplash"
+    ],
+    "max_words": 130
+   }
+  },
+  {
+   "id": "q61",
+   "kind": "job_visual",
+   "channel": "studio",
+   "message": "Show me mick up drwings or something for bisual reference",
+   "source": "2026-10-06 22:44 studio (real, typos kept)",
+   "expect": {
+    "tools_any": [
+     "find_files",
+     "open_final_doc",
+     "wa:documents",
+     "share_file",
+     "send_document"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "marleys-hyattsville",
+      "mockups-2piece",
+      "MODULE_MOCKUP",
+      "FULL_UL_LAYOUT",
+      "comparison-4vs8",
+      "correct-preview",
+      "ref-basketweave",
+      "\\.png",
+      "\\.pdf",
+      "mockup"
+     ]
+    ],
+    "must_not": [
+     "unsplash",
+     "yarn",
+     "\\bwarp\\b",
+     "\\bweft\\b",
+     "stock (?:photo|image)",
+     "images\\.unsplash"
+    ],
+    "max_words": 130
+   },
+   "history": [
+    {
+     "role": "user",
+     "content": "More like the requested design goes back to original request. Best possible solution is a 4 panel basket weave v 8 panel that we had. We can meet you half way at 65 sq ft."
+    },
+    {
+     "role": "assistant",
+     "content": "Got it: Marley's seat backs, 4-panel basketweave at $65/sq ft vs the original 8-panel."
+    }
+   ]
+  },
+  {
+   "id": "q62",
+   "kind": "job_visual",
+   "channel": "whatsapp",
+   "message": "Send me the Marley's 4 panel vs 8 panel basketweave mockup",
+   "source": "variant (WhatsApp)",
+   "expect": {
+    "tools_any": [
+     "find_files",
+     "open_final_doc",
+     "wa:documents",
+     "share_file",
+     "send_document"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "marleys-hyattsville",
+      "mockups-2piece",
+      "MODULE_MOCKUP",
+      "FULL_UL_LAYOUT",
+      "comparison-4vs8",
+      "correct-preview",
+      "ref-basketweave",
+      "\\.png",
+      "\\.pdf",
+      "mockup",
+      "sent",
+      "here"
+     ]
+    ],
+    "must_not": [
+     "unsplash",
+     "yarn",
+     "\\bwarp\\b",
+     "\\bweft\\b",
+     "stock (?:photo|image)",
+     "images\\.unsplash"
+    ],
+    "max_words": 130
    }
   }
  ]
