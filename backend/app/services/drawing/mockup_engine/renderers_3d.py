@@ -286,7 +286,7 @@ function createChannelMesh(width, height, depth, puff = 0.55) {{
   const nSeg = 14;
   for (let i = 0; i <= nSeg; i++) {{
     const x = width * (1.0 - i / nSeg);
-    const z = depth + puff * Math.sin(Math.PI * (x / width));
+    const z = -(depth + puff * Math.sin(Math.PI * (x / width)));
     shape.lineTo(x, z);
   }}
   shape.closePath();
@@ -317,12 +317,12 @@ function createCushionBox(w, h, d) {{
   const r = 0.4;
   shape.moveTo(r, 0);
   shape.lineTo(w - r, 0);
-  shape.quadraticCurveTo(w, 0, w, r);
-  shape.lineTo(w, d - r);
-  shape.quadraticCurveTo(w, d, w - r, d);
-  shape.lineTo(r, d);
-  shape.quadraticCurveTo(0, d, 0, d - r);
-  shape.lineTo(0, r);
+  shape.quadraticCurveTo(w, 0, w, -r);
+  shape.lineTo(w, -d + r);
+  shape.quadraticCurveTo(w, -d, w - r, -d);
+  shape.lineTo(r, -d);
+  shape.quadraticCurveTo(0, -d, 0, -d + r);
+  shape.lineTo(0, -r);
   shape.quadraticCurveTo(0, 0, r, 0);
 
   const geom = new THREE.ExtrudeGeometry(shape, {{
@@ -479,7 +479,7 @@ if (shape === "u_shape") {{
         new THREE.BoxGeometry(totalSeatDepth - toeRecess, baseH, bRightLen),
         M.base
       );
-      bRight.position.set(x1 - backThk - (netSeatDepth - toeRecess) / 2, baseH / 2, czR + bRightLen / 2);
+      bRight.position.set(x1 - (totalSeatDepth - toeRecess) / 2, baseH / 2, czR + bRightLen / 2);
       baseGroup.add(bRight);
     }}
 
@@ -522,7 +522,7 @@ if (shape === "u_shape") {{
       layoutEqualChannels(bLeftLen, x0 + backThk, leftLen, 0, -1, backGroup);
     }}
     if (bRightLen > 0) {{
-      layoutEqualChannels(bRightLen, x1 - backThk, czR, 0, 1, backGroup);
+      layoutEqualChannels(bRightLen, x1, czR, 0, 1, backGroup);
     }}
 
     // Fanning corner channels along inside arc:
@@ -565,14 +565,16 @@ if (shape === "u_shape") {{
       new THREE.BoxGeometry(totalSeatDepth - toeRecess, baseH, rightLen - (totalSeatDepth - toeRecess)),
       M.base
     );
-    bRight.position.set(x1 - backThk - (netSeatDepth - toeRecess) / 2, baseH / 2, (totalSeatDepth - toeRecess) + (rightLen - (totalSeatDepth - toeRecess)) / 2);
+    bRight.position.set(x1 - (totalSeatDepth - toeRecess) / 2, baseH / 2, (totalSeatDepth - toeRecess) + (rightLen - (totalSeatDepth - toeRecess)) / 2);
     baseGroup.add(bRight);
 
-    // Seat cushions
+    // Seat cushions:
+    // Main cushion along back wall, extending from backThk to totalSeatDepth + seatOverhang
     const cMain = createCushionBox(mainLen, cushThk, netSeatDepth + seatOverhang);
     cMain.position.set(x0, baseH, backThk);
     cushionGroup.add(cMain);
 
+    // Left return cushion from main cushion front to left end
     const cLeft = createCushionBox(netSeatDepth + seatOverhang, cushThk, leftLen - (totalSeatDepth + seatOverhang));
     cLeft.position.set(x0 + backThk, baseH, totalSeatDepth + seatOverhang);
     cushionGroup.add(cLeft);
@@ -582,21 +584,60 @@ if (shape === "u_shape") {{
     cushionGroup.add(cRight);
 
     // Backrest channels: Left 37 3/4" -> 3, Main 249 3/4" -> 21, Right 48 1/2" -> 4
-    layoutEqualChannels(leftLen, x0 + backThk, leftLen, 0, -1, backGroup);
+    layoutEqualChannels(leftLen, x0, leftLen, 0, -1, backGroup);
     layoutEqualChannels(mainLen, x0, 0, 1, 0, backGroup);
-    layoutEqualChannels(rightLen, x1 - backThk, 0, 0, 1, backGroup);
+    layoutEqualChannels(rightLen, x1, 0, 0, 1, backGroup);
   }}
+
+}} else if (shape === "l_shape") {{
+  /* L-SHAPED BENCH */
+  const shortLen = segDict["short"] || segDict["leg1"] || 95.375;
+  const longLen = segDict["long"] || segDict["leg2"] || 107.75;
+  const x0 = -shortLen / 2;
+  const x1 = shortLen / 2;
+  const toeRecess = 2.0;
+
+  // Base platform
+  const bShort = new THREE.Mesh(
+    new THREE.BoxGeometry(shortLen, baseH, totalSeatDepth - toeRecess),
+    M.base
+  );
+  bShort.position.set(0, baseH / 2, (totalSeatDepth - toeRecess) / 2);
+  baseGroup.add(bShort);
+
+  const bLong = new THREE.Mesh(
+    new THREE.BoxGeometry(totalSeatDepth - toeRecess, baseH, longLen - (totalSeatDepth - toeRecess)),
+    M.base
+  );
+  bLong.position.set(x1 - (totalSeatDepth - toeRecess) / 2, baseH / 2, (totalSeatDepth - toeRecess) + (longLen - (totalSeatDepth - toeRecess)) / 2);
+  baseGroup.add(bLong);
+
+  // Seat cushions:
+  // Short run cushion (from wall x0 to front edge of long run cushion x1 - totalSeatDepth - seatOverhang)
+  const cShort = createCushionBox(shortLen - (totalSeatDepth + seatOverhang), cushThk, netSeatDepth + seatOverhang);
+  cShort.position.set(x0, baseH, backThk);
+  cushionGroup.add(cShort);
+
+  // Long run return cushion (from main cushion back z = backThk to longLen)
+  const cLongLen = longLen - backThk;
+  const cLong = createCushionBox(netSeatDepth + seatOverhang, cushThk, cLongLen);
+  cLong.position.set(x1 - backThk - (netSeatDepth + seatOverhang), baseH, backThk);
+  cushionGroup.add(cLong);
+
+  // Backrest channels
+  layoutEqualChannels(shortLen, x0, 0, 1, 0, backGroup);
+  layoutEqualChannels(longLen, x1, 0, 0, 1, backGroup);
 
 }} else {{
   // Straight / generic bench layout
   const len = segDict["main"] || SPEC.footprint?.overall_width_in || 72.0;
   const x0 = -len / 2;
-  const bMesh = new THREE.Mesh(new THREE.BoxGeometry(len, baseH, netSeatDepth - 2.0), M.base);
-  bMesh.position.set(0, baseH / 2, (netSeatDepth - 2.0) / 2);
+  const bMesh = new THREE.Mesh(new THREE.BoxGeometry(len, baseH, totalSeatDepth - toeRecess), M.base);
+  bMesh.position.set(0, baseH / 2, (totalSeatDepth - toeRecess) / 2);
   baseGroup.add(bMesh);
 
   const cMesh = createCushionBox(len, cushThk, netSeatDepth + seatOverhang);
-  cMesh.position.set(x0, baseH, 0);
+  cMesh.position.set(x0, baseH, backThk);
   cushionGroup.add(cMesh);
 
   layoutEqualChannels(len, x0, 0, 1, 0, backGroup);
@@ -760,7 +801,7 @@ def _make_trimesh_channel(width: float, height: float, depth: float, puff: float
     pts = [(0, 0), (width, 0)]
     for i in range(num_samples + 1):
         x = width * (1.0 - i / num_samples)
-        z = depth + puff * math.sin(math.pi * (x / width))
+        z = -(depth + puff * math.sin(math.pi * (x / width)))
         pts.append((x, z))
     poly = Polygon(pts)
     mesh = trimesh.creation.extrude_polygon(poly, height=height)
@@ -872,7 +913,7 @@ def export_spec_to_glb(spec: PieceSpec, output_glb_path: str) -> str:
 
             if b_right_len > 0:
                 b_right = trimesh.creation.box(extents=[total_seat_d - toe_recess, base_h, b_right_len])
-                b_right.apply_translation([x1 - back_thk - (net_seat_d - toe_recess) / 2.0, base_h / 2.0, cz_r + b_right_len / 2.0])
+                b_right.apply_translation([x1 - (total_seat_d - toe_recess) / 2.0, base_h / 2.0, cz_r + b_right_len / 2.0])
                 b_right.visual.vertex_colors = base_color
                 meshes.append(b_right)
 
@@ -901,7 +942,7 @@ def export_spec_to_glb(spec: PieceSpec, output_glb_path: str) -> str:
 
             if b_right_len > 0:
                 c_right = trimesh.creation.box(extents=[net_seat_d + overhang, cush_thk, b_right_len])
-                c_right.apply_translation([x1 - total_seat_d + (net_seat_d + overhang) / 2.0, base_h + cush_thk / 2.0, cz_r + b_right_len / 2.0])
+                c_right.apply_translation([x1 - back_thk - (net_seat_d + overhang) / 2.0, base_h + cush_thk / 2.0, cz_r + b_right_len / 2.0])
                 c_right.visual.vertex_colors = seat_color
                 meshes.append(c_right)
 
@@ -921,8 +962,8 @@ def export_spec_to_glb(spec: PieceSpec, output_glb_path: str) -> str:
                 w_l = b_left_len / n_l
                 for i in range(n_l):
                     ch = _make_trimesh_channel(w_l, net_back_h, back_thk)
-                    ch.apply_transform(trimesh.transformations.rotation_matrix(-math.pi / 2, [0, 1, 0]))
-                    ch.apply_translation([x0 + back_thk, seat_h, left_len - i * w_l])
+                    ch.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2, [0, 1, 0]))
+                    ch.apply_translation([x0, seat_h, left_len - i * w_l])
                     ch.visual.vertex_colors = vinyl_color
                     meshes.append(ch)
 
@@ -940,8 +981,8 @@ def export_spec_to_glb(spec: PieceSpec, output_glb_path: str) -> str:
                 w_r = b_right_len / n_r
                 for i in range(n_r):
                     ch = _make_trimesh_channel(w_r, net_back_h, back_thk)
-                    ch.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2, [0, 1, 0]))
-                    ch.apply_translation([x1 - back_thk, seat_h, cz_r + i * w_r])
+                    ch.apply_transform(trimesh.transformations.rotation_matrix(-math.pi / 2, [0, 1, 0]))
+                    ch.apply_translation([x1, seat_h, cz_r + i * w_r])
                     ch.visual.vertex_colors = vinyl_color
                     meshes.append(ch)
 
@@ -977,7 +1018,7 @@ def export_spec_to_glb(spec: PieceSpec, output_glb_path: str) -> str:
             meshes.append(b_left)
 
             b_right = trimesh.creation.box(extents=[total_seat_d - toe_recess, base_h, right_len - (total_seat_d - toe_recess)])
-            b_right.apply_translation([x1 - back_thk - (net_seat_d - toe_recess) / 2.0, base_h / 2.0, (total_seat_d - toe_recess) + (right_len - (total_seat_d - toe_recess)) / 2.0])
+            b_right.apply_translation([x1 - (total_seat_d - toe_recess) / 2.0, base_h / 2.0, (total_seat_d - toe_recess) + (right_len - (total_seat_d - toe_recess)) / 2.0])
             b_right.visual.vertex_colors = base_color
             meshes.append(b_right)
 
@@ -1002,34 +1043,7 @@ def export_spec_to_glb(spec: PieceSpec, output_glb_path: str) -> str:
             w_l = left_len / n_l
             for i in range(n_l):
                 ch = _make_trimesh_channel(w_l, net_back_h, back_thk)
-                ch.apply_transform(trimesh.transformations.rotation_matrix(-math.pi / 2, [0, 1, 0]))
-                ch.apply_translation([x0, seat_h, left_len - i * w_l])
-                ch.visual.vertex_colors = vinyl_color
-                meshes.append(ch)
-
-            n_m = 21
-            w_m = main_len / n_m
-            for i in range(n_m):
-                ch = _make_trimesh_channel(w_m, net_back_h, back_thk)
-                ch.apply_translation([x0 + i * w_m, seat_h, 0])
-                ch.visual.vertex_colors = vinyl_color
-                meshes.append(ch)
-
-            n_r = 4
-            w_r = right_len / n_r
-            for i in range(n_r):
-                ch = _make_trimesh_channel(w_r, net_back_h, back_thk)
                 ch.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2, [0, 1, 0]))
-                ch.apply_translation([x1 - back_thk, seat_h, i * w_r])
-                ch.visual.vertex_colors = vinyl_color
-                meshes.append(ch)
-
-            # Channels: Left 3, Main 21, Right 4
-            n_l = 3
-            w_l = left_len / n_l
-            for i in range(n_l):
-                ch = _make_trimesh_channel(w_l, net_back_h, back_thk)
-                ch.apply_transform(trimesh.transformations.rotation_matrix(-math.pi / 2, [0, 1, 0]))
                 ch.apply_translation([x0, seat_h, left_len - i * w_l])
                 ch.visual.vertex_colors = vinyl_color
                 meshes.append(ch)
@@ -1046,22 +1060,68 @@ def export_spec_to_glb(spec: PieceSpec, output_glb_path: str) -> str:
             w_r = right_len / n_r
             for i in range(n_r):
                 ch = _make_trimesh_channel(w_r, net_back_h, back_thk)
-                ch.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2, [0, 1, 0]))
+                ch.apply_transform(trimesh.transformations.rotation_matrix(-math.pi / 2, [0, 1, 0]))
                 ch.apply_translation([x1, seat_h, i * w_r])
                 ch.visual.vertex_colors = vinyl_color
                 meshes.append(ch)
+
+    elif shape == "l_shape":
+        short_len = seg_dict.get("short") or seg_dict.get("leg1") or 95.375
+        long_len = seg_dict.get("long") or seg_dict.get("leg2") or 107.75
+        x0 = -short_len / 2.0
+        x1 = short_len / 2.0
+
+        b_short = trimesh.creation.box(extents=[short_len, base_h, total_seat_d - toe_recess])
+        b_short.apply_translation([0, base_h / 2.0, (total_seat_d - toe_recess) / 2.0])
+        b_short.visual.vertex_colors = base_color
+        meshes.append(b_short)
+
+        b_long = trimesh.creation.box(extents=[total_seat_d - toe_recess, base_h, long_len - (total_seat_d - toe_recess)])
+        b_long.apply_translation([x1 - (total_seat_d - toe_recess) / 2.0, base_h / 2.0, (total_seat_d - toe_recess) + (long_len - (total_seat_d - toe_recess)) / 2.0])
+        b_long.visual.vertex_colors = base_color
+        meshes.append(b_long)
+
+        # Cushions
+        c_short = trimesh.creation.box(extents=[short_len - (total_seat_d + overhang), cush_thk, net_seat_d + overhang])
+        c_short.apply_translation([x0 + (short_len - (total_seat_d + overhang)) / 2.0, base_h + cush_thk / 2.0, back_thk + (net_seat_d + overhang) / 2.0])
+        c_short.visual.vertex_colors = seat_color
+        meshes.append(c_short)
+
+        c_long_len = long_len - back_thk
+        c_long = trimesh.creation.box(extents=[net_seat_d + overhang, cush_thk, c_long_len])
+        c_long.apply_translation([x1 - back_thk - (net_seat_d + overhang) / 2.0, base_h + cush_thk / 2.0, back_thk + c_long_len / 2.0])
+        c_long.visual.vertex_colors = seat_color
+        meshes.append(c_long)
+
+        # Channels
+        n_sh = max(1, int(round(short_len / target_ch)))
+        w_sh = short_len / n_sh
+        for i in range(n_sh):
+            ch = _make_trimesh_channel(w_sh, net_back_h, back_thk)
+            ch.apply_translation([x0 + i * w_sh, seat_h, 0.0])
+            ch.visual.vertex_colors = vinyl_color
+            meshes.append(ch)
+
+        n_lg = max(1, int(round(long_len / target_ch)))
+        w_lg = long_len / n_lg
+        for i in range(n_lg):
+            ch = _make_trimesh_channel(w_lg, net_back_h, back_thk)
+            ch.apply_transform(trimesh.transformations.rotation_matrix(-math.pi / 2, [0, 1, 0]))
+            ch.apply_translation([x1, seat_h, i * w_lg])
+            ch.visual.vertex_colors = vinyl_color
+            meshes.append(ch)
 
     else:
         # Straight bench
         w = seg_dict.get("main") or spec.footprint.overall_width_in or 72.0
         x0 = -w / 2.0
-        b_mesh = trimesh.creation.box(extents=[w, base_h, net_seat_d - toe_recess])
-        b_mesh.apply_translation([0, base_h / 2.0, (net_seat_d - toe_recess) / 2.0])
+        b_mesh = trimesh.creation.box(extents=[w, base_h, total_seat_d - toe_recess])
+        b_mesh.apply_translation([0, base_h / 2.0, (total_seat_d - toe_recess) / 2.0])
         b_mesh.visual.vertex_colors = base_color
         meshes.append(b_mesh)
 
         c_mesh = trimesh.creation.box(extents=[w, cush_thk, net_seat_d + overhang])
-        c_mesh.apply_translation([0, base_h + cush_thk / 2.0, (net_seat_d + overhang) / 2.0])
+        c_mesh.apply_translation([0, base_h + cush_thk / 2.0, back_thk + (net_seat_d + overhang) / 2.0])
         c_mesh.visual.vertex_colors = seat_color
         meshes.append(c_mesh)
 
