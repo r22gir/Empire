@@ -290,21 +290,25 @@ def render_piece_mockup_pdf(
         l_len = seg_dict.get("left", 37.75)
         r_len = seg_dict.get("right", 48.5)
 
-        s_elev, scale_lbl_elev = _pick_optimal_scale("elev", "straight", m_len, 35.0, 660.0, 160.0)
+        s_elev, scale_lbl_elev = _pick_optimal_scale("elev", "straight", m_len, 35.0, 500.0, 160.0)
         y = H - 210
         render_elevation_segment(c, spec, 60, y, s_elev, m_len, "U MAIN")
         render_elevation_segment(c, spec, 60, y - 150, s_elev, l_len, "U LEFT")
-        render_elevation_segment(c, spec, 330, y - 150, s_elev, r_len, "U RIGHT")
+        render_elevation_segment(c, spec, 300, y - 150, s_elev, r_len, "U RIGHT")
+        if spec.include_section:
+            render_side_section(c, spec, W - 180, y - 150, s_elev)
         draw_scale_bar(c, 60, 40, s_elev, scale_lbl_elev)
     elif shape == "l_shape":
         seg_dict = {seg.name.lower(): seg.length_in for seg in spec.footprint.segments}
         sh_len = seg_dict.get("short", 95.375)
         lg_len = seg_dict.get("long", 107.75)
 
-        s_elev, scale_lbl_elev = _pick_optimal_scale("elev", "straight", max(sh_len, lg_len), 35.0, 660.0, 125.0)
+        s_elev, scale_lbl_elev = _pick_optimal_scale("elev", "straight", max(sh_len, lg_len), 35.0, 500.0, 125.0)
         elev_h = 35.0 * s_elev
         render_elevation_segment(c, spec, 60, H - 245, s_elev, lg_len, "L LONG")
         render_elevation_segment(c, spec, 60, H - 245 - elev_h - 45, s_elev, sh_len, "L SHORT")
+        if spec.include_section:
+            render_side_section(c, spec, W - 180, H - 245 - elev_h - 45, s_elev)
         draw_scale_bar(c, 60, 40, s_elev, scale_lbl_elev)
     else:
         # Straight bench / Chair / Single piece

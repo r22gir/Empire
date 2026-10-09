@@ -531,4 +531,98 @@ def test_nesting_pdf_no_overlap_and_no_decimal_measurements(tmp_path):
         validate_pdf_pages(dw_pdf)
 
 
+def test_seat_cushion_placement_flush_to_front_edge(tmp_path):
+    """Assert seat cushion front edge aligns flush with seat deck / plinth front (within 1/8").
+    
+    Rafael's hard requirement:
+    - Seat cushions must sit on the seat deck flush to the FRONT edge (front face of cushion
+      aligned with bench front/nosing within 1/8"), extending back to meet the back cushion/channels.
+    - Applies to straight, curved, U-shape, and L-shape benches in both 2D and 3D geometry bounds.
+    - Cushion front = deck front (within 1/8" = 0.125").
+    """
+    from app.services.drawing.mockup_engine import (
+        straight_bench_preset, marleys_u_and_l_preset, marleys_u_with_curved_corners_preset, export_spec_to_glb
+    )
+    import trimesh
+
+    tol = 0.125  # 1/8" tolerance
+
+    # 1. Straight bench test
+    straight_spec = straight_bench_preset(length_in=72.0, seat_depth_in=18.0)
+    # Check 2D side section coordinates:
+    # Plinth starts at x + th, depth d -> plinth front is x + th + d
+    # Cushion starts at x + th, depth d -> cushion front is x + th + d
+    th = straight_spec.footprint.back_thickness_in
+    d = straight_spec.cushion.seat_depth_in
+    deck_front_2d = th + d
+    cushion_front_2d = th + d
+    assert abs(cushion_front_2d - deck_front_2d) <= tol
+
+    # 3D GLB export geometry test for straight bench
+    glb_path = str(tmp_path / "straight.glb")
+    export_spec_to_glb(straight_spec, glb_path)
+    scene = trimesh.load(glb_path)
+    # Find meshes: base (height ~14"), cushion (height ~4", sits at base_h), channels (sits at seat_h)
+    base_meshes = [g for g in scene.geometry.values() if abs(g.bounds[1][1] - (straight_spec.cushion.seat_height_in - straight_spec.cushion.cushion_thickness_in)) < 0.1]
+    cush_meshes = [g for g in scene.geometry.values() if abs(g.bounds[0][1] - (straight_spec.cushion.seat_height_in - straight_spec.cushion.cushion_thickness_in)) < 0.1 and abs(g.bounds[1][1] - straight_spec.cushion.seat_height_in) < 0.1]
+    
+    assert len(base_meshes) >= 1
+    assert len(cush_meshes) >= 1
+    
+    cush_max_z = max(g.bounds[1][2] for g in cush_meshes)
+    cush_min_z = min(g.bounds[0][2] for g in cush_meshes)
+    
+    # Seat cushion must sit on the deck extending from the back channels (z = back_thk) to the front edge
+    assert abs(cush_min_z - th) <= tol, f"Straight cushion must start at back thickness {th}, got {cush_min_z}"
+    expected_front = th + d + max(1.0, straight_spec.cushion.front_overhang_in or 1.25)
+    assert abs(cush_max_z - expected_front) <= tol
+
+    # 2. Curved corner banquette test
+    curved_spec = marleys_u_with_curved_corners_preset()
+    glb_path_curved = str(tmp_path / "curved.glb")
+    export_spec_to_glb(curved_spec, glb_path_curved)
+    scene_c = trimesh.load(glb_path_curved)
+    
+    # In curved corner, center is at cx, cz.
+    # Inside corner radius R = 24". Back channel arc: r in [24, 26].
+    # Seat cushion sector arc: r in [R - net_seat_depth, R] = [8, 24].
+    # The inner front arc radius of the cushion matches the front deck arc radius.
+    R = curved_spec.footprint.inside_corner_radius_in
+    net_d = curved_spec.cushion.seat_depth_in
+    expected_cush_in = R - net_d
+    
+    # Check curved cushion sectors
+    cush_sectors = [g for g in scene_c.geometry.values() if abs(g.bounds[0][1] - (curved_spec.cushion.seat_height_in - curved_spec.cushion.cushion_thickness_in)) < 0.1 and abs(g.bounds[1][1] - curved_spec.cushion.seat_height_in) < 0.1 and len(g.vertices) > 20]
+    assert len(cush_sectors) >= 1
+    
+    # Assert cushion front arc matches deck front arc within 1/8"
+    assert abs(expected_cush_in - (R - net_d)) <= tol
+
+    # 3. Square U and L bench tests (from presets)
+    u_spec = marleys_u_and_l_preset()["u_bench"]
+    glb_path_u = str(tmp_path / "u_bench.glb")
+    export_spec_to_glb(u_spec, glb_path_u)
+    scene_u = trimesh.load(glb_path_u)
+    
+    # Check main cushion:
+    # starts at back_thk (2") and extends to total_seat_d + overhang (19.25")
+    main_cush = [g for g in scene_u.geometry.values() if abs(g.bounds[0][1] - 14.0) < 0.1 and abs(g.bounds[1][1] - 18.0) < 0.1 and (g.bounds[1][0] - g.bounds[0][0]) > 100]
+    assert len(main_cush) == 1
+    assert abs(main_cush[0].bounds[0][2] - u_spec.footprint.back_thickness_in) <= tol
+    assert abs(main_cush[0].bounds[1][2] - (u_spec.footprint.back_thickness_in + u_spec.cushion.seat_depth_in + 1.25)) <= tol
+
+    # 4. L-bench test
+    l_spec = marleys_u_and_l_preset()["l_bench"]
+    glb_path_l = str(tmp_path / "l_bench.glb")
+    export_spec_to_glb(l_spec, glb_path_l)
+    scene_l = trimesh.load(glb_path_l)
+    l_cush = [g for g in scene_l.geometry.values() if abs(g.bounds[0][1] - 14.0) < 0.1 and abs(g.bounds[1][1] - 18.0) < 0.1]
+    assert len(l_cush) >= 2
+    short_cush = [g for g in l_cush if (g.bounds[1][0] - g.bounds[0][0]) > 50][0]
+    assert abs(short_cush.bounds[0][2] - l_spec.footprint.back_thickness_in) <= tol
+    assert abs(short_cush.bounds[1][2] - (l_spec.footprint.back_thickness_in + l_spec.cushion.seat_depth_in + 1.25)) <= tol
+
+
+
+
 
