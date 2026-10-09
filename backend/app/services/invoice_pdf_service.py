@@ -213,7 +213,10 @@ def _qr_data_uri(url: str) -> str:
         import base64
         import io
         import qrcode
-        img = qrcode.make(url, box_size=6, border=2)
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=6, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image()
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
@@ -227,9 +230,9 @@ def _pay_link_html(invoice: dict, accent: str) -> str:
         return ""
     url = escape(link["url"], quote=True)
     qr = _qr_data_uri(link["url"])
-    qr_html = (f'<img src="{qr}" alt="Pay deposit QR code" style="width:110px;height:110px;display:block">'
+    qr_html = (f'<img src="{qr}" alt="Pay deposit QR code" style="width:140px;height:140px;display:block">'
                if qr else "")
-    return f"""<div style="margin:20px 0;padding:12px 14px;border:2px solid {accent};border-radius:8px;display:flex;align-items:center;gap:16px">
+    return f"""<div style="margin:14px 0;padding:10px 14px;border:2px solid {accent};page-break-inside:avoid;border-radius:8px;display:flex;align-items:center;gap:16px">
   {qr_html}
   <div style="font-size:10.5pt">
     <a href="{url}" style="color:{accent};font-weight:700;font-size:13pt;text-decoration:underline">Pay deposit online: ${link['amount']:,.2f}</a><br>
@@ -426,6 +429,7 @@ def render_client_invoice_html(
         co_title = f'<div class="invoice-number" style="font-weight:700">Change Order {escape(str(co.get("number")), quote=False)}</div>'
 
     pay_html = _pay_link_html(invoice, accent) if not is_woodcraft else ""
+    page_margin = "0.55in" if sqft_mode else "0.75in"
 
     contact_bits = [b for b in (brand["phone"], brand["email"], brand["address"]) if b]
     contact_html = "<br>".join(contact_bits)
@@ -437,7 +441,7 @@ def render_client_invoice_html(
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
-  @page {{ size: letter; margin: 0.75in; }}
+  @page {{ size: letter; margin: {page_margin}; }}
   body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a1a2e; font-size: 11pt; line-height: 1.5; }}
   .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; padding-bottom: 18px; border-bottom: 3px solid {accent}; }}
   .logo {{ font-size: 22pt; font-weight: 800; color: #1a1a2e; }}
@@ -454,7 +458,7 @@ def render_client_invoice_html(
   .totals tr td {{ padding: 6px 12px; }}
   .totals .total-row {{ font-size: 14pt; font-weight: 700; border-top: 2px solid {accent}; }}
   .totals .deposit-due-row td {{ padding-top: 10px; }}
-  .footer {{ margin-top: 36px; padding-top: 14px; border-top: 1px solid #e8e4dd; font-size: 9pt; color: #888; text-align: center; }}
+  .footer {{ margin-top: 18px; padding-top: 10px; page-break-inside: avoid; border-top: 1px solid #e8e4dd; font-size: 9pt; color: #888; text-align: center; }}
 </style></head><body>
 <title>INVOICE</title>
 
