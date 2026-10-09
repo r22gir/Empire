@@ -7,7 +7,7 @@ quoting -> quoted -> approved -> in_production -> installing -> completed -> inv
 Child tables: job_items, job_documents, job_selections, job_revisions, job_events.
 Enhanced invoicing with PDF generation, payment rollup, and revenue tracking.
 """
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -51,6 +51,89 @@ VALID_TRANSITIONS = {
 }
 
 ALL_STAGES = list(VALID_TRANSITIONS.keys()) + ["closed"]
+
+# ── 11 Canonical Kanban Stages (Mobile-First Empire Workroom) ─────────
+KANBAN_STAGE_SPECS = [
+    {"key": "lead", "label": "Lead", "color": "#6b7280"},
+    {"key": "estimate_sent", "label": "Estimate sent", "color": "#f59e0b"},
+    {"key": "deposit_paid", "label": "Approved/Deposit paid", "color": "#16a34a"},
+    {"key": "fabric_ordered", "label": "Fabric ordered", "color": "#3b82f6"},
+    {"key": "fabric_picked_up", "label": "Fabric picked up", "color": "#8b5cf6"},
+    {"key": "in_production", "label": "In production", "color": "#06b6d4"},
+    {"key": "ready", "label": "Ready", "color": "#10b981"},
+    {"key": "scheduled", "label": "Scheduled", "color": "#6366f1"},
+    {"key": "installed", "label": "Installed/Delivered", "color": "#059669"},
+    {"key": "final_invoice", "label": "Final invoice", "color": "#b8960c"},
+    {"key": "paid_closed", "label": "Paid/Closed", "color": "#15803d"},
+]
+
+KANBAN_STAGE_KEYS = [s["key"] for s in KANBAN_STAGE_SPECS]
+
+STAGE_NORMALIZATION = {
+    "lead": "lead",
+    "intake": "lead",
+    "measuring": "lead",
+    "designing": "lead",
+    "estimate_sent": "estimate_sent",
+    "quoting": "estimate_sent",
+    "quoted": "estimate_sent",
+    "deposit_paid": "deposit_paid",
+    "approved": "deposit_paid",
+    "deposit_received": "deposit_paid",
+    "fabric_ordered": "fabric_ordered",
+    "fabric_picked_up": "fabric_picked_up",
+    "in_production": "in_production",
+    "cutting": "in_production",
+    "sewing": "in_production",
+    "fabrication": "in_production",
+    "finishing": "in_production",
+    "ready": "ready",
+    "qc": "ready",
+    "quality_check": "ready",
+    "ready_for_install": "ready",
+    "scheduled": "scheduled",
+    "installed": "installed",
+    "installing": "installed",
+    "delivered": "installed",
+    "completed": "installed",
+    "final_invoice": "final_invoice",
+    "invoiced": "final_invoice",
+    "paid_closed": "paid_closed",
+    "paid": "paid_closed",
+    "closed": "paid_closed",
+}
+
+STATUS_BASE_MAP = {
+    "lead": "pending",
+    "intake": "pending",
+    "measuring": "pending",
+    "designing": "pending",
+    "estimate_sent": "pending",
+    "quoting": "pending",
+    "quoted": "pending",
+    "deposit_paid": "scheduled",
+    "approved": "scheduled",
+    "fabric_ordered": "scheduled",
+    "fabric_picked_up": "in_progress",
+    "in_production": "in_progress",
+    "cutting": "in_progress",
+    "sewing": "in_production",
+    "ready": "in_progress",
+    "scheduled": "scheduled",
+    "installed": "completed",
+    "installing": "in_progress",
+    "delivered": "completed",
+    "final_invoice": "completed",
+    "invoiced": "completed",
+    "paid_closed": "completed",
+    "paid": "completed",
+    "closed": "completed",
+    "completed": "completed",
+    "pending": "pending",
+    "in_progress": "in_progress",
+    "on_hold": "on_hold",
+    "cancelled": "cancelled",
+}
 
 # ── Business helpers ───────────────────────────────────────────────────
 
@@ -644,6 +727,45 @@ def _canonical_invoice_payments(conn, invoice_id: str) -> list[dict]:
     return legacy
 
 
+def _compute_job_payment_strip(conn, job_id: str, estimated_value: float = 0.0) -> dict:
+    """Compute payment strip (paid / balance / total) from invoices + payments table."""
+    try:
+        invoices = conn.execute(
+            "SELECT id, total, balance_due FROM invoices WHERE job_id = ?",
+            (job_id,)
+        ).fetchall()
+        total_invoiced = sum(float(inv["total"] or 0.0) for inv in invoices)
+        total_paid = 0.0
+        invoice_ids = [inv["id"] for inv in invoices if inv["id"]]
+        if invoice_ids:
+            ph = ",".join("?" * len(invoice_ids))
+            row = conn.execute(
+                f"SELECT SUM(amount) as s FROM payments WHERE invoice_id IN ({ph})",
+                invoice_ids
+            ).fetchone()
+            if row and row["s"] is not None:
+                total_paid += float(row["s"])
+            else:
+                row_leg = conn.execute(
+                    f"SELECT SUM(amount) as s FROM invoice_payments WHERE invoice_id IN ({ph})",
+                    invoice_ids
+                ).fetchone()
+                if row_leg and row_leg["s"] is not None:
+                    total_paid += float(row_leg["s"])
+
+        total_val = total_invoiced if total_invoiced > 0 else float(estimated_value or 0.0)
+        balance = max(0.0, total_val - total_paid)
+        return {
+            "paid": round(total_paid, 2),
+            "balance": round(balance, 2),
+            "total": round(total_val, 2),
+        }
+    except Exception as e:
+        logger.warning("Payment strip computation error for job %s: %s", job_id, e)
+        val = round(float(estimated_value or 0.0), 2)
+        return {"paid": 0.0, "balance": val, "total": val}
+
+
 def _next_job_number(conn) -> str:
     """Generate JOB-YYYY-XXXX."""
     year = date.today().year
@@ -763,6 +885,27 @@ class StatusChange(BaseModel):
     status: str
     actor: str = "founder"
     notes: Optional[str] = None
+
+
+class StageChange(BaseModel):
+    stage: str
+    actor: str = "founder"
+    notes: Optional[str] = None
+
+
+class ChangeOrderCreate(BaseModel):
+    title: str
+    amount: float = 0.0
+    description: Optional[str] = None
+    status: str = "approved"
+
+
+class EmailLogCreate(BaseModel):
+    subject: str
+    sender: str
+    recipient: Optional[str] = None
+    body: str
+    date: Optional[str] = None
 
 
 class ItemCreate(BaseModel):
@@ -1016,22 +1159,92 @@ def jobs_calendar(date_from: Optional[str] = None, date_to: Optional[str] = None
 
 
 @router.get("/jobs/kanban")
-def jobs_kanban():
-    """Jobs grouped by status for kanban board view."""
+def jobs_kanban(business: Optional[str] = None):
+    """Jobs grouped by 11 canonical kanban stages with computed payment strips."""
     with get_db() as conn:
-        rows = conn.execute(
-            """SELECT j.*, c.name as customer_name
-               FROM jobs j LEFT JOIN customers c ON j.customer_id = c.id
-               ORDER BY j.priority DESC, j.created_at DESC"""
-        ).fetchall()
+        if business:
+            rows = conn.execute(
+                """SELECT j.*, c.name as customer_name
+                   FROM jobs j LEFT JOIN customers c ON j.customer_id = c.id
+                   WHERE j.business = ? OR j.type = ?
+                   ORDER BY j.priority DESC, j.created_at DESC""",
+                (business, business),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT j.*, c.name as customer_name
+                   FROM jobs j LEFT JOIN customers c ON j.customer_id = c.id
+                   ORDER BY j.priority DESC, j.created_at DESC"""
+            ).fetchall()
         jobs = [_enrich_job(dict_row(r)) for r in rows]
-        columns = {}
+
+        # Initialize 11 canonical columns in order
+        col_map = {
+            s["key"]: {
+                "key": s["key"],
+                "label": s["label"],
+                "color": s["color"],
+                "jobs": [],
+                "count": 0,
+                "total_value": 0.0,
+            }
+            for s in KANBAN_STAGE_SPECS
+        }
+
         for job in jobs:
-            status = job.get("status", "pending")
-            columns.setdefault(status, []).append(job)
+            raw_stage = (job.get("pipeline_stage") or job.get("status") or "lead").strip().lower()
+            canonical_stage = STAGE_NORMALIZATION.get(raw_stage, "lead")
+            if canonical_stage not in col_map:
+                canonical_stage = "lead"
+
+            # Payment strip computed from canonical payments + invoices
+            p_strip = _compute_job_payment_strip(
+                conn, job["id"], float(job.get("estimated_value") or job.get("quoted_amount") or 0.0)
+            )
+            job["payment_strip"] = p_strip
+            job["canonical_stage"] = canonical_stage
+
+            # Determine next action
+            meta = job.get("metadata") or {}
+            next_action = None
+            if isinstance(meta, dict):
+                next_action = meta.get("next_action")
+            if not next_action:
+                defaults = {
+                    "lead": "Prepare initial estimate",
+                    "estimate_sent": "Follow up with client",
+                    "deposit_paid": "Order required fabric & materials",
+                    "fabric_ordered": "Confirm tracking / arrival",
+                    "fabric_picked_up": "Check yardage & prep work order",
+                    "in_production": "Cut & sew in workroom",
+                    "ready": "Quality check & prep for delivery",
+                    "scheduled": "Confirm install/pickup date",
+                    "installed": "Generate final invoice",
+                    "final_invoice": "Collect remaining balance",
+                    "paid_closed": "Complete & archived",
+                }
+                next_action = defaults.get(canonical_stage, "Review job details")
+            job["next_action"] = next_action
+
+            # Pickup / delivery date chip
+            pickup_delivery = (
+                job.get("scheduled_date")
+                or job.get("delivery_date")
+                or job.get("install_date")
+                or (meta.get("pickup_date") if isinstance(meta, dict) else None)
+            )
+            job["pickup_delivery_date"] = pickup_delivery
+
+            target_col = col_map[canonical_stage]
+            target_col["jobs"].append(job)
+            target_col["count"] += 1
+            target_col["total_value"] += p_strip["total"]
+
+        columns = [col_map[s["key"]] for s in KANBAN_STAGE_SPECS]
         return {
-            "columns": [{"status": s, "jobs": j, "count": len(j)} for s, j in columns.items()],
+            "columns": columns,
             "total": len(jobs),
+            "stages": KANBAN_STAGE_SPECS,
         }
 
 
@@ -1115,6 +1328,12 @@ def create_job(job: JobCreateSchema):
         job_number = _next_job_number(conn)
         job_id = None
 
+        # Resolve status to valid base check constraint
+        raw_stage = job.pipeline_stage or job.status or "lead"
+        base_status = STATUS_BASE_MAP.get(raw_stage.lower())
+        if not base_status:
+            base_status = "pending" if raw_stage not in ('pending', 'scheduled', 'in_progress', 'on_hold', 'completed', 'cancelled') else raw_stage
+
         conn.execute(
             """INSERT INTO jobs
                (id, job_number, title, customer_id, quote_id, status, job_type, priority,
@@ -1130,7 +1349,7 @@ def create_job(job: JobCreateSchema):
                 job.title,
                 customer_id,
                 job.quote_id,
-                job.pipeline_stage if job.pipeline_stage != "intake" else "pending",
+                base_status,
                 job.job_type,
                 job.priority,
                 job.assigned_to,
@@ -1203,14 +1422,44 @@ def get_job(job_id: str):
         invoices = [_enrich_invoice(dict_row(r)) for r in
                     conn.execute("SELECT * FROM invoices WHERE job_id = ? ORDER BY created_at DESC", (job_id,)).fetchall()]
 
+        # Linked payments from canonical payments table (falling back to legacy invoice_payments)
+        inv_ids = [inv["id"] for inv in invoices if inv.get("id")]
+        payments = []
+        if inv_ids:
+            ph = ",".join("?" * len(inv_ids))
+            try:
+                payments = [dict_row(r) for r in conn.execute(
+                    f"SELECT * FROM payments WHERE invoice_id IN ({ph}) ORDER BY payment_date DESC, created_at DESC",
+                    inv_ids
+                ).fetchall()]
+                if not payments:
+                    payments = [dict_row(r) for r in conn.execute(
+                        f"SELECT * FROM invoice_payments WHERE invoice_id IN ({ph}) ORDER BY created_at DESC",
+                        inv_ids
+                    ).fetchall()]
+            except Exception as e:
+                logger.warning("Error fetching payments for job %s: %s", job_id, e)
+
+        payment_strip = _compute_job_payment_strip(
+            conn, job_id, float(job.get("estimated_value") or job.get("quoted_amount") or 0.0)
+        )
+
         job["items"] = items
         job["documents"] = documents
         job["selections"] = selections
         job["events"] = events
         job["revisions"] = revisions
         job["invoices"] = invoices
+        job["payments"] = payments
+        job["payment_strip"] = payment_strip
+        raw_stage = (job.get("pipeline_stage") or job.get("status") or "lead").strip().lower()
+        job["canonical_stage"] = STAGE_NORMALIZATION.get(raw_stage, "lead")
 
-        return {"job": job}
+        # Flat fields support for frontend / backward compat
+        return {
+            "job": job,
+            **job,
+        }
 
 
 @router.put("/jobs/{job_id}")
@@ -1258,20 +1507,28 @@ def update_job(job_id: str, update: JobUpdateSchema):
 
 
 @router.patch("/jobs/{job_id}/status")
-def change_job_status(job_id: str, body: StatusChange):
-    """Change job status with pipeline validation."""
+@router.patch("/jobs/{job_id}/stage")
+def change_job_status(job_id: str, body: dict):
+    """Change job stage / status with kanban stage compatibility."""
+    status_val = body.get("stage") or body.get("status")
+    if not status_val:
+        raise HTTPException(status_code=400, detail="Missing 'stage' or 'status' in request body")
+    actor = body.get("actor", "founder")
+    notes = body.get("notes")
+
     with get_db() as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Job not found")
 
         job = dict_row(row)
-        current_stage = job.get("pipeline_stage", "intake")
-        new_stage = body.status
+        current_stage = (job.get("pipeline_stage") or job.get("status") or "lead").strip().lower()
+        new_stage = status_val.strip().lower()
 
-        # Validate transition
+        # Validate transition: allow if either stage is in KANBAN_STAGE_KEYS or STAGE_NORMALIZATION or VALID_TRANSITIONS
+        is_kanban = new_stage in KANBAN_STAGE_KEYS or new_stage in STAGE_NORMALIZATION
         allowed = VALID_TRANSITIONS.get(current_stage, [])
-        if new_stage not in allowed:
+        if not is_kanban and new_stage not in allowed:
             raise HTTPException(
                 status_code=400,
                 detail=f"Cannot transition from '{current_stage}' to '{new_stage}'. Allowed: {allowed}",
@@ -1283,15 +1540,24 @@ def change_job_status(job_id: str, body: StatusChange):
             "measuring": "site_visit_date",
             "quoting": "quote_date",
             "approved": "approved_date",
+            "deposit_paid": "approved_date",
             "in_production": "production_start",
             "installing": "install_date",
+            "installed": "install_date",
             "invoiced": "invoiced_date",
+            "final_invoice": "invoiced_date",
             "paid": "paid_date",
+            "paid_closed": "paid_date",
             "completed": "completed_date",
         }
 
+        # Map to valid base table status check constraint
+        base_status = STATUS_BASE_MAP.get(new_stage)
+        if not base_status:
+            base_status = new_stage if new_stage in ('pending', 'scheduled', 'in_progress', 'on_hold', 'completed', 'cancelled') else "pending"
+
         updates = ["pipeline_stage = ?", "status = ?", "updated_at = datetime('now')"]
-        params = [new_stage, new_stage]
+        params = [new_stage, base_status]
 
         if new_stage in date_fields:
             col = date_fields[new_stage]
@@ -1302,8 +1568,8 @@ def change_job_status(job_id: str, body: StatusChange):
         conn.execute(f"UPDATE jobs SET {', '.join(updates)} WHERE id = ?", params)
 
         _add_event(conn, job_id, "status_change",
-                   f"Status: {current_stage} -> {new_stage}" + (f" — {body.notes}" if body.notes else ""),
-                   body.actor, {"from": current_stage, "to": new_stage})
+                   f"Status: {current_stage} -> {new_stage}" + (f" — {notes}" if notes else ""),
+                   actor, {"from": current_stage, "to": new_stage})
 
         updated = conn.execute(
             """SELECT j.*, c.name as customer_name
@@ -1311,7 +1577,12 @@ def change_job_status(job_id: str, body: StatusChange):
                WHERE j.id = ?""",
             (job_id,),
         ).fetchone()
-        return {"job": _enrich_job(dict_row(updated))}
+        job_res = _enrich_job(dict_row(updated))
+        job_res["payment_strip"] = _compute_job_payment_strip(
+            conn, job_id, float(job_res.get("estimated_value") or job_res.get("quoted_amount") or 0.0)
+        )
+        job_res["canonical_stage"] = STAGE_NORMALIZATION.get(new_stage, "lead")
+        return {"job": job_res}
 
 
 @router.get("/jobs/{job_id}/timeline")
@@ -1440,6 +1711,106 @@ def add_job_document(job_id: str, doc: DocumentCreate):
             (job_id,),
         ).fetchone()
         return {"document": dict_row(row)}
+
+
+@router.post("/jobs/{job_id}/upload")
+async def upload_job_file(
+    job_id: str,
+    file: UploadFile = File(...),
+    document_type: str = Form("file"),
+    notes: Optional[str] = Form(None),
+    visible_to_client: bool = Form(False),
+):
+    """Upload a file/photo/PDF from phone or desktop directly into a job's document folder."""
+    with get_db() as conn:
+        exists = conn.execute("SELECT id FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        job_dir = Path.home() / "empire-repo" / "backend" / "data" / "uploads" / "jobs" / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_filename = file.filename or f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        save_path = job_dir / safe_filename
+        if save_path.exists():
+            stem, suffix = save_path.stem, save_path.suffix
+            save_path = job_dir / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
+
+        raw_bytes = await file.read()
+        with open(save_path, "wb") as f:
+            f.write(raw_bytes)
+
+        file_url = f"/api/v1/files/download/jobs/{job_id}/{save_path.name}"
+        doc_id = uuid.uuid4().hex[:16]
+
+        conn.execute(
+            """INSERT INTO job_documents (id, job_id, document_type, url, filename, visible_to_client)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (doc_id, job_id, document_type, file_url, safe_filename, 1 if visible_to_client else 0),
+        )
+
+        _add_event(conn, job_id, "document_uploaded", f"Uploaded {safe_filename} ({document_type})")
+
+        row = conn.execute("SELECT * FROM job_documents WHERE id = ?", (doc_id,)).fetchone()
+        return {"document": dict_row(row)}
+
+
+@router.post("/jobs/{job_id}/change-orders")
+def add_job_change_order(job_id: str, body: ChangeOrderCreate):
+    """Add a change order to a job folder."""
+    with get_db() as conn:
+        exists = conn.execute("SELECT id FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        doc_id = uuid.uuid4().hex[:16]
+        meta = json.dumps({"amount": body.amount, "description": body.description, "status": body.status})
+        conn.execute(
+            """INSERT INTO job_documents (id, job_id, document_type, filename, url, item_key)
+               VALUES (?, ?, 'change_order', ?, ?, ?)""",
+            (doc_id, job_id, body.title, meta, f"CO-{doc_id[:6].upper()}"),
+        )
+        _add_event(conn, job_id, "change_order_added", f"Change Order: {body.title} (${body.amount:,.2f})")
+        row = conn.execute("SELECT * FROM job_documents WHERE id = ?", (doc_id,)).fetchone()
+        return {"change_order": dict_row(row)}
+
+
+@router.post("/jobs/{job_id}/emails")
+def add_job_email_log(job_id: str, body: EmailLogCreate):
+    """Record an email log/message for a job."""
+    with get_db() as conn:
+        exists = conn.execute("SELECT id FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        doc_id = uuid.uuid4().hex[:16]
+        meta = json.dumps({
+            "sender": body.sender,
+            "recipient": body.recipient,
+            "subject": body.subject,
+            "body": body.body,
+            "date": body.date or datetime.now().isoformat(),
+        })
+        conn.execute(
+            """INSERT INTO job_documents (id, job_id, document_type, filename, url)
+               VALUES (?, ?, 'email', ?, ?)""",
+            (doc_id, job_id, body.subject, meta),
+        )
+        _add_event(conn, job_id, "email_logged", f"Email logged: {body.subject} from {body.sender}")
+        row = conn.execute("SELECT * FROM job_documents WHERE id = ?", (doc_id,)).fetchone()
+        return {"email": dict_row(row)}
+
+
+class StageUpdatePayload(BaseModel):
+    stage: str
+    notes: Optional[str] = None
+
+
+@router.patch("/jobs/{job_id}/stage")
+def update_job_stage(job_id: str, payload: StageUpdatePayload):
+    """Update job to any of the 11 canonical kanban stages."""
+    return update_job_status(job_id, payload.stage, payload.notes)
+
 
 
 @router.post("/jobs/{job_id}/selections")
