@@ -336,6 +336,47 @@ CREATE TABLE IF NOT EXISTS openclaw_tasks (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Schedule Events: calendar events, installations, pickups, loading dock reservations
+CREATE TABLE IF NOT EXISTS schedule_events (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    type TEXT NOT NULL CHECK (type IN ('install', 'delivery', 'pickup', 'drop_off', 'fabric_pickup', 'measure', 'loading_dock', 'errand', 'other')),
+    title TEXT NOT NULL,
+    job_id TEXT,
+    customer_vendor TEXT,
+    location_address TEXT,
+    start_time TEXT NOT NULL,
+    end_time TEXT,
+    status TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'confirmed', 'done', 'cancelled')),
+    notes TEXT,
+    created_by TEXT NOT NULL DEFAULT 'manual' CHECK (created_by IN ('max', 'manual')),
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (job_id) REFERENCES jobs(id)
+);
+
+-- Pickup & Drop-Off Log: physical custody changes linked to jobs & vendors
+CREATE TABLE IF NOT EXISTS pickup_dropoff_logs (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    schedule_event_id TEXT,
+    job_id TEXT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    direction TEXT NOT NULL CHECK (direction IN ('picked_up', 'dropped_off')),
+    items TEXT NOT NULL,
+    party TEXT NOT NULL,
+    notes TEXT,
+    created_by TEXT NOT NULL DEFAULT 'manual' CHECK (created_by IN ('max', 'manual')),
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (schedule_event_id) REFERENCES schedule_events(id),
+    FOREIGN KEY (job_id) REFERENCES jobs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_events_start ON schedule_events(start_time);
+CREATE INDEX IF NOT EXISTS idx_schedule_events_job ON schedule_events(job_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_events_status ON schedule_events(status);
+CREATE INDEX IF NOT EXISTS idx_pickup_dropoff_job ON pickup_dropoff_logs(job_id);
+CREATE INDEX IF NOT EXISTS idx_pickup_dropoff_event ON pickup_dropoff_logs(schedule_event_id);
+CREATE INDEX IF NOT EXISTS idx_pickup_dropoff_timestamp ON pickup_dropoff_logs(timestamp);
+
 CREATE INDEX IF NOT EXISTS idx_openclaw_tasks_status ON openclaw_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_openclaw_tasks_desk ON openclaw_tasks(desk);
 CREATE INDEX IF NOT EXISTS idx_openclaw_tasks_priority ON openclaw_tasks(priority);
@@ -480,6 +521,9 @@ def init_database():
         # ForgeCRM attribution columns + case-insensitive email index
         _migrate_customer_attribution(conn)
 
+        # Schedule Control & Pickup Log tables (safe to re-run)
+        _migrate_schedule_tables(conn)
+
         # Seed desk configs from desks.json if table is empty
         count = conn.execute("SELECT COUNT(*) FROM desk_configs").fetchone()[0]
         if count == 0 and DESKS_JSON_PATH.exists():
@@ -590,6 +634,50 @@ def _migrate_intake_soft_delete(conn):
         intake_conn.commit()
         print(f"  Intake soft-delete migration: added deleted_at to {added} table(s)")
     intake_conn.close()
+
+
+def _migrate_schedule_tables(conn):
+    """Ensure schedule_events and pickup_dropoff_logs tables exist. Safe to re-run."""
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS schedule_events (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+        type TEXT NOT NULL CHECK (type IN ('install', 'delivery', 'pickup', 'drop_off', 'fabric_pickup', 'measure', 'loading_dock', 'errand', 'other')),
+        title TEXT NOT NULL,
+        job_id TEXT,
+        customer_vendor TEXT,
+        location_address TEXT,
+        start_time TEXT NOT NULL,
+        end_time TEXT,
+        status TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'confirmed', 'done', 'cancelled')),
+        notes TEXT,
+        created_by TEXT NOT NULL DEFAULT 'manual' CHECK (created_by IN ('max', 'manual')),
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (job_id) REFERENCES jobs(id)
+    )
+    """)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS pickup_dropoff_logs (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+        schedule_event_id TEXT,
+        job_id TEXT,
+        timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+        direction TEXT NOT NULL CHECK (direction IN ('picked_up', 'dropped_off')),
+        items TEXT NOT NULL,
+        party TEXT NOT NULL,
+        notes TEXT,
+        created_by TEXT NOT NULL DEFAULT 'manual' CHECK (created_by IN ('max', 'manual')),
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (schedule_event_id) REFERENCES schedule_events(id),
+        FOREIGN KEY (job_id) REFERENCES jobs(id)
+    )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_schedule_events_start ON schedule_events(start_time)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_schedule_events_job ON schedule_events(job_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_schedule_events_status ON schedule_events(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pickup_dropoff_job ON pickup_dropoff_logs(job_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pickup_dropoff_event ON pickup_dropoff_logs(schedule_event_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pickup_dropoff_timestamp ON pickup_dropoff_logs(timestamp)")
 
 
 def _seed_desks(conn):

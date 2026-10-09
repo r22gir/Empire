@@ -64,6 +64,7 @@ import ProductDocs from './components/business/docs/ProductDocs';
 
 import TasksScreen from './components/screens/TasksScreen';
 import PresentationScreen from './components/screens/PresentationScreen';
+import ScheduleControl from './components/business/schedule/ScheduleControl';
 import LiveVoiceCall from './components/LiveVoiceCall';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
@@ -99,6 +100,8 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
 
 const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'pricing-studio': 'pricing-studio',
+  calendar: 'calendar',
+  schedule: 'calendar',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -520,6 +523,7 @@ export default function CommandCenter() {
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;
     if (activeScreen === 'memory-bank') return <MemoryBankScreen />;
     if (activeScreen === 'telegram') return <TelegramScreen />;
+    if (activeScreen === 'calendar') return <ScheduleControl />;
     if (activeScreen === 'report') return <SystemReportScreen />;
     if (activeScreen === 'tasks') return <TasksScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : activeProduct === 'owner' ? undefined : activeProduct} />;
     if (activeScreen === 'tickets') return <Suspense fallback={<Loading />}><TicketsPage /></Suspense>;
