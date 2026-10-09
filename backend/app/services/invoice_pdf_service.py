@@ -118,6 +118,72 @@ def _line_amount(item: dict) -> float:
         return 0.0
 
 
+def _plain(text: str) -> str:
+    try:
+        from app.services.pricing.dimensions import plain_fractions
+        return plain_fractions(text)
+    except Exception:
+        return text
+
+
+def _item_sqft(item: dict) -> tuple[Optional[float], Optional[float]]:
+    """(sq_ft, price_per_sqft) from the line or its pricing snapshot; (None, None) when not a sq-ft line."""
+    snap = item.get("pricing_snapshot") or item.get("pricing_snapshot_json") or {}
+    if isinstance(snap, str):
+        try:
+            snap = json.loads(snap)
+        except (TypeError, ValueError):
+            snap = {}
+    for src in (item, snap if isinstance(snap, dict) else {}):
+        try:
+            sq = src.get("sq_ft")
+            rate = src.get("price_per_sqft")
+            if sq not in (None, "") and rate not in (None, ""):
+                return float(sq), float(rate)
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return None, None
+
+
+def _change_order(invoice: dict) -> dict:
+    snap = invoice.get("pricing_snapshot_json") or {}
+    if isinstance(snap, str):
+        try:
+            snap = json.loads(snap)
+        except (TypeError, ValueError):
+            snap = {}
+    co = snap.get("change_order") if isinstance(snap, dict) else None
+    return co if isinstance(co, dict) else {}
+
+
+def _mdy(value: str) -> str:
+    v = str(value or "")[:10]
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+        return f"{v[5:7]}/{v[8:10]}/{v[0:4]}"
+    return v
+
+
+def credit_schedule(invoice: dict) -> Optional[dict]:
+    """Deposit already received elsewhere (e.g. a change order applying an earlier deposit):
+    total, less deposit received, deposit required, deposit due now, balance on completion."""
+    try:
+        total = float(invoice.get("total") or 0)
+        received = float(invoice.get("deposit_received") or 0)
+        required = float(invoice.get("deposit_required") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not (total > 0 and received > 0 and required > 0 and required <= total):
+        return None
+    return {
+        "total": round(total, 2),
+        "received": round(received, 2),
+        "received_date": _mdy(invoice.get("deposit_date") or ""),
+        "required": round(required, 2),
+        "due_now": round(max(required - received, 0), 2),
+        "balance_on_completion": round(total - required, 2),
+    }
+
+
 def _load_biz_cfg(is_woodcraft: bool) -> dict:
     config_dir = Path(__file__).resolve().parent.parent / "config"
     path = config_dir / ("woodcraft_business.json" if is_woodcraft else "business.json")
@@ -187,20 +253,55 @@ def render_client_invoice_html(
     items = list(invoice.get("line_items") or [])
     rows_html = ""
     has_rooms = any(str(it.get("room") or "").strip() for it in items)
+    sqft_mode = any(_item_sqft(it)[0] is not None for it in items)
+    ncols = 6 if sqft_mode else 5
     current_room = None
+    room_total = 0.0
+    td = "padding:5px 8px;border-bottom:1px solid #e8e4dd;font-size:9.5pt;line-height:1.3"
+
+    def _room_subtotal(name: str, amount: float) -> str:
+        return (f'<tr><td colspan="{ncols - 1}" style="padding:7px 12px;font-weight:700;background:#f3eee4">'
+                f'Subtotal &mdash; {escape(name, quote=False)}</td>'
+                f'<td style="padding:7px 12px;text-align:right;font-weight:700;background:#f3eee4">${amount:,.2f}</td></tr>')
+
     for idx, item in enumerate(items):
         if has_rooms:
             # room section headers, same grouping as the in-app invoice page (items are saved in room order)
             room = str(item.get("room") or "").strip() or "Job-wide"
             if room != current_room:
+                if sqft_mode and current_room is not None:
+                    rows_html += _room_subtotal(current_room, room_total)
                 current_room = room
-                rows_html += f"""<tr><td colspan="5" style="padding:9px 12px 6px;border-bottom:2px solid #c9a04a;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:9.5pt;background:#f3eee4">{escape(room, quote=False)}</td></tr>"""
+                room_total = 0.0
+                rows_html += f"""<tr><td colspan="{ncols}" style="padding:{'6px 8px 4px' if sqft_mode else '9px 12px 6px'};border-bottom:2px solid #c9a04a;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:9.5pt;background:#f3eee4">{escape(room, quote=False)}</td></tr>"""
         bg = "#f9f7f3" if idx % 2 == 0 else "#ffffff"
-        desc = escape(client_visible_line_description(item), quote=False)
+        desc = escape(_plain(client_visible_line_description(item)), quote=False)
         unit = (item.get("unit") or "ea").strip() or "ea"
         qty = item.get("quantity", 1)
         unit_price = item.get("unit_price", item.get("rate", 0))
         amount = _line_amount(item)
+        room_total += amount
+        if sqft_mode:
+            try:
+                qf = float(qty)
+                qty = int(qf) if qf.is_integer() else qty
+            except (TypeError, ValueError):
+                pass
+            raw_lines = [ln.strip() for ln in str(item.get("description") or "").split("\n") if ln.strip()]
+            sub = escape(_plain(raw_lines[1]), quote=False) if len(raw_lines) > 1 else ""
+            sub_html = f'<div style="font-size:8.5pt;color:#777;margin-top:2px">{sub}</div>' if sub else ""
+            sq, rate = _item_sqft(item)
+            sq_txt = f"{sq:,.2f}" if sq is not None else ""
+            rate_txt = f"{rate:,.2f}" if rate is not None else f"{float(unit_price or 0):,.2f}"
+            rows_html += f"""<tr style="background:{bg}">
+            <td style="{td}"><strong>{desc}</strong>{sub_html}</td>
+            <td style="{td};text-align:center">{qty}</td>
+            <td style="{td};text-align:center">{unit}</td>
+            <td style="{td};text-align:right">{sq_txt}</td>
+            <td style="{td};text-align:right">{rate_txt}</td>
+            <td style="{td};text-align:right">${amount:,.2f}</td>
+        </tr>"""
+            continue
         rows_html += f"""<tr style="background:{bg}">
             <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd">{desc}</td>
             <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:center">{qty}</td>
@@ -208,6 +309,8 @@ def render_client_invoice_html(
             <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:right">${float(unit_price or 0):,.2f}</td>
             <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:right">${amount:,.2f}</td>
         </tr>"""
+    if sqft_mode and has_rooms and current_room is not None:
+        rows_html += _room_subtotal(current_room, room_total)
 
     if not rows_html:
         sub = float(invoice.get("subtotal", 0) or 0)
@@ -236,18 +339,37 @@ def render_client_invoice_html(
         note_parts.append(client_note)
     note_html = ""
     if note_parts:
-        body = "<br>".join(escape(p, quote=False) for p in note_parts)
+        body = "<br>".join(escape(_plain(p), quote=False) for p in note_parts)
         note_html = (
             f'<div style="margin:24px 0;padding:12px;background:#f5f3ef;'
             f'border-radius:8px;font-size:10pt">{body}</div>'
         )
 
     totals_deposit_rows = ""
-    if schedule:
+    credit = credit_schedule(invoice) if not schedule else None
+    co = _change_order(invoice)
+    if credit:
+        ref = f" &middot; {escape(str(co.get('credit_ref')), quote=False)}" if co.get("credit_ref") else ""
+        pct = invoice.get("deposit_percent") or co.get("deposit_percent") or 50
+        totals_deposit_rows = f"""
+  <tr><td>Less deposit received {credit['received_date']}{ref}</td><td style="text-align:right">-${credit['received']:,.2f}</td></tr>
+  <tr><td>Deposit required ({float(pct):g}%)</td><td style="text-align:right">${credit['required']:,.2f}</td></tr>
+  <tr class="deposit-due-row"><td><strong>Deposit due now</strong></td>
+      <td style="text-align:right;font-weight:700;color:{accent}">${credit['due_now']:,.2f}</td></tr>
+  <tr><td>Balance on completion</td><td style="text-align:right">${credit['balance_on_completion']:,.2f}</td></tr>"""
+    elif schedule:
         totals_deposit_rows = f"""
   <tr class="deposit-due-row"><td><strong>50% Deposit Due</strong></td>
       <td style="text-align:right;font-weight:700;color:{accent}">${deposit_due:,.2f}</td></tr>
   <tr><td>Balance Due</td><td style="text-align:right">${balance_due:,.2f}</td></tr>"""
+
+    head_mid = ('<th style="text-align:right">Sq ft</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th>'
+                if sqft_mode else
+                '<th style="text-align:right">Unit Price</th><th style="text-align:right">Amount</th>')
+    totals_width = 420 if credit else 300
+    co_title = ""
+    if co.get("number"):
+        co_title = f'<div class="invoice-number" style="font-weight:700">Change Order {escape(str(co.get("number")), quote=False)}</div>'
 
     contact_bits = [b for b in (brand["phone"], brand["email"], brand["address"]) if b]
     contact_html = "<br>".join(contact_bits)
@@ -272,7 +394,7 @@ def render_client_invoice_html(
   table {{ width: 100%; border-collapse: collapse; margin: 16px 0; }}
   thead {{ background: #f5f3ef; }}
   th {{ padding: 10px 12px; text-align: left; font-size: 9pt; text-transform: uppercase; color: #666; letter-spacing: 0.5px; border-bottom: 2px solid {accent}; }}
-  .totals {{ margin-left: auto; width: 300px; }}
+  .totals {{ margin-left: auto; width: {totals_width}px; }}
   .totals tr td {{ padding: 6px 12px; }}
   .totals .total-row {{ font-size: 14pt; font-weight: 700; border-top: 2px solid {accent}; }}
   .totals .deposit-due-row td {{ padding-top: 10px; }}
@@ -289,6 +411,7 @@ def render_client_invoice_html(
   <div class="invoice-title">
     <h1>INVOICE</h1>
     <div class="invoice-number">{inv_num}</div>
+    {co_title}
   </div>
 </div>
 
@@ -312,8 +435,7 @@ def render_client_invoice_html(
     <th>Description</th>
     <th style="text-align:center">Qty</th>
     <th style="text-align:center">Unit</th>
-    <th style="text-align:right">Unit Price</th>
-    <th style="text-align:right">Amount</th>
+    {head_mid}
   </tr></thead>
   <tbody>{rows_html}</tbody>
 </table>
