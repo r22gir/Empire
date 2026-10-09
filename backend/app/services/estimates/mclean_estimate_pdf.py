@@ -1295,6 +1295,21 @@ def inches_to_fractions(text: str) -> str:
     return _DEC_INCH_RE.sub(_sub, text or "")
 
 
+def sqft_fraction(value: float | None) -> str:
+    """Square feet as a whole number plus a fraction to the nearest 1/8: 46.39 -> '46 3/8', 7.01 -> '7'."""
+    if value is None:
+        return ""
+    eighths = int(round(float(value) * 8))
+    whole, rem = divmod(eighths, 8)
+    if rem == 0:
+        return f"{whole:,}"
+    num, den = rem, 8
+    while num % 2 == 0 and den % 2 == 0:
+        num //= 2
+        den //= 2
+    return f"{whole:,} {num}/{den}" if whole else f"{num}/{den}"
+
+
 def _sqft_layout(sections: List[Tuple[str, List[Dict[str, Any]]]]) -> bool:
     return any(_line_sqft(it)[0] is not None for _n, lines in sections for it in lines)
 
@@ -1528,7 +1543,7 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
                         c.setFillColor(DK)
                         c.drawRightString(qty6_x, y, _qty_text(it))
                         c.drawRightString(unit_x, y, _unit_text(it))
-                        c.drawRightString(sqft_x, y, f"{sq:,.2f}" if sq is not None else "")
+                        c.drawRightString(sqft_x, y, sqft_fraction(sq))
                         if sq is not None and pps is not None:
                             c.drawRightString(price_x, y, f"{pps:,.2f}")
                         else:

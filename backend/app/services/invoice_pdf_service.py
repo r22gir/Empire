@@ -607,6 +607,13 @@ def generate_client_invoice_pdf_bytes(
     customer: Optional[dict] = None,
     is_woodcraft: bool = False,
 ) -> bytes:
+    if not is_woodcraft:
+        try:
+            from app.services.estimates.invoice_mclean_pdf import render_invoice_bytes
+            return render_invoice_bytes(invoice, customer)
+        except Exception:  # never fail an invoice over layout: fall back to the plain template
+            import logging
+            logging.getLogger(__name__).exception("estimate-style invoice render failed; using plain template")
     import weasyprint
 
     html = render_client_invoice_html(invoice, customer=customer, is_woodcraft=is_woodcraft)
