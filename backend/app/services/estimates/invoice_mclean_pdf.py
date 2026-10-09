@@ -65,6 +65,11 @@ def _title_suffix(inv: dict) -> str:
     return {"deposit": "Deposit invoice", "progress": "Progress invoice"}.get(stage, "")
 
 
+def sans_stringwidth(text: str, font: str, size: float) -> float:
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    return stringWidth(text or "", font, size)
+
+
 def _total_rows(inv: dict, accent_pay: Optional[dict]) -> List[Tuple[str, str, str]]:
     """(label, amount text, kind) rows for the totals panel."""
     from app.services import invoice_pdf_service as S
@@ -136,7 +141,7 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
     suffix = _title_suffix(inv)
     fake_q = {"customer_name": name, "quote_number": num, "created_at": created}
     pay = S.invoice_pay_link(inv)
-    rows = _total_rows(inv, pay)
+    total_rows = _total_rows(inv, pay)
 
     # sections by area, in saved order
     items = list(inv.get("line_items") or [])
@@ -256,7 +261,16 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
         # totals panel
         row_h = 13.0
         panel_w = 330.0
-        heights = sum(row_h + (4 if k in ("total", "due") else 0) for _l, _a, k in rows) + 14
+        wrapped: List[Tuple[str, str, str]] = []
+        for _l, _a, _k in total_rows:
+            if _k == "n":
+                avail = panel_w - 24 - sans_stringwidth(_a, sans, 9) - 10
+                parts = E._wrap_to_width(_l, sans, 8.5, max(avail, 80)) or [_l]
+                wrapped.append((parts[0], _a, "n"))
+                wrapped.extend((f"   {x}", "", "n") for x in parts[1:])
+            else:
+                wrapped.append((_l, _a, _k))
+        heights = sum(row_h + (4 if k in ("total", "due") else 0) for _l, _a, k in wrapped) + 14
         need(heights + 20)
         E._hr(c, y, weight=1.0, col=GOLD); y -= 8
         px = PW - E.MARGIN_R - panel_w
@@ -264,7 +278,7 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
         c.setFillColor(E.PANEL); c.roundRect(px, top - heights, panel_w, heights, 4, fill=1, stroke=0)
         c.setStrokeColor(GOLD); c.setLineWidth(0.9); c.roundRect(px, top - heights, panel_w, heights, 4, fill=0, stroke=1)
         ry = top - 16
-        for label, amt, kind in rows:
+        for label, amt, kind in wrapped:
             if kind == "head":
                 c.setFont(mono, 7); c.setFillColor(GOLD); c.drawString(px + 12, ry, label)
             elif kind == "total":
@@ -274,7 +288,7 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
                 c.setFont(sans_b, 10); c.setFillColor(E.DK); c.drawString(px + 12, ry, label)
                 c.setFont(sans_b, 12); c.setFillColor(GOLD); c.drawRightString(px + panel_w - 12, ry, amt); ry -= 4
             else:
-                c.setFont(sans, 8.5); c.setFillColor(E.MUTE); c.drawString(px + 12, ry, label[:60])
+                c.setFont(sans, 8.5); c.setFillColor(E.MUTE); c.drawString(px + 12, ry, label)
                 c.setFont(sans_b if False else sans, 9); c.setFillColor(E.DK); c.drawRightString(px + panel_w - 12, ry, amt)
             ry -= row_h
         # earlier-invoice note to the left of the totals panel
@@ -308,7 +322,15 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
             c.setStrokeColor(GOLD); c.setLineWidth(0.6)
             c.line(tx, y - 43, tx + c.stringWidth(label, sans_b, 13), y - 43)
             c.setFont(sans, 8); c.setFillColor(E.MUTE)
-            c.drawString(tx, y - 56, "Click the link or scan the code to pay securely by card (Stripe).")
+            c.drawString(tx, y - 56, "Click the link or scan the code to pay securely by card (Stripe). Link does not expire.")
+            url_font = 7.5
+            while c.stringWidth(pay["url"], mono, url_font) > E.CONTENT_W - (tx - E.MARGIN_L) - 12 and url_font > 5:
+                url_font -= 0.5
+            c.setFont(mono, url_font); c.setFillColor(GOLD)
+            c.drawString(tx, y - 70, pay["url"])
+            c.linkURL(pay["url"], (tx, y - 74, tx + c.stringWidth(pay["url"], mono, url_font), y - 64), relative=0)
+            if qr:
+                c.linkURL(pay["url"], (E.MARGIN_L + 10, y - bh + 6, E.MARGIN_L + 82, y - bh + 78), relative=0)
             y -= bh + 12
 
         # notes panel

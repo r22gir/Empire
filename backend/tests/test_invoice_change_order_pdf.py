@@ -46,17 +46,17 @@ def test_deposit_pay_link_and_qr():
     from app.services.invoice_pdf_service import deposit_pay_link
     inv = _inv()
     inv.update({"invoice_stage": "deposit", "status": "draft", "payment_status": "link_ready",
-                "balance_due": 200.0, "stripe_checkout_url": "https://checkout.stripe.com/c/pay/cs_test_x#frag"})
-    assert deposit_pay_link(inv) == {"url": "https://checkout.stripe.com/c/pay/cs_test_x#frag", "amount": 200.0}
+                "balance_due": 200.0, "stripe_checkout_url": "https://buy.stripe.com/test_x"})
+    assert deposit_pay_link(inv) == {"url": "https://buy.stripe.com/test_x", "amount": 200.0}
     html = render_client_invoice_html(inv)
-    assert "Pay deposit online: $200.00" in html and 'href="https://checkout.stripe.com/c/pay/cs_test_x#frag"' in html
+    assert "Pay deposit online: $200.00" in html and 'href="https://buy.stripe.com/test_x"' in html
     assert "data:image/png;base64," in html
 
 
 def test_no_pay_link_when_paid_expired_or_not_deposit():
     from app.services.invoice_pdf_service import deposit_pay_link
     base = {"invoice_stage": "deposit", "status": "draft", "payment_status": "link_ready", "balance_due": 10,
-            "stripe_checkout_url": "https://checkout.stripe.com/x"}
+            "stripe_checkout_url": "https://buy.stripe.com/x"}
     assert deposit_pay_link(dict(base, status="paid")) is None
     assert deposit_pay_link(dict(base, payment_status="expired")) is None
     assert deposit_pay_link(dict(base, invoice_stage="final")) is None

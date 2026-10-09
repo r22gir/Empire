@@ -266,8 +266,8 @@ def invoice_pay_link(invoice: dict) -> Optional[dict]:
     """Deposit or final invoice with an open Stripe Checkout URL -> {url, amount, label}.
     The amount is always the balance due now (never the gross total)."""
     url = str(invoice.get("stripe_checkout_url") or "").strip()
-    if not url.startswith("https://"):
-        return None
+    if not url.startswith("https://buy.stripe.com/"):
+        return None  # only non-expiring Payment Links; 24-hour Checkout Session URLs never go on a PDF
     stage = str(invoice.get("invoice_stage") or "").strip().lower()
     if stage not in ("deposit", "final", "progress"):
         return None

@@ -41,6 +41,27 @@ class _SessionAPI:
         )
 
 
+class _ProductAPI:
+    @classmethod
+    def create(cls, **kwargs):
+        return SimpleNamespace(id="prod_test_1")
+
+
+class _LinkAPI:
+    created = []
+    modified = []
+
+    @classmethod
+    def create(cls, **kwargs):
+        cls.created.append(kwargs)
+        n = len(cls.created)
+        return SimpleNamespace(id=f"plink_test_{n}", url=f"https://buy.stripe.com/test_abc{n}", active=True)
+
+    @classmethod
+    def modify(cls, link_id, **kwargs):
+        cls.modified.append((link_id, kwargs))
+
+
 def _request() -> Request:
     return Request({"type": "http", "method": "POST", "path": "/test", "headers": []})
 
@@ -88,8 +109,12 @@ def _load(monkeypatch, tmp_path):
     monkeypatch.setattr(finance, "QUOTES_DIR", quotes_dir)
 
     _SessionAPI.reset()
+    _LinkAPI.created = []
+    _LinkAPI.modified = []
     fake = SimpleNamespace(
         checkout=SimpleNamespace(Session=_SessionAPI),
+        PaymentLink=_LinkAPI,
+        Product=_ProductAPI,
         error=SimpleNamespace(StripeError=_StripeError),
     )
     monkeypatch.setattr(payments, "stripe", fake)
@@ -147,16 +172,16 @@ def test_quote_deposit_pay_link_is_idempotent_and_unpaid(monkeypatch, tmp_path):
     }
     assert round(first["invoice"]["total"], 2) == 110
     assert first["pay_link"]["checkout_url"] == second["pay_link"]["checkout_url"]
-    assert first["pay_link"]["checkout_url"].startswith("https://checkout.stripe.com/c/pay/")
+    assert first["pay_link"]["checkout_url"].startswith("https://buy.stripe.com/")
     assert second["pay_link"]["reused"] is True
     assert first["payment_status"] == "link_ready"
     assert second["payment_status"] == "link_ready"
     assert first["invoice"]["status"] != "paid"
-    assert len(_SessionAPI.created) == 1
-    assert _SessionAPI.created[0]["customer_email"] == "ada@example.com"
-    assert _SessionAPI.created[0]["metadata"]["flow"] == "workroom_invoice"
-    assert "studio.empirebox.store" not in (_SessionAPI.created[0]["success_url"])
-    assert "127.0.0.1:3005" in _SessionAPI.created[0]["success_url"]
+    assert len(_LinkAPI.created) == 1 and not _SessionAPI.created  # Payment Link, never a 24h Checkout Session
+    assert _LinkAPI.created[0]["metadata"]["flow"] == "workroom_invoice"
+    assert _LinkAPI.created[0]["metadata"]["invoice_id"] == first["invoice"]["id"]
+    assert _LinkAPI.created[0]["payment_intent_data"]["metadata"]["invoice_id"] == first["invoice"]["id"]
+    assert _LinkAPI.created[0]["line_items"][0]["price_data"]["unit_amount"] == 11000
 
     from app.db.database import get_db
     with get_db() as conn:
@@ -217,7 +242,7 @@ def test_stripe_paid_event_records_once_and_unpaid_event_does_not(monkeypatch, t
     assert again_link["pay_link"]["checkout_url"] == issued["pay_link"]["checkout_url"]
     assert again_link["pay_link"]["reused"] is True
     assert again_link["payment_status"] == "awaiting_confirmation"
-    assert len(_SessionAPI.created) == 1
+    assert len(_LinkAPI.created) == 1
 
     paid = payments.apply_workroom_checkout_event("checkout.session.async_payment_succeeded", {
         "id": session_id,
@@ -255,3 +280,26 @@ def test_missing_stripe_keeps_invoice_and_does_not_invent_a_link(monkeypatch, tm
     assert first["payment_status"] == "unpaid"
     assert "STRIPE_SECRET_KEY" in first["pay_link"]["error"]
     assert second["invoice_created"] is False
+
+
+def test_payment_link_webhook_without_metadata_credits_once_and_expiry_keeps_link(monkeypatch, tmp_path):
+    finance, payments, quotes_dir = _load(monkeypatch, tmp_path)
+    _write(quotes_dir, _quote("q-plink"))
+    issued = finance.create_quote_deposit_pay_link("q-plink")
+    invoice_id = issued["invoice"]["id"]
+    link_id = issued["pay_link"]["payment_link_id"]
+    assert link_id.startswith("plink_")
+    event = {"id": "cs_test_from_link", "payment_status": "paid", "payment_link": link_id,
+             "amount_total": 5500, "metadata": {}}
+    first = payments.apply_workroom_checkout_event("checkout.session.completed", event)
+    again = payments.apply_workroom_checkout_event("checkout.session.completed", event)
+    assert first["applied"] and again["applied"]
+    from app.db.database import get_db
+    with get_db() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM payments WHERE invoice_id = ?", (invoice_id,)).fetchone()[0]
+        amt = conn.execute("SELECT amount FROM payments WHERE invoice_id = ?", (invoice_id,)).fetchone()[0]
+        url = conn.execute("SELECT stripe_checkout_url FROM invoices WHERE id = ?", (invoice_id,)).fetchone()[0]
+    assert n == 1 and round(amt, 2) == 55.00
+    assert url.startswith("https://buy.stripe.com/")
+    expired = payments.apply_workroom_checkout_event("checkout.session.expired", {**event, "id": "cs_other"})
+    assert expired["applied"] is False

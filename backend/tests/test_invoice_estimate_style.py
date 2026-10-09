@@ -20,7 +20,7 @@ def _inv(**kw):
         "client_email": "info@example.com", "client_address": "6450 America Blvd", "invoice_date": "2026-10-09",
         "subtotal": 300.0, "total": 300.0, "tax_rate": 0, "tax_amount": 0, "amount_paid": 0, "balance_due": 200.0,
         "invoice_stage": "final", "status": "draft", "payment_status": "link_ready",
-        "stripe_checkout_url": "https://checkout.stripe.com/c/pay/cs_test_x",
+        "stripe_checkout_url": "https://buy.stripe.com/test_x",
         "pricing_snapshot_json": {"final_settlement": {"contract_total": 300}},
         "_ledger_credits": [{"label": "Deposit received", "invoice_number": "INV-2026-001", "amount": 100.0,
                               "payment_date": "2026-09-27"}],
@@ -50,7 +50,7 @@ def test_invoice_uses_estimate_design_and_balance_only_link(tmp_path):
     assert "PAYMENTS & CREDITS APPLIED" in t and "-$100.00" in t
     assert "Balance due" in t and "$200.00" in t
     assert "Pay balance online: $200.00" in t
-    assert b"/URI" in pdf and b"checkout.stripe.com" in pdf
+    assert b"/URI" in pdf and b"buy.stripe.com/test_x" in pdf
     assert "DRY RUN" not in t and "Nelma" not in t and "Bladensburg" not in t
 
 

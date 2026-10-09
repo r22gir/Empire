@@ -45,7 +45,7 @@ def _marleys(conn, job_ledger):
     _insert(conn, id="co1", invoice_number="INV-2026-124", total=11328.65, quote_id="q299", source_type="quote",
             source_id="q299", invoice_stage="deposit", deposit_required=5664.33, deposit_received=4576.31,
             deposit_date="2026-09-27", balance_due=1088.02, payment_status="link_ready",
-            stripe_checkout_url="https://checkout.stripe.com/c/pay/cs_test_co1",
+            stripe_checkout_url="https://buy.stripe.com/test_co1",
             pricing_snapshot_json=json.dumps({"change_order": {"number": 1, "credit_ref": "INV-2026-123 (EST-274B)"}}),
             created_at="2026-10-08 23:00:00")
     job_ledger.record_payment(conn, "old", 4576.31, method="card", reference="pi_1", payment_date="2026-09-27")
@@ -148,7 +148,7 @@ def test_final_invoice_pdf_has_payments_section_and_balance_link(monkeypatch, tm
         _marleys(conn, jl)
         fid = jl.create_final_invoice(conn, "co1")["invoice"]["id"]
         inv = finance._enrich_invoice(dict(conn.execute("select * from invoices where id=?", (fid,)).fetchone()))
-    inv["stripe_checkout_url"] = "https://checkout.stripe.com/c/pay/cs_test_final"
+    inv["stripe_checkout_url"] = "https://buy.stripe.com/test_final"
     inv["payment_status"] = "link_ready"
     html = render_client_invoice_html(inv)
     assert "Payments &amp; credits applied" in html
