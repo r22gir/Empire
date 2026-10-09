@@ -9,6 +9,7 @@ Generates professional Empire Workroom branded diagram sheets (11x17 landscape):
 """
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -20,6 +21,70 @@ from app.services.drawing.mockup_engine.canvas_helpers import (
     draw_chrome, format_in, format_yd,
     INK, MUT, GOLD, PAPER, WHITE, GRAY_LINE, WOOD_FILL, WOOD_DARK
 )
+
+def simplify_part_name(name: str, material: str = "Board") -> str:
+    """Format piece label cleanly to fit inside part rectangles without mid-word truncation."""
+    clean = name.replace("Marley's ", "").replace("Substrate Board", "Board").replace("Face Fabric", "Fabric").replace("2\" foam", "Foam").replace("Foam 2\"", "Foam")
+    # Patterns like "U Bench Ch 1 (12 9/16") Board" -> "U Ch 1 (12 9/16")"
+    clean = clean.replace("Bench ", "").replace("Channel ", "Ch ")
+    # Replace verbose component suffixes
+    for suffix in [" Substrate Board", " Board", " Foam", " Fabric", " Dacron Wrap", " Dacron"]:
+        if clean.endswith(suffix):
+            clean = clean[:-len(suffix)]
+            break
+    # Add short material hint if useful
+    if "Seat" in clean:
+        # e.g. "U Seat Main #1"
+        return f"{clean} – {material}"
+    return clean
+
+
+def draw_fitted_text(
+    c: canvas.Canvas,
+    text: str,
+    sub_text: str,
+    cx: float,
+    cy: float,
+    max_w: float,
+    max_h: float,
+    part_idx: Optional[int] = None,
+    text_color: Color = WHITE,
+) -> None:
+    """Draw text inside a part box ensuring it never clips, overflows, or truncates mid-word.
+    If the full text cannot fit even at small font sizes, display clean index number (#N).
+    """
+    if max_w < 12 or max_h < 8:
+        return
+
+    # Check if we can fit at reasonable font size
+    font_name = "Helvetica-Bold"
+    for font_size in (7.0, 6.0, 5.5, 5.0, 4.5):
+        w = c.stringWidth(text, font_name, font_size)
+        if w <= max_w - 4 and (font_size * 2.2 <= max_h or not sub_text):
+            c.setFont(font_name, font_size)
+            c.setFillColor(text_color)
+            if sub_text and max_h >= font_size * 2.2:
+                c.drawCentredString(cx, cy + font_size * 0.35, text)
+                c.setFont("Helvetica", max(4.0, font_size - 1.0))
+                c.drawCentredString(cx, cy - font_size * 0.85, sub_text)
+            else:
+                c.drawCentredString(cx, cy - font_size * 0.35, text)
+            return
+
+    # If sub_text alone fits:
+    if sub_text and c.stringWidth(sub_text, "Helvetica", 5.0) <= max_w - 4 and max_h >= 10:
+        c.setFont("Helvetica", 5.0)
+        c.setFillColor(text_color)
+        c.drawCentredString(cx, cy - 1.5, sub_text)
+        return
+
+    # If neither fits, and part_idx is provided, display piece index badge
+    if part_idx is not None and max_w >= 14 and max_h >= 10:
+        badge = f"#{part_idx}"
+        c.setFont("Helvetica-Bold", 6.0)
+        c.setFillColor(text_color)
+        c.drawCentredString(cx, cy - 2.0, badge)
+
 from app.services.drawing.mockup_engine.generator import render_pdf_to_png_previews
 
 
@@ -186,7 +251,7 @@ def render_nesting_pdf(
         ("Channel Fabric Cuts:", "Fabric cut per channel: at least 18\" wide for a 12\" channel (channel width + 2 1/2\" board/foam each side + pull), length = net back + 2 1/2\" wrap top and bottom + pull (Marley's 34\"). Exactly 2 channel cuts fit per 53\" usable roll width (23 cut rows)."),
         ("Seat Cushion Construction:", "18\" deep seat = 2\" back thickness + 16\" seat cushion. Front cushion overhang is 1 1/4\" (>= 1\"). Seat wrapped over 2\" high-density foam on 1/2\" plywood base."),
         ("Seat Fabric Cuts:", "Seat fabric cut width = 25 1/4\" (fits 2 seat runs side-by-side in 53\" roll width). Total linear seat run length = 539 1/8\" + 14 3/8\" pull allowance = 553 1/2\", yielding 276 3/4\" roll length = 7 11/16 yd."),
-        ("Yardage Validation Calculation:", "Backs: 45 channel cuts at 2 per width = 23 rows x 34\" = 782\" = 21 3/4 yd. Seats: 7 11/16 yd. Sum: 29 7/16 yd. Adding 10% shop waste = 32.35 yd -> rounded UP to nearest 1/2 yard = exactly 32 1/2 yd."),
+        ("Yardage Validation Calculation:", "Backs: 45 channel cuts at 2 per width = 23 rows x 34\" = 782\" = 21 3/4 yd. Seats: 7 11/16 yd. Sum: 29 7/16 yd. Adding 10% shop waste = about 32 3/8 yd, then rounded up to 32 1/2 yd."),
     ]
 
     ry = r_y - 65
@@ -238,9 +303,9 @@ def render_nesting_pdf(
         # Max display area: 850 pt W x 480 pt H
         # Scale: 96" along width -> 850 / 96 = 8.85 pt/in
         # Let's orient sheet with 96" along X (horizontal) and 48" along Y (vertical)
-        scale = 8.2  # pt per inch
-        diag_ox = 60
-        diag_oy = 130
+        scale = 8.0  # pt per inch (96" * 8.0 = 768 pt, 48" * 8.0 = 384 pt)
+        diag_ox = 80
+        diag_oy = 135
         sheet_disp_w = 96.0 * scale
         sheet_disp_h = 48.0 * scale
 
@@ -254,12 +319,16 @@ def render_nesting_pdf(
         c.setFont("Helvetica-Bold", 8)
         c.setFillColor(INK)
         c.drawCentredString(diag_ox + sheet_disp_w / 2, diag_oy + sheet_disp_h + 10, '96" SHEET LENGTH')
-        c.drawRightString(diag_ox - 10, diag_oy + sheet_disp_h / 2, '48" SHEET WIDTH')
+        c.saveState()
+        c.translate(diag_ox - 18, diag_oy + sheet_disp_h / 2)
+        c.rotate(90)
+        c.drawCentredString(0, 0, '48" SHEET WIDTH')
+        c.restoreState()
 
         # Draw placed parts
         # Parts were placed on 48" width x 96" length (packer coordinates: x in [0, 48], y in [0, 96])
         # Transpose to diagram: diag_x = diag_ox + p.y * scale, diag_y = diag_oy + p.x * scale
-        for p in sheet["placed_parts"]:
+        for p_i, p in enumerate(sheet["placed_parts"]):
             px = diag_ox + p.y * scale
             py = diag_oy + p.x * scale
             pw = p.length * scale
@@ -270,17 +339,15 @@ def render_nesting_pdf(
             c.setLineWidth(0.8)
             c.rect(px, py, pw, ph, stroke=1, fill=1)
 
-            # Label inside part
-            c.setFillColor(WHITE)
-            c.setFont("Helvetica-Bold", 6.5)
-            # Truncate label if narrow
-            lbl = p.name.replace("Substrate Board", "Board").replace("Marley's ", "")
-            if pw > 35 and ph > 15:
-                c.drawCentredString(px + pw / 2, py + ph / 2 + 2, lbl[:24])
-                c.setFont("Helvetica", 6.0)
-                c.drawCentredString(px + pw / 2, py + ph / 2 - 7, f"{format_in(p.width)} x {format_in(p.length)}")
-            elif pw > 20 and ph > 10:
-                c.drawCentredString(px + pw / 2, py + ph / 2 - 2, f"{format_in(p.width)}")
+            # Clean semantic label inside part without mid-word truncation
+            lbl = simplify_part_name(p.name, material="Board")
+            sub_lbl = f"{format_in(p.width)} x {format_in(p.length)}"
+            draw_fitted_text(
+                c, text=lbl, sub_text=sub_lbl,
+                cx=px + pw / 2, cy=py + ph / 2,
+                max_w=pw, max_h=ph, part_idx=p_i + 1,
+                text_color=WHITE,
+            )
 
         # Draw offcuts (usable free rects)
         for off in sheet.get("offcuts", []):
@@ -304,7 +371,7 @@ def render_nesting_pdf(
         c.setFillColor(INK)
         c.drawString(diag_ox, sched_y, f"PARTS ON SHEET {sheet['sheet_index']} ({len(sheet['placed_parts'])} items):")
         c.setFont("Helvetica", 7.5)
-        sched_items = [f"{p.name}: {format_in(p.width)} x {format_in(p.length)}" for p in sheet["placed_parts"]]
+        sched_items = [f"#{i+1}. {simplify_part_name(p.name, 'Board')}: {format_in(p.width)} x {format_in(p.length)}" for i, p in enumerate(sheet["placed_parts"])]
         # Display in 3 columns
         col_w = 320
         for i, item in enumerate(sched_items):
@@ -336,8 +403,8 @@ def render_nesting_pdf(
         )
 
         scale = 7.4
-        diag_ox = 60
-        diag_oy = 130
+        diag_ox = 80
+        diag_oy = 135
         sheet_disp_w = sheet["sheet_length"] * scale
         sheet_disp_h = sheet["sheet_width"] * scale
 
@@ -349,9 +416,13 @@ def render_nesting_pdf(
         c.setFont("Helvetica-Bold", 8)
         c.setFillColor(INK)
         c.drawCentredString(diag_ox + sheet_disp_w / 2, diag_oy + sheet_disp_h + 10, f"{format_in(sheet['sheet_length'])} BUN LENGTH")
-        c.drawRightString(diag_ox - 10, diag_oy + sheet_disp_h / 2, f"{format_in(sheet['sheet_width'])} BUN WIDTH")
+        c.saveState()
+        c.translate(diag_ox - 18, diag_oy + sheet_disp_h / 2)
+        c.rotate(90)
+        c.drawCentredString(0, 0, f"{format_in(sheet['sheet_width'])} BUN WIDTH")
+        c.restoreState()
 
-        for p in sheet["placed_parts"]:
+        for p_i, p in enumerate(sheet["placed_parts"]):
             px = diag_ox + p.y * scale
             py = diag_oy + p.x * scale
             pw = p.length * scale
@@ -362,50 +433,81 @@ def render_nesting_pdf(
             c.setLineWidth(0.8)
             c.rect(px, py, pw, ph, stroke=1, fill=1)
 
-            c.setFillColor(INK)
-            c.setFont("Helvetica-Bold", 6.5)
-            lbl = p.name.replace("Foam 2\"", "Foam").replace("Marley's ", "")
-            if pw > 35 and ph > 15:
-                c.drawCentredString(px + pw / 2, py + ph / 2 + 2, lbl[:24])
-                c.setFont("Helvetica", 6.0)
-                c.drawCentredString(px + pw / 2, py + ph / 2 - 7, f"{format_in(p.width)} x {format_in(p.length)}")
-            elif pw > 20 and ph > 10:
-                c.drawCentredString(px + pw / 2, py + ph / 2 - 2, f"{format_in(p.width)}")
+            lbl = simplify_part_name(p.name, material="Foam")
+            sub_lbl = f"{format_in(p.width)} x {format_in(p.length)}"
+            draw_fitted_text(
+                c, text=lbl, sub_text=sub_lbl,
+                cx=px + pw / 2, cy=py + ph / 2,
+                max_w=pw, max_h=ph, part_idx=p_i + 1,
+                text_color=INK,
+            )
+
+        # Foam parts schedule table at bottom
+        sched_y = diag_oy - 45
+        c.setFont("Helvetica-Bold", 8)
+        c.setFillColor(INK)
+        c.drawString(diag_ox, sched_y, f"PARTS ON BUN {idx + 1} ({len(sheet['placed_parts'])} items):")
+        c.setFont("Helvetica", 7.5)
+        sched_items = [f"#{i+1}. {simplify_part_name(p.name, 'Foam')}: {format_in(p.width)} x {format_in(p.length)}" for i, p in enumerate(sheet["placed_parts"])]
+        col_w = 320
+        for i, item in enumerate(sched_items):
+            cx = diag_ox + (i % 3) * col_w
+            cy = sched_y - 14 - (i // 3) * 11
+            if cy > 35:
+                c.drawString(cx, cy, f"• {item}")
 
         c.showPage()
         cur_page += 1
 
     # ════════════════════════════════════════════════════════════════════════
-    # FABRIC ROLL DIAGRAM (54" Roll / 53" Usable)
+    # FABRIC ROLL DIAGRAM (Dynamic based on fabric roll width)
     # ════════════════════════════════════════════════════════════════════════
+    fab_roll_w = fabric_res.get("roll_width", 54.0)
+    fab_usable_w = fabric_res.get("usable_width", 53.0)
+    fab_net_len = fabric_res.get("net_length_in", 1048.5)
+
     draw_chrome(
         c, W, H,
-        title="FABRIC ROLL CUT DIAGRAM — 54\" ROLL (53\" USABLE)",
-        subtitle=f"Total Roll Yardage: {totals['fabric_total_yards_fraction']} · 45 Channel Cuts (18\" x 34\" @ 2/width) + Seat Runs · Yield: {totals['fabric_yield_pct']}%",
+        title=f"FABRIC ROLL CUT DIAGRAM — {format_in(fab_roll_w)} ROLL ({format_in(fab_usable_w)} USABLE)",
+        subtitle=f"Total Roll Yardage: {totals['fabric_total_yards_fraction']} · Channel Cuts + Seat Runs · Yield: {totals['fabric_yield_pct']}%",
         page=cur_page,
         total=total_pages,
         client_name=client_name,
         client_address=client_address,
         doc_kind="FABRIC ROLL",
         quote_tag=f"{quote_number} · FABRIC ROLL",
-        footer_text=f"EMPIRE WORKROOM · Total Net Length: {format_in(fabric_res.get('net_length_in', 0))} · Total Billed: {totals['fabric_total_yards_fraction']} (incl. 10% waste)",
+        footer_text=f"EMPIRE WORKROOM · Total Net Length: {format_in(fab_net_len)} · Total Billed: {totals['fabric_total_yards_fraction']} (incl. 10% waste)",
     )
 
     # Roll diagram display:
-    # 53" roll width along Y. Total net length ~1080" along X.
-    # To fit 1080" across width, wrap into 3 horizontal strip bands across the sheet!
-    band_len = 380.0  # inches per strip band
-    scale_fab = 2.45   # pt per inch (380" * 2.45 = 931 pt)
-    strip_h = 53.0 * scale_fab  # 130 pt
-
+    # Wrap into horizontal strip bands across the sheet
     placed_fab = fabric_res.get("placed_parts", [])
+    max_part_len = max([p.y + p.length for p in placed_fab], default=fab_net_len)
+    
+    # Scale and bands depending on width and length
+    if fab_roll_w > 90.0:
+        # Double width roll (110", 118", 120"): net length ~400-450", height ~110-120"
+        # Fits on 1 or 2 bands
+        num_bands = 2 if max_part_len > 260.0 else 1
+        band_len = math.ceil(max_part_len / num_bands / 50.0) * 50.0
+        scale_fab = min(930.0 / band_len, 280.0 / (num_bands * fab_usable_w))
+        strip_h = fab_usable_w * scale_fab
+        band_gap = 50.0
+        start_y = H - 180 - strip_h
+    else:
+        num_bands = 3
+        band_len = 380.0
+        scale_fab = 2.45
+        strip_h = fab_usable_w * scale_fab
+        band_gap = 60.0
+        start_y = H - 265
 
-    for band_idx in range(3):
+    for band_idx in range(num_bands):
         by0 = band_idx * band_len
         by1 = (band_idx + 1) * band_len
         
         band_x = 80
-        band_y = H - 180 - band_idx * (strip_h + 55)
+        band_y = start_y - band_idx * (strip_h + band_gap)
 
         # Roll usable width band
         c.setFillColor(PAPER)
@@ -416,12 +518,14 @@ def render_nesting_pdf(
         c.setFont("Helvetica-Bold", 7.5)
         c.setFillColor(INK)
         c.drawString(band_x, band_y + strip_h + 4, f"SECTION {band_idx + 1}: {format_in(by0)} to {format_in(by1)} ({format_yd(by0 / 36)} to {format_yd(by1 / 36)})")
-        c.drawRightString(band_x - 10, band_y + strip_h / 2, '53" USABLE')
+        c.saveState()
+        c.translate(band_x - 16, band_y + strip_h / 2)
+        c.rotate(90)
+        c.drawCentredString(0, 0, f"{format_in(fab_usable_w)} USABLE")
+        c.restoreState()
 
         # Render pieces falling in this band
         for p in placed_fab:
-            # p.y is position along roll length, p.x is position across roll width (0 to 53)
-            # Check if piece overlaps this band
             p_len_start = p.y
             p_len_end = p.y + p.length
             if p_len_end > by0 and p_len_start < by1:
@@ -436,11 +540,29 @@ def render_nesting_pdf(
                 c.setLineWidth(0.6)
                 c.rect(draw_x, draw_y, draw_w, draw_h, stroke=1, fill=1)
 
-                c.setFillColor(WHITE)
-                c.setFont("Helvetica-Bold", 5.5)
-                if draw_w > 25 and draw_h > 15:
-                    lbl = "Ch Cut 18\"x34\"" if "Ch " in p.name else p.name.replace("Marley's ", "")[:18]
-                    c.drawCentredString(draw_x + draw_w / 2, draw_y + draw_h / 2 - 2, lbl)
+                # Check if piece is split across boundary
+                is_split = (p_len_start < by0) or (p_len_end > by1)
+                is_main_segment = (p_len_start >= by0) or (draw_w >= 100)
+
+                # Draw label cleanly inside box
+                if is_split and not is_main_segment:
+                    # Trailing continuation segment
+                    lbl = "(cont.)"
+                    sub_lbl = ""
+                else:
+                    if "Ch " in p.name:
+                        lbl = "Ch Cut 18\"x34\""
+                        sub_lbl = "(cont.)" if is_split else ""
+                    else:
+                        lbl = simplify_part_name(p.name, "Fabric")
+                        sub_lbl = f"{format_in(p.width)} x {format_in(p.length)}" + (" (cont.)" if is_split else "")
+
+                draw_fitted_text(
+                    c, text=lbl, sub_text=sub_lbl,
+                    cx=draw_x + draw_w / 2, cy=draw_y + draw_h / 2,
+                    max_w=draw_w, max_h=draw_h,
+                    text_color=WHITE,
+                )
 
     c.showPage()
     cur_page += 1
@@ -471,7 +593,8 @@ def render_nesting_pdf(
         by0 = band_idx * band_len_dac
         by1 = (band_idx + 1) * band_len_dac
         band_x = 80
-        band_y = H - 220 - band_idx * (strip_h_dac + 65)
+        # Start layout well below header & title block
+        band_y = H - 295 - band_idx * (strip_h_dac + 75)
 
         c.setFillColor(PAPER)
         c.setStrokeColor(HexColor("#4682B4"))
@@ -481,7 +604,11 @@ def render_nesting_pdf(
         c.setFont("Helvetica-Bold", 7.5)
         c.setFillColor(INK)
         c.drawString(band_x, band_y + strip_h_dac + 4, f"DACRON SECTION {band_idx + 1}: {format_in(by0)} to {format_in(by1)}")
-        c.drawRightString(band_x - 10, band_y + strip_h_dac / 2, totals['dacron_roll_width_fraction'])
+        c.saveState()
+        c.translate(band_x - 16, band_y + strip_h_dac / 2)
+        c.rotate(90)
+        c.drawCentredString(0, 0, f"{totals['dacron_roll_width_fraction']} ROLL WIDTH")
+        c.restoreState()
 
         for p in placed_dac:
             p_len_start = p.y
@@ -497,10 +624,21 @@ def render_nesting_pdf(
                 c.setLineWidth(0.6)
                 c.rect(draw_x, draw_y, draw_w, draw_h, stroke=1, fill=1)
 
-                c.setFillColor(INK)
-                c.setFont("Helvetica", 5.5)
-                if draw_w > 20 and draw_h > 15:
-                    c.drawCentredString(draw_x + draw_w / 2, draw_y + draw_h / 2 - 2, "Dacron Wrap")
+                is_split = (p_len_start < by0) or (p_len_end > by1)
+                is_main_segment = (p_len_start >= by0) or (draw_w >= 100)
+                if is_split and not is_main_segment:
+                    lbl = "(cont.)"
+                    sub_lbl = ""
+                else:
+                    lbl = "Dacron Wrap"
+                    sub_lbl = "(cont.)" if is_split else ""
+
+                draw_fitted_text(
+                    c, text=lbl, sub_text=sub_lbl,
+                    cx=draw_x + draw_w / 2, cy=draw_y + draw_h / 2,
+                    max_w=draw_w, max_h=draw_h,
+                    text_color=INK,
+                )
 
     c.showPage()
     c.save()
