@@ -3462,6 +3462,28 @@ def _generate_parametric_mockup(params: dict, desk: Optional[str] = None) -> Too
         return ToolResult(tool="generate_parametric_mockup", success=False, error=str(e))
 
 
+@tool("generate_material_nest")
+def _generate_material_nest(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Material Nesting Engine: generates cut lists, 2D sheet/roll packing layouts, and yield metrics for board, foam, dacron, and fabric."""
+    try:
+        import asyncio
+        from app.routers.drawings import generate_material_nest_endpoint, NestRequest
+
+        req = NestRequest(
+            specs=params.get("specs"),
+            spec=params.get("spec"),
+            preset=params.get("preset"),
+            quote_id=params.get("quote_id"),
+            job_id=params.get("job_id"),
+            config=params.get("config"),
+        )
+        res = _run_async(generate_material_nest_endpoint(req))
+        return ToolResult(tool="generate_material_nest", success=True, result=res)
+    except Exception as e:
+        logger.exception("generate_material_nest tool failed")
+        return ToolResult(tool="generate_material_nest", success=False, error=str(e))
+
+
 @tool("sketch_to_drawing")
 def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
     """HOTFIX 4.0 (b) — Draw-from-image ONLY.
@@ -5584,6 +5606,10 @@ State machine: `draft → founder_review → sent → accepted → in_production
   `{"tool": "generate_parametric_mockup", "preset": "marleys_u_curved", "format": "3d"}`
   `{"tool": "generate_parametric_mockup", "preset": "straight_bench"}`
   `{"tool": "generate_parametric_mockup", "quote_id": "EST-2026-299"}`
+- **generate_material_nest** — Run the nesting engine for upholstery and woodwork materials. Generates optimized cut lists, sheet/roll layouts, yield metrics, and a diagram PDF for plywood/board, foam, dacron, and fabric.
+  `{"tool": "generate_material_nest", "preset": "marleys_u_and_l"}`
+  `{"tool": "generate_material_nest", "preset": "marleys_u"}`
+  `{"tool": "generate_material_nest", "quote_id": "EST-2026-299"}`
 - **sketch_to_drawing** — Generate professional architectural drawings for ANY item type. Auto-classifies input and routes to the correct renderer. Returns a PDF file path.
   **Bench drawings** produce a 4-QUADRANT layout: Plan View + Isometric View + Front Elevation + title block. Workroom letterhead is the default; pass `"business_unit": "woodcraft"` for WoodCraft chrome and a `WC · …` category chip.
   `lf` is linear feet. `width` / `width_in` are inches (a 36" width stays 36"). Omitted `back_height` is 18" and the sheet marks it assumed — a number you pass wins (the old silent 34" default is retired). `panel_style: "flat"` stays flat; `has_back: false` draws no back.
