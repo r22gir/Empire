@@ -184,6 +184,60 @@ def credit_schedule(invoice: dict) -> Optional[dict]:
     }
 
 
+_OPEN_LINK_STATUSES = {"link_ready", "awaiting_confirmation", "unpaid", ""}
+
+
+def deposit_pay_link(invoice: dict) -> Optional[dict]:
+    """Deposit-stage invoice with an open Stripe Checkout URL -> {url, amount}; else None."""
+    url = str(invoice.get("stripe_checkout_url") or "").strip()
+    if not url.startswith("https://"):
+        return None
+    if str(invoice.get("invoice_stage") or "").strip().lower() != "deposit":
+        return None
+    if str(invoice.get("status") or "").lower() in ("paid", "cancelled"):
+        return None
+    if str(invoice.get("payment_status") or "").strip().lower() not in _OPEN_LINK_STATUSES:
+        return None
+    try:
+        amount = float(invoice.get("balance_due") if invoice.get("balance_due") is not None else invoice.get("total") or 0)
+    except (TypeError, ValueError):
+        return None
+    if amount <= 0:
+        return None
+    return {"url": url, "amount": round(amount, 2)}
+
+
+def _qr_data_uri(url: str) -> str:
+    """PNG QR code of the URL as a data: URI (empty string if the QR library is missing)."""
+    try:
+        import base64
+        import io
+        import qrcode
+        img = qrcode.make(url, box_size=6, border=2)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return ""
+
+
+def _pay_link_html(invoice: dict, accent: str) -> str:
+    link = deposit_pay_link(invoice)
+    if not link:
+        return ""
+    url = escape(link["url"], quote=True)
+    qr = _qr_data_uri(link["url"])
+    qr_html = (f'<img src="{qr}" alt="Pay deposit QR code" style="width:110px;height:110px;display:block">'
+               if qr else "")
+    return f"""<div style="margin:20px 0;padding:12px 14px;border:2px solid {accent};border-radius:8px;display:flex;align-items:center;gap:16px">
+  {qr_html}
+  <div style="font-size:10.5pt">
+    <a href="{url}" style="color:{accent};font-weight:700;font-size:13pt;text-decoration:underline">Pay deposit online: ${link['amount']:,.2f}</a><br>
+    <span style="font-size:8.5pt;color:#666">Click the link or scan the code to pay securely by card (Stripe).</span>
+  </div>
+</div>"""
+
+
 def _load_biz_cfg(is_woodcraft: bool) -> dict:
     config_dir = Path(__file__).resolve().parent.parent / "config"
     path = config_dir / ("woodcraft_business.json" if is_woodcraft else "business.json")
@@ -371,6 +425,8 @@ def render_client_invoice_html(
     if co.get("number"):
         co_title = f'<div class="invoice-number" style="font-weight:700">Change Order {escape(str(co.get("number")), quote=False)}</div>'
 
+    pay_html = _pay_link_html(invoice, accent) if not is_woodcraft else ""
+
     contact_bits = [b for b in (brand["phone"], brand["email"], brand["address"]) if b]
     contact_html = "<br>".join(contact_bits)
 
@@ -446,6 +502,8 @@ def render_client_invoice_html(
   <tr class="total-row"><td>Total</td><td style="text-align:right">${total:,.2f}</td></tr>
   {totals_deposit_rows}
 </table>
+
+{pay_html}
 
 {note_html}
 

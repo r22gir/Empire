@@ -55,7 +55,11 @@ MAX_PER_BLOCK_ERRORS = 16
 # allowlist check passes. Reply-To is set to max@empirebox.store (the
 # address the future inbound poller — SendGrid Inbound Parse webhook at
 # /webhooks/email/inbound AND Gmail check_inbox — will watch).
-DEFAULT_EMAIL_CC = ("rafa22giraldo@gmail.com",)
+# 2026-10-08 (Rafael, 11:35 PM): Max's emails go ONLY to empirebox2026@gmail.com —
+# no standing CC. The 2026-08-16 standing CC to rafa22giraldo@gmail.com is retired.
+DEFAULT_EMAIL_CC: tuple[str, ...] = ()
+# Default "email me" / doc / invoice recipient — always this one address.
+MAX_DOC_EMAIL_TO = "empirebox2026@gmail.com"
 DEFAULT_REPLY_TO = "max@empirebox.store"
 
 
@@ -3325,7 +3329,7 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
 
     # Resolve founder aliases to FOUNDER_EMAIL from .env
     if not to or to.lower() in ("me", "owner", "founder", "my email", "myself"):
-        to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+        to = MAX_DOC_EMAIL_TO
 
     if not subject or not body:
         return ToolResult(tool="send_email", success=False, error="subject and body are required")
@@ -3492,7 +3496,7 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     quote_ids = _normalize_quote_id_list(params)
     to = str(params.get("to", "") or "").strip()
     if to.lower() in ("me", "myself", "rafael", "founder", "owner", "my email"):
-        to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+        to = MAX_DOC_EMAIL_TO
     if not quote_ids:
         return ToolResult(tool="send_quote_email", success=False, error="No quote_id provided")
     if not to:
@@ -3932,7 +3936,7 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
         email_status = None
         if email_to:
             if email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
-                email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+                email_to = MAX_DOC_EMAIL_TO
             email_status = _auto_email_pdf(
                 ul_result["pdf_path"], email_to, ul_result.get("product_type", pt),
             )
@@ -4058,7 +4062,7 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
     email_status: dict | None = None
     if email_to:
         if email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
-            email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+            email_to = MAX_DOC_EMAIL_TO
         email_status = _auto_email_pdf(str(out_path), email_to, product_type)
 
     return ToolResult(
@@ -4159,7 +4163,7 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
         # Auto-email: if email_to is provided, send the PDF after generating
         email_to = params.get("email_to", "").strip()
         if email_to and email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
-            email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+            email_to = MAX_DOC_EMAIL_TO
 
         # ── Smart classifier (10 item types) ──
         from app.services.vision.drawing_service import classify_item
