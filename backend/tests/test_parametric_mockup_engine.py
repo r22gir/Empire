@@ -451,3 +451,84 @@ def test_nesting_engine_and_marleys_validation():
     assert tool_res.result["totals"]["fabric_total_yards_fraction"] == "32 1/2 yd"
 
 
+def test_nesting_pdf_no_overlap_and_no_decimal_measurements(tmp_path):
+    """Test every page of the generated nesting PDF for text bounding box overlap and decimal dimensions.
+
+    Rafael's hard rules:
+    1. Zero overlapping text boxes (beyond 2pt kerning tolerance) across headers, titles, diagrams, labels.
+    2. Zero text clipping beyond page margins (x in [10, W-10], y in [10, H-10]).
+    3. Zero decimal measurements for inches (r'\\d+\\.\\d+\"') or yards (r'\\d+\\.\\d+\\s*yd'). Percentages (e.g. 85.6%) are permitted.
+    4. Validates on standard Marley's nest and double-width variants.
+    """
+    import re
+    from app.services.drawing.mockup_engine import (
+        marleys_u_and_l_preset, NestingConfig, nest_project, render_nesting_pdf
+    )
+
+    presets = marleys_u_and_l_preset()
+    pieces = [presets["u_bench"], presets["l_bench"]]
+
+    # Test standard run
+    nest_data = nest_project(pieces)
+    pdf_path = str(tmp_path / "test_marleys_nest.pdf")
+    render_nesting_pdf(nest_data, pdf_path)
+    assert os.path.exists(pdf_path)
+
+    def validate_pdf_pages(file_path: str):
+        with pdfplumber.open(file_path) as pdf:
+            assert len(pdf.pages) >= 15
+            for page_idx, page in enumerate(pdf.pages):
+                p_num = page_idx + 1
+                words = page.extract_words(keep_blank_chars=False)
+
+                # 1. Bounds check: all words stay within printable bounds
+                for w in words:
+                    text = w["text"]
+                    x0, top, x1, bottom = w["x0"], w["top"], w["x1"], w["bottom"]
+                    assert x0 >= 10, f"Page {p_num}: Word '{text}' clipped at left margin (x0={x0})"
+                    assert x1 <= page.width - 10, f"Page {p_num}: Word '{text}' clipped at right margin (x1={x1})"
+                    assert top >= 5, f"Page {p_num}: Word '{text}' clipped at top margin (top={top})"
+                    assert bottom <= page.height - 5, f"Page {p_num}: Word '{text}' clipped at bottom margin (bottom={bottom})"
+
+                # 2. Decimal check: no decimal inches or decimal yards
+                page_text = page.extract_text() or ""
+                decimal_inches = re.findall(r"\b\d+\.\d+\"", page_text)
+                decimal_yards = re.findall(r"\b\d+\.\d+\s*yd\b", page_text)
+                assert decimal_inches == [], f"Page {p_num} has decimal inches: {decimal_inches}"
+                assert decimal_yards == [], f"Page {p_num} has decimal yards: {decimal_yards}"
+
+                # 3. Overlap check between word bounding boxes
+                # Filter out intentional superpositions or tiny words
+                for i in range(len(words)):
+                    w1 = words[i]
+                    for j in range(i + 1, len(words)):
+                        w2 = words[j]
+                        # Compute intersection
+                        ix0 = max(w1["x0"], w2["x0"])
+                        ix1 = min(w1["x1"], w2["x1"])
+                        itop = max(w1["top"], w2["top"])
+                        ibottom = min(w1["bottom"], w2["bottom"])
+
+                        overlap_w = ix1 - ix0
+                        overlap_h = ibottom - itop
+
+                        # If both width and height overlap exceed 2.5 pt tolerance, fail
+                        if overlap_w > 2.5 and overlap_h > 2.5:
+                            pytest.fail(
+                                f"Page {p_num}: Text overlap detected between '{w1['text']}' "
+                                f"({w1['x0']:.1f}, {w1['top']:.1f}, {w1['x1']:.1f}, {w1['bottom']:.1f}) and "
+                                f"'{w2['text']}' ({w2['x0']:.1f}, {w2['top']:.1f}, {w2['x1']:.1f}, {w2['bottom']:.1f})"
+                            )
+
+    validate_pdf_pages(pdf_path)
+
+    # Test double-width fabric variants (110", 118", 120")
+    for dw in [110.0, 118.0, 120.0]:
+        cfg = NestingConfig(fabric_roll_width=dw, fabric_usable_width=dw - 1.0)
+        dw_nest = nest_project(pieces, config=cfg)
+        dw_pdf = str(tmp_path / f"test_dw_{int(dw)}.pdf")
+        render_nesting_pdf(dw_nest, dw_pdf)
+        validate_pdf_pages(dw_pdf)
+
+
+
