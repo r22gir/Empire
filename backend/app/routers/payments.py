@@ -301,7 +301,7 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
     """Update invoice status and record payment in finance DB.
 
     Sprint 1d Payment Phase 1:
-      - Inserts into canonical `payments_v2` (NOT legacy `payments`)
+      - Writes the single payments table through app.services.job_ledger
       - `stripe_session_id` triggers idempotency: if a row with the
         same stripe_session_id already exists, return success without
         inserting (Stripe webhook can retry).
@@ -322,84 +322,25 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
             inv_dict = dict_row(inv)
 
             if status == "paid":
-                # IDEMPOTENCY: skip if stripe_session_id already in payments_v2
-                if stripe_session_id:
-                    existing = conn.execute(
-                        "SELECT 1 FROM payments_v2 WHERE stripe_session_id = ? LIMIT 1",
-                        (stripe_session_id,),
-                    ).fetchone()
-                    if existing:
-                        logger.info(
-                            f"Webhook: stripe_session_id={stripe_session_id} already in payments_v2, skip"
-                        )
-                        return True
-
-                # Use explicit amount_cents if provided (from metadata); else full balance_due
-                from datetime import date
+                # One payments table (job_ledger): idempotent on stripe_session_id,
+                # recalculates this invoice, any final invoice of the same job, and
+                # the customer's revenue. Amount: explicit cents, else what is due now.
+                from app.services.job_ledger import record_payment as ledger_record_payment, session_already_recorded
+                if stripe_session_id and session_already_recorded(conn, stripe_session_id):
+                    logger.info(f"Webhook: stripe_session_id={stripe_session_id} already recorded, skip")
+                    return True
                 if amount_cents is not None:
                     amount = amount_cents / 100.0
                 else:
                     amount = inv_dict.get("balance_due") or inv_dict.get("total", 0)
-                # business_unit: prefer the param (from metadata), else read from invoice row
-                bu = business_unit or inv_dict.get("business_unit") or "workroom"
-
-                conn.execute(
-                    """INSERT INTO payments_v2
-                       (payment_number, invoice_id, customer_id, amount,
-                        payment_method, payment_reference, payment_type, status,
-                        account_code, notes, business_unit,
-                        stripe_session_id, payment_date, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        f"pay_{stripe_session_id[:24]}" if stripe_session_id
-                            else f"pay_{int(date.today().strftime('%Y%m%d'))}_{invoice_id[:6]}",
-                        invoice_id,
-                        inv_dict.get("customer_id"),
-                        amount,
-                        payment_method,
-                        stripe_session_id or "",
-                        "payment",
-                        "completed",
-                        None,
-                        f"Paid via Stripe checkout.session.completed",
-                        bu,
-                        stripe_session_id or None,
-                        date.today().isoformat(),
-                        date.today().isoformat() + "T00:00:00",
-                        date.today().isoformat() + "T00:00:00",
-                    ),
+                if float(amount or 0) <= 0:
+                    logger.warning(f"Webhook: invoice {invoice_id} has nothing due; not recording a $0 payment")
+                    return True
+                ledger_record_payment(
+                    conn, invoice_id, float(amount), method=payment_method or "card",
+                    reference=stripe_session_id or "", notes="Paid via Stripe Checkout",
+                    stripe_session_id=stripe_session_id or None, source="stripe_webhook",
                 )
-
-                # Recalculate totals from canonical payments_v2
-                subtotal = inv_dict.get("subtotal", 0)
-                tax_rate = inv_dict.get("tax_rate", 0)
-                tax_amount = round(subtotal * tax_rate, 2)
-                total = round(subtotal + tax_amount, 2)
-
-                paid_row = conn.execute(
-                    "SELECT COALESCE(SUM(amount), 0) AS total_paid FROM payments_v2 WHERE invoice_id = ?",
-                    (invoice_id,),
-                ).fetchone()
-                amount_paid = paid_row["total_paid"]
-                balance_due = round(total - amount_paid, 2)
-                settled = balance_due <= 0
-
-                new_status = "paid" if balance_due <= 0.005 else "partial"
-                conn.execute(
-                    """UPDATE invoices SET status = ?, payment_status = ?, amount_paid = ?, balance_due = ?,
-                       paid_at = CASE WHEN ? = 'paid' THEN datetime('now') ELSE paid_at END,
-                       updated_at = datetime('now') WHERE id = ?""",
-                    (new_status, new_status, amount_paid, max(balance_due, 0), new_status, invoice_id),
-                )
-
-                # Update customer total_revenue from canonical payments_v2
-                if inv_dict.get("customer_id"):
-                    conn.execute(
-                        """UPDATE customers SET total_revenue = (
-                             SELECT COALESCE(SUM(amount), 0) FROM payments_v2 WHERE customer_id = ?
-                           ), updated_at = datetime('now') WHERE id = ?""",
-                        (inv_dict["customer_id"], inv_dict["customer_id"]),
-                    )
             else:
                 conn.execute(
                     "UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?",

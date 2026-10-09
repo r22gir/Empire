@@ -389,12 +389,28 @@ def _client_project(quote: Dict[str, Any]) -> Tuple[str, str]:
     client_safe = _client_safe(quote)
     if client_safe:
         project = re.sub(r"\s+v\d+\s*$", "", project, flags=re.IGNORECASE)
-    if len(client) > 36:
-        client = client[:33] + "…"
+    client = _fit_label(client, 48)
     project_limit = 60 if client_safe else 40
-    if len(project) > project_limit:
-        project = project[:project_limit - 3] + "…"
+    # header line is CLIENT · PROJECT in one 6pt mono run: keep the pair readable
+    project_limit = max(16, min(project_limit, 92 - len(client)))
+    project = _fit_label(project, project_limit)
     return client, project
+
+
+def _fit_label(text: str, limit: int) -> str:
+    """Shorten a header label without cutting a word in half: drop trailing
+    ' · ' segments first (e.g. '· Attn …'), then whole words, then add '…'."""
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(text) <= limit:
+        return text
+    parts = [p.strip() for p in re.split(r"\s+[·|/]\s+", text) if p.strip()]
+    while len(parts) > 1 and len(" · ".join(parts)) > limit:
+        parts.pop()
+    text = " · ".join(parts)
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1].rsplit(" ", 1)[0].rstrip(" ,·-–—&")
+    return (cut or text[: limit - 1]) + "…"
 
 
 def _client_safe(quote: Dict[str, Any]) -> bool:

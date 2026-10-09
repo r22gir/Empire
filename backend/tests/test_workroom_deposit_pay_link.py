@@ -207,7 +207,7 @@ def test_stripe_paid_event_records_once_and_unpaid_event_does_not(monkeypatch, t
     from app.db.database import get_db, dict_row
     with get_db() as conn:
         row = dict_row(conn.execute("SELECT status, payment_status FROM invoices WHERE id = ?", (invoice_id,)).fetchone())
-        pay_count = conn.execute("SELECT COUNT(*) FROM payments_v2 WHERE invoice_id = ?", (invoice_id,)).fetchone()[0]
+        pay_count = conn.execute("SELECT COUNT(*) FROM payments WHERE invoice_id = ?", (invoice_id,)).fetchone()[0]  # one payments table (job_ledger)
     assert row["status"] != "paid"
     assert row["payment_status"] == "awaiting_confirmation"
     assert pay_count == 0
@@ -234,7 +234,7 @@ def test_stripe_paid_event_records_once_and_unpaid_event_does_not(monkeypatch, t
 
     with get_db() as conn:
         row = dict_row(conn.execute("SELECT status, payment_status, balance_due FROM invoices WHERE id = ?", (invoice_id,)).fetchone())
-        pay_count = conn.execute("SELECT COUNT(*) FROM payments_v2 WHERE invoice_id = ?", (invoice_id,)).fetchone()[0]
+        pay_count = conn.execute("SELECT COUNT(*) FROM payments WHERE invoice_id = ?", (invoice_id,)).fetchone()[0]  # one payments table (job_ledger)
     assert row["status"] == "paid"
     assert row["payment_status"] == "paid"
     assert row["balance_due"] == 0

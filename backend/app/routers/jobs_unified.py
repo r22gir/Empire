@@ -1922,21 +1922,13 @@ def record_payment(invoice_id: str, payment: PaymentRecord):
         finance_method = payment.method if payment.method in {
             "cash", "check", "card", "zelle", "venmo", "wire", "crypto", "other",
         } else "other"
-        conn.execute(
-            """INSERT OR IGNORE INTO payments
-               (id, invoice_id, customer_id, amount, method, reference, notes, payment_date)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                pay["id"],
-                invoice_id,
-                customer_id,
-                payment.amount,
-                finance_method,
-                payment.reference,
-                payment.notes,
-                date.today().isoformat(),
-            ),
+        from app.services.job_ledger import record_payment as ledger_record_payment
+        ledger_record_payment(
+            conn, invoice_id, payment.amount, method=finance_method, reference=payment.reference or "",
+            notes=payment.notes or "", payment_date=date.today().isoformat(), source="jobs_api",
+            payment_id=pay["id"],
         )
+        updated = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
 
         result = {
             "invoice": _enrich_invoice(dict_row(updated)),

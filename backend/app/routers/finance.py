@@ -172,37 +172,14 @@ def _recalc_invoice(conn, invoice_id: str):
         applied_discount = discount_raw
     total = round(subtotal + tax_amount - applied_discount, 2)
 
-    # Sum all payments for this invoice
-    paid_row = conn.execute(
-        "SELECT COALESCE(SUM(amount), 0) as total_paid FROM payments WHERE invoice_id = ?",
-        (invoice_id,)
-    ).fetchone()
-    amount_paid = paid_row["total_paid"]
-    balance_due = round(total - amount_paid, 2)
-
-    # Determine status based on payment
-    status = inv["status"]
-    if amount_paid >= total and total > 0:
-        status = "paid"
-    elif amount_paid > 0 and amount_paid < total:
-        status = "partial"
-
-    paid_at = None
-    if status == "paid":
-        paid_at = datetime.now().isoformat()
-
-    payment_status = inv.get("payment_status") or "unpaid"
-    if status == "paid":
-        payment_status = "paid"
-    elif status == "partial":
-        payment_status = "partial"
-
     conn.execute(
-        """UPDATE invoices SET tax_amount = ?, total = ?, amount_paid = ?,
-           balance_due = ?, status = ?, payment_status = ?, paid_at = COALESCE(paid_at, ?),
-           updated_at = datetime('now') WHERE id = ?""",
-        (tax_amount, total, amount_paid, balance_due, status, payment_status, paid_at, invoice_id)
+        "UPDATE invoices SET tax_amount = ?, total = ?, updated_at = datetime('now') WHERE id = ?",
+        (tax_amount, total, invoice_id),
     )
+    # Paid / balance / status come from the job-aware ledger (one payments table,
+    # change-order credits, final-invoice credits, voids, superseded invoices).
+    from app.services.job_ledger import recalc_invoice
+    recalc_invoice(conn, invoice_id)
 
 
 def _enrich_invoice(inv: dict) -> dict:
@@ -2122,32 +2099,14 @@ def record_payment(request: Request, invoice_id: str, payment: PaymentCreate):
         inv_dict = dict_row(inv)
         pay_date = payment.payment_date or date.today().isoformat()
 
-        conn.execute(
-            """INSERT INTO payments
-               (id, invoice_id, customer_id, amount, method, reference, notes, payment_date)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                invoice_id,
-                inv_dict.get("customer_id"),
-                payment.amount,
-                payment.method,
-                payment.reference,
-                payment.notes,
-                pay_date,
+        from app.services.job_ledger import record_payment as ledger_record_payment
+        try:
+            ledger_record_payment(
+                conn, invoice_id, payment.amount, method=payment.method, reference=payment.reference or "",
+                notes=payment.notes or "", payment_date=pay_date, source="manual",
             )
-        )
-
-        # Recalculate invoice totals
-        _recalc_invoice(conn, invoice_id)
-
-        # Update customer total_revenue if linked
-        if inv_dict.get("customer_id"):
-            conn.execute(
-                """UPDATE customers SET total_revenue = (
-                     SELECT COALESCE(SUM(amount), 0) FROM payments WHERE customer_id = ?
-                   ), updated_at = datetime('now') WHERE id = ?""",
-                (inv_dict["customer_id"], inv_dict["customer_id"])
-            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
         updated_inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
         return {"invoice": _enrich_invoice(dict_row(updated_inv))}

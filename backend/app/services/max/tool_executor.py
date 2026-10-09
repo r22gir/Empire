@@ -6291,7 +6291,7 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
   Triggers: "MAX reset", "reset yourself", "clear your cache", "reload config", "refresh yourself", "start fresh"
 
 ### Payment Phase 1 Tools (Sprint 1d)
-- **create_invoice_from_quote** — Explicit quote→invoice action. Calls `POST /api/v1/quotes-v2/{id}/to-invoice`. The endpoint is GATED to quote.status ∈ {sent, accepted, in_production, completed}. A draft or founder_review quote returns HTTP 409 (use /submit-for-review + /approve first). Returns honest payload: invoice snapshot from canonical invoices table, store="quotes_v2", engine="lifecycle_v1". Use when the founder says "create an invoice from this quote", "bill the Willard", "invoice the bench + panel".
+- **create_invoice_from_quote** — Explicit quote→invoice action. Calls `POST /api/v1/quotes-v2/{id}/to-invoice`. The endpoint is GATED to quote.status ∈ {sent, accepted, in_production, completed}. A draft or founder_review quote returns HTTP 409 (use /submit-for-review + /approve first). Returns honest payload: invoice snapshot from canonical invoices table, store="quotes_v2", engine="lifecycle_v1". Use when the founder says "create an invoice from this quote", "bill the Willard", "invoice the bench + panel". If the job already has a deposit, an earlier invoice payment or a change order, use **job_invoice_ledger** instead (it applies those payments as credits).
   `{"tool": "create_invoice_from_quote", "quote_id": "4d9b1d03"}`
 - **split_invoice_from_invoice** — Split an existing invoice into one or more new draft invoices. Copies `line_items` exactly (no repricing, no drawings). Default `billed_by` is Empire Workroom; set `billed_by: "nelmas_workroom"` on a split (or per-split) when the founder says bill as Nelma's. Client PDF title is INVOICE only; 50% deposit due + balance due; plain line descriptions (no allocation math). Prior payments not copied unless `include_payments` is true.
   `{"tool": "split_invoice_from_invoice", "invoice_id": "abc123", "billed_by": "nelmas_workroom", "splits": [{"line_items": [{"description": "Supplied fabric, plain backs", "quantity": 1, "unit": "ea", "unit_price": 500, "total": 500}]}]}`
@@ -7978,6 +7978,16 @@ def _max_room_redesign(params: dict, desk: Optional[str] = None) -> ToolResult:
 # registered, so its header count used to be a hand-maintained literal that
 # went stale ("43 total" while 67 handlers were registered). Resolve it here,
 # after all registrations, from the live registry.
+# Job-aware invoice ledger (prior deposits / payments / change orders applied). 2026-10-09.
+try:
+    import importlib as _importlib, sys as _sys
+    _ledger_name = "app.services.max.tools_job_ledger"
+    _tools_job_ledger = (_importlib.reload(_sys.modules[_ledger_name]) if _ledger_name in _sys.modules
+                         else _importlib.import_module(_ledger_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_job_ledger.JOB_LEDGER_TOOLS_DOC
+except Exception as _ledger_err:  # never take Max down over an optional tool pack
+    logger.error(f"tools_job_ledger not loaded: {_ledger_err}")
+
 # Client-acquisition tools (LeadForge/SocialForge/pipeline, draft-only) + read-only
 # module bridge. Registered from their own module: docs/MAX_PROSPECTING.md.
 try:

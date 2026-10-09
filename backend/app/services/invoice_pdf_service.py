@@ -184,15 +184,92 @@ def credit_schedule(invoice: dict) -> Optional[dict]:
     }
 
 
+def final_settlement(invoice: dict) -> dict:
+    snap = invoice.get("pricing_snapshot_json") or {}
+    if isinstance(snap, str):
+        try:
+            snap = json.loads(snap)
+        except (TypeError, ValueError):
+            snap = {}
+    fs = snap.get("final_settlement") if isinstance(snap, dict) else None
+    return fs if isinstance(fs, dict) else {}
+
+
+def _ledger_for_pdf(invoice: dict) -> tuple[list, list]:
+    """(credits, prior invoices) for a final invoice; uses data attached by the caller,
+    else reads the job ledger."""
+    credits = invoice.get("_ledger_credits")
+    prior = invoice.get("_ledger_prior")
+    if credits is not None:
+        return list(credits), list(prior or [])
+    try:
+        from app.db.database import get_db
+        from app.services.job_ledger import final_credits, job_ledger
+        with get_db() as conn:
+            credits = final_credits(conn, invoice)
+            led = job_ledger(conn, invoice["id"])
+        prior = [i for i in led["invoices"] if i["id"] != invoice.get("id") and not i["void"]]
+        return credits, prior
+    except Exception:
+        return [], []
+
+
+def _settlement_rows(invoice: dict, accent: str) -> str:
+    credits, prior = _ledger_for_pdf(invoice)
+    total = float(invoice.get("total") or 0)
+    credit_total = round(sum(float(c.get("amount") or 0) for c in credits), 2)
+    balance = round(total - credit_total - float(invoice.get("amount_paid") or 0), 2)
+    rows = ['<tr><td colspan="2" style="padding-top:12px;font-weight:700;text-transform:uppercase;'
+            f'font-size:9pt;letter-spacing:.06em;color:{accent}">Payments &amp; credits applied</td></tr>']
+    if not credits:
+        rows.append('<tr><td style="color:#777">No payments received yet</td><td style="text-align:right">$0.00</td></tr>')
+    for c in credits:
+        bits = [escape(str(c.get("label") or "Payment received"), quote=False)]
+        if c.get("payment_date"):
+            bits.append(_mdy(c["payment_date"]))
+        if c.get("invoice_number"):
+            bits.append(escape(str(c["invoice_number"]), quote=False))
+        if c.get("method"):
+            bits.append(escape(str(c["method"]), quote=False))
+        rows.append(f'<tr><td>{" &middot; ".join(bits)}</td>'
+                    f'<td style="text-align:right">-${float(c.get("amount") or 0):,.2f}</td></tr>')
+    own = float(invoice.get("amount_paid") or 0)
+    if own > 0:
+        rows.append(f'<tr><td>Paid on this invoice</td><td style="text-align:right">-${own:,.2f}</td></tr>')
+    rows.append(f'<tr><td>Total payments &amp; credits</td><td style="text-align:right">-${credit_total + own:,.2f}</td></tr>')
+    rows.append(f'<tr class="deposit-due-row"><td><strong>Balance due</strong></td>'
+                f'<td style="text-align:right;font-weight:700;color:{accent}">${max(balance, 0):,.2f}</td></tr>')
+    if balance < 0:
+        rows.append(f'<tr><td>Credit balance</td><td style="text-align:right">${-balance:,.2f}</td></tr>')
+    if prior:
+        names = []
+        for p in prior:
+            names.append(f'{escape(str(p.get("invoice_number") or ""), quote=False)} (${float(p.get("total") or 0):,.2f}, '
+                         f'paid ${float(p.get("paid") or 0):,.2f})')
+        rows.append('<tr><td colspan="2" style="font-size:8.5pt;color:#777;padding-top:6px">Earlier invoices on this job: '
+                    + "; ".join(names) + ". Their payments are applied above; their open balances are replaced by this invoice.</td></tr>")
+    return "\n  ".join(rows)
+
+
 _OPEN_LINK_STATUSES = {"link_ready", "awaiting_confirmation", "unpaid", ""}
 
 
 def deposit_pay_link(invoice: dict) -> Optional[dict]:
     """Deposit-stage invoice with an open Stripe Checkout URL -> {url, amount}; else None."""
+    if str(invoice.get("invoice_stage") or "").strip().lower() != "deposit":
+        return None
+    link = invoice_pay_link(invoice)
+    return {"url": link["url"], "amount": link["amount"]} if link else None
+
+
+def invoice_pay_link(invoice: dict) -> Optional[dict]:
+    """Deposit or final invoice with an open Stripe Checkout URL -> {url, amount, label}.
+    The amount is always the balance due now (never the gross total)."""
     url = str(invoice.get("stripe_checkout_url") or "").strip()
     if not url.startswith("https://"):
         return None
-    if str(invoice.get("invoice_stage") or "").strip().lower() != "deposit":
+    stage = str(invoice.get("invoice_stage") or "").strip().lower()
+    if stage not in ("deposit", "final", "progress"):
         return None
     if str(invoice.get("status") or "").lower() in ("paid", "cancelled"):
         return None
@@ -204,7 +281,8 @@ def deposit_pay_link(invoice: dict) -> Optional[dict]:
         return None
     if amount <= 0:
         return None
-    return {"url": url, "amount": round(amount, 2)}
+    label = "Pay deposit online" if stage == "deposit" else "Pay balance online"
+    return {"url": url, "amount": round(amount, 2), "label": label}
 
 
 def _qr_data_uri(url: str) -> str:
@@ -225,17 +303,17 @@ def _qr_data_uri(url: str) -> str:
 
 
 def _pay_link_html(invoice: dict, accent: str) -> str:
-    link = deposit_pay_link(invoice)
+    link = invoice_pay_link(invoice)
     if not link:
         return ""
     url = escape(link["url"], quote=True)
     qr = _qr_data_uri(link["url"])
-    qr_html = (f'<img src="{qr}" alt="Pay deposit QR code" style="width:140px;height:140px;display:block">'
+    qr_html = (f'<img src="{qr}" alt="Pay online QR code" style="width:140px;height:140px;display:block">'
                if qr else "")
     return f"""<div style="margin:14px 0;padding:10px 14px;border:2px solid {accent};page-break-inside:avoid;border-radius:8px;display:flex;align-items:center;gap:16px">
   {qr_html}
   <div style="font-size:10.5pt">
-    <a href="{url}" style="color:{accent};font-weight:700;font-size:13pt;text-decoration:underline">Pay deposit online: ${link['amount']:,.2f}</a><br>
+    <a href="{url}" style="color:{accent};font-weight:700;font-size:13pt;text-decoration:underline">{link['label']}: ${link['amount']:,.2f}</a><br>
     <span style="font-size:8.5pt;color:#666">Click the link or scan the code to pay securely by card (Stripe).</span>
   </div>
 </div>"""
@@ -414,6 +492,8 @@ def render_client_invoice_html(
   <tr class="deposit-due-row"><td><strong>Deposit due now</strong></td>
       <td style="text-align:right;font-weight:700;color:{accent}">${credit['due_now']:,.2f}</td></tr>
   <tr><td>Balance on completion</td><td style="text-align:right">${credit['balance_on_completion']:,.2f}</td></tr>"""
+    elif final_settlement(invoice) and not is_woodcraft:
+        totals_deposit_rows = _settlement_rows(invoice, accent)
     elif schedule:
         totals_deposit_rows = f"""
   <tr class="deposit-due-row"><td><strong>50% Deposit Due</strong></td>
@@ -423,7 +503,7 @@ def render_client_invoice_html(
     head_mid = ('<th style="text-align:right">Sq ft</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th>'
                 if sqft_mode else
                 '<th style="text-align:right">Unit Price</th><th style="text-align:right">Amount</th>')
-    totals_width = 420 if credit else 300
+    totals_width = 460 if final_settlement(invoice) else (420 if credit else 300)
     co_title = ""
     if co.get("number"):
         co_title = f'<div class="invoice-number" style="font-weight:700">Change Order {escape(str(co.get("number")), quote=False)}</div>'
@@ -453,7 +533,8 @@ def render_client_invoice_html(
   .info-box h3 {{ margin: 0 0 6px; font-size: 9pt; text-transform: uppercase; color: {accent}; letter-spacing: 1px; }}
   table {{ width: 100%; border-collapse: collapse; margin: 16px 0; }}
   thead {{ background: #f5f3ef; }}
-  th {{ padding: 10px 12px; text-align: left; font-size: 9pt; text-transform: uppercase; color: #666; letter-spacing: 0.5px; border-bottom: 2px solid {accent}; }}
+  tr {{ page-break-inside: avoid; }}
+  th {{ white-space: nowrap; padding: 10px 12px; text-align: left; font-size: 9pt; text-transform: uppercase; color: #666; letter-spacing: 0.5px; border-bottom: 2px solid {accent}; }}
   .totals {{ margin-left: auto; width: {totals_width}px; }}
   .totals tr td {{ padding: 6px 12px; }}
   .totals .total-row {{ font-size: 14pt; font-weight: 700; border-top: 2px solid {accent}; }}
@@ -461,6 +542,7 @@ def render_client_invoice_html(
   .footer {{ margin-top: 18px; padding-top: 10px; page-break-inside: avoid; border-top: 1px solid #e8e4dd; font-size: 9pt; color: #888; text-align: center; }}
 </style></head><body>
 <title>INVOICE</title>
+{('<div style="border:2px dashed #b00;color:#b00;text-align:center;font-weight:700;padding:6px;margin-bottom:12px">DRY RUN &mdash; not issued, not sent</div>' if invoice.get("_dry_run") else "")}
 
 <div class="header">
   <div>
@@ -471,7 +553,7 @@ def render_client_invoice_html(
   <div class="invoice-title">
     <h1>INVOICE</h1>
     <div class="invoice-number">{inv_num}</div>
-    {co_title}
+    {co_title}{('<div class="invoice-number" style="font-weight:700">Final invoice</div>' if final_settlement(invoice) else "")}
   </div>
 </div>
 
