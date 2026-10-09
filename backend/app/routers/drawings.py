@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Response, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 import os
 import re
@@ -69,11 +69,18 @@ def _default_style_for(item_type: str) -> Optional[str]:
 
 @router.get("/drawings/files/{filename}")
 async def serve_drawing_file(filename: str):
-    """Serve generated drawing files (SVG, PDF)."""
-    base_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
+    """Serve generated drawing files (SVG, PDF, HTML, PNG, GLB)."""
+    from app.services.drawing.canonical_path import canonical_drawings_dir
+    base_dir = canonical_drawings_dir()
     file_path = os.path.join(base_dir, filename)
     if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Drawing file not found")
+        # Fallback to legacy path if present
+        legacy_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
+        legacy_path = os.path.join(legacy_dir, filename)
+        if os.path.exists(legacy_path):
+            file_path = legacy_path
+        else:
+            raise HTTPException(status_code=404, detail="Drawing file not found")
     # Determine media type
     if filename.endswith(".svg"):
         media_type = "image/svg+xml"
@@ -81,9 +88,289 @@ async def serve_drawing_file(filename: str):
         media_type = "application/pdf"
     elif filename.endswith(".png"):
         media_type = "image/png"
+    elif filename.endswith(".html"):
+        media_type = "text/html; charset=utf-8"
+    elif filename.endswith(".glb"):
+        media_type = "model/gltf-binary"
     else:
         media_type = "application/octet-stream"
     return FileResponse(file_path, media_type=media_type)
+
+
+class MockupFromSpecRequest(BaseModel):
+    spec: Optional[dict] = None
+    preset: Optional[str] = None  # marleys_u, marleys_l, marleys_u_curved, straight_bench, l_bench, u_bench, chair, wall_unit
+    quote_id: Optional[str] = None
+    job_id: Optional[str] = None
+    format: Optional[str] = "pdf"  # "pdf" (plan + elevation sheets) or "3d" (live HTML viewer + 3D stills + glb)
+
+
+@router.post("/drawings/mockup")
+async def generate_mockup_drawing(req: MockupFromSpecRequest):
+    """Parametric mockup generator endpoint.
+    Takes a PieceSpec, a preset name, or quote/job id and returns PDF + PNG preview paths.
+    """
+    from app.services.drawing.mockup_engine.spec import PieceSpec, FootprintSpec, SegmentSpec, BackStyleSpec, CushionSpec, MaterialFinishSpec
+    from app.services.drawing.mockup_engine.presets import (
+        marleys_u_and_l_preset, marleys_u_with_curved_corners_preset, straight_bench_preset, l_bench_preset,
+        u_bench_preset, single_chair_preset, woodcraft_wall_unit_preset
+    )
+    from app.services.drawing.mockup_engine.generator import render_piece_mockup_pdf, render_pdf_to_png_previews
+    from app.services.drawing.mockup_engine.renderers_3d import render_3d
+    from app.services.drawing.canonical_path import canonical_drawings_dir
+
+    out_dir = canonical_drawings_dir()
+    os.makedirs(out_dir, exist_ok=True)
+
+    piece_spec: Optional[PieceSpec] = None
+
+    if req.spec:
+        piece_spec = PieceSpec(**req.spec)
+    elif req.preset:
+        p = req.preset.lower().strip()
+        if p in ("marleys_u", "marleys_u_bench", "u_channel"):
+            piece_spec = marleys_u_and_l_preset()["u_bench"]
+        elif p in ("marleys_u_curved", "marleys_u_with_curved_corners", "curved_u"):
+            piece_spec = marleys_u_with_curved_corners_preset()
+        elif p in ("marleys_l", "marleys_l_bench", "l_channel"):
+            piece_spec = marleys_u_and_l_preset()["l_bench"]
+        elif p in ("straight", "straight_bench"):
+            piece_spec = straight_bench_preset()
+        elif p in ("l_shape", "l_bench"):
+            piece_spec = l_bench_preset()
+        elif p in ("u_shape", "u_bench"):
+            piece_spec = u_bench_preset()
+        elif p in ("chair", "single_chair"):
+            piece_spec = single_chair_preset()
+        elif p in ("wall_unit", "woodcraft_wall_unit", "casework"):
+            piece_spec = woodcraft_wall_unit_preset()
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown preset: {req.preset}")
+    elif req.quote_id or req.job_id:
+        target_id = req.quote_id or req.job_id
+        from app.services.quote_service import resolve_quote
+        quote = resolve_quote(target_id)
+        if not quote:
+            # Check CraftForge designs
+            from app.routers import craftforge
+            try:
+                design = craftforge._load(craftforge.DESIGNS_DIR, target_id)
+            except Exception:
+                design = None
+
+            if design:
+                piece_spec = woodcraft_wall_unit_preset(from_craftforge_design=design)
+            else:
+                raise HTTPException(status_code=404, detail=f"Quote or Job {target_id} not found")
+        else:
+            # Check if quote has line items with dimensions
+            items = quote.get("line_items", [])
+            quote_num = quote.get("quote_number", target_id)
+            client = quote.get("customer_name", "Client")
+
+            # Extract dimensions from line items or measurements
+            meas = quote.get("measurements") or {}
+            w = meas.get("width")
+            d = meas.get("depth")
+            h = meas.get("height")
+            bh = meas.get("back_height")
+
+            if not w and items:
+                for it in items:
+                    inp = it.get("inputs") or {}
+                    if inp.get("width_in") or inp.get("length_in") or inp.get("width"):
+                        w = inp.get("width_in") or inp.get("length_in") or inp.get("width")
+                        d = inp.get("depth_in") or inp.get("depth", 20.0)
+                        h = inp.get("height_in") or inp.get("height", 18.0)
+                        bh = inp.get("back_height_in") or inp.get("back_height")
+                        break
+
+            if not w:
+                # Omit drawing section rather than printing errors
+                return {
+                    "omitted": True,
+                    "reason": "quote lines lack dimensions",
+                    "quote_id": target_id,
+                }
+
+            piece_spec = straight_bench_preset(
+                length_in=float(w),
+                seat_depth_in=float(d or 20.0),
+                back_height_in=float(bh or 24.0),
+                name=quote.get("project_name") or f"Quote {quote_num} Mockup",
+            )
+            piece_spec.quote_number = quote_num
+            piece_spec.client_name = client
+
+    if not piece_spec:
+        raise HTTPException(status_code=400, detail="Must provide spec, preset, quote_id, or job_id")
+
+    file_id = uuid.uuid4().hex[:12]
+    clean_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", piece_spec.name.lower()).strip("_")
+
+    if (req.format or "").lower().strip() == "3d":
+        res_3d = render_3d(piece_spec, str(out_dir), prefix=f"mockup_3d_{clean_name}_{file_id}")
+        return {
+            "success": True,
+            "format": "3d",
+            "html_path": res_3d["html_path"],
+            "html_filename": res_3d["html_filename"],
+            "viewer_url": f"/api/v1/drawings/files/{res_3d['html_filename']}",
+            "stills": res_3d["stills"],
+            "still_filenames": res_3d["still_filenames"],
+            "still_urls": [f"/api/v1/drawings/files/{fn}" for fn in res_3d["still_filenames"]],
+            "glb_path": res_3d["glb_path"],
+            "glb_filename": res_3d["glb_filename"],
+            "glb_url": f"/api/v1/drawings/files/{res_3d['glb_filename']}" if res_3d["glb_filename"] else None,
+            "spec": piece_spec.model_dump(),
+        }
+
+    # Generate PDF
+    pdf_filename = f"mockup_{clean_name}_{file_id}.pdf"
+    pdf_path = str(out_dir / pdf_filename)
+
+    render_piece_mockup_pdf(piece_spec, pdf_path)
+
+    # Generate PNG previews
+    preview_prefix = str(out_dir / f"preview_{clean_name}_{file_id}")
+    png_previews = render_pdf_to_png_previews(pdf_path, preview_prefix)
+
+    return {
+        "success": True,
+        "format": "pdf",
+        "pdf_path": pdf_path,
+        "pdf_filename": pdf_filename,
+        "pdf_url": f"/api/v1/drawings/files/{pdf_filename}",
+        "png_previews": png_previews,
+        "png_filenames": [os.path.basename(p) for p in png_previews],
+        "spec": piece_spec.model_dump(),
+    }
+
+
+class NestRequest(BaseModel):
+    """Material nesting request for upholstery and woodwork."""
+    specs: Optional[List[dict]] = None
+    spec: Optional[dict] = None
+    preset: Optional[str] = None  # "marleys_u_and_l", "marleys_u", "marleys_l", "straight_bench", etc.
+    quote_id: Optional[str] = None
+    job_id: Optional[str] = None
+    config: Optional[dict] = None  # NestingConfig overrides
+
+
+@router.post("/drawings/nest")
+async def generate_material_nest_endpoint(req: NestRequest):
+    """Material Nesting Engine endpoint.
+    Computes optimized cut lists and sheet/roll layouts for board, foam, dacron, and fabric.
+    Returns JSON cut list + totals, generates diagram PDF, and renders PNG previews.
+    """
+    from app.services.drawing.mockup_engine.spec import PieceSpec
+    from app.services.drawing.mockup_engine.presets import (
+        marleys_u_and_l_preset, marleys_u_with_curved_corners_preset, straight_bench_preset,
+        l_bench_preset, u_bench_preset, single_chair_preset, woodcraft_wall_unit_preset
+    )
+    from app.services.drawing.mockup_engine.nesting_engine import NestingConfig, nest_project
+    from app.services.drawing.mockup_engine.nesting_renderers import render_nesting_pdf
+    from app.services.drawing.mockup_engine.generator import render_pdf_to_png_previews
+    from app.services.drawing.canonical_path import canonical_drawings_dir
+
+    out_dir = canonical_drawings_dir()
+    os.makedirs(out_dir, exist_ok=True)
+
+    pieces: List[PieceSpec] = []
+
+    if req.specs:
+        for s in req.specs:
+            pieces.append(PieceSpec(**s))
+    elif req.spec:
+        pieces.append(PieceSpec(**req.spec))
+    elif req.preset:
+        p = req.preset.lower().strip()
+        if p in ("marleys_u_and_l", "marleys", "marleys_both"):
+            m = marleys_u_and_l_preset()
+            pieces = [m["u_bench"], m["l_bench"]]
+        elif p in ("marleys_u", "marleys_u_bench", "u_channel"):
+            pieces = [marleys_u_and_l_preset()["u_bench"]]
+        elif p in ("marleys_u_curved", "curved_u"):
+            pieces = [marleys_u_with_curved_corners_preset()]
+        elif p in ("marleys_l", "marleys_l_bench", "l_channel"):
+            pieces = [marleys_u_and_l_preset()["l_bench"]]
+        elif p in ("straight", "straight_bench"):
+            pieces = [straight_bench_preset()]
+        elif p in ("l_shape", "l_bench"):
+            pieces = [l_bench_preset()]
+        elif p in ("u_shape", "u_bench"):
+            pieces = [u_bench_preset()]
+        elif p in ("chair", "single_chair"):
+            pieces = [single_chair_preset()]
+        elif p in ("wall_unit", "woodcraft_wall_unit", "casework"):
+            pieces = [woodcraft_wall_unit_preset()]
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown preset: {req.preset}")
+    elif req.quote_id or req.job_id:
+        target_id = req.quote_id or req.job_id
+        from app.routers.quotes import get_quote_data_by_id
+        quote = await get_quote_data_by_id(target_id)
+        if not quote:
+            raise HTTPException(status_code=404, detail=f"Quote or job {target_id} not found")
+        items = quote.get("items") or []
+        meas = quote.get("measurements") or {}
+        w = meas.get("width")
+        d = meas.get("depth")
+        bh = meas.get("back_height")
+        if not w and items:
+            for it in items:
+                inp = it.get("inputs") or {}
+                if inp.get("width_in") or inp.get("length_in") or inp.get("width"):
+                    w = inp.get("width_in") or inp.get("length_in") or inp.get("width")
+                    d = inp.get("depth_in") or inp.get("depth", 20.0)
+                    bh = inp.get("back_height_in") or inp.get("back_height")
+                    break
+        if not w:
+            return {"omitted": True, "reason": "quote lines lack dimensions", "quote_id": target_id}
+        sp = straight_bench_preset(
+            length_in=float(w),
+            seat_depth_in=float(d or 20.0),
+            back_height_in=float(bh or 24.0),
+            name=quote.get("project_name") or f"Quote {quote.get('quote_number', target_id)}",
+        )
+        pieces = [sp]
+
+    if not pieces:
+        raise HTTPException(status_code=400, detail="Must provide specs, spec, preset, or quote_id")
+
+    nest_cfg = NestingConfig(**req.config) if req.config else NestingConfig()
+    nest_data = nest_project(pieces, config=nest_cfg)
+
+    file_id = uuid.uuid4().hex[:12]
+    first_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", pieces[0].name.lower()).strip("_")
+    pdf_filename = f"nesting_{first_name}_{file_id}.pdf"
+    pdf_path = str(out_dir / pdf_filename)
+
+    render_nesting_pdf(
+        nest_data,
+        pdf_path,
+        client_name=pieces[0].client_name,
+        client_address=pieces[0].client_address or "",
+        quote_number=pieces[0].quote_number,
+        project_name=pieces[0].project_name,
+    )
+
+    preview_prefix = str(out_dir / f"nesting_preview_{first_name}_{file_id}")
+    png_previews = render_pdf_to_png_previews(pdf_path, preview_prefix)
+
+    return {
+        "success": True,
+        "format": "nesting",
+        "pdf_path": pdf_path,
+        "pdf_filename": pdf_filename,
+        "pdf_url": f"/api/v1/drawings/files/{pdf_filename}",
+        "png_previews": png_previews,
+        "png_filenames": [os.path.basename(p) for p in png_previews],
+        "totals": nest_data["totals"],
+        "cut_list": nest_data["cut_list"],
+        "nesting_results": nest_data["nesting_results"],
+        "pieces": [p.name for p in pieces],
+    }
 
 
 class BenchRequest(BaseModel):

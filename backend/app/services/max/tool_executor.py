@@ -3441,6 +3441,49 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
     )
 
 
+@tool("generate_parametric_mockup")
+def _generate_parametric_mockup(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Parametric mockup tool: takes a spec, preset, or quote_id/job_id and returns PDF + PNG previews or 3D live viewer."""
+    try:
+        import asyncio
+        from app.routers.drawings import generate_mockup_drawing, MockupFromSpecRequest
+
+        req = MockupFromSpecRequest(
+            spec=params.get("spec"),
+            preset=params.get("preset"),
+            quote_id=params.get("quote_id"),
+            job_id=params.get("job_id"),
+            format=params.get("format", "pdf"),
+        )
+        res = _run_async(generate_mockup_drawing(req))
+        return ToolResult(tool="generate_parametric_mockup", success=True, result=res)
+    except Exception as e:
+        logger.exception("generate_parametric_mockup tool failed")
+        return ToolResult(tool="generate_parametric_mockup", success=False, error=str(e))
+
+
+@tool("generate_material_nest")
+def _generate_material_nest(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Material Nesting Engine: generates cut lists, 2D sheet/roll packing layouts, and yield metrics for board, foam, dacron, and fabric."""
+    try:
+        import asyncio
+        from app.routers.drawings import generate_material_nest_endpoint, NestRequest
+
+        req = NestRequest(
+            specs=params.get("specs"),
+            spec=params.get("spec"),
+            preset=params.get("preset"),
+            quote_id=params.get("quote_id"),
+            job_id=params.get("job_id"),
+            config=params.get("config"),
+        )
+        res = _run_async(generate_material_nest_endpoint(req))
+        return ToolResult(tool="generate_material_nest", success=True, result=res)
+    except Exception as e:
+        logger.exception("generate_material_nest tool failed")
+        return ToolResult(tool="generate_material_nest", success=False, error=str(e))
+
+
 @tool("sketch_to_drawing")
 def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
     """HOTFIX 4.0 (b) — Draw-from-image ONLY.
@@ -5553,6 +5596,20 @@ State machine: `draft → founder_review → sent → accepted → in_production
   `{"tool": "svg_to_pdf", "svg_content": "<svg>...</svg>", "output_path": "/home/rg/empire-repo/uploads/drawing.pdf"}`
   Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`
   IMPORTANT: Always use this tool to convert SVG drawings to PDF. Do NOT write conversion scripts.
+- **generate_parametric_mockup** — Generate parametric architectural drawings (plan, front elevations, side sections) or interactive 3D live models with rendered stills for any furniture, upholstery, or millwork/casework piece.
+  Can take a full `spec`, a `preset` ("marleys_u", "marleys_u_curved", "marleys_l", "straight_bench", "l_bench", "u_bench", "chair", "wall_unit"), or a `quote_id`/`job_id`.
+  **When to use 3D vs plan/elevation:**
+  - Pass `"format": "3d"` when the user asks to "show in 3D", "live model", "orbit/rotate", "3D view", or needs perspective/isometric renders of the piece. Returns a live Three.js viewer link (`viewer_url`), 4 rendered stills (`iso`, `front`, `top`, `rear`), and optional `glb_url`.
+  - Pass `"format": "pdf"` (the default) for formal architectural shop drawings, submittal documents, dimensioned plan views, front elevations, and material schedules.
+  When quote lines lack dimensions, omits drawing rather than erroring.
+  `{"tool": "generate_parametric_mockup", "preset": "marleys_u", "format": "3d"}`
+  `{"tool": "generate_parametric_mockup", "preset": "marleys_u_curved", "format": "3d"}`
+  `{"tool": "generate_parametric_mockup", "preset": "straight_bench"}`
+  `{"tool": "generate_parametric_mockup", "quote_id": "EST-2026-299"}`
+- **generate_material_nest** — Run the nesting engine for upholstery and woodwork materials. Generates optimized cut lists, sheet/roll layouts, yield metrics, and a diagram PDF for plywood/board, foam, dacron, and fabric.
+  `{"tool": "generate_material_nest", "preset": "marleys_u_and_l"}`
+  `{"tool": "generate_material_nest", "preset": "marleys_u"}`
+  `{"tool": "generate_material_nest", "quote_id": "EST-2026-299"}`
 - **sketch_to_drawing** — Generate professional architectural drawings for ANY item type. Auto-classifies input and routes to the correct renderer. Returns a PDF file path.
   **Bench drawings** produce a 4-QUADRANT layout: Plan View + Isometric View + Front Elevation + title block. Workroom letterhead is the default; pass `"business_unit": "woodcraft"` for WoodCraft chrome and a `WC · …` category chip.
   `lf` is linear feet. `width` / `width_in` are inches (a 36" width stays 36"). Omitted `back_height` is 18" and the sheet marks it assumed — a number you pass wins (the old silent 34" default is retired). `panel_style: "flat"` stays flat; `has_back: false` draws no back.

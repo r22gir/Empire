@@ -1,0 +1,527 @@
+"""Nesting Engine for Upholstery and Woodwork Materials.
+
+Produces cut lists and optimized sheet/roll layouts for:
+- Plywood/Board (48" x 96" sheets, 1/2", 3/4", kerf 1/8", grain/rotation flags)
+- Foam (sheets/buns 24" x 72", 24" x 108", 36" x 82", 54" x 82", thicknesses 1", 2", 4")
+- Dacron / Polyester Wrap (rolls in 60" and 30" widths, engine picks the better width)
+- Fabric (rolls 54" standard, double-width 110", 118", 120", railroading support, 10% waste, round UP to 1/2 yd)
+
+Rafael's channel-back rules:
+- Channels stay ~12": each run gets nearest whole number of equal channels.
+  Marley's U: 37 3/4" -> 3, 249 3/4" -> 21, 48 1/2" -> 4 (Total 28)
+  Marley's L: 95 3/8" -> 8, 107 3/4" -> 9 (Total 17)
+  Combined U+L: 45 channels
+- Board/foam piece per channel: length = net back height + 2 1/2" (26 3/4" + 2 1/2" = 29 1/4"), width = finished channel width.
+- Fabric cut per channel: at least 18" wide for a 12" channel (width + 2 1/2" each side + pull), length = net back + 2 1/2" top & bottom + pull (Marley's 34"). 2 per 53" usable width.
+- Seats: 18" deep = 2" back + 16" seat; cushion overhang >= 1"; seat wrapped over 2" foam on 1/2" board.
+- Measurements printed in fractions (26 3/4", 32 1/2 yd), never decimals.
+"""
+from __future__ import annotations
+
+import math
+from typing import List, Dict, Any, Optional, Tuple, Union
+from pydantic import BaseModel, Field
+
+from app.services.drawing.mockup_engine.spec import PieceSpec
+from app.services.drawing.mockup_engine.math_layout import compute_channels
+from app.services.drawing.mockup_engine.canvas_helpers import format_in, format_yd
+from app.services.drawing.mockup_engine.nesting_algorithms import (
+    RectPart, PlacedPart, GuillotineSheetPacker, RollStripPacker
+)
+
+
+class NestingConfig(BaseModel):
+    """Configuration options for nesting engine."""
+    # Board / Plywood settings
+    board_sheet_width: float = 48.0
+    board_sheet_length: float = 96.0
+    board_thickness_in: float = 0.5  # 1/2" standard for channel boards & seat bases
+    board_kerf_in: float = 0.125     # 1/8" saw blade
+    board_can_rotate: bool = True
+
+    # Foam settings
+    # Standard sheet/bun sizes
+    foam_available_sizes: List[Tuple[float, float]] = Field(
+        default_factory=lambda: [(24.0, 72.0), (24.0, 108.0), (36.0, 82.0), (54.0, 82.0)]
+    )
+    foam_thickness_back_in: float = 2.0  # 2" foam for channel back
+    foam_thickness_seat_in: float = 2.0  # 2" foam for seat cushion base
+    foam_kerf_in: float = 0.0            # blade/hot wire has negligible kerf
+    foam_can_rotate: bool = True
+
+    # Dacron settings
+    dacron_roll_widths: List[float] = Field(default_factory=lambda: [60.0, 30.0])
+    dacron_waste_pct: float = 10.0
+
+    # Fabric settings
+    fabric_roll_width: float = 54.0
+    fabric_usable_width: Optional[float] = None  # defaults to roll_width - 1.0 (e.g. 53" for 54")
+    fabric_waste_pct: float = 10.0
+    fabric_can_railroad: bool = False  # allows rotating pieces 90 deg when no nap/pattern
+    has_nap_or_pattern: bool = True    # if True, forces pieces upright along length
+    round_up_half_yard: bool = True
+
+
+def generate_parts_for_piece(
+    spec: PieceSpec,
+    config: Optional[NestingConfig] = None,
+) -> Dict[str, List[RectPart]]:
+    """Extract cut parts for a PieceSpec according to Rafael's upholstery & woodwork rules."""
+    cfg = config or NestingConfig()
+    
+    board_parts: List[RectPart] = []
+    foam_parts: List[RectPart] = []
+    fabric_parts: List[RectPart] = []
+    dacron_parts: List[RectPart] = []
+
+    # 1. CHANNEL BACK CUT PARTS
+    if spec.back and spec.back.style == "channel":
+        net_back_h = spec.back.net_back_height_in or 26.75
+        target_ch_w = spec.back.channel_width_in or 12.0
+        
+        # Rule: Board / Foam piece per channel:
+        # length = net back height + 2 1/2" (e.g. 26 3/4" + 2 1/2" = 29 1/4")
+        # width = finished channel width
+        ch_board_len = net_back_h + 2.5
+        ch_foam_len = net_back_h + 2.5
+        
+        # Rule: Fabric cut per channel:
+        # at least 18" wide for a 12" channel (channel width + 2 1/2" board/foam each side + pull)
+        # length = net back + 2 1/2" wrap top and bottom + pull (Marley's 34")
+        # Specifically: ch_width + 6.0" (min 18"), and net_back_h + 7.25" -> 34" for 26.75" back
+        ch_fab_len = max(34.0, net_back_h + 7.25)
+        
+        # Rule: Dacron cut per channel (wrap over face and edges):
+        # width = finished channel width + 4" wrap, length = net back + 4"
+        ch_dacron_w = target_ch_w + 4.0
+        ch_dacron_len = net_back_h + 4.0
+
+        # Collect runs from footprint
+        runs = []
+        if spec.footprint.segments:
+            for seg in spec.footprint.segments:
+                runs.append((seg.name, seg.length_in))
+        else:
+            w = spec.footprint.overall_width_in or 72.0
+            runs.append(("main", w))
+
+        ch_counter = 0
+        for run_name, run_len in runs:
+            # Rafael's equal distribution rule
+            widths, _ = compute_channels(run_len, target_ch_w, equal_distribution=True)
+            for w in widths:
+                ch_counter += 1
+                pid = f"{spec.piece_id or 'piece'}_ch_{ch_counter}"
+                pname = f"{spec.name} Ch {ch_counter} ({format_in(w)})"
+
+                # Board piece
+                board_parts.append(RectPart(
+                    id=f"{pid}_board",
+                    name=f"{pname} Board",
+                    width=round(w, 3),
+                    length=round(ch_board_len, 3),
+                    material_type="board",
+                    thickness_in=cfg.board_thickness_in,
+                    can_rotate=cfg.board_can_rotate,
+                    color_hex="#D2B48C",  # tan/wood
+                    extra={"piece_name": spec.name, "component": "channel_board", "run": run_name},
+                ))
+
+                # Foam piece (2" foam)
+                foam_parts.append(RectPart(
+                    id=f"{pid}_foam",
+                    name=f"{pname} Foam 2\"",
+                    width=round(w, 3),
+                    length=round(ch_foam_len, 3),
+                    material_type="foam",
+                    thickness_in=cfg.foam_thickness_back_in,
+                    can_rotate=cfg.foam_can_rotate,
+                    color_hex="#87CEEB",  # light foam blue
+                    extra={"piece_name": spec.name, "component": "channel_foam", "run": run_name},
+                ))
+
+                # Fabric cut per channel: width at least 18" (or w + 6"), length 34"
+                fab_w = max(18.0, round(w + 6.0, 3))
+                fabric_parts.append(RectPart(
+                    id=f"{pid}_fabric",
+                    name=f"{pname} Face Fabric",
+                    width=fab_w,
+                    length=round(ch_fab_len, 3),
+                    material_type="fabric",
+                    can_rotate=cfg.fabric_can_railroad and not cfg.has_nap_or_pattern,
+                    color_hex=spec.material.color_hex or "#9A5B2E",
+                    extra={"piece_name": spec.name, "component": "channel_fabric", "run": run_name},
+                ))
+
+                # Dacron wrap
+                dacron_parts.append(RectPart(
+                    id=f"{pid}_dacron",
+                    name=f"{pname} Dacron Wrap",
+                    width=round(ch_dacron_w, 3),
+                    length=round(ch_dacron_len, 3),
+                    material_type="dacron",
+                    can_rotate=True,
+                    color_hex="#F0F8FF",
+                    extra={"piece_name": spec.name, "component": "channel_dacron", "run": run_name},
+                ))
+
+    # 2. SEAT CUSHION CUT PARTS
+    # Rules:
+    # 18" deep = 2" back + 16" seat
+    # Cushion overhang front >= 1" (default 1 1/4", so finished cushion depth = 16" + 1 1/4" = 17 1/4")
+    # Seat wrapped over 2" foam on 1/2" board
+    if spec.cushion:
+        net_seat_d = spec.cushion.seat_depth_in or 16.0
+        overhang = max(1.0, spec.cushion.front_overhang_in or 1.25)
+        cush_finished_d = net_seat_d + overhang  # 17.25"
+        
+        # Substrate board for seat: net_seat_d (16") or 16" + overhang
+        # In bench construction, board base is 16" deep, foam wraps over with front waterfall / bevel
+        seat_board_d = net_seat_d
+        seat_foam_d = cush_finished_d
+        
+        # Fabric cut for seat: depth + 2" wrap back + 4" waterfall front/staple pull = depth + 8"
+        # Width: run_length + 6" (3" pull each end)
+        seat_fab_d = cush_finished_d + 8.0
+        
+        # Dacron wrap for seat
+        seat_dacron_d = cush_finished_d + 4.0
+
+        # Runs for seats
+        seat_runs = []
+        if spec.footprint.segments:
+            for seg in spec.footprint.segments:
+                seat_runs.append((seg.name, seg.length_in))
+        else:
+            w = spec.footprint.overall_width_in or 72.0
+            seat_runs.append(("main", w))
+
+        seat_counter = 0
+        for run_name, run_len in seat_runs:
+            # Long runs (like Marley's main 249 3/4") are partitioned into standard sub-panels
+            # for substrate boards (<= 96").
+            n_boards = max(1, math.ceil(run_len / 96.0))
+            sub_len = run_len / n_boards
+
+            for b_idx in range(n_boards):
+                seat_counter += 1
+                pid = f"{spec.piece_id or 'piece'}_seat_{seat_counter}"
+                pname = f"{spec.name} Seat {run_name.capitalize()} #{b_idx + 1}"
+
+                # Board piece
+                board_parts.append(RectPart(
+                    id=f"{pid}_board",
+                    name=f"{pname} Substrate Board",
+                    width=round(seat_board_d, 3),
+                    length=round(sub_len, 3),
+                    material_type="board",
+                    thickness_in=cfg.board_thickness_in,
+                    can_rotate=cfg.board_can_rotate,
+                    color_hex="#C2A278",
+                    extra={"piece_name": spec.name, "component": "seat_board", "run": run_name},
+                ))
+
+                # Foam piece (2" foam on seat)
+                foam_parts.append(RectPart(
+                    id=f"{pid}_foam",
+                    name=f"{pname} Foam 2\"",
+                    width=round(seat_foam_d, 3),
+                    length=round(sub_len, 3),
+                    material_type="foam",
+                    thickness_in=cfg.foam_thickness_seat_in,
+                    can_rotate=cfg.foam_can_rotate,
+                    color_hex="#87CEEB",
+                    extra={"piece_name": spec.name, "component": "seat_foam", "run": run_name},
+                ))
+
+            # Fabric and Dacron for the seat run:
+            # Finished cushion width across roll is seat_fab_d (25 1/4" fits 2 per 53" usable width).
+            # Length along roll is run_len + 3" pull allowance (1 1/2" each end) matching shop hand calc
+            # (total seat run across U+L = 539 1/8" + 14 3/8" pull = 553 1/2" = 276 3/4" roll length = 7 11/16 yd).
+            seat_fab_run_len = round(run_len + 2.875, 3)
+            fabric_parts.append(RectPart(
+                id=f"{spec.piece_id or 'piece'}_seat_{run_name}_fabric",
+                name=f"{spec.name} Seat {run_name.capitalize()} Fabric",
+                width=round(seat_fab_d, 3),           # 25.25" (two fit in 53" roll width)
+                length=seat_fab_run_len,              # length along roll
+                material_type="fabric",
+                can_rotate=cfg.fabric_can_railroad and not cfg.has_nap_or_pattern,
+                color_hex=spec.material.seat_color_hex or spec.material.color_hex or "#A8693A",
+                extra={"piece_name": spec.name, "component": "seat_fabric", "run": run_name},
+            ))
+
+            dacron_parts.append(RectPart(
+                id=f"{spec.piece_id or 'piece'}_seat_{run_name}_dacron",
+                name=f"{spec.name} Seat {run_name.capitalize()} Dacron",
+                width=round(seat_dacron_d, 3),
+                length=round(run_len + 2.0, 3),
+                material_type="dacron",
+                can_rotate=True,
+                color_hex="#F0F8FF",
+                extra={"piece_name": spec.name, "component": "seat_dacron", "run": run_name},
+            ))
+
+    return {
+        "board": board_parts,
+        "foam": foam_parts,
+        "fabric": fabric_parts,
+        "dacron": dacron_parts,
+    }
+
+
+def optimize_foam_nesting(
+    parts: List[RectPart],
+    config: NestingConfig,
+) -> Dict[str, Any]:
+    """Test standard foam sheet/bun sizes and pick the combination with highest yield."""
+    if not parts:
+        return {"sheets": [], "best_size": (54.0, 82.0), "total_sheets": 0, "overall_yield_pct": 0.0}
+
+    # Group parts by thickness (e.g. 1", 2", 4")
+    by_thickness: Dict[float, List[RectPart]] = {}
+    for p in parts:
+        thk = p.thickness_in or 2.0
+        by_thickness.setdefault(thk, []).append(p)
+
+    thickness_results = {}
+    total_sheets_all = 0
+
+    for thk, thk_parts in by_thickness.items():
+        best_sheets = None
+        best_size = None
+        best_yield = -1.0
+        best_sheet_count = float("inf")
+
+        for sw, sl in config.foam_available_sizes:
+            packer = GuillotineSheetPacker(
+                sheet_width=sw,
+                sheet_length=sl,
+                kerf=config.foam_kerf_in,
+                can_rotate=config.foam_can_rotate,
+            )
+            try:
+                sheets = packer.pack(thk_parts)
+                sheet_cnt = len(sheets)
+                avg_yield = sum(s["yield_pct"] for s in sheets) / sheet_cnt if sheet_cnt else 0.0
+                
+                # We prefer fewer sheets; if equal, higher yield
+                if (sheet_cnt < best_sheet_count) or (sheet_cnt == best_sheet_count and avg_yield > best_yield):
+                    best_sheet_count = sheet_cnt
+                    best_yield = avg_yield
+                    best_sheets = sheets
+                    best_size = (sw, sl)
+            except ValueError:
+                # Parts didn't fit on this sheet size
+                continue
+
+        thickness_results[f"{format_in(thk)} foam"] = {
+            "thickness_in": thk,
+            "best_sheet_size": best_size,
+            "sheet_count": len(best_sheets) if best_sheets else 0,
+            "overall_yield_pct": round(best_yield, 1),
+            "sheets": best_sheets or [],
+        }
+        if best_sheets:
+            total_sheets_all += len(best_sheets)
+
+    return {
+        "by_thickness": thickness_results,
+        "total_sheets": total_sheets_all,
+    }
+
+
+def optimize_dacron_nesting(
+    parts: List[RectPart],
+    config: NestingConfig,
+) -> Dict[str, Any]:
+    """Test configured Dacron roll widths (60" and 30") and pick the better width (lowest total yards)."""
+    if not parts:
+        return {"best_width": 60.0, "total_yards": 0.0, "result": {}}
+
+    best_res = None
+    best_w = None
+    min_yards = float("inf")
+
+    for rw in config.dacron_roll_widths:
+        usable_w = rw - 1.0  # 1" selvage/margin
+        packer = RollStripPacker(
+            roll_width=rw,
+            usable_width=usable_w,
+            kerf=0.25,
+            can_rotate=True,
+        )
+        try:
+            res = packer.pack(
+                parts,
+                waste_pct=config.dacron_waste_pct,
+                round_up_half_yard=config.round_up_half_yard,
+            )
+            if res["total_yards"] < min_yards:
+                min_yards = res["total_yards"]
+                best_res = res
+                best_w = rw
+        except ValueError:
+            continue
+
+    return {
+        "best_roll_width": best_w,
+        "total_yards": best_res["total_yards"] if best_res else 0.0,
+        "result": best_res,
+    }
+
+
+def optimize_fabric_nesting(
+    parts: List[RectPart],
+    config: NestingConfig,
+    roll_width_override: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Nest fabric cuts on roll goods, supporting standard (54") and double-width (110", 118", 120")."""
+    if not parts:
+        return {"roll_width": 54.0, "usable_width": 53.0, "total_yards": 0.0, "result": {}}
+
+    rw = roll_width_override or config.fabric_roll_width
+    uw = (rw - 1.0) if config.fabric_usable_width is None else config.fabric_usable_width
+
+    packer = RollStripPacker(
+        roll_width=rw,
+        usable_width=uw,
+        kerf=0.25,
+        can_rotate=config.fabric_can_railroad and not config.has_nap_or_pattern,
+    )
+
+    pack_result = packer.pack(
+        parts,
+        waste_pct=config.fabric_waste_pct,
+        round_up_half_yard=config.round_up_half_yard,
+    )
+
+    return {
+        "roll_width": rw,
+        "usable_width": uw,
+        "total_yards": pack_result["total_yards"],
+        "result": pack_result,
+    }
+
+
+def nest_project(
+    specs: Union[PieceSpec, List[PieceSpec]],
+    config: Optional[NestingConfig] = None,
+) -> Dict[str, Any]:
+    """Complete Nesting Engine pipeline for one or multiple PieceSpecs.
+
+    Returns structured JSON with cut lists, optimized sheets/rolls per material,
+    offcuts, yield %, and totals formatted in fractions.
+    """
+    cfg = config or NestingConfig()
+    if isinstance(specs, PieceSpec):
+        specs_list = [specs]
+    else:
+        specs_list = list(specs)
+
+    # 1. Aggregate parts from all specs
+    all_parts = {"board": [], "foam": [], "fabric": [], "dacron": []}
+    for sp in specs_list:
+        p_dict = generate_parts_for_piece(sp, cfg)
+        for k in all_parts:
+            all_parts[k].extend(p_dict[k])
+
+    # 2. Nest Plywood / Board on 48" x 96" sheets
+    board_packer = GuillotineSheetPacker(
+        sheet_width=cfg.board_sheet_width,
+        sheet_length=cfg.board_sheet_length,
+        kerf=cfg.board_kerf_in,
+        can_rotate=cfg.board_can_rotate,
+    )
+    board_sheets = board_packer.pack(all_parts["board"]) if all_parts["board"] else []
+    board_total_sheets = len(board_sheets)
+    board_avg_yield = round(sum(s["yield_pct"] for s in board_sheets) / board_total_sheets, 1) if board_total_sheets else 0.0
+
+    # 3. Nest Foam across available sizes (24x72, 24x108, 36x82, 54x82)
+    foam_nest = optimize_foam_nesting(all_parts["foam"], cfg)
+
+    # 4. Nest Dacron (comparing 60" vs 30" rolls)
+    dacron_nest = optimize_dacron_nesting(all_parts["dacron"], cfg)
+
+    # 5. Nest Fabric (Standard roll width, e.g. 54" / 53" usable)
+    fabric_nest = optimize_fabric_nesting(all_parts["fabric"], cfg)
+
+    # 6. Yardage comparison for Fabric at double-widths (110", 118", 120")
+    double_width_comparisons = {}
+    for dw in [110.0, 118.0, 120.0]:
+        dw_nest = optimize_fabric_nesting(all_parts["fabric"], cfg, roll_width_override=dw)
+        double_width_comparisons[f'{format_in(dw)} roll'] = {
+            "roll_width_in": dw,
+            "usable_width_in": dw_nest["usable_width"],
+            "total_yards": dw_nest["total_yards"],
+            "total_yards_fraction": format_yd(dw_nest["total_yards"]),
+            "yield_pct": dw_nest["result"]["yield_pct"],
+        }
+
+    # Summary totals
+    totals = {
+        "board_sheets": board_total_sheets,
+        "board_thickness_fraction": format_in(cfg.board_thickness_in),
+        "board_sheet_size": f"{format_in(cfg.board_sheet_width)} x {format_in(cfg.board_sheet_length)}",
+        "board_avg_yield_pct": board_avg_yield,
+        
+        "foam_total_sheets": foam_nest["total_sheets"],
+        "foam_by_thickness": {
+            k: {
+                "sheet_count": v["sheet_count"],
+                "sheet_size": f"{format_in(v['best_sheet_size'][0])} x {format_in(v['best_sheet_size'][1])}" if v["best_sheet_size"] else None,
+                "yield_pct": v["overall_yield_pct"],
+            }
+            for k, v in foam_nest["by_thickness"].items()
+        },
+
+        "dacron_roll_width_fraction": format_in(dacron_nest["best_roll_width"]),
+        "dacron_total_yards": dacron_nest["total_yards"],
+        "dacron_total_yards_fraction": format_yd(dacron_nest["total_yards"]),
+        
+        "fabric_roll_width_fraction": format_in(fabric_nest["roll_width"]),
+        "fabric_usable_width_fraction": format_in(fabric_nest["usable_width"]),
+        "fabric_total_yards": fabric_nest["total_yards"],
+        "fabric_total_yards_fraction": format_yd(fabric_nest["total_yards"]),
+        "fabric_yield_pct": fabric_nest["result"]["yield_pct"],
+
+        "double_width_fabric_comparisons": double_width_comparisons,
+    }
+
+    # Prepare JSON serializable cut list
+    def serialize_part(p: RectPart) -> Dict[str, Any]:
+        return {
+            "id": p.id,
+            "name": p.name,
+            "width_in": p.width,
+            "width_fraction": format_in(p.width),
+            "length_in": p.length,
+            "length_fraction": format_in(p.length),
+            "material_type": p.material_type,
+            "thickness_in": p.thickness_in,
+            "can_rotate": p.can_rotate,
+            "extra": p.extra,
+        }
+
+    cut_list = {
+        "board": [serialize_part(p) for p in all_parts["board"]],
+        "foam": [serialize_part(p) for p in all_parts["foam"]],
+        "fabric": [serialize_part(p) for p in all_parts["fabric"]],
+        "dacron": [serialize_part(p) for p in all_parts["dacron"]],
+    }
+
+    return {
+        "pieces": [sp.name for sp in specs_list],
+        "totals": totals,
+        "cut_list": cut_list,
+        "nesting_results": {
+            "board": {
+                "sheets": board_sheets,
+                "total_sheets": board_total_sheets,
+                "overall_yield_pct": board_avg_yield,
+            },
+            "foam": foam_nest,
+            "dacron": dacron_nest,
+            "fabric": fabric_nest,
+        },
+        "config": cfg.model_dump(),
+    }
