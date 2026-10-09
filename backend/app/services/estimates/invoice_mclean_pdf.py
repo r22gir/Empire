@@ -175,8 +175,8 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
         c.drawRightString(PW - E.MARGIN_R, y - 2, meta)
         E._hr(c, y - 10, weight=1.0, col=GOLD)
         if dry:
-            c.setFillColor(HexColor_red()); c.setFont(sans_b, 8)
-            c.drawCentredString(PW * 0.64, y - 2, _DRY_TEXT)
+            c.setFillColor(HexColor_red()); c.setFont(sans_b, 7)
+            c.drawString(372, y - 2, _DRY_TEXT)
 
     def draw(total_pages: int) -> Tuple[bytes, int]:
         buf = BytesIO()
