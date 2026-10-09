@@ -16,6 +16,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from contextvars import ContextVar
 
 from app.config.business_config import biz
 from app.db.database import get_db, dict_row, dict_rows
@@ -512,6 +513,16 @@ def get_xai_tool_definitions() -> list:
 
 TOOL_REGISTRY = {}
 
+_CURRENT_JOB_ID_VAR: ContextVar[Optional[str]] = ContextVar("max_current_job_id", default=None)
+
+
+def set_current_job_id(job_id: Optional[str]) -> None:
+    _CURRENT_JOB_ID_VAR.set(job_id)
+
+
+def get_current_job_id() -> Optional[str]:
+    return _CURRENT_JOB_ID_VAR.get()
+
 
 def tool(name: str):
     """Decorator to register a tool handler."""
@@ -521,7 +532,7 @@ def tool(name: str):
     return decorator
 
 
-def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None, founder: bool = False, channel: Optional[str] = None) -> ToolResult:
+def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None, founder: bool = False, channel: Optional[str] = None, job_id: Optional[str] = None) -> ToolResult:
     """Dispatch and execute a tool call (with tier gating and access control).
 
     Args:
@@ -534,7 +545,18 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                  chat router does not pass this today; the audit
                  column will be NULL until the router plumbing is
                  updated (Phase 3 backlog).
+        job_id: Optional currently active job id propagated from client.
     """
+    if isinstance(tool_call, str):
+        tool_call = {"tool": tool_call, "parameters": {}}
+
+    if job_id:
+        set_current_job_id(job_id)
+    elif isinstance(tool_call, dict) and tool_call.get("job_id"):
+        set_current_job_id(str(tool_call["job_id"]))
+    elif isinstance(tool_call, dict) and isinstance(tool_call.get("parameters"), dict) and tool_call["parameters"].get("job_id"):
+        set_current_job_id(str(tool_call["parameters"]["job_id"]))
+
     tool_name = tool_call.get("tool", "")
     try:
         # 2026-09-29: auto-correction now runs BEFORE access control and the
@@ -603,6 +625,15 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "generate_presentation": "present",
             "make_presentation": "present",
             "presentation": "present",
+            "current_job": "get_current_job",
+            "active_job": "get_current_job",
+            "job_documents": "list_job_documents",
+            "job_docs": "list_job_documents",
+            "list_job_docs": "list_job_documents",
+            "open_doc": "open_job_document",
+            "open_document": "open_job_document",
+            "attach_doc": "attach_job_document",
+            "attach_document": "attach_job_document",
         }
         if tool_name not in TOOL_REGISTRY and tool_name in TOOL_CORRECTIONS:
             corrected = TOOL_CORRECTIONS[tool_name]
@@ -4173,6 +4204,156 @@ def _describe_job_image(params: dict, desk: Optional[str] = None) -> ToolResult:
             "full_response": mmx_data.get("full_response"),
         },
     )
+
+
+# ── MAX JOB BOARD & DOCUMENT FOLDER TOOLS ──────────────────────────
+
+@tool("get_current_job")
+def _get_current_job(tool_call: dict, desk: Optional[str] = None) -> ToolResult:
+    """Retrieve details for the currently active job being discussed with Max."""
+    params = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else tool_call
+    job_id = params.get("job_id") or get_current_job_id()
+    if not job_id:
+        # Search by client_name or search query if provided
+        q = params.get("query") or params.get("client_name") or params.get("search")
+        if q:
+            with get_db() as conn:
+                row = conn.execute(
+                    """SELECT j.*, c.name as customer_name
+                       FROM jobs j LEFT JOIN customers c ON j.customer_id = c.id
+                       WHERE j.id = ? OR j.job_number LIKE ? OR j.client_name LIKE ? OR c.name LIKE ?
+                       ORDER BY j.created_at DESC LIMIT 1""",
+                    (q, f"%{q}%", f"%{q}%", f"%{q}%"),
+                ).fetchone()
+                if row:
+                    job = dict_row(row)
+                    return ToolResult(tool="get_current_job", success=True, result={"job": job})
+
+        return ToolResult(
+            tool="get_current_job",
+            success=False,
+            error="No active job is selected. Specify a job_id or query.",
+        )
+
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT j.*, c.name as customer_name
+               FROM jobs j LEFT JOIN customers c ON j.customer_id = c.id
+               WHERE j.id = ? OR j.job_number = ?""",
+            (str(job_id), str(job_id)),
+        ).fetchone()
+        if not row:
+            return ToolResult(
+                tool="get_current_job",
+                success=False,
+                error=f"Job {job_id} not found in database.",
+            )
+        job = dict_row(row)
+        return ToolResult(tool="get_current_job", success=True, result={"job": job})
+
+
+@tool("list_job_documents")
+def _list_all_job_documents(tool_call: dict, desk: Optional[str] = None) -> ToolResult:
+    """List all documents, drawings, photos, change orders, emails, and files for a job."""
+    params = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else tool_call
+    job_id = params.get("job_id") or get_current_job_id()
+    doc_type = params.get("document_type") or params.get("type")
+
+    if not job_id:
+        return ToolResult(
+            tool="list_job_documents",
+            success=False,
+            error="No job_id provided or selected in context.",
+        )
+
+    with get_db() as conn:
+        query = "SELECT * FROM job_documents WHERE job_id = ?"
+        q_params = [str(job_id)]
+        if doc_type:
+            query += " AND document_type = ?"
+            q_params.append(doc_type)
+        query += " ORDER BY created_at DESC"
+
+        rows = conn.execute(query, q_params).fetchall()
+        docs = [dict_row(r) for r in rows]
+        return ToolResult(
+            tool="list_job_documents",
+            success=True,
+            result={"job_id": job_id, "count": len(docs), "documents": docs},
+        )
+
+
+@tool("attach_job_document")
+def _attach_job_document(tool_call: dict, desk: Optional[str] = None) -> ToolResult:
+    """Attach a document, estimate, drawing, photo, or note link to a job."""
+    params = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else tool_call
+    job_id = params.get("job_id") or get_current_job_id()
+    if not job_id:
+        return ToolResult(
+            tool="attach_job_document",
+            success=False,
+            error="No job_id provided or active.",
+        )
+
+    doc_type = params.get("document_type") or params.get("type") or "file"
+    url = params.get("url") or params.get("path") or ""
+    filename = params.get("filename") or params.get("title") or "document"
+    item_key = params.get("item_key")
+
+    with get_db() as conn:
+        exists = conn.execute("SELECT id FROM jobs WHERE id = ?", (str(job_id),)).fetchone()
+        if not exists:
+            return ToolResult(tool="attach_job_document", success=False, error=f"Job {job_id} not found.")
+
+        doc_id = uuid.uuid4().hex[:16]
+        conn.execute(
+            """INSERT INTO job_documents (id, job_id, document_type, url, filename, item_key)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (doc_id, str(job_id), doc_type, url, filename, item_key),
+        )
+        row = conn.execute("SELECT * FROM job_documents WHERE id = ?", (doc_id,)).fetchone()
+        return ToolResult(
+            tool="attach_job_document",
+            success=True,
+            result={"attached": True, "document": dict_row(row)},
+        )
+
+
+@tool("open_job_document")
+def _open_job_document(tool_call: dict, desk: Optional[str] = None) -> ToolResult:
+    """Retrieve document details and openable URL/metadata for client presentation."""
+    params = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else tool_call
+    doc_id = params.get("document_id") or params.get("id")
+    job_id = params.get("job_id") or get_current_job_id()
+
+    with get_db() as conn:
+        if doc_id:
+            row = conn.execute("SELECT * FROM job_documents WHERE id = ?", (str(doc_id),)).fetchone()
+        elif job_id and params.get("filename"):
+            row = conn.execute(
+                "SELECT * FROM job_documents WHERE job_id = ? AND filename LIKE ? ORDER BY created_at DESC LIMIT 1",
+                (str(job_id), f"%{params['filename']}%"),
+            ).fetchone()
+        else:
+            return ToolResult(
+                tool="open_job_document",
+                success=False,
+                error="Specify document_id or filename to open.",
+            )
+
+        if not row:
+            return ToolResult(
+                tool="open_job_document",
+                success=False,
+                error=f"Document not found.",
+            )
+
+        doc = dict_row(row)
+        return ToolResult(
+            tool="open_job_document",
+            success=True,
+            result={"document": doc, "action": "open", "url": doc.get("url")},
+        )
 
 
 # ── WEB SEARCH TOOL ───────────────────────────────────────────────
