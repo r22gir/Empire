@@ -582,6 +582,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "gmail": "check_email",
             "read_email": "check_email",
             "inbox": "check_email",
+            "outlook": "check_outlook",
+            "read_outlook": "check_outlook",
+            "search_outlook": "check_outlook",
+            "outlook_inbox": "check_outlook",
             "find_document": "open_final_doc",
             "find_file": "find_files",
             "search_files": "find_files",
@@ -3295,7 +3299,7 @@ def _check_email(params: dict, desk: Optional[str] = None) -> ToolResult:
                 con.close()
     except Exception as e:
         logger.debug(f"check_email inbound-store fallback failed: {e}")
-    missing = [gmail_status, "No Outlook/Microsoft 365 inbox reader is connected to Max (Nelma's Outlook cannot be read)."]
+    missing = [gmail_status, "Outlook/Microsoft 365 mail is a separate tool: check_outlook (read-only)."]
     if store_hits:
         return ToolResult(tool="check_email", success=True, result={
             "success": True, "source": "inbound_store", "count": len(store_hits),
@@ -3305,7 +3309,7 @@ def _check_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         })
     return ToolResult(tool="check_email", success=False, result={"missing": missing, "from_sender": from_sender},
                       error=(f"Could not read the inbox. {gmail_status}. The inbound mail store has no matching email"
-                             + (f" from '{from_sender}'" if from_sender else "") + ". No Outlook inbox reader is connected. "
+                             + (f" from '{from_sender}'" if from_sender else "") + ". For Outlook mail use check_outlook. "
                              "Tell Rafael exactly this; do not try shell_execute."))
 
 
@@ -7990,6 +7994,15 @@ try:
     TOOLS_DOC = TOOLS_DOC + _tools_files.FILE_TOOLS_DOC
 except Exception as _files_err:  # never take Max down over an optional tool pack
     logger.error(f"tools_files not loaded: {_files_err}")
+
+# Outlook / Microsoft 365 mail, READ-ONLY (Graph Mail.Read). 2026-10-08.
+try:
+    _outlook_name = "app.services.max.tools_outlook"
+    _tools_outlook = (_importlib.reload(_sys.modules[_outlook_name]) if _outlook_name in _sys.modules
+                      else _importlib.import_module(_outlook_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_outlook.OUTLOOK_TOOLS_DOC
+except Exception as _outlook_err:  # never take Max down over an optional tool pack
+    logger.error(f"tools_outlook not loaded: {_outlook_err}")
 
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))

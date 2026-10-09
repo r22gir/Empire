@@ -34,7 +34,7 @@ _CURRENT: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
 # Tools whose results carry content written by someone other than Rafael.
 # After one of these returns in a turn, restricted tools need the PIN again.
 UNTRUSTED_CONTENT_TOOLS = frozenset({
-    "check_email", "web_read", "web_search", "search_images",
+    "check_email", "check_outlook", "web_read", "web_search", "search_images",
     "read_whatsapp", "whatsapp_inbox", "read_telegram", "search_conversations",
     "browse", "browser_read", "research", "deep_research",
 })
