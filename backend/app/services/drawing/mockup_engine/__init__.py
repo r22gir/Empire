@@ -20,6 +20,13 @@ from app.services.drawing.mockup_engine.generator import (
 from app.services.drawing.mockup_engine.renderers_3d import (
     render_3d, build_viewer_html, export_spec_to_glb,
 )
+from app.services.drawing.mockup_engine.nesting_engine import (
+    NestingConfig, nest_project, generate_parts_for_piece,
+    optimize_foam_nesting, optimize_dacron_nesting, optimize_fabric_nesting,
+)
+from app.services.drawing.mockup_engine.nesting_renderers import (
+    render_nesting_pdf,
+)
 
 __all__ = [
     "PieceSpec",
@@ -45,4 +52,8 @@ __all__ = [
     "render_3d",
     "build_viewer_html",
     "export_spec_to_glb",
+    "NestingConfig",
+    "nest_project",
+    "generate_parts_for_piece",
+    "render_nesting_pdf",
 ]

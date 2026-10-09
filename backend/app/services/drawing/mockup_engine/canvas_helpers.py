@@ -36,6 +36,25 @@ def format_in(val: float) -> str:
     return f'{n}/{d}"'
 
 
+def format_yd(val: float) -> str:
+    """Format decimal yards as fractions rounded up to nearest 1/2 yd or 1/16 yd (e.g. 32.5 -> 32 1/2 yd)."""
+    if val is None:
+        return ""
+    val_f = float(val)
+    sixteenths = round(val_f * 16)
+    whole = sixteenths // 16
+    rem = sixteenths - whole * 16
+    if rem == 0:
+        return f'{whole} yd' if whole else '0 yd'
+    from math import gcd
+    g = gcd(rem, 16)
+    n = rem // g
+    d = 16 // g
+    if whole:
+        return f'{whole} {n}/{d} yd'
+    return f'{n}/{d} yd'
+
+
 def draw_chrome(
     c: canvas.Canvas,
     w: float,

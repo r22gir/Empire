@@ -358,3 +358,96 @@ def test_3d_render_and_curved_corners(tmp_path):
     assert "viewer_url" in max_res.result
     assert len(max_res.result["stills"]) == 4
 
+
+def test_nesting_engine_and_marleys_validation():
+    """Test material nesting engine for plywood/board, foam, dacron, and fabric."""
+    from app.services.drawing.mockup_engine import (
+        marleys_u_and_l_preset, NestingConfig, nest_project, render_nesting_pdf
+    )
+    from app.routers.drawings import generate_material_nest_endpoint, NestRequest
+
+    presets = marleys_u_and_l_preset()
+    u_bench = presets["u_bench"]
+    l_bench = presets["l_bench"]
+
+    # 1. Run nesting engine on Marley's U + L banquettes
+    nest_res = nest_project([u_bench, l_bench])
+    totals = nest_res["totals"]
+    cut_list = nest_res["cut_list"]
+
+    # Verify cut list counts:
+    # 45 channel cuts across all materials
+    # Substrate boards: 45 channel boards + 8 seat substrate boards (partitioned for 48x96" sheets) = 53 board cuts
+    # Foam: 45 channel foam cuts + 8 seat foam cuts = 53 foam cuts
+    # Fabric: 45 channel cuts + 5 continuous seat run cuts = 50 fabric cuts
+    # Dacron: 45 channel wraps + 5 continuous seat wraps = 50 dacron cuts
+    assert len(cut_list["board"]) == 53
+    assert len(cut_list["foam"]) == 53
+    assert len(cut_list["fabric"]) == 50
+    assert len(cut_list["dacron"]) == 50
+
+    # Channel cuts check: 45 channel cuts
+    ch_cuts = [c for c in cut_list["fabric"] if "Ch " in c["name"]]
+    assert len(ch_cuts) == 45
+    # Board length per channel = net back height (26 3/4") + 2 1/2" = 29 1/4"
+    assert cut_list["board"][0]["length_in"] == 29.25
+    assert cut_list["board"][0]["length_fraction"] == '29 1/4"'
+
+    # Fabric length per channel = 34"
+    assert ch_cuts[0]["length_in"] == 34.0
+    assert ch_cuts[0]["length_fraction"] == '34"'
+    # Fabric width at least 18"
+    assert ch_cuts[0]["width_in"] >= 18.0
+
+    # Board sheets check: 48" x 96"
+    assert totals["board_sheets"] > 0
+    assert totals["board_sheet_size"] == '48" x 96"'
+    assert totals["board_thickness_fraction"] == '1/2"'
+
+    # Foam buns check: engine selected from configured sizes (24x72, 24x108, 36x82, 54x82)
+    assert totals["foam_total_sheets"] > 0
+    foam_info = totals["foam_by_thickness"]['2" foam']
+    assert foam_info["sheet_size"] in ('24" x 108"', '54" x 82"', '36" x 82"', '24" x 72"')
+
+    # Dacron check: selected 60" or 30" width
+    assert totals["dacron_roll_width_fraction"] in ('60"', '30"')
+    assert totals["dacron_total_yards"] > 0
+    assert "yd" in totals["dacron_total_yards_fraction"]
+
+    # Fabric total validation for Marley's U+L:
+    # 45 channel cuts at 2 per width = 23 rows x 34" = 782" = 21 3/4 yd
+    # Seats: 7 11/16 yd
+    # Net: 29.41 yd + 10% waste = 32.35 yd -> rounded UP to nearest 1/2 yd = 32 1/2 yd!
+    assert totals["fabric_total_yards"] == 32.5
+    assert totals["fabric_total_yards_fraction"] == "32 1/2 yd"
+
+    # Double width comparison check (110", 118", 120" wide goods)
+    dw_comp = totals["double_width_fabric_comparisons"]
+    assert '110" roll' in dw_comp
+    assert '118" roll' in dw_comp
+    assert '120" roll' in dw_comp
+    # Extra-wide rolls drastically reduce yardage (12 1/2 yd to 13 1/2 yd vs 32 1/2 yd)
+    assert dw_comp['110" roll']["total_yards"] < 15.0
+
+    # 2. Test API Endpoint POST /api/v1/drawings/nest
+    api_res = asyncio.run(generate_material_nest_endpoint(NestRequest(
+        preset="marleys_u_and_l",
+    )))
+    assert api_res["success"] is True
+    assert api_res["format"] == "nesting"
+    assert os.path.exists(api_res["pdf_path"])
+    assert len(api_res["png_previews"]) >= 5
+    assert api_res["totals"]["fabric_total_yards_fraction"] == "32 1/2 yd"
+
+    # 3. Test Max tool generate_material_nest
+    tool_call = {
+        "tool": "generate_material_nest",
+        "preset": "marleys_u_and_l",
+    }
+    tool_res = execute_tool(tool_call, founder=True)
+    assert tool_res.success is True
+    assert tool_res.result["format"] == "nesting"
+    assert "pdf_url" in tool_res.result
+    assert tool_res.result["totals"]["fabric_total_yards_fraction"] == "32 1/2 yd"
+
+
