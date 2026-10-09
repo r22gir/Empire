@@ -106,6 +106,8 @@ _DATA_TABLES = [
     "chart_of_accounts",
     "quotes_v2",
     "customers",
+    "schedule_events",
+    "pickup_dropoff_logs",
 ]
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -152,6 +154,15 @@ def _build_empty_empire_db(path: str) -> None:
     except Exception:
         # Never let schema top-up break collection; tests that need the wider
         # columns will fail loudly on their own.
+        pass
+
+    try:
+        from app.db.init_db import _migrate_schedule_tables
+        conn_sched = sqlite3.connect(path)
+        _migrate_schedule_tables(conn_sched)
+        conn_sched.commit()
+        conn_sched.close()
+    except Exception:
         pass
 
 

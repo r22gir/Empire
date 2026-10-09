@@ -582,6 +582,14 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "create_quote": "create_engine_quote",
             "deposit_link": "deposit_pay_link",
             "pay_link": "deposit_pay_link",
+            "schedule": "list_schedule",
+            "get_schedule": "list_schedule",
+            "view_schedule": "list_schedule",
+            "create_schedule_event": "add_schedule_event",
+            "schedule_event": "add_schedule_event",
+            "pickup_dropoff": "log_pickup_dropoff",
+            "log_pickup": "log_pickup_dropoff",
+            "log_dropoff": "log_pickup_dropoff",
             "payment_link": "deposit_pay_link",
             "make_quote": "create_engine_quote",
             "new_quote": "create_engine_quote",
@@ -5481,6 +5489,16 @@ If a tool call fails with "Unknown tool", check the name against this list.
 - **search_conversations** — Search conversation history across all channels (Telegram, Web, CC, live Voice). Searches brain memories, conversation summaries, chat backups and saved voice-call transcripts. For the last voice call use `{"tool": "search_conversations", "query": "last voice call", "channel": "voice"}`.
   `{"tool": "search_conversations", "query": "keyword or phrase", "channel": "telegram|web|cc|voice"}`
 
+### Schedule & Custody Log Tools
+- **list_schedule** — Query schedule events by date range, job ID, or type (today, upcoming week, specific date).
+  `{"tool": "list_schedule", "start_date": "2026-10-09", "end_date": "2026-10-16", "job_id": "...", "type": "install|delivery|pickup|drop_off|loading_dock"}`
+- **add_schedule_event** — Schedule an event (install, delivery, pickup, drop_off, fabric_pickup, measure, loading_dock, errand, other). Must confirm and echo the resolved date/time in the response.
+  `{"tool": "add_schedule_event", "title": "...", "type": "pickup", "start_time": "2026-10-10T10:00:00", "end_time": "2026-10-10T11:00:00", "customer_vendor": "Whittington Design", "location_address": "123 Design St", "job_id": "...", "notes": "..."}`
+- **log_pickup_dropoff** — Record custody transfer for job items (what changed hands: drapery, cushion covers, fabric, etc.). When Rafael says 'picked up fabrics at Whittington Design and dropped off cushion covers', call this tool.
+  `{"tool": "log_pickup_dropoff", "direction": "picked_up|dropped_off", "items": "fabrics", "party": "Whittington Design", "job_id": "...", "notes": "..."}`
+- **propose_schedule_from_text** — DRAFT-ONLY proposal helper. Analyzes unstructured text/email and returns proposed events without creating them in DB until confirmed.
+  `{"tool": "propose_schedule_from_text", "text": "..."}`
+
 ### Action Tools
 - **deposit_pay_link** — Workroom or WoodCraft quote only. Creates (or reuses) a deposit invoice on the finance router and a Stripe Checkout link on the payments router. Client name/email/phone/address are copied from the quote. A second call returns the same invoice and the same open link. payment_status stays `link_ready` until Stripe reports paid — do not tell the founder the deposit is collected when status is not `paid`.
   `{"tool": "deposit_pay_link", "quote_id": "abc123"}`
@@ -7273,6 +7291,246 @@ def _max_room_redesign(params: dict, desk: Optional[str] = None) -> ToolResult:
     except Exception as e:
         logger.error(f"max_room_redesign failed: {e}")
         return ToolResult(tool="max_room_redesign", success=False, error=str(e)[:300])
+
+
+@tool("list_schedule")
+def _list_schedule(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """List schedule events by date range, job_id, or type."""
+    start_date = params.get("start_date")
+    end_date = params.get("end_date")
+    job_id = params.get("job_id")
+    event_type = params.get("type")
+    limit = int(params.get("limit", 50))
+
+    try:
+        from app.db.database import DB_PATH
+        import os
+        db_path = os.environ.get("EMPIRE_TASK_DB", DB_PATH)
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM schedule_events WHERE 1=1"
+        query_params = []
+
+        if start_date:
+            query += " AND start_time >= ?"
+            query_params.append(start_date)
+        if end_date:
+            query += " AND start_time <= ?"
+            query_params.append(end_date)
+        if job_id:
+            query += " AND job_id = ?"
+            query_params.append(job_id)
+        if event_type:
+            query += " AND type = ?"
+            query_params.append(event_type)
+
+        query += " ORDER BY start_time ASC LIMIT ?"
+        query_params.append(limit)
+
+        cursor.execute(query, query_params)
+        events = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+
+        return ToolResult(
+            tool="list_schedule",
+            success=True,
+            result={
+                "count": len(events),
+                "events": events,
+            },
+        )
+    except Exception as e:
+        logger.error(f"list_schedule failed: {e}")
+        return ToolResult(tool="list_schedule", success=False, error=str(e))
+
+
+@tool("add_schedule_event")
+def _add_schedule_event(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Add a schedule event with required echo confirmation of date/time."""
+    title = params.get("title", "").strip()
+    event_type = params.get("type", "other").strip()
+    start_time = params.get("start_time", "").strip()
+    end_time = params.get("end_time", "").strip()
+    job_id = params.get("job_id")
+    customer_vendor = params.get("customer_vendor", "").strip()
+    location_address = params.get("location_address", "").strip()
+    notes = params.get("notes", "").strip()
+
+    if not title:
+        return ToolResult(tool="add_schedule_event", success=False, error="Title is required")
+    if not start_time:
+        return ToolResult(tool="add_schedule_event", success=False, error="start_time is required")
+
+    try:
+        from app.db.database import DB_PATH
+        import os
+        import sqlite3
+        import uuid
+        norm_start = start_time
+        norm_end = end_time if end_time else None
+
+        db_path = os.environ.get("EMPIRE_TASK_DB", DB_PATH)
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        event_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+
+        cursor.execute(
+            """
+            INSERT INTO schedule_events (
+                id, type, title, job_id, customer_vendor, location_address,
+                start_time, end_time, status, notes, created_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                event_type,
+                title,
+                job_id,
+                customer_vendor,
+                location_address,
+                norm_start,
+                norm_end,
+                "confirmed" if params.get("confirmed") else "planned",
+                notes,
+                "max",
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        # Build clear confirmation echo of date/time
+        echo_msg = f"Scheduled '{title}' ({event_type}) on {norm_start}"
+        if norm_end:
+            echo_msg += f" to {norm_end}"
+        if customer_vendor:
+            echo_msg += f" with {customer_vendor}"
+        if location_address:
+            echo_msg += f" at {location_address}"
+
+        return ToolResult(
+            tool="add_schedule_event",
+            success=True,
+            result={
+                "event_id": event_id,
+                "title": title,
+                "type": event_type,
+                "start_time": norm_start,
+                "end_time": norm_end,
+                "customer_vendor": customer_vendor,
+                "location_address": location_address,
+                "echo_confirmation": echo_msg,
+            },
+        )
+    except Exception as e:
+        logger.error(f"add_schedule_event failed: {e}")
+        return ToolResult(tool="add_schedule_event", success=False, error=str(e))
+
+
+@tool("log_pickup_dropoff")
+def _log_pickup_dropoff(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Log physical custody transfer: items picked up or dropped off."""
+    direction = params.get("direction", "picked_up").strip()
+    items = params.get("items", "").strip()
+    party = params.get("party", "").strip()
+    job_id = params.get("job_id")
+    schedule_event_id = params.get("schedule_event_id")
+    notes = params.get("notes", "").strip()
+
+    if not items:
+        return ToolResult(tool="log_pickup_dropoff", success=False, error="items description is required")
+
+    try:
+        from app.db.database import DB_PATH
+        import os
+        import sqlite3
+        import uuid
+        db_path = os.environ.get("EMPIRE_TASK_DB", DB_PATH)
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        log_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+
+        cursor.execute(
+            """
+            INSERT INTO pickup_dropoff_logs (
+                id, schedule_event_id, job_id, timestamp, direction,
+                items, party, notes, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                log_id,
+                schedule_event_id,
+                job_id,
+                now,
+                direction,
+                items,
+                party,
+                notes,
+                "max",
+            ),
+        )
+
+        # If schedule_event_id was provided, update it to 'done'
+        if schedule_event_id:
+            cursor.execute(
+                "UPDATE schedule_events SET status = 'done', updated_at = ? WHERE id = ?",
+                (now, schedule_event_id),
+            )
+
+        conn.commit()
+        conn.close()
+
+        dir_verb = "Picked up" if direction == "picked_up" else "Dropped off"
+        summary = f"{dir_verb} {items}"
+        if party:
+            summary += f" {'from' if direction == 'picked_up' else 'to'} {party}"
+
+        return ToolResult(
+            tool="log_pickup_dropoff",
+            success=True,
+            result={
+                "log_id": log_id,
+                "direction": direction,
+                "items": items,
+                "party": party,
+                "job_id": job_id,
+                "timestamp": now,
+                "summary": summary,
+            },
+        )
+    except Exception as e:
+        logger.error(f"log_pickup_dropoff failed: {e}")
+        return ToolResult(tool="log_pickup_dropoff", success=False, error=str(e))
+
+
+@tool("propose_schedule_from_text")
+def _propose_schedule_from_text(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """DRAFT-ONLY schedule proposal helper. Does NOT write to DB without explicit user confirmation."""
+    text = params.get("text", "").strip()
+    if not text:
+        return ToolResult(tool="propose_schedule_from_text", success=False, error="Text input is required")
+
+    try:
+        from app.routers.schedule import extract_draft_events_from_text
+        proposals = extract_draft_events_from_text(text)
+        return ToolResult(
+            tool="propose_schedule_from_text",
+            success=True,
+            result={
+                "proposals_count": len(proposals),
+                "draft_proposals": proposals,
+                "notice": "DRAFT ONLY: No events were created in the database. Present these proposals to Rafael for confirmation.",
+            },
+        )
+    except Exception as e:
+        logger.error(f"propose_schedule_from_text failed: {e}")
+        return ToolResult(tool="propose_schedule_from_text", success=False, error=str(e))
 
 
 # ── Tool count in TOOLS_DOC (2026-09-29) ───────────────────────────
