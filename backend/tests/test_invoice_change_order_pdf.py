@@ -34,3 +34,9 @@ def test_plain_invoice_unchanged_columns():
            "line_items": [{"description": "Item", "quantity": 1, "unit_price": 10, "total": 10}]}
     html = render_client_invoice_html(inv)
     assert "Unit Price" in html and "Sq ft" not in html and "Deposit due now" not in html
+
+
+def test_deposit_rows_only_on_change_orders():
+    inv = _inv(); inv.pop("pricing_snapshot_json")
+    html = render_client_invoice_html(inv)
+    assert "Deposit due now" not in html and "Sq ft" in html

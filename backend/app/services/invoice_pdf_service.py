@@ -346,8 +346,8 @@ def render_client_invoice_html(
         )
 
     totals_deposit_rows = ""
-    credit = credit_schedule(invoice) if not schedule else None
     co = _change_order(invoice)
+    credit = credit_schedule(invoice) if (co and not schedule) else None
     if credit:
         ref = f" &middot; {escape(str(co.get('credit_ref')), quote=False)}" if co.get("credit_ref") else ""
         pct = invoice.get("deposit_percent") or co.get("deposit_percent") or 50
