@@ -327,6 +327,11 @@ def workroom_woodcraft_config() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def family_default_drawing_fixtures() -> tuple[str, ...]:
+    """Workroom golden sheets (Willard / McLean / Dahlia) are not family defaults."""
+    return ()
+
+
 def family_file_search_roots() -> tuple[Path, ...]:
     """Attachment / file-finder roots for this process. Family stays on EMPIRE_DATA_DIR."""
     if is_family_edition():
