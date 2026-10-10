@@ -267,6 +267,12 @@ body:has([data-intake-page]) {
   height: auto;
 }
 
+/* Allow scrolling on the private owner review pages (/review/addons) */
+body:has([data-review-page]) {
+  overflow: auto;
+  height: auto;
+}
+
 /* Allow scrolling on standalone channel verification page */
 body:has([data-channel-page]) {
   overflow: auto;

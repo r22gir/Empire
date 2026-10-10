@@ -1,30 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
-import { existsSync } from 'fs';
+import { resolveAllowedDoc } from '../doc-access';
 import path from 'path';
-
-const REPO_ROOT = path.resolve(process.cwd(), '..');
-const HOME = process.env.HOME || '/home/rg';
-
-function resolveDocPath(docPath: string): string {
-  if (docPath.startsWith('~/')) return path.join(HOME, docPath.slice(2));
-  if (docPath.startsWith('/')) return docPath;
-  return path.join(REPO_ROOT, docPath);
-}
-
-/** Registry paths say `data/...`; canonical files live in `backend/data/...`. */
-function candidatePaths(docPath: string): string[] {
-  const primary = resolveDocPath(docPath);
-  const extra: string[] = [];
-  if (!docPath.startsWith('/') && !docPath.startsWith('~/')) {
-    if (docPath.startsWith('data/')) {
-      extra.push(path.join(REPO_ROOT, 'backend', docPath));
-    } else if (docPath.startsWith('backend/data/')) {
-      extra.push(path.join(REPO_ROOT, docPath.slice('backend/'.length)));
-    }
-  }
-  return [primary, ...extra];
-}
 
 function missingDocumentHtml(docPath: string): string {
   const safe = docPath.replace(/[&<>"']/g, (ch) => (
@@ -68,22 +45,9 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 function firstExisting(docPath: string): { resolved: string | null; denied: boolean } {
-  const allowed = [
-    REPO_ROOT,
-    path.join(HOME, 'Empire'),
-    path.join(HOME, 'Downloads'),
-    path.join(HOME, 'Documents'),
-    path.join(HOME, '.claude'),
-  ];
-  let denied = false;
-  for (const resolved of candidatePaths(docPath)) {
-    if (!allowed.some(dir => resolved.startsWith(dir))) {
-      denied = true;
-      continue;
-    }
-    if (existsSync(resolved)) return { resolved, denied: false };
-  }
-  return { resolved: null, denied };
+  // SECURITY: registry-only, traversal-safe (see ../doc-access.ts). Denied
+  // and missing look the same to the caller.
+  return { resolved: resolveAllowedDoc(docPath), denied: false };
 }
 
 export async function GET(req: NextRequest) {
@@ -122,17 +86,20 @@ export async function GET(req: NextRequest) {
     const ext = path.extname(resolved).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
     const filename = path.basename(resolved);
+    // Non-ASCII names (em dash etc.) are invalid in a raw header value.
+    const asciiName = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+    const encodedName = encodeURIComponent(filename);
 
     return new NextResponse(buffer, {
       headers: {
         'Content-Type': contentType,
         'Content-Disposition': contentType.startsWith('image/') || contentType === 'application/pdf' || contentType === 'text/html'
-          ? `inline; filename="${filename}"`
-          : `attachment; filename="${filename}"`,
-        'Cache-Control': 'public, max-age=3600',
+          ? `inline; filename="${asciiName}"; filename*=UTF-8''${encodedName}`
+          : `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`,
+        'Cache-Control': 'private, max-age=300',
       },
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: 'Could not read file' }, { status: 500 });
   }
 }

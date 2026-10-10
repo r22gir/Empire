@@ -113,6 +113,9 @@ load_router("app.routers.licenses", "/licenses", ["licenses"])
 load_router("app.routers.shipping", "/shipping", ["shipping"])
 load_router("app.routers.preorders", "/preorders", ["preorders"])
 load_router("app.routers.auth", "/auth", ["auth"])
+# Same auth router under the public /api/v1 prefix used by studio.empirebox.store.
+# Keep the legacy /auth paths above for existing local/API consumers.
+load_router("app.routers.auth", "/api/v1/auth", ["auth-api-v1"])
 load_router("app.routers.users", "/users", ["users"])
 load_router("app.routers.listings", "/listings", ["listings"])
 load_router("app.routers.relistapp", "/api/v1", ["relistapp"])
@@ -759,6 +762,7 @@ except Exception as e:
 load_router("app.routers.workroom_capture", "/api/v1", ["workroom-capture"])
 
 # Onboarding & Tier
+load_router("app.routers.review_addons", "/api/v1", ["addon-review"])
 load_router("app.routers.onboarding", "/api/v1", ["onboarding"])
 
 # Smart Multi-Method Analyzer

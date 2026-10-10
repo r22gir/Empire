@@ -3398,6 +3398,9 @@ async def _chat_with_max_service_impl(
         # Append channel-specific directives
         if request.channel == "telegram" and enriched_prompt:
             enriched_prompt += TELEGRAM_DIRECTIVE
+        if request.channel == "whatsapp" and enriched_prompt:
+            from app.services.max.whatsapp_channel import WHATSAPP_DIRECTIVE
+            enriched_prompt += WHATSAPP_DIRECTIVE
         if getattr(request, "presentation", False) and enriched_prompt:
             from app.services.max.presentation_stage import PRESENTATION_DIRECTIVE
             enriched_prompt += PRESENTATION_DIRECTIVE
@@ -4658,6 +4661,9 @@ async def _chat_stream_impl(request: ChatRequest):
     # Append channel-specific directives
     if request.channel == "telegram" and enriched_prompt:
         enriched_prompt += TELEGRAM_DIRECTIVE
+    if request.channel == "whatsapp" and enriched_prompt:
+        from app.services.max.whatsapp_channel import WHATSAPP_DIRECTIVE
+        enriched_prompt += WHATSAPP_DIRECTIVE
     _freshness = freshness_directive(request.message)
     if _freshness:
         enriched_prompt = (enriched_prompt or "") + "\n\n" + _freshness
