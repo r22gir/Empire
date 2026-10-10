@@ -9,11 +9,14 @@
  * flushed immediately on {"type":"interrupt"} (barge-in).
  *
  * Mobile Safari/Chrome: the AudioContext is created and resumed inside the tap
- * handler (user gesture) and getUserMedia needs https (studio.empirebox.store)
+ * handler (user gesture) and getUserMedia needs https (this origin)
  * or localhost.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API } from '../lib/api';
+import { useAssistantName } from '../lib/assistant';
+import { editionFromEnv } from '../lib/edition';
+import { liveVoiceConnectError, liveVoiceTitle, liveVoiceUrl } from '../lib/liveVoice';
 
 type CallState = 'idle' | 'connecting' | 'live' | 'ending' | 'error';
 type Line = { id: string; role: 'user' | 'assistant' | 'system'; text: string; final: boolean };
@@ -24,11 +27,7 @@ const SAMPLE_RATE = 24000;
 const BARGE_IN_RMS = 0.045;
 
 function liveUrl(): string {
-  const base = API.replace(/\/$/, '');
-  if (base.startsWith('https://')) return base.replace(/^https:/, 'wss:') + '/avatar/live';
-  if (base.startsWith('http://')) return base.replace(/^http:/, 'ws:') + '/avatar/live';
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${proto}//${window.location.host}${base}/avatar/live`;
+  return liveVoiceUrl(window.location, API);
 }
 
 function fmt(sec: number): string {
@@ -220,7 +219,7 @@ export function useLiveVoice() {
           break;
       }
     };
-    ws.onerror = () => { setError('Connection error (are you signed in to studio.empirebox.store?)'); };
+    ws.onerror = () => { setError(liveVoiceConnectError(editionFromEnv())); };
     ws.onclose = () => { if (stateRef.current !== 'idle' && stateRef.current !== 'error') cleanup('idle'); };
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -296,6 +295,8 @@ export function useLiveVoice() {
 
 export default function LiveVoiceCall({ variant = 'floating' }: { variant?: 'floating' | 'inline' }) {
   const v = useLiveVoice();
+  const assistantName = useAssistantName();
+  const panelTitle = liveVoiceTitle(editionFromEnv(), assistantName);
   const active = v.state === 'connecting' || v.state === 'live' || v.state === 'ending';
   const [open, setOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -325,7 +326,7 @@ export default function LiveVoiceCall({ variant = 'floating' }: { variant?: 'flo
           boxShadow: '0 10px 30px rgba(0,0,0,0.5)', fontSize: 14,
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-            <strong style={{ color: '#d4af37' }}>Max · Live voice</strong>
+            <strong style={{ color: '#d4af37' }}>{panelTitle}</strong>
             <span style={{ fontVariantNumeric: 'tabular-nums', color: (v.remaining ?? 999) <= 30 ? '#f87171' : '#aaa' }}>
               {v.remaining !== null ? `${fmt(v.remaining)} left` : `cap ${fmt(v.cap)}`}
             </span>

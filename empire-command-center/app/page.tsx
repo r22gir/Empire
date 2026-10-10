@@ -67,6 +67,7 @@ import ProductDocs from './components/business/docs/ProductDocs';
 import TasksScreen from './components/screens/TasksScreen';
 import PresentationScreen from './components/screens/PresentationScreen';
 import LiveVoiceCall from './components/LiveVoiceCall';
+import FamilyAuthGate from './components/FamilyAuthGate';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));
@@ -115,6 +116,14 @@ const PRODUCT_DEEP_LINKS: Partial<Record<string, EcosystemProduct>> = {
 };
 
 export default function CommandCenter() {
+  return (
+    <FamilyAuthGate>
+      <CommandCenterApp />
+    </FamilyAuthGate>
+  );
+}
+
+function CommandCenterApp() {
   const [activeProduct, setActiveProduct] = useState<EcosystemProduct>(
     homeProductForEdition(editionFromEnv())
   );

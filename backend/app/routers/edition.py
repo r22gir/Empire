@@ -198,9 +198,13 @@ async def post_seed(request: Request):
 
 
 @router.get("/edition")
-async def get_edition():
+async def get_edition(request: Request):
     payload = edition_manifest()
-    payload["greeting"] = greeting()
+    authed = bool(getattr(request.state, "amp_email", None))
+    show_owner = authed or not is_family_edition()
+    payload["greeting"] = greeting(include_owner=show_owner)
+    payload["assistant"]["greeting_es"] = greeting("es", include_owner=show_owner)
+    payload["assistant"]["greeting_en"] = greeting("en", include_owner=show_owner)
     if is_family_edition():
         try:
             from app.services.edition_seed import maybe_load_seed

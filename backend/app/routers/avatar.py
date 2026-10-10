@@ -247,8 +247,9 @@ def _live_voice_status() -> dict:
 async def avatar_live(websocket: WebSocket):
     """Live back-and-forth voice with MAX (xAI Grok realtime), /api/v1/avatar/live.
 
-    Auth mirrors the Command Center: Cloudflare Access JWT when proxied through
-    the tunnel, loopback otherwise. The xAI key never leaves the server.
+    Auth mirrors the Command Center: Cloudflare Access JWT when proxied
+    through the Workroom tunnel, the AMP ``amp_session`` cookie on family
+    editions, loopback otherwise. The xAI key never leaves the server.
     """
     from app.services.max.voice_live import authorize_websocket, handle_live_call
 

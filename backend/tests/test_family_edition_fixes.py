@@ -20,6 +20,9 @@ if (familyHomeRedirect('maxine', '/', false) !== '/login') throw new Error('maxi
 if (familyHomeRedirect('amp', '/', true) !== null) throw new Error('session');
 if (familyHomeRedirect('workroom', '/', false) !== null) throw new Error('workroom');
 if (familyHomeRedirect('amp', '/login', false) !== null) throw new Error('other path');
+if (familyHomeRedirect('workroom', '/', false, 'amp.empirebox.store') !== '/login') throw new Error('amp host');
+if (familyHomeRedirect('amp', '/amp/dashboard', false) !== '/login') throw new Error('amp dashboard');
+if (familyHomeRedirect('amp', '/api/v1/edition', false) !== null) throw new Error('api public');
 const maxine = presentationChrome('maxine', 'Maxine');
 if (maxine.header !== 'Maxine') throw new Error(maxine.header);
 if (maxine.presentation !== 'Presentación') throw new Error(maxine.presentation);
@@ -155,6 +158,23 @@ def test_chat_screen_uses_the_edition_greeting():
     assert "chatWelcome" in hook
     assert "Hello! I'm **MAX**" not in hook
     assert "slowapi>=" in (ROOT / "backend" / "requirements.txt").read_text(encoding="utf-8")
+
+
+def test_family_auth_gate_redirects_before_the_shell():
+    gate = (ROOT / "empire-command-center" / "app" / "components" / "FamilyAuthGate.tsx").read_text(encoding="utf-8")
+    page = (ROOT / "empire-command-center" / "app" / "page.tsx").read_text(encoding="utf-8")
+    layout = (ROOT / "empire-command-center" / "app" / "layout.tsx").read_text(encoding="utf-8")
+    middleware = (ROOT / "empire-command-center" / "middleware.ts").read_text(encoding="utf-8")
+    dashboard = (ROOT / "empire-command-center" / "app" / "amp" / "dashboard" / "page.tsx").read_text(encoding="utf-8")
+    edition_router = (ROOT / "backend" / "app" / "routers" / "edition.py").read_text(encoding="utf-8")
+    assert "/api/v1/amp/me" in gate
+    assert "familyAuthFailedStatus" in gate
+    assert "FAMILY_LOGIN_PATH" in gate
+    assert "FamilyAuthGate" in page
+    assert "FamilyAuthGate" in layout
+    assert "familyHomeRedirect" in middleware
+    assert "if (loading || !user)" in dashboard
+    assert "include_owner=show_owner" in edition_router
 
 
 def test_edition_env_run_sources_a_file_and_execs(tmp_path):

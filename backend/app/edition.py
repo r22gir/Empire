@@ -534,6 +534,14 @@ def edition_prompt_suffix() -> str:
         default_persona(name),
         f"Default language for replies and generated content: {locale}.",
     ]
+    if is_family_edition():
+        lines.append(
+            "Responde en español salvo que pidan inglés. "
+            "Por defecto usa de 2 a 5 oraciones cortas. "
+            "Si la pregunta es vaga, haz una sola pregunta para aclarar. "
+            "Para noticias o hechos de hoy: busca primero en la web y luego resume "
+            "con 1 o 2 fuentes. No digas que no tienes información antes de buscar."
+        )
     if is_amp():
         lines.append(
             f"The app is {app_display_name()}. It is not named AMP. "
@@ -582,25 +590,34 @@ def apply_edition_prompt(base: str) -> str:
     return base + suffix
 
 
-def greeting(locale: Optional[str] = None) -> str:
+def greeting(locale: Optional[str] = None, *, include_owner: bool = True) -> str:
+    """Public anonymous callers get the assistant name only — no owner name."""
     name = assistant_name()
     lang = (locale or default_locale()).lower()
     if lang.startswith("es"):
         if is_maxine():
-            return f"Hola, soy {name}. Llevo el portafolio de desarrollos en ConstructionForge."
+            if include_owner:
+                return f"Hola, soy {name}. Llevo el portafolio de desarrollos en ConstructionForge."
+            return f"Hola, soy {name}."
         if is_amp():
-            return (
-                f"Hola, soy {name}. Juan Diego Giraldo tiene dos empresas aquí: "
-                "AMP (coaching) y Cibernettic (tecnología). Yo llevo la operación de las dos."
-            )
+            if include_owner:
+                return (
+                    f"Hola, soy {name}. Juan Diego Giraldo tiene dos empresas aquí: "
+                    "AMP (coaching) y Cibernettic (tecnología). Yo llevo la operación de las dos."
+                )
+            return f"Hola, soy {name}."
         return f"Hola, soy {name}."
     if is_maxine():
-        return f"Hi, I'm {name}. I run the development portfolio in ConstructionForge."
+        if include_owner:
+            return f"Hi, I'm {name}. I run the development portfolio in ConstructionForge."
+        return f"Hi, I'm {name}."
     if is_amp():
-        return (
-            f"Hi, I'm {name}. Juan Diego Giraldo has two businesses here: "
-            "AMP (coaching) and Cibernettic (technology). I run operations for both."
-        )
+        if include_owner:
+            return (
+                f"Hi, I'm {name}. Juan Diego Giraldo has two businesses here: "
+                "AMP (coaching) and Cibernettic (technology). I run operations for both."
+            )
+        return f"Hi, I'm {name}."
     return f"Hi, I'm {name}."
 
 
@@ -682,8 +699,8 @@ def edition_manifest() -> dict:
         "assistant": {
             "name": name,
             "persona": default_persona(name),
-            "greeting_es": greeting("es"),
-            "greeting_en": greeting("en"),
+            "greeting_es": greeting("es", include_owner=not is_family_edition()),
+            "greeting_en": greeting("en", include_owner=not is_family_edition()),
             "separate_from_workroom": bool(is_family_edition() or os.getenv("ASSISTANT_NAME", "").strip()),
         },
         "modules": {

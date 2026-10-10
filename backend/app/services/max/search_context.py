@@ -44,6 +44,20 @@ TOPIC_IMPLICIT_MARKERS = (
     "how about",
     "and ",
     "what about that",
+    "hoy",
+    "ahora",
+    "ayer",
+    "esta semana",
+    "este mes",
+    "este año",
+    "este ano",
+    "noticias",
+    "ultima hora",
+    "última hora",
+    "que paso",
+    "qué pasó",
+    "que esta pasando",
+    "qué está pasando",
 )
 
 
@@ -70,6 +84,14 @@ KNOWN_COUNTRIES = {
     "united kingdom": ("UK", "British"),
     "canada": ("Canada", "Canadian"),
     "australia": ("Australia", "Australian"),
+    "panama": ("Panamá", "Panama"),
+    "peru": ("Perú", "Peru"),
+    "chile": ("Chile", "Chilean"),
+    "ecuador": ("Ecuador", "Ecuadorian"),
+    "bolivia": ("Bolivia", "Bolivian"),
+    "uruguay": ("Uruguay", "Uruguayan"),
+    "paraguay": ("Paraguay", "Paraguayan"),
+    "costa rica": ("Costa Rica", "Costa Rican"),
 }
 
 
@@ -116,6 +138,43 @@ def _extract_topic_anchor(history: list[dict[str, Any]] | None) -> str | None:
     return None
 
 
+_SPANISH_SIGNAL_RE = re.compile(
+    r"\b(que|como|por que|noticias|paso|pasando|clima|dolar|trm|"
+    r"hoy|ayer|ultima hora|quien|cuanto|resultados|busca|investiga|"
+    r"averigua|en internet)\b",
+    re.I,
+)
+
+_SPANISH_CURRENT_RE = re.compile(
+    r"\b(que\s+paso|que\s+esta\s+pasando|noticias|hoy|ayer|"
+    r"ultima\s+hora|quien\s+gano|resultados|clima|dolar|trm)\b",
+    re.I,
+)
+
+
+def _fold_accents(text: str) -> str:
+    return (
+        (text or "")
+        .replace("á", "a").replace("é", "e").replace("í", "i")
+        .replace("ó", "o").replace("ú", "u").replace("ü", "u").replace("ñ", "n")
+        .replace("Á", "A").replace("É", "E").replace("Í", "I")
+        .replace("Ó", "O").replace("Ú", "U").replace("Ü", "U").replace("Ñ", "N")
+    )
+
+
+def _looks_spanish(message: str) -> bool:
+    return bool(_SPANISH_SIGNAL_RE.search(_fold_accents(message)))
+
+
+def _extract_place(message: str) -> str | None:
+    """Return a country/place already named in the current message."""
+    lowered = _fold_accents(message).lower()
+    for key, (canonical, _alt) in KNOWN_COUNTRIES.items():
+        if re.search(rf"\b{re.escape(key)}\b", lowered):
+            return canonical
+    return None
+
+
 def _is_topic_implicit_or_short(message: str) -> bool:
     """True if the message is short or carries a topic-implicit marker.
 
@@ -131,8 +190,27 @@ def _is_topic_implicit_or_short(message: str) -> bool:
     return any(marker in lowered for marker in TOPIC_IMPLICIT_MARKERS)
 
 
+def _apply_spanish_current_event_terms(query: str) -> tuple[str, list[str]]:
+    """Keep a Spanish news question in Spanish and add place + hoy when missing."""
+    folded = _fold_accents(query)
+    extras: list[str] = []
+    if not _SPANISH_CURRENT_RE.search(folded):
+        return query, extras
+    place = _extract_place(query)
+    if place and place.lower() not in folded.lower() and _fold_accents(place).lower() not in folded.lower():
+        query = f"{query} {place}"
+        extras.append(place)
+    if not re.search(r"\bhoy\b", folded, re.I):
+        query = f"{query} hoy"
+        extras.append("hoy")
+    return query, extras
+
+
 def build_search_query(message: str, history: list[dict[str, Any]] | None = None) -> dict:
     """Build a search query with topic context carry-forward.
+
+    Spanish current-event questions stay in Spanish and pick up the named
+    place plus ``hoy`` so the search targets today's local news.
 
     Args:
         message: the current user message.
@@ -148,23 +226,23 @@ def build_search_query(message: str, history: list[dict[str, Any]] | None = None
     if not raw:
         return {"query": "", "context_injected": False, "context_terms": []}
 
-    # Only inject context if the message is short or topic-implicit AND
+    query = raw
+    injected_terms: list[str] = []
+
+    # Only inject history context if the message is short or topic-implicit AND
     # we have a clear topic anchor from prior turns.
-    if not _is_topic_implicit_or_short(raw):
-        return {"query": raw, "context_injected": False, "context_terms": []}
+    if _is_topic_implicit_or_short(raw):
+        anchor = _extract_topic_anchor(history or [])
+        if anchor and anchor.lower() not in raw.lower():
+            query = f"{anchor} {raw}"
+            injected_terms.append(anchor)
 
-    anchor = _extract_topic_anchor(history or [])
-    if not anchor:
-        return {"query": raw, "context_injected": False, "context_terms": []}
+    if _looks_spanish(raw):
+        query, spanish_terms = _apply_spanish_current_event_terms(query)
+        injected_terms.extend(spanish_terms)
 
-    # Don't re-add the anchor if it's already in the message
-    if anchor.lower() in raw.lower():
-        return {"query": raw, "context_injected": False, "context_terms": []}
-
-    # Prepend the anchor to the query.
-    injected = f"{anchor} {raw}"
     return {
-        "query": injected,
-        "context_injected": True,
-        "context_terms": [anchor],
+        "query": query,
+        "context_injected": bool(injected_terms),
+        "context_terms": injected_terms,
     }

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import FamilyAuthGate from "./components/FamilyAuthGate";
 import { I18nWrapper } from "./components/I18nWrapper";
 import { appDescriptionFromEnv, appTitleFromEnv } from "./lib/appIdentity";
 
@@ -31,7 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           if('caches' in window){caches.keys().then(function(n){n.forEach(function(k){caches.delete(k)})});}
         `}} />
       </head>
-      <body className="antialiased"><I18nWrapper>{children}</I18nWrapper></body>
+      <body className="antialiased"><I18nWrapper><FamilyAuthGate>{children}</FamilyAuthGate></I18nWrapper></body>
     </html>
   );
 }

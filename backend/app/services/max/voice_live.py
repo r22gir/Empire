@@ -1003,11 +1003,59 @@ def verify_access_jwt(token: str) -> tuple[bool, str, str]:
         return False, f"invalid access token ({type(exc).__name__})", ""
 
 
-def authorize_websocket(ws) -> tuple[bool, str, str]:
-    """Same trust model as the Command Center: Cloudflare Access at the edge.
+def _ws_cookie(ws, name: str) -> str:
+    cookies = getattr(ws, "cookies", None) or {}
+    value = cookies.get(name) if hasattr(cookies, "get") else None
+    if value:
+        return str(value)
+    raw = ""
+    headers = getattr(ws, "headers", None) or {}
+    if hasattr(headers, "get"):
+        raw = headers.get("cookie") or headers.get("Cookie") or ""
+    for part in str(raw).split(";"):
+        if "=" not in part:
+            continue
+        key, val = part.split("=", 1)
+        if key.strip() == name:
+            return val.strip()
+    return ""
 
-    * Via the tunnel (proxy headers present): require a valid Access JWT
-      (Cf-Access-Jwt-Assertion header or CF_Authorization cookie).
+
+def _authorize_amp_session(ws) -> tuple[bool, str, str]:
+    """Accept the AMP login cookie on family editions (Max-e / Maxine)."""
+    try:
+        from app.services.amp_access import SESSION_COOKIE, session_email
+        from app.services import amp_allowlist
+    except Exception as exc:
+        return False, f"amp session unavailable ({type(exc).__name__})", ""
+    token = _ws_cookie(ws, SESSION_COOKIE)
+    if not token:
+        auth = ""
+        headers = getattr(ws, "headers", None) or {}
+        if hasattr(headers, "get"):
+            auth = headers.get("authorization") or headers.get("Authorization") or ""
+        if str(auth).lower().startswith("bearer "):
+            token = str(auth).split(" ", 1)[1].strip()
+    email = session_email(token) if token else None
+    if not email:
+        return False, "amp session required", ""
+    try:
+        allowed = amp_allowlist.is_allowed(email=email)
+    except Exception:
+        allowed = False
+    if not allowed:
+        return False, "amp session not allowlisted", ""
+    return True, "amp_session", email
+
+
+def authorize_websocket(ws) -> tuple[bool, str, str]:
+    """Same trust model as the Command Center, plus AMP session on family editions.
+
+    * Family edition (EMPIRE_EDITION=amp / maxine): accept the httpOnly
+      ``amp_session`` cookie (or the same token as a bearer). Cloudflare
+      Access JWT still works when present.
+    * Workroom via the tunnel (proxy headers present): require a valid
+      Access JWT (Cf-Access-Jwt-Assertion header or CF_Authorization cookie).
     * Direct local connection (loopback peer, no proxy headers): allowed —
       that is the Command Center on this box and the local test harness.
     """
@@ -1015,11 +1063,23 @@ def authorize_websocket(ws) -> tuple[bool, str, str]:
     host = (headers.get("host") or "").split(":")[0].lower()
     if host in _PUBLIC_UNGATED_HOSTS:
         return False, "public host not allowed", ""
-    token = headers.get("cf-access-jwt-assertion") or ws.cookies.get("CF_Authorization")
+    family = False
+    try:
+        from app.edition import is_family_edition
+        family = is_family_edition()
+    except Exception:
+        family = False
+    if family:
+        ok, via, user = _authorize_amp_session(ws)
+        if ok:
+            return ok, via, user
+    token = headers.get("cf-access-jwt-assertion") or _ws_cookie(ws, "CF_Authorization")
     if token:
         return verify_access_jwt(token)
     proxied = any(headers.get(h) for h in _PROXY_HEADERS)
     peer = getattr(ws.client, "host", "") if ws.client else ""
     if not proxied and peer in ("127.0.0.1", "::1", "localhost"):
         return True, "loopback", ""
+    if family:
+        return False, "amp session required", ""
     return False, "Cloudflare Access token required", ""

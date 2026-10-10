@@ -1176,6 +1176,12 @@ _PERFORMATIVE_WEB_SEARCH_SIGNALS: tuple[str, ...] = (
     "google",
     "search online",
     "look online for",
+    "busca",
+    "investiga",
+    "búscame",
+    "buscame",
+    "averigua",
+    "en internet",
 )
 
 
