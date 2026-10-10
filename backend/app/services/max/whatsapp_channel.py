@@ -211,9 +211,15 @@ def founder_allowlist() -> frozenset[str]:
         extra = data.get(key) or []
         if isinstance(extra, str):
             extra = [extra]
+        if isinstance(extra, dict):
+            extra = list(extra.values())
         if isinstance(extra, list):
-            raw.extend(str(item) for item in extra if str(item).strip())
-    return frozenset(n for n in (normalize_msisdn(item) for item in raw) if n)
+            for item in extra:
+                if isinstance(item, dict):
+                    raw.append(str(item.get("phone") or item.get("number") or item.get("wa_id") or ""))
+                else:
+                    raw.append(str(item))
+    return frozenset(n for n in (normalize_msisdn(item) for item in raw if str(item).strip()) if n)
 
 
 def is_allowlisted(wa_id: str | None) -> bool:
@@ -346,6 +352,7 @@ def parse_inbound(payload: dict | None) -> list[dict[str, Any]]:
                     "mime_type": "",
                     "caption": "",
                     "voice": False,
+                    "filename": "",
                 }
                 if kind == "text":
                     item["text"] = str((message.get("text") or {}).get("body") or "")
@@ -356,7 +363,136 @@ def parse_inbound(payload: dict | None) -> list[dict[str, Any]]:
                         item["mime_type"] = str(media.get("mime_type") or "")
                         item["caption"] = str(media.get("caption") or "")
                         item["voice"] = bool(media.get("voice"))
+                        item["filename"] = str(media.get("filename") or "")
+                elif kind == "location":
+                    loc = message.get("location") or {}
+                    if isinstance(loc, dict):
+                        lat = loc.get("latitude")
+                        lon = loc.get("longitude")
+                        name = loc.get("name") or loc.get("address") or ""
+                        item["text"] = f"Location: {lat}, {lon} ({name})".strip()
+                elif kind in {"system", "button", "interactive"}:
+                    item["text"] = str(
+                        (message.get("system") or {}).get("body")
+                        or (message.get("button") or {}).get("text")
+                        or kind
+                    )
                 found.append(item)
+            for call in value.get("calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                event = str(call.get("event") or call.get("status") or "event")
+                found.append({
+                    "message_id": str(call.get("id") or ""),
+                    "from": str(call.get("from") or call.get("to") or ""),
+                    "timestamp": call.get("timestamp"),
+                    "type": "call",
+                    "text": f"Call {event}",
+                    "media_id": "",
+                    "mime_type": "",
+                    "caption": "",
+                    "voice": False,
+                    "filename": "",
+                    "call_event": event,
+                })
+    return found
+
+
+def _log_chat(**kwargs: Any) -> None:
+    """Best-effort durable log. Failures never block send or webhook ack."""
+    try:
+        from app.services.max.whatsapp_log import log_message
+
+        log_message(**kwargs)
+    except Exception:
+        logger.warning("WhatsApp chat log write failed", exc_info=True)
+
+
+def _apply_status_updates(payload: dict | None) -> int:
+    updated = 0
+    try:
+        from app.services.max.whatsapp_log import update_delivery_status
+
+        for st in parse_statuses(payload):
+            if update_delivery_status(
+                st.get("id") or "",
+                st.get("status") or "",
+                error_code=st.get("error_code") or "",
+                error_message=st.get("error_message") or "",
+            ):
+                updated += 1
+    except Exception:
+        logger.warning("WhatsApp delivery status update failed", exc_info=True)
+    return updated
+
+
+def _inbound_log_fields(message: dict[str, Any]) -> dict[str, Any]:
+    kind = str(message.get("type") or "text")
+    voice = bool(message.get("voice") or kind == "audio")
+    caption = str(message.get("caption") or "")
+    filename = str(message.get("filename") or "")
+    text = str(message.get("text") or "")
+    if voice:
+        body = text or "[voice note]"
+        msg_type = "voice"
+    elif kind == "image":
+        body = caption or text or "[photo]"
+        msg_type = "image"
+    elif kind == "document":
+        label = filename or "document"
+        body = caption or text or f"[document: {label}]"
+        msg_type = "document"
+    elif kind == "call":
+        body = text or "[call]"
+        msg_type = "call"
+    elif kind == "location":
+        body = text or "[location]"
+        msg_type = "location"
+    elif kind in {"video", "sticker"}:
+        body = caption or text or f"[{kind}]"
+        msg_type = kind
+    else:
+        body = text or caption or f"[{kind or 'message'}]"
+        msg_type = kind or "text"
+    metadata: dict[str, Any] = {}
+    if filename:
+        metadata["filename"] = filename
+    if message.get("media_id"):
+        metadata["media_id"] = message.get("media_id")
+    if message.get("call_event"):
+        metadata["call_event"] = message.get("call_event")
+    return {
+        "message_type": msg_type,
+        "body": body,
+        "caption": caption,
+        "metadata": metadata,
+    }
+
+
+def parse_statuses(payload: dict | None) -> list[dict[str, Any]]:
+    """Flatten Cloud API status updates into dicts."""
+    if not isinstance(payload, dict):
+        return []
+    found: list[dict[str, Any]] = []
+    for entry in payload.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        for change in entry.get("changes") or []:
+            value = (change or {}).get("value") or {}
+            if not isinstance(value, dict):
+                continue
+            for st in value.get("statuses") or []:
+                if not isinstance(st, dict):
+                    continue
+                err = (st.get("errors") or [{}])[0] if st.get("errors") else {}
+                found.append({
+                    "id": str(st.get("id") or ""),
+                    "status": str(st.get("status") or ""),
+                    "timestamp": st.get("timestamp"),
+                    "recipient_id": str(st.get("recipient_id") or ""),
+                    "error_code": str(err.get("code") or ""),
+                    "error_message": str(err.get("title") or err.get("message") or ""),
+                })
     return found
 
 
@@ -625,6 +761,7 @@ async def reply_in_window(
     }, http_post=http_post)
     if not graph:
         graph = text_graph
+    outbound_msg_id = _public_graph(graph).get("message_id", "")
     attached: list[dict[str, str]] = []
     for doc in documents or []:
         if not isinstance(doc, dict):
@@ -635,6 +772,7 @@ async def reply_in_window(
         if not payload:
             continue
         filename = _pdf_filename(str(doc.get("filename") or "document.pdf"))
+        doc_id = str(doc.get("doc_id") or doc.get("quote_id") or doc.get("quote_number") or "")
         try:
             media_id = await upload_media(
                 bytes(payload), "application/pdf", filename, http_upload=http_upload,
@@ -650,9 +788,32 @@ async def reply_in_window(
                     "caption": "Draft. Not sent.",
                 },
             }, http_post=http_post)
-            attached.append({"filename": filename, "media_id": media_id})
+            attached.append({"filename": filename, "media_id": media_id, "doc_id": doc_id})
         except WhatsAppSendBlocked:
             logger.warning("WhatsApp PDF attach failed for %s", filename)
+
+    log_body = shown
+    if attached:
+        markers = ", ".join(
+            f"{row['filename']}" + (f" ({row['doc_id']})" if row.get("doc_id") else "")
+            for row in attached
+        )
+        log_body = f"{shown}\n[document: {markers}]".strip() if shown else f"[document: {markers}]"
+    _log_chat(
+        wa_id=number,
+        direction="outbound",
+        message_type="voice" if voice_sent else ("document" if attached else "text"),
+        body=log_body,
+        wa_message_id=outbound_msg_id,
+        delivery_status="sent",
+        metadata={
+            "voice_sent": voice_sent,
+            "voice_fallback": voice_fallback,
+            "reply_mode": mode,
+            "documents": [{"filename": d.get("filename", ""), "doc_id": d.get("doc_id", "")} for d in attached],
+        },
+    )
+
     return {
         "sent": True,
         "kind": "session",
@@ -921,7 +1082,9 @@ async def process_webhook(
             "reason": "invalid json",
             "results": [],
         }
-    messages = parse_inbound(payload if isinstance(payload, dict) else {})
+    parsed = payload if isinstance(payload, dict) else {}
+    statuses_updated = _apply_status_updates(parsed)
+    messages = parse_inbound(parsed)
     results: list[dict[str, Any]] = []
     on_text = text_handler or default_text_handler
     on_voice = voice_handler or default_voice_handler
@@ -948,6 +1111,20 @@ async def process_webhook(
                 "sent": False,
             })
             continue
+        fields = _inbound_log_fields(message)
+        from app.services.max.whatsapp_log import iso_from_wa_timestamp as _iso_wa
+
+        _log_chat(
+            wa_id=sender,
+            direction="inbound",
+            message_type=fields["message_type"],
+            body=fields["body"],
+            caption=fields["caption"],
+            wa_message_id=message_id,
+            delivery_status="received",
+            timestamp=_iso_wa(message.get("timestamp")),
+            metadata=fields["metadata"],
+        )
         note_customer_window(sender, message.get("timestamp"))
         reply = ""
         route = message["type"]
@@ -1006,5 +1183,6 @@ async def process_webhook(
         "enabled": True,
         "status": "enabled",
         "sent": False,
+        "statuses_updated": statuses_updated,
         "results": results,
     }

@@ -51,6 +51,7 @@ def _isolated(monkeypatch, tmp_path):
     monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.setattr(wa, "_state_path", lambda: tmp_path / "wa-state.json")
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path / "edition-data"))
     monkeypatch.setenv("VOICE_DOC_SESSIONS_PATH", str(tmp_path / "voice-sessions.json"))
     monkeypatch.setenv("EMPIRE_BOX_MEMORY_DIR", str(tmp_path / "memory"))
     monkeypatch.setenv("MAX_DRAWINGS_OUTPUT_DIR", str(tmp_path / "drawings"))
