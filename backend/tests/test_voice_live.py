@@ -62,6 +62,56 @@ def test_access_jwt_valid_accepted_wrong_aud_rejected(monkeypatch):
     assert vl.authorize_websocket(_WS({"cf-ray": "x", "cf-access-jwt-assertion": _token(pem, iss="https://evil")}))[0] is False
 
 
+def _amp_voice_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMPIRE_EDITION", "amp")
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("AMP_JWT_SECRET", "test-amp-jwt-secret")
+    monkeypatch.setenv("AMP_OWNER_EMAIL", "owner@example.com")
+    monkeypatch.setenv("AMP_OWNER_USERNAME", "owner")
+
+
+def test_amp_session_cookie_accepted_when_edition_is_amp(monkeypatch, tmp_path):
+    _amp_voice_env(monkeypatch, tmp_path)
+    from app.services.amp_access import SESSION_COOKIE, create_session_token
+
+    token = create_session_token("owner@example.com")
+    ws = _WS(
+        {"cf-ray": "x", "x-forwarded-for": "1.2.3.4", "host": "amp.empirebox.store"},
+        cookies={SESSION_COOKIE: token},
+        peer="10.0.0.5",
+    )
+    ok, via, user = vl.authorize_websocket(ws)
+    assert (ok, via, user) == (True, "amp_session", "owner@example.com")
+
+
+def test_amp_proxied_socket_without_session_is_denied(monkeypatch, tmp_path):
+    _amp_voice_env(monkeypatch, tmp_path)
+    ws = _WS(
+        {"cf-ray": "x", "x-forwarded-for": "1.2.3.4", "host": "amp.empirebox.store"},
+        peer="10.0.0.5",
+    )
+    ok, via, user = vl.authorize_websocket(ws)
+    assert ok is False
+    assert user == ""
+    assert "amp session" in via
+
+
+def test_workroom_ignores_amp_session_cookie(monkeypatch, tmp_path):
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
+    monkeypatch.setenv("AMP_JWT_SECRET", "test-amp-jwt-secret")
+    from app.services.amp_access import SESSION_COOKIE, create_session_token
+
+    token = create_session_token("owner@example.com")
+    ws = _WS(
+        {"cf-ray": "x", "x-forwarded-for": "1.2.3.4", "host": "studio.empirebox.store"},
+        cookies={SESSION_COOKIE: token},
+        peer="10.0.0.5",
+    )
+    ok, via, _ = vl.authorize_websocket(ws)
+    assert ok is False
+    assert via == "Cloudflare Access token required"
+
+
 def test_session_exposes_only_read_only_tools_and_voice_flag(monkeypatch):
     ev = vl.session_update_event()
     names = [t["name"] for t in ev["session"]["tools"]]

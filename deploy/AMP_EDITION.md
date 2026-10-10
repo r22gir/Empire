@@ -98,14 +98,17 @@ Optional templates (service categories and CRM fields only, no prices): Ciberseg
 
 ## Cloudflare tunnel
 
-Do not edit the live tunnel from this repo. Add this ingress entry on the existing empire tunnel (dashboard or the local config you already operate), then reload cloudflared yourself:
+Do not edit the live tunnel from this repo. Add these ingress entries on the existing empire tunnel (dashboard or the local config you already operate), then reload cloudflared yourself. Path rules must come **before** the hostname catch-all so `/api/v1/*` (including the live-voice WebSocket `wss://amp.empirebox.store/api/v1/avatar/live`) hits FastAPI on 8011 and is not sent through Next.js on 3011, which does not upgrade WebSockets:
 
 ```yaml
 - hostname: amp.empirebox.store
+  path: /api/v1/*
   service: http://localhost:8011
+- hostname: amp.empirebox.store
+  service: http://localhost:3011
 ```
 
-Workroom hostnames stay on port 8000. This document does not change them.
+A single `hostname: amp.empirebox.store → localhost:8011` rule reaches the API and the voice socket, but it does not serve the Next.js UI on 3011. Workroom hostnames stay on ports 8000 / 3005. This document does not change them.
 
 ## What stays put when the variables are unset
 
