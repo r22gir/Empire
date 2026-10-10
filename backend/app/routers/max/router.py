@@ -2409,6 +2409,17 @@ def _is_family_edition() -> bool:
         return False
 
 
+def family_search_failure_response(tool_entry=None) -> ChatResponse:
+    """User-facing search-failure reply. ChatResponse.response is what the client reads."""
+    return ChatResponse(
+        response=search_unavailable_reply(),
+        model_used="search-unavailable",
+        fallback_used=False,
+        tool_results=[tool_entry] if tool_entry else None,
+        metadata={"pre_search_failed": True},
+    )
+
+
 def _stream_immediate_response(response: ChatResponse, conversation_id: str | None = None) -> StreamingResponse:
     async def gen():
         cleaned_response = sanitize_output(_sanitize_internal_leakage_text(response.response))
@@ -3026,14 +3037,10 @@ async def _chat_with_max_service(
                     f"{tool_summary}\n\nQuestion: {request.message}"
                 )))
             elif _is_family_edition():
-                # Search first, then a short Spanish failure — never "no tengo información".
-                from types import SimpleNamespace
-                _family_search_failed = True
-                response = SimpleNamespace(
-                    content=search_unavailable_reply(),
-                    model_used="search-unavailable",
-                    fallback_used=False,
-                )
+                # Search first, then return the user-facing ChatResponse.response.
+                # Do not hand a .content stub to the model pipeline — the client
+                # reads ChatResponse.response, not an internal AIResponse.content.
+                return family_search_failure_response(_pre_search_entry)
             # H53 HARMONISATION: when there are no verified results, append
             # NOTHING. The pre-fix code emitted a "[SYSTEM: web_search returned
             # no results — do not fabricate…]" block on role="user"; MAX read

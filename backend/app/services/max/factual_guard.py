@@ -34,18 +34,6 @@ FACTUAL_PATTERNS = [
     r'\b(statistic|data|survey|poll|study|research|report)\b',
     r'\b(average|median|majority|most|many|few)\b.*\b(client|customer|project|order)\b',
     r'\b(weather|temperature|forecast|stock|market\s*index|exchange\s*rate)\b',
-    # Spanish current-events / live facts (accent-folded text).
-    r'\bque\s+paso\b',
-    r'\bque\s+esta\s+pasando\b',
-    r'\bnoticias\b',
-    r'\bhoy\b',
-    r'\bayer\b',
-    r'\bultima\s+hora\b',
-    r'\bquien\s+gano\b',
-    r'\bcuanto\s+cuesta\b',
-    r'\bclima\b',
-    r'\b(dolar|trm)\b',
-    r'\bresultados\b',
 ]
 
 # Evergreen explanatory/comparison questions. This intentionally catches
@@ -57,12 +45,36 @@ EVERGREEN_FACTUAL_PATTERNS = [
     r'\b(?:compare|comparison|difference|distinguish|versus|vs\.?|define|meaning|explain)\b',
     r'\bwhich\s+(?:is|are|has|have|should|would|works?)\b',
     r'\b(best|recommended|advantages?|disadvantages?|pros?\s+and\s+cons?)\b',
-    # Spanish evergreen (accent-folded).
-    r'\bque\s+(?:es|son|significa)\b',
-    r'\bcomo\s+(?:es|son|funciona|se|puedo|hacer|va)\b',
-    r'\bpor\s+que\b',
+    # Spanish evergreen (accent-folded). Skip deictics and help-offers.
+    r'\bque\s+(?:es|son|significa)\s+(?!eso\b|esto\b|aquello\b|asi\b)',
+    r'\bcomo\s+(?:es|son|funciona|se\b|hacer|va)\b',
+    r'\bpor\s+que\s+(?!no\s+funciona)',
     r'\bdiferencia\s+entre\b',
 ]
+
+# News-intent cues only. Bare "hoy" / "ayer" must not search on their own.
+_SPANISH_NEWS_CUES = (
+    r'\bque\s+paso\b',
+    r'\bque\s+esta\s+pasando\b',
+    r'\bnoticias\b',
+    r'\bultima\s+hora\b',
+    r'\bquien\s+gano\b',
+    r'\bcuanto\s+(?:cuesta|esta|es|vale)\b',
+    r'\bclima\b',
+    r'\b(?:dolar|trm)\b',
+    r'\bresultados?\b',
+    r'\belecciones?\b',
+)
+
+# Casual Spanish that mentions time or question words without asking for news.
+_CASUAL_SPANISH = (
+    r'\bhoy\s+no\s+(?:puedo|puedes|podemos|voy|vamos)\b',
+    r'\bvoy\s+a\s+(?:casa|la\s+casa)\b',
+    r'\bcomo\s+puedo\s+ayudarte\b',
+    r'\bque\s+es\s+(?:eso|esto|aquello|asi)\b',
+    r'\bpor\s+que\s+no\s+funciona\b',
+    r'\bque\s+tal\b',
+)
 
 # Pure chit-chat should not incur a public web lookup.
 # These are whole-message greetings so "hola, qué pasó en Panamá" still searches.
@@ -72,6 +84,7 @@ CHITCHAT_PATTERNS = (
     r'^(?:who are you|can you help me)\s*[?.!]*$',
     r'^(?:hola|gracias|buenos\s+dias|buenas\s+tardes|buenas\s+noches)\s*[?.!]*$',
     r'^(?:como\s+estas?|como\s+te\s+va)\s*[?.!]*$',
+    r'^(?:como\s+puedo\s+ayudarte)\s*[?.!]*$',
 )
 
 # Internal Empire data and founder pricing doctrine are already governed by
@@ -114,14 +127,35 @@ def _is_chitchat(msg: str) -> bool:
     return any(re.search(pattern, folded, re.I) for pattern in CHITCHAT_PATTERNS)
 
 
+def _has_spanish_news_cue(msg: str) -> bool:
+    return any(re.search(pattern, msg, re.I) for pattern in _SPANISH_NEWS_CUES)
+
+
+def _is_casual_spanish(msg: str) -> bool:
+    return any(re.search(pattern, msg, re.I) for pattern in _CASUAL_SPANISH)
+
+
+def _is_spanish_greeting_lead(msg: str) -> bool:
+    return bool(re.match(
+        r'^(?:hola|buenos\s+dias|buenas\s+tardes|buenas\s+noches|gracias)\b',
+        msg,
+        re.I,
+    ))
+
+
 def is_factual_question(message: str) -> bool:
     """Return whether a public factual answer needs web grounding."""
     raw = (message or '').strip()
     if not raw:
         return False
     msg = _fold_accents(raw).lower()
-    if _is_internal_or_pricing(msg) or _is_chitchat(msg):
+    if _is_internal_or_pricing(msg):
         return False
+    news = _has_spanish_news_cue(msg)
+    if (_is_chitchat(msg) or _is_casual_spanish(msg) or _is_spanish_greeting_lead(msg)) and not news:
+        return False
+    if news:
+        return True
     if any(re.search(p, msg, re.I) for p in FACTUAL_PATTERNS):
         return True
     # Evergreen questions should be lookup-backed even without a date word.

@@ -176,9 +176,26 @@ def test_spanish_news_question_triggers_search(monkeypatch, tmp_path):
 
     assert is_factual_question("Que paso en Panama")
     assert is_factual_question("Max-e, qué pasó en Panamá")
+    assert is_factual_question("noticias de hoy")
+    assert is_factual_question("cuanto esta el dolar hoy")
     query = build_search_query("Que paso en Panama")["query"].lower()
     assert "panama" in query or "panamá" in query
     assert "hoy" in query
+
+
+def test_casual_spanish_does_not_trigger_search(monkeypatch, tmp_path):
+    _amp_env(monkeypatch, tmp_path)
+    from app.services.max.factual_guard import is_factual_question
+
+    for message in (
+        "hoy no puedo",
+        "voy a casa hoy",
+        "como puedo ayudarte",
+        "que es eso",
+        "por que no funciona",
+        "buenos dias, que tal hoy",
+    ):
+        assert not is_factual_question(message), message
 
 
 def test_gate_rejects_anonymous_requests_when_amp(monkeypatch, tmp_path):
