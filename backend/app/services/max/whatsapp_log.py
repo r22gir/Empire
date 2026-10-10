@@ -111,7 +111,12 @@ def job_hint_window_seconds() -> float:
 
 
 def wants_photo_quote(*texts: str) -> bool:
-    """True only when the sender explicitly asked to price/quote the photo."""
+    """True only when THIS photo's caption/body asks to price/quote.
+
+    Pass only the same message's caption (or that message's own text).
+    Never pass nearby turns, album siblings, or combined_job_hint — those
+    would turn a later album of photos into drafts.
+    """
     blob = " ".join(str(t or "") for t in texts)
     return bool(QUOTE_ASK_RE.search(blob))
 
@@ -267,10 +272,13 @@ def init_db() -> None:
                     attachment_ids TEXT NOT NULL,
                     last_at TEXT NOT NULL,
                     hint_text TEXT DEFAULT '',
-                    asked INTEGER DEFAULT 0
+                    asked INTEGER DEFAULT 0,
+                    asked_at TEXT DEFAULT '',
+                    quoted INTEGER DEFAULT 0
                 )
                 """
             )
+            _ensure_batch_columns(conn)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_waa_msg ON whatsapp_attachments(message_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_waa_job ON whatsapp_attachments(job_slug)")
             conn.commit()
@@ -907,10 +915,12 @@ def get_pending_filings(wa_id: str) -> list[int]:
     return get_pending_filing_state(wa_id)["ids"]
 
 
-def set_pending_filings(wa_id: str, attachment_ids: list[int]) -> None:
+def set_pending_filings(wa_id: str, attachment_ids: list[int], *, mark_asked: bool = False) -> None:
+    """Park attachment ids. asked_at is set only when an ask was actually sent."""
     init_db()
-    existing = get_pending_filings(wa_id)
-    merged = sorted(set(existing + [int(i) for i in attachment_ids]))
+    state = get_pending_filing_state(wa_id)
+    merged = sorted(set(list(state.get("ids") or []) + [int(i) for i in attachment_ids]))
+    asked_at = datetime.now(timezone.utc).isoformat() if mark_asked else (state.get("asked_at") or "")
     with _lock:
         conn = _get_conn()
         try:
@@ -920,7 +930,7 @@ def set_pending_filings(wa_id: str, attachment_ids: list[int]) -> None:
                    ON CONFLICT(wa_id) DO UPDATE SET
                    attachment_ids=excluded.attachment_ids,
                    asked_at=excluded.asked_at""",
-                (str(wa_id or "").strip(), json.dumps(merged), datetime.now(timezone.utc).isoformat()),
+                (str(wa_id or "").strip(), json.dumps(merged), asked_at),
             )
             conn.commit()
         finally:
@@ -1012,6 +1022,7 @@ def refile_attachment(attachment_id: int, job_slug: str) -> dict[str, Any]:
 
 def _replace_pending(wa_id: str, attachment_ids: list[int]) -> None:
     init_db()
+    asked_at = get_pending_filing_state(wa_id).get("asked_at") or ""
     with _lock:
         conn = _get_conn()
         try:
@@ -1020,7 +1031,7 @@ def _replace_pending(wa_id: str, attachment_ids: list[int]) -> None:
                     """INSERT INTO whatsapp_pending_filings (wa_id, attachment_ids, asked_at)
                        VALUES (?, ?, ?)
                        ON CONFLICT(wa_id) DO UPDATE SET attachment_ids=excluded.attachment_ids""",
-                    (str(wa_id).strip(), json.dumps(attachment_ids), datetime.now(timezone.utc).isoformat()),
+                    (str(wa_id).strip(), json.dumps(attachment_ids), asked_at),
                 )
             else:
                 conn.execute("DELETE FROM whatsapp_pending_filings WHERE wa_id = ?", (str(wa_id).strip(),))
@@ -1035,16 +1046,48 @@ def slug_ok(job_slug: str) -> str:
 
 
 def _pending_ask_expired(asked_at: str) -> bool:
+    """True when a real ask timestamp is older than the job-answer window.
+
+    Empty asked_at means no ask was sent — that is not an open question.
+    Callers must not treat an empty stamp as a pending ask.
+    """
     if not asked_at:
         return False
+    age = _iso_age_seconds(asked_at)
+    if age is None:
+        return True
+    return age > get_job_answer_timeout()
+
+
+def _iso_age_seconds(stamp: str) -> Optional[float]:
     try:
-        parsed = datetime.fromisoformat(str(asked_at).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        age = datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)
-        return age.total_seconds() > get_job_answer_timeout()
+        return (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
     except ValueError:
-        return False
+        return None
+
+
+def _ensure_batch_columns(conn: sqlite3.Connection) -> None:
+    cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(whatsapp_media_batches)").fetchall()}
+    if "asked_at" not in cols:
+        conn.execute("ALTER TABLE whatsapp_media_batches ADD COLUMN asked_at TEXT DEFAULT ''")
+    if "quoted" not in cols:
+        conn.execute("ALTER TABLE whatsapp_media_batches ADD COLUMN quoted INTEGER DEFAULT 0")
+
+
+def _batch_row_expired(last_at: str, asked: int, asked_at: str) -> bool:
+    if int(asked or 0):
+        stamp = asked_at or last_at
+        if not stamp:
+            return True
+        age = _iso_age_seconds(stamp)
+        return age is None or age > get_job_answer_timeout()
+    age = _iso_age_seconds(last_at)
+    if age is None:
+        return True
+    return age > max(photo_batch_window_seconds(), 1.0)
 
 
 def recent_inbound_texts(wa_id: str, *, seconds: Optional[float] = None) -> list[str]:
@@ -1094,16 +1137,67 @@ def combined_job_hint(wa_id: str, *extra: str) -> str:
     return " ".join(seen)
 
 
+def expire_stale_batches(wa_id: Optional[str] = None) -> int:
+    """Drop stale photo-batch rows from SQLite. Survives process restart.
+
+    The in-memory flush task is not the source of truth. last_at / asked_at
+    are checked on every load so a restarted worker still expires old rows.
+    """
+    init_db()
+    removed = 0
+    with _lock:
+        conn = _get_conn()
+        try:
+            _ensure_batch_columns(conn)
+            if wa_id:
+                rows = conn.execute(
+                    "SELECT wa_id, last_at, asked, asked_at FROM whatsapp_media_batches WHERE wa_id = ?",
+                    (str(wa_id).strip(),),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT wa_id, last_at, asked, asked_at FROM whatsapp_media_batches"
+                ).fetchall()
+            for row in rows:
+                asked = int(row["asked"] or 0)
+                asked_at = str(row["asked_at"] or "")
+                if not _batch_row_expired(str(row["last_at"] or ""), asked, asked_at):
+                    continue
+                conn.execute("DELETE FROM whatsapp_media_batches WHERE wa_id = ?", (row["wa_id"],))
+                if asked or asked_at:
+                    conn.execute("DELETE FROM whatsapp_pending_filings WHERE wa_id = ?", (row["wa_id"],))
+                removed += 1
+            conn.commit()
+        finally:
+            conn.close()
+    return removed
+
+
+def _empty_batch() -> dict[str, Any]:
+    return {"ids": [], "last_at": "", "hint_text": "", "asked": 0, "asked_at": "", "quoted": 0}
+
+
 def _load_batch(wa_id: str) -> dict[str, Any]:
+    """Load the open photo batch for this sender.
+
+    Single-worker assumption: WhatsApp inbound, `_schedule_batch_flush`,
+    and this SQLite row are safe only with one process writing
+    `whatsapp_media_batches`. A second worker would race on last_at/asked
+    and could send a second ask. Expiry is stored on the row (last_at /
+    asked_at) so a restart still drops stale batches; the in-memory flush
+    task is not the source of truth.
+    """
+    expire_stale_batches(wa_id)
     init_db()
     conn = _get_conn()
     try:
         row = conn.execute(
-            "SELECT wa_id, attachment_ids, last_at, hint_text, asked FROM whatsapp_media_batches WHERE wa_id = ?",
+            """SELECT wa_id, attachment_ids, last_at, hint_text, asked, asked_at, quoted
+               FROM whatsapp_media_batches WHERE wa_id = ?""",
             (str(wa_id or "").strip(),),
         ).fetchone()
         if not row:
-            return {"ids": [], "last_at": "", "hint_text": "", "asked": 0}
+            return _empty_batch()
         try:
             ids = json.loads(row["attachment_ids"] or "[]")
         except Exception:
@@ -1113,9 +1207,43 @@ def _load_batch(wa_id: str) -> dict[str, Any]:
             "last_at": str(row["last_at"] or ""),
             "hint_text": str(row["hint_text"] or ""),
             "asked": int(row["asked"] or 0),
+            "asked_at": str(row["asked_at"] or ""),
+            "quoted": int(row["quoted"] or 0),
         }
     finally:
         conn.close()
+
+
+def photo_batch_quoted(wa_id: str) -> bool:
+    return int(_load_batch(wa_id).get("quoted") or 0) == 1
+
+
+def mark_photo_batch_quoted(wa_id: str) -> None:
+    """Cap photo-to-quote at one draft for the open batch."""
+    existing = _load_batch(wa_id)
+    now = datetime.now(timezone.utc).isoformat()
+    init_db()
+    with _lock:
+        conn = _get_conn()
+        try:
+            _ensure_batch_columns(conn)
+            conn.execute(
+                """INSERT INTO whatsapp_media_batches
+                   (wa_id, attachment_ids, last_at, hint_text, asked, asked_at, quoted)
+                   VALUES (?, ?, ?, ?, ?, ?, 1)
+                   ON CONFLICT(wa_id) DO UPDATE SET quoted=1""",
+                (
+                    str(wa_id or "").strip(),
+                    json.dumps(existing.get("ids") or []),
+                    existing.get("last_at") or now,
+                    existing.get("hint_text") or "",
+                    int(existing.get("asked") or 0),
+                    existing.get("asked_at") or "",
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def record_media_batch(wa_id: str, attachment_ids: list[int], hint_text: str = "") -> None:
@@ -1126,13 +1254,8 @@ def record_media_batch(wa_id: str, attachment_ids: list[int], hint_text: str = "
     existing = _load_batch(wa_id)
     keep = False
     if existing.get("last_at"):
-        try:
-            last = datetime.fromisoformat(str(existing["last_at"]).replace("Z", "+00:00"))
-            if last.tzinfo is None:
-                last = last.replace(tzinfo=timezone.utc)
-            keep = (now - last).total_seconds() <= max(photo_batch_window_seconds(), 1.0)
-        except ValueError:
-            keep = False
+        age = _iso_age_seconds(str(existing["last_at"]))
+        keep = age is not None and age <= max(photo_batch_window_seconds(), 1.0)
     ids = list(existing["ids"]) if keep else []
     for att_id in attachment_ids:
         if int(att_id) not in ids:
@@ -1141,19 +1264,24 @@ def record_media_batch(wa_id: str, attachment_ids: list[int], hint_text: str = "
     extra = (hint_text or "").strip()
     if extra and extra not in hint:
         hint = f"{hint} {extra}".strip()
+    quoted = int(existing.get("quoted") or 0) if keep else 0
     init_db()
     with _lock:
         conn = _get_conn()
         try:
+            _ensure_batch_columns(conn)
             conn.execute(
-                """INSERT INTO whatsapp_media_batches (wa_id, attachment_ids, last_at, hint_text, asked)
-                   VALUES (?, ?, ?, ?, ?)
+                """INSERT INTO whatsapp_media_batches
+                   (wa_id, attachment_ids, last_at, hint_text, asked, asked_at, quoted)
+                   VALUES (?, ?, ?, ?, 0, '', ?)
                    ON CONFLICT(wa_id) DO UPDATE SET
                    attachment_ids=excluded.attachment_ids,
                    last_at=excluded.last_at,
                    hint_text=excluded.hint_text,
-                   asked=0""",
-                (str(wa_id or "").strip(), json.dumps(ids), now.isoformat(), hint, 0),
+                   asked=0,
+                   asked_at='',
+                   quoted=excluded.quoted""",
+                (str(wa_id or "").strip(), json.dumps(ids), now.isoformat(), hint, quoted),
             )
             conn.commit()
         finally:
@@ -1218,14 +1346,16 @@ def finalize_photo_batch(wa_id: str, *, hint_text: str = "", force_ask: bool = F
         return None
     ask = format_job_ask(matches=probed.get("matches") or suggest_jobs(hint), hint=hint)
     if ids:
-        set_pending_filings(wa_id, ids)
+        set_pending_filings(wa_id, ids, mark_asked=True)
+    asked_at = datetime.now(timezone.utc).isoformat()
     init_db()
     with _lock:
         conn = _get_conn()
         try:
+            _ensure_batch_columns(conn)
             conn.execute(
-                "UPDATE whatsapp_media_batches SET asked = 1 WHERE wa_id = ?",
-                (str(wa_id or "").strip(),),
+                "UPDATE whatsapp_media_batches SET asked = 1, asked_at = ? WHERE wa_id = ?",
+                (asked_at, str(wa_id or "").strip()),
             )
             conn.commit()
         finally:
@@ -1234,15 +1364,24 @@ def finalize_photo_batch(wa_id: str, *, hint_text: str = "", force_ask: bool = F
 
 
 def consume_job_answer(wa_id: str, text: str) -> Optional[dict[str, Any]]:
-    """Resolve a pending batch/ask against folders and aliases. Never stay silent."""
+    """Consume text only when a real ask was sent. Unresolved text falls through.
+
+    A real ask is batch.asked==1 or a pending filing with asked_at set.
+    Open photo batches without an ask are file state, not a pending question —
+    'hello' / 'what's on my schedule today?' must reach Max chat.
+    """
     state = get_pending_filing_state(wa_id)
-    pending = list(state.get("ids") or [])
     batch = _load_batch(wa_id)
-    if not pending:
-        pending = list(batch.get("ids") or [])
-    if not pending and not batch.get("ids"):
+    asked = bool(int(batch.get("asked") or 0)) or bool(state.get("asked_at"))
+    if not asked:
         return None
-    if pending and _pending_ask_expired(state.get("asked_at") or ""):
+    pending = list(state.get("ids") or []) or list(batch.get("ids") or [])
+    if not pending:
+        return None
+    ask_stamp = state.get("asked_at") or batch.get("asked_at") or ""
+    if _pending_ask_expired(ask_stamp) or (
+        not ask_stamp and _batch_row_expired(batch.get("last_at") or "", 1, "")
+    ):
         clear_pending_filings(wa_id)
         clear_media_batch(wa_id)
         return None
@@ -1258,7 +1397,7 @@ def consume_job_answer(wa_id: str, text: str) -> Optional[dict[str, Any]]:
     probed = probe_job_text(text)
     if probed.get("status") == "unique":
         match = probed["match"]
-        results = _file_pending_ids(wa_id, match, pending or batch.get("ids") or [])
+        results = _file_pending_ids(wa_id, match, pending)
         clear_pending_filings(wa_id)
         clear_media_batch(wa_id)
         set_active_job(wa_id, match["slug"], match.get("client_name", ""), match.get("folder_path", ""))
@@ -1269,11 +1408,7 @@ def consume_job_answer(wa_id: str, text: str) -> Optional[dict[str, Any]]:
             "reply": _filed_confirmation(len(results) or len(pending), match),
             "results": results,
         }
-    ask = format_job_ask(
-        matches=probed.get("matches") or suggest_jobs(text),
-        hint=text,
-    )
-    return {"handled": True, "status": "need_job", "reply": ask, "matches": suggest_jobs(text)}
+    return None
 
 
 

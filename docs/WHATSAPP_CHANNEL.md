@@ -189,13 +189,13 @@ Non-image/PDF attachments are served as `application/octet-stream` with `X-Conte
 | `WHATSAPP_LABELS` | `$EMPIRE_DATA_DIR/whatsapp/labels.json` | Founder display names + allowlist extras |
 | `WHATSAPP_JOB_ANSWER_TIMEOUT_SECONDS` | 1800 | Parked-file job-answer window |
 | `WHATSAPP_PHOTO_BATCH_SECONDS` | 120 | Same-sender photos in this window are one batch |
-| `WHATSAPP_JOB_HINT_SECONDS` | 600 | Nearby text used as the job/quote hint |
+| `WHATSAPP_JOB_HINT_SECONDS` | 600 | Nearby text used as the job-name hint (not a quote trigger) |
 
 ### Job filing
 
 Photos go to `<jobs-root>/<client-slug>/photos/`. Documents go to `<jobs-root>/<client-slug>/received/`.
 
-**Default for photos is file-only.** A photo never auto-creates a draft estimate unless the caption or a nearby inbound text (same sender, ~10 minutes) explicitly asks for a quote/estimate/price (`quote`, `estimate`, `price`, `cotizacion`, `presupuesto`, `how much`). Photo-to-quote drafts stay **not sent**.
+**Default for photos is file-only.** A draft estimate is created only when the **same message’s caption** (not a nearby text, not a previous “send me a quote”) asks for a quote/estimate/price (`quote`, `estimate`, `price`, `cotizacion`, `presupuesto`, `how much`). At most **one draft per photo batch**. Photo-to-quote drafts stay **not sent**.
 
 Album / grouped-media comments, Cloud API `unknown`/`unsupported`/`interactive` bodies, and replies that carry `context` are parsed as normal text so they are not answered with “That message type is not handled.”
 
@@ -205,7 +205,10 @@ Resolution (`app/services/max/doc_lookup.py` + `client_aliases.json`):
 2. Photos from the same sender within ~2 minutes are **one batch**: one “Filed N photos under \<job\>” or one “Which job?” — not one reply per photo.
 3. More than one match → **do not guess**. Park in `EMPIRE_DATA_DIR/whatsapp/inbox/` and ask once.
 4. No job name → **ask once** for the batch, never file into a sticky active job.
-5. A reply to a pending ask is resolved against **existing job folders and client aliases**. Unique name files the batch. `skip` leaves it in inbox. Unresolved names (e.g. “Emma’s client”) get a clear question listing closest matches — not silence. Timeout falls through to normal chat.
+5. `consume_job_answer` intercepts a later text **only after a real ask was sent** (`whatsapp_media_batches.asked=1` or `whatsapp_pending_filings.asked_at` set). Unique name files the batch. `skip` leaves it in inbox. Anything else (`hello`, `thanks`, `what's on my schedule today?`, `Emma’s client`) falls through to normal Max chat. An open photo batch without an ask is file state, not a pending question.
+6. Stale batches expire from SQLite on load (`last_at` vs the photo-batch window; `asked_at` vs the job-answer timeout). Expiry survives process restart. The in-memory flush task is only a debounce.
+
+**Single-worker assumption:** `_load_batch` / `whatsapp_media_batches` and `_schedule_batch_flush` are safe only with one process writing that table. A second worker would race on `last_at`/`asked` and could send a second ask. Do not run multiple inbound WhatsApp workers against the same edition database.
 
 Existing files are never overwritten (UTC timestamp suffix). Move-to-job / refile accepts only an existing folder under this edition’s jobs root (no path traversal, no new arbitrary folders). That is the only write on the chats page.
 

@@ -1631,6 +1631,9 @@ def _schedule_batch_flush(
     http_post: Optional[Callable[..., Any]] = None,
     http_upload: Optional[Callable[..., Any]] = None,
 ) -> None:
+    # In-memory debounce only. SQLite last_at/asked_at on whatsapp_media_batches
+    # (see _load_batch) is the TTL that survives restart. Single-worker:
+    # two processes would each schedule a flush and could double-ask.
     from app.services.max.whatsapp_log import finalize_photo_batch, photo_batch_window_seconds
 
     delay = photo_batch_window_seconds()
@@ -1708,12 +1711,15 @@ async def process_webhook(
                 payload_texts.setdefault(str(preview["from"]), []).append(body)
     batch_senders: set[str] = set()
     job_replied: set[str] = set()
+    quoted_senders: set[str] = set()
     results: list[dict[str, Any]] = []
     on_text = text_handler or default_text_handler
     on_voice = voice_handler or default_voice_handler
     on_photo = photo_handler or default_photo_handler
     for message in messages:
         message_id = message["message_id"]
+        # Dedup Meta redeliveries of the same wa message id before persist,
+        # photo-batch aggregation, job-answer, or any handler.
         if message_id and _seen(message_id):
             results.append({
                 "message_id": message_id,
@@ -1741,6 +1747,8 @@ async def process_webhook(
             finalize_photo_batch,
             iso_from_wa_timestamp as _iso_wa,
             last_attachment_ids,
+            mark_photo_batch_quoted,
+            photo_batch_quoted,
             photo_batch_window_seconds,
             record_media_batch,
             set_pending_filings,
@@ -1807,7 +1815,7 @@ async def process_webhook(
                     inbox_ids = [int(a["id"]) for a in saved if a.get("filing_status") == "inbox"]
                     if inbox_ids:
                         set_pending_filings(sender, inbox_ids)
-                    if fileable_ids and not wants_photo_quote(hint, message.get("caption") or ""):
+                    if fileable_ids:
                         record_media_batch(sender, fileable_ids, hint)
                         batch_senders.add(sender)
             except Exception:
@@ -1843,12 +1851,19 @@ async def process_webhook(
                         audio, mime = await download_media(message["media_id"], http_get=http_get)
                     reply = await on_voice(audio, mime or message["mime_type"], sender)
                 elif message["type"] == "image":
-                    if wants_photo_quote(hint, message.get("caption") or ""):
+                    # File-only default. One draft only when THIS photo's
+                    # caption (same message) asks to quote, and only once
+                    # per open batch.
+                    caption_asks = wants_photo_quote(message.get("caption") or "")
+                    already_quoted = sender in quoted_senders or photo_batch_quoted(sender)
+                    if caption_asks and not already_quoted:
                         route = "photo_quote"
                         image, mime = media_bytes, media_mime
                         if not image and message.get("media_id"):
                             image, mime = await download_media(message["media_id"], http_get=http_get)
                         reply = await on_photo(image, mime or message["mime_type"], message["caption"], sender)
+                        quoted_senders.add(sender)
+                        mark_photo_batch_quoted(sender)
                     else:
                         route = "file_photo"
                         reply = ""
