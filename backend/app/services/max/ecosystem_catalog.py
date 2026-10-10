@@ -812,6 +812,13 @@ def get_desk_info(name: str) -> dict:
 
 def get_catalog_summary() -> str:
     """Return a formatted summary for the system prompt."""
+    try:
+        from app.edition import is_family_edition
+
+        if is_family_edition():
+            return ""
+    except Exception:
+        pass
     stats = EMPIRE_CATALOG["stats"]
     products = EMPIRE_CATALOG["products"]
     desks = EMPIRE_CATALOG.get("desks", {})

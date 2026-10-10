@@ -2,6 +2,10 @@
 
 Family editions never read repo client_aliases.json (9c34d3eb) and never
 call the Workroom docs hub (default :3005).
+
+This is a family stub. Do not merge PR #94 (whatsapp_channel / full
+doc_lookup) into family branches — that stack reads Workroom aliases,
+business.json, and the :3005 docs hub.
 """
 from __future__ import annotations
 
