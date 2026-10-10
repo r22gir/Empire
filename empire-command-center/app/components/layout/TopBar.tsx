@@ -49,6 +49,7 @@ const NOTIF_NAV_MAP: Record<string, { product?: string; screen?: string }> = {
   desk: { screen: 'desks' },
   system: { product: 'platform', screen: 'dashboard' },
   telegram: { screen: 'telegram' },
+  whatsapp: { screen: 'whatsapp' },
   brain: { product: 'platform', screen: 'dashboard' },
   inventory: { product: 'workroom', screen: 'dashboard' },
   customer: { product: 'workroom', screen: 'dashboard' },

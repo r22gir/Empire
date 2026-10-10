@@ -1,10 +1,16 @@
-"""WhatsApp Business Cloud API webhook. Disabled unless the four env vars are set."""
+"""WhatsApp Business Cloud API webhook plus founder chat-log reads.
+
+The webhook stays public (Meta signature). Conversation reads require
+the founder PIN. This module does not delete messages and does not send
+from the chats viewer.
+"""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
+from app.services.accounts.founder import FounderAuthError, assert_founder
 from app.services.max.whatsapp_channel import (
     WhatsAppSendBlocked,
     channel_status,
@@ -25,9 +31,68 @@ class OutboundIn(BaseModel):
     confirmed: bool = False
 
 
+def _require_founder(pin: str | None) -> None:
+    try:
+        assert_founder(pin)
+    except FounderAuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.get("/whatsapp/status")
 async def whatsapp_status():
     return channel_status()
+
+
+@router.get("/whatsapp/chats")
+async def whatsapp_list_chats(
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    """List conversations for this edition. Founder PIN required."""
+    _require_founder(x_founder_pin)
+    from app.services.max.whatsapp_log import list_conversations
+
+    return {"conversations": list_conversations()}
+
+
+@router.get("/whatsapp/chats/search")
+async def whatsapp_search_chats(
+    q: str = Query("", min_length=0),
+    limit: int = Query(50, ge=1, le=200),
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    """Simple text search across this edition's WhatsApp log."""
+    _require_founder(x_founder_pin)
+    from app.services.max.whatsapp_log import search_all_messages
+
+    return {"query": q, "messages": search_all_messages(q, limit=limit)}
+
+
+@router.get("/whatsapp/chats/{wa_id}/messages")
+async def whatsapp_conversation_messages(
+    wa_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    q: str = Query("", min_length=0),
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    """Page one conversation. Read-only."""
+    _require_founder(x_founder_pin)
+    from app.services.max.whatsapp_log import get_conversation_messages, get_display_label
+
+    messages, total = get_conversation_messages(
+        wa_id,
+        limit=limit,
+        offset=offset,
+        search=q or None,
+    )
+    return {
+        "wa_id": wa_id,
+        "display_label": get_display_label(wa_id),
+        "messages": messages,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/whatsapp/webhook")

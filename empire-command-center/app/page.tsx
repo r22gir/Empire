@@ -45,6 +45,7 @@ import DesksScreen from './components/screens/DesksScreen';
 import InboxScreen from './components/screens/InboxScreen';
 import SystemReportScreen from './components/screens/SystemReportScreen';
 import TelegramScreen from './components/screens/TelegramScreen';
+import WhatsAppChatsScreen from './components/screens/WhatsAppChatsScreen';
 import MemoryBankScreen from './components/screens/MemoryBankScreen';
 import EcosystemProductPage from './components/screens/EcosystemProductPage';
 import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
@@ -99,6 +100,7 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
 
 const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'pricing-studio': 'pricing-studio',
+  whatsapp: 'whatsapp',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -520,6 +522,7 @@ export default function CommandCenter() {
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;
     if (activeScreen === 'memory-bank') return <MemoryBankScreen />;
     if (activeScreen === 'telegram') return <TelegramScreen />;
+    if (activeScreen === 'whatsapp') return <WhatsAppChatsScreen />;
     if (activeScreen === 'report') return <SystemReportScreen />;
     if (activeScreen === 'tasks') return <TasksScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : activeProduct === 'owner' ? undefined : activeProduct} />;
     if (activeScreen === 'tickets') return <Suspense fallback={<Loading />}><TicketsPage /></Suspense>;
