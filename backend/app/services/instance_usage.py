@@ -24,6 +24,10 @@ is enforced with no baseline env. Baseline, first match wins:
    count. The baseline is ``max(recorded_total, default_floor)``.
    The floor (``EMPIRE_USAGE_DEFAULT_BASELINE_TOKENS``, default
    10_000_000) covers a cold month so 20% is a real allowance.
+   Workroom often writes no ``usage.db``: ``data_root_or_none()`` is
+   ``None`` when ``EMPIRE_DATA_DIR`` is unset, so Workroom is absent
+   from the pie and the floor applies until other edition files have
+   more than 10M tokens this month.
 
 USD for display and for case 1 is:
 
@@ -33,6 +37,11 @@ At 80% of the allowance the API reports ``level=warn`` and remaining
 percent. At 100%, heavy work is refused in Spanish; a short chat
 reply still runs unless this instance has used the whole baseline
 (the total spend limit).
+
+``GET /api/v1/edition/usage`` is ``public_usage_summary()``: used
+percent of this instance's allowance, remaining percent, level, and
+the Spanish message. It does not include baseline, allowance, or
+absolute token/cost totals (those would reveal EmpireBox-wide usage).
 """
 from __future__ import annotations
 
@@ -316,6 +325,7 @@ def usage_summary() -> dict:
         "day": {"tokens": 0, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0},
         "month": {"tokens": 0, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0},
         "used": 0.0,
+        "used_percent": 0.0 if family else None,
         "ratio": None,
         "remaining_percent": 100.0 if family else None,
         "total_spend_hit": False,
@@ -337,12 +347,14 @@ def usage_summary() -> dict:
     used = month["cost_usd"] if basis == "usd" else float(month["tokens"])
     ratio = None
     remaining_percent = 100.0 if family else None
+    used_percent = 0.0 if family else None
     level = "ok"
     message = ""
     total_spend_hit = bool(baseline is not None and baseline > 0 and used >= float(baseline))
     if allowance and allowance > 0:
         ratio = round(used / allowance, 4)
         remaining_percent = max(0.0, round((1.0 - ratio) * 100.0, 1))
+        used_percent = min(100.0, round(ratio * 100.0, 1))
         used_pct = round(ratio * 100)
         if total_spend_hit:
             level = "blocked"
@@ -369,6 +381,7 @@ def usage_summary() -> dict:
         "day": day,
         "month": month,
         "used": used,
+        "used_percent": used_percent,
         "ratio": ratio,
         "remaining_percent": remaining_percent,
         "total_spend_hit": total_spend_hit,
@@ -376,6 +389,24 @@ def usage_summary() -> dict:
         "message": message,
     })
     return empty
+
+
+PUBLIC_USAGE_KEYS = (
+    "enforced",
+    "edition",
+    "cap_percent",
+    "used_percent",
+    "remaining_percent",
+    "level",
+    "message",
+    "limit_note_es",
+)
+
+
+def public_usage_summary() -> dict:
+    """Owner-facing meter. Percentages only — no EmpireBox-wide totals."""
+    summary = usage_summary()
+    return {key: summary.get(key) for key in PUBLIC_USAGE_KEYS}
 
 
 def is_heavy_request(*, kind: str, text: str, desk: Optional[str], tools: bool, source: str, image: bool) -> bool:

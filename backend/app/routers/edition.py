@@ -163,8 +163,8 @@ async def get_usage(request: Request):
     if not is_family_edition():
         raise HTTPException(404, "El tope de uso es de las ediciones familiares")
     _require_admin(request)
-    from app.services.instance_usage import usage_summary
-    return usage_summary()
+    from app.services.instance_usage import public_usage_summary
+    return public_usage_summary()
 
 
 @router.get("/facts")

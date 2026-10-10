@@ -20,6 +20,8 @@ Baseline, first one that is set:
 
 The floor is `EMPIRE_USAGE_DEFAULT_BASELINE_TOKENS` (default **10,000,000** tokens). It is only a cold-start pie so a month with no history still has a real 20% allowance. Once recorded EmpireBox usage exceeds the floor, the pie is the recorded total and each family instance stays at 20% of that total.
 
+Workroom often has no `usage/usage.db`. `data_root_or_none()` is `None` when `EMPIRE_DATA_DIR` is unset (the Workroom default), so `usage_db_path()` returns `None` and Workroom does not write a usage file. The auto baseline still reads `/data/amp`, `/data/maxine`, `backend/data`, `~/empire-repo/backend/data`, and `EMPIRE_USAGE_PEER_DATA_DIRS` when those files exist. If none of them exist — or they have no rows this UTC month — `recorded_total` is 0 and the baseline is the **10,000,000** token floor. Family instances then get a 2,000,000 token allowance (20% of 10M) until recorded EmpireBox usage exceeds the floor.
+
 Estimated USD, for display and for case 1:
 
 ```
@@ -34,9 +36,9 @@ Estimated USD, for display and for case 1:
 
 Simli avatar sessions write into the same table (`provider=simli`, `model=simli-avatar`, `kind=avatar`). Output tokens are the capped session seconds. There is no separate Simli price; the estimator above turns those seconds into the USD figure the cap already uses.
 
-`GET /api/v1/edition/usage` returns both periods, the allowance, the ratio, `remaining_percent`, and `level`:
+`GET /api/v1/edition/usage` is owner-only and returns **percentages only** for this instance: `used_percent` (share of its 20% allowance), `remaining_percent`, `level`, `message`, plus the Spanish policy note. It does **not** include `baseline`, `baseline_basis`, `allowance`, or absolute token/cost totals — those would let anyone derive EmpireBox-wide usage (`allowance = 0.2 × total`). Enforcement still uses the internal totals.
 
-| ratio | level | behavior |
+| used % of allowance | level | behavior |
 | --- | --- | --- |
 | under 80% | `ok` | calls proceed |
 | 80% to under 100% | `warn` | calls proceed; the card shows remaining % in Spanish |

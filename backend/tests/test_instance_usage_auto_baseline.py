@@ -1,6 +1,8 @@
 """Family usage cap uses recorded EmpireBox totals — no baseline env required."""
 from __future__ import annotations
 
+import asyncio
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -141,3 +143,80 @@ def test_short_chats_stop_only_at_total_spend(monkeypatch, tmp_path):
     refused = enforce_usage_cap(text="hola")
     assert refused and "tope total" in refused
     assert "mensajes cortos quedan en pausa" in refused
+
+
+def test_public_usage_hides_empirebox_totals(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", "1000")
+    monkeypatch.setattr("app.services.instance_usage._usage_data_roots", lambda: [tmp_path])
+    from app.services.instance_usage import public_usage_summary, record_usage, usage_summary
+
+    record_usage(input_tokens=15, output_tokens=0)
+    internal = usage_summary()
+    assert internal["allowance"] == 200
+    assert internal["baseline"] == 1000
+    public = public_usage_summary()
+    assert public["used_percent"] == 7.5
+    assert public["remaining_percent"] == 92.5
+    assert public["level"] == "ok"
+    hidden = {"baseline", "baseline_basis", "allowance", "used", "day", "month", "ratio"}
+    assert hidden.isdisjoint(public)
+
+
+def test_chat_stream_respects_usage_cap(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", "1000")
+    monkeypatch.setenv("INSTANCE_USAGE_CAP_PCT", "20")
+    monkeypatch.setattr("app.services.instance_usage._usage_data_roots", lambda: [tmp_path])
+    from app.services.instance_usage import record_usage
+    from app.services.max.ai_router import AIMessage, AIResponse, AIRouter
+
+    async def fake_selected(self, **_kwargs):
+        return AIResponse(content="STREAMED", model_used="minimax-test")
+
+    monkeypatch.setattr(AIRouter, "_chat_via_selected_routing", fake_selected)
+    router = AIRouter()
+
+    async def collect(text: str):
+        return [
+            item
+            async for item in router.chat_stream(
+                [AIMessage(role="user", content=text)],
+                source="web",
+            )
+        ]
+
+    record_usage(input_tokens=200, output_tokens=0)
+    short = asyncio.run(collect("hola"))
+    assert short == [("STREAMED", "minimax-test")]
+
+    heavy = asyncio.run(collect("x" * 500))
+    assert heavy[0][1] == "usage-cap"
+    assert "tope" in heavy[0][0]
+
+    record_usage(input_tokens=800, output_tokens=0)
+    stopped = asyncio.run(collect("hola"))
+    assert stopped[0][1] == "usage-cap"
+    assert "tope total" in stopped[0][0]
+
+
+def test_usage_cap_check_logs_warning(monkeypatch, tmp_path, caplog):
+    _env(monkeypatch, tmp_path)
+    from app.services.max.ai_router import AIMessage, AIRouter
+
+    def boom(**_kwargs):
+        raise RuntimeError("cap boom")
+
+    monkeypatch.setattr("app.services.instance_usage.enforce_usage_cap", boom)
+    router = AIRouter()
+    with caplog.at_level(logging.WARNING, logger="max.ai_router"):
+        _model, refusal = router._family_chat_prep(
+            [AIMessage(role="user", content="hola")],
+            desk=None,
+            tools=False,
+            source="",
+            image_filename=None,
+            model=None,
+        )
+    assert refusal is None
+    assert "usage cap check skipped" in caplog.text
