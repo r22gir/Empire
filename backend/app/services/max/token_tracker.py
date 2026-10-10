@@ -13,6 +13,13 @@ from pathlib import Path
 
 from app.services.data_paths import data_root
 from app.services.max.routing_state import load_routing_state, provider_disabled
+from app.services.max.free_tiers import (
+    FREE_TIER_TABLE,
+    init_free_tier_db,
+    is_free_tier_model,
+    record_free_tier_usage,
+    get_all_free_tier_status,
+)
 
 logger = logging.getLogger("max.tokens")
 
@@ -211,6 +218,7 @@ class TokenTracker:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_model_canonical ON token_usage(model_canonical)")
             conn.commit()
             conn.close()
+            init_free_tier_db(self.db_path)
         except Exception as e:
             logger.error(f"Token tracker DB init failed: {e}")
 
@@ -246,6 +254,8 @@ class TokenTracker:
 
     @staticmethod
     def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+        if is_free_tier_model(model):
+            return 0.0
         rates = COST_RATES.get(model)
         if not rates:
             return 0.0
@@ -330,6 +340,16 @@ class TokenTracker:
             )
             conn.commit()
             conn.close()
+            if is_free_tier_model(model_canonical, provider_canonical):
+                try:
+                    record_free_tier_usage(
+                        model=model_canonical,
+                        provider=provider_canonical,
+                        tokens=total_tokens,
+                        db_path=self.db_path,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record free tier usage: {e}")
             logger.debug(
                 "Cost logged: provider=%s model=%s source=%s token_source=%s est=$%.4f final=$%.4f",
                 provider_canonical,
@@ -339,8 +359,18 @@ class TokenTracker:
                 cost,
                 final_cost,
             )
+            return {
+                "model": model_canonical,
+                "provider": provider_canonical,
+                "cost_usd": final_cost,
+                "input_tokens": int(input_tokens or 0),
+                "output_tokens": int(output_tokens or 0),
+                "total_tokens": total_tokens,
+                "request_id": req_id,
+            }
         except Exception as e:
             logger.warning(f"Failed to log token usage: {e}")
+            return None
 
     def log_fixed_cost(
         self,
@@ -399,6 +429,10 @@ class TokenTracker:
             raw_provider=provider,
             raw_model=model,
         )
+
+    def get_free_tier_status(self) -> list[dict]:
+        """Return free-tier specifications and current quota usage."""
+        return get_all_free_tier_status(self.db_path)
 
     def get_stats(self, days: int = 30) -> dict:
         """Get aggregated token usage stats."""
@@ -1074,5 +1108,6 @@ class TokenTracker:
         return not status["over_budget"]
 
 
-# Singleton
+# Singleton & module helpers
 token_tracker = TokenTracker()
+calculate_cost = TokenTracker.calculate_cost

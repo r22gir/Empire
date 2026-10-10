@@ -4,7 +4,7 @@ import { API } from '../../../lib/api';
 import {
   DollarSign, TrendingUp, Zap, Clock, Download, RefreshCw,
   BarChart3, PieChart as PieChartIcon, Activity, AlertTriangle,
-  ExternalLink, Edit3, Info, Shield,
+  ExternalLink, Edit3, Info, Shield, ShieldAlert,
 } from 'lucide-react';
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -13,6 +13,31 @@ import {
 } from 'recharts';
 
 /* ── Types ───────────────────────────────────────────────────── */
+export interface FreeTierData {
+  provider: string;
+  model_pattern: string;
+  cost_basis: string;
+  rpm: number;
+  rpd: number;
+  tpd: number;
+  reset_tz: string;
+  source_url: string;
+  verified_date: string;
+  use_cases: string;
+  not_for: string;
+  window_date?: string;
+  requests_day?: number;
+  tokens_day?: number;
+  requests_minute?: number;
+  rpm_limit?: number;
+  rpd_limit?: number;
+  tpd_limit?: number;
+  percent_used?: number;
+  status?: string;
+  warn?: boolean;
+  exhausted?: boolean;
+}
+
 interface CostOverview {
   period_days: number;
   total: { input_tokens: number; output_tokens: number; total_tokens: number; cost_usd: number; requests: number };
@@ -56,18 +81,47 @@ interface BleedAlert {
 
 /* ── Model Tier Map ──────────────────────────────────────────── */
 const MODEL_TIERS: Record<string, { tier: string; color: string; bg: string }> = {
+  // Free tier models ($0.00)
   'gemini': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
   'gemini-2.5-flash': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'gemini-2.5-flash-lite': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'gemini-3.5-flash': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'openai/gpt-oss-120b': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'openai/gpt-oss-20b': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'qwen/qwen3.8-27b': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'gpt-oss': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'qwen3.8': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'nvidia/nemotron-3-super-120b-a12b:free': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'google/gemma-4-31b-it:free': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'cohere/north-mini-code:free': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'openrouter/free': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  ':free': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'ollama': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+  'openclaw': { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' },
+
+  // Cheap models ($0.10 - $0.80 / 1M tokens) - Groq Llama 3.3 fixed as Cheap
   'gpt-4.1-nano': { tier: 'CHEAP', color: '#2563eb', bg: '#eff6ff' },
-  'groq': { tier: 'CHEAP', color: '#2563eb', bg: '#eff6ff' },
+  'llama-3.3-70b-versatile': { tier: 'CHEAP', color: '#2563eb', bg: '#eff6ff' },
+  'groq-llama-3.3-70b': { tier: 'CHEAP', color: '#2563eb', bg: '#eff6ff' },
+  'groq': { tier: 'CHEAP (Llama 3.3)', color: '#2563eb', bg: '#eff6ff' },
+  'llama-3.1-8b-instant': { tier: 'CHEAP', color: '#2563eb', bg: '#eff6ff' },
   'llama': { tier: 'CHEAP', color: '#2563eb', bg: '#eff6ff' },
+  'deepseek-v4-flash': { tier: 'CHEAP', color: '#2563eb', bg: '#eff6ff' },
+
+  // Moderate models ($0.15 - $3.00 / 1M tokens)
   'gpt-4o-mini': { tier: 'MODERATE', color: '#d97706', bg: '#fffbeb' },
   'claude-sonnet-4-6': { tier: 'MODERATE', color: '#d97706', bg: '#fffbeb' },
   'gpt-4.1-mini': { tier: 'MODERATE', color: '#d97706', bg: '#fffbeb' },
+  'deepseek-chat': { tier: 'MODERATE', color: '#d97706', bg: '#fffbeb' },
+  'deepseek-v4-pro': { tier: 'MODERATE', color: '#d97706', bg: '#fffbeb' },
+  'qwen-plus': { tier: 'MODERATE', color: '#d97706', bg: '#fffbeb' },
+
+  // Premium models (>= $5.00 / 1M tokens)
   'grok': { tier: 'PREMIUM', color: '#dc2626', bg: '#fef2f2' },
   'grok-image-gen': { tier: 'PREMIUM', color: '#dc2626', bg: '#fef2f2' },
   'claude-opus-4-6': { tier: 'PREMIUM', color: '#dc2626', bg: '#fef2f2' },
   'gpt-4o': { tier: 'PREMIUM', color: '#dc2626', bg: '#fef2f2' },
+  'qwen-max': { tier: 'PREMIUM', color: '#dc2626', bg: '#fef2f2' },
 };
 
 /* ── Provider Links ──────────────────────────────────────────── */
@@ -97,6 +151,9 @@ const PROVIDER_DASHBOARD_LIST = [
 /* ── Helpers ─────────────────────────────────────────────────── */
 function getTierForModel(model: string): { tier: string; color: string; bg: string } {
   const lower = model.toLowerCase();
+  if (lower.endsWith(':free')) return { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' };
+  if (lower.includes('gpt-oss') || lower.includes('qwen3.8')) return { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' };
+  if (lower.includes('gemini-2.5-flash') || lower.includes('gemini-3.5-flash')) return { tier: 'FREE', color: '#16a34a', bg: '#f0fdf4' };
   if (MODEL_TIERS[lower]) return MODEL_TIERS[lower];
   for (const [key, val] of Object.entries(MODEL_TIERS)) {
     if (lower.includes(key)) return val;
@@ -107,7 +164,7 @@ function getTierForModel(model: string): { tier: string; color: string; bg: stri
 function getTierCategory(model: string): 'free' | 'cheap' | 'moderate' | 'premium' {
   const t = getTierForModel(model).tier;
   if (t === 'FREE') return 'free';
-  if (t === 'CHEAP') return 'cheap';
+  if (t.startsWith('CHEAP')) return 'cheap';
   if (t === 'MODERATE') return 'moderate';
   return 'premium';
 }
@@ -255,6 +312,353 @@ function BudgetEditModal({ current, onSave, onClose }: { current: number; onSave
   );
 }
 
+/* ── Default Free Tier Fallback ──────────────────────────────── */
+const DEFAULT_FREE_TIERS: FreeTierData[] = [
+  {
+    provider: 'groq',
+    model_pattern: 'openai/gpt-oss-120b',
+    cost_basis: 'free_tier',
+    rpm: 30,
+    rpd: 1000,
+    tpd: 1000000,
+    reset_tz: 'America/Los_Angeles',
+    source_url: 'https://console.groq.com/docs/rate-limits',
+    verified_date: '2026-10-10',
+    use_cases: 'General reasoning, draft coding, analysis',
+    not_for: 'Client quotes, invoices, customer messages',
+    percent_used: 0,
+    status: 'normal',
+  },
+  {
+    provider: 'groq',
+    model_pattern: 'openai/gpt-oss-20b',
+    cost_basis: 'free_tier',
+    rpm: 30,
+    rpd: 1000,
+    tpd: 1000000,
+    reset_tz: 'America/Los_Angeles',
+    source_url: 'https://console.groq.com/docs/rate-limits',
+    verified_date: '2026-10-10',
+    use_cases: 'Fast extraction, summaries, parsing',
+    not_for: 'Client quotes, invoices, customer messages',
+    percent_used: 0,
+    status: 'normal',
+  },
+  {
+    provider: 'groq',
+    model_pattern: 'qwen/qwen3.8-27b',
+    cost_basis: 'free_tier',
+    rpm: 30,
+    rpd: 1000,
+    tpd: 1000000,
+    reset_tz: 'America/Los_Angeles',
+    source_url: 'https://console.groq.com/docs/rate-limits',
+    verified_date: '2026-10-10',
+    use_cases: 'Multilingual tasks, formatting, code reviews',
+    not_for: 'Client quotes, invoices, customer messages',
+    percent_used: 0,
+    status: 'normal',
+  },
+  {
+    provider: 'gemini',
+    model_pattern: 'gemini-2.5-flash',
+    cost_basis: 'free_tier',
+    rpm: 15,
+    rpd: 1500,
+    tpd: 1000000,
+    reset_tz: 'America/Los_Angeles',
+    source_url: 'https://ai.google.dev/pricing',
+    verified_date: '2026-10-10',
+    use_cases: 'Multimodal image analysis, large context docs',
+    not_for: 'Client quotes, invoices, customer messages',
+    percent_used: 0,
+    status: 'normal',
+  },
+  {
+    provider: 'gemini',
+    model_pattern: 'gemini-2.5-flash-lite',
+    cost_basis: 'free_tier',
+    rpm: 30,
+    rpd: 1500,
+    tpd: 1000000,
+    reset_tz: 'America/Los_Angeles',
+    source_url: 'https://ai.google.dev/pricing',
+    verified_date: '2026-10-10',
+    use_cases: 'Lightweight fast tasks, quick drafts',
+    not_for: 'Client quotes, invoices, customer messages',
+    percent_used: 0,
+    status: 'normal',
+  },
+  {
+    provider: 'gemini',
+    model_pattern: 'gemini-3.5-flash',
+    cost_basis: 'free_tier',
+    rpm: 15,
+    rpd: 1500,
+    tpd: 1000000,
+    reset_tz: 'America/Los_Angeles',
+    source_url: 'https://ai.google.dev/pricing',
+    verified_date: '2026-10-10',
+    use_cases: 'Advanced multimodal drafts, system tasks',
+    not_for: 'Client quotes, invoices, customer messages',
+    percent_used: 0,
+    status: 'normal',
+  },
+  {
+    provider: 'openrouter',
+    model_pattern: 'nvidia/nemotron-3-super-120b-a12b:free',
+    cost_basis: 'free_tier',
+    rpm: 20,
+    rpd: 200,
+    tpd: 500000,
+    reset_tz: 'UTC',
+    source_url: 'https://openrouter.ai/models',
+    verified_date: '2026-10-10',
+    use_cases: 'Deep reasoning, fallback synthesis',
+    not_for: 'Client quotes, invoices, customer messages',
+    percent_used: 0,
+    status: 'normal',
+  },
+  {
+    provider: 'openrouter',
+    model_pattern: 'google/gemma-4-31b-it:free',
+    cost_basis: 'free_tier',
+    rpm: 20,
+    rpd: 200,
+    tpd: 500000,
+    reset_tz: 'UTC',
+    source_url: 'https://openrouter.ai/models',
+    verified_date: '2026-10-10',
+    use_cases: 'Text transformation, instructions',
+    not_for: 'Client quotes, invoices, customer messages',
+    percent_used: 0,
+    status: 'normal',
+  },
+  {
+    provider: 'openrouter',
+    model_pattern: 'cohere/north-mini-code:free',
+    cost_basis: 'free_tier',
+    rpm: 20,
+    rpd: 200,
+    tpd: 500000,
+    reset_tz: 'UTC',
+    source_url: 'https://openrouter.ai/models',
+    verified_date: '2026-10-10',
+    use_cases: 'Code syntax checking, helper routines',
+    not_for: 'Client quotes, invoices, customer messages',
+    percent_used: 0,
+    status: 'normal',
+  },
+  {
+    provider: 'openrouter',
+    model_pattern: 'openrouter/free',
+    cost_basis: 'free_tier',
+    rpm: 20,
+    rpd: 200,
+    tpd: 500000,
+    reset_tz: 'UTC',
+    source_url: 'https://openrouter.ai/models',
+    verified_date: '2026-10-10',
+    use_cases: 'Generic router free fallback',
+    not_for: 'Client quotes, invoices, customer messages',
+    percent_used: 0,
+    status: 'normal',
+  },
+];
+
+/* ── Free-Tier Quota Cards Component ─────────────────────────── */
+function FreeTierQuotaCards({ freeTiers }: { freeTiers: FreeTierData[] }) {
+  const displayTiers = freeTiers.length > 0 ? freeTiers : DEFAULT_FREE_TIERS;
+
+  const fmtKTokens = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+    return String(n);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Black & Gold Theme Privacy Note */}
+      <div
+        className="rounded-2xl p-4 md:p-5 border transition-all"
+        style={{
+          background: 'linear-gradient(135deg, #0e1013 0%, #171a1f 100%)',
+          borderColor: '#b8960c',
+          boxShadow: '0 4px 20px rgba(184, 150, 12, 0.08)',
+        }}
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: 'rgba(184, 150, 12, 0.15)', border: '1px solid #b8960c' }}
+          >
+            <ShieldAlert size={18} className="text-[#d4b84a]" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#d4b84a]">
+                Free-Tier Policy & Guardrail Protection
+              </span>
+              <span
+                className="text-[9px] font-bold px-2 py-0.5 rounded tracking-wide"
+                style={{ background: '#b8960c', color: '#000' }}
+              >
+                FREE IS NOT PRIVATE
+              </span>
+            </div>
+            <p className="text-[12px] text-[#ccc] mt-1.5 leading-relaxed">
+              <strong className="text-white">Free is not private:</strong> Free-tier endpoints may store prompt transcripts and evaluate them for provider model fine-tuning.
+              Empire guardrails <strong>strictly block all client-facing and financial operations</strong> (forge quotes, customer invoices, workroom calculations, and client replies) from free models.
+            </p>
+            <div className="text-[10px] text-[#999] mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono">
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />
+                Quota alert: warns at 4/5 (80%) of daily or minute rate
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#ef4444]" />
+                Failover: 100% exhaustion auto-skips to next candidate
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" />
+                Cost basis: $0.00 / call
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Grid of Quota Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        {displayTiers.map((ft, idx) => {
+          const reqMin = ft.requests_minute || 0;
+          const limMin = ft.rpm_limit || ft.rpm || 30;
+          const reqDay = ft.requests_day || 0;
+          const limDay = ft.rpd_limit || ft.rpd || 1000;
+          const tokDay = ft.tokens_day || 0;
+          const limTok = ft.tpd_limit || ft.tpd || 1_000_000;
+
+          const pct = Math.min(ft.percent_used || 0, 100);
+          const isExhausted = ft.exhausted || pct >= 100;
+          const isWarn = ft.warn || pct >= 80;
+
+          // Status colors
+          const statusBg = isExhausted
+            ? 'rgba(220, 38, 38, 0.18)'
+            : isWarn
+            ? 'rgba(217, 119, 6, 0.18)'
+            : 'rgba(22, 163, 74, 0.18)';
+          const statusColor = isExhausted ? '#ef4444' : isWarn ? '#f59e0b' : '#22c55e';
+          const statusText = isExhausted
+            ? '100% EXHAUSTED (FAILOVER)'
+            : isWarn
+            ? `${pct.toFixed(0)}% WARN (≥80%)`
+            : 'NORMAL ($0)';
+
+          const useCasesText = typeof ft.use_cases === 'string'
+            ? ft.use_cases
+            : Array.isArray(ft.use_cases) ? (ft.use_cases as string[]).join(', ') : 'Internal tasks, draft analysis';
+
+          const notForText = typeof ft.not_for === 'string'
+            ? ft.not_for
+            : Array.isArray(ft.not_for) ? (ft.not_for as string[]).join(', ') : 'Quotes, invoices, client replies';
+
+          return (
+            <div
+              key={idx}
+              className="rounded-2xl p-4 flex flex-col justify-between transition-all"
+              style={{
+                background: '#121417',
+                border: `1px solid ${isExhausted ? '#dc2626' : isWarn ? '#d97706' : '#242830'}`,
+                boxShadow: isWarn ? '0 4px 14px rgba(217, 119, 6, 0.12)' : '0 2px 8px rgba(0,0,0,0.25)',
+              }}
+            >
+              <div>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-[#b8960c]">
+                      {ft.provider}
+                    </span>
+                    <h4 className="text-[12px] font-bold text-white font-mono break-all leading-tight mt-0.5">
+                      {ft.model_pattern}
+                    </h4>
+                  </div>
+                  <span
+                    className="text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 border whitespace-nowrap"
+                    style={{
+                      background: statusBg,
+                      color: statusColor,
+                      borderColor: `${statusColor}40`,
+                    }}
+                  >
+                    {statusText}
+                  </span>
+                </div>
+
+                {/* Quota Progress Bar */}
+                <div className="mt-3">
+                  <div className="flex justify-between items-center text-[10px] text-[#888] mb-1 font-mono">
+                    <span>Quota Utilized</span>
+                    <span style={{ color: statusColor }}>{pct.toFixed(1)}%</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full overflow-hidden bg-[#22262d]">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.max(pct, 2)}%`,
+                        backgroundColor: statusColor,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Quota Fractions (RPM, RPD, TPD) */}
+                <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-[#22262d] text-center font-mono">
+                  <div className="p-1.5 rounded-xl bg-[#181b20]">
+                    <div className="text-[9px] text-[#777] uppercase">RPM Limit</div>
+                    <div className="text-[11px] font-bold text-white mt-0.5">
+                      {reqMin}/{limMin}
+                    </div>
+                  </div>
+                  <div className="p-1.5 rounded-xl bg-[#181b20]">
+                    <div className="text-[9px] text-[#777] uppercase">RPD Limit</div>
+                    <div className="text-[11px] font-bold text-white mt-0.5">
+                      {reqDay}/{limDay}
+                    </div>
+                  </div>
+                  <div className="p-1.5 rounded-xl bg-[#181b20]">
+                    <div className="text-[9px] text-[#777] uppercase">TPD Limit</div>
+                    <div className="text-[11px] font-bold text-white mt-0.5">
+                      {fmtKTokens(tokDay)}/{fmtKTokens(limTok)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Use cases and Not for */}
+                <div className="mt-3 space-y-1 text-[10px]">
+                  <div className="text-[#a1a1aa] flex items-start gap-1">
+                    <span className="text-[#22c55e] font-bold shrink-0">✓ Best:</span>
+                    <span className="truncate">{useCasesText}</span>
+                  </div>
+                  <div className="text-[#fca5a5] flex items-start gap-1">
+                    <span className="text-[#ef4444] font-bold shrink-0">✕ Block:</span>
+                    <span className="truncate">{notForText}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 pt-2.5 border-t border-[#22262d] flex items-center justify-between text-[9px] text-[#777] font-mono">
+                <span className="text-[#b8960c] font-bold">$0 · Free Tier</span>
+                <span>Reset: {ft.reset_tz || 'UTC'}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ── Main Component ──────────────────────────────────────────── */
 export default function CostTracker() {
   const [overview, setOverview] = useState<CostOverview | null>(null);
@@ -262,10 +666,11 @@ export default function CostTracker() {
   const [byProvider, setByProvider] = useState<BreakdownItem[]>([]);
   const [byFeature, setByFeature] = useState<BreakdownItem[]>([]);
   const [byBusiness, setByBusiness] = useState<BreakdownItem[]>([]);
+  const [freeTiers, setFreeTiers] = useState<FreeTierData[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [trendData, setTrendData] = useState<{ label: string; cost: number; requests: number }[]>([]);
-  const [tab, setTab] = useState<'overview' | 'breakdown' | 'log'>('overview');
+  const [tab, setTab] = useState<'overview' | 'free-tiers' | 'breakdown' | 'log'>('overview');
   const [budgetOverride, setBudgetOverride] = useState<number | null>(null);
   const [showBudgetEdit, setShowBudgetEdit] = useState(false);
   const [bleedAlerts, setBleedAlerts] = useState<BleedAlert[]>([]);
@@ -292,13 +697,14 @@ export default function CostTracker() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [ov, tx, prov, feat, biz, bleed] = await Promise.all([
+      const [ov, tx, prov, feat, biz, bleed, ft] = await Promise.all([
         safeFetch(`${API}/costs/overview?days=30`),
         safeFetch(`${API}/costs/transactions?limit=100`),
         safeFetch(`${API}/costs/by-provider?days=30`),
         safeFetch(`${API}/costs/by-feature?days=30`),
         safeFetch(`${API}/costs/by-business?days=30`),
         safeFetch(`${API}/costs/bleed-watch?hours=24`),
+        safeFetch(`${API}/costs/free-tiers`),
       ]);
       setOverview(ov);
       setTransactions(ov?.transactions || tx?.transactions || tx || []);
@@ -306,6 +712,7 @@ export default function CostTracker() {
       setByFeature(feat?.by_feature || []);
       setByBusiness(biz?.by_business || []);
       setBleedAlerts(bleed?.alerts || []);
+      setFreeTiers(ft?.free_tiers || []);
     } catch (e) {
       console.error('Cost data load failed:', e);
     }
@@ -437,11 +844,11 @@ export default function CostTracker() {
 
           {/* Tabs */}
           <div className="flex gap-1 empire-card flat" style={{ padding: 4 }}>
-            {(['overview', 'breakdown', 'log'] as const).map(t => (
+            {(['overview', 'free-tiers', 'breakdown', 'log'] as const).map(t => (
               <button key={t} onClick={() => setTab(t)}
                 className={`filter-tab ${tab === t ? 'active' : ''}`}
                 style={{ flex: 1, textAlign: 'center', textTransform: 'capitalize' }}>
-                {t}
+                {t === 'free-tiers' ? 'Free-Tier Quotas' : t}
               </button>
             ))}
           </div>
@@ -618,6 +1025,22 @@ export default function CostTracker() {
                 </div>
               </div>
 
+              {/* Free-Tier Quota & Policy Section */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="section-label" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Shield size={15} className="text-[#b8960c]" /> Free-Tier Models & Active Quotas
+                  </span>
+                  <button
+                    onClick={() => setTab('free-tiers')}
+                    className="text-xs text-[#b8960c] hover:underline font-semibold cursor-pointer"
+                  >
+                    View details →
+                  </button>
+                </div>
+                <FreeTierQuotaCards freeTiers={freeTiers} />
+              </div>
+
               {/* Manage Providers */}
               <div className="empire-card flat" style={{ padding: 20 }}>
                 <span className="section-label" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -640,6 +1063,27 @@ export default function CostTracker() {
                 </div>
               </div>
             </>
+          )}
+
+          {/* ── Free Tiers Tab ────────────────────────────────────── */}
+          {tab === 'free-tiers' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-[#1a1a1a]">Free-Tier Models & Active Quotas</h3>
+                  <p className="text-xs text-[#777] mt-0.5">
+                    Real-time monitoring of free model quotas, rate limits, and privacy guardrails.
+                  </p>
+                </div>
+                <button
+                  onClick={load}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-[#ece8e0] bg-white hover:bg-[#fdf8eb] text-[#b8960c] flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh Quotas
+                </button>
+              </div>
+              <FreeTierQuotaCards freeTiers={freeTiers} />
+            </div>
           )}
 
           {/* ── Breakdown Tab ─────────────────────────────────────── */}

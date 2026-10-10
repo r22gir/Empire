@@ -238,7 +238,10 @@ def _format_route_inventory(paths: list[str], *, source: str, limit: int = 12) -
             "Live route inventory is currently unavailable "
             "(FastAPI app not introspectable in this process)."
         )
-    sample = paths[:limit]
+    priority = [p for p in paths if any(p.startswith(pref) for pref in ("/api/v1/quotes", "/api/v1/finance"))]
+    others = [p for p in paths if p not in priority]
+    ordered = priority + others
+    sample = ordered[:limit]
     more = f" (+{len(paths) - limit} more)" if len(paths) > limit else ""
     src = "live FastAPI mount" if source == "fastapi_app" else "registry/main.py fallback"
     return (
