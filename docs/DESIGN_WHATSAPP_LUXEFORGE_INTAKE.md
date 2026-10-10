@@ -1,196 +1,191 @@
 # Design: WhatsApp → LuxeForge central intake
 
 Date: 2026-10-10  
-Status: **design only** — Rafael approved the direction. No implementation in this PR.  
+Status: **design only** — Rafael approved the direction and the decisions in §0. No implementation in this PR.  
 Base for this note: `deploy/pr82-84-85`, plus WhatsApp filing rules as fixed in PR #91.
 
-WhatsApp is a capture channel. **LuxeForge is the central intake.** Inbound photos, PDFs, and 3D files (STL, Polycam exports) plus job text become one LuxeForge job record. Max, the job board, and the job folders all read that same record. A draft quote is created only after identify → measure (calibrated reference + confidence gate). Nothing is auto-sent to a client.
+WhatsApp is a capture channel. **Max is a general assistant**, not only Empire Workroom. Every inbound photo batch is filed into a **folder** (client job, or personal / insurance / store). A **LuxeForge job and a quote** happen only for **client work** and only when **Rafael asks for a quote**. Identify → measure-by-method → then at most one draft. Nothing is auto-sent to a client.
 
 ---
 
-## 0. Rules (non-negotiable)
+## 0. DECIDED (Rafael, 2026-10-10)
 
-1. **No estimate from photos unless explicitly asked** (PR #91): quote words must be in **this photo’s caption / same message**. Nearby “send me a quote for Emma” does not mint drafts.
+These replace the former open questions. Do not re-ask.
+
+1. **Folders vs jobs.** Every photo batch gets a folder: a **client job** folder, or **personal / insurance / store**. Max stays a general assistant. A LuxeForge job **and** a quote happen **only for client work and only when Rafael asks for a quote**. Personal / insurance / store folders **never** create a LuxeForge job or a LeadForge lead.
+2. **Measure gate is by METHOD, not a self-rated percent.** Grade is **HIGH** only if (a) Rafael typed the dimension, (b) a **calibrated known reference** is in frame, or (c) the dimension comes from a **3D / Polycam / plan file with confirmed units**. Anything else is **ESTIMATE**: show it labeled `estimated` and ask for **ONE named dimension** before any quote. A model score of **85 is only a secondary check on top, never sufficient alone**.
+3. **Polycam / STL.** Rafael may **type sizes as a last resort**. Max **names the exact dimension** needed. The 3D files are **uploaded and linked** to the (client) job. They do not pass HIGH unless units are confirmed.
+4. **Who is asked.** At first Max asks **only Rafael** for a missing dimension. Other people (Nelma, etc.) only **later, after review**.
+5. **First named dimension (per item).** All values in **fractions, never decimals**. One named dimension at a time. Record whether each is **measured** (and **how**: typed / calibrated reference / 3D-or-plan with units) or **estimated**.
+   - **Drapery:** finished panel length first (else floor-to-hardware, else floor-to-ceiling), then window/rod width, plus fullness/pleat style, lined or not.
+   - **Roman shade:** width, drop, inside vs outside mount, fold style.
+   - **Bench / banquette:** each section length, depth, seat height, back height and thickness, straight vs curved (radius/bow), return lengths for U/L.
+   - **Seat cushion:** length × width × thickness, shape/corners.
+   - **Channels / back:** channel width and total length; two labeled sizes: **wood/board cut** (true size, no add-ons) = foam cut, and a separate **fabric cut** (foam width + 2 to 3 in for stapling).
+   - **Upholstery / other:** each area’s width × height.
+6. **Ownership and send.** Records are owned by **Rafael’s founder/owner account**. Branding is **Empire Workroom** by default; **Nelma’s Workroom / Square only when he asks**. Max **never sends to clients**. Docs/invoices email **only** `empirebox2026@gmail.com`.
+7. **Deposit** default **50%**, editable per quote.
+8. **LeadForge lead** only on **conversion / when a quote is asked**, **not** in phase 0. Never for personal / insurance / store.
+9. **Numbers.** **LF job number at LuxeForge job creation** (client work + Rafael asked for a quote). **EST number only after the measure gate passes** and that quote ask is in effect.
+10. **Pricing columns.**
+    - **Upholstery only:** sq ft × price per sq ft, grouped by area. Columns: Description, Qty, Unit, Sq ft per item, Price per sq ft, Total, subtotal per area, grand total, deposit, balance.
+    - **Drapery:** priced **per width** (e.g. re-line with bump $150/width, without bump $125/width, lining $10.50/yd, napped $12.50/yd) **plus labor/hardware lines**. **Never** default drapery to sq ft.
+
+### Hard rules (still in force)
+
+1. **No estimate from photos unless explicitly asked** (PR #91): quote words must be in **this photo’s caption / same message**. Nearby “send me a quote for Emma” does not mint drafts. “Rafael asks” here means that same-message / explicit ask, not a leftover nearby text.
 2. **At most one draft per WhatsApp photo batch.**
-3. **Family editions stay isolated** (`EMPIRE_DATA_DIR` / `WHATSAPP_JOBS_ROOT`). Amp and Maxine never see Rafael’s jobs, chats, or intake rows.
-4. **No outbound WhatsApp / email / client PDF without Rafael’s yes.** Drafts stay `draft`. Owner mail (`workroom@empirebox.store`) is internal only.
-5. **Never lose a file.** Persist on the Max edition first; enqueue if LuxeForge is down; retry. Dedup Meta `wa_message_id` before ingest.
-6. **Never auto-create a quote without the measure gate.** Identify and measure first. Low confidence → ask **one** dimension, then continue.
-7. **No new public Luxe endpoints.** PR #71 / `docs/LUXE_API_LOCK.md` (repo cites PR 61 for the same gate in `luxe_public_edge.py`) locked `luxe.empirebox.store`. WhatsApp → LuxeForge is **authenticated server-to-server on the private cash path** (localhost / Tailscale / `studio` / `api`).
+3. **Family editions stay isolated** (`EMPIRE_DATA_DIR` / `WHATSAPP_JOBS_ROOT`).
+4. **Never lose a file.** Persist on the Max edition first; enqueue if LuxeForge is down; retry. Dedup Meta `wa_message_id` before ingest.
+5. **Never auto-create a quote without the measure gate** (HIGH by method, or Rafael’s typed dimension). ESTIMATE is shown labeled `estimated` and is not enough to mint an EST.
+6. **No new public Luxe endpoints.** PR #71 / `docs/LUXE_API_LOCK.md` (repo cites PR 61 for the same gate in `luxe_public_edge.py`). WhatsApp → LuxeForge is **authenticated server-to-server on the private cash path**.
 
 ---
 
 ## 1. Current-state audit
 
-Today WhatsApp and LuxeForge are **two production intake paths**. They both can create a `quotes_v2` draft. They do not share a job id.
+Today WhatsApp and LuxeForge are **two production intake paths**. They both can create a `quotes_v2` draft. They do not share a job id. WhatsApp filing already parks unnamed photos and can file into a client slug; it does **not** yet have personal / insurance / store as first-class folders, and it can still jump to a photo quote without the method gate.
 
 ### What to reuse
 
 | Piece | Path | Reuse how |
 | --- | --- | --- |
-| WhatsApp webhook, allowlist, 24h window, `_seen` dedup | `backend/app/services/max/whatsapp_channel.py` | Keep as the only Meta ingress. After persist/batch, call the new internal intake writer. |
-| Photo batch, job ask, SQLite TTL | `backend/app/services/max/whatsapp_log.py` | Keep file-only default, one ask, `asked==1` gate, expiry on load. |
-| Quote gate (caption only, one draft/batch) | `wants_photo_quote`, `mark_photo_batch_quoted` in the two files above; `docs/WHATSAPP_CHANNEL.md` | Do not regress PR #91. |
-| Job name resolve | `backend/app/services/max/doc_lookup.py`, `backend/app/config/client_aliases.json` | Unique name → attach to existing job folder + LuxeForge record. Ambiguous/unknown → ask once; do not guess. |
-| LuxeForge project row | `backend/app/routers/intake_auth.py` (`intake_projects`: `intake_code`, photos, scans, measurements, `quote_id`, `photo_analysis`) | **This is the central job record.** Extend it; do not invent a third table as the source of truth. |
-| Designer submit → Workroom | `backend/app/services/luxeforge_intake_handoff.py` | Reuse attach-files + owner notice. **Do not** call `create_quote` from WhatsApp until the measure gate passes. |
-| Shared lead/CRM brief | `backend/app/services/workroom_lead_intake.py`, `POST /api/v1/leadforge/intake` | Optional later: one CRM lead per LuxeForge job. Not required for phase 0. |
-| Photo item ID | `backend/app/services/quote_engine/item_analyzer.py`, `backend/app/routers/vision.py` | Identify items from photos. Today WhatsApp jumps from here straight to a quote. |
-| Photo → quote lines | `backend/app/services/quote_engine/photo_quote_lines.py` | Use **after** measure. Current WhatsApp `default_photo_handler` skips measure. |
-| Calibrate / pixel → inch | `backend/app/routers/luxeforge_measurements.py`, `backend/app/models/luxeforge_measurement.py` | Reuse calibrate + calculate. Wire to the intake attachment, not a loose `image_id`. |
-| Fractions (never shop decimals) | `backend/app/services/pricing/dimensions.py` (`format_inches_plain`) | All displayed measurements: `26 3/4"`, not `26.75`. |
-| Area-grouped totals, deposit, balance | `backend/app/services/quote_service.py` (`_area_grouped_financials`, `deposit_percent` default 50) | Draft quote columns after the gate. |
-| Empire Workroom branding | `backend/app/services/quote_pdf_service.py` (legacy portrait) | Default billed-as / PDF skin. |
-| Unified job board | `backend/app/routers/jobs_unified.py`, `backend/app/services/lifecycle_service.py` (`create_job_from_quote`) | Create/link a `jobs_unified` row **from the intake record**, not only after a quote exists. |
-| Job folders | `$EMPIRE_DATA_DIR/jobs/<slug>/photos\|received` via `whatsapp_log.file_into_job` | Same slug on the LuxeForge row. |
-| Public Luxe lock | `backend/app/security/luxe_public_edge.py`, `empire-command-center/middleware.ts`, `docs/LUXE_API_LOCK.md` | New writer must stay **off** the public allowlist. |
-| Founder PIN / founder JWT | `backend/app/accounts/founder.py`, `POST /api/v1/auth/founder-token` | Operator reads (Max, CC, WhatsApp chats). Not the S2S token. |
-| Intake JWT | `INTAKE_JWT_SECRET` in `intake_auth.py` | Designer portal only. Do not reuse for Max→LuxeForge. |
-| 3D upload extract | `backend/app/routers/photos.py` (stl/glb/usdz/zip) | Store on `intake_projects.scans`. Measure is **not** implemented. |
-| WhatsApp Chats UI | `empire-command-center` WhatsApp screen + `GET /api/v1/whatsapp/chats*` | Show the shared `intake_id` / `intake_code`. |
-| LuxeForge admin UI | `empire-command-center/app/components/screens/LuxeForgePage.tsx` | Same record. Must send intake JWT (`intakeFetch`); do not add public list APIs. |
+| WhatsApp webhook, allowlist, 24h window, `_seen` dedup | `backend/app/services/max/whatsapp_channel.py` | Keep as the only Meta ingress. After persist/batch, file the folder; call LuxeForge **only** on client + quote ask. |
+| Photo batch, job ask, SQLite TTL | `backend/app/services/max/whatsapp_log.py` | Keep file-only default, one ask, `asked==1` gate, expiry on load. Extend folder resolve to personal / insurance / store. |
+| Quote gate (caption only, one draft/batch) | `wants_photo_quote`, `mark_photo_batch_quoted`; `docs/WHATSAPP_CHANNEL.md` | Do not regress PR #91. Still not enough: measure gate must pass before EST. |
+| Job name resolve | `backend/app/services/max/doc_lookup.py`, `backend/app/config/client_aliases.json` | Unique client name → client folder. Personal / insurance / store are **not** aliases of a client. |
+| LuxeForge project row | `backend/app/routers/intake_auth.py` (`intake_projects`) | **Hub for client+quote-ask jobs only.** Owner = Rafael founder account. |
+| Designer submit → Workroom | `backend/app/services/luxeforge_intake_handoff.py` | Reuse attach-files. **Do not** `create_quote` until HIGH / typed dimension. Lead only when quote is asked. |
+| Shared lead/CRM brief | `backend/app/services/workroom_lead_intake.py`, `POST /api/v1/leadforge/intake` | Call **only** on conversion / quote ask, never phase 0, never personal/insurance/store. |
+| Photo item ID | `backend/app/services/quote_engine/item_analyzer.py`, `backend/app/routers/vision.py` | Identify items. A vision score of 85 is **secondary**, never HIGH by itself. |
+| Photo → quote lines | `backend/app/services/quote_engine/photo_quote_lines.py` | After gate. Split **drapery (per width)** vs **upholstery (sq ft)**. |
+| Calibrate / pixel → inch | `backend/app/routers/luxeforge_measurements.py`, `backend/app/models/luxeforge_measurement.py` | Method (b): calibrated known reference in frame → HIGH. |
+| Fractions (never shop decimals) | `backend/app/services/pricing/dimensions.py` (`format_inches_plain`) | All dimensions: `26 3/4"`, not `26.75`. |
+| Deposit / balance | `backend/app/services/quote_service.py` (`deposit_percent` default 50) | Default 50%, editable per quote. |
+| Area-grouped financials | `quote_service._area_grouped_financials` | **Upholstery only** for sq ft columns. |
+| Empire Workroom branding | `backend/app/services/quote_pdf_service.py` | Default. Nelma’s Workroom / Square only when Rafael asks. |
+| Unified job board | `backend/app/routers/jobs_unified.py` | Link a board row when an LF job is created (client + quote ask), not for personal folders. |
+| Job folders | `$EMPIRE_DATA_DIR/jobs/<slug>/…` plus new personal / insurance / store roots | Every batch files somewhere. |
+| Public Luxe lock | `backend/app/security/luxe_public_edge.py`, `docs/LUXE_API_LOCK.md` | Internal writer **off** the public allowlist. |
+| Founder PIN / founder JWT | `backend/app/accounts/founder.py` | Record owner is Rafael’s founder account. |
+| 3D upload extract | `backend/app/routers/photos.py` | Store and **link** STL/Polycam to the LF job. HIGH only with confirmed units. |
+| WhatsApp Chats / LuxeForge admin | Command Center screens | Chats show folder + optional `intake_code`. Admin only for LF jobs. |
 
 ### What is missing
 
 | Gap | Why it matters |
 | --- | --- |
-| WhatsApp never writes `intake_projects` | Files land in inbox/job folders; quotes (when asked) go straight to `quotes_v2` with `customer_name="Photo"`. Max and the board cannot see one job. |
-| No internal S2S intake API | Only designer JWT + public capture posts. A WhatsApp worker must not use the public luxe host or the designer JWT. |
-| No service token / scopes / rotation | Nothing today is “Max backend, scope `intake:write`”. |
-| Measure gate not on WhatsApp | `default_photo_handler` → `analyze_photo_items` → `create_quote`. No calibrated reference, no confidence stop, no “ask one dimension”. |
-| `luxeforge_measurements` not bound to intake | SQLAlchemy `luxeforge_image_measurements` is a parallel stack; not the `measurements` JSON on `intake_projects`. |
-| Polycam / STL / PDF-plan → dimensions | Files can be stored. There is no extractor that yields width/height/drop with confidence. |
-| `jobs_unified` not created from LuxeForge or WhatsApp | Handoff sets `quotes_v2` only. `create_job_from_quote` is a later operator click. |
-| Job folder ≠ DB job ≠ intake id | Three identifiers. Design: one `intake_id` + `intake_code`, folders keyed by `job_slug`, board keyed by `job_id`, all stored on the intake row. |
-| No durable retry queue | If LuxeForge/DB is down, WhatsApp persist can succeed and the intake write is lost. |
-| Owner list API on public luxe | `GET /api/v1/intake/owner/submissions` is denied and not implemented. Keep it that way. |
-| Area-grouped **line** columns Rafael listed | Financial split exists; the per-area table (Description, Qty, Unit, Sq ft/item, Price/sq ft, Total, area subtotal) is not a single WhatsApp/intake schema. |
+| No first-class personal / insurance / store folders | Every batch must file; those kinds must not create LF jobs or leads. |
+| WhatsApp never writes `intake_projects` | Client+quote-ask still has no shared LF id for Max / board. |
+| No internal S2S intake API + service token | Required for LF job create; must stay off public luxe. |
+| Measure gate is not method-based | Today photo_quote can mint EST from vision items with no typed / calibrated / unit-confirmed source. |
+| `luxeforge_measurements` not bound to intake | Calibrate exists but is not the gate. |
+| Polycam / STL / PDF units | Files store; units often unknown → ESTIMATE until Rafael types or units are confirmed. |
+| Drapery vs upholstery line schemas | Sq ft columns must not be the drapery default. Drapery width rates (bump / no bump / lining yd) are not a single intake schema. |
+| Per-item first-dimension script | No ordered ask list (panel length, roman width, section length, …). |
+| No durable retry queue | LF down must not lose client+quote-ask writes; folder persist already comes first. |
 
-### Parallel sinks (do not add a fourth “source of truth”)
+### Parallel sinks
 
-1. `intake_projects` — LuxeForge (chosen hub)  
-2. WhatsApp SQLite + `whatsapp/inbox/` — channel log + parked bytes  
-3. `quotes_v2` — drafts after the gate  
-4. `jobs_unified` — board, linked from intake  
-5. `lf_leads` / CRM — optional later  
+1. **Folders** (always) — client slug **or** personal / insurance / store  
+2. `intake_projects` — LuxeForge, **only** client + quote ask  
+3. `quotes_v2` — EST **only** after method gate  
+4. `jobs_unified` — board card for LF jobs  
+5. `lf_leads` — **only** on conversion / quote ask  
+6. WhatsApp SQLite — channel log  
 
 ---
 
 ## 2. Data model
 
-**Hub: `intake_projects` (LuxeForge job).** Additive columns; do not break designer portal.
+### Folder (always, every batch)
 
-### Job record (`intake_projects` extensions)
+| Kind | Where | Creates LF job? | Creates lead? | Creates EST? |
+| --- | --- | --- | --- | --- |
+| `client` | `$EMPIRE_DATA_DIR/jobs/<client-slug>/` | Only if Rafael asks for a quote | Only if quote asked / conversion | Only after method gate |
+| `personal` | edition `personal/` (exact slug TBD) | No | No | No |
+| `insurance` | edition `insurance/` | No | No | No |
+| `store` | edition `store/` | No | No | No |
+
+Unknown client name → ask once (PR #91) or file personal/insurance/store if Rafael says so. Do not guess a client.
+
+### LuxeForge job (`intake_projects`, client + quote ask only)
 
 | Field | Purpose |
 | --- | --- |
-| `id` | UUID hub key (`intake_id`). Max, board, folders, chat log store this. |
-| `intake_code` | Human id (`LF-YYYY-NNN`). |
-| `edition` | `EMPIRE_DATA_DIR` key. Family isolation. |
+| `id` | UUID (`intake_id`). Max, board, folder, chat log. |
+| `intake_code` | **LF-YYYY-NNN assigned at job creation** (this moment). |
+| `owner_account` | Rafael founder/owner. |
+| `edition` | Family isolation. |
 | `source` | `whatsapp` \| `designer_portal` \| `leadforge`. |
-| `status` | `received` → `identified` → `measuring` → `measured` → `quote_draft` → (Rafael) `quoted`. Never `sent` from automation. |
-| `job_slug` | Existing folder under this edition’s jobs root, or empty until named. |
-| `job_id` | `jobs_unified` id (created in phase 1). |
-| `quote_id` / `quote_number` | Set **only** after measure gate. |
-| `wa_id` | Sender. |
-| `wa_batch_id` | Open/closed WhatsApp media batch. |
-| `customer_name`, `address`, `treatment`, `notes` | From portal or `doc_lookup` / caption. |
+| `folder_kind` | Always `client` on this row. |
+| `status` | `received` → `identified` → `measuring` → `measured` → `quote_draft`. Never `sent` from automation. |
+| `job_slug` | Client folder. |
+| `job_id` | `jobs_unified` id when the LF job exists. |
+| `quote_id` / `quote_number` | **Empty until** method gate HIGH (or typed sizes) **and** quote ask. Then EST. |
+| `lead_id` | Set only on conversion / quote ask. |
+| `wa_id`, `wa_batch_id` | Channel keys. |
+| `branding` | Default `empire_workroom`. `nelma_workroom` / Square only when Rafael asks. |
 | `business` | Default `workroom`. |
 
-### Attachments (child table `intake_attachments`, new)
+### Attachments (`intake_attachments` on an LF job; folder files always)
 
-Do not only stuff JSON `photos`/`scans` if we need retry and confidence.
+Same as before (`kind`, `sha256`, `local_path`, `wa_message_id`, 3D linked). 3D/Polycam/PDF are **uploaded and linked** even when grade is ESTIMATE.
 
-| Field | Purpose |
-| --- | --- |
-| `id` | Attachment id. |
-| `intake_id` | Hub. |
-| `kind` | `photo` \| `pdf` \| `stl` \| `polycam` \| `other`. |
-| `sha256` | Dedup + never-lose. |
-| `local_path` | Edition media or job folder path. |
-| `wa_message_id` | Meta id; unique per edition. |
-| `whatsapp_attachment_id` | Row in `whatsapp_attachments`. |
-| `filing_status` | `inbox` \| `filed`. |
-| `identify_json` | Item analyzer output. |
-| `identify_confidence` | `high` \| `medium` \| `low`. |
-
-### Measurements (child `intake_measurements`)
+### Measurements (`intake_measurements`)
 
 | Field | Purpose |
 | --- | --- |
-| `intake_id`, `attachment_id`, `item_index` | Link. |
-| `source` | `calibrated_photo` \| `asked_dimension` \| `stl` \| `polycam` \| `pdf_plan` \| `manual`. |
-| `width_in`, `height_in`, `depth_in` / `drop_in` | Stored as rational sixteenths (integer 1/16ths) or text fractions. **Display via `format_inches_plain` only.** |
-| `area_sqft` | Derived after both plan dimensions exist. |
-| `confidence` | 0–1 plus `high/medium/low`. |
-| `reference` | `{label, pixels, real_in}` from `luxeforge_measurements.calibrate`. |
-| `asked` | True if this value came from the one WhatsApp dimension question. |
-| `gate_pass` | True only when confidence ≥ threshold **or** Rafael/asked dimension filled the hole. |
+| `item_type` | `drapery` \| `roman` \| `banquette` \| `cushion` \| `channel` \| `upholstery` \| … |
+| `name` | The **one named dimension** (e.g. `finished_panel_length`, `roman_width`, `section_length`, `wood_board_cut`, `fabric_cut`). |
+| `value_sixteenths` / display | Fractions via `format_inches_plain` only. |
+| `grade` | `HIGH` \| `ESTIMATE`. |
+| `method` | `rafael_typed` \| `calibrated_reference` \| `3d_or_plan_confirmed_units` \| `vision_only` \| `uncalibrated_photo`. |
+| `how` | Human note of how it was measured (for HIGH) or `estimated`. |
+| `vision_score` | Optional 0–100. **85 is secondary.** Never sets HIGH alone. |
+| `gate_pass` | True only if `grade=HIGH` (method a/b/c). ESTIMATE + ask outstanding → false. |
+
+HIGH iff method is (a), (b), or (c). Vision-only, no reference, unconfirmed-unit STL → ESTIMATE, labeled `estimated`, ask one named dimension.
 
 ### Quote drafts
 
-Reuse `quotes_v2` + `quote_line_items`. Create only when every priced item has `gate_pass`.
+Create **one** `quotes_v2` draft per batch, only when: client folder + Rafael asked + every priced item `gate_pass` + not already quoted.
 
-**Area-grouped columns (Rafael):** group by area/room, then:
+**Upholstery** (grouped by area): Description, Qty, Unit, Sq ft per item, Price per sq ft, Total, subtotal per area, grand total, deposit (50% default, editable), balance.
 
-| Column | Notes |
-| --- | --- |
-| Description | Identified item + location |
-| Qty | Integer |
-| Unit | e.g. panel, pair, sq ft |
-| Sq ft per item | Fraction-backed area |
-| Price per sq ft | Rate card |
-| Total | qty × sq ft × rate (or unit price) |
-| Subtotal per area | After the group |
-| Grand total | After all areas |
-| Deposit | Default 50% unless Rafael changes |
-| Balance | Grand − deposit |
+**Drapery** (never sq ft by default): per-width lines (re-line with bump $150/width, without bump $125/width) + lining $10.50/yd, napped $12.50/yd + labor/hardware. Then grand total, deposit, balance.
 
-Branding: **Empire Workroom** by default (`quote_pdf_service` legacy path / `business_unit=workroom`).
+Branding: Empire Workroom unless Rafael asks for Nelma’s Workroom / Square.
 
-### Links (all stored on the hub row and mirrored)
+### Links
 
 ```
-intake_id ──┬── jobs_unified.job_id
-            ├── jobs_root / <job_slug> / {photos,received,scans}
-            ├── quotes_v2.id          (after gate)
-            ├── whatsapp_messages.id + whatsapp_attachments.id
-            └── lf_leads.id           (optional)
+folder (always)
+  client slug ──┬── intake_id (only if quote asked)
+                ├── LF-YYYY-NNN
+                ├── jobs_unified.job_id
+                ├── quotes_v2 EST-…     (after method gate)
+                ├── lf_leads.id         (quote ask / conversion)
+                └── wa attachments + 3D
+personal | insurance | store ── files + wa log only
 ```
-
-Max tools (`get_quote`, `set_current_job_id`, open job) resolve `intake_id` first, then the linked quote/folder.
 
 ---
 
 ## 3. Auth (Max backend → LuxeForge)
 
-Public luxe already allows anonymous `POST /api/v1/intake/signup|login` and `POST /api/v1/leadforge/intake`. **Do not put WhatsApp ingest on those paths.** A stolen public form must not be able to write Rafael’s jobs.
-
-### Endpoint (private only)
+Unchanged intent: **no public ingest.** Private
 
 ```
-POST /api/v1/internal/luxeforge/jobs          create/update job
+POST /api/v1/internal/luxeforge/jobs
 POST /api/v1/internal/luxeforge/jobs/{id}/attachments
 POST /api/v1/internal/luxeforge/jobs/{id}/measurements
-GET  /api/v1/internal/luxeforge/jobs/{id}     Max / board / tests
+GET  /api/v1/internal/luxeforge/jobs/{id}
 ```
 
-- Prefix `/api/v1/internal/` is **denied** on `luxe.empirebox.store` / `test-luxe` (add to `_BLOCKED_PREFIXES` in `luxe_public_edge.py` and Next middleware).
-- Listen only on the process already behind Access / Tailscale / localhost.
-- No CORS for browsers. No cookies.
+`/api/v1/internal/` denied on `luxe.empirebox.store` / `test-luxe`. Service token `LUXEFORGE_INTAKE_SERVICE_TOKEN` (+ `TOKEN_PREVIOUS`), scopes `intake:write|attach|measure|read`, `hmac.compare_digest`, never log. Owner of created rows is Rafael’s founder account, not a synthetic WhatsApp user.
 
-### Service token
-
-| Item | Spec |
-| --- | --- |
-| Env | `LUXEFORGE_INTAKE_SERVICE_TOKEN` (random 32+ bytes). Optional `LUXEFORGE_INTAKE_SERVICE_TOKEN_PREVIOUS` for rotation overlap. |
-| Header | `Authorization: Bearer <token>` plus `X-Empire-Service: max-whatsapp` |
-| Compare | `hmac.compare_digest` of SHA-256 hashes; never log the token. |
-| Scopes | `intake:write`, `intake:attach`, `intake:measure`, `intake:read`. WhatsApp worker gets write+attach; measure worker gets measure; Max read tools use founder PIN **or** `intake:read`. |
-| Rotation | Deploy new token to `TOKEN` and old to `TOKEN_PREVIOUS`. Restart Max worker then intake. After 24h drop previous. One token per edition if family boxes share code (different env). |
-| Not | Designer `INTAKE_JWT_SECRET`, `FOUNDER_PIN`, Graph WhatsApp token. |
-
-If the token is missing, the writer is disabled; WhatsApp still persists files and enqueues.
+If the token is missing, folder persist still happens; LF create is queued.
 
 ---
 
@@ -200,42 +195,39 @@ If the token is missing, the writer is disabled; WhatsApp still persists files a
 sequenceDiagram
     participant Meta
     participant WA as whatsapp_channel
-    participant Disk as edition media + jobs/
+    participant Disk as folder (client or personal/insurance/store)
     participant Q as intake_retry_queue
-    participant LF as LuxeForge intake_projects
+    participant LF as LuxeForge job
     participant Board as jobs_unified
     participant Max
     participant Quote as quotes_v2
 
     Meta->>WA: webhook (photo/PDF/STL + text)
     WA->>WA: _seen(wa_message_id)? drop if yes
-    WA->>Disk: persist bytes (never lose)
-    WA->>WA: file-only unless caption wants_photo_quote
-    WA->>LF: S2S create/update job (service token)
-    alt LuxeForge down
-        WA->>Q: enqueue payload + paths
-        Q-->>LF: retry
+    WA->>Disk: persist + file folder (never lose)
+    Note over Disk: personal/insurance/store: stop here (no job, no lead)
+    alt client work AND Rafael asked for a quote
+        WA->>LF: S2S create job (LF number now)
+        LF->>Board: job_id
+        Note over LF: 3D/Polycam uploaded and linked
+        Note over Max: identify; grade HIGH only by method
+        alt grade ESTIMATE
+            Max->>Max: ask Rafael ONE named dimension
+            Max->>LF: rafael_typed → HIGH
+        end
+        alt method gate HIGH AND not already quoted
+            LF->>Quote: ONE EST draft (drapery per width / upholstery sq ft)
+            Quote-->>Max: draft for Rafael (not sent)
+        end
+    else client file-only or Max chat
+        Max-->>Max: general assistant / file only
     end
-    LF->>Board: ensure job_id (same intake_id)
-    LF->>Disk: file under job_slug when unique name
-    Note over WA,Max: identify items (vision / analyzer)
-    Note over WA,Max: measure (calibrate or 3D/PDF)
-    alt confidence low
-        WA->>Meta: ask ONE dimension (Rafael/client on WA)
-        Meta->>WA: 72 1/4 wide
-        WA->>LF: source=asked_dimension, gate_pass
+    alt LuxeForge down on client+quote-ask
+        WA->>Q: enqueue; retry; file already on disk
     end
-    alt caption asked quote AND gate_pass AND not already quoted this batch
-        LF->>Quote: ONE draft, area-grouped, fractions, Workroom brand
-        Quote-->>Max: draft for Rafael review (not sent)
-    else no quote ask or gate fail
-        Max-->>Max: chat / file only
-    end
-    Max->>LF: read intake_id
-    Board->>LF: read same intake_id
 ```
 
-Identify / measure run on the Max worker against private APIs. WhatsApp replies for “which job?” and “what is the width of the left panel?” stay in-window text. They are not quotes.
+Max asks **Rafael only** for the missing named dimension (see §0.5). Not Nelma, not the album sender, until a later reviewed phase.
 
 ---
 
@@ -243,88 +235,76 @@ Identify / measure run on the Max worker against private APIs. WhatsApp replies 
 
 | Case | Behavior |
 | --- | --- |
-| **Low confidence** | Do not draft. Ask **one** dimension (the missing plan measure: usually width **or** height/drop — not a questionnaire). Store answer as `source=asked_dimension`. If still blocked, leave status `measuring` and tell Rafael in Max. |
-| **Unknown / ambiguous job** | PR #91: park inbox, ask once. Create the LuxeForge row anyway (`job_slug` empty). Unique reply files the batch and sets `job_slug`. `hello` / schedule / unresolved text → Max chat, not a second ask. |
-| **Duplicate Meta delivery** | `_seen(wa_message_id)` before persist/batch (PR #91). S2S upsert on `(edition, wa_message_id)` / sha256. Second delivery is a no-op. |
-| **LuxeForge down** | Bytes already on disk. Insert `intake_retry_queue` (`payload_json`, `path`, `attempts`, `next_run`). Worker retries with backoff (1m / 5m / 30m / 2h). Dead-letter after N tries → Max alert. **Do not drop the file.** |
-| **Identify fails** | Status stays `received`. File is kept. No quote. |
-| **3D / PDF extract gap** | See §5.1. File is attached. Measure `source` stays empty; gate fails; no quote. |
-| **Quote path** | Never `send_quote`, never Graph document to the customer, never client email. |
-| **Caption did not ask** | No quote, even if measure is perfect. |
+| **ESTIMATE (not HIGH)** | Show value labeled `estimated`. Ask Rafael **one named** dimension for that item (script in §0.5). No EST. |
+| **Vision score 85, no method** | Still ESTIMATE. 85 never passes the gate alone. |
+| **Unknown / ambiguous client** | PR #91: park or ask once. Do not invent a client. Personal/insurance/store if Rafael files there. `hello` / schedule → Max chat. |
+| **Personal / insurance / store** | Folder only. No LF job, no lead, no EST, even if caption says “quote”. |
+| **Duplicate Meta delivery** | `_seen` before persist; upsert `(edition, wa_message_id)` / sha256. |
+| **LuxeForge down** | Folder already written. Queue LF create only when client+quote-ask. Retry; never drop the file. |
+| **Polycam/STL, units unknown** | Link files to the job. Grade ESTIMATE. Max names the exact dimension; Rafael may type sizes last resort. |
+| **Quote path** | Never send to a client. Email of docs **only** `empirebox2026@gmail.com`. |
+| **Caption did not ask** | Client folder only. No LF job, no lead, no EST. |
 | **Second photo in a quoted batch** | File + attach only. |
 
-### 5.1 Polycam / STL / PDF-plan extraction gaps (honest)
+### 5.1 Polycam / STL / PDF-plan gaps
 
-| Source | What we can store today | What we cannot do yet |
-| --- | --- | --- |
-| **Photo + known reference** (door, outlet, tape) | Vision prompts mention references (`vision.py`). Interactive calibrate exists (`luxeforge_measurements.py`). | No automatic “this is a 36" door → scale the window” with a stored confidence that the quote gate trusts. |
-| **Photo, no reference** | Item labels (roman, panel, sofa). | Real-world inches. Must ask one dimension or wait for a calibrated photo. |
-| **Polycam export** (USDZ/OBJ/GLB/ZIP) | `photos.py` unzip + `intake_projects.scans`. UI copy in Photo Analyzer. | No mesh → opening size pipeline. No unit metadata guarantee (meters vs inches). No confidence. |
-| **STL** | Stored; CraftForge has STL fields (`craftforge.py`) for a different product. | No bounding-box → Workroom width/height/drop. Facet scale often unitless. |
-| **PDF plan / shop drawing** | Bytes in `received/`. `notes_extraction.py` is handwritten notes, not scale drawings. | No title-block scale, no dimension-string OCR tied to an opening. |
-
-Until an extractor exists for a kind, that attachment **cannot** pass the measure gate by itself.
+Unchanged technically: we can store files; we cannot yet confirm units or extract openings. **DECIDED:** that is ESTIMATE until Rafael types or units are confirmed; files still upload and link.
 
 ---
 
 ## 6. Phases (each independently shippable)
 
-### Phase 0 — Smallest useful step
+### Phase 0 — Smallest useful step (folders only)
 
-WhatsApp batch (after persist) S2S-creates or updates one `intake_projects` row with source `whatsapp`, attachments on disk, `wa_message_id` dedup. No quote. No public endpoint. If LuxeForge errors, queue + retry. Max can `GET` the job by `intake_id` with founder PIN **or** service `intake:read`.
+Persist every batch into a **client or personal/insurance/store folder**. No LuxeForge job, no lead, no EST. Dedup `wamid`. Max remains general chat.
 
-**Done when:** a mocked webhook of 3 photos + “Maggie” yields one intake row + files under `maggie-frolich`, and a second identical `wamid` does not create a second row.
+**Done when:** mocked 3 photos + “Maggie” file under `maggie-frolich`; 3 photos + “personal” (or equivalent) file under personal and create **zero** `intake_projects` / `lf_leads` / `quotes_v2`; duplicate `wamid` is a no-op.
 
-### Phase 1 — One record everywhere
+### Phase 1 — LuxeForge job when Rafael asks (client only)
 
-Write `job_id` (`jobs_unified` status `intake`) and `job_slug` on the hub. Job board card and WhatsApp Chats show `intake_code`. Folder writes stay edition-scoped.
+On client folder **and** explicit quote ask: S2S-create `intake_projects` with **LF-YYYY-NNN**, owner = Rafael, link 3D/photos, `jobs_unified` card. Still **no EST**. Optional LeadForge lead **now** (quote asked). Queue if LF is down.
 
-**Done when:** opening the board card, the folder, and Max “open this job” all resolve the same `intake_id`.
+**Done when:** quote-caption on Maggie → one LF row + folder + board id; same photos in `store/` → still no LF row; personal batch never gets a lead.
 
-### Phase 2 — Identify + measure gate
+### Phase 2 — Method measure gate
 
-Run item analyzer; persist confidence. For photos, require calibrate **or** one asked dimension. Do not call `create_quote`.
+Grade HIGH only by method (a)(b)(c). ESTIMATE labeled `estimated`; Max asks Rafael **one named** dimension per §0.5. Vision 85 without a method does not pass. No `create_quote`.
 
-**Done when:** low-confidence fixture asks once and does not mint `quotes_v2`; high-confidence + reference reaches `measured`.
+**Done when:** uncalibrated photo → ask `finished_panel_length` (drapery) or the matching first name; typed `54 1/2"` → HIGH `rafael_typed`; 85-only fixture stays ESTIMATE.
 
-### Phase 3 — Draft quote after the gate
+### Phase 3 — One EST after the gate
 
-If and only if caption asked **and** batch not yet quoted **and** `gate_pass`: one `quotes_v2` draft, area-grouped columns, plain fractions, Empire Workroom, `not sent`.
+If HIGH + quote ask + not already quoted: one draft. **Upholstery** = area sq ft columns. **Drapery** = per-width + lining/labor/hardware, **not** sq ft. Deposit 50% editable. Empire Workroom default. Not sent.
 
-**Done when:** existing PR #91 tests still pass, plus a new test that measure-fail blocks `create_quote`.
+**Done when:** PR #91 tests still pass; drapery fixture has no “sq ft per item” default; measure-fail blocks EST.
 
-### Phase 4 — 3D / PDF extractors (optional, separate)
+### Phase 4 — 3D / PDF unit extractors (optional)
 
-Polycam/STL bounding box and PDF dimension strings, each with confidence. Until then those files remain attachments only.
+Confirm units on Polycam/STL/plan → method (c) HIGH. Until then: link files, Rafael types last resort.
 
 ---
 
 ## 7. Tests per phase (mocks only)
 
-No live Graph, no live `EMPIRE_DATA_DIR`, no live `client_aliases.json` (stub `MAX_CLIENT_ALIASES_PATH` as in WhatsApp tests). No writes to `~/empire-data`. Reuse `tests/_live_data_guard.py`.
+No live Graph, no live `EMPIRE_DATA_DIR`, stub `MAX_CLIENT_ALIASES_PATH`. Reuse `tests/_live_data_guard.py`.
 
 | Phase | Tests |
 | --- | --- |
-| 0 | S2S 401 without token; 403 on forged `Host: luxe.empirebox.store`; create job from mocked webhook; duplicate `wamid` no-op; LuxeForge 503 → queue row + file still on disk; family `EMPIRE_DATA_DIR` cannot read the other edition’s intake. |
-| 1 | Hub has `job_id` + `job_slug`; board GET and WhatsApp message metadata share `intake_id`. |
-| 2 | High confidence + reference → `measured`; low confidence → one ask, no quote; skip/hello still fall through (PR #91). |
-| 3 | Caption quote + gate → **one** draft; nearby quote text + 7 photos → 0 drafts; second captioned photo in batch → 0 extra drafts; fractions in line text (`3/4`, not `0.75`); `create_quote` not called when gate fails. |
-| 4 | STL/Polycam/PDF attach without extractor → `gate_pass=false`. |
+| 0 | File to client folder; file to personal/insurance/store with **no** intake/lead/quote rows; duplicate `wamid`; family edition isolation. |
+| 1 | Client + quote ask → one LF-YYYY-NNN, owner founder; store/personal + “quote” caption → **no** LF job; S2S 401 without token; 403 on `Host: luxe.empirebox.store`; LF 503 → queue, file kept; lead created only on quote ask, not on file-only. |
+| 2 | `rafael_typed` / calibrated reference / unit-confirmed 3D → HIGH; vision 85 only → ESTIMATE + one named ask to Rafael (not Nelma); fractions only; drapery first ask is finished panel length (else fallbacks). |
+| 3 | Caption + HIGH → **one** EST; nearby quote text + 7 photos → 0 EST; drapery lines are per-width not sq ft; upholstery has sq ft columns; deposit 50; `create_quote` not called on ESTIMATE. |
+| 4 | STL/Polycam linked; unconfirmed units → ESTIMATE; Rafael-typed size → HIGH. |
 
 ---
 
-## 8. Open questions for Rafael
+## 8. Open questions
 
-1. **When is a LuxeForge job created?** Every inbound photo/PDF/3D batch, or only when the caption asks for a quote / a job name is known? (Recommendation: every fileable batch, so the board sees work even when it is file-only.)
-2. **Confidence number.** What is “low”? Start at `< 0.75` or vision `low`/`medium`?
-3. **Which single dimension** do we ask first (width vs drop vs height)? Per treatment?
-4. **Who is the intake user** for WhatsApp rows — a system `whatsapp@empire` user, or Rafael’s operator account?
-5. **Deposit** still 50% on these drafts?
-6. **Should phase 0 also write a LeadForge/CRM lead**, or wait until Rafael converts the draft?
-7. **Polycam/STL:** block the quote until a photo measure exists, or allow Rafael to type sizes and skip 3D extract?
-8. **Job code vs EST number.** Keep `LF-YYYY-NNN` on the hub and EST only after the gate?
-9. **Ask the WhatsApp sender** for the missing dimension, or only Rafael/Max?
-10. **McLean-style area groups** — is the column set above (sq ft × price/sq ft) the default for drapery **and** upholstery?
+The ten questions from the first draft are **DECIDED** (§0). Left for implementation, not product direction:
+
+- Exact edition slugs/paths for `personal` / `insurance` / `store` (names only; behavior is decided).
+- How a vision “85” is computed when used as the **secondary** check (never as the gate).
+- The later review step that allows Max to ask Nelma (process only).
 
 ---
 
@@ -333,10 +313,13 @@ No live Graph, no live `EMPIRE_DATA_DIR`, no live `client_aliases.json` (stub `M
 - Merge or deploy this design.  
 - New routes on `luxe.empirebox.store`.  
 - Auto-send quotes, invoices, or WhatsApp documents to clients.  
+- Email docs anywhere except `empirebox2026@gmail.com`.  
+- LuxeForge job or lead from personal / insurance / store.  
+- EST from ESTIMATE or from a vision score alone.  
+- Default drapery pricing to sq ft.  
 - Delete or reuse EST-2026-300..306.  
-- One shared jobs tree across editions.  
-- Multiple inbound WhatsApp workers on one edition DB (PR #91 single-worker).  
-- CraftForge / LLC Factory as the hub (different products).  
+- Shared jobs tree across family editions.  
+- Multiple inbound WhatsApp workers on one edition DB.  
 
 ---
 
