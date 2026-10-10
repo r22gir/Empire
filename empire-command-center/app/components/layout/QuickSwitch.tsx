@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Search, MessageSquare, BarChart3, ClipboardList, FolderOpen, Globe, Video, Scissors, Hammer, Server, MessageCircle, ListTodo, Monitor, Terminal, HardDrive, ShoppingBag, FileText } from 'lucide-react';
+import { Search, MessageSquare, BarChart3, ClipboardList, FolderOpen, Globe, Video, Scissors, Hammer, Server, MessageCircle, ListTodo, Monitor, Terminal, HardDrive, ShoppingBag, FileText, Briefcase } from 'lucide-react';
+import { API } from '../../lib/api';
+import { jobHubHref } from '../jobhub/href';
 
 const SECTIONS = [
   { label: 'Chat', shortcut: 'C', screen: 'chat', icon: MessageSquare, color: '#b8960c' },
@@ -47,6 +49,19 @@ export default function QuickSwitch({ open, onClose, onSelect }: Props) {
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
+  // Jobs: one click from search to the job hub (quotes, invoices, drawings, photos, messages, notes, timeline).
+  const [jobs, setJobs] = useState<any[]>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || q.length < 2) { setJobs([]); return; }
+    let dead = false;
+    const t = setTimeout(() => {
+      fetch(`${API}/jobs/search?q=${encodeURIComponent(q)}`, { cache: 'no-store' }).then(r => (r.ok ? r.json() : null))
+        .then(d => { if (!dead) setJobs((d?.jobs || []).slice(0, 6)); }).catch(() => {});
+    }, 200);
+    return () => { dead = true; clearTimeout(t); };
+  }, [query, open]);
+
   if (!open) return null;
 
   const filtered = SECTIONS.filter(s => s.label.toLowerCase().includes(query.toLowerCase()));
@@ -73,7 +88,7 @@ export default function QuickSwitch({ open, onClose, onSelect }: Props) {
           <input ref={inputRef} value={query} onChange={e => { setQuery(e.target.value); setFocusIdx(0); }}
             onKeyDown={handleKeyDown}
             className="flex-1 py-4 text-[15px] bg-transparent outline-none placeholder:text-[#bbb] text-[#1a1a1a] font-medium"
-            placeholder="Jump to section..." />
+            placeholder="Jump to a section or job…" />
           <span className="text-[10px] font-mono text-[#999] bg-[#f0ede8] px-2.5 py-1 rounded-md border border-[#e5e0d8]">ESC</span>
         </div>
         <div className="max-h-[360px] overflow-y-auto py-2">
@@ -89,7 +104,16 @@ export default function QuickSwitch({ open, onClose, onSelect }: Props) {
               </button>
             );
           })}
-          {filtered.length === 0 && (
+          {jobs.length > 0 && <div className="px-5 pt-3 pb-1 text-[10px] font-mono tracking-[0.14em] text-[#999]">JOBS</div>}
+          {jobs.map(j => (
+            <a key={j.id} href={jobHubHref({ job: j.id })} onClick={onClose}
+              className="w-full text-left px-5 py-3 flex items-center gap-3 transition-colors hover:bg-[#f5f3ef] no-underline">
+              <Briefcase size={18} style={{ color: '#b8960c' }} />
+              <span className="text-[14px] font-semibold text-[#1a1a1a] flex-1 truncate">{j.client_name || j.customer_name || j.title}</span>
+              <span className="text-[11px] font-mono text-[#888] truncate max-w-[160px]">{j.job_number || ''}</span>
+            </a>
+          ))}
+          {filtered.length === 0 && jobs.length === 0 && (
             <div className="text-center text-sm text-[#aaa] py-8">No results for &quot;{query}&quot;</div>
           )}
         </div>

@@ -17,6 +17,14 @@ def data_root() -> Path:
     return Path(os.getenv("EMPIRE_DATA_DIR", backend_root() / "data"))
 
 
+def jobs_dir() -> Path:
+    """Edition-scoped jobs root (Max-e /data/amp, Maxine /data/maxine)."""
+    override = (os.getenv("WHATSAPP_JOBS_ROOT") or "").strip()
+    if override:
+        return Path(override)
+    return data_root() / "jobs"
+
+
 def quotes_data_dir() -> Path:
     return data_root() / "quotes"
 

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from app.services.data_paths import data_root
-from app.services.max.doc_lookup import jobs_root, list_job_folders, probe_job_text, resolve_job_folder
+from app.services.max.doc_lookup import existing_job_slug, jobs_root, list_job_folders, probe_job_text, resolve_job_folder
 
 logger = logging.getLogger("max.whatsapp_log")
 
@@ -38,19 +38,32 @@ _SECRET_ENVS = (
     "FOUNDER_PIN",
 )
 
-# Last-10 fallbacks if business.json has no founder_phones names.
-_KNOWN_LABELS = {
-    "2022996975": "Rafael",
-    "7036239203": "Nelma",
-}
-
 DEFAULT_MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024
 DEFAULT_RETENTION_DAYS = 365
+DEFAULT_JOB_ANSWER_TIMEOUT = 1800
 JOB_ASK_TEXT = (
     "Which job should I file this under? Reply with the client name, nickname, "
-    "job address, or quote number. I will not guess."
+    "job address, or quote number. I will not guess. Reply skip to leave it in the inbox."
 )
+JOB_SKIP_WORDS = {"skip", "cancel"}
 FILEABLE_TYPES = {"image", "photo", "document"}
+UNSAFE_MEDIA_TYPES = {
+    "text/html",
+    "application/xhtml+xml",
+    "image/svg+xml",
+    "text/xml",
+    "application/xml",
+    "text/javascript",
+    "application/javascript",
+}
+SAFE_INLINE_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+}
 
 
 def get_max_attachment_size() -> int:
@@ -61,6 +74,16 @@ def get_max_attachment_size() -> int:
     except Exception:
         pass
     return DEFAULT_MAX_ATTACHMENT_SIZE
+
+
+def get_job_answer_timeout() -> int:
+    try:
+        val = os.getenv("WHATSAPP_JOB_ANSWER_TIMEOUT_SECONDS")
+        if val and val.strip():
+            return max(30, int(val.strip()))
+    except Exception:
+        pass
+    return DEFAULT_JOB_ANSWER_TIMEOUT
 
 
 def get_retention_days() -> int:
@@ -203,27 +226,74 @@ def _load_business() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _labels_from_business() -> dict[str, str]:
-    """Map last-10 phone digits -> display name from founder_phones / owner_phones."""
+def _phonebook_paths() -> list[Path]:
+    paths: list[Path] = []
+    env = (os.getenv("WHATSAPP_LABELS") or "").strip()
+    if env:
+        paths.append(Path(env))
+    try:
+        paths.append(whatsapp_data_dir() / "labels.json")
+    except Exception:
+        pass
+    return paths
+
+
+def load_whatsapp_phonebook() -> list[dict[str, str]]:
+    """Founder names/phones from edition data or WHATSAPP_LABELS. Not committed."""
+    rows: list[dict[str, str]] = []
+    for path in _phonebook_paths():
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        phones = data.get("phones") if isinstance(data, dict) else data
+        if isinstance(phones, dict):
+            phones = [{"name": name, "phone": phone} for name, phone in phones.items()]
+        if not isinstance(phones, list):
+            continue
+        for item in phones:
+            if isinstance(item, dict):
+                name = str(item.get("name") or item.get("label") or "").strip()
+                phone = _phone_from_entry(item)
+                if phone:
+                    rows.append({"name": name, "phone": phone})
+            elif item:
+                rows.append({"name": "", "phone": str(item)})
+        if rows:
+            break
     data = _load_business()
-    labels: dict[str, str] = {}
     for key in ("founder_phones", "owner_phones"):
         extra = data.get(key) or []
         if isinstance(extra, dict):
-            extra = [
-                {"name": name, "phone": phone}
-                for name, phone in extra.items()
-            ]
+            extra = [{"name": name, "phone": phone} for name, phone in extra.items()]
         if not isinstance(extra, list):
             continue
         for item in extra:
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name") or item.get("label") or "").strip()
-            phone = _phone_from_entry(item)
-            tail = _digits(phone)[-10:]
-            if name and len(tail) == 10:
-                labels[tail] = name
+            if isinstance(item, dict):
+                name = str(item.get("name") or item.get("label") or "").strip()
+                phone = _phone_from_entry(item)
+                if phone:
+                    rows.append({"name": name, "phone": phone})
+            elif item:
+                rows.append({"name": "", "phone": str(item)})
+    env_phones = os.getenv("WHATSAPP_FOUNDER_PHONES") or ""
+    for part in env_phones.split(","):
+        if part.strip():
+            rows.append({"name": "", "phone": part.strip()})
+    return rows
+
+
+def _labels_from_phonebook() -> dict[str, str]:
+    """Map last-10 phone digits -> display name from the edition phonebook."""
+    labels: dict[str, str] = {}
+    for item in load_whatsapp_phonebook():
+        name = str(item.get("name") or "").strip()
+        tail = _digits(item.get("phone") or "")[-10:]
+        if name and len(tail) == 10:
+            labels[tail] = name
+    data = _load_business()
     owner = str(data.get("owner_name") or "").strip()
     biz = _digits(str(data.get("business_phone") or ""))[-10:]
     if owner and len(biz) == 10 and biz not in labels:
@@ -232,16 +302,14 @@ def _labels_from_business() -> dict[str, str]:
 
 
 def get_display_label(wa_id: str) -> str:
-    """Map a WhatsApp id to Rafael / Nelma / a founder_phones name."""
+    """Map a WhatsApp id to a phonebook name. No hardcoded founder numbers."""
     digits = _digits(wa_id)
     if not digits:
         return "Unknown"
     tail10 = digits[-10:]
-    labels = _labels_from_business()
+    labels = _labels_from_phonebook()
     if tail10 in labels:
         return labels[tail10]
-    if tail10 in _KNOWN_LABELS:
-        return _KNOWN_LABELS[tail10]
     return f"+{digits}" if not str(wa_id).startswith("+") else str(wa_id)
 
 
@@ -548,10 +616,41 @@ def search_all_messages(query_text: str, *, limit: int = 50) -> List[dict[str, A
         conn.close()
 
 
+def sanitize_filename(filename: str, max_len: int = 120) -> str:
+    """Strip controls, path separators, and over-long names."""
+    raw = str(filename or "attachment").replace("\x00", "")
+    raw = "".join(ch for ch in raw if ch.isprintable() and ord(ch) >= 32)
+    raw = raw.replace("\\", "/").split("/")[-1]
+    raw = re.sub(r'[<>:"|?*]', "", raw).strip(" .")
+    if not raw or raw in {".", ".."}:
+        raw = "attachment"
+    suffix = Path(raw).suffix
+    if suffix.lower() in {".html", ".htm", ".svg", ".shtml", ".xhtml"}:
+        raw = f"{Path(raw).stem or 'attachment'}.bin"
+        suffix = ".bin"
+    if len(raw) > max_len:
+        stem = Path(raw).stem
+        keep = max(1, max_len - len(suffix))
+        raw = f"{stem[:keep]}{suffix}"
+    return raw or "attachment"
+
+
+def media_serve_headers(mime_type: str, filename: str) -> tuple[str, dict[str, str]]:
+    """Safe Content-Type + nosniff. Non-image/PDF always download as attachment."""
+    clean_name = sanitize_filename(filename)
+    raw_mime = (mime_type or "").split(";")[0].strip().lower()
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if raw_mime in UNSAFE_MEDIA_TYPES or raw_mime not in SAFE_INLINE_TYPES:
+        headers["Content-Disposition"] = f'attachment; filename="{clean_name}"'
+        return "application/octet-stream", headers
+    headers["Content-Disposition"] = f'inline; filename="{clean_name}"'
+    return raw_mime or "application/octet-stream", headers
+
+
 def unique_dest(directory: Path, filename: str) -> Path:
     """Never overwrite: add a UTC timestamp suffix when the name exists."""
     directory.mkdir(parents=True, exist_ok=True)
-    clean = Path(filename or "attachment").name or "attachment"
+    clean = sanitize_filename(filename)
     stem = Path(clean).stem or "attachment"
     suffix = Path(clean).suffix or ".bin"
     dest = directory / f"{stem}{suffix}"
@@ -651,7 +750,7 @@ def set_active_job(wa_id: str, job_slug: str, client_name: str = "", folder_path
 
 
 def choose_job_for_inbound(text: str, wa_id: str) -> dict[str, Any]:
-    """Named unique match wins. Ambiguous never falls back. Else active job."""
+    """Named unique match only. A text with no job name never uses a sticky job."""
     probed = probe_job_text(text)
     status = probed.get("status")
     if status == "unique":
@@ -660,17 +759,6 @@ def choose_job_for_inbound(text: str, wa_id: str) -> dict[str, Any]:
         return {"status": "unique", "job": match}
     if status == "ambiguous":
         return {"status": "ambiguous", "job": None, "matches": probed.get("matches") or []}
-    active = get_active_job(wa_id)
-    if active:
-        return {
-            "status": "active",
-            "job": {
-                "slug": active["job_slug"],
-                "client_name": active.get("client_name") or active["job_slug"],
-                "folder_path": active.get("folder_path") or "",
-                "match_reason": "active conversation job",
-            },
-        }
     return {"status": "unknown", "job": None}
 
 
@@ -722,23 +810,30 @@ def prepare_inbound_attachment(
     return record
 
 
-def get_pending_filings(wa_id: str) -> list[int]:
+def get_pending_filing_state(wa_id: str) -> dict[str, Any]:
     init_db()
     conn = _get_conn()
     try:
         row = conn.execute(
-            "SELECT attachment_ids FROM whatsapp_pending_filings WHERE wa_id = ?",
+            "SELECT attachment_ids, asked_at FROM whatsapp_pending_filings WHERE wa_id = ?",
             (str(wa_id or "").strip(),),
         ).fetchone()
         if not row:
-            return []
+            return {"ids": [], "asked_at": ""}
         try:
             ids = json.loads(row["attachment_ids"] or "[]")
         except Exception:
             ids = []
-        return [int(i) for i in ids if str(i).isdigit() or isinstance(i, int)]
+        return {
+            "ids": [int(i) for i in ids if str(i).isdigit() or isinstance(i, int)],
+            "asked_at": str(row["asked_at"] or ""),
+        }
     finally:
         conn.close()
+
+
+def get_pending_filings(wa_id: str) -> list[int]:
+    return get_pending_filing_state(wa_id)["ids"]
 
 
 def set_pending_filings(wa_id: str, attachment_ids: list[int]) -> None:
@@ -803,7 +898,7 @@ def refile_attachment(attachment_id: int, job_slug: str) -> dict[str, Any]:
     """Move a parked or filed attachment into a job folder. Founder write."""
     slug = slug_ok(job_slug)
     if not slug:
-        raise ValueError("job slug is required")
+        raise ValueError("job folder does not exist under this edition's jobs root")
     init_db()
     with _lock:
         conn = _get_conn()
@@ -864,19 +959,48 @@ def _replace_pending(wa_id: str, attachment_ids: list[int]) -> None:
 
 
 def slug_ok(job_slug: str) -> str:
-    slug = re.sub(r"[^a-z0-9-]", "", (job_slug or "").strip().lower())
-    return slug
+    """Sanitized slug that already exists as a folder under this edition's jobs root."""
+    return existing_job_slug(job_slug)
+
+
+def _pending_ask_expired(asked_at: str) -> bool:
+    if not asked_at:
+        return False
+    try:
+        parsed = datetime.fromisoformat(str(asked_at).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)
+        return age.total_seconds() > get_job_answer_timeout()
+    except ValueError:
+        return False
 
 
 def consume_job_answer(wa_id: str, text: str) -> Optional[dict[str, Any]]:
-    """If this conversation has parked files, file them when the reply names a job."""
-    pending = get_pending_filings(wa_id)
+    """Consume a parked-file reply only when it clearly names one job, or skip/timeout."""
+    state = get_pending_filing_state(wa_id)
+    pending = state.get("ids") or []
     if not pending:
         return None
+    if _pending_ask_expired(state.get("asked_at") or ""):
+        clear_pending_filings(wa_id)
+        return None
+    stripped = (text or "").strip().lower().rstrip(".!")
+    if stripped in JOB_SKIP_WORDS:
+        clear_pending_filings(wa_id)
+        return {
+            "handled": True,
+            "status": "skipped",
+            "reply": "Left in the inbox. Say the job name later or move it from WhatsApp Chats.",
+        }
     probed = probe_job_text(text)
     if probed.get("status") == "unique":
         match = probed["match"]
         results = []
+        named = (jobs_root() / match["slug"]).resolve()
+        root = jobs_root().resolve()
+        if named.parent == root:
+            named.mkdir(parents=True, exist_ok=True)
         for att_id in pending:
             try:
                 results.append(refile_attachment(att_id, match["slug"]))
@@ -891,11 +1015,7 @@ def consume_job_answer(wa_id: str, text: str) -> Optional[dict[str, Any]]:
             "reply": f"Filed under {match.get('client_name') or match['slug']} ({match['slug']}).",
             "results": results,
         }
-    if probed.get("status") == "ambiguous":
-        return {"handled": True, "status": "ambiguous", "reply": JOB_ASK_TEXT}
-    if probed.get("status") in {"unknown", "empty"}:
-        return {"handled": True, "status": "unknown", "reply": JOB_ASK_TEXT}
-    return {"handled": True, "status": "unknown", "reply": JOB_ASK_TEXT}
+    return None
 
 
 def note_inbox_ask(wa_id: str, attachments: list[dict]) -> bool:

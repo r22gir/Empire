@@ -16,6 +16,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from contextvars import ContextVar
 
 from app.config.business_config import biz
 from app.db.database import get_db, dict_row, dict_rows
@@ -55,8 +56,27 @@ MAX_PER_BLOCK_ERRORS = 16
 # allowlist check passes. Reply-To is set to max@empirebox.store (the
 # address the future inbound poller — SendGrid Inbound Parse webhook at
 # /webhooks/email/inbound AND Gmail check_inbox — will watch).
-DEFAULT_EMAIL_CC = ("rafa22giraldo@gmail.com",)
+# 2026-10-08 (Rafael, 11:35 PM): Max's emails go ONLY to empirebox2026@gmail.com —
+# no standing CC. The 2026-08-16 standing CC to rafa22giraldo@gmail.com is retired.
+DEFAULT_EMAIL_CC: tuple[str, ...] = ()
+# Default "email me" / doc / invoice recipient — always this one address.
+MAX_DOC_EMAIL_TO = "empirebox2026@gmail.com"
 DEFAULT_REPLY_TO = "max@empirebox.store"
+
+
+def _merge_standing_email_cc(to: str, cc) -> list[str]:
+    """Merge DEFAULT_EMAIL_CC into cc (deduped, case-insensitive)."""
+    cc_list: list[str] = []
+    if cc:
+        cc_list = [a.strip() for a in str(cc).split(",") if a.strip()]
+    seen = {(to or "").lower()}
+    for a in cc_list:
+        seen.add(a.lower())
+    for default_cc in DEFAULT_EMAIL_CC:
+        if default_cc.lower() not in seen:
+            cc_list.append(default_cc)
+            seen.add(default_cc.lower())
+    return cc_list
 
 # ── Dangerous Tool PIN Gate ───────────────────────────────────────
 # db_query removed 2026-08-31 (D52, founder ruling). It is read-only at the
@@ -512,6 +532,16 @@ def get_xai_tool_definitions() -> list:
 
 TOOL_REGISTRY = {}
 
+_CURRENT_JOB_ID_VAR: ContextVar[Optional[str]] = ContextVar("max_current_job_id", default=None)
+
+
+def set_current_job_id(job_id: Optional[str]) -> None:
+    _CURRENT_JOB_ID_VAR.set(job_id)
+
+
+def get_current_job_id() -> Optional[str]:
+    return _CURRENT_JOB_ID_VAR.get()
+
 
 def tool(name: str):
     """Decorator to register a tool handler."""
@@ -521,7 +551,7 @@ def tool(name: str):
     return decorator
 
 
-def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None, founder: bool = False, channel: Optional[str] = None) -> ToolResult:
+def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None, founder: bool = False, channel: Optional[str] = None, job_id: Optional[str] = None) -> ToolResult:
     """Dispatch and execute a tool call (with tier gating and access control).
 
     Args:
@@ -534,7 +564,18 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                  chat router does not pass this today; the audit
                  column will be NULL until the router plumbing is
                  updated (Phase 3 backlog).
+        job_id: Optional currently active job id propagated from client.
     """
+    if isinstance(tool_call, str):
+        tool_call = {"tool": tool_call, "parameters": {}}
+
+    if job_id:
+        set_current_job_id(job_id)
+    elif isinstance(tool_call, dict) and tool_call.get("job_id"):
+        set_current_job_id(str(tool_call["job_id"]))
+    elif isinstance(tool_call, dict) and isinstance(tool_call.get("parameters"), dict) and tool_call["parameters"].get("job_id"):
+        set_current_job_id(str(tool_call["parameters"]["job_id"]))
+
     tool_name = tool_call.get("tool", "")
     try:
         # 2026-09-29: auto-correction now runs BEFORE access control and the
@@ -567,6 +608,27 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "gmail": "check_email",
             "read_email": "check_email",
             "inbox": "check_email",
+            "outlook": "check_outlook",
+            "read_outlook": "check_outlook",
+            "search_outlook": "check_outlook",
+            "outlook_inbox": "check_outlook",
+            "find_document": "open_final_doc",
+            "find_file": "find_files",
+            "search_files": "find_files",
+            "search_file": "find_files",
+            "locate_file": "find_files",
+            "send_file": "share_file",
+            "show_document": "open_final_doc",
+            "open_document": "open_final_doc",
+            "find_final_doc": "open_final_doc",
+            "show_final_doc": "open_final_doc",
+            "open_quote": "open_record",
+            "open_invoice": "open_record",
+            "show_quote": "open_record",
+            "show_invoice": "open_record",
+            "edit_quote_line": "edit_quote_lines",
+            "move_quote_line": "edit_quote_lines",
+            "quote_to_invoice": "convert_quote_to_invoice",
             "find_quotes": "search_quotes",
             "list_quotes": "search_quotes",
             "search_quote": "search_quotes",
@@ -582,6 +644,14 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "create_quote": "create_engine_quote",
             "deposit_link": "deposit_pay_link",
             "pay_link": "deposit_pay_link",
+            "schedule": "list_schedule",
+            "get_schedule": "list_schedule",
+            "view_schedule": "list_schedule",
+            "create_schedule_event": "add_schedule_event",
+            "schedule_event": "add_schedule_event",
+            "pickup_dropoff": "log_pickup_dropoff",
+            "log_pickup": "log_pickup_dropoff",
+            "log_dropoff": "log_pickup_dropoff",
             "payment_link": "deposit_pay_link",
             "make_quote": "create_engine_quote",
             "new_quote": "create_engine_quote",
@@ -603,6 +673,15 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "generate_presentation": "present",
             "make_presentation": "present",
             "presentation": "present",
+            "current_job": "get_current_job",
+            "active_job": "get_current_job",
+            "job_documents": "list_job_documents",
+            "job_docs": "list_job_documents",
+            "list_job_docs": "list_job_documents",
+            "open_doc": "open_job_document",
+            "open_document": "open_job_document",
+            "attach_doc": "attach_job_document",
+            "attach_document": "attach_job_document",
         }
         if tool_name not in TOOL_REGISTRY and tool_name in TOOL_CORRECTIONS:
             corrected = TOOL_CORRECTIONS[tool_name]
@@ -665,7 +744,24 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
         # and non-founder alike (H81 Phase 2). HOTFIX 4.2 fail-closed
         # semantics preserved: empty FOUNDER_PIN refuses with
         # CRITICAL log; missing PIN refuses; mismatched PIN refuses.
+        # 2026-10-05: a server-verified founder session (Cloudflare Access
+        # JWT whose email is a FOUNDER_EMAILS entry, main edition only, no
+        # untrusted inbound content earlier in the turn) runs restricted
+        # tools without the PIN. Client flags/channels never set this.
+        _founder_session_ok = False
         if _is_dangerous_call(tool_name, tool_call):
+            try:
+                from app.services.max.founder_session import founder_session_allows
+                _founder_session_ok = founder_session_allows(access_context, founder)
+            except Exception as _fs_err:
+                logger.warning(f"founder_session check failed (gate stays on): {_fs_err}")
+                _founder_session_ok = False
+            if _founder_session_ok:
+                logger.info(
+                    "Founder session verified (Cloudflare Access) — '%s' runs without the PIN",
+                    tool_name,
+                )
+        if _is_dangerous_call(tool_name, tool_call) and not _founder_session_ok:
             if not FOUNDER_PIN:
                 logger.critical(
                     "BLOCKED dangerous tool '%s' invocation: "
@@ -689,8 +785,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                 return ToolResult(
                     tool=tool_name, success=False,
                     error=(
-                        f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed. "
-                        f"The Chat PIN card collects it. Do not ask the founder to type the PIN into the chat."
+                        f"Tool '{tool_name}' was skipped: founder PIN required (no verified founder session for this call). "
+                        f"Continue the answer WITHOUT this tool: use the regular read tools (check_email, file_read, db_query, "
+                        f"search_*, get_services_health). The Chat PIN card collects it if needed; do not ask the founder to type the PIN "
+                        f"into the chat and do not call another restricted tool this turn."
                     ),
                 )
             if str(pin) != FOUNDER_PIN:
@@ -935,6 +1033,15 @@ def _get_desk_status(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── QUOTE TOOLS ────────────────────────────────────────────────────
 
+def _billed_as(billed_by) -> str:
+    """2026-10-08: empty billed_by = Empire Workroom. Nelma's only when explicitly set on the document."""
+    try:
+        from app.config.workroom_billing import normalize_billed_by, BILLED_BY_NELMA
+        return "Nelma's Workroom" if normalize_billed_by(billed_by) == BILLED_BY_NELMA else "Empire Workroom"
+    except Exception:
+        return "Empire Workroom"
+
+
 @tool("search_quotes")
 def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Search canonical quotes by customer, project/site, notes, or date.
@@ -1005,6 +1112,7 @@ def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
             "items_count": q.get("item_count") or 0,
             "source": "canonical",
             "business_unit": q.get("business_unit"),
+            "billed_as": _billed_as(q.get("billed_by")),
         })
     # "last/latest" and "today's" ask for the best current match, so do not
     # let an older duplicate draft outrank the just-updated 293.
@@ -1044,6 +1152,8 @@ def _get_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
             "optional_hardware_total": q.get("optional_hardware_total"),
             "deposit_required": q.get("deposit_required"),
         }
+    q = dict(q)
+    q["billed_as"] = _billed_as(q.get("billed_by"))
     return ToolResult(tool="get_quote", success=True, result=q)
 
 
@@ -1104,6 +1214,94 @@ def _open_quote_builder(params: dict, desk: Optional[str] = None) -> ToolResult:
     })
 
 
+@tool("open_final_doc")
+def _open_final_doc(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Find a saved job document (final estimate, presentation, invoice, drawing, photos)
+    via the Final Docs hub index and return an in-app viewer link. Read-only: nothing is
+    sent, moved or made public; the link needs the normal Empire sign-in."""
+    q = str(params.get("query") or params.get("q") or params.get("request") or "").strip()
+    extra = " ".join(str(params.get(k) or "").strip() for k in ("client", "customer_name", "quote_number", "job_number", "doc_type", "type"))
+    q = " ".join(x for x in (q, extra.strip()) if x).strip()
+    if not q:
+        return ToolResult(tool="open_final_doc", success=False, error="Say which document, e.g. \"Nehal's final estimate\".")
+    base = os.environ.get("EMPIRE_PORTAL_INTERNAL_URL", "http://localhost:3005").rstrip("/")
+    # 2026-10-04: client aliases / addresses / "last 2 docs" / filler words go through the
+    # fuzzy lookup first ("dhalias last 2 updated docs" failed the hub's every-word match).
+    fuzzy = None
+    try:
+        from app.services.max.doc_lookup import find_docs
+        fuzzy = find_docs(q)
+        # 2026-10-05: list every final for the client (both Nehal phases), not just the newest.
+        from app.services.max.final_docs_all import expand_finals
+        fuzzy = expand_finals(q, fuzzy)
+    except Exception as e:
+        logger.debug(f"open_final_doc fuzzy lookup failed: {e}")
+    if fuzzy and fuzzy.get("found") and (fuzzy.get("client") or (fuzzy.get("count") or 1) > 1):
+        return _final_docs_result(fuzzy)
+    try:
+        r = httpx.get(f"{base}/api/v1/docs-hub/resolve", params={"q": q}, timeout=20.0)
+        data = r.json()
+    except Exception as e:  # portal down or slow
+        if fuzzy and fuzzy.get("found"):
+            return _final_docs_result(fuzzy)
+        return ToolResult(tool="open_final_doc", success=False, error=f"Docs hub unavailable: {e}")
+    if not data.get("found") or not data.get("doc"):
+        if fuzzy and fuzzy.get("found"):
+            return _final_docs_result(fuzzy)
+        closest = (fuzzy or {}).get("closest") or []
+        near = "; ".join(
+            f"{c['client']}" + (f" (latest: {c['latest']['title']} {c['latest'].get('version') or ''})".rstrip() if c.get("latest") else "")
+            for c in closest
+        )
+        return ToolResult(tool="open_final_doc", success=False,
+                          result={"closest": closest},
+                          error=f"No saved document matched \"{q}\". "
+                                + (f"Closest matches: {near}. " if near else "No close client names either. ")
+                                + "Say so plainly; do not present any document as found.")
+    doc = data["doc"]
+    return ToolResult(tool="open_final_doc", success=True, result={
+        "action": "open_doc",
+        "doc_id": doc.get("id"),
+        "title": doc.get("title"),
+        "type": doc.get("type"),
+        "version": doc.get("version"),
+        "is_final": doc.get("isFinal"),
+        "client": doc.get("client") or doc.get("designer"),
+        "quote_number": doc.get("quoteNumber"),
+        "modified": doc.get("modified"),
+        "viewer_url": doc.get("viewer_url"),
+        "alternatives": [
+            {"title": a.get("title"), "version": a.get("version"), "type": a.get("type"), "viewer_url": a.get("viewer_url"), "doc_id": a.get("id")}
+            for a in (data.get("alternatives") or [])[:4]
+        ],
+        "message": f"{doc.get('title')} ({doc.get('version')}{', FINAL' if doc.get('isFinal') else ''}) is ready in the viewer: {doc.get('viewer_url')}",
+    })
+
+
+def _final_docs_result(found: dict) -> ToolResult:
+    """ToolResult for doc_lookup.find_docs hits (one or several finals)."""
+    docs = found.get("docs") or []
+    first = docs[0]
+    for d in docs:
+        d["viewer_url"] = f"/docs/view?id={d.get('doc_id')}"
+    names = "; ".join(f"{d.get('title')} ({d.get('version') or ''}{', FINAL' if d.get('is_final') else ''})" for d in docs)
+    return ToolResult(tool="open_final_doc", success=True, result={
+        "action": "open_doc",
+        "doc_id": first.get("doc_id"),
+        "title": first.get("title"),
+        "type": first.get("type"),
+        "version": first.get("version"),
+        "is_final": first.get("is_final"),
+        "client": found.get("client") or first.get("client"),
+        "quote_number": first.get("quote_number"),
+        "modified": first.get("modified"),
+        "viewer_url": first.get("viewer_url"),
+        "docs": docs,
+        "matched_client_via": found.get("client_via"),
+        "message": f"{len(docs)} document(s) for {found.get('client') or 'the request'}, newest first: {names}",
+    })
+
+
 # ── PRICING TABLES ────────────────────────────────────────────────
 
 # Fabric cost per yard by grade
@@ -1114,9 +1312,10 @@ FABRIC_GRADES = {
     "D": {"label": "Luxury", "per_yard": 120},
 }
 
-# Lining cost per yard
+# Lining SELL rate per yard. Workroom rates (Rafael 10/4/2026): lining $10.50, napped lining (interlining)
+# $12.50. Never use supplier list prices (they exclude freight).
 LINING_RATES = {
-    "none": 0, "standard": 8, "blackout": 14, "thermal": 12, "interlining": 18,
+    "none": 0, "standard": 10.50, "blackout": 14, "thermal": 12, "interlining": 12.50,
 }
 
 # Treatment-specific: fullness multiplier, labor hours per panel, fabric_width (inches)
@@ -1376,6 +1575,339 @@ def _qis_tiers_to_design_proposals(qis_tiers: dict, rooms: list) -> list:
             "selected": False,
         })
     return proposals
+
+
+# ── Document workspace (quote / invoice WYSIWYG pages) ─────────────────────
+# Rafael 2026-10-04: quotes and invoices are edited directly on a page that looks like
+# the client PDF (Document tab), grouped by room. These tools let Max open that page,
+# edit quote lines by room, and convert a quote to a DRAFT invoice (preview first).
+# Knowledge doc: docs/MAX_DOCUMENT_WORKSPACE.md
+
+def _ws_record_url(rtype: str, rid: str) -> str:
+    return f"/?screen={'invoice' if rtype == 'invoice' else 'quote'}&id={rid}"
+
+
+def _ws_find_quote(params: dict) -> Optional[dict]:
+    """Resolve a quotes_v2 row from quote_id / quote_number / query (client, project)."""
+    qid = str(params.get("quote_id") or params.get("id") or "").strip()
+    qnum = str(params.get("quote_number") or params.get("number") or "").strip()
+    query = str(params.get("query") or params.get("client") or params.get("customer_name") or "").strip()
+    with get_db() as conn:
+        if qid:
+            r = conn.execute("SELECT * FROM quotes_v2 WHERE id = ?", (qid,)).fetchone()
+            if r:
+                return dict_row(r)
+            qnum = qnum or qid
+        if qnum:
+            r = conn.execute("SELECT * FROM quotes_v2 WHERE UPPER(quote_number) = UPPER(?) ORDER BY updated_at DESC LIMIT 1", (qnum,)).fetchone()
+            if r:
+                return dict_row(r)
+        if query:
+            terms = [t for t in re.split(r"[\s,]+", query.lower()) if len(t) > 1 and t not in {"quote", "estimate", "the", "for", "open", "show", "s"}]
+            rows = dict_rows(conn.execute(
+                "SELECT * FROM quotes_v2 WHERE COALESCE(status,'') NOT IN ('cancelled','archived') ORDER BY updated_at DESC LIMIT 400").fetchall())
+            def score(row):
+                hay = " ".join(str(row.get(k) or "") for k in ("customer_name", "project_name", "quote_number", "customer_email", "project_address", "notes")).lower()
+                return sum(1 for t in terms if t in hay)
+            best = max(rows, key=score, default=None) if terms else None
+            if best and score(best) == len(terms):
+                return best
+    return None
+
+
+def _ws_find_invoice(params: dict) -> Optional[dict]:
+    iid = str(params.get("invoice_id") or params.get("id") or "").strip()
+    inum = str(params.get("invoice_number") or params.get("number") or "").strip()
+    query = str(params.get("query") or params.get("client") or "").strip()
+    with get_db() as conn:
+        if iid:
+            r = conn.execute("SELECT id, invoice_number, client_name, status, total, balance_due, quote_id FROM invoices WHERE id = ?", (iid,)).fetchone()
+            if r:
+                return dict_row(r)
+            inum = inum or iid
+        if inum:
+            r = conn.execute("SELECT id, invoice_number, client_name, status, total, balance_due, quote_id FROM invoices WHERE UPPER(invoice_number) = UPPER(?) LIMIT 1", (inum,)).fetchone()
+            if r:
+                return dict_row(r)
+        if query:
+            terms = [t for t in re.split(r"[\s,]+", query.lower()) if len(t) > 1 and t not in {"invoice", "the", "for", "open", "show"}]
+            rows = dict_rows(conn.execute("SELECT id, invoice_number, client_name, status, total, balance_due, quote_id, notes FROM invoices WHERE COALESCE(status,'') != 'cancelled' ORDER BY created_at DESC LIMIT 400").fetchall())
+            def score(row):
+                hay = " ".join(str(row.get(k) or "") for k in ("client_name", "invoice_number", "notes")).lower()
+                return sum(1 for t in terms if t in hay)
+            best = max(rows, key=score, default=None) if terms else None
+            if best and score(best) == len(terms):
+                best.pop("notes", None)
+                return best
+    return None
+
+
+@tool("open_record")
+def _open_record(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Open a quote or invoice in the document workspace (the page that looks like the
+    client PDF, with Document / Actual PDF / Docs tabs). Read-only."""
+    rtype = str(params.get("type") or "").lower().strip()
+    if not rtype:
+        rtype = "invoice" if (params.get("invoice_id") or params.get("invoice_number") or str(params.get("number") or "").upper().startswith("INV")) else "quote"
+    if rtype not in ("quote", "invoice", "estimate"):
+        return ToolResult(tool="open_record", success=False, error="type must be quote or invoice")
+    if rtype == "invoice":
+        inv = _ws_find_invoice(params)
+        if not inv:
+            return ToolResult(tool="open_record", success=False, error="No invoice matched. Give the invoice number (INV-2026-…) or client name.")
+        return ToolResult(tool="open_record", success=True, result={
+            "action": "open_record", "type": "invoice", "id": inv["id"], "number": inv.get("invoice_number"),
+            "client": inv.get("client_name"), "status": inv.get("status"), "total": inv.get("total"), "balance_due": inv.get("balance_due"),
+            "editable": inv.get("status") == "draft", "url": _ws_record_url("invoice", inv["id"]),
+            "message": f"Opened {inv.get('invoice_number')} ({inv.get('status')}). " + ("Draft: lines can be edited on the page." if inv.get("status") == "draft" else "Read-only (only draft invoices are editable)."),
+        })
+    q = _ws_find_quote(params)
+    if not q:
+        return ToolResult(tool="open_record", success=False, error="No quote matched. Give the quote number (EST-2026-…) or client / project name.")
+    locked = q.get("status") in ("sent", "accepted", "in_production", "completed")
+    return ToolResult(tool="open_record", success=True, result={
+        "action": "open_record", "type": "quote", "id": q["id"], "number": q.get("quote_number"),
+        "client": q.get("customer_name"), "project": q.get("project_name"), "status": q.get("status"), "total": q.get("total"),
+        "editable": not locked, "url": _ws_record_url("quote", q["id"]),
+        "message": f"Opened {q.get('quote_number')} for {q.get('customer_name') or 'client'} on the Document tab." + (" It is locked (status " + str(q.get('status')) + ")." if locked else " Click a line to edit; lines are grouped by room."),
+    })
+
+
+def _ws_quote_lines(conn, quote_id: str) -> list:
+    return dict_rows(conn.execute(
+        "SELECT id, line_number, description, room, quantity, unit, unit_price, subtotal FROM quote_line_items WHERE quote_id = ? ORDER BY line_number, id",
+        (quote_id,)).fetchall())
+
+
+def _ws_renumber_by_room(conn, quote_id: str) -> None:
+    """Keep line_number in room order (rooms by first appearance, job-wide last), which is
+    the section order the client PDF prints. Only line_number changes."""
+    rows = _ws_quote_lines(conn, quote_id)
+    order, groups = [], {}
+    for r in rows:
+        k = (r.get("room") or "").strip()
+        if k not in groups:
+            groups[k] = []
+            if k:
+                order.append(k)
+        groups[k].append(r)
+    seq = [r for k in order for r in groups[k]] + groups.get("", [])
+    for n, r in enumerate(seq, start=1):
+        if r["line_number"] != n:
+            conn.execute("UPDATE quote_line_items SET line_number = ? WHERE id = ? AND quote_id = ?", (n, r["id"], quote_id))
+
+
+def _ws_room_match(rooms: list, wanted: str, current: str = "") -> str:
+    """Map a spoken room ('living room') onto the quote's room strings, which look like
+    'LIVING ROOM — 1. Installation'. Exact match wins; otherwise keep the line's own part
+    (moving '... — 4. Materials' to 'office' lands in 'OFFICE — 4. Materials'); a room with a
+    single part maps to it; else returns '' with an error via ValueError listing the parts."""
+    w = (wanted or "").strip()
+    if not w or w.lower() in ("job-wide", "job wide", "jobwide", "none"):
+        return ""
+    exact = [r for r in rooms if r.lower() == w.lower()]
+    if exact:
+        return exact[0]
+    top = lambda r: r.split(" — ")[0].strip().lower()
+    part = lambda r: r.split(" — ", 1)[1].strip() if " — " in r else ""
+    family = [r for r in rooms if top(r) == top(w) or top(r) == w.lower()]
+    if not family:
+        return w.upper() if w == w.lower() else w  # new room
+    cur_part = part(current or "")
+    if cur_part:
+        same = [r for r in family if part(r).lower() == cur_part.lower()]
+        if same:
+            return same[0]
+    if len(family) == 1:
+        return family[0]
+    plain = [r for r in family if not part(r)]
+    if plain and len(family) == len(plain):
+        return plain[0]
+    raise ValueError(f"'{w}' has several parts: " + ", ".join(part(r) or "(none)" for r in family) + ". Say which part (room: '" + family[0] + "').")
+
+
+@tool("edit_quote_lines")
+def _edit_quote_lines(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Edit quote line items by room on a draft quote (same data the Document tab edits).
+    operations: [{op: move|update|add|remove, line (line_number) | item_id, room, description,
+    quantity, unit, unit_price}]. Sent/accepted quotes are locked. remove needs confirm=true."""
+    from app.services import quote_service as qs
+    q = _ws_find_quote(params)
+    if not q:
+        return ToolResult(tool="edit_quote_lines", success=False, error="Quote not found (give quote_id or EST number)")
+    if q.get("status") in qs.IMMUTABLE_STATUSES:
+        return ToolResult(tool="edit_quote_lines", success=False,
+                          error=f"{q.get('quote_number')} is {q.get('status')}; lines are locked after send. Revise it as a new version in QuoteBuilder.")
+    ops = params.get("operations") or params.get("ops") or []
+    if isinstance(ops, str):
+        try:
+            ops = json.loads(ops)
+        except Exception:
+            return ToolResult(tool="edit_quote_lines", success=False, error="operations must be a JSON list")
+    if isinstance(ops, dict):
+        ops = [ops]
+    if not ops and params.get("op"):
+        ops = [params]
+    if not ops:
+        return ToolResult(tool="edit_quote_lines", success=False, error="No operations given")
+    confirm = str(params.get("confirm") or "").lower() in ("1", "true", "yes")
+    qid = q["id"]
+    before_total = q.get("total")
+    done, errors = [], []
+    with get_db() as conn:
+        lines = _ws_quote_lines(conn, qid)
+    rooms = sorted({(l.get("room") or "").strip() for l in lines if (l.get("room") or "").strip()})
+    if any(str(o.get("op", "")).lower() in ("remove", "delete") for o in ops) and not confirm:
+        targets = []
+        for o in ops:
+            if str(o.get("op", "")).lower() in ("remove", "delete"):
+                ln = next((l for l in lines if (o.get("item_id") and l["id"] == int(o["item_id"])) or (o.get("line") is not None and l["line_number"] == int(o["line"]))), None)
+                targets.append(f"line {ln['line_number']}: {ln['description'][:70]} (${ln['subtotal']})" if ln else f"unknown line {o}")
+        return ToolResult(tool="edit_quote_lines", success=True, result={
+            "needs_confirmation": True, "quote_number": q.get("quote_number"), "would_remove": targets,
+            "message": "Removing lines needs confirmation. Ask the founder, then call again with confirm=true.",
+        })
+
+    def find_line(o):
+        if o.get("item_id") is not None:
+            return next((l for l in lines if l["id"] == int(o["item_id"])), None)
+        if o.get("line") is not None or o.get("line_number") is not None:
+            n = int(o.get("line") if o.get("line") is not None else o.get("line_number"))
+            return next((l for l in lines if l["line_number"] == n), None)
+        if o.get("match"):
+            m = str(o["match"]).lower()
+            hits = [l for l in lines if m in (l.get("description") or "").lower()]
+            return hits[0] if len(hits) == 1 else None
+        return None
+
+    for o in ops:
+        op = str(o.get("op") or "").lower()
+        try:
+            if op == "add":
+                room = _ws_room_match(rooms, o.get("room") or "")
+                data = {"description": o.get("description") or "New line", "room": room,
+                        "quantity": float(o.get("quantity") or 1), "unit": o.get("unit") or "ea",
+                        "unit_price": float(o.get("unit_price") or o.get("rate") or 0)}
+                data["subtotal"] = round(data["quantity"] * data["unit_price"], 2)
+                qs.add_line_item(qid, data)
+                done.append(f"added '{data['description'][:60]}' to {room or 'Job-wide'}")
+                continue
+            ln = find_line(o)
+            if not ln:
+                errors.append(f"{op}: line not found ({ {k: v for k, v in o.items() if k != 'op'} })")
+                continue
+            if op == "move":
+                room = _ws_room_match(rooms, o.get("room") or o.get("to") or "", ln.get("room") or "")
+                with get_db() as conn:
+                    qs._check_immutable(conn, qid, "line-item move")
+                    conn.execute("UPDATE quote_line_items SET room = ?, updated_at = ? WHERE id = ? AND quote_id = ?",
+                                 (room, datetime.now().isoformat(), ln["id"], qid))
+                done.append(f"moved line {ln['line_number']} to {room or 'Job-wide'}")
+            elif op in ("update", "edit", "set"):
+                data = {}
+                for k in ("description", "quantity", "unit", "unit_price"):
+                    if o.get(k) is not None:
+                        data[k] = o[k]
+                if o.get("rate") is not None:
+                    data["unit_price"] = o["rate"]
+                if o.get("room") is not None:
+                    data["room"] = _ws_room_match(rooms, o["room"], ln.get("room") or "")
+                if not data:
+                    errors.append(f"update line {ln['line_number']}: nothing to change")
+                    continue
+                qty = float(data.get("quantity", ln["quantity"] or 1))
+                rate = float(data.get("unit_price", ln["unit_price"] or 0))
+                data["subtotal"] = round(qty * rate, 2)
+                qs.update_line_item(qid, ln["id"], data)
+                note = ""
+                if "quantity" in data or "unit_price" in data:
+                    # quote totals sum final_price; update_line_item only touches subtotal,
+                    # so carry the new price into final_price unless the founder overrode it.
+                    with get_db() as conn:
+                        cur = conn.execute("UPDATE quote_line_items SET final_price = ?, proposed_price = ? WHERE id = ? AND quote_id = ? AND COALESCE(price_overridden, 0) = 0",
+                                           (data["subtotal"], data["subtotal"], ln["id"], qid))
+                        if cur.rowcount == 0:
+                            note = " (price override kept; total unchanged for this line)"
+                        qs._recalculate_totals(conn, qid, "max")
+                done.append(f"updated line {ln['line_number']} ({', '.join(k for k in data if k != 'subtotal')}){note}")
+            elif op in ("remove", "delete"):
+                qs.delete_line_item(qid, ln["id"])
+                done.append(f"removed line {ln['line_number']}: {ln['description'][:60]}")
+            else:
+                errors.append(f"unknown op '{op}'")
+        except Exception as e:
+            errors.append(f"{op}: {type(e).__name__}: {e}")
+    with get_db() as conn:
+        _ws_renumber_by_room(conn, qid)
+        row = dict_row(conn.execute("SELECT total, subtotal, updated_at FROM quotes_v2 WHERE id = ?", (qid,)).fetchone())
+        new_lines = _ws_quote_lines(conn, qid)
+    by_room = {}
+    for l in new_lines:
+        k = (l.get("room") or "").strip() or "Job-wide"
+        by_room[k] = round(by_room.get(k, 0) + float(l.get("subtotal") or 0), 2)
+    return ToolResult(tool="edit_quote_lines", success=bool(done), result={
+        "action": "open_record", "type": "quote", "id": qid, "number": q.get("quote_number"),
+        "url": _ws_record_url("quote", qid), "changes": done, "errors": errors,
+        "total_before": before_total, "total_after": row.get("total"), "room_subtotals": by_room,
+        "message": f"{q.get('quote_number')}: {len(done)} change(s); total {before_total} -> {row.get('total')}. Nothing was sent.",
+    }, error="; ".join(errors) if errors and not done else None)
+
+
+@tool("convert_quote_to_invoice")
+def _convert_quote_to_invoice(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Quote -> DRAFT invoice (items with rooms, client, deposit carried over) via the
+    canonical POST /quotes-v2/{id}/to-invoice. Without confirm=true it only previews.
+    Never sends anything to the client."""
+    q = _ws_find_quote(params)
+    if not q:
+        return ToolResult(tool="convert_quote_to_invoice", success=False, error="Quote not found (give quote_id or EST number)")
+    qid = q["id"]
+    with get_db() as conn:
+        existing = dict_rows(conn.execute("SELECT id, invoice_number, status, total FROM invoices WHERE quote_id = ? AND COALESCE(status,'') != 'cancelled'", (qid,)).fetchall())
+        lines = _ws_quote_lines(conn, qid)
+    if existing:
+        e = existing[0]
+        return ToolResult(tool="convert_quote_to_invoice", success=True, result={
+            "action": "open_record", "type": "invoice", "id": e["id"], "url": _ws_record_url("invoice", e["id"]),
+            "already_exists": True, "message": f"{q.get('quote_number')} already has invoice {e['invoice_number']} ({e['status']}, ${e['total']}). Opened it instead of creating a duplicate.",
+        })
+    status = q.get("status")
+    allowed = status in ("sent", "accepted", "in_production", "completed")
+    rooms = []
+    for l in lines:
+        k = (l.get("room") or "").strip() or "Job-wide"
+        if k not in rooms:
+            rooms.append(k)
+    preview = {"quote_number": q.get("quote_number"), "client": q.get("customer_name"), "status": status,
+               "total": q.get("total"), "deposit_percent": q.get("deposit_percent"), "deposit_required": q.get("deposit_required"), "lines": len(lines), "rooms": rooms}
+    if not allowed:
+        return ToolResult(tool="convert_quote_to_invoice", success=False, result=preview,
+                          error=f"{q.get('quote_number')} is '{status}'. Only sent or accepted quotes convert; it needs founder approval (PIN) and send first.")
+    confirm = str(params.get("confirm") or "").lower() in ("1", "true", "yes")
+    if not confirm:
+        return ToolResult(tool="convert_quote_to_invoice", success=True, result={
+            **preview, "needs_confirmation": True,
+            "message": f"Ready to create a DRAFT invoice from {q.get('quote_number')} ({len(lines)} lines in {len(rooms)} room(s), total ${q.get('total')}). Nothing is sent. Confirm to create it.",
+        })
+    try:
+        r = httpx.post(f"http://localhost:8000/api/v1/quotes-v2/{qid}/to-invoice", timeout=30.0)
+    except Exception as e:
+        return ToolResult(tool="convert_quote_to_invoice", success=False, error=f"{type(e).__name__}: {e}")
+    if r.status_code != 200:
+        detail = r.text[:200]
+        try:
+            detail = r.json().get("detail", detail)
+        except Exception:
+            pass
+        return ToolResult(tool="convert_quote_to_invoice", success=False, error=f"Conversion refused ({r.status_code}): {detail}")
+    data = r.json()
+    inv = data.get("invoice") or data
+    iid = inv.get("id") or data.get("invoice_id")
+    return ToolResult(tool="convert_quote_to_invoice", success=True, result={
+        "action": "open_record", "type": "invoice", "id": iid, "url": _ws_record_url("invoice", iid) if iid else None,
+        "invoice_number": inv.get("invoice_number"), "status": inv.get("status", "draft"), "total": inv.get("total"),
+        "message": f"Draft invoice {inv.get('invoice_number')} created from {q.get('quote_number')}. It has NOT been sent. Review it on the invoice page before sending.",
+    })
 
 
 @tool("create_quick_quote")
@@ -1858,12 +2390,36 @@ def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult
         qty = li.get("quantity", 1)
         if (qty is None or qty == "") and inputs.get("quantity") is not None:
             qty = inputs.get("quantity")
-        normalized_items.append({
+        item = {
             "category":    li.get("category"),
             "description": description,
             "inputs":      inputs,
             "quantity":    qty if qty is not None else 1,
-        })
+        }
+        # 2026-10-08 (Rafael): estimates grouped by area with Sq ft | Price per sq ft columns.
+        area = li.get("room") or li.get("area") or li.get("section")
+        if isinstance(area, str) and area.strip():
+            item["room"] = area.strip()
+        for k in ("width", "height", "depth", "unit"):
+            if li.get(k) not in (None, ""):
+                item[k] = li.get(k)
+        sq = li.get("sq_ft", li.get("sqft", inputs.get("sq_ft")))
+        pps = li.get("price_per_sqft", li.get("rate_per_sqft", inputs.get("price_per_sqft")))
+        try:
+            sq_f = float(sq) if sq not in (None, "") else None
+            pps_f = float(pps) if pps not in (None, "") else None
+        except (TypeError, ValueError):
+            sq_f = pps_f = None
+        if sq_f is not None:
+            item["pricing_snapshot"] = {"sq_ft": round(sq_f, 2), **({"price_per_sqft": pps_f} if pps_f is not None else {})}
+            if pps_f is not None and not item["category"]:
+                item["category"] = "manual_line"
+            if pps_f is not None and str(item["category"] or "").lower() == "manual_line" \
+                    and inputs.get("unit_price") in (None, ""):
+                inputs["unit_price"] = round(sq_f * pps_f, 2)
+                inputs.setdefault("quantity", item["quantity"])
+                inputs.setdefault("description", description)
+        normalized_items.append(item)
 
     billed_by = params.get("billed_by")
     if not billed_by:
@@ -2382,6 +2938,9 @@ def _get_weather(params: dict, desk: Optional[str] = None) -> ToolResult:
         "washington, dc": (38.91, -77.04),
         "washington d.c.": (38.91, -77.04),
         "dc": (38.91, -77.04),
+        "hyattsville": (38.96, -76.95),
+        "hyattsville, md": (38.96, -76.95),
+        "hyattsville md": (38.96, -76.95),
     }
 
     coords = CITY_COORDS.get(city.lower(), (34.05, -118.24))
@@ -2393,6 +2952,9 @@ def _get_weather(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "latitude": coords[0],
                 "longitude": coords[1],
                 "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
+                # 2026-10-07: daily forecast so "tomorrow" questions get an answer, not a web search
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+                "forecast_days": 4,
                 "temperature_unit": "fahrenheit",
                 "wind_speed_unit": "mph",
                 "timezone": "auto",
@@ -2419,6 +2981,16 @@ def _get_weather(params: dict, desk: Optional[str] = None) -> ToolResult:
             "humidity_percent": current.get("relative_humidity_2m"),
             "wind_mph": current.get("wind_speed_10m"),
             "conditions": WMO.get(current.get("weather_code", 0), "Unknown"),
+            "forecast": [
+                {"date": d, "high_f": hi, "low_f": lo, "rain_chance_percent": pp, "conditions": WMO.get(wc, "Unknown")}
+                for d, hi, lo, pp, wc in zip(
+                    (data.get("daily") or {}).get("time") or [],
+                    (data.get("daily") or {}).get("temperature_2m_max") or [],
+                    (data.get("daily") or {}).get("temperature_2m_min") or [],
+                    (data.get("daily") or {}).get("precipitation_probability_max") or [],
+                    (data.get("daily") or {}).get("weather_code") or [],
+                )
+            ],
             "source": "Open-Meteo (live)",
         })
     except Exception as e:
@@ -2710,19 +3282,78 @@ async def _generate_pdf_for_quote(quote_id: str) -> str:
 
 @tool("check_email")
 def _check_email(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Check Gmail inbox via OAuth2. Read-only — no delete, no move."""
-    limit = min(int(params.get("limit", 10)), 20)
-    unread_only = params.get("unread_only", True)
+    """Read email. Read-only — no delete, no move, no send.
+
+    2026-10-05: "check email from <name>" → pass from_sender (alias:
+    from / sender / name). With a sender or query the whole Gmail mailbox
+    is searched (read + unread). When Gmail is unavailable the inbound
+    mail store (unified_messages, channel=email) is searched instead and
+    the result says which source answered and what is missing.
+    """
+    try:
+        limit = min(int(params.get("limit", 10) or 10), 20)
+    except Exception:
+        limit = 10
+    from_sender = (params.get("from_sender") or params.get("from") or params.get("sender")
+                   or params.get("name") or "")
+    from_sender = str(from_sender).strip() or None
+    query = (str(params.get("query") or params.get("q") or "").strip() or None)
+    searching = bool(from_sender or query)
+    unread_only = params.get("unread_only", not searching)
     filter_to = params.get("filter_to", None)
 
+    gmail_error = None
     try:
         from app.services.max.gmail_reader import check_inbox
-        result = check_inbox(limit=limit, unread_only=unread_only, filter_to=filter_to)
-        if not result.get("success"):
-            return ToolResult(tool="check_email", success=False, error=result.get("error", "Gmail check failed"))
-        return ToolResult(tool="check_email", success=True, result=result)
+        result = check_inbox(limit=limit, unread_only=unread_only, filter_to=filter_to,
+                             from_sender=from_sender, query=query)
+        if result.get("success"):
+            return ToolResult(tool="check_email", success=True, result=result)
+        gmail_error = result.get("error", "Gmail check failed")
     except Exception as e:
-        return ToolResult(tool="check_email", success=False, error=str(e))
+        gmail_error = str(e)
+
+    reauth = any(m in (gmail_error or "").lower() for m in ("invalid_grant", "expired or revoked", "token not found"))
+    gmail_status = (
+        "Gmail OAuth token is expired or revoked (invalid_grant): inbox READ (check_email) needs "
+        "Rafael to re-run backend/gmail_auth.py against ~/.config/empirebox/gmail/. "
+        "Outbound send_email still uses SMTP and is separate — do not refuse send because of this."
+        if reauth else f"Gmail read failed: {gmail_error}"
+    )
+    # Fallback: inbound mail store (webhook intake), read-only.
+    store_hits: list = []
+    try:
+        import sqlite3
+        from app.services.max.unified_message_store import DB_PATH as _UMS_DB
+        if _UMS_DB.exists():
+            con = sqlite3.connect(f"file:{_UMS_DB}?mode=ro", uri=True)
+            try:
+                sql = ("SELECT sender, recipient, subject, substr(coalesce(extracted_content, content, ''), 1, 300), created_at "
+                       "FROM unified_messages WHERE channel='email' AND direction='inbound'")
+                args: list = []
+                for term in [t for t in (from_sender, query) if t]:
+                    sql += " AND lower(coalesce(sender,'')||' '||coalesce(subject,'')||' '||coalesce(content,'')) LIKE ?"
+                    args.append(f"%{term.lower()}%")
+                sql += " ORDER BY id DESC LIMIT ?"
+                args.append(limit)
+                for row in con.execute(sql, args):
+                    store_hits.append({"from": row[0], "to": row[1], "subject": row[2], "preview": row[3], "date": row[4]})
+            finally:
+                con.close()
+    except Exception as e:
+        logger.debug(f"check_email inbound-store fallback failed: {e}")
+    missing = [gmail_status, "Outlook/Microsoft 365 mail is a separate tool: check_outlook (read-only)."]
+    if store_hits:
+        return ToolResult(tool="check_email", success=True, result={
+            "success": True, "source": "inbound_store", "count": len(store_hits),
+            "emails": store_hits, "from_sender": from_sender, "query": query,
+            "note": "Gmail unavailable; these come from the inbound mail webhook store only.",
+            "missing": missing,
+        })
+    return ToolResult(tool="check_email", success=False, result={"missing": missing, "from_sender": from_sender},
+                      error=(f"Could not read the inbox. {gmail_status}. The inbound mail store has no matching email"
+                             + (f" from '{from_sender}'" if from_sender else "") + ". For Outlook mail use check_outlook. "
+                             "Tell Rafael exactly this; do not try shell_execute."))
 
 
 @tool("send_email")
@@ -2737,7 +3368,7 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
 
     # Resolve founder aliases to FOUNDER_EMAIL from .env
     if not to or to.lower() in ("me", "owner", "founder", "my email", "myself"):
-        to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+        to = MAX_DOC_EMAIL_TO
 
     if not subject or not body:
         return ToolResult(tool="send_email", success=False, error="subject and body are required")
@@ -2773,16 +3404,7 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     # standing address. Merge DEFAULT_EMAIL_CC with any user-supplied
     # cc (deduped, case-insensitive). This is enforced in the tool,
     # NOT in the prompt, so the model cannot forget it.
-    cc_list: list[str] = []
-    if cc:
-        cc_list = [a.strip() for a in str(cc).split(",") if a.strip()]
-    seen = {to.lower()}
-    for a in cc_list:
-        seen.add(a.lower())
-    for default_cc in DEFAULT_EMAIL_CC:
-        if default_cc.lower() not in seen:
-            cc_list.append(default_cc)
-            seen.add(default_cc.lower())
+    cc_list = _merge_standing_email_cc(to, cc)
     if cc_list:
         cc_authorized = [
             (a, authorize_email_recipient(a))
@@ -2880,6 +3502,30 @@ def _normalize_quote_id_list(params: dict) -> list[str]:
     return ids
 
 
+def _resolve_extra_attachments(params: dict) -> tuple[list[str], Optional[str]]:
+    """Mockups / drawings / files to ride in the same quote email. Same gate as share_file."""
+    raw = params.get("attachments") or params.get("files") or params.get("file_ids") or params.get("extra_files") or []
+    if isinstance(raw, (str, dict)):
+        raw = [raw]
+    out: list[str] = []
+    for ref in raw:
+        if isinstance(ref, dict):
+            ref = ref.get("file_id") or ref.get("path") or ref.get("file") or ""
+        ref = str(ref or "").strip()
+        if not ref:
+            continue
+        try:
+            from app.services.max import file_finder as _ff
+            path = _ff.resolve_file(ref)
+        except Exception:
+            path = None
+        if not path:
+            return out, ref
+        if path not in out:
+            out.append(path)
+    return out, None
+
+
 @tool("send_quote_email")
 def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Generate PDF(s) for quote(s) and send in one email to a recipient."""
@@ -2887,7 +3533,9 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         authorize_email_recipient, recipient_whitelist_status,
     )
     quote_ids = _normalize_quote_id_list(params)
-    to = params.get("to", "").strip()
+    to = str(params.get("to", "") or "").strip()
+    if to.lower() in ("me", "myself", "rafael", "founder", "owner", "my email"):
+        to = MAX_DOC_EMAIL_TO
     if not quote_ids:
         return ToolResult(tool="send_quote_email", success=False, error="No quote_id provided")
     if not to:
@@ -2908,6 +3556,13 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             ),
             result=verdict_to,
         )
+
+    # 2026-10-08: one email carries every quote PDF plus any mockups/drawings/files Rafael wants with it.
+    extra_paths, bad_ref = _resolve_extra_attachments(params)
+    if bad_ref:
+        return ToolResult(tool="send_quote_email", success=False, error=(
+            f"Attachment not available: {bad_ref}. Run find_files and pass its file_id or path "
+            "(secrets and family-edition files are never attached). Nothing was sent."))
 
     from app.services.quote_service import resolve_quote
 
@@ -2956,6 +3611,15 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         else:
             subject = f"Estimates {', '.join(str(n) for n in all_numbers)} — {customer}"
             attach_lines = [f"- Estimate {n}" for n in all_numbers]
+        if params.get("subject"):
+            subject = str(params.get("subject"))[:200]
+        attach_lines += [f"- {os.path.basename(p)}" for p in extra_paths]
+        all_files = pdf_paths + extra_paths
+        total_size = sum(os.path.getsize(p) for p in all_files if os.path.exists(p))
+        if total_size > 20 * 1024 * 1024:
+            return ToolResult(tool="send_quote_email", success=False, error=(
+                f"Attachments total {total_size // (1024 * 1024)} MB, over the 20 MB email limit. "
+                "Send the quotes now and share the big files as a Studio link. Nothing was sent."))
 
         body_text = params.get("body") or params.get("body_text") or ""
         if not str(body_text).strip():
@@ -2967,12 +3631,23 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "If you have any questions, please don't hesitate to reach out."
             )
 
+        # Standing CC (same policy as send_email)
+        cc_list = _merge_standing_email_cc(to, params.get("cc"))
+        if cc_list:
+            bad = [a for a in cc_list if not authorize_email_recipient(a)["recipient_authorized"]]
+            if bad:
+                return ToolResult(
+                    tool="send_quote_email", success=False,
+                    error=f"recipient_not_in_whitelist: cc contains non-allowlisted address(es)",
+                )
         sent = svc.send(
             to=to,
             subject=subject,
             body_text=body_text,
             recipient_name=customer,
-            attachments=pdf_paths,
+            attachments=all_files,
+            cc=", ".join(cc_list) if cc_list else None,
+            reply_to=DEFAULT_REPLY_TO,
         )
         if not sent:
             return ToolResult(
@@ -2984,6 +3659,9 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         ]
         return ToolResult(tool="send_quote_email", success=True, result={
             "sent_to": to,
+            "cc": cc_list,
+            "reply_to": DEFAULT_REPLY_TO,
+            "message_id": getattr(svc, "last_message_id", None),
             "quote_id": primary.get("id", quote_ids[0]),
             "quote_ids": [q.get("id", qid) for q, qid in zip(quotes, quote_ids)],
             "quote_number": quote_number,
@@ -2993,8 +3671,11 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             "pdf_path": pdf_paths[0],
             "pdf_paths": pdf_paths,
             "pdf_size_bytes": pdf_sizes[0] if pdf_sizes else 0,
-            "attachments_sent": len(pdf_paths),
-            "attachment_files": [os.path.basename(p) for p in pdf_paths],
+            "attachments_sent": len(all_files),
+            "attachment_files": [os.path.basename(p) for p in all_files],
+            "extra_attachments": [os.path.basename(p) for p in extra_paths],
+            "one_email": True,
+            **({"bundled_calls": int(params.get("_bundled_calls"))} if params.get("_bundled_calls") else {}),
         })
     except Exception as e:
         return ToolResult(tool="send_quote_email", success=False, error=f"Email send failed: {e}")
@@ -3294,7 +3975,7 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
         email_status = None
         if email_to:
             if email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
-                email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+                email_to = MAX_DOC_EMAIL_TO
             email_status = _auto_email_pdf(
                 ul_result["pdf_path"], email_to, ul_result.get("product_type", pt),
             )
@@ -3420,7 +4101,7 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
     email_status: dict | None = None
     if email_to:
         if email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
-            email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+            email_to = MAX_DOC_EMAIL_TO
         email_status = _auto_email_pdf(str(out_path), email_to, product_type)
 
     return ToolResult(
@@ -3439,6 +4120,49 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
             ),
         },
     )
+
+
+@tool("generate_parametric_mockup")
+def _generate_parametric_mockup(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Parametric mockup tool: takes a spec, preset, or quote_id/job_id and returns PDF + PNG previews or 3D live viewer."""
+    try:
+        import asyncio
+        from app.routers.drawings import generate_mockup_drawing, MockupFromSpecRequest
+
+        req = MockupFromSpecRequest(
+            spec=params.get("spec"),
+            preset=params.get("preset"),
+            quote_id=params.get("quote_id"),
+            job_id=params.get("job_id"),
+            format=params.get("format", "pdf"),
+        )
+        res = _run_async(generate_mockup_drawing(req))
+        return ToolResult(tool="generate_parametric_mockup", success=True, result=res)
+    except Exception as e:
+        logger.exception("generate_parametric_mockup tool failed")
+        return ToolResult(tool="generate_parametric_mockup", success=False, error=str(e))
+
+
+@tool("generate_material_nest")
+def _generate_material_nest(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Material Nesting Engine: generates cut lists, 2D sheet/roll packing layouts, and yield metrics for board, foam, dacron, and fabric."""
+    try:
+        import asyncio
+        from app.routers.drawings import generate_material_nest_endpoint, NestRequest
+
+        req = NestRequest(
+            specs=params.get("specs"),
+            spec=params.get("spec"),
+            preset=params.get("preset"),
+            quote_id=params.get("quote_id"),
+            job_id=params.get("job_id"),
+            config=params.get("config"),
+        )
+        res = _run_async(generate_material_nest_endpoint(req))
+        return ToolResult(tool="generate_material_nest", success=True, result=res)
+    except Exception as e:
+        logger.exception("generate_material_nest tool failed")
+        return ToolResult(tool="generate_material_nest", success=False, error=str(e))
 
 
 @tool("sketch_to_drawing")
@@ -3521,7 +4245,7 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
         # Auto-email: if email_to is provided, send the PDF after generating
         email_to = params.get("email_to", "").strip()
         if email_to and email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
-            email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+            email_to = MAX_DOC_EMAIL_TO
 
         # ── Smart classifier (10 item types) ──
         from app.services.vision.drawing_service import classify_item
@@ -4173,6 +4897,156 @@ def _describe_job_image(params: dict, desk: Optional[str] = None) -> ToolResult:
             "full_response": mmx_data.get("full_response"),
         },
     )
+
+
+# ── MAX JOB BOARD & DOCUMENT FOLDER TOOLS ──────────────────────────
+
+@tool("get_current_job")
+def _get_current_job(tool_call: dict, desk: Optional[str] = None) -> ToolResult:
+    """Retrieve details for the currently active job being discussed with Max."""
+    params = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else tool_call
+    job_id = params.get("job_id") or get_current_job_id()
+    if not job_id:
+        # Search by client_name or search query if provided
+        q = params.get("query") or params.get("client_name") or params.get("search")
+        if q:
+            with get_db() as conn:
+                row = conn.execute(
+                    """SELECT j.*, c.name as customer_name
+                       FROM jobs j LEFT JOIN customers c ON j.customer_id = c.id
+                       WHERE j.id = ? OR j.job_number LIKE ? OR j.client_name LIKE ? OR c.name LIKE ?
+                       ORDER BY j.created_at DESC LIMIT 1""",
+                    (q, f"%{q}%", f"%{q}%", f"%{q}%"),
+                ).fetchone()
+                if row:
+                    job = dict_row(row)
+                    return ToolResult(tool="get_current_job", success=True, result={"job": job})
+
+        return ToolResult(
+            tool="get_current_job",
+            success=False,
+            error="No active job is selected. Specify a job_id or query.",
+        )
+
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT j.*, c.name as customer_name
+               FROM jobs j LEFT JOIN customers c ON j.customer_id = c.id
+               WHERE j.id = ? OR j.job_number = ?""",
+            (str(job_id), str(job_id)),
+        ).fetchone()
+        if not row:
+            return ToolResult(
+                tool="get_current_job",
+                success=False,
+                error=f"Job {job_id} not found in database.",
+            )
+        job = dict_row(row)
+        return ToolResult(tool="get_current_job", success=True, result={"job": job})
+
+
+@tool("list_job_documents")
+def _list_all_job_documents(tool_call: dict, desk: Optional[str] = None) -> ToolResult:
+    """List all documents, drawings, photos, change orders, emails, and files for a job."""
+    params = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else tool_call
+    job_id = params.get("job_id") or get_current_job_id()
+    doc_type = params.get("document_type") or params.get("type")
+
+    if not job_id:
+        return ToolResult(
+            tool="list_job_documents",
+            success=False,
+            error="No job_id provided or selected in context.",
+        )
+
+    with get_db() as conn:
+        query = "SELECT * FROM job_documents WHERE job_id = ?"
+        q_params = [str(job_id)]
+        if doc_type:
+            query += " AND document_type = ?"
+            q_params.append(doc_type)
+        query += " ORDER BY created_at DESC"
+
+        rows = conn.execute(query, q_params).fetchall()
+        docs = [dict_row(r) for r in rows]
+        return ToolResult(
+            tool="list_job_documents",
+            success=True,
+            result={"job_id": job_id, "count": len(docs), "documents": docs},
+        )
+
+
+@tool("attach_job_document")
+def _attach_job_document(tool_call: dict, desk: Optional[str] = None) -> ToolResult:
+    """Attach a document, estimate, drawing, photo, or note link to a job."""
+    params = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else tool_call
+    job_id = params.get("job_id") or get_current_job_id()
+    if not job_id:
+        return ToolResult(
+            tool="attach_job_document",
+            success=False,
+            error="No job_id provided or active.",
+        )
+
+    doc_type = params.get("document_type") or params.get("type") or "file"
+    url = params.get("url") or params.get("path") or ""
+    filename = params.get("filename") or params.get("title") or "document"
+    item_key = params.get("item_key")
+
+    with get_db() as conn:
+        exists = conn.execute("SELECT id FROM jobs WHERE id = ?", (str(job_id),)).fetchone()
+        if not exists:
+            return ToolResult(tool="attach_job_document", success=False, error=f"Job {job_id} not found.")
+
+        doc_id = uuid.uuid4().hex[:16]
+        conn.execute(
+            """INSERT INTO job_documents (id, job_id, document_type, url, filename, item_key)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (doc_id, str(job_id), doc_type, url, filename, item_key),
+        )
+        row = conn.execute("SELECT * FROM job_documents WHERE id = ?", (doc_id,)).fetchone()
+        return ToolResult(
+            tool="attach_job_document",
+            success=True,
+            result={"attached": True, "document": dict_row(row)},
+        )
+
+
+@tool("open_job_document")
+def _open_job_document(tool_call: dict, desk: Optional[str] = None) -> ToolResult:
+    """Retrieve document details and openable URL/metadata for client presentation."""
+    params = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else tool_call
+    doc_id = params.get("document_id") or params.get("id")
+    job_id = params.get("job_id") or get_current_job_id()
+
+    with get_db() as conn:
+        if doc_id:
+            row = conn.execute("SELECT * FROM job_documents WHERE id = ?", (str(doc_id),)).fetchone()
+        elif job_id and params.get("filename"):
+            row = conn.execute(
+                "SELECT * FROM job_documents WHERE job_id = ? AND filename LIKE ? ORDER BY created_at DESC LIMIT 1",
+                (str(job_id), f"%{params['filename']}%"),
+            ).fetchone()
+        else:
+            return ToolResult(
+                tool="open_job_document",
+                success=False,
+                error="Specify document_id or filename to open.",
+            )
+
+        if not row:
+            return ToolResult(
+                tool="open_job_document",
+                success=False,
+                error=f"Document not found.",
+            )
+
+        doc = dict_row(row)
+        return ToolResult(
+            tool="open_job_document",
+            success=True,
+            result={"document": doc, "action": "open", "url": doc.get("url")},
+        )
 
 
 # ── WEB SEARCH TOOL ───────────────────────────────────────────────
@@ -5481,13 +6355,24 @@ If a tool call fails with "Unknown tool", check the name against this list.
 - **search_conversations** — Search conversation history across all channels (Telegram, Web, CC, live Voice). Searches brain memories, conversation summaries, chat backups and saved voice-call transcripts. For the last voice call use `{"tool": "search_conversations", "query": "last voice call", "channel": "voice"}`.
   `{"tool": "search_conversations", "query": "keyword or phrase", "channel": "telegram|web|cc|voice"}`
 
+### Schedule & Custody Log Tools
+- **list_schedule** — Query schedule events by date range, job ID, or type (today, upcoming week, specific date).
+  `{"tool": "list_schedule", "start_date": "2026-10-09", "end_date": "2026-10-16", "job_id": "...", "type": "install|delivery|pickup|drop_off|loading_dock"}`
+- **add_schedule_event** — Schedule an event (install, delivery, pickup, drop_off, fabric_pickup, measure, loading_dock, errand, other). Must confirm and echo the resolved date/time in the response.
+  `{"tool": "add_schedule_event", "title": "...", "type": "pickup", "start_time": "2026-10-10T10:00:00", "end_time": "2026-10-10T11:00:00", "customer_vendor": "Whittington Design", "location_address": "123 Design St", "job_id": "...", "notes": "..."}`
+- **log_pickup_dropoff** — Record custody transfer for job items (what changed hands: drapery, cushion covers, fabric, etc.). When Rafael says 'picked up fabrics at Whittington Design and dropped off cushion covers', call this tool.
+  `{"tool": "log_pickup_dropoff", "direction": "picked_up|dropped_off", "items": "fabrics", "party": "Whittington Design", "job_id": "...", "notes": "..."}`
+- **propose_schedule_from_text** — DRAFT-ONLY proposal helper. Analyzes unstructured text/email and returns proposed events without creating them in DB until confirmed.
+  `{"tool": "propose_schedule_from_text", "text": "..."}`
+
 ### Action Tools
 - **deposit_pay_link** — Workroom or WoodCraft quote only. Creates (or reuses) a deposit invoice on the finance router and a Stripe Checkout link on the payments router. Client name/email/phone/address are copied from the quote. A second call returns the same invoice and the same open link. payment_status stays `link_ready` until Stripe reports paid — do not tell the founder the deposit is collected when status is not `paid`.
   `{"tool": "deposit_pay_link", "quote_id": "abc123"}`
 - **create_quick_quote** — DEPRECATED. Legacy JSON store (`/home/rg/empire-data/quotes/*.json`). Does NOT use the pricing engine. Returns `store: "json_legacy"`, `engine: "qis"`, `deprecation_notice`. Will be retired in sprint 1d. **Do NOT pick this tool for new quotes — use `create_engine_quote` instead.**
-- **draft_estimate_and_presentation** — Draft only. Builds the header-B estimate and the landscape presentation from `openings` (width, height, panels, optional sheers, install_flat, photos). Saves a draft quote. Never emails, never creates a Square link. The deposit line stays `Pay deposit online: [Square payment link]`.
+- **draft_estimate_and_presentation** — Draft only. Builds the header-B estimate and the landscape presentation from `openings` (width, height, panels, optional sheers, install_flat, photos). Saves a draft quote. Never emails, never creates a Square link. The deposit line stays `Pay deposit online: [Square payment link]`. Re-line options per opening: default is "Re-line with lining and bump" ($150/width + lining + bump yardage); pass `"bump": false` for **"Re-line with lining (no bump)"** — lining only, no bump material, labor $125/width (Pricing Studio rule `reline_no_bump_per_width`). Widths are counted the same way for both (per 48" finished panel at 100% fullness). Use the no-bump option only when the founder/client asks for it; never change existing quotes.
   `{"tool": "draft_estimate_and_presentation", "billed_by": "nelmas_workroom", "project": {"address": "9408 Old Courthouse Rd"}, "openings": [{"room": "Living Room", "width": 160, "height": 119.75, "panels": 2}]}`
-- **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.**
+- **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.** For drawn pieces (bench, banquette, cushion, back, headboard, panel, pillow) put the real inch dimensions on each line (`width`, `height`, `depth`, or `inputs`) so its idea diagram renders; a line without dimensions simply gets no diagram.
+  Upholstery estimates (Rafael 10/8): group lines by area with `room` ("U banquette", "L banquette", "Material"); for pieces priced by area pass `sq_ft` (per item) and `price_per_sqft` (category "manual_line"; the total is computed); description = piece name, then a second line with the measurements in fractions (e.g. "Seat back — main\n249 3/4\" run · back 26 3/4\" · 12\" channels"). The PDF shows Description | Qty | Unit | Sq ft | Price | Total, a subtotal per area, then grand total, deposit and balance.
   `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4, "packs": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`
   Categories (from PRICING_SPECS in `backend/app/data/product_catalog.py`): `drapery`, `roman_shade`, `valance`, `cornice`, `fabric_only`, `hardware_rod_1_1_8`, `hardware_ripplefold_track`, `hardware_rings`, `hardware_brackets`, `labor`, `pillow`, `cover`. NEW (D38 / H77): `com_fabric` (the one permitted $0 line — pass `customer_supplied: true` with `fabric_name` and `quantity`), `hardware_rod_set` ($325 flat for 4-8 ft, founder supplies `override_price` beyond), `hardware_ripplefold_set` ($250 flat for 4-8 ft, founder supplies `override_price` beyond), `installation` (pass `treatment: roman_shade` $95/each or `treatment: drapery` $145 for first 8 ft), `manual_line` (pass-through: `description` + `unit_price` + `quantity`). PricingInputError → HTTP 400 (never silent fallback for catalog items).
 
@@ -5519,6 +6404,14 @@ State machine: `draft → founder_review → sent → accepted → in_production
 - **select_proposal** — Select a design proposal (A/B/C) on a quote to finalize the total and convert to a formal estimate.
   `{"tool": "select_proposal", "quote_id": "abc123", "option": "B"}`
   After selection, the quote gets real totals and can be sent via Telegram or email.
+- **open_final_doc** — Find a saved job document (final estimate, presentation, invoice, drawings, photos) and open it in the in-app viewer. Use for "show me Nehal's final estimate", "open the EST-2026-297 presentation", "Dahlia invoice". Returns viewer_url (needs normal Empire sign-in; never public). Read-only.
+  `{"tool": "open_final_doc", "query": "Nehal final estimate"}`
+- **open_record** — Open a quote or invoice in the document workspace (a page that looks like the client PDF; Document / Actual PDF / Docs tabs). Read-only. Use for "open Nehal's quote", "show INV-2026-123".
+  `{"tool": "open_record", "type": "quote", "quote_number": "EST-2026-297"}` or `{"tool": "open_record", "type": "invoice", "invoice_number": "INV-2026-123"}` or `{"tool": "open_record", "type": "quote", "query": "Dahlia Nehal"}`
+- **edit_quote_lines** — Edit a DRAFT quote's lines by room (move / update / add / remove). Sent or accepted quotes are locked. remove needs confirm=true after the founder agrees. Returns new total and room subtotals.
+  `{"tool": "edit_quote_lines", "quote_number": "EST-2026-297", "operations": [{"op": "move", "line": 15, "room": "living room"}, {"op": "update", "line": 3, "quantity": 2}, {"op": "add", "room": "OFFICE", "description": "Install", "quantity": 1, "unit_price": 150}]}`
+- **convert_quote_to_invoice** — Make a DRAFT invoice from a sent/accepted quote (lines with rooms, client, deposit carried over). First call WITHOUT confirm to get the preview, tell the founder, and only call with confirm=true after they say yes. Never sends anything.
+  `{"tool": "convert_quote_to_invoice", "quote_number": "EST-2026-297"}` then `{"tool": "convert_quote_to_invoice", "quote_number": "EST-2026-297", "confirm": true}`
 - **open_quote_builder** — Open the QuoteBuilder right here in the dashboard (ALWAYS use this instead of linking to WorkroomForge). Pre-fills customer info AND rooms/windows from the conversation.
   `{"tool": "open_quote_builder", "customer_name": "...", "customer_email": "...", "customer_phone": "...", "customer_address": "...", "project_name": "...", "rooms": [{"name": "Living Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "roman-shade", "fabricColor": "ivory", "liningType": "standard", "hardwareType": "cassette", "motorization": "none", "mountType": "wall"}], "upholstery": []}]}`
   treatmentType options: ripplefold, pinch-pleat, rod-pocket, grommet, roman-shade, roller-shade — USE THE ONE THE CUSTOMER ASKED FOR
@@ -5546,13 +6439,28 @@ State machine: `draft → founder_review → sent → accepted → in_production
 - **send_email** — Send an email with optional file attachments
   `{"tool": "send_email", "to": "client@example.com", "subject": "Your Estimate", "body": "<h2>Hello</h2><p>HTML body here</p>", "attachments": ["/path/to/file.pdf"], "cc": "optional@cc.com"}`
   IMPORTANT: When sending a PDF, you MUST include the file path in the "attachments" array. Without it, the email arrives with no attachment.
-- **send_quote_email** — Generate a quote PDF and email it to the recipient
+- **send_quote_email** — Generate quote PDF(s) and email them in ONE email. Several quotes → `quote_ids: [...]`; mockups, drawings or other files from find_files ride along in the same email with `attachments: [file_id or path, ...]`. Never split one send into several emails.
   `{"tool": "send_quote_email", "quote_id": "abc123", "to": "client@example.com"}`
+  `{"tool": "send_quote_email", "quote_ids": ["EST-2026-299", "EST-2026-300"], "attachments": ["/home/rg/jobs/marleys-hyattsville/x/MOCKUP.pdf"], "to": "me"}`
   Use this after creating/saving a quote to email the PDF directly to a client or the founder.
 - **svg_to_pdf** — Convert SVG content or file to a PDF. Use this instead of writing Python scripts. Returns the PDF file path.
   `{"tool": "svg_to_pdf", "svg_content": "<svg>...</svg>", "output_path": "/home/rg/empire-repo/uploads/drawing.pdf"}`
   Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`
   IMPORTANT: Always use this tool to convert SVG drawings to PDF. Do NOT write conversion scripts.
+- **generate_parametric_mockup** — Generate parametric architectural drawings (plan, front elevations, side sections) or interactive 3D live models with rendered stills for any furniture, upholstery, or millwork/casework piece.
+  Can take a full `spec`, a `preset` ("marleys_u", "marleys_u_curved", "marleys_l", "straight_bench", "l_bench", "u_bench", "chair", "wall_unit"), or a `quote_id`/`job_id`.
+  **When to use 3D vs plan/elevation:**
+  - Pass `"format": "3d"` when the user asks to "show in 3D", "live model", "orbit/rotate", "3D view", or needs perspective/isometric renders of the piece. Returns a live Three.js viewer link (`viewer_url`), 4 rendered stills (`iso`, `front`, `top`, `rear`), and optional `glb_url`.
+  - Pass `"format": "pdf"` (the default) for formal architectural shop drawings, submittal documents, dimensioned plan views, front elevations, and material schedules.
+  When quote lines lack dimensions, omits drawing rather than erroring.
+  `{"tool": "generate_parametric_mockup", "preset": "marleys_u", "format": "3d"}`
+  `{"tool": "generate_parametric_mockup", "preset": "marleys_u_curved", "format": "3d"}`
+  `{"tool": "generate_parametric_mockup", "preset": "straight_bench"}`
+  `{"tool": "generate_parametric_mockup", "quote_id": "EST-2026-299"}`
+- **generate_material_nest** — Run the nesting engine for upholstery and woodwork materials. Generates optimized cut lists, sheet/roll layouts, yield metrics, and a diagram PDF for plywood/board, foam, dacron, and fabric.
+  `{"tool": "generate_material_nest", "preset": "marleys_u_and_l"}`
+  `{"tool": "generate_material_nest", "preset": "marleys_u"}`
+  `{"tool": "generate_material_nest", "quote_id": "EST-2026-299"}`
 - **sketch_to_drawing** — Generate professional architectural drawings for ANY item type. Auto-classifies input and routes to the correct renderer. Returns a PDF file path.
   **Bench drawings** produce a 4-QUADRANT layout: Plan View + Isometric View + Front Elevation + title block. Workroom letterhead is the default; pass `"business_unit": "woodcraft"` for WoodCraft chrome and a `WC · …` category chip.
   `lf` is linear feet. `width` / `width_in` are inches (a 36" width stays 36"). Omitted `back_height` is 18" and the sheet marks it assumed — a number you pass wins (the old silent 34" default is retired). `panel_style: "flat"` stays flat; `has_back: false` draws no back.
@@ -5606,7 +6514,7 @@ State machine: `draft → founder_review → sent → accepted → in_production
 
 IMPORTANT: Always use tools for factual data. NEVER fabricate task lists, weather, system stats, quotes, or customer info. If a tool returns empty results, say so honestly.
 When asked to send a quote PDF to Telegram, use send_quote_telegram with the quote_id.
-When discussing visual topics (fabrics, designs, installations), use search_images to find relevant reference photos.
+When Rafael asks for mockups, diagrams, drawings, or visual reference on a job (Marley's, banquette, basketweave, site photos, comparison boards): call find_files first (jobs/marleys-hyattsville, marleys-hyattsville, site-photos, correct-preview, comparison-*). Share those local PDFs/PNGs. Do NOT call search_images / Unsplash for job visuals, and do not lecture about textile yarn weave (warp/weft) when the job uses Empire's constructed padded-bar basketweave (2 pieces = 1 square, V-set / H-set). Use search_images only when he explicitly asks for public/stock inspiration.
 When you need current info, pricing, or research — use web_search. Do NOT say "I can't access the web."
 When analyzing a photo of windows or furniture, use photo_to_quote to create and deliver the estimate automatically.
 
@@ -5639,7 +6547,7 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
   Triggers: "MAX reset", "reset yourself", "clear your cache", "reload config", "refresh yourself", "start fresh"
 
 ### Payment Phase 1 Tools (Sprint 1d)
-- **create_invoice_from_quote** — Explicit quote→invoice action. Calls `POST /api/v1/quotes-v2/{id}/to-invoice`. The endpoint is GATED to quote.status ∈ {sent, accepted, in_production, completed}. A draft or founder_review quote returns HTTP 409 (use /submit-for-review + /approve first). Returns honest payload: invoice snapshot from canonical invoices table, store="quotes_v2", engine="lifecycle_v1". Use when the founder says "create an invoice from this quote", "bill the Willard", "invoice the bench + panel".
+- **create_invoice_from_quote** — Explicit quote→invoice action. Calls `POST /api/v1/quotes-v2/{id}/to-invoice`. The endpoint is GATED to quote.status ∈ {sent, accepted, in_production, completed}. A draft or founder_review quote returns HTTP 409 (use /submit-for-review + /approve first). Returns honest payload: invoice snapshot from canonical invoices table, store="quotes_v2", engine="lifecycle_v1". Use when the founder says "create an invoice from this quote", "bill the Willard", "invoice the bench + panel". If the job already has a deposit, an earlier invoice payment or a change order, use **job_invoice_ledger** instead (it applies those payments as credits).
   `{"tool": "create_invoice_from_quote", "quote_id": "4d9b1d03"}`
 - **split_invoice_from_invoice** — Split an existing invoice into one or more new draft invoices. Copies `line_items` exactly (no repricing, no drawings). Default `billed_by` is Empire Workroom; set `billed_by: "nelmas_workroom"` on a split (or per-split) when the founder says bill as Nelma's. Client PDF title is INVOICE only; 50% deposit due + balance due; plain line descriptions (no allocation math). Prior payments not copied unless `include_payments` is true.
   `{"tool": "split_invoice_from_invoice", "invoice_id": "abc123", "billed_by": "nelmas_workroom", "splits": [{"line_items": [{"description": "Supplied fabric, plain backs", "quantity": 1, "unit": "ea", "unit_price": 500, "total": 500}]}]}`
@@ -5667,7 +6575,7 @@ Then after seeing results, use the quote_id:
 ```
 
 ### Development Tools (Atlas / Orion)
-- **file_read** — Read a file with optional line range. Paths are relative to the live Workroom checkout: the directory this backend code is running from (the tree with `.empire-canonical`, branch feature/drawing-standard). Do not look for source in a different repo path. `{{"tool": "file_read", "path": "backend/app/routers/voice_documents.py", "line_start": 1, "line_end": 50}}`
+- **file_read** — Read a file with optional line range. Paths are relative to the live Workroom checkout: the directory this backend code is running from (the tree with `.empire-canonical`, branch feature/drawing-standard). Do not look for source in a different repo path. Outside the repo you may read Rafael's own files (an absolute path or a find_files result path: jobs, Downloads, Documents, mounted drives; PDFs come back as text); secrets, databases and Max-e/Maxine data are never readable. `{{"tool": "file_read", "path": "backend/app/routers/voice_documents.py", "line_start": 1, "line_end": 50}}`
 - **file_write** — Write content to a file. Auto-backups existing files. `{{"tool": "file_write", "path": "backend/app/routers/new.py", "content": "..."}}`
 - **file_edit** — Replace a string in a file. Supports exact match, fuzzy whitespace match, and line_number mode. Use `old_str: "__APPEND__"` to append instead.
   `{{"tool": "file_edit", "path": "backend/app/main.py", "old_str": "old code", "new_str": "new code"}}`
@@ -5705,6 +6613,39 @@ import subprocess
 import time as _time
 
 
+_REPO_SECRET_NAME = re.compile(
+    r"(^\.env(\.|$))|(\.env$)|^id_(rsa|dsa|ecdsa|ed25519)|\.(pem|key|p12|pfx|kdbx?|keystore|jks|gpg)$|"
+    r"^\.?netrc$|^\.?pgpass$|client_secret|service[-_]account.*\.json$|credentials?\.json$|token\.json$",
+    re.IGNORECASE)
+
+
+def _founder_readable_file(ref: str) -> Optional[str]:
+    """A file outside the repo that Rafael's Max may read: same gate as find_files/share_file."""
+    ref = str(ref or "").strip()
+    if not ref or ".." in Path(os.path.expanduser(ref)).parts:
+        return None
+    try:
+        from app.services.max import file_finder as _ff
+        return _ff.resolve_file(ref)
+    except Exception:
+        return None
+
+
+def _read_text_lines(path: str) -> list[str]:
+    """Text lines of a file; PDFs via pdftotext. Refuses other binaries (use share_file)."""
+    if path.lower().endswith(".pdf"):
+        out = subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True, timeout=60)
+        if out.returncode != 0:
+            raise ValueError(f"could not extract text from PDF: {out.stderr.decode(errors='replace')[:200]}")
+        return out.stdout.decode("utf-8", errors="replace").splitlines(keepends=True)
+    with open(path, "rb") as fh:
+        head = fh.read(4096)
+    if isinstance(head, (bytes, bytearray)) and b"\x00" in head:
+        raise ValueError("binary file (image/office/archive): share it with share_file instead of reading it")
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        return f.readlines()
+
+
 @tool("file_read")
 def _file_read(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Read a file with optional line range."""
@@ -5720,23 +6661,36 @@ def _file_read(params: dict, desk: Optional[str] = None) -> ToolResult:
         resolve_path_under_canonical_root,
         CanonicalRootError,
     )
+    raw_path = path
+    if _REPO_SECRET_NAME.search(os.path.basename(str(raw_path))):
+        log_execution("file_read", params, "secret file refused", desk=desk, success=False)
+        return ToolResult(tool="file_read", success=False, error=(
+            "That is a secrets file (.env / key / credential); it is never read into chat. "
+            "Use env_get to check which variable names exist."))
     try:
         # Absolute historical paths (/home/rg/empire-repo-main/...) are
         # rewritten onto the live checkout inside the resolver. Open
         # that path, not the path the model typed.
         path = str(resolve_path_under_canonical_root(path))
     except CanonicalRootError as exc:
-        log_execution("file_read", params, str(exc), desk=desk, success=False)
-        return ToolResult(tool="file_read", success=False, error=str(exc))
-
-    ok, reason = validate_path(path)
-    if not ok:
-        log_execution("file_read", params, reason, desk=desk, success=False)
-        return ToolResult(tool="file_read", success=False, error=reason)
+        # 2026-10-08: outside the repo, Rafael's own files (home, jobs, Downloads, Documents,
+        # mounted drives) are readable through the same rules as find_files/share_file:
+        # secrets, databases and Max-e/Maxine family data never, and only on the main edition.
+        wide = _founder_readable_file(raw_path)
+        if not wide:
+            log_execution("file_read", params, str(exc), desk=desk, success=False)
+            return ToolResult(tool="file_read", success=False, error=(
+                f"{exc}. Outside the repo only Rafael's own files can be read (run find_files first); "
+                "secrets, databases and family-edition data are never read."))
+        path = wide
+    else:
+        ok, reason = validate_path(path)
+        if not ok:
+            log_execution("file_read", params, reason, desk=desk, success=False)
+            return ToolResult(tool="file_read", success=False, error=reason)
 
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
+        lines = _read_text_lines(path)
 
         line_start = params.get("line_start")
         line_end = params.get("line_end")
@@ -7275,10 +8229,290 @@ def _max_room_redesign(params: dict, desk: Optional[str] = None) -> ToolResult:
         return ToolResult(tool="max_room_redesign", success=False, error=str(e)[:300])
 
 
+@tool("list_schedule")
+def _list_schedule(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """List schedule events by date range, job_id, or type."""
+    start_date = params.get("start_date")
+    end_date = params.get("end_date")
+    job_id = params.get("job_id")
+    event_type = params.get("type")
+    limit = int(params.get("limit", 50))
+
+    try:
+        from app.db.database import DB_PATH
+        import os
+        db_path = os.environ.get("EMPIRE_TASK_DB", DB_PATH)
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM schedule_events WHERE 1=1"
+        query_params = []
+
+        if start_date:
+            query += " AND start_time >= ?"
+            query_params.append(start_date)
+        if end_date:
+            query += " AND start_time <= ?"
+            query_params.append(end_date)
+        if job_id:
+            query += " AND job_id = ?"
+            query_params.append(job_id)
+        if event_type:
+            query += " AND type = ?"
+            query_params.append(event_type)
+
+        query += " ORDER BY start_time ASC LIMIT ?"
+        query_params.append(limit)
+
+        cursor.execute(query, query_params)
+        events = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+
+        return ToolResult(
+            tool="list_schedule",
+            success=True,
+            result={
+                "count": len(events),
+                "events": events,
+            },
+        )
+    except Exception as e:
+        logger.error(f"list_schedule failed: {e}")
+        return ToolResult(tool="list_schedule", success=False, error=str(e))
+
+
+@tool("add_schedule_event")
+def _add_schedule_event(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Add a schedule event with required echo confirmation of date/time."""
+    title = params.get("title", "").strip()
+    event_type = params.get("type", "other").strip()
+    start_time = params.get("start_time", "").strip()
+    end_time = params.get("end_time", "").strip()
+    job_id = params.get("job_id")
+    customer_vendor = params.get("customer_vendor", "").strip()
+    location_address = params.get("location_address", "").strip()
+    notes = params.get("notes", "").strip()
+
+    if not title:
+        return ToolResult(tool="add_schedule_event", success=False, error="Title is required")
+    if not start_time:
+        return ToolResult(tool="add_schedule_event", success=False, error="start_time is required")
+
+    try:
+        from app.db.database import DB_PATH
+        import os
+        import sqlite3
+        import uuid
+        norm_start = start_time
+        norm_end = end_time if end_time else None
+
+        db_path = os.environ.get("EMPIRE_TASK_DB", DB_PATH)
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        event_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+
+        cursor.execute(
+            """
+            INSERT INTO schedule_events (
+                id, type, title, job_id, customer_vendor, location_address,
+                start_time, end_time, status, notes, created_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                event_type,
+                title,
+                job_id,
+                customer_vendor,
+                location_address,
+                norm_start,
+                norm_end,
+                "confirmed" if params.get("confirmed") else "planned",
+                notes,
+                "max",
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        # Build clear confirmation echo of date/time
+        echo_msg = f"Scheduled '{title}' ({event_type}) on {norm_start}"
+        if norm_end:
+            echo_msg += f" to {norm_end}"
+        if customer_vendor:
+            echo_msg += f" with {customer_vendor}"
+        if location_address:
+            echo_msg += f" at {location_address}"
+
+        return ToolResult(
+            tool="add_schedule_event",
+            success=True,
+            result={
+                "event_id": event_id,
+                "title": title,
+                "type": event_type,
+                "start_time": norm_start,
+                "end_time": norm_end,
+                "customer_vendor": customer_vendor,
+                "location_address": location_address,
+                "echo_confirmation": echo_msg,
+            },
+        )
+    except Exception as e:
+        logger.error(f"add_schedule_event failed: {e}")
+        return ToolResult(tool="add_schedule_event", success=False, error=str(e))
+
+
+@tool("log_pickup_dropoff")
+def _log_pickup_dropoff(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Log physical custody transfer: items picked up or dropped off."""
+    direction = params.get("direction", "picked_up").strip()
+    items = params.get("items", "").strip()
+    party = params.get("party", "").strip()
+    job_id = params.get("job_id")
+    schedule_event_id = params.get("schedule_event_id")
+    notes = params.get("notes", "").strip()
+
+    if not items:
+        return ToolResult(tool="log_pickup_dropoff", success=False, error="items description is required")
+
+    try:
+        from app.db.database import DB_PATH
+        import os
+        import sqlite3
+        import uuid
+        db_path = os.environ.get("EMPIRE_TASK_DB", DB_PATH)
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        log_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+
+        cursor.execute(
+            """
+            INSERT INTO pickup_dropoff_logs (
+                id, schedule_event_id, job_id, timestamp, direction,
+                items, party, notes, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                log_id,
+                schedule_event_id,
+                job_id,
+                now,
+                direction,
+                items,
+                party,
+                notes,
+                "max",
+            ),
+        )
+
+        # If schedule_event_id was provided, update it to 'done'
+        if schedule_event_id:
+            cursor.execute(
+                "UPDATE schedule_events SET status = 'done', updated_at = ? WHERE id = ?",
+                (now, schedule_event_id),
+            )
+
+        conn.commit()
+        conn.close()
+
+        dir_verb = "Picked up" if direction == "picked_up" else "Dropped off"
+        summary = f"{dir_verb} {items}"
+        if party:
+            summary += f" {'from' if direction == 'picked_up' else 'to'} {party}"
+
+        return ToolResult(
+            tool="log_pickup_dropoff",
+            success=True,
+            result={
+                "log_id": log_id,
+                "direction": direction,
+                "items": items,
+                "party": party,
+                "job_id": job_id,
+                "timestamp": now,
+                "summary": summary,
+            },
+        )
+    except Exception as e:
+        logger.error(f"log_pickup_dropoff failed: {e}")
+        return ToolResult(tool="log_pickup_dropoff", success=False, error=str(e))
+
+
+@tool("propose_schedule_from_text")
+def _propose_schedule_from_text(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """DRAFT-ONLY schedule proposal helper. Does NOT write to DB without explicit user confirmation."""
+    text = params.get("text", "").strip()
+    if not text:
+        return ToolResult(tool="propose_schedule_from_text", success=False, error="Text input is required")
+
+    try:
+        from app.routers.schedule import extract_draft_events_from_text
+        proposals = extract_draft_events_from_text(text)
+        return ToolResult(
+            tool="propose_schedule_from_text",
+            success=True,
+            result={
+                "proposals_count": len(proposals),
+                "draft_proposals": proposals,
+                "notice": "DRAFT ONLY: No events were created in the database. Present these proposals to Rafael for confirmation.",
+            },
+        )
+    except Exception as e:
+        logger.error(f"propose_schedule_from_text failed: {e}")
+        return ToolResult(tool="propose_schedule_from_text", success=False, error=str(e))
+
+
 # ── Tool count in TOOLS_DOC (2026-09-29) ───────────────────────────
 # TOOLS_DOC is defined mid-module, before every @tool handler has been
 # registered, so its header count used to be a hand-maintained literal that
 # went stale ("43 total" while 67 handlers were registered). Resolve it here,
 # after all registrations, from the live registry.
+# Job-aware invoice ledger (prior deposits / payments / change orders applied). 2026-10-09.
+try:
+    import importlib as _importlib, sys as _sys
+    _ledger_name = "app.services.max.tools_job_ledger"
+    _tools_job_ledger = (_importlib.reload(_sys.modules[_ledger_name]) if _ledger_name in _sys.modules
+                         else _importlib.import_module(_ledger_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_job_ledger.JOB_LEDGER_TOOLS_DOC
+except Exception as _ledger_err:  # never take Max down over an optional tool pack
+    logger.error(f"tools_job_ledger not loaded: {_ledger_err}")
+
+# Client-acquisition tools (LeadForge/SocialForge/pipeline, draft-only) + read-only
+# module bridge. Registered from their own module: docs/MAX_PROSPECTING.md.
+try:
+    import importlib as _importlib, sys as _sys
+    _acq_name = "app.services.max.tools_acquisition"
+    # reload on module reload so the handlers register into the fresh TOOL_REGISTRY
+    _tools_acquisition = (_importlib.reload(_sys.modules[_acq_name]) if _acq_name in _sys.modules
+                          else _importlib.import_module(_acq_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_acquisition.ACQUISITION_TOOLS_DOC
+except Exception as _acq_err:  # never take Max down over an optional tool pack
+    logger.error(f"tools_acquisition not loaded: {_acq_err}")
+
+# Rafael's file finder (read-only search + share to Rafael only). 2026-10-05.
+try:
+    _files_name = "app.services.max.tools_files"
+    _tools_files = (_importlib.reload(_sys.modules[_files_name]) if _files_name in _sys.modules
+                    else _importlib.import_module(_files_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_files.FILE_TOOLS_DOC
+except Exception as _files_err:  # never take Max down over an optional tool pack
+    logger.error(f"tools_files not loaded: {_files_err}")
+
+# Outlook / Microsoft 365 mail, READ-ONLY (Graph Mail.Read). 2026-10-08.
+try:
+    _outlook_name = "app.services.max.tools_outlook"
+    _tools_outlook = (_importlib.reload(_sys.modules[_outlook_name]) if _outlook_name in _sys.modules
+                      else _importlib.import_module(_outlook_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_outlook.OUTLOOK_TOOLS_DOC
+except Exception as _outlook_err:  # never take Max down over an optional tool pack
+    logger.error(f"tools_outlook not loaded: {_outlook_err}")
+
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))

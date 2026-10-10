@@ -3237,10 +3237,7 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
         idea_diagrams_html = quote_idea_html(quote)
     except Exception as idea_err:
         logger.warning(f"Idea diagrams skipped for quote PDF: {idea_err}")
-        idea_diagrams_html = (
-            f'<p style="color:#8a5a00;font-size:0.85em">Idea diagrams unavailable: {idea_err}. '
-            "The quote totals are unchanged.</p>"
-        )
+        idea_diagrams_html = ""  # omitted, never an error line in a client PDF
 
     # AI Outline drawings
     outlines_html = ""

@@ -16,11 +16,13 @@ Public API (keep identical across editions):
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 from datetime import datetime, timedelta, timezone
@@ -105,6 +107,7 @@ def channel_status() -> dict[str, Any]:
         "interface_point": "whatsapp_cloud_api",
         "graph_version": GRAPH_VERSION,
         "reply_mode": reply_mode(),
+        "calling_enabled": bool((os.getenv("WHATSAPP_CALLING_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")),
     }
 
 
@@ -219,6 +222,16 @@ def founder_allowlist() -> frozenset[str]:
                     raw.append(str(item.get("phone") or item.get("number") or item.get("wa_id") or ""))
                 else:
                     raw.append(str(item))
+    env_phones = os.getenv("WHATSAPP_FOUNDER_PHONES") or ""
+    if env_phones.strip():
+        raw.extend(part.strip() for part in env_phones.split(",") if part.strip())
+    try:
+        from app.services.max.whatsapp_log import load_whatsapp_phonebook
+
+        for row in load_whatsapp_phonebook():
+            raw.append(str(row.get("phone") or ""))
+    except Exception:
+        logger.debug("WhatsApp phonebook unavailable for allowlist")
     return frozenset(n for n in (normalize_msisdn(item) for item in raw if str(item).strip()) if n)
 
 
@@ -256,7 +269,7 @@ def _save_state(data: dict[str, Any]) -> None:
 
 def clear_runtime_state() -> None:
     with _lock:
-        _save_state({"windows": {}, "seen": []})
+        _save_state({"windows": {}, "seen": [], "conversations": {}})
 
 
 def _parse_stamp(value: Any) -> datetime:
@@ -267,7 +280,10 @@ def _parse_stamp(value: Any) -> datetime:
         if text.isdigit():
             stamp = datetime.fromtimestamp(int(text), tz=timezone.utc)
         else:
-            stamp = datetime.now(timezone.utc)
+            try:
+                stamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                stamp = datetime.now(timezone.utc)
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)
     return stamp.astimezone(timezone.utc)
@@ -566,6 +582,47 @@ def parse_statuses(payload: dict | None) -> list[dict[str, Any]]:
     return found
 
 
+def parse_inbound_calls(payload: dict | None) -> list[dict[str, Any]]:
+    """Flatten a Cloud API webhook into inbound call events."""
+    if not isinstance(payload, dict):
+        return []
+    if payload.get("object") not in (None, "whatsapp_business_account"):
+        return []
+    calls: list[dict[str, Any]] = []
+    for entry in payload.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        for change in entry.get("changes") or []:
+            field = change.get("field")
+            value = (change or {}).get("value") or {}
+            if not isinstance(value, dict):
+                continue
+            # Meta may send calls under changes with field == 'calls' or value having 'calls'
+            raw_calls = value.get("calls") or []
+            if not isinstance(raw_calls, list) and isinstance(raw_calls, dict):
+                raw_calls = [raw_calls]
+            for call_ev in raw_calls:
+                if not isinstance(call_ev, dict):
+                    continue
+                call_id = str(call_ev.get("id") or call_ev.get("call_id") or "")
+                caller = str(call_ev.get("from") or "")
+                event = str(call_ev.get("event") or "")
+                session = call_ev.get("session") or {}
+                sdp = ""
+                if isinstance(session, dict):
+                    sdp = session.get("sdp") or ""
+                calls.append({
+                    "call_id": call_id,
+                    "from": caller,
+                    "event": event,
+                    "sdp": sdp,
+                    "timestamp": call_ev.get("timestamp"),
+                    "raw": call_ev,
+                })
+    return calls
+
+
+
 def _require_enabled() -> None:
     if not channel_status()["enabled"]:
         raise WhatsAppSendBlocked("WhatsApp is disabled")
@@ -855,7 +912,7 @@ async def reply_in_window(
                 "document": {
                     "id": media_id,
                     "filename": filename,
-                    "caption": "Draft. Not sent.",
+                    "caption": str(doc.get("caption") or "Draft. Not sent.")[:1024],
                 },
             }, http_post=http_post)
             attached.append({"filename": filename, "media_id": media_id, "doc_id": doc_id, "data": bytes(payload)})
@@ -1015,27 +1072,391 @@ def _session_key(wa_id: str) -> str:
     return f"whatsapp:{normalize_msisdn(wa_id)}"
 
 
-async def max_chat(text: str, wa_id: str) -> str:
-    """Text adapter. Family editions can replace this without forking the webhook."""
+# ── One rolling conversation per WhatsApp sender ───────────────────
+# 2026-10-04: every inbound message got a fresh studio-<uuid> conversation, so Max
+# forgot the previous message ("Send me a pdf here" -> "which document?"). Now one
+# conversation_id per wa_id, reused until WHATSAPP_CONVERSATION_IDLE_HOURS (12h)
+# of silence, with the recent turns passed as history and the last documents shown.
+
+ENV_CONVERSATION_IDLE_HOURS = "WHATSAPP_CONVERSATION_IDLE_HOURS"
+DEFAULT_CONVERSATION_IDLE_HOURS = 12.0
+HISTORY_MESSAGES = 12
+HISTORY_CHARS = 1500
+MAX_ATTACHED_DOCS = 3
+
+WHATSAPP_DIRECTIVE = (
+    "\n\n## CHANNEL: WHATSAPP (chat with Rafael, the founder)\n"
+    "- This is Rafael's own WhatsApp chat with you. 'here', 'aquí', 'por aquí', 'en este chat' mean: "
+    "attach it in THIS WhatsApp chat to Rafael. That is a reply to him, not an outbound send, so it is "
+    "allowed without a confirm. Never offer to email it instead, and never call an email tool for it.\n"
+    "- To deliver a saved document, call open_final_doc (client name, nickname or job address is fine, "
+    "e.g. 'Dahlia last 2 docs'). The channel attaches the PDFs of the documents that tool returns as "
+    "WhatsApp documents. Say 'PDF attached'.\n"
+    "- Never paste studio.empirebox.store or /docs/view links: they need a login and do not open on "
+    "his phone.\n"
+    "- If open_final_doc did not find the document, say so plainly and name the closest matches it "
+    "returned. Never describe a document as found, opened or attached when the tool failed.\n"
+    "- Short, plain text. No markdown headers or tables."
+)
+
+
+def _conversation_idle_hours() -> float:
+    try:
+        return max(0.5, float(os.getenv(ENV_CONVERSATION_IDLE_HOURS) or DEFAULT_CONVERSATION_IDLE_HOURS))
+    except ValueError:
+        return DEFAULT_CONVERSATION_IDLE_HOURS
+
+
+def whatsapp_conversation(wa_id: str, now: datetime | None = None) -> dict[str, Any]:
+    """The sender's current conversation (created or rolled over after the idle window)."""
+    number = normalize_msisdn(wa_id)
+    now = now or datetime.now(timezone.utc)
+    with _lock:
+        data = _load_state()
+        convs = data.setdefault("conversations", {})
+        entry = convs.get(number) if isinstance(convs.get(number), dict) else None
+        if entry:
+            idle = now - _parse_stamp(entry.get("last_at"))
+            if idle > timedelta(hours=_conversation_idle_hours()):
+                entry = None
+        if not entry:
+            entry = {
+                "conversation_id": f"whatsapp-{number}-{now.strftime('%Y%m%d%H%M%S')}",
+                "started_at": now.isoformat(),
+                "last_at": now.isoformat(),
+                "history": [],
+                "last_docs": [],
+            }
+            convs[number] = entry
+            _save_state(data)
+        return json.loads(json.dumps(entry))
+
+
+def remember_whatsapp_turn(
+    wa_id: str,
+    user_text: str,
+    assistant_text: str,
+    *,
+    docs: Optional[list[dict[str, Any]]] = None,
+    now: datetime | None = None,
+) -> None:
+    number = normalize_msisdn(wa_id)
+    now = now or datetime.now(timezone.utc)
+    with _lock:
+        data = _load_state()
+        convs = data.setdefault("conversations", {})
+        entry = convs.get(number)
+        if not isinstance(entry, dict):
+            return
+        hist = list(entry.get("history") or [])
+        if user_text:
+            hist.append({"role": "user", "content": str(user_text)[:HISTORY_CHARS]})
+        if assistant_text:
+            hist.append({"role": "assistant", "content": str(assistant_text)[:HISTORY_CHARS]})
+        entry["history"] = hist[-HISTORY_MESSAGES:]
+        entry["last_at"] = now.isoformat()
+        if docs:
+            entry["last_docs"] = [
+                {k: d.get(k) for k in ("doc_id", "title", "version", "type", "filename", "client")}
+                for d in docs[:MAX_ATTACHED_DOCS]
+            ]
+        _save_state(data)
+
+
+_STUDIO_LINK_MD = re.compile(r"\[([^\]]*)\]\((?:https?://[^)\s]*empirebox\.store[^)\s]*|/docs/view[^)\s]*|/docs-hub[^)\s]*)\)")
+_STUDIO_URL = re.compile(r"(?:https?://\S*empirebox\.store\S*|(?<![\w/])/docs/view\?id=[\w-]+|(?<![\w/])/api/v1/docs-hub/\S+)")
+
+
+def strip_studio_links(text: str) -> str:
+    """Studio/viewer links need a login and do not open on the phone."""
+    def _md(m: re.Match) -> str:
+        label = m.group(1).strip()
+        return "" if re.fullmatch(r"\d+", label or "") else label
+
+    out = _STUDIO_LINK_MD.sub(_md, text or "")
+    out = _STUDIO_URL.sub("", out)
+    out = re.sub(r"[ \t]+([,.;:)])", r"\1", out)
+    out = re.sub(r"\(\s*\)", "", out)
+    out = re.sub(r"`\s*`", "", out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return out.strip()
+
+
+def _docs_from_tool_results(tool_results: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(found docs, failed open_final_doc calls) from a chat turn's tool results."""
+    found: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in tool_results or []:
+        if not isinstance(row, dict) or row.get("tool") != "open_final_doc":
+            continue
+        if not row.get("success"):
+            failed.append(row)
+            continue
+        res = row.get("result") or {}
+        docs = res.get("docs") or [res]
+        for d in docs:
+            doc_id = str(d.get("doc_id") or "")
+            if doc_id and doc_id not in seen:
+                seen.add(doc_id)
+                found.append(d)
+    return found, failed
+
+
+def _attach_final_docs(
+    docs: list[dict[str, Any]],
+    *,
+    fetch: Optional[Callable[[str], bytes]] = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """PDF bytes for Final Docs, ready for reply_in_window(documents=...)."""
+    from app.services.max.doc_lookup import fetch_pdf
+
+    get = fetch or (lambda doc_id: fetch_pdf(doc_id))
+    out: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for d in docs[:MAX_ATTACHED_DOCS]:
+        title = str(d.get("title") or d.get("doc_id") or "document")
+        try:
+            data = get(str(d.get("doc_id") or ""))
+        except Exception:
+            logger.warning("WhatsApp final doc fetch failed", exc_info=True)
+            data = b""
+        if not data:
+            missing.append(title)
+            continue
+        name = d.get("filename") or f"{title}.pdf"
+        out.append({"filename": _pdf_filename(str(name)), "data": data, "mime": "application/pdf", "kind": "final_doc",
+                    "caption": f"{title}. For you; not sent to the client."})
+    return out, missing
+
+
+def _doc_lines(docs: list[dict[str, Any]]) -> str:
+    rows = []
+    for i, d in enumerate(docs[:MAX_ATTACHED_DOCS], 1):
+        ver = f" ({d.get('version')}{', FINAL' if d.get('is_final') else ''})" if d.get("version") else ""
+        mod = str(d.get("modified") or "")[:10]
+        rows.append(f"{i}. {d.get('title')}{ver}" + (f", updated {mod}" if mod else ""))
+    return "\n".join(rows)
+
+
+def _no_doc_reply(failed: list[dict[str, Any]]) -> str:
+    """Honest reply when every open_final_doc call failed."""
+    first = failed[0] if failed else {}
+    err = str(first.get("error") or "")
+    m = re.search(r'matched "([^"]+)"', err)
+    asked = m.group(1) if m else "that"
+    closest = ((first.get("result") or {}).get("closest")) or []
+    lines = [f'I could not find a saved document for "{asked}". Nothing attached.']
+    if closest:
+        lines.append("Closest matches:")
+        for c in closest[:4]:
+            latest = c.get("latest") or {}
+            extra = f" (latest: {latest.get('title')})" if latest.get("title") else ""
+            lines.append(f"- {c.get('client')}{extra}")
+    else:
+        lines.append("No close client names either. Tell me the client, nickname or job address.")
+    return "\n".join(lines)
+
+
+def _finish_doc_reply(
+    wa_id: str,
+    user_text: str,
+    text: str,
+    docs: list[dict[str, Any]],
+    *,
+    fetch: Optional[Callable[[str], bytes]] = None,
+):
+    documents, missing = _attach_final_docs(docs, fetch=fetch)
+    body = strip_studio_links(text)
+    if documents:
+        body = f"{body}\nPDF attached ({len(documents)}). For you only; nothing was sent to the client.".strip()
+    if missing:
+        body = f"{body}\nCould not attach: {', '.join(missing)}.".strip()
+    remember_whatsapp_turn(wa_id, user_text, body, docs=docs if documents else None)
+    if documents:
+        return {"text": body, "documents": documents}
+    return body
+
+
+async def max_chat(text: str, wa_id: str, *, fetch: Optional[Callable[[str], bytes]] = None):
+    """Text adapter. Family editions can replace this without forking the webhook.
+
+    One conversation per sender (history + conversation_id), Final Docs PDFs found in
+    this turn ride along as WhatsApp documents, studio links are stripped, and a turn
+    where every doc lookup failed gets an honest 'not found' reply."""
     from app.routers.max.router import ChatRequest, _chat_with_max_service
 
+    number = normalize_msisdn(wa_id)
+    conv = whatsapp_conversation(wa_id)
     response = await _chat_with_max_service(
-        ChatRequest(message=text, channel="whatsapp", chat_id=normalize_msisdn(wa_id)),
+        ChatRequest(
+            message=text,
+            channel="whatsapp",
+            chat_id=number,
+            conversation_id=conv["conversation_id"],
+            history=conv.get("history") or [],
+        ),
         canonical_channel="whatsapp",
-        canonical_chat_id=normalize_msisdn(wa_id),
+        canonical_chat_id=number,
         canonical_founder=True,
     )
     reply = getattr(response, "response", None)
-    if reply is None and isinstance(response, dict):
-        reply = response.get("response")
-    return str(reply or "No reply. Nothing sent.")
+    tool_results = getattr(response, "tool_results", None)
+    if isinstance(response, dict):
+        reply = response.get("response") if reply is None else reply
+        tool_results = response.get("tool_results") if tool_results is None else tool_results
+    reply = str(reply or "No reply. Nothing sent.")
+    docs, failed = _docs_from_tool_results(tool_results)
+    if failed and not docs:
+        honest = _no_doc_reply(failed)
+        remember_whatsapp_turn(wa_id, text, honest)
+        return honest
+    if docs:
+        return _finish_doc_reply(wa_id, text, reply, docs, fetch=fetch)
+    clean = strip_studio_links(reply)
+    remember_whatsapp_turn(wa_id, text, clean)
+    return clean
+
+
+_SEND_VERB = re.compile(
+    r"\b(?:send|sent|attach|share|give|forward|pass|show|m[aá]nd\w*|env[ií]\w*|p[aá]sa\w*|mu[eé]str\w*|adjunt\w*|comparte\w*)\b",
+    re.IGNORECASE,
+)
+_PDF_WORD = re.compile(r"\b(?:pdfs?|docs?|documents?|documentos?|files?|archivos?)\b", re.IGNORECASE)
+_PRONOUN = re.compile(r"\b(?:it|them|those|these|that|this|eso|esos|esas|ese|esa|los|las|lo|la)\b", re.IGNORECASE)
+_HERE = re.compile(r"\b(?:here|aqu[ií]|ac[aá]|in this chat|en este chat|on whatsapp|por whatsapp)\b", re.IGNORECASE)
+
+
+async def whatsapp_doc_request(
+    body: str,
+    wa_id: str,
+    *,
+    hub_get: Optional[Callable[[str, dict], dict]] = None,
+    fetch: Optional[Callable[[str], bytes]] = None,
+):
+    """'Show me Dahlia's last 2 docs here' / 'send me the pdf here' answered directly:
+    resolve the Final Docs (aliases, addresses, last N) or reuse the documents shown last
+    in this conversation, and attach the PDFs. None when the message is something else."""
+    t = (body or "").strip()
+    if not t or len(t) > 240 or t.endswith("?") and not _HERE.search(t):
+        return None
+    if not _SEND_VERB.search(t):
+        return None
+    wants_doc = bool(_PDF_WORD.search(t))
+    if not wants_doc and not (_PRONOUN.search(t) and _HERE.search(t)):
+        return None
+    from app.services.max.doc_lookup import find_docs, parse_request
+
+    req = parse_request(t)
+    conv = whatsapp_conversation(wa_id)
+    specific = bool(req["terms"] or req["quote_number"] or req["type"])
+    if specific:
+        try:
+            found = await asyncio.to_thread(find_docs, t, hub_get=hub_get)
+        except Exception:
+            logger.warning("WhatsApp doc lookup failed", exc_info=True)
+            return None
+        if found.get("found") and (found.get("client") or found.get("type") or req["quote_number"]):
+            docs = found["docs"]
+            who = found.get("client") or "that"
+            head = f"{who}: {len(docs)} latest final document(s), newest first:" if len(docs) > 1 else f"{who}:"
+            return _finish_doc_reply(wa_id, t, f"{head}\n{_doc_lines(docs)}", docs, fetch=fetch)
+        if not found.get("found") and (found.get("client") or req["terms"]):
+            if found.get("client") is None and not _HERE.search(t):
+                return None  # not clearly a doc request for here; let Max chat handle it
+            honest = _no_doc_reply([{"error": f'No saved document matched "{t}"', "result": {"closest": found.get("closest") or []}}])
+            remember_whatsapp_turn(wa_id, t, honest)
+            return honest
+        return None
+    last = conv.get("last_docs") or []
+    if not last:
+        return None  # nothing shown yet in this conversation; Max will ask which one
+    return _finish_doc_reply(
+        wa_id, t, f"Here {'they are' if len(last) > 1 else 'it is'}:\n{_doc_lines(last)}", last, fetch=fetch,
+    )
+
+
+_DICTATION_DETAIL = re.compile(
+    r"\d|\b(?:inch|inches|foot|feet|yard|yards|fabric|cushion|bench|pillow|drape|drapes|drapery|shade|shades|"
+    r"valance|cornice|headboard|upholster\w*|foam|welt|tuft\w*|channel|piping|lining|pleat\w*|ripplefold|track|rod|"
+    r"client|customer|address|deposit|quantity|qty|price|rate|color|colour)\b",
+    re.IGNORECASE,
+)
+_SEND_IT = re.compile(r"^\W*(?:ok[, ]+)?(?:send it|send the quote|email it|email the quote)\W*$", re.IGNORECASE)
+
+
+def _belongs_to_voice_draft(body: str, probe: Any, open_draft: bool) -> bool:
+    """New-document dictation (or a follow-up to the open draft) vs. a normal message.
+
+    2026-10-04: every WhatsApp voice note and, once a draft was open, every text (even "Hi")
+    went into quote intake. Greetings, questions and requests about EXISTING quotes/jobs now
+    go to Max chat; only dictation joins the draft.
+    """
+    from app.services.max.quick_replies import is_greeting, parse_quote_lookup
+
+    t = body.strip()
+    if is_greeting(t) or parse_quote_lookup(t):
+        return False
+    question = bool(re.match(
+        r"^\W*(?:can|could|would|will|do|does|did|is|are|what|what's|whats|where|when|which|who|how|why|"
+        r"show|tell|give|find|check|pull|open|list)\b", t, re.IGNORECASE)) or t.endswith("?")
+    creating = bool(re.search(
+        r"\b(?:new|make|create|start|draft|build|prepare|write up)\b[^.?!]{0,40}\b(?:quote|estimate|invoice|drawing)\b",
+        t, re.IGNORECASE))
+    if question and not creating:
+        return False
+    if open_draft:
+        return bool(probe.done or _SEND_IT.match(t) or probe.document_intent or _DICTATION_DETAIL.search(t))
+    return bool(probe.document_intent or probe.done)
+
+
+async def _quick_whatsapp_reply(body: str):
+    """Greeting / docs / existing-quote status, answered without the model. The quote PDF rides
+    along in this chat with Rafael: a reply to the founder, not an outbound send."""
+    from app.services.max.quick_replies import direct_reply
+
+    hit = direct_reply(body, channel="whatsapp")
+    if not hit:
+        return None
+    text = hit["text"]
+    q = hit.get("quote") or None
+    if q and hit.get("want_pdf"):
+        try:
+            from app.services.quote_pdf_service import generate_quote_pdf
+
+            data = generate_quote_pdf(q.get("id"))
+            if data:
+                text = f"{text}\nPDF below (for you; nothing was sent to the client)."
+                return {"text": text, "documents": [{
+                    "filename": _pdf_filename(f"{q.get('quote_number') or 'quote'}.pdf"),
+                    "data": data, "mime": "application/pdf", "kind": "quote",
+                }]}
+        except Exception:
+            logger.warning("WhatsApp quote lookup PDF skipped", exc_info=True)
+            text = f"{text}\nThe PDF could not be attached right now."
+    return text
 
 
 async def default_text_handler(text: str, wa_id: str) -> str:
-    """Quote-shaped text joins the open voice draft. Everything else is Max chat."""
+    """Dictation joins the open voice draft. Everything else is Max chat."""
     body = (text or "").strip()
     if not body:
         return "Empty message. Nothing sent."
+    try:
+        quick = await _quick_whatsapp_reply(body)
+        if quick:
+            whatsapp_conversation(wa_id)
+            q_text, _q_docs = _split_reply(quick)
+            remember_whatsapp_turn(wa_id, body, q_text)
+            return quick
+    except Exception:
+        logger.warning("WhatsApp quick reply failed", exc_info=True)
+    try:
+        doc_reply = await whatsapp_doc_request(body, wa_id)
+        if doc_reply:
+            return doc_reply
+    except Exception:
+        logger.warning("WhatsApp doc request failed", exc_info=True)
     try:
         from app.services.voice_documents.extract import extract_transcript
         from app.services.voice_documents.pipeline import ingest_transcript
@@ -1043,7 +1464,7 @@ async def default_text_handler(text: str, wa_id: str) -> str:
 
         probe = extract_transcript(body)
         open_draft = active_session(_session_key(wa_id)) is not None
-        if probe.document_intent or probe.done or probe.send_requested or open_draft:
+        if _belongs_to_voice_draft(body, probe, open_draft):
             result = ingest_transcript(
                 body,
                 channel="whatsapp",
@@ -1069,17 +1490,12 @@ async def default_voice_handler(audio: bytes, mime: str, wa_id: str) -> str:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
             handle.write(audio)
             path = handle.name
-        from app.services.voice_documents.pipeline import ingest_audio
+        # 2026-10-04: transcribe first, then route like a typed message (dictation -> draft,
+        # everything else -> Max chat). The reply goes back as a voice note when the reply
+        # mode follows the inbound message.
+        from app.services.max.stt_service import stt_service
 
-        result = await ingest_audio(
-            path,
-            channel="whatsapp",
-            session_key=_session_key(wa_id),
-            edition_id="workroom",
-        )
-        if result.get("handled"):
-            return _outbound(result.get("reply_text") or "Draft updated. Not sent.", result)
-        transcript = (result.get("transcript") or result.get("transcript_raw") or "").strip()
+        transcript = (await stt_service.transcribe(path, language="en") or "").strip()
         if transcript:
             return await default_text_handler(transcript, wa_id)
         return "No transcript. Nothing sent."
@@ -1142,6 +1558,19 @@ async def default_photo_handler(image: bytes, mime: str, caption: str, wa_id: st
     except Exception:
         logger.warning("WhatsApp photo quote failed", exc_info=True)
         return "Photo analysis failed. Nothing sent."
+
+
+
+_SENDER_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _sender_lock(sender: str) -> asyncio.Lock:
+    """Per-sender lock so inbound WhatsApp messages are handled one at a time, in arrival order."""
+    key = normalize_msisdn(sender) or str(sender or "")
+    lock = _SENDER_LOCKS.get(key)
+    if lock is None:
+        lock = _SENDER_LOCKS[key] = asyncio.Lock()
+    return lock
 
 
 async def process_webhook(
@@ -1215,85 +1644,112 @@ async def process_webhook(
             set_pending_filings,
         )
 
-        media_bytes, media_mime = b"", ""
-        if message.get("media_id"):
-            media_bytes, media_mime = await _safe_download(message["media_id"], http_get)
-        inbound_atts = _persist_inbound_media(message, media_bytes, media_mime or message.get("mime_type") or "")
-
-        filed_reply = ""
-        if message["type"] == "text":
-            answered = consume_job_answer(sender, message.get("text") or "")
-            if answered and answered.get("handled"):
-                filed_reply = answered.get("reply") or ""
-
-        msg_row_id = _log_chat(
-            wa_id=sender,
-            direction="inbound",
-            message_type=fields["message_type"],
-            body=fields["body"],
-            caption=fields["caption"],
-            wa_message_id=message_id,
-            delivery_status="received",
-            timestamp=_iso_wa(message.get("timestamp")),
-            metadata={
-                **fields["metadata"],
-                "filed": [
-                    {"filename": a.get("filename"), "job_slug": a.get("job_slug"), "filed_path": a.get("filed_path"), "filing_status": a.get("filing_status")}
-                    for a in inbound_atts
-                ],
-            },
-            attachments=inbound_atts,
-        )
-        if msg_row_id:
-            saved = last_attachment_ids(msg_row_id)
-            inbox_ids = [int(a["id"]) for a in saved if a.get("filing_status") == "inbox"]
-            if inbox_ids:
-                set_pending_filings(sender, inbox_ids)
-        note_customer_window(sender, message.get("timestamp"))
-        reply = ""
-        route = message["type"]
-        try:
-            if filed_reply:
-                route = "job_file"
-                reply = filed_reply
-            elif message["type"] == "text":
-                route = "chat"
-                reply = await on_text(message["text"], sender)
-            elif message["type"] == "audio" or message.get("voice"):
-                route = "voice_document"
-                reply = await on_voice(media_bytes, media_mime or message["mime_type"], sender)
-            elif message["type"] == "image":
-                route = "photo_quote"
-                reply = await on_photo(media_bytes, media_mime or message["mime_type"], message["caption"], sender)
-            else:
-                reply = "That message type is not handled. Nothing sent."
-        except Exception:
-            logger.warning("WhatsApp inbound handler failed", exc_info=True)
-            reply = "That message failed. Nothing sent."
-        reply_text, documents = _split_reply(reply)
-        if any(a.get("needs_job_ask") or a.get("filing_status") == "inbox" for a in inbound_atts):
-            if JOB_ASK_TEXT not in (reply_text or ""):
-                reply_text = f"{reply_text}\n{JOB_ASK_TEXT}".strip() if reply_text else JOB_ASK_TEXT
-        reply_sent = False
-        reply_error = ""
-        voice_sent = False
-        voice_fallback = ""
-        if reply_text or documents:
+        # 2026-10-08 queueing: one sender's messages are answered in order.
+        async with _sender_lock(sender):
+            media_bytes, media_mime = b"", ""
+            inbound_atts: list[dict[str, Any]] = []
+            filed_reply = ""
+            persist_failed = False
             try:
-                delivered = await reply_in_window(
-                    sender,
-                    reply_text,
-                    http_post=http_post,
-                    http_upload=http_upload,
-                    inbound_type=message["type"],
-                    inbound_voice=bool(message.get("voice")),
-                    documents=documents,
+                if message.get("media_id"):
+                    media_bytes, media_mime = await _safe_download(message["media_id"], http_get)
+                inbound_atts = _persist_inbound_media(
+                    message, media_bytes, media_mime or message.get("mime_type") or "",
                 )
-                reply_sent = True
-                voice_sent = bool(delivered.get("voice_sent"))
-                voice_fallback = delivered.get("voice_fallback") or ""
-            except WhatsAppSendBlocked as exc:
-                reply_error = str(exc)
+                if message["type"] == "text":
+                    answered = consume_job_answer(sender, message.get("text") or "")
+                    if answered and answered.get("handled"):
+                        filed_reply = answered.get("reply") or ""
+                msg_row_id = _log_chat(
+                    wa_id=sender,
+                    direction="inbound",
+                    message_type=fields["message_type"],
+                    body=fields["body"],
+                    caption=fields["caption"],
+                    wa_message_id=message_id,
+                    delivery_status="received",
+                    timestamp=_iso_wa(message.get("timestamp")),
+                    metadata={
+                        **fields["metadata"],
+                        "filed": [
+                            {
+                                "filename": a.get("filename"),
+                                "job_slug": a.get("job_slug"),
+                                "filed_path": a.get("filed_path"),
+                                "filing_status": a.get("filing_status"),
+                            }
+                            for a in inbound_atts
+                        ],
+                    },
+                    attachments=inbound_atts,
+                )
+                if msg_row_id:
+                    saved = last_attachment_ids(msg_row_id)
+                    inbox_ids = [int(a["id"]) for a in saved if a.get("filing_status") == "inbox"]
+                    if inbox_ids:
+                        set_pending_filings(sender, inbox_ids)
+            except Exception:
+                persist_failed = True
+                inbound_atts = []
+                filed_reply = ""
+                logger.warning(
+                    "WhatsApp persist/file/job-answer failed; falling back to handler",
+                    exc_info=True,
+                )
+            note_customer_window(sender, message.get("timestamp"))
+            reply = ""
+            route = message["type"]
+            try:
+                if filed_reply and not persist_failed:
+                    route = "job_file"
+                    reply = filed_reply
+                elif message["type"] == "text":
+                    route = "chat"
+                    reply = await on_text(message["text"], sender)
+                elif message["type"] == "audio" or message.get("voice"):
+                    route = "voice_document"
+                    audio, mime = media_bytes, media_mime
+                    if not audio and message.get("media_id"):
+                        audio, mime = await download_media(message["media_id"], http_get=http_get)
+                    reply = await on_voice(audio, mime or message["mime_type"], sender)
+                elif message["type"] == "image":
+                    route = "photo_quote"
+                    image, mime = media_bytes, media_mime
+                    if not image and message.get("media_id"):
+                        image, mime = await download_media(message["media_id"], http_get=http_get)
+                    reply = await on_photo(image, mime or message["mime_type"], message["caption"], sender)
+                elif message["type"] == "call":
+                    route = "call"
+                    reply = ""
+                else:
+                    reply = "That message type is not handled. Nothing sent."
+            except Exception:
+                logger.warning("WhatsApp inbound handler failed", exc_info=True)
+                reply = "That message failed. Nothing sent."
+            reply_text, documents = _split_reply(reply)
+            if any(a.get("needs_job_ask") or a.get("filing_status") == "inbox" for a in inbound_atts):
+                if JOB_ASK_TEXT not in (reply_text or ""):
+                    reply_text = f"{reply_text}\n{JOB_ASK_TEXT}".strip() if reply_text else JOB_ASK_TEXT
+            reply_sent = False
+            reply_error = ""
+            voice_sent = False
+            voice_fallback = ""
+            if reply_text or documents:
+                try:
+                    delivered = await reply_in_window(
+                        sender,
+                        reply_text,
+                        http_post=http_post,
+                        http_upload=http_upload,
+                        inbound_type=message["type"],
+                        inbound_voice=bool(message.get("voice")),
+                        documents=documents,
+                    )
+                    reply_sent = True
+                    voice_sent = bool(delivered.get("voice_sent"))
+                    voice_fallback = delivered.get("voice_fallback") or ""
+                except WhatsAppSendBlocked as exc:
+                    reply_error = str(exc)
         results.append({
             "message_id": message_id,
             "type": message["type"],
@@ -1305,6 +1761,61 @@ async def process_webhook(
             "voice_sent": voice_sent,
             "voice_fallback": voice_fallback,
         })
+    # Check for calls field events (connect, terminate, status)
+    calls = parse_inbound_calls(payload if isinstance(payload, dict) else {})
+    if calls:
+        try:
+            from app.services.max.whatsapp_calling import (
+                handle_call_terminate,
+                schedule_call_connect,
+            )
+        except ImportError:
+            logging.getLogger("max.whatsapp_calling").warning(
+                "whatsapp_calling unavailable; reject-only fallback for %s call event(s)",
+                len(calls),
+            )
+
+            async def schedule_call_connect(c_id, c_from, sdp, http_post=None):  # type: ignore[misc]
+                if not is_allowlisted(c_from):
+                    return {"action": "rejected", "call_id": c_id, "reason": "not_allowlisted"}
+                if not channel_status().get("calling_enabled"):
+                    return {"action": "rejected", "call_id": c_id, "reason": "calling_disabled"}
+                return {"action": "noted", "call_id": c_id, "reason": "calling_unavailable"}
+
+            async def handle_call_terminate(c_id, reason="webhook_terminate"):  # type: ignore[misc]
+                return {"action": "noted", "call_id": c_id, "reason": reason}
+        for call_item in calls:
+            c_id = call_item["call_id"]
+            c_from = call_item["from"]
+            c_event = call_item["event"]
+            c_res: dict[str, Any] = {
+                "call_id": c_id,
+                "type": "call",
+                "event": c_event,
+                "from": c_from,
+            }
+            logging.getLogger("max.whatsapp_calling").info(
+                "whatsapp_call[%s] webhook event=%s from=%s sdp=%s",
+                c_id, c_event, c_from, "yes" if call_item["sdp"] else "no",
+            )
+            if c_event == "connect":
+                # Allowlisted calls are set up in the background so Meta gets
+                # its 200 immediately (WHATSAPP_CALL_SETUP_INLINE=1 awaits).
+                res = await schedule_call_connect(
+                    c_id,
+                    c_from,
+                    call_item["sdp"],
+                    http_post=http_post,
+                )
+                c_res.update(res)
+            elif c_event == "terminate":
+                res = await handle_call_terminate(c_id, reason="webhook_terminate")
+                c_res.update(res)
+            else:
+                # status or other call event (e.g., ringing)
+                c_res["action"] = "noted"
+            results.append(c_res)
+
     return {
         "accepted": True,
         "http_status": 200,

@@ -99,12 +99,25 @@ def _append_idea_diagrams(story, styles, items) -> None:
         meta = item.get("idea_diagram") if isinstance(item.get("idea_diagram"), dict) else {}
         status = meta.get("status")
         svg = item.get("drawing_svg") or ""
-        if status == "not_applicable":
+        # 2026-10-08: only drawn sheets reach a client PDF; degraded/notice sheets are omitted.
+        if status and status != "attached":
             continue
-        if not status and not svg:
+        if not status and "<svg" not in svg:
             continue
         diagrams.append((item, meta, svg))
-    if not diagrams:
+    # Draw first; a sheet that cannot be drawn is left out (logged), never printed as an error.
+    drawn = []
+    for item, meta, svg in diagrams:
+        label = item.get("description") or item.get("item_type") or meta.get("category") or "Item"
+        try:
+            from app.services.drawing.idea_drawing import idea_png_bytes
+            png = idea_png_bytes({**meta, "svg": svg})
+        except Exception as exc:
+            logger.warning("Idea diagram omitted for %s: %s", label, exc)
+            png = None
+        if png:
+            drawn.append((label, meta.get("note") or "", png))
+    if not drawn:
         return
 
     try:
@@ -115,40 +128,17 @@ def _append_idea_diagrams(story, styles, items) -> None:
             styles['SmallMuted'],
         ))
         story.append(Spacer(1, 8))
-    except Exception as exc:
-        logger.warning("Idea diagram header failed: %s", exc)
-        return
-
-    for item, meta, svg in diagrams:
-        label = item.get("description") or item.get("item_type") or meta.get("category") or "Item"
-        note = meta.get("note") or ""
-        try:
+        from io import BytesIO
+        for label, note, png in drawn:
             story.append(Paragraph(f"<b>{label}</b>", styles['ItemDesc']))
-            png = None
-            if meta or (svg and "<svg" in svg):
-                from app.services.drawing.idea_drawing import idea_png_bytes
-                png = idea_png_bytes({**meta, "svg": svg})
-            if png:
-                from io import BytesIO
-                image = Image(BytesIO(png), width=6.5 * inch, height=6.5 * inch * (480 / 720))
-                image.hAlign = "LEFT"
-                story.append(image)
-            elif note:
-                story.append(Paragraph(note, styles['SmallMuted']))
-            else:
-                story.append(Paragraph(
-                    "Idea diagram unavailable for this line. The quote totals are unchanged.",
-                    styles['SmallMuted'],
-                ))
-            if note and png:
+            image = Image(BytesIO(png), width=6.5 * inch, height=6.5 * inch * (480 / 720))
+            image.hAlign = "LEFT"
+            story.append(image)
+            if note:
                 story.append(Paragraph(note, styles['SmallMuted']))
             story.append(Spacer(1, 8))
-        except Exception as exc:
-            logger.warning("Idea diagram skipped for %s: %s", label, exc)
-            story.append(Paragraph(
-                f"Idea diagram unavailable for {label}: {exc}. The quote totals are unchanged.",
-                styles['SmallMuted'],
-            ))
+    except Exception as exc:
+        logger.warning("Idea diagrams omitted: %s", exc)
 
 
 def generate_quote_pdf(quote_id: str) -> bytes:

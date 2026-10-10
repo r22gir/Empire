@@ -1,0 +1,10 @@
+[Unit]
+Description=Empire morning growth brief to Rafael's Telegram, weekdays 7:15 AM ET
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 07:15:00 America/New_York
+Persistent=false
+Unit=empire-growth-brief.service
+
+[Install]
+WantedBy=timers.target

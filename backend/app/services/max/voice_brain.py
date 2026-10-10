@@ -27,7 +27,8 @@ from typing import Any, Callable, Optional
 logger = logging.getLogger("max.voice_brain")
 
 CACHE_TTL = 60                # seconds
-MAX_INSTRUCTION_CHARS = 28000  # ~7k tokens hard cap
+MAX_INSTRUCTION_CHARS = 34000  # ~8.5k tokens hard cap (2026-10-06: + Chief e brief)
+VOICE_BRIEF_CHARS = 6000
 SOURCE_TIMEOUT = 6.0           # seconds per source before we give up on it
 
 _cache: dict[str, Any] = {"text": None, "at": 0.0, "meta": None}
@@ -209,21 +210,47 @@ VOICE_STYLE = (
     "Speak naturally and briefly: one to three short sentences per turn unless asked for detail. No "
     "markdown, lists, emojis or URLs; say numbers and money the way a person would; say quote ids like "
     "EST-2026-285 as 'E S T twenty twenty-six two eighty-five'. If interrupted, stop and listen. Match "
-    "Rafael's language (English or Spanish). Say a quick 'one sec' before a lookup."
+    "Rafael's language (English or Spanish): his latest words decide. Before a lookup say a quick "
+    "'un segundo' in Spanish or 'one sec' in English."
 )
 
 VOICE_CAPABILITIES = (
     "# What you can do in voice (server-enforced)\n"
     "Read-only tools: {read_tools}. Use them instead of guessing whenever Rafael asks about quotes, "
-    "customers, tasks, desks, services, the machine, email, job photos, past conversations or weather.\n"
+    "customers, tasks, desks, services, the machine, email, job photos, past conversations or weather. "
+    "For news, local events or any current public fact (e.g. 'últimas noticias en Cartago, Valle'), call "
+    "web_search and summarize the top headlines in a few sentences; never say you have no news access.\n"
     "One request tool: queue_for_founder_approval(action, details). It only files a pending task tagged "
     "voice-request / needs-founder-approval in the Empire task system. It never sends, runs or changes "
     "anything; Rafael (or text Max after his approval) acts on it later. Use it for requests like "
     "'send Max this transcript', 'draft an email to X', 'remind me to...', or anything that needs a "
     "write. Tell Rafael it is queued for his approval, not done.\n"
-    "You CANNOT send email or messages, run shell commands, write or delete files, approve or reject "
-    "quotes, create deposit or payment links, or delete anything from voice. If asked, offer to queue "
-    "it for approval or to do it in the Command Center text chat.\n"
+    "Email to Rafael himself: when he says 'email me' / 'send that to my email' or names "
+    "empirebox2026@gmail.com, rafa22giraldo@gmail.com or max@empirebox.store, call send_email right "
+    "away. No PIN, no second yes. Outbound send uses SMTP and works; never say you can't send email or "
+    "that email settings block it (a Gmail inbox-read token problem does not affect sending). If a send "
+    "fails, say the real error in one sentence.\n"
+    "Your own work: for 'what are you building / working on', 'what's next', 'next step with you' or 'status', "
+    "call max_status and say its few lines; never web_search for questions about yourself or EmpireBox.\n"
+    "Files: find_files searches ALL of Rafael's files (jobs, Downloads, Desktop, Documents, Pictures, quote "
+    "PDFs, backup drive, Gmail attachments, Google Drive) by name, client or nickname (Dahlia = Nehal Elrefai) "
+    "or quote number. If it says Gmail needs re-auth or Drive is not connected, say that source was not "
+    "searched; never say the file does not exist. Say how many "
+    "matched and name the top ones (e.g. both Nehal phases). share_file sends one to Rafael by email, WhatsApp "
+    "or a studio link. Never say you found or sent a file without a tool result; if nothing matched, say so "
+    "and name the closest files.\n"
+    "Email to anyone else (clients, vendors) needs Rafael's explicit yes in text chat: offer "
+    "queue_for_founder_approval. You CANNOT send texts or messages, run shell commands, write or delete "
+    "files, approve or reject quotes, create deposit or payment links, or delete anything from voice. If "
+    "asked, offer to queue it for approval or to do it in the Command Center text chat.\n"
+    "Change requests: when Rafael asks you to change, fix or investigate-and-fix something in Empire "
+    "(a module, a chart, permissions, how you behave), call request_improvement in the same turn with his "
+    "words and say it is filed and will be built on a test copy for his approval. Never say you can't "
+    "edit your own code.\n"
+    "Unclear requests: speech-to-text mishears (for example 'yo quiero' heard as 'no quiero'). If a request "
+    "is unclear, contradicts itself or does not fit what was just said, ask ONE short clarifying question "
+    "(e.g. '¿Qué permisos: los del teléfono, del portal o de los archivos?'). Never drop a request or "
+    "answer it with 'ok, nothing'. If it is clearly a request to fix something, file request_improvement.\n"
     "Transcripts: this call IS being saved. Every line you and Rafael say, each tool call, and the start "
     "and end time go into your normal conversation history (channel 'voice'), plus a short end-of-call "
     "summary, so text Max can see and continue it. If asked, say yes, it is saved."
@@ -261,14 +288,23 @@ async def _run_async(coro_fn, label: str, meta: dict) -> str:
         return ""
 
 
+def chief_e_brief() -> str:
+    """Chief e's brief (Rafael's rules, pricing, active jobs, claims), same loader text chat uses.
+    Empty for family editions or when the file is missing."""
+    from app.services.max.chief_e_brief import load_chief_e_brief
+    return load_chief_e_brief() or ""
+
+
 def assemble(*, model: str, read_tools: list[str], core: str, snapshot: str,
-             brain: str, memory: str) -> str:
+             brain: str, memory: str, brief: str = "") -> str:
     parts = [
         VOICE_ROLE.format(model=model),
         VOICE_STYLE,
         VOICE_CAPABILITIES.format(read_tools=", ".join(read_tools)),
         VOICE_TRUTH,
     ]
+    if brief:
+        parts.append("# Chief e brief (Rafael's rules, prices, jobs; newest wins)\n" + _clip(brief, VOICE_BRIEF_CHARS))
     if snapshot:
         parts.append("# Live snapshot (loaded at call start)\n" + _clip(snapshot, 4500))
     if core:
@@ -285,14 +321,15 @@ def assemble(*, model: str, read_tools: list[str], core: str, snapshot: str,
 
 async def build_voice_instructions(*, model: str, read_tools: list[str]) -> tuple[str, dict]:
     meta: dict[str, Any] = {}
-    core, snapshot, brain, memory = await asyncio.gather(
+    core, snapshot, brain, memory, brief = await asyncio.gather(
         _run_sync(operating_core, "operating_core", meta),
         _run_sync(live_snapshot, "live_snapshot", meta),
         _run_sync(live_brain_context, "live_brain_context", meta),
         _run_async(memory_context, "memory_context", meta),
+        _run_sync(chief_e_brief, "chief_e_brief", meta),
     )
     text = assemble(model=model, read_tools=read_tools, core=core, snapshot=snapshot,
-                    brain=brain, memory=memory)
+                    brain=brain, memory=memory, brief=brief)
     meta["chars"] = len(text)
     meta["approx_tokens"] = len(text) // 4
     return text, meta

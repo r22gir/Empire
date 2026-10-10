@@ -1,0 +1,1552 @@
+{
+ "version": 1,
+ "created": "2026-10-06",
+ "note": "Rafael's real questions from max-sessions 2026-10-04..06 plus close variants; q57-q62 (brief me on today, Marley's basketweave mockup) added 2026-10-07. Expected kinds: short, grounded, right tool, no headers. Scored by scoring.py; run with run_eval.py on a test copy only.",
+ "questions": [
+  {
+   "id": "q01",
+   "kind": "quote_number",
+   "channel": "studio",
+   "message": "What's the status of EST-2026-297?",
+   "source": "variant",
+   "expect": {
+    "tools_any": [
+     "get_quote",
+     "search_quotes",
+     "show_quote_for_review",
+     "open_final_doc",
+     "find_files",
+     "shortcut:quote_lookup"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-297"
+     ],
+     [
+      "draft"
+     ],
+     [
+      "3,411\\.84",
+      "4,759\\.96"
+     ]
+    ],
+    "max_words": 70
+   }
+  },
+  {
+   "id": "q02",
+   "kind": "quote_number",
+   "channel": "studio",
+   "message": "EST-2026-298 total?",
+   "source": "variant",
+   "expect": {
+    "tools_any": [
+     "get_quote",
+     "search_quotes",
+     "show_quote_for_review",
+     "open_final_doc",
+     "find_files",
+     "shortcut:quote_lookup"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "9,350\\.76"
+     ]
+    ],
+    "max_words": 60
+   }
+  },
+  {
+   "id": "q03",
+   "kind": "quote_number",
+   "channel": "whatsapp",
+   "message": "send me EST-2026-295 here",
+   "source": "variant (WhatsApp 'send me a pdf here' 2026-10-04)",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-295"
+     ]
+    ],
+    "must_not": [
+     "can't send",
+     "cannot send"
+    ],
+    "max_words": 70
+   }
+  },
+  {
+   "id": "q04",
+   "kind": "quote_number",
+   "channel": "studio",
+   "message": "Is EST-2026-284 sent?",
+   "source": "variant",
+   "expect": {
+    "tools_any": [
+     "get_quote",
+     "search_quotes",
+     "show_quote_for_review",
+     "open_final_doc",
+     "find_files",
+     "shortcut:quote_lookup"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "sent"
+     ],
+     [
+      "Maura",
+      "Lindsey",
+      "395"
+     ]
+    ],
+    "max_words": 60
+   }
+  },
+  {
+   "id": "q05",
+   "kind": "quote_number",
+   "channel": "studio",
+   "message": "pull up EST-2026-083",
+   "source": "variant",
+   "expect": {
+    "tools_any": [
+     "get_quote",
+     "search_quotes",
+     "show_quote_for_review",
+     "open_final_doc",
+     "find_files",
+     "shortcut:quote_lookup"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-083"
+     ],
+     [
+      "Naomi",
+      "Phillip",
+      "Philipp"
+     ]
+    ],
+    "max_words": 80
+   }
+  },
+  {
+   "id": "q06",
+   "kind": "quote_client",
+   "channel": "studio",
+   "message": "What's the latest quote for Dahlia?",
+   "source": "2026-10-04 voice 17:01",
+   "expect": {
+    "tools_any": [
+     "get_quote",
+     "search_quotes",
+     "show_quote_for_review",
+     "open_final_doc",
+     "find_files",
+     "shortcut:quote_lookup"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-298"
+     ]
+    ],
+    "must_not": [
+     "2,430",
+     "twenty-five line items"
+    ],
+    "max_words": 80
+   }
+  },
+  {
+   "id": "q07",
+   "kind": "quote_client",
+   "channel": "studio",
+   "message": "Can you send me like a voice message, like a status on the last Marley's quote?",
+   "source": "2026-10-04 voice-doc 20:03",
+   "expect": {
+    "tools_any": [
+     "get_quote",
+     "search_quotes",
+     "show_quote_for_review",
+     "open_final_doc",
+     "find_files",
+     "shortcut:quote_lookup"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-299",
+      "EST-2026-300"
+     ]
+    ],
+    "must_not": [
+     "Missing:",
+     "Client name",
+     "What to make"
+    ],
+    "max_words": 90
+   }
+  },
+  {
+   "id": "q08",
+   "kind": "quote_client",
+   "channel": "whatsapp",
+   "message": "Send me last quote",
+   "source": "2026-10-04 voice-doc 20:05",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-29[78]",
+      "which"
+     ]
+    ],
+    "must_not": [
+     "Missing:",
+     "What to make"
+    ],
+    "max_words": 80
+   }
+  },
+  {
+   "id": "q09",
+   "kind": "quote_client",
+   "channel": "studio",
+   "message": "Isn't there an accompanying quote, like a sister quote, basically like the phase two part?",
+   "source": "2026-10-05 voice 18:36",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-298"
+     ]
+    ],
+    "max_words": 70
+   },
+   "history": [
+    {
+     "role": "user",
+     "content": "What's the most recent quote we were working on?"
+    },
+    {
+     "role": "assistant",
+     "content": "The most recent quote is EST-2026-297 for Dahlia Design, Phase 1 living room and office, $3,411.84, still in draft."
+    }
+   ]
+  },
+  {
+   "id": "q10",
+   "kind": "alias",
+   "channel": "studio",
+   "message": "What do we have for Nehal?",
+   "source": "variant (Nehal = Dahlia alias)",
+   "expect": {
+    "tools_any": [
+     "get_quote",
+     "search_quotes",
+     "show_quote_for_review",
+     "open_final_doc",
+     "find_files",
+     "shortcut:quote_lookup",
+     "search_contacts"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-29[78]"
+     ]
+    ],
+    "max_words": 110
+   }
+  },
+  {
+   "id": "q11",
+   "kind": "alias",
+   "channel": "studio",
+   "message": "Show me Nehal's phase 1 quote",
+   "source": "variant",
+   "expect": {
+    "tools_any": [
+     "get_quote",
+     "search_quotes",
+     "show_quote_for_review",
+     "open_final_doc",
+     "find_files",
+     "shortcut:quote_lookup"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-297"
+     ]
+    ],
+    "must_not": [
+     "couldn't find",
+     "could not find"
+    ],
+    "max_words": 80
+   }
+  },
+  {
+   "id": "q12",
+   "kind": "alias",
+   "channel": "whatsapp",
+   "message": "What's the total on Dalia phase 2?",
+   "source": "variant (typo alias)",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "9,350\\.76"
+     ]
+    ],
+    "max_words": 60
+   }
+  },
+  {
+   "id": "q13",
+   "kind": "file_find",
+   "channel": "studio",
+   "message": "Okay, so can you look up any documents we have for Lauren Bassett on a well unit?",
+   "source": "2026-10-05 studio 20:58",
+   "expect": {
+    "tools_any": [
+     "find_files",
+     "search_quotes",
+     "open_final_doc"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "wall unit",
+      "Philipp",
+      "Phillip",
+      "Naomi",
+      "R6"
+     ]
+    ],
+    "must_not": [
+     "window well",
+     "wellhead",
+     "egress"
+    ],
+    "max_words": 120
+   }
+  },
+  {
+   "id": "q14",
+   "kind": "file_find",
+   "channel": "studio",
+   "message": "There is no crock bot and its a wall unit not a well unit. And there are documents related to the led lighting system. I need those",
+   "source": "2026-10-05 studio 21:08",
+   "expect": {
+    "tools_any": [
+     "find_files"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "shell_execute"
+    ],
+    "must_any": [
+     [
+      "LED",
+      "lighting"
+     ]
+    ],
+    "must_not": [
+     "needs your PIN",
+     "Still no files found"
+    ],
+    "max_words": 120
+   },
+   "history": [
+    {
+     "role": "user",
+     "content": "Okay, so can you look up any documents we have for Lauren Bassett on a well unit?"
+    },
+    {
+     "role": "assistant",
+     "content": "I found Lauren Bassett quotes (EST-2026-291, EST-2026-262) but nothing named 'well unit'. Did you mean something else?"
+    }
+   ]
+  },
+  {
+   "id": "q15",
+   "kind": "send_me",
+   "channel": "whatsapp",
+   "message": "Send me led documents from Phillip and Naomi",
+   "source": "2026-10-05 WhatsApp 22:00",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "LED",
+      "R6"
+     ]
+    ],
+    "must_not": [
+     "No LED documents found",
+     "no LED spec"
+    ],
+    "max_words": 90
+   }
+  },
+  {
+   "id": "q16",
+   "kind": "file_find",
+   "channel": "studio",
+   "message": "Find the Willard addendum PDF",
+   "source": "variant",
+   "expect": {
+    "tools_any": [
+     "find_files",
+     "open_final_doc",
+     "search_quotes"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-293",
+      "838",
+      "Willard"
+     ]
+    ],
+    "max_words": 100
+   }
+  },
+  {
+   "id": "q17",
+   "kind": "file_find",
+   "channel": "studio",
+   "message": "Where are the docs you have completed?",
+   "source": "2026-10-04 (quick_replies docstring)",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "Final Docs",
+      "final-docs"
+     ]
+    ],
+    "max_words": 120
+   }
+  },
+  {
+   "id": "q54",
+   "kind": "file_find",
+   "channel": "studio",
+   "message": "Wall Unit for Philip and Naomi.",
+   "source": "2026-10-05 studio 20:59",
+   "expect": {
+    "tools_any": [
+     "find_files",
+     "search_quotes",
+     "open_final_doc",
+     "get_quote"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "Philipp",
+      "Phillip",
+      "Naomi"
+     ],
+     [
+      "INV-2026-119",
+      "2,276\\.40",
+      "R6",
+      "LED",
+      "EST-2026-083",
+      "walnut"
+     ]
+    ],
+    "max_words": 120
+   },
+   "history": [
+    {
+     "role": "user",
+     "content": "Okay, so can you look up any documents we have for Lauren Bassett on a well unit?"
+    },
+    {
+     "role": "assistant",
+     "content": "I found Lauren Bassett quotes (EST-2026-291, EST-2026-262) but nothing named 'well unit'. Did you mean something else?"
+    }
+   ]
+  },
+  {
+   "id": "q18",
+   "kind": "send_me",
+   "channel": "studio",
+   "message": "Email me the Dahlia phase 2 quote",
+   "source": "variant",
+   "expect": {
+    "tools_any": [
+     "send_quote_email",
+     "send_email",
+     "share_file"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-298",
+      "phase 2",
+      "Phase 2"
+     ]
+    ],
+    "must_not": [
+     "can't send",
+     "cannot send",
+     "need your PIN"
+    ],
+    "max_words": 70
+   }
+  },
+  {
+   "id": "q19",
+   "kind": "send_me",
+   "channel": "studio",
+   "message": "Can you send those two quotes to my email?",
+   "source": "2026-10-05 voice 18:37",
+   "expect": {
+    "tools_any": [
+     "send_quote_email",
+     "send_email",
+     "share_file"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "297"
+     ],
+     [
+      "298"
+     ]
+    ],
+    "must_not": [
+     "can't send email",
+     "cannot send email",
+     "queued it"
+    ],
+    "max_words": 70
+   },
+   "history": [
+    {
+     "role": "user",
+     "content": "What's the most recent quote we were working on?"
+    },
+    {
+     "role": "assistant",
+     "content": "EST-2026-297 for Dahlia Design (Nehal Elrefai, Phase 1 living room and office), $3,411.84, draft. Phase 2 is EST-2026-298, $9,350.76, draft."
+    }
+   ]
+  },
+  {
+   "id": "q20",
+   "kind": "email_me",
+   "channel": "studio",
+   "message": "can you send me a test e mail",
+   "source": "2026-10-05 studio 18:03",
+   "expect": {
+    "tools_any": [
+     "send_email"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "sent",
+      "Sent"
+     ]
+    ],
+    "max_words": 40
+   }
+  },
+  {
+   "id": "q21",
+   "kind": "send_me",
+   "channel": "whatsapp",
+   "message": "Send me a pdf here",
+   "source": "2026-10-04 WhatsApp 21:40",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "send_email",
+     "send_quote_email",
+     "share_file"
+    ],
+    "must_ask": true,
+    "max_words": 50
+   }
+  },
+  {
+   "id": "q22",
+   "kind": "status",
+   "channel": "studio",
+   "message": "What are you building now?",
+   "source": "2026-10-06 (Rafael's complaint)",
+   "expect": {
+    "tools_any": [
+     "max_status",
+     "shortcut:max_status"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_not": [
+     "https?://",
+     "leadership",
+     "blog"
+    ],
+    "max_words": 110
+   }
+  },
+  {
+   "id": "q23",
+   "kind": "status",
+   "channel": "whatsapp",
+   "message": "what is empirebox next step with you",
+   "source": "2026-10-06 (Rafael's complaint)",
+   "expect": {
+    "tools_any": [
+     "max_status",
+     "shortcut:max_status"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_not": [
+     "https?://",
+     "roadmap"
+    ],
+    "max_words": 110
+   }
+  },
+  {
+   "id": "q24",
+   "kind": "status",
+   "channel": "studio",
+   "message": "Is Max operating normally?",
+   "source": "2026-10-05 studio 08:54",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "max_words": 50
+   }
+  },
+  {
+   "id": "q25",
+   "kind": "status",
+   "channel": "studio",
+   "message": "Are you fixed now",
+   "source": "2026-10-05 studio 13:39",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "max_words": 70
+   }
+  },
+  {
+   "id": "q26",
+   "kind": "status",
+   "channel": "studio",
+   "message": "What needs my approval?",
+   "source": "2026-10-05 studio 17:44",
+   "expect": {
+    "tools_any": [
+     "list_quotes_awaiting_review",
+     "get_tasks",
+     "max_status",
+     "shortcut:max_status"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "max_words": 90
+   }
+  },
+  {
+   "id": "q27",
+   "kind": "status",
+   "channel": "whatsapp",
+   "message": "What's new",
+   "source": "2026-10-05 WhatsApp 21:59",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_not": [
+     "https?://"
+    ],
+    "max_words": 90
+   }
+  },
+  {
+   "id": "q55",
+   "kind": "status",
+   "channel": "whatsapp",
+   "message": "Did you get my call",
+   "source": "2026-10-04 WhatsApp 21:34",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "max_words": 60
+   }
+  },
+  {
+   "id": "q28",
+   "kind": "solar",
+   "channel": "studio",
+   "message": "Research what's new in For this house on the traveles claim whatt is a good solar aystem. You have elec and give me the 3 things worth my time.",
+   "source": "2026-10-05 studio 18:02",
+   "expect": {
+    "research": true,
+    "tools_none": [
+     "shortcut:whats_new"
+    ],
+    "must_any": [
+     [
+      "solar"
+     ],
+     [
+      "Travelers",
+      "claim",
+      "Burns",
+      "JJN4296"
+     ]
+    ],
+    "must_not": [
+     "9974207c",
+     "commit",
+     "Live backend"
+    ],
+    "max_words": 260
+   }
+  },
+  {
+   "id": "q29",
+   "kind": "solar",
+   "channel": "studio",
+   "message": "Research the latest on For this house on the traveles claim whatt is a good solar aystem. You have elec for me and summarize what matters.",
+   "source": "2026-10-04 studio 19:22",
+   "expect": {
+    "research": true,
+    "must_any": [
+     [
+      "solar"
+     ],
+     [
+      "Travelers",
+      "claim",
+      "Burns",
+      "JJN4296"
+     ]
+    ],
+    "max_words": 260
+   }
+  },
+  {
+   "id": "q30",
+   "kind": "solar",
+   "channel": "studio",
+   "message": "For the Travelers claim house, what size solar system makes sense?",
+   "source": "variant",
+   "expect": {
+    "must_any": [
+     [
+      "Travelers",
+      "claim",
+      "Burns",
+      "JJN4296"
+     ],
+     [
+      "solar",
+      "kW"
+     ]
+    ],
+    "max_words": 160
+   }
+  },
+  {
+   "id": "q31",
+   "kind": "research",
+   "channel": "studio",
+   "message": "So how much did that Pentagon monument for the 9/11 thing cost?",
+   "source": "2026-10-05 voice 19:52",
+   "expect": {
+    "tools_any": [
+     "web_search"
+    ],
+    "must_any": [
+     [
+      "22 million",
+      "\\$22"
+     ]
+    ],
+    "max_words": 80
+   }
+  },
+  {
+   "id": "q32",
+   "kind": "research",
+   "channel": "studio",
+   "message": "Research the best 24V COB LED strip options for a walnut wall unit and give me the top 3",
+   "source": "variant",
+   "expect": {
+    "research": true,
+    "tools_any": [
+     "web_search"
+    ],
+    "must_any": [
+     [
+      "COB"
+     ]
+    ],
+    "max_words": 300
+   }
+  },
+  {
+   "id": "q33",
+   "kind": "research",
+   "channel": "studio",
+   "message": "What's the weather in Hyattsville tomorrow?",
+   "source": "variant (voice weather tool)",
+   "expect": {
+    "tools_any": [
+     "get_weather",
+     "web_search"
+    ],
+    "max_words": 60
+   }
+  },
+  {
+   "id": "q34",
+   "kind": "email_read",
+   "channel": "studio",
+   "message": "Check e mail from nelma",
+   "source": "2026-10-05 studio 10:48",
+   "expect": {
+    "tools_any": [
+     "check_email",
+     "search_email",
+     "gmail"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "shell_execute"
+    ],
+    "must_not": [
+     "PIN"
+    ],
+    "max_words": 90
+   }
+  },
+  {
+   "id": "q35",
+   "kind": "email_read",
+   "channel": "studio",
+   "message": "What inbox are you checking?",
+   "source": "2026-10-05 voice 19:28",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "empirebox2026"
+     ]
+    ],
+    "max_words": 50
+   }
+  },
+  {
+   "id": "q36",
+   "kind": "capability",
+   "channel": "studio",
+   "message": "Why do I need a pin. I am the founder. Fix that",
+   "source": "2026-10-05 studio 10:51",
+   "expect": {
+    "tools_any": [
+     "request_improvement"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_not": [
+     "IRS",
+     "IP PIN"
+    ],
+    "max_words": 90
+   }
+  },
+  {
+   "id": "q37",
+   "kind": "capability",
+   "channel": "studio",
+   "message": "I think you need to add GropBot usage in the charts and in the module that relates to API expenses.",
+   "source": "2026-10-04 studio 20:56",
+   "expect": {
+    "tools_any": [
+     "request_improvement"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_not": [
+     "I don't edit my own code",
+     "I can't edit"
+    ],
+    "max_words": 80
+   }
+  },
+  {
+   "id": "q38",
+   "kind": "capability",
+   "channel": "studio",
+   "message": "So you cant see memory on grok bot)",
+   "source": "2026-10-04 studio 19:24",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_not": [
+     "✅",
+     "❌"
+    ],
+    "max_words": 80
+   }
+  },
+  {
+   "id": "q39",
+   "kind": "capability",
+   "channel": "whatsapp",
+   "message": "Why is the document not loading",
+   "source": "2026-10-04 WhatsApp 21:40",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_ask": true,
+    "max_words": 60
+   }
+  },
+  {
+   "id": "q40",
+   "kind": "capability",
+   "channel": "studio",
+   "message": "can you see my attachments?",
+   "source": "2026-10-05 studio 17:52",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "max_words": 50
+   }
+  },
+  {
+   "id": "q52",
+   "kind": "capability",
+   "channel": "studio",
+   "message": "did you get this update yet? in reference to the pdf i just gave you",
+   "source": "2026-10-05 studio 17:58",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "max_words": 70
+   }
+  },
+  {
+   "id": "q41",
+   "kind": "small_talk",
+   "channel": "whatsapp",
+   "message": "Hi",
+   "source": "2026-10-04 WhatsApp 19:46",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "get_services_health"
+    ],
+    "must_not": [
+     "services",
+     "OpenClaw",
+     "configured email"
+    ],
+    "max_words": 25
+   }
+  },
+  {
+   "id": "q42",
+   "kind": "small_talk",
+   "channel": "whatsapp",
+   "message": "Who am I ?",
+   "source": "2026-10-04 WhatsApp 20:33",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "Rafael"
+     ]
+    ],
+    "max_words": 70
+   }
+  },
+  {
+   "id": "q43",
+   "kind": "small_talk",
+   "channel": "whatsapp",
+   "message": "But now you can speak in English. Sorry for the confusion",
+   "source": "2026-10-04 WhatsApp 21:35",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "max_words": 30
+   }
+  },
+  {
+   "id": "q44",
+   "kind": "small_talk",
+   "channel": "studio",
+   "message": "thanks Max",
+   "source": "variant",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "max_words": 25
+   }
+  },
+  {
+   "id": "q56",
+   "kind": "small_talk",
+   "channel": "studio",
+   "message": "hi",
+   "source": "2026-10-05 studio 18:02",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "max_words": 25
+   }
+  },
+  {
+   "id": "q45",
+   "kind": "spanish",
+   "channel": "studio",
+   "message": "¿Cuáles son las últimas noticias en Cartago Valle?",
+   "source": "2026-10-04 voice 20:54",
+   "expect": {
+    "tools_any": [
+     "web_search"
+    ],
+    "lang": "es",
+    "must_not": [
+     "No tengo acceso"
+    ],
+    "max_words": 140
+   }
+  },
+  {
+   "id": "q46",
+   "kind": "spanish",
+   "channel": "whatsapp",
+   "message": "¿Cuál es la última cotización de Dahlia?",
+   "source": "variant",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "lang": "es",
+    "must_any": [
+     [
+      "EST-2026-298"
+     ]
+    ],
+    "max_words": 80
+   }
+  },
+  {
+   "id": "q47",
+   "kind": "spanish",
+   "channel": "studio",
+   "message": "¿Qué estás construyendo ahora?",
+   "source": "variant of 2026-10-06",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "lang": "es",
+    "max_words": 100
+   }
+  },
+  {
+   "id": "q48",
+   "kind": "spanish",
+   "channel": "whatsapp",
+   "message": "Mándame la cotización EST-2026-297 aquí",
+   "source": "variant",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "lang": "es",
+    "must_any": [
+     [
+      "EST-2026-297"
+     ]
+    ],
+    "max_words": 80
+   }
+  },
+  {
+   "id": "q49",
+   "kind": "multi_part",
+   "channel": "studio",
+   "message": "So, is voice working? Are we a hundred percent? Are you connected to what's going on? What's the most recent quote we were working on?",
+   "source": "2026-10-05 voice 18:36",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-29[78]"
+     ],
+     [
+      "voice",
+      "connected",
+      "online",
+      "working",
+      "running"
+     ]
+    ],
+    "max_words": 100
+   }
+  },
+  {
+   "id": "q50",
+   "kind": "multi_part",
+   "channel": "studio",
+   "message": "What's the total of Dahlia phase 1 and phase 2, and which one is newer?",
+   "source": "variant",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "3,411\\.84",
+      "4,759\\.96"
+     ],
+     [
+      "9,350\\.76"
+     ]
+    ],
+    "max_words": 90
+   }
+  },
+  {
+   "id": "q51",
+   "kind": "multi_part",
+   "channel": "studio",
+   "message": "Find the Willard final estimate and tell me the deposit amount",
+   "source": "variant",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read"
+    ],
+    "must_any": [
+     [
+      "EST-2026-293",
+      "Willard"
+     ],
+     [
+      "4,644"
+     ]
+    ],
+    "max_words": 90
+   }
+  },
+  {
+   "id": "q57",
+   "kind": "brief",
+   "channel": "studio",
+   "message": "brief me on today",
+   "source": "2026-10-07 ship criteria (Chief e brief line 94)",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "Marley",
+      "Devon",
+      "INV-2026-123",
+      "Dahlia",
+      "Nehal",
+      "EST-2026-2\\d\\d",
+      "basketweave",
+      "banquette",
+      "Willard",
+      "Philipp",
+      "Phillip",
+      "Naomi",
+      "solar",
+      "Travelers",
+      "quote",
+      "invoice",
+      "deposit"
+     ]
+    ],
+    "must_not": [
+     "https?://",
+     "unsplash",
+     "Here's what's new",
+     "Recent live changes"
+    ],
+    "max_words": 170
+   }
+  },
+  {
+   "id": "q58",
+   "kind": "brief",
+   "channel": "studio",
+   "message": "Give me a quick rundown of today, what's on my plate?",
+   "source": "variant",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "Marley",
+      "Devon",
+      "INV-2026-123",
+      "Dahlia",
+      "Nehal",
+      "EST-2026-2\\d\\d",
+      "basketweave",
+      "banquette",
+      "Willard",
+      "Philipp",
+      "Phillip",
+      "Naomi",
+      "solar",
+      "Travelers",
+      "quote",
+      "invoice",
+      "deposit"
+     ]
+    ],
+    "must_not": [
+     "https?://",
+     "unsplash",
+     "Here's what's new",
+     "Recent live changes"
+    ],
+    "max_words": 170
+   }
+  },
+  {
+   "id": "q59",
+   "kind": "brief",
+   "channel": "whatsapp",
+   "message": "Morning Max, brief me on today's jobs",
+   "source": "variant (WhatsApp)",
+   "expect": {
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "Marley",
+      "Devon",
+      "INV-2026-123",
+      "Dahlia",
+      "Nehal",
+      "EST-2026-2\\d\\d",
+      "basketweave",
+      "banquette",
+      "Willard",
+      "Philipp",
+      "Phillip",
+      "Naomi",
+      "solar",
+      "Travelers",
+      "quote",
+      "invoice",
+      "deposit"
+     ]
+    ],
+    "must_not": [
+     "https?://",
+     "unsplash",
+     "Here's what's new",
+     "Recent live changes"
+    ],
+    "max_words": 170
+   }
+  },
+  {
+   "id": "q60",
+   "kind": "job_visual",
+   "channel": "studio",
+   "message": "Show me a mockup of the Marley's basketweave seat back",
+   "source": "2026-10-07 ship criteria",
+   "expect": {
+    "tools_any": [
+     "find_files",
+     "open_final_doc",
+     "wa:documents",
+     "share_file",
+     "send_document"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "marleys-hyattsville",
+      "mockups-2piece",
+      "MODULE_MOCKUP",
+      "FULL_UL_LAYOUT",
+      "comparison-4vs8",
+      "correct-preview",
+      "ref-basketweave",
+      "\\.png",
+      "\\.pdf",
+      "mockup"
+     ],
+     [
+      "2[- ]piece",
+      "two[- ]piece",
+      "2 pieces",
+      "two pieces",
+      "2 bars",
+      "two bars",
+      "vertical",
+      "horizontal",
+      "padded",
+      "\\bbars?\\b"
+     ]
+    ],
+    "must_not_affirm": [
+     "unsplash",
+     "yarn",
+     "\\bwarp\\b",
+     "\\bweft\\b",
+     "stock (?:photo|image)",
+     "images\\.unsplash"
+    ],
+    "max_words": 130
+   }
+  },
+  {
+   "id": "q61",
+   "kind": "job_visual",
+   "channel": "studio",
+   "message": "Show me mick up drwings or something for bisual reference",
+   "source": "2026-10-06 22:44 studio (real, typos kept)",
+   "expect": {
+    "tools_any": [
+     "find_files",
+     "open_final_doc",
+     "wa:documents",
+     "share_file",
+     "send_document"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "marleys-hyattsville",
+      "mockups-2piece",
+      "MODULE_MOCKUP",
+      "FULL_UL_LAYOUT",
+      "comparison-4vs8",
+      "correct-preview",
+      "ref-basketweave",
+      "\\.png",
+      "\\.pdf",
+      "mockup"
+     ]
+    ],
+    "must_not_affirm": [
+     "unsplash",
+     "yarn",
+     "\\bwarp\\b",
+     "\\bweft\\b",
+     "stock (?:photo|image)",
+     "images\\.unsplash"
+    ],
+    "max_words": 130
+   },
+   "history": [
+    {
+     "role": "user",
+     "content": "More like the requested design goes back to original request. Best possible solution is a 4 panel basket weave v 8 panel that we had. We can meet you half way at 65 sq ft."
+    },
+    {
+     "role": "assistant",
+     "content": "Got it: Marley's seat backs, 4-panel basketweave at $65/sq ft vs the original 8-panel."
+    }
+   ]
+  },
+  {
+   "id": "q62",
+   "kind": "job_visual",
+   "channel": "whatsapp",
+   "message": "Send me the Marley's 4 panel vs 8 panel basketweave mockup",
+   "source": "variant (WhatsApp)",
+   "expect": {
+    "tools_any": [
+     "find_files",
+     "open_final_doc",
+     "wa:documents",
+     "share_file",
+     "send_document"
+    ],
+    "tools_none": [
+     "web_search",
+     "web_read",
+     "search_images"
+    ],
+    "must_any": [
+     [
+      "marleys-hyattsville",
+      "mockups-2piece",
+      "MODULE_MOCKUP",
+      "FULL_UL_LAYOUT",
+      "comparison-4vs8",
+      "correct-preview",
+      "ref-basketweave",
+      "\\.png",
+      "\\.pdf",
+      "mockup",
+      "sent",
+      "here"
+     ]
+    ],
+    "must_not_affirm": [
+     "unsplash",
+     "yarn",
+     "\\bwarp\\b",
+     "\\bweft\\b",
+     "stock (?:photo|image)",
+     "images\\.unsplash"
+    ],
+    "max_words": 130
+   }
+  }
+ ]
+}

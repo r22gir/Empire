@@ -144,7 +144,8 @@ def test_quote_pdf_dimension_line_uses_fractions(monkeypatch, tmp_path):
     assert pdf_bytes[:4] == b"%PDF"
 
     text = _pdf_text(pdf_bytes)
-    assert '14½"' in text or "14½" in text
+    # 2026-10-08 (Rafael): estimate PDFs print plain-text fractions ('14 1/2"'), no glyphs, no decimals.
+    assert '14 1/2"' in text
     assert "72.00" not in text
     assert "14.5" not in text
 

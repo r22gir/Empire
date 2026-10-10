@@ -1,17 +1,21 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { V3Rail, BusinessesSheet } from '../../v3/Shell';
+import type { SheetGroup } from '../../v3/Shell';
+import type { RailItem } from '../../v3/edition';
 import { EcosystemProduct, ScreenMode } from '../../lib/types';
 import RightPanel from './RightPanel';
 import {
-  Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
+  Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server, Lightbulb,
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
-  ChevronDown, ChevronRight, MessageCircle,
+  ChevronDown, ChevronRight, LayoutGrid, CalendarCheck,
+  FileStack, MessageCircle,
 } from 'lucide-react';
 
-interface NavItem {
+export interface NavItem {
   id: string;
   name: string;
   icon: React.ReactNode;
@@ -22,7 +26,7 @@ interface NavItem {
   kind?: 'product' | 'screen' | 'daily-summary';
 }
 
-interface NavGroup {
+export interface NavGroup {
   key: string;
   label: string;
   defaultExpanded: boolean;
@@ -37,7 +41,8 @@ interface NavGroup {
 // "Daily Summary" replaces the loose Dashboard toggle below the
 // divider — it is now a 4th item inside Command.
 // ------------------------------------------------------------------
-const NAV_GROUPS: NavGroup[] = [
+// Exported so /preview/cockpit can mirror the real menu (same items, same order).
+export const NAV_GROUPS: NavGroup[] = [
   {
     key: 'command',
     label: 'Command',
@@ -45,9 +50,12 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'owner', name: "Owner's Desk", icon: <Crown size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
       { id: 'workroom', name: 'Empire Workroom', icon: <Scissors size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
+      { id: 'schedule', name: 'Schedule Control', icon: <CalendarCheck size={16} />, status: 'active', color: '#b8960c', screen: 'calendar' as ScreenMode, kind: 'screen' },
       { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04', kind: 'product' },
       // Daily Summary is the inline Dashboard panel (rightPanel) — toggled, not navigated.
       { id: 'daily-summary', name: 'Daily Summary', icon: <LayoutDashboard size={16} />, status: 'active', color: '#7c3aed', kind: 'daily-summary' },
+      // Final Docs hub: latest final estimate / presentation / invoice / drawings / photos per job.
+      { id: 'final-docs', name: 'Final Docs', icon: <FileStack size={16} />, status: 'active', color: '#00e5ff', screen: 'final-docs' as ScreenMode, kind: 'screen' },
     ],
   },
   {
@@ -107,6 +115,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'platform', name: 'PlatformForge', icon: <Server size={16} />, status: 'active', color: '#2563eb', kind: 'product' },
       { id: 'openclaw', name: 'OpenClaw', icon: <Bot size={16} />, status: 'active', color: '#f59e0b', kind: 'product' },
       { id: 'max-continuity', name: 'MAX Continuity', icon: <ShieldCheck size={16} />, status: 'active', color: '#0d9488', kind: 'product' },
+      { id: 'improvements', name: 'Improvements', icon: <Lightbulb size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
       { id: 'system', name: 'System', icon: <Activity size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
       { id: 'tokens', name: 'Tokens & Costs', icon: <Coins size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
       { id: 'hardware', name: 'Hardware', icon: <Cpu size={16} />, status: 'dev', color: '#d97706', kind: 'product' },
@@ -136,223 +145,78 @@ interface Props {
   dashboardProps?: any;
 }
 
+// Rail key for the current screen (v3 launcher rail highlight).
+function railKey(product: EcosystemProduct, screen?: ScreenMode): string | null {
+  if (screen === 'invoices' || screen === 'invoice') return 'finance';
+  if (screen === 'inbox') return 'comms';
+  if (screen === 'final-docs' || screen === 'docs') return 'docs';
+  const p = String(product);
+  if (p === 'owner' && (screen === 'chat' || !screen)) return 'max';
+  if (['workroom', 'craft', 'construction', 'amp', 'lead', 'social', 'market', 'system'].includes(p)) return p;
+  return null;
+}
+
+/**
+ * Left navigation (design system v3): the launcher rail with the main forges, plus an
+ * "All" sheet that lists every module in NAV_GROUPS (one click away). Daily Summary
+ * (RightPanel) opens as a side panel next to the rail. On phones the rail is hidden
+ * and a floating button opens the same sheet.
+ */
 export default function LeftNav({ activeProduct, activeScreen, onProductChange, onScreenChange, dashboardProps }: Props) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [sheet, setSheet] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  // Per-group expanded state. Default: Command expanded, all others collapsed.
-  // Accordion: only one group can be expanded at a time. Clicking a collapsed
-  // group expands it AND collapses any currently-expanded group.
-  const [expandedGroup, setExpandedGroup] = useState<string>('command');
-  // Daily Summary toggle is a separate piece of state (it's a panel, not a nav).
   const [showDashboard, setShowDashboard] = useState(false);
 
-  // Detect mobile and auto-collapse the sidebar
   useEffect(() => {
-    const check = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      if (mobile) {
-        setCollapsed(true);
-        setMobileOpen(false);
-      }
-    };
+    const check = () => setIsMobile(window.innerWidth < 768);
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  // On mobile: show hamburger button (rendered in TopBar area via CSS), overlay nav
-  const handleNavClick = (item: NavItem) => {
-    if (item.kind === 'daily-summary') {
-      setShowDashboard(s => !s);
-      if (isMobile) setMobileOpen(false);
-      return;
-    }
-    if (item.screen && onScreenChange) {
-      onScreenChange(item.screen);
-    } else if (item.kind === 'product') {
-      onProductChange(item.id as EcosystemProduct);
-    } else if (item.screen) {
-      // safety: also fall through to onProductChange if kind was 'screen' but product also wanted
-      onProductChange(item.id as EcosystemProduct);
-    } else {
-      onProductChange(item.id as EcosystemProduct);
-    }
-    if (isMobile) setMobileOpen(false);
-  };
+  const handleNavClick = useCallback((item: NavItem) => {
+    if (item.kind === 'daily-summary') { setShowDashboard(s => !s); return; }
+    if (item.screen && onScreenChange) onScreenChange(item.screen);
+    else onProductChange(item.id as EcosystemProduct);
+  }, [onProductChange, onScreenChange]);
 
-  const toggleGroup = (key: string) => {
-    setExpandedGroup(prev => (prev === key ? '' : key));
-  };
+  const groups: SheetGroup[] = useMemo(() => NAV_GROUPS.map(g => ({
+    key: g.key, label: g.label,
+    items: g.items.map(it => ({
+      id: it.id, name: it.name, icon: it.icon, status: it.status,
+      href: it.kind === 'screen' && it.screen ? `/?screen=${it.screen}` : it.kind === 'daily-summary' ? '/?product=owner&screen=dashboard' : `/?product=${it.id}`,
+      on: it.kind === 'daily-summary' ? showDashboard : (it.screen ? activeScreen === it.screen : activeProduct === it.id),
+      onPick: () => handleNavClick(it),
+    })),
+  })), [activeProduct, activeScreen, showDashboard, handleNavClick]);
 
-  const showNav = isMobile ? mobileOpen : true;
-  const isCollapsed = isMobile ? false : collapsed; // On mobile overlay, always show expanded
-
-  // Helper: count visible items per group (active + dev + planned).
-  const groupCount = (g: NavGroup) => g.items.length;
+  const onGo = useCallback((it: RailItem) => {
+    if (it.screen && onScreenChange) onScreenChange(it.screen as ScreenMode);
+    else if (it.product) onProductChange(it.product as EcosystemProduct);
+  }, [onProductChange, onScreenChange]);
+  const closeSheet = useCallback(() => setSheet(false), []);
 
   return (
     <>
-      {/* Mobile hamburger button - fixed position */}
-      {isMobile && !mobileOpen && (
-        <button
-          onClick={() => setMobileOpen(true)}
-          className="fixed bottom-20 left-3 z-[110] flex items-center justify-center"
-          style={{
-            width: 48, height: 48, borderRadius: 14,
-            background: '#b8960c', color: '#fff',
-            boxShadow: '0 4px 16px rgba(184,150,12,0.4)',
-            border: 'none', cursor: 'pointer',
-          }}
-          aria-label="Open menu"
-        >
-          <Menu size={22} />
-        </button>
+      {!isMobile && <V3Rail className="static" active={railKey(activeProduct, activeScreen)} onGo={onGo} onAll={() => setSheet(true)} />}
+      {!isMobile && showDashboard && dashboardProps && (
+        <aside className="v3-dash" aria-label="Daily summary">
+          <div className="v3-ph"><h2 className="v3-disp">Daily Summary</h2>
+            <span className="r"><button type="button" className="v3-ib" onClick={() => setShowDashboard(false)} aria-label="Close daily summary"><X size={13} /></button></span></div>
+          <RightPanel {...dashboardProps} />
+        </aside>
       )}
-
-      {/* Mobile overlay backdrop */}
-      {isMobile && mobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 z-[100]"
-          onClick={() => setMobileOpen(false)}
-        />
+      {isMobile && !sheet && (
+        <button type="button" onClick={() => setSheet(true)} className="v3-fab" aria-label="Open all modules"><LayoutGrid size={20} strokeWidth={1.6} /></button>
       )}
-
-      {/* Nav panel */}
-      {showNav && (
-        <nav
-          className={`bg-[var(--panel)] border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto ${
-            isMobile ? 'fixed inset-y-0 left-0 z-[101] shadow-2xl' : ''
-          }`}
-          style={{
-            width: isCollapsed ? 56 : 220,
-            transition: 'width 0.2s ease',
-            padding: isCollapsed ? '8px 6px' : '12px 10px',
-          }}
-        >
-          {/* Close / Collapse toggle */}
-          <button
-            onClick={() => {
-              if (isMobile) setMobileOpen(false);
-              else setCollapsed(!collapsed);
-            }}
-            className="flex items-center justify-center cursor-pointer hover:bg-[#f0ede8] transition-colors"
-            style={{
-              width: isCollapsed ? 36 : '100%',
-              height: 36,
-              borderRadius: 8,
-              border: 'none',
-              background: 'transparent',
-              color: '#999',
-              marginBottom: 8,
-              alignSelf: isCollapsed ? 'center' : 'flex-end',
-            }}
-            title={isMobile ? 'Close menu' : (collapsed ? 'Expand sidebar' : 'Collapse sidebar')}
-          >
-            {isMobile ? <X size={18} /> : (collapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />)}
-          </button>
-
-          {/* Groups */}
-          {NAV_GROUPS.map((group, gi) => {
-            const isOpen = expandedGroup === group.key;
-            return (
-              <div key={group.key} style={{ marginTop: gi === 0 ? 0 : 4 }}>
-                {gi > 0 && !isCollapsed && <div className="h-px bg-[var(--border)] my-1.5" />}
-                {/* Group header — clickable to expand/collapse. Hidden entirely in icon-only mode. */}
-                {!isCollapsed && (
-                  <button
-                    onClick={() => toggleGroup(group.key)}
-                    className="w-full flex items-center justify-between gap-1.5 cursor-pointer hover:bg-[#f5f3ef] transition-colors"
-                    style={{
-                      padding: '7px 8px',
-                      borderRadius: 8,
-                      background: 'transparent',
-                      border: 'none',
-                      marginBottom: isOpen ? 4 : 0,
-                    }}
-                    title={isOpen ? `Collapse ${group.label}` : `Expand ${group.label}`}
-                    aria-expanded={isOpen}
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      {isOpen
-                        ? <ChevronDown size={11} className="text-[#999] shrink-0" />
-                        : <ChevronRight size={11} className="text-[#999] shrink-0" />
-                      }
-                      <span style={{ fontSize: 10, fontWeight: 700, color: '#666', letterSpacing: 1, textTransform: 'uppercase' }}>
-                        {group.label}
-                      </span>
-                      <span style={{ fontSize: 9, color: '#aaa', background: '#f0ede8', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>
-                        {groupCount(group)}
-                      </span>
-                    </div>
-                  </button>
-                )}
-
-                {/* Items — only when group is expanded AND not in icon-only mode. */}
-                {isOpen && !isCollapsed && (
-                  <div className="flex flex-col" style={{ gap: 3 }}>
-                    {group.items.map(item => {
-                      const isActive =
-                        item.kind === 'daily-summary'
-                          ? showDashboard
-                          : (item.screen ? activeScreen === item.screen : activeProduct === item.id);
-                      const statusDot = item.status === 'active' ? '#22c55e'
-                        : item.status === 'dev' ? '#f59e0b'
-                        : '#d1d5db';
-
-                      return (
-                        <button
-                          key={item.id}
-                          onClick={() => handleNavClick(item)}
-                          className="w-full text-left flex items-center gap-2.5 cursor-pointer transition-all"
-                          style={{
-                            padding: '8px 10px',
-                            borderRadius: 10,
-                            fontSize: 12.5,
-                            minHeight: 36,
-                            border: isActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
-                            background: isActive ? '#fdf8eb' : 'transparent',
-                            fontWeight: isActive ? 600 : 400,
-                            boxShadow: isActive ? '0 1px 4px rgba(184,150,12,0.08)' : 'none',
-                          }}
-                          onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; } }}
-                          onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
-                        >
-                          <span className="shrink-0" style={{ color: isActive ? '#b8960c' : item.color, opacity: isActive ? 1 : 0.7 }}>
-                            {item.icon}
-                          </span>
-                          <span className="flex-1 truncate" style={{ color: isActive ? '#96750a' : '#666' }}>{item.name}</span>
-                          {item.kind === 'daily-summary' ? (
-                            <span style={{ fontSize: 7, color: showDashboard ? '#b8960c' : '#9ca3af', fontWeight: 700, background: showDashboard ? '#fdf8eb' : '#f3f4f6', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>
-                              {showDashboard ? 'ON' : 'OFF'}
-                            </span>
-                          ) : (
-                            <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: isActive ? '#b8960c' : statusDot }} />
-                          )}
-                          {item.status === 'dev' && !isActive && (
-                            <span style={{ fontSize: 7, color: '#d97706', fontWeight: 700, background: '#fffbeb', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>DEV</span>
-                          )}
-                          {item.status === 'planned' && !isActive && (
-                            <span style={{ fontSize: 7, color: '#9ca3af', fontWeight: 700, background: '#f3f4f6', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>SOON</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Inline dashboard panel (Daily Summary). Always available regardless of which group is expanded. */}
-          {showDashboard && !isCollapsed && dashboardProps && (
-            <div style={{ padding: '8px 4px', marginTop: 8, borderTop: '1px solid var(--border)' }}>
-              <RightPanel {...dashboardProps} />
-            </div>
-          )}
-        </nav>
+      {isMobile && showDashboard && dashboardProps && (
+        <div className="v3-sheet v3-dash-m" role="dialog" aria-label="Daily summary">
+          <div className="hd"><h2 className="v3-disp">Daily Summary</h2>
+            <button type="button" className="v3-ib" style={{ marginLeft: 'auto' }} onClick={() => setShowDashboard(false)} aria-label="Close"><X size={14} /></button></div>
+          <RightPanel {...dashboardProps} />
+        </div>
       )}
+      <BusinessesSheet open={sheet} onClose={closeSheet} groups={groups} />
     </>
   );
 }

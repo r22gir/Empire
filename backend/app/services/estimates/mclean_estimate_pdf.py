@@ -389,12 +389,28 @@ def _client_project(quote: Dict[str, Any]) -> Tuple[str, str]:
     client_safe = _client_safe(quote)
     if client_safe:
         project = re.sub(r"\s+v\d+\s*$", "", project, flags=re.IGNORECASE)
-    if len(client) > 36:
-        client = client[:33] + "…"
+    client = _fit_label(client, 48)
     project_limit = 60 if client_safe else 40
-    if len(project) > project_limit:
-        project = project[:project_limit - 3] + "…"
+    # header line is CLIENT · PROJECT in one 6pt mono run: keep the pair readable
+    project_limit = max(16, min(project_limit, 92 - len(client)))
+    project = _fit_label(project, project_limit)
     return client, project
+
+
+def _fit_label(text: str, limit: int) -> str:
+    """Shorten a header label without cutting a word in half: drop trailing
+    ' · ' segments first (e.g. '· Attn …'), then whole words, then add '…'."""
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(text) <= limit:
+        return text
+    parts = [p.strip() for p in re.split(r"\s+[·|/]\s+", text) if p.strip()]
+    while len(parts) > 1 and len(" · ".join(parts)) > limit:
+        parts.pop()
+    text = " · ".join(parts)
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1].rsplit(" ", 1)[0].rstrip(" ,·-–—&")
+    return (cut or text[: limit - 1]) + "…"
 
 
 def _client_safe(quote: Dict[str, Any]) -> bool:
@@ -426,6 +442,16 @@ def _estimate_bill() -> WorkroomBilling:
     )
 
 
+def _quote_rev(quote: Dict[str, Any]) -> str:
+    """Revision letter: quote.revision / metadata.revision, or notes starting 'Rev B.'; default A."""
+    meta = quote.get("metadata") if isinstance(quote.get("metadata"), dict) else {}
+    for raw in (quote.get("revision"), meta.get("revision")):
+        if isinstance(raw, str) and re.fullmatch(r"[A-Za-z]", raw.strip()):
+            return raw.strip().upper()
+    m = re.match(r"\s*rev(?:ision)?\.?\s+([A-Za-z])\b", str(quote.get("notes") or ""), re.I)
+    return m.group(1).upper() if m else "A"
+
+
 def _paint_page_chrome(c: canvas.Canvas, quote: Dict[str, Any], page: int, pages: int) -> None:
     client, project = _client_project(quote)
     qn = quote.get("quote_number") or quote.get("id") or "ESTIMATE"
@@ -440,7 +466,7 @@ def _paint_page_chrome(c: canvas.Canvas, quote: Dict[str, Any], page: int, pages
         powered_by=bill.chrome_subheader_upper,
         client=client,
         project=project,
-        rev="A",
+        rev=_quote_rev(quote),
         date=created,
         status=_status_banner(quote),
     )
@@ -500,7 +526,9 @@ def _draw_client_block(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> flo
     c.setFont(sans, 10)
     c.setFillColor(DK)
     client = quote.get("customer_name") or "Client"
-    site = quote.get("customer_address") or ""
+    # "PROJECT SITE": the job address when the quote has one (designer jobs bill the designer
+    # but install at the client's home); otherwise the customer address as before.
+    site = quote.get("project_address") or quote.get("customer_address") or ""
     c.drawString(MARGIN_L + 8, y - 26, str(client)[:56])
     c.drawString(MARGIN_L + CONTENT_W * 0.52, y - 26, str(site)[:56])
 
@@ -581,9 +609,12 @@ def _draw_totals(
     _hr(c, y, weight=1.0, col=GOLD)
     y -= 18
     panel_x = PW - MARGIN_R - 280
-    panel_h = 88 if has_extra_tbd else 72
+    # 2026-10-08 (Rafael): area subtotals sit in the table; the panel is Grand total, Deposit, Balance.
+    # A subtotal row appears only when unpriced extra work is listed beside it.
+    show_sub = has_extra_tbd or no_extra_client_copy
+    panel_h = 88 if has_extra_tbd else (72 if show_sub else 58)
     if not show_deposit:
-        panel_h = 56 if has_extra_tbd else 44
+        panel_h = 56 if has_extra_tbd else (44 if show_sub else 30)
     c.setFillColor(PANEL)
     c.roundRect(panel_x, y - (panel_h - 16), 280, panel_h, 4, fill=1, stroke=0)
     c.setStrokeColor(GOLD)
@@ -591,19 +622,22 @@ def _draw_totals(
     c.roundRect(panel_x, y - (panel_h - 16), 280, panel_h, 4, fill=0, stroke=1)
 
     row = y - 4
-    c.setFont(sans, 8.5)
-    c.setFillColor(MUTE)
-    quoted_label = "Addendum items" if no_extra_client_copy else "SUBTOTAL — Quoted / already given"
-    c.drawString(panel_x + 12, row, quoted_label)
-    c.setFont(sans_b, 10)
-    c.setFillColor(DK)
-    c.drawRightString(PW - MARGIN_R - 12, row, _money(quoted_subtotal))
+    if show_sub:
+        c.setFont(sans, 8.5)
+        c.setFillColor(MUTE)
+        quoted_label = "Addendum items" if no_extra_client_copy else "Subtotal (priced)"
+        c.drawString(panel_x + 12, row, quoted_label)
+        c.setFont(sans_b, 10)
+        c.setFillColor(DK)
+        c.drawRightString(PW - MARGIN_R - 12, row, _money(quoted_subtotal))
+    else:
+        row += 14  # first row below is the grand total
 
     if has_extra_tbd:
         row -= 14
         c.setFont(sans, 8.5)
         c.setFillColor(MUTE)
-        c.drawString(panel_x + 12, row, "SUBTOTAL — Extra work (not priced)")
+        c.drawString(panel_x + 12, row, "Extra work (not priced)")
         c.setFont(sans_b, 10)
         c.setFillColor(DK)
         c.drawRightString(PW - MARGIN_R - 12, row, "TBD")
@@ -611,7 +645,7 @@ def _draw_totals(
     row -= 14
     c.setFont(sans, 8.5)
     c.setFillColor(MUTE)
-    total_label = "Addendum subtotal" if no_extra_client_copy else "GRAND TOTAL (priced / quoted only)"
+    total_label = "Addendum subtotal" if no_extra_client_copy else "Grand total"
     c.drawString(panel_x + 12, row, total_label)
     c.setFont(sans_b, 12)
     c.setFillColor(DK)
@@ -621,8 +655,7 @@ def _draw_totals(
         row -= 14
         c.setFont(sans, 8)
         c.setFillColor(MUTE)
-        deposit_label = (f"Deposit to begin ({pct:.0f}%)" if client_safe
-                         else f"Deposit to begin ({pct:.0f}% of priced)")
+        deposit_label = f"Deposit ({pct:.0f}%)"
         c.drawString(panel_x + 12, row, deposit_label)
         c.setFont(sans_b, 9)
         c.setFillColor(DK)
@@ -631,7 +664,7 @@ def _draw_totals(
         row -= 12
         c.setFont(sans, 8)
         c.setFillColor(MUTE)
-        c.drawString(panel_x + 12, row, "Balance on completion" if client_safe else "Balance on completion (priced)")
+        c.drawString(panel_x + 12, row, "Balance")
         c.setFont(sans, 8.5)
         c.drawRightString(PW - MARGIN_R - 12, row, _money(balance))
 
@@ -641,7 +674,7 @@ def _draw_totals(
         c.drawString(
             MARGIN_L,
             y - (panel_h - 10),
-            "Extra work is TBD — not included in total due now / deposit. Do not invent prices.",
+            "Extra work is TBD and not included in the grand total or deposit.",
         )
     return y - panel_h - 10
 
@@ -1205,6 +1238,98 @@ def group_estimate_sections(items: List[Dict[str, Any]]) -> List[Tuple[str, List
     return sections
 
 
+# ── 2026-10-08 (Rafael): upholstery estimate format ─────────────────────────────
+# Grouped by area (U banquette, L banquette, material); columns
+# Description | Qty | Unit | Sq ft | Price | Total; subtotal per area, then grand total,
+# deposit, balance; measurements in the sub-text, in fractions (never decimals).
+_SQFT_DESC_RE = re.compile(
+    r"\s*[-–—·,]?\s*(\d+(?:\.\d+)?)\s*(?:sq\.?\s*ft|sf|sqft|ft²)\s*(?:[x×@]|at)\s*\$?\s*(\d+(?:\.\d+)?)"
+    r"(?:\s*/\s*(?:sq\.?\s*ft|sf))?",
+    re.I)
+_SQFT_UNITS = {"sqft", "sq ft", "sq. ft", "sq.ft", "sf", "ft2", "ft²", "square feet", "sq_ft"}
+_DEC_INCH_RE = re.compile(r"(?<![\d.])(\d+\.\d+)\s*(\"|''|”|in\b\.?|inch(?:es)?\b)")
+
+
+def _num(v: Any) -> float | None:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None
+
+
+def _line_sqft(it: Dict[str, Any]) -> Tuple[float | None, float | None]:
+    """(sq ft per item, price per sq ft) for a line priced by area, else (None, None)."""
+    snap = it.get("pricing_snapshot")
+    if isinstance(snap, str):
+        try:
+            import json as _json
+            snap = _json.loads(snap)
+        except Exception:
+            snap = None
+    for src in (it, it.get("inputs") if isinstance(it.get("inputs"), dict) else None,
+                snap if isinstance(snap, dict) else None):
+        if not src:
+            continue
+        sq = next((_num(src.get(k)) for k in ("sq_ft", "sqft", "square_feet") if _num(src.get(k)) is not None), None)
+        pps = next((_num(src.get(k)) for k in ("price_per_sqft", "rate_per_sqft", "price_per_sq_ft")
+                    if _num(src.get(k)) is not None), None)
+        if sq is not None:
+            return sq, pps
+    unit = str(it.get("unit") or "").strip().lower()
+    if unit in _SQFT_UNITS:
+        return _num(it.get("quantity")), _line_rate(it)
+    m = _SQFT_DESC_RE.search(str(it.get("description") or ""))
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    return None, None
+
+
+def inches_to_fractions(text: str) -> str:
+    """'26.75"' -> '26 3/4"' (nearest 1/16). Measurements are never shown as decimals."""
+    from app.services.pricing.dimensions import format_inches_plain as format_inches
+
+    def _sub(m: "re.Match[str]") -> str:
+        out = format_inches(float(m.group(1)))
+        return out if m.group(2).startswith(('"', "''", "”")) else out.rstrip('"') + " " + m.group(2).strip()
+    return _DEC_INCH_RE.sub(_sub, text or "")
+
+
+def sqft_fraction(value: float | None) -> str:
+    """Square feet as a whole number plus a fraction to the nearest 1/8: 46.39 -> '46 3/8', 7.01 -> '7'."""
+    if value is None:
+        return ""
+    eighths = int(round(float(value) * 8))
+    whole, rem = divmod(eighths, 8)
+    if rem == 0:
+        return f"{whole:,}"
+    num, den = rem, 8
+    while num % 2 == 0 and den % 2 == 0:
+        num //= 2
+        den //= 2
+    return f"{whole:,} {num}/{den}" if whole else f"{num}/{den}"
+
+
+def _sqft_layout(sections: List[Tuple[str, List[Dict[str, Any]]]]) -> bool:
+    return any(_line_sqft(it)[0] is not None for _n, lines in sections for it in lines)
+
+
+def _unit_text(it: Dict[str, Any]) -> str:
+    qty, _t = _qty_number(it)
+    unit = str(it.get("unit") or "").strip()
+    if unit.lower() in _SQFT_UNITS:
+        return "ea"
+    return _canon_unit(unit, qty) if unit else "ea"
+
+
+def _qty_text(it: Dict[str, Any]) -> str:
+    unit = str(it.get("unit") or "").strip().lower()
+    if unit in _SQFT_UNITS:
+        return "1"
+    _q, text = _qty_number(it)
+    return text or "1"
+
+
 def _description_max_width() -> float:
     """Description column stops short of the right-aligned qty."""
     qty_x = PW - MARGIN_R - 200
@@ -1229,11 +1354,20 @@ def _wrap_to_width(text: str, font: str, size: float, max_width: float) -> List[
     return lines
 
 
-def _description_lines(it: Dict[str, Any]) -> List[str]:
+def _description_lines(it: Dict[str, Any], max_width: float | None = None) -> List[str]:
     _serif, sans, _sans_b, _mono = _ensure_body_fonts()
-    raw = " ".join((it.get("description") or "Item").split()) or "Item"
-    lines = _wrap_to_width(raw, sans, _DESC_FONT, _description_max_width()) or ["Item"]
-    dim = quote_item_dimension_text(it)
+    width = max_width or _description_max_width()
+    raw_desc = str(it.get("description") or "Item")
+    if _line_sqft(it)[0] is not None:
+        raw_desc = _SQFT_DESC_RE.sub("", raw_desc)
+    raw_desc = inches_to_fractions(raw_desc)
+    lines: List[str] = []
+    for part in [p for p in raw_desc.split("\n") if p.strip()] or ["Item"]:
+        lines.extend(_wrap_to_width(" ".join(part.split()), sans, _DESC_FONT, width))
+    lines = lines or ["Item"]
+    from app.services.pricing.dimensions import plain_fractions
+    dim = plain_fractions(quote_item_dimension_text(it))
+    lines = [plain_fractions(line) for line in lines]
     if dim and all(dim not in line for line in lines):
         lines.append(dim)
     fabric = it.get("fabric_name")
@@ -1242,9 +1376,12 @@ def _description_lines(it: Dict[str, Any]) -> List[str]:
     return lines
 
 
+_SQFT_DESC_W = None  # set per render (narrower description column in the sq-ft layout)
+
+
 def _line_block_height(it: Dict[str, Any]) -> float:
     """Row height grows with every wrapped description line."""
-    return _DESC_LEADING * len(_description_lines(it)) + _ROW_GAP
+    return _DESC_LEADING * len(_description_lines(it, _SQFT_DESC_W)) + _ROW_GAP
 
 
 def _estimate_note_lines(quote: Dict[str, Any]) -> List[str]:
@@ -1290,6 +1427,15 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
         return _draw_grouped_client_copy(quote, area_grouping)
 
     sections = group_estimate_sections(items)
+    global _SQFT_DESC_W
+    sqft_mode = _sqft_layout(sections)
+    # Description | Qty | Unit | Sq ft | Price | Total
+    total_x = PW - MARGIN_R
+    price_x = total_x - 92
+    sqft_x = price_x - 72
+    unit_x = sqft_x - 58
+    qty6_x = unit_x - 48
+    _SQFT_DESC_W = (qty6_x - 40 - MARGIN_L) if sqft_mode else None
     notes = _estimate_note_lines(quote)
     section_h = 18.0
     columns_h = 16.0
@@ -1373,6 +1519,38 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
             elif kind == "section":
                 _section_label(c, MARGIN_L, y, str(op[1]), mono)
                 y -= section_h
+            elif kind == "columns" and sqft_mode:
+                c.setFont(sans_b, 7.5)
+                c.setFillColor(GOLD)
+                c.drawString(MARGIN_L, y, "Description")
+                c.drawRightString(qty6_x, y, "Qty")
+                c.drawRightString(unit_x, y, "Unit")
+                c.drawRightString(sqft_x, y, "Sq ft")
+                c.drawRightString(price_x, y, "Price")
+                c.drawRightString(total_x, y, "Total")
+                _hr(c, y - 4, weight=0.7, col=GOLD)
+                y -= columns_h
+            elif kind == "line" and sqft_mode:
+                it = op[1]
+                desc_lines = _description_lines(it, _SQFT_DESC_W)
+                sq, pps = _line_sqft(it)
+                for i, line in enumerate(desc_lines):
+                    c.setFont(sans_b if i == 0 else sans, _DESC_FONT if i == 0 else _DESC_FONT - 0.5)
+                    c.setFillColor(DK if i == 0 else DETAIL)
+                    c.drawString(MARGIN_L + (0 if i == 0 else 8), y, line)
+                    if i == 0:
+                        c.setFont(sans, _DESC_FONT)
+                        c.setFillColor(DK)
+                        c.drawRightString(qty6_x, y, _qty_text(it))
+                        c.drawRightString(unit_x, y, _unit_text(it))
+                        c.drawRightString(sqft_x, y, sqft_fraction(sq))
+                        if sq is not None and pps is not None:
+                            c.drawRightString(price_x, y, f"{pps:,.2f}")
+                        else:
+                            c.drawRightString(price_x, y, _rate_text(it).replace("$", ""))
+                        c.drawRightString(total_x, y, _money(_line_amount_value(it)))
+                    y -= _DESC_LEADING
+                y -= _ROW_GAP
             elif kind == "columns":
                 c.setFont(sans_b, 7.5)
                 c.setFillColor(GOLD)

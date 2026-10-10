@@ -1,11 +1,11 @@
 // Ecosystem product = left nav item
-export type EcosystemProduct = 'owner' | 'workroom' | 'craft' | 'social' | 'platform' | 'openclaw' | 'vendorops' | 'recovery' | 'luxe' | 'hardware' | 'system' | 'tokens' | 'max-continuity' | 'market' | 'contractor' | 'support' | 'lead' | 'ship' | 'crm' | 'relist' | 'llc' | 'apost' | 'assist' | 'pay' | 'amp' | 'vetforge' | 'petforge' | 'vision' | 'max-avatar' | 'dev' | 'drawings' | 'construction' | 'storefront' | 'archive' | 'transcript';
+export type EcosystemProduct = 'owner' | 'workroom' | 'craft' | 'social' | 'platform' | 'openclaw' | 'vendorops' | 'recovery' | 'luxe' | 'hardware' | 'system' | 'tokens' | 'max-continuity' | 'market' | 'contractor' | 'support' | 'lead' | 'ship' | 'crm' | 'relist' | 'llc' | 'apost' | 'assist' | 'pay' | 'amp' | 'vetforge' | 'petforge' | 'vision' | 'max-avatar' | 'dev' | 'drawings' | 'construction' | 'storefront' | 'archive' | 'transcript' | 'improvements';
 
 // Legacy BusinessTab mapping (for hooks/data that still reference it)
 export type BusinessTab = 'max' | 'workroom' | 'craft' | 'social' | 'platform' | 'tickets' | 'shipping';
 
 // What's shown in center content area
-export type ScreenMode = 'chat' | 'quote' | 'docs' | 'research' | 'video' | 'dashboard' | 'desks' | 'inbox' | 'memory-bank' | 'report' | 'tickets' | 'shipping' | 'costs' | 'mail' | 'tasks' | 'calendar' | 'telegram' | 'whatsapp' | 'product-docs' | 'pricing' | 'pricing-studio' | 'business-profile' | 'presentation' | 'dev' | 'jobs' | 'invoices';
+export type ScreenMode = 'chat' | 'quote' | 'docs' | 'research' | 'video' | 'dashboard' | 'desks' | 'inbox' | 'memory-bank' | 'report' | 'tickets' | 'shipping' | 'costs' | 'mail' | 'tasks' | 'calendar' | 'telegram' | 'whatsapp' | 'product-docs' | 'pricing' | 'pricing-studio' | 'business-profile' | 'presentation' | 'dev' | 'jobs' | 'invoices' | 'final-docs' | 'invoice';
 
 export type SidebarIcon = 'chat' | 'dashboard' | 'desks' | 'inbox' | 'files' | 'search' | 'voice' | 'settings';
 export type RightTab = 'desks' | 'inbox' | 'system' | 'memory';
@@ -31,6 +31,12 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  /** Uploaded image filename sent with this user turn (/files/upload). */
+  image?: string;
+  /** Archived copy from the Max session journal (/max/sessions/attachment/...). */
+  imageUrl?: string;
+  /** Sent while Max was still answering; runs after the current turn (2026-10-08). */
+  queued?: boolean;
   model?: string;
   latency?: string;
   toolResults?: ToolResult[];

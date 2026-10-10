@@ -94,6 +94,10 @@ load_router("app.routers.max", "/api/v1", ["api-v1"])
 
 # Files API
 load_router("app.api.v1.files", "/api/v1", ["files"])
+# Final Docs hub is implemented as Next.js routes on the portal (:3005).
+# Cloudflare (and api.empirebox.store) send /api/v1/* here, so proxy those
+# paths to the portal. See app.routers.docs_hub_portal_proxy.
+load_router("app.routers.docs_hub_portal_proxy", "/api/v1", ["docs-hub"])
 
 # Chat History API
 
@@ -109,6 +113,9 @@ load_router("app.routers.licenses", "/licenses", ["licenses"])
 load_router("app.routers.shipping", "/shipping", ["shipping"])
 load_router("app.routers.preorders", "/preorders", ["preorders"])
 load_router("app.routers.auth", "/auth", ["auth"])
+# Same auth router under the public /api/v1 prefix used by studio.empirebox.store.
+# Keep the legacy /auth paths above for existing local/API consumers.
+load_router("app.routers.auth", "/api/v1/auth", ["auth-api-v1"])
 load_router("app.routers.users", "/users", ["users"])
 load_router("app.routers.listings", "/listings", ["listings"])
 load_router("app.routers.relistapp", "/api/v1", ["relistapp"])
@@ -192,6 +199,7 @@ load_router("app.routers.customer_mgmt", "/api/v1", ["crm"])
 load_router("app.routers.inventory", "/api/v1", ["inventory"])
 # load_router("app.routers.jobs", "/api/v1", ["jobs"])  # replaced by jobs_unified
 load_router("app.routers.jobs_unified", "/api/v1", ["jobs-unified"])
+load_router("app.routers.schedule", "/api/v1/schedule", ["schedule"])
 
 # Customer Journey Linkage MVP — read-only endpoints
 # (mounted at /api/v1 so the paths /customers/{id}/journey, /quotes/{id}/invoice,
@@ -741,6 +749,8 @@ load_router("app.routers.contacts", "/api/v1", ["contacts"])
 
 # LeadForge — Lead generation & sales machine
 load_router("app.routers.leadforge", "/api/v1", ["leadforge"])
+load_router("app.routers.growth", "/api/v1", ["growth"])  # approval queue, ROI, social proof, improvements
+load_router("app.routers.home_center", "/api/v1", ["home-center"])  # Max home: research interests + growth lists (per user)
 try:
     from app.routers.leadforge import intake_alias_router
     app.include_router(intake_alias_router, prefix="/api/v1", tags=["leadforge"])
@@ -753,6 +763,7 @@ except Exception as e:
 load_router("app.routers.workroom_capture", "/api/v1", ["workroom-capture"])
 
 # Onboarding & Tier
+load_router("app.routers.review_addons", "/api/v1", ["addon-review"])
 load_router("app.routers.onboarding", "/api/v1", ["onboarding"])
 
 # Smart Multi-Method Analyzer

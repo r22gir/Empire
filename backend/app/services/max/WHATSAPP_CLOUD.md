@@ -58,13 +58,22 @@ Quote and drawing PDFs go out as document messages on that same reply. They are 
 Copy these without changing the function names or the routes:
 
 - `backend/app/services/max/whatsapp_channel.py`
+- `backend/app/services/max/whatsapp_calling.py`
 - `backend/app/routers/whatsapp.py`
 - this file
+- `docs/WHATSAPP_CHANNEL.md`
 
 `hermes_phase3.py` only reports `channel_status()`. The default handlers call Workroom voice, Photo Analyzer, and Max chat; another edition can pass its own handlers into `process_webhook` without forking the webhook, signature, allowlist, window, or confirm gate.
 
 ## Chat log (this edition only)
 
-Inbound and outbound turns are appended to `EMPIRE_DATA_DIR/whatsapp/whatsapp_chat_log.db`. Delivery status webhooks update `sent` / `delivered` / `read` / `failed`. Media is stored under that edition’s `whatsapp/media`. Photos and documents file into `~/jobs/<slug>` when `doc_lookup` is unique or the conversation has an active job; otherwise they park in inbox and Max asks. Founder-PIN reads live at `/api/v1/whatsapp/chats`. Details: `docs/WHATSAPP_CHANNEL.md`.
+Inbound and outbound turns are appended to `EMPIRE_DATA_DIR/whatsapp/whatsapp_chat_log.db`. Delivery status webhooks update `sent` / `delivered` / `read` / `failed`. Media is stored under that edition’s `whatsapp/media`. Photos and documents file into `<edition-jobs-root>/<slug>` when `doc_lookup` is unique; a text with no job name never files into a sticky active job. Otherwise they park in inbox and Max asks. Founder-PIN reads live at `/api/v1/whatsapp/chats`. Details: `docs/WHATSAPP_CHANNEL.md`.
 
+## Calling audio / NAT
 
+Signaling (webhooks + Graph pre_accept/accept) can succeed while the call is silent if ICE media UDP cannot hairpin through the router. On a dual-WAN OpenWrt this is common: STUN reports one public IP while return traffic arrives on the other.
+
+Mitigations (pick one):
+1. **Managed TURN** (preferred): set `WHATSAPP_TURN_URL` / `WHATSAPP_TURN_USERNAME` / `WHATSAPP_TURN_CREDENTIAL` (Cloudflare Calls TURN or Twilio). Relay candidates let Meta reach the Dell without port forwards.
+2. **coturn on the Dell**: UDP/TCP 3478 plus a relay UDP range (e.g. 49152-65535) forwarded from the router to 192.168.1.190 — requires a router change Rafael owns.
+3. Pin host candidates with `WHATSAPP_ICE_INTERFACES=enp0s25` (already recommended) so virbr/tailscale are never advertised.

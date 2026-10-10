@@ -165,7 +165,7 @@ def test_ambiguous_parks_inbox_and_asks(isolated_whatsapp_edition, monkeypatch):
     assert get_pending_filings(RAFAEL)
 
 
-def test_active_job_used_when_caption_empty(isolated_whatsapp_edition):
+def test_unnamed_text_never_files_into_sticky_active_job(isolated_whatsapp_edition):
     prepare_inbound_attachment(
         b"aaa",
         filename="one.jpg",
@@ -182,8 +182,9 @@ def test_active_job_used_when_caption_empty(isolated_whatsapp_edition):
         wa_id=RAFAEL,
         hint_text="",
     )
-    assert rec["job_slug"] == "maggie-frolich"
-    assert rec["filing_status"] == "filed"
+    assert rec["job_slug"] == ""
+    assert rec["filing_status"] == "inbox"
+    assert rec["needs_job_ask"] is True
 
 
 def test_job_answer_files_parked_attachment(isolated_whatsapp_edition, monkeypatch):
@@ -281,3 +282,191 @@ def test_file_into_job_uses_received_for_docs(isolated_whatsapp_edition):
     assert "/received/" in path.replace("\\", "/")
     assert Path(path).read_bytes() == b"abc"
     assert str(jobs_root()) in path
+
+
+def test_job_answer_falls_through_unless_named_or_skip(isolated_whatsapp_edition):
+    rec = prepare_inbound_attachment(
+        b"parked",
+        filename="scan.pdf",
+        mime_type="application/pdf",
+        media_type="document",
+        wa_id=RAFAEL,
+        hint_text="",
+    )
+    from app.services.max.whatsapp_log import log_message, last_attachment_ids, set_pending_filings
+
+    mid = log_message(RAFAEL, "inbound", "document", body="[document: scan.pdf]", attachments=[rec])
+    att_id = last_attachment_ids(mid)[0]["id"]
+    set_pending_filings(RAFAEL, [att_id])
+    assert consume_job_answer(RAFAEL, "how's the weather today") is None
+    assert get_pending_filings(RAFAEL) == [att_id]
+    skipped = consume_job_answer(RAFAEL, "skip")
+    assert skipped["status"] == "skipped"
+    assert get_pending_filings(RAFAEL) == []
+
+
+def test_job_answer_timeout_falls_through(isolated_whatsapp_edition, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    rec = prepare_inbound_attachment(
+        b"old",
+        filename="old.pdf",
+        mime_type="application/pdf",
+        media_type="document",
+        wa_id=RAFAEL,
+        hint_text="",
+    )
+    from app.services.max.whatsapp_log import (
+        _get_conn,
+        _lock,
+        init_db,
+        last_attachment_ids,
+        log_message,
+        set_pending_filings,
+    )
+
+    mid = log_message(RAFAEL, "inbound", "document", body="[document: old.pdf]", attachments=[rec])
+    att_id = last_attachment_ids(mid)[0]["id"]
+    set_pending_filings(RAFAEL, [att_id])
+    stale = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    init_db()
+    with _lock:
+        conn = _get_conn()
+        try:
+            conn.execute(
+                "UPDATE whatsapp_pending_filings SET asked_at = ? WHERE wa_id = ?",
+                (stale, RAFAEL),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    monkeypatch.setenv("WHATSAPP_JOB_ANSWER_TIMEOUT_SECONDS", "60")
+    assert consume_job_answer(RAFAEL, "hello Max") is None
+    assert get_pending_filings(RAFAEL) == []
+
+
+def test_refile_rejects_traversal_and_unknown_folders(isolated_whatsapp_edition):
+    rec = prepare_inbound_attachment(
+        b"pdf",
+        filename="scan.pdf",
+        mime_type="application/pdf",
+        media_type="document",
+        wa_id=RAFAEL,
+        hint_text="",
+    )
+    from app.services.max.whatsapp_log import last_attachment_ids, log_message
+
+    mid = log_message(RAFAEL, "inbound", "document", body="[document: scan.pdf]", attachments=[rec])
+    att_id = last_attachment_ids(mid)[0]["id"]
+    with pytest.raises(ValueError):
+        refile_attachment(att_id, "../etc")
+    with pytest.raises(ValueError):
+        refile_attachment(att_id, "brand-new-arbitrary")
+
+
+def test_media_serve_never_renders_html_or_svg(isolated_whatsapp_edition):
+    rec = store_edition_media(b"<svg xmlns='http://www.w3.org/2000/svg'></svg>", "evil.svg", "image/svg+xml", "document")
+    from app.services.max.whatsapp_log import last_attachment_ids, log_message
+
+    mid = log_message(RAFAEL, "inbound", "document", body="[document: evil.svg]", attachments=[rec])
+    att_id = last_attachment_ids(mid)[0]["id"]
+    client = _client()
+    res = client.get(f"/api/v1/whatsapp/media/{att_id}", headers={"X-Founder-Pin": FOUNDER_PIN})
+    assert res.status_code == 200
+    assert res.headers.get("content-type", "").startswith("application/octet-stream")
+    assert res.headers.get("x-content-type-options") == "nosniff"
+    assert "attachment" in (res.headers.get("content-disposition") or "")
+
+
+def test_founder_pin_failures_are_rate_limited(isolated_whatsapp_edition):
+    client = _client()
+    headers = {"X-Founder-Pin": "wrong-pin", "X-Forwarded-For": "203.0.113.50"}
+    last = None
+    for _ in range(9):
+        last = client.get("/api/v1/whatsapp/chats", headers=headers)
+    assert last is not None
+    assert last.status_code == 429
+    assert FOUNDER_PIN not in last.text
+    assert "wrong-pin" not in last.text
+
+
+def test_filename_sanitize_strips_paths_and_controls(isolated_whatsapp_edition):
+    from app.services.max.whatsapp_log import sanitize_filename
+
+    assert sanitize_filename("../etc/passwd") == "passwd"
+    assert "\x00" not in sanitize_filename("a\x00b.jpg")
+    assert "/" not in sanitize_filename("a/b/c.jpg")
+    long_name = sanitize_filename("x" * 400 + ".jpg")
+    assert len(long_name) <= 120
+
+
+def test_jobs_root_is_edition_scoped(monkeypatch, tmp_path):
+    monkeypatch.delenv("WHATSAPP_JOBS_ROOT", raising=False)
+    amp = tmp_path / "amp"
+    maxine = tmp_path / "maxine"
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(amp))
+    from app.services.max.doc_lookup import jobs_root
+
+    assert jobs_root() == amp / "jobs"
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(maxine))
+    assert jobs_root() == maxine / "jobs"
+
+
+def test_family_edition_cannot_read_or_file_rafael_jobs(isolated_whatsapp_edition, monkeypatch, tmp_path):
+    rec = prepare_inbound_attachment(
+        b"rafael-bytes",
+        filename="site.jpg",
+        mime_type="image/jpeg",
+        media_type="image",
+        wa_id=RAFAEL,
+        hint_text="Maggie porch",
+    )
+    from app.services.max.whatsapp_log import (
+        file_into_job as file_job,
+        get_conversation_messages,
+        list_conversations,
+        log_message,
+    )
+
+    log_message(RAFAEL, "inbound", "image", body="[photo]", attachments=[rec])
+    rafael_jobs = jobs_root()
+    assert list_conversations()
+    family = tmp_path / "family-edition"
+    family.mkdir()
+    family_jobs = tmp_path / "family-jobs"
+    family_jobs.mkdir()
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(family))
+    monkeypatch.setenv("WHATSAPP_JOBS_ROOT", str(family_jobs))
+    monkeypatch.delenv("WHATSAPP_LABELS", raising=False)
+    assert list_conversations() == []
+    msgs, total = get_conversation_messages(RAFAEL)
+    assert msgs == []
+    assert total == 0
+    path = file_job(b"family-bytes", "family.jpg", "image", "maggie-frolich")
+    assert str(family_jobs) in path
+    assert str(rafael_jobs) not in path
+    assert not list(Path(rafael_jobs).rglob("family.jpg"))
+    with pytest.raises(ValueError):
+        refile_attachment(1, "maggie-frolich")
+
+
+def test_persist_failure_still_answers(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    posts = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    def _boom(*_a, **_k):
+        raise OSError("disk full")
+
+    async def _chat(text, wa_id):
+        return "Max still answered. Not sent."
+
+    monkeypatch.setattr(wa, "_persist_inbound_media", _boom)
+    raw = _payload({"type": "text", "id": "wamid.persist-fail", "text": {"body": "hello after fail"}})
+    result = asyncio.run(wa.process_webhook(raw, _sign(raw), text_handler=_chat, http_post=_post))
+    assert result["results"][0]["reply_sent"] is True
+    assert "Max still answered" in posts[0]["text"]["body"]

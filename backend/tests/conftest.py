@@ -38,6 +38,25 @@ from pathlib import Path
 
 import pytest
 
+# ── 2026-10-04 live-data firewall (runs before ANY app import) ─────────────
+# Root cause of test traffic in Rafael's live data: shells with the backend
+# env loaded export EMPIRE_DATA_DIR / EMPIRE_TASK_DB = ~/empire-data, and the
+# D33 block below used os.environ.setdefault, so the live values won. Now:
+#   1. every data env var is FORCED to a per-run temp tree (never setdefault),
+#   2. a process-wide audit-hook firewall refuses any touch of live data
+#      (also in Python subprocesses via a generated sitecustomize),
+#   3. conftest refuses to run at all if a data path still resolves live.
+# See tests/_live_data_guard.py. There is no opt-out marker for this layer.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _live_data_guard as _ldg  # noqa: E402
+
+_LIVE_WATCH_BEFORE = _ldg.fingerprint()  # stat-only, before anything runs
+_TEST_TMP_ROOT = Path(tempfile.mkdtemp(prefix=f"empire_test_pid{os.getpid()}_"))
+_LIVE_GUARD_LOG = _TEST_TMP_ROOT / "live_data_violations.log"
+_REDIRECTED_ENV = _ldg.redirect_env(_TEST_TMP_ROOT)
+_ldg.write_sitecustomize(_TEST_TMP_ROOT)
+_ldg.install(str(_LIVE_GUARD_LOG))
+
 # D33 — set EMPIRE_TASK_DB at conftest LOAD TIME, before pytest
 # collects test modules. Module-level DB_PATH captures in
 # backend/app/ (21 modules per §1b) bind to whatever EMPIRE_TASK_DB
@@ -54,7 +73,9 @@ _PRE_COLLECTION_DB_PATH = os.path.join(
     tempfile.gettempdir(),
     f"empire_test_d33_pid{os.getpid()}.db",
 )
-os.environ.setdefault("EMPIRE_TASK_DB", _PRE_COLLECTION_DB_PATH)
+# 2026-10-04: forced, not setdefault — a live value exported by the shell
+# must never win.
+os.environ["EMPIRE_TASK_DB"] = _PRE_COLLECTION_DB_PATH
 
 # D44 — the single-writer reads EMPIRE_DB_PATH / EMPIRE_PHOTOS_DIR via
 # canonical_path.py at call time, but app-level imports (e.g. label_station)
@@ -64,8 +85,13 @@ _PRE_COLLECTION_PHOTOS_DIR = os.path.join(
     tempfile.gettempdir(),
     f"empire_test_d33_pid{os.getpid()}_photos",
 )
-os.environ.setdefault("EMPIRE_DB_PATH", _PRE_COLLECTION_DB_PATH)
-os.environ.setdefault("EMPIRE_PHOTOS_DIR", _PRE_COLLECTION_PHOTOS_DIR)
+os.environ["EMPIRE_DB_PATH"] = _PRE_COLLECTION_DB_PATH
+os.environ["EMPIRE_PHOTOS_DIR"] = _PRE_COLLECTION_PHOTOS_DIR
+# label_station / accounts read EMPIRE_DB (default: the live empire.db).
+os.environ["EMPIRE_DB"] = _PRE_COLLECTION_DB_PATH
+
+# Fail fast: refuse to collect a single test if any data path is still live.
+_ldg.assert_isolated()
 
 # Default safety knob: tests should never write to the prod DB unless
 # they explicitly opt out. We block write-path calls that point at the
@@ -106,6 +132,8 @@ _DATA_TABLES = [
     "chart_of_accounts",
     "quotes_v2",
     "customers",
+    "schedule_events",
+    "pickup_dropoff_logs",
 ]
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -152,6 +180,15 @@ def _build_empty_empire_db(path: str) -> None:
     except Exception:
         # Never let schema top-up break collection; tests that need the wider
         # columns will fail loudly on their own.
+        pass
+
+    try:
+        from app.db.init_db import _migrate_schedule_tables
+        conn_sched = sqlite3.connect(path)
+        _migrate_schedule_tables(conn_sched)
+        conn_sched.commit()
+        conn_sched.close()
+    except Exception:
         pass
 
 
@@ -459,19 +496,324 @@ def _skip_e2e_unless_opted_in(request):
     )
 
 
+def _tmp_mirror(path_str: str) -> str:
+    """Temp stand-in for a live path.
+
+    HARD roots (~/empire-data, /data/amp, /data/maxine) are never read: they
+    map onto the run's temp data tree, the same place the forced env vars
+    point (``~/empire-data/X`` -> ``$EMPIRE_DATA_DIR/X``; ``empire.db`` -> the
+    isolated schema DB), so hard-coded and env-based code agree.
+    SOFT roots (repo data dirs) are readable: files are copied into
+    ``<tmp>/mirror/<hash>/<name>`` and directories get an empty copy of their
+    sub-directory skeleton (no files) so ``UPLOAD_DIR / category`` still works.
+    """
+    import hashlib
+    import shutil
+    norm = os.path.normpath(os.path.abspath(os.path.expanduser(path_str)))
+    kind = _ldg.classify(norm)
+    if kind == "hard":
+        home_data = os.path.normpath(str(_ldg.HOME / "empire-data"))
+        if norm in (os.path.join(home_data, "empire.db"),):
+            return _PRE_COLLECTION_DB_PATH
+        for live, tmp in (
+            (home_data, _TEST_TMP_ROOT / "data"),
+            ("/data/amp", _TEST_TMP_ROOT / "family-amp"),
+            ("/data/maxine", _TEST_TMP_ROOT / "family-maxine"),
+        ):
+            if norm == live or norm.startswith(live + os.sep):
+                dst = Path(tmp) / os.path.relpath(norm, live)
+                break
+        else:  # realpath-only match (symlink); keep it in a hashed bucket
+            dst = _TEST_TMP_ROOT / "mirror" / hashlib.sha1(norm.encode()).hexdigest()[:12] / os.path.basename(norm)
+        dst = Path(os.path.normpath(dst))
+        if not Path(norm).suffix:
+            dst.mkdir(parents=True, exist_ok=True)
+        else:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+        return str(dst)
+    # Hashed bucket + basename: the mirror path must not contain the live
+    # path as a substring (the D33 sqlite guard matches substrings).
+    bucket = hashlib.sha1(norm.encode()).hexdigest()[:12]
+    dst = _TEST_TMP_ROOT / "mirror" / bucket / (os.path.basename(norm) or "root")
+    src = Path(norm)
+    if src.is_dir():
+        if not dst.exists():
+            dst.mkdir(parents=True, exist_ok=True)
+            base_depth = norm.count(os.sep)
+            for dirpath, dirnames, _files in os.walk(norm):
+                if dirpath.count(os.sep) - base_depth >= 2:
+                    dirnames[:] = []
+                    continue
+                for d in dirnames:
+                    (dst / os.path.relpath(os.path.join(dirpath, d), norm)).mkdir(parents=True, exist_ok=True)
+    else:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_file() and not dst.exists():
+            shutil.copyfile(src, dst)  # soft root: read-only source, temp copy
+    return str(dst)
+
+
+def _redirect_live_module_constants(modules) -> list[str]:
+    """Point UPPER_CASE module constants that hold live paths (captured at
+    import, e.g. chat dirs, upload dirs, audit files, LIVE_DB in the journey
+    tests) at temp mirrors. The audit hook still catches anything missed."""
+    import types as _types
+
+    def _live(value) -> bool:
+        if not isinstance(value, (str, Path)):
+            return False
+        sval = str(value)
+        return "/" in sval and len(sval) <= 4096 and bool(_ldg.classify(sval))
+
+    def _swap(value):
+        new = _tmp_mirror(str(value))
+        return Path(new) if isinstance(value, Path) else new
+
+    changed = []
+    for mod in modules:
+        if mod is None:
+            continue
+        for name, value in list(vars(mod).items()):
+            if name.isupper() and _live(value):
+                setattr(mod, name, _swap(value))
+                changed.append(f"{mod.__name__}.{name}")
+            # Default args captured at def time, e.g.
+            # write_review_queue_snapshot(path=REVIEW_QUEUE_PATH).
+            elif isinstance(value, _types.FunctionType) and getattr(value, "__module__", None) == mod.__name__:
+                d = value.__defaults__
+                if d and any(_live(x) for x in d):
+                    value.__defaults__ = tuple(_swap(x) if _live(x) else x for x in d)
+                    changed.append(f"{mod.__name__}.{name}()")
+                kd = value.__kwdefaults__
+                if kd and any(_live(x) for x in kd.values()):
+                    value.__kwdefaults__ = {k: (_swap(x) if _live(x) else x) for k, x in kd.items()}
+                    changed.append(f"{mod.__name__}.{name}(*)")
+    return changed
+
+
+_REDIRECTED_CONSTANTS: list[str] = []
+
+
+class _AppConstantRedirectFinder:
+    """meta_path shim: after any ``app.*`` module executes (including lazy
+    imports inside test bodies), rewrite its live-path constants to temp."""
+
+    _active = False
+
+    def find_spec(self, name, path=None, target=None):
+        if self._active or not (name == "app" or name.startswith("app.")):
+            return None
+        self._active = True
+        try:
+            for finder in sys.meta_path:
+                if finder is self or isinstance(finder, _AppConstantRedirectFinder) or not hasattr(finder, "find_spec"):
+                    continue
+                spec = finder.find_spec(name, path, target)
+                if spec is not None:
+                    break
+            else:
+                return None
+        finally:
+            self._active = False
+        loader = spec.loader
+        if loader is not None and hasattr(loader, "exec_module") and not getattr(loader, "_ldg_wrapped", False):
+            orig = loader.exec_module
+
+            def exec_module(module, _orig=orig):
+                _orig(module)
+                _REDIRECTED_CONSTANTS.extend(_redirect_live_module_constants([module]))
+
+            try:
+                loader.exec_module = exec_module
+                loader._ldg_wrapped = True
+            except (AttributeError, TypeError):
+                pass
+        return spec
+
+
+# Import-time connects (e.g. tool_audit.init_audit_db() runs at import with
+# AUDIT_DB still live, before the constant can be rewritten): translate any
+# sqlite3.connect target under a live root to its temp mirror. Anything that
+# bypasses this wrapper still hits the audit-hook firewall and fails.
+_SQLITE_REWRITES: list[str] = []
+_real_sqlite3_connect = sqlite3.connect
+
+
+def _firewall_sqlite3_connect(database, *args, **kwargs):
+    if isinstance(database, (str, Path)):
+        db = str(database)
+        if db.startswith("file:"):
+            body, sep, query = db[5:].partition("?")
+            if body and _ldg.classify(body):
+                _SQLITE_REWRITES.append(body)
+                database = "file:" + _tmp_mirror(body) + sep + query
+        elif db and db != ":memory:" and _ldg.classify(db):
+            _SQLITE_REWRITES.append(db)
+            database = _tmp_mirror(db)
+    return _real_sqlite3_connect(database, *args, **kwargs)
+
+
+sqlite3.connect = _firewall_sqlite3_connect
+
+# Same idea for the chmod 600 that DB initialisers run right after connect.
+_real_os_chmod = os.chmod
+
+
+def _firewall_os_chmod(path, mode, *args, **kwargs):
+    if isinstance(path, (str, Path)) and _ldg.classify(str(path)):
+        _SQLITE_REWRITES.append(f"chmod:{path}")
+        path = _tmp_mirror(str(path))
+        if not os.path.exists(path):
+            return None
+    return _real_os_chmod(path, mode, *args, **kwargs)
+
+
+os.chmod = _firewall_os_chmod
+
+sys.meta_path.insert(0, _AppConstantRedirectFinder())
+# Modules already imported by plugins/conftest before this point.
+_REDIRECTED_CONSTANTS.extend(_redirect_live_module_constants(
+    [m for n, m in list(sys.modules.items()) if n == "app" or n.startswith("app.")]
+))
+
+# Test modules whose LIVE_DB constant now points at a temp COPY of the
+# frozen ~/empire-repo/backend/data/empire.db snapshot.
+_SNAPSHOT_COPY_MODULES: dict[str, str] = {}
+
+
 def pytest_collection_modifyitems(config, items):
-    """D34: auto-mark journey tests as live_db so the legacy-mirror
-    substring added to _PROD_PATHS doesn't break their read-only
-    assertions. These tests deliberately read
-    ~/empire-repo/backend/data/empire.db (a 2026-07-08 frozen
-    snapshot, NOT a live DB) — verified D34 STEP 2. They don't
-    write, but the guard fires on sqlite3.connect itself, so the
-    existing live_db exemption is the correct knob."""
+    """2026-10-04: the journey tests used to be auto-marked live_db and read
+    ~/empire-repo/backend/data/empire.db directly — and, in shells with the
+    backend env loaded, EMPIRE_DB_PATH sent generate_review_queue() to the
+    LIVE ~/empire-data/empire.db. They now read a per-run temp COPY of the
+    frozen snapshot (LIVE_DB rewritten, EMPIRE_DB_PATH/EMPIRE_TASK_DB pointed
+    at the copy for those tests only) and their audit JSON goes to temp."""
+    mods = {item.module for item in items}
+    mods |= {m for n, m in list(sys.modules.items()) if n == "app" or n.startswith("app.")}
+    _REDIRECTED_CONSTANTS.extend(_redirect_live_module_constants(mods))
     for item in items:
-        # `item.module.__name__` resolves to "tests.test_journey_linkage"
-        # under the `backend/tests/` collection root — match the suffix.
-        if item.module.__name__.endswith((
-            ".test_journey_linkage",
-            ".test_journey_review_queue",
-        )):
+        mod = item.module
+        live_db = getattr(mod, "LIVE_DB", None) if mod is not None else None
+        if isinstance(live_db, (str, Path)) and str(live_db).startswith(str(_TEST_TMP_ROOT)):
+            _SNAPSHOT_COPY_MODULES[mod.__name__] = str(live_db)
+            # live_db marker = "don't truncate this DB between tests"; it no
+            # longer bypasses the firewall, and the DB is a temp copy.
             item.add_marker(pytest.mark.live_db)
+
+
+@pytest.fixture(autouse=True)
+def _point_snapshot_tests_at_copy(request, monkeypatch):
+    mod = getattr(request, "module", None)
+    copy = _SNAPSHOT_COPY_MODULES.get(getattr(mod, "__name__", ""))
+    if copy:
+        monkeypatch.setenv("EMPIRE_DB_PATH", copy)
+        monkeypatch.setenv("EMPIRE_TASK_DB", copy)
+    yield
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    start = getattr(item, "_ldg_blocked_start", None)
+    if start is None:
+        item._ldg_blocked_start = start = len(_ldg.blocked_connects)
+    outcome = yield
+    rep = outcome.get_result()
+    new = _ldg.blocked_connects[start:]
+    if rep.failed and new:
+        rep.sections.append(("live-data firewall", "connects to live services were blocked:\n  " + "\n  ".join(sorted(set(new)))))
+
+
+_ISOLATED_ENV_NAMES = (
+    "EMPIRE_TASK_DB", "EMPIRE_DB_PATH", "EMPIRE_DB", "EMPIRE_PHOTOS_DIR", "EMPIRE_DATA_DIR",
+    "EMPIRE_BRAIN_DIR", "MAX_MEMORY_PATH", "OPENCLAW_DB_PATH", "EMPIRE_TEST_GUARD_LOG",
+    "EMPIRE_MAX_JOURNAL_DB", "EMPIRE_MAX_JOURNAL_ARCHIVE", "COST_TRACKER_DB",
+    "MAX_IMPROVE_SPEC_DIR", "VOICE_DOC_SESSIONS_PATH", "CHAT_BACKUP_DIR",
+)
+_ISOLATED_ENV = {n: os.environ[n] for n in _ISOLATED_ENV_NAMES if n in os.environ}
+
+
+@pytest.fixture(autouse=True)
+def _restore_isolated_env():
+    """After every test: put the run's isolated data env back and re-check it.
+
+    Some tests set os.environ["EMPIRE_TASK_DB"] directly, or
+    importlib.reload(app.db.database) against their own tmp DB, and never
+    restore it, so every later test silently used that stale DB
+    (order-dependent 'no such table'). Also fail fast if anything left a
+    data var pointing at live data."""
+    mod = sys.modules.get("app.db.database")
+    before = getattr(mod, "DB_PATH", None) if mod else None
+    yield
+    for name, value in _ISOLATED_ENV.items():
+        if os.environ.get(name) != value:
+            os.environ[name] = value
+    mod = sys.modules.get("app.db.database")
+    if mod is not None and before is not None and getattr(mod, "DB_PATH", None) != before:
+        mod.DB_PATH = before
+    _ldg.assert_isolated()
+
+
+@pytest.fixture(autouse=True)
+def _live_data_firewall_check(request):
+    """Fail the test if it attempted to touch live data, even when the
+    code under test swallowed the PermissionError."""
+    start = len(_ldg.violations)
+    yield
+    new = _ldg.violations[start:]
+    if new:
+        pytest.fail(
+            f"{request.node.nodeid} tried to touch live Empire data:\n  " + "\n  ".join(new[:10]),
+            pytrace=False,
+        )
+
+
+def pytest_report_header(config):
+    return [
+        f"live-data firewall: temp root {_TEST_TMP_ROOT}",
+        f"live-data firewall: env redirected: {', '.join(sorted(_REDIRECTED_ENV)) or 'none'}",
+    ]
+
+
+def pytest_sessionfinish(session, exitstatus):
+    # Any change to a watched live file (the Max session journal) during the
+    # run fails the run, whoever wrote it, and is reported.
+    watch_changed = _ldg.changed_files(_LIVE_WATCH_BEFORE, _ldg.fingerprint())
+    if watch_changed:
+        sys.stderr.write(
+            "\n[live-data firewall] LIVE FILE CHANGED DURING THE TEST RUN (run marked failed): "
+            + ", ".join(watch_changed)
+            + f"\n  this pytest process recorded {len(_ldg.violations)} refused access(es); if 0, the"
+              " writer was another process (e.g. the live backend serving real traffic) - check its log.\n"
+        )
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    logged = []
+    try:
+        if _LIVE_GUARD_LOG.exists():
+            logged = _LIVE_GUARD_LOG.read_text().splitlines()
+    except OSError:
+        pass
+    refused = [l for l in logged if "LIVE_DATA_VIOLATION" in l]
+    blocked = [l for l in logged if "LIVE_SERVICE_BLOCKED" in l]
+    if refused or _ldg.violations:
+        sys.stderr.write(
+            f"\n[live-data firewall] {len(refused) or len(_ldg.violations)} refused live-data access(es):\n  "
+            + "\n  ".join((refused or _ldg.violations)[:30]) + "\n"
+        )
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    if blocked:
+        from collections import Counter
+        c = Counter(l.split("socket.connect -> ", 1)[-1] for l in blocked)
+        sys.stderr.write(
+            f"\n[live-data firewall] {len(blocked)} connect(s) to live services blocked (not failures by themselves): "
+            + ", ".join(f"{k} x{v}" for k, v in c.most_common()) + "\n"
+        )
+    if _SQLITE_REWRITES:
+        sys.stderr.write(
+            f"\n[live-data firewall] sqlite connects rewritten to temp mirrors: {len(_SQLITE_REWRITES)} "
+            f"({', '.join(sorted(set(_SQLITE_REWRITES))[:8])})\n"
+        )
+    if _REDIRECTED_CONSTANTS:
+        sys.stderr.write(f"[live-data firewall] module constants redirected to temp: {len(_REDIRECTED_CONSTANTS)}\n")
+    if not os.environ.get("EMPIRE_TEST_KEEP_TMP"):
+        import shutil
+        shutil.rmtree(_TEST_TMP_ROOT, ignore_errors=True)

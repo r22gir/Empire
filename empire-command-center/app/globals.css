@@ -267,10 +267,22 @@ body:has([data-intake-page]) {
   height: auto;
 }
 
+/* Allow scrolling on the private owner review pages (/review/addons) */
+body:has([data-review-page]) {
+  overflow: auto;
+  height: auto;
+}
+
 /* Allow scrolling on standalone channel verification page */
 body:has([data-channel-page]) {
   overflow: auto;
   height: auto;
+}
+
+/* Allow scrolling on jobs, kanban and per-job folder views */
+body:has([data-jobs-scrollable]) {
+  overflow-y: auto !important;
+  height: auto !important;
 }
 
 /* R1X-PUB-EMPIREBOX: Allow scrolling on the public apex landing page.
@@ -807,3 +819,11 @@ body:has([data-platform-page]) {
   overflow: auto;
   height: auto;
 }
+
+/* Schedule Control mobile responsiveness & dark mode theme tokens */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --schedule-accent: #06b6d4;
+  }
+}
+

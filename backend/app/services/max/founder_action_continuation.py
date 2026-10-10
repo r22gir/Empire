@@ -31,6 +31,94 @@ def assistant_announces_future_work(text: str | None) -> bool:
     return bool(_DANGLING_PROMISE_RE.search(body))
 
 
+# Announced-action guard (2026-10-04): a reply that says it is about to do something
+# ("Let me pull up the cost module...", "I'll submit the improvement request",
+# "Voy a revisar...") but called no tool in that response is not a final answer.
+# The loop continues once or twice with a nudge so Max either calls the tool now
+# or answers plainly. Questions back to Rafael (ending in "?") are allowed.
+ANNOUNCED_ACTION_MAX_ROUNDS = 2
+_ACTION_VERBS = (
+    r"check|look(?:\s+(?:into|up|at))?|pull(?:\s+up)?|find|investigate|search|open|grab|get|fetch|review|"
+    r"make\s+the\s+change|add|fix|change|build|file|submit|create|draft|prepare|"
+    r"set\s+up|dig\s+into|track\s+down|send|email|generate|render|update|run|make|attach|apply|put\s+together|"
+    r"start|kick\s+off|do\s+(?:it|that|this)|get\s+(?:it|that|this)\s+done"
+)
+_ANNOUNCED_ACTION_RE = re.compile(
+    r"(?i)(?:"
+    r"\blet\s+me\s+(?:go\s+ahead\s+and\s+|quickly\s+|now\s+|first\s+)?(?:" + _ACTION_VERBS + r")\b"
+    r"|\bi(?:'ll|\s+will|\s*'m\s+going\s+to|\s+am\s+going\s+to)\s+(?:now\s+|first\s+|quickly\s+|go\s+ahead\s+and\s+)?(?:" + _ACTION_VERBS + r")\b"
+    r"|\b(?:one|a)\s+(?:sec|second|moment)\b"
+    r"|^\W*(?:on\s+it|got\s+it|will\s+do|doing\s+it\s+now|right\s+away)\b"
+    r"|\b(?:creating|sending|generating|building|drafting|updating|adding|rendering|preparing|pulling|emailing|attaching|"
+    r"running|starting|fixing|making)\b[^.?!\n]{0,80}\b(?:now|next|shortly|right\s+away|in\s+a\s+(?:sec|moment|minute))\b"
+    r"|\b(?:going\s+to|gonna|about\s+to)\s+(?:" + _ACTION_VERBS + r")\b"
+    r"|\bvoy\s+a\s+(?:revisar|buscar|consultar|investigar|averiguar|hacer|agregar|añadir|arreglar|crear|preparar|abrir|mirar|ver)\b"
+    r"|\bd[ée]jame\s+(?:revisar|buscar|ver|consultar|mirar|averiguar)\b"
+    r"|\bun\s+(?:segundo|momento)\b"
+    r")"
+)
+
+
+_CONDITIONAL_RE = re.compile(
+    r"(?i)\b(?:once|when|if|after|as\s+soon\s+as)\s+you\b|\bsay\s+(?:yes|go|the\s+word)\b|"
+    r"\b(?:give|send)\s+me\s+the\s+go-?ahead\b|\bcuando\s+(?:me\s+)?digas\b|\bsi\s+(?:me\s+)?dices\b")
+
+
+def announces_action_without_tool(text: str | None) -> bool:
+    """True when the reply announces an imminent action (and is not just asking Rafael)."""
+    body = (text or "").strip()
+    if not body or len(body) > 1200:
+        return False
+    if body.rstrip().endswith("?"):
+        return False
+    if _CONDITIONAL_RE.search(body):
+        return False  # "I'll send it once you say yes" waits on Rafael; it is not an announcement
+    return bool(_ANNOUNCED_ACTION_RE.search(body))
+
+
+_GO_RE = re.compile(
+    r"(?i)^\W*(?:go|go\s+ahead|go\s+for\s+it|do\s+it|yes|yep|yeah|ok(?:ay)?|sure|please|proceed|run\s+it|ship\s+it|"
+    r"dale|s[ií]|hazlo|adelante|claro)(?:\W+(?:go|do\s+it|please|now|ahead|all|both|everything|that))*\W*$")
+
+
+def is_go_message(message: str | None) -> bool:
+    """'go' / 'yes do it' / 'dale': Rafael approved the plan in Max's previous message."""
+    return bool(_GO_RE.match((message or "").strip()))
+
+
+_OFFER_RE = re.compile(r"(?i)\b(?:want\s+me\s+to|shall\s+i|should\s+i|i\s+can|ready\s+to|say\s+(?:go|the\s+word)|"
+                       r"plan|next\s+steps?|i'?d\s+(?:create|send|build|update|draft|add))\b|\?\s*$")
+
+
+def go_without_action(message: str | None, history: Any, tool_round: int, assistant_text: str | None) -> bool:
+    """Rafael said 'go' to an offer/plan and this reply ran no tool: push for the tools, same turn."""
+    if tool_round > 0 or not is_go_message(message):
+        return False
+    body = (assistant_text or "").strip()
+    if body.endswith("?") or len(body) > 1200:
+        return False
+    prev = ""
+    for h in reversed(list(history or [])):
+        role = h.get("role") if isinstance(h, dict) else getattr(h, "role", "")
+        if role == "assistant":
+            prev = str((h.get("content") if isinstance(h, dict) else getattr(h, "content", "")) or "")
+            break
+    return bool(prev and _OFFER_RE.search(prev[-800:]))
+
+
+def announced_action_nudge(assistant_text: str | None, message: str | None = None) -> str:
+    go = ("Rafael just said go to the plan in your previous message: call those tools now, in this reply, "
+          "one ```tool``` block per step, then report what actually happened. " if is_go_message(message) else "")
+    return go + (
+        "Your last reply announced an action but called no tool, so nothing happened. Do not narrate. "
+        "Either call the right tool now in a ```tool``` block (for a change to Empire itself, call "
+        "request_improvement with his words, then say it will be built on a test copy for his approval), "
+        "or, if no tool applies, give the direct answer or ask one short clarifying question. "
+        "Never say you don't edit your own code. This nudge never authorizes sending, approving, "
+        "paying or deleting anything; those still need Rafael's explicit yes."
+    )
+
+
 def strip_performative_closing(text: str) -> str:
     """Remove trailing sentences that only promise work not yet done."""
     if not text:
@@ -266,6 +354,25 @@ def founder_resume_hint(remaining_tools: list[str], tool_results: list[Any] | No
     return " ".join(parts)
 
 
+def _model_first() -> bool:
+    try:
+        from app.services.max.answer_policy import model_first
+        return model_first()
+    except Exception:
+        return True
+
+
+def plain_not_done_note(message, tool_results, assistant_text=None) -> str:
+    items = []
+    for item in _not_done_lines(message, tool_results, assistant_text):
+        item = str(item).lstrip("✗ ").strip().rstrip(".")
+        if item and item not in items:
+            items.append(item)
+    if not items:
+        return ""
+    return "Not done: " + "; ".join(items[:4]) + "."
+
+
 def format_founder_status_block(
     message: str | None,
     tool_results: list[Any] | None,
@@ -303,11 +410,20 @@ def finalize_founder_action_reply(
     still_incomplete = bool(incomplete_reasons) or assistant_announces_future_work(reply_text)
 
     body = reply_text
-    if still_incomplete:
+    if still_incomplete and _model_first():
+        # 2026-10-08 (Rafael): no Status / Done / To finish template, no "say X to finish".
+        # One plain sentence says what did not happen and why.
+        body = strip_performative_closing(body)
+        note = plain_not_done_note(message, tool_results, reply_text)
+        if note and note not in body:
+            body = (body.rstrip() + "\n\n" + note).strip() if body.strip() else note
+    elif still_incomplete:
         body = strip_performative_closing(body)
         status = format_founder_status_block(message, tool_results, reply_text)
         if status not in body:
             body = (body.rstrip() + "\n\n" + status).strip() if body.strip() else status
+    elif _model_first():
+        pass
     elif len([s for s in steps if s.startswith("✓")]) >= 2:
         summary_lines = ["**Steps completed**"] + [f"- {s}" for s in steps if s.startswith("✓")]
         summary = "\n".join(summary_lines)

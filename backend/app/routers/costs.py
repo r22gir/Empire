@@ -2,8 +2,9 @@
 AI Cost Tracker API — /api/v1/costs/*
 Provides cost analytics, budget management, and transaction log.
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from app.services.max.token_tracker import token_tracker, COST_RATES, FIXED_COSTS, FEATURES, BUSINESSES
+from app.services.max.free_tiers import FREE_TIER_TABLE
 
 router = APIRouter()
 
@@ -47,8 +48,29 @@ async def cost_monthly(months: int = Query(12, ge=1, le=24)):
 
 @router.get("/costs/by-provider")
 async def cost_by_provider(days: int = Query(30, ge=1, le=365)):
-    """Cost breakdown by provider (xAI, Anthropic, Groq, local)."""
-    return {"by_provider": token_tracker.get_by_provider(days)}
+    """Cost breakdown by provider (xAI, Anthropic, Groq, local), plus providers billed
+    outside Empire (Grok Bot / Cursor) under "manual" — dollars only from Rafael's entries."""
+    from app.services.max import manual_costs
+    return {"by_provider": token_tracker.get_by_provider(days), "manual": manual_costs.summary(days)}
+
+
+@router.get("/costs/manual")
+async def cost_manual(days: int = Query(30, ge=1, le=365)):
+    """Providers billed outside Empire (Grok Bot (Chief e) / Cursor). cost=null means not entered."""
+    from app.services.max import manual_costs
+    return {"manual": manual_costs.summary(days), "providers": manual_costs.MANUAL_PROVIDERS}
+
+
+@router.post("/costs/manual")
+async def cost_manual_add(payload: dict = Body(...)):
+    """Record a monthly amount for a manual provider: {provider, month: 'YYYY-MM', amount_usd, note}."""
+    from app.services.max import manual_costs
+    try:
+        return {"ok": True, "entry": manual_costs.add_entry(
+            payload.get("provider") or "grok_bot", payload.get("month") or "", payload.get("amount_usd"),
+            payload.get("note") or "")}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/costs/by-feature")
@@ -108,6 +130,12 @@ async def tenant_budget(tenant_id: str, tier: str = Query("pro")):
     return token_tracker.get_tenant_budget_status(tenant_id, tier)
 
 
+@router.get("/costs/free-tiers")
+async def cost_free_tiers():
+    """Return free-tier models, specifications, and current quota usage."""
+    return {"free_tiers": token_tracker.get_free_tier_status()}
+
+
 @router.get("/costs/rates")
 async def cost_rates():
     """Current pricing rates for all models."""
@@ -116,4 +144,5 @@ async def cost_rates():
         "fixed_costs": FIXED_COSTS,
         "features": FEATURES,
         "businesses": BUSINESSES,
+        "free_tiers": [spec.to_dict() for spec in FREE_TIER_TABLE],
     }

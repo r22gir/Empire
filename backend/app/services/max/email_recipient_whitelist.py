@@ -48,9 +48,19 @@ DEFAULT_ALLOWED_KEYS = (
 # not fail-open.
 _INTERNAL_FALLBACK_ADDRESSES = (
     "empirebox2026@gmail.com",  # FOUNDER_EMAIL default
+    "rafa22giraldo@gmail.com",  # standing founder CC / personal
+    "max@empirebox.store",      # Max From/Reply-To alias (founder-facing)
     "workroom@empirebox.store",
     "woodcraft@empirebox.store",
 )
+
+# Addresses that are Rafael himself — send_email to these needs no extra
+# chat confirmation beyond him asking Max to email him.
+FOUNDER_SELF_EMAILS = frozenset({
+    "empirebox2026@gmail.com",
+    "rafa22giraldo@gmail.com",
+    "max@empirebox.store",
+})
 
 
 def normalize_address(addr: str | None) -> str:
@@ -59,6 +69,11 @@ def normalize_address(addr: str | None) -> str:
         return ""
     _, address = parseaddr(addr)
     return (address or addr).strip().lower()
+
+
+def is_founder_self_email(addr: str | None) -> bool:
+    """True when the mailbox is one of Rafael's own addresses."""
+    return normalize_address(addr) in FOUNDER_SELF_EMAILS
 
 
 def _default_internal_addresses() -> set[str]:

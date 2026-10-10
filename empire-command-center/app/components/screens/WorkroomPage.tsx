@@ -4,7 +4,7 @@ import { API } from '../../lib/api';
 import {
   Scissors, DollarSign, ClipboardList, TrendingUp, Calendar, Users, Inbox,
   Package, FileText, Receipt, BarChart3, Truck, Headphones, Loader2, Zap, Camera, Lightbulb, Eye, ArrowLeft, Plus,
-  CheckCircle2, Circle, Clock, Flag, Filter, Search, Sparkles, Send, X, Check, CreditCard, Ruler, Trash2
+  CheckCircle2, Circle, Clock, Flag, Filter, Search, Sparkles, Send, X, Check, CreditCard, Ruler, Trash2, Briefcase
 } from 'lucide-react';
 import QuoteActions from '../business/quotes/QuoteActions';
 import QuickQuoteBuilder from '../business/quotes/QuickQuoteBuilder';
@@ -12,6 +12,7 @@ import { QuickQuotePanel, QuotePhasePipeline } from '../business/quotes/QuotePip
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
 import YardageCalculator from '../business/quotes/YardageCalculator';
+import { HudStage, HudHeader, GaugeRow, RadialGauge, HexTile, MaxStrip, HudPanel, StatusPill, SectionLabel, BackButton, Fade, CountUp, fmtMoney, daysSince, type MaxSuggestion, type HudChip } from '../cyber/hud';
 
 // Lazy-load business modules (they'll be created by the build agents)
 const FinanceDashboard = lazy(() => import('../business/finance/FinanceDashboard'));
@@ -20,14 +21,17 @@ const ExpenseTracker = lazy(() => import('../business/finance/ExpenseTracker'));
 const CustomerList = lazy(() => import('../business/crm/CustomerList'));
 const CustomerDetail = lazy(() => import('../business/crm/CustomerDetail'));
 const JobBoard = lazy(() => import('../business/jobs/JobBoard'));
+const ScheduleControl = lazy(() => import('../business/schedule/ScheduleControl'));
 const PhotoAnalysisPanel = lazy(() => import('../business/vision/PhotoAnalysisPanel'));
 const InventorySection = lazy(() => import('../business/inventory/InventorySection'));
 const QuoteReviewScreen = lazy(() => import('./QuoteReviewScreen'));
 const QuoteBuilderScreen = lazy(() => import('./QuoteBuilderScreen'));
 const TemplateModule = lazy(() => import('../business/templates/TemplateModule'));
+const JobHub = lazy(() => import('../jobhub/JobHub'));
 
 const NAV_SECTIONS = [
   { id: 'overview', label: 'Overview', icon: Scissors },
+  { id: 'jobhub', label: 'Job hub', icon: Briefcase },
   { id: 'creations', label: 'Creations', icon: Lightbulb },
   { id: 'quotes', label: 'Quotes', icon: ClipboardList },
   { id: 'finance', label: 'Finance', icon: DollarSign },
@@ -36,6 +40,7 @@ const NAV_SECTIONS = [
   { id: 'customers', label: 'Customers', icon: Users },
   { id: 'inventory', label: 'Inventory', icon: Package },
   { id: 'jobs', label: 'Jobs', icon: Calendar },
+  { id: 'schedule', label: 'Schedule & Log', icon: Clock },
   { id: 'templates', label: 'Templates', icon: Ruler },
   { id: 'tasks', label: 'Tasks', icon: CheckCircle2 },
   { id: 'analysis', label: 'AI Analysis', icon: Camera },
@@ -112,8 +117,12 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
         return <QuotesSection key={navKey} quotes={quotes} initialQuoteId={initialQuoteId} onClearInitial={() => setInitialQuoteId(null)} startQuickQuote={openQuickQuote} />;
       case 'inventory':
         return <Suspense fallback={<Loading />}><InventorySection /></Suspense>;
+      case 'jobhub':
+        return <Suspense fallback={<Loading />}><JobHub /></Suspense>;
       case 'jobs':
         return <Suspense fallback={<Loading />}><JobBoard /></Suspense>;
+      case 'schedule':
+        return <Suspense fallback={<Loading />}><ScheduleControl business="workroom" /></Suspense>;
       case 'templates':
         return <Suspense fallback={<Loading />}><TemplateModule /></Suspense>;
       case 'tasks':
@@ -144,49 +153,32 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
 
   return (
     <div className="flex-1 flex flex-col sm:flex-row overflow-hidden">
-      {/* Sidebar nav */}
-      <nav className="sm:w-[200px] w-full sm:border-r border-b sm:border-b-0" style={{ background: '#fff', borderColor: '#ece8e0', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '18px 16px', borderBottom: '1px solid #ece8e0' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#dcfce7] flex items-center justify-center">
-              <Scissors size={18} className="text-[#16a34a]" />
-            </div>
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a' }}>Workroom</div>
-              <div style={{ fontSize: 10, color: '#999' }}>Drapery & Upholstery</div>
-            </div>
+      {/* Sidebar nav — angular neon tabs */}
+      <nav className="cy-subnav sm:w-[200px] w-full sm:border-r border-b sm:border-b-0" style={{ flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="cy-subnav-brand">
+          <span className="cy-plate-ico" style={{ width: 34, height: 34 }}><Scissors size={16} /></span>
+          <div>
+            <b>Workroom</b>
+            <small>Drapery & Upholstery</small>
           </div>
         </div>
-        <div className="flex-1 overflow-x-auto sm:overflow-x-hidden overflow-y-auto" style={{ padding: '10px 10px' }}>
+        <div className="cy-subnav-list flex-1 overflow-x-auto sm:overflow-x-hidden overflow-y-auto">
           <div className="flex sm:flex-col flex-row gap-1.5 sm:flex-nowrap flex-nowrap sm:w-auto w-max">
-            <a href="/workroom/capture"
-              className="w-full flex items-center gap-3 text-left"
-              style={{ padding: '10px 14px', borderRadius: 12, fontSize: 13, fontWeight: 700, color: '#16a34a', textDecoration: 'none' }}
-            >
-              <Inbox size={17} />
-              Inbox capture
+            <a href="/workroom/capture" className="cy-tab is-alert-soft" style={{ textDecoration: 'none' }}>
+              <span className="cy-tab-ico" style={{ color: 'var(--cy-teal)' }}><Inbox size={15} /></span>
+              <span className="cy-tab-label">Inbox capture</span>
             </a>
-            {NAV_SECTIONS.map(nav => {
+            {NAV_SECTIONS.map((nav, ni) => {
               const Icon = nav.icon;
               const isActive = section === nav.id && !selectedCustomer;
               return (
                 <button key={nav.id}
                   onClick={() => { setSection(nav.id); setSelectedCustomer(null); setNavKey(k => k + 1); }}
-                  className="w-full flex items-center gap-3 text-left cursor-pointer transition-all"
-                  style={{
-                    padding: '10px 14px',
-                    borderRadius: 12,
-                    fontSize: 13,
-                    fontWeight: isActive ? 700 : 500,
-                    background: isActive ? '#dcfce7' : 'transparent',
-                    color: isActive ? '#16a34a' : '#666',
-                    border: isActive ? '1.5px solid #bbf7d0' : '1.5px solid transparent',
-                  }}
-                  onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; } }}
-                  onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
+                  className={`cy-tab${isActive ? ' is-active' : ''}`}
+                  aria-current={isActive ? 'page' : undefined}
                 >
-                  <Icon size={17} />
-                  {nav.label}
+                  <span className="cy-tab-ico"><Icon size={15} /></span>
+                  <span className="cy-tab-label">{nav.label}</span>
                 </button>
               );
             })}
@@ -195,7 +187,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
       </nav>
 
       {/* Main content */}
-      <div className="flex-1 overflow-y-auto" style={{ background: '#f5f2ed' }}>
+      <div className="cy-module-scroll flex-1 overflow-y-auto">
         {renderContent()}
       </div>
     </div>
@@ -231,13 +223,14 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
   };
 
   // Build activity feed from quotes + jobs
-  const activities: { text: string; time: string; color: string; icon: React.ReactNode }[] = [];
+  const activities: { text: string; time: string; color: string; icon: React.ReactNode; open: () => void; label: string }[] = [];
   quotes.slice(0, 5).forEach(q => {
     activities.push({
       text: `Quote ${q.quote_number || 'Q'} ${q.status === 'accepted' ? 'accepted by' : q.status === 'sent' ? 'sent to' : 'created for'} ${q.customer_name || 'Customer'} — $${(q.total || 0).toLocaleString()}`,
       time: q.created_at || q.updated_at || '',
       color: q.status === 'accepted' ? '#16a34a' : q.status === 'sent' ? '#2563eb' : '#b8960c',
       icon: <ClipboardList size={14} />,
+      open: () => onSelectQuote?.(q.id), label: `Open quote ${q.quote_number || ''}`,
     });
   });
   jobs.slice(0, 3).forEach(j => {
@@ -246,189 +239,156 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
       time: j.updated_at || j.created_at || '',
       color: j.status === 'completed' ? '#16a34a' : j.status === 'in_progress' ? '#d97706' : '#777',
       icon: <Calendar size={14} />,
+      open: () => (j.quote_id ? onSelectQuote?.(j.quote_id) : onNavigate('jobs')), label: j.quote_id ? `Open the quote for ${j.title || 'this job'}` : `Open job board for ${j.title || 'this job'}`,
     });
   });
   activities.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
 
   const revenue = finance?.revenue?.amount || stats.pipeline || 0;
   const customerCount = finance?.customers?.total || customers.length || 0;
+  const acceptedValue = quotes.filter(q => q.status === 'accepted').reduce((t, q) => t + (q.total || 0), 0);
+  const drafts = quotes.filter(q => q.status === 'draft');
+  const staleSent = quotes
+    .filter(q => q.status === 'sent' && (daysSince(q.updated_at || q.created_at) ?? 0) >= 7)
+    .sort((a, b) => (a.updated_at || a.created_at || '').localeCompare(b.updated_at || b.created_at || ''));
+  const lowStock = Number(inventory?.low_stock_count || 0);
+  const loaded = quotes.length > 0 || jobs.length > 0;
+
+  const chips: HudChip[] = [
+    { label: 'Live data', tone: 'teal', live: true },
+    { label: `${quotes.length} quotes loaded`, tone: 'cyan' },
+    overdueJobs.length > 0 ? { label: `${overdueJobs.length} jobs overdue`, tone: 'mag', live: true } : { label: 'Jobs on track', tone: 'teal' },
+    lowStock > 0 ? { label: `${lowStock} low stock`, tone: 'amber' } : { label: 'Stock OK', tone: 'muted' },
+  ];
+
+  const sugg: MaxSuggestion[] = [];
+  if (staleSent.length > 0) {
+    const q = staleSent[0];
+    sugg.push({ id: 'stale', tone: 'mag', title: 'Quote follow-up', actionLabel: 'Open quote', onAction: () => onSelectQuote?.(q.id),
+      text: `${staleSent.length} sent quote${staleSent.length > 1 ? 's' : ''} with no reply in 7+ days. Oldest: ${q.quote_number || 'quote'} · ${q.customer_name || 'customer'} · ${fmtMoney(q.total || 0)}.`,
+      source: 'quotes-v2 · status sent' });
+  }
+  if (drafts.length > 0) {
+    sugg.push({ id: 'drafts', tone: 'cyan', title: 'Drafts ready to review', actionLabel: 'Review drafts', onAction: () => onNavigate('quotes'),
+      text: `${drafts.length} draft quote${drafts.length > 1 ? 's' : ''} worth ${fmtMoney(drafts.reduce((t, q) => t + (q.total || 0), 0))} waiting to be approved and sent.`,
+      source: 'quotes-v2 · status draft' });
+  }
+  if (overdueJobs.length > 0) {
+    sugg.push({ id: 'jobs', tone: 'amber', title: 'Overdue jobs', actionLabel: 'Open job board', onAction: () => onNavigate('jobs'),
+      text: `${overdueJobs.length} job${overdueJobs.length > 1 ? 's are' : ' is'} past due: ${overdueJobs.slice(0, 2).map(j => j.title).join(', ')}.`, source: 'jobs · due_date' });
+  }
+  if (lowStock > 0) {
+    sugg.push({ id: 'stock', tone: 'amber', title: 'Reorder fabric', actionLabel: 'Open inventory', onAction: () => onNavigate('inventory'),
+      text: `${lowStock} inventory item${lowStock > 1 ? 's are' : ' is'} below reorder level.`, source: 'inventory/dashboard' });
+  }
+
+  const stageTiles = [
+    { label: 'Pending', count: stageCounts.pending, tone: 'muted' as const },
+    { label: 'Scheduled', count: stageCounts.scheduled, tone: 'blue' as const },
+    { label: 'In progress', count: stageCounts.in_progress, tone: 'amber' as const },
+    { label: 'Completed', count: stageCounts.completed, tone: 'teal' as const },
+  ];
 
   return (
-    <div style={{ maxWidth: 1060, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-3">
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Empire Workroom</h1>
-          <span style={{ fontSize: 11, color: '#b8960c', fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: '#fdf8eb', border: '1px solid #f0e6c0' }}>
-            Custom Drapery & Upholstery
-          </span>
-        </div>
-        <span style={{ fontSize: 13, color: '#aaa' }} suppressHydrationWarning>
-          {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-        </span>
-      </div>
+    <HudStage>
+      <HudHeader
+        icon={<Scissors size={20} />}
+        title="Empire Workroom"
+        subtitle={<span suppressHydrationWarning>Custom drapery & upholstery · {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>}
+        chips={chips}
+        actions={<>
+          <button type="button" className="cy-btn is-primary" onClick={() => onNavigate('quotes')}><Plus size={14} /> New Quote</button>
+          <button type="button" className="cy-btn" onClick={() => onNavigate('customers')}><Users size={14} /> New Customer</button>
+          <button type="button" className="cy-btn" onClick={() => onNavigate('jobs')}><Calendar size={14} /> New Job</button>
+          <button type="button" className="cy-btn" onClick={() => onNavigate('invoices')}><FileText size={14} /> Send Invoice</button>
+        </>}
+      />
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 mb-6">
-        <KPI icon={<DollarSign size={18} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Revenue Pipeline" value={`$${revenue.toLocaleString()}`} sub={`${quotes.length} quotes total`} onClick={() => onNavigate('quotes')} />
-        <KPI icon={<Calendar size={18} />} iconBg="#eff6ff" iconColor="#2563eb" label="Active Jobs" value={String(activeJobs.length)} sub={overdueJobs.length > 0 ? `${overdueJobs.length} overdue` : 'On track'} onClick={() => onNavigate('jobs')} />
-        <KPI icon={<ClipboardList size={18} />} iconBg="#fef3c7" iconColor="#d97706" label="Open Quotes" value={String(stats.openQuotes)} sub={`$${stats.pipeline.toLocaleString()} value`} onClick={() => onNavigate('quotes')} />
-        <KPI icon={<Users size={18} />} iconBg="#dcfce7" iconColor="#16a34a" label="Customers" value={String(customerCount)} sub={`${customers.length} recent`} onClick={() => onNavigate('customers')} />
-      </div>
+      <GaugeRow>
+        <RadialGauge i={0} label="Revenue pipeline" value={revenue} format={n => fmtMoney(n)} tone="cyan"
+          fraction={stats.pipeline > 0 ? acceptedValue / stats.pipeline : null} ringLabel={stats.pipeline > 0 ? `${Math.round((acceptedValue / stats.pipeline) * 100)}%` : undefined}
+          sub={`${quotes.length} quotes total · ring = share accepted`} onClick={() => onNavigate('quotes')} icon={<DollarSign size={20} />} />
+        <RadialGauge i={1} label="Active jobs" value={activeJobs.length} tone={overdueJobs.length > 0 ? 'mag' : 'teal'}
+          fraction={jobs.length > 0 ? activeJobs.length / jobs.length : null}
+          sub={overdueJobs.length > 0 ? `${overdueJobs.length} overdue · of ${jobs.length} jobs` : `On track · of ${jobs.length} jobs`} onClick={() => onNavigate('jobs')} icon={<Calendar size={20} />} />
+        <RadialGauge i={2} label="Open quotes" value={stats.openQuotes} tone="amber"
+          fraction={quotes.length > 0 ? stats.openQuotes / quotes.length : null}
+          sub={`${fmtMoney(stats.pipeline)} value`} onClick={() => onNavigate('quotes')} icon={<ClipboardList size={20} />} />
+        <RadialGauge i={3} label="Customers" value={customerCount} tone="violet" fraction={null}
+          sub={`${customers.length} recently active`} onClick={() => onNavigate('customers')} icon={<Users size={20} />} />
+      </GaugeRow>
 
-      {/* Quick Actions */}
-      <div className="flex flex-wrap gap-3 mb-6">
-        <button onClick={() => onNavigate('quotes')} className="flex items-center gap-2 cursor-pointer hover:brightness-95 transition-all active:scale-[0.98]"
-          style={{ minHeight: 44, padding: '0 20px', fontSize: 13, fontWeight: 700, borderRadius: 12, background: '#b8960c', color: '#fff', border: 'none', boxShadow: '0 2px 8px rgba(184,150,12,0.3)' }}>
-          <Plus size={16} /> New Quote
-        </button>
-        <button onClick={() => onNavigate('customers')} className="flex items-center gap-2 cursor-pointer hover:brightness-95 transition-all active:scale-[0.98]"
-          style={{ minHeight: 44, padding: '0 20px', fontSize: 13, fontWeight: 700, borderRadius: 12, background: '#b8960c', color: '#fff', border: 'none', boxShadow: '0 2px 8px rgba(184,150,12,0.3)' }}>
-          <Users size={16} /> New Customer
-        </button>
-        <button onClick={() => onNavigate('jobs')} className="flex items-center gap-2 cursor-pointer hover:bg-[#f5f3ef] transition-all"
-          style={{ minHeight: 44, padding: '0 20px', fontSize: 13, fontWeight: 700, borderRadius: 12, background: '#fff', color: '#555', border: '1.5px solid #ece8e0' }}>
-          <Calendar size={16} /> New Job
-        </button>
-        <button onClick={() => onNavigate('invoices')} className="flex items-center gap-2 cursor-pointer hover:bg-[#f5f3ef] transition-all"
-          style={{ minHeight: 44, padding: '0 20px', fontSize: 13, fontWeight: 700, borderRadius: 12, background: '#fff', color: '#555', border: '1.5px solid #ece8e0' }}>
-          <FileText size={16} /> Send Invoice
-        </button>
-      </div>
+      <MaxStrip items={sugg} loading={!loaded} empty="All clear — no stale quotes, overdue jobs or low stock." />
 
-      {/* Jobs at a Glance */}
       {jobs.length > 0 && (
-        <div className="mb-6">
-          <div className="section-label" style={{ marginBottom: 10 }}>Jobs at a Glance</div>
-          <div className="flex gap-3 flex-wrap">
-            {[
-              { label: 'Pending', count: stageCounts.pending, color: '#777', bg: '#f0ede8' },
-              { label: 'Scheduled', count: stageCounts.scheduled, color: '#2563eb', bg: '#eff6ff' },
-              { label: 'In Progress', count: stageCounts.in_progress, color: '#d97706', bg: '#fffbeb' },
-              { label: 'Completed', count: stageCounts.completed, color: '#16a34a', bg: '#f0fdf4' },
-            ].map(stage => (
-              <button key={stage.label} onClick={() => onNavigate('jobs')}
-                className="cursor-pointer hover:shadow-md transition-all"
-                style={{ padding: '12px 20px', borderRadius: 12, background: stage.bg, border: 'none', minWidth: 100, textAlign: 'center' }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: stage.color }}>{stage.count}</div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: stage.color, opacity: 0.8 }}>{stage.label}</div>
-              </button>
-            ))}
-            {overdueJobs.length > 0 && (
-              <button onClick={() => onNavigate('jobs')}
-                className="cursor-pointer hover:shadow-md transition-all"
-                style={{ padding: '12px 20px', borderRadius: 12, background: '#fef2f2', border: '1.5px solid #fecaca', minWidth: 100, textAlign: 'center' }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#dc2626' }}>{overdueJobs.length}</div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#dc2626' }}>Overdue</div>
-              </button>
-            )}
+        <Fade i={3} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SectionLabel>Jobs at a glance</SectionLabel>
+          <div className="cy-hexrow">
+            {stageTiles.map(st => <HexTile key={st.label} label={st.label} value={st.count} tone={st.tone} onClick={() => onNavigate('jobs')} />)}
+            {overdueJobs.length > 0 && <HexTile label="Overdue" value={overdueJobs.length} tone="mag" onClick={() => onNavigate('jobs')} />}
           </div>
-        </div>
+        </Fade>
       )}
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        {/* Recent Activity Feed */}
-        <div className="empire-card" style={{ minHeight: 280 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }} className="flex items-center gap-2">
-            <TrendingUp size={15} className="text-[#b8960c]" /> Recent Activity
-          </h3>
-          <div className="space-y-2">
+      <div className="cy-grid2">
+        <HudPanel i={4} title="Recent activity" icon={<TrendingUp size={14} />} style={{ minHeight: 280 }}>
+          <div className="cy-list">
             {activities.slice(0, 6).map((a, i) => (
-              <div key={i} className="flex items-start gap-3" style={{ padding: '10px 12px', borderRadius: 10, background: '#faf9f7', border: '1px solid #ece8e0' }}>
-                <span className="mt-0.5 shrink-0" style={{ color: a.color }}>{a.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <div style={{ fontSize: 12, color: '#555', lineHeight: 1.4 }}>{a.text}</div>
-                  {a.time && (
-                    <div style={{ fontSize: 9, color: '#bbb', marginTop: 3 }} suppressHydrationWarning>
-                      {new Date(a.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </div>
-                  )}
+              <button type="button" key={i} className="cy-row" onClick={a.open} aria-label={a.label} title={a.label}>
+                <span className="cy-row-ico" style={{ color: a.color }}>{a.icon}</span>
+                <div className="cy-row-main">
+                  <div className="cy-row-title" style={{ whiteSpace: 'normal' }}>{a.text}</div>
+                  {a.time && <div className="cy-row-sub" suppressHydrationWarning>{new Date(a.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>}
                 </div>
-              </div>
+              </button>
             ))}
-            {activities.length === 0 && (
-              <div style={{ fontSize: 12, color: '#aaa', textAlign: 'center', padding: '24px 0' }}>No recent activity</div>
-            )}
+            {activities.length === 0 && <div className="cy-nodata">SIN DATOS · NO DATA<span>No recent quote or job activity</span></div>}
           </div>
-        </div>
+        </HudPanel>
 
-        {/* Recent Quotes */}
-        <div className="empire-card" style={{ minHeight: 280 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }} className="flex items-center gap-2">
-            <ClipboardList size={15} className="text-[#b8960c]" /> Recent Quotes
-          </h3>
-          <div className="space-y-2">
+        <HudPanel i={5} title="Recent quotes" icon={<ClipboardList size={14} />} style={{ minHeight: 280 }}
+          actions={<button type="button" className="cy-btn is-sm" onClick={() => onNavigate('quotes')}>All quotes →</button>}>
+          <div className="cy-list">
             {quotes.slice(0, 6).map((q, i) => (
-              <div key={i} onClick={() => onSelectQuote?.(q.id)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0' }} className="hover:border-[#b8960c] hover:bg-[#fdf8eb] transition-all cursor-pointer flex items-center justify-between">
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{q.quote_number || `Q-${i + 1}`}</div>
-                  <div style={{ fontSize: 10, color: '#777' }}>{q.customer_name || 'Customer'}</div>
+              <button type="button" key={i} onClick={() => onSelectQuote?.(q.id)} className="cy-row">
+                <div className="cy-row-main">
+                  <div className="cy-row-title cy-mono">{q.quote_number || `Q-${i + 1}`}</div>
+                  <div className="cy-row-sub">{q.customer_name || 'Customer'}</div>
                 </div>
-                <div className="text-right">
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>${(q.total || 0).toLocaleString()}</div>
-                  <StatusBadge status={q.status} />
+                <div className="cy-row-end">
+                  <span className="cy-money">{fmtMoney(q.total || 0, (q.total || 0) % 1 !== 0)}</span>
+                  <StatusPill status={q.status} />
                 </div>
-              </div>
+              </button>
             ))}
-            {quotes.length === 0 && <div style={{ fontSize: 12, color: '#aaa', textAlign: 'center', padding: '24px 0' }}>No quotes yet</div>}
+            {quotes.length === 0 && <div className="cy-nodata">SIN DATOS · NO DATA<span>No quotes yet</span></div>}
           </div>
-        </div>
+        </HudPanel>
       </div>
 
-      {/* Bottom Row: Inventory + Business Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Inventory Summary */}
-        <div className="empire-card">
-          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }} className="flex items-center gap-2">
-            <Package size={15} className="text-[#16a34a]" /> Inventory
-          </h3>
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div style={{ textAlign: 'center', padding: '10px 6px', borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#16a34a' }}>{inventory?.total_items || 0}</div>
-              <div style={{ fontSize: 9, fontWeight: 600, color: '#16a34a', opacity: 0.8 }}>Items</div>
-            </div>
-            <div style={{ textAlign: 'center', padding: '10px 6px', borderRadius: 10, background: inventory?.low_stock_count > 0 ? '#fffbeb' : '#faf9f7', border: `1px solid ${inventory?.low_stock_count > 0 ? '#fde68a' : '#ece8e0'}` }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: inventory?.low_stock_count > 0 ? '#d97706' : '#777' }}>{inventory?.low_stock_count || 0}</div>
-              <div style={{ fontSize: 9, fontWeight: 600, color: inventory?.low_stock_count > 0 ? '#d97706' : '#999' }}>Low Stock</div>
-            </div>
-            <div style={{ textAlign: 'center', padding: '10px 6px', borderRadius: 10, background: '#faf9f7', border: '1px solid #ece8e0' }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#b8960c' }}>${(inventory?.total_value || 0).toLocaleString()}</div>
-              <div style={{ fontSize: 9, fontWeight: 600, color: '#999' }}>Value</div>
-            </div>
+      <div className="cy-grid2">
+        <HudPanel i={6} title="Inventory" icon={<Package size={14} />}>
+          <div className="cy-hexrow" style={{ justifyContent: 'space-around', marginBottom: 10 }}>
+            <HexTile label="Items" value={inventory ? Number(inventory.total_items || 0) : null} tone="teal" onClick={() => onNavigate('inventory')} />
+            <HexTile label="Low stock" value={inventory ? lowStock : null} tone={lowStock > 0 ? 'amber' : 'muted'} onClick={() => onNavigate('inventory')} />
+            <div className="cy-hex t-cyan" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => onNavigate('inventory')} onKeyDown={e => { if (e.key === 'Enter') onNavigate('inventory'); }}><b style={{ fontSize: 15 }}>{inventory ? <CountUp value={Number(inventory.total_value || 0)} format={n => fmtMoney(n)} /> : '—'}</b><span>Value</span></div>
           </div>
-          {inventory?.low_stock_count > 0 && (
-            <button onClick={() => onNavigate('inventory')} className="w-full cursor-pointer hover:bg-[#fef3c7] transition-colors"
-              style={{ padding: '8px 12px', borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', fontSize: 11, fontWeight: 600, color: '#d97706', textAlign: 'center' }}>
-              {inventory.low_stock_count} items need reorder
-            </button>
-          )}
-          {!inventory?.low_stock_count && (
-            <button onClick={() => onNavigate('inventory')} className="w-full cursor-pointer hover:bg-[#f5f3ef] transition-colors"
-              style={{ padding: '8px 12px', borderRadius: 8, background: '#faf9f7', border: '1px solid #ece8e0', fontSize: 11, fontWeight: 600, color: '#777', textAlign: 'center' }}>
-              View All Inventory
-            </button>
-          )}
-        </div>
-
-        {/* Business Summary */}
-        <div className="empire-card">
-          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }} className="flex items-center gap-2">
-            <BarChart3 size={15} className="text-[#7c3aed]" /> Business Summary
-          </h3>
-          <div className="space-y-2">
-            <InfoRow label="Total Pipeline" value={`$${stats.pipeline.toLocaleString()}`} color="#b8960c" />
-            <InfoRow label="Open Quotes" value={String(stats.openQuotes)} color="#d97706" />
-            <InfoRow label="Accepted Quotes" value={String(stats.accepted)} color="#16a34a" />
-            <InfoRow label="Active Jobs" value={String(activeJobs.length)} color="#2563eb" />
-          </div>
-          <button onClick={() => onNavigate('finance')} className="w-full cursor-pointer hover:bg-[#f5f3ef] transition-colors mt-3"
-            style={{ padding: '8px 12px', borderRadius: 8, background: '#faf9f7', border: '1px solid #ece8e0', fontSize: 11, fontWeight: 600, color: '#777', textAlign: 'center' }}>
-            View Full Financial Dashboard
+          <button type="button" className={`cy-btn${lowStock > 0 ? ' is-pulse' : ''}`} style={{ width: '100%' }} onClick={() => onNavigate('inventory')}>
+            {lowStock > 0 ? `${lowStock} items need reorder` : 'View all inventory'}
           </button>
-        </div>
+        </HudPanel>
+
+        <HudPanel i={7} title="Business summary" icon={<BarChart3 size={14} />}>
+          <div className="cy-kvlist">
+            <div className="cy-kv" style={{ ['--g' as any]: '#00e5ff' }}>Total pipeline <b><CountUp value={stats.pipeline} format={n => fmtMoney(n)} /></b></div>
+            <div className="cy-kv" style={{ ['--g' as any]: '#ffc857' }}>Open quotes <b><CountUp value={stats.openQuotes} /></b></div>
+            <div className="cy-kv" style={{ ['--g' as any]: '#14f1c6' }}>Accepted quotes <b><CountUp value={stats.accepted} /></b></div>
+            <div className="cy-kv" style={{ ['--g' as any]: '#5cc8ff' }}>Active jobs <b><CountUp value={activeJobs.length} /></b></div>
+          </div>
+          <button type="button" className="cy-btn" style={{ width: '100%', marginTop: 12 }} onClick={() => onNavigate('finance')}>View full financial dashboard</button>
+        </HudPanel>
       </div>
-    </div>
+    </HudStage>
   );
 }
 
@@ -553,238 +513,210 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial, 
   // Viewing a specific quote — show full review
   if (viewingQuoteId) {
     return (
-      <div style={{ maxWidth: 960, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
-        <button
-          onClick={() => setViewingQuoteId(null)}
-          className="flex items-center gap-2 cursor-pointer mb-4 transition-colors hover:text-[#b8960c]"
-          style={{ background: 'none', border: 'none', fontSize: 13, fontWeight: 600, color: '#777', padding: 0 }}
-        >
-          <ArrowLeft size={16} /> Back to Quotes
-        </button>
-        <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 size={24} className="text-[#b8960c] animate-spin" /></div>}>
+      <HudStage wide>
+        <div><BackButton onClick={() => setViewingQuoteId(null)}>Back to Quotes</BackButton></div>
+        <Suspense fallback={<div className="cy-nodata">LOADING QUOTE…</div>}>
           <QuoteReviewScreen quoteId={viewingQuoteId} onOpenBuilder={() => { setBuilderQuoteId(viewingQuoteId); setViewingQuoteId(null); setShowBuilder(true); }} />
         </Suspense>
-      </div>
+      </HudStage>
     );
   }
 
+  const countOf = (st: string) => quotes.filter(q => q.status === st).length;
+  const pipelineValue = quotes.reduce((t, q) => t + (q.total || 0), 0);
+  const draftCount = countOf('draft');
+  const sentCount = countOf('sent');
+  const acceptedCount = countOf('accepted');
+  const decided = acceptedCount + countOf('rejected') + countOf('declined');
+  const staleSent = quotes
+    .filter(q => q.status === 'sent' && (daysSince(q.updated_at || q.created_at) ?? 0) >= 7)
+    .sort((x, y) => (x.updated_at || x.created_at || '').localeCompare(y.updated_at || y.created_at || ''));
+  const loadedOf = totalQuotes !== null && totalQuotes > quotes.length ? ` of ${quotes.length} loaded` : '';
+  const qChips: HudChip[] = [
+    { label: 'Live', tone: 'teal', live: true },
+    { label: business === 'workroom' ? 'Workroom' : 'WoodCraft', tone: 'cyan' },
+    { label: `${totalQuotes ?? quotes.length} total`, tone: 'muted' },
+    ...(filter !== 'all' || search ? [{ label: `${filtered.length} shown`, tone: 'violet' as const }] : []),
+    ...(selected.size > 0 ? [{ label: `${selected.size} selected`, tone: 'mag' as const, live: true }] : []),
+  ];
+  const qSugg: MaxSuggestion[] = [];
+  if (staleSent.length > 0) {
+    const q = staleSent[0];
+    qSugg.push({ id: 'stale', tone: 'mag', title: 'Chase silent quotes', actionLabel: `Open ${q.quote_number || 'quote'}`, onAction: () => setViewingQuoteId(q.id),
+      text: `${staleSent.length} sent quote${staleSent.length > 1 ? 's' : ''} with no reply for 7+ days. Oldest: ${q.customer_name || 'customer'} · ${fmtMoney(q.total || 0)} · ${daysSince(q.updated_at || q.created_at)}d.`,
+      source: 'status sent · last update' });
+  }
+  if (draftCount > 0) {
+    const dv = quotes.filter(q => q.status === 'draft').reduce((t, q) => t + (q.total || 0), 0);
+    qSugg.push({ id: 'drafts', tone: 'cyan', title: 'Send your drafts', actionLabel: 'Show drafts', onAction: () => setFilter('draft'),
+      text: `${draftCount} draft${draftCount > 1 ? 's' : ''} worth ${fmtMoney(dv)} not sent yet${loadedOf}.`, source: 'status draft' });
+  }
+  if (acceptedCount > 0) {
+    qSugg.push({ id: 'acc', tone: 'teal', title: 'Turn wins into invoices', actionLabel: 'Show accepted', onAction: () => setFilter('accepted'),
+      text: `${acceptedCount} accepted quote${acceptedCount > 1 ? 's' : ''}${loadedOf}. Check that each one has a deposit invoice.`, source: 'status accepted' });
+  }
+
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-5 gap-3">
-        <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }} className="flex items-center gap-2">
-          <ClipboardList size={20} className="text-[#b8960c]" /> Quotes
-        </h2>
-        <div className="flex items-center gap-1">
-          {(['workroom', 'woodcraft'] as const).map(key => (
-            <button
-              key={key}
-              onClick={() => setBusiness(key)}
-              className="cursor-pointer"
-              style={{
-                height: 32,
-                padding: '0 10px',
-                borderRadius: 8,
-                fontSize: 11,
-                fontWeight: 700,
-                border: business === key ? '1.5px solid #b8960c' : '1px solid #ece8e0',
-                background: business === key ? '#fdf8eb' : '#fff',
-                color: business === key ? '#8a7010' : '#777',
-              }}
-            >
-              {key === 'workroom' ? 'Workroom' : 'WoodCraft'}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setShowBuilder(true)}
-            className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:bg-[#a08509]"
-            style={{ minHeight: 44, padding: '0 14px', fontSize: 13, borderRadius: 10, background: '#b8960c', color: '#fff', border: 'none' }}
-          >
-            <Plus size={14} /> New Quote
-          </button>
-          <button
-            onClick={() => setShowQuickQuote(!showQuickQuote)}
-            className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:border-[#b8960c] hover:text-[#b8960c]"
-            style={{ minHeight: 44, padding: '0 14px', fontSize: 13, borderRadius: 10, background: '#faf9f7', color: '#555', border: '1.5px solid #ece8e0' }}
-          >
-            <Zap size={14} /> Quick Quote
-          </button>
-          <button
-            onClick={() => setShowQuickCalc(!showQuickCalc)}
-            className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:border-[#16a34a] hover:text-[#16a34a]"
-            style={{ minHeight: 44, padding: '0 14px', fontSize: 13, borderRadius: 10, background: '#faf9f7', color: '#555', border: '1.5px solid #ece8e0' }}
-          >
-            <Ruler size={14} /> Yardage Calc
-          </button>
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search quotes..."
-            style={{ padding: '8px 12px', border: '1px solid #ece8e0', borderRadius: 10, fontSize: 13, background: '#fff', outline: 'none', minHeight: 44 }}
-            className="focus:border-[#b8960c] w-full sm:w-[200px]" />
-        </div>
-      </div>
+    <HudStage wide>
+      <HudHeader
+        icon={<ClipboardList size={20} />}
+        title="Quotes"
+        subtitle="Estimates · approvals · pipeline"
+        chips={qChips}
+        actions={<>
+          <div className="cy-seg" role="group" aria-label="Business">
+            {(['workroom', 'woodcraft'] as const).map(key => (
+              <button key={key} type="button" onClick={() => setBusiness(key)} className={`cy-btn is-sm${business === key ? ' is-active' : ''}`} aria-pressed={business === key}>
+                {key === 'workroom' ? 'Workroom' : 'WoodCraft'}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => setShowBuilder(true)} className="cy-btn is-primary"><Plus size={14} /> New Quote</button>
+          <button type="button" onClick={() => setShowQuickQuote(!showQuickQuote)} className={`cy-btn${showQuickQuote ? ' is-active' : ''}`}><Zap size={14} /> Quick Quote</button>
+          <button type="button" onClick={() => setShowQuickCalc(!showQuickCalc)} className={`cy-btn is-teal${showQuickCalc ? ' is-active' : ''}`}><Ruler size={14} /> Yardage Calc</button>
+        </>}
+      />
+
+      <GaugeRow>
+        <RadialGauge i={0} label="Total quotes" value={totalQuotes ?? quotes.length} tone="cyan" fraction={null} icon={<ClipboardList size={20} />}
+          sub={totalQuotes !== null && totalQuotes > quotes.length ? `${quotes.length} loaded` : 'all loaded'} onClick={() => setFilter('all')} />
+        <RadialGauge i={1} label="Pipeline value" value={pipelineValue} format={n => fmtMoney(n)} tone="teal" fraction={null} icon={<DollarSign size={20} />}
+          sub={`sum of ${quotes.length} loaded`} />
+        <RadialGauge i={2} label="Drafts" value={draftCount} tone="muted" fraction={quotes.length ? draftCount / quotes.length : null}
+          sub="not sent yet" onClick={() => setFilter('draft')} />
+        <RadialGauge i={3} label="Awaiting reply" value={sentCount} tone={staleSent.length > 0 ? 'mag' : 'blue'} fraction={quotes.length ? sentCount / quotes.length : null}
+          sub={staleSent.length > 0 ? `${staleSent.length} silent 7d+` : 'sent'} onClick={() => setFilter('sent')} />
+        <RadialGauge i={4} label="Accepted" value={acceptedCount} tone="teal" fraction={decided > 0 ? acceptedCount / decided : null}
+          ringLabel={decided > 0 ? `${Math.round((acceptedCount / decided) * 100)}%` : undefined}
+          sub={decided > 0 ? 'win rate of decided' : 'no decisions yet'} onClick={() => setFilter('accepted')} icon={<CheckCircle2 size={20} />} />
+      </GaugeRow>
+
+      <MaxStrip items={qSugg} loading={quotes.length === 0 && totalQuotes === null} empty="No stale or unsent quotes in the loaded list." />
 
       {/* Quick Quote Builder (photo-based) */}
       {showQuickQuote && (
-        <div style={{ marginBottom: 20 }}>
-          <QuickQuoteBuilder onClose={() => setShowQuickQuote(false)} />
-        </div>
+        <Fade className="cy-tool-host"><QuickQuoteBuilder onClose={() => setShowQuickQuote(false)} /></Fade>
       )}
 
       {/* Yardage Calculator (the $199/mo feature) */}
       {showQuickCalc && (
-        <div style={{ marginBottom: 20 }}>
-          <YardageCalculator onClose={() => setShowQuickCalc(false)} />
-        </div>
+        <Fade className="cy-tool-host"><YardageCalculator onClose={() => setShowQuickCalc(false)} /></Fade>
       )}
 
       {/* Phase Pipeline (when a quote is selected for pipeline review) */}
       {pipelineQuoteId && (
-        <div style={{ marginBottom: 20 }}>
-          <div className="flex items-center justify-between mb-2">
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#777' }}>Phase Pipeline</span>
-            <button onClick={() => setPipelineQuoteId(null)}
-              className="cursor-pointer" style={{ background: 'none', border: 'none', fontSize: 11, color: '#999' }}>
-              <X size={14} /> Close
-            </button>
-          </div>
-          <QuotePhasePipeline quoteId={pipelineQuoteId} />
-        </div>
+        <HudPanel i={0} title="Phase pipeline" icon={<TrendingUp size={14} />}
+          actions={<button type="button" onClick={() => setPipelineQuoteId(null)} className="cy-btn is-sm"><X size={12} /> Close</button>}>
+          <div className="cy-tool-host"><QuotePhasePipeline quoteId={pipelineQuoteId} /></div>
+        </HudPanel>
       )}
 
-      {/* Filter tabs + bulk actions */}
-      <div className="flex flex-wrap items-center gap-1 mb-4">
-        {filters.map(f => (
-          <button key={f} onClick={() => setFilter(f)}
-            className={`filter-tab ${filter === f ? 'active' : ''}`}>
-            {f === 'all' ? 'All Status' : f.charAt(0).toUpperCase() + f.slice(1)}
-          </button>
-        ))}
-        {selected.size > 0 && (
-          <button
-            onClick={bulkDelete}
-            disabled={deleting}
-            className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:bg-red-700 ml-auto"
-            style={{ minHeight: 36, padding: '0 14px', fontSize: 12, borderRadius: 10, background: '#dc2626', color: '#fff', border: 'none' }}
-          >
-            {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-            Delete {selected.size} Selected
-          </button>
-        )}
-      </div>
+      <HudPanel i={3} title={<>Quote register <span className="cy-mono" style={{ color: 'var(--cy-faint)', fontSize: 10 }}>[{filtered.length}]</span></>} icon={<ClipboardList size={14} />}
+        actions={
+          <div className="cy-tablebar">
+            <label className="cy-search">
+              <Search size={13} aria-hidden />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer, quote #, intake…" aria-label="Search quotes" className="cy-input" />
+            </label>
+          </div>
+        }>
+        {/* Filter tabs + bulk actions */}
+        <div className="cy-filterbar">
+          {filters.map(f => (
+            <button key={f} type="button" onClick={() => setFilter(f)} className={`cy-btn is-sm${filter === f ? ' is-active' : ''}`} aria-pressed={filter === f}>
+              {f === 'all' ? 'All status' : f.charAt(0).toUpperCase() + f.slice(1)}
+              <span className="cy-mono cy-count">{f === 'all' ? quotes.length : countOf(f)}</span>
+            </button>
+          ))}
+          {selected.size > 0 && (
+            <button type="button" onClick={bulkDelete} disabled={deleting} className="cy-btn is-danger" style={{ marginLeft: 'auto' }}>
+              {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              Delete {selected.size} selected
+            </button>
+          )}
+        </div>
 
-      <div className="overflow-x-auto">
-      <table className="empire-table">
-        <thead>
-          <tr>
-            <th style={{ width: 36 }}>
-              <input
-                type="checkbox"
-                checked={filtered.length > 0 && selected.size === filtered.length}
-                onChange={toggleSelectAll}
-                className="cursor-pointer"
-                style={{ width: 16, height: 16, accentColor: '#b8960c' }}
-              />
-            </th>
-            <th>Quote #</th>
-            <th>Customer</th>
-            <th style={{ textAlign: 'right' }}>Total</th>
-            <th>Status</th>
-            <th>Date</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((q, i) => (
-            <React.Fragment key={i}>
-              <tr className="cursor-pointer hover:bg-[#fdf8eb] transition-colors" onClick={() => setViewingQuoteId(q.id)}>
-                <td onClick={e => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(q.id)}
-                    onChange={() => toggleSelect(q.id)}
-                    className="cursor-pointer"
-                    style={{ width: 16, height: 16, accentColor: '#b8960c' }}
-                  />
-                </td>
-                <td style={{ fontWeight: 600, color: '#1a1a1a' }}>{q.quote_number || `Q-${i + 1}`}</td>
-                <td>
-                  {q.customer_name || '--'}
-                  {q.intake_code && (
-                    <span style={{ marginLeft: 6, fontSize: 9, padding: '1px 6px', borderRadius: 6, background: '#eff6ff', border: '1px solid #bfdbfe', color: '#2563eb', fontWeight: 600 }}>
-                      {q.intake_code}
-                    </span>
-                  )}
-                </td>
-                <td style={{ fontWeight: 700, color: '#b8960c', textAlign: 'right' }}>${(q.total || 0).toLocaleString()}</td>
-                <td><StatusBadge status={q.status} /></td>
-                <td style={{ fontFamily: 'monospace', color: '#999', fontSize: 10 }} suppressHydrationWarning>
-                  {q.created_at ? new Date(q.created_at).toLocaleDateString() : '--'}
-                </td>
-                <td>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setViewingQuoteId(q.id)}
-                      title="View Quote"
-                      className="inline-flex items-center justify-center transition-all cursor-pointer"
-                      style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: '#fff', color: '#b8960c', border: '1px solid #ece8e0' }}
-                      onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#b8960c'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#b8960c'; }}
-                      onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#fff'; e.currentTarget.style.color = '#b8960c'; e.currentTarget.style.borderColor = '#ece8e0'; }}
-                    >
-                      <Eye size={14} />
-                    </button>
-                    <QuoteActions quoteId={q.id} status={q.status || 'draft'} compact onAction={(action) => { if (action === 'delete') refetchQuotes(); }} />
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setPipelineQuoteId(pipelineQuoteId === q.id ? null : q.id); }}
-                      title="Phase Pipeline"
-                      className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[#ece8e0] hover:border-[#16a34a] hover:bg-[#f0fdf4] transition-all cursor-pointer"
-                    >
-                      <TrendingUp size={14} className="text-[#16a34a]" />
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setAnalyzingQuoteId(analyzingQuoteId === q.id ? null : q.id); }}
-                      title="AI Photo Analysis"
-                      className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[#ece8e0] hover:border-[#7c3aed] hover:bg-[#f5f0ff] transition-all cursor-pointer"
-                    >
-                      <Camera size={14} className="text-[#7c3aed]" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-              {analyzingQuoteId === q.id && (
-                <tr>
-                  <td colSpan={7} style={{ padding: 0 }}>
-                    <div style={{ padding: '16px 20px', background: '#faf9f7', borderTop: '1px solid #ece8e0' }}>
-                      <Suspense fallback={<div className="flex items-center justify-center py-8"><Loader2 size={20} className="text-[#7c3aed] animate-spin" /></div>}>
-                        <PhotoAnalysisPanel compact onAnalysisComplete={(type: string, data: any) => {
-                          void(type); void(data); // Analysis complete for quote
-                        }} />
-                      </Suspense>
+        <div className="cy-tablewrap">
+        <table className="cy-hudtable is-cards-sm">
+          <thead>
+            <tr>
+              <th style={{ width: 36 }}>
+                <input type="checkbox" aria-label="Select all quotes"
+                  checked={filtered.length > 0 && selected.size === filtered.length}
+                  onChange={toggleSelectAll} className="cy-check" />
+              </th>
+              <th>Quote #</th>
+              <th>Customer</th>
+              <th className="is-num">Total</th>
+              <th>Status</th>
+              <th>Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((q, i) => (
+              <React.Fragment key={i}>
+                <tr className={`cy-trow${selected.has(q.id) ? ' is-selected' : ''}`} onClick={() => setViewingQuoteId(q.id)}>
+                  <td onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" aria-label={`Select ${q.quote_number || 'quote'}`} checked={selected.has(q.id)} onChange={() => toggleSelect(q.id)} className="cy-check" />
+                  </td>
+                  <td className="is-id">{q.quote_number || `Q-${i + 1}`}</td>
+                  <td className="is-cust">
+                    {q.customer_name || '--'}
+                    {q.intake_code && <span className="cy-spill t-violet" style={{ marginLeft: 6 }}>{q.intake_code}</span>}
+                  </td>
+                  <td className="is-num cy-money">{fmtMoney(q.total || 0, (q.total || 0) % 1 !== 0)}</td>
+                  <td><StatusPill status={q.status} /></td>
+                  <td className="is-date" suppressHydrationWarning>
+                    {q.created_at ? new Date(q.created_at).toLocaleDateString() : '--'}
+                  </td>
+                  <td>
+                    <div className="cy-rowactions">
+                      <button type="button" onClick={() => setViewingQuoteId(q.id)} title="View Quote" aria-label="View quote" className="cy-btn cy-iconbtn">
+                        <Eye size={14} />
+                      </button>
+                      <QuoteActions quoteId={q.id} status={q.status || 'draft'} compact onAction={(action) => { if (action === 'delete') refetchQuotes(); }} />
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setPipelineQuoteId(pipelineQuoteId === q.id ? null : q.id); }}
+                        title="Phase Pipeline" aria-label="Phase pipeline" className={`cy-btn cy-iconbtn is-teal${pipelineQuoteId === q.id ? ' is-active' : ''}`}>
+                        <TrendingUp size={14} />
+                      </button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setAnalyzingQuoteId(analyzingQuoteId === q.id ? null : q.id); }}
+                        title="AI Photo Analysis" aria-label="AI photo analysis" className={`cy-btn cy-iconbtn is-violet${analyzingQuoteId === q.id ? ' is-active' : ''}`}>
+                        <Camera size={14} />
+                      </button>
                     </div>
                   </td>
                 </tr>
-              )}
-            </React.Fragment>
-          ))}
-        </tbody>
-      </table>
-      </div>
-      {filtered.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '40px 0', fontSize: 13, color: '#aaa' }}>No quotes found</div>
-      )}
-      {totalQuotes !== null && quotes.length < totalQuotes && (
-        <div style={{ textAlign: 'center', padding: '16px 0' }}>
-          <button
-            onClick={loadMoreQuotes}
-            disabled={loadingMore}
-            className="cursor-pointer font-bold transition-all hover:border-[#b8960c] hover:text-[#b8960c]"
-            style={{ minHeight: 40, padding: '0 16px', fontSize: 12, borderRadius: 10, background: '#faf9f7', color: '#777', border: '1.5px solid #ece8e0' }}
-          >
-            {loadingMore ? 'Loading...' : `Load More (${quotes.length} of ${totalQuotes})`}
-          </button>
+                {analyzingQuoteId === q.id && (
+                  <tr className="cy-trow-detail">
+                    <td colSpan={7} style={{ padding: 0 }}>
+                      <div className="cy-tool-host" style={{ padding: '16px 20px' }}>
+                        <Suspense fallback={<div className="cy-nodata">LOADING ANALYSIS…</div>}>
+                          <PhotoAnalysisPanel compact onAnalysisComplete={(type: string, data: any) => {
+                            void(type); void(data); // Analysis complete for quote
+                          }} />
+                        </Suspense>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
         </div>
-      )}
-    </div>
+        {filtered.length === 0 && (
+          <div className="cy-nodata">SIN DATOS · NO DATA<span>No quotes match this view</span></div>
+        )}
+        {totalQuotes !== null && quotes.length < totalQuotes && (
+          <div style={{ textAlign: 'center', padding: '16px 0 4px' }}>
+            <button type="button" onClick={loadMoreQuotes} disabled={loadingMore} className="cy-btn">
+              {loadingMore ? 'Loading…' : <>Load more <span className="cy-mono">({quotes.length} of {totalQuotes})</span></>}
+            </button>
+          </div>
+        )}
+      </HudPanel>
+    </HudStage>
   );
 }
 

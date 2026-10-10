@@ -35,11 +35,17 @@ Voice upgrade (2026-09-30, founder-approved)
     plus queue_for_founder_approval, which only files a pending task
     (status 'waiting', tags voice-request / needs-founder-approval) and never
     executes anything. Everything else is refused server-side.
+  * SELF EMAIL (2026-10-05): send_email is allowed in voice ONLY when every
+    recipient (to + cc) is Rafael himself (FOUNDER_SELF_EMAILS). It sends
+    right away, same as text chat. Any other recipient is refused before
+    tool_executor is touched; client email needs Rafael's explicit yes in
+    text chat (or queue_for_founder_approval).
 
 Safety
   * Tools run server-side; anything not in VOICE_TOOL_ALLOWLIST is refused
-    before tool_executor is touched (send_email, shell_execute, file_write,
-    approve/reject, deposit links, deletes ... are all refused).
+    before tool_executor is touched (shell_execute, file_write, approve/reject,
+    deposit links, deletes ... are all refused; send_email only to Rafael's
+    own addresses).
   * Hard cap per call (MAX_VOICE_CALL_CAP_SECONDS, default 600 s) with
     auto-hangup; limited concurrent calls.
   * xAI is used for voice via its own flag (MAX_VOICE_XAI_ENABLED, default
@@ -52,6 +58,7 @@ import base64
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -71,14 +78,17 @@ VOICE_READ_ONLY_TOOLS = (
     "get_tasks", "get_desk_status", "get_services_health", "get_system_stats",
     "check_email", "list_job_images", "search_conversations", "get_weather",
     "list_quotes_awaiting_review", "show_quote_for_review",
-    "get_revenue_chart",
+    "get_revenue_chart", "web_search", "find_files", "open_final_doc", "max_status",
 )
 QUEUE_TOOL = "queue_for_founder_approval"
-VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL,))
+IMPROVE_TOOL = "request_improvement"  # writes a change request only; builds need Rafael's tap in the studio
+SELF_EMAIL_TOOL = "send_email"  # Rafael's own addresses only (server-enforced in run_voice_tool)
+SHARE_TOOL = "share_file"  # found file -> Rafael only (studio link / his email / his WhatsApp); enforced in tools_files
+VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL, SHARE_TOOL))
 READ_ONLY_TOOLS = VOICE_READ_ONLY_TOOLS  # backwards-compatible name
 # Explicitly named so logs/tests are clear; the allowlist above is what enforces.
 VOICE_DENIED_EXAMPLES = frozenset({
-    "send_email", "send_telegram", "shell_execute", "env_set", "file_write", "file_edit",
+    "send_telegram", "shell_execute", "env_set", "file_write", "file_edit",
     "file_append", "file_delete", "approve_quote", "reject_quote", "deposit_pay_link",
     "create_task", "service_manager", "git_ops", "delete_quote", "delete_contact",
 })
@@ -163,6 +173,58 @@ async def fresh_instructions() -> tuple[str, dict]:
         return build_instructions(), {"fallback": True, "error": type(exc).__name__}
 
 
+# ── Language (2026-10-04) ───────────────────────────────────────────
+_ES_RE = re.compile(r"[áéíóúñ¿¡]|\b(que|qué|quiero|cuál|cuáles|dónde|cómo|hola|gracias|por|favor|el|la|los|las|de|en|un|una|es|está|noticias|necesito|puedes|dime|mis?|sí|también|ahora|hoy|esto|eso|para|con|hay)\b", re.I)
+_EN_RE = re.compile(r"\b(the|what|is|are|my|me|please|can|you|how|where|show|tell|hey|hi|i|need|want|this|that|it|to|of|and|for|with|today|now)\b", re.I)
+
+
+def detect_language(text: str) -> Optional[str]:
+    """'es' / 'en' for a short utterance, None when unclear."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    es, en = len(_ES_RE.findall(t)), len(_EN_RE.findall(t))
+    if es == en:
+        return None
+    return "es" if es > en else "en"
+
+
+def last_call_language(db_path: Optional[str] = None) -> Optional[str]:
+    """Language of Rafael's most recent voice call (from the session journal, read-only)."""
+    try:
+        import sqlite3
+        from app.services.max import session_journal as sj
+        path = str(db_path or sj.journal_db_path())
+        if not os.path.exists(path):
+            return None
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
+        try:
+            row = conn.execute(
+                "SELECT conversation_id FROM max_session_turns WHERE channel='voice' AND role='user' "
+                "AND edition=? ORDER BY id DESC LIMIT 1", (sj.edition(),)).fetchone()
+            if not row:
+                return None
+            texts = [r[0] or "" for r in conn.execute(
+                "SELECT content FROM max_session_turns WHERE conversation_id=? AND role='user' "
+                "ORDER BY id DESC LIMIT 6", (row[0],)).fetchall()]
+        finally:
+            conn.close()
+        return detect_language(" ".join(texts))
+    except Exception as exc:  # never block a call on this
+        logger.debug("voice_live: last call language unavailable (%s)", type(exc).__name__)
+        return None
+
+
+def language_section(last_lang: Optional[str]) -> str:
+    name = {"es": "Spanish", "en": "English"}.get(last_lang or "")
+    fallback = (f"If his first words are unclear, use {name}: his last call was in {name}." if name
+                else "If his first words are unclear, ask in both, briefly: '¿Español o English?'.")
+    return ("\n\n# Language\n"
+            "Your FIRST reply must be in the language of Rafael's first words. " + fallback +
+            " After that, always answer in the language of his latest words. Lookup fillers too: "
+            "'un segundo' in Spanish, 'one sec' in English. Never switch to English while he speaks Spanish.")
+
+
 # ── Tools ───────────────────────────────────────────────────────────
 
 def _obj(props: dict, required: list | None = None) -> dict:
@@ -245,6 +307,17 @@ _FALLBACK_TOOL_SCHEMAS = {
         "description": "Current weather (Open-Meteo). Default city Washington DC. Read-only.",
         "parameters": _obj({"city": {"type": "string", "description": "City (default Washington DC)"}}),
     },
+    "max_status": {
+        "description": "What you (Max) are building, what shipped recently and what's next or waiting on Rafael, from "
+                       "the real improvements queue, recent commits, tasks and approvals. Use for 'what are you "
+                       "building / working on', 'what's next', 'next step with you', 'status'. Never use web_search "
+                       "for these. Speak the result in a few short sentences; invent nothing.",
+        "parameters": _obj({"question": {"type": "string", "description": "Rafael's question, verbatim"}}),
+    },
+    "web_search": {
+        "description": "Read-only web search (DuckDuckGo, Brave fallback) for current news, local events, prices or any public fact. For news, put the topic and place in the query (e.g. 'noticias Cartago Valle del Cauca hoy'). Speak a short summary of the top headlines; never read URLs aloud. Sends nothing.",
+        "parameters": _obj({"query": {"type": "string", "description": "Search query, in the language of the place"}}, ["query"]),
+    },
     "get_revenue_chart": {
         "description": "Read-only revenue totals by month from recorded payments. Use for 'last month's revenue' or 'this week's numbers'. Returns a chart. Never invents amounts. Does not send anything.",
         "parameters": _obj({}),
@@ -263,6 +336,50 @@ _FALLBACK_TOOL_SCHEMAS = {
             "action": {"type": "string", "description": "Short imperative description, e.g. 'Send Max the transcript of this voice call'"},
             "details": {"type": "string", "description": "Everything needed to do it later: who, what, which quote/customer, wording"},
         }, ["action"]),
+    },
+    "find_files": {
+        "description": "Search ALL of Rafael's files: the Dell (jobs, Downloads, Desktop, Documents, Pictures, "
+                       "empire-data, quote PDFs, the backup drive), Gmail attachments and Google Drive, by file "
+                       "name, client or nickname (Dahlia = Nehal "
+                       "Elrefai), quote number or words in the name. Returns every match ranked with a file_id. "
+                       "Read-only. Never claim a file was found unless this returns it; if nothing matched, say so "
+                       "and name the closest files. If source_notes says Gmail needs re-auth or Drive is not "
+                       "connected, say that source was not searched.",
+        "parameters": _obj({"query": {"type": "string", "description": "e.g. 'Nehal final estimate', 'EST-2026-298'"},
+                            "limit": {"type": "integer", "description": "Max results (default 8)"}}, ["query"]),
+    },
+    "open_final_doc": {
+        "description": "Final Docs for a client (final estimate, presentation, invoice, drawing). Lists every final "
+                       "for the client, e.g. both Nehal phases. Read-only.",
+        "parameters": _obj({"query": {"type": "string", "description": "Client + doc type, e.g. 'Nehal final estimate'"}}, ["query"]),
+    },
+    SHARE_TOOL: {
+        "description": "Send one file found by find_files to Rafael himself: via 'email' (his own address, right "
+                       "away), 'whatsapp' (his number) or 'studio' (link in his chat). Never to anyone else.",
+        "parameters": _obj({"file_id": {"type": "string", "description": "file_id from find_files"},
+                            "via": {"type": "string", "enum": ["email", "whatsapp", "studio"]}}, ["file_id"]),
+    },
+    SELF_EMAIL_TOOL: {
+        "description": "Email Rafael HIMSELF right now (empirebox2026@gmail.com, rafa22giraldo@gmail.com or "
+                       "max@empirebox.store; leave 'to' empty for his main inbox). Sends immediately via SMTP: no "
+                       "PIN, no second yes. Any other recipient (clients, vendors) is refused: those need his "
+                       "explicit yes in text chat, so offer queue_for_founder_approval instead.",
+        "parameters": _obj({
+            "to": {"type": "string", "description": "One of Rafael's own addresses; empty = empirebox2026@gmail.com"},
+            "subject": {"type": "string", "description": "Email subject"},
+            "body": {"type": "string", "description": "Email body (plain text or simple HTML)"},
+            "cc": {"type": "string", "description": "Optional, Rafael's own addresses only"},
+        }, ["subject", "body"]),
+    },
+    IMPROVE_TOOL: {
+        "description": "When Rafael asks for a SYSTEM improvement (a new feature, a fix, a change to how Empire or Max works), write ONE structured change request to the Improvements page. Builds nothing; Rafael approves it in the studio, and merge/deploy needs a second approval. Tell him it is on the Improvements page waiting for his tap.",
+        "parameters": _obj({
+            "title": {"type": "string", "description": "Short name of the change"},
+            "problem": {"type": "string", "description": "What is wrong or missing today, in Rafael's words"},
+            "proposed_change": {"type": "string", "description": "What to build or change, concretely"},
+            "affected_modules": {"type": "array", "items": {"type": "string"}, "description": "e.g. LeadForge, Quotes, Max"},
+            "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+        }, ["title", "problem", "proposed_change"]),
     },
 }
 
@@ -326,6 +443,23 @@ def _compact_for_voice(name: str, data: dict[str, Any]) -> dict[str, Any]:
                              if k in ("type", "role", "content", "summary", "channel", "date", "subject",
                                       "conversation_id", "started_at", "lines")})
         out["result"] = {"query": res.get("query"), "count": res.get("count", len(rows)), "results": rows}
+    elif name == "web_search":
+        hits = [{"title": str(r.get("title") or "")[:160], "snippet": str(r.get("snippet") or r.get("body") or "")[:260],
+                 "site": (str(r.get("url") or r.get("link") or "").split("/")[2:3] or [""])[0]}
+                for r in (res.get("results") or [])[:6] if isinstance(r, dict)]
+        out["result"] = {"query": res.get("query"), "count": len(hits), "results": hits, "source": res.get("source")}
+    elif name == "find_files":
+        rows = [{k: m.get(k) for k in ("file_id", "name", "source", "folder", "modified", "size", "is_final", "other_copies")}
+                for m in (res.get("matches") or [])[:8] if isinstance(m, dict)]
+        out["result"] = {"total": res.get("total"), "matches": rows, "parsed": res.get("parsed"),
+                         "sources": res.get("sources"), "source_notes": res.get("source_notes"),
+                         "closest": [{"file_id": c.get("file_id"), "name": c.get("name")}
+                                     for c in (res.get("closest") or [])[:5]]}
+    elif name == "open_final_doc":
+        docs = res.get("docs") or [res]
+        out["result"] = {"client": res.get("client"), "docs": [
+            {k: d.get(k) for k in ("title", "version", "type", "quote_number", "modified", "is_final")}
+            for d in docs[:8] if isinstance(d, dict)]}
     elif name == "get_tasks":
         tasks = [{k: t.get(k) for k in ("id", "title", "status", "priority", "desk", "due_date", "created_at")}
                  for t in (res.get("tasks") or [])[:15] if isinstance(t, dict)]
@@ -349,7 +483,7 @@ def realtime_tool_definitions() -> list[dict[str, Any]]:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("voice_live: canonical tool schemas unavailable: %s", exc)
     out = []
-    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL,):
+    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL, SHARE_TOOL):
         fn = canonical.get(name) or _FALLBACK_TOOL_SCHEMAS[name]
         out.append({
             "type": "function",
@@ -415,18 +549,72 @@ def queue_for_founder_approval(action: str, details: str = "", *, call_id: str =
     }}
 
 
+_SELF_ALIASES = ("", "me", "myself", "owner", "founder", "my email", "rafael", "rafa")
+
+
+def voice_self_email(arguments: dict[str, Any], *, call_id: str = "") -> dict[str, Any]:
+    """send_email from voice: Rafael's own addresses only, sent immediately.
+
+    Same rule as text chat (no PIN / second yes for self-email). Anything
+    addressed to someone else is refused here, before tool_executor runs.
+    Attachments are not taken from voice.
+    """
+    from app.services.max.email_recipient_whitelist import FOUNDER_SELF_EMAILS, is_founder_self_email
+    to = str((arguments or {}).get("to") or "").strip()
+    if to.lower() in _SELF_ALIASES:
+        to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+    cc_raw = (arguments or {}).get("cc") or ""
+    cc = [c.strip() for c in (cc_raw if isinstance(cc_raw, list) else str(cc_raw).split(",")) if str(c).strip()]
+    subject = str((arguments or {}).get("subject") or "").strip()[:200]
+    body = str((arguments or {}).get("body") or "").strip()[:20000]
+    others = [a for a in [to, *cc] if not is_founder_self_email(a)]
+    if others:
+        logger.info("voice_live[%s]: send_email refused for non-self recipient", call_id or "-")
+        return {"success": False, "tool": SELF_EMAIL_TOOL, "error": (
+            "From voice I can only email Rafael's own addresses ("
+            + ", ".join(sorted(FOUNDER_SELF_EMAILS)) + "). Emails to clients or anyone else need his "
+            "explicit yes in text chat. Offer to queue it with queue_for_founder_approval.")}
+    if not subject or not body:
+        return {"success": False, "tool": SELF_EMAIL_TOOL, "error": "subject and body are required"}
+    from app.services.max.tool_executor import execute_tool
+    call = {"tool": "send_email", "to": to, "subject": subject, "body": body}
+    if cc:
+        call["cc"] = ", ".join(cc)
+    result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
+    data = result.to_dict()
+    if not data.get("success"):
+        # Never blame "email settings": report the real send error plainly.
+        logger.warning("voice_live[%s]: self send_email failed: %s", call_id or "-", str(data.get("error"))[:200])
+    return data
+
+
 def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
                    conversation_id: str = "") -> dict[str, Any]:
     """Execute one allowlisted voice tool (sync). Server-side allowlist enforced here."""
     if name not in VOICE_TOOL_ALLOWLIST:
         logger.warning("voice_live[%s]: refused non-allowlisted tool %r", call_id or "-", name)
-        return {"success": False, "error": f"Tool '{name}' is not available in voice mode (read-only tools "
-                                           f"plus queue_for_founder_approval only). Offer to queue it for "
+        return {"success": False, "error": f"Tool '{name}' is not available in voice mode (read-only tools, "
+                                           f"self-email and queue_for_founder_approval only). Offer to queue it for "
                                            f"Rafael's approval instead."}
     call = {k: v for k, v in (arguments or {}).items() if not str(k).startswith("_")}
+    if name == SELF_EMAIL_TOOL:
+        return voice_self_email(call, call_id=call_id)
     if name == QUEUE_TOOL:
         return queue_for_founder_approval(call.get("action", ""), call.get("details", ""),
                                           call_id=call_id, conversation_id=conversation_id)
+    if name == IMPROVE_TOOL:
+        try:
+            from app.services.max import improvements
+            req = improvements.create_request(
+                title=call.get("title", ""), problem=call.get("problem", ""),
+                proposed_change=call.get("proposed_change", ""), affected_modules=call.get("affected_modules") or [],
+                risk=call.get("risk") or "medium", requested_via="voice",
+                requested_text=f"voice call {call_id or '-'} / conversation {conversation_id or '-'}")
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        return {"success": True, "tool": IMPROVE_TOOL, "result": {
+            "id": req["id"], "title": req["title"], "status": req["status"], "executed": False,
+            "note": "On the Improvements page waiting for Rafael's Approve tap. Nothing was built or deployed."}}
     if name == "get_revenue_chart":
         from app.services.max.presentation_stage import revenue_tool_result
         return revenue_tool_result()
@@ -461,6 +649,12 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
         call["limit"] = min(int(call.get("limit") or 8), 20)
     elif name == "get_weather":
         call["city"] = call.get("city") or "Washington DC"
+    elif name == "web_search":
+        call = {"tool": name, "query": str(call.get("query") or "")[:300], "num_results": 6}
+    elif name == "find_files":
+        call["limit"] = min(int(call.get("limit") or 8), 20)
+    elif name == SHARE_TOOL:
+        call["via"] = str(call.get("via") or "email")
     result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
     return _compact_for_voice(name, result.to_dict())
 
@@ -868,6 +1062,9 @@ class LiveCall:
             instr_task.cancel()
             return
         instructions, self.instructions_meta = await instr_task
+        _lang = last_call_language()
+        self.instructions_meta["last_call_language"] = _lang
+        instructions += language_section(_lang)
         logger.info("voice_live[%s]: instructions %s chars (~%s tokens, cached=%s, fallback=%s)",
                     self.call_id, len(instructions), len(instructions) // 4,
                     self.instructions_meta.get("cached"), self.instructions_meta.get("fallback", False))

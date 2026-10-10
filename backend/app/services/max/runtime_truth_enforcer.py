@@ -438,6 +438,16 @@ PROOF_TOOL_EXACT = frozenset({
     "search_invoices",
     "search_payments",
     "search_customers",
+    # Attachment pipeline (PDF/docx/txt upload reader) — counts as proof
+    # for "I read" claims so raw guard text never replaces a real extract.
+    "attachment_reader",
+    "attachment-reader",
+    "file_read",
+    # Rafael file finder (2026-10-05)
+    "find_files",
+    "max_status",
+    "share_file",
+    "open_final_doc",
 })
 
 
@@ -823,7 +833,7 @@ def _has_file_read_receipt(tool_results: list[Any] | None) -> bool:
         if not entry.get("success"):
             continue
         tool = entry.get("tool")
-        if tool == "file_read":
+        if tool in ("file_read", "attachment_reader", "attachment-reader"):
             return True
         # run_desk_task is a wrapper. It may have delegated to
         # file_read; we treat the wrapper receipt as proof the work
@@ -1028,13 +1038,44 @@ def should_halt_after_tool_failure(
 
 
 def runtime_truth_failure_message(failures: list[str]) -> str:
-    unique = list(dict.fromkeys([failure for failure in failures if failure]))
-    if not unique:
-        # Default message when we know we should halt but no specific failure.
-        return "I have not run that yet. I need a real tool result before I can claim I did something."
-    reason = "; ".join(unique)
-    return f"I have not run that yet. {reason}"
+    """User-facing fallback when a truth claim is blocked.
 
+    Internal reason strings (e.g. "Claim 'I read' has no structured proof
+    object") stay in logs only — never echo them to chat.
+    """
+    unique = list(dict.fromkeys([failure for failure in failures if failure]))
+    if unique:
+        import logging as _logging
+        _logging.getLogger("max.runtime_truth").warning(
+            "truth_guard blocked response: %s", "; ".join(unique)[:500]
+        )
+    return (
+        "I have not confirmed that with a live result, so I'm not claiming it."
+    )
+
+
+
+def attachment_proofs_from_session(conversation_id: str | None, max_turns: int = 3) -> list[dict]:
+    """Return successful attachment_reader proofs from recent session turns.
+
+    Follow-up messages like "and" / "did you get the PDF" often claim "I read"
+    without re-running the reader; prior-turn proofs still count.
+    """
+    if not conversation_id:
+        return []
+    out: list[dict] = []
+    try:
+        from app.services.max.chat_session import load_recent_turns
+        for turn in load_recent_turns(conversation_id, max_turns=max_turns) or []:
+            for entry in turn.get("tool_results") or []:
+                if not isinstance(entry, dict):
+                    continue
+                tool = str(entry.get("tool") or "")
+                if tool in ("attachment_reader", "attachment-reader") and entry.get("success") is not False:
+                    out.append(entry)
+    except Exception:
+        return out
+    return out
 
 def enforce_runtime_truth_response(
     user_message: str | None,

@@ -1,18 +1,27 @@
 'use client';
+import MaxDocCard from '../docs/MaxDocCard';
+import MaxRecordCard from '../docs/MaxRecordCard';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X, Copy, Check } from 'lucide-react';
+import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X, Copy, Check, ExternalLink } from 'lucide-react';
 import ChatHistoryPanel from '../ChatHistoryPanel';
 import { Message } from '../../lib/types';
+import { splitForView } from '../../hooks/chatQueue';
 import { API } from '../../lib/api';
 import QuoteCard from '../business/quotes/QuoteCard';
 import InlineDrawing from '../InlineDrawing';
 import ContinuityPanel from '../ContinuityPanel';
 import ViewPdfControl from '../ViewPdfControl';
 import ChatChartBlock from '../ChatChartBlock';
+import ChatMarkdown from '../chat/ChatMarkdown';
+import '../chat/chat.css';
+import { chiefEHref } from '../../lib/chiefE';
 import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../lib/chatContent';
 import FounderPinCard from '../chat/FounderPinCard';
 import { useTranslation } from '../../lib/i18n';
 import { composerLooksLikePin } from '../../lib/founderPin';
+import { useJob } from '../../hooks/useJob';
+import JobFolderModal from '../jobs/JobFolderModal';
+import { Briefcase, FolderOpen } from 'lucide-react';
 import {
   HOLD_ARM_MS,
   HOLD_LONGER_HINT,
@@ -80,9 +89,13 @@ interface Props {
   onNewChat?: () => void;
   onSubmitPin?: (messageId: string, resumeId: string, pin: string) => Promise<void> | void;
   onCancelPin?: (messageId: string, resumeId: string) => void;
+  /** Remove a message that is still waiting in the queue (2026-10-08). */
+  onCancelQueued?: (messageId: string) => void;
 }
 
-export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat, onSubmitPin, onCancelPin }: Props) {
+export default function ChatScreen({ messages, isStreaming, streamingContent, streamingSteps = [], streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat, onSubmitPin, onCancelPin, onCancelQueued }: Props) {
+  // 2026-10-08 queueing: messages sent while Max answers show under the live reply, marked queued.
+  const { settled: settledMessages, queued: queuedMessages } = splitForView(messages);
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
@@ -124,6 +137,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const { locale } = useTranslation();
   const localeRef = useRef(locale);
   useEffect(() => { localeRef.current = locale; }, [locale]);
+
+  const { activeJob, clearJob } = useJob();
+  const [chatFolderOpen, setChatFolderOpen] = useState(false);
   useEffect(() => { recordingRef.current = recording; }, [recording]);
   useEffect(() => {
     const coarse = window.matchMedia('(pointer: coarse)').matches;
@@ -579,7 +595,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       case 'tasks': onSend('Show my tasks for today'); break;
       case 'research': onScreenChange?.('research'); break;
       case 'documents': onScreenChange?.('docs'); break;
-      case 'calendar': onSend('Show my calendar for today'); break;
+      case 'calendar': onScreenChange?.('calendar'); break;
       default: break;
     }
   };
@@ -649,6 +665,16 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         }}>
           MAX
         </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <a
+          className="cm-chiefe-btn"
+          href={chiefEHref([...messages].reverse().find(m => m.role === 'user')?.content)}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open Chief e (Grok Bot) with your last question"
+        >
+          <ExternalLink size={13} /> Ask Chief e
+        </a>
         <button
           onClick={() => setHistoryOpen(prev => !prev)}
           title="Chat History"
@@ -665,6 +691,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         >
           <Clock size={16} />
         </button>
+        </div>
         {voiceMode && (
           <span style={{
             fontSize: 11,
@@ -703,6 +730,110 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         }}>
           {quickQuoteNotice}
         </div>
+      )}
+
+      {/* Current Job Chip in Chat Header */}
+      {activeJob && (
+        <div
+          data-testid="chat-current-job-chip"
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            padding: '6px 14px',
+            background: '#121214',
+            borderBottom: '2px solid #b8960c',
+            color: '#fff',
+            fontSize: 11,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <span
+              style={{
+                background: 'linear-gradient(135deg, #b8960c, #d4af37)',
+                color: '#121214',
+                fontSize: '9px',
+                fontWeight: 800,
+                padding: '2px 6px',
+                borderRadius: '4px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              CURRENT JOB
+            </span>
+            <span style={{ fontWeight: 700, color: '#f5f2ed', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {activeJob.client_name || 'Client'}
+            </span>
+            <span style={{ color: '#b8960c', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+              ({activeJob.job_number || `JOB-${activeJob.id}`})
+            </span>
+            <span
+              style={{
+                background: '#222',
+                color: '#aaa',
+                border: '1px solid #444',
+                padding: '1px 6px',
+                borderRadius: '4px',
+                fontSize: '9px',
+                textTransform: 'uppercase',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {activeJob.pipeline_stage || activeJob.status}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => setChatFolderOpen(true)}
+              style={{
+                minHeight: '28px',
+                padding: '2px 8px',
+                borderRadius: '6px',
+                background: '#222',
+                border: '1px solid #b8960c',
+                color: '#b8960c',
+                fontSize: '10px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <FolderOpen size={12} />
+              <span>Job Docs</span>
+            </button>
+            <button
+              type="button"
+              onClick={clearJob}
+              title="Unlink job from Max conversation"
+              style={{
+                minHeight: '28px',
+                background: 'none',
+                border: 'none',
+                color: '#777',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0 4px',
+              }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {chatFolderOpen && activeJob && (
+        <JobFolderModal
+          jobId={activeJob.id}
+          isOpen={chatFolderOpen}
+          onClose={() => setChatFolderOpen(false)}
+        />
       )}
 
       {maxStatus && (
@@ -800,8 +931,8 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         padding: '8px 10px',
       }}
       className="sm:!px-9 sm:!py-6 pb-10 md:!pb-6">
-        {messages.map((msg, i) => (
-          <div key={msg.id || i} style={{
+        {settledMessages.map((msg, i) => (
+          <div key={msg.id || i} className="cm-msg" style={{
             marginBottom: 16,
             maxWidth: '90%',
             marginLeft: msg.role === 'user' ? 'auto' : undefined,
@@ -811,26 +942,25 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               const { cleanContent, toolCalls } = msg.role === 'assistant'
                 ? parseToolBlocks(msg.content)
                 : { cleanContent: msg.content, toolCalls: [] };
+              const msgImage = msg.imageUrl
+                || (msg.image ? `${API}/files/view/images/${encodeURIComponent(msg.image)}` : '');
               return (
                 <>
+                  {msgImage && (
+                    <a href={msgImage} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 6, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
+                      <img
+                        src={msgImage}
+                        alt={msg.image || 'attached image'}
+                        loading="lazy"
+                        style={{ maxWidth: 240, maxHeight: 240, borderRadius: 10, border: '1px solid var(--border)', objectFit: 'cover' }}
+                      />
+                    </a>
+                  )}
                   {cleanContent && (
-                    <div style={{
-                      padding: '14px 18px',
-                      fontSize: 14,
-                      lineHeight: 1.65,
-                      whiteSpace: 'pre-wrap',
-                      ...(msg.role === 'user' ? {
-                        background: 'var(--text)',
-                        color: '#fff',
-                        borderRadius: '14px 14px 6px 14px',
-                      } : {
-                        background: '#fff',
-                        color: 'var(--text)',
-                        border: '1px solid var(--border)',
-                        borderRadius: '14px 14px 14px 6px',
-                      }),
-                    }}>
-                      {renderContent(cleanContent, onScreenChange)}
+                    <div className={`cm-bubble ${msg.role === 'user' ? 'is-user chat-bubble-user' : 'is-assistant chat-bubble-assistant'}`}>
+                      {msg.role === 'user'
+                        ? cleanContent
+                        : renderContent(cleanContent, onScreenChange, [...settledMessages.slice(0, i)].reverse().find(m => m.role === 'user')?.content)}
                     </div>
                   )}
                   {/* Inline tool call cards (from message content) */}
@@ -879,9 +1009,8 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                 </>
               );
             })()}
-            <div style={{
+            <div className="cm-meta" style={{
               fontSize: 10,
-              color: 'var(--muted)',
               marginTop: 4,
               fontFamily: "'Inter', monospace",
               display: 'flex',
@@ -966,6 +1095,12 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                     onSend={onSend}
                   />
                 );
+              }
+              if (tr.tool === 'open_final_doc' && tr.success && tr.result?.viewer_url) {
+                return <MaxDocCard key={j} result={tr.result} />;
+              }
+              if (['open_record', 'edit_quote_lines', 'convert_quote_to_invoice'].includes(tr.tool) && tr.result && (tr.result.id || tr.result.needs_confirmation)) {
+                return <MaxRecordCard key={j} tool={tr.tool} result={tr.result} />;
               }
               if (tr.tool === 'sketch_to_drawing' && tr.success && tr.result?.svg) {
                 return <InlineDrawing key={j} result={tr.result} />;
@@ -1119,18 +1254,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                 ))}
               </div>
             )}
-            <div style={{
-              padding: '14px 18px',
-              fontSize: 14,
-              lineHeight: 1.65,
-              whiteSpace: 'pre-wrap',
-              background: '#fff',
-              color: 'var(--text)',
-              border: '1px solid var(--border)',
-              borderRadius: '14px 14px 14px 6px',
-            }}>
+            <div className="cm-msg"><div className="cm-bubble is-assistant chat-bubble-assistant">
               {streamingContent ? renderContent(streamingContent, onScreenChange) : (streamingSteps.length ? '' : '...')}
-            </div>
+            </div></div>
             <div style={{
               fontSize: 10,
               color: 'var(--muted)',
@@ -1160,6 +1286,25 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             </div>
           </div>
         )}
+        {/* Queued messages: sent while Max was answering; they run in order after the current reply */}
+        {queuedMessages.map((msg, k) => (
+          <div key={msg.id} className="cm-msg" data-testid="queued-message" style={{ marginBottom: 12, maxWidth: '90%', marginLeft: 'auto', marginRight: 0 }}>
+            <div className="cm-bubble is-user chat-bubble-user" style={{ opacity: 0.6 }}>{msg.content}</div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, textAlign: 'right', fontFamily: "'Inter', monospace" }}>
+              <span>Queued{queuedMessages.length > 1 ? ` · ${k + 1} of ${queuedMessages.length}` : ''} · Max answers it next</span>
+              {onCancelQueued && (
+                <button
+                  type="button"
+                  onClick={() => onCancelQueued(msg.id)}
+                  aria-label="Remove queued message"
+                  style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 10, fontWeight: 600, padding: 0 }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
         <div ref={msgsEndRef} />
       </div>
 
@@ -1350,6 +1495,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           {/* Text input */}
           <div style={{
             flex: 1,
+            minWidth: 0,
             background: codeMode ? '#fdf8eb' : voiceMode ? '#f5f0ff' : '#fff',
             border: `1.5px solid ${codeMode ? '#b8960c' : voiceMode ? '#7c3aed' : inputFocused ? 'var(--gold)' : 'var(--border)'}`,
             borderRadius: 14,
@@ -1365,7 +1511,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               onKeyDown={handleKeyDown}
               onFocus={() => setInputFocused(true)}
               onBlur={() => setInputFocused(false)}
-              placeholder={codeMode ? 'Code Mode — describe what to build or fix...' : 'Message MAX...'}
+              placeholder={codeMode ? 'Code Mode — describe what to build or fix...' : isStreaming ? 'Max is answering. Type away, it queues...' : 'Message MAX...'}
               rows={1}
               style={{
                 flex: 1, padding: '13px 18px', border: 'none', outline: 'none',
@@ -1483,16 +1629,16 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             type="button"
             aria-label="Send message"
             onClick={handleSend}
-            disabled={isStreaming}
+            title={isStreaming ? 'Max is answering. This message will be queued and answered next.' : 'Send'}
             style={{
               width: 44, height: 44, borderRadius: 12,
               background: 'var(--text)', border: 'none',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: isStreaming ? 'not-allowed' : 'pointer',
+              cursor: 'pointer',
               color: '#fff', flexShrink: 0,
-              opacity: isStreaming ? 0.5 : 1, transition: 'all 0.2s',
+              opacity: 1, transition: 'all 0.2s',
             }}
-            onMouseEnter={e => { if (!isStreaming) e.currentTarget.style.background = 'var(--gold)'; }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--gold)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'var(--text)'; }}
           >
             <ArrowUp size={20} />
@@ -1624,84 +1770,33 @@ function StatusChip({ label, tone }: { label: string; tone: 'ok' | 'warn' | 'dar
   );
 }
 
-function renderContent(content: string, onScreenChange?: (s: string, id?: string) => void) {
+function renderContent(content: string, onScreenChange?: (s: string, id?: string) => void, question = '') {
+  // Quote numbers resolve to their canonical id via /quotes-v2/by-number/{qn}.
+  // Stay silent on a miss: never fall back to "first row of the list" (HOTFIX 4b).
+  const openQuoteNumber = (quoteNumber: string) => {
+    fetch(`${API}/quotes-v2/by-number/${encodeURIComponent(quoteNumber)}`)
+      .then(r => {
+        if (r.status === 404) throw new Error(`Quote ${quoteNumber} not found`);
+        if (!r.ok) throw new Error(`Resolver returned ${r.status}`);
+        return r.json();
+      })
+      .then((q: any) => { if (q && q.id) onScreenChange?.('quote', q.id); })
+      // eslint-disable-next-line no-console
+      .catch(err => console.error(`[quote-link] failed to resolve ${quoteNumber}:`, err));
+  };
   const segments = splitChatContent(content);
   return segments.map((segment, segIndex) => {
     if (segment.kind === 'chart') {
       return <ChatChartBlock key={`chart-${segIndex}`} chart={segment.chart} />;
     }
-    const text = segment.text;
     return (
-      <span key={`text-${segIndex}`}>
-        {text.split('\n').map((line, i, lines) => {
-    // Bold
-    let processed = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    // Italic
-    processed = processed.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    // Detect QuoteBuilder / quote references and make them clickable
-    const hasQuoteRef = /QuoteBuilder|quote.*interface/i.test(processed);
-    if (hasQuoteRef && onScreenChange) {
-      processed = processed.replace(
-        /(QuoteBuilder\s*interface|QuoteBuilder)/gi,
-        '<a class="quote-link" data-link-type="builder" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">$1</a>'
-      );
-    }
-    // Detect quote numbers like EST-2026-027 and make clickable. The
-    // data-quote-number attr lets the click handler resolve the visible
-    // badge to its canonical id via /quotes-v2/by-number/{qn}. Without
-    // this, a click routed to screen='quote' with NO id and the
-    // QuoteReviewScreen silently fell back to the first row of the list
-    // (HOTFIX 4b defect).
-    processed = processed.replace(
-      /(EST-\d{4}-\d{3})/g,
-      (match: string) =>
-        `<a class="quote-link" data-link-type="quote-number" data-quote-number="${match}" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${match}</a>`
-    );
-    const html = processed + (i < lines.length - 1 ? '<br/>' : '');
-    return (
-      <span
-        key={i}
-        dangerouslySetInnerHTML={{ __html: html }}
-        onClick={(e) => {
-          const target = e.target as HTMLElement;
-          if (!target.classList.contains('quote-link')) return;
-          const linkType = target.getAttribute('data-link-type');
-          if (linkType === 'quote-number') {
-            const quoteNumber = target.getAttribute('data-quote-number');
-            if (!quoteNumber) return;
-            // Resolve the visible "EST-2026-110" to its canonical id.
-            // Stay silent on miss — never fall back to "first row of
-            // the list" again; that's the exact bug we're fixing.
-            fetch(`${API}/quotes-v2/by-number/${encodeURIComponent(quoteNumber)}`)
-              .then(r => {
-                if (r.status === 404) {
-                  throw new Error(`Quote ${quoteNumber} not found`);
-                }
-                if (!r.ok) throw new Error(`Resolver returned ${r.status}`);
-                return r.json();
-              })
-              .then((q: any) => {
-                if (q && q.id) onScreenChange?.('quote', q.id);
-              })
-              .catch(err => {
-                // Visible in dev console only — don't navigate. The user
-                // remains on chat and can re-ask MAX to surface the
-                // quote id explicitly.
-                // eslint-disable-next-line no-console
-                console.error(`[quote-link] failed to resolve ${quoteNumber}:`, err);
-              });
-            return;
-          }
-          if (linkType === 'builder') {
-            onScreenChange?.('quote');
-            return;
-          }
-          onScreenChange?.('quote');
-        }}
+      <ChatMarkdown
+        key={`text-${segIndex}`}
+        text={segment.text}
+        question={question}
+        onQuoteNumber={openQuoteNumber}
+        onBuilder={() => onScreenChange?.('quote')}
       />
-    );
-        })}
-      </span>
     );
   });
 }

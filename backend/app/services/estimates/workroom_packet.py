@@ -44,6 +44,16 @@ def _line(group: str, description: str, qty: float, rate: float, unit: str = "ea
     }
 
 
+def wants_bump(opening: dict) -> bool:
+    """Re-line with bump is the default. ``bump: false`` (or ``reline_type`` "no_bump" /
+    "lining_only") prices "Re-line with lining (no bump)": lining only, no bump material,
+    labor at ``reline_no_bump_per_width``. Widths are counted exactly as for the standard re-line."""
+    kind = str(opening.get("reline_type") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if kind in {"no_bump", "lining_only", "without_bump", "lining_no_bump"}:
+        return False
+    return opening.get("bump", True) not in (False, "false", "no", 0, "0")
+
+
 def price_opening(opening: dict) -> dict:
     """Price one opening into the four groups. Does not invent a mount or ceiling."""
     room = str(opening.get("room") or "Room")
@@ -54,6 +64,7 @@ def price_opening(opening: dict) -> dict:
     finished = height
     cut = cut_length(finished)
     yards = lining_yards(cloth["total"], finished)
+    bump = wants_bump(opening)
     lines: list[dict] = []
 
     install = install_price(width, opening.get("install_flat"))
@@ -90,11 +101,12 @@ def price_opening(opening: dict) -> dict:
         ))
 
     if opening.get("reline", True):
-        rate = rule("reline_per_width")
+        rate = rule("reline_per_width") if bump else rule("reline_no_bump_per_width")
+        label = "Re-line with lining and bump" if bump else "Re-line with lining (no bump)"
         lines.append(_line(
             "Construction",
             (
-                f"Re-line with lining and bump · {panels} panels x "
+                f"{label} · {panels} panels x "
                 f"{_widths_label(cloth['per_panel'])} widths = "
                 f"{_widths_label(cloth['total'])} widths @ ${rate:,.0f}"
             ),
@@ -158,13 +170,14 @@ def price_opening(opening: dict) -> dict:
             rule("lining_per_yard"),
             "yd",
         ))
-        lines.append(_line(
-            "Materials",
-            f"Bump interlining · {yards:.1f} yd @ ${rule('bump_per_yard'):,.2f}",
-            yards,
-            rule("bump_per_yard"),
-            "yd",
-        ))
+        if bump:
+            lines.append(_line(
+                "Materials",
+                f"Bump interlining · {yards:.1f} yd @ ${rule('bump_per_yard'):,.2f}",
+                yards,
+                rule("bump_per_yard"),
+                "yd",
+            ))
     if sheer_meta and sheer_job and sheer_job.carrier_count:
         rate = rule("ripplefold_carrier_each")
         lines.append(_line(
@@ -209,6 +222,7 @@ def price_opening(opening: dict) -> dict:
         "widths": cloth,
         "cut_length": cut,
         "yards": yards,
+        "bump": bump,
         "sheer": sheer_job,
         "groups": groups,
         "subtotal": round(sum(g["subtotal"] for g in groups), 2),

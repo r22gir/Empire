@@ -1,0 +1,11 @@
+[Unit]
+Description=Max sessions daily export (Rafael main studio only; local files, no network)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/rg/empire-repo-main/backend
+Environment=EMPIRE_DATA_DIR=/home/rg/empire-data
+UnsetEnvironment=EMPIRE_EDITION
+ExecStart=/home/rg/empire-repo-main/backend/venv/bin/python3 scripts/export_max_sessions.py --yesterday
+ExecStart=/home/rg/empire-repo-main/backend/venv/bin/python3 scripts/export_max_sessions.py
+Nice=10

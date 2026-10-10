@@ -1,5 +1,6 @@
 'use client';
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { insertAfter, historyFor, markActive, dropQueued, nextId, type QueuedTurn } from './chatQueue';
 import { Message, PinPrompt, ToolResult } from '../lib/types';
 import { API } from '../lib/api';
 import { asksForFounderPin, redactSecret, toolResultPreview } from '../lib/founderPin';
@@ -10,6 +11,57 @@ const WELCOME: Message = {
   content: "Hello! I'm **MAX**, your Empire AI Assistant.\n\n_Tip: Ctrl+V to paste images · Shift+Enter for newlines_",
   timestamp: '',
 };
+
+// UI-side error notices. They are shown to Rafael but never sent back to Max
+// as history: on 2026-10-06 the old "**Connection error.** Backend may be
+// offline." notice was replayed and the model copied it as its answer.
+// Keep in sync with _UI_ERROR_PREFIXES in backend/app/routers/max/router.py.
+const UI_ERROR_PREFIXES = [
+  '**Connection error.**',
+  '**Connection dropped.**',
+  "**Can't reach the server.**",
+  '**Server error.**',
+];
+const isUiErrorNotice = (m: { role: string; content: string }) =>
+  m.role === 'assistant' && UI_ERROR_PREFIXES.some(p => (m.content || '').trimStart().startsWith(p));
+
+class StreamHttpError extends Error {
+  status: number;
+  constructor(status: number, detail: string) {
+    super(detail);
+    this.name = 'StreamHttpError';
+    this.status = status;
+  }
+}
+
+async function serverIsUp(): Promise<boolean> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const r = await fetch(API + '/system/health', { cache: 'no-store', signal: ctrl.signal });
+    return r.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** Plain-words notice for a failed reply (instead of a blanket "Backend may be offline"). */
+async function describeStreamFailure(e: any): Promise<string> {
+  if (e instanceof StreamHttpError) {
+    return `**Server error.** The server is up, but this request failed (HTTP ${e.status})`
+      + (e.message ? `: ${e.message}` : '.') + ' Please try again.';
+  }
+  const why = e?.message ? ` (error: "${String(e.message).slice(0, 120)}")` : '';
+  if (await serverIsUp()) {
+    return '**Connection dropped.** The server is up, but the connection to this screen was cut before '
+      + "Max's reply arrived" + why + '. This usually happens when the phone pauses Safari (switching apps '
+      + 'or locking the screen) or the network blips. Send it again and keep this screen open until the reply shows.';
+  }
+  return "**Can't reach the server.** The Empire server did not answer" + why
+    + '. Check the internet connection and try again in a minute.';
+}
 
 function formatContextPack(data: any): string {
   const parts: string[] = [];
@@ -33,6 +85,9 @@ export function useChat() {
   const streamingRef = useRef(false);
   const messagesRef = useRef<Message[]>([WELCOME]);
   const contextPackRef = useRef<string>('');
+  // 2026-10-08: messages sent while Max is answering wait here and run in order.
+  const queueRef = useRef<QueuedTurn[]>([]);
+  const [queuedCount, setQueuedCount] = useState(0);
 
   // Set welcome timestamp on client only (avoids hydration mismatch)
   useEffect(() => {
@@ -85,7 +140,20 @@ export function useChat() {
     setMessages(next);
     messagesRef.current = next;
     chatIdRef.current = chatId;
+    // another chat opened: queued messages belonged to the old one
+    queueRef.current = [];
+    setQueuedCount(0);
   }, []);
+
+  const runTurnRef = useRef<((turn: QueuedTurn) => Promise<void>) | null>(null);
+
+  const runNextQueued = useCallback(() => {
+    const next = queueRef.current.shift();
+    setQueuedCount(queueRef.current.length);
+    if (!next || !runTurnRef.current) return;
+    updateMessages(prev => markActive(prev, next.msg.id));
+    void runTurnRef.current({ ...next, msg: { ...next.msg, queued: false } });
+  }, [updateMessages]);
 
   const sendMessage = useCallback(async (
     input: string,
@@ -93,17 +161,37 @@ export function useChat() {
     desk?: string,
     channel?: string,
   ) => {
-    if (!input.trim() || streamingRef.current) return;
-
+    if (!input.trim()) return;
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: nextId(),
       role: 'user',
       content: input,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      ...(imageFilename ? { image: imageFilename } : {}),
     };
-    const current = messagesRef.current;
-    const newMsgs = [...current, userMsg];
-    updateMessages(newMsgs);
+    if (streamingRef.current || queueRef.current.length > 0) {
+      // Max is still answering: never drop or block the message. Show it now, run it next.
+      queueRef.current.push({ msg: { ...userMsg, queued: true }, imageFilename, desk, channel });
+      setQueuedCount(queueRef.current.length);
+      updateMessages(prev => [...prev, { ...userMsg, queued: true }]);
+      return;
+    }
+    updateMessages(prev => [...prev, userMsg]);
+    await runTurnRef.current?.({ msg: userMsg, imageFilename, desk, channel });
+  }, [updateMessages]);
+
+  const cancelQueued = useCallback((id: string) => {
+    queueRef.current = queueRef.current.filter(t => t.msg.id !== id);
+    setQueuedCount(queueRef.current.length);
+    updateMessages(prev => dropQueued(prev, id));
+  }, [updateMessages]);
+
+  const runTurn = useCallback(async ({ msg: userMsg, imageFilename, desk, channel }: QueuedTurn) => {
+    const input = userMsg.content;
+    // conversation as of this turn (later queued messages are not part of it yet)
+    // (messagesRef can lag one render behind the state update that added this turn)
+    const base = messagesRef.current.some(m => m.id === userMsg.id) ? messagesRef.current : [...messagesRef.current, userMsg];
+    const newMsgs = historyFor(base, userMsg.id);
     setIsStreaming(true);
     streamingRef.current = true;
     setStreamingContent('');
@@ -118,7 +206,7 @@ export function useChat() {
     let responseMetadata: any = undefined;
 
     try {
-      const historySlice = newMsgs.slice(-20).map(m => ({ role: m.role, content: m.content }));
+      const historySlice = newMsgs.filter(m => !isUiErrorNotice(m)).slice(-20).map(m => ({ role: m.role, content: m.content }));
       if (contextPackRef.current && historySlice.filter(m => m.role === 'user').length <= 1) {
         historySlice.unshift({ role: 'user', content: contextPackRef.current });
         historySlice.unshift({ role: 'assistant', content: 'Context loaded. Ready.' });
@@ -133,6 +221,12 @@ export function useChat() {
       };
       if (desk) body.desk = desk;
       if (imageFilename) body.image_filename = imageFilename;
+      try {
+        const activeJobId = localStorage.getItem('empire-active-job-id');
+        if (activeJobId) {
+          body.job_id = activeJobId;
+        }
+      } catch { /* ignore storage errors */ }
 
       const response = await fetch(API + '/max/chat/stream', {
         method: 'POST',
@@ -141,12 +235,22 @@ export function useChat() {
         signal: ctrl.signal,
       });
 
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const raw = await response.text();
+          try { const j = JSON.parse(raw); detail = String(j.detail || j.error || j.message || ''); } catch { detail = raw; }
+        } catch { /* ignore */ }
+        throw new StreamHttpError(response.status, detail.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200));
+      }
       if (!response.body) throw new Error('No response body');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
       const toolResults: ToolResult[] = [];
       const pinPrompts: PinPrompt[] = [];
+      let gotDone = false;
+      let gotError = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -173,12 +277,14 @@ export function useChat() {
             } else if (ev.type === 'tool_result') {
               toolResults.push({ tool: ev.tool || 'unknown', success: ev.success ?? false, result: ev.result, error: ev.error });
             } else if (ev.type === 'done') {
+              gotDone = true;
               modelUsed = ev.model_used || '';
               setStreamingModel(modelUsed);
               if (ev.quality) qualityBadge = ev.quality;
               if (ev.metadata) responseMetadata = ev.metadata;
               if (ev.conversation_id && !chatIdRef.current) chatIdRef.current = ev.conversation_id;
             } else if (ev.type === 'error') {
+              gotError = true;
               accumulated += '\n\n*Error: ' + (ev.content || 'Unknown error') + '*';
               setStreamingContent(accumulated);
             }
@@ -186,7 +292,11 @@ export function useChat() {
         }
       }
 
-      const assistantId = (Date.now() + 1).toString();
+      // The stream closed without Max's "done": the reply was cut off on the way.
+      if (!gotDone && !gotError && !accumulated) throw new Error('the reply stream closed early');
+      if (!gotDone && !gotError) accumulated += "\n\n*[Reply cut off before Max finished. Send it again to get the rest.]*";
+
+      const assistantId = nextId();
       if (pinPrompts.length === 0 && asksForFounderPin(accumulated)) {
         pinPrompts.push({
           resumeId: `verify:${assistantId}`,
@@ -205,34 +315,41 @@ export function useChat() {
         quality: qualityBadge,
         metadata: responseMetadata,
       };
-      updateMessages([...newMsgs, assistantMsg]);
+      updateMessages(prev => insertAfter(prev, userMsg.id, assistantMsg));
       setStreamingContent('');
       setStreamingSteps([]);
       if (onMessageCompleteRef.current) onMessageCompleteRef.current(assistantMsg);
     } catch (e: any) {
       if (e.name === 'AbortError') {
         if (accumulated) {
-          updateMessages(prev => [...prev, {
-            id: (Date.now() + 1).toString(),
+          updateMessages(prev => insertAfter(prev, userMsg.id, {
+            id: nextId(),
             role: 'assistant', content: accumulated + '\n\n*[Stopped]*',
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             model: modelUsed,
-          }]);
+          }));
         }
       } else {
-        updateMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant', content: '**Connection error.** Backend may be offline.',
+        const notice = await describeStreamFailure(e);
+        updateMessages(prev => insertAfter(prev, userMsg.id, {
+          id: nextId(),
+          role: 'assistant',
+          // keep any partial reply; the notice goes underneath it
+          content: accumulated ? `${accumulated}\n\n${notice.replace(/^\*\*([^*]+)\*\*/, '*$1*')}` : notice,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        }]);
+          model: modelUsed,
+        }));
       }
       setStreamingContent('');
     } finally {
       setIsStreaming(false);
       streamingRef.current = false;
       abortRef.current = null;
+      // next queued message, in order (Stop ends only the current reply)
+      if (queueRef.current.length) setTimeout(runNextQueued, 0);
     }
-  }, [updateMessages]);
+  }, [updateMessages, runNextQueued]);
+  runTurnRef.current = runTurn;
 
   const submitFounderPin = useCallback(async (messageId: string, resumeId: string, pin: string) => {
     const secret = pin;
@@ -325,8 +442,8 @@ export function useChat() {
   }, []);
 
   return {
-    messages, isStreaming, streamingContent, streamingSteps, streamingModel,
-    sendMessage, stopStreaming, loadMessages, setOnMessageComplete, submitFounderPin, cancelFounderPin,
+    messages, isStreaming, streamingContent, streamingSteps, streamingModel, queuedCount,
+    sendMessage, stopStreaming, loadMessages, setOnMessageComplete, submitFounderPin, cancelFounderPin, cancelQueued,
     chatId: chatIdRef.current,
   };
 }

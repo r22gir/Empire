@@ -3,6 +3,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Bell, ChevronDown, Check, ArrowLeft } from 'lucide-react';
 import { API } from '../../lib/api';
 import LanguageSwitcher from '../LanguageSwitcher';
+import ThemeToggle from '../ThemeToggle';
+import { EDITION } from '../../v3/edition';
 
 type ProviderRow = {
   id: string;
@@ -40,6 +42,46 @@ const DISABLED_REASON_LABELS: Record<string, string> = {
   ai_calls_disabled: 'AI calls off',
   local_service_unavailable: 'Local service unavailable',
 };
+
+const FALLBACK_PROVIDER_MODELS: Record<string, string[]> = {
+  groq: [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+    'qwen/qwen3.8-27b',
+  ],
+  gemini: [
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-3.5-flash',
+  ],
+  openrouter: [
+    'openai/gpt-4o-mini',
+    'anthropic/claude-3.5-sonnet',
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'google/gemma-4-31b-it:free',
+    'cohere/north-mini-code:free',
+    'openrouter/free',
+  ],
+  minimax: ['MiniMax-M3'],
+  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  qwen: ['qwen-plus', 'qwen-max'],
+  claude: ['claude-sonnet-4-6', 'claude-opus-4-6'],
+  openai: ['gpt-4o', 'gpt-4o-mini'],
+  xai: ['grok-3', 'grok-2-vision-1212'],
+};
+
+function isFreeTierModel(modelName: string): boolean {
+  if (!modelName) return false;
+  const m = modelName.toLowerCase();
+  if (m.endsWith(':free')) return true;
+  if (m.includes('gpt-oss-120b') || m.includes('gpt-oss-20b') || m.includes('gpt-oss')) return true;
+  if (m.includes('qwen3.8-27b') || m.includes('qwen3.8')) return true;
+  if (m.includes('gemini-2.5-flash-lite') || m.includes('gemini-3.5-flash') || m.includes('gemini-2.5-flash')) return true;
+  if (m.includes('openrouter/free')) return true;
+  return false;
+}
 
 // Map notification sources to navigation targets
 const NOTIF_NAV_MAP: Record<string, { product?: string; screen?: string }> = {
@@ -79,6 +121,7 @@ interface Props {
 export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack, canGoBack = true }: Props) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerRows, setProviderRows] = useState<ProviderRow[]>([]);
   const [selectedProvider, setSelectedProvider] = useState('minimax');
   const [selectedModelName, setSelectedModelName] = useState('MiniMax-M3');
@@ -135,12 +178,12 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
     return () => clearInterval(iv);
   }, [fetchRoutingModels]);
 
-  const switchProvider = useCallback(async (provider: ProviderRow) => {
+  const switchProvider = useCallback(async (provider: ProviderRow, specificModel?: string) => {
     if (switchingProvider || provider.disabled || !provider.available) return;
     setSwitchingProvider(true);
     try {
       const targetProvider = provider.provider_canonical || provider.id;
-      const targetModel = provider.model || provider.models?.[0] || '';
+      const targetModel = specificModel || provider.model || provider.models?.[0] || '';
       const res = await fetch(`${API}/max/routing-state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -198,13 +241,9 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
     return `${Math.floor(hrs / 24)}d`;
   };
 
-  // Fallback notifications if API returns none
-  const displayNotifs = notifications.length > 0 ? notifications : [
-    { id: '1', title: 'Maria — New Quote', message: 'Request for living room valances', category: 'quote', source: 'Empire', created_at: '', read: false },
-    { id: '2', title: 'Emily — Shipping', message: 'Valance order picked up', category: 'shipping', source: 'Empire', created_at: '', read: false },
-    { id: '3', title: 'Aria Desk', message: 'Instagram post drafted', category: 'desk', source: 'Empire', created_at: '', read: true },
-    { id: '4', title: 'System', message: 'All services healthy', category: 'system', source: 'Empire', created_at: '', read: true },
-  ];
+  // Real notifications only (the old sample "Maria — New Quote" placeholders are gone;
+  // an empty list shows "No notifications").
+  const displayNotifs = notifications;
 
   const catColor = (cat: string): string => {
     const c = cat.toLowerCase();
@@ -217,11 +256,10 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
   };
 
   return (
-    <header className="h-[56px] bg-[var(--panel)] border-b border-[var(--border)] flex items-center justify-between px-3 md:px-6 shrink-0 z-50">
-      {/* Logo */}
-      <div className="text-[16px] font-bold tracking-[3px] text-[var(--text)]">
-        <span className="text-[var(--gold)]">E</span>MPIRE
-      </div>
+    <header className="v3-band app">
+      {/* Logo: mono-E + wordmark (design system v3). "/" is the Max home. */}
+      <a href="/" className="logo" title="Max home" aria-label="Empire — Max home"><span className="v3-mono-e">E</span></a>
+      <a href="/" className="v3-wm" tabIndex={-1} aria-hidden="true">EMPIRE</a>
 
       {/* N2: Global Back button. Always visible per Founder spec.
           - Desktop: text label "← Back"
@@ -232,85 +270,186 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
       {onBack && (
         <button
           onClick={onBack}
-          className="flex items-center gap-1 md:gap-1.5 bg-transparent border border-transparent rounded-[var(--radius)] px-1.5 md:px-2.5 py-[6px] md:py-[7px] text-[12px] font-semibold cursor-pointer transition-all"
-          style={{
-            color: canGoBack ? '#666' : '#bbb',
-            opacity: canGoBack ? 1 : 0.55,
-          }}
-          onMouseEnter={e => { if (canGoBack) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; e.currentTarget.style.color = '#1a1a1a'; } }}
-          onMouseLeave={e => { if (canGoBack) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.color = '#666'; } }}
+          className={`v3-back${canGoBack ? '' : ' is-off'}`}
           title={canGoBack ? 'Back to previous screen' : 'No previous screen — clicking returns to Owner’s Desk'}
           aria-label="Back"
         >
           <ArrowLeft size={14} />
-          <span className="hidden sm:inline">Back</span>
+          <span className="lbl">Back</span>
         </button>
       )}
 
       {/* Search — hidden on mobile */}
       <button
         onClick={onQuickSwitch}
-        className="hidden md:flex items-center gap-2 bg-[#f5f3ef] border border-[var(--border)] rounded-[var(--radius)] px-5 py-[10px] w-[320px] text-[13px] text-[var(--faint)] cursor-pointer hover:border-[var(--border-h)] transition-colors"
+        className="v3-search"
       >
-        <span className="text-[11px] font-mono">⌘K</span>
-        <span>Search anything...</span>
+        <span>Search anything…</span>
+        <kbd>⌘K</kbd>
       </button>
 
       {/* Right controls */}
-      <div className="flex items-center gap-2 md:gap-3">
+      <div className="br">
         {/* Model selector — visible on all widths (compact on mobile) */}
         <div ref={modelRef} className="relative">
           <button
             onClick={() => setShowModelPicker(!showModelPicker)}
-            className="empire-card flex items-center gap-1.5 md:gap-2 !py-2 !px-2 md:!px-3 text-[11px] font-bold font-mono"
+            className="v3-modelbtn"
             aria-label={`Current model: ${selectedProvider} ${selectedModelName}. Click to switch.`}
             title={`${selectedProvider} · ${selectedModelName}`}
           >
             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: PROVIDER_COLORS[selectedProvider] || '#b8960c' }} />
-            <span className="hidden sm:inline" style={{ color: PROVIDER_COLORS[selectedProvider] || '#b8960c' }}>
-              {selectedProvider}
-            </span>
-            <span style={{ color: PROVIDER_COLORS[selectedProvider] || '#b8960c' }}>
-              · {selectedModelName}
-            </span>
-            <ChevronDown size={12} className="text-[var(--faint)] shrink-0" />
+            <span className="prov">{selectedProvider}</span>
+            <span className="mdl">· {selectedModelName}</span>
+            <ChevronDown size={12} className="chev" />
           </button>
           {showModelPicker && (
-            <div className="absolute top-[46px] right-0 w-[calc(100vw-24px)] md:w-[320px] max-w-[380px] bg-[var(--panel)] border border-[var(--border)] rounded-[var(--radius)] shadow-[0_8px_30px_rgba(0,0,0,0.12)] z-[200] overflow-hidden py-1">
-              {providerRows.map((row) => {
-                const canonical = row.provider_canonical || row.id;
-                const selected = canonical === selectedProvider;
-                const color = PROVIDER_COLORS[canonical] || '#6b7280';
-                const disabledReason = row.disabled_reason ? (DISABLED_REASON_LABELS[row.disabled_reason] || row.disabled_reason) : '';
-                const unavailable = !!row.disabled || !row.available;
-                return (
-                  <button
-                    key={canonical}
-                    onClick={() => switchProvider(row)}
-                    disabled={unavailable || switchingProvider}
-                    className={`w-full text-left px-3 py-2.5 text-[11px] flex items-center gap-2 transition-colors ${selected ? 'bg-[var(--card-bg)]' : 'hover:bg-[var(--hover)]'} ${unavailable ? 'opacity-55 cursor-not-allowed' : 'cursor-pointer'}`}
-                    title={disabledReason || ''}
-                  >
-                    <span className="w-2 h-2 rounded-full" style={{ background: color }} />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold truncate" style={{ color }}>
-                        {row.name || canonical}
-                        {selected ? ' · active' : ''}
+            <div className="absolute top-[46px] right-0 w-[calc(100vw-24px)] sm:w-[380px] max-w-[420px] bg-[#121417] border border-[#b8960c]/40 rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.5)] z-[200] overflow-hidden flex flex-col max-h-[82vh]">
+              {/* Black & Gold header */}
+              <div className="px-4 py-3 border-b border-[#242830] bg-[#0d0f12] flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#b8960c]" />
+                  <span className="text-[11px] font-bold tracking-wider uppercase text-[#d4b84a]">
+                    AI Provider & Model Router
+                  </span>
+                </div>
+                <span className="text-[9px] font-mono text-[#888] truncate max-w-[150px]">
+                  {selectedProvider} · {selectedModelName}
+                </span>
+              </div>
+
+              {/* Provider List with Sub-Picker */}
+              <div className="overflow-y-auto divide-y divide-[#1e2229] py-1 flex-1">
+                {providerRows.map((row) => {
+                  const canonical = row.provider_canonical || row.id;
+                  const isSelected = canonical === selectedProvider;
+                  const color = PROVIDER_COLORS[canonical] || '#6b7280';
+                  const models = (row.models && row.models.length > 0)
+                    ? row.models
+                    : (FALLBACK_PROVIDER_MODELS[canonical] || (row.model ? [row.model] : []));
+                  const isExpanded = expandedProvider === canonical || (expandedProvider === null && isSelected);
+                  const unavailable = !!row.disabled || !row.available;
+                  const disabledReason = row.disabled_reason ? (DISABLED_REASON_LABELS[row.disabled_reason] || row.disabled_reason) : '';
+                  const hasFree = models.some(isFreeTierModel);
+
+                  return (
+                    <div key={canonical} className={`transition-colors ${isSelected ? 'bg-[#181b22]' : 'hover:bg-[#15181d]'}`}>
+                      {/* Provider Row Header */}
+                      <div className="px-3 py-2 flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => switchProvider(row)}
+                          disabled={unavailable || switchingProvider}
+                          className={`flex items-center gap-2 text-left min-w-0 flex-1 ${unavailable ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                          title={disabledReason || ''}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
+                          <div className="min-w-0">
+                            <div className="font-bold text-[12px] text-white flex items-center gap-1.5 truncate">
+                              <span>{row.name || canonical}</span>
+                              {isSelected && (
+                                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[#b8960c]/20 text-[#d4b84a] border border-[#b8960c]/40">
+                                  ACTIVE
+                                </span>
+                              )}
+                              {hasFree && (
+                                <span className="text-[8px] font-mono px-1 py-0.2 rounded bg-[#16a34a]/20 text-[#22c55e] border border-[#16a34a]/30">
+                                  FREE TIERS
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-[#888] font-mono truncate">
+                              {row.model || models[0] || 'default model'}
+                              {unavailable ? ` · ${disabledReason || 'unavailable'}` : ''}
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Expand / Collapse sub-picker button */}
+                        {models.length > 0 && (
+                          <button
+                            onClick={() => setExpandedProvider(isExpanded ? '' : canonical)}
+                            className="p-1.5 rounded-lg text-[#888] hover:text-[#d4b84a] hover:bg-[#20252e] transition-colors cursor-pointer shrink-0"
+                            title="Toggle models sub-picker"
+                            aria-label="Toggle models"
+                          >
+                            <ChevronDown
+                              size={14}
+                              className={`transition-transform duration-200 ${isExpanded ? 'rotate-180 text-[#d4b84a]' : ''}`}
+                            />
+                          </button>
+                        )}
                       </div>
-                      <div className="text-[9px] text-[var(--muted)] truncate">
-                        {row.model || row.models?.[0] || 'model not set'}
-                        {unavailable ? ` · ${disabledReason || 'unavailable'}` : ''}
-                      </div>
+
+                      {/* Models Sub-Picker */}
+                      {isExpanded && models.length > 0 && (
+                        <div className="px-2.5 pb-2.5 pt-1 space-y-1 bg-[#0f1115]">
+                          <div className="text-[9px] font-bold uppercase tracking-wider text-[#777] px-2 pt-0.5 flex justify-between items-center">
+                            <span>Available Models ({models.length})</span>
+                            <span className="font-mono text-[8px] text-[#555]">Click to select</span>
+                          </div>
+                          {models.map((modelName) => {
+                            const isModelSelected = isSelected && selectedModelName === modelName;
+                            const isFree = isFreeTierModel(modelName);
+
+                            return (
+                              <button
+                                key={modelName}
+                                onClick={() => switchProvider(row, modelName)}
+                                disabled={unavailable || switchingProvider}
+                                className={`w-full text-left p-2 rounded-xl transition-all border ${
+                                  isModelSelected
+                                    ? 'bg-[#1c2029] border-[#b8960c] text-white shadow-sm'
+                                    : 'bg-[#14171d] border-[#22262f] hover:border-[#383e4c] text-[#ccc] hover:text-white'
+                                } ${unavailable ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono text-[11px] font-bold truncate">
+                                    {modelName}
+                                  </span>
+                                  {isFree ? (
+                                    <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-[#16a34a]/25 text-[#22c55e] border border-[#16a34a]/40 uppercase shrink-0">
+                                      FREE
+                                    </span>
+                                  ) : (
+                                    <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-[#242832] text-[#999] shrink-0">
+                                      PAID
+                                    </span>
+                                  )}
+                                </div>
+
+                                {isFree ? (
+                                  <div className="mt-1 space-y-0.5">
+                                    <div className="text-[10px] font-mono font-semibold text-[#b8960c]">
+                                      $0 · limits
+                                    </div>
+                                    <div className="text-[9px] text-[#fca5a5] flex items-center gap-1 font-medium">
+                                      <span>✕</span>
+                                      <span>not for quotes, invoices or client replies</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="mt-0.5 text-[9px] text-[#777] font-mono">
+                                    Standard provider API rates apply
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </button>
-                );
-              })}
-              {providerRows.length === 0 && (
-                <div className="px-3 py-2 text-[10px] text-[var(--muted)]">No providers loaded</div>
-              )}
+                  );
+                })}
+                {providerRows.length === 0 && (
+                  <div className="px-3 py-4 text-center text-[10px] text-[var(--muted)]">No providers loaded</div>
+                )}
+              </div>
             </div>
           )}
         </div>
+
+        {/* Dark / Gold theme (per device) */}
+        <ThemeToggle />
 
         {/* Language Switcher */}
         <LanguageSwitcher />
@@ -319,12 +458,11 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
         <div ref={notifRef} className="relative">
           <button
             onClick={() => setShowNotifs(!showNotifs)}
-            className="empire-card !p-2 relative"
+            className="icon-btn"
+            aria-label={`Notifications${unreadCount ? `: ${unreadCount} unread` : ''}`}
           >
-            <Bell size={16} className="text-[var(--dim)]" />
-            {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 bg-[#dc2626] text-white text-[8px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{unreadCount}</span>
-            )}
+            <Bell size={17} strokeWidth={1.5} />
+            {unreadCount > 0 && <span className="badge">{unreadCount > 9 ? '9+' : unreadCount}</span>}
           </button>
           {showNotifs && (
             <div className="absolute top-[46px] right-0 w-[calc(100vw-24px)] md:w-[380px] max-w-[380px] bg-[var(--panel)] border border-[var(--border)] rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] z-[200] overflow-hidden">
@@ -409,16 +547,14 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
         </div>
 
         {/* Settings */}
-        <button onClick={onClientView} className="empire-card !p-2">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--dim)]">
+        <button onClick={onClientView} className="icon-btn hide-sm" aria-label="Client view (hide internal data)" title="Client view">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
           </svg>
         </button>
 
         {/* Avatar */}
-        <div className="w-[36px] h-[36px] rounded-[12px] bg-[var(--gold)] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer">
-          RG
-        </div>
+        <span className="v3-av" aria-label={EDITION.ownerName}>{EDITION.ownerInitials}</span>
       </div>
     </header>
   );
