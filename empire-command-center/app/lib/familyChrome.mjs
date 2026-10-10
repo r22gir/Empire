@@ -101,10 +101,48 @@ export function chatWelcome(edition, assistantName) {
   return `¡Hola! Soy **${name}**, tu asistente de EmpireBox.\n\n_Consejo: Ctrl+V para pegar imágenes · Shift+Enter para una línea nueva_`;
 }
 
-/** Logged-out family home goes to /login. Workroom stays on the shell. */
-export function familyHomeRedirect(edition, pathname, hasSession) {
-  if (!isFamilyEdition(edition)) return null;
-  if (pathname !== '/') return null;
+const FAMILY_HOSTS = new Set(['amp.empirebox.store', 'maxine.empirebox.store']);
+
+export function isFamilyHost(host) {
+  const h = String(host || '').split(':')[0].toLowerCase();
+  return FAMILY_HOSTS.has(h);
+}
+
+export function isFamilySurface(edition, host) {
+  return isFamilyEdition(edition) || isFamilyHost(host);
+}
+
+export function normalizeFamilyPath(pathname) {
+  let path = String(pathname || '/').split('?')[0].split('#')[0] || '/';
+  if (!path.startsWith('/')) path = `/${path}`;
+  while (path.includes('//')) path = path.split('//').join('/');
+  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  return path || '/';
+}
+
+export function isFamilyPublicPath(pathname) {
+  const path = normalizeFamilyPath(pathname);
+  if (
+    path === '/login'
+    || path === '/amp/login'
+    || path === '/amp/signup'
+    || path === '/amp'
+    || path === '/favicon.ico'
+    || path === '/robots.txt'
+  ) return true;
+  if (path.startsWith('/_next/')) return true;
+  if (path.startsWith('/api/')) return true;
+  return false;
+}
+
+/** Logged-out family home and operator pages go to /login. Workroom stays on the shell.
+ *  Edition is NEXT_PUBLIC_EMPIRE_EDITION (baked at build). Host covers amp.empirebox.store
+ *  even when that env was missing from an old build. */
+export function familyHomeRedirect(edition, pathname, hasSession, host) {
+  if (!isFamilySurface(edition, host)) return null;
   if (hasSession) return null;
-  return '/login';
+  const path = normalizeFamilyPath(pathname);
+  if (isFamilyPublicPath(path)) return null;
+  if (path === '/' || path.startsWith('/amp/')) return '/login';
+  return null;
 }

@@ -100,6 +100,7 @@ export function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_EMPIRE_EDITION || "",
     pathname,
     Boolean(request.cookies.get("amp_session")?.value),
+    host,
   );
   if (home) {
     const url = request.nextUrl.clone();

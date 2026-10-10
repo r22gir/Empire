@@ -36,15 +36,37 @@ curl -s http://127.0.0.1:8011/api/v1/edition
 
 `/api/v1/edition` is public so the UI can show the edition and the Spanish "sin acceso" state. Everything else requires the allowlist.
 
-Frontend for this instance (separate from the Workroom command center process if you want a different name in the shell):
+Frontend for this instance (separate from the Workroom command center process). **`NEXT_PUBLIC_*` is baked at `next build`.** A rebuild is required after changing these. Middleware will not send anonymous `/` to `/login` if `NEXT_PUBLIC_EMPIRE_EDITION=amp` was missing from the build (the host `amp.empirebox.store` is a fallback in this commit).
+
+Dev:
 
 ```bash
+cd /home/rg/empire-repo/empire-command-center
 NEXT_PUBLIC_EMPIRE_EDITION=amp \
 NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
 EMPIRE_API_BASE=http://127.0.0.1:8011 \
 npx next dev -p 3011
 ```
+
+Production (rebuild, then start on 3011):
+
+```bash
+cd /home/rg/empire-repo/empire-command-center
+NEXT_PUBLIC_EMPIRE_EDITION=amp \
+NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
+EMPIRE_API_BASE=http://127.0.0.1:8011 \
+npx next build --webpack
+
+NEXT_PUBLIC_EMPIRE_EDITION=amp \
+NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
+EMPIRE_API_BASE=http://127.0.0.1:8011 \
+npx next start -p 3011
+```
+
+`AMP_LOGIN_REDIRECT` is a **backend** env (default `/login?listo=1`) used after a magic-link login. It is not a Next.js build variable.
 
 The language switcher still toggles English. With no saved choice, this edition starts in Spanish.
 

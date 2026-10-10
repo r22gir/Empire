@@ -153,8 +153,8 @@ export default function AmpDashboard() {
     } catch {}
   };
 
-  if (loading) return (
-    <div style={{ minHeight: '100vh', background: '#FFF9F0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+  if (loading || !user) return (
+    <div data-amp-page style={{ minHeight: '100vh', background: '#FFF9F0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <Flame size={32} color="#D4A030" style={{ animation: 'pulse 1.5s infinite' }} />
     </div>
   );
