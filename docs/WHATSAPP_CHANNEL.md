@@ -18,7 +18,7 @@ Webhook: `/api/v1/whatsapp/webhook`
 
 ### Environment
 
-Set these on the instance. Do not commit them.
+Set these in the instance environment, or configure them through the guided "Connect WhatsApp" step during onboarding/settings (saved with file mode 0600 in the edition's data directory). Process environment variables override stored credentials.
 
 | Variable | Purpose |
 |---|---|
@@ -29,8 +29,22 @@ Set these on the instance. Do not commit them.
 | `WHATSAPP_OWNER_NUMBERS` | Comma-separated owner numbers. Required before the channel answers |
 | `WHATSAPP_APPROVED_TEMPLATES` | Optional comma-separated template names already approved in Meta |
 | `WHATSAPP_REPLY_MODE` | `voice_text` (default), `text`, or `match` |
+| `WHATSAPP_WEBHOOK_BASE_URL` | Optional base URL (defaults to `https://wa-amp.empirebox.store` for Max-e, `https://wa-maxine.empirebox.store` for Maxine) |
 
 If any of the first four is missing, inbound webhooks return 503 and the UI shows the channel off.
+
+### Family Editions Guided Walkthrough (Max-e & Maxine)
+
+In the initial setup interview or the Command Center dashboard:
+1. **Interactive Guided Setup**: The owner is asked whether they already have Meta credentials or need a step-by-step walkthrough.
+2. **Step-by-Step Meta Walkthrough**:
+   - Create a Meta for Developers account with the owner's OWN Facebook login.
+   - Create a Business-type app and add the WhatsApp product.
+   - Use Meta's free test number first and verify the owner's personal number with the 6-digit code.
+   - Copy the Phone Number ID, Access Token, and App Secret into the edition form.
+3. **Secure Storage**: Credentials are saved to `$EMPIRE_DATA_DIR/whatsapp_credentials.json` with strict `0600` permissions. Raw tokens and secrets are never returned by any API or shown in the UI.
+4. **Test Connection**: A read-only verification action calls Meta Graph API to read `display_phone_number` and `verified_name` and check webhook handshake status without sending any WhatsApp message.
+5. **Phase 2 Note**: WhatsApp voice calls are clearly marked for Phase 2; Phase 1 delivers interactive text, voice note audio transcription, and PDF document delivery.
 
 ### Behavior
 
@@ -82,7 +96,7 @@ Webhook: `/api/v1/whatsapp/webhook`
 
 ### Entorno
 
-Estas variables viven en la instancia. No se commitean.
+Estas variables viven en el entorno de la instancia o se configuran desde el paso guiado "Conectar WhatsApp" en la entrevista de bienvenida / centro de mando (guardadas con permisos estrictos 0600 en el directorio de datos de la edición). Las variables del entorno del proceso tienen prioridad como sobreescritura si existen.
 
 | Variable | Para qué |
 |---|---|
@@ -93,8 +107,22 @@ Estas variables viven en la instancia. No se commitean.
 | `WHATSAPP_OWNER_NUMBERS` | Números del dueño, separados por coma. Sin esto el canal no contesta |
 | `WHATSAPP_APPROVED_TEMPLATES` | Opcional. Nombres de plantillas ya aprobadas en Meta |
 | `WHATSAPP_REPLY_MODE` | `voice_text` (predeterminado), `text` o `match` |
+| `WHATSAPP_WEBHOOK_BASE_URL` | URL base opcional (por defecto `https://wa-amp.empirebox.store` en Max-e y `https://wa-maxine.empirebox.store` en Maxine) |
 
 Si falta alguna de las cuatro primeras, el webhook responde 503 y la interfaz muestra el canal apagado.
+
+### Tutorial Guiado en Ediciones Familiares (Max-e y Maxine)
+
+En la entrevista inicial o desde el Centro de Mando:
+1. **Paso Interactivo**: Pregunta al dueño si ya tiene credenciales de Meta o prefiere la guía paso a paso.
+2. **Tutorial Numérico para Meta**:
+   - Crear cuenta de desarrollador con su PROPIA cuenta de Facebook (no la de Rafael).
+   - Crear una aplicación tipo Negocios (Business) y agregar WhatsApp.
+   - Usar el número de prueba gratuito y registrar su celular personal con el código de 6 dígitos.
+   - Copiar el Identificador del número de teléfono, el Token de acceso y la Clave secreta (App Secret).
+3. **Almacenamiento Seguro**: Se guardan en `$EMPIRE_DATA_DIR/whatsapp_credentials.json` con permisos `0600`. Ninguna API devuelve los secretos crudos.
+4. **Probar Conexión**: Botón de prueba de solo lectura que consulta en Graph API el `display_phone_number` y `verified_name`, y confirma si el webhook ya hizo el apretón de manos con Meta, sin enviar ningún mensaje de WhatsApp.
+5. **Aviso Fase 2**: Se indica claramente que las llamadas de voz por WhatsApp llegarán en la Fase 2, funcionando actualmente texto, notas de voz y PDFs.
 
 ### Comportamiento
 

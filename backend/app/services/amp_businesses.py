@@ -43,7 +43,7 @@ INTERVIEW_MODULES = (
     "leadforge",
     "courses",
 )
-INTERVIEW_LAST_STEP = 10
+INTERVIEW_LAST_STEP = 11
 BLANK_TEMPLATES = {"", "blank", "en_blanco", "none"}
 PAYMENT_METHODS = ("efectivo", "transferencia", "tarjeta", "nequi", "daviplata", "pse")
 # Static API paths under /businesses. Never use these as company slugs.
@@ -744,6 +744,7 @@ def empty_interview_answers() -> dict:
         "phase_name": "",
         "lots": [],
         "argos_consent": "",
+        "whatsapp_setup_status": "pending",
     }
 
 
@@ -787,6 +788,7 @@ def sanitize_interview_answers(raw: Optional[dict]) -> dict:
     base["phase_name"] = _clip(raw.get("phase_name"), 80)
     base["lots"] = _sanitize_lots(raw.get("lots"))
     base["argos_consent"] = _choice(raw.get("argos_consent"), {"all", "public", "later"}, "")
+    base["whatsapp_setup_status"] = _choice(raw.get("whatsapp_setup_status"), {"configured", "skipped", "pending"}, "pending")
     return base
 
 
