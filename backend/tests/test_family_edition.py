@@ -45,7 +45,10 @@ def test_usage_cap_warns_then_soft_blocks_heavy_only(monkeypatch, tmp_path):
     assert summary["allowance"] == 200
     assert summary["level"] == "warn"
     assert summary["cap_percent"] == 20
+    assert summary["used_percent"] == 80.0
+    assert summary["remaining_percent"] == 20.0
     assert "20" in summary["message"]
+    assert "Queda el 20%" in summary["message"]
     assert "20%" in summary["limit_note_es"]
     assert "MiniMax" in summary["limit_note_es"]
     assert enforce_usage_cap(text="hola") is None
@@ -105,15 +108,24 @@ def test_usage_page_is_owner_only_and_states_the_twenty_percent_cap(monkeypatch,
     body = client.get("/api/v1/edition/usage")
     assert body.status_code == 200
     payload = body.json()
-    assert payload["month"]["input_tokens"] == 10
-    assert payload["month"]["output_tokens"] == 5
-    assert payload["month"]["cost_usd"] == 0.01
     assert payload["cap_percent"] == 20
+    assert payload["used_percent"] == 7.5
+    assert payload["remaining_percent"] == 92.5
     assert payload["limit_note_es"] == "Tu uso está limitado al 20% del uso total de MiniMax."
+    hidden = {"baseline", "baseline_basis", "allowance", "used", "day", "month", "ratio"}
+    assert hidden.isdisjoint(payload)
     card = (Path(__file__).resolve().parents[2] / "empire-command-center" / "app" / "components" / "UsageCard.tsx").read_text(encoding="utf-8")
     page = (Path(__file__).resolve().parents[2] / "empire-command-center" / "app" / "uso" / "page.tsx").read_text(encoding="utf-8")
     assert "limitado al" in card
+    assert "queda" in card
+    assert "usado" in card
+    assert " tok" not in card
+    assert "cupo" not in card
+    assert "baseline" not in card
     assert "20%" in page
+    assert "queda" in page
+    assert "usado" in page
+    assert "cupo" not in page
     assert "solo para el dueño" in page
 
 
@@ -357,7 +369,7 @@ def test_maxine_interview_and_payment_plan_share_construction_rows(monkeypatch, 
         conn.close()
 
 
-def test_usage_endpoint_reports_day_and_month(monkeypatch, tmp_path):
+def test_usage_endpoint_reports_percentages_only(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     monkeypatch.setenv("EMPIRE_USAGE_BASELINE_MONTHLY_USD", "1")
     monkeypatch.setenv("INSTANCE_USAGE_CAP_PCT", "20")
@@ -370,6 +382,9 @@ def test_usage_endpoint_reports_day_and_month(monkeypatch, tmp_path):
     assert body.status_code == 200
     data = body.json()
     assert data["enforced"] is True
-    assert data["allowance"] == 0.2
-    assert data["month"]["tokens"] == 1_000_000
+    assert data["used_percent"] == 100.0
+    assert data["remaining_percent"] == 0.0
     assert data["level"] == "blocked"
+    assert "allowance" not in data
+    assert "baseline" not in data
+    assert "month" not in data

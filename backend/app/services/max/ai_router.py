@@ -1176,14 +1176,26 @@ class AIRouter:
             provider_unavailable=True,
         )
 
-    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
-        user_text = "\n".join((m.content or "") for m in (messages or []) if getattr(m, "role", "") != "system")
+    def _family_chat_prep(
+        self,
+        messages: List[AIMessage],
+        *,
+        desk: Optional[str],
+        tools: bool,
+        source: str,
+        image_filename: Optional[str],
+        model: Optional[AIModel],
+    ) -> tuple[Optional[AIModel], Optional[str]]:
+        """Force MiniMax on family editions. Return a Spanish cap refusal or None."""
         try:
             from app.edition import is_family_edition
             from app.services.instance_usage import enforce_usage_cap
             if is_family_edition():
                 # These editions stay on MiniMax M3 via the routing state.
                 model = None
+            user_text = "\n".join(
+                (m.content or "") for m in (messages or []) if getattr(m, "role", "") != "system"
+            )
             refusal = enforce_usage_cap(
                 kind="chat",
                 text=user_text,
@@ -1192,10 +1204,22 @@ class AIRouter:
                 source=source,
                 image=bool(image_filename),
             )
-            if refusal:
-                return AIResponse(content=refusal, model_used="usage-cap", fallback_used=False)
+            return model, refusal
         except Exception:
-            logger.debug("usage cap check skipped", exc_info=True)
+            logger.warning("usage cap check skipped", exc_info=True)
+            return model, None
+
+    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
+        model, refusal = self._family_chat_prep(
+            messages,
+            desk=desk,
+            tools=bool(tools),
+            source=source,
+            image_filename=image_filename,
+            model=model,
+        )
+        if refusal:
+            return AIResponse(content=refusal, model_used="usage-cap", fallback_used=False)
         # Per-desk model routing: if no explicit model requested and desk has a preferred model, use it
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]
@@ -1412,6 +1436,17 @@ class AIRouter:
     # ── Streaming chat ──────────────────────────────────────────────────
 
     async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AsyncGenerator[tuple[str, str], None]:
+        model, refusal = self._family_chat_prep(
+            messages,
+            desk=desk,
+            tools=False,
+            source=source,
+            image_filename=image_filename,
+            model=model,
+        )
+        if refusal:
+            yield refusal, "usage-cap"
+            return
         # Per-desk model routing
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]
