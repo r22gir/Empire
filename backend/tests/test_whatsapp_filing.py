@@ -1324,8 +1324,8 @@ def test_new_job_caption_creates_folder_and_files(isolated_whatsapp_edition, mon
         },
     })
     asyncio.run(wa.process_webhook(raw, _sign(raw), http_get=_image_get, http_post=_post))
-    bodies = [p["text"]["body"] for p in posts]
-    assert any("Created job Home Wood Suites" in b and "filed" in b.lower() for b in bodies)
+    bodies = [p.get("text", {}).get("body") for p in posts]
+    assert any("Created job Home Wood Suites" in (b or "") and "filed" in (b or "").lower() for b in bodies)
     folder = jobs_root() / "home-wood-suites"
     assert (folder / "JOB-FACTS.md").is_file()
     rec = read_job_record("home-wood-suites")

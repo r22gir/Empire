@@ -47,7 +47,9 @@ SCAN_MIME_HINTS = (
 )
 FILEABLE_MEDIA = {"image", "photo", "document", "scan", "model"}
 NEW_JOB_RE = re.compile(
-    r"\b(?:new\s+job|nuevo\s+trabajo|new\s+client)\s*[:\-]?\s+(.+)",
+    r"\b(?:new\s+job|nuevo\s+trabajo|new\s+client)\s*[:\-]?\s+"
+    r"(.+?)"
+    r"(?=\s+(?:new\s+job|nuevo\s+trabajo|new\s+client)\b|[.!?]|$)",
     re.IGNORECASE | re.DOTALL,
 )
 PURCHASE_RE = re.compile(
@@ -57,6 +59,7 @@ PURCHASE_RE = re.compile(
 )
 
 _record_lock = threading.RLock()
+_just_created_slugs: set[str] = set()
 
 
 class UnsafeJobSlug(ValueError):
@@ -191,6 +194,12 @@ def parse_new_job_name(text: str) -> Optional[str]:
     if not match:
         return None
     raw = re.sub(r"[\s.!?]+$", "", match.group(1).strip())
+    raw = re.sub(
+        r"\b(?:new\s+job|nuevo\s+trabajo|new\s+client)\b",
+        " ",
+        raw,
+        flags=re.IGNORECASE,
+    )
     raw = re.sub(r"\s+", " ", raw).strip(" -:;,'\"")
     if not raw:
         return None
@@ -245,14 +254,24 @@ def create_client_job_folder(
             json.dumps(record, indent=2, sort_keys=True) + "\n",
         )
     add_client_alias(title, slug, aliases=[title, name.strip()])
+    if not existed:
+        _just_created_slugs.add(slug)
     return {
         "slug": slug,
         "client_name": title,
         "folder_path": str(folder),
         "kind": "client",
-        "created": not existed,
+        "created": not existed or slug in _just_created_slugs,
         "match_reason": "new job" if not existed else "existing folder",
     }
+
+
+def consume_created_job_flag(slug: str) -> bool:
+    """True once after create_client_job_folder, then cleared (for the ack line)."""
+    if slug in _just_created_slugs:
+        _just_created_slugs.discard(slug)
+        return True
+    return False
 
 
 def resolve_or_create_folder(text: str) -> Optional[dict[str, Any]]:
@@ -268,8 +287,13 @@ def resolve_or_create_folder(text: str) -> Optional[dict[str, Any]]:
                 return match
         if probed.get("status") == "ambiguous":
             return None
-        return create_client_job_folder(named)
-    return resolve_folder(text)
+        created = create_client_job_folder(named)
+        created["created"] = True
+        return created
+    match = resolve_folder(text)
+    if match and match.get("slug") in _just_created_slugs:
+        match["created"] = True
+    return match
 
 
 def is_scan_file(filename: str = "", mime_type: str = "", media_type: str = "") -> bool:

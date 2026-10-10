@@ -259,7 +259,7 @@ Unchanged technically: we can store files; we cannot yet confirm units or extrac
 
 Persist every batch into a **client or personal / insurance / store / luxeforge** folder. Shared `JOB-RECORD.json` + `JOB-FACTS.md` on the folder. Chat-log attachments store `job_slug` / `filed_path`. STL / Polycam (including `.zip`) / USDZ / PDF stored (scans/received). No LuxeForge job row, no lead, no EST. Dedup `wamid`. Max remains general chat.
 
-Writers (`file_into_job`, `append_job_record`) validate the slug themselves and keep the resolved path under the jobs root. `JOB-RECORD.json` is written via temp + `os.replace` under a lock; corrupt JSON is quarantined to a timestamped `.corrupt-*` copy before a fresh record starts. Unique client match beats a reserved word. Record `owner` is the edition label, not a hardcoded `founder` on Max-e / Maxine. Attachment cap: `WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES` (default 256 MB).
+Writers (`file_into_job`, `append_job_record`) validate the slug themselves and keep the resolved path under the jobs root. `JOB-RECORD.json` is written via temp + `os.replace` under a lock; corrupt JSON is quarantined to a timestamped `.corrupt-*` copy before a fresh record starts. Unique client match beats a reserved word. `New job <name>` creates a client folder + alias (no LF/quote/lead). Hint text is captions + job-naming text in the batch window only. Every photo batch gets one ack. Record `owner` is the edition label, not a hardcoded `founder` on Max-e / Maxine. Attachment cap: `WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES` (default 256 MB).
 
 **Code:** `backend/app/services/max/whatsapp_folders.py`, wired from `whatsapp_log.py` / `whatsapp_channel.py`.
 

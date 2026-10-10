@@ -1762,6 +1762,7 @@ async def process_webhook(
             consume_job_answer,
             finalize_photo_batch,
             is_job_hint_text,
+            photo_status_reply,
             iso_from_wa_timestamp as _iso_wa,
             last_attachment_ids,
             mark_photo_batch_quoted,
@@ -1864,7 +1865,11 @@ async def process_webhook(
                         other.get("type") == "image" and other.get("from") == sender
                         for other in messages
                     )
-                    if album_mate:
+                    photo_reply = photo_status_reply(sender, message.get("text") or "")
+                    if photo_reply:
+                        route = "photo_status"
+                        reply = photo_reply
+                    elif album_mate:
                         route = "job_hint"
                         reply = ""
                     else:

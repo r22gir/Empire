@@ -38,6 +38,7 @@ from app.services.max.doc_lookup import (
 from app.services.max.whatsapp_folders import (
     FILEABLE_MEDIA,
     append_job_record,
+    consume_created_job_flag,
     ensure_reserved_folders,
     filing_subdir,
     folder_kind_for_slug,
@@ -226,7 +227,7 @@ def isolate_job_hints(text: str) -> list[str]:
     named = parse_new_job_name(text)
     if named:
         found.append(f"New job {named}")
-    blob = " ".join(str(text or "").split()).strip()
+    blob = " ".join(str(text or "").split()).strip().rstrip(".!?")
     if (
         blob
         and "?" not in blob
@@ -941,10 +942,9 @@ def choose_job_for_inbound(text: str, wa_id: str) -> dict[str, Any]:
     match = resolve_or_create_folder(text) if is_job_hint_text(text) or parse_new_job_name(text or "") else None
     if match:
         set_active_job(wa_id, match["slug"], match.get("client_name", ""), match.get("folder_path", ""))
-        remember_batch_job(wa_id, match["slug"], match.get("client_name", ""), created=bool(match.get("created")))
         return {"status": "unique", "job": match}
     held = batch_resolved_job(wa_id)
-    if held:
+    if held and (held.get("slug") and (text or "").strip() == ""):
         return {"status": "unique", "job": held}
     probed = probe_job_text(text)
     if probed.get("status") == "ambiguous":
@@ -1604,7 +1604,11 @@ def finalize_photo_batch(wa_id: str, *, hint_text: str = "", force_ask: bool = F
         match = batch_resolved_job(wa_id)
     if match:
         results = _file_pending_ids(wa_id, match, ids)
-        created = bool(match.get("created") or int(batch.get("created_job") or 0))
+        created = bool(
+            match.get("created")
+            or int(batch.get("created_job") or 0)
+            or consume_created_job_flag(match.get("slug") or "")
+        )
         remember_batch_job(wa_id, match["slug"], match.get("client_name", ""), created=created)
         clear_pending_filings(wa_id)
         _keep_resolved_batch(wa_id, match, created=False)
