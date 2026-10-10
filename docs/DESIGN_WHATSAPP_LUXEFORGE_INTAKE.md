@@ -257,11 +257,13 @@ Unchanged technically: we can store files; we cannot yet confirm units or extrac
 
 ### Phase 0 — Folders only (**shipped**)
 
-Persist every batch into a **client or personal / insurance / store / luxeforge** folder. Shared `JOB-RECORD.json` + `JOB-FACTS.md` on the folder. Chat-log attachments store `job_slug` / `filed_path`. STL / Polycam / PDF stored (scans/received). No LuxeForge job row, no lead, no EST. Dedup `wamid`. Max remains general chat.
+Persist every batch into a **client or personal / insurance / store / luxeforge** folder. Shared `JOB-RECORD.json` + `JOB-FACTS.md` on the folder. Chat-log attachments store `job_slug` / `filed_path`. STL / Polycam (including `.zip`) / USDZ / PDF stored (scans/received). No LuxeForge job row, no lead, no EST. Dedup `wamid`. Max remains general chat.
+
+Writers (`file_into_job`, `append_job_record`) validate the slug themselves and keep the resolved path under the jobs root. `JOB-RECORD.json` is written via temp + `os.replace` under a lock; corrupt JSON is quarantined to a timestamped `.corrupt-*` copy before a fresh record starts. Unique client match beats a reserved word. Record `owner` is the edition label, not a hardcoded `founder` on Max-e / Maxine. Attachment cap: `WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES` (default 256 MB).
 
 **Code:** `backend/app/services/max/whatsapp_folders.py`, wired from `whatsapp_log.py` / `whatsapp_channel.py`.
 
-**Done when:** mocked 3 photos + “Maggie” file under `maggie-frolich` with a manifest; 3 photos + “personal” file under `personal` with **zero** intake/lead/quote writes; luxeforge/insurance/store likewise; duplicate `wamid` is a no-op.
+**Done when:** mocked 3 photos + “Maggie” file under `maggie-frolich` with a manifest; 3 photos + “personal” file under `personal` with **zero** intake/lead/quote writes; luxeforge/insurance/store likewise; duplicate `wamid` is a no-op; `../../zz` / absolute / separator slugs are rejected; concurrent appends keep every photo; corrupt records are quarantined; `Emma's store order` files to Emma.
 
 ### Phase 1 — LuxeForge job when Rafael asks (client only)
 
@@ -293,7 +295,7 @@ No live Graph, no live `EMPIRE_DATA_DIR`, stub `MAX_CLIENT_ALIASES_PATH`. Reuse 
 
 | Phase | Tests |
 | --- | --- |
-| 0 | File to client folder; file to personal/insurance/store with **no** intake/lead/quote rows; duplicate `wamid`; family edition isolation. |
+| 0 | File to client folder; file to personal/insurance/store with **no** intake/lead/quote rows; duplicate `wamid`; family edition isolation; slug traversal rejected; JOB-RECORD lock + corrupt quarantine; unique client beats reserved word; edition owner label; Polycam `.zip` → scans. |
 | 1 | Client + quote ask → one LF-YYYY-NNN, owner founder; store/personal + “quote” caption → **no** LF job; S2S 401 without token; 403 on `Host: luxe.empirebox.store`; LF 503 → queue, file kept; lead created only on quote ask, not on file-only. |
 | 2 | `rafael_typed` / calibrated reference / unit-confirmed 3D → HIGH; vision 85 only → ESTIMATE + one named ask to Rafael (not Nelma); fractions only; drapery first ask is finished panel length (else fallbacks). |
 | 3 | Caption + HIGH → **one** EST; nearby quote text + 7 photos → 0 EST; drapery lines are per-width not sq ft; upholstery has sq ft columns; deposit 50; `create_quote` not called on ESTIMATE. |

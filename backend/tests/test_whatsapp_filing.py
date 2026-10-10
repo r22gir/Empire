@@ -647,8 +647,8 @@ def test_unresolved_job_text_falls_through_after_ask(isolated_whatsapp_edition):
     set_pending_filings(RAFAEL, [att_id])
     record_media_batch(RAFAEL, [att_id], "")
     finalize_photo_batch(RAFAEL, force_ask=True)
-    # Isolated aliases only (Maggie/Willard/McLean). This phrase must not
-    # resolve uniquely even if live client_aliases.json later adds Emma.
+    # Isolated aliases only (Maggie/Willard/McLean/Emma). This phrase must
+    # not resolve uniquely even if live client_aliases.json later adds more.
     assert consume_job_answer(RAFAEL, "These are for Zorblax skylight") is None
     assert get_pending_filings(RAFAEL) == [att_id]
     names = {row["client_name"] for row in suggest_jobs("Zorblax skylight")}
@@ -1114,3 +1114,158 @@ def test_phase0_family_edition_reserved_folders_isolated(isolated_whatsapp_editi
     assert other["attachments"] == []
     assert (rafael_root / "personal" / "JOB-RECORD.json").is_file()
     assert not (family_jobs / "personal" / "JOB-RECORD.json").is_file() or read_job_record("personal")["attachments"] == []
+
+
+def test_file_into_job_and_append_reject_unsafe_slugs(isolated_whatsapp_edition):
+    from app.services.max.whatsapp_folders import UnsafeJobSlug, append_job_record
+
+    root = jobs_root().resolve()
+    outside = root.parent / "zz"
+    for slug in ("../../zz", "/tmp/zz", "foo/bar", r"foo\bar", "C:\\zz"):
+        with pytest.raises(UnsafeJobSlug):
+            file_into_job(b"x", "a.jpg", "image", slug)
+        with pytest.raises(UnsafeJobSlug):
+            append_job_record(slug, {"filename": "a.jpg", "filed_path": "/tmp/a.jpg"})
+    assert not outside.exists()
+    assert not (root / "zz").exists()
+    leaked = [p for p in root.parent.iterdir() if p.name == "zz" or p.name.endswith("zz")]
+    assert leaked == []
+
+
+def test_unique_client_beats_reserved_store_word(isolated_whatsapp_edition):
+    from app.services.max.whatsapp_folders import (
+        match_reserved_folder,
+        resolve_folder,
+    )
+
+    emma = resolve_folder("Emma's store order")
+    assert emma and emma["slug"] == "emma-vita"
+    assert emma["kind"] == "client"
+    store = resolve_folder("for the store")
+    assert store and store["slug"] == "store"
+    assert match_reserved_folder("shop photos") is None
+    assert match_reserved_folder("private photos") is None
+    assert match_reserved_folder("claim photos") is None
+    assert match_reserved_folder("showroom photos") is None
+    assert resolve_folder("shop photos") is None
+    rec = prepare_inbound_attachment(
+        b"\xff\xd8emma",
+        filename="order.jpg",
+        mime_type="image/jpeg",
+        media_type="image",
+        wa_id=RAFAEL,
+        hint_text="Emma's store order",
+    )
+    assert rec["filing_status"] == "filed"
+    assert rec["job_slug"] == "emma-vita"
+    assert "store" not in Path(rec["filed_path"]).parts or "emma-vita" in rec["filed_path"]
+    assert "emma-vita" in rec["filed_path"]
+
+
+def test_append_job_record_concurrent_photos_keep_both(isolated_whatsapp_edition):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.services.max.whatsapp_folders import append_job_record, read_job_record
+
+    def write(i: int) -> None:
+        append_job_record(
+            "personal",
+            {
+                "filename": f"p{i}.jpg",
+                "filed_path": f"/tmp/p{i}.jpg",
+                "media_type": "image",
+                "whatsapp_attachment_id": f"att-{i}",
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(write, range(8)))
+    rec = read_job_record("personal")
+    ids = {a.get("whatsapp_attachment_id") for a in rec["attachments"]}
+    assert ids == {f"att-{i}" for i in range(8)}
+
+
+def test_corrupt_job_record_is_quarantined_then_fresh(isolated_whatsapp_edition):
+    from app.services.max.whatsapp_folders import (
+        JOB_RECORD_NAME,
+        append_job_record,
+        read_job_record,
+    )
+
+    folder = jobs_root() / "personal"
+    folder.mkdir(parents=True, exist_ok=True)
+    dest = folder / JOB_RECORD_NAME
+    dest.write_text("{not-json", encoding="utf-8")
+    rec = append_job_record(
+        "personal",
+        {"filename": "a.jpg", "filed_path": "/tmp/a.jpg", "media_type": "image"},
+    )
+    assert rec["attachments"]
+    corrupt = list(folder.glob(f"{JOB_RECORD_NAME}.corrupt-*"))
+    assert len(corrupt) == 1
+    assert "{not-json" in corrupt[0].read_text(encoding="utf-8")
+    assert dest.is_file()
+    fresh = json.loads(dest.read_text(encoding="utf-8"))
+    assert fresh["attachments"]
+    assert read_job_record("personal")["attachments"]
+
+
+def test_job_record_owner_follows_edition_label(isolated_whatsapp_edition, monkeypatch, tmp_path):
+    from app.services.max.whatsapp_folders import (
+        append_job_record,
+        edition_owner_label,
+        empty_job_record,
+        read_job_record,
+    )
+
+    monkeypatch.delenv("WHATSAPP_EDITION_OWNER", raising=False)
+    monkeypatch.delenv("EMPIRE_OWNER_LABEL", raising=False)
+    maxine = tmp_path / "maxine"
+    maxine.mkdir()
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(maxine))
+    assert edition_owner_label() == "Maxine"
+    assert empty_job_record("personal")["owner"] == "Maxine"
+    rec = append_job_record(
+        "personal",
+        {"filename": "a.jpg", "filed_path": "/tmp/a.jpg", "media_type": "image"},
+    )
+    assert rec["owner"] == "Maxine"
+    assert read_job_record("personal")["owner"] == "Maxine"
+
+    amp = tmp_path / "amp"
+    amp.mkdir()
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(amp))
+    assert edition_owner_label() == "Max-e"
+    monkeypatch.setenv("WHATSAPP_EDITION_OWNER", "Nelma")
+    assert edition_owner_label() == "Nelma"
+
+
+def test_default_attachment_cap_fits_polycam(monkeypatch):
+    monkeypatch.delenv("WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES", raising=False)
+    from app.services.max.whatsapp_log import (
+        DEFAULT_MAX_ATTACHMENT_SIZE,
+        get_max_attachment_size,
+    )
+
+    assert DEFAULT_MAX_ATTACHMENT_SIZE == 256 * 1024 * 1024
+    assert get_max_attachment_size() == 256 * 1024 * 1024
+    monkeypatch.setenv("WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES", "1048576")
+    assert get_max_attachment_size() == 1048576
+
+
+def test_polycam_zip_files_as_scan(isolated_whatsapp_edition):
+    from app.services.max.whatsapp_folders import classify_media_type, filing_subdir, is_scan_file
+
+    assert is_scan_file("Room-Polycam.zip", "application/zip", "document")
+    assert classify_media_type("document", "Room-Polycam.zip", "application/zip") == "scan"
+    assert filing_subdir("document", "Room-Polycam.zip", "application/zip") == "scans"
+    path = file_into_job(
+        b"PK\x03\x04polycam",
+        "Room-Polycam.zip",
+        "document",
+        "maggie-frolich",
+        mime_type="application/zip",
+    )
+    assert "/scans/" in path.replace("\\", "/")
+    assert Path(path).is_file()
+    assert not is_scan_file("invoice.zip", "application/zip", "document")

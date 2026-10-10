@@ -183,7 +183,8 @@ Non-image/PDF attachments are served as `application/octet-stream` with `X-Conte
 
 | Variable | Default | Role |
 | --- | --- | --- |
-| `WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES` | 52428800 (50 MB) | Skip storing oversize files |
+| `WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES` | 268435456 (256 MB) | Skip storing oversize files. 256 MB so a Polycam room / USDZ / mesh zip (often 50–200 MB) is kept; Meta documents cap near 100 MB. Override down if disk is tight. |
+| `WHATSAPP_EDITION_OWNER` | from `EMPIRE_OWNER_LABEL` or data-dir name (`amp` → Max-e, `maxine` → Maxine, else `founder`) | `owner` on `JOB-RECORD.json`. Family editions must not write `founder`. |
 | `WHATSAPP_RETENTION_DAYS` | 365 | Purge edition `media/` and `inbox/` (never another edition’s jobs) |
 | `WHATSAPP_JOBS_ROOT` | `$EMPIRE_DATA_DIR/jobs` | Edition-scoped job folders |
 | `WHATSAPP_LABELS` | `$EMPIRE_DATA_DIR/whatsapp/labels.json` | Founder display names + allowlist extras |
@@ -193,7 +194,7 @@ Non-image/PDF attachments are served as `application/octet-stream` with `X-Conte
 
 ### Job filing
 
-Photos go to `<jobs-root>/<slug>/photos/`. PDFs/documents go to `<jobs-root>/<slug>/received/`. STL / Polycam / 3D go to `<jobs-root>/<slug>/scans/`. No measurement in Phase 0.
+Photos go to `<jobs-root>/<slug>/photos/`. PDFs/documents go to `<jobs-root>/<slug>/received/`. STL / Polycam / USDZ / Polycam `.zip` / 3D go to `<jobs-root>/<slug>/scans/`. No measurement in Phase 0.
 
 **Every fileable batch is filed into a folder** under this edition’s jobs root:
 
@@ -205,9 +206,11 @@ Photos go to `<jobs-root>/<slug>/photos/`. PDFs/documents go to `<jobs-root>/<sl
 | `store` | reserved | Never |
 | `luxeforge` | reserved | Never (Rafael: do this folder now too) |
 
-Say the client name, or **personal / insurance / store / luxeforge**. Unknown names still ask once (PR #91). `skip` leaves inbox.
+Say the client name, or **personal / insurance / store / luxeforge**. A **unique client name beats a reserved word** (`Emma's store order` → Emma’s job, not `store`). `shop` / `claim` / `private` / `showroom` are not reserved aliases. Unknown names still ask once (PR #91). `skip` leaves inbox.
 
-Each folder has `JOB-FACTS.md` and a shared **`JOB-RECORD.json`** (attachments, sha256, chat-log ids). `intake_id` / `quote_id` / `lead_id` stay null in Phase 0. Max, the job board, and the chat log read that file later. Family editions have their own jobs root.
+Each folder has `JOB-FACTS.md` and a shared **`JOB-RECORD.json`** (attachments, sha256, chat-log ids). Writes are a temp file + `os.replace` under a lock so two photos in one batch cannot drop an entry. A corrupt record is moved to `JOB-RECORD.json.corrupt-<UTC>` and a fresh record is started — never silently overwritten. `intake_id` / `quote_id` / `lead_id` stay null in Phase 0. `owner` is the edition label (Workroom `founder`, Max-e / Maxine their own). Max, the job board, and the chat log read that file later. Family editions have their own jobs root.
+
+`file_into_job` and `append_job_record` themselves reject anything that is not a single safe path segment (`../../zz`, absolute paths, slugs with separators) and verify the resolved path stays under the jobs root.
 
 **Default for photos is file-only.** A draft estimate is created only when the **same message’s caption** (not a nearby text, not a previous “send me a quote”) asks for a quote/estimate/price (`quote`, `estimate`, `price`, `cotizacion`, `presupuesto`, `how much`). At most **one draft per photo batch**. Photo-to-quote drafts stay **not sent**.
 

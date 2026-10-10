@@ -42,6 +42,7 @@ from app.services.max.whatsapp_folders import (
     filing_subdir,
     folder_kind_for_slug,
     resolve_folder,
+    safe_folder_slug,
 )
 
 logger = logging.getLogger("max.whatsapp_log")
@@ -56,7 +57,10 @@ _SECRET_ENVS = (
     "FOUNDER_PIN",
 )
 
-DEFAULT_MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024
+# 256 MB: Meta documents cap near 100 MB; Polycam room / USDZ / mesh
+# zips commonly land 50–200 MB. 50 MB silently dropped those scans.
+# Override with WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES.
+DEFAULT_MAX_ATTACHMENT_SIZE = 256 * 1024 * 1024
 DEFAULT_RETENTION_DAYS = 365
 DEFAULT_JOB_ANSWER_TIMEOUT = 1800
 DEFAULT_PHOTO_BATCH_SECONDS = 120
@@ -794,10 +798,15 @@ def file_into_job(
     job_slug: str,
     mime_type: str = "",
 ) -> str:
-    """Copy into <jobs-root>/<slug>/photos|received|scans. Never overwrites."""
+    """Copy into <jobs-root>/<slug>/photos|received|scans. Never overwrites.
+
+    Slug is validated here (not only in callers): a single safe path
+    segment whose resolved path stays under this edition's jobs root.
+    """
+    slug = safe_folder_slug(job_slug)
     ensure_reserved_folders()
     sub = filing_subdir(media_type, filename, mime_type)
-    dest = unique_dest(jobs_root() / job_slug / sub, filename)
+    dest = unique_dest(jobs_root() / slug / sub, filename)
     dest.write_bytes(content or b"")
     return str(dest)
 

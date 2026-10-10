@@ -499,6 +499,11 @@ def _write_test_client_aliases(root: Path) -> Path:
                     "name": "McLean Residence",
                     "aliases": ["McLean"],
                 },
+                {
+                    "slug": "emma-vita",
+                    "name": "Emma Vita",
+                    "aliases": ["Emma"],
+                },
             ]
         }),
         encoding="utf-8",
@@ -513,7 +518,7 @@ def isolated_whatsapp_edition(tmp_path, monkeypatch):
     root.mkdir(parents=True, exist_ok=True)
     jobs = tmp_path / "jobs"
     jobs.mkdir(parents=True, exist_ok=True)
-    for slug in ("maggie-frolich", "willard-hotel", "mclean-residence"):
+    for slug in ("maggie-frolich", "willard-hotel", "mclean-residence", "emma-vita"):
         (jobs / slug).mkdir(exist_ok=True)
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(root))
     monkeypatch.setenv("WHATSAPP_JOBS_ROOT", str(jobs))
