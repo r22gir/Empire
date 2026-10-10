@@ -230,7 +230,7 @@ def render_nesting_pdf(
 
     c.setFillColor(HexColor("#2E6930"))
     c.setFont("Helvetica-Bold", 8)
-    c.drawString(card_x + 16, dw_y - 6, "Wide goods save ~60% yardage (12 1/2 yd vs 32 1/2 yd) by eliminating row splits")
+    c.drawString(card_x + 16, dw_y - 6, "Wide goods reduce yardage by eliminating row splits (compare totals above)")
 
     # Right Column: Upholstery & Construction Engineering Rules
     r_x = card_x + card_w + 28
@@ -247,11 +247,11 @@ def render_nesting_pdf(
 
     rules = [
         ("Channel-Back Distribution:", "Channels stay ~12\" wide. Each run is partitioned into the nearest whole number of equal channels (zero leftover end strips). Marley's U: 37 3/4\" -> 3 equal, 249 3/4\" -> 21 equal, 48 1/2\" -> 4 equal. Marley's L: 95 3/8\" -> 8 equal, 107 3/4\" -> 9 equal. Combined project: 45 channels total."),
-        ("Channel Board & Foam Cuts:", "Substrate board and 2\" foam cut per channel: length = net back height + 2 1/2\" (Marley's 26 3/4\" + 2 1/2\" = 29 1/4\"), width = finished channel width. Board substrate cut from 1/2\" plywood."),
-        ("Channel Fabric Cuts:", "Fabric cut per channel: at least 18\" wide for a 12\" channel (channel width + 2 1/2\" board/foam each side + pull), length = net back + 2 1/2\" wrap top and bottom + pull (Marley's 34\"). Exactly 2 channel cuts fit per 53\" usable roll width (23 cut rows)."),
+        ("Channel Wood & Foam Cut:", "WOOD CUT = true size, no add-ons: length = net back height (Marley's 26 3/4\"), width = finished channel width. FOAM CUT = exactly the wood cut size. Board is cut from 1/2\" plywood."),
+        ("Channel Fabric Cut:", "FABRIC CUT = foam size + 2 to 3\" for stapling (3\" default) in width and length, always shown as a separate size from the wood cut (12\" channel: wood 12\" x 26 3/4\", fabric 15\" x 29 3/4\"). 3 channel cuts fit per 53\" usable roll width."),
         ("Seat Cushion Construction:", "18\" deep seat = 2\" back thickness + 16\" seat cushion. Front cushion overhang is 1 1/4\" (>= 1\"). Seat wrapped over 2\" high-density foam on 1/2\" plywood base."),
         ("Seat Fabric Cuts:", "Seat fabric cut width = 25 1/4\" (fits 2 seat runs side-by-side in 53\" roll width). Total linear seat run length = 539 1/8\" + 14 3/8\" pull allowance = 553 1/2\", yielding 276 3/4\" roll length = 7 11/16 yd."),
-        ("Yardage Validation Calculation:", "Backs: 45 channel cuts at 2 per width = 23 rows x 34\" = 782\" = 21 3/4 yd. Seats: 7 11/16 yd. Sum: 29 7/16 yd. Adding 10% shop waste = about 32 3/8 yd, then rounded up to 32 1/2 yd."),
+        ("Yardage Validation Calculation:", "Computed from the nested cut list: channel fabric cuts + seat runs, plus 10% shop waste, rounded UP to the nearest 1/2 yd (see yardage total above)."),
     ]
 
     ry = r_y - 65

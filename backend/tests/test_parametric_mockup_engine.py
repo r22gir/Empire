@@ -389,15 +389,20 @@ def test_nesting_engine_and_marleys_validation():
     # Channel cuts check: 45 channel cuts
     ch_cuts = [c for c in cut_list["fabric"] if "Ch " in c["name"]]
     assert len(ch_cuts) == 45
-    # Board length per channel = net back height (26 3/4") + 2 1/2" = 29 1/4"
-    assert cut_list["board"][0]["length_in"] == 29.25
-    assert cut_list["board"][0]["length_fraction"] == '29 1/4"'
-
-    # Fabric length per channel = 34"
-    assert ch_cuts[0]["length_in"] == 34.0
-    assert ch_cuts[0]["length_fraction"] == '34"'
-    # Fabric width at least 18"
-    assert ch_cuts[0]["width_in"] >= 18.0
+    # Wood cut = TRUE size (net back 26 3/4"), no add-ons; foam cut = wood cut
+    assert cut_list["board"][0]["length_in"] == 26.75
+    assert cut_list["board"][0]["length_fraction"] == '26 3/4"'
+    assert cut_list["foam"][0]["length_in"] == cut_list["board"][0]["length_in"]
+    assert cut_list["foam"][0]["width_in"] == cut_list["board"][0]["width_in"]
+    # Fabric cut = foam size + 3" stapling allowance (2-3" rule), separate labeled size
+    assert ch_cuts[0]["length_in"] == 29.75
+    assert ch_cuts[0]["length_fraction"] == '29 3/4"'
+    assert ch_cuts[0]["width_in"] == round(cut_list["foam"][0]["width_in"] + 3.0, 3)
+    # Always two labeled sizes per channel
+    assert len(nest_res["channel_cuts"]) == 45
+    cc = nest_res["channel_cuts"][0]
+    assert cc["wood_cut"] == cc["foam_cut"] and cc["fabric_cut"] != cc["wood_cut"]
+    assert '"' in cc["fabric_cut"] and "." not in cc["fabric_cut"]
 
     # Board sheets check: 48" x 96"
     assert totals["board_sheets"] > 0
@@ -415,18 +420,17 @@ def test_nesting_engine_and_marleys_validation():
     assert "yd" in totals["dacron_total_yards_fraction"]
 
     # Fabric total validation for Marley's U+L:
-    # 45 channel cuts at 2 per width = 23 rows x 34" = 782" = 21 3/4 yd
-    # Seats: 7 11/16 yd
-    # Net: 29.41 yd + 10% waste = 32.35 yd -> rounded UP to nearest 1/2 yd = 32 1/2 yd!
-    assert totals["fabric_total_yards"] == 32.5
-    assert totals["fabric_total_yards_fraction"] == "32 1/2 yd"
+    # Channel fabric cuts are foam size + 3" (29 3/4" long), 3 across a 53" usable roll;
+    # plus seat runs, 10% waste, rounded UP to 1/2 yd.
+    assert totals["fabric_total_yards"] == 23.0
+    assert totals["fabric_total_yards_fraction"] == "23 yd"
 
     # Double width comparison check (110", 118", 120" wide goods)
     dw_comp = totals["double_width_fabric_comparisons"]
     assert '110" roll' in dw_comp
     assert '118" roll' in dw_comp
     assert '120" roll' in dw_comp
-    # Extra-wide rolls drastically reduce yardage (12 1/2 yd to 13 1/2 yd vs 32 1/2 yd)
+    # Extra-wide rolls drastically reduce yardage (12 1/2 yd to 13 1/2 yd vs 23 yd)
     assert dw_comp['110" roll']["total_yards"] < 15.0
 
     # 2. Test API Endpoint POST /api/v1/drawings/nest
@@ -437,7 +441,7 @@ def test_nesting_engine_and_marleys_validation():
     assert api_res["format"] == "nesting"
     assert os.path.exists(api_res["pdf_path"])
     assert len(api_res["png_previews"]) >= 5
-    assert api_res["totals"]["fabric_total_yards_fraction"] == "32 1/2 yd"
+    assert api_res["totals"]["fabric_total_yards_fraction"] == "23 yd"
 
     # 3. Test Max tool generate_material_nest
     tool_call = {
@@ -448,7 +452,7 @@ def test_nesting_engine_and_marleys_validation():
     assert tool_res.success is True
     assert tool_res.result["format"] == "nesting"
     assert "pdf_url" in tool_res.result
-    assert tool_res.result["totals"]["fabric_total_yards_fraction"] == "32 1/2 yd"
+    assert tool_res.result["totals"]["fabric_total_yards_fraction"] == "23 yd"
 
 
 def test_nesting_pdf_no_overlap_and_no_decimal_measurements(tmp_path):

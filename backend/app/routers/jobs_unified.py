@@ -1742,7 +1742,7 @@ async def upload_job_file(
         if not exists:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        job_dir = Path.home() / "empire-repo" / "backend" / "data" / "uploads" / "jobs" / job_id
+        job_dir = Path(os.getenv("EMPIRE_DATA_DIR") or (Path.home() / "empire-data")) / "uploads" / "jobs" / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
         safe_filename = file.filename or f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}"

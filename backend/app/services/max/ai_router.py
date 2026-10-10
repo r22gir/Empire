@@ -986,7 +986,7 @@ class AIRouter:
 
             elif provider_type == "groq":
                 groq_model = model_override or "llama-3.3-70b-versatile"
-                if is_free_tier_quota_exhausted(groq_model, "groq", self.token_tracker.db_path):
+                if is_free_tier_quota_exhausted(groq_model, "groq", token_tracker.db_path):
                     logger.warning(f"[MAX] Groq free quota exhausted for {groq_model}, skipping")
                     return None
                 logger.info(f"[MAX] Chat via Groq ({groq_model}){' (fallback)' if fallback else ''}")
@@ -996,7 +996,7 @@ class AIRouter:
 
             elif provider_type == "gemini":
                 gemini_model = model_override or "gemini-2.5-flash"
-                if is_free_tier_quota_exhausted(gemini_model, "gemini", self.token_tracker.db_path):
+                if is_free_tier_quota_exhausted(gemini_model, "gemini", token_tracker.db_path):
                     logger.warning(f"[MAX] Gemini free quota exhausted for {gemini_model}, skipping")
                     return None
                 logger.info(f"[MAX] Chat via Gemini ({gemini_model}){' (fallback)' if fallback else ''}")
@@ -1027,7 +1027,7 @@ class AIRouter:
 
             elif provider_type == "openrouter":
                 or_model = model_override or self.openrouter_model
-                if is_free_tier_quota_exhausted(or_model, "openrouter", self.token_tracker.db_path):
+                if is_free_tier_quota_exhausted(or_model, "openrouter", token_tracker.db_path):
                     logger.warning(f"[MAX] OpenRouter free quota exhausted for {or_model}, skipping")
                     return None
                 logger.info(f"[MAX] Chat via OpenRouter ({or_model}){' (fallback)' if fallback else ''}")
@@ -1191,7 +1191,7 @@ class AIRouter:
                 continue
 
             # Skip free model whose quota is exhausted
-            if is_free_tier_quota_exhausted(model_name, provider, self.token_tracker.db_path):
+            if is_free_tier_quota_exhausted(model_name, provider, token_tracker.db_path):
                 logger.warning(f"[MAX] Free quota exhausted for {model_name} ({provider}), skipping candidate")
                 blocked.append(f"{provider}:{model_name}:free_quota_exhausted")
                 continue
@@ -1350,7 +1350,7 @@ class AIRouter:
             # Desk requested Gemini
             if is_client_fin:
                 use_model = AIModel.MINIMAX
-            elif is_free_tier_quota_exhausted("gemini-2.5-flash", "gemini", self.token_tracker.db_path):
+            elif is_free_tier_quota_exhausted("gemini-2.5-flash", "gemini", token_tracker.db_path):
                 logger.warning("[MAX] Gemini free quota exhausted, falling back")
                 use_model = AIModel.GROQ
             else:
@@ -1443,7 +1443,7 @@ class AIRouter:
                 groq_model = "llama-3.3-70b-versatile"
                 if is_client_fin and is_free_tier_model(groq_model, "groq"):
                     continue
-                if is_free_tier_quota_exhausted(groq_model, "groq", self.token_tracker.db_path):
+                if is_free_tier_quota_exhausted(groq_model, "groq", token_tracker.db_path):
                     logger.warning("[MAX] Groq free quota exhausted, skipping in legacy chat")
                     continue
                 try:
@@ -1562,7 +1562,7 @@ class AIRouter:
                 target_m = model_override or provider_default_model(provider_type)
                 if is_client_fin and is_free_tier_model(target_m, provider_type):
                     continue
-                if is_free_tier_quota_exhausted(target_m, provider_type, self.token_tracker.db_path):
+                if is_free_tier_quota_exhausted(target_m, provider_type, token_tracker.db_path):
                     logger.warning(f"[MAX] Free quota exhausted for {target_m}, skipping in stream")
                     continue
                 fallback = not is_first
@@ -1652,7 +1652,7 @@ class AIRouter:
         elif use_model == AIModel.GEMINI:
             if is_client_fin:
                 use_model = AIModel.MINIMAX
-            elif is_free_tier_quota_exhausted("gemini-2.5-flash", "gemini", self.token_tracker.db_path):
+            elif is_free_tier_quota_exhausted("gemini-2.5-flash", "gemini", token_tracker.db_path):
                 logger.warning("[MAX] Gemini free quota exhausted, falling back")
                 use_model = AIModel.GROQ
             else:
@@ -1733,7 +1733,7 @@ class AIRouter:
                 groq_model = "llama-3.3-70b-versatile"
                 if is_client_fin and is_free_tier_model(groq_model, "groq"):
                     continue
-                if is_free_tier_quota_exhausted(groq_model, "groq", self.token_tracker.db_path):
+                if is_free_tier_quota_exhausted(groq_model, "groq", token_tracker.db_path):
                     logger.warning("[MAX] Groq free quota exhausted, skipping in legacy stream")
                     continue
                 try:
