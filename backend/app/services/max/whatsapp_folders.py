@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from app.services.max.doc_lookup import jobs_root, probe_job_text
+from app.services.max.doc_lookup import add_client_alias, jobs_root, probe_job_text, slugify
 
 logger = logging.getLogger("max.whatsapp_folders")
 
@@ -46,8 +46,26 @@ SCAN_MIME_HINTS = (
     "application/vnd.ms-pki.stl",
 )
 FILEABLE_MEDIA = {"image", "photo", "document", "scan", "model"}
+NEW_JOB_PHRASE = r"(?:new\s+job|nuevo\s+trabajo|new\s+client)"
+# Phrase must start the message/caption or follow a sentence break.
+# Mid-chat "I have a new job offer" must not create a folder.
+NEW_JOB_RE = re.compile(
+    r"(?:^\s*|[.!?]\s+)"
+    + NEW_JOB_PHRASE
+    + r"\s*[:\-]?\s+"
+    r"((?:\S+\s+){0,2}\S+)"
+    r"(?=\s+" + NEW_JOB_PHRASE + r"\b|[.!?,;:]|$|\s)",
+    re.IGNORECASE,
+)
+MIN_CLIENT_SLUG_LEN = 4
+PURCHASE_RE = re.compile(
+    r"\b(?:need to buy|have to buy|want to buy|buy a|buying a|bought a|"
+    r"purchase|need a case|buy (?:this|that|it))\b",
+    re.IGNORECASE,
+)
 
 _record_lock = threading.RLock()
+_just_created_slugs: set[str] = set()
 
 
 class UnsafeJobSlug(ValueError):
@@ -101,11 +119,65 @@ def safe_folder_slug(slug: str, *, jobs_root_path: Optional[Path | str] = None) 
     return cleaned
 
 
+def reserved_slug_for_name(name: str) -> Optional[str]:
+    """Reserved folder or reserved alias (luxe forge → luxeforge), else None."""
+    raw = " ".join(str(name or "").lower().split())
+    if not raw:
+        return None
+    slug = slugify(raw)
+    compact = slug.replace("-", "").replace("_", "")
+    if slug in RESERVED_FOLDER_SLUGS:
+        return slug
+    if compact in RESERVED_FOLDER_SLUGS:
+        return compact
+    for reserved, aliases in RESERVED_FOLDER_ALIASES.items():
+        reserved_compact = reserved.replace("-", "").replace("_", "")
+        if slug == reserved or compact == reserved_compact:
+            return reserved
+        for alias in aliases:
+            alias_slug = slugify(alias)
+            if raw == " ".join(alias.lower().split()) or slug == alias_slug:
+                return reserved
+            if compact and compact == alias_slug.replace("-", "").replace("_", ""):
+                return reserved
+    return None
+
+
 def folder_kind_for_slug(slug: str) -> str:
     raw = (slug or "").strip().lower()
+    reserved = reserved_slug_for_name(raw)
+    if reserved:
+        return reserved
     if raw in RESERVED_FOLDER_SLUGS:
         return raw
     return "client"
+
+
+def acceptable_client_job_name(name: str) -> bool:
+    """True when a new-job name can become a client folder. Else ask for a name.
+
+    Rejects reserved aliases (including 'luxe forge'), leading-dot / leading-dash
+    names, slugs shorter than MIN_CLIENT_SLUG_LEN, and slugs with no letter.
+    """
+    raw = (name or "").strip()
+    if not raw or raw.startswith(".") or raw.startswith("-"):
+        return False
+    if reserved_slug_for_name(raw):
+        return False
+    slug = slugify(raw)
+    if not slug or len(slug) < MIN_CLIENT_SLUG_LEN:
+        return False
+    if not any(ch.isalpha() for ch in slug):
+        return False
+    if slug.startswith(".") or slug.startswith("-"):
+        return False
+    if folder_kind_for_slug(slug) != "client":
+        return False
+    try:
+        safe_folder_slug(slug)
+    except UnsafeJobSlug:
+        return False
+    return True
 
 
 def folder_allows_quote(slug: Optional[str]) -> bool:
@@ -167,11 +239,141 @@ def resolve_folder(text: str) -> Optional[dict[str, str]]:
         kind = folder_kind_for_slug(slug)
         if kind == "client":
             match["kind"] = "client"
+            match["created"] = False
             return match
     reserved = match_reserved_folder(text)
     if reserved:
+        reserved["created"] = False
         return reserved
     return None
+
+
+def parse_new_job_name(text: str) -> Optional[str]:
+    """'New job home wood suites.' / 'nuevo trabajo X' / 'new client X' → the name.
+
+    Only matches at the start of the text or after a sentence break, and
+    keeps at most three words. Ordinary chat ('I have a new job offer')
+    is not a create. Callers must run is_chat_not_job before this.
+    """
+    match = NEW_JOB_RE.search(str(text or ""))
+    if not match:
+        return None
+    raw = re.sub(r"[\s.!?]+$", "", match.group(1).strip())
+    raw = re.sub(
+        r"\b(?:new\s+job|nuevo\s+trabajo|new\s+client)\b",
+        " ",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    raw = re.sub(r"\s+", " ", raw).strip(" -:;,'\"")
+    words = [w for w in raw.split() if w]
+    if not words:
+        return None
+    raw = " ".join(words[:3])
+    if not acceptable_client_job_name(raw):
+        return None
+    return raw
+
+
+def title_job_name(name: str) -> str:
+    cleaned = re.sub(r"[\s.!?]+$", "", (name or "").strip())
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned:
+        return ""
+    if cleaned == cleaned.lower() or cleaned == cleaned.upper():
+        return cleaned.title()
+    return cleaned
+
+
+def sounds_like_purchase(text: str) -> bool:
+    return bool(PURCHASE_RE.search(str(text or "")))
+
+
+def create_client_job_folder(
+    name: str,
+    *,
+    jobs_root_path: Optional[Path | str] = None,
+) -> Optional[dict[str, Any]]:
+    """Create <jobs-root>/<slug> + JOB-FACTS / JOB-RECORD stubs + alias. No LF/quote/lead.
+
+    Accents are folded to ASCII before slugging. A name that cannot become a
+    safe client slug returns None so the caller can ask for a name — never
+    raises UnsafeJobSlug on inbound chat.
+    """
+    title = title_job_name(name)
+    if not acceptable_client_job_name(title):
+        logger.info("ask for a client name; refusing job title %r", name)
+        return None
+    try:
+        slug = safe_folder_slug(slugify(title), jobs_root_path=jobs_root_path)
+    except UnsafeJobSlug:
+        logger.info("ask for a client name; slug failed for %r", name)
+        return None
+    if folder_kind_for_slug(slug) != "client":
+        logger.info("ask for a client name; %r is reserved", name)
+        return None
+    root = jobs_root(jobs_root_path)
+    folder = root / slug
+    existed = folder.is_dir() and (folder / JOB_RECORD_NAME).is_file()
+    folder.mkdir(parents=True, exist_ok=True)
+    for sub in FOLDER_SUBDIRS:
+        (folder / sub).mkdir(parents=True, exist_ok=True)
+    facts = folder / JOB_FACTS_NAME
+    if not facts.is_file():
+        facts.write_text(
+            f"# {title}\n\nShared folder record. Attachments live in JOB-RECORD.json.\n",
+            encoding="utf-8",
+        )
+    if not (folder / JOB_RECORD_NAME).is_file():
+        record = empty_job_record(slug, jobs_root_path=jobs_root_path)
+        record["slug"] = slug
+        _atomic_write_text(
+            folder / JOB_RECORD_NAME,
+            json.dumps(record, indent=2, sort_keys=True) + "\n",
+        )
+    add_client_alias(title, slug, aliases=[title, name.strip()])
+    if not existed:
+        _just_created_slugs.add(slug)
+    return {
+        "slug": slug,
+        "client_name": title,
+        "folder_path": str(folder),
+        "kind": "client",
+        "created": not existed or slug in _just_created_slugs,
+        "match_reason": "new job" if not existed else "existing folder",
+    }
+
+
+def consume_created_job_flag(slug: str) -> bool:
+    """True once after create_client_job_folder, then cleared (for the ack line)."""
+    if slug in _just_created_slugs:
+        _just_created_slugs.discard(slug)
+        return True
+    return False
+
+
+def resolve_or_create_folder(text: str) -> Optional[dict[str, Any]]:
+    """Unique existing job, reserved folder, or 'new job <name>' create. Never guesses."""
+    named = parse_new_job_name(text)
+    if named:
+        probed = probe_job_text(named)
+        if probed.get("status") == "unique" and probed.get("match"):
+            match = dict(probed["match"])
+            if folder_kind_for_slug(str(match.get("slug") or "")) == "client":
+                match["kind"] = "client"
+                match["created"] = False
+                return match
+        if probed.get("status") == "ambiguous":
+            return None
+        created = create_client_job_folder(named)
+        if not created:
+            return None
+        created["created"] = True
+        return created
+    match = resolve_folder(text)
+    if match and match.get("slug") in _just_created_slugs:
+        match["created"] = True
+    return match
 
 
 def is_scan_file(filename: str = "", mime_type: str = "", media_type: str = "") -> bool:

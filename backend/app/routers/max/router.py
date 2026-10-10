@@ -3402,6 +3402,14 @@ async def _chat_with_max_service_impl(
         if request.channel == "whatsapp" and enriched_prompt:
             from app.services.max.whatsapp_channel import WHATSAPP_DIRECTIVE
             enriched_prompt += WHATSAPP_DIRECTIVE
+            try:
+                from app.services.max.whatsapp_log import parked_photos_note
+
+                _parked = parked_photos_note(request.chat_id or "")
+                if _parked:
+                    enriched_prompt += "\n- " + _parked
+            except Exception:
+                pass
         if getattr(request, "presentation", False) and enriched_prompt:
             from app.services.max.presentation_stage import PRESENTATION_DIRECTIVE
             enriched_prompt += PRESENTATION_DIRECTIVE
@@ -4665,6 +4673,14 @@ async def _chat_stream_impl(request: ChatRequest):
     if request.channel == "whatsapp" and enriched_prompt:
         from app.services.max.whatsapp_channel import WHATSAPP_DIRECTIVE
         enriched_prompt += WHATSAPP_DIRECTIVE
+        try:
+            from app.services.max.whatsapp_log import parked_photos_note
+
+            _parked = parked_photos_note(request.chat_id or "")
+            if _parked:
+                enriched_prompt += "\n- " + _parked
+        except Exception:
+            pass
     _freshness = freshness_directive(request.message)
     if _freshness:
         enriched_prompt = (enriched_prompt or "") + "\n\n" + _freshness

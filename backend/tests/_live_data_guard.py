@@ -527,6 +527,8 @@ def isolated_whatsapp_edition(tmp_path, monkeypatch):
     monkeypatch.setenv("WHATSAPP_JOB_HINT_SECONDS", "600")
     aliases = _write_test_client_aliases(root)
     monkeypatch.setenv("MAX_CLIENT_ALIASES_PATH", str(aliases))
+    # Do not merge the tracked repo file into WhatsApp tests.
+    monkeypatch.setenv("MAX_CLIENT_ALIASES_REPO_PATH", str(tmp_path / "repo-client-aliases.json"))
     labels = _write_test_whatsapp_labels(root)
     monkeypatch.setenv("WHATSAPP_LABELS", str(labels))
     for name in (

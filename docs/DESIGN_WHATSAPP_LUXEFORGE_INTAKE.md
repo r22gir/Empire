@@ -53,7 +53,7 @@ Today WhatsApp and LuxeForge are **two production intake paths**. They both can 
 | WhatsApp webhook, allowlist, 24h window, `_seen` dedup | `backend/app/services/max/whatsapp_channel.py` | Keep as the only Meta ingress. After persist/batch, file the folder; call LuxeForge **only** on client + quote ask. |
 | Photo batch, job ask, SQLite TTL | `backend/app/services/max/whatsapp_log.py` | Keep file-only default, one ask, `asked==1` gate, expiry on load. Extend folder resolve to personal / insurance / store. |
 | Quote gate (caption only, one draft/batch) | `wants_photo_quote`, `mark_photo_batch_quoted`; `docs/WHATSAPP_CHANNEL.md` | Do not regress PR #91. Still not enough: measure gate must pass before EST. |
-| Job name resolve | `backend/app/services/max/doc_lookup.py`, `backend/app/config/client_aliases.json` | Unique client name → client folder. Personal / insurance / store are **not** aliases of a client. |
+| Job name resolve | `backend/app/services/max/doc_lookup.py`, read-only `backend/app/config/client_aliases.json` merged with `$EMPIRE_DATA_DIR/client_aliases.json` | Unique client name → client folder. Personal / insurance / store are **not** aliases of a client. New-job rows write only the edition file. |
 | LuxeForge project row | `backend/app/routers/intake_auth.py` (`intake_projects`) | **Hub for client+quote-ask jobs only.** Owner = Rafael founder account. |
 | Designer submit → Workroom | `backend/app/services/luxeforge_intake_handoff.py` | Reuse attach-files. **Do not** `create_quote` until HIGH / typed dimension. Lead only when quote is asked. |
 | Shared lead/CRM brief | `backend/app/services/workroom_lead_intake.py`, `POST /api/v1/leadforge/intake` | Call **only** on conversion / quote ask, never phase 0, never personal/insurance/store. |
@@ -259,7 +259,7 @@ Unchanged technically: we can store files; we cannot yet confirm units or extrac
 
 Persist every batch into a **client or personal / insurance / store / luxeforge** folder. Shared `JOB-RECORD.json` + `JOB-FACTS.md` on the folder. Chat-log attachments store `job_slug` / `filed_path`. STL / Polycam (including `.zip`) / USDZ / PDF stored (scans/received). No LuxeForge job row, no lead, no EST. Dedup `wamid`. Max remains general chat.
 
-Writers (`file_into_job`, `append_job_record`) validate the slug themselves and keep the resolved path under the jobs root. `JOB-RECORD.json` is written via temp + `os.replace` under a lock; corrupt JSON is quarantined to a timestamped `.corrupt-*` copy before a fresh record starts. Unique client match beats a reserved word. Record `owner` is the edition label, not a hardcoded `founder` on Max-e / Maxine. Attachment cap: `WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES` (default 256 MB).
+Writers (`file_into_job`, `append_job_record`) validate the slug themselves and keep the resolved path under the jobs root. `JOB-RECORD.json` is written via temp + `os.replace` under a lock; corrupt JSON is quarantined to a timestamped `.corrupt-*` copy before a fresh record starts. Unique client match beats a reserved word. `New job <name>` creates a client folder + alias (no LF/quote/lead). Hint text is captions + job-naming text in the batch window only. Every photo batch gets one ack. Record `owner` is the edition label, not a hardcoded `founder` on Max-e / Maxine. Attachment cap: `WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES` (default 256 MB).
 
 **Code:** `backend/app/services/max/whatsapp_folders.py`, wired from `whatsapp_log.py` / `whatsapp_channel.py`.
 
