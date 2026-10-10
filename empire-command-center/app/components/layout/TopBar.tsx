@@ -43,6 +43,46 @@ const DISABLED_REASON_LABELS: Record<string, string> = {
   local_service_unavailable: 'Local service unavailable',
 };
 
+const FALLBACK_PROVIDER_MODELS: Record<string, string[]> = {
+  groq: [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+    'qwen/qwen3.8-27b',
+  ],
+  gemini: [
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-3.5-flash',
+  ],
+  openrouter: [
+    'openai/gpt-4o-mini',
+    'anthropic/claude-3.5-sonnet',
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'google/gemma-4-31b-it:free',
+    'cohere/north-mini-code:free',
+    'openrouter/free',
+  ],
+  minimax: ['MiniMax-M3'],
+  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  qwen: ['qwen-plus', 'qwen-max'],
+  claude: ['claude-sonnet-4-6', 'claude-opus-4-6'],
+  openai: ['gpt-4o', 'gpt-4o-mini'],
+  xai: ['grok-3', 'grok-2-vision-1212'],
+};
+
+function isFreeTierModel(modelName: string): boolean {
+  if (!modelName) return false;
+  const m = modelName.toLowerCase();
+  if (m.endsWith(':free')) return true;
+  if (m.includes('gpt-oss-120b') || m.includes('gpt-oss-20b') || m.includes('gpt-oss')) return true;
+  if (m.includes('qwen3.8-27b') || m.includes('qwen3.8')) return true;
+  if (m.includes('gemini-2.5-flash-lite') || m.includes('gemini-3.5-flash') || m.includes('gemini-2.5-flash')) return true;
+  if (m.includes('openrouter/free')) return true;
+  return false;
+}
+
 // Map notification sources to navigation targets
 const NOTIF_NAV_MAP: Record<string, { product?: string; screen?: string }> = {
   quote: { product: 'workroom', screen: 'dashboard' },
@@ -80,6 +120,7 @@ interface Props {
 export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack, canGoBack = true }: Props) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerRows, setProviderRows] = useState<ProviderRow[]>([]);
   const [selectedProvider, setSelectedProvider] = useState('minimax');
   const [selectedModelName, setSelectedModelName] = useState('MiniMax-M3');
@@ -136,12 +177,12 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
     return () => clearInterval(iv);
   }, [fetchRoutingModels]);
 
-  const switchProvider = useCallback(async (provider: ProviderRow) => {
+  const switchProvider = useCallback(async (provider: ProviderRow, specificModel?: string) => {
     if (switchingProvider || provider.disabled || !provider.available) return;
     setSwitchingProvider(true);
     try {
       const targetProvider = provider.provider_canonical || provider.id;
-      const targetModel = provider.model || provider.models?.[0] || '';
+      const targetModel = specificModel || provider.model || provider.models?.[0] || '';
       const res = await fetch(`${API}/max/routing-state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -262,38 +303,146 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
             <ChevronDown size={12} className="chev" />
           </button>
           {showModelPicker && (
-            <div className="absolute top-[46px] right-0 w-[calc(100vw-24px)] md:w-[320px] max-w-[380px] bg-[var(--panel)] border border-[var(--border)] rounded-[var(--radius)] shadow-[0_8px_30px_rgba(0,0,0,0.12)] z-[200] overflow-hidden py-1">
-              {providerRows.map((row) => {
-                const canonical = row.provider_canonical || row.id;
-                const selected = canonical === selectedProvider;
-                const color = PROVIDER_COLORS[canonical] || '#6b7280';
-                const disabledReason = row.disabled_reason ? (DISABLED_REASON_LABELS[row.disabled_reason] || row.disabled_reason) : '';
-                const unavailable = !!row.disabled || !row.available;
-                return (
-                  <button
-                    key={canonical}
-                    onClick={() => switchProvider(row)}
-                    disabled={unavailable || switchingProvider}
-                    className={`w-full text-left px-3 py-2.5 text-[11px] flex items-center gap-2 transition-colors ${selected ? 'bg-[var(--card-bg)]' : 'hover:bg-[var(--hover)]'} ${unavailable ? 'opacity-55 cursor-not-allowed' : 'cursor-pointer'}`}
-                    title={disabledReason || ''}
-                  >
-                    <span className="w-2 h-2 rounded-full" style={{ background: color }} />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold truncate" style={{ color }}>
-                        {row.name || canonical}
-                        {selected ? ' · active' : ''}
+            <div className="absolute top-[46px] right-0 w-[calc(100vw-24px)] sm:w-[380px] max-w-[420px] bg-[#121417] border border-[#b8960c]/40 rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.5)] z-[200] overflow-hidden flex flex-col max-h-[82vh]">
+              {/* Black & Gold header */}
+              <div className="px-4 py-3 border-b border-[#242830] bg-[#0d0f12] flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#b8960c]" />
+                  <span className="text-[11px] font-bold tracking-wider uppercase text-[#d4b84a]">
+                    AI Provider & Model Router
+                  </span>
+                </div>
+                <span className="text-[9px] font-mono text-[#888] truncate max-w-[150px]">
+                  {selectedProvider} · {selectedModelName}
+                </span>
+              </div>
+
+              {/* Provider List with Sub-Picker */}
+              <div className="overflow-y-auto divide-y divide-[#1e2229] py-1 flex-1">
+                {providerRows.map((row) => {
+                  const canonical = row.provider_canonical || row.id;
+                  const isSelected = canonical === selectedProvider;
+                  const color = PROVIDER_COLORS[canonical] || '#6b7280';
+                  const models = (row.models && row.models.length > 0)
+                    ? row.models
+                    : (FALLBACK_PROVIDER_MODELS[canonical] || (row.model ? [row.model] : []));
+                  const isExpanded = expandedProvider === canonical || (expandedProvider === null && isSelected);
+                  const unavailable = !!row.disabled || !row.available;
+                  const disabledReason = row.disabled_reason ? (DISABLED_REASON_LABELS[row.disabled_reason] || row.disabled_reason) : '';
+                  const hasFree = models.some(isFreeTierModel);
+
+                  return (
+                    <div key={canonical} className={`transition-colors ${isSelected ? 'bg-[#181b22]' : 'hover:bg-[#15181d]'}`}>
+                      {/* Provider Row Header */}
+                      <div className="px-3 py-2 flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => switchProvider(row)}
+                          disabled={unavailable || switchingProvider}
+                          className={`flex items-center gap-2 text-left min-w-0 flex-1 ${unavailable ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                          title={disabledReason || ''}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
+                          <div className="min-w-0">
+                            <div className="font-bold text-[12px] text-white flex items-center gap-1.5 truncate">
+                              <span>{row.name || canonical}</span>
+                              {isSelected && (
+                                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[#b8960c]/20 text-[#d4b84a] border border-[#b8960c]/40">
+                                  ACTIVE
+                                </span>
+                              )}
+                              {hasFree && (
+                                <span className="text-[8px] font-mono px-1 py-0.2 rounded bg-[#16a34a]/20 text-[#22c55e] border border-[#16a34a]/30">
+                                  FREE TIERS
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-[#888] font-mono truncate">
+                              {row.model || models[0] || 'default model'}
+                              {unavailable ? ` · ${disabledReason || 'unavailable'}` : ''}
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Expand / Collapse sub-picker button */}
+                        {models.length > 0 && (
+                          <button
+                            onClick={() => setExpandedProvider(isExpanded ? '' : canonical)}
+                            className="p-1.5 rounded-lg text-[#888] hover:text-[#d4b84a] hover:bg-[#20252e] transition-colors cursor-pointer shrink-0"
+                            title="Toggle models sub-picker"
+                            aria-label="Toggle models"
+                          >
+                            <ChevronDown
+                              size={14}
+                              className={`transition-transform duration-200 ${isExpanded ? 'rotate-180 text-[#d4b84a]' : ''}`}
+                            />
+                          </button>
+                        )}
                       </div>
-                      <div className="text-[9px] text-[var(--muted)] truncate">
-                        {row.model || row.models?.[0] || 'model not set'}
-                        {unavailable ? ` · ${disabledReason || 'unavailable'}` : ''}
-                      </div>
+
+                      {/* Models Sub-Picker */}
+                      {isExpanded && models.length > 0 && (
+                        <div className="px-2.5 pb-2.5 pt-1 space-y-1 bg-[#0f1115]">
+                          <div className="text-[9px] font-bold uppercase tracking-wider text-[#777] px-2 pt-0.5 flex justify-between items-center">
+                            <span>Available Models ({models.length})</span>
+                            <span className="font-mono text-[8px] text-[#555]">Click to select</span>
+                          </div>
+                          {models.map((modelName) => {
+                            const isModelSelected = isSelected && selectedModelName === modelName;
+                            const isFree = isFreeTierModel(modelName);
+
+                            return (
+                              <button
+                                key={modelName}
+                                onClick={() => switchProvider(row, modelName)}
+                                disabled={unavailable || switchingProvider}
+                                className={`w-full text-left p-2 rounded-xl transition-all border ${
+                                  isModelSelected
+                                    ? 'bg-[#1c2029] border-[#b8960c] text-white shadow-sm'
+                                    : 'bg-[#14171d] border-[#22262f] hover:border-[#383e4c] text-[#ccc] hover:text-white'
+                                } ${unavailable ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono text-[11px] font-bold truncate">
+                                    {modelName}
+                                  </span>
+                                  {isFree ? (
+                                    <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-[#16a34a]/25 text-[#22c55e] border border-[#16a34a]/40 uppercase shrink-0">
+                                      FREE
+                                    </span>
+                                  ) : (
+                                    <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-[#242832] text-[#999] shrink-0">
+                                      PAID
+                                    </span>
+                                  )}
+                                </div>
+
+                                {isFree ? (
+                                  <div className="mt-1 space-y-0.5">
+                                    <div className="text-[10px] font-mono font-semibold text-[#b8960c]">
+                                      $0 · limits
+                                    </div>
+                                    <div className="text-[9px] text-[#fca5a5] flex items-center gap-1 font-medium">
+                                      <span>✕</span>
+                                      <span>not for quotes, invoices or client replies</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="mt-0.5 text-[9px] text-[#777] font-mono">
+                                    Standard provider API rates apply
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </button>
-                );
-              })}
-              {providerRows.length === 0 && (
-                <div className="px-3 py-2 text-[10px] text-[var(--muted)]">No providers loaded</div>
-              )}
+                  );
+                })}
+                {providerRows.length === 0 && (
+                  <div className="px-3 py-4 text-center text-[10px] text-[var(--muted)]">No providers loaded</div>
+                )}
+              </div>
             </div>
           )}
         </div>

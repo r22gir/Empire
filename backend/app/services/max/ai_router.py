@@ -33,6 +33,11 @@ from .routing_state import (
     update_routing_state,
     openclaw_inner_model,
 )
+from .free_tiers import (
+    is_free_tier_model,
+    is_free_tier_quota_exhausted,
+    is_financial_or_client_desk,
+)
 
 load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
@@ -980,16 +985,24 @@ class AIRouter:
                 return AIResponse(content=resp, model_used=model_id, fallback_used=fallback)
 
             elif provider_type == "groq":
-                logger.info(f"[MAX] Chat via Groq{' (fallback)' if fallback else ''}")
-                resp = await self._groq_chat(full_messages)
-                self._log_chat_cost(full_messages, resp, "groq-llama-3.3-70b", feature, business, tenant_id)
-                return AIResponse(content=resp, model_used="groq-llama-3.3-70b", fallback_used=fallback)
+                groq_model = model_override or "llama-3.3-70b-versatile"
+                if is_free_tier_quota_exhausted(groq_model, "groq", self.token_tracker.db_path):
+                    logger.warning(f"[MAX] Groq free quota exhausted for {groq_model}, skipping")
+                    return None
+                logger.info(f"[MAX] Chat via Groq ({groq_model}){' (fallback)' if fallback else ''}")
+                resp = await self._groq_chat(full_messages, model=groq_model)
+                self._log_chat_cost(full_messages, resp, groq_model, feature, business, tenant_id)
+                return AIResponse(content=resp, model_used=groq_model, fallback_used=fallback)
 
             elif provider_type == "gemini":
-                logger.info(f"[MAX] Chat via Gemini 2.5 Flash{' (fallback)' if fallback else ''}")
-                resp = await self._gemini_chat(full_messages, image_path)
-                self._log_chat_cost(full_messages, resp, "gemini-2.5-flash", feature, business, tenant_id)
-                return AIResponse(content=resp, model_used="gemini-2.5-flash", fallback_used=fallback)
+                gemini_model = model_override or "gemini-2.5-flash"
+                if is_free_tier_quota_exhausted(gemini_model, "gemini", self.token_tracker.db_path):
+                    logger.warning(f"[MAX] Gemini free quota exhausted for {gemini_model}, skipping")
+                    return None
+                logger.info(f"[MAX] Chat via Gemini ({gemini_model}){' (fallback)' if fallback else ''}")
+                resp = await self._gemini_chat(full_messages, image_path, model=gemini_model)
+                self._log_chat_cost(full_messages, resp, gemini_model, feature, business, tenant_id)
+                return AIResponse(content=resp, model_used=gemini_model, fallback_used=fallback)
 
             elif provider_type == "openai":
                 oai_model = model_override or "gpt-4.1-nano"
@@ -1014,6 +1027,9 @@ class AIRouter:
 
             elif provider_type == "openrouter":
                 or_model = model_override or self.openrouter_model
+                if is_free_tier_quota_exhausted(or_model, "openrouter", self.token_tracker.db_path):
+                    logger.warning(f"[MAX] OpenRouter free quota exhausted for {or_model}, skipping")
+                    return None
                 logger.info(f"[MAX] Chat via OpenRouter ({or_model}){' (fallback)' if fallback else ''}")
                 resp = await self._openrouter_chat(full_messages, model=or_model, image_path=image_path)
                 self._log_chat_cost(full_messages, resp, or_model, feature, business, tenant_id)
@@ -1151,16 +1167,33 @@ class AIRouter:
         business: str,
         tenant_id: str,
         tools: Optional[list] = None,
+        desk: Optional[str] = None,
     ) -> AIResponse:
         state = self._refresh_routing_state()
         candidates = self._selected_provider_candidates(state)
         attempted: list[str] = []
         blocked: list[str] = []
 
+        is_client_fin = is_financial_or_client_desk(desk=desk or business, feature=feature, business=business)
+
         for provider, model_name, fallback in candidates:
             reason = self._provider_disabled_reason(provider, state)
             if reason:
                 blocked.append(f"{provider}:{reason}")
+                continue
+
+            # Guardrail: client-facing/financial desks (forge quotes, finance) must never be routed to free-tier models
+            if is_client_fin and is_free_tier_model(model_name, provider):
+                logger.warning(
+                    f"[MAX GUARDRAIL] Free-tier model '{model_name}' ({provider}) blocked for client/financial desk/feature ({business}/{feature})"
+                )
+                blocked.append(f"{provider}:{model_name}:free_tier_forbidden_for_client_financial_desk")
+                continue
+
+            # Skip free model whose quota is exhausted
+            if is_free_tier_quota_exhausted(model_name, provider, self.token_tracker.db_path):
+                logger.warning(f"[MAX] Free quota exhausted for {model_name} ({provider}), skipping candidate")
+                blocked.append(f"{provider}:{model_name}:free_quota_exhausted")
                 continue
 
             attempted.append(provider)
@@ -1272,7 +1305,13 @@ class AIRouter:
                 business=business,
                 tenant_id=tenant_id,
                 tools=tools,
+                desk=desk,
             )
+
+        is_client_fin = is_financial_or_client_desk(desk=desk or business, feature=feature, business=business)
+        if is_client_fin and use_model == AIModel.GEMINI:
+            logger.warning(f"[MAX GUARDRAIL] Gemini free-tier blocked for client/financial desk={desk or business}, overriding to MiniMax")
+            use_model = AIModel.MINIMAX
 
         # Complexity-based routing (only when no desk override and no explicit model)
         if model is None and not desk:
@@ -1283,6 +1322,8 @@ class AIRouter:
 
             is_first = True
             for provider_type, model_override in providers_chain:
+                if is_client_fin and is_free_tier_model(model_override or provider_default_model(provider_type), provider_type):
+                    continue
                 result = await self._try_provider_chat(provider_type, model_override, full_messages, messages, image_path, not is_first, feature, business, tenant_id, tools=tools)
                 is_first = False
                 if result:
@@ -1307,14 +1348,20 @@ class AIRouter:
             use_model = AIModel.CLAUDE
         elif use_model == AIModel.GEMINI:
             # Desk requested Gemini
-            try:
-                logger.info("[MAX] Chat via Gemini 2.5 Flash (desk)")
-                resp = await self._gemini_chat(full_messages, image_path)
-                self._log_chat_cost(full_messages, resp, "gemini-2.5-flash", feature, business, tenant_id)
-                return AIResponse(content=resp, model_used="gemini-2.5-flash", fallback_used=False)
-            except Exception as e:
-                logger.warning(f"Gemini failed: {type(e).__name__}: {e}")
-                use_model = AIModel.GROQ  # fallback
+            if is_client_fin:
+                use_model = AIModel.MINIMAX
+            elif is_free_tier_quota_exhausted("gemini-2.5-flash", "gemini", self.token_tracker.db_path):
+                logger.warning("[MAX] Gemini free quota exhausted, falling back")
+                use_model = AIModel.GROQ
+            else:
+                try:
+                    logger.info("[MAX] Chat via Gemini 2.5 Flash (desk)")
+                    resp = await self._gemini_chat(full_messages, image_path, model="gemini-2.5-flash")
+                    self._log_chat_cost(full_messages, resp, "gemini-2.5-flash", feature, business, tenant_id)
+                    return AIResponse(content=resp, model_used="gemini-2.5-flash", fallback_used=False)
+                except Exception as e:
+                    logger.warning(f"Gemini failed: {type(e).__name__}: {e}")
+                    use_model = AIModel.GROQ  # fallback
         elif use_model == AIModel.OPENAI_NANO:
             try:
                 logger.info("[MAX] Chat via OpenAI (gpt-4.1-nano) (desk)")
@@ -1393,11 +1440,17 @@ class AIRouter:
                     self._record_provider_error("claude", e)
 
             elif provider == AIModel.GROQ and self.groq_key:
+                groq_model = "llama-3.3-70b-versatile"
+                if is_client_fin and is_free_tier_model(groq_model, "groq"):
+                    continue
+                if is_free_tier_quota_exhausted(groq_model, "groq", self.token_tracker.db_path):
+                    logger.warning("[MAX] Groq free quota exhausted, skipping in legacy chat")
+                    continue
                 try:
-                    logger.info(f"[MAX] Chat via Groq{' (fallback)' if fallback else ''}")
-                    resp = await self._groq_chat(full_messages)
-                    self._log_chat_cost(full_messages, resp, "groq-llama-3.3-70b", feature, business, tenant_id)
-                    return AIResponse(content=resp, model_used="groq-llama-3.3-70b", fallback_used=fallback)
+                    logger.info(f"[MAX] Chat via Groq ({groq_model}){' (fallback)' if fallback else ''}")
+                    resp = await self._groq_chat(full_messages, model=groq_model)
+                    self._log_chat_cost(full_messages, resp, groq_model, feature, business, tenant_id)
+                    return AIResponse(content=resp, model_used=groq_model, fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Groq failed: {type(e).__name__}: {e}")
                     self._record_provider_error("groq", e)
@@ -1486,9 +1539,15 @@ class AIRouter:
                 business=business,
                 tenant_id=tenant_id,
                 tools=None,
+                desk=desk,
             )
             yield selected.content, selected.model_used
             return
+
+        is_client_fin = is_financial_or_client_desk(desk=desk or business, feature=feature, business=business)
+        if is_client_fin and use_model == AIModel.GEMINI:
+            logger.warning(f"[MAX GUARDRAIL] Gemini free-tier blocked for client/financial desk={desk or business}, overriding to MiniMax")
+            use_model = AIModel.MINIMAX
 
         # Complexity-based routing (only when no desk override and no explicit model)
         if model is None and not desk:
@@ -1500,6 +1559,12 @@ class AIRouter:
             chain_exhausted = True
             is_first = True
             for provider_type, model_override in providers_chain:
+                target_m = model_override or provider_default_model(provider_type)
+                if is_client_fin and is_free_tier_model(target_m, provider_type):
+                    continue
+                if is_free_tier_quota_exhausted(target_m, provider_type, self.token_tracker.db_path):
+                    logger.warning(f"[MAX] Free quota exhausted for {target_m}, skipping in stream")
+                    continue
                 fallback = not is_first
                 is_first = False
                 try:
@@ -1523,21 +1588,23 @@ class AIRouter:
                         return
 
                     elif provider_type == "groq":
-                        logger.info(f"[MAX] Streaming via Groq{' (fallback)' if fallback else ''}")
+                        g_model = model_override or "llama-3.3-70b-versatile"
+                        logger.info(f"[MAX] Streaming via Groq ({g_model}){' (fallback)' if fallback else ''}")
                         collected = []
-                        async for chunk in self._groq_chat_stream(full_messages):
+                        async for chunk in self._groq_chat_stream(full_messages, model=g_model):
                             collected.append(chunk)
-                            yield chunk, "groq-llama-3.3-70b"
-                        self._log_chat_cost(full_messages, "".join(collected), "groq-llama-3.3-70b", feature, business, tenant_id)
+                            yield chunk, g_model
+                        self._log_chat_cost(full_messages, "".join(collected), g_model, feature, business, tenant_id)
                         return
 
                     elif provider_type == "gemini":
-                        logger.info(f"[MAX] Streaming via Gemini 2.5 Flash{' (fallback)' if fallback else ''}")
+                        gem_model = model_override or "gemini-2.5-flash"
+                        logger.info(f"[MAX] Streaming via Gemini ({gem_model}){' (fallback)' if fallback else ''}")
                         collected = []
-                        async for chunk in self._gemini_chat_stream(full_messages, image_path):
+                        async for chunk in self._gemini_chat_stream(full_messages, image_path, model=gem_model):
                             collected.append(chunk)
-                            yield chunk, "gemini-2.5-flash"
-                        self._log_chat_cost(full_messages, "".join(collected), "gemini-2.5-flash", feature, business, tenant_id)
+                            yield chunk, gem_model
+                        self._log_chat_cost(full_messages, "".join(collected), gem_model, feature, business, tenant_id)
                         return
 
                     elif provider_type == "openai":
@@ -1583,17 +1650,23 @@ class AIRouter:
             claude_model_id = "claude-sonnet-4-6"
             use_model = AIModel.CLAUDE
         elif use_model == AIModel.GEMINI:
-            try:
-                logger.info("[MAX] Streaming via Gemini 2.5 Flash (desk)")
-                collected = []
-                async for chunk in self._gemini_chat_stream(full_messages, image_path):
-                    collected.append(chunk)
-                    yield chunk, "gemini-2.5-flash"
-                self._log_chat_cost(full_messages, "".join(collected), "gemini-2.5-flash", feature, business, tenant_id)
-                return
-            except Exception as e:
-                logger.warning(f"Gemini stream failed: {type(e).__name__}: {e}")
+            if is_client_fin:
+                use_model = AIModel.MINIMAX
+            elif is_free_tier_quota_exhausted("gemini-2.5-flash", "gemini", self.token_tracker.db_path):
+                logger.warning("[MAX] Gemini free quota exhausted, falling back")
                 use_model = AIModel.GROQ
+            else:
+                try:
+                    logger.info("[MAX] Streaming via Gemini 2.5 Flash (desk)")
+                    collected = []
+                    async for chunk in self._gemini_chat_stream(full_messages, image_path, model="gemini-2.5-flash"):
+                        collected.append(chunk)
+                        yield chunk, "gemini-2.5-flash"
+                    self._log_chat_cost(full_messages, "".join(collected), "gemini-2.5-flash", feature, business, tenant_id)
+                    return
+                except Exception as e:
+                    logger.warning(f"Gemini stream failed: {type(e).__name__}: {e}")
+                    use_model = AIModel.GROQ
         elif use_model in (AIModel.OPENAI_NANO, AIModel.OPENAI_MINI, AIModel.OPENAI_4O):
             oai_model = use_model.value
             try:
@@ -1657,13 +1730,19 @@ class AIRouter:
                     self._record_provider_error("claude", e)
 
             elif provider == AIModel.GROQ and self.groq_key:
+                groq_model = "llama-3.3-70b-versatile"
+                if is_client_fin and is_free_tier_model(groq_model, "groq"):
+                    continue
+                if is_free_tier_quota_exhausted(groq_model, "groq", self.token_tracker.db_path):
+                    logger.warning("[MAX] Groq free quota exhausted, skipping in legacy stream")
+                    continue
                 try:
-                    logger.info("[MAX] Streaming via Groq")
+                    logger.info(f"[MAX] Streaming via Groq ({groq_model})")
                     collected = []
-                    async for chunk in self._groq_chat_stream(full_messages):
+                    async for chunk in self._groq_chat_stream(full_messages, model=groq_model):
                         collected.append(chunk)
-                        yield chunk, "groq-llama-3.3-70b"
-                    self._log_chat_cost(full_messages, "".join(collected), "groq-llama-3.3-70b", feature, business, tenant_id)
+                        yield chunk, groq_model
+                    self._log_chat_cost(full_messages, "".join(collected), groq_model, feature, business, tenant_id)
                     return
                 except Exception as e:
                     logger.warning(f"Groq stream failed: {e}")
@@ -1853,28 +1932,30 @@ class AIRouter:
                     elif data.get("type") == "message_stop":
                         return
 
-    # ── Groq (OpenAI-compatible, Llama 3.3 70B) ──────────────────────
+    # ── Groq (OpenAI-compatible, Llama 3.3 70B & Free Models) ───────
 
-    async def _groq_chat(self, messages: List[AIMessage]) -> str:
+    async def _groq_chat(self, messages: List[AIMessage], model: Optional[str] = None) -> str:
+        groq_model = model or "llama-3.3-70b-versatile"
         api_messages = self._prepare_openai_messages(messages)
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"},
-                json={"model": "llama-3.3-70b-versatile", "messages": api_messages, "max_tokens": 2048}
+                json={"model": groq_model, "messages": api_messages, "max_tokens": 2048}
             )
             if resp.status_code != 200:
                 raise Exception(f"Groq HTTP {resp.status_code}: {resp.text}")
             return resp.json()["choices"][0]["message"]["content"]
 
-    async def _groq_chat_stream(self, messages: List[AIMessage]) -> AsyncGenerator[str, None]:
+    async def _groq_chat_stream(self, messages: List[AIMessage], model: Optional[str] = None) -> AsyncGenerator[str, None]:
+        groq_model = model or "llama-3.3-70b-versatile"
         api_messages = self._prepare_openai_messages(messages)
         async with httpx.AsyncClient(timeout=30.0) as client:
             async with client.stream(
                 "POST",
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"},
-                json={"model": "llama-3.3-70b-versatile", "messages": api_messages, "max_tokens": 2048, "stream": True}
+                json={"model": groq_model, "messages": api_messages, "max_tokens": 2048, "stream": True}
             ) as response:
                 if response.status_code != 200:
                     error_body = await response.aread()
@@ -1894,10 +1975,11 @@ class AIRouter:
                     if text:
                         yield text
 
-    # ── Google Gemini (REST API, 2.5 Flash) ───────────────────────────
+    # ── Google Gemini (REST API, 2.5 Flash & Free Models) ─────────────
 
-    async def _gemini_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
-        """Chat via Google Gemini 2.5 Flash (free tier)."""
+    async def _gemini_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None, model: Optional[str] = None) -> str:
+        """Chat via Google Gemini (free tier models)."""
+        gemini_model = model or "gemini-2.5-flash"
         contents = []
         for msg in messages:
             role = "user" if msg.role in ("user", "system") else "model"
@@ -1912,7 +1994,7 @@ class AIRouter:
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.gemini_key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={self.gemini_key}",
                 json={"contents": contents, "generationConfig": {"maxOutputTokens": 4096}}
             )
             if resp.status_code == 429:
@@ -1926,8 +2008,9 @@ class AIRouter:
                 return "".join(p.get("text", "") for p in parts)
             return "No response from Gemini"
 
-    async def _gemini_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
-        """Stream chat via Google Gemini 2.5 Flash."""
+    async def _gemini_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None, model: Optional[str] = None) -> AsyncGenerator[str, None]:
+        """Stream chat via Google Gemini."""
+        gemini_model = model or "gemini-2.5-flash"
         contents = []
         for msg in messages:
             role = "user" if msg.role in ("user", "system") else "model"
@@ -1942,7 +2025,7 @@ class AIRouter:
         async with httpx.AsyncClient(timeout=30.0) as client:
             async with client.stream(
                 "POST",
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key={self.gemini_key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:streamGenerateContent?alt=sse&key={self.gemini_key}",
                 json={"contents": contents, "generationConfig": {"maxOutputTokens": 4096}}
             ) as response:
                 if response.status_code != 200:
