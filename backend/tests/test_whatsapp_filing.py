@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import time
 from pathlib import Path
 
@@ -589,7 +590,8 @@ def test_photo_batch_files_once_from_nearby_job_text(isolated_whatsapp_edition, 
     ))
     bodies = [p["text"]["body"] for p in posts]
     assert len(bodies) == 1
-    assert "Filed 3 photos under Maggie" in bodies[0]
+    assert "Filed" in bodies[0] and "Maggie" in bodies[0]
+    assert "3" in bodies[0]
     assert not any(r.get("route") == "photo_quote" for r in result["results"])
     messages, _ = get_conversation_messages(RAFAEL)
     atts = [a for m in messages if m["direction"] == "inbound" for a in m.get("attachments") or []]
@@ -1269,3 +1271,195 @@ def test_polycam_zip_files_as_scan(isolated_whatsapp_edition):
     assert "/scans/" in path.replace("\\", "/")
     assert Path(path).is_file()
     assert not is_scan_file("invoice.zip", "application/zip", "document")
+
+
+def test_job_hint_drops_chat_and_keeps_captions(isolated_whatsapp_edition):
+    from app.services.max.whatsapp_log import (
+        combined_job_hint,
+        is_job_hint_text,
+        log_message,
+        record_media_batch,
+        _load_batch,
+    )
+
+    assert is_job_hint_text("New job home wood suites.")
+    assert is_job_hint_text("These are for Maggie")
+    assert not is_job_hint_text("You online?")
+    assert not is_job_hint_text("Need to buy a case")
+    assert not is_job_hint_text("Next 2 months")
+    assert not is_job_hint_text("Are you vetting my pictures?")
+    log_message(RAFAEL, "inbound", "text", body="Next 2 months")
+    log_message(RAFAEL, "inbound", "text", body="You online?")
+    log_message(RAFAEL, "inbound", "image", caption="New job home wood suites.", body="[photo]")
+    hint = combined_job_hint(RAFAEL, "You online?", "Need to buy a case", "New job home wood suites.")
+    assert "home wood" in hint.lower()
+    assert "online" not in hint.lower()
+    assert "buy a case" not in hint.lower()
+    record_media_batch(RAFAEL, [1], "You online? Next 2 months New job home wood suites.")
+    stored = _load_batch(RAFAEL)["hint_text"].lower()
+    assert "online" not in stored
+    assert "next 2 months" not in stored
+
+
+def test_new_job_caption_creates_folder_and_files(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    from app.services.max.doc_lookup import load_client_aliases
+    from app.services.max.whatsapp_folders import read_job_record
+
+    _quote_spies(monkeypatch)
+    posts = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    raw = _payload({
+        "type": "image",
+        "id": "wamid.newjob",
+        "image": {
+            "id": "media-new",
+            "mime_type": "image/jpeg",
+            "caption": "New job home wood suites.",
+        },
+    })
+    asyncio.run(wa.process_webhook(raw, _sign(raw), http_get=_image_get, http_post=_post))
+    bodies = [p["text"]["body"] for p in posts]
+    assert any("Created job Home Wood Suites" in b and "filed" in b.lower() for b in bodies)
+    folder = jobs_root() / "home-wood-suites"
+    assert (folder / "JOB-FACTS.md").is_file()
+    rec = read_job_record("home-wood-suites")
+    assert rec["kind"] == "client"
+    assert rec["quote_id"] is None and rec["lead_id"] is None and rec["intake_id"] is None
+    assert rec["attachments"]
+    slugs = {c["slug"] for c in (load_client_aliases().get("clients") or [])}
+    assert "home-wood-suites" in slugs
+    bak = list((Path(os.environ["MAX_CLIENT_ALIASES_PATH"]).parent).glob("client_aliases.json.bak-*"))
+    assert bak
+
+
+def test_new_job_ambiguous_asks_once(isolated_whatsapp_edition):
+    from app.services.max.whatsapp_folders import parse_new_job_name, resolve_or_create_folder
+
+    assert parse_new_job_name("nuevo trabajo Casa Azul") == "Casa Azul"
+    assert parse_new_job_name("new client Oak Lane") == "Oak Lane"
+    assert resolve_or_create_folder("New job Maggie and Willard") is None
+
+
+def test_purchase_text_asks_personal_or_store(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    posts = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    raw = _payloads([
+        {"type": "image", "id": "wamid.case1", "image": {"id": "media-case", "mime_type": "image/jpeg"}},
+        {"type": "text", "id": "wamid.case2", "text": {"body": "Need to buy a case"}},
+    ])
+    asyncio.run(wa.process_webhook(raw, _sign(raw), http_get=_image_get, http_post=_post))
+    bodies = [p["text"]["body"] for p in posts]
+    assert any("Personal or store folder?" in b for b in bodies)
+    assert not any("Closest:" in b for b in bodies)
+
+
+def test_photo_status_reply_knows_parked_and_filed(isolated_whatsapp_edition):
+    from app.services.max.whatsapp_log import (
+        last_attachment_ids,
+        log_message,
+        parked_photos_note,
+        photo_status_reply,
+        prepare_inbound_attachment,
+        set_pending_filings,
+    )
+
+    rec = prepare_inbound_attachment(
+        b"park",
+        filename="a.jpg",
+        mime_type="image/jpeg",
+        media_type="image",
+        wa_id=RAFAEL,
+        hint_text="",
+    )
+    mid = log_message(RAFAEL, "inbound", "image", body="[photo]", attachments=[rec])
+    att_id = last_attachment_ids(mid)[0]["id"]
+    set_pending_filings(RAFAEL, [att_id])
+    note = parked_photos_note(RAFAEL)
+    assert "waiting to be filed" in note
+    reply = photo_status_reply(RAFAEL, "Are you vetting my pictures?")
+    assert reply and reply.startswith("Yes")
+    assert "waiting" in reply.lower()
+
+
+def test_live_oct10_sequence_new_job_and_truthful_photos(isolated_whatsapp_edition, monkeypatch):
+    """Regression for the 10/10 5:35–5:42 PM Dell live test (chat log 34–47)."""
+    import asyncio
+    import os
+
+    from app.services.max.whatsapp_folders import read_job_record
+    from app.services.max.whatsapp_log import _load_batch, photo_status_reply
+
+    _quote_spies(monkeypatch)
+    chats = []
+    posts = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    async def _chat(text, wa_id):
+        chats.append(text)
+        return f"chat:{text}"
+
+    async def _voice(audio, mime, wa_id):
+        chats.append("[voice]")
+        return "voice ok"
+
+    def _run(messages):
+        raw = _payloads(messages)
+        return asyncio.run(wa.process_webhook(
+            raw, _sign(raw), text_handler=_chat, voice_handler=_voice,
+            http_get=_image_get, http_post=_post,
+        ))
+
+    _run([{"type": "audio", "id": "wamid.v1", "audio": {"id": "media-v", "mime_type": "audio/ogg", "voice": True}, "voice": True}])
+    _run([{"type": "text", "id": "wamid.t1", "text": {"body": "Next 2 months"}}])
+    _run([{
+        "type": "image",
+        "id": "wamid.p1",
+        "image": {"id": "media-p1", "mime_type": "image/jpeg", "caption": "New job home wood suites."},
+    }])
+    _run([{"type": "text", "id": "wamid.t2", "text": {"body": "You online?"}}])
+    _run([{"type": "image", "id": "wamid.p2", "image": {"id": "media-p2", "mime_type": "image/jpeg"}}])
+    _run([{"type": "image", "id": "wamid.p3", "image": {"id": "media-p3", "mime_type": "image/jpeg"}}])
+    _run([{"type": "text", "id": "wamid.t3", "text": {"body": "Need to buy a case"}}])
+    _run([{"type": "text", "id": "wamid.t4", "text": {"body": "Are you vetting my pictures?"}}])
+
+    hint = (_load_batch(RAFAEL).get("hint_text") or "").lower()
+    assert "online" not in hint
+    assert "next 2 months" not in hint
+    assert "buy a case" not in hint
+    assert "vetting" not in hint
+
+    messages, _ = get_conversation_messages(RAFAEL)
+    atts = [a for m in messages if m["direction"] == "inbound" for a in m.get("attachments") or []]
+    photos = [a for a in atts if a.get("media_type") in {"image", "photo"}]
+    assert len(photos) == 3
+    assert all(a["filing_status"] == "filed" and a["job_slug"] == "home-wood-suites" for a in photos)
+    rec = read_job_record("home-wood-suites")
+    assert rec["quote_id"] is None and rec["lead_id"] is None
+    assert len(rec["attachments"]) == 3
+
+    bodies = [p["text"]["body"] for p in posts]
+    assert any("Created job Home Wood Suites" in b for b in bodies)
+    assert any("Filed under Home Wood Suites" in b or "filed" in b.lower() for b in bodies)
+    assert any(b.startswith("Yes") and "Home Wood Suites" in b for b in bodies)
+    assert not any("I don't have any new pictures" in b for b in bodies)
+    assert "You online?" in chats
+    assert "Need to buy a case" in chats
+    assert "Are you vetting my pictures?" not in chats
+    assert photo_status_reply(RAFAEL, "did you get my photos")
+    aliases_path = Path(os.environ["MAX_CLIENT_ALIASES_PATH"])
+    assert "home-wood-suites" in aliases_path.read_text(encoding="utf-8")

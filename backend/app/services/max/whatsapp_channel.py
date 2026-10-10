@@ -1532,6 +1532,16 @@ async def default_text_handler(text: str, wa_id: str) -> str:
     except Exception:
         logger.warning("WhatsApp text document route failed", exc_info=True)
     try:
+        from app.services.max.whatsapp_log import photo_status_reply
+
+        photo_reply = photo_status_reply(wa_id, body)
+        if photo_reply:
+            whatsapp_conversation(wa_id)
+            remember_whatsapp_turn(wa_id, body, photo_reply)
+            return photo_reply
+    except Exception:
+        logger.warning("WhatsApp photo-status reply failed", exc_info=True)
+    try:
         return await max_chat(body, wa_id)
     except Exception:
         logger.warning("WhatsApp Max chat failed", exc_info=True)
@@ -1717,6 +1727,7 @@ async def process_webhook(
     batch_senders: set[str] = set()
     job_replied: set[str] = set()
     quoted_senders: set[str] = set()
+    immediate_ack: set[str] = set()
     results: list[dict[str, Any]] = []
     on_text = text_handler or default_text_handler
     on_voice = voice_handler or default_voice_handler
@@ -1750,6 +1761,7 @@ async def process_webhook(
             combined_job_hint,
             consume_job_answer,
             finalize_photo_batch,
+            is_job_hint_text,
             iso_from_wa_timestamp as _iso_wa,
             last_attachment_ids,
             mark_photo_batch_quoted,
@@ -1762,14 +1774,15 @@ async def process_webhook(
         from app.services.max.whatsapp_folders import (
             folder_allows_quote,
             resolve_folder,
+            resolve_or_create_folder,
         )
 
-        hint = combined_job_hint(
-            sender,
+        hint_bits = [
             message.get("caption") or "",
             message.get("text") or "",
-            *payload_texts.get(sender, []),
-        )
+            *[t for t in payload_texts.get(sender, []) if is_job_hint_text(t)],
+        ]
+        hint = combined_job_hint(sender, *hint_bits)
 
         # 2026-10-08 queueing: one sender's messages are answered in order.
         async with _sender_lock(sender):
@@ -1828,6 +1841,9 @@ async def process_webhook(
                     if fileable_ids:
                         record_media_batch(sender, fileable_ids, hint)
                         batch_senders.add(sender)
+                        caption_only = str(message.get("caption") or "").strip()
+                        if caption_only and resolve_or_create_folder(caption_only):
+                            immediate_ack.add(sender)
             except Exception:
                 persist_failed = True
                 inbound_atts = []
@@ -1932,7 +1948,7 @@ async def process_webhook(
             if prev and not prev.done():
                 prev.cancel()
             continue
-        if photo_batch_window_seconds() <= 0:
+        if sender in immediate_ack or photo_batch_window_seconds() <= 0:
             note = finalize_photo_batch(sender)
             reply = (note or {}).get("reply") or ""
             if reply:

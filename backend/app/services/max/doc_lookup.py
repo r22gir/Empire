@@ -19,14 +19,25 @@ from __future__ import annotations
 
 import difflib
 import json
+import logging
 import os
 import re
+import shutil
+import tempfile
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 HubGet = Callable[[str, dict], dict]
 
 ALIASES_PATH = Path(__file__).resolve().parents[2] / "config" / "client_aliases.json"
+_alias_write_lock = threading.Lock()
+_ALIAS_PHONE_KEYS = {
+    "phone", "phones", "mobile", "telephone", "whatsapp", "wa_id",
+    "msisdn", "number", "numbers", "founder_phone",
+}
+logger = logging.getLogger("max.doc_lookup")
 
 FILLER = {
     "show", "me", "the", "open", "final", "finals", "latest", "last", "newest", "recent", "recently",
@@ -290,6 +301,83 @@ def load_client_aliases() -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def add_client_alias(
+    name: str,
+    slug: str,
+    aliases: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """Append one client row. Atomic write + timestamped backup. No phone numbers.
+
+    load_client_aliases() reads the file every call (no cache), so the next
+    probe sees the new row — hot-reload safe.
+    """
+    title = re.sub(r"\s+", " ", (name or "").strip())
+    clean_slug = slugify(slug or title)
+    if not title or not clean_slug:
+        raise ValueError("client alias needs a name and slug")
+    extra = [str(a).strip() for a in (aliases or []) if str(a).strip()]
+    alias_list = [
+        item for item in dict.fromkeys([title, *extra, title.lower(), clean_slug.replace("-", " ")])
+        if item and not _looks_like_phone(item)
+    ]
+    entry = {"slug": clean_slug, "name": title, "aliases": alias_list, "address": ""}
+    for key in _ALIAS_PHONE_KEYS:
+        entry.pop(key, None)
+    with _alias_write_lock:
+        path = _config_path()
+        data = load_client_aliases()
+        if not data:
+            data = {"clients": []}
+        clients = list(data.get("clients") or [])
+        for existing in clients:
+            if not isinstance(existing, dict):
+                continue
+            if str(existing.get("slug") or "") == clean_slug:
+                merged = list(existing.get("aliases") or [])
+                for item in alias_list:
+                    if item not in merged:
+                        merged.append(item)
+                existing["aliases"] = merged
+                if not existing.get("name"):
+                    existing["name"] = title
+                _write_aliases_atomic(path, data)
+                return existing
+        clients.append(entry)
+        data["clients"] = clients
+        _write_aliases_atomic(path, data)
+        return entry
+
+
+def _write_aliases_atomic(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file():
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup = path.with_name(f"{path.name}.bak-{stamp}")
+        try:
+            shutil.copy2(path, backup)
+        except OSError as exc:
+            logger.warning("could not backup client aliases %s: %s", path, exc)
+    payload = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    fd, tmp = tempfile.mkstemp(prefix=".client-aliases-", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _looks_like_phone(value: str) -> bool:
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    return len(digits) >= 10
 
 
 def normalize_term(term: str) -> str:

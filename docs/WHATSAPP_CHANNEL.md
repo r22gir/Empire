@@ -206,7 +206,11 @@ Photos go to `<jobs-root>/<slug>/photos/`. PDFs/documents go to `<jobs-root>/<sl
 | `store` | reserved | Never |
 | `luxeforge` | reserved | Never (Rafael: do this folder now too) |
 
-Say the client name, or **personal / insurance / store / luxeforge**. A **unique client name beats a reserved word** (`Emma's store order` → Emma’s job, not `store`). `shop` / `claim` / `private` / `showroom` are not reserved aliases. Unknown names still ask once (PR #91). `skip` leaves inbox.
+Say the client name, or **personal / insurance / store / luxeforge**. A **unique client name beats a reserved word** (`Emma's store order` → Emma’s job, not `store`). `shop` / `claim` / `private` / `showroom` are not reserved aliases.
+
+**`New job <name>`** (also `nuevo trabajo <name>`, `new client <name>`) in a photo caption or in text near photos **creates** a client folder when nothing unique already matches: slug from the name, `JOB-FACTS.md` + `JOB-RECORD.json` stubs, and an alias row in `client_aliases.json` (atomic write + timestamped `.bak-*`, no phone numbers). Confirm in one line: `Created job Home Wood Suites and filed 3 photos`. If the name is ambiguous with an existing job, ask once. Never a quote, LuxeForge job, or lead.
+
+Unknown names still ask once (PR #91). `skip` leaves inbox. A photo of an object plus purchase chat (`Need to buy a case`) asks `Personal or store folder?` once — not a list of client closest matches.
 
 Each folder has `JOB-FACTS.md` and a shared **`JOB-RECORD.json`** (attachments, sha256, chat-log ids). Writes are a temp file + `os.replace` under a lock so two photos in one batch cannot drop an entry. A corrupt record is moved to `JOB-RECORD.json.corrupt-<UTC>` and a fresh record is started — never silently overwritten. `intake_id` / `quote_id` / `lead_id` stay null in Phase 0. `owner` is the edition label (Workroom `founder`, Max-e / Maxine their own). Max, the job board, and the chat log read that file later. Family editions have their own jobs root.
 
@@ -218,12 +222,17 @@ Album / grouped-media comments, Cloud API `unknown`/`unsupported`/`interactive` 
 
 Resolution (`app/services/max/doc_lookup.py` + `client_aliases.json`):
 
-1. Caption, album text, or a nearby message (~10 minutes before or after) names one client, nickname, address, or quote number → that job for the whole batch.
-2. Photos from the same sender within ~2 minutes are **one batch**: one “Filed N photos under \<job\>” or one “Which job?” — not one reply per photo.
-3. More than one match → **do not guess**. Park in `EMPIRE_DATA_DIR/whatsapp/inbox/` and ask once.
-4. No job name → **ask once** for the batch, never file into a sticky active job.
-5. `consume_job_answer` intercepts a later text **only after a real ask was sent** (`whatsapp_media_batches.asked=1` or `whatsapp_pending_filings.asked_at` set). Unique name files the batch. `skip` leaves it in inbox. Anything else (`hello`, `thanks`, `what's on my schedule today?`, `Emma’s client`) falls through to normal Max chat. An open photo batch without an ask is file state, not a pending question.
-6. Stale batches expire from SQLite on load (`last_at` vs the photo-batch window; `asked_at` vs the job-answer timeout). Expiry survives process restart. The in-memory flush task is only a debounce.
+1. **Job-naming text only.** Caption of the photos and immediate text inside the **~2 minute photo-batch window**. Not every nearby chat. `You online?`, `Need to buy a case`, `Next 2 months`, `Are you vetting my pictures?` are never stored as `hint_text`.
+2. `New job <name>` / `nuevo trabajo` / `new client` → create that folder when no unique existing job matches (see above).
+3. Caption or nearby text names one existing client, nickname, address, or quote number → that job for the whole batch. Later photos in the same window follow that resolved slug (batch-scoped, not a sticky job from last week).
+4. Photos from the same sender within ~2 minutes are **one batch**. Reply **once**, and **never stay silent**:
+   - Job named in the first caption → ack immediately: `Got 1 photo. Filed under X` or `Created job X and filed 1 photo`.
+   - After the batch window: `Got 3 photos. Filed under X` or `Got 3 photos. Which job? (reply with the name, personal, insurance, store, or skip)`.
+5. More than one match → **do not guess**. Park in `EMPIRE_DATA_DIR/whatsapp/inbox/` and ask once.
+6. No job name → **ask once** for the batch. Purchase-sounding text → `Personal or store folder?`
+7. `consume_job_answer` intercepts a later text **only after a real ask was sent**. Unique name or `new job <name>` files the batch. `skip` leaves it in inbox. Anything else (`hello`, `thanks`, `what's on my schedule today?`) falls through to Max chat.
+8. Max chat is told when photos are parked (`N photos from the user are waiting to be filed; ask which job if relevant`). `Are you vetting my pictures?` / `did you get my photos` is answered truthfully (yes, N received, filed under X or waiting for a job name).
+9. Stale batches expire from SQLite on load (`last_at` vs the photo-batch window; `asked_at` vs the job-answer timeout). Expiry survives process restart. The in-memory flush task is only a debounce.
 
 **Single-worker assumption:** `_load_batch` / `whatsapp_media_batches` and `_schedule_batch_flush` are safe only with one process writing that table. A second worker would race on `last_at`/`asked` and could send a second ask. Do not run multiple inbound WhatsApp workers against the same edition database.
 

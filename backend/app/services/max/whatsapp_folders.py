@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from app.services.max.doc_lookup import jobs_root, probe_job_text
+from app.services.max.doc_lookup import add_client_alias, jobs_root, probe_job_text, slugify
 
 logger = logging.getLogger("max.whatsapp_folders")
 
@@ -46,6 +46,15 @@ SCAN_MIME_HINTS = (
     "application/vnd.ms-pki.stl",
 )
 FILEABLE_MEDIA = {"image", "photo", "document", "scan", "model"}
+NEW_JOB_RE = re.compile(
+    r"\b(?:new\s+job|nuevo\s+trabajo|new\s+client)\s*[:\-]?\s+(.+)",
+    re.IGNORECASE | re.DOTALL,
+)
+PURCHASE_RE = re.compile(
+    r"\b(?:need to buy|have to buy|want to buy|buy a|buying a|bought a|"
+    r"purchase|need a case|buy (?:this|that|it))\b",
+    re.IGNORECASE,
+)
 
 _record_lock = threading.RLock()
 
@@ -167,11 +176,100 @@ def resolve_folder(text: str) -> Optional[dict[str, str]]:
         kind = folder_kind_for_slug(slug)
         if kind == "client":
             match["kind"] = "client"
+            match["created"] = False
             return match
     reserved = match_reserved_folder(text)
     if reserved:
+        reserved["created"] = False
         return reserved
     return None
+
+
+def parse_new_job_name(text: str) -> Optional[str]:
+    """'New job home wood suites.' / 'nuevo trabajo X' / 'new client X' → the name."""
+    match = NEW_JOB_RE.search(str(text or ""))
+    if not match:
+        return None
+    raw = re.sub(r"[\s.!?]+$", "", match.group(1).strip())
+    raw = re.sub(r"\s+", " ", raw).strip(" -:;,'\"")
+    if not raw:
+        return None
+    if folder_kind_for_slug(slugify(raw)) != "client":
+        return None
+    if not slugify(raw):
+        return None
+    return raw
+
+
+def title_job_name(name: str) -> str:
+    cleaned = re.sub(r"[\s.!?]+$", "", (name or "").strip())
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned:
+        return ""
+    if cleaned == cleaned.lower() or cleaned == cleaned.upper():
+        return cleaned.title()
+    return cleaned
+
+
+def sounds_like_purchase(text: str) -> bool:
+    return bool(PURCHASE_RE.search(str(text or "")))
+
+
+def create_client_job_folder(
+    name: str,
+    *,
+    jobs_root_path: Optional[Path | str] = None,
+) -> dict[str, Any]:
+    """Create <jobs-root>/<slug> + JOB-FACTS / JOB-RECORD stubs + alias. No LF/quote/lead."""
+    title = title_job_name(name)
+    slug = safe_folder_slug(slugify(title), jobs_root_path=jobs_root_path)
+    if folder_kind_for_slug(slug) != "client":
+        raise UnsafeJobSlug("reserved folder is not a new client job")
+    root = jobs_root(jobs_root_path)
+    folder = root / slug
+    existed = folder.is_dir() and (folder / JOB_RECORD_NAME).is_file()
+    folder.mkdir(parents=True, exist_ok=True)
+    for sub in FOLDER_SUBDIRS:
+        (folder / sub).mkdir(parents=True, exist_ok=True)
+    facts = folder / JOB_FACTS_NAME
+    if not facts.is_file():
+        facts.write_text(
+            f"# {title}\n\nShared folder record. Attachments live in JOB-RECORD.json.\n",
+            encoding="utf-8",
+        )
+    if not (folder / JOB_RECORD_NAME).is_file():
+        record = empty_job_record(slug, jobs_root_path=jobs_root_path)
+        record["slug"] = slug
+        _atomic_write_text(
+            folder / JOB_RECORD_NAME,
+            json.dumps(record, indent=2, sort_keys=True) + "\n",
+        )
+    add_client_alias(title, slug, aliases=[title, name.strip()])
+    return {
+        "slug": slug,
+        "client_name": title,
+        "folder_path": str(folder),
+        "kind": "client",
+        "created": not existed,
+        "match_reason": "new job" if not existed else "existing folder",
+    }
+
+
+def resolve_or_create_folder(text: str) -> Optional[dict[str, Any]]:
+    """Unique existing job, reserved folder, or 'new job <name>' create. Never guesses."""
+    named = parse_new_job_name(text)
+    if named:
+        probed = probe_job_text(named)
+        if probed.get("status") == "unique" and probed.get("match"):
+            match = dict(probed["match"])
+            if folder_kind_for_slug(str(match.get("slug") or "")) == "client":
+                match["kind"] = "client"
+                match["created"] = False
+                return match
+        if probed.get("status") == "ambiguous":
+            return None
+        return create_client_job_folder(named)
+    return resolve_folder(text)
 
 
 def is_scan_file(filename: str = "", mime_type: str = "", media_type: str = "") -> bool:
