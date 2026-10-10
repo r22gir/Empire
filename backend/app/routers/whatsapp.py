@@ -7,7 +7,7 @@ from the chats viewer.
 from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
 from app.services.accounts.founder import FounderAuthError, assert_founder
@@ -29,6 +29,10 @@ class OutboundIn(BaseModel):
     template_name: str = ""
     language: str = "en"
     confirmed: bool = False
+
+
+class RefileIn(BaseModel):
+    job_slug: str
 
 
 def _require_founder(pin: str | None) -> None:
@@ -85,6 +89,8 @@ async def whatsapp_conversation_messages(
         offset=offset,
         search=q or None,
     )
+    from app.services.max.whatsapp_log import get_active_job
+
     return {
         "wa_id": wa_id,
         "display_label": get_display_label(wa_id),
@@ -92,7 +98,89 @@ async def whatsapp_conversation_messages(
         "total": total,
         "limit": limit,
         "offset": offset,
+        "active_job": get_active_job(wa_id),
     }
+
+
+@router.get("/whatsapp/jobs")
+async def whatsapp_list_jobs(
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    _require_founder(x_founder_pin)
+    from app.services.max.doc_lookup import list_job_folders
+
+    return {"jobs": list_job_folders()}
+
+
+@router.get("/whatsapp/media/{attachment_id}")
+async def whatsapp_media(
+    attachment_id: int,
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    _require_founder(x_founder_pin)
+    from app.services.max.whatsapp_log import attachment_file_path, get_attachment
+
+    att = get_attachment(attachment_id)
+    path = attachment_file_path(attachment_id)
+    if not att or path is None:
+        raise HTTPException(status_code=404, detail="attachment not found")
+    return FileResponse(
+        path,
+        media_type=att.get("mime_type") or "application/octet-stream",
+        filename=att.get("filename") or path.name,
+    )
+
+
+@router.post("/whatsapp/attachments/{attachment_id}/refile")
+async def whatsapp_refile(
+    attachment_id: int,
+    body: RefileIn,
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    """Only write on the chats page: move an attachment into a job folder."""
+    _require_founder(x_founder_pin)
+    from app.services.max.whatsapp_log import refile_attachment
+
+    try:
+        return refile_attachment(attachment_id, body.job_slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/whatsapp/chats/{wa_id}/copy")
+async def whatsapp_copy_chat(
+    wa_id: str,
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    _require_founder(x_founder_pin)
+    from app.services.max.whatsapp_log import conversation_copy_text
+
+    return {"wa_id": wa_id, "text": conversation_copy_text(wa_id)}
+
+
+@router.get("/whatsapp/chats/{wa_id}/export")
+async def whatsapp_export_chat(
+    wa_id: str,
+    format: str = Query("pdf"),
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    _require_founder(x_founder_pin)
+    from app.services.max.whatsapp_log import conversation_copy_text, conversation_export_pdf, get_display_label
+
+    label = get_display_label(wa_id).replace(" ", "-")
+    if (format or "pdf").lower() == "txt":
+        text = conversation_copy_text(wa_id)
+        return PlainTextResponse(text, headers={
+            "Content-Disposition": f'attachment; filename="whatsapp-{label}.txt"',
+        })
+    pdf = conversation_export_pdf(wa_id)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="whatsapp-{label}.pdf"'},
+    )
 
 
 @router.get("/whatsapp/webhook")

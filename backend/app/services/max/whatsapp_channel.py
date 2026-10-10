@@ -371,6 +371,7 @@ def parse_inbound(payload: dict | None) -> list[dict[str, Any]]:
                         lon = loc.get("longitude")
                         name = loc.get("name") or loc.get("address") or ""
                         item["text"] = f"Location: {lat}, {lon} ({name})".strip()
+                        item["location"] = loc
                 elif kind in {"system", "button", "interactive"}:
                     item["text"] = str(
                         (message.get("system") or {}).get("body")
@@ -398,14 +399,82 @@ def parse_inbound(payload: dict | None) -> list[dict[str, Any]]:
     return found
 
 
-def _log_chat(**kwargs: Any) -> None:
+async def _safe_download(
+    media_id: str,
+    http_get: Optional[Callable[..., Any]] = None,
+) -> tuple[bytes, str]:
+    if not media_id:
+        return b"", ""
+    try:
+        return await download_media(media_id, http_get=http_get)
+    except Exception:
+        logger.warning("WhatsApp media download failed", exc_info=True)
+        return b"", ""
+
+
+def _default_media_name(message: dict[str, Any]) -> str:
+    if message.get("filename"):
+        return str(message["filename"])
+    kind = str(message.get("type") or "file")
+    voice = bool(message.get("voice") or kind == "audio")
+    if voice:
+        return "voice.ogg"
+    if kind == "image":
+        return "photo.jpg"
+    if kind == "sticker":
+        return "sticker.webp"
+    if kind == "video":
+        return "video.mp4"
+    if kind == "document":
+        return "document.bin"
+    if kind == "location":
+        return "location.json"
+    return f"{kind or 'file'}.bin"
+
+
+def _persist_inbound_media(
+    message: dict[str, Any],
+    content: bytes,
+    mime: str,
+) -> list[dict[str, Any]]:
+    """Save inbound bytes and file photos/docs when the job is known."""
+    from app.services.max.whatsapp_log import prepare_inbound_attachment
+
+    kind = str(message.get("type") or "document")
+    media_type = "voice" if (message.get("voice") or kind == "audio") else kind
+    if kind == "image":
+        media_type = "image"
+    hint = str(message.get("caption") or message.get("text") or "")
+    fileable = media_type in {"image", "document"}
+    if not content and kind != "location":
+        return []
+    payload = content
+    filename = _default_media_name(message)
+    if kind == "location":
+        loc = message.get("location") or {}
+        payload = json.dumps(loc, default=str).encode()
+        mime = mime or "application/json"
+    return [prepare_inbound_attachment(
+        payload,
+        filename=filename,
+        mime_type=mime or message.get("mime_type") or "application/octet-stream",
+        media_type=media_type,
+        wa_id=str(message.get("from") or ""),
+        hint_text=hint,
+        wa_media_id=str(message.get("media_id") or ""),
+        file_to_job=fileable,
+    )]
+
+
+def _log_chat(**kwargs: Any) -> int:
     """Best-effort durable log. Failures never block send or webhook ack."""
     try:
         from app.services.max.whatsapp_log import log_message
 
-        log_message(**kwargs)
+        return int(log_message(**kwargs) or 0)
     except Exception:
         logger.warning("WhatsApp chat log write failed", exc_info=True)
+        return 0
 
 
 def _apply_status_updates(payload: dict | None) -> int:
@@ -789,9 +858,33 @@ async def reply_in_window(
                     "caption": "Draft. Not sent.",
                 },
             }, http_post=http_post)
-            attached.append({"filename": filename, "media_id": media_id, "doc_id": doc_id})
+            attached.append({"filename": filename, "media_id": media_id, "doc_id": doc_id, "data": bytes(payload)})
         except WhatsAppSendBlocked:
             logger.warning("WhatsApp PDF attach failed for %s", filename)
+
+    outbound_atts: list[dict[str, Any]] = []
+    try:
+        from app.services.max.whatsapp_log import store_edition_media
+
+        for row in attached:
+            stored = store_edition_media(
+                row.get("data") or b"",
+                row.get("filename") or "document.pdf",
+                "application/pdf",
+                "document",
+            )
+            outbound_atts.append({
+                "wa_media_id": row.get("media_id", ""),
+                "filename": stored.get("filename") or row.get("filename"),
+                "mime_type": "application/pdf",
+                "size_bytes": stored.get("size_bytes") or 0,
+                "local_path": stored.get("local_path") or "",
+                "media_type": "document",
+                "doc_id": row.get("doc_id") or "",
+                "filing_status": "outbound",
+            })
+    except Exception:
+        logger.warning("WhatsApp outbound document copy failed", exc_info=True)
 
     log_body = shown
     if attached:
@@ -813,6 +906,7 @@ async def reply_in_window(
             "reply_mode": mode,
             "documents": [{"filename": d.get("filename", ""), "doc_id": d.get("doc_id", "")} for d in attached],
         },
+        attachments=outbound_atts,
     )
 
     return {
@@ -822,7 +916,7 @@ async def reply_in_window(
         "reply_mode": mode,
         "voice_sent": voice_sent,
         "voice_fallback": voice_fallback,
-        "documents": attached,
+        "documents": [{"filename": d.get("filename", ""), "media_id": d.get("media_id", ""), "doc_id": d.get("doc_id", "")} for d in attached],
         "graph": _public_graph(graph),
     }
 
@@ -1113,9 +1207,26 @@ async def process_webhook(
             })
             continue
         fields = _inbound_log_fields(message)
-        from app.services.max.whatsapp_log import iso_from_wa_timestamp as _iso_wa
+        from app.services.max.whatsapp_log import (
+            JOB_ASK_TEXT,
+            consume_job_answer,
+            iso_from_wa_timestamp as _iso_wa,
+            last_attachment_ids,
+            set_pending_filings,
+        )
 
-        _log_chat(
+        media_bytes, media_mime = b"", ""
+        if message.get("media_id"):
+            media_bytes, media_mime = await _safe_download(message["media_id"], http_get)
+        inbound_atts = _persist_inbound_media(message, media_bytes, media_mime or message.get("mime_type") or "")
+
+        filed_reply = ""
+        if message["type"] == "text":
+            answered = consume_job_answer(sender, message.get("text") or "")
+            if answered and answered.get("handled"):
+                filed_reply = answered.get("reply") or ""
+
+        msg_row_id = _log_chat(
             wa_id=sender,
             direction="inbound",
             message_type=fields["message_type"],
@@ -1124,29 +1235,45 @@ async def process_webhook(
             wa_message_id=message_id,
             delivery_status="received",
             timestamp=_iso_wa(message.get("timestamp")),
-            metadata=fields["metadata"],
+            metadata={
+                **fields["metadata"],
+                "filed": [
+                    {"filename": a.get("filename"), "job_slug": a.get("job_slug"), "filed_path": a.get("filed_path"), "filing_status": a.get("filing_status")}
+                    for a in inbound_atts
+                ],
+            },
+            attachments=inbound_atts,
         )
+        if msg_row_id:
+            saved = last_attachment_ids(msg_row_id)
+            inbox_ids = [int(a["id"]) for a in saved if a.get("filing_status") == "inbox"]
+            if inbox_ids:
+                set_pending_filings(sender, inbox_ids)
         note_customer_window(sender, message.get("timestamp"))
         reply = ""
         route = message["type"]
         try:
-            if message["type"] == "text":
+            if filed_reply:
+                route = "job_file"
+                reply = filed_reply
+            elif message["type"] == "text":
                 route = "chat"
                 reply = await on_text(message["text"], sender)
             elif message["type"] == "audio" or message.get("voice"):
                 route = "voice_document"
-                audio, mime = await download_media(message["media_id"], http_get=http_get)
-                reply = await on_voice(audio, mime or message["mime_type"], sender)
+                reply = await on_voice(media_bytes, media_mime or message["mime_type"], sender)
             elif message["type"] == "image":
                 route = "photo_quote"
-                image, mime = await download_media(message["media_id"], http_get=http_get)
-                reply = await on_photo(image, mime or message["mime_type"], message["caption"], sender)
+                reply = await on_photo(media_bytes, media_mime or message["mime_type"], message["caption"], sender)
             else:
                 reply = "That message type is not handled. Nothing sent."
         except Exception:
             logger.warning("WhatsApp inbound handler failed", exc_info=True)
             reply = "That message failed. Nothing sent."
         reply_text, documents = _split_reply(reply)
+        if any(a.get("needs_job_ask") or a.get("filing_status") == "inbox" for a in inbound_atts):
+            if JOB_ASK_TEXT not in (reply_text or ""):
+                reply_text = f"{reply_text}\n{JOB_ASK_TEXT}".strip() if reply_text else JOB_ASK_TEXT
         reply_sent = False
         reply_error = ""
         voice_sent = False

@@ -1,0 +1,19 @@
+{
+  "clients": [
+    {
+      "slug": "maggie-frolich",
+      "name": "Maggie",
+      "aliases": ["maggie", "5124 frolich", "frolich"]
+    },
+    {
+      "slug": "willard-hotel",
+      "name": "Willard InterContinental",
+      "aliases": ["willard", "willard lobby", "1401 pennsylvania"]
+    },
+    {
+      "slug": "mclean-residence",
+      "name": "McLean Residence",
+      "aliases": ["mclean", "ballantrae", "chain bridge"]
+    }
+  ]
+}
