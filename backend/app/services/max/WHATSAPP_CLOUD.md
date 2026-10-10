@@ -62,3 +62,8 @@ Copy these without changing the function names or the routes:
 - this file
 
 `hermes_phase3.py` only reports `channel_status()`. The default handlers call Workroom voice, Photo Analyzer, and Max chat; another edition can pass its own handlers into `process_webhook` without forking the webhook, signature, allowlist, window, or confirm gate.
+
+## Chat log (this edition only)
+
+Inbound and outbound turns are appended to `EMPIRE_DATA_DIR/whatsapp/whatsapp_chat_log.db`. Delivery status webhooks update `sent` / `delivered` / `read` / `failed`. Founder-PIN reads live at `/api/v1/whatsapp/chats`. The Command Center **WhatsApp Chats** page is view-only. Media save and job-folder filing are not in this step. Details: `docs/WHATSAPP_CHANNEL.md`.
+
