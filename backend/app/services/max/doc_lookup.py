@@ -252,3 +252,266 @@ def fetch_pdf(doc_id: str, *, http_get: Optional[Callable[[str, dict], Any]] = N
         r = http_get(url, {"id": doc_id})
         data = getattr(r, "content", r) or b""
     return data if isinstance(data, (bytes, bytearray)) and bytes(data[:5]) == b"%PDF-" else b""
+
+
+# --- WhatsApp job filing (kept alongside Final Docs hub lookup) ---
+
+
+def _config_path() -> Path:
+    return Path(os.environ.get("MAX_CLIENT_ALIASES_PATH") or ALIASES_PATH)
+
+
+def jobs_root(override: Optional[Path | str] = None) -> Path:
+    """Edition-scoped jobs directory.
+
+    Override order: explicit path, WHATSAPP_JOBS_ROOT, then EMPIRE_DATA_DIR/jobs
+    (Max-e = /data/amp/jobs, Maxine = /data/maxine/jobs). Never defaults to a
+    shared ~/jobs tree, so a family edition cannot see Rafael's folders.
+    """
+    if override:
+        return Path(override)
+    env = (os.getenv("WHATSAPP_JOBS_ROOT") or "").strip()
+    if env:
+        return Path(env)
+    try:
+        from app.services.data_paths import data_root
+
+        return data_root() / "jobs"
+    except Exception:
+        return Path(os.getenv("EMPIRE_DATA_DIR") or ".") / "jobs"
+
+
+def load_client_aliases() -> dict[str, Any]:
+    path = _config_path()
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def normalize_term(term: str) -> str:
+    cleaned = re.sub(r"[^\w\s-]", "", (term or "").lower()).strip()
+    return re.sub(r"\s+", " ", cleaned)
+
+
+def slugify(name: str) -> str:
+    s = re.sub(r"[^\w\s-]", "", (name or "").lower()).strip()
+    return re.sub(r"[-\s]+", "-", s)
+
+
+def _clients() -> list[dict[str, Any]]:
+    data = load_client_aliases()
+    clients = list(data.get("clients") or [])
+    if isinstance(data, dict) and not clients:
+        for key, value in data.items():
+            if key == "clients":
+                continue
+            if isinstance(value, dict):
+                clients.append(value)
+            elif isinstance(value, str):
+                clients.append({"slug": value, "name": str(key).title(), "aliases": [key]})
+    return [c for c in clients if isinstance(c, dict)]
+
+
+def _quote_customer(raw_text: str, base_dir: Path) -> Optional[dict[str, Any]]:
+    quote_match = re.search(r"\b(est[-_\s]?\d+|q[-_\s]?\d+)\b", raw_text, re.IGNORECASE)
+    if not quote_match:
+        return None
+    q_code = quote_match.group(1).upper().replace(" ", "-").replace("_", "-")
+    try:
+        from app.db.database import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT customer_name, project_name FROM quotes_v2 "
+                "WHERE upper(quote_number) = ? OR id = ? LIMIT 1",
+                (q_code, q_code),
+            ).fetchone()
+        if row and row[0]:
+            c_name = row[0]
+            return {
+                "slug": slugify(c_name),
+                "client_name": c_name,
+                "folder_path": str(base_dir / slugify(c_name)),
+                "match_reason": f"quote {q_code}",
+            }
+    except Exception:
+        return None
+    return None
+
+
+def probe_job_text(
+    text: str,
+    *,
+    jobs_root_path: Optional[Path | str] = None,
+) -> dict[str, Any]:
+    """Classify text as empty, unique, ambiguous, or unknown. Never guesses."""
+    if not text or not str(text).strip():
+        return {"status": "empty", "matches": []}
+
+    raw_text = str(text).strip()
+    norm_text = normalize_term(raw_text)
+    base_dir = jobs_root(jobs_root_path)
+
+    quoted = _quote_customer(raw_text, base_dir)
+    if quoted:
+        return {"status": "unique", "match": quoted, "matches": [quoted]}
+
+    text_tokens: list[str] = []
+    for w in _words(raw_text):
+        text_tokens.extend(_depossess(w))
+    text_token_set = {t for t in text_tokens if t and t not in FILLER}
+
+    matches: list[dict[str, Any]] = []
+    for client in _clients():
+        c_slug = client.get("slug") or slugify(client.get("name", ""))
+        c_name = client.get("name") or c_slug
+        terms = [c_slug, str(c_name).lower()] + [str(a).lower() for a in client.get("aliases") or []]
+        if client.get("address"):
+            terms.append(str(client.get("address")).lower())
+        hit = ""
+        for term in terms:
+            norm_term = normalize_term(term)
+            if norm_term and re.search(r"\b" + re.escape(norm_term) + r"\b", norm_text):
+                hit = norm_term
+                break
+            term_words = [w for w in _words(term) if w not in FILLER and len(w) >= 3]
+            if term_words and all(any(tw == nw for tw in text_token_set) for nw in term_words):
+                hit = norm_term or term
+                break
+        if hit:
+            matches.append({
+                "slug": c_slug,
+                "client_name": c_name,
+                "folder_path": str(base_dir / c_slug),
+                "match_reason": f"matched term '{hit}'",
+            })
+
+    if len(matches) == 1:
+        return {"status": "unique", "match": matches[0], "matches": matches}
+    if len(matches) > 1:
+        return {"status": "ambiguous", "matches": matches}
+
+    dir_matches: list[dict[str, Any]] = []
+    if base_dir.is_dir():
+        try:
+            for entry in base_dir.iterdir():
+                if not entry.is_dir() or entry.name.startswith("."):
+                    continue
+                words = entry.name.lower().replace("-", " ").replace("_", " ")
+                if entry.name.lower() in norm_text or (words and words in norm_text):
+                    dir_matches.append({
+                        "slug": entry.name,
+                        "client_name": entry.name.replace("-", " ").title(),
+                        "folder_path": str(entry),
+                        "match_reason": f"matched folder {entry.name}",
+                    })
+        except OSError:
+            pass
+    if len(dir_matches) == 1:
+        return {"status": "unique", "match": dir_matches[0], "matches": dir_matches}
+    if len(dir_matches) > 1:
+        return {"status": "ambiguous", "matches": dir_matches}
+    return {"status": "unknown", "matches": []}
+
+
+def resolve_job_folder(
+    text: str,
+    *,
+    jobs_root_path: Optional[Path | str] = None,
+) -> Optional[dict[str, Any]]:
+    """Unique match only. None if empty, unknown, or ambiguous."""
+    probed = probe_job_text(text, jobs_root_path=jobs_root_path)
+    if probed.get("status") == "unique":
+        return probed.get("match")
+    return None
+
+
+def existing_job_slug(job_slug: str, *, jobs_root_path: Optional[Path | str] = None) -> str:
+    """Return a sanitized slug only if it is an existing folder under jobs_root."""
+    raw = (job_slug or "").strip()
+    if not raw or "/" in raw or "\\" in raw or ".." in raw:
+        return ""
+    slug = re.sub(r"[^a-z0-9-]", "", raw.lower())
+    if not slug or slug in {".", ".."}:
+        return ""
+    base_dir = jobs_root(jobs_root_path).resolve()
+    try:
+        candidate = (base_dir / slug).resolve()
+    except (OSError, RuntimeError):
+        return ""
+    if candidate.parent != base_dir:
+        return ""
+    if candidate.is_dir():
+        return slug
+    return ""
+
+
+def list_job_folders(*, jobs_root_path: Optional[Path | str] = None) -> list[dict[str, str]]:
+    """Existing job folders under this edition's jobs root (plus named aliases that exist)."""
+    base_dir = jobs_root(jobs_root_path)
+    found: dict[str, dict[str, str]] = {}
+    if base_dir.is_dir():
+        try:
+            for entry in base_dir.iterdir():
+                if entry.is_dir() and not entry.name.startswith("."):
+                    found[entry.name] = {
+                        "slug": entry.name,
+                        "client_name": entry.name.replace("-", " ").title(),
+                        "folder_path": str(entry),
+                    }
+        except OSError:
+            pass
+    for client in _clients():
+        slug = str(client.get("slug") or slugify(client.get("name", "")))
+        if not slug or slug not in found:
+            continue
+        found[slug]["client_name"] = str(client.get("name") or found[slug]["client_name"])
+    return sorted(found.values(), key=lambda row: row["slug"])
+
+
+def list_known_jobs(*, jobs_root_path: Optional[Path | str] = None) -> list[dict[str, str]]:
+    """Alias clients plus existing folders — used for close-match questions."""
+    base_dir = jobs_root(jobs_root_path)
+    found: dict[str, dict[str, str]] = {}
+    for client in _clients():
+        slug = str(client.get("slug") or slugify(client.get("name", "")))
+        if slug:
+            found[slug] = {
+                "slug": slug,
+                "client_name": str(client.get("name") or slug),
+                "folder_path": str(base_dir / slug),
+            }
+    for row in list_job_folders(jobs_root_path=jobs_root_path):
+        found.setdefault(row["slug"], row)
+    return sorted(found.values(), key=lambda row: row["slug"])
+
+
+def suggest_jobs(text: str, *, jobs_root_path: Optional[Path | str] = None, limit: int = 5) -> list[dict[str, str]]:
+    """Closest alias/folder names. Never auto-picks; callers must ask."""
+    terms = [w for w in _words(text or "") if w not in FILLER and not w.isdigit()]
+    expanded = []
+    for t in terms:
+        expanded.extend(_depossess(t))
+    if not expanded:
+        return list_known_jobs(jobs_root_path=jobs_root_path)[:limit]
+    scored: list[tuple[float, dict[str, str]]] = []
+    for row in list_known_jobs(jobs_root_path=jobs_root_path):
+        names = [row.get("slug") or "", row.get("client_name") or ""]
+        best = 0.0
+        for name in names:
+            for nw in _words(name):
+                if nw in FILLER:
+                    continue
+                for t in expanded:
+                    best = max(best, difflib.SequenceMatcher(None, nw, t).ratio())
+        if best >= 0.35:
+            scored.append((best, row))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    picked = [row for _score, row in scored[:limit]]
+    if picked:
+        return picked
+    return list_known_jobs(jobs_root_path=jobs_root_path)[:limit]

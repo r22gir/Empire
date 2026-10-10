@@ -32,10 +32,13 @@ There is deliberately no opt-out marker for this layer.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
 from pathlib import Path
+
+import pytest
 
 HOME = Path(os.path.expanduser("~"))
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -409,3 +412,124 @@ def fingerprint(paths=None) -> dict:
 
 def changed_files(before: dict, after: dict) -> list:
     return [p for p in sorted(set(before) | set(after)) if before.get(p) != after.get(p)]
+
+
+# --- WhatsApp chat-log / filing isolation (used by test_whatsapp_*.py) ---
+
+LIVE_GRAPH_MARKERS = (
+    "graph.facebook.com",
+    "lookaside.fbsbx.com",
+    "graph.instagram.com",
+)
+
+PROD_PATH_MARKERS = (
+    "empire-data/empire.db",
+    "empire-data\\empire.db",
+    "/empire-data/empire.db",
+    "empire-repo/backend/data",
+    "empire-repo\\backend\\data",
+    "/data/amp",
+    "/data/maxine",
+)
+
+
+def _looks_like_prod(value: str) -> bool:
+    lowered = (value or "").replace("\\", "/")
+    return any(marker.replace("\\", "/") in lowered for marker in PROD_PATH_MARKERS)
+
+
+def assert_isolated_env() -> None:
+    """Fail loudly if this process is pointed at live data or live Graph."""
+    for name in ("EMPIRE_TASK_DB", "EMPIRE_DB_PATH", "EMPIRE_DATA_DIR", "WHATSAPP_JOBS_ROOT"):
+        value = os.getenv(name) or ""
+        if _looks_like_prod(value):
+            raise RuntimeError(f"{name} points at live data: {value}")
+    data_dir = os.getenv("EMPIRE_DATA_DIR") or ""
+    if data_dir:
+        path = Path(data_dir)
+        live_backend = (Path.home() / "empire-repo" / "backend" / "data").resolve()
+        try:
+            if path.exists() and path.resolve() == live_backend:
+                raise RuntimeError("EMPIRE_DATA_DIR resolved to the live backend/data folder")
+        except OSError:
+            pass
+
+
+def assert_no_live_graph(url: str) -> None:
+    lowered = (url or "").lower()
+    if any(host in lowered for host in LIVE_GRAPH_MARKERS):
+        raise RuntimeError(f"live Meta Graph call refused in tests: {url}")
+
+
+def _write_test_whatsapp_labels(root: Path) -> Path:
+    """Test-only labels. Real founder numbers stay out of committed business.json."""
+    wa_dir = root / "whatsapp"
+    wa_dir.mkdir(parents=True, exist_ok=True)
+    path = wa_dir / "labels.json"
+    path.write_text(
+        json.dumps({
+            "phones": [
+                {"name": "Rafael", "phone": "+12022996975"},
+                {"name": "Nelma", "phone": "+17036239203"},
+            ]
+        }),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_test_client_aliases(root: Path) -> Path:
+    """Stub aliases so WhatsApp tests never read live client_aliases.json."""
+    path = root / "client_aliases.json"
+    path.write_text(
+        json.dumps({
+            "clients": [
+                {
+                    "slug": "maggie-frolich",
+                    "name": "Maggie Frolich",
+                    "aliases": ["Maggie", "Frolich"],
+                },
+                {
+                    "slug": "willard-hotel",
+                    "name": "Willard Hotel",
+                    "aliases": ["Willard"],
+                },
+                {
+                    "slug": "mclean-residence",
+                    "name": "McLean Residence",
+                    "aliases": ["McLean"],
+                },
+            ]
+        }),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.fixture
+def isolated_whatsapp_edition(tmp_path, monkeypatch):
+    """Clean per-edition data dir + founder PIN. No live WhatsApp credentials."""
+    root = tmp_path / "edition-data"
+    root.mkdir(parents=True, exist_ok=True)
+    jobs = tmp_path / "jobs"
+    jobs.mkdir(parents=True, exist_ok=True)
+    for slug in ("maggie-frolich", "willard-hotel", "mclean-residence"):
+        (jobs / slug).mkdir(exist_ok=True)
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(root))
+    monkeypatch.setenv("WHATSAPP_JOBS_ROOT", str(jobs))
+    monkeypatch.setenv("FOUNDER_PIN", "test-founder-pin")
+    monkeypatch.setenv("WHATSAPP_PHOTO_BATCH_SECONDS", "0")
+    monkeypatch.setenv("WHATSAPP_JOB_HINT_SECONDS", "600")
+    aliases = _write_test_client_aliases(root)
+    monkeypatch.setenv("MAX_CLIENT_ALIASES_PATH", str(aliases))
+    labels = _write_test_whatsapp_labels(root)
+    monkeypatch.setenv("WHATSAPP_LABELS", str(labels))
+    for name in (
+        "WHATSAPP_ACCESS_TOKEN",
+        "WHATSAPP_APP_SECRET",
+        "WHATSAPP_VERIFY_TOKEN",
+        "WHATSAPP_PHONE_NUMBER_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    assert_isolated_env()
+    return root

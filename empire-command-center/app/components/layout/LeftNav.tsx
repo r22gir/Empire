@@ -12,7 +12,7 @@ import {
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
   ChevronDown, ChevronRight, LayoutGrid, CalendarCheck,
-  FileStack,
+  FileStack, MessageCircle,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -104,6 +104,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'amp', name: 'AMP', icon: <Sun size={16} />, status: 'active', color: '#f59e0b', kind: 'product' },
       { id: 'archive', name: 'ArchiveForge', icon: <Archive size={16} />, status: 'active', color: '#06b6d4', kind: 'product' },
       { id: 'transcript', name: 'TranscriptForge', icon: <FileAudio size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
+      { id: 'whatsapp', name: 'WhatsApp Chats', icon: <MessageCircle size={16} />, status: 'active', color: '#25d366', screen: 'whatsapp' as ScreenMode, kind: 'screen' },
     ],
   },
   {

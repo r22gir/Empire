@@ -44,6 +44,7 @@ import DesksScreen from './components/screens/DesksScreen';
 import InboxScreen from './components/screens/InboxScreen';
 import SystemReportScreen from './components/screens/SystemReportScreen';
 import TelegramScreen from './components/screens/TelegramScreen';
+import WhatsAppChatsScreen from './components/screens/WhatsAppChatsScreen';
 import MemoryBankScreen from './components/screens/MemoryBankScreen';
 import EcosystemProductPage from './components/screens/EcosystemProductPage';
 import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
@@ -144,7 +145,7 @@ const NAV_PRODUCT_IDS = new Set<string>([
 ]);
 const NAV_SCREEN_IDS = new Set<string>([
   'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
-  'report', 'desks', 'memory-bank', 'telegram', 'docs', 'research', 'final-docs', 'invoice',
+  'report', 'desks', 'memory-bank', 'telegram', 'whatsapp', 'docs', 'research', 'final-docs', 'invoice',
 ]);
 function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
   if (product === 'owner') return 'chat';
@@ -471,6 +472,7 @@ export default function CommandCenter() {
       jobs: 'jobs',
       invoices: 'invoices',
       'final-docs': 'final-docs',
+      whatsapp: 'whatsapp',
     };
     setActiveSection(null);
     setActiveScreen(moduleScreenMap[module] || 'dashboard');
@@ -668,6 +670,7 @@ export default function CommandCenter() {
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;
     if (activeScreen === 'memory-bank') return <MemoryBankScreen />;
     if (activeScreen === 'telegram') return <TelegramScreen />;
+    if (activeScreen === 'whatsapp') return <WhatsAppChatsScreen />;
     if (activeScreen === 'calendar') return <ScheduleControl />;
     if (activeScreen === 'report') return <SystemReportScreen />;
     if (activeScreen === 'tasks') return <TasksScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : activeProduct === 'owner' ? undefined : activeProduct} />;
