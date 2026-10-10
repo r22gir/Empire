@@ -214,9 +214,25 @@ def founder_allowlist() -> frozenset[str]:
         extra = data.get(key) or []
         if isinstance(extra, str):
             extra = [extra]
+        if isinstance(extra, dict):
+            extra = list(extra.values())
         if isinstance(extra, list):
-            raw.extend(str(item) for item in extra if str(item).strip())
-    return frozenset(n for n in (normalize_msisdn(item) for item in raw) if n)
+            for item in extra:
+                if isinstance(item, dict):
+                    raw.append(str(item.get("phone") or item.get("number") or item.get("wa_id") or ""))
+                else:
+                    raw.append(str(item))
+    env_phones = os.getenv("WHATSAPP_FOUNDER_PHONES") or ""
+    if env_phones.strip():
+        raw.extend(part.strip() for part in env_phones.split(",") if part.strip())
+    try:
+        from app.services.max.whatsapp_log import load_whatsapp_phonebook
+
+        for row in load_whatsapp_phonebook():
+            raw.append(str(row.get("phone") or ""))
+    except Exception:
+        logger.debug("WhatsApp phonebook unavailable for allowlist")
+    return frozenset(n for n in (normalize_msisdn(item) for item in raw if str(item).strip()) if n)
 
 
 def is_allowlisted(wa_id: str | None) -> bool:
@@ -352,6 +368,7 @@ def parse_inbound(payload: dict | None) -> list[dict[str, Any]]:
                     "mime_type": "",
                     "caption": "",
                     "voice": False,
+                    "filename": "",
                 }
                 if kind == "text":
                     item["text"] = str((message.get("text") or {}).get("body") or "")
@@ -362,7 +379,206 @@ def parse_inbound(payload: dict | None) -> list[dict[str, Any]]:
                         item["mime_type"] = str(media.get("mime_type") or "")
                         item["caption"] = str(media.get("caption") or "")
                         item["voice"] = bool(media.get("voice"))
+                        item["filename"] = str(media.get("filename") or "")
+                elif kind == "location":
+                    loc = message.get("location") or {}
+                    if isinstance(loc, dict):
+                        lat = loc.get("latitude")
+                        lon = loc.get("longitude")
+                        name = loc.get("name") or loc.get("address") or ""
+                        item["text"] = f"Location: {lat}, {lon} ({name})".strip()
+                        item["location"] = loc
+                elif kind in {"system", "button", "interactive"}:
+                    item["text"] = str(
+                        (message.get("system") or {}).get("body")
+                        or (message.get("button") or {}).get("text")
+                        or kind
+                    )
                 found.append(item)
+            for call in value.get("calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                event = str(call.get("event") or call.get("status") or "event")
+                found.append({
+                    "message_id": str(call.get("id") or ""),
+                    "from": str(call.get("from") or call.get("to") or ""),
+                    "timestamp": call.get("timestamp"),
+                    "type": "call",
+                    "text": f"Call {event}",
+                    "media_id": "",
+                    "mime_type": "",
+                    "caption": "",
+                    "voice": False,
+                    "filename": "",
+                    "call_event": event,
+                })
+    return found
+
+
+async def _safe_download(
+    media_id: str,
+    http_get: Optional[Callable[..., Any]] = None,
+) -> tuple[bytes, str]:
+    if not media_id:
+        return b"", ""
+    try:
+        return await download_media(media_id, http_get=http_get)
+    except Exception:
+        logger.warning("WhatsApp media download failed", exc_info=True)
+        return b"", ""
+
+
+def _default_media_name(message: dict[str, Any]) -> str:
+    if message.get("filename"):
+        return str(message["filename"])
+    kind = str(message.get("type") or "file")
+    voice = bool(message.get("voice") or kind == "audio")
+    if voice:
+        return "voice.ogg"
+    if kind == "image":
+        return "photo.jpg"
+    if kind == "sticker":
+        return "sticker.webp"
+    if kind == "video":
+        return "video.mp4"
+    if kind == "document":
+        return "document.bin"
+    if kind == "location":
+        return "location.json"
+    return f"{kind or 'file'}.bin"
+
+
+def _persist_inbound_media(
+    message: dict[str, Any],
+    content: bytes,
+    mime: str,
+) -> list[dict[str, Any]]:
+    """Save inbound bytes and file photos/docs when the job is known."""
+    from app.services.max.whatsapp_log import prepare_inbound_attachment
+
+    kind = str(message.get("type") or "document")
+    media_type = "voice" if (message.get("voice") or kind == "audio") else kind
+    if kind == "image":
+        media_type = "image"
+    hint = str(message.get("caption") or message.get("text") or "")
+    fileable = media_type in {"image", "document"}
+    if not content and kind != "location":
+        return []
+    payload = content
+    filename = _default_media_name(message)
+    if kind == "location":
+        loc = message.get("location") or {}
+        payload = json.dumps(loc, default=str).encode()
+        mime = mime or "application/json"
+    return [prepare_inbound_attachment(
+        payload,
+        filename=filename,
+        mime_type=mime or message.get("mime_type") or "application/octet-stream",
+        media_type=media_type,
+        wa_id=str(message.get("from") or ""),
+        hint_text=hint,
+        wa_media_id=str(message.get("media_id") or ""),
+        file_to_job=fileable,
+    )]
+
+
+def _log_chat(**kwargs: Any) -> int:
+    """Best-effort durable log. Failures never block send or webhook ack."""
+    try:
+        from app.services.max.whatsapp_log import log_message
+
+        return int(log_message(**kwargs) or 0)
+    except Exception:
+        logger.warning("WhatsApp chat log write failed", exc_info=True)
+        return 0
+
+
+def _apply_status_updates(payload: dict | None) -> int:
+    updated = 0
+    try:
+        from app.services.max.whatsapp_log import update_delivery_status
+
+        for st in parse_statuses(payload):
+            if update_delivery_status(
+                st.get("id") or "",
+                st.get("status") or "",
+                error_code=st.get("error_code") or "",
+                error_message=st.get("error_message") or "",
+            ):
+                updated += 1
+    except Exception:
+        logger.warning("WhatsApp delivery status update failed", exc_info=True)
+    return updated
+
+
+def _inbound_log_fields(message: dict[str, Any]) -> dict[str, Any]:
+    kind = str(message.get("type") or "text")
+    voice = bool(message.get("voice") or kind == "audio")
+    caption = str(message.get("caption") or "")
+    filename = str(message.get("filename") or "")
+    text = str(message.get("text") or "")
+    if voice:
+        body = text or "[voice note]"
+        msg_type = "voice"
+    elif kind == "image":
+        body = caption or text or "[photo]"
+        msg_type = "image"
+    elif kind == "document":
+        label = filename or "document"
+        extra = caption or text
+        body = f"[document: {label}]" + (f" {extra}" if extra else "")
+        msg_type = "document"
+    elif kind == "call":
+        body = text or "[call]"
+        msg_type = "call"
+    elif kind == "location":
+        body = text or "[location]"
+        msg_type = "location"
+    elif kind in {"video", "sticker"}:
+        body = caption or text or f"[{kind}]"
+        msg_type = kind
+    else:
+        body = text or caption or f"[{kind or 'message'}]"
+        msg_type = kind or "text"
+    metadata: dict[str, Any] = {}
+    if filename:
+        metadata["filename"] = filename
+    if message.get("media_id"):
+        metadata["media_id"] = message.get("media_id")
+    if message.get("call_event"):
+        metadata["call_event"] = message.get("call_event")
+    return {
+        "message_type": msg_type,
+        "body": body,
+        "caption": caption,
+        "metadata": metadata,
+    }
+
+
+def parse_statuses(payload: dict | None) -> list[dict[str, Any]]:
+    """Flatten Cloud API status updates into dicts."""
+    if not isinstance(payload, dict):
+        return []
+    found: list[dict[str, Any]] = []
+    for entry in payload.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        for change in entry.get("changes") or []:
+            value = (change or {}).get("value") or {}
+            if not isinstance(value, dict):
+                continue
+            for st in value.get("statuses") or []:
+                if not isinstance(st, dict):
+                    continue
+                err = (st.get("errors") or [{}])[0] if st.get("errors") else {}
+                found.append({
+                    "id": str(st.get("id") or ""),
+                    "status": str(st.get("status") or ""),
+                    "timestamp": st.get("timestamp"),
+                    "recipient_id": str(st.get("recipient_id") or ""),
+                    "error_code": str(err.get("code") or ""),
+                    "error_message": str(err.get("title") or err.get("message") or ""),
+                })
     return found
 
 
@@ -672,6 +888,7 @@ async def reply_in_window(
     }, http_post=http_post)
     if not graph:
         graph = text_graph
+    outbound_msg_id = _public_graph(graph).get("message_id", "")
     attached: list[dict[str, str]] = []
     for doc in documents or []:
         if not isinstance(doc, dict):
@@ -682,6 +899,7 @@ async def reply_in_window(
         if not payload:
             continue
         filename = _pdf_filename(str(doc.get("filename") or "document.pdf"))
+        doc_id = str(doc.get("doc_id") or doc.get("quote_id") or doc.get("quote_number") or "")
         try:
             media_id = await upload_media(
                 bytes(payload), "application/pdf", filename, http_upload=http_upload,
@@ -697,9 +915,57 @@ async def reply_in_window(
                     "caption": str(doc.get("caption") or "Draft. Not sent.")[:1024],
                 },
             }, http_post=http_post)
-            attached.append({"filename": filename, "media_id": media_id})
+            attached.append({"filename": filename, "media_id": media_id, "doc_id": doc_id, "data": bytes(payload)})
         except WhatsAppSendBlocked:
             logger.warning("WhatsApp PDF attach failed for %s", filename)
+
+    outbound_atts: list[dict[str, Any]] = []
+    try:
+        from app.services.max.whatsapp_log import store_edition_media
+
+        for row in attached:
+            stored = store_edition_media(
+                row.get("data") or b"",
+                row.get("filename") or "document.pdf",
+                "application/pdf",
+                "document",
+            )
+            outbound_atts.append({
+                "wa_media_id": row.get("media_id", ""),
+                "filename": stored.get("filename") or row.get("filename"),
+                "mime_type": "application/pdf",
+                "size_bytes": stored.get("size_bytes") or 0,
+                "local_path": stored.get("local_path") or "",
+                "media_type": "document",
+                "doc_id": row.get("doc_id") or "",
+                "filing_status": "outbound",
+            })
+    except Exception:
+        logger.warning("WhatsApp outbound document copy failed", exc_info=True)
+
+    log_body = shown
+    if attached:
+        markers = ", ".join(
+            f"{row['filename']}" + (f" ({row['doc_id']})" if row.get("doc_id") else "")
+            for row in attached
+        )
+        log_body = f"{shown}\n[document: {markers}]".strip() if shown else f"[document: {markers}]"
+    _log_chat(
+        wa_id=number,
+        direction="outbound",
+        message_type="voice" if voice_sent else ("document" if attached else "text"),
+        body=log_body,
+        wa_message_id=outbound_msg_id,
+        delivery_status="sent",
+        metadata={
+            "voice_sent": voice_sent,
+            "voice_fallback": voice_fallback,
+            "reply_mode": mode,
+            "documents": [{"filename": d.get("filename", ""), "doc_id": d.get("doc_id", "")} for d in attached],
+        },
+        attachments=outbound_atts,
+    )
+
     return {
         "sent": True,
         "kind": "session",
@@ -707,7 +973,7 @@ async def reply_in_window(
         "reply_mode": mode,
         "voice_sent": voice_sent,
         "voice_fallback": voice_fallback,
-        "documents": attached,
+        "documents": [{"filename": d.get("filename", ""), "media_id": d.get("media_id", ""), "doc_id": d.get("doc_id", "")} for d in attached],
         "graph": _public_graph(graph),
     }
 
@@ -1340,7 +1606,9 @@ async def process_webhook(
             "reason": "invalid json",
             "results": [],
         }
-    messages = parse_inbound(payload if isinstance(payload, dict) else {})
+    parsed = payload if isinstance(payload, dict) else {}
+    statuses_updated = _apply_status_updates(parsed)
+    messages = parse_inbound(parsed)
     results: list[dict[str, Any]] = []
     on_text = text_handler or default_text_handler
     on_voice = voice_handler or default_voice_handler
@@ -1367,31 +1635,101 @@ async def process_webhook(
                 "sent": False,
             })
             continue
-        note_customer_window(sender, message.get("timestamp"))
-        # 2026-10-08 queueing: one sender's messages are answered in order. A message that
-        # arrives while Max is still on the previous one waits here, then runs with that
-        # reply already in the conversation (WhatsApp itself never locks his keyboard).
+        fields = _inbound_log_fields(message)
+        from app.services.max.whatsapp_log import (
+            JOB_ASK_TEXT,
+            consume_job_answer,
+            iso_from_wa_timestamp as _iso_wa,
+            last_attachment_ids,
+            set_pending_filings,
+        )
+
+        # 2026-10-08 queueing: one sender's messages are answered in order.
         async with _sender_lock(sender):
+            media_bytes, media_mime = b"", ""
+            inbound_atts: list[dict[str, Any]] = []
+            filed_reply = ""
+            persist_failed = False
+            try:
+                if message.get("media_id"):
+                    media_bytes, media_mime = await _safe_download(message["media_id"], http_get)
+                inbound_atts = _persist_inbound_media(
+                    message, media_bytes, media_mime or message.get("mime_type") or "",
+                )
+                if message["type"] == "text":
+                    answered = consume_job_answer(sender, message.get("text") or "")
+                    if answered and answered.get("handled"):
+                        filed_reply = answered.get("reply") or ""
+                msg_row_id = _log_chat(
+                    wa_id=sender,
+                    direction="inbound",
+                    message_type=fields["message_type"],
+                    body=fields["body"],
+                    caption=fields["caption"],
+                    wa_message_id=message_id,
+                    delivery_status="received",
+                    timestamp=_iso_wa(message.get("timestamp")),
+                    metadata={
+                        **fields["metadata"],
+                        "filed": [
+                            {
+                                "filename": a.get("filename"),
+                                "job_slug": a.get("job_slug"),
+                                "filed_path": a.get("filed_path"),
+                                "filing_status": a.get("filing_status"),
+                            }
+                            for a in inbound_atts
+                        ],
+                    },
+                    attachments=inbound_atts,
+                )
+                if msg_row_id:
+                    saved = last_attachment_ids(msg_row_id)
+                    inbox_ids = [int(a["id"]) for a in saved if a.get("filing_status") == "inbox"]
+                    if inbox_ids:
+                        set_pending_filings(sender, inbox_ids)
+            except Exception:
+                persist_failed = True
+                inbound_atts = []
+                filed_reply = ""
+                logger.warning(
+                    "WhatsApp persist/file/job-answer failed; falling back to handler",
+                    exc_info=True,
+                )
+            note_customer_window(sender, message.get("timestamp"))
             reply = ""
             route = message["type"]
             try:
-                if message["type"] == "text":
+                if filed_reply and not persist_failed:
+                    route = "job_file"
+                    reply = filed_reply
+                elif message["type"] == "text":
                     route = "chat"
                     reply = await on_text(message["text"], sender)
                 elif message["type"] == "audio" or message.get("voice"):
                     route = "voice_document"
-                    audio, mime = await download_media(message["media_id"], http_get=http_get)
+                    audio, mime = media_bytes, media_mime
+                    if not audio and message.get("media_id"):
+                        audio, mime = await download_media(message["media_id"], http_get=http_get)
                     reply = await on_voice(audio, mime or message["mime_type"], sender)
                 elif message["type"] == "image":
                     route = "photo_quote"
-                    image, mime = await download_media(message["media_id"], http_get=http_get)
+                    image, mime = media_bytes, media_mime
+                    if not image and message.get("media_id"):
+                        image, mime = await download_media(message["media_id"], http_get=http_get)
                     reply = await on_photo(image, mime or message["mime_type"], message["caption"], sender)
+                elif message["type"] == "call":
+                    route = "call"
+                    reply = ""
                 else:
                     reply = "That message type is not handled. Nothing sent."
             except Exception:
                 logger.warning("WhatsApp inbound handler failed", exc_info=True)
                 reply = "That message failed. Nothing sent."
             reply_text, documents = _split_reply(reply)
+            if any(a.get("needs_job_ask") or a.get("filing_status") == "inbox" for a in inbound_atts):
+                if JOB_ASK_TEXT not in (reply_text or ""):
+                    reply_text = f"{reply_text}\n{JOB_ASK_TEXT}".strip() if reply_text else JOB_ASK_TEXT
             reply_sent = False
             reply_error = ""
             voice_sent = False
@@ -1433,9 +1771,19 @@ async def process_webhook(
             )
         except ImportError:
             logging.getLogger("max.whatsapp_calling").warning(
-                "whatsapp_calling unavailable; ignoring %s call event(s)", len(calls),
+                "whatsapp_calling unavailable; reject-only fallback for %s call event(s)",
+                len(calls),
             )
-            calls = []
+
+            async def schedule_call_connect(c_id, c_from, sdp, http_post=None):  # type: ignore[misc]
+                if not is_allowlisted(c_from):
+                    return {"action": "rejected", "call_id": c_id, "reason": "not_allowlisted"}
+                if not channel_status().get("calling_enabled"):
+                    return {"action": "rejected", "call_id": c_id, "reason": "calling_disabled"}
+                return {"action": "noted", "call_id": c_id, "reason": "calling_unavailable"}
+
+            async def handle_call_terminate(c_id, reason="webhook_terminate"):  # type: ignore[misc]
+                return {"action": "noted", "call_id": c_id, "reason": reason}
         for call_item in calls:
             c_id = call_item["call_id"]
             c_from = call_item["from"]
@@ -1474,5 +1822,6 @@ async def process_webhook(
         "enabled": True,
         "status": "enabled",
         "sent": False,
+        "statuses_updated": statuses_updated,
         "results": results,
     }

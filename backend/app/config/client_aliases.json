@@ -1,7 +1,8 @@
 {
-  "_note": "Nicknames and job addresses Rafael uses for clients. Read by app/services/max/doc_lookup.py (Final Docs lookup). Add a row per client; aliases are matched fuzzily (typos, possessives).",
+  "_note": "Nicknames and job addresses Rafael uses for clients. Read by app/services/max/doc_lookup.py (Final Docs lookup and WhatsApp filing). Add a row per client; aliases are matched fuzzily (typos, possessives). Optional slug is used when filing into this edition's jobs root.",
   "clients": [
     {
+      "slug": "nehal-elrefai",
       "name": "Nehal Elrefai",
       "aliases": [
         "Dahlia",
@@ -12,6 +13,7 @@
       "address": "9408 Old Courthouse Rd"
     },
     {
+      "slug": "philipp-naomi-r6-wall-unit",
       "name": "Philipp Naomi R6 Wall Unit",
       "aliases": [
         "Philipp",
@@ -26,7 +28,22 @@
       ],
       "address": "",
       "designer": "Lauren Bassett / LB Design",
-      "note": "R6 walnut wall unit for Philipp & Naomi; designer Lauren Bassett / LB Design. Docs in ~/jobs/philipp-naomi-r6-wall-unit (facts in ref-source/JOB-FACTS.md). Current LED guide = R6-LED-LIGHTING-INSTALL-GUIDE-CURRENT-1m-jumpers-FINAL.pdf (1 m Litcessory MICRO V4 B08F9WVCS1); the OLD-6in PDF is superseded. COB option not approved. INV-2026-119 $2,276.40 to LB Design."
+      "note": "R6 walnut wall unit for Philipp & Naomi; designer Lauren Bassett / LB Design. Docs in the edition jobs root under philipp-naomi-r6-wall-unit (facts in ref-source/JOB-FACTS.md). Current LED guide = R6-LED-LIGHTING-INSTALL-GUIDE-CURRENT-1m-jumpers-FINAL.pdf (1 m Litcessory MICRO V4 B08F9WVCS1); the OLD-6in PDF is superseded. COB option not approved. INV-2026-119 $2,276.40 to LB Design."
+    },
+    {
+      "slug": "maggie-frolich",
+      "name": "Maggie",
+      "aliases": ["maggie", "5124 frolich", "frolich"]
+    },
+    {
+      "slug": "willard-hotel",
+      "name": "Willard InterContinental",
+      "aliases": ["willard", "willard lobby", "1401 pennsylvania"]
+    },
+    {
+      "slug": "mclean-residence",
+      "name": "McLean Residence",
+      "aliases": ["mclean", "ballantrae", "chain bridge"]
     }
   ]
 }

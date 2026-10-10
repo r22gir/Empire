@@ -1,0 +1,6 @@
+{
+  "_note": "Copy to EMPIRE_DATA_DIR/whatsapp/labels.json or point WHATSAPP_LABELS at a file. Real founder numbers are not committed. Main edition keeps the live file under the edition data dir.",
+  "phones": [
+    {"name": "Example", "phone": "+15555550100"}
+  ]
+}

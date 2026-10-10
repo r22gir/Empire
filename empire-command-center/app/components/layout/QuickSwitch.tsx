@@ -17,6 +17,7 @@ const SECTIONS = [
   { label: 'WoodCraft', shortcut: 'G', screen: 'craft-page', icon: Hammer, color: '#ca8a04' },
   { label: 'Platform', shortcut: 'P', screen: 'platform-page', icon: Server, color: '#2563eb' },
   { label: 'Telegram', shortcut: 'T', screen: 'telegram', icon: MessageCircle, color: '#2563eb' },
+  { label: 'WhatsApp Chats', shortcut: 'H', screen: 'whatsapp', icon: MessageCircle, color: '#25d366' },
   { label: 'Dev Panel', shortcut: 'X', screen: 'dev', icon: Terminal, color: '#b8960c' },
   { label: 'RecoveryForge', shortcut: 'Y', screen: 'recovery', icon: HardDrive, color: '#b8960c' },
   { label: 'Pricing Studio', shortcut: 'Z', screen: 'pricing-studio', icon: Scissors, color: '#16a34a' },

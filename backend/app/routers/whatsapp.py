@@ -1,10 +1,19 @@
-"""WhatsApp Business Cloud API webhook. Disabled unless the four env vars are set."""
+"""WhatsApp Business Cloud API webhook plus founder chat-log reads.
+
+The webhook stays public (Meta signature). Conversation reads require
+the founder PIN. This module does not delete messages and does not send
+from the chats viewer.
+"""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+import threading
+import time
+
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
+from app.services.accounts.founder import FounderAuthError, assert_founder
 from app.services.max.whatsapp_channel import (
     WhatsAppSendBlocked,
     channel_status,
@@ -16,6 +25,11 @@ from app.services.max.whatsapp_channel import (
 
 router = APIRouter()
 
+_PIN_FAILS: dict[str, list[float]] = {}
+_PIN_LOCK = threading.Lock()
+_PIN_WINDOW_SECONDS = 300.0
+_PIN_MAX_FAILURES = 8
+
 
 class OutboundIn(BaseModel):
     to: str
@@ -25,9 +39,188 @@ class OutboundIn(BaseModel):
     confirmed: bool = False
 
 
+class RefileIn(BaseModel):
+    job_slug: str
+
+
+def _client_key(request: Request | None) -> str:
+    if request is None:
+        return "unknown"
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if forwarded:
+        return forwarded
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _require_founder(pin: str | None, request: Request | None = None) -> None:
+    key = _client_key(request)
+    now = time.monotonic()
+    with _PIN_LOCK:
+        recent = [t for t in _PIN_FAILS.get(key, []) if now - t < _PIN_WINDOW_SECONDS]
+        _PIN_FAILS[key] = recent
+        if len(recent) >= _PIN_MAX_FAILURES:
+            raise HTTPException(status_code=429, detail="Too many PIN attempts. Try again later.")
+    try:
+        assert_founder(pin)
+    except FounderAuthError as exc:
+        with _PIN_LOCK:
+            _PIN_FAILS.setdefault(key, []).append(now)
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    with _PIN_LOCK:
+        _PIN_FAILS.pop(key, None)
+
+
 @router.get("/whatsapp/status")
 async def whatsapp_status():
     return channel_status()
+
+
+@router.get("/whatsapp/chats")
+async def whatsapp_list_chats(
+    request: Request,
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    """List conversations for this edition. Founder PIN required."""
+    _require_founder(x_founder_pin, request)
+    from app.services.max.whatsapp_log import list_conversations
+
+    return {"conversations": list_conversations()}
+
+
+@router.get("/whatsapp/chats/search")
+async def whatsapp_search_chats(
+    request: Request,
+    q: str = Query("", min_length=0),
+    limit: int = Query(50, ge=1, le=200),
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    """Simple text search across this edition's WhatsApp log."""
+    _require_founder(x_founder_pin, request)
+    from app.services.max.whatsapp_log import search_all_messages
+
+    return {"query": q, "messages": search_all_messages(q, limit=limit)}
+
+
+@router.get("/whatsapp/chats/{wa_id}/messages")
+async def whatsapp_conversation_messages(
+    wa_id: str,
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    q: str = Query("", min_length=0),
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    """Page one conversation. Read-only."""
+    _require_founder(x_founder_pin, request)
+    from app.services.max.whatsapp_log import get_conversation_messages, get_display_label
+
+    messages, total = get_conversation_messages(
+        wa_id,
+        limit=limit,
+        offset=offset,
+        search=q or None,
+    )
+    from app.services.max.whatsapp_log import get_active_job
+
+    return {
+        "wa_id": wa_id,
+        "display_label": get_display_label(wa_id),
+        "messages": messages,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "active_job": get_active_job(wa_id),
+    }
+
+
+@router.get("/whatsapp/jobs")
+async def whatsapp_list_jobs(
+    request: Request,
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    _require_founder(x_founder_pin, request)
+    from app.services.max.doc_lookup import list_job_folders
+
+    return {"jobs": list_job_folders()}
+
+
+@router.get("/whatsapp/media/{attachment_id}")
+async def whatsapp_media(
+    attachment_id: int,
+    request: Request,
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    _require_founder(x_founder_pin, request)
+    from app.services.max.whatsapp_log import attachment_file_path, get_attachment, media_serve_headers
+
+    att = get_attachment(attachment_id)
+    path = attachment_file_path(attachment_id)
+    if not att or path is None:
+        raise HTTPException(status_code=404, detail="attachment not found")
+    media_type, extra = media_serve_headers(att.get("mime_type") or "", att.get("filename") or path.name)
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=att.get("filename") or path.name,
+        headers=extra,
+    )
+
+
+@router.post("/whatsapp/attachments/{attachment_id}/refile")
+async def whatsapp_refile(
+    attachment_id: int,
+    body: RefileIn,
+    request: Request,
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    """Only write on the chats page: move an attachment into a job folder."""
+    _require_founder(x_founder_pin, request)
+    from app.services.max.whatsapp_log import refile_attachment
+
+    try:
+        return refile_attachment(attachment_id, body.job_slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/whatsapp/chats/{wa_id}/copy")
+async def whatsapp_copy_chat(
+    wa_id: str,
+    request: Request,
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    _require_founder(x_founder_pin, request)
+    from app.services.max.whatsapp_log import conversation_copy_text
+
+    return {"wa_id": wa_id, "text": conversation_copy_text(wa_id)}
+
+
+@router.get("/whatsapp/chats/{wa_id}/export")
+async def whatsapp_export_chat(
+    wa_id: str,
+    request: Request,
+    format: str = Query("pdf"),
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    _require_founder(x_founder_pin, request)
+    from app.services.max.whatsapp_log import conversation_copy_text, conversation_export_pdf, get_display_label
+
+    label = get_display_label(wa_id).replace(" ", "-")
+    if (format or "pdf").lower() == "txt":
+        text = conversation_copy_text(wa_id)
+        return PlainTextResponse(text, headers={
+            "Content-Disposition": f'attachment; filename="whatsapp-{label}.txt"',
+        })
+    pdf = conversation_export_pdf(wa_id)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="whatsapp-{label}.pdf"'},
+    )
 
 
 @router.get("/whatsapp/webhook")
