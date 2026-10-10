@@ -78,11 +78,11 @@ def test_prompt_context_paths_stay_in_data_root_for_amp_and_maxine(monkeypatch, 
 
 
 def test_family_system_prompt_has_no_workroom_text(monkeypatch, tmp_path):
+    from app.edition import brain_sync_storage_paths
     from app.services.max.hermes_memory import memory_root, render_hermes_bridge_for_prompt
     from app.services.max.supermemory_recall import store_path
     from app.services.max.continuity_compaction import default_handoff_path
     from app.services.max.system_prompt import get_max_brain_context, get_system_prompt
-    from app.services.max.scheduler import brain_sync_storage_paths
 
     for edition, assistant in (("amp", "Max-e"), ("maxine", "Maxine")):
         root = tmp_path / f"prompt-{edition}"

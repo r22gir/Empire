@@ -13,32 +13,9 @@ from apscheduler.triggers.cron import CronTrigger
 from pathlib import Path
 
 from app.config.business_config import biz
+from app.edition import brain_sync_storage_paths
 
 logger = logging.getLogger("max.scheduler")
-
-
-def brain_sync_storage_paths() -> dict[str, Path]:
-    """Quote / inbox / brain files counted by nightly sync.
-
-    Family editions stay under EMPIRE_DATA_DIR. Workroom keeps the
-    historical HOME/repo paths so its counts do not change.
-    """
-    from app.edition import is_family_edition, require_data_root
-    from app.services.max.brain.brain_config import get_db_path
-
-    if is_family_edition():
-        root = require_data_root()
-        return {
-            "quotes": root / "quotes",
-            "inbox": root / "inbox",
-            "brain_db": Path(get_db_path()),
-        }
-    home_data = Path.home() / "empire-repo" / "backend" / "data"
-    return {
-        "quotes": home_data / "quotes",
-        "inbox": home_data / "inbox",
-        "brain_db": home_data / "brain" / "memories.db",
-    }
 
 
 class MaxScheduler:

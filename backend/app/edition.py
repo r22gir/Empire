@@ -785,6 +785,28 @@ def family_forbidden_prompt_roots() -> tuple[Path, ...]:
     )
 
 
+def brain_sync_storage_paths() -> dict[str, Path]:
+    """Quote / inbox / brain files counted by nightly sync.
+
+    Family editions stay under EMPIRE_DATA_DIR. Workroom keeps the
+    historical HOME/repo paths so its counts do not change.
+    """
+    if is_family_edition():
+        root = require_data_root()
+        brain = Path(os.getenv("EMPIRE_BRAIN_DIR", "").strip() or (root / "assistant" / "brain"))
+        return {
+            "quotes": root / "quotes",
+            "inbox": root / "inbox",
+            "brain_db": brain / "memories.db",
+        }
+    home_data = Path.home() / "empire-repo" / "backend" / "data"
+    return {
+        "quotes": home_data / "quotes",
+        "inbox": home_data / "inbox",
+        "brain_db": home_data / "brain" / "memories.db",
+    }
+
+
 def apply_amp_process_paths() -> None:
     """Force process data paths under EMPIRE_DATA_DIR for a family instance.
 
