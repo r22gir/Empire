@@ -95,7 +95,7 @@ def test_recorded_total_across_editions_sets_baseline(monkeypatch, tmp_path):
     mine = tmp_path / "amp"
     peer = tmp_path / "maxine"
     _env(monkeypatch, mine)
-    monkeypatch.setenv("EMPIRE_USAGE_DEFAULT_BASELINE_TOKENS", "1000")
+    monkeypatch.setenv("EMPIRE_USAGE_DEFAULT_BASELINE_TOKENS", "500")
     monkeypatch.setattr("app.services.instance_usage._usage_data_roots", lambda: [mine, peer])
     _seed_usage_db(peer, 800, provider="groq")
     from app.services.instance_usage import (
@@ -116,9 +116,9 @@ def test_recorded_total_across_editions_sets_baseline(monkeypatch, tmp_path):
     assert summary["level"] == "ok"
     assert summary["remaining_percent"] == 44.4
 
-    record_usage(input_tokens=90, output_tokens=0)
+    record_usage(input_tokens=110, output_tokens=0)
     over = usage_summary()
-    assert over["used"] == 190
+    assert over["used"] == 210
     assert over["level"] == "blocked"
     assert over["total_spend_hit"] is False
     assert enforce_usage_cap(text="corto") is None
