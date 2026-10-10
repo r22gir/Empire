@@ -1653,8 +1653,22 @@ def _approve_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     chat_id = params.get("chat_id") or params.get("_chat_id") or ""
     if not quote_id:
         return ToolResult(tool="approve_quote", success=False, error="quote_id required")
+    # IMP-0004: verified founder sessions (CC/web, Telegram founder, voice
+    # on a founder session — execute_tool sets _founder) bypass the PIN
+    # prompt, same pattern as shell_execute's founder allowlist bypass.
+    # The service-layer PIN check still runs server-side: we forward the
+    # env PIN without ever exposing it. Non-founder calls keep full safety.
+    from app.services.max.access_control import FOUNDER_APPROVAL_PIN, verify_founder_approval
+    if params.get("_founder") is True and not founder_pin:
+        if not FOUNDER_APPROVAL_PIN:
+            return ToolResult(
+                tool="approve_quote", success=False,
+                error=("founder approval required: FOUNDER_APPROVAL_PIN is not "
+                       "configured on the server.")
+            )
+        logger.info("Founder auto-auth — approve_quote without PIN prompt")
+        founder_pin = FOUNDER_APPROVAL_PIN
     # Primary gate: real-identity check OR founder_pin match.
-    from app.services.max.access_control import verify_founder_approval
     if not verify_founder_approval(channel, chat_id, founder_pin):
         return ToolResult(
             tool="approve_quote", success=False,
@@ -1698,7 +1712,17 @@ def _reject_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     chat_id = params.get("chat_id") or params.get("_chat_id") or ""
     if not quote_id:
         return ToolResult(tool="reject_quote", success=False, error="quote_id required")
-    from app.services.max.access_control import verify_founder_approval
+    # IMP-0004: same verified-founder bypass as approve_quote (see above).
+    from app.services.max.access_control import FOUNDER_APPROVAL_PIN, verify_founder_approval
+    if params.get("_founder") is True and not founder_pin:
+        if not FOUNDER_APPROVAL_PIN:
+            return ToolResult(
+                tool="reject_quote", success=False,
+                error=("founder approval required: FOUNDER_APPROVAL_PIN is not "
+                       "configured on the server.")
+            )
+        logger.info("Founder auto-auth — reject_quote without PIN prompt")
+        founder_pin = FOUNDER_APPROVAL_PIN
     if not verify_founder_approval(channel, chat_id, founder_pin):
         return ToolResult(
             tool="reject_quote", success=False,
@@ -2185,7 +2209,13 @@ def _check_email(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("send_email")
 def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Send an email with optional file attachments."""
+    """Send an email with optional file attachments.
+
+    IMP-0004: verified founder sessions (voice included) may send directly;
+    non-founder calls keep full safety via execute_tool access control.
+    The founder recipient lock applies to EVERYONE: only
+    empirebox2026@gmail.com, no cc/bcc/reply-to overrides, never clients.
+    """
     to = params.get("to", "").strip()
     subject = params.get("subject", "").strip()
     body = params.get("body", "").strip()
@@ -2193,6 +2223,18 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     # Resolve founder aliases to FOUNDER_EMAIL from .env
     if not to or to.lower() in ("me", "owner", "founder", "my email", "myself"):
         to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+
+    # IMP-0004 recipient lock — server-side, founder sessions included.
+    try:
+        from app.services.max.email_recipient_guard import validate_outbound_email
+        validate_outbound_email(
+            to,
+            cc=params.get("cc"),
+            bcc=params.get("bcc"),
+            reply_to=params.get("reply_to"),
+        )
+    except ValueError as e:
+        return ToolResult(tool="send_email", success=False, error=str(e))
 
     if not subject or not body:
         return ToolResult(tool="send_email", success=False, error="subject and body are required")
@@ -2240,13 +2282,28 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("send_quote_email")
 def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Generate PDF for a quote and send it to a recipient via email."""
+    """Generate PDF for a quote and send it to a recipient via email.
+
+    IMP-0004: recipient lock applies — only empirebox2026@gmail.com.
+    Client/quote emails stay drafts only; any other address is rejected.
+    """
     quote_id = params.get("quote_id", "")
     to = params.get("to", "").strip()
     if not quote_id:
         return ToolResult(tool="send_quote_email", success=False, error="No quote_id provided")
     if not to:
         return ToolResult(tool="send_quote_email", success=False, error="No recipient email (to) provided")
+
+    try:
+        from app.services.max.email_recipient_guard import validate_outbound_email
+        validate_outbound_email(
+            to,
+            cc=params.get("cc"),
+            bcc=params.get("bcc"),
+            reply_to=params.get("reply_to"),
+        )
+    except ValueError as e:
+        return ToolResult(tool="send_quote_email", success=False, error=str(e))
 
     # Load quote
     quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")

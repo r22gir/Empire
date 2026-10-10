@@ -81,6 +81,11 @@ class EmailService:
             raise RuntimeError(
                 "Email not configured — set SENDGRID_API_KEY or SMTP_USER/SMTP_PASSWORD env vars"
             )
+        # IMP-0004 recipient lock (mandatory): MAX may only send to
+        # empirebox2026@gmail.com — no cc/bcc/reply-to overrides, never to
+        # clients. Enforced server-side for founder and non-founder alike.
+        from app.services.max.email_recipient_guard import validate_outbound_email
+        validate_outbound_email(to, cc=cc, reply_to=reply_to)
         self._verify_send_payload(to, subject, body_html, attachments)
 
         if self.sendgrid_key:
