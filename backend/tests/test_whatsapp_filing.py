@@ -1463,3 +1463,220 @@ def test_live_oct10_sequence_new_job_and_truthful_photos(isolated_whatsapp_editi
     assert photo_status_reply(RAFAEL, "did you get my photos")
     aliases_path = Path(os.environ["MAX_CLIENT_ALIASES_PATH"])
     assert "home-wood-suites" in aliases_path.read_text(encoding="utf-8")
+
+
+CHAT_NEW_JOB_SENTENCES = (
+    "I have a new job offer",
+    "I got a new job at the bank today",
+)
+
+
+def _alias_lock_worker(payload):
+    """Spawned process: add one edition alias. Must be top-level for pickle."""
+    edition_dir, repo_missing, name, slug = payload
+    os.environ["EMPIRE_DATA_DIR"] = edition_dir
+    os.environ["MAX_CLIENT_ALIASES_REPO_PATH"] = repo_missing
+    os.environ.pop("MAX_CLIENT_ALIASES_PATH", None)
+    from app.services.max.doc_lookup import add_client_alias
+
+    add_client_alias(name, slug)
+    return slug
+
+
+def test_mid_sentence_new_job_creates_no_folder_or_alias(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    from app.services.max.doc_lookup import load_client_aliases
+    from app.services.max.whatsapp_folders import parse_new_job_name, resolve_or_create_folder
+    from app.services.max.whatsapp_log import (
+        is_chat_not_job,
+        is_job_hint_text,
+        record_media_batch,
+    )
+
+    for sentence in CHAT_NEW_JOB_SENTENCES:
+        assert parse_new_job_name(sentence) is None
+        assert resolve_or_create_folder(sentence) is None
+        record_media_batch(RAFAEL, [900 + hash(sentence) % 50], sentence)
+
+    slugs = {c["slug"] for c in (load_client_aliases().get("clients") or [])}
+    assert "offer" not in slugs
+    assert "at-the-bank-today" not in slugs
+    assert not (jobs_root() / "offer").exists()
+    assert not (jobs_root() / "at-the-bank-today").exists()
+
+    _quote_spies(monkeypatch)
+    posts = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    for i, caption in enumerate(CHAT_NEW_JOB_SENTENCES):
+        raw = _payload({
+            "type": "image",
+            "id": f"wamid.chatjob{i}",
+            "image": {
+                "id": f"media-chatjob{i}",
+                "mime_type": "image/jpeg",
+                "caption": caption,
+            },
+        })
+        asyncio.run(wa.process_webhook(raw, _sign(raw), http_get=_image_get, http_post=_post))
+
+    slugs = {c["slug"] for c in (load_client_aliases().get("clients") or [])}
+    assert "offer" not in slugs
+    assert "at-the-bank-today" not in slugs
+    assert not (jobs_root() / "offer").exists()
+    assert not (jobs_root() / "at-the-bank-today").exists()
+    messages, _ = get_conversation_messages(RAFAEL)
+    atts = [a for m in messages if m["direction"] == "inbound" for a in m.get("attachments") or []]
+    assert atts
+    assert all(a.get("job_slug") != "offer" for a in atts)
+    assert all(a.get("job_slug") != "at-the-bank-today" for a in atts)
+    assert is_chat_not_job("Do you have a new job for me?")
+    assert not is_job_hint_text("Do you have a new job for me?")
+    assert parse_new_job_name("You online? New job pine ridge.") == "pine ridge"
+
+
+def test_accented_new_job_slugs_and_caption_files(isolated_whatsapp_edition):
+    from app.services.max.doc_lookup import load_client_aliases, slugify
+    from app.services.max.whatsapp_folders import (
+        create_client_job_folder,
+        parse_new_job_name,
+        resolve_or_create_folder,
+    )
+
+    assert slugify("Casa Pérez") == "casa-perez"
+    assert slugify("Émma Ñandú") == "emma-nandu"
+    assert parse_new_job_name("new job Casa Pérez") == "Casa Pérez"
+    assert parse_new_job_name("new job Émma Ñandú") == "Émma Ñandú"
+    created = resolve_or_create_folder("new job Casa Pérez")
+    assert created and created["slug"] == "casa-perez"
+    emma = resolve_or_create_folder("new job Émma Ñandú")
+    assert emma and emma["slug"] == "emma-nandu"
+    long_word = "Abcdefghij" * 20
+    parsed = parse_new_job_name("new job " + long_word)
+    assert parsed
+    long_folder = create_client_job_folder(parsed)
+    assert long_folder is not None
+    assert len(long_folder["slug"]) <= 120
+
+    rec = prepare_inbound_attachment(
+        b"perez-photo",
+        filename="casa.jpg",
+        mime_type="image/jpeg",
+        media_type="image",
+        wa_id=RAFAEL,
+        hint_text="Casa Pérez",
+    )
+    assert rec["filing_status"] == "filed"
+    assert rec["job_slug"] == "casa-perez"
+    slugs = {c["slug"] for c in (load_client_aliases().get("clients") or [])}
+    assert "casa-perez" in slugs
+    assert "emma-nandu" in slugs
+
+
+def test_reserved_alias_and_short_new_job_names_rejected(isolated_whatsapp_edition):
+    from app.services.max.whatsapp_folders import (
+        create_client_job_folder,
+        parse_new_job_name,
+        resolve_or_create_folder,
+    )
+
+    assert parse_new_job_name("new job luxe forge") is None
+    assert resolve_or_create_folder("new job luxe forge") is None
+    assert create_client_job_folder("luxe forge") is None
+    assert not (jobs_root() / "luxe-forge").exists()
+    for raw in ("con", ".hidden", "-rf"):
+        assert parse_new_job_name(f"new job {raw}") is None
+        assert create_client_job_folder(raw) is None
+        assert not (jobs_root() / slug_guess(raw)).exists()
+
+
+def slug_guess(raw: str) -> str:
+    from app.services.max.doc_lookup import slugify
+
+    return slugify(raw) or raw.strip(".-")
+
+
+def test_edition_aliases_merge_repo_and_never_write_repo(isolated_whatsapp_edition, tmp_path, monkeypatch):
+    from app.services.max.doc_lookup import (
+        add_client_alias,
+        edition_aliases_path,
+        load_client_aliases,
+        repo_aliases_path,
+    )
+
+    repo = tmp_path / "dell-repo-aliases.json"
+    repo.write_text(
+        json.dumps({
+            "clients": [{
+                "slug": "dell-live-edit",
+                "name": "Dell Live Edit",
+                "aliases": ["DellLive"],
+            }]
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAX_CLIENT_ALIASES_REPO_PATH", str(repo))
+    before = repo.read_text(encoding="utf-8")
+    add_client_alias("Casa Perez", "casa-perez", aliases=["Casa Pérez"])
+    data = load_client_aliases()
+    slugs = {c["slug"] for c in data.get("clients") or []}
+    assert "dell-live-edit" in slugs
+    assert "casa-perez" in slugs
+    assert "maggie-frolich" in slugs
+    assert repo.read_text(encoding="utf-8") == before
+    edition = edition_aliases_path()
+    assert edition.resolve() != repo.resolve()
+    assert edition.resolve() != repo_aliases_path().resolve()
+    edition_text = edition.read_text(encoding="utf-8")
+    assert "casa-perez" in edition_text
+    assert "dell-live-edit" not in edition_text
+
+
+def test_alias_backups_pruned(isolated_whatsapp_edition):
+    from app.services.max.doc_lookup import MAX_ALIAS_BACKUPS, add_client_alias, edition_aliases_path
+
+    path = edition_aliases_path()
+    for i in range(6):
+        add_client_alias(f"Backup Client {i}", f"backup-client-{i}")
+    baks = list(path.parent.glob(f"{path.name}.bak-*"))
+    assert len(baks) <= MAX_ALIAS_BACKUPS
+
+
+def test_corrupt_aliases_refuse_write(isolated_whatsapp_edition):
+    from app.services.max.doc_lookup import add_client_alias, edition_aliases_path
+
+    path = edition_aliases_path()
+    path.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(ValueError, match="corrupt"):
+        add_client_alias("Casa Perez", "casa-perez")
+    assert path.read_text(encoding="utf-8") == "{not-json"
+
+
+def test_alias_lock_keeps_all_process_writes(isolated_whatsapp_edition, tmp_path, monkeypatch):
+    import multiprocessing
+
+    from app.services.max.doc_lookup import load_client_aliases
+
+    edition = tmp_path / "flock-edition"
+    edition.mkdir()
+    (edition / "client_aliases.json").write_text(
+        json.dumps({"clients": []}), encoding="utf-8"
+    )
+    repo_missing = str(tmp_path / "flock-repo-missing.json")
+    jobs = [
+        (str(edition), repo_missing, f"Alpha {i} Client", f"alpha-{i}-client")
+        for i in range(4)
+    ]
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(4) as pool:
+        slugs = pool.map(_alias_lock_worker, jobs)
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(edition))
+    monkeypatch.delenv("MAX_CLIENT_ALIASES_PATH", raising=False)
+    monkeypatch.setenv("MAX_CLIENT_ALIASES_REPO_PATH", repo_missing)
+    found = {c["slug"] for c in (load_client_aliases().get("clients") or [])}
+    assert found == set(slugs)
+    assert len(found) == 4

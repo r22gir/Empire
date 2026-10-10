@@ -12,12 +12,15 @@ This module sits in front of the hub:
 - "last 2" / "two" / "latest" -> that many most recently modified finals
 - when nothing matches: the closest matches, so Max can say so plainly
 
-Read-only. Talks to the docs hub on the portal (same as open_final_doc) and
-never returns public links.
+Final Docs lookup is read-only (talks to the docs hub; never returns public
+links). WhatsApp new-job aliases write only `$EMPIRE_DATA_DIR/client_aliases.json`
+and merge the tracked repo file on read.
 """
 from __future__ import annotations
 
+import contextlib
 import difflib
+import fcntl
 import json
 import logging
 import os
@@ -25,13 +28,18 @@ import re
 import shutil
 import tempfile
 import threading
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 
 HubGet = Callable[[str, dict], dict]
 
+# Tracked repo file. Read-only. New-job aliases never write here (Dell
+# ff-only merges break when this file and leftover .bak files are dirty).
 ALIASES_PATH = Path(__file__).resolve().parents[2] / "config" / "client_aliases.json"
+REPO_ALIASES_PATH = ALIASES_PATH
+MAX_ALIAS_BACKUPS = 3
 _alias_write_lock = threading.Lock()
 _ALIAS_PHONE_KEYS = {
     "phone", "phones", "mobile", "telephone", "whatsapp", "wa_id",
@@ -77,18 +85,23 @@ def default_hub_get(path: str, params: dict) -> dict:
 
 
 def load_aliases(path: Optional[Path] = None) -> list[dict[str, Any]]:
-    p = path or Path(os.environ.get("MAX_CLIENT_ALIASES_PATH") or ALIASES_PATH)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    rows = data.get("clients") if isinstance(data, dict) else data
+    if path is not None:
+        data, _corrupt = _read_alias_dict(Path(path))
+    else:
+        data = load_client_aliases()
+    rows = data.get("clients") if isinstance(data, dict) else []
     return [r for r in rows or [] if isinstance(r, dict) and r.get("name")]
+
+
+def ascii_fold(text: str) -> str:
+    """NFKD → ASCII letters so Casa Pérez / Émma Ñandú slug and match."""
+    folded = unicodedata.normalize("NFKD", text or "")
+    return "".join(ch for ch in folded if not unicodedata.combining(ch))
 
 
 def _words(text: str) -> list[str]:
     out = []
-    for raw in re.split(r"[^a-z0-9áéíóúñ']+", (text or "").lower()):
+    for raw in re.split(r"[^a-z0-9']+", ascii_fold(text).lower()):
         w = raw.strip("'")
         w = re.sub(r"'s$", "", w)
         if w:
@@ -268,8 +281,43 @@ def fetch_pdf(doc_id: str, *, http_get: Optional[Callable[[str, dict], Any]] = N
 # --- WhatsApp job filing (kept alongside Final Docs hub lookup) ---
 
 
+def repo_aliases_path() -> Path:
+    override = (os.environ.get("MAX_CLIENT_ALIASES_REPO_PATH") or "").strip()
+    if override:
+        return Path(override)
+    return REPO_ALIASES_PATH
+
+
+def _default_edition_aliases_path() -> Path:
+    try:
+        from app.services.data_paths import data_root
+
+        return data_root() / "client_aliases.json"
+    except Exception:
+        return Path(os.getenv("EMPIRE_DATA_DIR") or ".") / "client_aliases.json"
+
+
+def edition_aliases_path() -> Path:
+    """Writable per-edition aliases. Never the tracked repo file."""
+    override = (os.environ.get("MAX_CLIENT_ALIASES_PATH") or "").strip()
+    if override:
+        candidate = Path(override)
+        try:
+            if candidate.resolve() == repo_aliases_path().resolve():
+                logger.warning(
+                    "MAX_CLIENT_ALIASES_PATH points at the repo aliases file; "
+                    "writing new-job rows to EMPIRE_DATA_DIR instead"
+                )
+                return _default_edition_aliases_path()
+        except OSError:
+            pass
+        return candidate
+    return _default_edition_aliases_path()
+
+
 def _config_path() -> Path:
-    return Path(os.environ.get("MAX_CLIENT_ALIASES_PATH") or ALIASES_PATH)
+    """Backward-compat alias for the writable edition file."""
+    return edition_aliases_path()
 
 
 def jobs_root(override: Optional[Path | str] = None) -> Path:
@@ -292,15 +340,118 @@ def jobs_root(override: Optional[Path | str] = None) -> Path:
         return Path(os.getenv("EMPIRE_DATA_DIR") or ".") / "jobs"
 
 
-def load_client_aliases() -> dict[str, Any]:
-    path = _config_path()
+def _read_alias_dict(path: Path) -> tuple[dict[str, Any], bool]:
+    """Return (data, corrupt). Missing file is empty and not corrupt."""
     if not path.is_file():
-        return {}
+        return {}, False
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
+        logger.error("client aliases file is corrupt (invalid JSON): %s", path)
+        return {}, True
+    if not isinstance(data, dict):
+        logger.error("client aliases file is corrupt (not an object): %s", path)
+        return {}, True
+    return data, False
+
+
+def _iter_client_rows(data: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    clients = list(data.get("clients") or [])
+    if clients:
+        for row in clients:
+            if isinstance(row, dict):
+                yield row
+        return
+    for key, value in data.items():
+        if key == "clients":
+            continue
+        if isinstance(value, dict):
+            yield value
+        elif isinstance(value, str):
+            yield {"slug": value, "name": str(key).title(), "aliases": [key]}
+
+
+def _merge_alias_dicts(repo: dict[str, Any], edition: dict[str, Any]) -> dict[str, Any]:
+    """Repo rows first (Dell live edits), edition overlays the same slug."""
+    by_slug: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+
+    def _ingest(row: dict[str, Any], *, overlay: bool) -> None:
+        slug = str(row.get("slug") or slugify(row.get("name") or ""))
+        if not slug:
+            return
+        if slug not in by_slug:
+            by_slug[slug] = dict(row)
+            order.append(slug)
+            return
+        existing = by_slug[slug]
+        merged = list(existing.get("aliases") or [])
+        for item in row.get("aliases") or []:
+            if item not in merged:
+                merged.append(item)
+        existing["aliases"] = merged
+        if overlay:
+            if row.get("name"):
+                existing["name"] = row["name"]
+            for key, value in row.items():
+                if key == "aliases":
+                    continue
+                if value not in (None, "", []):
+                    existing[key] = value
+        else:
+            for key, value in row.items():
+                if key == "aliases":
+                    continue
+                if key not in existing or existing.get(key) in (None, "", []):
+                    existing[key] = value
+
+    for row in _iter_client_rows(repo):
+        _ingest(row, overlay=False)
+    for row in _iter_client_rows(edition):
+        _ingest(row, overlay=True)
+    merged: dict[str, Any] = {k: v for k, v in repo.items() if k != "clients"}
+    merged.update({k: v for k, v in edition.items() if k != "clients"})
+    merged["clients"] = [by_slug[slug] for slug in order]
+    return merged
+
+
+def load_client_aliases() -> dict[str, Any]:
+    """Merge the read-only repo file with this edition's writable aliases.
+
+    Dell live edits in backend/app/config/client_aliases.json stay visible.
+    New-job rows live in $EMPIRE_DATA_DIR/client_aliases.json and never
+    write the repo file. A corrupt edition file is skipped on read.
+    """
+    repo, repo_corrupt = _read_alias_dict(repo_aliases_path())
+    if repo_corrupt:
+        logger.error("skipping corrupt repo client aliases on read: %s", repo_aliases_path())
+    edition, edition_corrupt = _read_alias_dict(edition_aliases_path())
+    if edition_corrupt:
+        logger.error(
+            "skipping corrupt edition client aliases on read: %s",
+            edition_aliases_path(),
+        )
+    if not repo and not edition:
         return {}
-    return data if isinstance(data, dict) else {}
+    return _merge_alias_dicts(repo, edition)
+
+
+@contextlib.contextmanager
+def _alias_file_lock(path: Path):
+    """Thread RLock + cross-process fcntl.flock on a sidecar lock file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(path.name + ".lock")
+    with _alias_write_lock:
+        fh = open(lock_path, "a+b")
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            fh.close()
 
 
 def add_client_alias(
@@ -308,10 +459,11 @@ def add_client_alias(
     slug: str,
     aliases: Optional[list[str]] = None,
 ) -> dict[str, Any]:
-    """Append one client row. Atomic write + timestamped backup. No phone numbers.
+    """Append one client row to the edition file. Never writes the repo file.
 
-    load_client_aliases() reads the file every call (no cache), so the next
-    probe sees the new row — hot-reload safe.
+    Reads the edition file only (not the merged view) so repo clients are
+    not copied in. A corrupt edition file is refused and left untouched.
+    Cross-process lock via fcntl.flock. load_client_aliases() has no cache.
     """
     title = re.sub(r"\s+", " ", (name or "").strip())
     clean_slug = slugify(slug or title)
@@ -325,9 +477,20 @@ def add_client_alias(
     entry = {"slug": clean_slug, "name": title, "aliases": alias_list, "address": ""}
     for key in _ALIAS_PHONE_KEYS:
         entry.pop(key, None)
-    with _alias_write_lock:
-        path = _config_path()
-        data = load_client_aliases()
+    path = edition_aliases_path()
+    try:
+        if path.resolve() == repo_aliases_path().resolve():
+            path = _default_edition_aliases_path()
+            logger.warning("refusing to write repo client aliases; using %s", path)
+    except OSError:
+        pass
+    with _alias_file_lock(path):
+        data, corrupt = _read_alias_dict(path)
+        if corrupt:
+            logger.error(
+                "refusing to overwrite corrupt client aliases %s", path
+            )
+            raise ValueError("client aliases file is corrupt; refusing to overwrite")
         if not data:
             data = {"clients": []}
         clients = list(data.get("clients") or [])
@@ -350,7 +513,27 @@ def add_client_alias(
         return entry
 
 
+def _prune_alias_backups(path: Path, keep: int = MAX_ALIAS_BACKUPS) -> None:
+    backups = sorted(
+        path.parent.glob(f"{path.name}.bak-*"),
+        key=lambda item: item.name,
+    )
+    extra = backups[:-keep] if keep > 0 else backups
+    for old in extra:
+        try:
+            old.unlink()
+        except OSError as exc:
+            logger.warning("could not prune alias backup %s: %s", old, exc)
+
+
 def _write_aliases_atomic(path: Path, data: dict[str, Any]) -> None:
+    try:
+        if path.resolve() == repo_aliases_path().resolve():
+            raise ValueError("refusing to write the repo client_aliases.json")
+    except ValueError:
+        raise
+    except OSError:
+        pass
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_file():
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -373,6 +556,7 @@ def _write_aliases_atomic(path: Path, data: dict[str, Any]) -> None:
         except OSError:
             pass
         raise
+    _prune_alias_backups(path)
 
 
 def _looks_like_phone(value: str) -> bool:
@@ -381,13 +565,17 @@ def _looks_like_phone(value: str) -> bool:
 
 
 def normalize_term(term: str) -> str:
-    cleaned = re.sub(r"[^\w\s-]", "", (term or "").lower()).strip()
+    cleaned = re.sub(r"[^a-z0-9\s-]", "", ascii_fold(term).lower()).strip()
     return re.sub(r"\s+", " ", cleaned)
 
 
-def slugify(name: str) -> str:
-    s = re.sub(r"[^\w\s-]", "", (name or "").lower()).strip()
-    return re.sub(r"[-\s]+", "-", s)
+def slugify(name: str, *, max_len: int = 120) -> str:
+    """ASCII-fold, hyphenate, truncate. Never keep combining marks or non-Latin."""
+    s = re.sub(r"[^a-z0-9\s-]", "", ascii_fold(name).lower()).strip()
+    s = re.sub(r"[-\s]+", "-", s).strip("-")
+    if max_len and len(s) > max_len:
+        s = s[:max_len].rstrip("-")
+    return s
 
 
 def _clients() -> list[dict[str, Any]]:

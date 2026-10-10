@@ -193,11 +193,10 @@ def format_job_ask(*, matches: Optional[list] = None, hint: str = "", count: int
 
 
 def is_chat_not_job(text: str) -> bool:
+    """Questions and ordinary chat. Run this BEFORE parse_new_job_name."""
     blob = " ".join(str(text or "").split()).strip()
     if not blob:
         return True
-    if parse_new_job_name(blob):
-        return False
     if resolve_folder(blob):
         return False
     if "?" in blob:
@@ -939,7 +938,11 @@ def choose_job_for_inbound(text: str, wa_id: str) -> dict[str, Any]:
     Does not use a sticky job from an old conversation. An open photo
     batch may hold a resolved slug for later photos in the same window.
     """
-    match = resolve_or_create_folder(text) if is_job_hint_text(text) or parse_new_job_name(text or "") else None
+    blob = text or ""
+    match = None
+    if blob.strip() and not is_chat_not_job(blob):
+        if is_job_hint_text(blob) or parse_new_job_name(blob):
+            match = resolve_or_create_folder(blob)
     if match:
         set_active_job(wa_id, match["slug"], match.get("client_name", ""), match.get("folder_path", ""))
         return {"status": "unique", "job": match}
