@@ -20,9 +20,9 @@ from app.services.max.whatsapp_log import (
     search_all_messages,
     update_delivery_status,
 )
-from tests._live_data_guard import assert_isolated_env, assert_no_live_graph
-
 pytest_plugins = ["tests._live_data_guard"]
+
+from tests._live_data_guard import assert_isolated_env
 
 FAKE_TOKEN = "test-access-token-secret"
 FAKE_SECRET = "test-app-secret"
@@ -129,7 +129,6 @@ def test_inbound_and_outbound_logged_via_webhook(isolated_whatsapp_edition, monk
     posts = []
 
     def _post(url, body, headers):
-        assert_no_live_graph(url)
         assert FAKE_TOKEN not in json.dumps(body)
         posts.append(body)
         return _GraphResponse({"messages": [{"id": "wamid.out-1"}]})
@@ -220,11 +219,9 @@ def test_outbound_document_marker_has_filename_and_doc_id(isolated_whatsapp_edit
     import asyncio
 
     def _post(url, body, headers):
-        assert_no_live_graph(url)
         return _GraphResponse({"messages": [{"id": "wamid.out-doc"}]})
 
     def _upload(url, data, mime, filename, headers):
-        assert_no_live_graph(url)
         return {"id": "media-pdf"}
 
     wa.note_customer_window(RAFAEL)

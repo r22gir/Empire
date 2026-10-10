@@ -440,7 +440,8 @@ def _inbound_log_fields(message: dict[str, Any]) -> dict[str, Any]:
         msg_type = "image"
     elif kind == "document":
         label = filename or "document"
-        body = caption or text or f"[document: {label}]"
+        extra = caption or text
+        body = f"[document: {label}]" + (f" {extra}" if extra else "")
         msg_type = "document"
     elif kind == "call":
         body = text or "[call]"
