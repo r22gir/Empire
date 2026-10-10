@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1c1917"/>
+      <stop offset="100%" stop-color="#0c0a09"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#292524" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="800" height="500" fill="url(#bg)"/>
+  <rect width="800" height="500" fill="url(#grid)"/>
+
+  <!-- Title & Header -->
+  <text x="40" y="45" font-family="monospace" font-size="14" font-weight="bold" fill="#d4af37">WOODCRAFT BY EMPIRE · WILLARD CST-23 CNC NEST</text>
+  <text x="40" y="70" font-family="sans-serif" font-size="18" font-weight="bold" fill="#f5f5f4">Part #23: Channel Back Board #7 (CHB-07)</text>
+  <text x="40" y="95" font-family="sans-serif" font-size="13" fill="#a8a29e">Sheet 6 of 8 · Material: 3/4" Baltic Birch · True Wood Cut: 9 5/32" × 36"</text>
+
+  <!-- Part Outline Drawing Box -->
+  <rect x="60" y="125" width="680" height="280" rx="6" fill="#292524" fill-opacity="0.3" stroke="#d4af37" stroke-width="2"/>
+  
+  <!-- Part Graphic Representation -->
+  <rect x="100" y="160" width="600" height="210" rx="4" fill="#3f3f46" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6,4"/>
+  <path d="M 100 160 L 700 370 M 700 160 L 100 370" stroke="#71717a" stroke-width="1" stroke-dasharray="2,4"/>
+  
+  <!-- Dimension Callouts -->
+  <text x="400" y="150" text-anchor="middle" font-family="monospace" font-size="14" font-weight="bold" fill="#fbbf24">TRUE WOOD CUT: 9 5/32" × 36"</text>
+  <text x="400" y="270" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="bold" fill="#fafaf9">CHB-07 — Channel Back Board #7</text>
+  <text x="400" y="295" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#d6d3d1">Wood cut true size. Fabric cut 11 21/32" × 38 1/2"</text>
+  <text x="400" y="320" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#a8a29e">Willard CST-23 Reviewed Piece: Wood cut = true size. Foam cut = same as wood. Fabric cut = +2" to 3" for stapling.</text>
+
+  <!-- Footer Tag -->
+  <rect x="40" y="440" width="720" height="36" rx="4" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
+  <text x="60" y="463" font-family="sans-serif" font-size="12" fill="#d4af37">CNC ROUTE PROFILE · CHIEF E BOX: /workspace/willard_cst23_rev/ · REVISED 8-SHEET PACK</text>
+  <text x="730" y="463" text-anchor="end" font-family="monospace" font-size="12" fill="#a8a29e">SHEET 6/8</text>
+</svg>

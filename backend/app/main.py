@@ -151,6 +151,7 @@ load_router("app.routers.client_portal", "/api/v1", ["client-portal"])
 
 # CraftForge — CNC & 3D print business
 load_router("app.routers.craftforge", "/api/v1/craftforge", ["craftforge"])
+load_router("app.routers.willard_cst23", "/api/v1/craftforge/willard-cst23", ["willard-cst23", "craftforge"])
 load_router("app.routers.socialforge", "/api/v1/socialforge", ["socialforge"])
 load_router("app.routers.social_setup", "/api/v1", ["social-setup"])
 

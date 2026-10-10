@@ -99,6 +99,66 @@ export default function WoodcraftLanding() {
         ))}
       </section>
 
+      {/* Featured Project: Willard CST-23 */}
+      <section style={{ maxWidth: 1040, margin: '36px auto 0', padding: '0 24px' }}>
+        <div style={{
+          background: 'linear-gradient(135deg, #1c1917 0%, #292524 100%)',
+          border: '1px solid #d4af37',
+          borderRadius: 16,
+          padding: '32px 28px',
+          color: '#f5f5f4',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 24,
+          boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
+        }}>
+          <div style={{ maxWidth: 640 }}>
+            <div style={{
+              display: 'inline-block',
+              background: 'rgba(212, 175, 55, 0.15)',
+              border: '1px solid rgba(212, 175, 55, 0.4)',
+              color: '#d4af37',
+              padding: '4px 12px',
+              borderRadius: 12,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 1.2,
+              textTransform: 'uppercase',
+              marginBottom: 12,
+            }}>
+              Featured 3D Project · Willard CST-23
+            </div>
+            <h2 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 10px', color: '#fff' }}>
+              Willard CST-23 3D Assembly Review &amp; Layer Engine
+            </h2>
+            <p style={{ fontSize: 14, color: '#d6d3d1', lineHeight: 1.6, margin: 0 }}>
+              Curved banquette for Maggie O&apos;Neill / The Willard Scotch Bar. Interactive 3D WebGL model with foam/fabric layer thickness controls, channel width/height sizing rules, armrest options, and revised 8-sheet CNC nesting schedule.
+            </p>
+          </div>
+          <a
+            href="/woodcraft/willard-cst23"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'linear-gradient(135deg, #d4a017, #e8b830)',
+              color: '#1c1917',
+              padding: '14px 28px',
+              borderRadius: 10,
+              fontSize: 15,
+              fontWeight: 800,
+              textDecoration: 'none',
+              boxShadow: '0 4px 16px rgba(212,175,55,0.3)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Launch 3D Assembly Review &rarr;
+          </a>
+        </div>
+      </section>
+
       {/* Services */}
       <section style={{ maxWidth: 1000, margin: '0 auto', padding: '64px 24px' }}>
         <h2 style={{

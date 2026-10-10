@@ -3,7 +3,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { API } from '../../lib/api';
 import {
   Hammer, PenTool, ClipboardList, Package, Users, DollarSign,
-  TrendingUp, Loader2, FileText, CreditCard, Wrench
+  TrendingUp, Loader2, FileText, CreditCard, Wrench, Box
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
@@ -251,10 +251,11 @@ function OverviewSection({ onNavigate }: { onNavigate: (s: Section) => void }) {
 
       {/* Quick access */}
       <div className="section-label mb-2">Quick Access</div>
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <QuickLink icon={<PenTool size={18} />} label="New Quote" desc="Create a design quote" color="#b8960c" onClick={() => onNavigate('quotes')} />
         <QuickLink icon={<ClipboardList size={18} />} label="Job Board" desc="Production tracking" color="#2563eb" onClick={() => onNavigate('jobs')} />
         <QuickLink icon={<Package size={18} />} label="Inventory" desc="Materials & stock levels" color="#22c55e" onClick={() => onNavigate('inventory')} />
+        <QuickLink icon={<Box size={18} />} label="Willard 3D Review" desc="CST-23 3D model & nest" color="#d4af37" onClick={() => window.open('/woodcraft/willard-cst23', '_blank')} />
       </div>
 
       {/* Recent Jobs */}
