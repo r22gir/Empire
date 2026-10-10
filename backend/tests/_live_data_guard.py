@@ -499,6 +499,11 @@ def _write_test_client_aliases(root: Path) -> Path:
                     "name": "McLean Residence",
                     "aliases": ["McLean"],
                 },
+                {
+                    "slug": "emma-vita",
+                    "name": "Emma Vita",
+                    "aliases": ["Emma"],
+                },
             ]
         }),
         encoding="utf-8",
@@ -513,15 +518,18 @@ def isolated_whatsapp_edition(tmp_path, monkeypatch):
     root.mkdir(parents=True, exist_ok=True)
     jobs = tmp_path / "jobs"
     jobs.mkdir(parents=True, exist_ok=True)
-    for slug in ("maggie-frolich", "willard-hotel", "mclean-residence"):
+    for slug in ("maggie-frolich", "willard-hotel", "mclean-residence", "emma-vita"):
         (jobs / slug).mkdir(exist_ok=True)
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(root))
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
     monkeypatch.setenv("WHATSAPP_JOBS_ROOT", str(jobs))
     monkeypatch.setenv("FOUNDER_PIN", "test-founder-pin")
     monkeypatch.setenv("WHATSAPP_PHOTO_BATCH_SECONDS", "0")
     monkeypatch.setenv("WHATSAPP_JOB_HINT_SECONDS", "600")
     aliases = _write_test_client_aliases(root)
     monkeypatch.setenv("MAX_CLIENT_ALIASES_PATH", str(aliases))
+    # Do not merge the tracked repo file into WhatsApp tests.
+    monkeypatch.setenv("MAX_CLIENT_ALIASES_REPO_PATH", str(tmp_path / "repo-client-aliases.json"))
     labels = _write_test_whatsapp_labels(root)
     monkeypatch.setenv("WHATSAPP_LABELS", str(labels))
     for name in (

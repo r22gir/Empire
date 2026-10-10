@@ -183,7 +183,8 @@ Non-image/PDF attachments are served as `application/octet-stream` with `X-Conte
 
 | Variable | Default | Role |
 | --- | --- | --- |
-| `WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES` | 52428800 (50 MB) | Skip storing oversize files |
+| `WHATSAPP_MAX_ATTACHMENT_SIZE_BYTES` | 268435456 (256 MB) | Skip storing oversize files. 256 MB so a Polycam room / USDZ / mesh zip (often 50–200 MB) is kept; Meta documents cap near 100 MB. Override down if disk is tight. |
+| `WHATSAPP_EDITION_OWNER` | from `EMPIRE_OWNER_LABEL` or data-dir name (`amp` → Max-e, `maxine` → Maxine, else `founder`) | `owner` on `JOB-RECORD.json`. Family editions must not write `founder`. |
 | `WHATSAPP_RETENTION_DAYS` | 365 | Purge edition `media/` and `inbox/` (never another edition’s jobs) |
 | `WHATSAPP_JOBS_ROOT` | `$EMPIRE_DATA_DIR/jobs` | Edition-scoped job folders |
 | `WHATSAPP_LABELS` | `$EMPIRE_DATA_DIR/whatsapp/labels.json` | Founder display names + allowlist extras |
@@ -193,20 +194,45 @@ Non-image/PDF attachments are served as `application/octet-stream` with `X-Conte
 
 ### Job filing
 
-Photos go to `<jobs-root>/<client-slug>/photos/`. Documents go to `<jobs-root>/<client-slug>/received/`.
+Photos go to `<jobs-root>/<slug>/photos/`. PDFs/documents go to `<jobs-root>/<slug>/received/`. STL / Polycam / USDZ / Polycam `.zip` / 3D go to `<jobs-root>/<slug>/scans/`. No measurement in Phase 0.
+
+**Every fileable batch is filed into a folder** under this edition’s jobs root:
+
+| Slug | Kind | LuxeForge job / lead / EST |
+| --- | --- | --- |
+| existing client slug (e.g. `maggie-frolich`) | `client` | Phase 0: folder + `JOB-RECORD.json` only. Job/lead/EST wait for a later phase. |
+| `personal` | reserved | Never |
+| `insurance` | reserved | Never |
+| `store` | reserved | Never |
+| `luxeforge` | reserved | Never (Rafael: do this folder now too) |
+
+Say the client name, or **personal / insurance / store / luxeforge**. A **unique client name beats a reserved word** (`Emma's store order` → Emma’s job, not `store`). `shop` / `claim` / `private` / `showroom` are not reserved aliases.
+
+**`New job <name>`** (also `nuevo trabajo <name>`, `new client <name>`) **only at the start of the message/caption or after a sentence break**, at most three words, and only after ordinary chat/questions are skipped (`is_chat_not_job` before `parse_new_job_name`). Mid-sentence chat (`I have a new job offer`, `I got a new job at the bank today`) does **not** create a folder or alias. Creates a client folder when nothing unique already matches: slug from the name (NFKD→ASCII, truncated to 120), `JOB-FACTS.md` + `JOB-RECORD.json` stubs, and an alias row in **`$EMPIRE_DATA_DIR/client_aliases.json`** (never the tracked repo `backend/app/config/client_aliases.json`). Read merges the read-only repo file (Dell live edits stay) with the edition file **on the founder edition only** (`EMPIRE_EDITION` unset / data dir not `amp`/`maxine`). Family editions read only their own `$EMPIRE_DATA_DIR/client_aliases.json` so Rafael’s names and addresses never leak. Writes use `fcntl.flock`, keep the last 3 `.bak-*` files, and **refuse** (log, do not overwrite) if the edition file is corrupt. Reserved aliases (`luxe forge` → `luxeforge`) and short/non-letter names (`con`, `.hidden`, `-rf`) are rejected — ask for a name instead of raising. Confirm in one line: `Created job Home Wood Suites and filed 3 photos`. If the name is ambiguous with an existing job, ask once. Never a quote, LuxeForge job, or lead.
+
+Unknown names still ask once (PR #91). `skip` leaves inbox. A photo of an object plus purchase chat (`Need to buy a case`) asks `Personal or store folder?` once — not a list of client closest matches.
+
+Each folder has `JOB-FACTS.md` and a shared **`JOB-RECORD.json`** (attachments, sha256, chat-log ids). Writes are a temp file + `os.replace` under a lock so two photos in one batch cannot drop an entry. A corrupt record is moved to `JOB-RECORD.json.corrupt-<UTC>` and a fresh record is started — never silently overwritten. `intake_id` / `quote_id` / `lead_id` stay null in Phase 0. `owner` is the edition label (Workroom `founder`, Max-e / Maxine their own). Max, the job board, and the chat log read that file later. Family editions have their own jobs root.
+
+`file_into_job` and `append_job_record` themselves reject anything that is not a single safe path segment (`../../zz`, absolute paths, slugs with separators) and verify the resolved path stays under the jobs root.
 
 **Default for photos is file-only.** A draft estimate is created only when the **same message’s caption** (not a nearby text, not a previous “send me a quote”) asks for a quote/estimate/price (`quote`, `estimate`, `price`, `cotizacion`, `presupuesto`, `how much`). At most **one draft per photo batch**. Photo-to-quote drafts stay **not sent**.
 
 Album / grouped-media comments, Cloud API `unknown`/`unsupported`/`interactive` bodies, and replies that carry `context` are parsed as normal text so they are not answered with “That message type is not handled.”
 
-Resolution (`app/services/max/doc_lookup.py` + `client_aliases.json`):
+Resolution (`app/services/max/doc_lookup.py` + founder-only merge of repo `client_aliases.json` with `$EMPIRE_DATA_DIR/client_aliases.json`):
 
-1. Caption, album text, or a nearby message (~10 minutes before or after) names one client, nickname, address, or quote number → that job for the whole batch.
-2. Photos from the same sender within ~2 minutes are **one batch**: one “Filed N photos under \<job\>” or one “Which job?” — not one reply per photo.
-3. More than one match → **do not guess**. Park in `EMPIRE_DATA_DIR/whatsapp/inbox/` and ask once.
-4. No job name → **ask once** for the batch, never file into a sticky active job.
-5. `consume_job_answer` intercepts a later text **only after a real ask was sent** (`whatsapp_media_batches.asked=1` or `whatsapp_pending_filings.asked_at` set). Unique name files the batch. `skip` leaves it in inbox. Anything else (`hello`, `thanks`, `what's on my schedule today?`, `Emma’s client`) falls through to normal Max chat. An open photo batch without an ask is file state, not a pending question.
-6. Stale batches expire from SQLite on load (`last_at` vs the photo-batch window; `asked_at` vs the job-answer timeout). Expiry survives process restart. The in-memory flush task is only a debounce.
+1. **Job-naming text only.** Caption of the photos and immediate text inside the **~2 minute photo-batch window**. Not every nearby chat. `You online?`, `Need to buy a case`, `Next 2 months`, `Are you vetting my pictures?` are never stored as `hint_text`.
+2. `New job <name>` / `nuevo trabajo` / `new client` at the **start** (or after `.!?`) → create that folder when no unique existing job matches (see above). Mid-sentence “new job” is chat.
+3. Caption or nearby text names one existing client, nickname, address, or quote number → that job for the whole batch. Later photos in the same window follow that resolved slug (batch-scoped, not a sticky job from last week).
+4. Photos from the same sender within ~2 minutes are **one batch**. Reply **once**, and **never stay silent**:
+   - Job named in the first caption → ack immediately: `Got 1 photo. Filed under X` or `Created job X and filed 1 photo`.
+   - After the batch window: `Got 3 photos. Filed under X` or `Got 3 photos. Which job? (reply with the name, personal, insurance, store, or skip)`.
+5. More than one match → **do not guess**. Park in `EMPIRE_DATA_DIR/whatsapp/inbox/` and ask once.
+6. No job name → **ask once** for the batch. Purchase-sounding text → `Personal or store folder?`
+7. `consume_job_answer` intercepts a later text **only after a real ask was sent**. Unique name or `new job <name>` files the batch. `skip` leaves it in inbox. Anything else (`hello`, `thanks`, `what's on my schedule today?`) falls through to Max chat.
+8. Max chat is told when photos are parked (`N photos from the user are waiting to be filed; ask which job if relevant`). `Are you vetting my pictures?` / `did you get my photos` is answered truthfully (yes, N received, filed under X or waiting for a job name).
+9. Stale batches expire from SQLite on load (`last_at` vs the photo-batch window; `asked_at` vs the job-answer timeout). Expiry survives process restart. The in-memory flush task is only a debounce.
 
 **Single-worker assumption:** `_load_batch` / `whatsapp_media_batches` and `_schedule_batch_flush` are safe only with one process writing that table. A second worker would race on `last_at`/`asked` and could send a second ask. Do not run multiple inbound WhatsApp workers against the same edition database.
 

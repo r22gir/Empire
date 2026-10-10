@@ -507,16 +507,21 @@ def _persist_inbound_media(
     """Save inbound bytes and file photos/docs when the job is known."""
     from app.services.max.whatsapp_log import prepare_inbound_attachment
 
+    from app.services.max.whatsapp_folders import FILEABLE_MEDIA, classify_media_type
+
     kind = str(message.get("type") or "document")
+    filename = _default_media_name(message)
+    mime_name = mime or str(message.get("mime_type") or "")
     media_type = "voice" if (message.get("voice") or kind == "audio") else kind
     if kind == "image":
         media_type = "image"
+    else:
+        media_type = classify_media_type(kind, filename, mime_name)
     hint = hint_text or str(message.get("caption") or message.get("text") or "")
-    fileable = media_type in {"image", "document"}
+    fileable = media_type in FILEABLE_MEDIA
     if not content and kind != "location":
         return []
     payload = content
-    filename = _default_media_name(message)
     if kind == "location":
         loc = message.get("location") or {}
         payload = json.dumps(loc, default=str).encode()
@@ -1527,6 +1532,16 @@ async def default_text_handler(text: str, wa_id: str) -> str:
     except Exception:
         logger.warning("WhatsApp text document route failed", exc_info=True)
     try:
+        from app.services.max.whatsapp_log import photo_status_reply
+
+        photo_reply = photo_status_reply(wa_id, body)
+        if photo_reply:
+            whatsapp_conversation(wa_id)
+            remember_whatsapp_turn(wa_id, body, photo_reply)
+            return photo_reply
+    except Exception:
+        logger.warning("WhatsApp photo-status reply failed", exc_info=True)
+    try:
         return await max_chat(body, wa_id)
     except Exception:
         logger.warning("WhatsApp Max chat failed", exc_info=True)
@@ -1712,6 +1727,7 @@ async def process_webhook(
     batch_senders: set[str] = set()
     job_replied: set[str] = set()
     quoted_senders: set[str] = set()
+    immediate_ack: set[str] = set()
     results: list[dict[str, Any]] = []
     on_text = text_handler or default_text_handler
     on_voice = voice_handler or default_voice_handler
@@ -1745,6 +1761,8 @@ async def process_webhook(
             combined_job_hint,
             consume_job_answer,
             finalize_photo_batch,
+            is_job_hint_text,
+            photo_status_reply,
             iso_from_wa_timestamp as _iso_wa,
             last_attachment_ids,
             mark_photo_batch_quoted,
@@ -1754,13 +1772,18 @@ async def process_webhook(
             set_pending_filings,
             wants_photo_quote,
         )
+        from app.services.max.whatsapp_folders import (
+            folder_allows_quote,
+            resolve_folder,
+            resolve_or_create_folder,
+        )
 
-        hint = combined_job_hint(
-            sender,
+        hint_bits = [
             message.get("caption") or "",
             message.get("text") or "",
-            *payload_texts.get(sender, []),
-        )
+            *[t for t in payload_texts.get(sender, []) if is_job_hint_text(t)],
+        ]
+        hint = combined_job_hint(sender, *hint_bits)
 
         # 2026-10-08 queueing: one sender's messages are answered in order.
         async with _sender_lock(sender):
@@ -1797,6 +1820,7 @@ async def process_webhook(
                             {
                                 "filename": a.get("filename"),
                                 "job_slug": a.get("job_slug"),
+                                "folder_kind": a.get("folder_kind") or "",
                                 "filed_path": a.get("filed_path"),
                                 "filing_status": a.get("filing_status"),
                             }
@@ -1810,7 +1834,7 @@ async def process_webhook(
                     fileable_ids = [
                         int(a["id"])
                         for a in saved
-                        if a.get("media_type") in {"image", "photo", "document"}
+                        if a.get("media_type") in {"image", "photo", "document", "scan", "model"}
                     ]
                     inbox_ids = [int(a["id"]) for a in saved if a.get("filing_status") == "inbox"]
                     if inbox_ids:
@@ -1818,6 +1842,9 @@ async def process_webhook(
                     if fileable_ids:
                         record_media_batch(sender, fileable_ids, hint)
                         batch_senders.add(sender)
+                        caption_only = str(message.get("caption") or "").strip()
+                        if caption_only and resolve_or_create_folder(caption_only):
+                            immediate_ack.add(sender)
             except Exception:
                 persist_failed = True
                 inbound_atts = []
@@ -1838,7 +1865,11 @@ async def process_webhook(
                         other.get("type") == "image" and other.get("from") == sender
                         for other in messages
                     )
-                    if album_mate:
+                    photo_reply = photo_status_reply(sender, message.get("text") or "")
+                    if photo_reply:
+                        route = "photo_status"
+                        reply = photo_reply
+                    elif album_mate:
                         route = "job_hint"
                         reply = ""
                     else:
@@ -1856,7 +1887,9 @@ async def process_webhook(
                     # per open batch.
                     caption_asks = wants_photo_quote(message.get("caption") or "")
                     already_quoted = sender in quoted_senders or photo_batch_quoted(sender)
-                    if caption_asks and not already_quoted:
+                    folder = resolve_folder(hint)
+                    client_folder = folder_allows_quote((folder or {}).get("slug"))
+                    if caption_asks and not already_quoted and client_folder:
                         route = "photo_quote"
                         image, mime = media_bytes, media_mime
                         if not image and message.get("media_id"):
@@ -1867,6 +1900,9 @@ async def process_webhook(
                     else:
                         route = "file_photo"
                         reply = ""
+                elif message["type"] == "document":
+                    route = "file_document"
+                    reply = ""
                 elif message["type"] == "call":
                     route = "call"
                     reply = ""
@@ -1917,7 +1953,7 @@ async def process_webhook(
             if prev and not prev.done():
                 prev.cancel()
             continue
-        if photo_batch_window_seconds() <= 0:
+        if sender in immediate_ack or photo_batch_window_seconds() <= 0:
             note = finalize_photo_batch(sender)
             reply = (note or {}).get("reply") or ""
             if reply:
