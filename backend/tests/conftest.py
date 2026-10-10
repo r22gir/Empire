@@ -65,6 +65,7 @@ _PRE_COLLECTION_PHOTOS_DIR = os.path.join(
     f"empire_test_d33_pid{os.getpid()}_photos",
 )
 os.environ.setdefault("EMPIRE_DB_PATH", _PRE_COLLECTION_DB_PATH)
+os.environ.setdefault("EMPIRE_DB", _PRE_COLLECTION_DB_PATH)
 os.environ.setdefault("EMPIRE_PHOTOS_DIR", _PRE_COLLECTION_PHOTOS_DIR)
 
 # Default safety knob: tests should never write to the prod DB unless

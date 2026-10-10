@@ -4,6 +4,7 @@ Provides cost analytics, budget management, and transaction log.
 """
 from fastapi import APIRouter, Query
 from app.services.max.token_tracker import token_tracker, COST_RATES, FIXED_COSTS, FEATURES, BUSINESSES
+from app.services.max.free_tiers import FREE_TIER_TABLE
 
 router = APIRouter()
 
@@ -108,6 +109,12 @@ async def tenant_budget(tenant_id: str, tier: str = Query("pro")):
     return token_tracker.get_tenant_budget_status(tenant_id, tier)
 
 
+@router.get("/costs/free-tiers")
+async def cost_free_tiers():
+    """Return free-tier models, specifications, and current quota usage."""
+    return {"free_tiers": token_tracker.get_free_tier_status()}
+
+
 @router.get("/costs/rates")
 async def cost_rates():
     """Current pricing rates for all models."""
@@ -116,4 +123,5 @@ async def cost_rates():
         "fixed_costs": FIXED_COSTS,
         "features": FEATURES,
         "businesses": BUSINESSES,
+        "free_tiers": [spec.to_dict() for spec in FREE_TIER_TABLE],
     }

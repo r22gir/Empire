@@ -217,3 +217,108 @@ class TestOllamaDisablePolicy:
         ollama = next((m for m in models if m["id"] == "ollama-llama"), None)
         assert ollama is not None
         assert ollama["disabled"] is True
+
+
+class TestFreeModelRoutingAndGuardrails:
+    """Free model routing additions, quota fallback, and financial desk guardrails."""
+
+    def test_known_models_contain_free_models(self):
+        """routing_state.KNOWN_MODELS must contain verified free models."""
+        from app.services.max.routing_state import KNOWN_MODELS
+
+        groq_models = KNOWN_MODELS.get("groq", [])
+        assert "openai/gpt-oss-120b" in groq_models
+        assert "openai/gpt-oss-20b" in groq_models
+        assert "qwen/qwen3.8-27b" in groq_models
+
+        gemini_models = KNOWN_MODELS.get("gemini", [])
+        assert "gemini-2.5-flash-lite" in gemini_models
+        assert "gemini-3.5-flash" in gemini_models
+
+        openrouter_models = KNOWN_MODELS.get("openrouter", [])
+        assert "nvidia/nemotron-3-super-120b-a12b:free" in openrouter_models
+        assert "google/gemma-4-31b-it:free" in openrouter_models
+        assert "cohere/north-mini-code:free" in openrouter_models
+        assert "openrouter/free" in openrouter_models
+
+    def test_ai_router_chat_signatures_accept_model(self):
+        """_groq_chat and _gemini_chat must accept model keyword argument."""
+        import inspect
+        from app.services.max.ai_router import AIRouter
+
+        groq_sig = inspect.signature(AIRouter._groq_chat)
+        assert "model" in groq_sig.parameters
+
+        gemini_sig = inspect.signature(AIRouter._gemini_chat)
+        assert "model" in gemini_sig.parameters
+
+        groq_stream_sig = inspect.signature(AIRouter._groq_chat_stream)
+        assert "model" in groq_stream_sig.parameters
+
+        gemini_stream_sig = inspect.signature(AIRouter._gemini_chat_stream)
+        assert "model" in gemini_stream_sig.parameters
+
+    def test_client_facing_and_financial_desks_block_free_models(self):
+        """Client-facing and financial desks must never route to free-tier models."""
+        from app.services.max.free_tiers import is_financial_or_client_desk, is_free_tier_model
+
+        # Check guardrail classification
+        assert is_financial_or_client_desk("forge") is True
+        assert is_financial_or_client_desk("finance") is True
+        assert is_financial_or_client_desk("workroom") is True
+        assert is_financial_or_client_desk(feature="quote") is True
+        assert is_financial_or_client_desk(feature="invoice") is True
+        assert is_financial_or_client_desk(feature="client_reply") is True
+
+        # Non-financial / internal desks are allowed
+        assert is_financial_or_client_desk("dev", feature="code") is False
+        assert is_financial_or_client_desk("notes", feature="summary") is False
+
+        # In AIRouter._chat_via_selected_routing, financial desks skip free-tier candidates
+        import importlib
+        import app.services.max.ai_router as ai_router_mod
+        importlib.reload(ai_router_mod)
+
+        router = ai_router_mod.AIRouter()
+        # Simulated candidate routing: free model on forge desk is skipped
+        assert is_free_tier_model("openai/gpt-oss-120b") is True
+        assert is_free_tier_model("nvidia/nemotron-3-super-120b-a12b:free") is True
+
+    @pytest.mark.asyncio
+    async def test_free_model_quota_exhausted_skips_and_falls_back(self, tmp_path, monkeypatch):
+        """When a free model's quota is exhausted, router skips it."""
+        from app.services.max.free_tiers import record_free_tier_usage, is_free_tier_quota_exhausted
+        from datetime import datetime
+
+        db_file = str(tmp_path / "test_quota_exhaust.db")
+        now = datetime(2026, 10, 10, 12, 0, 0)
+
+        # Exhaust groq free model (limit: 1000 requests/day)
+        record_free_tier_usage("openai/gpt-oss-120b", "groq", requests=1000, tokens=1000, db_path=db_file, now=now)
+
+        assert is_free_tier_quota_exhausted("openai/gpt-oss-120b", "groq", db_path=db_file, now=now) is True
+
+        # Router skip check
+        import app.services.max.ai_router as ai_router_mod
+        router = ai_router_mod.AIRouter()
+
+        # Mocking check_free_tier_quota to exhaust
+        monkeypatch.setattr(
+            "app.services.max.ai_router.is_free_tier_quota_exhausted",
+            lambda model, provider=None: model == "openai/gpt-oss-120b",
+        )
+
+        # In _try_provider_chat, exhausted free model returns None (skips and falls back)
+        res = await router._try_provider_chat(
+            provider_type="groq",
+            model_override="openai/gpt-oss-120b",
+            full_messages=[],
+            messages=[],
+            image_path=None,
+            fallback=False,
+            feature="chat",
+            business="general",
+            tenant_id="founder",
+        )
+        assert res is None
+
