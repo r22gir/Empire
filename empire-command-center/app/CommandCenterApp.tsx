@@ -59,7 +59,8 @@ import InvoiceScreen from './components/screens/InvoiceScreen';
 import FinalDocsScreen from './components/docs/FinalDocsScreen';
 import DocViewerHost from './components/docs/DocViewerHost';
 import InvoiceDocScreen from './components/docs/InvoiceDocScreen';
-import { OPEN_RECORD_EVENT, type RecordRef } from './components/docs/recordBus';
+import { OPEN_RECORD_EVENT, recordHref, type RecordRef } from './components/docs/recordBus';
+const CustomerDetail = lazy(() => import('./components/business/crm/CustomerDetail'));
 import ConstructionForgePage from './components/screens/ConstructionForgePage';
 import StoreFrontForgePage from './components/screens/StoreFrontForgePage';
 import TranscriptForgePage from './components/screens/TranscriptForgePage';
@@ -145,6 +146,7 @@ const NAV_PRODUCT_IDS = new Set<string>([
 const NAV_SCREEN_IDS = new Set<string>([
   'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
   'report', 'desks', 'memory-bank', 'telegram', 'docs', 'research', 'final-docs', 'invoice',
+  'customer', 'job', 'payment', 'expense',
 ]);
 function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
   if (product === 'owner') return 'chat';
@@ -159,6 +161,12 @@ export default function CommandCenter() {
   const [activeProduct, setActiveProduct] = useState<EcosystemProduct>('owner');
   const [activeScreen, setActiveScreen] = useState<ScreenMode>('chat');
   const [activeSection, setActiveSection] = useState<string | null>(null);
+  const [activeCustomerId, setActiveCustomerId] = useState<string | null>(null);
+  const [activeCustomerTab, setActiveCustomerTab] = useState<string | null>(null);
+  const [activeCustomerFilter, setActiveCustomerFilter] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [activeJobTab, setActiveJobTab] = useState<string | null>(null);
+  const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
   const [showQuickSwitch, setShowQuickSwitch] = useState(false);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [clientView, setClientView] = useState(false);
@@ -272,8 +280,50 @@ export default function CommandCenter() {
         pendingDeepLinkScreen.current = null;
         // click-and-go record links: /?screen=quote&id=… and /?screen=invoice&id=…
         const recId = params.get('id');
-        if (screenOnly === 'quote' && recId) setActiveQuoteId(recId);
-        if (screenOnly === 'invoice' && recId) setActiveInvoiceId(recId);
+        const tabParam = params.get('tab');
+        const filterParam = params.get('filter');
+
+        if (screenOnly === 'quote') {
+          if (recId) setActiveQuoteId(recId);
+          setActiveScreen('quote');
+          setActiveSection(null);
+          return;
+        }
+        if (screenOnly === 'invoice') {
+          if (recId) setActiveInvoiceId(recId);
+          setActiveScreen('invoice');
+          setActiveSection(null);
+          return;
+        }
+        if (screenOnly === 'customer') {
+          if (recId) setActiveCustomerId(recId);
+          setActiveCustomerTab(tabParam || null);
+          setActiveCustomerFilter(filterParam || null);
+          setActiveScreen('customer');
+          setActiveSection(null);
+          return;
+        }
+        if (screenOnly === 'job' || screenOnly === 'jobs') {
+          if (recId) setActiveJobId(recId);
+          setActiveJobTab(tabParam || null);
+          setActiveScreen('jobs');
+          setActiveSection(null);
+          return;
+        }
+        if (screenOnly === 'payment') {
+          if (recId) setActivePaymentId(recId);
+          setActiveProduct('workroom');
+          setActiveScreen('dashboard');
+          setActiveSection('payments');
+          return;
+        }
+        if (screenOnly === 'expense') {
+          setActiveProduct('workroom');
+          setActiveScreen('dashboard');
+          setActiveSection('expenses');
+          return;
+        }
+
         setActiveScreen(screenOnly as ScreenMode);
         setActiveSection(null);
         return;
@@ -365,15 +415,43 @@ export default function CommandCenter() {
       if (!r?.id) return;
       pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
       if (r.type === 'quote' || (r.type === 'job' && r.quoteId)) {
-        setActiveQuoteId(r.type === 'job' ? (r.quoteId as string) : r.id); setActiveSection(null); setActiveScreen('quote');
+        setActiveQuoteId(r.type === 'job' ? (r.quoteId as string) : r.id);
+        setActiveSection(null);
+        setActiveScreen('quote');
       } else if (r.type === 'invoice') {
-        setActiveInvoiceId(r.id); setActiveSection(null); setActiveScreen('invoice');
+        setActiveInvoiceId(r.id);
+        setActiveSection(null);
+        setActiveScreen('invoice');
       } else if (r.type === 'invoice-edit') {
         (window as any).__empireFocusInvoice = r.id;
-        setActiveProduct('workroom'); setActiveScreen('dashboard'); setActiveSection('invoices');
+        setActiveProduct('workroom');
+        setActiveScreen('dashboard');
+        setActiveSection('invoices');
       } else if (r.type === 'job') {
-        setActiveSection(null); setActiveScreen('jobs');
+        setActiveJobId(r.id);
+        setActiveJobTab(r.tab || null);
+        setActiveSection(null);
+        setActiveScreen('jobs');
+      } else if (r.type === 'customer') {
+        setActiveCustomerId(r.id);
+        setActiveCustomerTab(r.tab || null);
+        setActiveCustomerFilter(r.filter || null);
+        setActiveSection(null);
+        setActiveScreen('customer');
+      } else if (r.type === 'payment') {
+        setActivePaymentId(r.id);
+        setActiveProduct('workroom');
+        setActiveScreen('dashboard');
+        setActiveSection('payments');
+      } else if (r.type === 'expense') {
+        setActiveProduct('workroom');
+        setActiveScreen('dashboard');
+        setActiveSection('expenses');
       }
+      try {
+        const href = recordHref(r);
+        window.history.pushState({}, '', href);
+      } catch { /* ignore */ }
       try { window.scrollTo(0, 0); } catch { /* ignore */ }
     };
     window.addEventListener(OPEN_RECORD_EVENT, on);
@@ -598,7 +676,7 @@ export default function CommandCenter() {
     // Dashboard renders product-specific pages
     if (activeScreen === 'dashboard') {
       switch (activeProduct) {
-        case 'workroom': return <WorkroomPage initialSection={activeSection || undefined} />;
+        case 'workroom': return <WorkroomPage initialSection={activeSection || undefined} initialCustomerId={activeCustomerId} initialJobId={activeJobId} initialJobTab={activeJobTab} initialQuoteId={activeQuoteId} />;
         case 'craft': return <CraftForgePage initialSection={activeSection || undefined} />;
         case 'social': return <SocialForgePage />;
         case 'platform': return <PlatformPage />;
@@ -701,9 +779,21 @@ export default function CommandCenter() {
         />
       );
     }
+    if (activeScreen === 'customer' && activeCustomerId) {
+      return (
+        <Suspense fallback={<Loading />}>
+          <CustomerDetail
+            customerId={activeCustomerId}
+            initialTab={activeCustomerTab as any}
+            initialFilter={activeCustomerFilter}
+            onBack={navigationHistory.current.length > 0 ? handleBack : () => { setActiveProduct('workroom'); setActiveScreen('dashboard'); setActiveSection('customers'); }}
+          />
+        </Suspense>
+      );
+    }
     if (activeScreen === 'quote') return <QuoteReviewScreen quoteId={activeQuoteId ?? undefined} onBack={navigationHistory.current.length > 0 ? handleBack : undefined} />;
     if (activeScreen === 'invoice') return <InvoiceDocScreen invoiceId={activeInvoiceId} onBack={navigationHistory.current.length > 0 ? handleBack : undefined} />;
-    if (activeScreen === 'jobs') return <JobsScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : undefined} />;
+    if (activeScreen === 'jobs') return <JobsScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : undefined} initialJobId={activeJobId} initialJobTab={activeJobTab} onCloseJob={() => setActiveJobId(null)} />;
     if (activeScreen === 'invoices') return <InvoiceScreen />;
     if (activeScreen === 'final-docs') return <FinalDocsScreen />;
     if (activeScreen === 'docs') return <DocumentScreen />;

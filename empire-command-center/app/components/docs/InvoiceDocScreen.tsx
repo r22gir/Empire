@@ -5,7 +5,7 @@
  * (click a line, add / move lines by room, totals update live). Sent / paid invoices are read-only.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, FileText, Printer, Loader2, Pencil, Eye, Save, Undo2, Lock, Receipt, Plus, ExternalLink } from 'lucide-react';
+import { ArrowLeft, FileText, Printer, Loader2, Pencil, Eye, Save, Undo2, Lock, Receipt, Plus, ExternalLink, Briefcase } from 'lucide-react';
 import { API } from '../../lib/api';
 import JobHeader from './JobHeader';
 import DocActionBar from './DocActionBar';
@@ -14,6 +14,7 @@ import DocsTab from './DocsTab';
 import DocPaper, { money2, orderByRoom } from './DocPaper';
 import { moveToRoom } from './QuoteRooms';
 import { openRecord } from './recordBus';
+import Breadcrumb from '../shared/Breadcrumb';
 import './docs.css';
 import './paper.css';
 
@@ -115,7 +116,17 @@ export default function InvoiceDocScreen({ invoiceId, onBack }: { invoiceId: str
   const client = inv.client_name || inv.customer_name || '';
   return (
     <div className="cy-invdoc" style={{ padding: '12px 16px 90px', maxWidth: 1180, margin: '0 auto' }}>
-      {onBack && <button type="button" className="dh-act" style={{ marginBottom: 8 }} onClick={onBack}><ArrowLeft size={15} /> Back</button>}
+      <div style={{ marginBottom: 12 }}>
+        <Breadcrumb
+          items={[
+            { label: 'Workroom', onClick: onBack },
+            { label: 'Invoices', onClick: onBack },
+            { label: inv.invoice_number || 'Invoice' },
+          ]}
+          onBack={onBack}
+          backLabel="Back"
+        />
+      </div>
       <JobHeader invoice={inv.id} refreshKey={inv.updated_at} />
       <DocActionBar doc={pdfDoc} sticky spacer="none" loading={saving} clientPhone={inv.client_phone} clientEmail={inv.client_email}
         shareText={`Invoice ${inv.invoice_number || ''}${client ? ` for ${client}` : ''}`} />
@@ -145,6 +156,7 @@ export default function InvoiceDocScreen({ invoiceId, onBack }: { invoiceId: str
             {dirty && <button type="button" className="dh-act is-primary" onClick={save} disabled={saving}>{saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Save</button>}
             {!editable && <button type="button" className="dh-act" onClick={() => openRecord({ type: 'invoice-edit', id: inv.id })} title="Payments, status and reminders in the invoice manager"><ExternalLink size={15} /> Payments &amp; status</button>}
             {inv.quote_id && <button type="button" className="dh-act" onClick={() => openRecord({ type: 'quote', id: inv.quote_id })}><Receipt size={15} /> Source quote</button>}
+            {inv.job_id && <button type="button" className="dh-act" onClick={() => openRecord({ type: 'job', id: inv.job_id })}><Briefcase size={15} /> Job</button>}
           </div>
           <div className="qp-scroll">
             <article className={`qp is-invoice cy-keep-light${canEdit ? ' is-editable' : ''}`} aria-label={`Invoice ${inv.invoice_number || ''}`}>
@@ -159,7 +171,24 @@ export default function InvoiceDocScreen({ invoiceId, onBack }: { invoiceId: str
                   <small>Date: {fmtDate(inv.invoice_date || inv.created_at)} · Due: {fmtDate(inv.due_date) || '—'}</small>
                 </div>
                 <div className="qp-parties">
-                  <div><div className="qp-label">Bill to</div><b>{client || '—'}</b>{inv.client_address && <span>{inv.client_address}</span>}{inv.client_phone && <span>Tel: {inv.client_phone}</span>}{inv.client_email && <span>{inv.client_email}</span>}</div>
+                  <div>
+                    <div className="qp-label">Bill to</div>
+                    {client ? (
+                      <button
+                        type="button"
+                        onClick={() => openRecord({ type: 'customer', id: inv.customer_id || inv.client_id || client })}
+                        className="text-left font-bold text-[#b8960c] hover:underline cursor-pointer bg-transparent border-0 p-0 block"
+                        title="View customer record"
+                      >
+                        {client}
+                      </button>
+                    ) : (
+                      <b>—</b>
+                    )}
+                    {inv.client_address && <span>{inv.client_address}</span>}
+                    {inv.client_phone && <span>Tel: {inv.client_phone}</span>}
+                    {inv.client_email && <span>{inv.client_email}</span>}
+                  </div>
                   <div><div className="qp-label">Terms</div><b>{inv.terms || '—'}</b><span>Status: {status.replace(/_/g, ' ')}</span></div>
                 </div>
                 <DocPaper items={items} fields={FIELDS} amountOf={lineAmount} editable={canEdit} onRequestEdit={editable ? () => setEditMode(true) : undefined}

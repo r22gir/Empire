@@ -2,7 +2,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { API } from '../../../lib/api';
 import { useJob } from '../../../hooks/useJob';
-import JobFolderModal from '../../jobs/JobFolderModal';
+import JobFolderModal, { JobFolderTab } from '../../jobs/JobFolderModal';
+import { openRecord } from '../../docs/recordBus';
+import { readTheme, EmpireTheme } from '../../ThemeToggle';
 import {
   ClipboardList, Clock, Play, CheckCircle2, Plus, X, Loader2,
   AlertCircle, LayoutGrid, List, ChevronRight, Save,
@@ -50,6 +52,9 @@ export interface JobCardData {
   id: string | number;
   _id?: string;
   job_number?: string;
+  customer_id?: string | number;
+  client_id?: string | number;
+  quote_id?: string | number;
   client_name?: string;
   customer_name?: string;
   title?: string;
@@ -81,7 +86,15 @@ interface KanbanApiResponse {
   total_value: number;
 }
 
-export default function JobBoard({ business }: { business?: string } = {}) {
+export default function JobBoard({
+  business,
+  initialJobId,
+  initialJobTab,
+}: {
+  business?: string;
+  initialJobId?: string | number | null;
+  initialJobTab?: JobFolderTab;
+} = {}) {
   const [boardData, setBoardData] = useState<KanbanApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'kanban' | 'list'>('kanban');
@@ -89,9 +102,35 @@ export default function JobBoard({ business }: { business?: string } = {}) {
   const [draggedJobId, setDraggedJobId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
 
+  // Theme support
+  const [theme, setTheme] = useState<EmpireTheme>(readTheme());
+  useEffect(() => {
+    setTheme(readTheme());
+    const sync = () => setTheme(readTheme());
+    window.addEventListener('empire-theme', sync);
+    return () => window.removeEventListener('empire-theme', sync);
+  }, []);
+  const isDark = theme === 'dark';
+  const accentColor = isDark ? '#22d3ee' : '#b8960c';
+  const badgeBg = isDark ? 'linear-gradient(135deg, #0891b2, #22d3ee)' : 'linear-gradient(135deg, #b8960c, #d4af37)';
+  const badgeText = isDark ? '#06131a' : '#121214';
+  const cardBg = isDark ? '#121821' : '#ffffff';
+  const headerBg = isDark ? '#0b0f14' : '#121214';
+  const headerBorder = `2px solid ${accentColor}`;
+  const borderLine = isDark ? 'rgba(255, 255, 255, 0.1)' : '#ece8e0';
+
   // Per-job folder modal state
-  const [selectedJobIdForFolder, setSelectedJobIdForFolder] = useState<string | number | null>(null);
-  const [isFolderOpen, setIsFolderOpen] = useState(false);
+  const [selectedJobIdForFolder, setSelectedJobIdForFolder] = useState<string | number | null>(initialJobId || null);
+  const [folderInitialTab, setFolderInitialTab] = useState<JobFolderTab>(initialJobTab || 'estimates');
+  const [isFolderOpen, setIsFolderOpen] = useState(Boolean(initialJobId));
+
+  useEffect(() => {
+    if (initialJobId) {
+      setSelectedJobIdForFolder(initialJobId);
+      if (initialJobTab) setFolderInitialTab(initialJobTab);
+      setIsFolderOpen(true);
+    }
+  }, [initialJobId, initialJobTab]);
 
   // Quick switch active job in Max context
   const { setActiveJob, activeJob } = useJob();
@@ -183,8 +222,9 @@ export default function JobBoard({ business }: { business?: string } = {}) {
     }
   };
 
-  const openJobFolder = (job: JobCardData) => {
+  const openJobFolder = (job: JobCardData, tab: JobFolderTab = 'estimates') => {
     setSelectedJobIdForFolder(job.id);
+    setFolderInitialTab(tab);
     setIsFolderOpen(true);
     // Also set as active job for context
     setActiveJob(job as any);
@@ -218,14 +258,14 @@ export default function JobBoard({ business }: { business?: string } = {}) {
         overflowY: 'auto',
       }}
     >
-      {/* Top Header Banner: Black & Gold branding */}
+      {/* Top Header Banner: Theme-aware branding */}
       <div
         style={{
-          background: '#121214',
+          background: headerBg,
           color: '#fff',
           borderRadius: '14px',
           padding: '16px 20px',
-          borderBottom: '2px solid #b8960c',
+          borderBottom: headerBorder,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -237,11 +277,11 @@ export default function JobBoard({ business }: { business?: string } = {}) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span
               style={{
-                background: 'linear-gradient(135deg, #b8960c, #d4af37)',
-                color: '#121214',
+                background: badgeBg,
+                color: badgeText,
                 fontSize: '11px',
                 fontWeight: 800,
-                padding: '2px 8px',
+                padding: '4px 10px',
                 borderRadius: '6px',
                 letterSpacing: '0.5px',
               }}
@@ -253,26 +293,29 @@ export default function JobBoard({ business }: { business?: string } = {}) {
             </h1>
           </div>
           <p style={{ fontSize: '12px', color: '#aaa', margin: '4px 0 0 0' }}>
-            Live jobs pipeline across 11 stages. Tap any card to open complete file folder.
+            Live jobs pipeline across 11 stages. Tap any card or metric to open complete file folder.
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* View toggle */}
-          <div style={{ display: 'flex', background: '#222', borderRadius: '8px', padding: '2px', border: '1px solid #333' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {/* View toggle (min 44px tap targets) */}
+          <div style={{ display: 'flex', background: isDark ? '#1a222f' : '#222', borderRadius: '8px', padding: '2px', border: `1px solid ${borderLine}` }}>
             <button
               type="button"
               onClick={() => setView('kanban')}
               style={{
-                minHeight: '40px',
-                padding: '6px 14px',
+                minHeight: '44px',
+                padding: '6px 16px',
                 borderRadius: '6px',
                 border: 'none',
-                background: view === 'kanban' ? '#b8960c' : 'transparent',
-                color: view === 'kanban' ? '#121214' : '#888',
+                background: view === 'kanban' ? accentColor : 'transparent',
+                color: view === 'kanban' ? (isDark ? '#06131a' : '#121214') : '#888',
                 fontWeight: 700,
-                fontSize: '11px',
+                fontSize: '12px',
                 cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
               Kanban
@@ -281,15 +324,18 @@ export default function JobBoard({ business }: { business?: string } = {}) {
               type="button"
               onClick={() => setView('list')}
               style={{
-                minHeight: '40px',
-                padding: '6px 14px',
+                minHeight: '44px',
+                padding: '6px 16px',
                 borderRadius: '6px',
                 border: 'none',
-                background: view === 'list' ? '#b8960c' : 'transparent',
-                color: view === 'list' ? '#121214' : '#888',
+                background: view === 'list' ? accentColor : 'transparent',
+                color: view === 'list' ? (isDark ? '#06131a' : '#121214') : '#888',
                 fontWeight: 700,
-                fontSize: '11px',
+                fontSize: '12px',
                 cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
               List View
@@ -301,10 +347,10 @@ export default function JobBoard({ business }: { business?: string } = {}) {
             onClick={fetchKanban}
             title="Refresh jobs"
             style={{
-              minHeight: '40px',
-              minWidth: '40px',
-              background: '#222',
-              border: '1px solid #333',
+              minHeight: '44px',
+              minWidth: '44px',
+              background: isDark ? '#1a222f' : '#222',
+              border: `1px solid ${borderLine}`,
               borderRadius: '8px',
               color: '#fff',
               display: 'flex',
@@ -313,12 +359,12 @@ export default function JobBoard({ business }: { business?: string } = {}) {
               cursor: 'pointer',
             }}
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={16} />
           </button>
         </div>
       </div>
 
-      {/* KPI Stats Bar */}
+      {/* KPI Stats Bar with QuickBooks-style drilldowns */}
       <div
         style={{
           display: 'grid',
@@ -326,25 +372,43 @@ export default function JobBoard({ business }: { business?: string } = {}) {
           gap: 12,
         }}
       >
-        <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '12px', border: '1px solid #ece8e0' }}>
+        <div
+          onClick={() => setStatusFilter('all')}
+          style={{ background: cardBg, padding: '12px 16px', borderRadius: '12px', border: `1px solid ${borderLine}`, cursor: 'pointer' }}
+          title="Click to show all jobs"
+        >
           <div style={{ fontSize: '11px', fontWeight: 600, color: '#888' }}>TOTAL LIVE JOBS</div>
-          <div style={{ fontSize: '22px', fontWeight: 800, color: '#1a1a1a', marginTop: 2 }}>
+          <div style={{ fontSize: '22px', fontWeight: 800, color: isDark ? '#f4f7fa' : '#1a1a1a', marginTop: 2 }}>
             {boardData?.total_jobs ?? allJobs.length}
           </div>
         </div>
-        <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '12px', border: '1px solid #ece8e0' }}>
+        <div
+          onClick={() => openRecord({ type: 'quote', id: 'pipeline' })}
+          style={{ background: cardBg, padding: '12px 16px', borderRadius: '12px', border: `1px solid ${borderLine}`, cursor: 'pointer' }}
+          title="Click to view quotes pipeline"
+        >
           <div style={{ fontSize: '11px', fontWeight: 600, color: '#888' }}>PIPELINE VALUE</div>
-          <div style={{ fontSize: '22px', fontWeight: 800, color: '#b8960c', marginTop: 2 }}>
+          <div style={{ fontSize: '22px', fontWeight: 800, color: accentColor, marginTop: 2 }}>
             ${Number(boardData?.total_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
-        <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '12px', border: '1px solid #ece8e0' }}>
+        <div
+          onClick={() => setStatusFilter('in_production')}
+          style={{ background: cardBg, padding: '12px 16px', borderRadius: '12px', border: `1px solid ${borderLine}`, cursor: 'pointer' }}
+          title="Click to filter jobs in production"
+        >
           <div style={{ fontSize: '11px', fontWeight: 600, color: '#888' }}>IN PRODUCTION</div>
           <div style={{ fontSize: '22px', fontWeight: 800, color: '#06b6d4', marginTop: 2 }}>
             {allJobs.filter(j => j.canonical_stage === 'in_production' || j.status === 'in_production').length}
           </div>
         </div>
-        <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '12px', border: '1px solid #ece8e0' }}>
+        <div
+          onClick={() => {
+            if (activeJob) openJobFolder(activeJob as any);
+          }}
+          style={{ background: cardBg, padding: '12px 16px', borderRadius: '12px', border: `1px solid ${borderLine}`, cursor: activeJob ? 'pointer' : 'default' }}
+          title={activeJob ? "Click to open active job folder" : undefined}
+        >
           <div style={{ fontSize: '11px', fontWeight: 600, color: '#888' }}>ACTIVE MAX CHAT JOB</div>
           <div style={{ fontSize: '13px', fontWeight: 700, color: activeJob ? '#16a34a' : '#888', marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {activeJob ? `${activeJob.client_name || activeJob.job_number}` : 'None selected'}
@@ -543,9 +607,32 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                             {/* Card Top: Client & Job Name */}
                             <div>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (job.customer_id) {
+                                      openRecord({ type: 'customer', id: String(job.customer_id) });
+                                    } else {
+                                      openJobFolder(job);
+                                    }
+                                  }}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    padding: 0,
+                                    margin: 0,
+                                    fontSize: '13px',
+                                    fontWeight: 700,
+                                    color: isDark ? '#f4f7fa' : '#1a1a1a',
+                                    textAlign: 'left',
+                                    cursor: 'pointer',
+                                    textDecoration: job.customer_id ? 'underline' : 'none',
+                                    textDecorationColor: accentColor,
+                                  }}
+                                >
                                   {clientName}
-                                </div>
+                                </button>
                                 {isCurrentlyActiveInChat && (
                                   <span
                                     title="Active with Max"
@@ -571,18 +658,18 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                             {job.next_action && (
                               <div
                                 style={{
-                                  background: '#faf9f7',
-                                  border: '1px solid #ece8e0',
+                                  background: isDark ? '#161f2c' : '#faf9f7',
+                                  border: `1px solid ${borderLine}`,
                                   borderRadius: '6px',
                                   padding: '4px 8px',
                                   fontSize: '11px',
-                                  color: '#444',
+                                  color: isDark ? '#f4f7fa' : '#444',
                                   display: 'flex',
                                   alignItems: 'center',
                                   gap: 4,
                                 }}
                               >
-                                <span style={{ color: '#b8960c', fontWeight: 700 }}>Next:</span>
+                                <span style={{ color: accentColor, fontWeight: 700 }}>Next:</span>
                                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {job.next_action}
                                 </span>
@@ -600,15 +687,15 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                                   color: '#777',
                                 }}
                               >
-                                <Clock size={11} color="#b8960c" />
+                                <Clock size={11} color={accentColor} />
                                 <span>{job.pickup_delivery_date || job.due_date || job.scheduled_date}</span>
                               </div>
                             )}
 
-                            {/* Payment Strip: Paid / Balance */}
+                            {/* Payment Strip: Paid / Balance with drill-downs */}
                             <div
                               style={{
-                                borderTop: '1px solid #f5f2ed',
+                                borderTop: `1px solid ${borderLine}`,
                                 paddingTop: '8px',
                                 display: 'flex',
                                 justifyContent: 'space-between',
@@ -616,38 +703,69 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                                 fontSize: '11px',
                               }}
                             >
-                              <div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openJobFolder(job, 'estimates');
+                                }}
+                                title="View estimates"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  padding: 0,
+                                  margin: 0,
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                }}
+                              >
                                 <span style={{ color: '#888', fontSize: '10px' }}>Value: </span>
-                                <strong style={{ color: '#1a1a1a' }}>
+                                <strong style={{ color: isDark ? '#f4f7fa' : '#1a1a1a' }}>
                                   ${Number(value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                                 </strong>
-                              </div>
+                              </button>
 
                               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                <span
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openJobFolder(job, 'payments');
+                                  }}
+                                  title="View payments"
                                   style={{
                                     fontSize: '10px',
                                     fontWeight: 700,
                                     color: payment.paid > 0 ? '#16a34a' : '#888',
-                                    background: payment.paid > 0 ? '#ecfdf5' : '#f5f3ef',
-                                    padding: '1px 6px',
+                                    background: payment.paid > 0 ? (isDark ? 'rgba(34, 197, 94, 0.2)' : '#ecfdf5') : (isDark ? 'rgba(255,255,255,0.05)' : '#f5f3ef'),
+                                    padding: '3px 8px',
                                     borderRadius: '4px',
+                                    border: 'none',
+                                    cursor: 'pointer',
                                   }}
                                 >
                                   Pd: ${Number(payment.paid || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                </span>
-                                <span
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openJobFolder(job, 'invoices');
+                                  }}
+                                  title="View balance & invoices"
                                   style={{
                                     fontSize: '10px',
                                     fontWeight: 700,
-                                    color: payment.balance > 0 ? '#b8960c' : '#16a34a',
-                                    background: payment.balance > 0 ? '#fefce8' : '#ecfdf5',
-                                    padding: '1px 6px',
+                                    color: payment.balance > 0 ? accentColor : '#16a34a',
+                                    background: payment.balance > 0 ? (isDark ? 'rgba(34, 211, 238, 0.15)' : '#fefce8') : (isDark ? 'rgba(34, 197, 94, 0.2)' : '#ecfdf5'),
+                                    padding: '3px 8px',
                                     borderRadius: '4px',
+                                    border: 'none',
+                                    cursor: 'pointer',
                                   }}
                                 >
                                   Bal: ${Number(payment.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                </span>
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -741,6 +859,7 @@ export default function JobBoard({ business }: { business?: string } = {}) {
       {selectedJobIdForFolder && (
         <JobFolderModal
           jobId={selectedJobIdForFolder}
+          initialTab={folderInitialTab}
           isOpen={isFolderOpen}
           onClose={() => {
             setIsFolderOpen(false);

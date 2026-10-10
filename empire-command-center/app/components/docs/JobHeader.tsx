@@ -5,6 +5,7 @@ import { Phone, MapPin, MessageCircle, ArrowRight, Briefcase } from 'lucide-reac
 import { jobHubHref } from '../jobhub/href';
 import type { JobContext } from '../../lib/docs-hub/types';
 import { DOCS_API } from '../../lib/docs-hub/types';
+import { openRecord } from './recordBus';
 import './docs.css';
 
 const money = (n?: number | null) => n == null ? '—' : `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
@@ -37,9 +38,35 @@ export default function JobHeader({ quote, job, invoice, context, refreshKey, cl
     <header className={`dh dh-jobhead ${className}`} aria-label="Job summary">
       <div className="dh-jobhead-main">
         <div className="dh-jobhead-title">
-          <span>{c.client || c.designer || 'Client'}</span>
+          <button
+            type="button"
+            onClick={() => openRecord({ type: 'customer', id: (c as any).clientId || c.client || c.designer || 'client' })}
+            className="hover:underline font-bold text-left bg-transparent border-0 p-0 text-[inherit] cursor-pointer"
+            title="View customer record"
+          >
+            {c.client || c.designer || 'Client'}
+          </button>
           {c.designer && c.designer !== c.client && <small>via {c.designer}</small>}
-          {ids.map(i => <small key={i} className="dh-num">{i}</small>)}
+          {c.jobNumber && (
+            <button
+              type="button"
+              onClick={() => openRecord({ type: 'job', id: String(c.jobId || c.jobNumber), title: c.jobNumber || undefined })}
+              className="dh-num hover:underline cursor-pointer bg-transparent border-0 p-0"
+              title="Open job folder"
+            >
+              Job {c.jobNumber}
+            </button>
+          )}
+          {c.quoteNumber && (
+            <button
+              type="button"
+              onClick={() => openRecord({ type: 'quote', id: String(c.quoteId || c.quoteNumber), title: c.quoteNumber || undefined })}
+              className="dh-num hover:underline cursor-pointer bg-transparent border-0 p-0"
+              title="Open quote"
+            >
+              {c.quoteNumber}
+            </button>
+          )}
         </div>
         <div className="dh-jobhead-meta">
           {c.address && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}`} target="_blank" rel="noopener noreferrer">{c.address}</a>}

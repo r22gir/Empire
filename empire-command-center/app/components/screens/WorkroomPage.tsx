@@ -13,6 +13,7 @@ import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
 import YardageCalculator from '../business/quotes/YardageCalculator';
 import { HudStage, HudHeader, GaugeRow, RadialGauge, HexTile, MaxStrip, HudPanel, StatusPill, SectionLabel, BackButton, Fade, CountUp, fmtMoney, daysSince, type MaxSuggestion, type HudChip } from '../cyber/hud';
+import { openRecord } from '../docs/recordBus';
 
 // Lazy-load business modules (they'll be created by the build agents)
 const FinanceDashboard = lazy(() => import('../business/finance/FinanceDashboard'));
@@ -52,20 +53,37 @@ type Section = typeof NAV_SECTIONS[number]['id'];
 
 interface WorkroomPageProps {
   initialSection?: string;
+  initialCustomerId?: string | null;
+  initialJobId?: string | null;
+  initialJobTab?: string | null;
+  initialQuoteId?: string | null;
 }
 
-export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
+export default function WorkroomPage({ initialSection, initialCustomerId, initialJobId, initialJobTab, initialQuoteId: propQuoteId }: WorkroomPageProps) {
   const openQuickQuote = initialSection === 'quick-quote';
-  const [section, setSection] = useState<Section>(openQuickQuote ? 'quotes' : ((initialSection as Section) || 'overview'));
+  const [section, setSection] = useState<Section>(openQuickQuote ? 'quotes' : ((initialSection as Section) || (initialCustomerId ? 'customers' : initialJobId ? 'jobs' : 'overview')));
   const [quotes, setQuotes] = useState<any[]>([]);
   const [stats, setStats] = useState({ pipeline: 0, openQuotes: 0, accepted: 0 });
-  const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
-  const [initialQuoteId, setInitialQuoteId] = useState<string | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<string | null>(initialCustomerId || null);
+  const [initialQuoteId, setInitialQuoteId] = useState<string | null>(propQuoteId || null);
   // Bumped on every sidebar tab click so re-clicking Quotes remounts
   // QuotesSection and returns to the list instead of a stale detail view.
   const [navKey, setNavKey] = useState(0);
 
   // Sync section when initialSection prop changes (e.g. from module click)
+  useEffect(() => {
+    if (initialCustomerId) {
+      setSelectedCustomer(initialCustomerId);
+      setSection('customers');
+    }
+  }, [initialCustomerId]);
+
+  useEffect(() => {
+    if (initialJobId) {
+      setSection('jobs');
+    }
+  }, [initialJobId]);
+
   useEffect(() => {
     if (initialSection === 'quick-quote') setSection('quotes');
     else if (initialSection) setSection(initialSection as Section);
@@ -120,7 +138,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
       case 'jobhub':
         return <Suspense fallback={<Loading />}><JobHub /></Suspense>;
       case 'jobs':
-        return <Suspense fallback={<Loading />}><JobBoard /></Suspense>;
+        return <Suspense fallback={<Loading />}><JobBoard initialJobId={initialJobId} initialJobTab={initialJobTab as any} /></Suspense>;
       case 'schedule':
         return <Suspense fallback={<Loading />}><ScheduleControl business="workroom" /></Suspense>;
       case 'templates':
@@ -239,7 +257,7 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
       time: j.updated_at || j.created_at || '',
       color: j.status === 'completed' ? '#16a34a' : j.status === 'in_progress' ? '#d97706' : '#777',
       icon: <Calendar size={14} />,
-      open: () => (j.quote_id ? onSelectQuote?.(j.quote_id) : onNavigate('jobs')), label: j.quote_id ? `Open the quote for ${j.title || 'this job'}` : `Open job board for ${j.title || 'this job'}`,
+      open: () => (j.quote_id ? onSelectQuote?.(j.quote_id) : openRecord({ type: 'job', id: j.id || j.job_number, title: j.title })), label: j.quote_id ? `Open the quote for ${j.title || 'this job'}` : `Open job ${j.job_number || j.title || 'this job'}`,
     });
   });
   activities.sort((a, b) => (b.time || '').localeCompare(a.time || ''));

@@ -18,6 +18,7 @@ import { orderByRoom } from '../docs/DocPaper';
 import { openRecord } from '../docs/recordBus';
 import { openDocViewer } from '../docs/viewerBus';
 import { HudHeader, GaugeRow, RadialGauge, MaxStrip, fmtMoney, daysSince, type HudChip, type MaxSuggestion } from '../cyber/hud';
+import Breadcrumb from '../shared/Breadcrumb';
 
 interface UploadedPhoto {
   filename: string;
@@ -607,12 +608,22 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder, onBack }: Pr
 
   return (
     <div className="cy-qr flex-1 w-full">
-      {onBack && <button type="button" className="dh-act" style={{ marginBottom: 8 }} onClick={onBack}><ArrowLeft size={15} /> Back</button>}
+      <div style={{ marginBottom: 10 }}>
+        <Breadcrumb
+          items={[
+            { label: 'Workroom', onClick: onBack },
+            { label: 'Quotes', onClick: onBack },
+            { label: quote.quote_number || 'Quote Review' },
+          ]}
+          onBack={onBack}
+          backLabel="Back"
+        />
+      </div>
       <JobHeader quote={quote.id} refreshKey={(quote as any).updated_at} />
       <HudHeader
         icon={<FileText size={20} />}
         title={<><span className="cy-mono">{quote.quote_number}</span> · Quote Review</>}
-        subtitle={<span suppressHydrationWarning>{quote.customer_name} · Created {quote.created_at ? new Date(quote.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Today'}</span>}
+        subtitle={<span suppressHydrationWarning><button type="button" onClick={() => openRecord({ type: 'customer', id: (quote as any).customer_id || quote.customer_name })} className="font-bold text-[#b8960c] hover:underline cursor-pointer bg-transparent border-0 p-0" title="View customer record">{quote.customer_name}</button> · Created {quote.created_at ? new Date(quote.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Today'}</span>}
         chips={hudChips}
       />
       <DocActionBar

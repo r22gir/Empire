@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Receipt, Plus, AlertCircle } from 'lucide-react';
+import { Receipt, Plus, AlertCircle, X, Filter } from 'lucide-react';
 import { API } from '../../../lib/api';
 import DataTable, { Column } from '../shared/DataTable';
 import EmptyState from '../shared/EmptyState';
@@ -32,6 +32,8 @@ export default function ExpenseTracker() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
 
   // Quick-add form
   const [formDate, setFormDate] = useState(todayISO());
@@ -201,35 +203,129 @@ export default function ExpenseTracker() {
         {/* Monthly Summary by Category */}
         {Object.keys(categorySummary).length > 0 && (
           <div className="mb-6">
-            <div className="section-label">Summary by Category</div>
+            <div className="section-label">Summary by Category (Click to filter)</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {Object.entries(categorySummary)
                 .sort((a, b) => b[1] - a[1])
-                .map(([cat, total]) => (
-                  <div key={cat} className="empire-card flat" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+                .map(([cat, total]) => {
+                  const isSelected = selectedCategory === cat;
+                  return (
                     <div
-                      className="w-3 h-3 rounded-full shrink-0"
-                      style={{ backgroundColor: CATEGORY_COLORS[cat] || '#6b7280' }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="kpi-label capitalize" style={{ marginBottom: 0 }}>{cat.replace(/_/g, ' ')}</p>
-                      <p className="text-sm font-bold text-[#1a1a1a]">{fmt(total)}</p>
+                      key={cat}
+                      onClick={() => setSelectedCategory(prev => prev === cat ? null : cat)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedCategory(prev => prev === cat ? null : cat); }}
+                      className="empire-card flat cursor-pointer transition-all hover:border-[#b8960c]"
+                      style={{
+                        padding: 14,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        borderColor: isSelected ? '#b8960c' : undefined,
+                        backgroundColor: isSelected ? '#fdf8eb' : undefined,
+                        boxShadow: isSelected ? '0 0 0 1px #b8960c' : undefined,
+                      }}
+                    >
+                      <div
+                        className="w-3.5 h-3.5 rounded-full shrink-0"
+                        style={{ backgroundColor: CATEGORY_COLORS[cat] || '#6b7280' }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="kpi-label capitalize" style={{ marginBottom: 0 }}>{cat.replace(/_/g, ' ')}</p>
+                        <p className="text-sm font-bold text-[#1a1a1a]">{fmt(total)}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
             </div>
           </div>
         )}
 
+        {/* Filter Indicator */}
+        {selectedCategory && (
+          <div className="flex items-center justify-between mb-3 px-3.5 py-2 bg-[#fdf8eb] border border-[#b8960c]/30 rounded-xl text-xs">
+            <span className="font-semibold text-[#b8960c] flex items-center gap-1.5 capitalize">
+              <Filter size={13} />
+              Filtered by Category: {selectedCategory.replace(/_/g, ' ')} ({(expenses.filter(e => e.category === selectedCategory)).length} matching)
+            </span>
+            <button
+              onClick={() => setSelectedCategory(null)}
+              className="text-[#999] hover:text-[#1a1a1a] flex items-center gap-1 font-semibold cursor-pointer"
+            >
+              <X size={13} /> Clear Filter
+            </button>
+          </div>
+        )}
+
         {/* Expenses Table */}
-        {!loading && expenses.length === 0 && !error ? (
+        {!loading && (selectedCategory ? expenses.filter(e => e.category === selectedCategory) : expenses).length === 0 && !error ? (
           <EmptyState
             icon={<Receipt size={40} />}
-            title="No expenses recorded"
-            description="Connect backend endpoint to enable, or use the form above to add your first expense."
+            title="No expenses found"
+            description={selectedCategory ? `No expenses recorded under ${selectedCategory}.` : "Connect backend endpoint to enable, or use the form above to add your first expense."}
           />
         ) : (
-          <DataTable columns={columns} data={expenses} loading={loading} emptyMessage="No expenses found." />
+          <DataTable
+            columns={columns}
+            data={selectedCategory ? expenses.filter(e => e.category === selectedCategory) : expenses}
+            loading={loading}
+            onRowClick={(row) => setSelectedExpense(row)}
+            emptyMessage="No expenses found."
+          />
+        )}
+
+        {/* Expense Detail Modal */}
+        {selectedExpense && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="empire-card" style={{ padding: 24, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.12)' }}>
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-[#ece8e0]">
+                <div className="flex items-center gap-2">
+                  <Receipt size={18} className="text-[#b8960c]" />
+                  <h3 className="font-bold text-base text-[#1a1a1a]">Expense Details</h3>
+                </div>
+                <button onClick={() => setSelectedExpense(null)} className="p-1 hover:bg-[#f0ede8] rounded-lg cursor-pointer">
+                  <X size={16} className="text-[#999]" />
+                </button>
+              </div>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between py-1.5 border-b border-[#f5f3ef]">
+                  <span className="text-[#999] font-medium">Vendor</span>
+                  <span className="font-bold text-[#1a1a1a]">{selectedExpense.vendor}</span>
+                </div>
+                <div className="flex justify-between py-1.5 border-b border-[#f5f3ef]">
+                  <span className="text-[#999] font-medium">Amount</span>
+                  <span className="font-bold text-red-600">{fmt(selectedExpense.amount)}</span>
+                </div>
+                <div className="flex justify-between py-1.5 border-b border-[#f5f3ef]">
+                  <span className="text-[#999] font-medium">Category</span>
+                  <span className="status-pill capitalize" style={{ backgroundColor: '#f0ede8', color: '#777' }}>
+                    {selectedExpense.category.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                <div className="flex justify-between py-1.5 border-b border-[#f5f3ef]">
+                  <span className="text-[#999] font-medium">Date</span>
+                  <span className="text-[#555]">{selectedExpense.date ? new Date(selectedExpense.date).toLocaleDateString() : '—'}</span>
+                </div>
+                {selectedExpense.description && (
+                  <div className="pt-2">
+                    <span className="text-[#999] text-xs font-semibold block mb-1">Description</span>
+                    <p className="text-[#555] bg-[#faf9f7] p-2.5 rounded-xl border border-[#ece8e0] text-xs leading-relaxed">
+                      {selectedExpense.description}
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => setSelectedExpense(null)}
+                  className="px-4 py-2 text-xs font-bold bg-[#faf9f7] hover:bg-[#f0ede8] border border-[#ece8e0] rounded-xl text-[#555] cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>
