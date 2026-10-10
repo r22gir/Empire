@@ -34,18 +34,17 @@ def test_max_email_service_uses_sendgrid_http_without_sdk(monkeypatch, tmp_path)
 
     svc = EmailService()
     assert svc.send(
-        to="founder@example.com",
+        to="empirebox2026@gmail.com",
         subject="Audit",
         body_html="<p>Body</p>",
         attachments=[str(attachment)],
-        cc="copy@example.com",
     ) is True
 
     assert sent["url"] == "https://api.sendgrid.com/v3/mail/send"
     assert sent["headers"]["Authorization"] == "Bearer SG.test"
     assert sent["json"]["from"]["email"] == "max@empirebox.store"
-    assert sent["json"]["personalizations"][0]["to"][0]["email"] == "founder@example.com"
-    assert sent["json"]["personalizations"][0]["cc"][0]["email"] == "copy@example.com"
+    assert sent["json"]["personalizations"][0]["to"][0]["email"] == "empirebox2026@gmail.com"
+    assert "cc" not in sent["json"]["personalizations"][0]
     assert sent["json"]["attachments"][0]["filename"] == Path(attachment).name
 
 
@@ -152,11 +151,11 @@ def test_smtp_uses_smtp_from_when_set(monkeypatch, tmp_path):
     monkeypatch.setattr("smtplib.SMTP", FakeSMTP)
 
     svc = EmailService()
-    svc.send(to="founder@example.com", subject="Test", body_html="<p>Hi</p>")
+    svc.send(to="empirebox2026@gmail.com", subject="Test", body_html="<p>Hi</p>")
 
     assert len(sent_records) == 1
     assert sent_records[0]["from"] == "max@empirebox.store"
-    assert sent_records[0]["to"] == ["founder@example.com"]
+    assert sent_records[0]["to"] == ["empirebox2026@gmail.com"]
     from_name, from_addr = _decoded_address(sent_records[0]["msg"], "From")
     assert from_name == "MAX — Empire AI"
     assert from_addr == "max@empirebox.store"
@@ -216,7 +215,7 @@ def test_smtp_reply_to_header_when_configured(monkeypatch, tmp_path):
     monkeypatch.setattr("smtplib.SMTP", FakeSMTP)
 
     svc = EmailService()
-    svc.send(to="founder@example.com", subject="MAX Test", body_html="<p>Test body</p>")
+    svc.send(to="empirebox2026@gmail.com", subject="MAX Test", body_html="<p>Test body</p>")
 
     assert len(sent_records) == 1
     msg = sent_records[0]
@@ -240,7 +239,7 @@ def test_email_service_rejects_empty_body_before_send(monkeypatch, tmp_path):
 
     svc = EmailService()
     try:
-        svc.send(to="founder@example.com", subject="Empty", body_html="   ")
+        svc.send(to="empirebox2026@gmail.com", subject="Empty", body_html="   ")
     except ValueError as exc:
         assert "Email body is empty" in str(exc)
     else:
@@ -260,7 +259,7 @@ def test_email_service_rejects_missing_attachment_before_send(monkeypatch, tmp_p
     svc = EmailService()
     try:
         svc.send(
-            to="founder@example.com",
+            to="empirebox2026@gmail.com",
             subject="Missing attachment",
             body_html="<p>Body</p>",
             attachments=[str(tmp_path / "missing.pdf")],
