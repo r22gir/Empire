@@ -507,16 +507,21 @@ def _persist_inbound_media(
     """Save inbound bytes and file photos/docs when the job is known."""
     from app.services.max.whatsapp_log import prepare_inbound_attachment
 
+    from app.services.max.whatsapp_folders import FILEABLE_MEDIA, classify_media_type
+
     kind = str(message.get("type") or "document")
+    filename = _default_media_name(message)
+    mime_name = mime or str(message.get("mime_type") or "")
     media_type = "voice" if (message.get("voice") or kind == "audio") else kind
     if kind == "image":
         media_type = "image"
+    else:
+        media_type = classify_media_type(kind, filename, mime_name)
     hint = hint_text or str(message.get("caption") or message.get("text") or "")
-    fileable = media_type in {"image", "document"}
+    fileable = media_type in FILEABLE_MEDIA
     if not content and kind != "location":
         return []
     payload = content
-    filename = _default_media_name(message)
     if kind == "location":
         loc = message.get("location") or {}
         payload = json.dumps(loc, default=str).encode()
@@ -1754,6 +1759,10 @@ async def process_webhook(
             set_pending_filings,
             wants_photo_quote,
         )
+        from app.services.max.whatsapp_folders import (
+            folder_allows_quote,
+            resolve_folder,
+        )
 
         hint = combined_job_hint(
             sender,
@@ -1797,6 +1806,7 @@ async def process_webhook(
                             {
                                 "filename": a.get("filename"),
                                 "job_slug": a.get("job_slug"),
+                                "folder_kind": a.get("folder_kind") or "",
                                 "filed_path": a.get("filed_path"),
                                 "filing_status": a.get("filing_status"),
                             }
@@ -1810,7 +1820,7 @@ async def process_webhook(
                     fileable_ids = [
                         int(a["id"])
                         for a in saved
-                        if a.get("media_type") in {"image", "photo", "document"}
+                        if a.get("media_type") in {"image", "photo", "document", "scan", "model"}
                     ]
                     inbox_ids = [int(a["id"]) for a in saved if a.get("filing_status") == "inbox"]
                     if inbox_ids:
@@ -1856,7 +1866,9 @@ async def process_webhook(
                     # per open batch.
                     caption_asks = wants_photo_quote(message.get("caption") or "")
                     already_quoted = sender in quoted_senders or photo_batch_quoted(sender)
-                    if caption_asks and not already_quoted:
+                    folder = resolve_folder(hint)
+                    client_folder = folder_allows_quote((folder or {}).get("slug"))
+                    if caption_asks and not already_quoted and client_folder:
                         route = "photo_quote"
                         image, mime = media_bytes, media_mime
                         if not image and message.get("media_id"):
@@ -1867,6 +1879,9 @@ async def process_webhook(
                     else:
                         route = "file_photo"
                         reply = ""
+                elif message["type"] == "document":
+                    route = "file_document"
+                    reply = ""
                 elif message["type"] == "call":
                     route = "call"
                     reply = ""
