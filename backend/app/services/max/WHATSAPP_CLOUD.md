@@ -65,5 +65,6 @@ Copy these without changing the function names or the routes:
 
 ## Chat log (this edition only)
 
-Inbound and outbound turns are appended to `EMPIRE_DATA_DIR/whatsapp/whatsapp_chat_log.db`. Delivery status webhooks update `sent` / `delivered` / `read` / `failed`. Founder-PIN reads live at `/api/v1/whatsapp/chats`. The Command Center **WhatsApp Chats** page is view-only. Media save and job-folder filing are not in this step. Details: `docs/WHATSAPP_CHANNEL.md`.
+Inbound and outbound turns are appended to `EMPIRE_DATA_DIR/whatsapp/whatsapp_chat_log.db`. Delivery status webhooks update `sent` / `delivered` / `read` / `failed`. Media is stored under that edition’s `whatsapp/media`. Photos and documents file into `~/jobs/<slug>` when `doc_lookup` is unique or the conversation has an active job; otherwise they park in inbox and Max asks. Founder-PIN reads live at `/api/v1/whatsapp/chats`. Details: `docs/WHATSAPP_CHANNEL.md`.
+
 

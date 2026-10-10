@@ -176,12 +176,17 @@ def test_voice_document_and_call_markers(isolated_whatsapp_edition, monkeypatch)
         voice_raw, _sign(voice_raw), voice_handler=_voice, http_get=_get, http_post=_post,
     ))
 
+    def _get_doc(url, headers):
+        if str(url).endswith("/media-doc"):
+            return _GraphResponse({"url": "https://example.test/doc", "mime_type": "application/pdf"})
+        return _GraphResponse(content=b"%PDF-1.4 measure")
+
     doc_raw = _payload({
         "type": "document",
         "id": "wamid.doc-in",
         "document": {"id": "media-doc", "filename": "measure.pdf", "caption": "for Willard"},
     })
-    asyncio.run(wa.process_webhook(doc_raw, _sign(doc_raw), http_post=_post))
+    asyncio.run(wa.process_webhook(doc_raw, _sign(doc_raw), http_get=_get_doc, http_post=_post))
 
     call_body = {
         "object": "whatsapp_business_account",

@@ -55,6 +55,7 @@ def isolated_whatsapp_edition(tmp_path, monkeypatch):
     root = tmp_path / "edition-data"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(root))
+    monkeypatch.setenv("WHATSAPP_JOBS_ROOT", str(tmp_path / "jobs"))
     monkeypatch.setenv("FOUNDER_PIN", "test-founder-pin")
     for name in (
         "WHATSAPP_ACCESS_TOKEN",
