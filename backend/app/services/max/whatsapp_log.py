@@ -1243,7 +1243,10 @@ def recent_inbound_texts(
     Default: only texts that can name a job. Chat and questions are dropped.
     """
     window = photo_batch_window_seconds() if seconds is None else seconds
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=max(0.0, window if window > 0 else 1.0))
+    # WhatsApp timestamps are integer seconds. A 1s lookback drops a
+    # same-payload text when processing crosses a second boundary.
+    lookback = window if window > 0 else 2.0
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=max(2.0, lookback))
     init_db()
     conn = _get_conn()
     try:

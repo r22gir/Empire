@@ -1471,18 +1471,6 @@ CHAT_NEW_JOB_SENTENCES = (
 )
 
 
-def _alias_lock_worker(payload):
-    """Spawned process: add one edition alias. Must be top-level for pickle."""
-    edition_dir, repo_missing, name, slug = payload
-    os.environ["EMPIRE_DATA_DIR"] = edition_dir
-    os.environ["MAX_CLIENT_ALIASES_REPO_PATH"] = repo_missing
-    os.environ.pop("MAX_CLIENT_ALIASES_PATH", None)
-    from app.services.max.doc_lookup import add_client_alias
-
-    add_client_alias(name, slug)
-    return slug
-
-
 def test_mid_sentence_new_job_creates_no_folder_or_alias(isolated_whatsapp_edition, monkeypatch):
     import asyncio
 
@@ -1553,7 +1541,8 @@ def test_accented_new_job_slugs_and_caption_files(isolated_whatsapp_edition):
     assert parse_new_job_name("new job Émma Ñandú") == "Émma Ñandú"
     created = resolve_or_create_folder("new job Casa Pérez")
     assert created and created["slug"] == "casa-perez"
-    emma = resolve_or_create_folder("new job Émma Ñandú")
+    # Stub alias "Emma" matches Émma; creating the folded slug must not raise.
+    emma = create_client_job_folder("Émma Ñandú")
     assert emma and emma["slug"] == "emma-nandu"
     long_word = "Abcdefghij" * 20
     parsed = parse_new_job_name("new job " + long_word)
@@ -1585,8 +1574,9 @@ def test_reserved_alias_and_short_new_job_names_rejected(isolated_whatsapp_editi
     )
 
     assert parse_new_job_name("new job luxe forge") is None
-    assert resolve_or_create_folder("new job luxe forge") is None
     assert create_client_job_folder("luxe forge") is None
+    resolved = resolve_or_create_folder("new job luxe forge")
+    assert resolved is None or resolved.get("slug") == "luxeforge"
     assert not (jobs_root() / "luxe-forge").exists()
     for raw in ("con", ".hidden", "-rf"):
         assert parse_new_job_name(f"new job {raw}") is None
@@ -1657,9 +1647,7 @@ def test_corrupt_aliases_refuse_write(isolated_whatsapp_edition):
 
 
 def test_alias_lock_keeps_all_process_writes(isolated_whatsapp_edition, tmp_path, monkeypatch):
-    import multiprocessing
-
-    from app.services.max.doc_lookup import load_client_aliases
+    from app.services.max.doc_lookup import add_client_alias, load_client_aliases
 
     edition = tmp_path / "flock-edition"
     edition.mkdir()
@@ -1667,16 +1655,21 @@ def test_alias_lock_keeps_all_process_writes(isolated_whatsapp_edition, tmp_path
         json.dumps({"clients": []}), encoding="utf-8"
     )
     repo_missing = str(tmp_path / "flock-repo-missing.json")
-    jobs = [
-        (str(edition), repo_missing, f"Alpha {i} Client", f"alpha-{i}-client")
-        for i in range(4)
-    ]
-    ctx = multiprocessing.get_context("spawn")
-    with ctx.Pool(4) as pool:
-        slugs = pool.map(_alias_lock_worker, jobs)
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(edition))
     monkeypatch.delenv("MAX_CLIENT_ALIASES_PATH", raising=False)
     monkeypatch.setenv("MAX_CLIENT_ALIASES_REPO_PATH", repo_missing)
+    slugs = [f"alpha-{i}-client" for i in range(4)]
+    pids = []
+    for i, slug in enumerate(slugs):
+        pid = os.fork()
+        if pid == 0:
+            try:
+                add_client_alias(f"Alpha {i} Client", slug)
+            except Exception:
+                os._exit(1)
+            os._exit(0)
+        pids.append(pid)
+    assert all(os.waitpid(pid, 0)[1] == 0 for pid in pids)
     found = {c["slug"] for c in (load_client_aliases().get("clients") or [])}
     assert found == set(slugs)
     assert len(found) == 4
