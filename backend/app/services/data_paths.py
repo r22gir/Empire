@@ -75,6 +75,19 @@ def chats_dir() -> Path:
 def inbox_dir() -> Path:
     return data_root() / "inbox"
 
+def jobs_dir() -> Path:
+    """Edition-scoped jobs root (Max-e /data/amp/jobs, Maxine /data/maxine/jobs)."""
+    override = (os.getenv("WHATSAPP_JOBS_ROOT") or "").strip()
+    if override:
+        return Path(override)
+    return data_root() / "jobs"
+
+def uploads_dir() -> Path:
+    return data_root() / "uploads"
+
+def whatsapp_dir() -> Path:
+    return data_root() / "whatsapp"
+
 def apostapp_dir() -> Path:
     return data_root() / "apostapp"
 

@@ -268,11 +268,23 @@ class AIRouter:
         else:
             self.primary_model = AIModel.OLLAMA
         self.system_prompt = get_system_prompt()
-        self.upload_dirs = [
-            data_root() / "uploads",
-            Path.home() / "empire-repo" / "backend" / "data" / "uploads",
-            Path.home() / "empire-repo" / "uploads",
-        ]
+        try:
+            from app.edition import family_file_search_roots, is_family_edition
+
+            if is_family_edition():
+                self.upload_dirs = list(family_file_search_roots())
+            else:
+                self.upload_dirs = [
+                    data_root() / "uploads",
+                    Path.home() / "empire-repo" / "backend" / "data" / "uploads",
+                    Path.home() / "empire-repo" / "uploads",
+                ]
+        except Exception:
+            self.upload_dirs = [
+                data_root() / "uploads",
+                Path.home() / "empire-repo" / "backend" / "data" / "uploads",
+                Path.home() / "empire-repo" / "uploads",
+            ]
         self.upload_dir = self.upload_dirs[0]
         providers = []
         if self.xai_key: providers.append("xAI")

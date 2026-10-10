@@ -509,6 +509,29 @@ def get_xai_tool_definitions() -> list:
     return XAI_TOOL_DEFINITIONS
 
 
+FAMILY_TOOLS_DOC = """## Herramientas de esta instancia
+Usa solo datos de este centro de mando. No leas el Workroom, cotizaciones EST del fundador, ni carpetas de otros.
+No hay envíos a clientes. Los borradores se quedan en esta instancia.
+No uses nombres ni direcciones de otro taller.
+"""
+
+
+def tools_doc_for_process() -> str:
+    """Tool list the current process may show the model.
+
+    Family editions never receive the Workroom TOOLS_DOC (Willard / Nelma /
+    Dahlia examples and shop addresses).
+    """
+    try:
+        from app.edition import is_family_edition
+
+        if is_family_edition():
+            return FAMILY_TOOLS_DOC
+    except Exception:
+        pass
+    return TOOLS_DOC if "TOOLS_DOC" in globals() else FAMILY_TOOLS_DOC
+
+
 # ── Tool Dispatcher ────────────────────────────────────────────────
 
 TOOL_REGISTRY = {}

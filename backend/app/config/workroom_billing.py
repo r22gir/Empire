@@ -65,12 +65,11 @@ class WorkroomBilling:
 
 
 def _load_business_json() -> dict:
-    if not _CONFIG_PATH.is_file():
+    from app.edition import is_founder_edition, workroom_business_config
+
+    if not is_founder_edition():
         return {}
-    try:
-        return json.loads(_CONFIG_PATH.read_text())
-    except (OSError, json.JSONDecodeError, TypeError):
-        return {}
+    return workroom_business_config()
 
 
 def _contact_from_config(data: dict) -> tuple[str, str, str, str]:
@@ -130,6 +129,18 @@ def founder_requests_nelmas_billing(text: str) -> bool:
 
 
 def resolve_billing(billed_by: Optional[str] = None) -> WorkroomBilling:
+    from app.edition import assistant_name, is_founder_edition
+
+    if not is_founder_edition():
+        return WorkroomBilling(
+            billed_by="instance",
+            name=assistant_name(),
+            address="",
+            phone="",
+            email="",
+            website="",
+            tagline="",
+        )
     key = normalize_billed_by(billed_by)
     data = _load_business_json()
     phone, email, website, tagline = _contact_from_config(data)

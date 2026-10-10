@@ -593,10 +593,19 @@ Begin every new session by stating the configured founder email and checking Ope
 def _get_tools_doc() -> str:
     """Load tool documentation from tool_executor."""
     try:
-        from app.services.max.tool_executor import TOOLS_DOC
-        return TOOLS_DOC
+        from app.services.max.tool_executor import tools_doc_for_process
+
+        return tools_doc_for_process()
     except Exception:
-        return ""
+        try:
+            from app.services.max.tool_executor import TOOLS_DOC
+            from app.edition import is_family_edition
+
+            if is_family_edition():
+                return ""
+            return TOOLS_DOC
+        except Exception:
+            return ""
 
 
 def get_max_brain_context() -> str:

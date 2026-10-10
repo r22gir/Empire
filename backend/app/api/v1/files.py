@@ -12,12 +12,39 @@ from PIL import Image
 
 router = APIRouter(prefix="/files", tags=["files"])
 
+# Founder/Workroom legacy paths. Family editions never mkdir these.
 UPLOAD_DIR = Path.home() / "empire-repo" / "backend" / "data" / "uploads"
 LOG_DIR = Path.home() / "empire-repo" / "backend" / "data" / "logs" / "file_access"
 
-for cat in ['documents', 'code', 'images', 'audio', 'other']:
-    (UPLOAD_DIR / cat).mkdir(parents=True, exist_ok=True)
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+def _upload_dir() -> Path:
+    try:
+        from app.edition import is_family_edition, require_data_root
+
+        if is_family_edition():
+            path = require_data_root() / "uploads"
+            for cat in ['documents', 'code', 'images', 'audio', 'other']:
+                (path / cat).mkdir(parents=True, exist_ok=True)
+            return path
+    except Exception:
+        pass
+    for cat in ['documents', 'code', 'images', 'audio', 'other']:
+        (UPLOAD_DIR / cat).mkdir(parents=True, exist_ok=True)
+    return UPLOAD_DIR
+
+
+def _log_dir() -> Path:
+    try:
+        from app.edition import is_family_edition, require_data_root
+
+        if is_family_edition():
+            path = require_data_root() / "logs" / "file_access"
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+    except Exception:
+        pass
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    return LOG_DIR
 
 def get_category(filename: str) -> str:
     ext = filename.lower().split('.')[-1] if '.' in filename else ''
@@ -33,7 +60,7 @@ def get_category(filename: str) -> str:
 
 def log_access(action: str, filename: str, agent: str, details: str = ""):
     log_entry = {"timestamp": datetime.now().isoformat(), "action": action, "filename": filename, "agent": agent, "details": details}
-    log_file = LOG_DIR / f"{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+    log_file = _log_dir() / f"{datetime.now().strftime('%Y-%m-%d')}.jsonl"
     with open(log_file, 'a') as f:
         f.write(json.dumps(log_entry) + '\n')
 
@@ -45,10 +72,10 @@ async def upload_file(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(400, "No filename")
     category = get_category(file.filename)
-    save_path = UPLOAD_DIR / category / file.filename
+    save_path = _upload_dir() / category / file.filename
     if save_path.exists():
         stem, suffix = save_path.stem, save_path.suffix
-        save_path = UPLOAD_DIR / category / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
+        save_path = _upload_dir() / category / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
     raw_bytes = file.file.read()
     with open(save_path, 'wb') as f:
         f.write(raw_bytes)
@@ -81,15 +108,46 @@ async def upload_from_path(req: PathRequest):
     if not source.is_file():
         raise HTTPException(400, "Not a file")
     category = get_category(source.name)
-    save_path = UPLOAD_DIR / category / source.name
+    save_path = _upload_dir() / category / source.name
     if save_path.exists():
-        save_path = UPLOAD_DIR / category / f"{save_path.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{save_path.suffix}"
+        save_path = _upload_dir() / category / f"{save_path.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{save_path.suffix}"
     shutil.copy2(source, save_path)
     log_access("upload", source.name, "founder", f"from={req.path}")
     return {"status": "success", "filename": save_path.name, "category": category, "size": save_path.stat().st_size}
 
 @router.get("/browse")
 async def browse_directory(path: str = "~"):
+    try:
+        from app.edition import is_family_edition, require_data_root, assert_under_root
+
+        if is_family_edition():
+            root = require_data_root()
+            raw = (path or "").strip()
+            target = root if not raw or raw in {"~", ".", "/"} else Path(raw)
+            if not target.is_absolute():
+                target = root / target
+            target = assert_under_root(target, root)
+            if not target.exists() or not target.is_dir():
+                target = root
+            files = []
+            for f in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+                if f.name.startswith('.'):
+                    continue
+                try:
+                    files.append({
+                        "name": f.name,
+                        "path": str(f),
+                        "isDir": f.is_dir(),
+                        "size": f.stat().st_size if f.is_file() else 0
+                    })
+                except OSError:
+                    pass
+            return {"files": files, "current_path": str(target)}
+    except Exception:
+        from app.edition import is_family_edition, EditionPathError
+
+        if is_family_edition():
+            raise HTTPException(403, "Ruta fuera del directorio de esta instancia") from None
     target = Path(path).expanduser()
     if not target.exists():
         target = Path.home()
@@ -118,7 +176,7 @@ async def list_files(category: Optional[str] = None):
     files = []
     categories = [category] if category else ['documents', 'code', 'images', 'audio', 'other']
     for cat in categories:
-        cat_path = UPLOAD_DIR / cat
+        cat_path = _upload_dir() / cat
         if cat_path.exists():
             for f in cat_path.iterdir():
                 if f.is_file():
@@ -131,7 +189,7 @@ async def view_file(category: str, filename: str):
     # Prevent matching other named routes (list, logs, browse, upload, etc.)
     if category in ("list", "logs", "browse", "upload", "upload-from-path", "delete"):
         raise HTTPException(404, "File not found")
-    file_path = UPLOAD_DIR / category / filename
+    file_path = _upload_dir() / category / filename
     if not file_path.exists():
         raise HTTPException(404, "File not found")
     log_access("view", filename, "founder", f"category={category}")
@@ -140,7 +198,7 @@ async def view_file(category: str, filename: str):
 @router.get("/logs")
 async def get_logs(date: Optional[str] = None):
     target_date = date or datetime.now().strftime('%Y-%m-%d')
-    log_file = LOG_DIR / f"{target_date}.jsonl"
+    log_file = _log_dir() / f"{target_date}.jsonl"
     if not log_file.exists():
         return {"logs": [], "date": target_date}
     logs = [json.loads(line) for line in open(log_file)]
@@ -148,7 +206,7 @@ async def get_logs(date: Optional[str] = None):
 
 @router.delete("/delete/{category}/{filename}")
 async def delete_file(category: str, filename: str):
-    file_path = UPLOAD_DIR / category / filename
+    file_path = _upload_dir() / category / filename
     if not file_path.exists():
         raise HTTPException(404, "File not found")
     file_path.unlink()

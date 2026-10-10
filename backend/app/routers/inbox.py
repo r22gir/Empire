@@ -12,8 +12,22 @@ import os
 
 router = APIRouter(prefix="/inbox", tags=["inbox"])
 
+# Founder/Workroom legacy path. Family editions never mkdir or read this.
 INBOX_DIR = os.path.expanduser("~/empire-repo/backend/data/inbox")
-os.makedirs(INBOX_DIR, exist_ok=True)
+
+
+def _inbox_dir() -> str:
+    try:
+        from app.edition import is_family_edition, require_data_root
+
+        if is_family_edition():
+            path = require_data_root() / "inbox"
+            path.mkdir(parents=True, exist_ok=True)
+            return str(path)
+    except Exception:
+        pass
+    os.makedirs(INBOX_DIR, exist_ok=True)
+    return INBOX_DIR
 
 
 class InboxCreate(BaseModel):
@@ -41,7 +55,7 @@ class InboxUpdate(BaseModel):
 
 
 def _msg_path(msg_id: str) -> str:
-    return os.path.join(INBOX_DIR, f"{msg_id}.json")
+    return os.path.join(_inbox_dir(), f"{msg_id}.json")
 
 
 def _load_msg(msg_id: str) -> dict:
@@ -78,10 +92,10 @@ async def create_inbox_message(payload: InboxCreate):
 async def list_inbox(status: Optional[str] = None, intent: Optional[str] = None):
     """List inbox messages, optionally filtered."""
     messages = []
-    for fname in os.listdir(INBOX_DIR):
+    for fname in os.listdir(_inbox_dir()):
         if not fname.endswith(".json"):
             continue
-        with open(os.path.join(INBOX_DIR, fname)) as f:
+        with open(os.path.join(_inbox_dir(), fname)) as f:
             m = json.load(f)
         if status and m.get("status") != status:
             continue
@@ -96,10 +110,10 @@ async def list_inbox(status: Optional[str] = None, intent: Optional[str] = None)
 async def pending_review():
     """Get all messages needing founder review (not yet 'reviewed' or 'done')."""
     messages = []
-    for fname in os.listdir(INBOX_DIR):
+    for fname in os.listdir(_inbox_dir()):
         if not fname.endswith(".json"):
             continue
-        with open(os.path.join(INBOX_DIR, fname)) as f:
+        with open(os.path.join(_inbox_dir(), fname)) as f:
             m = json.load(f)
         if m.get("status") not in ("reviewed",):
             messages.append(m)
@@ -111,10 +125,10 @@ async def pending_review():
 async def inbox_summary():
     """Summary stats for morning briefing."""
     all_msgs = []
-    for fname in os.listdir(INBOX_DIR):
+    for fname in os.listdir(_inbox_dir()):
         if not fname.endswith(".json"):
             continue
-        with open(os.path.join(INBOX_DIR, fname)) as f:
+        with open(os.path.join(_inbox_dir(), fname)) as f:
             all_msgs.append(json.load(f))
 
     by_intent = {}

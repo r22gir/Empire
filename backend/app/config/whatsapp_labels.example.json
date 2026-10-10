@@ -1,0 +1,6 @@
+{
+  "_note": "Copy to EMPIRE_DATA_DIR/whatsapp/labels.json or set WHATSAPP_LABELS. Real owner numbers are not committed.",
+  "phones": [
+    {"name": "Example", "phone": "+15555550100"}
+  ]
+}

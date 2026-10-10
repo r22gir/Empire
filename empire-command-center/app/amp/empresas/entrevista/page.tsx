@@ -834,6 +834,8 @@ export default function EntrevistaPage() {
               <p style={{ marginTop: 16, lineHeight: 1.5 }}>
                 {t('Cuando termines, mira cómo entrar desde el celular, la tableta o el computador.', 'When you finish, see how to open this on a phone, tablet, or computer.')}{' '}
                 <Link href="/ayuda/dispositivos" style={{ color: '#D4A030', fontWeight: 800 }}>Cómo conectarte desde tus dispositivos</Link>
+                {' · '}
+                <Link href="/amp/whatsapp" style={{ color: '#D4A030', fontWeight: 800 }}>WhatsApp</Link>
               </p>
             </>
           )}

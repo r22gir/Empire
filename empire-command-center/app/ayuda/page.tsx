@@ -3,6 +3,7 @@ import Link from 'next/link';
 const ARTICLES = [
   { href: '/ayuda/voz', title: 'Cómo usar la voz', note: 'Dicta, revisa y aprueba el borrador.' },
   { href: '/ayuda/dispositivos', title: 'Cómo conectarte desde tus dispositivos', note: 'Sitio web, pantalla de inicio y acceso privado.' },
+  { href: '/ayuda/whatsapp', title: 'Cómo configurar WhatsApp', note: 'Tu cuenta de Meta, número de prueba y webhook. Sin secretos en la página.' },
 ];
 
 export default function AyudaMenu() {

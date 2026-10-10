@@ -101,6 +101,26 @@ def configured() -> bool:
     return not missing_config()
 
 
+def webhook_public_url() -> str:
+    base = (
+        os.getenv("WHATSAPP_WEBHOOK_BASE_URL", "").strip()
+        or os.getenv("AMP_PUBLIC_BASE_URL", "").strip()
+    )
+    if not base:
+        try:
+            from app.edition import edition_profile
+
+            host = str((edition_profile() or {}).get("host") or "").strip()
+            if host:
+                base = f"https://{host}"
+        except Exception:
+            base = ""
+    base = base.rstrip("/")
+    if not base:
+        return "/api/v1/whatsapp/webhook"
+    return f"{base}/api/v1/whatsapp/webhook"
+
+
 def channel_status() -> dict:
     missing = missing_config()
     owners = owner_numbers()
@@ -122,6 +142,17 @@ def channel_status() -> dict:
         reason_es = "WhatsApp responde solo a los números del dueño, dentro de las 24 horas. El PDF sale después de confirmar en el chat."
         reason_en = "WhatsApp replies only to the owner's numbers, inside 24 hours. The PDF is sent after a chat confirmation."
     phone_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    usage_cap = os.getenv("INSTANCE_USAGE_CAP_PCT", "").strip() or "20"
+    secret_file = ""
+    try:
+        from app.edition import edition_name
+
+        if edition_name() == "amp":
+            secret_file = "/home/rg/empire-amp.env"
+        elif edition_name() == "maxine":
+            secret_file = "/home/rg/empire-maxine.env"
+    except Exception:
+        secret_file = ""
     return {
         "enabled": enabled,
         "configured": not missing,
@@ -134,7 +165,14 @@ def channel_status() -> dict:
         "approved_templates": approved_templates(),
         "service_window_hours": 24,
         "webhook_path": "/api/v1/whatsapp/webhook",
+        "webhook_url": webhook_public_url(),
         "documents_auto_send": False,
+        "draft_only": True,
+        "client_sends": False,
+        "usage_cap_pct": usage_cap,
+        "secret_file": secret_file,
+        "setup_path": "/amp/whatsapp",
+        "chats_path": "/amp/whatsapp/chats",
         "reply_mode": reply_mode(),
         "reply_language": reply_language(),
         "reason_es": reason_es,
@@ -163,12 +201,27 @@ def verify_handshake(mode: str, token: str, challenge: str) -> str | None:
 
 def _state_path() -> str:
     explicit = os.getenv("WHATSAPP_STATE_DB", "").strip()
-    if explicit:
-        return os.path.expanduser(explicit)
     try:
-        from app.edition import data_root_or_none
+        from app.edition import (
+            EditionPathError,
+            assert_under_root,
+            is_family_edition,
+            require_data_root,
+            data_root_or_none,
+        )
 
+        if is_family_edition():
+            root = require_data_root()
+            if explicit:
+                path = Path(os.path.expanduser(explicit))
+                assert_under_root(path, root)
+                return str(path)
+            return str(root / "whatsapp.db")
+        if explicit:
+            return os.path.expanduser(explicit)
         root = data_root_or_none()
+    except EditionPathError:
+        raise
     except Exception:
         root = None
     if root is None:
@@ -482,6 +535,18 @@ def send_reply(wa_id: str, text: str, *, now: int | None = None, inbound_kind: s
     else:
         body = text
     delivered = send_session_text(wa_id, body, now=now)
+    try:
+        from app.services.whatsapp_store import record_message
+
+        record_message(
+            number,
+            direction="out",
+            kind="voice_text" if voice_sent else "text",
+            body=body,
+            created_at=int(now or time.time()),
+        )
+    except Exception:
+        pass
     return {
         "sent": bool(delivered.get("sent")),
         "voice": voice_sent,
@@ -663,20 +728,36 @@ def handle_webhook(body: bytes, signature: str, *, transcribe=None, synthesize=N
                 remember_inbound(sender, timestamp)
                 kind = message.get("type")
                 if kind == "text":
-                    last = _reply_pipeline(sender, ((message.get("text") or {}).get("body") or ""), now=timestamp, inbound_kind="text", synthesize=synthesize)
+                    text_body = ((message.get("text") or {}).get("body") or "")
+                    try:
+                        from app.services.whatsapp_store import record_message
+
+                        record_message(sender, direction="in", kind="text", body=text_body, created_at=timestamp)
+                    except Exception:
+                        pass
+                    last = _reply_pipeline(sender, text_body, now=timestamp, inbound_kind="text", synthesize=synthesize)
                     processed += 1
                 elif kind in {"audio", "voice"}:
                     media = message.get("audio") or message.get("voice") or {}
                     raw = _download_media(str(media.get("id") or ""))
-                    folder = Path(_state_path()).parent / "wa-media"
-                    folder.mkdir(parents=True, exist_ok=True)
-                    path = folder / f"{uuid.uuid4().hex}.ogg"
-                    path.write_bytes(raw)
+                    keep_media = False
+                    try:
+                        from app.services.whatsapp_store import record_message, save_media
+
+                        path = save_media(raw, f"{uuid.uuid4().hex}.ogg")
+                        record_message(sender, direction="in", kind=str(kind), body="", media_path=str(path), created_at=timestamp)
+                        keep_media = True
+                    except Exception:
+                        folder = Path(_state_path()).parent / "wa-media"
+                        folder.mkdir(parents=True, exist_ok=True)
+                        path = folder / f"{uuid.uuid4().hex}.ogg"
+                        path.write_bytes(raw)
                     try:
                         reader = transcribe or _default_transcribe
                         transcript = reader(path)
                     finally:
-                        path.unlink(missing_ok=True)
+                        if not keep_media:
+                            path.unlink(missing_ok=True)
                     if not transcript or str(transcript).startswith("["):
                         send_reply(sender, "No pude transcribir la nota.", now=timestamp, inbound_kind=kind, synthesize=synthesize)
                         last = {"handled": False, "document": False}
@@ -697,6 +778,20 @@ def handle_webhook(body: bytes, signature: str, *, transcribe=None, synthesize=N
                         stage=stage,
                         source="whatsapp",
                     )
+                    try:
+                        from app.services.whatsapp_store import record_message, save_media
+
+                        stored = save_media(raw, f"{uuid.uuid4().hex}.jpg")
+                        record_message(
+                            sender,
+                            direction="in",
+                            kind="image",
+                            body=str(media.get("caption") or ""),
+                            media_path=str(stored),
+                            created_at=timestamp,
+                        )
+                    except Exception:
+                        pass
                     send_reply(sender, f"Foto guardada en {project}. Lote {lot or '—'} · etapa {stage or '—'}.", now=timestamp, inbound_kind="image", synthesize=synthesize)
                     processed += 1
                 else:

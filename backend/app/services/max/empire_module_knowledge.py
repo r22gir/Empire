@@ -42,6 +42,7 @@ MODULE_ALIASES: dict[str, tuple[str, ...]] = {
     "MarketForge": ("marketforge", "market forge"),
     "Workroom": ("workroom", "empire workroom"),
     "Woodcraft": ("woodcraft", "wood craft", "craftforge", "craft forge"),
+    "LuxeForge": ("luxeforge", "luxe forge", "luxeforge intake"),
     "Drawing Studio": ("drawing studio",),
     "RecoveryForge": ("recoveryforge", "recovery forge"),
     "RelistApp": ("relistapp", "relist app"),
@@ -57,6 +58,11 @@ MODULE_QUESTION_HINTS = (
     "what",
     "whats",
     "what's",
+    "qué",
+    "que es",
+    "qué es",
+    "qué sabes",
+    "que sabes",
     "status",
     "going on",
     "done",
@@ -410,6 +416,29 @@ _SPECIALIZED = {
     "OpenClaw": lambda _text: _openclaw_response(),
 }
 
+# Founder shop modules. Family editions must not get the canned Hyattsville /
+# WoodCraft / LuxeForge blurbs (Chief-e NO-GO on the direct-route shortcut).
+_FAMILY_HIDDEN_MODULES = frozenset({"Workroom", "Woodcraft", "LuxeForge"})
+
+
+def _family_unknown_module(module_name: str) -> dict:
+    if module_name == "Workroom":
+        reply = (
+            "No conozco el Workroom. Esta instancia no es ese taller "
+            "y no tiene sus datos."
+        )
+    else:
+        reply = (
+            "Ese módulo no existe en esta instancia. "
+            "No tengo datos de ese negocio."
+        )
+    return {
+        "module": module_name,
+        "response": reply,
+        "sources": [],
+        "family_unknown": True,
+    }
+
 
 def resolve_empire_module_question(message: str | None) -> Optional[dict]:
     text = _normalize(message)
@@ -420,6 +449,13 @@ def resolve_empire_module_question(message: str | None) -> Optional[dict]:
         return None
     if not _looks_like_module_question(text):
         return None
+    try:
+        from app.edition import is_family_edition
+
+        if is_family_edition() and module_name in _FAMILY_HIDDEN_MODULES:
+            return _family_unknown_module(module_name)
+    except Exception:
+        pass
     builder = _SPECIALIZED.get(module_name)
     if builder is not None:
         return builder(text)

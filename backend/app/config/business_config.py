@@ -37,7 +37,17 @@ class BusinessConfig:
 
     @classmethod
     def load(cls, path: Path = CONFIG_PATH) -> "BusinessConfig":
-        """Load config from JSON file, falling back to defaults."""
+        """Load config from JSON file, falling back to defaults.
+
+        Family editions never read repo business.json (Workroom address / phone).
+        """
+        try:
+            from app.edition import is_founder_edition
+
+            if not is_founder_edition():
+                return cls()
+        except Exception:
+            pass
         if path.exists():
             with open(path) as f:
                 data = json.load(f)

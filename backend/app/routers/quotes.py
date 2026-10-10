@@ -3292,14 +3292,9 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
     if quote.get("install_date"):
         install_date = f"<p><strong>Estimated Install Date:</strong> {quote['install_date']}</p>"
 
-    # Load business config for contact info on PDF
-    import json as _json
-    _biz_cfg_path = Path(__file__).resolve().parent.parent / "config" / "business.json"
-    _biz_cfg = {}
-    try:
-        _biz_cfg = _json.loads(_biz_cfg_path.read_text())
-    except Exception:
-        pass
+    # Repo business.json is founder-only. Family PDFs do not read Workroom identity.
+    from app.edition import workroom_business_config
+    _biz_cfg = workroom_business_config()
 
     logo_html = ""
     from app.config.workroom_billing import get_workroom_billing
