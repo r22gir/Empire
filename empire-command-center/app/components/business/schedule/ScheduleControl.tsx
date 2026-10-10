@@ -165,7 +165,7 @@ const TYPE_CONFIG: Record<
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // Common standard items for custody transfer
-const COMMON_ITEMS = [
+export const COMMON_ITEMS = [
   'cushion covers',
   'drapery',
   'roman shades',
@@ -176,140 +176,18 @@ const COMMON_ITEMS = [
   'other',
 ];
 
-// Rich default live jobs with quote lines and items
-const DEFAULT_SCHEDULE_JOBS = [
-  {
-    id: 'JOB-0010',
-    job_number: 'JOB-0010',
-    title: 'Custom Velvet Sectional & Bolsters',
-    customer_name: 'Sarah Jenkins',
-    client_name: 'Sarah Jenkins',
-    customer_id: 'CUST-001',
-    status: 'in_progress',
-    items: ['4 cushion covers', '2 bolster cushions', '1 sectional frame', '5 bolt velvet'],
-    quote_lines: ['Custom 3-piece sectional upholstery', 'High-density foam cushions (4x)', 'Velvet bolster pillows (2x)'],
-  },
-  {
-    id: 'JOB-0008',
-    job_number: 'JOB-0008',
-    title: 'Dining Chairs Reupholstery (4x)',
-    customer_name: 'Sarah Jenkins',
-    client_name: 'Sarah Jenkins',
-    customer_id: 'CUST-001',
-    status: 'ready',
-    items: ['4 dining chair seats', '4 backrest pads', 'Brass tack trim'],
-    quote_lines: ['Dining chair seats reupholstery (4x)', 'Antique brass decorative nailheads'],
-  },
-  {
-    id: 'JOB-0005',
-    job_number: 'JOB-0005',
-    title: 'Master Bedroom Silk Drapery Panels',
-    customer_name: 'Whittington Design',
-    client_name: 'Whittington Design',
-    customer_id: 'CUST-002',
-    status: 'in_progress',
-    items: ['2 drapery panels', 'Blackout lining', 'Traverse rod hardware', 'Tiebacks'],
-    quote_lines: ['Custom 96" pinch pleat silk drapery panels', 'Blackout thermal interlining', 'Antique brass baton rods'],
-  },
-  {
-    id: 'JOB-0004',
-    job_number: 'JOB-0004',
-    title: 'Linen Roman Shades with Motorized Track',
-    customer_name: "Nelma's Workroom",
-    client_name: "Nelma's Workroom",
-    customer_id: 'CUST-003',
-    status: 'scheduled',
-    items: ['3 roman shades', 'Somfy motor pack', 'Mounting brackets'],
-    quote_lines: ['Linen relaxed roman shades (3x)', 'Somfy WireFree RTS motor kit'],
-  },
-];
+export interface PartySuggestion {
+  category: 'Vendors (Preset)' | 'Places (Preset)' | 'Customers (Max API)' | 'Vendors (Max API)';
+  name: string;
+  isPreset: boolean;
+}
 
-// Curated parties and locations
-const DEFAULT_PARTIES: { category: 'Customers' | 'Vendors' | 'Places'; name: string }[] = [
-  { category: 'Customers', name: 'Sarah Jenkins (Jenkins Design Studio)' },
-  { category: 'Customers', name: 'Whittington Design' },
-  { category: 'Customers', name: 'Michael Chang' },
-  { category: 'Customers', name: 'Elena Rostova' },
-  { category: 'Customers', name: 'David Sterling' },
-  { category: 'Vendors', name: "Nelma's Workroom" },
-  { category: 'Vendors', name: 'Kravet Fabrics' },
-  { category: 'Vendors', name: 'Schumacher & Co' },
-  { category: 'Vendors', name: 'Robert Allen' },
-  { category: 'Vendors', name: 'Sunbrella' },
-  { category: 'Vendors', name: 'Highland Hardware' },
-  { category: 'Places', name: 'Warehouse / Receiving Dock' },
-  { category: 'Places', name: 'Client site / Residence' },
-  { category: 'Places', name: 'Studio Workroom' },
-  { category: 'Places', name: 'Off-site Upholstery Shop' },
-];
-
-const DEFAULT_LOGS: PickupDropoffLog[] = [
-  {
-    id: 'log-1',
-    direction: 'picked_up',
-    timestamp: new Date().toISOString(),
-    items: '4 cushion covers (84½" × 38¼"), 1 bolt velvet fabric',
-    party: 'Sarah Jenkins (Jenkins Design Studio)',
-    job_id: 'JOB-0010',
-    notes: 'Checked and signed by receiving team. No fabric defects.',
-  },
-  {
-    id: 'log-2',
-    direction: 'dropped_off',
-    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
-    items: '2 drapery panels (96" pinch pleat), brass baton hardware',
-    party: 'Whittington Design',
-    job_id: 'JOB-0005',
-    notes: 'Delivered to residence master bedroom. Signed by site manager.',
-  },
-  {
-    id: 'log-3',
-    direction: 'picked_up',
-    timestamp: new Date(Date.now() - 86400000).toISOString(),
-    items: '4 dining chair seats, 4 backrest pads',
-    party: "Nelma's Workroom",
-    job_id: 'JOB-0008',
-    notes: 'Frames ready for foam buildup and decorative tacks.',
-  },
-];
-
-const DEFAULT_EVENTS: ScheduleEvent[] = [
-  {
-    id: 'evt-1',
-    type: 'pickup',
-    title: 'Pick up velvet rolls & cushion inserts',
-    job_id: 'JOB-0010',
-    customer_vendor: 'Sarah Jenkins',
-    location_address: '1420 Luxury Lane, Suite 400',
-    start_time: `${new Date().toISOString().split('T')[0]}T10:00:00`,
-    end_time: `${new Date().toISOString().split('T')[0]}T11:00:00`,
-    status: 'confirmed',
-    notes: 'Pick up 5 bolt velvet for 84½" sectional project',
-  },
-  {
-    id: 'evt-2',
-    type: 'install',
-    title: 'Drapery Installation & Motor Programming',
-    job_id: 'JOB-0005',
-    customer_vendor: 'Whittington Design',
-    location_address: '740 Park Avenue, Apt 11B',
-    start_time: `${new Date().toISOString().split('T')[0]}T14:00:00`,
-    end_time: `${new Date().toISOString().split('T')[0]}T16:30:00`,
-    status: 'planned',
-    notes: 'Install 96" silk drapery panels and program Somfy remote',
-  },
-  {
-    id: 'evt-3',
-    type: 'loading_dock',
-    title: 'Loading Dock Freight Receiving',
-    job_id: 'JOB-0004',
-    customer_vendor: "Nelma's Workroom",
-    location_address: 'Studio Main Dock - Bay 2',
-    start_time: `${new Date().toISOString().split('T')[0]}T08:30:00`,
-    end_time: `${new Date().toISOString().split('T')[0]}T09:30:00`,
-    status: 'done',
-    notes: 'Received hardware shipment for roman shades',
-  },
+// Fixed vendor and place presets designated by Rafael
+export const PRESET_PARTIES: PartySuggestion[] = [
+  { category: 'Vendors (Preset)', name: "Nelma's Workroom", isPreset: true },
+  { category: 'Vendors (Preset)', name: 'Whittington Design', isPreset: true },
+  { category: 'Places (Preset)', name: 'Warehouse', isPreset: true },
+  { category: 'Places (Preset)', name: 'Client site', isPreset: true },
 ];
 
 export default function ScheduleControl({ business, initialJobId }: ScheduleControlProps) {
@@ -342,11 +220,21 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
 
   const [viewMode, setViewMode] = useState<'agenda' | 'week' | 'month'>('agenda');
   const [activeDate, setActiveDate] = useState(() => new Date());
-  const [events, setEvents] = useState<ScheduleEvent[]>(DEFAULT_EVENTS);
-  const [logs, setLogs] = useState<PickupDropoffLog[]>(DEFAULT_LOGS);
+  const [events, setEvents] = useState<ScheduleEvent[]>([]);
+  const [logs, setLogs] = useState<PickupDropoffLog[]>([]);
   const [todaySummary, setTodaySummary] = useState<TodaySummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [jobs, setJobs] = useState<any[]>(DEFAULT_SCHEDULE_JOBS);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+
+  // Live jobs from Max API (honest - no mock fallbacks)
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+
+  // Live customers & vendors from Max API
+  const [apiCustomers, setApiCustomers] = useState<{ id?: string; name: string }[]>([]);
+  const [apiVendors, setApiVendors] = useState<{ id?: string; name: string }[]>([]);
+  const [apiPartiesError, setApiPartiesError] = useState<string | null>(null);
 
   // Modals & Panels
   const [showAddModal, setShowAddModal] = useState(false);
@@ -392,32 +280,84 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
   const [proposalsResult, setProposalsResult] = useState<any[]>([]);
   const [proposalNotice, setProposalNotice] = useState('');
 
-  // Fetch Jobs list for dropdown picker
+  // Fetch Jobs list for dropdown picker from Max API (honest - no mock fallbacks)
   useEffect(() => {
+    let active = true;
+    setJobsLoading(true);
+    setJobsError(null);
     fetch(`${API}/jobs`)
-      .then((r) => r.json())
-      .then((d) => {
-        const fetched = d.jobs || (Array.isArray(d) ? d : []);
-        if (fetched.length > 0) {
-          // Merge with default jobs ensuring rich metadata
-          const merged = [...fetched];
-          for (const dj of DEFAULT_SCHEDULE_JOBS) {
-            if (!merged.some((j: any) => j.id === dj.id || j.job_number === dj.job_number)) {
-              merged.push(dj);
-            }
-          }
-          setJobs(merged);
-        }
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
       })
-      .catch(() => {
-        // Fallback to default jobs
-        setJobs(DEFAULT_SCHEDULE_JOBS);
+      .then((d) => {
+        if (!active) return;
+        const fetched = d.jobs || (Array.isArray(d) ? d : []);
+        setJobs(fetched);
+      })
+      .catch((err) => {
+        if (!active) return;
+        console.warn('Could not load jobs from Max API:', err);
+        setJobs([]);
+        setJobsError('Max Jobs API unavailable');
+      })
+      .finally(() => {
+        if (active) setJobsLoading(false);
       });
+    return () => {
+      active = false;
+    };
   }, []);
 
-  // Fetch Data
+  // Fetch Customers & Vendors from Max API (honest - no mock fallbacks)
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      fetch(`${API}/customers?limit=100`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch(`${API}/vendors?limit=100`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]).then(([custData, vendData]) => {
+      if (!active) return;
+      const customers: { id?: string; name: string }[] = [];
+      if (custData) {
+        const list = custData.customers || (Array.isArray(custData) ? custData : []);
+        for (const c of list) {
+          const name = c.name || c.company || c.client_name;
+          if (name && !customers.some((x) => x.name.toLowerCase() === name.toLowerCase())) {
+            customers.push({ id: c.id, name });
+          }
+        }
+      }
+      setApiCustomers(customers);
+
+      const vendors: { id?: string; name: string }[] = [];
+      if (vendData) {
+        const list = vendData.vendors || (Array.isArray(vendData) ? vendData : []);
+        for (const v of list) {
+          const name = v.name || v.contact_name;
+          if (name && !vendors.some((x) => x.name.toLowerCase() === name.toLowerCase())) {
+            vendors.push({ id: v.id, name });
+          }
+        }
+      }
+      setApiVendors(vendors);
+
+      if (!custData && !vendData) {
+        setApiPartiesError('Customers/Vendors API unavailable');
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Fetch Data from Max API (honest - no mock fallbacks)
   const loadScheduleData = useCallback(async () => {
     setLoading(true);
+    setScheduleError(null);
     try {
       const [eventsRes, summaryRes, logsRes] = await Promise.all([
         fetch(`${API}/schedule/events?limit=200`).catch(() => null),
@@ -427,22 +367,35 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
 
       if (eventsRes && eventsRes.ok) {
         const evData = await eventsRes.json();
-        if (evData.events && evData.events.length > 0) {
-          setEvents(evData.events);
+        const evList = evData.events || (Array.isArray(evData) ? evData : []);
+        setEvents(evList);
+      } else {
+        setEvents([]);
+        if (!eventsRes || !eventsRes.ok) {
+          setScheduleError('Max Schedule API unavailable');
         }
       }
+
       if (summaryRes && summaryRes.ok) {
         const sData = await summaryRes.json();
         setTodaySummary(sData);
+      } else {
+        setTodaySummary(null);
       }
+
       if (logsRes && logsRes.ok) {
         const lData = await logsRes.json();
-        if (lData.logs && lData.logs.length > 0) {
-          setLogs(lData.logs);
-        }
+        const lList = lData.logs || (Array.isArray(lData) ? lData : []);
+        setLogs(lList);
+      } else {
+        setLogs([]);
       }
     } catch (e) {
-      console.warn('Using offline schedule data:', e);
+      console.warn('Failed to load schedule data from Max API:', e);
+      setEvents([]);
+      setLogs([]);
+      setTodaySummary(null);
+      setScheduleError('Max Schedule API unavailable');
     } finally {
       setLoading(false);
     }
@@ -451,6 +404,31 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
   useEffect(() => {
     loadScheduleData();
   }, [loadScheduleData]);
+
+  // Combined Party list: Fixed presets designated by Rafael + real records from Max API
+  const availableParties = useMemo<PartySuggestion[]>(() => {
+    const list: PartySuggestion[] = [...PRESET_PARTIES];
+    // Add real customers from Max API
+    for (const c of apiCustomers) {
+      if (c.name && !list.some((p) => p.name.toLowerCase() === c.name.toLowerCase())) {
+        list.push({ category: 'Customers (Max API)', name: c.name, isPreset: false });
+      }
+    }
+    // Add real vendors from Max API
+    for (const v of apiVendors) {
+      if (v.name && !list.some((p) => p.name.toLowerCase() === v.name.toLowerCase())) {
+        list.push({ category: 'Vendors (Max API)', name: v.name, isPreset: false });
+      }
+    }
+    // Add client/customer from loaded live jobs
+    for (const j of jobs) {
+      const name = j.customer_name || j.client_name;
+      if (name && !list.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
+        list.push({ category: 'Customers (Max API)', name, isPreset: false });
+      }
+    }
+    return list;
+  }, [apiCustomers, apiVendors, jobs]);
 
   // Derived: Selected Custody Job & Quote Line Items
   const selectedCustodyJob = useMemo(() => {
@@ -1143,7 +1121,7 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
             <textarea
               value={proposalText}
               onChange={(e) => setProposalText(e.target.value)}
-              placeholder="e.g. 'Sarah says we can pick up the velvet bolts at 1420 Luxury Lane tomorrow at 10am, and delivery is set for Friday 2pm.'"
+              placeholder="e.g. 'Client says we can pick up the fabric bolts at the warehouse tomorrow at 10am, and delivery is set for Friday 2pm.'"
               rows={3}
               style={{
                 width: '100%',
@@ -1259,6 +1237,25 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
         </div>
 
         {/* ── 3. VIEWS CONTAINER ── */}
+        {scheduleError && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: 10,
+              border: `1px solid ${isDark ? 'rgba(239, 68, 68, 0.3)' : '#fecaca'}`,
+              background: isDark ? 'rgba(239, 68, 68, 0.1)' : '#fef2f2',
+              color: isDark ? '#f87171' : '#b91c1c',
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <AlertCircle size={14} className="flex-shrink-0" />
+            <span>Max API Notice: {scheduleError}. No simulated or mock data is shown.</span>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 size={28} className="animate-spin text-[#b8960c]" />
@@ -1737,39 +1734,49 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
                       >
                         No linked job
                       </div>
-                      {jobs.map((j) => (
-                        <div
-                          key={j.id}
-                          onClick={() => {
-                            setFormJobId(j.id || j.job_number);
-                            if (j.customer_name || j.client_name) {
-                              setFormCustomerVendor(j.customer_name || j.client_name);
-                            }
-                            if (j.title) {
-                              setFormTitle(`${TYPE_CONFIG[formType]?.label || 'Event'}: ${j.title}`);
-                            }
-                            setShowAddJobDropdown(false);
-                          }}
-                          style={{
-                            padding: '10px 14px',
-                            fontSize: '12px',
-                            cursor: 'pointer',
-                            color: textPrimary,
-                            borderBottom: `1px solid ${cardBorder}`,
-                            minHeight: 44,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          <div style={{ fontWeight: 700, color: accentColor }}>
-                            {j.job_number || j.id}: {j.customer_name || j.client_name}
-                          </div>
-                          <div style={{ fontSize: '11px', color: textMuted }} className="truncate">
-                            {j.title}
-                          </div>
+                      {jobsLoading ? (
+                        <div style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: 8, fontSize: '12px', color: textMuted }}>
+                          <Loader2 size={14} className="animate-spin" /> Loading jobs from Max API...
                         </div>
-                      ))}
+                      ) : jobs.length === 0 ? (
+                        <div style={{ padding: '12px', fontSize: '11px', color: textMuted }}>
+                          {jobsError || 'No jobs found in Max API.'}
+                        </div>
+                      ) : (
+                        jobs.map((j) => (
+                          <div
+                            key={j.id}
+                            onClick={() => {
+                              setFormJobId(j.id || j.job_number);
+                              if (j.customer_name || j.client_name) {
+                                setFormCustomerVendor(j.customer_name || j.client_name);
+                              }
+                              if (j.title) {
+                                setFormTitle(`${TYPE_CONFIG[formType]?.label || 'Event'}: ${j.title}`);
+                              }
+                              setShowAddJobDropdown(false);
+                            }}
+                            style={{
+                              padding: '10px 14px',
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              color: textPrimary,
+                              borderBottom: `1px solid ${cardBorder}`,
+                              minHeight: 44,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <div style={{ fontWeight: 700, color: accentColor }}>
+                              {j.job_number || j.id}: {j.customer_name || j.client_name}
+                            </div>
+                            <div style={{ fontSize: '11px', color: textMuted }} className="truncate">
+                              {j.title}
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>
@@ -1870,7 +1877,7 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
                         right: 0,
                         zIndex: 70,
                         marginTop: 4,
-                        maxHeight: 180,
+                        maxHeight: 220,
                         overflowY: 'auto',
                         borderRadius: 10,
                         background: cardBg,
@@ -1878,31 +1885,52 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
                         boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
                       }}
                     >
-                      {DEFAULT_PARTIES.filter((p) =>
+                      {availableParties.filter((p) =>
                         p.name.toLowerCase().includes(formCustomerVendor.toLowerCase())
-                      ).map((p) => (
-                        <div
-                          key={p.name}
-                          onClick={() => {
-                            setFormCustomerVendor(p.name);
-                            setShowAddPartyDropdown(false);
-                          }}
-                          style={{
-                            padding: '8px 12px',
-                            fontSize: '12px',
-                            cursor: 'pointer',
-                            color: textPrimary,
-                            borderBottom: `1px solid ${cardBorder}`,
-                            minHeight: 40,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                          }}
-                        >
-                          <span>{p.name}</span>
-                          <span style={{ fontSize: '10px', color: accentColor }}>{p.category}</span>
+                      ).length === 0 ? (
+                        <div style={{ padding: '10px 12px', fontSize: '11px', color: textMuted }}>
+                          No matching presets or Max API contacts. Custom party name will be saved.
                         </div>
-                      ))}
+                      ) : (
+                        availableParties
+                          .filter((p) => p.name.toLowerCase().includes(formCustomerVendor.toLowerCase()))
+                          .map((p) => (
+                            <div
+                              key={`${p.category}-${p.name}`}
+                              onClick={() => {
+                                setFormCustomerVendor(p.name);
+                                setShowAddPartyDropdown(false);
+                              }}
+                              style={{
+                                padding: '8px 12px',
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                color: textPrimary,
+                                borderBottom: `1px solid ${cardBorder}`,
+                                minHeight: 40,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                              }}
+                            >
+                              <span style={{ fontWeight: 600 }}>{p.name}</span>
+                              <span
+                                style={{
+                                  fontSize: '10px',
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  background: p.isPreset
+                                    ? (isDark ? 'rgba(34, 211, 238, 0.15)' : '#fef3c7')
+                                    : (isDark ? 'rgba(255,255,255,0.08)' : '#f1f1f1'),
+                                  color: p.isPreset ? accentColor : textMuted,
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {p.category}
+                              </span>
+                            </div>
+                          ))
+                      )}
                     </div>
                   )}
                 </div>
@@ -2270,30 +2298,40 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
                       >
                         No linked job
                       </div>
-                      {jobs.map((j) => (
-                        <div
-                          key={j.id}
-                          onClick={() => handleSelectCustodyJob(j)}
-                          style={{
-                            padding: '10px 14px',
-                            fontSize: '12px',
-                            cursor: 'pointer',
-                            color: textPrimary,
-                            borderBottom: `1px solid ${cardBorder}`,
-                            minHeight: 44,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          <div style={{ fontWeight: 700, color: accentColor }}>
-                            {j.job_number || j.id}: {j.customer_name || j.client_name}
-                          </div>
-                          <div style={{ fontSize: '11px', color: textMuted }} className="truncate">
-                            {j.title}
-                          </div>
+                      {jobsLoading ? (
+                        <div style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: 8, fontSize: '12px', color: textMuted }}>
+                          <Loader2 size={14} className="animate-spin" /> Loading jobs from Max API...
                         </div>
-                      ))}
+                      ) : jobs.length === 0 ? (
+                        <div style={{ padding: '12px', fontSize: '11px', color: textMuted }}>
+                          {jobsError || 'No jobs found in Max API.'}
+                        </div>
+                      ) : (
+                        jobs.map((j) => (
+                          <div
+                            key={j.id}
+                            onClick={() => handleSelectCustodyJob(j)}
+                            style={{
+                              padding: '10px 14px',
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              color: textPrimary,
+                              borderBottom: `1px solid ${cardBorder}`,
+                              minHeight: 44,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <div style={{ fontWeight: 700, color: accentColor }}>
+                              {j.job_number || j.id}: {j.customer_name || j.client_name}
+                            </div>
+                            <div style={{ fontSize: '11px', color: textMuted }} className="truncate">
+                              {j.title}
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>
@@ -2338,7 +2376,7 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
                         right: 0,
                         zIndex: 70,
                         marginTop: 4,
-                        maxHeight: 200,
+                        maxHeight: 220,
                         overflowY: 'auto',
                         borderRadius: 10,
                         background: cardBg,
@@ -2346,33 +2384,52 @@ export default function ScheduleControl({ business, initialJobId }: ScheduleCont
                         boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
                       }}
                     >
-                      {DEFAULT_PARTIES.filter((p) =>
+                      {availableParties.filter((p) =>
                         p.name.toLowerCase().includes(custodyParty.toLowerCase())
-                      ).map((p) => (
-                        <div
-                          key={p.name}
-                          onClick={() => {
-                            setCustodyParty(p.name);
-                            setShowPartyDropdown(false);
-                          }}
-                          style={{
-                            padding: '8px 12px',
-                            fontSize: '12px',
-                            cursor: 'pointer',
-                            color: textPrimary,
-                            borderBottom: `1px solid ${cardBorder}`,
-                            minHeight: 44,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                          }}
-                        >
-                          <span style={{ fontWeight: 600 }}>{p.name}</span>
-                          <span style={{ fontSize: '10px', color: accentColor, fontWeight: 700 }}>
-                            {p.category}
-                          </span>
+                      ).length === 0 ? (
+                        <div style={{ padding: '10px 12px', fontSize: '11px', color: textMuted }}>
+                          No matching presets or Max API contacts. Custom party name will be recorded.
                         </div>
-                      ))}
+                      ) : (
+                        availableParties
+                          .filter((p) => p.name.toLowerCase().includes(custodyParty.toLowerCase()))
+                          .map((p) => (
+                            <div
+                              key={`${p.category}-${p.name}`}
+                              onClick={() => {
+                                setCustodyParty(p.name);
+                                setShowPartyDropdown(false);
+                              }}
+                              style={{
+                                padding: '8px 12px',
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                color: textPrimary,
+                                borderBottom: `1px solid ${cardBorder}`,
+                                minHeight: 44,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                              }}
+                            >
+                              <span style={{ fontWeight: 600 }}>{p.name}</span>
+                              <span
+                                style={{
+                                  fontSize: '10px',
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  background: p.isPreset
+                                    ? (isDark ? 'rgba(34, 211, 238, 0.15)' : '#fef3c7')
+                                    : (isDark ? 'rgba(255,255,255,0.08)' : '#f1f1f1'),
+                                  color: p.isPreset ? accentColor : textMuted,
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {p.category}
+                              </span>
+                            </div>
+                          ))
+                      )}
                     </div>
                   )}
                 </div>

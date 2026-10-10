@@ -1,66 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { formatInches } from '../../../lib/formatInches';
-
-// Testable helper functions extracted/matching ScheduleControl logic
-export const COMMON_ITEMS = [
-  'cushion covers',
-  'drapery',
-  'roman shades',
-  'fabric',
-  'hardware',
-  'bench parts',
-  'samples',
-  'other',
-];
-
-export const DEFAULT_PARTIES = [
-  { category: 'Customers', name: 'Sarah Jenkins (Jenkins Design Studio)' },
-  { category: 'Customers', name: 'Whittington Design' },
-  { category: 'Customers', name: 'Michael Chang' },
-  { category: 'Customers', name: 'Elena Rostova' },
-  { category: 'Customers', name: 'David Sterling' },
-  { category: 'Vendors', name: "Nelma's Workroom" },
-  { category: 'Vendors', name: 'Kravet Fabrics' },
-  { category: 'Vendors', name: 'Schumacher & Co' },
-  { category: 'Vendors', name: 'Robert Allen' },
-  { category: 'Vendors', name: 'Sunbrella' },
-  { category: 'Vendors', name: 'Highland Hardware' },
-  { category: 'Places', name: 'Warehouse / Receiving Dock' },
-  { category: 'Places', name: 'Client site / Residence' },
-  { category: 'Places', name: 'Studio Workroom' },
-  { category: 'Places', name: 'Off-site Upholstery Shop' },
-];
-
-export const MOCK_JOBS = [
-  {
-    id: 'JOB-0010',
-    job_number: 'JOB-0010',
-    title: 'Custom Velvet Sectional & Bolsters',
-    customer_name: 'Sarah Jenkins',
-    client_name: 'Sarah Jenkins',
-    items: ['4 cushion covers', '2 bolster cushions', '1 sectional frame', '5 bolt velvet'],
-    quote_lines: ['Custom 3-piece sectional upholstery', 'High-density foam cushions (4x)', 'Velvet bolster pillows (2x)'],
-  },
-  {
-    id: 'JOB-0005',
-    job_number: 'JOB-0005',
-    title: 'Master Bedroom Silk Drapery Panels',
-    customer_name: 'Whittington Design',
-    client_name: 'Whittington Design',
-    items: ['2 drapery panels', 'Blackout lining', 'Traverse rod hardware', 'Tiebacks'],
-    quote_lines: ['Custom 96" pinch pleat silk drapery panels', 'Blackout thermal interlining', 'Antique brass baton rods'],
-  },
-  {
-    id: 'JOB-0004',
-    job_number: 'JOB-0004',
-    title: 'Linen Roman Shades with Motorized Track',
-    customer_name: "Nelma's Workroom",
-    client_name: "Nelma's Workroom",
-    items: ['3 roman shades', 'Somfy motor pack', 'Mounting brackets'],
-    quote_lines: ['Linen relaxed roman shades (3x)', 'Somfy WireFree RTS motor kit'],
-  },
-];
+import { PRESET_PARTIES, COMMON_ITEMS, PartySuggestion } from './ScheduleControl';
 
 export function extractJobItems(job: any): string[] {
   const itemsSet = new Set<string>();
@@ -100,7 +41,26 @@ export function addCustomChip(current: string[], item: string): string[] {
   return [...current, trimmed];
 }
 
-test('COMMON_ITEMS contains all required preset item types', () => {
+export function mergePartiesWithApi(
+  presets: PartySuggestion[],
+  apiCustomers: { name: string }[],
+  apiVendors: { name: string }[]
+): PartySuggestion[] {
+  const list: PartySuggestion[] = [...presets];
+  for (const c of apiCustomers) {
+    if (c.name && !list.some((p) => p.name.toLowerCase() === c.name.toLowerCase())) {
+      list.push({ category: 'Customers (Max API)', name: c.name, isPreset: false });
+    }
+  }
+  for (const v of apiVendors) {
+    if (v.name && !list.some((p) => p.name.toLowerCase() === v.name.toLowerCase())) {
+      list.push({ category: 'Vendors (Max API)', name: v.name, isPreset: false });
+    }
+  }
+  return list;
+}
+
+test('COMMON_ITEMS contains standard custody item categories', () => {
   const required = [
     'cushion covers',
     'drapery',
@@ -116,35 +76,58 @@ test('COMMON_ITEMS contains all required preset item types', () => {
   }
 });
 
-test('DEFAULT_PARTIES includes required vendors, customers, and common places', () => {
-  const names = DEFAULT_PARTIES.map((p) => p.name);
-  assert.ok(names.some((n) => n.includes("Nelma's Workroom")), 'Expected Nelma\'s Workroom vendor');
-  assert.ok(names.some((n) => n.includes('Whittington Design')), 'Expected Whittington Design');
-  assert.ok(names.some((n) => n.includes('Sarah Jenkins')), 'Expected Sarah Jenkins customer');
-  assert.ok(names.some((n) => n.includes('Warehouse')), 'Expected Warehouse place');
-  assert.ok(names.some((n) => n.includes('Client site')), 'Expected Client site place');
+test('PRESET_PARTIES contains only real fixed vendor/place presets designated by Rafael', () => {
+  const names = PRESET_PARTIES.map((p) => p.name);
+
+  // Assert Rafael's 4 presets are present
+  assert.ok(names.includes("Nelma's Workroom"), 'Expected Nelma\'s Workroom vendor preset');
+  assert.ok(names.includes('Whittington Design'), 'Expected Whittington Design vendor preset');
+  assert.ok(names.includes('Warehouse'), 'Expected Warehouse place preset');
+  assert.ok(names.includes('Client site'), 'Expected Client site place preset');
+  assert.equal(PRESET_PARTIES.length, 4, 'PRESET_PARTIES must contain strictly Rafael\'s 4 presets');
+
+  // Verify all are marked as presets
+  for (const preset of PRESET_PARTIES) {
+    assert.equal(preset.isPreset, true, `${preset.name} must be marked as preset`);
+    assert.ok(preset.category.includes('(Preset)'), `${preset.category} must indicate preset`);
+  }
+
+  // Assert NO fake mock names are in PRESET_PARTIES
+  const forbiddenMockNames = ['Sarah Jenkins', 'Michael Chang', 'Elena Rostova', 'David Sterling', 'Kravet Fabrics'];
+  for (const mock of forbiddenMockNames) {
+    assert.ok(!names.includes(mock), `Forbidden fake name "${mock}" must NOT be in PRESET_PARTIES`);
+  }
+});
+
+test('mergePartiesWithApi merges real API customers and vendors without duplicates', () => {
+  const realApiCustomers = [{ name: 'Acme Interiors' }, { name: 'Whittington Design' }]; // Whittington already preset
+  const realApiVendors = [{ name: 'Luxury Trims Co' }];
+
+  const merged = mergePartiesWithApi(PRESET_PARTIES, realApiCustomers, realApiVendors);
+
+  assert.equal(merged.length, 6); // 4 presets + Acme Interiors + Luxury Trims Co
+  assert.ok(merged.some((p) => p.name === 'Acme Interiors' && p.category === 'Customers (Max API)'));
+  assert.ok(merged.some((p) => p.name === 'Luxury Trims Co' && p.category === 'Vendors (Max API)'));
 });
 
 test('autoFillFromJob auto-populates party and quote lines when job is picked', () => {
-  // Select JOB-0010
-  const job10 = autoFillFromJob('JOB-0010', MOCK_JOBS);
-  assert.equal(job10.party, 'Sarah Jenkins');
-  assert.deepEqual(job10.items, ['4 cushion covers', '2 bolster cushions']);
-  assert.ok(job10.allOptions.includes('4 cushion covers'));
-  assert.ok(job10.allOptions.includes('Custom 3-piece sectional upholstery'));
-  assert.ok(job10.allOptions.includes('cushion covers'));
+  const sampleJobs = [
+    {
+      id: 'JOB-0100',
+      job_number: 'JOB-0100',
+      title: 'Silk Drapery Panels',
+      customer_name: 'Acme Interiors',
+      items: ['2 drapery panels', 'Blackout lining'],
+      quote_lines: ['Custom silk drapery panels (2x)'],
+    },
+  ];
 
-  // Select JOB-0005
-  const job5 = autoFillFromJob('JOB-0005', MOCK_JOBS);
-  assert.equal(job5.party, 'Whittington Design');
-  assert.deepEqual(job5.items, ['2 drapery panels', 'Blackout lining']);
-  assert.ok(job5.allOptions.includes('2 drapery panels'));
-  assert.ok(job5.allOptions.includes('Custom 96" pinch pleat silk drapery panels'));
-
-  // Select JOB-0004
-  const job4 = autoFillFromJob('JOB-0004', MOCK_JOBS);
-  assert.equal(job4.party, "Nelma's Workroom");
-  assert.deepEqual(job4.items, ['3 roman shades', 'Somfy motor pack']);
+  const result = autoFillFromJob('JOB-0100', sampleJobs);
+  assert.equal(result.party, 'Acme Interiors');
+  assert.deepEqual(result.items, ['2 drapery panels', 'Blackout lining']);
+  assert.ok(result.allOptions.includes('2 drapery panels'));
+  assert.ok(result.allOptions.includes('Custom silk drapery panels (2x)'));
+  assert.ok(result.allOptions.includes('cushion covers'));
 });
 
 test('Multi-select chip toggling and custom entry work reliably', () => {
