@@ -369,6 +369,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "generate_presentation": "present",
             "make_presentation": "present",
             "presentation": "present",
+            "find_file": "find_files",
+            "search_files": "find_files",
+            "locate_file": "find_files",
+            "search_attachments": "find_files",
         }
         if tool_name not in TOOL_REGISTRY and tool_name in TOOL_CORRECTIONS:
             corrected = TOOL_CORRECTIONS[tool_name]
@@ -3927,7 +3931,7 @@ def _reset_max_state(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── TOOL DOCUMENTATION (for system prompt) ─────────────────────────
 
-TOOLS_DOC = """## Available Tools (42 total)
+TOOLS_DOC = """## Available Tools (43 total)
 You have access to real tools that query live data. Use them instead of making up information.
 To call a tool, include a tool block in your response:
 
@@ -3955,6 +3959,9 @@ If a tool call fails with "Unknown tool", check the name against this list.
   `{"tool": "get_desk_status"}`
 - **search_conversations** — Search conversation history across all channels (Telegram, Web, CC). Searches brain memories, conversation summaries, and chat backups.
   `{"tool": "search_conversations", "query": "keyword or phrase", "channel": "telegram|web|cc"}`
+- **find_files** — Find files across local disks, Gmail attachments (empirebox2026@gmail.com), and Rafael's Google Drive. Read-only (gmail.readonly + drive.readonly). Merged + ranked with the same client-alias matching; secret/family paths excluded. Each hit carries proof plus draft-only share options (Studio link, email to Rafael's own addresses, WhatsApp draft — founder tap required before any send). If Gmail auth is bad the result says "Gmail needs re-auth" — never claim nothing exists when a source failed. Same tool for chat, Telegram, and voice "find/send me X" requests.
+  `{"tool": "find_files", "query": "curtain measurements Johnson"}`
+  Optional: `limit` (default 10, max 20), `include_gmail` / `include_drive` (default true). Triggers: "find/send me X", "locate the file", "where is that PDF/attachment".
 
 ### Action Tools
 - **create_quick_quote** — DEPRECATED. Legacy JSON store (`/home/rg/empire-data/quotes/*.json`). Does NOT use the pricing engine. Returns `store: "json_legacy"`, `engine: "qis"`, `deprecation_notice`. Will be retired in sprint 1d. **Do NOT pick this tool for new quotes — use `create_engine_quote` instead.**
@@ -5309,6 +5316,37 @@ def _search_conversations(params: dict, desk: Optional[str] = None) -> ToolResul
         "count": len(results),
         "results": results,
     })
+
+
+@tool("find_files")
+def _find_files(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Find files across local disks, Gmail attachments, and Google Drive.
+
+    Read-only (gmail.readonly + drive.readonly). Returns merged, ranked hits
+    with proof per hit plus gmail_status/drive_status and notices. Works the
+    same for chat, Telegram, and voice-transcribed "find/send me X" requests.
+    Share options in each hit are draft-only proposals — never sent by tools.
+    """
+    start = _time.time()
+    query = (params.get("query", "") or params.get("filename", "") or "").strip()
+    if not query:
+        return ToolResult(tool="find_files", success=False, error="query is required")
+    limit = min(max(int(params.get("limit", 10)), 1), 20)
+    try:
+        from app.services.max.file_finder import find_files as _find
+        result = _find(
+            query,
+            limit=limit,
+            include_gmail=params.get("include_gmail", True),
+            include_drive=params.get("include_drive", True),
+        )
+        duration = int((_time.time() - start) * 1000)
+        log_execution("find_files", params, {"count": result.get("count", 0)}, access_level=1, desk=desk, success=True, duration_ms=duration)
+        return ToolResult(tool="find_files", success=True, result=result)
+    except Exception as e:
+        logger.error(f"find_files failed: {e}")
+        log_execution("find_files", params, str(e), desk=desk, success=False)
+        return ToolResult(tool="find_files", success=False, error=str(e))
 
 
 # ── MINIMAX MULTIMODAL TOOLS ────────────────────────────────────────
