@@ -1673,3 +1673,106 @@ def test_alias_lock_keeps_all_process_writes(isolated_whatsapp_edition, tmp_path
     found = {c["slug"] for c in (load_client_aliases().get("clients") or [])}
     assert found == set(slugs)
     assert len(found) == 4
+
+
+_RAFAEL_REPO_CLIENTS = {
+    "clients": [
+        {
+            "slug": "nehal-elrefai",
+            "name": "Nehal Elrefai",
+            "aliases": ["Dahlia", "Dhalia", "Dalia", "Nehal"],
+            "address": "9408 Old Courthouse Rd",
+        },
+        {
+            "slug": "emma-vita",
+            "name": "Emma Vita",
+            "aliases": ["Emma"],
+        },
+    ]
+}
+
+_FAMILY_LEAK_QUERIES = (
+    "dahlia",
+    "9408 old courthouse",
+    "emma vita",
+)
+
+
+def _write_rafael_repo_aliases(path: Path) -> Path:
+    path.write_text(json.dumps(_RAFAEL_REPO_CLIENTS), encoding="utf-8")
+    return path
+
+
+def test_new_job_emma_resolves_existing_emma_vita(isolated_whatsapp_edition):
+    from app.services.max.whatsapp_folders import resolve_or_create_folder
+
+    match = resolve_or_create_folder("new job emma")
+    assert match is not None
+    assert match["slug"] == "emma-vita"
+    assert match.get("created") is False
+    assert not (jobs_root() / "emma").exists()
+
+
+def test_founder_still_resolves_repo_dahlia_and_address(isolated_whatsapp_edition, tmp_path, monkeypatch):
+    from app.services.max.doc_lookup import (
+        edition_aliases_path,
+        is_founder_edition,
+        load_client_aliases,
+        resolve_job_folder,
+    )
+
+    _write_rafael_repo_aliases(tmp_path / "rafael-repo-aliases.json")
+    monkeypatch.setenv("MAX_CLIENT_ALIASES_REPO_PATH", str(tmp_path / "rafael-repo-aliases.json"))
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
+    edition_aliases_path().write_text(json.dumps({"clients": []}), encoding="utf-8")
+    assert is_founder_edition()
+    slugs = {c["slug"] for c in (load_client_aliases().get("clients") or [])}
+    assert "nehal-elrefai" in slugs
+    assert "emma-vita" in slugs
+    assert resolve_job_folder("dahlia")["slug"] == "nehal-elrefai"
+    assert resolve_job_folder("9408 old courthouse")["slug"] == "nehal-elrefai"
+    assert resolve_job_folder("emma vita")["slug"] == "emma-vita"
+
+
+def test_family_editions_do_not_read_repo_aliases(isolated_whatsapp_edition, tmp_path, monkeypatch):
+    from app.services.max.doc_lookup import (
+        is_founder_edition,
+        load_client_aliases,
+        resolve_job_folder,
+    )
+    from app.services.max.whatsapp_folders import resolve_or_create_folder
+
+    repo = _write_rafael_repo_aliases(tmp_path / "rafael-repo-aliases.json")
+    monkeypatch.setenv("MAX_CLIENT_ALIASES_REPO_PATH", str(repo))
+    for edition, dirname in (("amp", "amp"), ("maxine", "maxine")):
+        family_root = tmp_path / dirname
+        family_root.mkdir(exist_ok=True)
+        family_jobs = family_root / "jobs"
+        family_jobs.mkdir(exist_ok=True)
+        family_aliases = family_root / "client_aliases.json"
+        family_aliases.write_text(json.dumps({"clients": []}), encoding="utf-8")
+        monkeypatch.setenv("EMPIRE_EDITION", edition)
+        monkeypatch.setenv("EMPIRE_DATA_DIR", str(family_root))
+        monkeypatch.setenv("WHATSAPP_JOBS_ROOT", str(family_jobs))
+        monkeypatch.setenv("MAX_CLIENT_ALIASES_PATH", str(family_aliases))
+        assert not is_founder_edition()
+        slugs = {c["slug"] for c in (load_client_aliases().get("clients") or [])}
+        assert "nehal-elrefai" not in slugs
+        assert "emma-vita" not in slugs
+        for query in _FAMILY_LEAK_QUERIES:
+            assert resolve_job_folder(query) is None
+            match = resolve_or_create_folder(query)
+            assert match is None or match.get("slug") not in {"nehal-elrefai", "emma-vita"}
+        created = resolve_or_create_folder("new job dahlia")
+        assert created is None or created.get("slug") != "nehal-elrefai"
+
+
+def test_create_job_leaves_no_folder_when_aliases_corrupt(isolated_whatsapp_edition):
+    from app.services.max.doc_lookup import edition_aliases_path
+    from app.services.max.whatsapp_folders import create_client_job_folder
+
+    path = edition_aliases_path()
+    path.write_text("{not-json", encoding="utf-8")
+    assert create_client_job_folder("Pine Ridge") is None
+    assert not (jobs_root() / "pine-ridge").exists()
+    assert path.read_text(encoding="utf-8") == "{not-json"

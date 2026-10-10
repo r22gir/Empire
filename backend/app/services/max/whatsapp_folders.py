@@ -315,6 +315,13 @@ def create_client_job_folder(
     root = jobs_root(jobs_root_path)
     folder = root / slug
     existed = folder.is_dir() and (folder / JOB_RECORD_NAME).is_file()
+    try:
+        add_client_alias(title, slug, aliases=[title, name.strip()])
+    except ValueError:
+        logger.error(
+            "refusing to create job folder %s; alias write failed (corrupt?)", slug
+        )
+        return None
     folder.mkdir(parents=True, exist_ok=True)
     for sub in FOLDER_SUBDIRS:
         (folder / sub).mkdir(parents=True, exist_ok=True)
@@ -331,7 +338,6 @@ def create_client_job_folder(
             folder / JOB_RECORD_NAME,
             json.dumps(record, indent=2, sort_keys=True) + "\n",
         )
-    add_client_alias(title, slug, aliases=[title, name.strip()])
     if not existed:
         _just_created_slugs.add(slug)
     return {
