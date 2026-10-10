@@ -10,6 +10,7 @@ type Usage = {
   level?: string;
   message?: string;
   ratio?: number | null;
+  remaining_percent?: number | null;
   day?: { tokens?: number; cost_usd?: number };
   month?: { tokens?: number; cost_usd?: number };
   allowance?: number | null;
@@ -70,6 +71,7 @@ export default function UsageCard() {
       <div style={{ marginTop: 6, fontSize: 12, color: '#5C5650' }}>
         {note}
         {ratio !== null ? ` · ${ratio}% usado` : ''}
+        {typeof usage?.remaining_percent === 'number' ? ` · queda ${usage.remaining_percent}%` : ''}
         {usage?.baseline_basis && usage.baseline_basis !== 'none' ? ` · base ${usage.baseline_basis}` : ''}
       </div>
       <a href="/uso" style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: '#9a7b2f', fontWeight: 700 }}>

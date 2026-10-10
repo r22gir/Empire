@@ -9,6 +9,7 @@ type Usage = {
   message?: string;
   limit_note_es?: string;
   ratio?: number | null;
+  remaining_percent?: number | null;
   allowance?: number | null;
   baseline_basis?: string;
   day?: { tokens?: number; input_tokens?: number; output_tokens?: number; cost_usd?: number };
@@ -57,8 +58,9 @@ export default function UsoPage() {
           </p>
           <p>
             Tope {usage.cap_percent ?? 20}%
-            {usage.allowance != null ? ` · cupo ${usage.allowance}` : ' · falta la base del mes para aplicar el tope'}
+            {usage.allowance != null ? ` · cupo ${usage.allowance}` : ''}
             {typeof usage.ratio === 'number' ? ` · ${Math.round(usage.ratio * 100)}% usado` : ''}
+            {typeof usage.remaining_percent === 'number' ? ` · queda ${usage.remaining_percent}%` : ''}
             {usage.level ? ` · ${usage.level}` : ''}
           </p>
           {usage.message ? <p>{usage.message}</p> : null}
