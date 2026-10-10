@@ -5,6 +5,16 @@ import { useRouter } from 'next/navigation';
 import { useAssistantName } from '../../lib/assistant';
 import { API } from '../../lib/api';
 
+/** Only routes that exist under empire-command-center/app. */
+const ORGANIZER = [
+  { label: 'Entrevista', href: '/amp/empresas/entrevista' },
+  { label: 'Empresas', href: '/amp/empresas' },
+  { label: 'Contactos', href: '/amp/empresas' },
+  { label: 'Finanzas', href: '/amp/empresas' },
+  { label: 'Cursos', href: '/amp/cursos' },
+  { label: 'Panel', href: '/amp/dashboard' },
+] as const;
+
 export default function AmpNav({ user }: { user?: { name: string } | null }) {
   const router = useRouter();
   const assistant = useAssistantName();
@@ -26,16 +36,26 @@ export default function AmpNav({ user }: { user?: { name: string } | null }) {
         </a>
         {user && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={() => router.push('/amp/perfil')}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#9B9590', background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#9B9590', fontSize: 11, fontWeight: 600 }}>
               <User size={13} />
               <span>{user.name}</span>
-            </button>
+            </span>
             <button onClick={handleLogout} style={{ color: '#666', background: 'none', border: 'none', cursor: 'pointer' }} title="Salir">
               <LogOut size={14} />
             </button>
           </div>
         )}
+      </div>
+      <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 16px 10px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {ORGANIZER.map((item) => (
+          <a
+            key={`${item.label}-${item.href}`}
+            href={item.href}
+            style={{ color: '#D4A030', fontSize: 11, fontWeight: 700, textDecoration: 'none', letterSpacing: 0.3 }}
+          >
+            {item.label}
+          </a>
+        ))}
       </div>
     </nav>
   );

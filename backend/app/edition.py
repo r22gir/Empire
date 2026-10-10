@@ -534,6 +534,14 @@ def edition_prompt_suffix() -> str:
         default_persona(name),
         f"Default language for replies and generated content: {locale}.",
     ]
+    if is_family_edition():
+        lines.append(
+            "Responde en español salvo que pidan inglés. "
+            "Por defecto usa de 2 a 5 oraciones cortas. "
+            "Si la pregunta es vaga, haz una sola pregunta para aclarar. "
+            "Para noticias o hechos de hoy: busca primero en la web y luego resume "
+            "con 1 o 2 fuentes. No digas que no tienes información antes de buscar."
+        )
     if is_amp():
         lines.append(
             f"The app is {app_display_name()}. It is not named AMP. "

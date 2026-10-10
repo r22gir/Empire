@@ -246,6 +246,24 @@ export default function AmpDashboard() {
           )}
         </div>
 
+        {/* Organizer — only routes that exist in this app */}
+        <div style={{ background: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, border: '1px solid #F5EDE0' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#9B9590', letterSpacing: 1, marginBottom: 12 }}>ORGANIZADOR</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            {[
+              { label: 'Entrevista', href: '/amp/empresas/entrevista', color: '#D4A030' },
+              { label: 'Contactos', href: '/amp/empresas', color: '#7CB98B' },
+              { label: 'Finanzas', href: '/amp/empresas', color: '#2D2A26' },
+              { label: 'Cursos', href: '/amp/cursos', color: '#9B8EC4' },
+            ].map((item) => (
+              <button key={item.label} onClick={() => router.push(item.href)}
+                style={{ background: '#FFF9F0', border: '1px solid #F5EDE0', borderRadius: 12, padding: 14, textAlign: 'left', cursor: 'pointer' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: item.color }}>{item.label}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Book Mentoring CTA */}
         <div style={{
           background: 'linear-gradient(135deg, #2D2A26 0%, #3d3530 100%)', borderRadius: 16, padding: 20, marginBottom: 16,
@@ -402,8 +420,8 @@ export default function AmpDashboard() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
           {[
             { label: 'Cursos', icon: <BookOpen size={18} />, href: '/amp/cursos', color: '#D4A030' },
-            { label: 'Retos', icon: <Target size={18} />, href: '/amp/retos', color: '#E07A5F' },
-            { label: 'Animo', icon: <Calendar size={18} />, href: '/amp/animo', color: '#7CB98B' },
+            { label: 'Entrevista', icon: <Target size={18} />, href: '/amp/empresas/entrevista', color: '#E07A5F' },
+            { label: 'Empresas', icon: <Calendar size={18} />, href: '/amp/empresas', color: '#7CB98B' },
             { label: 'Mentoria', icon: <Video size={18} />, href: 'https://actitudmentalpositiva.com/', color: '#9B8EC4', external: true },
           ].map(link => (
             <button key={link.label} onClick={() => link.external ? window.open(link.href as string, '_blank') : router.push(link.href)}
