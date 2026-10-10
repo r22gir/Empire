@@ -69,6 +69,72 @@ def test_maxine_edition_paths_and_cap(monkeypatch, tmp_path):
     assert jobs_root().resolve() == (root / "jobs").resolve()
 
 
+def test_maxine_fail_closed_on_data_dir_basename(monkeypatch, tmp_path):
+    from app.edition import edition_name, is_family_edition, is_founder_edition, is_maxine
+
+    root = tmp_path / "maxine"
+    root.mkdir()
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(root))
+    assert is_maxine() is True
+    assert is_family_edition() is True
+    assert is_founder_edition() is False
+    assert edition_name() == "maxine"
+
+
+def test_maxine_cannot_see_workroom_inbox_chats_quotes_or_jobs(monkeypatch, tmp_path):
+    from app.api.v1 import chats as chats_mod
+    from app.edition import family_file_search_roots, module_enabled
+    from app.routers import inbox as inbox_mod
+    from app.services.data_paths import quotes_data_dir
+    from app.services.max.doc_lookup import find_docs, _hub_base
+    from app.services.max.system_prompt import get_system_prompt, _prompt_cache
+    from app.services.whatsapp_store import jobs_root
+
+    root = _maxine(monkeypatch, tmp_path)
+    workroom_inbox = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
+    workroom_chats = Path(__file__).resolve().parents[1] / "data" / "chats"
+    inbox = Path(inbox_mod._inbox_dir()).resolve()
+    chats = chats_mod._chats_dir().resolve()
+    quotes = quotes_data_dir().resolve()
+    jobs = jobs_root().resolve()
+    assert inbox == (root / "inbox").resolve()
+    assert chats == (root / "chats").resolve()
+    assert quotes == (root / "quotes").resolve()
+    assert jobs == (root / "jobs").resolve()
+    assert inbox != workroom_inbox.resolve()
+    assert chats != workroom_chats.resolve()
+    assert list(inbox.glob("*.json")) == []
+    assert list(chats.glob("**/*.json")) == []
+    assert _hub_base() is None
+    assert find_docs("dahlia")["docs"] == []
+    for path in family_file_search_roots():
+        assert path.resolve().is_relative_to(root.resolve())
+        assert "empire-repo" not in str(path)
+    assert module_enabled("drawings") is False
+    _prompt_cache.update({"prompt": None, "expires": 0, "edition": None})
+    prompt = get_system_prompt()
+    for leak in (
+        "5124 Frolich",
+        "Nelma's Workroom",
+        "Nehal Elrefai",
+        "The Willard Hotel",
+        "Empire Workroom",
+    ):
+        assert leak not in prompt
+
+
+def test_maxine_env_example_has_no_owner_number_or_token():
+    text = Path(__file__).resolve().parents[2].joinpath(
+        "deploy", "empire-maxine.env.example"
+    ).read_text(encoding="utf-8")
+    assert "WHATSAPP_OWNER_NUMBERS=" in text
+    assert "3122842350" not in text
+    assert "3174437313" not in text
+    assert "EAA" not in text
+    assert "INSTANCE_USAGE_CAP_PCT=20" in text
+
+
 def test_maxine_does_not_see_workroom_or_amp_aliases(monkeypatch, tmp_path):
     from app.services.max.doc_lookup import load_client_aliases, resolve_job_folder
     from app.edition import workroom_business_config
