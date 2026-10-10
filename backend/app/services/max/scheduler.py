@@ -10,7 +10,10 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from pathlib import Path
+
 from app.config.business_config import biz
+from app.edition import brain_sync_storage_paths
 
 logger = logging.getLogger("max.scheduler")
 
@@ -373,19 +376,19 @@ class MaxScheduler:
             except Exception as e:
                 logger.error(f"Brain sync DB stats failed: {e}")
 
-            # Quote file count
-            quotes_dir = Path.home() / "empire-repo" / "backend" / "data" / "quotes"
+            # Quote / inbox / brain counts — edition data root on family, never HOME/repo.
+            storage = brain_sync_storage_paths()
+            quotes_dir = storage["quotes"]
             quote_count = len(list(quotes_dir.glob("*.json"))) if quotes_dir.exists() else 0
 
-            # Inbox count
-            inbox_dir = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
+            inbox_dir = storage["inbox"]
             inbox_count = len(list(inbox_dir.glob("*.json"))) if inbox_dir.exists() else 0
 
             # Brain memories count
             brain_memories = 0
             try:
                 import sqlite3
-                brain_db = Path.home() / "empire-repo" / "backend" / "data" / "brain" / "memories.db"
+                brain_db = storage["brain_db"]
                 if brain_db.exists():
                     bconn = sqlite3.connect(str(brain_db))
                     brain_memories = bconn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
@@ -404,14 +407,15 @@ class MaxScheduler:
             except Exception:
                 sys_info = "unavailable"
 
-            # Backend router count (approximate from main.py)
+            # Backend router count. Family editions do not read the repo or HOME.
             router_count = 0
-            try:
-                main_py = Path.home() / "empire-repo" / "backend" / "app" / "main.py"
-                if main_py.exists():
-                    router_count = main_py.read_text().count("load_router(")
-            except Exception:
-                pass
+            if not is_family_edition():
+                try:
+                    main_py = Path.home() / "empire-repo" / "backend" / "app" / "main.py"
+                    if main_py.exists():
+                        router_count = main_py.read_text().count("load_router(")
+                except Exception:
+                    pass
 
             # Active tasks summary
             active_tasks_summary = ""

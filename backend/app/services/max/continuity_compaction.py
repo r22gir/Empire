@@ -15,6 +15,14 @@ CONTEXT_TOKEN_THRESHOLD = 120_000
 PACKET_SCHEMA_VERSION = 1
 HANDOFF_PATH = Path.home() / "empire-repo" / "backend" / "data" / "max" / "session_handoff.json"
 
+
+def default_handoff_path() -> Path:
+    try:
+        from app.edition import session_handoff_path
+        return session_handoff_path()
+    except Exception:
+        return HANDOFF_PATH
+
 COMPACTION_POLICY = {
     "threshold_tokens": CONTEXT_TOKEN_THRESHOLD,
     "triggers": [
@@ -88,8 +96,21 @@ def _git_commit() -> str:
         return ""
 
 
+def _task_db_path() -> Path:
+    raw = os.getenv("EMPIRE_TASK_DB", "").strip()
+    if raw:
+        return Path(raw)
+    try:
+        from app.edition import is_family_edition, require_data_root
+        if is_family_edition():
+            return require_data_root() / "empire.db"
+    except Exception:
+        pass
+    return Path.home() / "empire-data" / "empire.db"
+
+
 def _active_task_state() -> dict[str, Any]:
-    db_path = os.getenv("EMPIRE_TASK_DB", str(Path.home() / "empire-data" / "empire.db"))
+    db_path = str(_task_db_path())
     try:
         import sqlite3
         with sqlite3.connect(db_path) as conn:
@@ -141,7 +162,7 @@ def create_founder_handoff(
     path: Path | None = None,
 ) -> dict[str, Any]:
     """Refresh a founder-visible session handoff packet from current runtime truth."""
-    path = path or HANDOFF_PATH
+    path = path or default_handoff_path()
     runtime_truth = _runtime_truth()
 
     active_state = _active_task_state()
@@ -282,13 +303,15 @@ def build_session_handoff_packet(
     }
 
 
-def write_session_handoff_packet(packet: dict[str, Any], path: Path = HANDOFF_PATH) -> Path:
+def write_session_handoff_packet(packet: dict[str, Any], path: Path | None = None) -> Path:
+    path = path or default_handoff_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8")
     return path
 
 
-def read_session_handoff_packet(path: Path = HANDOFF_PATH) -> dict[str, Any] | None:
+def read_session_handoff_packet(path: Path | None = None) -> dict[str, Any] | None:
+    path = path or default_handoff_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if data.get("packet_schema_version") != PACKET_SCHEMA_VERSION:
@@ -302,7 +325,8 @@ def read_session_handoff_packet(path: Path = HANDOFF_PATH) -> dict[str, Any] | N
         return None
 
 
-def restore_session_handoff(path: Path = HANDOFF_PATH) -> dict[str, Any]:
+def restore_session_handoff(path: Path | None = None) -> dict[str, Any]:
+    path = path or default_handoff_path()
     packet = read_session_handoff_packet(path)
     if not packet:
         return {"restored": False, "reason": "no valid handoff packet"}

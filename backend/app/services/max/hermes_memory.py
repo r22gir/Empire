@@ -16,10 +16,14 @@ TRUTH_HIERARCHY = ("runtime", "registry", "repo_truth", "hermes_memory", "skills
 
 
 def memory_root() -> Path:
-    raw = os.getenv(MEMORY_ROOT_ENV)
-    if raw:
-        return Path(raw).expanduser()
-    return Path.home() / "empire-box-memory"
+    try:
+        from app.edition import hermes_memory_dir
+        return hermes_memory_dir()
+    except Exception:
+        raw = os.getenv(MEMORY_ROOT_ENV)
+        if raw:
+            return Path(raw).expanduser()
+        return Path.home() / "empire-box-memory"
 
 
 def context_path() -> Path:
@@ -71,6 +75,20 @@ Suggested sections:
 
 
 def _default_user() -> str:
+    try:
+        from app.edition import AMP_COACH_NAME, MAXINE_OWNER_NAME, is_amp, is_family_edition
+        if is_family_edition():
+            owner = AMP_COACH_NAME if is_amp() else MAXINE_OWNER_NAME
+            return (
+                f"# USER\n\n"
+                f"Nombre: {owner}\n"
+                f"Rol: founder\n"
+                f"Preferencias: (vacío)\n"
+                f"Notas: (vacío)\n\n"
+                f"Esta instancia no hereda datos del Workroom.\n"
+            )
+    except Exception:
+        pass
     return """# USER
 
 Hermes maintains this file.
