@@ -490,6 +490,8 @@ def isolated_whatsapp_edition(tmp_path, monkeypatch):
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(root))
     monkeypatch.setenv("WHATSAPP_JOBS_ROOT", str(jobs))
     monkeypatch.setenv("FOUNDER_PIN", "test-founder-pin")
+    monkeypatch.setenv("WHATSAPP_PHOTO_BATCH_SECONDS", "0")
+    monkeypatch.setenv("WHATSAPP_JOB_HINT_SECONDS", "600")
     labels = _write_test_whatsapp_labels(root)
     monkeypatch.setenv("WHATSAPP_LABELS", str(labels))
     for name in (

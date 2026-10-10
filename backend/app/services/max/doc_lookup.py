@@ -360,6 +360,11 @@ def probe_job_text(
     if quoted:
         return {"status": "unique", "match": quoted, "matches": [quoted]}
 
+    text_tokens: list[str] = []
+    for w in _words(raw_text):
+        text_tokens.extend(_depossess(w))
+    text_token_set = {t for t in text_tokens if t and t not in FILLER}
+
     matches: list[dict[str, Any]] = []
     for client in _clients():
         c_slug = client.get("slug") or slugify(client.get("name", ""))
@@ -367,16 +372,23 @@ def probe_job_text(
         terms = [c_slug, str(c_name).lower()] + [str(a).lower() for a in client.get("aliases") or []]
         if client.get("address"):
             terms.append(str(client.get("address")).lower())
+        hit = ""
         for term in terms:
             norm_term = normalize_term(term)
             if norm_term and re.search(r"\b" + re.escape(norm_term) + r"\b", norm_text):
-                matches.append({
-                    "slug": c_slug,
-                    "client_name": c_name,
-                    "folder_path": str(base_dir / c_slug),
-                    "match_reason": f"matched term '{norm_term}'",
-                })
+                hit = norm_term
                 break
+            term_words = [w for w in _words(term) if w not in FILLER and len(w) >= 3]
+            if term_words and all(any(tw == nw for tw in text_token_set) for nw in term_words):
+                hit = norm_term or term
+                break
+        if hit:
+            matches.append({
+                "slug": c_slug,
+                "client_name": c_name,
+                "folder_path": str(base_dir / c_slug),
+                "match_reason": f"matched term '{hit}'",
+            })
 
     if len(matches) == 1:
         return {"status": "unique", "match": matches[0], "matches": matches}
@@ -459,3 +471,47 @@ def list_job_folders(*, jobs_root_path: Optional[Path | str] = None) -> list[dic
             continue
         found[slug]["client_name"] = str(client.get("name") or found[slug]["client_name"])
     return sorted(found.values(), key=lambda row: row["slug"])
+
+
+def list_known_jobs(*, jobs_root_path: Optional[Path | str] = None) -> list[dict[str, str]]:
+    """Alias clients plus existing folders — used for close-match questions."""
+    base_dir = jobs_root(jobs_root_path)
+    found: dict[str, dict[str, str]] = {}
+    for client in _clients():
+        slug = str(client.get("slug") or slugify(client.get("name", "")))
+        if slug:
+            found[slug] = {
+                "slug": slug,
+                "client_name": str(client.get("name") or slug),
+                "folder_path": str(base_dir / slug),
+            }
+    for row in list_job_folders(jobs_root_path=jobs_root_path):
+        found.setdefault(row["slug"], row)
+    return sorted(found.values(), key=lambda row: row["slug"])
+
+
+def suggest_jobs(text: str, *, jobs_root_path: Optional[Path | str] = None, limit: int = 5) -> list[dict[str, str]]:
+    """Closest alias/folder names. Never auto-picks; callers must ask."""
+    terms = [w for w in _words(text or "") if w not in FILLER and not w.isdigit()]
+    expanded = []
+    for t in terms:
+        expanded.extend(_depossess(t))
+    if not expanded:
+        return list_known_jobs(jobs_root_path=jobs_root_path)[:limit]
+    scored: list[tuple[float, dict[str, str]]] = []
+    for row in list_known_jobs(jobs_root_path=jobs_root_path):
+        names = [row.get("slug") or "", row.get("client_name") or ""]
+        best = 0.0
+        for name in names:
+            for nw in _words(name):
+                if nw in FILLER:
+                    continue
+                for t in expanded:
+                    best = max(best, difflib.SequenceMatcher(None, nw, t).ratio())
+        if best >= 0.35:
+            scored.append((best, row))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    picked = [row for _score, row in scored[:limit]]
+    if picked:
+        return picked
+    return list_known_jobs(jobs_root_path=jobs_root_path)[:limit]
