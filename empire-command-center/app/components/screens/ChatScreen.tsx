@@ -19,6 +19,9 @@ import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../
 import FounderPinCard from '../chat/FounderPinCard';
 import { useTranslation } from '../../lib/i18n';
 import { composerLooksLikePin } from '../../lib/founderPin';
+import { useJob } from '../../hooks/useJob';
+import JobFolderModal from '../jobs/JobFolderModal';
+import { Briefcase, FolderOpen } from 'lucide-react';
 import {
   HOLD_ARM_MS,
   HOLD_LONGER_HINT,
@@ -134,6 +137,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const { locale } = useTranslation();
   const localeRef = useRef(locale);
   useEffect(() => { localeRef.current = locale; }, [locale]);
+
+  const { activeJob, clearJob } = useJob();
+  const [chatFolderOpen, setChatFolderOpen] = useState(false);
   useEffect(() => { recordingRef.current = recording; }, [recording]);
   useEffect(() => {
     const coarse = window.matchMedia('(pointer: coarse)').matches;
@@ -724,6 +730,110 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         }}>
           {quickQuoteNotice}
         </div>
+      )}
+
+      {/* Current Job Chip in Chat Header */}
+      {activeJob && (
+        <div
+          data-testid="chat-current-job-chip"
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            padding: '6px 14px',
+            background: '#121214',
+            borderBottom: '2px solid #b8960c',
+            color: '#fff',
+            fontSize: 11,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <span
+              style={{
+                background: 'linear-gradient(135deg, #b8960c, #d4af37)',
+                color: '#121214',
+                fontSize: '9px',
+                fontWeight: 800,
+                padding: '2px 6px',
+                borderRadius: '4px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              CURRENT JOB
+            </span>
+            <span style={{ fontWeight: 700, color: '#f5f2ed', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {activeJob.client_name || 'Client'}
+            </span>
+            <span style={{ color: '#b8960c', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+              ({activeJob.job_number || `JOB-${activeJob.id}`})
+            </span>
+            <span
+              style={{
+                background: '#222',
+                color: '#aaa',
+                border: '1px solid #444',
+                padding: '1px 6px',
+                borderRadius: '4px',
+                fontSize: '9px',
+                textTransform: 'uppercase',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {activeJob.pipeline_stage || activeJob.status}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => setChatFolderOpen(true)}
+              style={{
+                minHeight: '28px',
+                padding: '2px 8px',
+                borderRadius: '6px',
+                background: '#222',
+                border: '1px solid #b8960c',
+                color: '#b8960c',
+                fontSize: '10px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <FolderOpen size={12} />
+              <span>Job Docs</span>
+            </button>
+            <button
+              type="button"
+              onClick={clearJob}
+              title="Unlink job from Max conversation"
+              style={{
+                minHeight: '28px',
+                background: 'none',
+                border: 'none',
+                color: '#777',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0 4px',
+              }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {chatFolderOpen && activeJob && (
+        <JobFolderModal
+          jobId={activeJob.id}
+          isOpen={chatFolderOpen}
+          onClose={() => setChatFolderOpen(false)}
+        />
       )}
 
       {maxStatus && (

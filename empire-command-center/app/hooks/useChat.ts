@@ -221,6 +221,12 @@ export function useChat() {
       };
       if (desk) body.desk = desk;
       if (imageFilename) body.image_filename = imageFilename;
+      try {
+        const activeJobId = localStorage.getItem('empire-active-job-id');
+        if (activeJobId) {
+          body.job_id = activeJobId;
+        }
+      } catch { /* ignore storage errors */ }
 
       const response = await fetch(API + '/max/chat/stream', {
         method: 'POST',

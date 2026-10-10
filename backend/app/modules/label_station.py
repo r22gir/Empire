@@ -49,6 +49,10 @@ router = APIRouter(prefix="/label", tags=["label-station"])
 
 # --------------------------------------------------------------------- db
 def _conn() -> sqlite3.Connection:
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
+    except Exception:
+        pass
     c = sqlite3.connect(DB_PATH, timeout=10)
     c.row_factory = sqlite3.Row
     return c

@@ -806,6 +806,7 @@ class ChatRequest(BaseModel):
     channel: Optional[str] = None  # "telegram", "web", etc.
     chat_id: Optional[str] = None  # Telegram chat ID for founder detection
     presentation: bool = False  # Presentation Mode: short speech, detail on the stage
+    job_id: Optional[str] = None  # Active job ID from client context
 
 
 class RoutingStateUpdateRequest(BaseModel):
@@ -3732,7 +3733,7 @@ async def _chat_with_max_service_impl(
                         mark_untrusted(_ac_context, (_prev or {}).get("tool") if isinstance(_prev, dict) else None)
                 except Exception:
                     pass
-                result = await _execute_tool_nonblocking(tc, desk=request.desk, access_context=_ac_context, founder=founder)
+                result = await _execute_tool_nonblocking(tc, desk=request.desk, access_context=_ac_context, founder=founder, job_id=request.job_id)
                 follow_tc = None
                 if _sketch_error_names_render_shop(result):
                     result, follow_tc = await _maybe_auto_follow_render_shop(
@@ -4957,7 +4958,7 @@ async def _chat_stream_impl(request: ChatRequest):
                         pass
                     try:
                         result = await asyncio.wait_for(
-                            _execute_tool_nonblocking(tc, desk=request.desk, access_context=_stream_ac_context, founder=founder),
+                            _execute_tool_nonblocking(tc, desk=request.desk, access_context=_stream_ac_context, founder=founder, job_id=request.job_id),
                             timeout=90,
                         )
                     except asyncio.TimeoutError:

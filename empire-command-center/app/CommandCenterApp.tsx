@@ -116,6 +116,7 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
 
 const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'pricing-studio': 'pricing-studio',
+  'jobs': 'jobs',
   calendar: 'calendar',
   schedule: 'calendar',
 };

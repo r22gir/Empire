@@ -279,6 +279,12 @@ body:has([data-channel-page]) {
   height: auto;
 }
 
+/* Allow scrolling on jobs, kanban and per-job folder views */
+body:has([data-jobs-scrollable]) {
+  overflow-y: auto !important;
+  height: auto !important;
+}
+
 /* R1X-PUB-EMPIREBOX: Allow scrolling on the public apex landing page.
    The default body is height:100vh / overflow:hidden for the Command Center;
    the landing page is a long scrollable public surface and needs the same
