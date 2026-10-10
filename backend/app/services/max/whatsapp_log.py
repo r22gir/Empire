@@ -24,7 +24,14 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from app.services.data_paths import data_root
-from app.services.max.doc_lookup import existing_job_slug, jobs_root, list_job_folders, probe_job_text, resolve_job_folder
+from app.services.max.doc_lookup import (
+    existing_job_slug,
+    jobs_root,
+    list_job_folders,
+    probe_job_text,
+    resolve_job_folder,
+    suggest_jobs,
+)
 
 logger = logging.getLogger("max.whatsapp_log")
 
@@ -41,11 +48,18 @@ _SECRET_ENVS = (
 DEFAULT_MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024
 DEFAULT_RETENTION_DAYS = 365
 DEFAULT_JOB_ANSWER_TIMEOUT = 1800
+DEFAULT_PHOTO_BATCH_SECONDS = 120
+DEFAULT_JOB_HINT_SECONDS = 600
 JOB_ASK_TEXT = (
     "Which job should I file this under? Reply with the client name, nickname, "
     "job address, or quote number. I will not guess. Reply skip to leave it in the inbox."
 )
 JOB_SKIP_WORDS = {"skip", "cancel"}
+QUOTE_ASK_RE = re.compile(
+    r"\b(quote|quotes|estimate|estimates|price|pricing|cost|costs|"
+    r"cotizaci[oó]n|cotizacion|presupuesto|presupuestos|how\s+much)\b",
+    re.IGNORECASE,
+)
 FILEABLE_TYPES = {"image", "photo", "document"}
 UNSAFE_MEDIA_TYPES = {
     "text/html",
@@ -74,6 +88,52 @@ def get_max_attachment_size() -> int:
     except Exception:
         pass
     return DEFAULT_MAX_ATTACHMENT_SIZE
+
+
+def photo_batch_window_seconds() -> float:
+    try:
+        val = os.getenv("WHATSAPP_PHOTO_BATCH_SECONDS")
+        if val is not None and str(val).strip() != "":
+            return max(0.0, float(val))
+    except Exception:
+        pass
+    return float(DEFAULT_PHOTO_BATCH_SECONDS)
+
+
+def job_hint_window_seconds() -> float:
+    try:
+        val = os.getenv("WHATSAPP_JOB_HINT_SECONDS")
+        if val is not None and str(val).strip() != "":
+            return max(60.0, float(val))
+    except Exception:
+        pass
+    return float(DEFAULT_JOB_HINT_SECONDS)
+
+
+def wants_photo_quote(*texts: str) -> bool:
+    """True only when the sender explicitly asked to price/quote the photo."""
+    blob = " ".join(str(t or "") for t in texts)
+    return bool(QUOTE_ASK_RE.search(blob))
+
+
+def format_job_ask(*, matches: Optional[list] = None, hint: str = "") -> str:
+    names = []
+    for row in matches or suggest_jobs(hint):
+        label = str(row.get("client_name") or row.get("slug") or "").strip()
+        if label and label not in names:
+            names.append(label)
+    if not names:
+        from app.services.max.doc_lookup import list_known_jobs
+
+        names = [str(row.get("client_name") or row.get("slug") or "") for row in list_known_jobs()[:5]]
+        names = [n for n in names if n]
+    if names:
+        listed = ", ".join(names[:5])
+        return (
+            f"I don't have a unique job for that. Closest: {listed}. "
+            "Reply with the client name, nickname, address, or quote number, or skip."
+        )
+    return JOB_ASK_TEXT
 
 
 def get_job_answer_timeout() -> int:
@@ -197,6 +257,17 @@ def init_db() -> None:
                     wa_id TEXT PRIMARY KEY,
                     attachment_ids TEXT NOT NULL,
                     asked_at TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS whatsapp_media_batches (
+                    wa_id TEXT PRIMARY KEY,
+                    attachment_ids TEXT NOT NULL,
+                    last_at TEXT NOT NULL,
+                    hint_text TEXT DEFAULT '',
+                    asked INTEGER DEFAULT 0
                 )
                 """
             )
@@ -976,18 +1047,209 @@ def _pending_ask_expired(asked_at: str) -> bool:
         return False
 
 
-def consume_job_answer(wa_id: str, text: str) -> Optional[dict[str, Any]]:
-    """Consume a parked-file reply only when it clearly names one job, or skip/timeout."""
-    state = get_pending_filing_state(wa_id)
-    pending = state.get("ids") or []
-    if not pending:
+def recent_inbound_texts(wa_id: str, *, seconds: Optional[float] = None) -> list[str]:
+    """Inbound captions/bodies from this sender in the job-hint window."""
+    window = job_hint_window_seconds() if seconds is None else seconds
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=max(0.0, window))
+    init_db()
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT body, caption, timestamp, message_type
+            FROM whatsapp_messages
+            WHERE wa_id = ? AND direction = 'inbound'
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 40
+            """,
+            (str(wa_id or "").strip(),),
+        ).fetchall()
+    finally:
+        conn.close()
+    found: list[str] = []
+    for row in rows:
+        ts = iso_from_wa_timestamp(row["timestamp"])
+        try:
+            parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if parsed < cutoff:
+                continue
+        except ValueError:
+            continue
+        for part in (row["caption"], row["body"]):
+            text = str(part or "").strip()
+            if text and text not in found:
+                found.append(text)
+    return found
+
+
+def combined_job_hint(wa_id: str, *extra: str) -> str:
+    parts = [str(x).strip() for x in extra if str(x or "").strip()]
+    parts.extend(recent_inbound_texts(wa_id))
+    seen: list[str] = []
+    for part in parts:
+        if part not in seen:
+            seen.append(part)
+    return " ".join(seen)
+
+
+def _load_batch(wa_id: str) -> dict[str, Any]:
+    init_db()
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT wa_id, attachment_ids, last_at, hint_text, asked FROM whatsapp_media_batches WHERE wa_id = ?",
+            (str(wa_id or "").strip(),),
+        ).fetchone()
+        if not row:
+            return {"ids": [], "last_at": "", "hint_text": "", "asked": 0}
+        try:
+            ids = json.loads(row["attachment_ids"] or "[]")
+        except Exception:
+            ids = []
+        return {
+            "ids": [int(i) for i in ids if str(i).isdigit() or isinstance(i, int)],
+            "last_at": str(row["last_at"] or ""),
+            "hint_text": str(row["hint_text"] or ""),
+            "asked": int(row["asked"] or 0),
+        }
+    finally:
+        conn.close()
+
+
+def record_media_batch(wa_id: str, attachment_ids: list[int], hint_text: str = "") -> None:
+    """Add fileable items to the open batch (same sender, within the batch window)."""
+    if not attachment_ids:
+        return
+    now = datetime.now(timezone.utc)
+    existing = _load_batch(wa_id)
+    keep = False
+    if existing.get("last_at"):
+        try:
+            last = datetime.fromisoformat(str(existing["last_at"]).replace("Z", "+00:00"))
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            keep = (now - last).total_seconds() <= max(photo_batch_window_seconds(), 1.0)
+        except ValueError:
+            keep = False
+    ids = list(existing["ids"]) if keep else []
+    for att_id in attachment_ids:
+        if int(att_id) not in ids:
+            ids.append(int(att_id))
+    hint = existing["hint_text"] if keep else ""
+    extra = (hint_text or "").strip()
+    if extra and extra not in hint:
+        hint = f"{hint} {extra}".strip()
+    init_db()
+    with _lock:
+        conn = _get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO whatsapp_media_batches (wa_id, attachment_ids, last_at, hint_text, asked)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(wa_id) DO UPDATE SET
+                   attachment_ids=excluded.attachment_ids,
+                   last_at=excluded.last_at,
+                   hint_text=excluded.hint_text,
+                   asked=0""",
+                (str(wa_id or "").strip(), json.dumps(ids), now.isoformat(), hint, 0),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def clear_media_batch(wa_id: str) -> None:
+    init_db()
+    with _lock:
+        conn = _get_conn()
+        try:
+            conn.execute("DELETE FROM whatsapp_media_batches WHERE wa_id = ?", (str(wa_id or "").strip(),))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _file_pending_ids(wa_id: str, match: dict[str, Any], pending: list[int]) -> list[dict[str, Any]]:
+    results = []
+    named = (jobs_root() / match["slug"]).resolve()
+    root = jobs_root().resolve()
+    if named.parent == root:
+        named.mkdir(parents=True, exist_ok=True)
+    for att_id in pending:
+        try:
+            results.append(refile_attachment(att_id, match["slug"]))
+        except Exception as exc:
+            logger.warning("refile on job answer failed for %s: %s", att_id, exc)
+    return results
+
+
+def _filed_confirmation(count: int, match: dict[str, Any]) -> str:
+    name = match.get("client_name") or match.get("slug") or "the job"
+    noun = "photo" if count == 1 else "photos"
+    return f"Filed {count} {noun} under {name}."
+
+
+def finalize_photo_batch(wa_id: str, *, hint_text: str = "", force_ask: bool = False) -> Optional[dict[str, Any]]:
+    """One confirmation or one ask for the open photo batch."""
+    batch = _load_batch(wa_id)
+    pending_ids = list(get_pending_filings(wa_id))
+    ids = list(dict.fromkeys((batch.get("ids") or []) + pending_ids))
+    if not ids and not force_ask:
         return None
-    if _pending_ask_expired(state.get("asked_at") or ""):
+    hint = combined_job_hint(wa_id, hint_text, batch.get("hint_text") or "")
+    probed = probe_job_text(hint)
+    if probed.get("status") == "unique":
+        match = probed["match"]
+        results = _file_pending_ids(wa_id, match, ids)
         clear_pending_filings(wa_id)
+        clear_media_batch(wa_id)
+        set_active_job(wa_id, match["slug"], match.get("client_name", ""), match.get("folder_path", ""))
+        filed_n = len(results) or len(ids)
+        return {
+            "handled": True,
+            "status": "filed",
+            "job": match,
+            "reply": _filed_confirmation(filed_n, match),
+            "results": results,
+        }
+    if batch.get("asked") and not force_ask:
+        return None
+    ask = format_job_ask(matches=probed.get("matches") or suggest_jobs(hint), hint=hint)
+    if ids:
+        set_pending_filings(wa_id, ids)
+    init_db()
+    with _lock:
+        conn = _get_conn()
+        try:
+            conn.execute(
+                "UPDATE whatsapp_media_batches SET asked = 1 WHERE wa_id = ?",
+                (str(wa_id or "").strip(),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return {"handled": True, "status": "need_job", "reply": ask, "matches": suggest_jobs(hint)}
+
+
+def consume_job_answer(wa_id: str, text: str) -> Optional[dict[str, Any]]:
+    """Resolve a pending batch/ask against folders and aliases. Never stay silent."""
+    state = get_pending_filing_state(wa_id)
+    pending = list(state.get("ids") or [])
+    batch = _load_batch(wa_id)
+    if not pending:
+        pending = list(batch.get("ids") or [])
+    if not pending and not batch.get("ids"):
+        return None
+    if pending and _pending_ask_expired(state.get("asked_at") or ""):
+        clear_pending_filings(wa_id)
+        clear_media_batch(wa_id)
         return None
     stripped = (text or "").strip().lower().rstrip(".!")
     if stripped in JOB_SKIP_WORDS:
         clear_pending_filings(wa_id)
+        clear_media_batch(wa_id)
         return {
             "handled": True,
             "status": "skipped",
@@ -996,26 +1258,23 @@ def consume_job_answer(wa_id: str, text: str) -> Optional[dict[str, Any]]:
     probed = probe_job_text(text)
     if probed.get("status") == "unique":
         match = probed["match"]
-        results = []
-        named = (jobs_root() / match["slug"]).resolve()
-        root = jobs_root().resolve()
-        if named.parent == root:
-            named.mkdir(parents=True, exist_ok=True)
-        for att_id in pending:
-            try:
-                results.append(refile_attachment(att_id, match["slug"]))
-            except Exception as exc:
-                logger.warning("refile on job answer failed for %s: %s", att_id, exc)
+        results = _file_pending_ids(wa_id, match, pending or batch.get("ids") or [])
         clear_pending_filings(wa_id)
+        clear_media_batch(wa_id)
         set_active_job(wa_id, match["slug"], match.get("client_name", ""), match.get("folder_path", ""))
         return {
             "handled": True,
             "status": "filed",
             "job": match,
-            "reply": f"Filed under {match.get('client_name') or match['slug']} ({match['slug']}).",
+            "reply": _filed_confirmation(len(results) or len(pending), match),
             "results": results,
         }
-    return None
+    ask = format_job_ask(
+        matches=probed.get("matches") or suggest_jobs(text),
+        hint=text,
+    )
+    return {"handled": True, "status": "need_job", "reply": ask, "matches": suggest_jobs(text)}
+
 
 
 def note_inbox_ask(wa_id: str, attachments: list[dict]) -> bool:

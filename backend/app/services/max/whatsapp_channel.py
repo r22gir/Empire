@@ -357,44 +357,7 @@ def parse_inbound(payload: dict | None) -> list[dict[str, Any]]:
             for message in value.get("messages") or []:
                 if not isinstance(message, dict):
                     continue
-                kind = str(message.get("type") or "")
-                item: dict[str, Any] = {
-                    "message_id": str(message.get("id") or ""),
-                    "from": str(message.get("from") or ""),
-                    "timestamp": message.get("timestamp"),
-                    "type": kind,
-                    "text": "",
-                    "media_id": "",
-                    "mime_type": "",
-                    "caption": "",
-                    "voice": False,
-                    "filename": "",
-                }
-                if kind == "text":
-                    item["text"] = str((message.get("text") or {}).get("body") or "")
-                elif kind in {"audio", "image", "video", "document", "sticker"}:
-                    media = message.get(kind) or {}
-                    if isinstance(media, dict):
-                        item["media_id"] = str(media.get("id") or "")
-                        item["mime_type"] = str(media.get("mime_type") or "")
-                        item["caption"] = str(media.get("caption") or "")
-                        item["voice"] = bool(media.get("voice"))
-                        item["filename"] = str(media.get("filename") or "")
-                elif kind == "location":
-                    loc = message.get("location") or {}
-                    if isinstance(loc, dict):
-                        lat = loc.get("latitude")
-                        lon = loc.get("longitude")
-                        name = loc.get("name") or loc.get("address") or ""
-                        item["text"] = f"Location: {lat}, {lon} ({name})".strip()
-                        item["location"] = loc
-                elif kind in {"system", "button", "interactive"}:
-                    item["text"] = str(
-                        (message.get("system") or {}).get("body")
-                        or (message.get("button") or {}).get("text")
-                        or kind
-                    )
-                found.append(item)
+                found.append(_normalize_inbound_message(message))
             for call in value.get("calls") or []:
                 if not isinstance(call, dict):
                     continue
@@ -413,6 +376,92 @@ def parse_inbound(payload: dict | None) -> list[dict[str, Any]]:
                     "call_event": event,
                 })
     return found
+
+
+def _interactive_text(message: dict[str, Any]) -> str:
+    inter = message.get("interactive") or {}
+    if not isinstance(inter, dict):
+        return ""
+    for key in ("nfm_reply", "button_reply", "list_reply"):
+        part = inter.get(key) or {}
+        if isinstance(part, dict):
+            text = str(part.get("body") or part.get("title") or part.get("description") or "").strip()
+            if text:
+                return text
+    return str(inter.get("body") or "").strip()
+
+
+def _raw_text_body(message: dict[str, Any]) -> str:
+    raw = message.get("text")
+    if isinstance(raw, dict):
+        return str(raw.get("body") or raw.get("text") or "").strip()
+    if raw:
+        return str(raw).strip()
+    return ""
+
+
+def _extract_inbound_text(message: dict[str, Any]) -> str:
+    """Pull a usable body from text, replies, albums, interactive, or unknown types."""
+    return (
+        _raw_text_body(message)
+        or _interactive_text(message)
+        or str((message.get("button") or {}).get("text") or "").strip()
+        or str((message.get("system") or {}).get("body") or "").strip()
+        or str((message.get("reaction") or {}).get("emoji") or "").strip()
+    )
+
+
+def _normalize_inbound_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Flatten one Cloud API message. Album captions, context replies, and
+    unknown/interactive types with a body become normal text so they are not
+    answered with 'That message type is not handled.'
+    """
+    raw_type = str(message.get("type") or "").strip().lower()
+    ctx = message.get("context") if isinstance(message.get("context"), dict) else {}
+    item: dict[str, Any] = {
+        "message_id": str(message.get("id") or ""),
+        "from": str(message.get("from") or ""),
+        "timestamp": message.get("timestamp"),
+        "type": raw_type,
+        "raw_type": raw_type,
+        "text": "",
+        "media_id": "",
+        "mime_type": "",
+        "caption": "",
+        "voice": False,
+        "filename": "",
+        "context_id": str(ctx.get("id") or ""),
+        "context_from": str(ctx.get("from") or ""),
+    }
+    extracted = _extract_inbound_text(message)
+    if raw_type in {"audio", "image", "video", "document", "sticker"}:
+        media = message.get(raw_type) or {}
+        if isinstance(media, dict):
+            item["media_id"] = str(media.get("id") or "")
+            item["mime_type"] = str(media.get("mime_type") or "")
+            item["caption"] = str(media.get("caption") or "")
+            item["voice"] = bool(media.get("voice"))
+            item["filename"] = str(media.get("filename") or "")
+        if extracted and not item["caption"]:
+            item["caption"] = extracted
+    elif raw_type == "location":
+        loc = message.get("location") or {}
+        if isinstance(loc, dict):
+            lat = loc.get("latitude")
+            lon = loc.get("longitude")
+            name = loc.get("name") or loc.get("address") or ""
+            item["text"] = extracted or f"Location: {lat}, {lon} ({name})".strip()
+            item["location"] = loc
+    else:
+        # text, button, interactive, system, unknown, unsupported, empty,
+        # album companion comments, and replies that carry context.
+        item["text"] = extracted
+        placeholder = raw_type in {"", "unknown", "unsupported", "interactive", "button", "system"}
+        if item["text"] and (placeholder or raw_type not in {"call", "contacts", "order", "reaction"}):
+            item["type"] = "text"
+        elif raw_type in {"unknown", "unsupported", ""}:
+            item["type"] = "text" if item["text"] else "ignored"
+    return item
 
 
 async def _safe_download(
@@ -452,6 +501,8 @@ def _persist_inbound_media(
     message: dict[str, Any],
     content: bytes,
     mime: str,
+    *,
+    hint_text: str = "",
 ) -> list[dict[str, Any]]:
     """Save inbound bytes and file photos/docs when the job is known."""
     from app.services.max.whatsapp_log import prepare_inbound_attachment
@@ -460,7 +511,7 @@ def _persist_inbound_media(
     media_type = "voice" if (message.get("voice") or kind == "audio") else kind
     if kind == "image":
         media_type = "image"
-    hint = str(message.get("caption") or message.get("text") or "")
+    hint = hint_text or str(message.get("caption") or message.get("text") or "")
     fileable = media_type in {"image", "document"}
     if not content and kind != "location":
         return []
@@ -1562,6 +1613,7 @@ async def default_photo_handler(image: bytes, mime: str, caption: str, wa_id: st
 
 
 _SENDER_LOCKS: dict[str, asyncio.Lock] = {}
+_BATCH_FLUSH_TASKS: dict[str, asyncio.Task] = {}
 
 
 def _sender_lock(sender: str) -> asyncio.Lock:
@@ -1571,6 +1623,45 @@ def _sender_lock(sender: str) -> asyncio.Lock:
     if lock is None:
         lock = _SENDER_LOCKS[key] = asyncio.Lock()
     return lock
+
+
+def _schedule_batch_flush(
+    sender: str,
+    *,
+    http_post: Optional[Callable[..., Any]] = None,
+    http_upload: Optional[Callable[..., Any]] = None,
+) -> None:
+    from app.services.max.whatsapp_log import finalize_photo_batch, photo_batch_window_seconds
+
+    delay = photo_batch_window_seconds()
+    key = normalize_msisdn(sender) or str(sender or "")
+    prev = _BATCH_FLUSH_TASKS.pop(key, None)
+    if prev and not prev.done():
+        prev.cancel()
+    if delay <= 0:
+        return
+
+    async def _run() -> None:
+        try:
+            await asyncio.sleep(delay)
+            note = finalize_photo_batch(sender)
+            reply = (note or {}).get("reply") or ""
+            if reply:
+                await reply_in_window(
+                    sender,
+                    reply,
+                    http_post=http_post,
+                    http_upload=http_upload,
+                    inbound_type="image",
+                )
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.warning("WhatsApp photo-batch flush failed", exc_info=True)
+        finally:
+            _BATCH_FLUSH_TASKS.pop(key, None)
+
+    _BATCH_FLUSH_TASKS[key] = asyncio.create_task(_run())
 
 
 async def process_webhook(
@@ -1609,6 +1700,14 @@ async def process_webhook(
     parsed = payload if isinstance(payload, dict) else {}
     statuses_updated = _apply_status_updates(parsed)
     messages = parse_inbound(parsed)
+    payload_texts: dict[str, list[str]] = {}
+    for preview in messages:
+        if (preview.get("type") == "text" or preview.get("text")) and preview.get("from"):
+            body = str(preview.get("text") or "").strip()
+            if body:
+                payload_texts.setdefault(str(preview["from"]), []).append(body)
+    batch_senders: set[str] = set()
+    job_replied: set[str] = set()
     results: list[dict[str, Any]] = []
     on_text = text_handler or default_text_handler
     on_voice = voice_handler or default_voice_handler
@@ -1637,11 +1736,22 @@ async def process_webhook(
             continue
         fields = _inbound_log_fields(message)
         from app.services.max.whatsapp_log import (
-            JOB_ASK_TEXT,
+            combined_job_hint,
             consume_job_answer,
+            finalize_photo_batch,
             iso_from_wa_timestamp as _iso_wa,
             last_attachment_ids,
+            photo_batch_window_seconds,
+            record_media_batch,
             set_pending_filings,
+            wants_photo_quote,
+        )
+
+        hint = combined_job_hint(
+            sender,
+            message.get("caption") or "",
+            message.get("text") or "",
+            *payload_texts.get(sender, []),
         )
 
         # 2026-10-08 queueing: one sender's messages are answered in order.
@@ -1654,12 +1764,16 @@ async def process_webhook(
                 if message.get("media_id"):
                     media_bytes, media_mime = await _safe_download(message["media_id"], http_get)
                 inbound_atts = _persist_inbound_media(
-                    message, media_bytes, media_mime or message.get("mime_type") or "",
+                    message,
+                    media_bytes,
+                    media_mime or message.get("mime_type") or "",
+                    hint_text=hint,
                 )
                 if message["type"] == "text":
                     answered = consume_job_answer(sender, message.get("text") or "")
                     if answered and answered.get("handled"):
                         filed_reply = answered.get("reply") or ""
+                        job_replied.add(sender)
                 msg_row_id = _log_chat(
                     wa_id=sender,
                     direction="inbound",
@@ -1685,9 +1799,17 @@ async def process_webhook(
                 )
                 if msg_row_id:
                     saved = last_attachment_ids(msg_row_id)
+                    fileable_ids = [
+                        int(a["id"])
+                        for a in saved
+                        if a.get("media_type") in {"image", "photo", "document"}
+                    ]
                     inbox_ids = [int(a["id"]) for a in saved if a.get("filing_status") == "inbox"]
                     if inbox_ids:
                         set_pending_filings(sender, inbox_ids)
+                    if fileable_ids and not wants_photo_quote(hint, message.get("caption") or ""):
+                        record_media_batch(sender, fileable_ids, hint)
+                        batch_senders.add(sender)
             except Exception:
                 persist_failed = True
                 inbound_atts = []
@@ -1704,8 +1826,16 @@ async def process_webhook(
                     route = "job_file"
                     reply = filed_reply
                 elif message["type"] == "text":
-                    route = "chat"
-                    reply = await on_text(message["text"], sender)
+                    album_mate = any(
+                        other.get("type") == "image" and other.get("from") == sender
+                        for other in messages
+                    )
+                    if album_mate:
+                        route = "job_hint"
+                        reply = ""
+                    else:
+                        route = "chat"
+                        reply = await on_text(message["text"], sender)
                 elif message["type"] == "audio" or message.get("voice"):
                     route = "voice_document"
                     audio, mime = media_bytes, media_mime
@@ -1713,13 +1843,20 @@ async def process_webhook(
                         audio, mime = await download_media(message["media_id"], http_get=http_get)
                     reply = await on_voice(audio, mime or message["mime_type"], sender)
                 elif message["type"] == "image":
-                    route = "photo_quote"
-                    image, mime = media_bytes, media_mime
-                    if not image and message.get("media_id"):
-                        image, mime = await download_media(message["media_id"], http_get=http_get)
-                    reply = await on_photo(image, mime or message["mime_type"], message["caption"], sender)
+                    if wants_photo_quote(hint, message.get("caption") or ""):
+                        route = "photo_quote"
+                        image, mime = media_bytes, media_mime
+                        if not image and message.get("media_id"):
+                            image, mime = await download_media(message["media_id"], http_get=http_get)
+                        reply = await on_photo(image, mime or message["mime_type"], message["caption"], sender)
+                    else:
+                        route = "file_photo"
+                        reply = ""
                 elif message["type"] == "call":
                     route = "call"
+                    reply = ""
+                elif message["type"] == "ignored":
+                    route = "ignored"
                     reply = ""
                 else:
                     reply = "That message type is not handled. Nothing sent."
@@ -1727,9 +1864,6 @@ async def process_webhook(
                 logger.warning("WhatsApp inbound handler failed", exc_info=True)
                 reply = "That message failed. Nothing sent."
             reply_text, documents = _split_reply(reply)
-            if any(a.get("needs_job_ask") or a.get("filing_status") == "inbox" for a in inbound_atts):
-                if JOB_ASK_TEXT not in (reply_text or ""):
-                    reply_text = f"{reply_text}\n{JOB_ASK_TEXT}".strip() if reply_text else JOB_ASK_TEXT
             reply_sent = False
             reply_error = ""
             voice_sent = False
@@ -1761,6 +1895,50 @@ async def process_webhook(
             "voice_sent": voice_sent,
             "voice_fallback": voice_fallback,
         })
+    for sender in batch_senders:
+        key = normalize_msisdn(sender) or sender
+        if sender in job_replied:
+            prev = _BATCH_FLUSH_TASKS.pop(key, None)
+            if prev and not prev.done():
+                prev.cancel()
+            continue
+        if photo_batch_window_seconds() <= 0:
+            note = finalize_photo_batch(sender)
+            reply = (note or {}).get("reply") or ""
+            if reply:
+                try:
+                    delivered = await reply_in_window(
+                        sender,
+                        reply,
+                        http_post=http_post,
+                        http_upload=http_upload,
+                        inbound_type="image",
+                    )
+                    results.append({
+                        "message_id": "",
+                        "type": "image",
+                        "route": "file_photo_batch",
+                        "allowlisted": True,
+                        "sent": False,
+                        "reply_sent": True,
+                        "reply_error": "",
+                        "voice_sent": bool(delivered.get("voice_sent")),
+                        "voice_fallback": delivered.get("voice_fallback") or "",
+                    })
+                except WhatsAppSendBlocked as exc:
+                    results.append({
+                        "message_id": "",
+                        "type": "image",
+                        "route": "file_photo_batch",
+                        "allowlisted": True,
+                        "sent": False,
+                        "reply_sent": False,
+                        "reply_error": str(exc),
+                        "voice_sent": False,
+                        "voice_fallback": "",
+                    })
+        else:
+            _schedule_batch_flush(sender, http_post=http_post, http_upload=http_upload)
     # Check for calls field events (connect, terminate, status)
     calls = parse_inbound_calls(payload if isinstance(payload, dict) else {})
     if calls:

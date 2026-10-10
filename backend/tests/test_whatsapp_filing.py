@@ -13,7 +13,8 @@ from fastapi.testclient import TestClient
 
 from app.routers import whatsapp as whatsapp_router
 from app.services.max import whatsapp_channel as wa
-from app.services.max.doc_lookup import probe_job_text, resolve_job_folder
+from app.services.max.doc_lookup import probe_job_text, resolve_job_folder, suggest_jobs
+from app.services.max.whatsapp_channel import parse_inbound
 from app.services.max.whatsapp_log import (
     JOB_ASK_TEXT,
     consume_job_answer,
@@ -68,17 +69,23 @@ def _sign(body: bytes) -> str:
 
 
 def _payload(message: dict, sender: str = RAFAEL) -> bytes:
+    return _payloads([message], sender=sender)
+
+
+def _payloads(messages: list[dict], sender: str = RAFAEL) -> bytes:
+    packed = []
+    now = int(time.time())
+    for i, message in enumerate(messages):
+        packed.append({
+            "from": sender,
+            "id": message.get("id") or f"wamid.{i+1}",
+            "timestamp": message.get("timestamp") or str(now),
+            "type": message["type"],
+            **{k: v for k, v in message.items() if k not in {"id", "timestamp", "type"}},
+        })
     return json.dumps({
         "object": "whatsapp_business_account",
-        "entry": [{"changes": [{"field": "messages", "value": {
-            "messages": [{
-                "from": sender,
-                "id": message.get("id") or "wamid.1",
-                "timestamp": message.get("timestamp") or str(int(time.time())),
-                "type": message["type"],
-                **{k: v for k, v in message.items() if k not in {"id", "timestamp", "type"}},
-            }]
-        }}]}],
+        "entry": [{"changes": [{"field": "messages", "value": {"messages": packed}}]}],
     }).encode()
 
 
@@ -154,9 +161,11 @@ def test_ambiguous_parks_inbox_and_asks(isolated_whatsapp_edition, monkeypatch):
     result = asyncio.run(wa.process_webhook(
         raw, _sign(raw), photo_handler=_photo, http_get=_get, http_post=_post,
     ))
-    assert result["results"][0]["reply_sent"] is True
+    assert result["results"][0]["route"] == "file_photo"
+    assert not any("Photo draft" in ((p.get("text") or {}).get("body") or "") for p in posts)
+    assert any(r.get("route") == "file_photo_batch" and r.get("reply_sent") for r in result["results"])
     sent = posts[0]["text"]["body"]
-    assert JOB_ASK_TEXT in sent
+    assert "Which job" in sent or "Closest" in sent or "Maggie" in sent
     messages, _ = get_conversation_messages(RAFAEL)
     inbound = [m for m in messages if m["direction"] == "inbound"][0]
     att = inbound["attachments"][0]
@@ -298,7 +307,9 @@ def test_job_answer_falls_through_unless_named_or_skip(isolated_whatsapp_edition
     mid = log_message(RAFAEL, "inbound", "document", body="[document: scan.pdf]", attachments=[rec])
     att_id = last_attachment_ids(mid)[0]["id"]
     set_pending_filings(RAFAEL, [att_id])
-    assert consume_job_answer(RAFAEL, "how's the weather today") is None
+    weather = consume_job_answer(RAFAEL, "how's the weather today")
+    assert weather["status"] == "need_job"
+    assert "Closest" in weather["reply"] or "Which job" in weather["reply"]
     assert get_pending_filings(RAFAEL) == [att_id]
     skipped = consume_job_answer(RAFAEL, "skip")
     assert skipped["status"] == "skipped"
@@ -470,3 +481,217 @@ def test_persist_failure_still_answers(isolated_whatsapp_edition, monkeypatch):
     result = asyncio.run(wa.process_webhook(raw, _sign(raw), text_handler=_chat, http_post=_post))
     assert result["results"][0]["reply_sent"] is True
     assert "Max still answered" in posts[0]["text"]["body"]
+
+
+def test_parse_album_context_and_unknown_text_as_text():
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [{"changes": [{"value": {"messages": [
+            {
+                "from": RAFAEL,
+                "id": "wamid.ctx",
+                "timestamp": "1",
+                "type": "unknown",
+                "text": {"body": "These are for Emmas client"},
+                "context": {"from": RAFAEL, "id": "wamid.photo1"},
+            },
+            {
+                "from": RAFAEL,
+                "id": "wamid.nfm",
+                "timestamp": "2",
+                "type": "interactive",
+                "interactive": {"nfm_reply": {"body": "These are for Emmas client"}},
+            },
+        ]}}]}],
+    }
+    parsed = parse_inbound(payload)
+    assert [m["type"] for m in parsed] == ["text", "text"]
+    assert all("Emmas" in m["text"] for m in parsed)
+    assert parsed[0]["context_id"] == "wamid.photo1"
+    assert parsed[0]["raw_type"] == "unknown"
+
+
+def test_unknown_album_text_is_not_unhandled(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    posts = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    async def _chat(text, wa_id):
+        return "should-not-run-for-album-mate"
+
+    async def _photo(image, mime, caption, wa_id):
+        return "Photo draft. Not sent."
+
+    def _get(url, headers):
+        if "/media-" in str(url) and not str(url).endswith("/img"):
+            return _GraphResponse({"url": "https://example.test/img", "mime_type": "image/jpeg"})
+        return _GraphResponse(content=b"\xff\xd8img")
+
+    raw = _payloads([
+        {"type": "image", "id": "wamid.p1", "image": {"id": "media-1", "mime_type": "image/jpeg"}},
+        {
+            "type": "unknown",
+            "id": "wamid.txt",
+            "text": {"body": "These are for Emmas client"},
+            "context": {"id": "wamid.p1"},
+        },
+    ])
+    result = asyncio.run(wa.process_webhook(
+        raw, _sign(raw), text_handler=_chat, photo_handler=_photo, http_get=_get, http_post=_post,
+    ))
+    bodies = [p["text"]["body"] for p in posts]
+    assert bodies
+    assert all("not handled" not in b.lower() for b in bodies)
+    assert all("Photo draft" not in b for b in bodies)
+    assert all("should-not-run" not in b for b in bodies)
+    assert any("Closest" in b or "Which job" in b or "Emma" in b for b in bodies)
+    assert len(bodies) == 1
+
+
+def test_photo_batch_files_once_from_nearby_job_text(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    posts = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    async def _photo(image, mime, caption, wa_id):
+        raise AssertionError("photo_quote must not run without quote words")
+
+    def _get(url, headers):
+        if "/media-" in str(url) and not str(url).endswith("/img"):
+            return _GraphResponse({"url": "https://example.test/img", "mime_type": "image/jpeg"})
+        return _GraphResponse(content=b"\xff\xd8img")
+
+    raw = _payloads([
+        {"type": "image", "id": "wamid.b1", "image": {"id": "media-b1", "mime_type": "image/jpeg"}},
+        {"type": "image", "id": "wamid.b2", "image": {"id": "media-b2", "mime_type": "image/jpeg"}},
+        {"type": "image", "id": "wamid.b3", "image": {"id": "media-b3", "mime_type": "image/jpeg"}},
+        {"type": "text", "id": "wamid.hint", "text": {"body": "These are for Maggie"}},
+    ])
+    result = asyncio.run(wa.process_webhook(
+        raw, _sign(raw), photo_handler=_photo, http_get=_get, http_post=_post,
+    ))
+    bodies = [p["text"]["body"] for p in posts]
+    assert len(bodies) == 1
+    assert "Filed 3 photos under Maggie" in bodies[0]
+    assert not any(r.get("route") == "photo_quote" for r in result["results"])
+    messages, _ = get_conversation_messages(RAFAEL)
+    atts = [a for m in messages if m["direction"] == "inbound" for a in m.get("attachments") or []]
+    assert len(atts) == 3
+    assert all(a["filing_status"] == "filed" and a["job_slug"] == "maggie-frolich" for a in atts)
+
+
+def test_photo_batch_asks_once_when_job_unknown(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    posts = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    async def _photo(image, mime, caption, wa_id):
+        return "Photo draft. Not sent."
+
+    def _get(url, headers):
+        if "/media-" in str(url) and not str(url).endswith("/img"):
+            return _GraphResponse({"url": "https://example.test/img", "mime_type": "image/jpeg"})
+        return _GraphResponse(content=b"\xff\xd8img")
+
+    raw = _payloads([
+        {"type": "image", "id": "wamid.c1", "image": {"id": "media-c1", "mime_type": "image/jpeg"}},
+        {"type": "image", "id": "wamid.c2", "image": {"id": "media-c2", "mime_type": "image/jpeg"}},
+    ])
+    asyncio.run(wa.process_webhook(raw, _sign(raw), photo_handler=_photo, http_get=_get, http_post=_post))
+    bodies = [p["text"]["body"] for p in posts]
+    assert len(bodies) == 1
+    assert "Photo draft" not in bodies[0]
+    assert "Which job" in bodies[0] or "Closest" in bodies[0]
+
+
+def test_emmas_client_lists_close_matches(isolated_whatsapp_edition):
+    rec = prepare_inbound_attachment(
+        b"parked",
+        filename="win.jpg",
+        mime_type="image/jpeg",
+        media_type="image",
+        wa_id=RAFAEL,
+        hint_text="",
+    )
+    from app.services.max.whatsapp_log import last_attachment_ids, log_message, set_pending_filings
+
+    mid = log_message(RAFAEL, "inbound", "image", body="[photo]", attachments=[rec])
+    att_id = last_attachment_ids(mid)[0]["id"]
+    set_pending_filings(RAFAEL, [att_id])
+    answered = consume_job_answer(RAFAEL, "These are for Emmas client")
+    assert answered["status"] == "need_job"
+    assert "Closest" in answered["reply"]
+    names = {row["client_name"] for row in suggest_jobs("Emmas client")}
+    assert names
+    assert get_pending_filings(RAFAEL) == [att_id]
+
+
+def test_photo_with_quote_caption_still_creates_draft(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    posts = []
+    quotes = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    def _get(url, headers):
+        if str(url).endswith("/media-q"):
+            return _GraphResponse({"url": "https://example.test/img", "mime_type": "image/jpeg"})
+        return _GraphResponse(content=b"\xff\xd8img")
+
+    async def _photo(image, mime, caption, wa_id):
+        quotes.append({"caption": caption, "bytes": image})
+        return "Photo draft EST-TEST. Not sent."
+
+    raw = _payload({
+        "type": "image",
+        "id": "wamid.quote",
+        "image": {"id": "media-q", "mime_type": "image/jpeg", "caption": "Please quote this window"},
+    })
+    result = asyncio.run(wa.process_webhook(
+        raw, _sign(raw), photo_handler=_photo, http_get=_get, http_post=_post,
+    ))
+    assert quotes
+    assert any(r.get("route") == "photo_quote" for r in result["results"])
+    assert "Not sent" in posts[0]["text"]["body"]
+    assert "EST-TEST" in posts[0]["text"]["body"]
+
+
+def test_nearby_quote_text_enables_photo_quote(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    quotes = []
+
+    def _post(url, body, headers):
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    def _get(url, headers):
+        if "/media-" in str(url) and not str(url).endswith("/img"):
+            return _GraphResponse({"url": "https://example.test/img", "mime_type": "image/jpeg"})
+        return _GraphResponse(content=b"\xff\xd8img")
+
+    async def _photo(image, mime, caption, wa_id):
+        quotes.append(True)
+        return "Photo draft. Not sent."
+
+    raw = _payloads([
+        {"type": "text", "id": "wamid.askq", "text": {"body": "need an estimate for these"}},
+        {"type": "image", "id": "wamid.pq", "image": {"id": "media-pq", "mime_type": "image/jpeg"}},
+    ])
+    result = asyncio.run(wa.process_webhook(raw, _sign(raw), photo_handler=_photo, http_get=_get, http_post=_post))
+    assert quotes
+    assert any(r.get("route") == "photo_quote" for r in result["results"])
