@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 from contextvars import ContextVar
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -508,6 +509,7 @@ def ensure_assistant_files() -> dict:
     if is_family_edition():
         log_path.write_text(f"{assistant_name()} listo\n", encoding="utf-8")
         assert_under_root(log_path)
+    founder = ensure_founder_profile() if is_family_edition() else {}
     for path in (memory, history, assistant_settings_path()):
         assert_under_root(path)
     return {
@@ -518,6 +520,7 @@ def ensure_assistant_files() -> dict:
         "history_path": str(history),
         "settings_path": str(assistant_settings_path()),
         "brain_dir": str(assistant_brain_dir()),
+        "founder_profile": founder,
     }
 
 
@@ -656,12 +659,138 @@ def coerce_social_status(requested: Optional[str]) -> str:
     return "pending_approval"
 
 
+def edition_service_ports() -> dict[str, int]:
+    """Health probes for this process. Family editions never check Workroom ports."""
+    profile = edition_profile()
+    if is_family_edition():
+        return {
+            "Backend API": int(profile.get("backend_port") or 8011),
+            "Command Center": int(profile.get("frontend_port") or 3011),
+        }
+    return {
+        "Backend API": 8000,
+        "Command Center": 3005,
+        "OpenClaw": 7878,
+        "Ollama": 11434,
+    }
+
+
+def hermes_memory_dir() -> Path:
+    raw = os.getenv("EMPIRE_BOX_MEMORY_DIR", "").strip()
+    if raw:
+        path = Path(raw).expanduser()
+        return assert_under_root(path) if is_family_edition() else path
+    if is_family_edition():
+        return require_data_root() / "assistant" / "hermes"
+    return Path.home() / "empire-box-memory"
+
+
+def supermemory_store_path() -> Path:
+    if is_family_edition():
+        return assert_under_root(require_data_root() / "assistant" / "brain" / "supermemory_scaffold.jsonl")
+    return Path.home() / "empire-repo" / "backend" / "data" / "max" / "supermemory_scaffold.jsonl"
+
+
+def session_handoff_path() -> Path:
+    if is_family_edition():
+        return assert_under_root(require_data_root() / "assistant" / "brain" / "session_handoff.json")
+    return Path.home() / "empire-repo" / "backend" / "data" / "max" / "session_handoff.json"
+
+
+def session_log_path() -> Path:
+    today = datetime.now().strftime("%Y-%m-%d")
+    if is_family_edition():
+        return log_dir() / today / "session-log.md"
+    return Path.home() / "empire-repo" / "backend" / "data" / "logs" / today / "session-log.md"
+
+
+def last_chat_summary_path() -> Optional[Path]:
+    """Workroom Claude session file. Family editions must not read HOME."""
+    if is_family_edition():
+        return None
+    return Path.home() / ".claude-context" / "last_chat_summary.md"
+
+
+def founder_profile_path() -> Path:
+    return assert_under_root(require_data_root() / "assistant" / "founder.json")
+
+
+def ensure_founder_profile() -> dict:
+    """Empty founder memory: owner name only. No Workroom records."""
+    if not is_family_edition():
+        return {}
+    path = founder_profile_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    owner = AMP_COACH_NAME if is_amp() else MAXINE_OWNER_NAME
+    data: dict = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except json.JSONDecodeError:
+            data = {}
+    data["role"] = "founder"
+    data["owner_name"] = owner
+    data.setdefault("preferences", {})
+    data.setdefault("notes", "")
+    data["workroom"] = None
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    stub = assert_under_root(require_data_root() / "assistant" / "brain" / "founder_profile.md")
+    stub.parent.mkdir(parents=True, exist_ok=True)
+    if not stub.exists():
+        stub.write_text(
+            f"# Founder\n\nNombre: {owner}\n\n(Perfil vacío. Sin datos del Workroom.)\n",
+            encoding="utf-8",
+        )
+    assert_under_root(path)
+    return data
+
+
+def family_prompt_context_paths() -> dict[str, Path]:
+    """Every live-context file a family prompt may read. All under the data root."""
+    if not is_family_edition():
+        raise EditionPathError("family_prompt_context_paths() solo aplica a amp/maxine")
+    root = require_data_root()
+    today = datetime.now().strftime("%Y-%m-%d")
+    hermes = hermes_memory_dir()
+    brain = Path(os.getenv("EMPIRE_BRAIN_DIR", "").strip() or (root / "assistant" / "brain"))
+    logs = Path(os.getenv("EMPIRE_LOG_DIR", "").strip() or (root / "logs"))
+    return {
+        "hermes_root": hermes,
+        "hermes_context": hermes / "CONTEXT.md",
+        "hermes_memory": hermes / "MEMORY.md",
+        "hermes_user": hermes / "USER.md",
+        "supermemory": supermemory_store_path(),
+        "handoff": session_handoff_path(),
+        "brain_db": brain / "memories.db",
+        "founder_profile": founder_profile_path(),
+        "founder_memory": brain / "founder_profile.md",
+        "session_log": logs / today / "session-log.md",
+        "quotes": root / "quotes",
+        "inbox": root / "inbox",
+        "assistant_memory": root / "assistant" / "memory.md",
+        "logs": logs,
+    }
+
+
+def family_forbidden_prompt_roots() -> tuple[Path, ...]:
+    """HOME / repo trees family live context must never resolve into."""
+    home = Path.home()
+    return (
+        home / ".claude-context",
+        home / "empire-repo",
+        home / "empire-box-memory",
+        home / "empire-data",
+    )
+
+
 def apply_amp_process_paths() -> None:
-    """Force process data paths under EMPIRE_DATA_DIR for the AMP instance.
+    """Force process data paths under EMPIRE_DATA_DIR for a family instance.
 
     Called after dotenv so a shared Workroom .env cannot redirect this
-    process at the Workroom database, brain, or memory file.
-    No-op unless EMPIRE_EDITION=amp.
+    process at the Workroom database, brain, Hermes memory, or memory file.
+    No-op unless EMPIRE_EDITION is amp or maxine.
     """
     if not is_family_edition():
         return
@@ -669,8 +798,11 @@ def apply_amp_process_paths() -> None:
     if root is None:
         return
     root.mkdir(parents=True, exist_ok=True)
+    hermes = root / "assistant" / "hermes"
+    brain = root / "assistant" / "brain"
     os.environ["EMPIRE_DATA_DIR"] = str(root)
-    os.environ["EMPIRE_BRAIN_DIR"] = str(root / "assistant" / "brain")
+    os.environ["EMPIRE_BRAIN_DIR"] = str(brain)
+    os.environ["EMPIRE_BOX_MEMORY_DIR"] = str(hermes)
     os.environ["MAX_MEMORY_PATH"] = str(root / "assistant" / "memory.md")
     os.environ["DATABASE_URL"] = f"sqlite:///{root / 'empirebox.db'}"
     os.environ["EMPIRE_TASK_DB"] = str(root / "empire.db")
@@ -680,8 +812,12 @@ def apply_amp_process_paths() -> None:
     os.environ["MAX_SELECTED_PROVIDER"] = "minimax"
     os.environ["MAX_SELECTED_MODEL"] = os.getenv("MINIMAX_MODEL", "").strip() or "MiniMax-M3"
     os.environ.setdefault("INSTANCE_USAGE_CAP_PCT", "20")
-    (root / "assistant" / "brain").mkdir(parents=True, exist_ok=True)
+    brain.mkdir(parents=True, exist_ok=True)
+    hermes.mkdir(parents=True, exist_ok=True)
     (root / "logs").mkdir(parents=True, exist_ok=True)
+    (root / "quotes").mkdir(parents=True, exist_ok=True)
+    (root / "inbox").mkdir(parents=True, exist_ok=True)
+    ensure_founder_profile()
 
 
 def edition_manifest() -> dict:
