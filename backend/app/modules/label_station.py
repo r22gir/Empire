@@ -38,7 +38,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-DB_PATH = os.environ.get("EMPIRE_DB", "/home/rg/empire-data/empire.db")
+DB_PATH = os.environ.get("EMPIRE_DB", os.environ.get("EMPIRE_TASK_DB", "/home/rg/empire-data/empire.db"))
 APP_DIR = Path(os.environ.get("LABEL_STATION_DIR", Path(__file__).parent / "static"))
 DEFAULT_BUSINESS = os.environ.get("LABEL_STATION_BUSINESS", "empire_workroom")
 
@@ -55,17 +55,20 @@ def _conn() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    with _conn() as c:
-        c.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS label_catalog (
-                business   TEXT PRIMARY KEY,
-                products   TEXT NOT NULL DEFAULT '[]',
-                settings   TEXT NOT NULL DEFAULT '{}',
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            """
-        )
+    try:
+        with _conn() as c:
+            c.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS label_catalog (
+                    business   TEXT PRIMARY KEY,
+                    products   TEXT NOT NULL DEFAULT '[]',
+                    settings   TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                """
+            )
+    except Exception:
+        pass
 
 
 init_db()

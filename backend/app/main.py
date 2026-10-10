@@ -199,6 +199,7 @@ load_router("app.routers.customer_mgmt", "/api/v1", ["crm"])
 load_router("app.routers.inventory", "/api/v1", ["inventory"])
 # load_router("app.routers.jobs", "/api/v1", ["jobs"])  # replaced by jobs_unified
 load_router("app.routers.jobs_unified", "/api/v1", ["jobs-unified"])
+load_router("app.routers.schedule", "/api/v1/schedule", ["schedule"])
 
 # Customer Journey Linkage MVP — read-only endpoints
 # (mounted at /api/v1 so the paths /customers/{id}/journey, /quotes/{id}/invoice,

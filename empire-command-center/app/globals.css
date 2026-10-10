@@ -813,3 +813,11 @@ body:has([data-platform-page]) {
   overflow: auto;
   height: auto;
 }
+
+/* Schedule Control mobile responsiveness & dark mode theme tokens */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --schedule-accent: #06b6d4;
+  }
+}
+

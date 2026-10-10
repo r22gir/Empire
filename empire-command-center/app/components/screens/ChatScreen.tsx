@@ -589,7 +589,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       case 'tasks': onSend('Show my tasks for today'); break;
       case 'research': onScreenChange?.('research'); break;
       case 'documents': onScreenChange?.('docs'); break;
-      case 'calendar': onSend('Show my calendar for today'); break;
+      case 'calendar': onScreenChange?.('calendar'); break;
       default: break;
     }
   };
