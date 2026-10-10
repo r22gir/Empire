@@ -38,7 +38,8 @@ def test_route_renders_only_the_signed_in_edition():
     assert "Agregar a pantalla de inicio" in max_e
     assert "Agregar a pantalla principal" in max_e
     assert "Tailscale" in max_e
-    assert "WhatsApp, pronto" in max_e
+    assert "/amp/whatsapp" in max_e
+    assert "/ayuda/whatsapp" in max_e
     assert "maxine.empirebox.store" not in max_e
     assert "Maxine" not in max_e
 

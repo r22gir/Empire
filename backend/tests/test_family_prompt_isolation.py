@@ -17,6 +17,10 @@ WORKROOM_PROMPT_LEAKS = (
     ".claude-context",
     "RG's Drapery",
     "empire-box-memory",
+    "Dahlia = Nehal Elrefai",
+    "Nehal Elrefai",
+    "The Willard Hotel",
+    "McLean Whittington",
 )
 
 

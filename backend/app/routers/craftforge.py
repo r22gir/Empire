@@ -677,12 +677,12 @@ async def list_customers():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _load_woodcraft_config() -> dict:
-    cfg_path = os.path.join(os.path.dirname(__file__), "..", "config", "woodcraft_business.json")
-    try:
-        with open(cfg_path) as f:
-            return json.load(f)
-    except Exception:
-        return {"business_name": "WoodCraft by Empire", "business_email": "", "business_phone": "", "business_address": "", "business_website": ""}
+    from app.edition import workroom_woodcraft_config
+
+    data = workroom_woodcraft_config()
+    if data:
+        return data
+    return {"business_name": "WoodCraft by Empire", "business_email": "", "business_phone": "", "business_address": "", "business_website": ""}
 
 
 def _find_or_create_woodcraft_customer(conn, design: dict) -> Optional[str]:

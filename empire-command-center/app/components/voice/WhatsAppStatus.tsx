@@ -41,6 +41,13 @@ export default function WhatsAppStatus() {
           {status.edition} · ···{status.phone_number_id_last4} · {status.owner_count || 0}
         </p>
       ) : null}
+      {spanish ? (
+        <p style={{ margin: '10px 0 0' }}>
+          <a href="/amp/whatsapp" style={{ color: '#b8960c', fontWeight: 700, fontSize: 13 }}>Configurar WhatsApp</a>
+          {' · '}
+          <a href="/amp/whatsapp/chats" style={{ color: '#b8960c', fontWeight: 700, fontSize: 13 }}>Ver chats</a>
+        </p>
+      ) : null}
     </div>
   );
 }

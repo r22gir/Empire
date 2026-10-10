@@ -23,6 +23,17 @@ MAXINE_EDITION = "maxine"
 # Personal instances that share one codebase: Spanish, own data dir,
 # allowlist, usage cap, MiniMax M3. The edition id stays the instance name.
 FAMILY_EDITIONS = frozenset({AMP_EDITION, MAXINE_EDITION})
+# Fail-closed: a family data-dir basename is family even if EMPIRE_EDITION
+# is unset, "workroom", or an unknown value. Repo aliases and business.json
+# stay founder-only.
+FAMILY_DATA_DIR_ALIASES = {
+    "amp": AMP_EDITION,
+    "max_e": AMP_EDITION,
+    "max-e": AMP_EDITION,
+    "maxe": AMP_EDITION,
+    "maxine": MAXINE_EDITION,
+}
+FOUNDER_EDITION_VALUES = frozenset({"", "main", "workroom"})
 
 # Workroom display stays "Max" when ASSISTANT_NAME is unset.
 # business.json still says "MAX" for older prompt callers; the identity
@@ -143,8 +154,22 @@ class EditionPathError(RuntimeError):
     """A data path escaped the instance data root."""
 
 
+def _family_from_data_dir() -> Optional[str]:
+    raw = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    if not raw:
+        return None
+    return FAMILY_DATA_DIR_ALIASES.get(Path(raw).name.lower())
+
+
 def edition_name() -> str:
     raw = os.getenv("EMPIRE_EDITION", "").strip().lower()
+    if raw in FAMILY_EDITIONS:
+        return raw
+    inferred = _family_from_data_dir()
+    if inferred:
+        return inferred
+    if raw in {"", "main"}:
+        return WORKROOM_EDITION
     return raw or WORKROOM_EDITION
 
 
@@ -157,8 +182,24 @@ def is_maxine() -> bool:
 
 
 def is_family_edition() -> bool:
-    """A personal instance (Max-e, Maxine, …), not the Workroom."""
+    """A personal instance (Max-e, Maxine, …), not the Workroom.
+
+    Fail closed: unknown or unset EMPIRE_EDITION plus a family data-dir
+    basename (amp / maxine) is treated as that family edition.
+    """
     return edition_name() in FAMILY_EDITIONS
+
+
+def is_founder_edition() -> bool:
+    """True only for the founder / Workroom process.
+
+    Family editions (including fail-closed data-dir inference) never
+    read repo client_aliases.json or business.json.
+    """
+    if is_family_edition():
+        return False
+    raw = (os.getenv("EMPIRE_EDITION") or "").strip().lower()
+    return raw in FOUNDER_EDITION_VALUES
 
 
 def edition_profile() -> dict:
@@ -260,6 +301,45 @@ def require_data_root() -> Path:
         )
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def workroom_business_config() -> dict:
+    """Repo business.json. Family editions get an empty dict (no Workroom address)."""
+    if not is_founder_edition():
+        return {}
+    path = Path(__file__).resolve().parent / "config" / "business.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def workroom_woodcraft_config() -> dict:
+    """Repo woodcraft_business.json. Founder-only."""
+    if not is_founder_edition():
+        return {}
+    path = Path(__file__).resolve().parent / "config" / "woodcraft_business.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def family_file_search_roots() -> tuple[Path, ...]:
+    """Attachment / file-finder roots for this process. Family stays on EMPIRE_DATA_DIR."""
+    if is_family_edition():
+        root = require_data_root()
+        return (root / "uploads", root / "whatsapp" / "media", root / "jobs")
+    from app.services.data_paths import data_root
+
+    home_repo = Path.home() / "empire-repo"
+    return (
+        data_root() / "uploads",
+        home_repo / "backend" / "data" / "uploads",
+        home_repo / "uploads",
+    )
 
 
 def assert_under_root(path: Path, root: Optional[Path] = None) -> Path:
@@ -839,6 +919,12 @@ def apply_amp_process_paths() -> None:
     (root / "logs").mkdir(parents=True, exist_ok=True)
     (root / "quotes").mkdir(parents=True, exist_ok=True)
     (root / "inbox").mkdir(parents=True, exist_ok=True)
+    (root / "chats").mkdir(parents=True, exist_ok=True)
+    (root / "uploads").mkdir(parents=True, exist_ok=True)
+    (root / "jobs").mkdir(parents=True, exist_ok=True)
+    (root / "whatsapp").mkdir(parents=True, exist_ok=True)
+    (root / "whatsapp" / "media").mkdir(parents=True, exist_ok=True)
+    (root / "whatsapp" / "inbox").mkdir(parents=True, exist_ok=True)
     ensure_founder_profile()
 
 

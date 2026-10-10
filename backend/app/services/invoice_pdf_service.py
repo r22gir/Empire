@@ -119,12 +119,9 @@ def _line_amount(item: dict) -> float:
 
 
 def _load_biz_cfg(is_woodcraft: bool) -> dict:
-    config_dir = Path(__file__).resolve().parent.parent / "config"
-    path = config_dir / ("woodcraft_business.json" if is_woodcraft else "business.json")
-    try:
-        return json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
+    from app.edition import workroom_business_config, workroom_woodcraft_config
+
+    return workroom_woodcraft_config() if is_woodcraft else workroom_business_config()
 
 
 def resolve_invoice_branding(invoice: dict, is_woodcraft: bool) -> dict:

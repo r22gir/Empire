@@ -12,6 +12,8 @@ const ORGANIZER = [
   { label: 'Contactos', href: '/amp/empresas' },
   { label: 'Finanzas', href: '/amp/empresas' },
   { label: 'Cursos', href: '/amp/cursos' },
+  { label: 'WhatsApp', href: '/amp/whatsapp' },
+  { label: 'Chats', href: '/amp/whatsapp/chats' },
   { label: 'Panel', href: '/amp/dashboard' },
 ] as const;
 

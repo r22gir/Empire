@@ -207,8 +207,16 @@ def _init_tables():
 
         conn.commit()
 
-        # Seed business profiles if empty
+        # Seed business profiles if empty. Family editions skip Workroom /
+        # WoodCraft rows so 5124 Frolich never lands in their DB.
         existing = conn.execute("SELECT COUNT(*) FROM business_profiles").fetchone()[0]
+        try:
+            from app.edition import is_family_edition
+
+            if is_family_edition():
+                existing = max(existing, 1)
+        except Exception:
+            pass
         if existing == 0:
             conn.execute("""
                 INSERT INTO business_profiles
