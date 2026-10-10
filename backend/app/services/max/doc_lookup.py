@@ -37,9 +37,12 @@ HubGet = Callable[[str, dict], dict]
 
 # Tracked repo file. Read-only. New-job aliases never write here (Dell
 # ff-only merges break when this file and leftover .bak files are dirty).
+# Family editions never read it — it has Rafael's client names/addresses.
 ALIASES_PATH = Path(__file__).resolve().parents[2] / "config" / "client_aliases.json"
 REPO_ALIASES_PATH = ALIASES_PATH
 MAX_ALIAS_BACKUPS = 3
+_FAMILY_DATA_DIR_NAMES = {"amp", "max_e", "max-e", "maxe", "maxine"}
+_FOUNDER_EDITION_VALUES = {"", "main", "workroom"}
 _alias_write_lock = threading.Lock()
 _ALIAS_PHONE_KEYS = {
     "phone", "phones", "mobile", "telephone", "whatsapp", "wa_id",
@@ -281,6 +284,21 @@ def fetch_pdf(doc_id: str, *, http_get: Optional[Callable[[str, dict], Any]] = N
 # --- WhatsApp job filing (kept alongside Final Docs hub lookup) ---
 
 
+def is_founder_edition() -> bool:
+    """True only for the founder/workroom process.
+
+    EMPIRE_EDITION unset (or main/workroom) and EMPIRE_DATA_DIR not a
+    family basename (amp / maxine). Same edition notion as owner labels.
+    Family editions must not read Rafael's repo client_aliases.json.
+    """
+    edition = (os.getenv("EMPIRE_EDITION") or "").strip().lower()
+    if edition not in _FOUNDER_EDITION_VALUES:
+        return False
+    raw = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    name = Path(raw).name.lower() if raw else ""
+    return name not in _FAMILY_DATA_DIR_NAMES
+
+
 def repo_aliases_path() -> Path:
     override = (os.environ.get("MAX_CLIENT_ALIASES_REPO_PATH") or "").strip()
     if override:
@@ -416,21 +434,27 @@ def _merge_alias_dicts(repo: dict[str, Any], edition: dict[str, Any]) -> dict[st
 
 
 def load_client_aliases() -> dict[str, Any]:
-    """Merge the read-only repo file with this edition's writable aliases.
+    """Load this edition's aliases. Founder also merges the repo file.
 
-    Dell live edits in backend/app/config/client_aliases.json stay visible.
-    New-job rows live in $EMPIRE_DATA_DIR/client_aliases.json and never
-    write the repo file. A corrupt edition file is skipped on read.
+    Family editions (Max-e / Maxine) read only $EMPIRE_DATA_DIR/client_aliases.json
+    so Rafael's names and addresses never leak. Founder (EMPIRE_EDITION unset,
+    data dir not amp/maxine) merges the read-only repo file so Dell live
+    edits stay visible. New-job rows never write the repo file.
     """
-    repo, repo_corrupt = _read_alias_dict(repo_aliases_path())
-    if repo_corrupt:
-        logger.error("skipping corrupt repo client aliases on read: %s", repo_aliases_path())
     edition, edition_corrupt = _read_alias_dict(edition_aliases_path())
     if edition_corrupt:
         logger.error(
             "skipping corrupt edition client aliases on read: %s",
             edition_aliases_path(),
         )
+    repo: dict[str, Any] = {}
+    if is_founder_edition():
+        repo, repo_corrupt = _read_alias_dict(repo_aliases_path())
+        if repo_corrupt:
+            logger.error(
+                "skipping corrupt repo client aliases on read: %s",
+                repo_aliases_path(),
+            )
     if not repo and not edition:
         return {}
     return _merge_alias_dicts(repo, edition)

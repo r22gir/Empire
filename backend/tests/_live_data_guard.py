@@ -521,6 +521,7 @@ def isolated_whatsapp_edition(tmp_path, monkeypatch):
     for slug in ("maggie-frolich", "willard-hotel", "mclean-residence", "emma-vita"):
         (jobs / slug).mkdir(exist_ok=True)
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(root))
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
     monkeypatch.setenv("WHATSAPP_JOBS_ROOT", str(jobs))
     monkeypatch.setenv("FOUNDER_PIN", "test-founder-pin")
     monkeypatch.setenv("WHATSAPP_PHOTO_BATCH_SECONDS", "0")
