@@ -478,6 +478,34 @@ def _write_test_whatsapp_labels(root: Path) -> Path:
     return path
 
 
+def _write_test_client_aliases(root: Path) -> Path:
+    """Stub aliases so WhatsApp tests never read live client_aliases.json."""
+    path = root / "client_aliases.json"
+    path.write_text(
+        json.dumps({
+            "clients": [
+                {
+                    "slug": "maggie-frolich",
+                    "name": "Maggie Frolich",
+                    "aliases": ["Maggie", "Frolich"],
+                },
+                {
+                    "slug": "willard-hotel",
+                    "name": "Willard Hotel",
+                    "aliases": ["Willard"],
+                },
+                {
+                    "slug": "mclean-residence",
+                    "name": "McLean Residence",
+                    "aliases": ["McLean"],
+                },
+            ]
+        }),
+        encoding="utf-8",
+    )
+    return path
+
+
 @pytest.fixture
 def isolated_whatsapp_edition(tmp_path, monkeypatch):
     """Clean per-edition data dir + founder PIN. No live WhatsApp credentials."""
@@ -492,6 +520,8 @@ def isolated_whatsapp_edition(tmp_path, monkeypatch):
     monkeypatch.setenv("FOUNDER_PIN", "test-founder-pin")
     monkeypatch.setenv("WHATSAPP_PHOTO_BATCH_SECONDS", "0")
     monkeypatch.setenv("WHATSAPP_JOB_HINT_SECONDS", "600")
+    aliases = _write_test_client_aliases(root)
+    monkeypatch.setenv("MAX_CLIENT_ALIASES_PATH", str(aliases))
     labels = _write_test_whatsapp_labels(root)
     monkeypatch.setenv("WHATSAPP_LABELS", str(labels))
     for name in (

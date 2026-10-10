@@ -647,9 +647,11 @@ def test_unresolved_job_text_falls_through_after_ask(isolated_whatsapp_edition):
     set_pending_filings(RAFAEL, [att_id])
     record_media_batch(RAFAEL, [att_id], "")
     finalize_photo_batch(RAFAEL, force_ask=True)
-    assert consume_job_answer(RAFAEL, "These are for Emmas client") is None
+    # Isolated aliases only (Maggie/Willard/McLean). This phrase must not
+    # resolve uniquely even if live client_aliases.json later adds Emma.
+    assert consume_job_answer(RAFAEL, "These are for Zorblax skylight") is None
     assert get_pending_filings(RAFAEL) == [att_id]
-    names = {row["client_name"] for row in suggest_jobs("Emmas client")}
+    names = {row["client_name"] for row in suggest_jobs("Zorblax skylight")}
     assert names
 
 
