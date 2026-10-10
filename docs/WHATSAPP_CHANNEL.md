@@ -193,7 +193,21 @@ Non-image/PDF attachments are served as `application/octet-stream` with `X-Conte
 
 ### Job filing
 
-Photos go to `<jobs-root>/<client-slug>/photos/`. Documents go to `<jobs-root>/<client-slug>/received/`.
+Photos go to `<jobs-root>/<slug>/photos/`. PDFs/documents go to `<jobs-root>/<slug>/received/`. STL / Polycam / 3D go to `<jobs-root>/<slug>/scans/`. No measurement in Phase 0.
+
+**Every fileable batch is filed into a folder** under this edition’s jobs root:
+
+| Slug | Kind | LuxeForge job / lead / EST |
+| --- | --- | --- |
+| existing client slug (e.g. `maggie-frolich`) | `client` | Phase 0: folder + `JOB-RECORD.json` only. Job/lead/EST wait for a later phase. |
+| `personal` | reserved | Never |
+| `insurance` | reserved | Never |
+| `store` | reserved | Never |
+| `luxeforge` | reserved | Never (Rafael: do this folder now too) |
+
+Say the client name, or **personal / insurance / store / luxeforge**. Unknown names still ask once (PR #91). `skip` leaves inbox.
+
+Each folder has `JOB-FACTS.md` and a shared **`JOB-RECORD.json`** (attachments, sha256, chat-log ids). `intake_id` / `quote_id` / `lead_id` stay null in Phase 0. Max, the job board, and the chat log read that file later. Family editions have their own jobs root.
 
 **Default for photos is file-only.** A draft estimate is created only when the **same message’s caption** (not a nearby text, not a previous “send me a quote”) asks for a quote/estimate/price (`quote`, `estimate`, `price`, `cotizacion`, `presupuesto`, `how much`). At most **one draft per photo batch**. Photo-to-quote drafts stay **not sent**.
 

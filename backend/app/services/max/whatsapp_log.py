@@ -7,8 +7,11 @@ editions never share Rafael's log.
 
 Never logs access tokens, app secrets, or API keys.
 Inbound media is stored under this edition's whatsapp/media (URLs expire).
-Photos and documents are copied into ~/jobs/<slug>/photos|received when the
-job is known; otherwise they park in whatsapp/inbox until the sender answers.
+Photos, PDFs, and 3D files are copied into this edition's jobs root
+(<slug>/photos|received|scans) when the folder is known — a client job
+or personal / insurance / store / luxeforge. Otherwise they park in
+whatsapp/inbox until the sender answers. Phase 0 never writes a
+LuxeForge job, lead, or estimate.
 """
 from __future__ import annotations
 
@@ -32,6 +35,14 @@ from app.services.max.doc_lookup import (
     resolve_job_folder,
     suggest_jobs,
 )
+from app.services.max.whatsapp_folders import (
+    FILEABLE_MEDIA,
+    append_job_record,
+    ensure_reserved_folders,
+    filing_subdir,
+    folder_kind_for_slug,
+    resolve_folder,
+)
 
 logger = logging.getLogger("max.whatsapp_log")
 
@@ -51,8 +62,9 @@ DEFAULT_JOB_ANSWER_TIMEOUT = 1800
 DEFAULT_PHOTO_BATCH_SECONDS = 120
 DEFAULT_JOB_HINT_SECONDS = 600
 JOB_ASK_TEXT = (
-    "Which job should I file this under? Reply with the client name, nickname, "
-    "job address, or quote number. I will not guess. Reply skip to leave it in the inbox."
+    "Which folder should I file this under? Reply with the client name, "
+    "nickname, job address, quote number, or personal / insurance / store / "
+    "luxeforge. I will not guess. Reply skip to leave it in the inbox."
 )
 JOB_SKIP_WORDS = {"skip", "cancel"}
 QUOTE_ASK_RE = re.compile(
@@ -60,7 +72,7 @@ QUOTE_ASK_RE = re.compile(
     r"cotizaci[oó]n|cotizacion|presupuesto|presupuestos|how\s+much)\b",
     re.IGNORECASE,
 )
-FILEABLE_TYPES = {"image", "photo", "document"}
+FILEABLE_TYPES = set(FILEABLE_MEDIA)
 UNSAFE_MEDIA_TYPES = {
     "text/html",
     "application/xhtml+xml",
@@ -136,7 +148,8 @@ def format_job_ask(*, matches: Optional[list] = None, hint: str = "") -> str:
         listed = ", ".join(names[:5])
         return (
             f"I don't have a unique job for that. Closest: {listed}. "
-            "Reply with the client name, nickname, address, or quote number, or skip."
+            "Reply with the client name, nickname, address, quote number, "
+            "or personal / insurance / store / luxeforge, or skip."
         )
     return JOB_ASK_TEXT
 
@@ -779,9 +792,11 @@ def file_into_job(
     filename: str,
     media_type: str,
     job_slug: str,
+    mime_type: str = "",
 ) -> str:
-    """Copy into ~/jobs/<slug>/photos or received. Never overwrites."""
-    sub = "photos" if media_type in ("image", "photo") else "received"
+    """Copy into <jobs-root>/<slug>/photos|received|scans. Never overwrites."""
+    ensure_reserved_folders()
+    sub = filing_subdir(media_type, filename, mime_type)
     dest = unique_dest(jobs_root() / job_slug / sub, filename)
     dest.write_bytes(content or b"")
     return str(dest)
@@ -829,14 +844,13 @@ def set_active_job(wa_id: str, job_slug: str, client_name: str = "", folder_path
 
 
 def choose_job_for_inbound(text: str, wa_id: str) -> dict[str, Any]:
-    """Named unique match only. A text with no job name never uses a sticky job."""
-    probed = probe_job_text(text)
-    status = probed.get("status")
-    if status == "unique":
-        match = probed["match"]
+    """Named unique client or reserved folder. Never uses a sticky job."""
+    match = resolve_folder(text)
+    if match:
         set_active_job(wa_id, match["slug"], match.get("client_name", ""), match.get("folder_path", ""))
         return {"status": "unique", "job": match}
-    if status == "ambiguous":
+    probed = probe_job_text(text)
+    if probed.get("status") == "ambiguous":
         return {"status": "ambiguous", "job": None, "matches": probed.get("matches") or []}
     return {"status": "unknown", "job": None}
 
@@ -876,11 +890,16 @@ def prepare_inbound_attachment(
         return record
     choice = choose_job_for_inbound(hint_text, wa_id)
     if choice.get("job"):
-        filed = file_into_job(content, record["filename"], media_type, choice["job"]["slug"])
-        record["job_slug"] = choice["job"]["slug"]
+        slug = choice["job"]["slug"]
+        filed = file_into_job(
+            content, record["filename"], media_type, slug, mime_type=mime_type,
+        )
+        record["job_slug"] = slug
+        record["folder_kind"] = folder_kind_for_slug(slug)
         record["filed_path"] = filed
         record["filing_status"] = "filed"
         record["filed_at"] = datetime.now(timezone.utc).isoformat()
+        append_job_record(slug, record, content=content)
         return record
     parked = park_in_inbox(content, record["filename"])
     record["filed_path"] = parked
@@ -992,7 +1011,13 @@ def refile_attachment(attachment_id: int, job_slug: str) -> dict[str, Any]:
             if not source or not Path(source).is_file():
                 raise FileNotFoundError("attachment bytes are not on disk")
             content = Path(source).read_bytes()
-            new_path = file_into_job(content, att.get("filename") or "file", att.get("media_type") or "document", slug)
+            new_path = file_into_job(
+                content,
+                att.get("filename") or "file",
+                att.get("media_type") or "document",
+                slug,
+                mime_type=str(att.get("mime_type") or ""),
+            )
             old_filed = att.get("filed_path") or ""
             try:
                 if old_filed and str(inbox_dir()) in old_filed:
@@ -1017,7 +1042,18 @@ def refile_attachment(attachment_id: int, job_slug: str) -> dict[str, Any]:
         set_active_job(msg["wa_id"], slug, folder_path=str(jobs_root() / slug))
         remaining = [i for i in get_pending_filings(msg["wa_id"]) if i != attachment_id]
         _replace_pending(msg["wa_id"], remaining)
-    return {"ok": True, "attachment_id": attachment_id, "job_slug": slug, "filed_path": new_path}
+    filed = {
+        "ok": True,
+        "attachment_id": attachment_id,
+        "job_slug": slug,
+        "folder_kind": folder_kind_for_slug(slug),
+        "filed_path": new_path,
+        "filename": att.get("filename") or "file",
+        "media_type": att.get("media_type") or "document",
+        "whatsapp_attachment_id": attachment_id,
+    }
+    append_job_record(slug, filed, content=content)
+    return filed
 
 
 def _replace_pending(wa_id: str, attachment_ids: list[int]) -> None:
@@ -1307,6 +1343,20 @@ def _file_pending_ids(wa_id: str, match: dict[str, Any], pending: list[int]) -> 
         named.mkdir(parents=True, exist_ok=True)
     for att_id in pending:
         try:
+            existing = get_attachment(att_id) or {}
+            if (
+                existing.get("job_slug") == match["slug"]
+                and existing.get("filing_status") == "filed"
+                and existing.get("filed_path")
+            ):
+                results.append({
+                    "ok": True,
+                    "attachment_id": att_id,
+                    "job_slug": match["slug"],
+                    "filed_path": existing.get("filed_path"),
+                    "already_filed": True,
+                })
+                continue
             results.append(refile_attachment(att_id, match["slug"]))
         except Exception as exc:
             logger.warning("refile on job answer failed for %s: %s", att_id, exc)
@@ -1327,9 +1377,8 @@ def finalize_photo_batch(wa_id: str, *, hint_text: str = "", force_ask: bool = F
     if not ids and not force_ask:
         return None
     hint = combined_job_hint(wa_id, hint_text, batch.get("hint_text") or "")
-    probed = probe_job_text(hint)
-    if probed.get("status") == "unique":
-        match = probed["match"]
+    match = resolve_folder(hint)
+    if match:
         results = _file_pending_ids(wa_id, match, ids)
         clear_pending_filings(wa_id)
         clear_media_batch(wa_id)
@@ -1344,6 +1393,7 @@ def finalize_photo_batch(wa_id: str, *, hint_text: str = "", force_ask: bool = F
         }
     if batch.get("asked") and not force_ask:
         return None
+    probed = probe_job_text(hint)
     ask = format_job_ask(matches=probed.get("matches") or suggest_jobs(hint), hint=hint)
     if ids:
         set_pending_filings(wa_id, ids, mark_asked=True)
@@ -1394,9 +1444,8 @@ def consume_job_answer(wa_id: str, text: str) -> Optional[dict[str, Any]]:
             "status": "skipped",
             "reply": "Left in the inbox. Say the job name later or move it from WhatsApp Chats.",
         }
-    probed = probe_job_text(text)
-    if probed.get("status") == "unique":
-        match = probed["match"]
+    match = resolve_folder(text)
+    if match:
         results = _file_pending_ids(wa_id, match, pending)
         clear_pending_filings(wa_id)
         clear_media_batch(wa_id)

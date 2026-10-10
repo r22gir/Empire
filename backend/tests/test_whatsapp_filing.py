@@ -677,7 +677,7 @@ def test_photo_with_quote_caption_still_creates_draft(isolated_whatsapp_edition,
     raw = _payload({
         "type": "image",
         "id": "wamid.quote",
-        "image": {"id": "media-q", "mime_type": "image/jpeg", "caption": "Please quote this window"},
+        "image": {"id": "media-q", "mime_type": "image/jpeg", "caption": "Please quote this window for Maggie"},
     })
     result = asyncio.run(wa.process_webhook(
         raw, _sign(raw), photo_handler=_photo, http_get=_get, http_post=_post,
@@ -811,7 +811,7 @@ def test_same_message_caption_creates_one_draft_per_batch(isolated_whatsapp_edit
             "image": {
                 "id": f"media-cap{i}",
                 "mime_type": "image/jpeg",
-                "caption": "Please quote this window",
+                "caption": "Please quote this window for Maggie",
             },
         }
         for i in range(7)
@@ -886,3 +886,231 @@ def test_stale_photo_batch_expires_from_sqlite_after_restart(isolated_whatsapp_e
     assert expire_stale_batches(RAFAEL) == 1
     assert _load_batch(RAFAEL)["ids"] == []
     assert consume_job_answer(RAFAEL, "hello") is None
+
+
+def _quote_spies(monkeypatch):
+    created = {"quotes": 0, "leads": 0, "handoffs": 0}
+
+    def _no_quote(*_a, **_k):
+        created["quotes"] += 1
+        raise AssertionError("Phase 0 must not create estimates")
+
+    def _no_lead(*_a, **_k):
+        created["leads"] += 1
+        raise AssertionError("Phase 0 must not create LeadForge leads")
+
+    def _no_handoff(*_a, **_k):
+        created["handoffs"] += 1
+        raise AssertionError("Phase 0 must not create LuxeForge jobs")
+
+    monkeypatch.setattr("app.services.quote_service.create_quote", _no_quote, raising=False)
+    monkeypatch.setattr(
+        "app.services.workroom_lead_intake.submit_intake", _no_lead, raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.luxeforge_intake_handoff.handoff_submitted_intake",
+        _no_handoff,
+        raising=False,
+    )
+    return created
+
+
+def test_phase0_client_photos_write_job_record(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    from app.services.max.whatsapp_folders import JOB_FACTS_NAME, JOB_RECORD_NAME, read_job_record
+
+    _quote_spies(monkeypatch)
+    posts = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    raw = _payloads([
+        {"type": "image", "id": "wamid.p0a", "image": {"id": "media-p0a", "mime_type": "image/jpeg"}},
+        {"type": "image", "id": "wamid.p0b", "image": {"id": "media-p0b", "mime_type": "image/jpeg"}},
+        {"type": "image", "id": "wamid.p0c", "image": {"id": "media-p0c", "mime_type": "image/jpeg"}},
+        {"type": "text", "id": "wamid.p0t", "text": {"body": "These are for Maggie"}},
+    ])
+    asyncio.run(wa.process_webhook(raw, _sign(raw), http_get=_image_get, http_post=_post))
+    record = read_job_record("maggie-frolich")
+    assert record["kind"] == "client"
+    assert record["intake_id"] is None
+    assert record["quote_id"] is None
+    assert record["lead_id"] is None
+    assert len(record["attachments"]) == 3
+    folder = jobs_root() / "maggie-frolich"
+    assert (folder / JOB_RECORD_NAME).is_file()
+    assert (folder / JOB_FACTS_NAME).is_file()
+    photos = list((folder / "photos").glob("*"))
+    assert len(photos) == 3
+    messages, _ = get_conversation_messages(RAFAEL)
+    atts = [a for m in messages if m["direction"] == "inbound" for a in m.get("attachments") or []]
+    assert all(a.get("job_slug") == "maggie-frolich" for a in atts if a.get("media_type") == "image")
+
+
+def test_phase0_personal_and_luxeforge_never_quote(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    from app.services.max.whatsapp_folders import read_job_record
+
+    _quote_spies(monkeypatch)
+    quotes = []
+
+    def _post(url, body, headers):
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    async def _photo(*_a, **_k):
+        quotes.append(True)
+        return "Photo draft. Not sent."
+
+    raw = _payloads([
+        {
+            "type": "image",
+            "id": "wamid.pers1",
+            "image": {
+                "id": "media-pers1",
+                "mime_type": "image/jpeg",
+                "caption": "please quote this — personal",
+            },
+        },
+        {"type": "image", "id": "wamid.pers2", "image": {"id": "media-pers2", "mime_type": "image/jpeg"}},
+        {"type": "image", "id": "wamid.pers3", "image": {"id": "media-pers3", "mime_type": "image/jpeg"}},
+    ])
+    result = asyncio.run(wa.process_webhook(
+        raw, _sign(raw), photo_handler=_photo, http_get=_image_get, http_post=_post,
+    ))
+    assert quotes == []
+    assert not any(r.get("route") == "photo_quote" for r in result["results"])
+    record = read_job_record("personal")
+    assert record["kind"] == "personal"
+    assert record["intake_id"] is None and record["lead_id"] is None and record["quote_id"] is None
+    assert len(list((jobs_root() / "personal" / "photos").glob("*"))) == 3
+
+    luxe = _payloads([
+        {
+            "type": "image",
+            "id": "wamid.lf1",
+            "image": {"id": "media-lf1", "mime_type": "image/jpeg", "caption": "luxeforge"},
+        },
+    ])
+    asyncio.run(wa.process_webhook(luxe, _sign(luxe), photo_handler=_photo, http_get=_image_get, http_post=_post))
+    luxe_rec = read_job_record("luxeforge")
+    assert luxe_rec["kind"] == "luxeforge"
+    assert luxe_rec["attachments"]
+    assert quotes == []
+
+
+def test_phase0_insurance_store_and_3d_pdf(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    from app.services.max.whatsapp_folders import read_job_record
+
+    _quote_spies(monkeypatch)
+    posts = []
+
+    def _post(url, body, headers):
+        posts.append(body)
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    def _get(url, headers):
+        u = str(url)
+        if u.endswith("/media-ins"):
+            return _GraphResponse({"url": "https://example.test/img", "mime_type": "image/jpeg"})
+        if u.endswith("/media-stl"):
+            return _GraphResponse({"url": "https://example.test/m.stl", "mime_type": "model/stl"})
+        if u.endswith("/media-pdf"):
+            return _GraphResponse({"url": "https://example.test/p.pdf", "mime_type": "application/pdf"})
+        if u.endswith("/media-usd"):
+            return _GraphResponse({"url": "https://example.test/p.usdz", "mime_type": "model/vnd.usdz+zip"})
+        if u.endswith(".stl") or "m.stl" in u:
+            return _GraphResponse(content=b"solid test\nendsolid")
+        if u.endswith(".pdf") or "p.pdf" in u:
+            return _GraphResponse(content=b"%PDF-1.4 test")
+        if "usdz" in u:
+            return _GraphResponse(content=b"PK\x03\x04usdz")
+        return _GraphResponse(content=b"\xff\xd8img")
+
+    raw = _payloads([
+        {
+            "type": "image",
+            "id": "wamid.ins",
+            "image": {"id": "media-ins", "mime_type": "image/jpeg", "caption": "insurance claim photos"},
+        },
+        {
+            "type": "document",
+            "id": "wamid.stl",
+            "document": {"id": "media-stl", "filename": "seat.stl", "mime_type": "model/stl"},
+        },
+        {
+            "type": "document",
+            "id": "wamid.pdf",
+            "document": {"id": "media-pdf", "filename": "plan.pdf", "mime_type": "application/pdf"},
+        },
+        {
+            "type": "document",
+            "id": "wamid.usd",
+            "document": {"id": "media-usd", "filename": "room.usdz", "mime_type": "model/vnd.usdz+zip"},
+        },
+    ])
+    result = asyncio.run(wa.process_webhook(raw, _sign(raw), http_get=_get, http_post=_post))
+    assert all("not handled" not in (p.get("text") or {}).get("body", "").lower() for p in posts)
+    assert not any(r.get("route") == "photo_quote" for r in result["results"])
+    rec = read_job_record("insurance")
+    assert rec["kind"] == "insurance"
+    assert rec["quote_id"] is None and rec["lead_id"] is None
+    ins = jobs_root() / "insurance"
+    assert list((ins / "photos").glob("*"))
+    assert list((ins / "scans").glob("*.stl")) or list((ins / "scans").glob("*"))
+    assert list((ins / "received").glob("*.pdf")) or list((ins / "received").glob("*"))
+
+    store = _payload({"type": "image", "id": "wamid.store", "image": {
+        "id": "media-ins", "mime_type": "image/jpeg", "caption": "for the store",
+    }})
+    asyncio.run(wa.process_webhook(store, _sign(store), http_get=_get, http_post=_post))
+    assert read_job_record("store")["kind"] == "store"
+
+
+def test_phase0_reserved_reply_after_ask(isolated_whatsapp_edition, monkeypatch):
+    import asyncio
+
+    from app.services.max.whatsapp_folders import read_job_record
+
+    _quote_spies(monkeypatch)
+
+    def _post(url, body, headers):
+        return _GraphResponse({"messages": [{"id": "wamid.out"}]})
+
+    raw = _payloads([
+        {"type": "image", "id": "wamid.u1", "image": {"id": "media-u1", "mime_type": "image/jpeg"}},
+    ])
+    asyncio.run(wa.process_webhook(raw, _sign(raw), http_get=_image_get, http_post=_post))
+    assert get_pending_filings(RAFAEL)
+    answered = consume_job_answer(RAFAEL, "luxeforge")
+    assert answered and answered["status"] == "filed"
+    assert answered["job"]["slug"] == "luxeforge"
+    rec = read_job_record("luxeforge")
+    assert rec["kind"] == "luxeforge"
+    assert rec["attachments"]
+    assert rec["intake_id"] is None
+
+
+def test_phase0_family_edition_reserved_folders_isolated(isolated_whatsapp_edition, monkeypatch, tmp_path):
+    from app.services.max.whatsapp_folders import append_job_record, ensure_reserved_folders, read_job_record
+
+    ensure_reserved_folders()
+    append_job_record("personal", {"filename": "a.jpg", "filed_path": "/tmp/a.jpg", "media_type": "image"})
+    rafael_root = jobs_root()
+    assert read_job_record("personal")["attachments"]
+    family = tmp_path / "family-edition"
+    family.mkdir()
+    family_jobs = tmp_path / "family-jobs"
+    family_jobs.mkdir()
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(family))
+    monkeypatch.setenv("WHATSAPP_JOBS_ROOT", str(family_jobs))
+    ensure_reserved_folders()
+    other = read_job_record("personal")
+    assert other["attachments"] == []
+    assert (rafael_root / "personal" / "JOB-RECORD.json").is_file()
+    assert not (family_jobs / "personal" / "JOB-RECORD.json").is_file() or read_job_record("personal")["attachments"] == []
