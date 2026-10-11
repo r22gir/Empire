@@ -177,6 +177,12 @@ def is_factual_question(message: str) -> bool:
         return False
     if is_memory_or_test_turn(raw):
         return False
+    try:
+        from app.services.max.family_answer_policy import should_skip_public_lookup
+        if should_skip_public_lookup(raw):
+            return False
+    except Exception:
+        pass
     msg = _fold_accents(raw).lower()
     if _is_internal_or_pricing(msg):
         return False

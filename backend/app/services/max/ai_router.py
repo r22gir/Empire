@@ -1257,6 +1257,14 @@ class AIRouter:
             user_text = "\n".join(
                 (m.content or "") for m in (messages or []) if getattr(m, "role", "") != "system"
             )
+            try:
+                from app.services.max.family_answer_policy import family_answer_policy_reply
+
+                policy = family_answer_policy_reply(user_text)
+                if policy:
+                    return model, policy
+            except Exception:
+                pass
             refusal = enforce_usage_cap(
                 kind="chat",
                 text=user_text,
