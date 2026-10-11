@@ -1,7 +1,8 @@
 name: Family isolation and WhatsApp
 
-# No secrets. Mocks only. Runs the Max-e / Maxine isolation suite and the
-# WhatsApp login-gate + 20% usage-cap proofs.
+# No secrets. Mocks only. Runs the Max-e isolation suite and the
+# WhatsApp login-gate + 20% usage-cap proofs. Maxine-only isolation
+# lives on the stacked Maxine PR (#113).
 
 on:
   pull_request:
@@ -35,32 +36,29 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install \
             pytest pytest-asyncio \
-            fastapi httpx \
+            fastapi httpx starlette \
             'pydantic[email]' pydantic-settings \
             python-multipart python-dotenv \
-            'python-jose[cryptography]'
+            'python-jose[cryptography]' \
+            'passlib[bcrypt]' 'bcrypt>=4.0.1,<4.1.0' \
+            psutil numpy \
+            python-telegram-bot \
+            sqlalchemy aiosqlite \
+            python-dateutil Pillow
 
       - name: Family isolation and WhatsApp tests
         working-directory: backend
         env:
           PYTHONPATH: .
         run: |
-          files=(
-            tests/test_family_whatsapp_isolation.py
-            tests/test_family_whatsapp_gate_cap.py
-            tests/test_family_leak_gates.py
-            tests/test_family_direct_route_isolation.py
-            tests/test_maxine_whatsapp_isolation.py
-            tests/test_family_prompt_isolation.py
-            tests/test_whatsapp_cloud.py
-          )
-          existing=()
-          for f in "${files[@]}"; do
-            if [ -f "$f" ]; then
-              existing+=("$f")
-            fi
-          done
-          pytest -q "${existing[@]}"
+          pytest -q \
+            tests/test_family_whatsapp_isolation.py \
+            tests/test_family_whatsapp_gate_cap.py \
+            tests/test_family_leak_gates.py \
+            tests/test_family_direct_route_isolation.py \
+            tests/test_family_prompt_isolation.py \
+            tests/test_whatsapp_cloud.py \
+            tests/test_instance_usage_auto_baseline.py
 
       - name: Node
         uses: actions/setup-node@v4

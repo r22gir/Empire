@@ -43,6 +43,10 @@ def _family_env(monkeypatch, tmp_path, edition: str):
     monkeypatch.setenv("WHATSAPP_REPLY_MODE", "text")
     monkeypatch.setenv("VOICE_DRAFTS_DB", str(tmp_path / "voice.db"))
     monkeypatch.setenv("WHATSAPP_STATE_DB", str(tmp_path / "wa.db"))
+    monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_USD", raising=False)
+    monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", raising=False)
+    monkeypatch.delenv("EMPIRE_USAGE_PEER_DATA_DIRS", raising=False)
+    monkeypatch.setattr("app.services.instance_usage._usage_data_roots", lambda: [tmp_path])
     from app.edition import apply_amp_process_paths
 
     apply_amp_process_paths()
@@ -258,9 +262,11 @@ def test_family_default_baseline_enforces_without_env_both_editions(monkeypatch,
         summary = usage_summary()
         assert summary["enforced"] is True
         assert summary["baseline_source"] == "default"
-        assert summary["baseline_basis"] == "tokens"
+        assert summary["baseline_basis"] == "recorded_tokens"
         assert summary["baseline"] == DEFAULT_FAMILY_BASELINE_MONTHLY_TOKENS
         assert summary["allowance"] == default_allowance
+        assert summary["used_percent"] == 0.0
+        assert summary["remaining_percent"] == 20.0
         assert summary["level"] == "ok"
         assert summary["cap_percent"] == 20
         assert enforce_whatsapp_model_cap() is None
@@ -276,6 +282,8 @@ def test_family_default_baseline_enforces_without_env_both_editions(monkeypatch,
         record_usage(input_tokens=int(default_allowance), output_tokens=0, model="MiniMax-M3")
         blocked = usage_summary()
         assert blocked["level"] == "blocked"
+        assert blocked["used_percent"] == 20.0
+        assert blocked["remaining_percent"] == 0.0
         assert blocked["used"] >= blocked["allowance"]
         assert enforce_whatsapp_model_cap() == whatsapp_cap_reply_es()
 
