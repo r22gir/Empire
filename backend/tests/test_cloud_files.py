@@ -91,6 +91,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("MAX_CLIENT_ALIASES_PATH", str(aliases))
     monkeypatch.setenv("MAX_FILE_FINDER_ROOTS", str(home))
     monkeypatch.setenv("GDRIVE_TOKEN_PATH", str(tmp_path / "no-drive-token.json"))
+    monkeypatch.setenv("EMPIRE_EDITION", "workroom")
     ff.INDEX.clear()
     gmail = FakeGmail([
         _msg("m1", "Nehal estimate signed", ["EST-2026-298-phase2-signed.pdf", "token.json", ".env", "empire-amp-notes.pdf"]),

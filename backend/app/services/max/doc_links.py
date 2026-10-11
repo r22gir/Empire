@@ -19,8 +19,21 @@ from app.services.max import file_finder as ff
 DEFAULT_PUBLIC_BASE = "https://studio.empirebox.store"
 FOUND_PATH = "/api/v1/files/found"
 SPOKEN_CHANNELS = frozenset({"voice", "telegram", "phone", "sms"})
-_FAMILY_EDITIONS = frozenset({"amp", "maxine", "max-e", "maxe", "family"})
-_FAMILY_PATHS = ("/data/amp", "/data/maxine", "empire-amp", "empire-maxine")
+# Studio default is allowed only for an explicit workroom/founder edition.
+# Aliases match file_finder._edition_allowed (minus empty — empty fails closed).
+_WORKROOM_FOUNDER_EDITIONS = frozenset({"workroom", "founder", "main", "studio", "empire"})
+
+_MD_URL_LINK = re.compile(
+    r"\[([^\]]+)\]\((?:https?://[^)\s]+|/api/v1/files/found\?[^)\s]+|/docs/view\?[^)\s]+)\)",
+    re.IGNORECASE,
+)
+_BARE_ABS_URL = re.compile(r"https?://[^\s)>\]]+", re.IGNORECASE)
+_BARE_FOUND_PATH = re.compile(
+    r"(?<![(\w/])(/api/v1/files/found\?t=[A-Za-z0-9._=-]+)",
+    re.IGNORECASE,
+)
+_BARE_DOCS_VIEW = re.compile(r"(?<![(\w/])(/docs/view\?[^\s)>\]]+)", re.IGNORECASE)
+_SOURCES_HEAD = re.compile(r"^\s*sources\s*$", re.IGNORECASE)
 
 _RELATIVE_MD = re.compile(
     r"\]\((/api/v1/files/found\?t=[^)\s]+)\)",
@@ -44,22 +57,34 @@ _DOC_CONTEXT = re.compile(
 )
 
 
+def _edition() -> str:
+    return (os.getenv("EMPIRE_EDITION") or "").strip().lower()
+
+
+def is_workroom_founder_edition() -> bool:
+    """True only when EMPIRE_EDITION is an explicit workroom/founder value."""
+    return _edition() in _WORKROOM_FOUNDER_EDITIONS
+
+
 def is_family_edition() -> bool:
-    ed = (os.getenv("EMPIRE_EDITION") or "").strip().lower()
-    if ed in _FAMILY_EDITIONS:
-        return True
-    paths = " ".join(os.getenv(k, "") for k in ("EMPIRE_DATA_DIR", "DATABASE_URL", "MAX_MEMORY_PATH"))
-    return any(m in paths for m in _FAMILY_PATHS)
+    """Fail closed: missing or unknown EMPIRE_EDITION is not the workroom."""
+    return not is_workroom_founder_edition()
 
 
 def public_base() -> str:
-    """Public origin for file links. Empty on family editions unless a non-studio host is set."""
+    """Public origin for file links.
+
+    Fail closed: the studio default (and any studio env value) is used only
+    when EMPIRE_EDITION is explicitly workroom/founder/main. A family backend
+    that forgot EMPIRE_EDITION never falls back to studio.empirebox.store.
+    A non-studio PUBLIC_BASE_URL still works on family/unknown editions.
+    """
     raw = (os.getenv("EMPIRE_PUBLIC_BASE_URL") or os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
-    if is_family_edition():
-        if not raw or "studio.empirebox.store" in raw.lower():
-            return ""
+    if is_workroom_founder_edition():
+        return raw or DEFAULT_PUBLIC_BASE
+    if raw and "studio.empirebox.store" not in raw.lower():
         return raw
-    return raw or DEFAULT_PUBLIC_BASE
+    return ""
 
 
 def is_spoken_channel(channel: str | None) -> bool:
@@ -222,6 +247,41 @@ def sources_chunk_is_public_file_list(chunk: str | None) -> bool:
     return _has_absolute_found_link(chunk)
 
 
+def strip_spoken_urls(text: str | None) -> str:
+    """Drop URLs from a voice/Telegram/phone/sms reply. Keep link titles."""
+    out = text or ""
+    out = _MD_URL_LINK.sub(r"\1", out)
+    out = _BARE_ABS_URL.sub("", out)
+    out = _BARE_FOUND_PATH.sub("", out)
+    out = _BARE_DOCS_VIEW.sub("", out)
+    lines = out.split("\n")
+    kept: list[str] = []
+    i = 0
+    while i < len(lines):
+        if _SOURCES_HEAD.match(lines[i]):
+            j = i + 1
+            block: list[str] = []
+            while j < len(lines) and (
+                not lines[j].strip() or re.match(r"^\s*(?:\d+[.)]|[-*•])\s", lines[j])
+            ):
+                item = re.sub(r"^\s*(?:\d+[.)]|[-*•])\s*", "", lines[j]).strip()
+                if item:
+                    block.append(item)
+                j += 1
+            if block:
+                kept.append("Sources")
+                kept.extend(f"{n}. {title}" for n, title in enumerate(block, 1))
+            i = j
+            continue
+        kept.append(lines[i])
+        i += 1
+    out = "\n".join(kept)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r" +\n", "\n", out)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out.strip()
+
+
 def first_reply_link_instruction() -> str:
     """Prompt line that uses the live public_base(), or a no-URL rule when empty."""
     base = public_base()
@@ -239,12 +299,12 @@ def ensure_absolute_doc_links(
 ) -> str:
     """Rewrite relative found-links and inject a titled Sources list if missing.
 
-    Voice / Telegram / phone: return the reply unchanged (no URLs, no Sources).
+    Voice / Telegram / phone / sms: strip URLs in code (do not read them aloud).
     Family / empty public_base: no rewriting or injection.
     """
     out = text or ""
     if is_spoken_channel(channel):
-        return out
+        return strip_spoken_urls(out)
     if not public_base():
         return out
     out = rewrite_relative_file_links(out)

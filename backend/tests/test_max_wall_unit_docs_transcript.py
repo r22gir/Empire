@@ -16,8 +16,11 @@ from app.services.max.doc_links import (
     ensure_absolute_doc_links,
     first_reply_link_instruction,
     is_document_lookup_request,
+    is_family_edition,
+    is_workroom_founder_edition,
     public_base,
     rewrite_relative_file_links,
+    strip_spoken_urls,
     studio_found_url,
 )
 from app.services.max.drawing_intent import (
@@ -53,8 +56,8 @@ FOREIGN_URL = "https://evil.example/api/v1/files/found?t=abc.sig"
 
 @pytest.fixture
 def studio_env(monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "workroom")
     monkeypatch.setenv("EMPIRE_PUBLIC_BASE_URL", STUDIO)
-    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
     monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
     yield STUDIO
 
@@ -236,13 +239,76 @@ def test_non_document_chat_unchanged(studio_env):
     ) == text
 
 
-@pytest.mark.parametrize("channel", ("voice", "telegram"))
+@pytest.mark.parametrize("channel", ("voice", "telegram", "phone", "sms"))
 def test_voice_and_telegram_do_not_append_sources(channel, studio_env):
     text = "I found the wall unit LED spec."
     out = ensure_absolute_doc_links(text, _found_tools(), channel=channel)
     assert out == text
     assert "Sources" not in out
     assert "files/found" not in out
+
+
+@pytest.mark.parametrize("channel", ("voice", "telegram", "phone", "sms"))
+def test_spoken_channels_strip_urls_in_code(channel, studio_env):
+    text = (
+        "I found the LED spec. "
+        f"[Wall-Unit-LED.pdf]({REAL_URL}) "
+        f"also {REAL_URL} and /api/v1/files/found?t=rel.sig\n\n"
+        "Sources\n"
+        f"1. [Layout.pdf]({REAL_URL})"
+    )
+    out = ensure_absolute_doc_links(text, _found_tools(), channel=channel)
+    assert "http" not in out.lower()
+    assert "files/found" not in out
+    assert "studio.empirebox.store" not in out
+    assert "Wall-Unit-LED.pdf" in out
+    assert "Layout.pdf" in out
+    stripped = strip_spoken_urls(text)
+    assert stripped == out
+    assert "http" not in stripped.lower()
+
+
+def test_unset_edition_never_falls_back_to_studio(monkeypatch):
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
+    monkeypatch.delenv("EMPIRE_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    assert is_workroom_founder_edition() is False
+    assert is_family_edition() is True
+    assert public_base() == ""
+    relative = "See [x](/api/v1/files/found?t=abc.sig)"
+    assert rewrite_relative_file_links(relative) == relative
+    out = ensure_absolute_doc_links("I found the LED spec.", _found_tools(), channel="web")
+    assert out == "I found the LED spec."
+    assert "studio.empirebox.store" not in out
+    assert "studio.empirebox.store" not in first_reply_link_instruction()
+    assert "studio.empirebox.store" not in studio_found_url("/tmp/A.pdf")
+
+
+def test_unset_edition_rejects_studio_env_override(monkeypatch):
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
+    monkeypatch.setenv("EMPIRE_PUBLIC_BASE_URL", STUDIO)
+    monkeypatch.setenv("PUBLIC_BASE_URL", STUDIO)
+    assert public_base() == ""
+    assert rewrite_relative_file_links("See [x](/api/v1/files/found?t=abc.sig)") == (
+        "See [x](/api/v1/files/found?t=abc.sig)"
+    )
+
+
+@pytest.mark.parametrize("edition", ("workroom", "founder"))
+def test_explicit_workroom_founder_uses_studio_default(monkeypatch, edition):
+    monkeypatch.setenv("EMPIRE_EDITION", edition)
+    monkeypatch.delenv("EMPIRE_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    assert is_workroom_founder_edition() is True
+    assert is_family_edition() is False
+    assert public_base() == STUDIO
+
+
+def test_unset_edition_allows_non_studio_public_base(monkeypatch):
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://maxine.example")
+    monkeypatch.delenv("EMPIRE_PUBLIC_BASE_URL", raising=False)
+    assert public_base() == "https://maxine.example"
 
 
 def test_attach_links_never_emits_relative_viewer(tmp_path, monkeypatch, studio_env):
