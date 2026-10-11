@@ -182,9 +182,11 @@ def grounding_directive(message: str | None = None) -> str:
             return (
                 "Responde en 2 a 5 oraciones cortas en español. Usa solo las páginas "
                 "ya leídas. Cita con enlaces markdown [título](url). Termina con "
-                "**Fuentes**: lista numerada de enlaces clicables (título + URL). "
-                "Orden: sitio oficial y registros/listados primero, noticias de "
-                "referencia después, Facebook / Instagram / TikTok al final. "
+                "**Fuentes**: lista numerada de un enlace clicable por fuente "
+                "(solo el título, sin repetir la URL). "
+                "Orden: sitio oficial (gobierno o web propia del negocio) y "
+                "registros/listados primero, noticias de referencia después, "
+                "Facebook / Instagram / TikTok al final. "
                 "No inventes fechas ni fuentes."
             )
     except Exception:

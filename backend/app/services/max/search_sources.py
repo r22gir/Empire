@@ -1,13 +1,15 @@
 """Rank web-search hits and format clickable Fuentes for Max-e / Maxine.
 
-Official sites and registries first, major news next, everything else after,
-Facebook / Instagram / TikTok last. Family answers keep Spanish short and
-always show title + URL as markdown links.
+Official sites (government TLDs and the edition's own websites) and
+registries first, major news next, everything else after, Facebook /
+Instagram / TikTok last. Each source is one short markdown link; the
+raw URL is not repeated after the title.
 """
 from __future__ import annotations
 
+import os
 import re
-from typing import Any
+from typing import Any, Iterable
 from urllib.parse import urlparse
 
 SOCIAL_HOSTS = frozenset({
@@ -52,23 +54,26 @@ NEWS_HOSTS = frozenset({
     "aljazeera.com",
 })
 
-REGISTRY_MARKERS = (
+# Host / registrable-domain tokens only. Do not match these in titles or paths
+# ("Cámara de Comercio" in a news headline is not a registry hit).
+REGISTRY_HOST_TOKENS = (
     "rues",
-    "registro",
     "camara",
-    "superintendencia",
+    "directorio",
+    "chamber",
     "opencorporates",
     "companieshouse",
-    "sec.gov",
+    "superintendencia",
     "sunat",
-    "sat.gob",
-    "directorio",
     "yellowpages",
     "paginasamarillas",
     "infobel",
+    "registro",
+)
+
+REGISTRY_HOST_SUFFIXES = (
+    "sec.gov",
     "dnb.com",
-    "bloomberg.com/profile",
-    "chamber",
 )
 
 _OFFICIAL_HOST_RE = re.compile(
@@ -90,6 +95,23 @@ def _host(url: str) -> str:
     return host
 
 
+def _normalize_host(value: str) -> str:
+    raw = (value or "").strip().lower()
+    if not raw:
+        return ""
+    if "://" in raw:
+        return _host(raw)
+    if raw.startswith("www."):
+        raw = raw[4:]
+    return raw.split("/")[0].split(":")[0]
+
+
+def _host_matches(host: str, official: str) -> bool:
+    if not host or not official:
+        return False
+    return host == official or host.endswith("." + official)
+
+
 def _is_social(host: str) -> bool:
     return any(host == name or host.endswith("." + name) for name in SOCIAL_HOSTS)
 
@@ -98,7 +120,7 @@ def _is_news(host: str) -> bool:
     return any(host == name or host.endswith("." + name) for name in NEWS_HOSTS)
 
 
-def _is_official(host: str) -> bool:
+def _is_gov_official(host: str) -> bool:
     if not host:
         return False
     if _OFFICIAL_HOST_RE.search(host):
@@ -106,36 +128,108 @@ def _is_official(host: str) -> bool:
     return host.endswith(".gov") or host.endswith(".gob") or host.endswith(".edu") or host.endswith(".mil")
 
 
-def _is_registry(url: str, title: str, host: str) -> bool:
-    blob = f"{host} {url} {title}".lower()
-    return any(marker in blob for marker in REGISTRY_MARKERS)
+def _is_registry_host(host: str) -> bool:
+    if not host:
+        return False
+    if any(_host_matches(host, suffix) for suffix in REGISTRY_HOST_SUFFIXES):
+        return True
+    labels = [part for part in host.split(".") if part]
+    for token in REGISTRY_HOST_TOKENS:
+        if any(
+            label == token or label.startswith(token) or label.endswith(token)
+            for label in labels
+        ):
+            return True
+    return False
 
 
-def source_bucket(url: str, title: str = "") -> str:
+def edition_official_hosts(extra: Iterable[str] | None = None) -> frozenset[str]:
+    """Hosts that belong to this edition's businesses (own websites)."""
+    found: set[str] = set()
+    for raw in extra or ():
+        host = _normalize_host(str(raw))
+        if host:
+            found.add(host)
+    for raw in (os.getenv("EDITION_OFFICIAL_SITES") or "").split(","):
+        host = _normalize_host(raw)
+        if host:
+            found.add(host)
+    try:
+        from app.edition import edition_manifest
+
+        product = edition_manifest().get("product") or {}
+        host = _normalize_host(str(product.get("site") or ""))
+        if host:
+            found.add(host)
+    except Exception:
+        pass
+    try:
+        from app.services.leadforge.trade_profile import social_default_profile, trade_profile
+
+        profile = trade_profile() or {}
+        social = profile.get("social") or {}
+        for blob in (
+            social.get("profile"),
+            *((social.get("profiles_by_business") or {}).values()),
+        ):
+            if isinstance(blob, dict):
+                host = _normalize_host(str(blob.get("website") or ""))
+                if host:
+                    found.add(host)
+        extra_profile = social_default_profile() or {}
+        host = _normalize_host(str(extra_profile.get("website") or ""))
+        if host:
+            found.add(host)
+    except Exception:
+        pass
+    return frozenset(found)
+
+
+def source_bucket(
+    url: str,
+    title: str = "",
+    *,
+    official_hosts: Iterable[str] | None = None,
+) -> str:
     host = _host(url)
     if _is_social(host):
         return "social"
-    if _is_official(host):
+    own = {
+        _normalize_host(str(item))
+        for item in (official_hosts if official_hosts is not None else edition_official_hosts())
+        if _normalize_host(str(item))
+    }
+    if _is_gov_official(host) or any(_host_matches(host, item) for item in own):
         return "official"
-    if _is_registry(url, title, host):
+    if _is_registry_host(host):
         return "registry"
     if _is_news(host):
         return "news"
     return "other"
 
 
-def source_rank(url: str, title: str = "") -> int:
+def source_rank(
+    url: str,
+    title: str = "",
+    *,
+    official_hosts: Iterable[str] | None = None,
+) -> int:
     return {
         "official": 0,
         "registry": 1,
         "news": 2,
         "other": 3,
         "social": 4,
-    }.get(source_bucket(url, title), 3)
+    }.get(source_bucket(url, title, official_hosts=official_hosts), 3)
 
 
-def rank_search_results(results: list[Any] | None) -> list[dict]:
+def rank_search_results(
+    results: list[Any] | None,
+    *,
+    official_hosts: Iterable[str] | None = None,
+) -> list[dict]:
     """Stable sort: official / registry / news / other / social. Drops empty URLs."""
+    hosts = None if official_hosts is None else list(official_hosts)
     cleaned: list[dict] = []
     seen: set[str] = set()
     for item in results or []:
@@ -152,21 +246,38 @@ def rank_search_results(results: list[Any] | None) -> list[dict]:
         row = dict(item)
         row["url"] = url
         row["title"] = title
-        row["source_bucket"] = source_bucket(url, title)
+        row["source_bucket"] = source_bucket(url, title, official_hosts=hosts)
         cleaned.append(row)
-    cleaned.sort(key=lambda row: (source_rank(row["url"], row["title"]), row["title"].lower()))
+    cleaned.sort(
+        key=lambda row: (
+            source_rank(row["url"], row["title"], official_hosts=hosts),
+            row["title"].lower(),
+        )
+    )
     return cleaned
 
 
-def format_fuentes_markdown(results: list[dict] | None, *, heading: str = "Fuentes") -> str:
-    rows = rank_search_results(results)
+def _display_title(title: str, url: str) -> str:
+    host = _host(url)
+    cleaned = (title or "").replace("]", "").replace("[", "").strip()
+    if not cleaned or cleaned.rstrip("/") == url.rstrip("/") or cleaned.lower() == url.lower():
+        return host or cleaned or url
+    return cleaned
+
+
+def format_fuentes_markdown(
+    results: list[dict] | None,
+    *,
+    heading: str = "Fuentes",
+    official_hosts: Iterable[str] | None = None,
+) -> str:
+    rows = rank_search_results(results, official_hosts=official_hosts)
     if not rows:
         return ""
     lines = [f"**{heading}**"]
     for index, row in enumerate(rows, start=1):
-        title = row["title"].replace("]", "").replace("[", "")
-        url = row["url"]
-        lines.append(f"{index}. [{title}]({url}) — {url}")
+        title = _display_title(row["title"], row["url"])
+        lines.append(f"{index}. [{title}]({row['url']})")
     return "\n".join(lines)
 
 
@@ -192,12 +303,20 @@ def extract_web_search_results(tool_results: list[Any] | None) -> list[dict]:
     return found
 
 
-def attach_ranked_sources(answer: str, tool_results: list[Any] | None) -> str:
-    """Replace or append a Fuentes list of clickable title + URL links."""
-    rows = rank_search_results(extract_web_search_results(tool_results))
+def attach_ranked_sources(
+    answer: str,
+    tool_results: list[Any] | None,
+    *,
+    official_hosts: Iterable[str] | None = None,
+) -> str:
+    """Replace or append a Fuentes list of short clickable title links."""
+    rows = rank_search_results(
+        extract_web_search_results(tool_results),
+        official_hosts=official_hosts,
+    )
     if not rows:
         return answer or ""
-    block = format_fuentes_markdown(rows)
+    block = format_fuentes_markdown(rows, official_hosts=official_hosts)
     text = answer or ""
     if _FUENTES_HEADING_RE.search(text):
         text = _FUENTES_HEADING_RE.sub("\n\n" + block, text).rstrip()

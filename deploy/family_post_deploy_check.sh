@@ -109,6 +109,81 @@ contains_any() {
   return 1
 }
 
+WORKROOM_RECORD_LEAKS=(
+  "frolich" "hyattsville" "workroom@" "woodcraft@" "5124"
+  "nelma" "nehal" "dahlia" "rg's drapery" "the willard" "mclean whittington"
+  "empire workroom" "9408 old courthouse"
+)
+
+scan_workroom_records() {
+  local blob="$1"
+  contains_any "$blob" "${WORKROOM_RECORD_LEAKS[@]}"
+}
+
+env_value() {
+  local env_file="$1" key="$2"
+  (
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+    python3 -c 'import os,sys; print(os.environ.get(sys.argv[1],""))' "$key"
+  )
+}
+
+check_home_v3() {
+  local label="$1" base="$2" token="$3" env_file="$4" expected_root="$5"
+  local data_dir ed raw path status
+  data_dir="$(env_value "$env_file" EMPIRE_DATA_DIR)"
+  echo "  EMPIRE_DATA_DIR=$data_dir"
+  if [ "$data_dir" != "$expected_root" ]; then
+    fail "$label EMPIRE_DATA_DIR debe ser $expected_root"
+  else
+    pass "$label EMPIRE_DATA_DIR=$expected_root"
+  fi
+
+  ed="$(curl -sS -H "Authorization: Bearer $token" "$base/api/v1/edition")"
+  path="$(printf '%s' "$ed" | python3 -c 'import json,sys; d=json.load(sys.stdin); a=d.get("assistant") or {}; print(a.get("memory_path") or a.get("history_path") or "")')"
+  if [ -n "$path" ]; then
+    echo "  edition memory_path: $path"
+    if printf '%s' "$path" | grep -q "^$expected_root"; then
+      pass "$label home v3 memoria bajo $expected_root"
+    else
+      fail "$label home v3 memoria fuera de $expected_root"
+    fi
+  fi
+  if printf '%s' "$ed" | grep -Eqi '/home/rg/empire-repo|/data/maxine|empire-data'; then
+    fail "$label GET /edition apunta a otro árbol"
+  fi
+
+  local ep
+  for ep in \
+    "/api/v1/quotes-v2?limit=500" \
+    "/api/v1/jobs?limit=500" \
+    "/api/v1/leads/?limit=500" \
+    "/api/v1/finance/dashboard" \
+    "/api/v1/payments/overdue"
+  do
+    raw="$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $token" "$base$ep")"
+    status="${raw##*$'\n'}"
+    raw="${raw%$'\n'*}"
+    echo "  GET $ep → $status"
+    if [ "$status" != "200" ]; then
+      fail "$label home v3 $ep HTTP $status"
+      continue
+    fi
+    if ! printf '%s' "$raw" | python3 -c 'import json,sys; json.load(sys.stdin)' >/dev/null 2>&1; then
+      fail "$label home v3 $ep no es JSON"
+      continue
+    fi
+    if scan_workroom_records "$raw"; then
+      fail "$label home v3 $ep devolvió registros del Workroom"
+      continue
+    fi
+    pass "$label home v3 $ep solo datos de $expected_root"
+  done
+}
+
 check_usage() {
   local label="$1" base="$2" token="$3"
   local raw keys
@@ -145,11 +220,7 @@ check_isolation_reply() {
   local label="$1" question="$2" reply="$3"
   echo "  Q: $question"
   echo "  A: $reply"
-  local leaks=(
-    "frolich" "hyattsville" "workroom@" "woodcraft@" "5124"
-    "nelma" "nehal" "dahlia" "rg's drapery"
-  )
-  if contains_any "$reply" "${leaks[@]}"; then
+  if contains_any "$reply" "${WORKROOM_RECORD_LEAKS[@]}"; then
     fail "$label aislamiento filtró datos: $question"
     return
   fi
@@ -188,6 +259,10 @@ run_edition() {
   fi
 
   check_usage "$name" "$base" "$token"
+
+  if [ "$edition" = "amp" ]; then
+    check_home_v3 "$name" "$base" "$token" "$env_file" "/data/amp"
+  fi
 
   local probe="POSTDEPLOY-$(date +%s)-$RANDOM"
   local store_conv="postdeploy-store-$probe"

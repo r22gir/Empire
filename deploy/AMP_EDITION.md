@@ -12,31 +12,52 @@ There is one login (`/login`, `amp_session`). `/amp/login` and `/amp/signup` red
 
 ## Run it on the Dell
 
-Workroom stays on port 8000. Do not restart it and do not point AMP at its `.env` or its data directory.
+Max-e lives in **`/home/rg/empire-amp`** (branch `amp-local`). Workroom stays in `/home/rg/empire-repo` on port **8000** — do not `cd` there, do not restart it, and do not point AMP at its `.env` or its data directory. Maxine is not part of this pass.
+
+Live units already exist: `empire-amp.service` on **127.0.0.1:8011** and `empire-amp-frontend.service` on **127.0.0.1:3011** (`WorkingDirectory=/home/rg/empire-amp/empire-command-center`). **Do not `cp deploy/empire-amp.service` over the Dell unit.** That template used to hardcode `/home/rg/empire-repo/backend` (Workroom). Compare first; paths in git now match `/home/rg/empire-amp`.
+
+First-time only (if no unit exists):
 
 ```bash
 mkdir -p /data/amp
 cp deploy/empire-amp.env.example /home/rg/empire-amp.env
 # Edit /home/rg/empire-amp.env on the server. Placeholders only are in git.
-
-mkdir -p ~/.config/systemd/user
-cp deploy/empire-amp.service ~/.config/systemd/user/empire-amp.service
-systemctl --user daemon-reload
-systemctl --user enable --now empire-amp.service
+# Compare, then install the unit only if none exists:
+#   cp deploy/empire-amp.service ~/.config/systemd/user/empire-amp.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now empire-amp.service
 ```
 
-The process listens on **127.0.0.1:8011**. The Next.js frontend for this instance listens on **127.0.0.1:3011**.
+This-pass update (existing Dell units):
+
+```bash
+cd /home/rg/empire-amp
+git branch backup/amp-local-$(date +%Y%m%d)
+git fetch origin cursor/amp-local-reconcile-3abe
+git checkout cursor/amp-local-reconcile-3abe
+./backend/venv/bin/pip install -r backend/requirements.txt   # bcrypt>=4.0.1,<4.1.0
+systemctl --user restart empire-amp.service
+
+cd /home/rg/empire-amp/empire-command-center
+NEXT_PUBLIC_EMPIRE_EDITION=amp \
+NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
+npx next build --webpack
+systemctl --user restart empire-amp-frontend.service
+```
 
 Check:
 
 ```bash
 curl -s http://127.0.0.1:8011/health
 curl -s http://127.0.0.1:8011/api/v1/edition
+# never: curl :8000  or  systemctl restart empire-backend
 ```
 
-After deploy, run the Spanish post-deploy check (memory recall, isolation, usage percentages only). It never talks to Workroom:
+After deploy, run the Spanish post-deploy check from this checkout (memory, isolation, home v3 data root, usage percentages). It never talks to Workroom:
 
 ```bash
+cd /home/rg/empire-amp
 deploy/family_post_deploy_check.sh amp
 ```
 
@@ -49,7 +70,7 @@ Frontend for this instance (separate from the Workroom command center process). 
 Dev:
 
 ```bash
-cd /home/rg/empire-repo/empire-command-center
+cd /home/rg/empire-amp/empire-command-center
 NEXT_PUBLIC_EMPIRE_EDITION=amp \
 NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
@@ -57,20 +78,13 @@ EMPIRE_API_BASE=http://127.0.0.1:8011 \
 npx next dev -p 3011
 ```
 
-Production (rebuild, then start on 3011):
+Production rebuild is the `empire-amp-frontend` restart above. Manual start if that unit is down:
 
 ```bash
-cd /home/rg/empire-repo/empire-command-center
+cd /home/rg/empire-amp/empire-command-center
 NEXT_PUBLIC_EMPIRE_EDITION=amp \
 NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
-EMPIRE_API_BASE=http://127.0.0.1:8011 \
-npx next build --webpack
-
-NEXT_PUBLIC_EMPIRE_EDITION=amp \
-NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
-NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
-EMPIRE_API_BASE=http://127.0.0.1:8011 \
 npx next start -p 3011
 ```
 
@@ -85,7 +99,7 @@ Ships with only the owner/admin account (`AMP_OWNER_EMAIL` / `AMP_OWNER_USERNAME
 Add a person (email or username):
 
 ```bash
-cd /home/rg/empire-repo/backend
+cd /home/rg/empire-amp/backend
 EMPIRE_EDITION=amp EMPIRE_DATA_DIR=/data/amp \
   ./venv/bin/python scripts/amp_allowlist.py add --email person@example.com
 ```

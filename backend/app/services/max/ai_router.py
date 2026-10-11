@@ -1262,7 +1262,10 @@ class AIRouter:
             )
             return model, refusal
         except Exception:
-            logger.warning("usage cap check skipped", exc_info=True)
+            logger.warning(
+                "usage cap check failed open; chat proceeds without a cap refusal",
+                exc_info=True,
+            )
             return model, None
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:

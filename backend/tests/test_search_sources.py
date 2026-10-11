@@ -1,6 +1,7 @@
 """Ranked clickable Fuentes for Max-e web search."""
 from app.services.max.search_sources import (
     attach_ranked_sources,
+    edition_official_hosts,
     format_fuentes_markdown,
     rank_search_results,
     source_bucket,
@@ -23,13 +24,60 @@ def test_official_and_news_beat_social():
     assert source_bucket("https://www.facebook.com/x") == "social"
 
 
-def test_fuentes_are_clickable_title_and_url():
+def test_own_business_website_is_official():
+    rows = rank_search_results(
+        [
+            {"title": "TikTok AMP", "url": "https://www.tiktok.com/@amp"},
+            {"title": "Nota", "url": "https://www.eltiempo.com/amp-nota"},
+            {"title": "Cursos AMP", "url": "https://actitudmentalpositiva.com/cursos"},
+            {"title": "WWW AMP", "url": "https://www.actitudmentalpositiva.com/"},
+        ],
+        official_hosts=["actitudmentalpositiva.com"],
+    )
+    assert [row["source_bucket"] for row in rows[:2]] == ["official", "official"]
+    assert rows[-1]["source_bucket"] == "social"
+    assert source_bucket(
+        "https://cursos.actitudmentalpositiva.com",
+        official_hosts=["actitudmentalpositiva.com"],
+    ) == "official"
+    assert source_bucket(
+        "https://notactitudmentalpositiva.com",
+        official_hosts=["actitudmentalpositiva.com"],
+    ) == "other"
+
+
+def test_amp_edition_product_site_is_official(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMPIRE_EDITION", "amp")
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    hosts = edition_official_hosts()
+    assert "actitudmentalpositiva.com" in hosts
+    assert source_bucket("https://actitudmentalpositiva.com/cursos") == "official"
+
+
+def test_registry_matches_host_not_title_or_path():
+    assert source_bucket("https://www.rues.org.co/empresa", "Empresa") == "registry"
+    assert source_bucket("https://www.camaracali.org.co/", "Cámara") == "registry"
+    assert source_bucket("https://directorio.example.co/fichas", "") == "registry"
+    assert source_bucket("https://www.bogotachamber.com/listing", "") == "registry"
+    assert source_bucket(
+        "https://www.eltiempo.com/directorio-empresas",
+        "Directorio y Cámara de Comercio / RUES",
+    ) == "news"
+    assert source_bucket(
+        "https://www.elespectador.com/economia/camara-de-comercio",
+        "La cámara y el RUES",
+    ) == "news"
+
+
+def test_fuentes_are_short_clickable_links_without_raw_url():
     block = format_fuentes_markdown([
         {"title": "Sitio oficial AMP", "url": "https://amp.gov.co/hola"},
         {"title": "TikTok AMP", "url": "https://www.tiktok.com/@amp"},
     ])
     assert block.startswith("**Fuentes**")
-    assert "[Sitio oficial AMP](https://amp.gov.co/hola) — https://amp.gov.co/hola" in block
+    assert "[Sitio oficial AMP](https://amp.gov.co/hola)" in block
+    assert " — https://amp.gov.co/hola" not in block
+    assert block.count("https://amp.gov.co/hola") == 1
     assert block.index("amp.gov.co") < block.index("tiktok.com")
 
 
@@ -45,6 +93,7 @@ def test_attach_replaces_bare_sources_list():
     }])
     assert "**Fuentes**" in out
     assert "[BanRep](https://www.banrep.gov.co/trm)" in out
+    assert " — https://www.banrep.gov.co/trm" not in out
     assert out.index("banrep.gov.co") < out.index("instagram.com")
     assert "tiktok.com" not in out
 
@@ -57,5 +106,6 @@ def test_family_grounding_asks_for_clickable_fuentes(monkeypatch, tmp_path):
     text = grounding_directive("Qué pasó en Panamá")
     assert "Fuentes" in text
     assert "[título](url)" in text
+    assert "sin repetir" in text
     assert "TikTok" in text
     assert "2 a 5 oraciones" in text
