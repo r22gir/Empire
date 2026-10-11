@@ -92,6 +92,8 @@ RESTRICTED_ACTIONS = frozenset({
     "commit_code",
     "push_code",
     "deploy",
+    "publish",
+    "publish_to_prod",
     "contact_customer_without_approval",
 })
 

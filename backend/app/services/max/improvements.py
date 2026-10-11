@@ -30,9 +30,18 @@ BASE_REF = os.getenv("MAX_IMPROVE_BASE_REF", "main")
 SPEC_DIR = Path(os.getenv("MAX_IMPROVE_SPEC_DIR", str(Path.home() / "empire-data" / "improvements")))
 RISKS = ("low", "medium", "high")
 API = "https://api.cursor.com"
-# Cloud-agent launches by Max must include a model. Always grok-4.6.
-# Never retry without a model. Never try to raise a usage limit.
-INCLUDED_MODEL = os.getenv("MAX_IMPROVE_MODEL", "grok-4.6")
+# Cloud-agent launches must include a model. Always grok-4.6 unless an
+# operator explicitly sets MAX_IMPROVE_MODEL. Leave that env unset by default
+# — do not write it, and do not treat getenv's default as a set env var.
+_LAUNCH_MODEL = "grok-4.6"
+
+
+def included_model() -> str:
+    override = (os.getenv("MAX_IMPROVE_MODEL") or "").strip()
+    return override or _LAUNCH_MODEL
+
+
+INCLUDED_MODEL = included_model()
 DEFAULT_MODEL = INCLUDED_MODEL
 DEFAULT_PARAMS = [{"id": "effort", "value": os.getenv("MAX_IMPROVE_EFFORT", "medium")}]
 SMALL_MODEL = INCLUDED_MODEL
@@ -190,8 +199,8 @@ def is_small_fix(req: dict) -> bool:
 
 
 def pick_model(req: dict) -> dict:
-    """Always include grok-4.6. Small-fix path uses the same included model."""
-    return {"id": INCLUDED_MODEL, "params": DEFAULT_PARAMS}
+    """Always include a model id (grok-4.6 unless MAX_IMPROVE_MODEL is set)."""
+    return {"id": included_model(), "params": DEFAULT_PARAMS}
 
 
 def _is_usage_limit_exceeded(status_code: int, body: str) -> bool:

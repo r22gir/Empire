@@ -24,6 +24,11 @@ verifies, reports, and escalates. He does not do the desks' work himself.
 13. Cloud-agent launch (Approve tap only) includes `model.id = grok-4.6`. If Cursor returns `usage_limit_exceeded`, the build note says so plainly. Max never retries without a model and never tries to raise the limit.
 14. Time out a desk task three times — status becomes `failed` (not an endless `todo` reset).
 15. Unrouted work lands in `founder_inbox` (survives process restart).
+16. `can you show me the Marley docs` — **normal reply / doc lookup**, not a founder-inbox task. Same for polite `can you / please / draft / review / create` with no desk keyword.
+17. Spanish outbound (`envia esta factura`, `manda el correo`, `cobra al cliente`, `publica esto`, `despliega`) — held for founder tap. Approve via `POST /api/v1/max/tasks/{id}/approve` (or the inbox line in the digest) to resume.
+18. Max-e / Maxine chat does **not** create Workroom-desk tasks or write the Workroom `tasks` table.
+19. Tasks-table migration copies the SQLite file first (`*.tasks-mig-*.bak`) and is a no-op when `failed`/`escalated` are already allowed.
+20. `MAX_IMPROVE_MODEL` stays **unset** unless an operator sets it. Cloud-agent launch still sends `grok-4.6`.
 
 ## DB queries to inspect desk usage
 
@@ -76,12 +81,15 @@ ORDER BY retry_count DESC;
 
 | Area | Change |
 |---|---|
-| `/max/chat` | Delegate-first step after existing shortcuts. Model answers only orchestration/status/trivial lookups. |
+| `/max/chat` | Delegate-first after shortcuts. Default is a normal reply unless a desk keyword/classifier owns the work. |
 | Desk router | Keywords first (analytics/quality/intake added). LLM via active provider only; never Ollama. |
 | Tasks CHECK | `failed` / `escalated` allowed. Retry cap (3) + backoff. |
 | Founder inbox | SQLite table, not process memory. |
 | Async `run_desk_task` | Honors `desk=`; Atlas only when CodeForge owns the work. |
 | Review | Template output is reported `draft only`. Second pass uses the active model. |
 | Sweeper | Every 10 min + 07:45 daily digest (desk, task, state, next step). |
-| Improvements | Deep link `?screen=improvements&id=N`. Cloud agent model `grok-4.6`. |
-| Document search | No search without document words. Coordinates with PR #105. |
+| Improvements | Deep link `?screen=improvements&id=N`. Cloud agent model `grok-4.6`. `MAX_IMPROVE_MODEL` unset by default. |
+| Document search | No search without document words. Coordinates with PR #105 (`show me the Marley docs` stays a lookup). |
+| Approval | EN + ES outbound verbs. Uncertain outbound is held. `POST /tasks/{id}/approve` resumes waiting tasks. |
+| Edition | Delegate-first only on workroom/founder. Max-e/Maxine never write Workroom `tasks`. |
+| Migration | SQLite backup copy first; rebuild is idempotent. |

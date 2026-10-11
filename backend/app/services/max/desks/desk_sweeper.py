@@ -128,10 +128,14 @@ async def send_daily_digest() -> dict[str, Any]:
 def _digest_row(r: dict, now: datetime) -> dict[str, Any]:
     status = r.get("status")
     desk = r.get("desk")
+    tid = r.get("id")
     nxt = {
         "todo": "Worker will pick up when backoff allows",
         "in_progress": "Sweeper watching; timeout hits retry cap then failed",
-        "waiting": "Waiting on founder tap or a dependency",
+        "waiting": (
+            f"Held for founder tap — approve task #{tid} to resume "
+            f"(inbox or POST /api/v1/max/tasks/{tid}/approve)"
+        ),
         "escalated": "In founder inbox — assign a desk or decide",
         "failed": "Capped or errored — re-open only on founder ask",
         "done": "Done (reviewed)",

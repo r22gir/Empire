@@ -9,6 +9,7 @@ LLM classification uses the active chat provider only — never disabled Ollama.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -17,15 +18,46 @@ from .desk_registry import DESK_IDS, desk_label, live_desk_count
 
 logger = logging.getLogger("max.desks.delegate_first")
 
+# ── To-me lookups (EN + ES). These are replies, never outbound. ──────
+# "send me the quote" / "envíame los docs" stay a normal answer.
+_LOOKUP_TO_ME = re.compile(
+    r"\b(?:send|email|show|give|find|open|get|pull|look\s*up|"
+    r"env[ií]a|mand[ae]|muestra|ense[nñ]a|dame)\s+(?:me|us|nos)\b|"
+    r"\b(?:env[ií]ame|env[ií]arme|m[aá]ndame|m[aá]ndarme|"
+    r"mu[eé]strame|ens[eé][nñ]ame|dame)\b",
+    re.I,
+)
+
 # ── Approval gates (founder tap required; Max never executes) ─────────
+# English + Spanish outbound verbs. Uncertain outbound is also held.
 _APPROVAL = re.compile(
-    r"\b(?:send\s+(?:this|it|the|an?|email|invoice|quote)|"
+    r"\b(?:"
+    # English send/invoice/pay/price/legal/deploy/publish
+    r"send\s+(?:this|it|the|an?|email|invoice|quote)|"
     r"email\s+(?:the\s+)?client|invoice\s+(?:them|the\s+client)|"
     r"charge|take\s+payment|collect\s+payment|process\s+payment|"
     r"change\s+(?:the\s+)?pric(?:e|ing)|cut\s+the\s+price|raise\s+the\s+price|"
     r"sign\s+(?:the\s+)?(?:contract|agreement)|send\s+(?:the\s+)?(?:contract|legal)|"
     r"deploy|merge\s+(?:to|into)\s+(?:main|prod)|push\s+to\s+prod|"
-    r"go\s+live|publish\s+to\s+prod)\b",
+    r"go\s+live|publish\s+to\s+prod|"
+    # Spanish: envia/manda/cobra/factura/publica/despliega (+ inflected)
+    r"env[ií]a(?:r|rle|le|lo|la)?|"
+    r"mand(?:a|ar|ale|alo|ala)|"
+    r"cobr(?:a|ar|ale|alo)|"
+    r"factur(?:a|ar|ale|alo)\s+(?:al|el|la|los|las|un|una|este|esta|esto|del|de|cliente)|"
+    r"public(?:a|ar|alo|ala)|"
+    r"despleg(?:a|ar|alo|ala)|desplieg(?:a|as|an|ue)|"
+    r"envi[aá]rselo|m[aá]ndaselo|"
+    r"c[oó]brale|c[oó]bralo"
+    r")\b",
+    re.I,
+)
+
+# Outbound-ish but not clearly "send to client" — hold, do not auto-execute.
+_UNCERTAIN_OUTBOUND = re.compile(
+    r"\b(?:send|email|publish|deploy|charge|invoice)\s+(?:this|it|that|them)\b|"
+    r"\b(?:env[ií]alo|m[aá]ndalo|p[uú]blicalo|despli[eé]galo|"
+    r"envialo|mandalo|publicalo|despliegalo)\b",
     re.I,
 )
 
@@ -45,15 +77,19 @@ _ORCH = re.compile(
     re.I,
 )
 
-# Trivial lookups Max should answer (existing shortcuts / prelookup)
+# Trivial lookups Max should answer (existing shortcuts / prelookup / PR #105 docs)
 _LOOKUP = re.compile(
     r"\b(?:quote|estimate|cotizaci|"
     r"weather(?:\s+forecast)?|"
     r"brief(?:\s+me)?|rundown|agenda|"
     r"check\s+(?:my\s+)?(?:email|inbox|gmail)|"
     r"what(?:'s| is)\s+(?:the\s+)?(?:latest|status|total)|"
-    r"show\s+me\s+(?:the\s+)?(?:quote|estimate|invoice|file|doc|pdf)|"
-    r"find\s+(?:the\s+)?(?:file|doc|pdf|quote|invoice)|"
+    r"(?:show|send|give|find|open|get|pull)\s+(?:me\s+)?(?:the\s+)?"
+    r"(?:quote|estimate|invoice|file|doc|docs|document|documents|pdf|drawing|drawings|photo|photos)|"
+    r"(?:show|send|give|find)\s+(?:me\s+).{0,40}\b(?:docs?|documents?|files?|pdfs?|drawings?|photos?)\b|"
+    r"(?:where\s+are|look\s*up)\s+(?:my\s+|the\s+)?(?:docs?|documents?|files?)|"
+    r"(?:mu[eé]stra(?:me)?|ens[eé][nñ]a(?:me)?|dame|busca)\s+"
+    r"(?:los\s+|las\s+|el\s+|la\s+)?(?:docs?|documentos?|archivos?|pdfs?|cotizaci\w*)|"
     r"open\s+(?:the\s+)?(?:quote|invoice|file|doc))\b",
     re.I,
 )
@@ -174,28 +210,29 @@ def classify_request(
         return RouteDecision(action="answer", reason="follow-up / not a new desk task")
     if _ORCH.search(text):
         return RouteDecision(action="answer", reason="orchestration/status")
-    if _APPROVAL.search(text):
+    # Lookups (including "send/show me the Marley docs") beat outbound gates.
+    if _LOOKUP_TO_ME.search(text) or _LOOKUP.search(text):
+        return RouteDecision(action="answer", reason="trivial lookup")
+    if _APPROVAL.search(text) or _UNCERTAIN_OUTBOUND.search(text):
         desk = _keyword_desk(text) or "forge"
+        uncertain = bool(_UNCERTAIN_OUTBOUND.search(text) and not _APPROVAL.search(text))
         return RouteDecision(
             action="approval", desk_id=desk,
-            reason="founder approval required (send/invoice/payment/pricing/legal/deploy)",
+            reason=(
+                "uncertain outbound — held for founder tap"
+                if uncertain
+                else "founder approval required (send/invoice/payment/pricing/legal/deploy)"
+            ),
             approval_required=True,
         )
-    if _LOOKUP.search(text):
-        return RouteDecision(action="answer", reason="trivial lookup")
     desk = _keyword_desk(text)
     if desk:
         return RouteDecision(
             action="delegate", desk_id=desk,
             reason=f"keyword rule → {desk}", method="rule",
         )
-    # Work-shaped request with no keyword hit: still delegate (inbox if unmatched)
-    if _looks_like_work(text) and not has_image:
-        return RouteDecision(
-            action="delegate", desk_id=None,
-            reason="work request, no keyword desk — needs desk or founder inbox",
-            method="rule",
-        )
+    # Default: normal reply. Polite "can you / please / draft / review / create"
+    # with no desk keyword is chat, not a founder-inbox task.
     return RouteDecision(action="answer", reason="not a desk task")
 
 
@@ -209,13 +246,21 @@ def _keyword_desk(text: str) -> Optional[str]:
     return best if score else None
 
 
-def _looks_like_work(text: str) -> bool:
-    return bool(re.search(
-        r"\b(?:please|need you to|can you|could you|draft|prepare|build|"
-        r"generate|create|write|handle|process|audit|scan|review|research|"
-        r"summarize|follow\s+up|schedule|assign)\b",
-        text, re.I,
-    )) and len(text.split()) >= 4
+def workroom_desks_allowed() -> bool:
+    """Delegate-first + Workroom tasks table: founder/workroom edition only.
+
+    Max-e / Maxine (and other family editions) must not create Workroom-desk
+    tasks or write the Workroom ``tasks`` table.
+    """
+    try:
+        from app.services.max.chat_style import _is_family
+        if _is_family():
+            return False
+    except Exception:
+        ed = (os.getenv("EMPIRE_EDITION") or "main").strip().lower().replace("-", "_")
+        if ed not in ("", "main", "workroom", "empire", "founder"):
+            return False
+    return True
 
 
 async def classify_with_active_llm(message: str, fallback: RouteDecision) -> RouteDecision:
@@ -281,9 +326,19 @@ def create_tracked_task(
     import json
     import uuid
     from app.db.database import get_db
-    from .task_lifecycle import allowed_status
+    from .task_lifecycle import allowed_status, migrate_task_status_constraint
 
-    from .task_lifecycle import migrate_task_status_constraint
+    if not workroom_desks_allowed():
+        logger.info("create_tracked_task skipped — family edition (no Workroom tasks)")
+        return {
+            "id": "",
+            "title": title[:200],
+            "desk": None,
+            "desk_label": None,
+            "status": "skipped_family_edition",
+            "approval_required": approval_required,
+            "skipped": True,
+        }
 
     tid = uuid.uuid4().hex[:8]
     status = "waiting" if approval_required else "todo"
@@ -316,7 +371,14 @@ def create_tracked_task(
             f"INSERT INTO tasks ({', '.join(cols)}) VALUES ({placeholders})",
             vals,
         )
-    if not desk_id:
+    if approval_required:
+        from . import founder_inbox
+        founder_inbox.add(
+            task_id=tid, title=title, description=description,
+            priority=priority, reason="held for founder tap — approve to resume",
+            source=source, conversation_id=conversation_id, desk=desk_id,
+        )
+    elif not desk_id:
         from . import founder_inbox
         founder_inbox.add(
             task_id=tid, title=title, description=description,
@@ -372,6 +434,8 @@ async def maybe_delegate(
 
     Returns None when Max should answer directly (shortcuts already handled).
     """
+    if not workroom_desks_allowed():
+        return None
     decision = classify_request(
         message, specified_desk=specified_desk, has_image=has_image,
     )
@@ -379,7 +443,7 @@ async def maybe_delegate(
         return None
     if decision.action == "delegate" and not decision.desk_id:
         decision = await classify_with_active_llm(message, decision)
-        if decision.answers_directly:
+        if decision.answers_directly or not decision.desk_id:
             return None
     title = (message or "").strip().split("\n")[0][:160] or "Desk task"
     task = create_tracked_task(
@@ -389,6 +453,8 @@ async def maybe_delegate(
         conversation_id=conversation_id,
         approval_required=decision.approval_required,
     )
+    if task.get("skipped"):
+        return None
     report = format_delegation_report(decision, task)
     return {
         "decision": decision,

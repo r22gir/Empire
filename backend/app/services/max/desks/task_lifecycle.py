@@ -6,10 +6,13 @@ rebuilds the constraint and tracks retry_count / next_retry_at.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
+import shutil
 from datetime import datetime, timedelta
-from typing import Iterable
+from typing import Any, Iterable, Optional
 
 logger = logging.getLogger("max.desks.lifecycle")
 
@@ -47,19 +50,66 @@ def next_retry_iso(retry_count: int, now: datetime | None = None) -> str:
     return (now + timedelta(minutes=backoff_minutes(retry_count))).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def migrate_task_status_constraint(conn) -> None:
-    """Allow failed/escalated on tasks.status. Safe to re-run."""
+def _sqlite_file_path(conn) -> Optional[str]:
+    try:
+        row = conn.execute("PRAGMA database_list").fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    path = row[2] if len(row) > 2 else ""
+    if not path or path == ":memory:":
+        return None
+    return path
+
+
+def backup_tasks_db(conn) -> Optional[str]:
+    """Copy the SQLite file before a destructive tasks-table rebuild.
+
+    Returns the backup path, or None when the db is in-memory / unnamed
+    (tests) or the copy failed. Never raises.
+    """
+    src = _sqlite_file_path(conn)
+    if not src or not os.path.isfile(src):
+        logger.info("tasks migration: skip backup (no on-disk sqlite file)")
+        return None
+    ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    dest = f"{src}.tasks-mig-{ts}.bak"
+    try:
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
+        shutil.copy2(src, dest)
+        logger.info("tasks migration backup: %s", dest)
+        return dest
+    except Exception as exc:
+        logger.warning("tasks migration backup failed: %s", exc)
+        return None
+
+
+def tasks_status_check_migrated(conn) -> bool:
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
     ).fetchone()
     sql = (row[0] if row else "") or ""
-    if not ("'failed'" in sql and "'escalated'" in sql):
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
-        if cols:
-            try:
-                _rebuild_tasks_status_check(conn, cols)
-            except Exception as exc:
-                logger.warning("tasks.status CHECK rebuild failed: %s", exc)
+    return "'failed'" in sql and "'escalated'" in sql
+
+
+def migrate_task_status_constraint(conn) -> None:
+    """Allow failed/escalated on tasks.status. Backup first. Idempotent."""
+    if tasks_status_check_migrated(conn):
+        _ensure_retry_columns(conn)
+        return
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    if not cols:
+        _ensure_retry_columns(conn)
+        return
+    backup_tasks_db(conn)
+    try:
+        _rebuild_tasks_status_check(conn, cols)
+    except Exception as exc:
+        logger.warning("tasks.status CHECK rebuild failed: %s", exc)
     _ensure_retry_columns(conn)
 
 
@@ -173,3 +223,72 @@ def apply_status_update(conn, task_id: str, status: str, result_summary: str | N
                WHERE id=?""",
             (status, result_summary[:2000], status, task_id),
         )
+
+
+def parse_task_metadata(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def metadata_allows_auto_execute(raw: Any) -> bool:
+    """False when the task is still held for a founder tap."""
+    meta = parse_task_metadata(raw)
+    if meta.get("approval_required") and not meta.get("approval_granted"):
+        return False
+    if meta.get("auto_execute") is False and not meta.get("approval_granted"):
+        return False
+    return True
+
+
+def approve_waiting_task(conn, task_id: str, *, approved_by: str = "founder") -> dict[str, Any]:
+    """Founder tap: waiting → todo so the worker can resume.
+
+    Clears the hold flags, records approval_granted, and resolves the
+    matching founder_inbox row. Does not itself send/invoice/deploy —
+    desks still refuse restricted outbound actions.
+    """
+    _ensure_retry_columns(conn)
+    row = conn.execute(
+        "SELECT id, status, metadata, desk, title FROM tasks WHERE id=?",
+        (task_id,),
+    ).fetchone()
+    if not row:
+        return {"ok": False, "error": "not_found", "task_id": task_id}
+    keys = row.keys() if hasattr(row, "keys") else None
+    status = row["status"] if keys else row[1]
+    raw_meta = row["metadata"] if keys else row[2]
+    desk = row["desk"] if keys else row[3]
+    title = row["title"] if keys else ""
+    if status != "waiting":
+        return {"ok": False, "error": "not_waiting", "status": status, "task_id": task_id}
+    meta = parse_task_metadata(raw_meta)
+    meta["approval_required"] = False
+    meta["auto_execute"] = True
+    meta["approval_granted"] = True
+    meta["approved_by"] = approved_by
+    meta["approved_at"] = datetime.utcnow().isoformat()
+    conn.execute(
+        "UPDATE tasks SET status='todo', metadata=?, updated_at=datetime('now') WHERE id=?",
+        (json.dumps(meta), task_id),
+    )
+    try:
+        from . import founder_inbox
+        founder_inbox.resolve(task_id)
+    except Exception as exc:
+        logger.debug("founder_inbox resolve after approve failed: %s", exc)
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "status": "todo",
+        "desk": desk,
+        "title": title,
+        "approved_by": approved_by,
+        "resumed": True,
+    }

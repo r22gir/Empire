@@ -7,17 +7,35 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.max.desks.desk_registry import DESK_ROSTER, live_desk_count, roster_prompt_block
-from app.services.max.desks.delegate_first import classify_request, create_tracked_task
+import glob
+import os
+
+from app.services.max.desks.desk_registry import DESK_IDS, DESK_ROSTER, live_desk_count, roster_prompt_block
+
+from app.services.max.desks.delegate_first import (
+    classify_request,
+    create_tracked_task,
+    maybe_delegate,
+    workroom_desks_allowed,
+)
+from app.services.max.desks.desk_outbound import (
+    DESK_AUTO_EXECUTE_AUDIT,
+    auto_execute_may_run,
+    is_outbound_action,
+)
 from app.services.max.desks.desk_review import looks_like_template, mark_draft_only, review_desk_output
 from app.services.max.desks.desk_sweeper import format_digest, sweep_once
 from app.services.max.desks.task_lifecycle import (
     ALLOWED_STATUSES,
+    approve_waiting_task,
+    backup_tasks_db,
+    metadata_allows_auto_execute,
     migrate_task_status_constraint,
     record_timeout_retry,
+    tasks_status_check_migrated,
 )
 from app.services.max.desks import founder_inbox
-from app.services.max.improvements import approval_deep_link, INCLUDED_MODEL
+from app.services.max.improvements import approval_deep_link, included_model, pick_model
 from app.services.max.answer_policy import wants_document_search, prelookup_calls
 
 
@@ -224,7 +242,6 @@ def test_improvement_deep_link_stable():
     url = approval_deep_link(9)
     assert url.endswith("?screen=improvements&id=9")
     assert "screen=improvements" in url
-    assert INCLUDED_MODEL == "grok-4.6"
     from app.services.max.improvements import _row
     # _row is for sqlite rows; check create_request shape via helper
     assert approval_deep_link("12") == approval_deep_link(12)
@@ -240,4 +257,167 @@ def test_give_me_a_link_does_not_document_search():
 
 def test_show_me_docs_still_searches():
     assert wants_document_search("show me wall unit led docs") is True
+    assert wants_document_search("can you show me the Marley docs") is True
     assert "find_files" in [c["tool"] for c in prelookup_calls("Find the Willard addendum PDF")]
+
+
+# ── review #110: default reply, not inbox ────────────────────────────────
+
+@pytest.mark.parametrize("msg", [
+    "can you show me the Marley docs",
+    "please show me the Marley documents",
+    "can you please draft a summary of our week",
+    "please review this when you have a minute",
+    "create a short note about tomorrow",
+    "can you help me think through this",
+])
+def test_polite_chat_without_desk_keyword_is_a_reply(msg):
+    d = classify_request(msg)
+    assert d.answers_directly, (msg, d.action, d.reason)
+    assert d.action == "answer"
+
+
+def test_marley_docs_is_lookup_not_inbox():
+    d = classify_request("can you show me the Marley docs")
+    assert d.action == "answer"
+    assert d.reason == "trivial lookup"
+
+
+# ── review #110: Spanish + uncertain approval, resume path ───────────────
+
+@pytest.mark.parametrize("msg", [
+    "Email the client this invoice and charge the card",
+    "envia esta factura al cliente",
+    "manda el correo al cliente",
+    "cobra al cliente",
+    "factura al cliente el saldo",
+    "publica esto en instagram",
+    "despliega a produccion",
+    "send this to them",
+])
+def test_approval_english_and_spanish_is_held(msg):
+    d = classify_request(msg)
+    assert d.action == "approval"
+    assert d.approval_required is True
+
+
+def test_approve_waiting_task_resumes(tasks_db):
+    task = create_tracked_task(
+        title="Envia la factura",
+        description="envia esta factura al cliente",
+        desk_id="finance",
+        approval_required=True,
+    )
+    row = tasks_db.execute("SELECT status, metadata FROM tasks WHERE id=?", (task["id"],)).fetchone()
+    assert row["status"] == "waiting"
+    assert metadata_allows_auto_execute(row["metadata"]) is False
+    inbox = founder_inbox.list_open()
+    assert any(r["id"] == task["id"] for r in inbox)
+    result = approve_waiting_task(tasks_db, task["id"])
+    assert result["ok"] is True
+    assert result["status"] == "todo"
+    row = tasks_db.execute("SELECT status, metadata FROM tasks WHERE id=?", (task["id"],)).fetchone()
+    assert row["status"] == "todo"
+    assert metadata_allows_auto_execute(row["metadata"]) is True
+    assert not any(r["id"] == task["id"] for r in founder_inbox.list_open())
+
+
+def test_digest_surfaces_approve_resume_path(tasks_db):
+    old = (datetime.utcnow() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+    tasks_db.execute(
+        "INSERT INTO tasks (id, title, status, desk, updated_at, created_at) "
+        "VALUES ('hold1','Envia factura','waiting','finance', ?, ?)",
+        (old, old),
+    )
+    tasks_db.commit()
+    text = format_digest(sweep_once())
+    assert "hold1" in text
+    assert "approve" in text.lower()
+
+
+def test_outbound_audit_blocks_restricted_actions():
+    assert is_outbound_action("send_invoice")
+    assert is_outbound_action("create_payment")
+    assert is_outbound_action("deploy")
+    assert is_outbound_action("publish")
+    assert auto_execute_may_run("draft_invoice")
+    assert auto_execute_may_run("notify_founder")
+    assert auto_execute_may_run("create_payment") is False
+    ids = set(DESK_AUTO_EXECUTE_AUDIT)
+    assert set(DESK_IDS) <= ids
+    for desk_id, spec in DESK_AUTO_EXECUTE_AUDIT.items():
+        for action in spec["outbound"]:
+            assert is_outbound_action(action), (desk_id, action)
+
+
+# ── review #110: edition guard ───────────────────────────────────────────
+
+def test_family_edition_skips_workroom_tasks(tasks_db, monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "maxine")
+    assert workroom_desks_allowed() is False
+    task = create_tracked_task(
+        title="Daily metrics",
+        description="Pull today's analytics metrics and forecast",
+        desk_id="analytics",
+    )
+    assert task.get("skipped") is True
+    n = tasks_db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+    assert n == 0
+
+
+def test_max_e_maybe_delegate_is_noop(monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "max_e")
+    import asyncio
+    assert asyncio.run(maybe_delegate("Pull today's analytics metrics and forecast")) is None
+
+
+def test_workroom_edition_allows_desks(monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "workroom")
+    monkeypatch.delenv("EMPIRE_DATA_DIR", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("MAX_MEMORY_PATH", raising=False)
+    assert workroom_desks_allowed() is True
+
+
+# ── review #110: migration backup + idempotent ───────────────────────────
+
+def test_tasks_migration_backs_up_and_is_idempotent(isolated_empire_db):
+    conn = sqlite3.connect(isolated_empire_db)
+    conn.row_factory = sqlite3.Row
+    conn.execute("DROP TABLE IF EXISTS tasks")
+    conn.executescript(OLD_TASKS_SQL)
+    conn.commit()
+    before = set(glob.glob(isolated_empire_db + ".tasks-mig-*.bak"))
+    migrate_task_status_constraint(conn)
+    after = set(glob.glob(isolated_empire_db + ".tasks-mig-*.bak"))
+    assert after - before, "expected a SQLite backup copy before rebuild"
+    assert tasks_status_check_migrated(conn)
+    migrate_task_status_constraint(conn)
+    after2 = set(glob.glob(isolated_empire_db + ".tasks-mig-*.bak"))
+    assert after2 == after
+    conn.execute(
+        "INSERT INTO tasks (id, title, status, desk) VALUES ('m1','t','failed','it')"
+    )
+    conn.commit()
+    assert conn.execute("SELECT status FROM tasks WHERE id='m1'").fetchone()[0] == "failed"
+    conn.close()
+
+
+def test_backup_helper_skips_memory_db():
+    conn = sqlite3.connect(":memory:")
+    conn.execute(OLD_TASKS_SQL)
+    assert backup_tasks_db(conn) is None
+    conn.close()
+
+
+# ── review #110: MAX_IMPROVE_MODEL unset ─────────────────────────────────
+
+def test_improve_model_env_unset_by_default():
+    assert not (os.getenv("MAX_IMPROVE_MODEL") or "").strip()
+    assert included_model() == "grok-4.6"
+    assert pick_model({"risk": "low"})["id"] == "grok-4.6"
+
+
+def test_improve_model_honors_explicit_env(monkeypatch):
+    monkeypatch.setenv("MAX_IMPROVE_MODEL", "grok-4.6")
+    assert included_model() == "grok-4.6"
