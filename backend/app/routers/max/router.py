@@ -2335,7 +2335,40 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
     )
 
 
+def _family_answer_policy_response(request: ChatRequest) -> ChatResponse | None:
+    """Fail-closed Maxine refusal for company legal-detail asks."""
+    try:
+        from app.services.max.family_answer_policy import family_answer_policy_reply
+
+        reply = family_answer_policy_reply(request.message or "")
+    except Exception:
+        try:
+            from app.services.max.family_answer_policy import (
+                legal_details_refusal,
+                looks_like_company_legal_query,
+                reply_locale,
+            )
+
+            if looks_like_company_legal_query(request.message or ""):
+                reply = legal_details_refusal(reply_locale(request.message or ""))
+            else:
+                reply = None
+        except Exception:
+            reply = None
+    if not reply:
+        return None
+    return ChatResponse(
+        response=reply,
+        model_used="family-answer-policy",
+        fallback_used=False,
+        metadata=_response_metadata(request.channel, skill_used="family_answer_policy"),
+    )
+
+
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
+    policy = _family_answer_policy_response(request)
+    if policy is not None:
+        return policy
     # 2026-10-04: greetings, "where are my docs" and existing-quote status answer directly
     # (no tools, no status dumps, no internal-doc citations). Image messages go to the model.
     if not request.desk:
@@ -2805,6 +2838,9 @@ async def _chat_with_max_service_impl(
     if not is_safe:
         logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
         return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+    policy = _family_answer_policy_response(request)
+    if policy is not None:
+        return policy
     try:
         from app.services.max.family_memory import persist_user_stated_facts
         persist_user_stated_facts(request.message)
@@ -4043,6 +4079,9 @@ async def _chat_stream_impl(request: ChatRequest):
             yield f"data: {_safe_dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
             yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
         return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+    policy = _family_answer_policy_response(request)
+    if policy is not None:
+        return _stream_immediate_response(policy, request.conversation_id)
     try:
         from app.services.max.family_memory import persist_user_stated_facts
         persist_user_stated_facts(request.message)

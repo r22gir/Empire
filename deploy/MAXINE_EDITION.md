@@ -46,7 +46,7 @@ EMPIRE_API_BASE=http://127.0.0.1:8012 \
 npx next start -p 3012
 ```
 
-After deploy, run the Spanish post-deploy check (memory recall, isolation including Argos Campestre legal details, usage percentages only). It never talks to Workroom or Max-e data:
+After deploy, run the Spanish post-deploy check (memory recall, isolation, company legal-detail refusal using only category words, usage percentages only). It never talks to Workroom or Max-e data:
 
 ```bash
 deploy/family_post_deploy_check.sh maxine
