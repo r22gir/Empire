@@ -105,9 +105,14 @@ def _addr(item: dict, job: Optional[dict]) -> str:
     return (item.get("location_address") or (job or {}).get("address") or (job or {}).get("customer_address") or "").strip()
 
 
-def _enqueue(**kwargs) -> dict:
+def _enqueue(conn=None, **kwargs) -> dict:
     from app.services.leadforge.growth import enqueue
     kwargs.setdefault("source", "organizer")
+    if conn is not None:
+        try:
+            conn.commit()
+        except Exception:
+            pass
     return enqueue(**kwargs)
 
 
@@ -231,8 +236,9 @@ def _draft_message(kind: str, item: dict, job: Optional[dict], extra: str = "") 
     return {"channel": "email", "subject": f"Follow-up — {name}", "body": body, "to_address": _email(job, item), "to_name": name}
 
 
-def _save_draft(msg: dict, *, job_id=None, customer_id=None, source_ref=None, title="") -> dict:
+def _save_draft(msg: dict, *, job_id=None, customer_id=None, source_ref=None, title="", conn=None) -> dict:
     return _enqueue(
+        conn=conn,
         channel=msg.get("channel") or "email",
         body=msg["body"],
         source="organizer",
@@ -252,6 +258,10 @@ async def run_action(conn, *, action: str, item: dict, confirm: bool = False, ex
     extra = extra or {}
     job = _job_row(conn, extra.get("job_id") or item.get("job_id"))
     quote = _quote_for_job(conn, job) if job else None
+    try:
+        conn.commit()
+    except Exception:
+        pass
     sent = False
     performed = []
     approval = None

@@ -63,6 +63,10 @@ def consume(conn, bucket: str, n: int = 1, edition: str | None = None) -> dict:
         f"UPDATE organizer_usage SET {bucket} = {bucket} + ? WHERE edition = ? AND day = ?",
         (n, ed, day),
     )
+    try:
+        conn.commit()
+    except Exception:
+        pass
     return snapshot(conn, ed)
 
 

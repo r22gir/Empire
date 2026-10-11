@@ -35,18 +35,31 @@ from app.services.organizer.schema import migrate_organizer_tables
 def ensure_schema(conn) -> None:
     migrate_organizer_tables(conn)
     seed_spaces(conn)
+    try:
+        conn.commit()
+    except Exception:
+        pass
 
 
 def seed_spaces(conn) -> None:
+    ed = process_edition()
+    existing = {
+        (r[0] if not hasattr(r, "keys") else r["slug"])
+        for r in conn.execute(
+            "SELECT slug FROM organizer_spaces WHERE edition = ?", (ed,)
+        ).fetchall()
+    }
     stamp = now_iso()
     for i, space in enumerate(default_spaces()):
-        sid = f"{process_edition()}:{space['slug']}"
+        if space["slug"] in existing:
+            continue
+        sid = f"{ed}:{space['slug']}"
         conn.execute(
             """
             INSERT OR IGNORE INTO organizer_spaces (id, edition, slug, label, kind, sort_order, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (sid, process_edition(), space["slug"], space["label"], space["kind"], i, stamp),
+            (sid, ed, space["slug"], space["label"], space["kind"], i, stamp),
         )
 
 
