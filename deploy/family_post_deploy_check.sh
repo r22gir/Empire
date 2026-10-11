@@ -305,8 +305,8 @@ if missing:
     sys.exit("faltan " + ",".join(sorted(missing)))
 if d.get("edition") != os.environ["EXPECT_EDITION"]:
     sys.exit("edition=" + repr(d.get("edition")))
-if float(d.get("text_cap_pct") or 0) != 10:
-    sys.exit("text_cap_pct debe ser 10 (cada edición familiar)")
+if float(d.get("text_cap_pct") or 0) != 20:
+    sys.exit("text_cap_pct debe ser 20 (cada edición familiar, sin tope combinado)")
 if int(d.get("image_daily_cap") or 0) != 5:
     sys.exit("image_daily_cap=" + repr(d.get("image_daily_cap")))
 if int(d.get("tts_daily_cap") or 0) != 20:
@@ -319,7 +319,7 @@ if "baseline" in d or "allowance" in d:
     fail "$label minimax-meter /me JSON inválido"
     return
   fi
-  pass "$label minimax-meter /me (10% texto, 5 imágenes, 20 TTS, sin clave)"
+  pass "$label minimax-meter /me (20% texto por edición, 5 imágenes, 20 TTS, sin clave)"
 
   local tts_flag h3_flag
   tts_flag="$(read_env_key "$env_file" MINIMAX_FAMILY_TTS || true)"

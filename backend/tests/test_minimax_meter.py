@@ -12,8 +12,7 @@ def _env(monkeypatch, tmp_path, edition="amp"):
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path / edition))
     monkeypatch.setenv("MINIMAX_METER_DIR", str(tmp_path / "meter"))
     monkeypatch.setenv("MINIMAX_TEXT_POOL_FLOOR", "1000")
-    monkeypatch.setenv("MINIMAX_EDITION_TEXT_SHARE_PCT", "10")
-    monkeypatch.setenv("MINIMAX_FAMILY_TEXT_SHARE_PCT", "20")
+    monkeypatch.setenv("MINIMAX_EDITION_TEXT_SHARE_PCT", "20")
     monkeypatch.setenv("MINIMAX_RESERVED_SHARE_PCT", "80")
     monkeypatch.setenv("MINIMAX_IMAGE_DAILY_CAP", "5")
     monkeypatch.setenv("MINIMAX_TTS_DAILY_CAP", "20")
@@ -62,29 +61,35 @@ def test_existing_20_percent_instance_cap_still_works(monkeypatch, tmp_path):
     assert enforce_usage_cap(text="x" * 500)
 
 
-def test_each_family_edition_capped_at_10_percent(monkeypatch, tmp_path):
+def test_each_family_edition_capped_at_20_percent(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path, "amp")
-    _seed(monkeypatch, tmp_path, "amp", tokens=100)
+    _seed(monkeypatch, tmp_path, "amp", tokens=200)
     from app.services.minimax_meter import check
 
     blocked = check(kind="text", edition="amp", input_tokens=1)
     assert blocked
-    assert "10%" in blocked
+    assert "20%" in blocked
     assert "Edition cap" in blocked
+    assert "no combined" in blocked.lower() or "no hay tope combinado" in blocked.lower()
 
 
-def test_family_combined_stays_under_20_percent(monkeypatch, tmp_path):
+def test_no_combined_family_text_cap(monkeypatch, tmp_path):
+    """Amp at 15% and Maxine at 18% must not block Amp — no combined 20% limit."""
     _env(monkeypatch, tmp_path, "amp")
-    _seed(monkeypatch, tmp_path, "amp", tokens=90)
-    _seed(monkeypatch, tmp_path, "maxine", tokens=110)
+    _seed(monkeypatch, tmp_path, "amp", tokens=150)
+    _seed(monkeypatch, tmp_path, "maxine", tokens=180)
     from app.services.minimax_meter import check
 
+    assert check(kind="text", edition="amp", input_tokens=10) is None
+    assert check(kind="text", edition="maxine", input_tokens=10) is None
+    _seed(monkeypatch, tmp_path, "amp", tokens=50)
     blocked = check(kind="text", edition="amp", input_tokens=1)
     assert blocked
-    assert "20%" in blocked or "Family cap" in blocked
+    assert "Edition cap" in blocked
+    assert "Family cap" not in blocked
 
 
-def test_rafael_not_limited_by_family_10(monkeypatch, tmp_path):
+def test_rafael_not_limited_by_family_20(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path, "workroom")
     monkeypatch.setenv("EMPIRE_EDITION", "workroom")
     _seed(monkeypatch, tmp_path, "workroom", tokens=500)
@@ -208,14 +213,18 @@ def test_founder_summary_lists_editions_family_me_does_not(monkeypatch, tmp_path
     mine = edition_public_summary("amp")
     assert mine["edition"] == "amp"
     assert "editions" not in mine
-    assert mine["text_cap_pct"] == 10
+    assert mine["text_cap_pct"] == 20
     monkeypatch.setenv("EMPIRE_EDITION", "workroom")
     full = founder_summary()
     names = {row["edition"] for row in full["editions"]}
     assert names == {"workroom", "amp", "maxine"}
+    assert full["edition_text_share_pct"] == 20
+    assert full["combined_family_cap"] is False
     amp = next(row for row in full["editions"] if row["edition"] == "amp")
     maxine = next(row for row in full["editions"] if row["edition"] == "maxine")
     assert amp["text_tokens"] != maxine["text_tokens"]
+    assert amp["text_cap_pct"] == 20
+    assert maxine["text_cap_pct"] == 20
 
 
 def test_prompt_sanitizer_strips_workroom_and_client_data(monkeypatch, tmp_path):

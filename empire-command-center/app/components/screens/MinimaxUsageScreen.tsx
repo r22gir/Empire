@@ -22,7 +22,8 @@ type EditionRow = {
 type Usage = {
   editions?: EditionRow[];
   family_text_share_used_pct?: number;
-  family_text_share_pct?: number;
+  edition_text_share_pct?: number;
+  combined_family_cap?: boolean;
   reserved_share_pct?: number;
   plan?: {
     available?: boolean;
@@ -108,7 +109,8 @@ export default function MinimaxUsageScreen() {
         </p>
       )}
       <p>
-        {t.family}: {usage?.family_text_share_used_pct ?? 0}% / {usage?.family_text_share_pct ?? 20}%
+        {t.family}: {usage?.edition_text_share_pct ?? 20}% {t.combinedUsed}
+        {usage?.family_text_share_used_pct != null ? ` ${usage.family_text_share_used_pct}%` : ''}
         {' · '}
         {t.reserved}: {usage?.reserved_share_pct ?? 80}%
       </p>

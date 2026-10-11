@@ -150,19 +150,36 @@ def test_generate_rejects_edition_mismatch(monkeypatch, tmp_path):
 
 def test_llm_video_tool_drafts_only_ignores_approval_id(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path, "workroom")
-    from app.services.max.tool_executor import _minimax_video_async
-    from app.services.minimax_video import approve, create_draft, get_draft
+    from app.services.minimax_video import (
+        approve,
+        create_draft,
+        get_draft,
+        llm_create_draft,
+        llm_tool_refuses_generate,
+    )
 
     draft = create_draft("a silent clock, no people", edition="workroom")
     approve(draft["id"], confirmed=True)
-    result = asyncio.run(_minimax_video_async({"prompt": "clock", "approval_id": draft["id"]}))
-    assert result.success is False
-    assert "cannot generate" in (result.error or "").lower() or "no genera" in (result.error or "").lower()
+    refusal = llm_tool_refuses_generate({"prompt": "clock", "approval_id": draft["id"]})
+    assert refusal
+    assert "cannot generate" in refusal.lower() or "no genera" in refusal.lower()
+    with pytest.raises(PermissionError, match="cannot generate|no genera"):
+        llm_create_draft({"prompt": "clock", "approval_id": draft["id"]})
     assert get_draft(draft["id"])["status"] == "approved"
 
-    draft_only = asyncio.run(_minimax_video_async({"prompt": "a silent clock, no people"}))
-    assert draft_only.success is True
-    assert draft_only.result["status"] == "draft"
+    draft_only = llm_create_draft({"prompt": "a silent clock, no people"})
+    assert draft_only["status"] == "draft"
+    assert draft_only["id"] != draft["id"]
+
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "app/services/max/tool_executor.py"
+    blob = src.read_text(encoding="utf-8")
+    start = blob.find("async def _minimax_video_async")
+    end = blob.find("\n@tool(\"minimax_h3_video\")", start)
+    fn = blob[start:end]
+    assert "generate_approved_clip" not in fn
+    assert "llm_tool_refuses_generate" in fn
 
 
 def test_family_image_and_drafts_require_admin(monkeypatch, tmp_path):

@@ -7635,29 +7635,13 @@ def _minimax_music_generate(params: dict, desk: Optional[str] = None) -> ToolRes
 
 async def _minimax_video_async(params: dict) -> ToolResult:
     """H3 video — LLM tool may only create drafts. Never generate."""
-    from app.services.minimax_meter import h3_enabled
-    from app.services.minimax_video import create_draft
+    from app.services.minimax_video import llm_create_draft, llm_tool_refuses_generate
 
-    approval_id = (params.get("approval_id") or params.get("approval") or "").strip()
-    if approval_id:
-        return ToolResult(
-            tool="minimax_video_generate",
-            success=False,
-            error=(
-                "The LLM tool cannot generate clips. Rafael generates from personal Max "
-                "with header X-Minimax-Video-Confirm: aprobar. / "
-                "La herramienta no genera clips; Rafael genera desde Max personal "
-                "con X-Minimax-Video-Confirm: aprobar."
-            ),
-        )
-    if not h3_enabled():
-        return ToolResult(
-            tool="minimax_video_generate",
-            success=False,
-            error="H3 video is disabled (MINIMAX_H3_ENABLED). / El video H3 está apagado.",
-        )
+    refusal = llm_tool_refuses_generate(params)
+    if refusal:
+        return ToolResult(tool="minimax_video_generate", success=False, error=refusal)
     try:
-        draft = create_draft(params.get("prompt", ""), duration=int(params.get("duration", 5) or 5))
+        draft = llm_create_draft(params)
     except Exception as exc:
         return ToolResult(tool="minimax_video_generate", success=False, error=str(exc)[:300])
     return ToolResult(

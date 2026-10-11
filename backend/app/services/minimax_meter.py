@@ -4,8 +4,9 @@ Per-edition append-only logs (0700 dirs, 0600 files). Every MiniMax call
 is reserved under one exclusive lock, then reconciled after the call.
 
 Caps:
-* Max-e and Maxine each <= 10% of the text pool; together <= 20%.
-* Rafael's personal Max keeps the reserved 80%.
+* Max-e and Maxine each <= 20% of the text pool (env MINIMAX_EDITION_TEXT_SHARE_PCT).
+* No combined family text cap — each edition is independent.
+* Matches INSTANCE_USAGE_CAP_PCT=20 per family instance.
 * Per family edition per UTC day: 5 images, ~20 short TTS replies.
 * Video: 1 clip/week, founder approval only.
 * All agents hard-stop near 80% of the plan bar when remains is readable.
@@ -36,8 +37,7 @@ FAMILY_EDITIONS = frozenset({"amp", "maxine"})
 KNOWN_EDITIONS = frozenset({"amp", "maxine", "workroom"})
 NONESSENTIAL_KINDS = frozenset({"image", "tts", "video", "web_search"})
 
-DEFAULT_EDITION_TEXT_SHARE_PCT = 10.0
-DEFAULT_FAMILY_TEXT_SHARE_PCT = 20.0
+DEFAULT_EDITION_TEXT_SHARE_PCT = 20.0
 DEFAULT_RESERVED_SHARE_PCT = 80.0
 DEFAULT_IMAGE_DAILY_CAP = 5
 DEFAULT_TTS_DAILY_CAP = 20
@@ -105,10 +105,6 @@ def _int_env(name: str, default: int) -> int:
 
 def edition_text_share_pct() -> float:
     return _float_env("MINIMAX_EDITION_TEXT_SHARE_PCT", DEFAULT_EDITION_TEXT_SHARE_PCT)
-
-
-def family_text_share_pct() -> float:
-    return _float_env("MINIMAX_FAMILY_TEXT_SHARE_PCT", DEFAULT_FAMILY_TEXT_SHARE_PCT)
 
 
 def reserved_share_pct() -> float:
@@ -555,30 +551,16 @@ def _family_text_block(edition: str, add_tokens: int, month: str, rows: list[dic
         return None
     pool = _pool_tokens(month, rows)
     mine = int(totals(edition=edition, month=month, rows=rows)["text_tokens"]) + max(0, add_tokens)
-    family = _family_combined_tokens(month, rows) + max(0, add_tokens)
     per = edition_text_share_pct()
-    combined = family_text_share_pct()
     mine_pct = (mine / pool) * 100.0 if pool else 0.0
-    family_pct = (family / pool) * 100.0 if pool else 0.0
     if mine_pct > per + 1e-9:
         return bilingual(
             f"Tope de esta edición: Max-e y Maxine pueden usar cada una el {per:g}% "
-            f"del cupo de texto MiniMax. Esta edición ya iría al {mine_pct:.1f}%.",
+            f"del cupo de texto MiniMax (el mismo 20% que INSTANCE_USAGE_CAP_PCT). "
+            f"Esta edición ya iría al {mine_pct:.1f}%. No hay tope combinado.",
             f"Edition cap: Max-e and Maxine may each use {per:g}% of the MiniMax "
-            f"text pool. This edition would be at {mine_pct:.1f}%.",
-        )
-    if family_pct > combined + 1e-9:
-        return bilingual(
-            f"Tope familiar: Max-e y Maxine juntas se quedan bajo el {combined:g}% "
-            f"del cupo de texto (el 20% existente). Juntas irían al {family_pct:.1f}%.",
-            f"Family cap: Max-e and Maxine together stay under {combined:g}% of the "
-            f"text pool (the existing 20%). Together they would be at {family_pct:.1f}%.",
-        )
-    reserved = reserved_share_pct()
-    if family_pct > max(0.0, 100.0 - reserved) + 1e-9:
-        return bilingual(
-            f"La parte reservada de Rafael ({reserved:g}%) no se puede usar.",
-            f"Rafael's reserved share ({reserved:g}%) cannot be used.",
+            f"text pool (the same 20% as INSTANCE_USAGE_CAP_PCT). "
+            f"This edition would be at {mine_pct:.1f}%. There is no combined family cap.",
         )
     return None
 
@@ -952,7 +934,7 @@ def founder_summary() -> dict[str, Any]:
         "day": day,
         "week": week,
         "edition_text_share_pct": edition_text_share_pct(),
-        "family_text_share_pct": family_text_share_pct(),
+        "combined_family_cap": False,
         "reserved_share_pct": reserved_share_pct(),
         "family_text_share_used_pct": round(family_pct, 2),
         "image_daily_cap": image_daily_cap(),
@@ -979,10 +961,12 @@ def founder_summary() -> dict[str, Any]:
         "message": plan_block
         or warning
         or bilingual(
-            "Medidor MiniMax por edición (0700/0600). Max-e y Maxine 10% cada una; juntas bajo el 20%. "
-            "Si remains no responde, se bloquea. Apaga Auto credit usage.",
-            "Per-edition MiniMax meter (0700/0600). Max-e and Maxine 10% each; together under 20%. "
-            "If remains is down, we block. Turn off Auto credit usage.",
+            "Medidor MiniMax por edición (0700/0600). Max-e y Maxine: 20% cada una del cupo de texto "
+            "(igual que INSTANCE_USAGE_CAP_PCT). Sin tope combinado. Si remains no responde, se bloquea. "
+            "Apaga Auto credit usage.",
+            "Per-edition MiniMax meter (0700/0600). Max-e and Maxine: 20% each of the text pool "
+            "(same as INSTANCE_USAGE_CAP_PCT). No combined family cap. If remains is down, we block. "
+            "Turn off Auto credit usage.",
         ),
     }
 

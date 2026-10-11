@@ -424,3 +424,34 @@ def compare_snapshots(before: dict, after: dict) -> dict[str, Any]:
 
 def probe_live_allowed() -> bool:
     return (os.getenv("MINIMAX_H3_PROBE_LIVE") or "").strip() in {"1", "true", "yes"}
+
+
+def llm_tool_refuses_generate(params: Optional[dict] = None) -> Optional[str]:
+    """LLM / tool path may only create drafts. approval_id is never a spend key."""
+    params = params or {}
+    approval_id = (params.get("approval_id") or params.get("approval") or "").strip()
+    if approval_id:
+        return bilingual(
+            "La herramienta no genera clips; Rafael genera desde Max personal "
+            "con X-Minimax-Video-Confirm: aprobar.",
+            "The LLM tool cannot generate clips. Rafael generates from personal Max "
+            "with header X-Minimax-Video-Confirm: aprobar.",
+        )
+    return None
+
+
+def llm_create_draft(params: dict) -> dict[str, Any]:
+    refusal = llm_tool_refuses_generate(params)
+    if refusal:
+        raise PermissionError(refusal)
+    if not h3_enabled():
+        raise PermissionError(
+            bilingual(
+                "El video H3 está apagado (MINIMAX_H3_ENABLED).",
+                "H3 video is disabled (MINIMAX_H3_ENABLED).",
+            )
+        )
+    return create_draft(
+        params.get("prompt", ""),
+        duration=int(params.get("duration", 5) or 5),
+    )

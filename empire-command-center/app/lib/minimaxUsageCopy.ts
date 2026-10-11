@@ -4,11 +4,12 @@ export function minimaxUsageLabels(locale: string = 'es') {
     nav: es ? 'Uso MiniMax' : 'MiniMax usage',
     title: es ? 'Uso MiniMax por edición' : 'MiniMax usage by edition',
     intro: es
-      ? 'Max-e y Maxine: 10% cada una del cupo de texto (juntas bajo el 20%). La parte de Rafael queda reservada. No se gastan créditos de regalo.'
-      : 'Max-e and Maxine: 10% each of the text pool (together under 20%). Rafael\'s share stays reserved. Gift credits are not spent.',
+      ? 'Max-e y Maxine: 20% cada una del cupo de texto (igual que INSTANCE_USAGE_CAP_PCT). Sin tope combinado. No se gastan créditos de regalo.'
+      : 'Max-e and Maxine: 20% each of the text pool (same as INSTANCE_USAGE_CAP_PCT). No combined family cap. Gift credits are not spent.',
     plan: es ? 'Barra del plan' : 'Plan bar',
     reserved: es ? 'Reservado para Rafael' : 'Reserved for Rafael',
-    family: es ? 'Familia (Max-e + Maxine)' : 'Family (Max-e + Maxine)',
+    family: es ? 'Familia (20% cada edición, sin tope combinado)' : 'Family (20% each edition, no combined cap)',
+    combinedUsed: es ? 'Uso juntos (informativo)' : 'Combined used (informational)',
     images: es ? 'Imágenes hoy' : 'Images today',
     voice: es ? 'Voz hoy' : 'Voice today',
     video: es ? 'Video esta semana' : 'Video this week',
