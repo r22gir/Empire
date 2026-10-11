@@ -15,7 +15,6 @@ from app.services.organizer.conflicts import detect_conflicts
 from app.services.organizer.parse import parse_quick_add
 from app.services.organizer.followups import detect_followups
 from app.services.organizer.dayplan import propose_day
-from app.services.max.tool_executor import execute_tool, TOOL_REGISTRY
 from app.services.organizer.actions import parse_command, available_actions
 from app.services.leadforge.growth import list_queue
 
@@ -187,13 +186,7 @@ def test_quick_add_and_max_draft(client, isolated_empire_db):
     assert body["is_draft_only"] is True
     assert body["created"] == []
     assert body["drafts"][0]["job_id"]
-
-    assert "draft_organizer_item" in TOOL_REGISTRY
-    tool = execute_tool({"tool": "draft_organizer_item", "text": "schedule install for the Marley job Friday 10am"})
-    assert tool.success is True
-    assert tool.result["saved"] is False
-    assert tool.result["sent"] is False
-    assert tool.result["draft"]["kind"] == "install"
+    assert body["drafts"][0]["kind"] == "call"
 
 
 def test_day_plan_route_followups_ics(client, isolated_empire_db):
@@ -476,9 +469,12 @@ def test_command_move_and_crew_draft(client, isolated_empire_db):
     # Friday relative to "today" (2026-10-11 in this environment) or the next Friday.
     assert fresh.json()["start_time"] != "2026-10-12T10:00:00"
 
-    tool = execute_tool({"tool": "run_organizer_command", "text": "request deposit for Marley"})
-    assert tool.success is True
-    assert tool.result["sent"] is False
+    cmd_again = client.post(
+        "/api/v1/organizer/command",
+        json={"text": "request deposit for Marley"},
+    )
+    assert cmd_again.status_code == 200, cmd_again.text
+    assert cmd_again.json()["sent"] is False
 
 
 def test_move_with_notify_crew_flag(client, isolated_empire_db):

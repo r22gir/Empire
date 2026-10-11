@@ -449,6 +449,7 @@ async def run_command(conn, text: str, *, confirm: bool = False) -> dict:
             "UPDATE schedule_events SET start_time = ?, end_time = ?, updated_at = ? WHERE id = ?",
             (payload["start_time"], payload["end_time"], now_iso(), ev["id"]),
         )
+        conn.commit()
         item = {**ev, "start_time": payload["start_time"], "end_time": payload["end_time"], "job_id": ev.get("job_id")}
         notify = None
         if cmd.get("tell_crew"):

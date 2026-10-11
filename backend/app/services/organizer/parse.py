@@ -175,7 +175,12 @@ def extract_subject_name(text: str) -> Optional[str]:
     for pat in patterns:
         m = re.search(pat, text)
         if m:
-            name = re.sub(r"'s$", "", m.group(1).strip(" .,"), flags=re.I)
+            parts = m.group(1).strip(" .,").split()
+            while parts and parts[-1].lower().rstrip("'s") in skip:
+                parts.pop()
+            if not parts:
+                continue
+            name = re.sub(r"'s$", "", " ".join(parts), flags=re.I)
             if name.lower() not in skip:
                 return name
     # lowercase fallback: 'the marley job'
