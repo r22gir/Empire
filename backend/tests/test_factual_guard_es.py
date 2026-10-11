@@ -32,6 +32,8 @@ def test_spanish_chitchat_does_not_trigger_search():
     assert not is_factual_question("gracias")
     assert not is_factual_question("buenos días")
     assert not is_factual_question("cómo estás")
+    assert not is_factual_question("remember this code ABC123")
+    assert not is_factual_question("Recuerda que mi empresa se llama Norte")
 
 
 def test_casual_spanish_does_not_trigger_search():

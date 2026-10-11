@@ -62,6 +62,7 @@ export default function InlineDrawing({ result }: InlineDrawingProps) {
         {/* SVG display */}
         <div style={{ padding: 8, background: '#fff', cursor: 'pointer' }} onClick={() => setExpanded(true)}>
           <div
+            className="cy-keep-light cy-paper"
             dangerouslySetInnerHTML={{ __html: svg }}
             style={{ width: '100%', maxHeight: 350, overflow: 'hidden' }}
           />
@@ -108,7 +109,7 @@ export default function InlineDrawing({ result }: InlineDrawingProps) {
             }}>
               <X size={16} />
             </button>
-            <div dangerouslySetInnerHTML={{ __html: svg }} style={{ maxWidth: '100%' }} />
+            <div className="cy-keep-light cy-paper" dangerouslySetInnerHTML={{ __html: svg }} style={{ maxWidth: '100%' }} />
             <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'center' }}>
               {pdfUrl && (
                 <a href={pdfUrl} target="_blank" rel="noopener noreferrer"

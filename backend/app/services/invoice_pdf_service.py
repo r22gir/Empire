@@ -7,7 +7,7 @@ from html import escape
 from pathlib import Path
 from typing import Optional
 
-from app.config.workroom_billing import get_workroom_billing
+from app.config.workroom_billing import client_facing_website, get_workroom_billing
 
 JOB_DEPOSIT_SCHEDULE_NOTE = (
     "50% deposit due to begin work. Balance due on completion."
@@ -133,7 +133,7 @@ def resolve_invoice_branding(invoice: dict, is_woodcraft: bool) -> dict:
             "phone": cfg.get("business_phone", ""),
             "email": cfg.get("business_email", ""),
             "address": cfg.get("business_address", ""),
-            "website": cfg.get("business_website", ""),
+            "website": client_facing_website(cfg.get("business_website", "")),
             "accent": "#d4a636",
             "header_bg": "#3d2e1a",
         }
@@ -183,7 +183,15 @@ def render_client_invoice_html(
 
     items = list(invoice.get("line_items") or [])
     rows_html = ""
+    has_rooms = any(str(it.get("room") or "").strip() for it in items)
+    current_room = None
     for idx, item in enumerate(items):
+        if has_rooms:
+            # room section headers, same grouping as the in-app invoice page (items are saved in room order)
+            room = str(item.get("room") or "").strip() or "Job-wide"
+            if room != current_room:
+                current_room = room
+                rows_html += f"""<tr><td colspan="5" style="padding:9px 12px 6px;border-bottom:2px solid #c9a04a;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:9.5pt;background:#f3eee4">{escape(room, quote=False)}</td></tr>"""
         bg = "#f9f7f3" if idx % 2 == 0 else "#ffffff"
         desc = escape(client_visible_line_description(item), quote=False)
         unit = (item.get("unit") or "ea").strip() or "ea"

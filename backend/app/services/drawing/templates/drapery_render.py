@@ -638,8 +638,19 @@ def _render_drapery_side(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
     pass
 
 
+def _is_ripplefold(spec: dict) -> bool:
+    token = str(spec.get("product_type") or "").lower()
+    token = token.replace("_", "").replace("-", "").replace(" ", "")
+    return token == "ripplefold"
+
+
 def render_drapery(spec: dict) -> bytes:
     """Public entry-point for the Drapery family vector renderer."""
+    if _is_ripplefold(spec):
+        from app.services.drawing.templates.ripplefold_render import (
+            render_ripplefold_pdf,
+        )
+        return render_ripplefold_pdf(spec)
     from app.services.drawing.templates.registry import get_template
     template = get_template(spec["product_type"])
     result = template.compute(spec)

@@ -6,7 +6,7 @@ import IntakeNav from '../../../components/intake/IntakeNav';
 import PhotoUploader from '../../../components/intake/PhotoUploader';
 import MeasurementInput, { Measurement } from '../../../components/intake/MeasurementInput';
 import FabricInfoSection, { FabricInfo } from '../../../components/intake/FabricInfoSection';
-import { intakeFetch, getToken } from '../../../lib/intake-auth';
+import { intakeFetch, getToken, intakeAuthHeaders } from '../../../lib/intake-auth';
 
 import { API, API_BASE } from '../../../lib/api';
 
@@ -124,22 +124,29 @@ export default function NewProject() {
 
   // Save fabric info to backend
   const saveFabrics = async (pid: string) => {
-    const fabricItems = items.filter(i => i.fabric && i.fabric.fabric_preference !== 'not_sure');
-    for (const item of fabricItems) {
-      if (!item.fabric) continue;
-      const payload = {
+    const fabrics = items
+      .filter(i => i.fabric && i.fabric.fabric_preference !== 'not_sure')
+      .map(item => ({
         ...item.fabric,
         room_name: item.room || 'Unspecified',
         item_name: item.description || item.treatment || 'Item',
-      };
-      try {
-        await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${pid}/fabrics`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      } catch { /* best effort */ }
+      }));
+    const res = await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${pid}/fabrics`, {
+      method: 'PUT',
+      headers: intakeAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ fabrics }),
+    });
+    if (!res.ok) {
+      throw new Error('Fabric details did not save');
     }
+  };
+
+  const ensureProject = async () => {
+    if (projectId) return projectId;
+    if (!name.trim()) {
+      throw new Error('Enter a project name, then add the fabric photo.');
+    }
+    return createProject();
   };
 
   const saveDetails = async () => {
@@ -342,6 +349,7 @@ export default function NewProject() {
                           onChange={(f) => updateItem(item.id, 'fabric', f)}
                           onRemove={() => { updateItem(item.id, 'showFabric', false); updateItem(item.id, 'fabric', undefined); }}
                           projectId={projectId || undefined}
+                          ensureProject={ensureProject}
                         />
                       )}
                     </div>
@@ -366,8 +374,7 @@ export default function NewProject() {
               <h2 className="text-base font-bold text-[#1a1a1a] mb-2">Upload Photos, Drawings &amp; Scans</h2>
               <p className="text-[11px] text-[#888] mb-4">
                 Take photos of your windows, rooms, or any inspiration images. You can also attach drawings,
-                CAD files, 3D scans, PDFs, spreadsheets, and other project documents. We&apos;ll use AI to help
-                analyze the photos.
+                CAD files, 3D scans, PDFs, spreadsheets, and other project documents.
               </p>
               <PhotoUploader projectId={projectId} photos={photos} scans={scans} onUpload={refreshPhotos} />
             </div>

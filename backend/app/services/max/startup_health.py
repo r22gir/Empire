@@ -11,7 +11,12 @@ from typing import Any
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+    """Live Workroom checkout, not the historical empire-repo-main path."""
+    try:
+        from app.services.drawing.canonical_path import resolve_canonical_root
+        return resolve_canonical_root()
+    except Exception:
+        return Path(__file__).resolve().parents[4]
 
 
 def _backend_port() -> int:

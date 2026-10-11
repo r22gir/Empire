@@ -50,6 +50,168 @@ def test_loopback_allowed_proxied_denied_public_host_denied():
     assert vl.authorize_websocket(_WS(peer="10.0.0.5"))[0] is False
 
 
+def test_tailscale_serve_allowlist(monkeypatch):
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "founder@example.com, second@example.com")
+    ok, via, user = vl.authorize_websocket(_WS(
+        {"Tailscale-User-Login": "Founder@example.com"}, peer="127.0.0.1",
+    ))
+    assert (ok, via, user) == (True, "tailscale", "Founder@example.com")
+    ok, via, user = vl.authorize_websocket(_WS(
+        {"tailscale-user-login": "second@example.com", "x-forwarded-for": "100.1.2.3"},
+        peer="::1",
+    ))
+    assert (ok, via) == (True, "tailscale")
+
+    ok, via, _user = vl.authorize_websocket(_WS(peer="127.0.0.1"))
+    assert ok is True and via == "loopback"
+    ok, via, _user = vl.authorize_websocket(_WS(
+        {"x-forwarded-for": "100.1.2.3"}, peer="127.0.0.1",
+    ))
+    assert ok is False
+
+    ok, via, _user = vl.authorize_websocket(_WS(
+        {"tailscale-user-login": "stranger@example.com"}, peer="127.0.0.1",
+    ))
+    assert ok is False and via == "tailscale login not allowed"
+
+    ok, via, _user = vl.authorize_websocket(_WS(
+        {"tailscale-user-login": "founder@example.com", "x-forwarded-for": "100.1.2.3"},
+        peer="100.64.0.8",
+    ))
+    assert ok is False and via == "tailscale header from non-loopback"
+
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "")
+    ok, via, _user = vl.authorize_websocket(_WS(
+        {"tailscale-user-login": "founder@example.com"}, peer="127.0.0.1",
+    ))
+    assert ok is False and via == "tailscale login not allowed"
+    monkeypatch.delenv("TAILSCALE_ALLOWED_LOGINS", raising=False)
+    ok, _, _ = vl.authorize_websocket(_WS(
+        {"tailscale-user-login": "founder@example.com"}, peer="::1",
+    ))
+    assert ok is False
+
+
+def test_presentation_http_uses_the_same_tailscale_rule(monkeypatch):
+    from pathlib import Path
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.simli_avatar import router as simli_router
+
+    avatar_src = (Path(__file__).resolve().parents[1] / "app" / "routers" / "avatar.py").read_text(encoding="utf-8")
+    for needle in ("async def avatar_chat", "async def avatar_listen", "async def avatar_speak", "async def avatar_status"):
+        assert "_require_avatar_access(request)" in avatar_src.split(needle, 1)[1][:400]
+
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "founder@example.com")
+    app = FastAPI()
+    app.include_router(simli_router, prefix="/api/v1")
+    allowed = TestClient(app, client=("127.0.0.1", 9))
+    denied = TestClient(app, client=("100.64.0.8", 9))
+    ok = allowed.get("/api/v1/avatar/simli/status", headers={"Tailscale-User-Login": "founder@example.com"})
+    assert ok.status_code == 200
+    spoofed = denied.get("/api/v1/avatar/simli/status", headers={"Tailscale-User-Login": "founder@example.com"})
+    assert spoofed.status_code == 401
+
+
+def _proxy_wrapped_app():
+    """Same middleware uvicorn installs: trusted loopback, X-Forwarded-For rewrites the peer."""
+    from fastapi import FastAPI, Request, WebSocket
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    from app.routers.simli_avatar import router as simli_router
+
+    inner = FastAPI()
+    inner.include_router(simli_router, prefix="/api/v1")
+
+    @inner.get("/who")
+    def who(request: Request):
+        return {"peer": request.client.host if request.client else ""}
+
+    @inner.websocket("/ws")
+    async def ws_endpoint(websocket: WebSocket):
+        ok, via, user = vl.authorize_websocket(websocket)
+        if not ok:
+            await websocket.close(code=4401)
+            return
+        await websocket.accept()
+        await websocket.send_json({"via": via, "user": user})
+
+    return ProxyHeadersMiddleware(inner, trusted_hosts="127.0.0.1")
+
+
+def test_proxy_headers_rewrite_peer_before_the_app_sees_it():
+    from fastapi.testclient import TestClient
+
+    client = TestClient(_proxy_wrapped_app(), client=("127.0.0.1", 9))
+    seen = client.get("/who", headers={"x-forwarded-for": "100.110.233.75"})
+    assert seen.status_code == 200
+    assert seen.json()["peer"] == "100.110.233.75"
+    ignored = TestClient(_proxy_wrapped_app(), client=("10.0.0.8", 9))
+    stayed = ignored.get("/who", headers={"x-forwarded-for": "100.110.233.75"})
+    assert stayed.json()["peer"] == "10.0.0.8"
+
+
+def test_rewritten_tailscale_peer_needs_the_next_stamp(monkeypatch):
+    from fastapi.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "founder@example.com")
+    monkeypatch.setenv("EMPIRE_PROXY_AUTH_SECRET", "hop-secret")
+    client = TestClient(_proxy_wrapped_app(), client=("127.0.0.1", 9))
+    rewritten = {"x-forwarded-for": "100.110.233.75"}
+    trusted = {
+        **rewritten,
+        "x-empire-proxy-secret": "hop-secret",
+        "x-empire-tailscale-verified": "1",
+        "tailscale-user-login": "founder@example.com",
+    }
+    who = client.get("/who", headers=trusted)
+    assert who.json()["peer"] == "100.110.233.75"
+    assert client.get("/api/v1/avatar/simli/status", headers=trusted).status_code == 200
+
+    spoofed = {
+        **rewritten,
+        "x-empire-proxy-secret": "hop-secret",
+        "tailscale-user-login": "founder@example.com",
+    }
+    assert client.get("/api/v1/avatar/simli/status", headers=spoofed).status_code == 401
+
+    restored = {**rewritten, "x-empire-proxy-secret": "hop-secret"}
+    assert client.get("/api/v1/avatar/simli/status", headers=restored).status_code == 200
+
+    cloudflare = {**restored, "cf-ray": "abc"}
+    assert client.get("/api/v1/avatar/simli/status", headers=cloudflare).status_code == 401
+
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "")
+    assert client.get("/api/v1/avatar/simli/status", headers=trusted).status_code == 401
+    monkeypatch.setenv("TAILSCALE_ALLOWED_LOGINS", "founder@example.com")
+
+    wrong = {**trusted, "x-empire-proxy-secret": "nope"}
+    assert client.get("/api/v1/avatar/simli/status", headers=wrong).status_code == 401
+    missing = {k: v for k, v in trusted.items() if k != "x-empire-proxy-secret"}
+    assert client.get("/api/v1/avatar/simli/status", headers=missing).status_code == 401
+
+    lan = TestClient(_proxy_wrapped_app(), client=("10.0.0.8", 9))
+    injected = {
+        "x-forwarded-for": "127.0.0.1",
+        "x-empire-proxy-secret": "spoofed",
+        "x-empire-tailscale-verified": "1",
+        "tailscale-user-login": "founder@example.com",
+    }
+    assert lan.get("/who", headers=injected).json()["peer"] == "10.0.0.8"
+    assert lan.get("/api/v1/avatar/simli/status", headers=injected).status_code == 401
+
+    with client.websocket_connect("/ws", headers=trusted) as socket:
+        assert socket.receive_json()["via"] == "tailscale"
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws", headers=spoofed):
+            pass
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws", headers=restored):
+            pass
+
+
 def test_access_jwt_valid_accepted_wrong_aud_rejected(monkeypatch):
     pem, jwk = _keypair()
     monkeypatch.setitem(vl._jwks_cache, "keys", {"keys": [jwk]})
@@ -115,7 +277,8 @@ def test_workroom_ignores_amp_session_cookie(monkeypatch, tmp_path):
 def test_session_exposes_only_read_only_tools_and_voice_flag(monkeypatch):
     ev = vl.session_update_event()
     names = [t["name"] for t in ev["session"]["tools"]]
-    assert names == list(vl.VOICE_READ_ONLY_TOOLS) + ["queue_for_founder_approval"]
+    # request_improvement only writes a change request; builds need Rafael's tap (Oct 4, 2026)
+    assert names == list(vl.VOICE_READ_ONLY_TOOLS) + ["queue_for_founder_approval", "request_improvement"]
     for must in ("get_tasks", "get_desk_status", "get_services_health", "get_system_stats", "check_email",
                  "list_job_images", "search_conversations", "get_weather", "list_quotes_awaiting_review",
                  "show_quote_for_review"):

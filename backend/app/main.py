@@ -28,7 +28,7 @@ _preserved_edition_env = {key: os.environ[key] for key in _EDITION_ENV_KEYS if k
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 os.environ.update(_preserved_edition_env)
 
-from app.edition import apply_amp_process_paths
+from app.edition import apply_amp_process_paths, is_family_edition
 apply_amp_process_paths()
 
 from fastapi import FastAPI, Request
@@ -102,6 +102,8 @@ async def no_cache_middleware(request: Request, call_next):
     response.headers["Expires"] = "0"
     response.headers["Surrogate-Control"] = "no-store"
     response.headers["CDN-Cache-Control"] = "no-store"
+    if is_family_edition():
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
     return response
 
 # Helper to safely load routers
@@ -140,6 +142,10 @@ load_router("app.routers.preorders", "/preorders", ["preorders"])
 load_router("app.routers.auth", "/auth", ["auth"])
 load_router("app.routers.users", "/users", ["users"])
 load_router("app.routers.listings", "/listings", ["listings"])
+# Same routers under /api/v1: the tunnel and the Next rewrite only forward /api/v1.
+load_router("app.routers.shipping", "/api/v1/shipping", ["shipping"])
+load_router("app.routers.listings", "/api/v1/listings", ["listings"])
+load_router("app.routers.preorders", "/api/v1/preorders", ["preorders"])
 load_router("app.routers.relistapp", "/api/v1", ["relistapp"])
 # ArchiveForge — Photo-first intake for collectible print/media (V1: LIFE Magazine)
 load_router("app.routers.archiveforge", "/api/v1", ["archiveforge"])
@@ -152,6 +158,7 @@ load_router("app.routers.businessops", "/api/v1", ["businessops"])
 load_router("app.routers.presentations", "/api/v1", ["presentations"])
 load_router("app.routers.messages", "/messages", ["messages"])
 load_router("app.routers.marketplaces", "/marketplaces", ["marketplaces"])
+load_router("app.routers.marketforge_connect", "/api/v1/marketforge", ["marketforge"])
 load_router("app.routers.marketforge_products", "", ["marketforge-products"])
 load_router("app.routers.webhooks", "/webhooks", ["webhooks"])
 load_router("app.routers.ai", "/ai", ["ai"])
@@ -246,6 +253,7 @@ load_router("app.routers.apostapp_public", "/api/v1", ["apostapp-public"])
 
 # ConstructionForge — Colombian real estate land development
 load_router("app.routers.construction", "/api/v1", ["construction"])
+load_router("app.routers.public_sales", "/api/v1", ["public-sales"])
 
 # Voice notes → borrador (quote, invoice, contract, plan de pagos). Never auto-sends.
 load_router("app.routers.voice_documents", "/api/v1", ["voice-documents"])
@@ -264,6 +272,12 @@ load_router("app.routers.custom_shapes", "/api/v1", ["custom-shapes"])
 
 # Drawing Studio — architectural bench drawings (SVG + PDF)
 load_router("app.routers.drawings", "/api/v1", ["drawings"])
+
+# Voice notes → draft quote / drawing (same pipeline as Telegram voice)
+load_router("app.routers.voice_documents", "/api/v1", ["voice-documents"])
+
+# WhatsApp Business Cloud API. Disabled unless the four WHATSAPP_* env vars are set.
+load_router("app.routers.whatsapp", "/api/v1", ["whatsapp"])
 
 # Fabric Library
 load_router("app.routers.fabrics", "/api/v1/fabrics", ["fabrics"])
@@ -498,6 +512,42 @@ async def start_background_services():
         print("✓ Desk Scheduler: starting in background")
     except Exception as e:
         print(f"✗ Desk Scheduler: {e}")
+
+    # SocialForge publisher. Draft-only until a founder turns on auto-publish.
+    async def _social_publish_loop():
+        while True:
+            try:
+                from app.services.accounts.publisher import run_publish_tick
+                from app.services.accounts.store import connect as accounts_connect
+                from app.services.accounts.vault import VaultNotConfigured, require_vault
+                import httpx
+
+                def _transport(method, url, **kwargs):
+                    with httpx.Client(timeout=30) as client:
+                        response = client.request(method, url, **kwargs)
+                        try:
+                            return response.json()
+                        except Exception:
+                            return {"error": response.text[:200]}
+
+                conn = accounts_connect()
+                try:
+                    try:
+                        vault = require_vault()
+                    except VaultNotConfigured:
+                        vault = None
+                    run_publish_tick(conn, vault, _transport)
+                finally:
+                    conn.close()
+            except Exception as loop_error:
+                print(f"✗ SocialForge publish tick: {loop_error}")
+            await asyncio.sleep(60)
+
+    try:
+        asyncio.create_task(_social_publish_loop())
+        print("✓ SocialForge publisher: draft-only until auto-publish is enabled")
+    except Exception as e:
+        print(f"✗ SocialForge publisher: {e}")
 
     # MAX Autonomous Scheduler (daily briefs, task checks, reports)
     try:
@@ -760,6 +810,8 @@ load_router("app.routers.contacts", "/api/v1", ["contacts"])
 
 # LeadForge — Lead generation & sales machine
 load_router("app.routers.leadforge", "/api/v1", ["leadforge"])
+load_router("app.routers.growth", "/api/v1", ["growth"])  # approval queue, ROI, social proof, improvements
+load_router("app.routers.home_center", "/api/v1", ["home-center"])  # Max home: research interests + growth lists (per user)
 try:
     from app.routers.leadforge import intake_alias_router
     app.include_router(intake_alias_router, prefix="/api/v1", tags=["leadforge"])

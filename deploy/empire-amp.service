@@ -1,17 +1,23 @@
-# systemd --user unit for the AMP edition.
+# systemd --user unit for the AMP edition (Max-e).
 #
-# This does not start anything by itself. On the Dell:
+# Dell live checkout is /home/rg/empire-amp (branch amp-local), NOT
+# /home/rg/empire-repo (Workroom on :8000). Do not copy this file over
+# the live Dell unit unless you have compared the two; a copy that still
+# pointed at empire-repo would bind Max-e to the Workroom tree.
 #
+# Paths here MUST stay /home/rg/empire-amp. Never /home/rg/empire-repo.
+# Do not restart Workroom (port 8000) as part of bringing AMP up.
+#
+#   # First-time only, if no unit exists:
 #   mkdir -p /data/amp
 #   cp deploy/empire-amp.env.example /home/rg/empire-amp.env
-#   # edit /home/rg/empire-amp.env locally; do not commit it
 #   mkdir -p ~/.config/systemd/user
 #   cp deploy/empire-amp.service ~/.config/systemd/user/empire-amp.service
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now empire-amp.service
 #
-# Do not point this unit at the Workroom .env. Do not restart the
-# Workroom service (port 8000) as part of bringing AMP up.
+# Frontend is a separate unit: empire-amp-frontend.service on :3011,
+# WorkingDirectory=/home/rg/empire-amp/empire-command-center.
 
 [Unit]
 Description=EmpireBox Max-e command center (AMP edition)
@@ -19,9 +25,9 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/rg/empire-repo/backend
+WorkingDirectory=/home/rg/empire-amp/backend
 EnvironmentFile=/home/rg/empire-amp.env
-ExecStart=/home/rg/empire-repo/backend/venv/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8011 --timeout-keep-alive 65
+ExecStart=/home/rg/empire-amp/backend/venv/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8011 --timeout-keep-alive 65
 Restart=on-failure
 RestartSec=5
 

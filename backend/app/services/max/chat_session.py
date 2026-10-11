@@ -46,14 +46,15 @@ logger = logging.getLogger("max.chat_session")
 #     worse than either pattern alone).
 #   - _connect() routes through _resolved_db_path(). No reader in
 #     this module touches DB_PATH directly any more.
-DEFAULT_DB_PATH = os.path.expanduser("~/empire-data/empire.db")
+from app.db.database import resolve_task_db_path
+DEFAULT_DB_PATH = resolve_task_db_path()
 # Backwards-compat alias.
 DB_PATH = DEFAULT_DB_PATH
 
 
 def _resolved_db_path() -> str:
     """Read EMPIRE_TASK_DB at call time. Per-call, never captured."""
-    return os.getenv("EMPIRE_TASK_DB") or DB_PATH
+    return resolve_task_db_path()
 
 
 def _connect() -> sqlite3.Connection:

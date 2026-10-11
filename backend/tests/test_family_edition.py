@@ -45,10 +45,10 @@ def test_usage_cap_warns_then_soft_blocks_heavy_only(monkeypatch, tmp_path):
     assert summary["allowance"] == 200
     assert summary["level"] == "warn"
     assert summary["cap_percent"] == 20
-    assert summary["used_percent"] == 80.0
-    assert summary["remaining_percent"] == 20.0
+    assert summary["used_percent"] == 16.0
+    assert summary["remaining_percent"] == 4.0
     assert "20" in summary["message"]
-    assert "Queda el 20%" in summary["message"]
+    assert "Queda el 4%" in summary["message"]
     assert "20%" in summary["limit_note_es"]
     assert "MiniMax" in summary["limit_note_es"]
     assert enforce_usage_cap(text="hola") is None
@@ -109,8 +109,9 @@ def test_usage_page_is_owner_only_and_states_the_twenty_percent_cap(monkeypatch,
     assert body.status_code == 200
     payload = body.json()
     assert payload["cap_percent"] == 20
-    assert payload["used_percent"] == 7.5
-    assert payload["remaining_percent"] == 92.5
+    assert payload["used_percent"] == 1.5
+    assert payload["remaining_percent"] == 18.5
+    assert payload["used_percent"] + payload["remaining_percent"] == payload["cap_percent"]
     assert payload["limit_note_es"] == "Tu uso está limitado al 20% del uso total de MiniMax."
     hidden = {"baseline", "baseline_basis", "allowance", "used", "day", "month", "ratio"}
     assert hidden.isdisjoint(payload)
@@ -119,12 +120,14 @@ def test_usage_page_is_owner_only_and_states_the_twenty_percent_cap(monkeypatch,
     assert "limitado al" in card
     assert "queda" in card
     assert "usado" in card
+    assert "del total" in card
     assert " tok" not in card
     assert "cupo" not in card
     assert "baseline" not in card
     assert "20%" in page
     assert "queda" in page
     assert "usado" in page
+    assert "del total" in page
     assert "cupo" not in page
     assert "solo para el dueño" in page
 

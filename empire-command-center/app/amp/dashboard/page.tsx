@@ -255,6 +255,8 @@ export default function AmpDashboard() {
               { label: 'Contactos', href: '/amp/empresas', color: '#7CB98B' },
               { label: 'Finanzas', href: '/amp/empresas', color: '#2D2A26' },
               { label: 'Cursos', href: '/amp/cursos', color: '#9B8EC4' },
+              { label: 'WhatsApp', href: '/amp/whatsapp', color: '#D4A030' },
+              { label: 'Ayuda WhatsApp', href: '/ayuda/whatsapp', color: '#b8960c' },
             ].map((item) => (
               <button key={item.label} onClick={() => router.push(item.href)}
                 style={{ background: '#FFF9F0', border: '1px solid #F5EDE0', borderRadius: 12, padding: 14, textAlign: 'left', cursor: 'pointer' }}>

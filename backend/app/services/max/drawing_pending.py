@@ -17,9 +17,10 @@ import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from app.db.database import resolve_task_db_path
 
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB") or os.path.expanduser("~/empire-data/empire.db")
+DB_PATH = resolve_task_db_path()
 TTL_HOURS = 24
 
 # Cancel keywords — if a founder reply contains any of these, drop the

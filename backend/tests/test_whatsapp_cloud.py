@@ -18,6 +18,8 @@ def _sign(body: bytes, secret: str = "test-secret") -> str:
 def _ready(monkeypatch, tmp_path, edition: str = "amp"):
     monkeypatch.setenv("EMPIRE_EDITION", edition)
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("EMPIRE_DEFAULT_LOCALE", "es" if edition in {"amp", "maxine"} else "en")
+    monkeypatch.delenv("WHATSAPP_REPLY_MODE", raising=False)
     monkeypatch.setenv("VOICE_DRAFTS_DB", str(tmp_path / "voice.db"))
     monkeypatch.setenv("WHATSAPP_STATE_DB", str(tmp_path / "wa.db"))
     monkeypatch.setenv("PHOTOS_DB", str(tmp_path / "photos.db"))
@@ -189,6 +191,8 @@ def test_default_reply_is_ogg_voice_plus_summary(monkeypatch, tmp_path):
     assert len(texts[0]["body"]) < len(full)
     assert "cotizaci" in texts[0]["body"].decode("utf-8")
     monkeypatch.setenv("EMPIRE_EDITION", "workroom")
+    monkeypatch.setenv("EMPIRE_DEFAULT_LOCALE", "en")
+    monkeypatch.delenv("WHATSAPP_REPLY_MODE", raising=False)
     assert wa.reply_language() == "en"
 
 

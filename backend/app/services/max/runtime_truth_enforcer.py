@@ -850,6 +850,31 @@ def _file_content_failure_reason(matched: str) -> str:
     )
 
 
+_SQL_ERROR_RE = re.compile(
+    r"no such column|no such table|operationalerror|syntax error",
+    re.IGNORECASE,
+)
+
+
+def _is_recovered_sql_error(entry: dict[str, Any]) -> bool:
+    if (entry.get("tool") or "") != "db_query" or entry.get("success"):
+        return False
+    return bool(_SQL_ERROR_RE.search(str(entry.get("error") or "")))
+
+
+def _db_query_sql_error_recovered(entries: list[dict[str, Any]]) -> bool:
+    """True when a later db_query succeeded after one SQL error."""
+    saw_sql_error = False
+    for entry in entries:
+        if (entry.get("tool") or "") != "db_query":
+            continue
+        if entry.get("success") and saw_sql_error:
+            return True
+        if _is_recovered_sql_error(entry):
+            saw_sql_error = True
+    return False
+
+
 def runtime_truth_failures(
     tool_results: list[Any] | None,
     user_message: str | None = None,
@@ -896,8 +921,13 @@ def runtime_truth_failures(
     failures: list[str] = []
 
     # Failure mode 1: tool verification failures.
-    for entry in normalize_tool_results(tool_results):
+    # A SQL error that a later db_query already corrected is not a failed turn.
+    normalized = normalize_tool_results(tool_results)
+    sql_recovered = _db_query_sql_error_recovered(normalized)
+    for entry in normalized:
         reason = _tool_failure_reason(entry, user_message=user_message)
+        if reason and sql_recovered and _is_recovered_sql_error(entry):
+            continue
         if reason:
             failures.append(reason)
 

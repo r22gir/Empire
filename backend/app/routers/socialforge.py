@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["socialforge"])
 
+from app.routers.account_hub import router as account_hub_router  # noqa: E402
+
+router.include_router(account_hub_router)
+
 
 def _storage_root() -> str:
     from app.edition import socialforge_storage_dir
@@ -48,12 +52,8 @@ def _profile_file() -> str:
     return os.path.join(_storage_root(), "business_profile.json")
 
 
-# Workroom keeps creating the legacy directory at import. The AMP edition
-# resolves a directory under its own data root at call time instead.
-if os.getenv("EMPIRE_EDITION", "").strip().lower() != "amp":
-    _legacy = os.path.expanduser("~/empire-repo/backend/data/socialforge")
-    for _d in (os.path.join(_legacy, "posts"), os.path.join(_legacy, "campaigns")):
-        os.makedirs(_d, exist_ok=True)
+# Never mkdir ~/empire-repo at import. Family editions resolve under
+# EMPIRE_DATA_DIR via socialforge_storage_dir(); Workroom mkdirs on first write.
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -495,13 +495,41 @@ class ProfileUpdate(BaseModel):
     service_area: Optional[str] = None
 
 
+def _family_default_profile() -> Optional[dict]:
+    """Maxine / Max-e start from their own trade, never the Workroom profile."""
+    from app.edition import active_business_slug, is_family_edition
+
+    if not is_family_edition():
+        return None
+    from app.services.leadforge.trade_profile import social_default_profile
+
+    trade = social_default_profile(active_business_slug())
+    if trade is None:
+        return None
+    blank = {k: "" for k in DEFAULT_PROFILE}
+    blank.update(trade)
+    return blank
+
+
+def _is_workroom_seed_profile(profile: dict) -> bool:
+    return (
+        (profile.get("business_name") or "") == DEFAULT_PROFILE["business_name"]
+        and (profile.get("services") or "") == DEFAULT_PROFILE["services"]
+    )
+
+
 def _load_profile() -> dict:
+    family_default = _family_default_profile()
     if os.path.exists(_profile_file()):
         with open(_profile_file()) as f:
-            return json.load(f)
+            stored = json.load(f)
+        if family_default is None or not _is_workroom_seed_profile(stored):
+            return stored
+        # A family profile still holding the untouched Workroom seed: replace it.
+    default = family_default if family_default is not None else DEFAULT_PROFILE
     with open(_profile_file(), "w") as f:
-        json.dump(DEFAULT_PROFILE, f, indent=2)
-    return DEFAULT_PROFILE.copy()
+        json.dump(default, f, indent=2)
+    return dict(default)
 
 
 def _save_profile(profile: dict):
@@ -576,13 +604,44 @@ DEFAULT_ACCOUNTS = [
 ]
 
 
+# Workroom-only directory listings (drapery / interior design leads).
+_FAMILY_HIDDEN_ACCOUNTS = {"houzz", "thumbtack"}
+_FAMILY_ACCOUNT_DESCRIPTIONS = {
+    "email_business": "Correo principal del negocio",
+    "email_support": "Correo para atención a clientes",
+    "pinterest": "Tableros con fotos del proyecto e inspiración",
+    "linkedin": "Presencia profesional para aliados y empresas",
+    "tiktok": "Videos cortos: recorridos, avances y consejos",
+    "mailchimp": "Boletín y seguimiento a interesados",
+    "canva": "Piezas gráficas para redes y presentaciones",
+    "domain_email": "Correo con dominio propio",
+}
+
+
+def _family_accounts(accounts: list[dict]) -> list[dict]:
+    from app.edition import is_family_edition
+
+    if not is_family_edition():
+        return accounts
+    out = []
+    for acc in accounts:
+        if acc.get("id") in _FAMILY_HIDDEN_ACCOUNTS:
+            continue
+        acc = dict(acc)
+        if acc.get("id") in _FAMILY_ACCOUNT_DESCRIPTIONS:
+            acc["description"] = _FAMILY_ACCOUNT_DESCRIPTIONS[acc["id"]]
+        out.append(acc)
+    return out
+
+
 def _load_accounts() -> list[dict]:
     if os.path.exists(_accounts_file()):
         with open(_accounts_file()) as f:
-            return json.load(f)
+            return _family_accounts(json.load(f))
     # Initialize with defaults
-    _save_accounts(DEFAULT_ACCOUNTS)
-    return DEFAULT_ACCOUNTS
+    defaults = _family_accounts(DEFAULT_ACCOUNTS)
+    _save_accounts(defaults)
+    return defaults
 
 
 def _save_accounts(accounts: list[dict]):
@@ -741,3 +800,14 @@ async def ai_setup_guide(data: AIContentRequest):
         }
     except Exception as e:
         raise HTTPException(500, f"AI guide generation failed: {e}")
+
+
+# ── LeadForge feed (read-only) ─────────────────────────────────────────────
+# Social profiles found by LeadForge's free contact lookup (prospect websites
+# linking to Instagram / Facebook / LinkedIn). Use as an engage/follow list.
+# DMs stay drafts (LeadForge prospect drafts); nothing is posted or sent here.
+
+@router.get("/prospect-targets")
+async def leadforge_prospect_targets(limit: int = 100):
+    from app.services.leadforge.prospect_ops import social_targets
+    return social_targets(limit=max(1, min(int(limit), 500)))

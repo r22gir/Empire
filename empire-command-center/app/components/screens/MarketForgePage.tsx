@@ -53,9 +53,8 @@ interface Order {
 // ============ API ============
 
 import { API } from '../../lib/api';
-const _API_BASE = API.replace('/api/v1', '');
-const LISTINGS_URL = `${_API_BASE}/listings`;
-const ORDERS_URL = `${_API_BASE}/preorders/`;
+const LISTINGS_URL = `${API}/listings`;
+const ORDERS_URL = `${API}/preorders/`;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapListingFromAPI(raw: any): Listing {
@@ -97,6 +96,10 @@ function useListings() {
     setError(null);
     try {
       const res = await fetch(LISTINGS_URL);
+      if (res.status === 401 && ['amp', 'maxine'].includes((process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').trim().toLowerCase())) {
+        setListings([]);
+        return;
+      }
       if (!res.ok) throw new Error(`Failed to fetch listings: ${res.status}`);
       const data = await res.json();
       const items = Array.isArray(data) ? data : (data.listings ?? data.items ?? data.results ?? []);

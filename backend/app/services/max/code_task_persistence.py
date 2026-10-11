@@ -74,7 +74,8 @@ logger = logging.getLogger("max.code_task_persistence")
 #     unreachable paths). It is no longer the resolver.
 #   - _connect() routes through _resolved_db_path(). No reader in
 #     this module touches DB_PATH directly any more.
-DEFAULT_DB_PATH = os.path.expanduser("~/empire-data/empire.db")
+from app.db.database import resolve_task_db_path
+DEFAULT_DB_PATH = resolve_task_db_path()
 # Backwards-compat alias — older code/tests reference DB_PATH.
 # New code should use _resolved_db_path() or _DEFAULT_DB_PATH.
 DB_PATH = DEFAULT_DB_PATH
@@ -82,7 +83,7 @@ DB_PATH = DEFAULT_DB_PATH
 
 def _resolved_db_path() -> str:
     """Read EMPIRE_TASK_DB at call time. Per-call, never captured."""
-    return os.getenv("EMPIRE_TASK_DB") or DB_PATH
+    return resolve_task_db_path()
 
 
 def _connect_raw() -> sqlite3.Connection:

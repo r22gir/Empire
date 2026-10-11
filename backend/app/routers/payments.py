@@ -406,7 +406,15 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
                     (status, invoice_id)
                 )
 
-            return True
+        if status == "paid":
+            # Growth: deposit paid -> matching LeadForge lead marked won (never raises)
+            try:
+                from app.services.leadforge.growth import on_invoice_paid
+                won = on_invoice_paid(invoice_id, source="stripe_webhook")
+                logger.info(f"Deposit->won for invoice {invoice_id}: {won.get('status')}")
+            except Exception as hook_exc:
+                logger.warning(f"deposit->won hook skipped for {invoice_id}: {hook_exc}")
+        return True
     except Exception as e:
         import traceback
         logger.error(f"Failed to update invoice {invoice_id}: {e}\n{traceback.format_exc()}")

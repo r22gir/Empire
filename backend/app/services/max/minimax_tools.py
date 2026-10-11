@@ -168,9 +168,25 @@ def _update_mcp_probe_status(success: bool, error: str | None) -> None:
 
 # ── Storage ───────────────────────────────────────────────────────────────────
 
-# Reuse existing generated media directory from vision.py
+# Reuse existing generated media directory from vision.py.
+# Never mkdir at import — family / EMPIRE_DATA_DIR / tests must not create
+# checkout backend/data/generated.
 _GENERATED_DIR = Path(__file__).resolve().parents[2] / "data" / "generated"
-_GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+_DEFAULT_GENERATED_DIR = _GENERATED_DIR
+
+
+def _generated_dir() -> Path:
+    current = Path(_GENERATED_DIR)
+    if current != Path(_DEFAULT_GENERATED_DIR):
+        current.mkdir(parents=True, exist_ok=True)
+        return current
+    env = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    if env:
+        path = Path(env).expanduser() / "generated"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    current.mkdir(parents=True, exist_ok=True)
+    return current
 
 # Stable browser-accessible URL prefix
 _MEDIA_URL_PREFIX = "/api/v1/vision/images"
@@ -204,7 +220,7 @@ def _load_runtime_env() -> None:
 def _save_bytes(data: bytes, prefix: str, ext: str = "png") -> tuple[str, Path]:
     """Save bytes to GENERATED_DIR, return (serve_url, file_path)."""
     fname = f"{prefix}-{int(time.time())}-{uuid.uuid4().hex[:8]}.{ext}"
-    path = _GENERATED_DIR / fname
+    path = _generated_dir() / fname
     path.write_bytes(data)
     return f"{_MEDIA_URL_PREFIX}/{fname}", path
 

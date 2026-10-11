@@ -80,16 +80,19 @@ def test_cap_enforces_without_baseline_env(monkeypatch, tmp_path):
     assert empty["baseline_basis"] == "recorded_tokens"
     assert empty["baseline"] == DEFAULT_BASELINE_MONTHLY_TOKENS
     assert empty["allowance"] == DEFAULT_BASELINE_MONTHLY_TOKENS * 0.20
-    assert empty["remaining_percent"] == 100.0
+    assert empty["used_percent"] == 0.0
+    assert empty["remaining_percent"] == 20.0
     assert empty["level"] == "ok"
     assert empty["total_spend_hit"] is False
     assert "EMPIRE_USAGE_BASELINE" not in (empty["message"] or "")
 
     record_usage(input_tokens=int(DEFAULT_BASELINE_MONTHLY_TOKENS * 0.16), output_tokens=0)
     warned = usage_summary()
+    assert warned["used_percent"] == 16.0
     assert warned["level"] == "warn"
-    assert warned["remaining_percent"] == 20.0
-    assert "Queda el 20%" in warned["message"]
+    assert warned["remaining_percent"] == 4.0
+    assert "16%" in warned["message"]
+    assert "Queda el 4%" in warned["message"]
     assert enforce_usage_cap(text="hola") is None
 
 
@@ -115,8 +118,9 @@ def test_recorded_total_across_editions_sets_baseline(monkeypatch, tmp_path):
     assert summary["baseline"] == 900
     assert summary["allowance"] == 180
     assert summary["used"] == 100
+    assert summary["used_percent"] == 11.1
     assert summary["level"] == "ok"
-    assert summary["remaining_percent"] == 44.4
+    assert summary["remaining_percent"] == 8.9
 
     record_usage(input_tokens=110, output_tokens=0)
     over = usage_summary()
@@ -145,6 +149,28 @@ def test_short_chats_stop_only_at_total_spend(monkeypatch, tmp_path):
     assert "mensajes cortos quedan en pausa" in refused
 
 
+def test_used_percent_is_share_of_total_not_of_allowance(monkeypatch, tmp_path):
+    """Dell saw used_percent 65.7 vs cap 20 / level ok — that was % of the 20% slice."""
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", "1000")
+    monkeypatch.setattr("app.services.instance_usage._usage_data_roots", lambda: [tmp_path])
+    from app.services.instance_usage import public_usage_summary, record_usage, usage_summary
+
+    record_usage(input_tokens=131, output_tokens=0)
+    summary = usage_summary()
+    public = public_usage_summary()
+    assert summary["allowance"] == 200
+    assert summary["used"] == 131
+    assert public["cap_percent"] == 20
+    assert public["used_percent"] == 13.1
+    assert public["remaining_percent"] == 6.9
+    assert public["level"] == "ok"
+    assert "13.1%" in public["message"]
+    assert "20%" in public["message"]
+    assert public["used_percent"] < public["cap_percent"]
+    assert public["used_percent"] + public["remaining_percent"] == public["cap_percent"]
+
+
 def test_public_usage_hides_empirebox_totals(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     monkeypatch.setenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", "1000")
@@ -156,9 +182,10 @@ def test_public_usage_hides_empirebox_totals(monkeypatch, tmp_path):
     assert internal["allowance"] == 200
     assert internal["baseline"] == 1000
     public = public_usage_summary()
-    assert public["used_percent"] == 7.5
-    assert public["remaining_percent"] == 92.5
+    assert public["used_percent"] == 1.5
+    assert public["remaining_percent"] == 18.5
     assert public["level"] == "ok"
+    assert public["used_percent"] + public["remaining_percent"] == public["cap_percent"]
     hidden = {"baseline", "baseline_basis", "allowance", "used", "day", "month", "ratio"}
     assert hidden.isdisjoint(public)
 
@@ -219,4 +246,5 @@ def test_usage_cap_check_logs_warning(monkeypatch, tmp_path, caplog):
             model=None,
         )
     assert refusal is None
-    assert "usage cap check skipped" in caplog.text
+    assert "usage cap check failed open" in caplog.text
+    assert "chat proceeds without a cap refusal" in caplog.text

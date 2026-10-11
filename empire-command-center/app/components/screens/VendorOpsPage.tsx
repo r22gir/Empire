@@ -5,6 +5,8 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { API } from '../../lib/api';
 import ProductDocs from '../business/docs/ProductDocs';
 
+const FAMILY_EDITION = ['amp', 'maxine'].includes((process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').trim().toLowerCase());
+
 type Tier = 'free' | 'starter' | 'pro';
 type Tab = 'dashboard' | 'accounts' | 'approvals' | 'subscriptions' | 'preferences' | 'audit' | 'docs';
 type ModalMode = 'account-create' | 'account-edit' | 'subscription-create' | 'subscription-edit' | null;
@@ -472,15 +474,15 @@ export default function VendorOpsPage() {
             <div className="text-xs font-bold uppercase tracking-[0.16em]" style={{ color: '#0d9488' }}>Standalone Add-On</div>
             <h1 className="mt-2 text-2xl font-bold text-slate-950">VendorOps</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              Track vendor accounts, approvals, renewals, credential ownership, and subscription risk without mixing VendorOps into Empire payments or RelistApp.
+              {FAMILY_EDITION ? 'Lleva el control de cuentas de proveedores, aprobaciones, renovaciones y suscripciones.' : 'Track vendor accounts, approvals, renewals, credential ownership, and subscription risk without mixing VendorOps into Empire payments or RelistApp.'}
             </p>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+            {!FAMILY_EDITION && <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
               <span className="rounded-md bg-slate-100 px-2.5 py-1 text-slate-700">Route: /api/v1/vendorops</span>
               <span className="rounded-md bg-slate-100 px-2.5 py-1 text-slate-700">DB prefix: vo_</span>
               <span className="rounded-md bg-amber-100 px-2.5 py-1 text-amber-800">MAX query-only</span>
               <span className="rounded-md bg-teal-100 px-2.5 py-1 text-teal-800">Activation: {activation?.activation_state || 'loading'}</span>
               <span className="rounded-md bg-slate-100 px-2.5 py-1 text-slate-700">Checkout: {activation?.checkout_status || 'loading'}</span>
-            </div>
+            </div>}
           </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Current Tier</label>
@@ -494,9 +496,9 @@ export default function VendorOpsPage() {
               <option value="pro">Pro</option>
             </select>
             <div className="mt-2 text-xs text-slate-600">{currentPlan?.positioning || 'Loading plan truth from VendorOps.'}</div>
-            <div className="mt-2 text-xs font-semibold text-slate-700">
+            {!FAMILY_EDITION && <div className="mt-2 text-xs font-semibold text-slate-700">
               Billing: {activation?.billing_status || 'loading'} · Checkout: {activation?.checkout_status || 'loading'}
-            </div>
+            </div>}
             {activation?.completed_at && <div className="mt-1 text-xs text-emerald-700">Completed: {shortDate(activation.completed_at)}</div>}
           </div>
         </header>
@@ -791,9 +793,9 @@ function FeatureLocks({ tier, status }: { tier: Tier; status: VendorStatus | nul
           </div>
         ))}
       </div>
-      <div className="mt-3 text-xs text-slate-500">
+      {!FAMILY_EDITION && <div className="mt-3 text-xs text-slate-500">
         Credential policy: {status?.credential_policy || 'Loading from VendorOps status.'}
-      </div>
+      </div>}
     </div>
   );
 }

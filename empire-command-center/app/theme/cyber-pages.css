@@ -1,0 +1,51 @@
+/* Cyber skin — page-specific touch-ups for the classic Command Center
+   screens (loaded last). Visual only: selectors target existing markup,
+   no behaviour changes. */
+
+/* Tailwind spacing utilities are flattened by globals.css' unlayered
+   "* { margin: 0; padding: 0 }" reset. Screens that opt in with
+   .cy-tw-spacing get their written spacing (p-5, px-3, space-y-4 …) back. */
+.cy-shell .cy-tw-spacing, .cy-shell .cy-tw-spacing * { margin: revert-layer; padding: revert-layer; }
+
+/* Max chat — send button was var(--text) (now light) with a white icon */
+.cy-shell button[aria-label="Send message"] {
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(0, 160, 200, 0.9)) !important;
+  color: #001018 !important; box-shadow: 0 0 16px rgba(0, 229, 255, 0.4);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); border-radius: 0 !important;
+}
+.cy-shell button[aria-label="Send message"]:hover { box-shadow: 0 0 22px rgba(0, 229, 255, 0.65); }
+
+/* dark-on-dark panels (BottomBar news, toasts) keep their light text */
+.cy-shell :is(.bg-\[\#1a1a1a\], .bg-\[\#222\], .bg-\[\#111\]) :is(.text-\[\#ccc\], .text-\[\#ddd\], .text-\[\#bbb\]) { color: #a9c7d3 !important; }
+.cy-shell :is(.bg-\[\#1a1a1a\], .bg-\[\#222\]) .text-\[\#666\] { color: #7fa3b2 !important; }
+.cy-shell .bg-\[\#222\] { background-color: rgba(4, 18, 27, 0.92) !important; border-color: rgba(0, 229, 255, 0.2) !important; }
+
+/* brand mark breathing room */
+@media (min-width: 768px) { .cy-shell .cy-logo { margin-left: 4px; } }
+
+/* drawings / SVG previews stay on white paper so dark strokes stay readable */
+.cy-shell .cy-paper { background-color: #fff !important; color: #1a1a1a; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.25), 0 0 18px rgba(0, 229, 255, 0.12); }
+
+/* Module pages with their own side menu (ForgeCRM, LeadForge, ConstructionForge).
+   Desktop: unchanged. Phones: the side menu becomes a horizontal neon tab strip
+   above the content so the page gets the full 390px width. */
+.cy-shell .cy-module-nav > button { transition: background .15s, color .15s, box-shadow .15s; }
+.cy-shell .cy-module-nav > button:hover { background-color: rgba(0, 229, 255, 0.08) !important; color: var(--cy-cyan) !important; }
+@media (max-width: 767px) {
+  .cy-shell .cy-module { flex-direction: column !important; min-height: 0; }
+  .cy-shell .cy-module-nav {
+    width: 100% !important; flex: 0 0 auto !important; display: flex !important; flex-direction: row !important; align-items: center;
+    gap: 6px; overflow-x: auto !important; overflow-y: hidden !important; padding: 8px 10px !important;
+    border-right: 0 !important; border-bottom: 1px solid rgba(0, 229, 255, 0.25) !important; scrollbar-width: none;
+  }
+  .cy-shell .cy-module-nav::-webkit-scrollbar { display: none; }
+  .cy-shell .cy-module-nav > * { flex: 0 0 auto !important; margin: 0 !important; }
+  .cy-shell .cy-module-nav > div:first-child { padding: 0 8px 0 2px !important; border: 0 !important; }
+  .cy-shell .cy-module-nav > div:first-child div + div { display: none; }
+  .cy-shell .cy-module-nav > button {
+    width: auto !important; white-space: nowrap; padding: 8px 12px !important; border: 1px solid rgba(0, 229, 255, 0.2) !important;
+    clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px); border-radius: 0 !important;
+  }
+  .cy-shell .cy-module-aside { display: none !important; }
+  .cy-shell .cy-module-main { flex: 1 1 auto !important; min-height: 0; padding: 14px 12px 90px !important; }
+}

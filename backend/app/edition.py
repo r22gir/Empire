@@ -104,6 +104,27 @@ AMP_DISABLED_PREFIXES = (
     "/api/v1/workroom-capture",
     "/api/luxeforge",
     "/workroom",
+    # Empire internals: docs, git/build info, host stats, infra control.
+    "/api/v1/dev",
+    "/api/v1/system",
+    "/api/v1/docs",
+    "/api/v1/documentation",
+    "/api/v1/docs-registry",
+    "/api/v1/max/control-plane",
+    "/api/v1/max/system-report",
+    "/api/v1/max/tool-registry",
+    "/api/v1/max/orchestration",
+    "/api/v1/max/pipeline",
+    "/api/v1/max/runtime-truth",
+    "/api/v1/recovery-core",
+    "/api/v1/transcriptforge/incidents",
+    "/api/v1/channels/status",
+    "/api/v1/orchestration",
+    "/api/v1/docker",
+    "/api/v1/ollama",
+    "/api/v1/openclaw",
+    "/api/v1/maintenance",
+    "/api/v1/qr",
 )
 
 # Shared base, mapped to coaching on the AMP business and reused as-is
@@ -398,22 +419,21 @@ def amp_app_dir() -> Path:
         path = root / "amp"
         path.mkdir(parents=True, exist_ok=True)
         return path
-    path = _legacy_amp_db().parent / "amp"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    # Workroom historical path. Do not mkdir ~/empire-repo at call time —
+    # tests and family processes must never create that tree.
+    return _legacy_amp_db().parent / "amp"
 
 
 def amp_sqlite_path() -> Path:
     if is_family_edition():
         return amp_app_dir() / "amp.db"
-    path = _legacy_amp_db()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    return _legacy_amp_db()
 
 
 def amp_audio_dir() -> Path:
     path = amp_app_dir() / "audio"
-    path.mkdir(parents=True, exist_ok=True)
+    if is_family_edition():
+        path.mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -720,9 +740,9 @@ def socialforge_storage_dir() -> Path:
     path = resolve_socialforge_root()
     if is_family_edition():
         path = assert_under_root(path)
-    path.mkdir(parents=True, exist_ok=True)
-    (path / "posts").mkdir(parents=True, exist_ok=True)
-    (path / "campaigns").mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "posts").mkdir(parents=True, exist_ok=True)
+        (path / "campaigns").mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -1010,8 +1030,27 @@ def edition_manifest() -> dict:
     return manifest
 
 
+import re as _re
+
+_PUBLIC_SALES_PREFIX = "/api/v1/public/ventas/"
+_PUBLIC_SALES_LEAD = _re.compile(r"^/api/v1/public/ventas/projects/[a-z0-9-]{1,80}/lead$")
+
+
+def public_sales_exempt(method: str, path: str) -> bool:
+    """Maxine's public sales site: read-only project data plus one lead form."""
+    clean = path.split("?", 1)[0]
+    verb = method.upper()
+    if ".." in clean or "//" in clean:
+        return False
+    if verb in ("GET", "HEAD") and clean.startswith(_PUBLIC_SALES_PREFIX):
+        return True
+    return verb == "POST" and bool(_PUBLIC_SALES_LEAD.match(clean))
+
+
 def access_exempt(method: str, path: str) -> bool:
     clean = path.split("?", 1)[0]
+    if public_sales_exempt(method, clean):
+        return True
     for allowed_method, allowed_path in _ALLOWLIST_EXEMPT:
         if method.upper() == allowed_method and clean == allowed_path:
             return True
