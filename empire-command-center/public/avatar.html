@@ -60,6 +60,7 @@ function normalizeEdition(raw) {
 }
 const edition = normalizeEdition(params.get('edition'));
 const fallback = (params.get('fallback') || 'talkinghead').toLowerCase();
+const OWN_ORIGIN = window.location.origin;
 const EDITION_GLB = {
   workroom: { url: '/avatars/workroom.glb', body: 'M' },
   max_e: { url: '/avatars/max-e.glb', body: 'M' },
@@ -81,7 +82,7 @@ let simli = null;
 let renderer = 'talkinghead';
 
 function tellParent(extra) {
-  window.parent.postMessage({ type: 'avatar-status', edition, renderer, ...extra }, '*');
+  window.parent.postMessage({ type: 'avatar-status', edition, renderer, ...extra }, OWN_ORIGIN);
 }
 
 function showBadge(text) {
@@ -154,14 +155,14 @@ async function init() {
     loading.style.display = 'none';
     showBadge('');
     tellParent({ success: true, renderer: 'simli', placeholder: false, placeholderNote: '' });
-    window.parent.postMessage({ type: 'avatar-loaded', success: true, renderer: 'simli' }, '*');
+    window.parent.postMessage({ type: 'avatar-loaded', success: true, renderer: 'simli' }, OWN_ORIGIN);
     return;
   }
   if (fallback === 'none') {
     renderer = 'none';
     loading.style.display = 'none';
     tellParent({ success: false, renderer: 'none', placeholder: false, placeholderNote: '', reason: fallbackReason });
-    window.parent.postMessage({ type: 'avatar-loaded', success: false, renderer: 'none' }, '*');
+    window.parent.postMessage({ type: 'avatar-loaded', success: false, renderer: 'none' }, OWN_ORIGIN);
     return;
   }
   try {
@@ -175,13 +176,13 @@ async function init() {
       placeholderNote: model.placeholder ? PLACEHOLDER.note : '',
       reason: fallbackReason,
     });
-    window.parent.postMessage({ type: 'avatar-loaded', success: true, renderer: 'talkinghead' }, '*');
+    window.parent.postMessage({ type: 'avatar-loaded', success: true, renderer: 'talkinghead' }, OWN_ORIGIN);
   } catch (e) {
     console.error('Avatar init failed:', e);
     loading.style.display = 'none';
     errorDiv.style.display = 'flex';
     errorDiv.textContent = 'Avatar failed: ' + e.message;
-    window.parent.postMessage({ type: 'avatar-loaded', success: false, error: e.message }, '*');
+    window.parent.postMessage({ type: 'avatar-loaded', success: false, error: e.message }, OWN_ORIGIN);
   }
 }
 
@@ -196,6 +197,7 @@ async function feedSimliPcm(int16) {
 }
 
 window.addEventListener('message', async (event) => {
+  if (event.origin !== OWN_ORIGIN) return;
   const data = event.data || {};
   if (data.type === 'live-pcm' && data.pcm) {
     let view = null;

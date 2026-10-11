@@ -7,7 +7,7 @@ SIMLI_API_KEY is unset, status says so and the UI keeps TalkingHead.
 
 Public API (keep identical across editions):
     simli_status, create_session, record_usage, usage_card,
-    normalize_edition, face_env_name, edition_avatar
+    normalize_edition, running_avatar_edition, face_env_name, edition_avatar
 """
 from __future__ import annotations
 
@@ -79,6 +79,19 @@ def normalize_edition(edition: str | None) -> str:
     if key in EDITIONS:
         return key
     return "workroom"
+
+
+def running_avatar_edition() -> str:
+    """Face and minutes edition for this process.
+
+    Derived from EMPIRE_EDITION (the running checkout), never from a
+    client query or body. Unset / main / empire / max → workroom.
+    Family processes (amp, maxine) cannot be switched by ?edition=.
+    """
+    raw = (os.getenv("EMPIRE_EDITION") or "").strip().lower()
+    if raw in {"", "main", "empire", "max"}:
+        return "workroom"
+    return normalize_edition(raw)
 
 
 def face_env_name(edition: str | None) -> str:

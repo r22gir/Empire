@@ -27,3 +27,11 @@ test('avatar.html maps amp to max_e and can skip TalkingHead for the home orb fa
   assert.match(html, /fallback === 'none'/);
   assert.match(html, /startSimliFace/);
 });
+
+test('avatar.html posts to its own origin, never *', () => {
+  const html = read('public/avatar.html');
+  assert.match(html, /const OWN_ORIGIN = window\.location\.origin/);
+  assert.match(html, /postMessage\([^)]+,\s*OWN_ORIGIN\)/);
+  assert.match(html, /event\.origin !== OWN_ORIGIN/);
+  assert.doesNotMatch(html, /postMessage\([^)]+,\s*['"]\*['"]\s*\)/);
+});
