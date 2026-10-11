@@ -25,7 +25,8 @@ TTL_HOURS = 24
 # Cancel keywords — if a founder reply contains any of these, drop the
 # pending job entirely AND skip the drawing flow on this turn.
 CANCEL_PATTERNS = re.compile(
-    r"\b(cancel|discard|nevermind|stop drawing|abort|forget it|drop it)\b",
+    r"\b(cancel|discard|nevermind|stop drawing|abort|forget it|drop it|"
+    r"i need no drawing|need no drawing|no drawing needed)\b",
     re.IGNORECASE,
 )
 
@@ -250,6 +251,13 @@ def looks_like_continuation(text: str, history) -> "dict | None":
             return None
     except Exception:
         pass
+    # Link/doc follow-ups are not dimension replies (Rafael: "regenerate where").
+    if re.search(
+        r"\b(?:regenerate where|there are no links|no links|what do you mean|relative links)\b",
+        text or "",
+        re.IGNORECASE,
+    ):
+        return None
     try:
         # Walk the last few assistant turns. We stop at the first
         # matching turn so the most recent missing-keys context

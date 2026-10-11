@@ -164,7 +164,7 @@ def test_share_gmail_attachment_studio_and_email(env, monkeypatch):
     r = tf._find_files({"query": "Nehal estimate"})
     gm = next(m for m in r.result["matches"] if m["source"] == "gmail")
     s = tf._share_file({"file_id": gm["file_id"], "via": "studio"})
-    assert s.success and s.result["viewer_url"].startswith("/api/v1/files/found?t=")
+    assert s.success and s.result["viewer_url"].startswith("https://") and "/api/v1/files/found?t=" in s.result["viewer_url"]
     real = ff.verify_share_token(s.result["viewer_url"].split("t=", 1)[1])
     assert real and open(real, "rb").read() == PDF and "max-cloud-share-" in real
     import app.services.max.tool_executor as te

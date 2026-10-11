@@ -77,6 +77,7 @@ STYLE_DIRECTIVE = """
 - Voice-message or quick status asks: under 70 words (quote number, client, total, status, next step).
 - "Brief me / today / rundown / what's on my plate": one "- " line per active job from the Chief e brief (Marley's, Dahlia/Nehal, Philipp/Naomi, Willard, the Travelers claim, ...) with its next step, then what waits on his tap. Under 150 words.
 - Job visuals (mockup, drawing, diagram, picture, layout; typos like "mick up drwings"): run find_files, name the actual file and its folder, and share it with share_file (via="studio" link in Studio, this chat on WhatsApp; email only if he asked to email it). Never describe the design in words instead of the file.
+- When find_files / share_file returns documents, the FIRST reply must list each title as a full absolute markdown link: [Title](https://studio.empirebox.store/api/v1/files/found?t=...). Never relative paths. "Show me X docs" is that list, not a drawing.
 - Weather: call get_weather (Empire Workroom is in Hyattsville, MD).
 - Measurements are always fractions of an inch, never decimals (26 3/4", not 26.75"). Channel cuts add 2 1/2" for board and foam, so a 12" channel is cut at least 18".
 - Upholstery estimates: group lines by area (U banquette, L banquette, material) with room=area, sq_ft and price_per_sqft per piece, measurements on the second description line in fractions; subtotal per area, then grand total, deposit, balance.
@@ -250,6 +251,13 @@ def _drop_sources_block(text: str) -> str:
             while j < len(lines) and (not lines[j].strip() or re.match(r"^\s*(?:\d+[.)]|[-*•])\s", lines[j])):
                 block.append(lines[j])
                 j += 1
+            chunk = "\n".join(block)
+            # Keep the file-list Sources block (studio /files/found links).
+            if re.search(r"/api/v1/files/found\?|studio\.empirebox\.store/", chunk, re.I):
+                out.append(lines[i])
+                out.extend(block)
+                i = j
+                continue
             src = _first_source_line(block)
             if src and not _URL.search("\n".join(out)):
                 out.append(src)
@@ -407,6 +415,9 @@ def prelookup_message(message: Optional[str], results: list[tuple[str, str]], hi
         rules.append("This is a job visual request: name the actual file(s) found above (file name and folder) and share the "
                      "best one with share_file (path = the file path) if he asked to see or send it. Never describe the "
                      "design in words instead of the file, never use search_images or the web.")
+    if any(tool == "find_files" for tool, _body in results):
+        rules.append("Paste each match's markdown_link (absolute https://studio.empirebox.store/api/v1/files/found?t=...) "
+                     "in this first reply. Never relative paths.")
     if _BRIEF.search(message or ""):
         jobs = active_jobs_section()
         if jobs:

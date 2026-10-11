@@ -70,6 +70,8 @@ def _find_files(params: dict, desk: Optional[str] = None) -> ToolResult:
     res["sources"] = {"local": "ok", **{k: v.get("status") for k, v in cloud["status"].items()}}
     notes = [v["message"] for v in cloud["status"].values() if v.get("status") != "ok" and v.get("message")]
     res["source_notes"] = notes
+    from app.services.max.doc_links import attach_studio_links_to_matches
+    res["matches"] = attach_studio_links_to_matches(res.get("matches") or [])
     note_txt = (" " + " ".join(notes)) if notes else ""
     if not res["found"]:
         near = "; ".join(c["path"] for c in res.get("closest") or [])
@@ -79,7 +81,12 @@ def _find_files(params: dict, desk: Optional[str] = None) -> ToolResult:
             + "Say so plainly, and if a source was not searched, say that instead of claiming the file does not exist."))
     res["message"] = (f"{res['total']} match(es) for \"{q}\", best first"
                       + (f" (showing {len(res['matches'])})" if res['total'] > len(res['matches']) else "")
-                      + ". Use share_file with a file_id to show or send one to Rafael." + note_txt)
+                      + ". Paste each markdown_link in the FIRST reply as [Title](https://studio.empirebox.store/...). "
+                        "Never use relative paths." + note_txt)
+    links = [m.get("markdown_link") for m in res["matches"] if m.get("markdown_link")]
+    if links:
+        res["first_reply_links"] = links
+        res["message"] += " First-reply links (paste as-is):\n" + "\n".join(f"- {L}" for L in links)
     if res.get("indexing"):
         res["message"] += " Still indexing: " + ", ".join(res["indexing"]) + " (results there may be missing)."
     return ToolResult(tool="find_files", success=True, result=res)
@@ -155,11 +162,12 @@ def _share_file(params: dict, desk: Optional[str] = None) -> ToolResult:
         shown = ("Gmail attachment" if remote["source"] == "gmail" else "Google Drive") + f": {remote['name']}"
     size = os.path.getsize(path)
     if via == "studio":
-        token = ff.share_token(path)
-        url = f"/api/v1/files/found?t={token}"
+        from app.services.max.doc_links import studio_found_url
+        url = studio_found_url(path)
         return ToolResult(tool="share_file", success=True, result={
             "action": "open_file", "via": "studio", "name": name, "path": shown, "size": ff._human_size(size),
             "viewer_url": url, "download_url": url + "&download=1", "expires_in_hours": 24,
+            "markdown_link": f"[{name}]({url})",
             "message": f"[{name}]({url}) — {shown} ({ff._human_size(size)}). Link works for 24 hours.",
         })
     if via == "email":
@@ -217,6 +225,10 @@ FILE_TOOLS_DOC = """
   "Gmail needs re-auth" or Drive is not connected, tell Rafael that source was not searched (do not say the file
   does not exist) and give him the one command from the note.
   `{"tool": "find_files", "query": "Nehal final estimate"}`
+  Each match includes viewer_url and markdown_link already as an absolute
+  https://studio.empirebox.store/api/v1/files/found?t=... URL. "Show me X docs"
+  means list those markdown_link values in the FIRST reply (titled clickable
+  links). Never paste relative paths or /api/... without the studio host.
 - **share_file** — Show or send one found file to Rafael: via "studio" (chat link, 24 h), "email" (his own
   addresses only, sent right away) or "whatsapp" (his number). Never to anyone else.
   `{"tool": "share_file", "file_id": "<from find_files>", "via": "studio"}`
