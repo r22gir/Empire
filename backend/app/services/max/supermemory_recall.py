@@ -21,6 +21,14 @@ MEMORY_VALID_DAYS = 30
 GENERIC_SURFACES = {"", "all", "generic", None}
 
 
+def store_path() -> Path:
+    try:
+        from app.edition import supermemory_store_path
+        return supermemory_store_path()
+    except Exception:
+        return STORE_PATH
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -56,7 +64,8 @@ def _registry_baseline() -> dict[str, Any]:
     return {"registry_version": info["registry_version"], "commit_hash": commit}
 
 
-def _load_memories(path: Path = STORE_PATH) -> list[dict[str, Any]]:
+def _load_memories(path: Path | None = None) -> list[dict[str, Any]]:
+    path = path or store_path()
     if not path.exists():
         return []
     memories: list[dict[str, Any]] = []
@@ -72,7 +81,8 @@ def _load_memories(path: Path = STORE_PATH) -> list[dict[str, Any]]:
     return memories
 
 
-def _append_memory(memory: dict[str, Any], path: Path = STORE_PATH) -> dict[str, Any]:
+def _append_memory(memory: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
+    path = path or store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(memory, sort_keys=True, default=str) + "\n")
@@ -110,9 +120,10 @@ def query_supermemory_recall(
     *,
     surface: str = "web",
     limit: int = 5,
-    path: Path = STORE_PATH,
+    path: Path | None = None,
 ) -> dict[str, Any]:
     """Return ranked secondary recall after surface identity resolution."""
+    path = path or store_path()
     baseline = _registry_baseline()
     canonical = normalize_surface(surface).get("canonical_channel")
     query_text = (query or "").lower()
@@ -151,9 +162,10 @@ def write_supermemory_memory(
     tags: list[str] | None = None,
     product: str | None = None,
     trigger: str,
-    path: Path = STORE_PATH,
+    path: Path | None = None,
 ) -> dict[str, Any]:
     """Write a guarded secondary recall memory with registry/commit metadata."""
+    path = path or store_path()
     baseline = _registry_baseline()
     written_at = _now()
     valid_until = written_at + timedelta(days=MEMORY_VALID_DAYS)
@@ -202,7 +214,8 @@ def write_handoff_memory_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def write_product_snapshots(path: Path = STORE_PATH) -> dict[str, Any]:
+def write_product_snapshots(path: Path | None = None) -> dict[str, Any]:
+    path = path or store_path()
     registry = load_operating_registry()
     targets = {"relistapp", "finance", "openclaw", "max"}
     writes = []

@@ -4,6 +4,8 @@ Workroom is wired to saved rates, the bench drawing engine, and
 Empire / Nelma billing. Max-e and Maxine share the core and declare
 their own output names; their rate and drawing adapters are unported
 until those editions land.
+
+Repo business.json is founder-only (Chief-e leak gate).
 """
 from __future__ import annotations
 
@@ -58,19 +60,34 @@ class EditionConfig:
 def _owner_tokens() -> tuple[str, ...]:
     """Names that must never land on a client document."""
     tokens = {"rafael"}
-    path = Path(__file__).resolve().parents[2] / "config" / "business.json"
     try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError, TypeError):
-        data = {}
+        from app.edition import is_founder_edition, workroom_business_config
+
+        if not is_founder_edition():
+            return tuple(sorted(tokens))
+        data = workroom_business_config()
+    except Exception:
+        path = Path(__file__).resolve().parents[2] / "config" / "business.json"
+        try:
+            from app.edition import is_founder_edition
+
+            if not is_founder_edition():
+                return tuple(sorted(tokens))
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError, TypeError, Exception):
+            data = {}
     owner = str(data.get("owner_name") or "").strip()
-    if owner and owner.lower() not in {"empire", "workroom"}:
+    if owner and owner.lower() not in frozenset({"workroom", "empire"}):
         tokens.add(owner.lower())
     return tuple(sorted(tokens))
 
 
-FORBIDDEN_CLIENT_NAMES = _owner_tokens()
+def forbidden_client_names() -> tuple[str, ...]:
+    """Owner tokens. Family editions do not read repo business.json."""
+    return _owner_tokens()
 
+
+FORBIDDEN_CLIENT_NAMES = ()  # call forbidden_client_names() — do not cache at import
 
 WORKROOM = EditionConfig(
     edition_id="workroom",
@@ -117,6 +134,6 @@ _EDITIONS = {
 
 def get_edition(edition_id: str | None = None) -> EditionConfig:
     key = (edition_id or "workroom").strip().lower().replace("-", "_")
-    if key in ("maxe", "max_e"):
+    if key in {"maxe", "max_e"}:
         return MAX_E
     return _EDITIONS.get(key, WORKROOM)

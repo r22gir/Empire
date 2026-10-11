@@ -36,15 +36,37 @@ curl -s http://127.0.0.1:8011/api/v1/edition
 
 `/api/v1/edition` is public so the UI can show the edition and the Spanish "sin acceso" state. Everything else requires the allowlist.
 
-Frontend for this instance (separate from the Workroom command center process if you want a different name in the shell):
+Frontend for this instance (separate from the Workroom command center process). **`NEXT_PUBLIC_*` is baked at `next build`.** A rebuild is required after changing these. Middleware will not send anonymous `/` to `/login` if `NEXT_PUBLIC_EMPIRE_EDITION=amp` was missing from the build (the host `amp.empirebox.store` is a fallback in this commit).
+
+Dev:
 
 ```bash
+cd /home/rg/empire-repo/empire-command-center
 NEXT_PUBLIC_EMPIRE_EDITION=amp \
 NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
 EMPIRE_API_BASE=http://127.0.0.1:8011 \
 npx next dev -p 3011
 ```
+
+Production (rebuild, then start on 3011):
+
+```bash
+cd /home/rg/empire-repo/empire-command-center
+NEXT_PUBLIC_EMPIRE_EDITION=amp \
+NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
+EMPIRE_API_BASE=http://127.0.0.1:8011 \
+npx next build --webpack
+
+NEXT_PUBLIC_EMPIRE_EDITION=amp \
+NEXT_PUBLIC_ASSISTANT_NAME=Max-e \
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 \
+EMPIRE_API_BASE=http://127.0.0.1:8011 \
+npx next start -p 3011
+```
+
+`AMP_LOGIN_REDIRECT` is a **backend** env (default `/login?listo=1`) used after a magic-link login. It is not a Next.js build variable.
 
 The language switcher still toggles English. With no saved choice, this edition starts in Spanish.
 
@@ -98,14 +120,17 @@ Optional templates (service categories and CRM fields only, no prices): Ciberseg
 
 ## Cloudflare tunnel
 
-Do not edit the live tunnel from this repo. Add this ingress entry on the existing empire tunnel (dashboard or the local config you already operate), then reload cloudflared yourself:
+Do not edit the live tunnel from this repo. Add these ingress entries on the existing empire tunnel (dashboard or the local config you already operate), then reload cloudflared yourself. Path rules must come **before** the hostname catch-all so `/api/v1/*` (including the live-voice WebSocket `wss://amp.empirebox.store/api/v1/avatar/live`) hits FastAPI on 8011 and is not sent through Next.js on 3011, which does not upgrade WebSockets:
 
 ```yaml
 - hostname: amp.empirebox.store
+  path: /api/v1/*
   service: http://localhost:8011
+- hostname: amp.empirebox.store
+  service: http://localhost:3011
 ```
 
-Workroom hostnames stay on port 8000. This document does not change them.
+A single `hostname: amp.empirebox.store → localhost:8011` rule reaches the API and the voice socket, but it does not serve the Next.js UI on 3011. Workroom hostnames stay on ports 8000 / 3005. This document does not change them.
 
 ## What stays put when the variables are unset
 

@@ -19,8 +19,20 @@ _CACHE_TTL = 60  # 1 minute — fast refresh for brain context accuracy
 
 def _load_session_context() -> str:
     """Load today's session context from logs if available."""
-    today = datetime.now().strftime("%Y-%m-%d")
-    log_file = Path.home() / "empire-repo" / "backend" / "data" / "logs" / today / "session-log.md"
+    try:
+        from app.edition import data_root_or_none, is_family_edition, session_log_path
+        if is_family_edition() and data_root_or_none() is None:
+            return ""
+        log_file = session_log_path()
+    except Exception:
+        try:
+            from app.edition import is_family_edition
+            if is_family_edition():
+                return ""
+        except Exception:
+            return ""
+        today = datetime.now().strftime("%Y-%m-%d")
+        log_file = Path.home() / "empire-repo" / "backend" / "data" / "logs" / today / "session-log.md"
     if log_file.exists():
         try:
             return log_file.read_text(encoding="utf-8")[:3000]
@@ -56,20 +68,69 @@ His own standing limits still apply because they are his instructions too: no ou
 """
 
 
+def _family_system_prompt(dynamic_sections: str) -> str:
+    """Identity + rules for Max-e / Maxine. No Workroom shop, ports, or HOME paths."""
+    from app.edition import (
+        app_display_name,
+        assistant_name,
+        default_persona,
+        edition_profile,
+        edition_service_ports,
+    )
+    name = assistant_name()
+    profile = edition_profile()
+    ports = edition_service_ports()
+    port_lines = "\n".join(f"- {label}: 127.0.0.1:{port}" for label, port in ports.items())
+    today = datetime.now().strftime("%B %d, %Y")
+    return f"""You are {name} — the assistant for this instance ({app_display_name()}).
+
+{default_persona(name)}
+
+You are not the Workroom assistant. You do not read or write Workroom data, quotes, memory, or Claude session files.
+
+=== CORE RULES ===
+1. Verify numbers with tools before stating them.
+2. Do not invent prices, legal details, or customer records.
+3. Facts marked confidential never appear in public content.
+4. Do not treat another instance's shop, ports, or files as yours.
+
+=== SERVICES ===
+- Host: {profile.get("host") or "this instance"}
+{port_lines}
+
+=== RESPONSE STYLE ===
+- Responde en español salvo que pidan inglés.
+- 2 a 5 oraciones cortas por defecto.
+- Cierra las búsquedas web con **Fuentes**: enlaces markdown [título](url), sitio oficial y registros primero, Facebook/Instagram/TikTok al final.
+- Nunca afirmes que hiciste algo que no sucedió.
+
+Today's date is {today}.
+{dynamic_sections}
+"""
+
+
 def get_system_prompt() -> str:
     # Return cached prompt if still valid
     now = time.time()
-    if _prompt_cache["prompt"] and now < _prompt_cache["expires"]:
-        from app.edition import apply_edition_prompt
+    from app.edition import apply_edition_prompt, edition_name, is_family_edition
+    ed = edition_name()
+    if (
+        _prompt_cache["prompt"]
+        and now < _prompt_cache["expires"]
+        and _prompt_cache.get("edition") == ed
+    ):
         return apply_edition_prompt(_prompt_cache["prompt"])
 
     session = _load_session_context()
 
-    # Build ecosystem catalog summary
-    try:
-        catalog_summary = get_catalog_summary()
-    except Exception:
-        catalog_summary = ""
+    # Build ecosystem catalog summary. Family editions skip it — the
+    # catalog is Workroom shop data (Hyattsville, drapery counts, emails).
+    catalog_summary = ""
+    if not is_family_edition():
+        try:
+            catalog_summary = get_catalog_summary()
+        except Exception:
+            catalog_summary = ""
 
     # Generate capabilities section from registry
     try:
@@ -129,6 +190,13 @@ def get_system_prompt() -> str:
             dynamic_sections += f"\n\n## Supermemory Recall (secondary only)\n{supermemory_context}"
     except Exception:
         pass
+
+    if is_family_edition():
+        result = _family_system_prompt(dynamic_sections)
+        _prompt_cache["prompt"] = result
+        _prompt_cache["expires"] = time.time() + _CACHE_TTL
+        _prompt_cache["edition"] = ed
+        return apply_edition_prompt(result)
 
     founder_email = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
     workroom_email = os.getenv("WORKROOM_EMAIL", "workroom@empirebox.store")
@@ -552,17 +620,26 @@ Begin every new session by stating the configured founder email and checking Ope
     # Cache for 5 minutes
     _prompt_cache["prompt"] = result
     _prompt_cache["expires"] = time.time() + _CACHE_TTL
-    from app.edition import apply_edition_prompt
+    _prompt_cache["edition"] = ed
     return apply_edition_prompt(result)
 
 
 def _get_tools_doc() -> str:
     """Load tool documentation from tool_executor."""
     try:
-        from app.services.max.tool_executor import TOOLS_DOC
-        return TOOLS_DOC
+        from app.services.max.tool_executor import tools_doc_for_process
+
+        return tools_doc_for_process()
     except Exception:
-        return ""
+        try:
+            from app.services.max.tool_executor import TOOLS_DOC
+            from app.edition import is_family_edition
+
+            if is_family_edition():
+                return ""
+            return TOOLS_DOC
+        except Exception:
+            return ""
 
 
 def get_max_brain_context() -> str:
@@ -579,11 +656,14 @@ def get_max_brain_context() -> str:
     """
     _brain_cache_key = "_brain_ctx"
     now = time.time()
+    from app.edition import edition_name, is_family_edition
+    ed = edition_name()
 
     # Cache brain context for 60 seconds to avoid hammering DB/git on rapid messages
     if (
         _prompt_cache.get(_brain_cache_key)
         and now < _prompt_cache.get("_brain_expires", 0)
+        and _prompt_cache.get("_brain_edition") == ed
     ):
         return _prompt_cache[_brain_cache_key]
 
@@ -606,34 +686,28 @@ def get_max_brain_context() -> str:
         logger.debug(f"Brain context: session memories unavailable: {e}")
 
     # ── b. Last 5 git commits ──
-    # H57 Phase 3: cwd resolves via canonical-root marker (NOT a
-    # hardcoded `~/empire-repo/` string — that was the stale-fork
-    # leak MAX was reporting). If the marker is missing, MAX's
-    # git context is unavailable (and we skip the section rather
-    # than fabricate stale context).
-    try:
-        from app.services.drawing.canonical_path import (
-            resolve_canonical_root, CanonicalRootError,
-        )
-        repo = resolve_canonical_root()
-        result = subprocess.run(
-            ["git", "log", "--oneline", "-10"],
-            cwd=repo, capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            sections.append(f"### Recent Commits\n```\n{result.stdout.strip()}\n```")
-    except Exception as e:
-        logger.debug(f"Brain context: git log unavailable: {e}")
+    # Family editions skip the repo. Workroom still resolves via the
+    # canonical-root marker (not a hardcoded ~/empire-repo/ string).
+    if not is_family_edition():
+        try:
+            from app.services.drawing.canonical_path import (
+                resolve_canonical_root, CanonicalRootError,
+            )
+            repo = resolve_canonical_root()
+            result = subprocess.run(
+                ["git", "log", "--oneline", "-10"],
+                cwd=repo, capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                sections.append(f"### Recent Commits\n```\n{result.stdout.strip()}\n```")
+        except Exception as e:
+            logger.debug(f"Brain context: git log unavailable: {e}")
 
     # ── c. Service health (port check only — fast) ──
     try:
         import socket
-        services = {
-            "Backend API": 8000,
-            "Command Center": 3005,
-            "OpenClaw": 7878,
-            "Ollama": 11434,
-        }
+        from app.edition import edition_service_ports
+        services = edition_service_ports()
         status_lines = ["### Service Health"]
         for name, port in services.items():
             try:
@@ -671,9 +745,11 @@ def get_max_brain_context() -> str:
         logger.debug(f"Brain context: tasks unavailable: {e}")
 
     # ── e. Current session context (from claude-end/claude-start) ──
+    # Family editions never read ~/.claude-context (Workroom Claude).
     try:
-        last_summary = Path.home() / ".claude-context" / "last_chat_summary.md"
-        if last_summary.exists():
+        from app.edition import last_chat_summary_path
+        last_summary = last_chat_summary_path()
+        if last_summary and last_summary.exists():
             age_s = time.time() - last_summary.stat().st_mtime
             if age_s < 172800:  # within 48 hours
                 content = last_summary.read_text(encoding="utf-8")[:600]
@@ -718,6 +794,7 @@ def get_max_brain_context() -> str:
     # Cache for 60 seconds
     _prompt_cache[_brain_cache_key] = result
     _prompt_cache["_brain_expires"] = now + 60
+    _prompt_cache["_brain_edition"] = ed
 
     return result
 

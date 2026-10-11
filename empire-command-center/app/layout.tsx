@@ -10,6 +10,7 @@ import "./theme/theme-toggle.css";
 import "./v3/tokens.css";
 import "./v3/shell.css";
 import { Inter, Inter_Tight, Playfair_Display, IBM_Plex_Mono } from "next/font/google";
+import FamilyAuthGate from "./components/FamilyAuthGate";
 import { I18nWrapper } from "./components/I18nWrapper";
 import { appDescriptionFromEnv, appTitleFromEnv } from "./lib/appIdentity";
 import { COMMAND_CENTER_DOCUMENT_TITLE, documentTitleForHost } from "./lib/luxeDocumentTitle";
@@ -70,7 +71,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           if(localStorage.getItem('empire.theme')==='gold'){document.documentElement.setAttribute('data-theme','gold');}}catch(e){}})();
         `}} />
       </head>
-      <body className="antialiased"><I18nWrapper>{children}</I18nWrapper></body>
+      <body className="antialiased"><I18nWrapper><FamilyAuthGate>{children}</FamilyAuthGate></I18nWrapper></body>
     </html>
   );
 }

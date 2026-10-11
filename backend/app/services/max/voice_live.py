@@ -234,7 +234,7 @@ _FALLBACK_TOOL_SCHEMAS = {
     "search_quotes": {
         "description": "List/search Empire quotes newest by updated_at. Matches customer, project/site, address, notes, and quote number. Use latest=true for the newest match or today=true for today's newest quote. Read-only.",
         "parameters": _obj({
-            "query": {"type": "string", "description": "Free-text customer/project/site/notes search, e.g. Willard (optional)"},
+            "query": {"type": "string", "description": "Free-text customer/project/site/notes search (optional)"},
             "customer_name": {"type": "string", "description": "Part of the customer's name (optional)"},
             "status": {"type": "string", "description": "Optional status filter: draft, founder_review, sent, accepted, rejected, expired"},
             "latest": {"type": "boolean", "description": "Return only the newest matching quote"},
@@ -1161,30 +1161,84 @@ def _cloudflare_proxied(headers) -> bool:
     return any(headers.get(name) for name in ("cf-ray", "cf-connecting-ip"))
 
 
+def _ws_cookie(ws, name: str) -> str:
+    cookies = getattr(ws, "cookies", None) or {}
+    value = cookies.get(name) if hasattr(cookies, "get") else None
+    if value:
+        return str(value)
+    raw = ""
+    headers = getattr(ws, "headers", None) or {}
+    if hasattr(headers, "get"):
+        raw = headers.get("cookie") or headers.get("Cookie") or ""
+    for part in str(raw).split(";"):
+        if "=" not in part:
+            continue
+        key, val = part.split("=", 1)
+        if key.strip() == name:
+            return val.strip()
+    return ""
+
+
+def _authorize_amp_session(ws) -> tuple[bool, str, str]:
+    """Accept the AMP login cookie on family editions (Max-e / Maxine)."""
+    try:
+        from app.services.amp_access import SESSION_COOKIE, session_email
+        from app.services import amp_allowlist
+    except Exception as exc:
+        return False, f"amp session unavailable ({type(exc).__name__})", ""
+    token = _ws_cookie(ws, SESSION_COOKIE)
+    if not token:
+        auth = ""
+        headers = getattr(ws, "headers", None) or {}
+        if hasattr(headers, "get"):
+            auth = headers.get("authorization") or headers.get("Authorization") or ""
+        if str(auth).lower().startswith("bearer "):
+            token = str(auth).split(" ", 1)[1].strip()
+    email = session_email(token) if token else None
+    if not email:
+        return False, "amp session required", ""
+    try:
+        allowed = amp_allowlist.is_allowed(email=email)
+    except Exception:
+        allowed = False
+    if not allowed:
+        return False, "amp session not allowlisted", ""
+    return True, "amp_session", email
+
+
 def authorize_websocket(ws, *, surface: str = "live") -> tuple[bool, str, str]:
     """Who may open Live Voice and the other Presentation Mode avatar routes.
 
+    * Family edition (EMPIRE_EDITION=amp / maxine): accept the httpOnly
+      ``amp_session`` cookie (or the same token as a bearer). Cloudflare
+      Access JWT still works when present.
     * Cloudflare Access JWT (header or CF_Authorization cookie) is checked
-      first, including on loopback. That path is unchanged. A Cloudflare
-      tunnel request without a valid JWT stays denied.
+      next, including on loopback. A Cloudflare tunnel request without a
+      valid JWT stays denied.
     * Direct local connection (loopback peer, no proxy headers, no Tailscale
       identity header): allowed. That is the Command Center on this box.
     * `tailscale serve` reaches Next from 127.0.0.1. Next keeps
       Tailscale-User-Login only in that case, stamps a shared secret, and
       forwards to uvicorn. Accept the login when that stamp is present and
       the login is in TAILSCALE_ALLOWED_LOGINS. An empty allowlist denies.
-      The same header without the stamp, or from any other peer, is denied.
     * HTTP avatar and Simli routes (surface="http") are also allowed when
       Next's secret matches and this is not a Cloudflare tunnel request.
-      Those routes had no auth before the Tailscale gate, so plain HTTP on
-      the LAN or the Tailscale IP (Next on :3005, no serve identity) keeps
-      working. Live Voice does not use that path.
     """
     headers = ws.headers
     host = (headers.get("host") or "").split(":")[0].lower()
     if host in _PUBLIC_UNGATED_HOSTS:
         return False, "public host not allowed", ""
-    token = headers.get("cf-access-jwt-assertion") or ws.cookies.get("CF_Authorization")
+    family = False
+    try:
+        from app.edition import is_family_edition
+        family = is_family_edition()
+    except Exception:
+        family = False
+    if family:
+        ok, via, user = _authorize_amp_session(ws)
+        if ok:
+            return ok, via, user
+    token = headers.get("cf-access-jwt-assertion") or _ws_cookie(ws, "CF_Authorization")
     if token:
         return verify_access_jwt(token)
     peer = _peer_host(ws)
@@ -1203,4 +1257,6 @@ def authorize_websocket(ws, *, surface: str = "live") -> tuple[bool, str, str]:
     proxied = any(headers.get(h) for h in _PROXY_HEADERS)
     if not proxied and peer in ("127.0.0.1", "::1", "localhost"):
         return True, "loopback", ""
+    if family:
+        return False, "amp session required", ""
     return False, "Cloudflare Access token required", ""

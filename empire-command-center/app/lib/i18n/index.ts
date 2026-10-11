@@ -53,6 +53,13 @@ function editionDefaultLocale(): Locale {
   return 'en';
 }
 
+function readStoredLocale(): Locale | null {
+  if (typeof localStorage === 'undefined') return null;
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored === 'es' || stored === 'en') return stored;
+  return null;
+}
+
 const I18nContext = createContext<I18nContextType>({
   locale: 'en',
   setLocale: () => {},
@@ -67,8 +74,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   // Initialize locale from storage or browser detection
   useEffect(() => {
-    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) as Locale : null;
-    // AMP edition defaults to Spanish. A saved choice (the English toggle) wins.
+    const stored = readStoredLocale();
+    // AMP / Maxine default to Spanish. A valid saved choice wins.
+    // An empty or unknown empire-locale value falls back to the edition default.
     const initial = stored || (editionDefaultLocale() === 'es' ? 'es' : detectBrowserLocale());
     setLocaleState(initial);
   }, []);

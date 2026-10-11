@@ -26,6 +26,106 @@ MINIMAX_BASE_URL = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rs
 MINIMAX_MODEL = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
 
 
+def _use_spanish_extraction() -> bool:
+    try:
+        from app.edition import is_family_edition
+        return is_family_edition()
+    except Exception:
+        return False
+
+
+def extraction_prompts(kind: str, text: str = "") -> tuple[str, str]:
+    """User + system prompts for summarize / classify / facts.
+
+    Family editions ask for Spanish JSON values. Workroom stays English.
+    """
+    spanish = _use_spanish_extraction()
+    if kind == "summarize":
+        if spanish:
+            return (
+                f"""Resume esta conversación de forma concisa. Extrae:
+1. SUMMARY: resumen de 2-3 oraciones
+2. KEY_DECISIONS: decisiones tomadas (arreglo JSON)
+3. TASKS: tareas o pendientes mencionados (arreglo JSON)
+4. CUSTOMERS: nombres de clientes mencionados (arreglo JSON)
+5. TOPICS: temas principales (arreglo JSON)
+6. MOOD: tono general (productivo/planificación/urgente/casual)
+7. KEY_FACTS: hechos importantes para recordar (arreglo JSON)
+
+Responde solo en JSON. Los textos en español.
+
+Conversación:
+{text}""",
+                "Eres un analizador de conversaciones. Responde solo en JSON válido. Redacta en español.",
+            )
+        return (
+            f"""Summarize this conversation concisely. Extract:
+1. SUMMARY: 2-3 sentence overview
+2. KEY_DECISIONS: any decisions made (as JSON array)
+3. TASKS: any action items or tasks mentioned (as JSON array)
+4. CUSTOMERS: any customer names mentioned (as JSON array)
+5. TOPICS: main topics discussed (as JSON array)
+6. MOOD: overall tone (productive/planning/urgent/casual)
+7. KEY_FACTS: important facts to remember (as JSON array)
+
+Respond in JSON format only.
+
+Conversation:
+{text}""",
+            "You are a conversation analyzer. Respond only in valid JSON.",
+        )
+    if kind == "classify":
+        if spanish:
+            return (
+                f"""Clasifica este mensaje:
+"{text}"
+
+Categorías:
+- task: una acción o recordatorio
+- question: pide información
+- instruction: le pide a Max-e que haga algo
+- note: una idea para guardar
+- urgent: necesita atención inmediata
+- customer: sobre un cliente
+
+Responde en JSON: {{"intent": "...", "priority": "low/medium/high/urgent", "customer_name": null o "Nombre", "summary": "resumen breve"}}
+Los textos en español.""",
+                "Eres un clasificador de intención. Responde solo en JSON válido. Redacta en español.",
+            )
+        return (
+            f"""Classify this message:
+"{text}"
+
+Categories:
+- task: an action item or reminder
+- question: asking for information
+- instruction: telling MAX to do something
+- note: an idea or thought to save for later
+- urgent: needs immediate attention
+- customer: about a specific customer
+
+Respond in JSON: {{"intent": "...", "priority": "low/medium/high/urgent", "customer_name": null or "Name", "summary": "brief summary"}}""",
+            "You are an intent classifier. Respond only in valid JSON.",
+        )
+    if spanish:
+        return (
+            f"""Extrae los hechos clave que valga la pena recordar de este texto.
+Devuelve un arreglo JSON de frases cortas.
+Solo incluye hechos útiles para recordar después.
+
+Texto: {text}""",
+            "Extrae hechos como un arreglo JSON de cadenas. Redacta en español.",
+        )
+    return (
+        f"""Extract the key facts worth remembering from this text.
+Return as a JSON array of short fact strings.
+Only include facts that would be useful to recall later.
+
+Text: {text}""",
+        "Extract facts as JSON array of strings.",
+    )
+
+
 class LocalLLM:
     def __init__(self):
         self.base_url = OLLAMA_BASE_URL
@@ -173,24 +273,9 @@ class LocalLLM:
         conversation_text = "\n".join(
             f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
         )
+        prompt, system = extraction_prompts("summarize", conversation_text)
 
-        prompt = f"""Summarize this conversation concisely. Extract:
-1. SUMMARY: 2-3 sentence overview
-2. KEY_DECISIONS: any decisions made (as JSON array)
-3. TASKS: any action items or tasks mentioned (as JSON array)
-4. CUSTOMERS: any customer names mentioned (as JSON array)
-5. TOPICS: main topics discussed (as JSON array)
-6. MOOD: overall tone (productive/planning/urgent/casual)
-7. KEY_FACTS: important facts to remember (as JSON array)
-
-Respond in JSON format only.
-
-Conversation:
-{conversation_text}"""
-
-        response = await self.generate(
-            prompt, system="You are a conversation analyzer. Respond only in valid JSON."
-        )
+        response = await self.generate(prompt, system=system)
 
         return self._parse_json_dict(response, {
             "summary": response[:200] if response else "",
@@ -204,22 +289,9 @@ Conversation:
 
     async def classify_intent(self, message: str) -> dict:
         """Classify the intent of an incoming message."""
-        prompt = f"""Classify this message:
-"{message}"
+        prompt, system = extraction_prompts("classify", message)
 
-Categories:
-- task: an action item or reminder
-- question: asking for information
-- instruction: telling MAX to do something
-- note: an idea or thought to save for later
-- urgent: needs immediate attention
-- customer: about a specific customer
-
-Respond in JSON: {{"intent": "...", "priority": "low/medium/high/urgent", "customer_name": null or "Name", "summary": "brief summary"}}"""
-
-        response = await self.generate(
-            prompt, system="You are an intent classifier. Respond only in valid JSON."
-        )
+        response = await self.generate(prompt, system=system)
 
         return self._parse_json_dict(response, {
             "intent": "note",
@@ -253,15 +325,9 @@ Respond in JSON: {{"intent": "...", "priority": "low/medium/high/urgent", "custo
 
     async def extract_facts(self, text: str) -> list[str]:
         """Extract memorable facts from text."""
-        prompt = f"""Extract the key facts worth remembering from this text.
-Return as a JSON array of short fact strings.
-Only include facts that would be useful to recall later.
+        prompt, system = extraction_prompts("facts", text)
 
-Text: {text}"""
-
-        response = await self.generate(
-            prompt, system="Extract facts as JSON array of strings."
-        )
+        response = await self.generate(prompt, system=system)
 
         return self._parse_json_list(response)
 

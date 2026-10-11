@@ -47,3 +47,15 @@ npx next start -p 3012
 ```
 
 Login is the same `/login` session as Max-e. The setup interview creates a ConstructionForge project, phase, and only the lots the owner typed, then asks Confirmar datos (Publicar / Confidencial, default Confidencial).
+
+## WhatsApp (draft only, this instance)
+
+Spanish guide on this site: `https://maxine.empirebox.store/amp/whatsapp` (also `/ayuda/whatsapp`). Read-only chats: `/amp/whatsapp/chats`.
+
+Camilo creates **his own new** Meta / WhatsApp account and Meta test number — not Rafael’s, not the Workroom number, not Max-e’s. Webhook:
+
+`https://maxine.empirebox.store/api/v1/whatsapp/webhook` → uvicorn on **8012**.
+
+Secrets (`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_OWNER_NUMBERS`) go only through the secure secret request into `/home/rg/empire-maxine.env`. Never type them in chat or on the page. Owner allowlist is Camilo’s number only. Draft-only; 20% usage cap; no client sends.
+
+This checkout is `feature/amp-edition` with `EMPIRE_EDITION=maxine`. There is no separate Maxine edition git branch.

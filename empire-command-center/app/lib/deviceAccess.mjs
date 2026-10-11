@@ -59,8 +59,8 @@ ${website}
 </ol>
 <h2>2. Tailscale, si prefieres una red privada</h2>
 ${tailscale}
-<h2>3. WhatsApp, pronto</h2>
-<p>Más adelante podrás mandar notas de voz y texto a ${name} desde tu número autorizado. Todavía no está listo.</p>
+<h2>3. WhatsApp</h2>
+<p>Ya puedes configurar tu propio WhatsApp (cuenta nueva de Meta, no la de Rafael) en <a href="/amp/whatsapp" style="color:#b8960c;font-weight:700">la guía de WhatsApp</a>. También está en <a href="/ayuda/whatsapp" style="color:#b8960c;font-weight:700">/ayuda/whatsapp</a>.</p>
 <p><a href="/ayuda" style="color:#b8960c;font-weight:700">Volver a Ayuda</a></p>
 </main>`;
 

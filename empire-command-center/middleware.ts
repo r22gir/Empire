@@ -104,9 +104,14 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const edition = (process.env.NEXT_PUBLIC_EMPIRE_EDITION || "").trim().toLowerCase();
   const familyEdition = edition === "amp" || edition === "maxine";
-  const openAccess = ["1", "true", "yes", "on"].includes(
+  const openAccessRequested = ["1", "true", "yes", "on"].includes(
     (process.env.AMP_OPEN_ACCESS || "").trim().toLowerCase(),
   );
+  const productionRuntime = ["production", "prod"].includes(
+    (process.env.NODE_ENV || process.env.EMPIRE_ENV || "").trim().toLowerCase(),
+  );
+  // Local Dell convenience only. Never skip the login gate in production.
+  const honorOpenAccess = openAccessRequested && !productionRuntime;
   const familyResponse = (response: NextResponse) => {
     if (familyEdition) response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
     return response;
@@ -124,7 +129,8 @@ export function middleware(request: NextRequest) {
   const home = familyHomeRedirect(
     process.env.NEXT_PUBLIC_EMPIRE_EDITION || "",
     pathname,
-    Boolean(request.cookies.get("amp_session")?.value) || openAccess,
+    Boolean(request.cookies.get("amp_session")?.value) || honorOpenAccess,
+    host,
   );
   if (home) {
     const url = request.nextUrl.clone();

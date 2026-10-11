@@ -8,11 +8,8 @@ type Usage = {
   level?: string;
   message?: string;
   limit_note_es?: string;
-  ratio?: number | null;
-  allowance?: number | null;
-  baseline_basis?: string;
-  day?: { tokens?: number; input_tokens?: number; output_tokens?: number; cost_usd?: number };
-  month?: { tokens?: number; input_tokens?: number; output_tokens?: number; cost_usd?: number };
+  used_percent?: number | null;
+  remaining_percent?: number | null;
 };
 
 export default function UsoPage() {
@@ -34,9 +31,6 @@ export default function UsoPage() {
       .catch(() => {});
   }, []);
 
-  const money = (value?: number) =>
-    typeof value === 'number' ? `$${value.toLocaleString('en-US', { maximumFractionDigits: 4 })}` : '—';
-
   return (
     <main style={{ maxWidth: 720, margin: '0 auto', padding: 24, fontFamily: 'Inter, sans-serif', color: '#1a1a1a' }}>
       <p style={{ color: '#b8960c', fontWeight: 700, fontSize: 12 }}>USO</p>
@@ -48,17 +42,9 @@ export default function UsoPage() {
       {usage ? (
         <>
           <p>
-            Hoy: {usage.day?.input_tokens ?? 0} tokens de entrada, {usage.day?.output_tokens ?? 0} de salida
-            {' '}({usage.day?.tokens ?? 0} en total, {money(usage.day?.cost_usd)}).
-          </p>
-          <p>
-            Este mes: {usage.month?.input_tokens ?? 0} tokens de entrada, {usage.month?.output_tokens ?? 0} de salida
-            {' '}({usage.month?.tokens ?? 0} en total, {money(usage.month?.cost_usd)}).
-          </p>
-          <p>
             Tope {usage.cap_percent ?? 20}%
-            {usage.allowance != null ? ` · cupo ${usage.allowance}` : ' · falta la base del mes para aplicar el tope'}
-            {typeof usage.ratio === 'number' ? ` · ${Math.round(usage.ratio * 100)}% usado` : ''}
+            {typeof usage.used_percent === 'number' ? ` · ${usage.used_percent}% usado` : ''}
+            {typeof usage.remaining_percent === 'number' ? ` · queda ${usage.remaining_percent}%` : ''}
             {usage.level ? ` · ${usage.level}` : ''}
           </p>
           {usage.message ? <p>{usage.message}</p> : null}

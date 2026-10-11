@@ -9,8 +9,24 @@ import uuid
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
+# Founder/Workroom checkout path. Tests may monkeypatch this. Family
+# editions never mkdir or read it — they use EMPIRE_DATA_DIR/chats.
 CHATS_DIR = Path(__file__).parent.parent.parent.parent / "data" / "chats"
-CHATS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _chats_dir() -> Path:
+    try:
+        from app.edition import is_family_edition, require_data_root
+
+        if is_family_edition():
+            path = require_data_root() / "chats"
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+    except Exception:
+        pass
+    path = Path(CHATS_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class SaveChatRequest(BaseModel):
@@ -66,7 +82,7 @@ async def save_chat(req: SaveChatRequest):
     chat_id = str(uuid.uuid4())[:8]
     title = req.title or _auto_title(req.messages)
 
-    user_dir = CHATS_DIR / req.user_id
+    user_dir = _chats_dir() / req.user_id
     user_dir.mkdir(exist_ok=True)
 
     chat_data = {
@@ -87,7 +103,7 @@ async def save_chat(req: SaveChatRequest):
 
 @router.put("/{chat_id}")
 async def update_chat(chat_id: str, req: UpdateChatRequest, user_id: str = "founder"):
-    user_dir = CHATS_DIR / user_id
+    user_dir = _chats_dir() / user_id
     user_dir.mkdir(parents=True, exist_ok=True)
     chat_file = user_dir / f"{chat_id}.json"
     now = datetime.now().isoformat()
@@ -125,8 +141,11 @@ async def list_chats(user_id: str = "founder", limit: int = 200, offset: int = 0
     2026-10-04: the full list had grown to 2,812 chats / 687KB and was fetched on every
     studio page load (a suspect in the iPhone Safari tab crash). Default page = 200;
     pass limit=0 for everything. ``count`` is still the total.
+
+    Family editions read EMPIRE_DATA_DIR/chats via ``_chats_dir()`` so Max-e
+    and Maxine never list Rafael's Workroom history.
     """
-    user_dir = CHATS_DIR / user_id
+    user_dir = _chats_dir() / user_id
     if not user_dir.exists():
         return {"chats": [], "count": 0}
 
@@ -162,7 +181,7 @@ async def list_chats(user_id: str = "founder", limit: int = 200, offset: int = 0
 @router.get("/search")
 async def search_chats(q: str, user_id: str = "founder"):
     """Search chat history by keyword across titles and message content."""
-    user_dir = CHATS_DIR / user_id
+    user_dir = _chats_dir() / user_id
     if not user_dir.exists():
         return {"results": [], "count": 0, "query": q}
 
@@ -310,7 +329,7 @@ async def memory_bank_threads(limit: int = 100):
 
 @router.get("/{chat_id}")
 async def load_chat(chat_id: str, user_id: str = "founder"):
-    chat_file = CHATS_DIR / user_id / f"{chat_id}.json"
+    chat_file = _chats_dir() / user_id / f"{chat_id}.json"
     if not chat_file.exists():
         raise HTTPException(status_code=404, detail="Chat not found")
 
@@ -320,7 +339,7 @@ async def load_chat(chat_id: str, user_id: str = "founder"):
 
 @router.patch("/{chat_id}/title")
 async def rename_chat(chat_id: str, req: RenameChatRequest, user_id: str = "founder"):
-    chat_file = CHATS_DIR / user_id / f"{chat_id}.json"
+    chat_file = _chats_dir() / user_id / f"{chat_id}.json"
     if not chat_file.exists():
         raise HTTPException(status_code=404, detail="Chat not found")
     with open(chat_file, "r") as f:
@@ -335,7 +354,7 @@ async def rename_chat(chat_id: str, req: RenameChatRequest, user_id: str = "foun
 @router.patch("/{chat_id}/pin")
 async def pin_chat(chat_id: str, req: PinChatRequest, user_id: str = "founder"):
     """Pin or unpin a chat conversation."""
-    chat_file = CHATS_DIR / user_id / f"{chat_id}.json"
+    chat_file = _chats_dir() / user_id / f"{chat_id}.json"
     if not chat_file.exists():
         raise HTTPException(status_code=404, detail="Chat not found")
     with open(chat_file, "r") as f:
@@ -349,7 +368,7 @@ async def pin_chat(chat_id: str, req: PinChatRequest, user_id: str = "founder"):
 
 @router.delete("/{chat_id}")
 async def delete_chat(chat_id: str, user_id: str = "founder"):
-    chat_file = CHATS_DIR / user_id / f"{chat_id}.json"
+    chat_file = _chats_dir() / user_id / f"{chat_id}.json"
     if chat_file.exists():
         os.remove(chat_file)
     return {"status": "deleted"}

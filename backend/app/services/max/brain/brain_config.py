@@ -10,12 +10,19 @@ from pathlib import Path
 
 
 def _brain_root() -> Path:
-    """Canonical brain root. Honors EMPIRE_BRAIN_DIR; default is canonical."""
-    root = Path(
-        os.environ.get(
-            "EMPIRE_BRAIN_DIR", os.path.expanduser("~/empire-data/brain")
-        )
-    )
+    """Canonical brain root. Honors EMPIRE_BRAIN_DIR; family uses the edition root."""
+    raw = os.environ.get("EMPIRE_BRAIN_DIR", "").strip()
+    if raw:
+        root = Path(raw)
+    else:
+        try:
+            from app.edition import assistant_brain_dir, is_family_edition
+            if is_family_edition():
+                root = assistant_brain_dir()
+            else:
+                root = Path(os.path.expanduser("~/empire-data/brain"))
+        except Exception:
+            root = Path(os.path.expanduser("~/empire-data/brain"))
     root.mkdir(parents=True, exist_ok=True)
     return root
 

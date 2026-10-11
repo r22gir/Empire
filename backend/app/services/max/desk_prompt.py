@@ -59,8 +59,13 @@ def get_desk_system_prompt(desk_id: str) -> str:
     )
 
     try:
-        from app.services.max.tool_executor import TOOLS_DOC
-        tool_instructions = f"\n\n{TOOLS_DOC}"
+        from app.edition import is_family_edition
+
+        if is_family_edition():
+            return get_system_prompt()
+        from app.services.max.tool_executor import tools_doc_for_process
+
+        tool_instructions = f"\n\n{tools_doc_for_process()}"
     except Exception:
         tool_instructions = ""
 

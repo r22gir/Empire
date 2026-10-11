@@ -52,7 +52,12 @@ from app.services.max.drawing_intent import (
 )
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
-from app.services.max.factual_guard import is_factual_question, enforce_web_search, grounding_directive
+from app.services.max.factual_guard import (
+    is_factual_question,
+    enforce_web_search,
+    grounding_directive,
+    search_unavailable_reply,
+)
 from app.services.max.answer_quality import (
     COMPLETENESS_RECOVERY_INSTRUCTION,
     detect_quality_flags,
@@ -2481,6 +2486,36 @@ def _maybe_handle_gpu_safety_request(request: ChatRequest) -> ChatResponse | Non
     )
 
 
+def _family_pre_search_open(desk: str | None) -> bool:
+    """Pre-search runs on the main chat lane, and always on family editions."""
+    if not desk:
+        return True
+    try:
+        from app.edition import is_family_edition
+        return is_family_edition()
+    except Exception:
+        return False
+
+
+def _is_family_edition() -> bool:
+    try:
+        from app.edition import is_family_edition
+        return is_family_edition()
+    except Exception:
+        return False
+
+
+def family_search_failure_response(tool_entry=None) -> ChatResponse:
+    """User-facing search-failure reply. ChatResponse.response is what the client reads."""
+    return ChatResponse(
+        response=search_unavailable_reply(),
+        model_used="search-unavailable",
+        fallback_used=False,
+        tool_results=[tool_entry] if tool_entry else None,
+        metadata={"pre_search_failed": True},
+    )
+
+
 def _stream_immediate_response(response: ChatResponse, conversation_id: str | None = None) -> StreamingResponse:
     async def gen():
         cleaned_response = sanitize_output(_sanitize_internal_leakage_text(response.response))
@@ -3183,6 +3218,7 @@ async def _chat_with_max_service_impl(
         _pre_search_entry = None
         _research_page_entries: list[dict[str, Any]] = []
         _research_read_urls: set[str] = set()
+        _family_search_failed = False
         _finance_prefetch_entries: list[dict[str, Any]] = []
         if _is_local_finance_readiness_request(request.message):
             _finance_prefetch_entries = await _prefetch_finance_readiness_entries(
@@ -3195,7 +3231,7 @@ async def _chat_with_max_service_impl(
             messages.insert(-1, AIMessage(role="system", content=(
                 finance_system_preamble(include_totals=True) + "\n" + _finance_context
             )))
-        if not request.desk and (
+        if _family_pre_search_open(request.desk) and (
             (_is_performative_web_search_request(request.message)
              or is_factual_question(request.message))
             and not _is_local_finance_readiness_request(request.message)
@@ -3220,16 +3256,22 @@ async def _chat_with_max_service_impl(
                 )
                 _research_page_entries = list(_grounded.get("tool_entries") or [])
                 messages.insert(-1, AIMessage(role="system", content=_grounded["message"]))
+            elif _is_family_edition():
+                # Search first, then return the user-facing ChatResponse.response.
+                # Do not hand a .content stub to the model pipeline — the client
+                # reads ChatResponse.response, not an internal AIResponse.content.
+                return family_search_failure_response(_pre_search_entry)
             # H53 HARMONISATION: when there are no verified results, append
             # NOTHING. The pre-fix code emitted a "[SYSTEM: web_search returned
             # no results — do not fabricate…]" block on role="user"; MAX read
             # it as a prompt-injection attempt. The doctrine answer is silence,
             # not a fabricated apology.
 
-        response = await asyncio.wait_for(
-            ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
-            timeout=_resolve_max_chat_timeout(request.message),
-        )
+        if not _family_search_failed:
+            response = await asyncio.wait_for(
+                ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
+                timeout=_resolve_max_chat_timeout(request.message),
+            )
 
         # Resolve access control user
         _ac_context = None
@@ -3579,6 +3621,11 @@ async def _chat_with_max_service_impl(
             final_content = qr.cleaned
 
         final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
+        try:
+            from app.services.max.search_sources import attach_family_search_sources
+            final_content = attach_family_search_sources(final_content, tool_results_list)
+        except Exception:
+            pass
 
         # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
         # D52 H80: receipt suppression. tools_used_names feeds the
@@ -4291,7 +4338,7 @@ async def _chat_stream_impl(request: ChatRequest):
             messages.insert(-1, AIMessage(role="system", content=(
                 finance_system_preamble(include_totals=True) + "\n" + _finance_context
             )))
-        if not request.desk and (
+        if _family_pre_search_open(request.desk) and (
             (_is_performative_web_search_request(request.message)
              or is_factual_question(request.message))
             and not _is_local_finance_readiness_request(request.message)
@@ -4314,6 +4361,12 @@ async def _chat_stream_impl(request: ChatRequest):
                 )
                 _stream_page_entries = list(_stream_grounded.get("tool_entries") or [])
                 messages.insert(-1, AIMessage(role="system", content=_stream_grounded["message"]))
+            elif _is_family_edition():
+                # Search first, then a short Spanish failure — never "no tengo información".
+                _fail = search_unavailable_reply()
+                yield f"data: {_safe_dumps({'type': 'text', 'content': _fail})}\n\n"
+                yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'search-unavailable'})}\n\n"
+                return
             # If web_search returned nothing, append NOTHING. Do not fabricate
             # a "[SYSTEM: ...]" apology — that was the H53 shape in this code path.
         try:
@@ -4717,6 +4770,11 @@ async def _chat_stream_impl(request: ChatRequest):
                 full_response = _gpu_guard_resp
                 yield f"data: {_safe_dumps({'type': 'gpu_safety_replace', 'replacement': full_response})}\n\n"
             full_response = _sanitize_internal_leakage_text(full_response)
+            try:
+                from app.services.max.search_sources import attach_family_search_sources
+                full_response = attach_family_search_sources(full_response, tool_results_list)
+            except Exception:
+                pass
 
             # Emit grounding events (after quality engine so all fixes are sequential)
             for _ge in _grounding_events:

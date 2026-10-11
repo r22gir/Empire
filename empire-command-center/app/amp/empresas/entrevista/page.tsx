@@ -41,12 +41,14 @@ type Answers = {
 };
 
 const MODULES = [
-  { id: 'crm', es: 'CRM — contactos y clientes', en: 'CRM — contacts and customers' },
-  { id: 'quotes', es: 'Cotizaciones', en: 'Quotes' },
-  { id: 'invoices', es: 'Facturas', en: 'Invoices' },
-  { id: 'socialforge', es: 'SocialForge — redes, con tu aprobación antes de publicar', en: 'SocialForge — social posts, with your approval' },
-  { id: 'leadforge', es: 'LeadForge — prospectos', en: 'LeadForge — prospects' },
+  { id: 'crm', es: 'Coachees (CRM)', en: 'Coachees (CRM)' },
+  { id: 'quotes', es: 'Paquetes y cotizaciones', en: 'Packages and quotes' },
+  { id: 'invoices', es: 'Membresías y facturas', en: 'Memberships and invoices' },
+  { id: 'socialforge', es: 'SocialForge (aprobación antes de publicar)', en: 'SocialForge (approval before publishing)' },
+  { id: 'leadforge', es: 'Ingreso y llamadas de descubrimiento', en: 'Intake and discovery calls' },
   { id: 'courses', es: 'Cursos', en: 'Courses' },
+  { id: 'scheduling', es: 'Agenda de sesiones', en: 'Session calendar' },
+  { id: 'finance', es: 'Finanzas', en: 'Finance' },
 ];
 
 const PAYMENTS = [
@@ -290,6 +292,7 @@ export default function EntrevistaPage() {
   const { locale, setLocale } = useTranslation();
   const assistant = useAssistantName();
   const constructionShell = useEdition() === 'maxine';
+  // Interview is Spanish-first. empire-locale must be the explicit 'en' toggle.
   const es = locale !== 'en';
   const t = (spanish: string, english: string) => (es ? spanish : english);
   const [step, setStep] = useState(0);
@@ -306,6 +309,14 @@ export default function EntrevistaPage() {
   const welcome = welcomeCopy(constructionShell ? 'maxine' : 'amp');
   const last = steps.length - 1;
   const currentId = steps[Math.min(step, last)]?.id || 'bienvenida';
+
+  useEffect(() => {
+    if (typeof localStorage === 'undefined') return;
+    const stored = localStorage.getItem('empire-locale');
+    if (stored !== 'en' && stored !== 'es') {
+      setLocale('es');
+    }
+  }, [setLocale]);
 
   useEffect(() => {
     let cancelled = false;
@@ -823,6 +834,8 @@ export default function EntrevistaPage() {
               <p style={{ marginTop: 16, lineHeight: 1.5 }}>
                 {t('Cuando termines, mira cómo entrar desde el celular, la tableta o el computador.', 'When you finish, see how to open this on a phone, tablet, or computer.')}{' '}
                 <Link href="/ayuda/dispositivos" style={{ color: '#D4A030', fontWeight: 800 }}>Cómo conectarte desde tus dispositivos</Link>
+                {' · '}
+                <Link href="/amp/whatsapp" style={{ color: '#D4A030', fontWeight: 800 }}>WhatsApp</Link>
               </p>
             </>
           )}

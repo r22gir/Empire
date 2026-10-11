@@ -169,14 +169,70 @@ def test_module_gating_blocks_hidden_routes(monkeypatch, tmp_path):
     assert edition.json()["edition"] == "amp"
 
 
+def test_spanish_news_question_triggers_search(monkeypatch, tmp_path):
+    _amp_env(monkeypatch, tmp_path)
+    from app.services.max.factual_guard import is_factual_question
+    from app.services.max.search_context import build_search_query
+
+    assert is_factual_question("Que paso en Panama")
+    assert is_factual_question("Max-e, qué pasó en Panamá")
+    assert is_factual_question("noticias de hoy")
+    assert is_factual_question("cuanto esta el dolar hoy")
+    query = build_search_query("Que paso en Panama")["query"].lower()
+    assert "panama" in query or "panamá" in query
+    assert "hoy" in query
+
+
+def test_casual_spanish_does_not_trigger_search(monkeypatch, tmp_path):
+    _amp_env(monkeypatch, tmp_path)
+    from app.services.max.factual_guard import is_factual_question
+
+    for message in (
+        "hoy no puedo",
+        "voy a casa hoy",
+        "como puedo ayudarte",
+        "que es eso",
+        "por que no funciona",
+        "buenos dias, que tal hoy",
+    ):
+        assert not is_factual_question(message), message
+
+
+def test_gate_rejects_anonymous_requests_when_amp(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    for path in ("/api/v1/whoami", "/api/v1/businesses", "/api/v1/amp/content"):
+        denied = client.get(path)
+        assert denied.status_code == 403, path
+        body = denied.json()
+        assert body["code"] == "sin_acceso"
+        assert "Sin acceso" in body["detail"]
+    open_health = client.get("/health")
+    assert open_health.status_code == 200
+
+
+def test_family_prompt_asks_for_short_spanish_and_search_first(monkeypatch, tmp_path):
+    _amp_env(monkeypatch, tmp_path)
+    from app.edition import edition_prompt_suffix
+
+    suffix = edition_prompt_suffix()
+    assert "Responde en español" in suffix
+    assert "2 a 5 oraciones" in suffix
+    assert "una sola pregunta" in suffix
+    assert "busca primero" in suffix
+
+
 def test_spanish_default_and_english_greeting(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     body = client.get("/api/v1/edition").json()
     assert body["default_locale"] == "es"
     assert body["greeting"].startswith("Hola, soy Max-e")
-    assert "Juan Diego Giraldo" in body["greeting"]
+    assert "Juan Diego Giraldo" not in body["greeting"]
+    assert "Juan Diego Giraldo" not in body["assistant"]["greeting_es"]
+    assert "Juan Diego Giraldo" not in body["assistant"]["greeting_en"]
     from app.edition import greeting
     assert greeting("en").startswith("Hi, I'm Max-e")
+    assert "Juan Diego Giraldo" in greeting("es", include_owner=True)
+    assert "Juan Diego Giraldo" not in greeting("es", include_owner=False)
 
 
 def test_max_e_is_separate_from_workroom_max(monkeypatch, tmp_path):

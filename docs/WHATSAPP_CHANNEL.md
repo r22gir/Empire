@@ -4,6 +4,10 @@ Each Empire instance has its own WhatsApp number. Max-e, Maxine, and Workroom Ma
 
 Webhook: `/api/v1/whatsapp/webhook`
 
+In-site Spanish guide (family editions): `/amp/whatsapp` and `/ayuda/whatsapp`.
+Read-only chats: `/amp/whatsapp/chats`. Secrets go only into the Dell env file
+(`/home/rg/empire-amp.env` or `/home/rg/empire-maxine.env`), never into the page.
+
 ## English
 
 ### What you do in Meta

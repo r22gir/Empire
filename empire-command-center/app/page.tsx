@@ -6,6 +6,8 @@
 //   link and bookmark keeps working. Hash links (/#presentation, …) are
 //   forwarded to /classic by MaxHome on mount.
 // - The classic app is also reachable directly at /classic.
+// Family editions wrap this tree in FamilyAuthGate (layout.tsx): signed-out
+// visitors never render the dashboard or the coach name.
 import CommandCenterApp from './CommandCenterApp';
 import MaxHome from './components/home3/MaxHome';
 
