@@ -12,7 +12,26 @@ from datetime import datetime
 
 logger = logging.getLogger("max.tool_audit")
 
+# Workroom checkout path. Tests may monkeypatch. Never mkdir at import.
 AUDIT_DB = os.path.expanduser("~/empire-repo/backend/data/tool_audit.db")
+
+
+def _audit_db() -> str:
+    try:
+        from app.edition import is_family_edition, require_data_root
+
+        if is_family_edition():
+            path = require_data_root() / "tool_audit.db"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return str(path)
+    except Exception:
+        pass
+    env = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    if env:
+        path = os.path.join(os.path.expanduser(env), "tool_audit.db")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return path
+    return AUDIT_DB
 
 
 def init_audit_db():
@@ -20,8 +39,9 @@ def init_audit_db():
     Apply column-level migrations idempotently — safe to call on
     existing DBs (H81 Phase 2, 2026-09-01)."""
     try:
-        os.makedirs(os.path.dirname(AUDIT_DB), exist_ok=True)
-        conn = sqlite3.connect(AUDIT_DB)
+        db = _audit_db()
+        os.makedirs(os.path.dirname(db), exist_ok=True)
+        conn = sqlite3.connect(db)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS tool_executions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,8 +77,8 @@ def init_audit_db():
             logger.info("H81 Phase 2: added 'founder' column to tool_executions")
         conn.commit()
         conn.close()
-        os.chmod(AUDIT_DB, 0o600)
-        logger.info(f"Audit DB initialized: {AUDIT_DB}")
+        os.chmod(db, 0o600)
+        logger.info(f"Audit DB initialized: {db}")
     except Exception as e:
         logger.warning(f"Could not initialize audit DB: {e}")
 
@@ -85,7 +105,7 @@ def log_execution(
     pre-Phase-2 history and is preserved.
     """
     try:
-        conn = sqlite3.connect(AUDIT_DB, timeout=5)
+        conn = sqlite3.connect(_audit_db(), timeout=5)
         conn.execute(
             """INSERT INTO tool_executions
                (timestamp, tool, params, result, access_level, approved_via, desk, success, duration_ms, channel, founder)
@@ -113,7 +133,7 @@ def log_execution(
 def get_recent_executions(limit: int = 50) -> list[dict]:
     """Get recent tool executions for the dev panel."""
     try:
-        conn = sqlite3.connect(AUDIT_DB, timeout=5)
+        conn = sqlite3.connect(_audit_db(), timeout=5)
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT * FROM tool_executions ORDER BY id DESC LIMIT ?",
