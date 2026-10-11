@@ -848,6 +848,65 @@ def test_ticket_with_attachment_reaches_founder_inbox_and_email(monkeypatch, tmp
     assert mail["attachments"][0]["content_type"] == "image/png"
 
 
+def test_maxine_attachment_email_mentions_only_never_attaches(monkeypatch, tmp_path):
+    """Maxine files stay inbox-hidden; notify mail must not attach bytes."""
+    inbox = tmp_path / "shared-inbox"
+    inbox.mkdir()
+    _family(monkeypatch, tmp_path, "maxine", inbox)
+    sent = []
+
+    async def _fake_send(to, subject, html, attachments=None):
+        sent.append({"to": to, "subject": subject, "html": html, "attachments": attachments or []})
+        return True
+
+    monkeypatch.setattr("app.services.email.sender.send_email", _fake_send)
+    from app.services.family_help import (
+        attachments_hidden_until_reveal,
+        create_ticket,
+        format_byte_size,
+        get_ticket,
+        split_email_attachments,
+    )
+
+    assert attachments_hidden_until_reveal("maxine") is True
+    assert attachments_hidden_until_reveal("amp") is False
+    png = b"\x89PNG\r\n\x1a\n" + b"maxine-secret" + b"\x00" * 40
+    attach, mention = split_email_attachments(
+        [{"filename": "secreto.png", "content_type": "image/png", "data": png, "size": len(png), "kind": "image"}],
+        allow_attach=False,
+    )
+    assert attach == []
+    assert mention and mention[0]["filename"] == "secreto.png"
+
+    ticket = create_ticket(
+        message="mira el archivo",
+        attachments=[{
+            "filename": "secreto.png",
+            "content_type": "image/png",
+            "data": png,
+            "kind": "file",
+        }],
+        notify=True,
+    )
+    assert ticket["attachments"]
+    assert sent
+    mail = sent[0]
+    assert mail["attachments"] == []
+    assert "secreto.png" in mail["html"]
+    assert format_byte_size(len(png)) in mail["html"]
+    assert "Abrir adjuntos" in mail["html"]
+    assert "incluido en este correo" not in mail["html"]
+    _assert_no_public_url(mail["html"])
+    blob = (mail["html"] or "") + str(mail["attachments"])
+    assert b"maxine-secret" not in blob.encode("utf-8", errors="ignore")
+    assert png not in (mail["attachments"] or [])
+
+    _founder(monkeypatch, tmp_path, inbox)
+    hidden = get_ticket(ticket["id"])
+    assert hidden["attachments_hidden"] is True
+    assert hidden["attachments"] == []
+
+
 def test_large_attachment_email_mentions_inbox_without_url(monkeypatch, tmp_path):
     inbox = tmp_path / "shared-inbox"
     inbox.mkdir()

@@ -1,4 +1,6 @@
-// Mirrors next.config.ts so production builds do not depend on transpiling TS config.
+// Live Next config. Next.js CONFIG_FILES is [next.config.js, .mjs, .ts],
+// so this file wins whenever both .js and .ts exist. next.config.ts is
+// a typed mirror only — edits there do not reach `next build` / `next start`.
 const BUILD_TIMESTAMP = Date.now();
 
 function empireUpstream() {

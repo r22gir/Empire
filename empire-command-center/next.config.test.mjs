@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+// next.config.js is the file Next.js loads (CONFIG_FILES: js, then mjs, then ts).
 import config from './next.config.js';
 
 function sizeBytes(value) {
