@@ -1,0 +1,71 @@
+name: Family isolation and WhatsApp
+
+# No secrets. Mocks only. Runs the Max-e / Maxine isolation suite and the
+# WhatsApp login-gate + 20% usage-cap proofs.
+
+on:
+  pull_request:
+    branches:
+      - feature/amp-edition
+      - 'feature/amp-*'
+      - 'cursor/**'
+  push:
+    branches:
+      - feature/amp-edition
+      - 'cursor/**whatsapp**'
+      - 'cursor/**family**'
+      - 'cursor/**maxine**'
+      - 'cursor/**amp**'
+
+jobs:
+  family-whatsapp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            pytest pytest-asyncio \
+            fastapi httpx \
+            'pydantic[email]' pydantic-settings \
+            python-multipart python-dotenv \
+            'python-jose[cryptography]'
+
+      - name: Family isolation and WhatsApp tests
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          files=(
+            tests/test_family_whatsapp_isolation.py
+            tests/test_family_whatsapp_gate_cap.py
+            tests/test_family_leak_gates.py
+            tests/test_family_direct_route_isolation.py
+            tests/test_maxine_whatsapp_isolation.py
+            tests/test_family_prompt_isolation.py
+            tests/test_whatsapp_cloud.py
+          )
+          existing=()
+          for f in "${files[@]}"; do
+            if [ -f "$f" ]; then
+              existing+=("$f")
+            fi
+          done
+          pytest -q "${existing[@]}"
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Family chats login redirect
+        run: node --experimental-strip-types --test empire-command-center/app/lib/familyAuth.test.ts

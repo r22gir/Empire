@@ -232,14 +232,20 @@ def test_amp_cannot_see_workroom_quotes_jobs_chats(monkeypatch, tmp_path):
 
 
 def test_whatsapp_chats_api_is_readonly(monkeypatch, tmp_path):
+    from app.middleware.edition_gate import amp_access_middleware
     from app.routers.whatsapp import router
+    from app.services.amp_access import SESSION_COOKIE, create_session_token
     from app.services.whatsapp_store import record_message
 
     _family_env(monkeypatch, tmp_path, "amp")
+    monkeypatch.setenv("AMP_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("AMP_OWNER_EMAIL", "owner@example.com")
     record_message("573001112233", direction="in", kind="text", body="hola desde la casa")
     app = FastAPI()
+    app.middleware("http")(amp_access_middleware)
     app.include_router(router, prefix="/api/v1")
     client = TestClient(app)
+    client.cookies.set(SESSION_COOKIE, create_session_token("owner@example.com"))
     listed = client.get("/api/v1/whatsapp/chats")
     assert listed.status_code == 200
     body = listed.json()

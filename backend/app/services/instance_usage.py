@@ -37,11 +37,12 @@ is enforced with no baseline env. Baseline, first match wins:
    ``EMPIRE_USAGE_PEER_DATA_DIRS``). All providers in those files
    count. The baseline is ``max(recorded_total, default_floor)``.
    The floor (``EMPIRE_USAGE_DEFAULT_BASELINE_TOKENS``, default
-   10_000_000) covers a cold month so 20% is a real allowance.
-   Workroom often writes no ``usage.db``: ``data_root_or_none()`` is
-   ``None`` when ``EMPIRE_DATA_DIR`` is unset, so Workroom is absent
-   from the pie and the floor applies until other edition files have
-   more than 10M tokens this month.
+   5_000_000) covers a cold month so 20% is a real allowance
+   (1_000_000 tokens per family instance). Workroom often writes no
+   ``usage.db``: ``data_root_or_none()`` is ``None`` when
+   ``EMPIRE_DATA_DIR`` is unset, so Workroom is absent from the pie
+   and the floor applies until other edition files have more than
+   5M tokens this month.
 
 USD for display and for case 1 is:
 
@@ -69,8 +70,9 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy"})
-DEFAULT_BASELINE_MONTHLY_TOKENS = 10_000_000.0
+HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy", "whatsapp"})
+DEFAULT_BASELINE_MONTHLY_TOKENS = 5_000_000.0
+DEFAULT_FAMILY_BASELINE_MONTHLY_TOKENS = DEFAULT_BASELINE_MONTHLY_TOKENS
 
 
 def _now() -> datetime:
@@ -473,3 +475,30 @@ def enforce_usage_cap(
     if not is_heavy_request(kind=kind, text=text, desk=desk, tools=tools, source=source, image=image):
         return None
     return summary["message"]
+
+
+def whatsapp_cap_reply_es() -> str:
+    """Friendly Spanish refusal for an inbound WhatsApp model call at the cap."""
+    pct = cap_percent()
+    return (
+        f"Llegamos al tope de uso de esta instancia "
+        f"({pct:g}% del uso de EmpireBox este mes). "
+        "No generé una respuesta nueva. "
+        "Cuando haya cupo, escríbeme de nuevo."
+    )
+
+
+def enforce_whatsapp_model_cap() -> Optional[str]:
+    """Refuse a WhatsApp model call at or over the instance cap. Family only.
+
+    Unlike chat, inbound WhatsApp that would call a model is always heavy:
+    the check runs before ingest or transcription. Under the cap returns None.
+    """
+    from app.edition import is_family_edition
+
+    if not is_family_edition():
+        return None
+    summary = usage_summary()
+    if summary["level"] != "blocked":
+        return None
+    return whatsapp_cap_reply_es()

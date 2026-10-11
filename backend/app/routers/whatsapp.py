@@ -2,15 +2,29 @@
 
 Draft-only. This router never sends to clients. Secrets stay in the
 instance env file — they are never accepted on these routes.
+
+Chat-log routes require a family login (middleware 401 plus this
+dependency). The Meta webhook stays exempt.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from app.edition import is_family_edition, sin_acceso_body
 from app.services.whatsapp_cloud import channel_status, handle_webhook, verify_handshake
 
 router = APIRouter(tags=["whatsapp"])
+
+
+def require_family_chats_login(request: Request) -> None:
+    """401 when a family edition has no allowlisted session on the chats API."""
+    if not is_family_edition():
+        return
+    email = getattr(request.state, "amp_email", None)
+    if email:
+        return
+    raise HTTPException(status_code=401, detail=sin_acceso_body()["detail"])
 
 
 @router.get("/whatsapp/status")
@@ -61,7 +75,7 @@ async def whatsapp_inbound(request: Request):
 
 
 @router.get("/whatsapp/chats")
-def whatsapp_list_chats():
+def whatsapp_list_chats(_auth: None = Depends(require_family_chats_login)):
     """Read-only conversation list for this edition."""
     from app.services.whatsapp_store import list_conversations
 
@@ -69,14 +83,19 @@ def whatsapp_list_chats():
 
 
 @router.get("/whatsapp/chats/search")
-def whatsapp_search_chats(q: str = ""):
+def whatsapp_search_chats(q: str = "", _auth: None = Depends(require_family_chats_login)):
     from app.services.whatsapp_store import search_messages
 
     return {"matches": search_messages(q), "readonly": True}
 
 
 @router.get("/whatsapp/chats/{wa_id}/messages")
-def whatsapp_conversation_messages(wa_id: str, limit: int = 100, before: int | None = None):
+def whatsapp_conversation_messages(
+    wa_id: str,
+    limit: int = 100,
+    before: int | None = None,
+    _auth: None = Depends(require_family_chats_login),
+):
     from app.services.whatsapp_store import list_messages
 
     return {
