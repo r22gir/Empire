@@ -643,7 +643,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--chat-bg)' }}>
+    <div data-cc-chat style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', background: 'var(--chat-bg)' }}>
 
       {/* MAX Header — compact bold line */}
       <div style={{
@@ -925,8 +925,11 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       <ContinuityPanel mode="compact" onOpenContinuity={() => onProductNavigate?.('max-continuity', 'dashboard')} />
 
       {/* Messages */}
-      <div style={{
+      <div
+        data-testid="chat-message-list"
+        style={{
         flex: 1,
+        minHeight: 0,
         overflowY: 'auto',
         padding: '8px 10px',
       }}

@@ -38,9 +38,76 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
   color: var(--text);
+  /* 100vh on iOS Safari is the large viewport (taller than visible). The
+     Command Center then clips the composer and cannot scroll to it because
+     overflow is hidden. 100dvh is the visible viewport; 100vh is the fallback. */
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
+
+/* Max home (/) is a long document. On this tree it is a SIBLING of
+   .cy-shell.v3 (page.tsx: MaxHome vs CommandCenterApp), with data-max-home
+   on .mh-root. Unlock body — and unlock the shell IF a checkout nests
+   Max home inside .cy-shell.v3 (otherwise the 100dvh/overflow:hidden
+   lock below would still clip it). */
+body:has([data-max-home]) {
+  overflow: auto;
+  height: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.cy-shell.v3:has([data-max-home]) {
+  height: auto;
+  max-height: none;
+  overflow: auto;
+}
+
+/* Command Center app-shell scroll contract.
+   Body stays overflow:hidden so TopBar, left rail, Daily Summary, and the
+   chat composer stay sticky. The center column and chat list are the
+   scrollports. min-height:0 lets flex children shrink so overflow-y:auto
+   actually scrolls (flex default min-height:auto is content-sized). */
+.cy-shell.v3 {
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+.cy-shell.v3 > .v3-body {
+  min-height: 0;
+}
+.cy-shell.v3 [data-cc-scroll="main"] {
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+/* Document screens (Dashboard, Family Help, MiniMax usage, WhatsApp, …)
+   use the pane as the scrollport. Beats inline height:100% so a root that
+   is only h-full / overflow-hidden cannot clip. Chat and presentation
+   keep their own inner layout. Fixed/centered modals are unchanged. */
+.cy-shell.v3 [data-cc-scroll="main"] > *:not([data-cc-chat]):not(.presentation-root) {
+  height: auto !important;
+  max-height: none;
+}
+.cy-shell.v3 [data-cc-chat] {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.cy-shell.v3 [data-testid="chat-message-list"] {
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* MANUAL CHECK (studio.empirebox.store, Dark/Gold, desktop):
+   1. / — Max home scrolls (Research / Growth / Today).
+   2. /?product=owner — chat list scrolls; composer stays sticky; new replies auto-scroll to bottom.
+   3. /?product=owner&screen=dashboard — center pane scrolls.
+   4. /?screen=family-help — Family Help scrolls in the data-cc-scroll pane.
+   5. /?screen=minimax-usage — MiniMax usage scrolls in the pane.
+   6. /?screen=whatsapp — WhatsApp chats scroll in the pane.
+   7. Open Quick Switch / a job folder: modal still centers.
+   8. iPhone Safari: composer sits above the browser chrome (100dvh). */
 
 /* ═══ UNIFIED CARD SYSTEM ═══ */
 .empire-card {
