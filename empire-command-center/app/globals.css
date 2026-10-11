@@ -74,9 +74,6 @@ body:has([data-max-home]) {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
-.cy-shell.v3 [data-cc-scroll="main"] > * {
-  min-height: 0;
-}
 .cy-shell.v3 [data-cc-chat] {
   min-height: 0;
   flex: 1 1 auto;
