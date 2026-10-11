@@ -34,6 +34,14 @@ curl -s http://127.0.0.1:8011/health
 curl -s http://127.0.0.1:8011/api/v1/edition
 ```
 
+After deploy, run the Spanish post-deploy check (memory recall, isolation, usage percentages only). It never talks to Workroom:
+
+```bash
+deploy/family_post_deploy_check.sh amp
+```
+
+See `deploy/FAMILY_POST_DEPLOY_CHECK.md` for the exact curls and expected Spanish replies.
+
 `/api/v1/edition` is public so the UI can show the edition and the Spanish "sin acceso" state. Everything else requires the allowlist.
 
 Frontend for this instance (separate from the Workroom command center process). **`NEXT_PUBLIC_*` is baked at `next build`.** A rebuild is required after changing these. Middleware will not send anonymous `/` to `/login` if `NEXT_PUBLIC_EMPIRE_EDITION=amp` was missing from the build (the host `amp.empirebox.store` is a fallback in this commit).
