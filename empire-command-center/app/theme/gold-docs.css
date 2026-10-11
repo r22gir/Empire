@@ -1,0 +1,119 @@
+/* ==========================================================================
+   Gold theme = gold-standard docs palette. Colors only, no layout changes. Optional; Dark is the default.
+   Active only when <html data-theme="gold">, set by the Dark/Gold toggle in the top bar
+   (components/ThemeToggle.tsx), ?theme=gold or /preview/gold, and remembered per device in
+   localStorage("empire.theme"). ?theme=default (or the toggle) switches back.
+   gold-docs.generated.css (scripts/gen_gold_theme.py) recolors the cyber/docs/ring sheets;
+   this file adds the hand-tuned pieces: dark header band like the PDF sheet header,
+   gold primary buttons, the paper toolbar, and inline-style accents.
+   Palette (from backend/app/services/drawing/max_sheet_chrome.py + mclean_estimate_pdf.py):
+     paper #f7f3ea · panel #efe9dc · card #fbf8f1 · band #16191c · ink #20241f
+     gold #b8912f · hairline #cdc4b0 · mute #7b7466 · cream text #f4efe2 · band mute #a49b88
+   ========================================================================== */
+html[data-theme="gold"] { color-scheme: light; --gd-paper: #f7f3ea; --gd-panel: #efe9dc; --gd-card: #fbf8f1; --gd-band: #16191c;
+  --gd-ink: #20241f; --gd-ink2: #3d3a33; --gd-mute: #6b6457; --gd-gold: #b8912f; --gd-gold-t: #7d5f17; --gd-hair: #cdc4b0;
+  --gd-cream: #f4efe2; --gd-band-mute: #a49b88; }
+html[data-theme="gold"] body { background: var(--gd-paper); color: var(--gd-ink); }
+
+/* header band = the dark sheet header of the estimate PDF, with its gold rule */
+html[data-theme="gold"] .cy-shell header.shrink-0 { background: var(--gd-band) !important; border-bottom: 2px solid var(--gd-gold) !important; box-shadow: none !important; }
+html[data-theme="gold"] .cy-shell header.shrink-0 :is(a, span, button, div, svg) { color: var(--gd-cream) !important; }
+html[data-theme="gold"] .cy-shell header.shrink-0 .cy-logo span span { color: var(--gd-gold) !important; }
+html[data-theme="gold"] .cy-shell header.shrink-0 :is(button, .empire-card) { background: transparent !important; border-color: rgba(164, 155, 136, 0.45) !important; box-shadow: none !important; }
+html[data-theme="gold"] .cy-shell header.shrink-0 [class*="bg-[var(--gold)]"] { background: var(--gd-gold) !important; color: var(--gd-band) !important; }
+html[data-theme="gold"] .cy-shell header.shrink-0 [class*="bg-[var(--gold)]"] * { color: var(--gd-band) !important; }
+html[data-theme="gold"] .cy-shell header.shrink-0 .bg-\[\#dc2626\], html[data-theme="gold"] .cy-shell header.shrink-0 [class*="bg-[#dc2626]"] { background: #b23b3b !important; }
+html[data-theme="gold"] .cy-shell header.shrink-0 .cy-logo-ring { border-color: rgba(164, 155, 136, 0.45) !important; color: var(--gd-band-mute) !important; }
+
+/* primary actions: gold fill with band-dark text (5.9:1) */
+html[data-theme="gold"] :is(.cy-btn.is-primary, .dh-act.is-primary, .dh-tab.is-active .dh-act-count) { background: var(--gd-gold) !important; color: var(--gd-band) !important; border-color: var(--gd-gold) !important; box-shadow: none !important; }
+html[data-theme="gold"] :is(.cy-btn.is-primary, .dh-act.is-primary) svg { color: var(--gd-band) !important; }
+html[data-theme="gold"] .dh-tab.is-active { border-bottom-color: var(--gd-gold) !important; color: var(--gd-ink) !important; }
+
+/* paper toolbar (Document tab) */
+html[data-theme="gold"] .qp-toolbar { background: rgba(239, 233, 220, 0.96) !important; border-color: var(--gd-hair) !important; }
+html[data-theme="gold"] .qp-toolbar .qp-state { color: var(--gd-mute) !important; }
+html[data-theme="gold"] .qp-toolbar .qp-state b { color: var(--gd-ink) !important; }
+html[data-theme="gold"] .qp-toolbar .qp-dot { background: #3f8a5a; } html[data-theme="gold"] .qp-toolbar .qp-dot.is-dirty { background: #c8691c; } html[data-theme="gold"] .qp-toolbar .qp-dot.is-locked { background: #7b7466; }
+html[data-theme="gold"] .qp { box-shadow: 0 1px 0 var(--gd-hair), 0 6px 22px rgba(32, 36, 31, 0.10) !important; }
+
+/* inline-style accents written in components. SSR keeps the source form ("color:#00e5ff"),
+   client renders serialize as rgb(); both forms are matched. */
+html[data-theme="gold"] [style^="color:#00e5ff"], html[data-theme="gold"] [style*=";color:#00e5ff"], html[data-theme="gold"] [style*="; color:#00e5ff"], html[data-theme="gold"] [style^="color: rgb(0, 229, 255)"], html[data-theme="gold"] [style*=";color: rgb(0, 229, 255)"], html[data-theme="gold"] [style*="; color: rgb(0, 229, 255)"] { color: var(--gd-gold-t) !important; }
+html[data-theme="gold"] [style^="color:#14f1c6"], html[data-theme="gold"] [style*=";color:#14f1c6"], html[data-theme="gold"] [style*="; color:#14f1c6"], html[data-theme="gold"] [style^="color: rgb(20, 241, 198)"], html[data-theme="gold"] [style*=";color: rgb(20, 241, 198)"], html[data-theme="gold"] [style*="; color: rgb(20, 241, 198)"] { color: #2f6b45 !important; }
+html[data-theme="gold"] [style^="color:#ffc857"], html[data-theme="gold"] [style*=";color:#ffc857"], html[data-theme="gold"] [style*="; color:#ffc857"], html[data-theme="gold"] [style^="color: rgb(255, 200, 87)"], html[data-theme="gold"] [style*=";color: rgb(255, 200, 87)"], html[data-theme="gold"] [style*="; color: rgb(255, 200, 87)"] { color: #8f4a12 !important; }
+html[data-theme="gold"] [style^="color:#ff2bd6"], html[data-theme="gold"] [style*=";color:#ff2bd6"], html[data-theme="gold"] [style*="; color:#ff2bd6"], html[data-theme="gold"] [style^="color: rgb(255, 43, 214)"], html[data-theme="gold"] [style*=";color: rgb(255, 43, 214)"], html[data-theme="gold"] [style*="; color: rgb(255, 43, 214)"] { color: #9e2f2f !important; }
+html[data-theme="gold"] [style^="color:#ff6be3"], html[data-theme="gold"] [style*=";color:#ff6be3"], html[data-theme="gold"] [style*="; color:#ff6be3"], html[data-theme="gold"] [style^="color: rgb(255, 107, 227)"], html[data-theme="gold"] [style*=";color: rgb(255, 107, 227)"], html[data-theme="gold"] [style*="; color: rgb(255, 107, 227)"] { color: #9e2f2f !important; }
+html[data-theme="gold"] [style^="color:#ff8ae9"], html[data-theme="gold"] [style*=";color:#ff8ae9"], html[data-theme="gold"] [style*="; color:#ff8ae9"], html[data-theme="gold"] [style^="color: rgb(255, 138, 233)"], html[data-theme="gold"] [style*=";color: rgb(255, 138, 233)"], html[data-theme="gold"] [style*="; color: rgb(255, 138, 233)"] { color: #9e2f2f !important; }
+html[data-theme="gold"] [style^="color:#a46bff"], html[data-theme="gold"] [style*=";color:#a46bff"], html[data-theme="gold"] [style*="; color:#a46bff"], html[data-theme="gold"] [style^="color: rgb(164, 107, 255)"], html[data-theme="gold"] [style*=";color: rgb(164, 107, 255)"], html[data-theme="gold"] [style*="; color: rgb(164, 107, 255)"] { color: #5e4590 !important; }
+html[data-theme="gold"] [style^="color:#eaffff"], html[data-theme="gold"] [style*=";color:#eaffff"], html[data-theme="gold"] [style*="; color:#eaffff"], html[data-theme="gold"] [style^="color: rgb(234, 255, 255)"], html[data-theme="gold"] [style*=";color: rgb(234, 255, 255)"], html[data-theme="gold"] [style*="; color: rgb(234, 255, 255)"] { color: var(--gd-ink) !important; }
+html[data-theme="gold"] [style^="color:#f2fbff"], html[data-theme="gold"] [style*=";color:#f2fbff"], html[data-theme="gold"] [style*="; color:#f2fbff"], html[data-theme="gold"] [style^="color: rgb(242, 251, 255)"], html[data-theme="gold"] [style*=";color: rgb(242, 251, 255)"], html[data-theme="gold"] [style*="; color: rgb(242, 251, 255)"] { color: var(--gd-ink) !important; }
+html[data-theme="gold"] [style^="color:#f0ffff"], html[data-theme="gold"] [style*=";color:#f0ffff"], html[data-theme="gold"] [style*="; color:#f0ffff"], html[data-theme="gold"] [style^="color: rgb(240, 255, 255)"], html[data-theme="gold"] [style*=";color: rgb(240, 255, 255)"], html[data-theme="gold"] [style*="; color: rgb(240, 255, 255)"] { color: var(--gd-ink) !important; }
+html[data-theme="gold"] [style^="color:#a9c7d3"], html[data-theme="gold"] [style*=";color:#a9c7d3"], html[data-theme="gold"] [style*="; color:#a9c7d3"], html[data-theme="gold"] [style^="color: rgb(169, 199, 211)"], html[data-theme="gold"] [style*=";color: rgb(169, 199, 211)"], html[data-theme="gold"] [style*="; color: rgb(169, 199, 211)"] { color: var(--gd-ink2) !important; }
+html[data-theme="gold"] [style^="color:#8fb3c2"], html[data-theme="gold"] [style*=";color:#8fb3c2"], html[data-theme="gold"] [style*="; color:#8fb3c2"], html[data-theme="gold"] [style^="color: rgb(143, 179, 194)"], html[data-theme="gold"] [style*=";color: rgb(143, 179, 194)"], html[data-theme="gold"] [style*="; color: rgb(143, 179, 194)"] { color: var(--gd-ink2) !important; }
+html[data-theme="gold"] [style^="color:#7d8f97"], html[data-theme="gold"] [style*=";color:#7d8f97"], html[data-theme="gold"] [style*="; color:#7d8f97"], html[data-theme="gold"] [style^="color: rgb(125, 143, 151)"], html[data-theme="gold"] [style*=";color: rgb(125, 143, 151)"], html[data-theme="gold"] [style*="; color: rgb(125, 143, 151)"] { color: var(--gd-mute) !important; }
+html[data-theme="gold"] [style*="background:#00e5ff"], html[data-theme="gold"] [style*="background-color:#00e5ff"], html[data-theme="gold"] [style*="background: rgb(0, 229, 255)"], html[data-theme="gold"] [style*="background-color: rgb(0, 229, 255)"] { background: var(--gd-gold) !important; }
+html[data-theme="gold"] [style*="background:#14f1c6"], html[data-theme="gold"] [style*="background-color:#14f1c6"], html[data-theme="gold"] [style*="background: rgb(20, 241, 198)"], html[data-theme="gold"] [style*="background-color: rgb(20, 241, 198)"] { background: #3f8a5a !important; }
+html[data-theme="gold"] [style*="background:#ffc857"], html[data-theme="gold"] [style*="background-color:#ffc857"], html[data-theme="gold"] [style*="background: rgb(255, 200, 87)"], html[data-theme="gold"] [style*="background-color: rgb(255, 200, 87)"] { background: #c8691c !important; }
+html[data-theme="gold"] [style*="background:#ff2bd6"], html[data-theme="gold"] [style*="background-color:#ff2bd6"], html[data-theme="gold"] [style*="background: rgb(255, 43, 214)"], html[data-theme="gold"] [style*="background-color: rgb(255, 43, 214)"] { background: #b23b3b !important; }
+html[data-theme="gold"] [style*="background:#a46bff"], html[data-theme="gold"] [style*="background-color:#a46bff"], html[data-theme="gold"] [style*="background: rgb(164, 107, 255)"], html[data-theme="gold"] [style*="background-color: rgb(164, 107, 255)"] { background: #7a5bb0 !important; }
+html[data-theme="gold"] [style*="background:#0b1d28"], html[data-theme="gold"] [style*="background-color:#0b1d28"], html[data-theme="gold"] [style*="background: rgb(11, 29, 40)"], html[data-theme="gold"] [style*="background-color: rgb(11, 29, 40)"] { background: var(--gd-card) !important; }
+html[data-theme="gold"] [style*="background:#071721"], html[data-theme="gold"] [style*="background-color:#071721"], html[data-theme="gold"] [style*="background: rgb(7, 23, 33)"], html[data-theme="gold"] [style*="background-color: rgb(7, 23, 33)"] { background: var(--gd-card) !important; }
+html[data-theme="gold"] [style*="background:#06121a"], html[data-theme="gold"] [style*="background-color:#06121a"], html[data-theme="gold"] [style*="background: rgb(6, 18, 26)"], html[data-theme="gold"] [style*="background-color: rgb(6, 18, 26)"] { background: var(--gd-card) !important; }
+html[data-theme="gold"] [style*="background:#00131a"], html[data-theme="gold"] [style*="background-color:#00131a"], html[data-theme="gold"] [style*="background: rgb(0, 19, 26)"], html[data-theme="gold"] [style*="background-color: rgb(0, 19, 26)"] { background: var(--gd-card) !important; }
+html[data-theme="gold"] [style*="solid #00e5ff"], html[data-theme="gold"] [style*="border-color:#00e5ff"], html[data-theme="gold"] [style*="solid rgb(0, 229, 255)"], html[data-theme="gold"] [style*="border-color: rgb(0, 229, 255)"] { border-color: var(--gd-gold) !important; }
+html[data-theme="gold"] [style*="solid #14f1c6"], html[data-theme="gold"] [style*="border-color:#14f1c6"], html[data-theme="gold"] [style*="solid rgb(20, 241, 198)"], html[data-theme="gold"] [style*="border-color: rgb(20, 241, 198)"] { border-color: #3f8a5a !important; }
+html[data-theme="gold"] [style*="solid #ffc857"], html[data-theme="gold"] [style*="border-color:#ffc857"], html[data-theme="gold"] [style*="solid rgb(255, 200, 87)"], html[data-theme="gold"] [style*="border-color: rgb(255, 200, 87)"] { border-color: #c8691c !important; }
+html[data-theme="gold"] [style*="solid #ff2bd6"], html[data-theme="gold"] [style*="border-color:#ff2bd6"], html[data-theme="gold"] [style*="solid rgb(255, 43, 214)"], html[data-theme="gold"] [style*="border-color: rgb(255, 43, 214)"] { border-color: #b23b3b !important; }
+html[data-theme="gold"] [style*="color: var(--cy-text-2"], html[data-theme="gold"] [style*="color:var(--cy-text-2"] { color: var(--gd-ink2) !important; }
+html[data-theme="gold"] [stroke="#00e5ff"] { stroke: var(--gd-gold) !important; } html[data-theme="gold"] [fill="#00e5ff"] { fill: var(--gd-gold) !important; }
+html[data-theme="gold"] [stroke="#ffc857"] { stroke: #c8691c !important; } html[data-theme="gold"] [fill="#ffc857"] { fill: #c8691c !important; }
+html[data-theme="gold"] [stroke="#ff2bd6"] { stroke: #b23b3b !important; } html[data-theme="gold"] [fill="#ff2bd6"] { fill: #b23b3b !important; }
+html[data-theme="gold"] [stroke="#4a5a63"] { stroke: #a49b88 !important; } html[data-theme="gold"] [fill="#4a5a63"] { fill: #a49b88 !important; }
+html[data-theme="gold"] [stroke="#14f1c6"] { stroke: #3f8a5a !important; } html[data-theme="gold"] [fill="#14f1c6"] { fill: #3f8a5a !important; }
+html[data-theme="gold"] [stroke="#a46bff"] { stroke: #7a5bb0 !important; } html[data-theme="gold"] [fill="#a46bff"] { fill: #7a5bb0 !important; }
+html[data-theme="gold"] [stroke="rgba(0,229,255,0.2)"] { stroke: rgba(184,145,47,0.45) !important; }
+html[data-theme="gold"] [stroke="rgba(0,229,255,0.35)"] { stroke: rgba(184,145,47,0.60) !important; }
+html[data-theme="gold"] [stroke="rgba(0,229,255,0.45)"] { stroke: rgba(184,145,47,0.70) !important; }
+html[data-theme="gold"] [stroke="rgba(0,229,255,0.5)"] { stroke: rgba(184,145,47,0.75) !important; }
+html[data-theme="gold"] [fill="rgba(0,229,255,0.10)"] { fill: rgba(184,145,47,0.10) !important; } html[data-theme="gold"] [fill="rgba(255,43,214,0.16)"] { fill: rgba(178,59,59,0.12) !important; }
+html[data-theme="gold"] [fill="rgba(255,200,87,0.10)"] { fill: rgba(200,105,28,0.10) !important; } html[data-theme="gold"] [fill="rgba(74,90,99,0.12)"] { fill: rgba(123,116,102,0.10) !important; }
+html[data-theme="gold"] [fill="rgba(0,20,30,0.55)"] { fill: var(--gd-card) !important; }
+
+/* home ring: values in ink/status tones, centre orb as the dark sheet band with gold rule */
+html[data-theme="gold"] .rg-label strong { text-shadow: none !important; }
+html[data-theme="gold"] .rg-wave i { box-shadow: none !important; }
+html[data-theme="gold"] .rg-orb { background: radial-gradient(circle at 40% 35%, #2a2e31, var(--gd-band) 70%) !important; box-shadow: 0 0 0 2px var(--gd-gold), 0 4px 18px rgba(32, 36, 31, 0.18) !important; }
+html[data-theme="gold"] .rg-orb::before { background: repeating-linear-gradient(0deg, rgba(184, 145, 47, 0.16) 0 1px, transparent 1px 7px), repeating-linear-gradient(90deg, rgba(184, 145, 47, 0.10) 0 1px, transparent 1px 9px) !important; }
+html[data-theme="gold"] .rg-orb span { color: var(--gd-cream) !important; text-shadow: none !important; }
+
+/* module icons: one gold tone like the PDF accents (brand colours stay in the default theme) */
+html[data-theme="gold"] :is(.cy-nav, .rg-tabs, .rg-tab) svg[stroke]:not([stroke="none"]) { stroke: var(--gd-gold-t) !important; }
+html[data-theme="gold"] :is(.cy-nav, .rg-tabs, .rg-tab) [style*="color"] > svg { color: var(--gd-gold-t) !important; }
+
+html[data-theme="gold"] :is(.cy-nav, .rg-tabs, .rg-ring, body) :is(.cy-tab, .rg-tab):is(.is-active, [aria-current="page"]) svg[stroke] { stroke: var(--gd-ink) !important; color: var(--gd-ink) !important; }
+
+/* top band: model/status chips keep a readable gold on the dark band (5.9:1) */
+html[data-theme="gold"] .cy-shell header.shrink-0 [style*="color"] { color: var(--gd-gold) !important; }
+
+/* KPI rows that take their accent from an inline --g custom property (Workroom summary) */
+html[data-theme="gold"] [style*="--g:#00e5ff"], html[data-theme="gold"] [style*="--g: #00e5ff"] { --g: #7d5f17 !important; }
+html[data-theme="gold"] [style*="--g:#ffc857"], html[data-theme="gold"] [style*="--g: #ffc857"] { --g: #8f4a12 !important; }
+html[data-theme="gold"] [style*="--g:#14f1c6"], html[data-theme="gold"] [style*="--g: #14f1c6"] { --g: #2f6b45 !important; }
+html[data-theme="gold"] [style*="--g:#5cc8ff"], html[data-theme="gold"] [style*="--g: #5cc8ff"] { --g: #2c5a85 !important; }
+html[data-theme="gold"] [style*="--g:#ff2bd6"], html[data-theme="gold"] [style*="--g: #ff2bd6"] { --g: #9e2f2f !important; }
+html[data-theme="gold"] [style*="--g:#a46bff"], html[data-theme="gold"] [style*="--g: #a46bff"] { --g: #5e4590 !important; }
+html[data-theme="gold"] .cy-subnav-brand small { color: var(--gd-mute) !important; }
+html[data-theme="gold"] .cy-btn.is-active .cy-count { background: var(--gd-gold) !important; color: var(--gd-band) !important; }
+
+/* mobile menu button: dark band chip with gold rule instead of the cyan glow */
+html[data-theme="gold"] button.fixed[aria-label="Open menu"] { background: var(--gd-band) !important; color: var(--gd-gold) !important; border-color: var(--gd-gold) !important; box-shadow: 0 2px 10px rgba(32, 36, 31, 0.25) !important; }
+
+/* solid inline/utility fills are turned into light tints by the theme sheets; white label text
+   on those tints would vanish on paper, so it becomes ink (outside the dark top band) */
+html[data-theme="gold"] .cy-shell [style*="background"]:is([style*="color: rgb(255, 255, 255)"], [style*="color:#fff;" i], [style$="color:#fff" i], [style*="color:#ffffff" i], [style*="color: white"], [style*="color:white"]):not(header *),
+html[data-theme="gold"] .cy-shell .text-white:is([class*="bg-["], [class*="bg-green"], [class*="bg-red"], [class*="bg-blue"], [class*="bg-emerald"], [class*="bg-amber"]):not(header *, header) { color: var(--gd-ink) !important; }
+html[data-theme="gold"] .cy-shell [style*="background"]:is([style*="color: rgb(255, 255, 255)"], [style*="color:#fff" i], [style*="color: white"]):not(header *) svg { color: var(--gd-ink) !important; }
+
+/* glow pulses read as smudges on paper */
+html[data-theme="gold"] :is(.is-pulse, .cy-pulse) { animation: none !important; }

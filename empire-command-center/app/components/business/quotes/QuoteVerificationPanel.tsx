@@ -86,8 +86,10 @@ export default function QuoteVerificationPanel({ quoteId, onVerified, compact = 
   useEffect(() => {
     const loadExisting = async () => {
       try {
-        const res = await fetch(`${API}/quotes/verify/${quoteId}`);
-        if (res.ok) setResult(await res.json());
+        // Same-origin read of the saved result: answers 200 even when the quote was
+        // never verified, so opening a quote doesn't log a 404 in the console.
+        const res = await fetch(`/api/v1/quote-verification?id=${encodeURIComponent(quoteId)}`);
+        if (res.ok) { const d = await res.json(); if (d.exists && d.result) setResult(d.result); }
       } catch { /* no existing verification */ }
     };
     loadExisting();

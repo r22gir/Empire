@@ -1,0 +1,10 @@
+[Unit]
+Description=Empire weekly prospect search, Mondays 6:00 AM ET
+
+[Timer]
+OnCalendar=Mon *-*-* 06:00:00 America/New_York
+Persistent=true
+Unit=empire-growth-weekly.service
+
+[Install]
+WantedBy=timers.target

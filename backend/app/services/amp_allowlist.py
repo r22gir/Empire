@@ -42,9 +42,11 @@ def _empty() -> dict:
 
 
 def load_allowlist() -> dict:
+    # Workroom never consults this file — do not mkdir ~/empire-repo/backend/data/amp.
+    if not is_family_edition():
+        return _empty()
     path = allowlist_path()
-    if is_family_edition():
-        assert_under_root(path)
+    assert_under_root(path)
     if not path.exists():
         data = _empty()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,9 +61,10 @@ def load_allowlist() -> dict:
 
 
 def save_allowlist(data: dict) -> None:
+    if not is_family_edition():
+        return
     path = allowlist_path()
-    if is_family_edition():
-        assert_under_root(path)
+    assert_under_root(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

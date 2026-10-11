@@ -1,0 +1,11 @@
+[Unit]
+Description=Empire growth job: brief (approved by Rafael 2026-10-04)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/rg/empire-repo-main/backend
+EnvironmentFile=/home/rg/.config/empirebox/empire-backend.env
+EnvironmentFile=-/home/rg/.config/empirebox/empire-backend-smtp.env
+EnvironmentFile=-/home/rg/.config/empirebox/empire-backend-secrets.env
+ExecStart=/home/rg/empire-repo-main/backend/venv/bin/python3 scripts/growth_jobs.py brief
+TimeoutStartSec=1800

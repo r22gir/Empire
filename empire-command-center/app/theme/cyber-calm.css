@@ -1,0 +1,141 @@
+/* ==========================================================================
+   Calm layer (2026-10-04, Rafael: "tone down the cyber a bit").
+   Loaded LAST. Keeps the dark theme, cyan accent and the HUD layouts, but:
+   - no glitch accents, no scanlines, grid floor dropped, page grid very faint
+   - glow/bloom reduced to a soft 1px edge highlight
+   - corner brackets only on main panels (HudPanel / quote cards)
+   - cleaner angular tabs (smaller cuts, no tick marks)
+   - monospace ONLY for numbers / IDs; clean sans for everything else
+   - count-up and fade-in stay; pulsing / blinking / sweeping is removed
+   ========================================================================== */
+:root, .cy-shell, .cy-stage {
+  --cy-num: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+  --cy-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* everything that used to be "mono" becomes sans; numbers opt back in via --cy-num */
+  --cy-mono: var(--cy-sans);
+  --cy-glow: 0 0 0 1px rgba(0, 229, 255, 0.28);
+  --cy-glow-mag: 0 0 0 1px rgba(255, 43, 214, 0.32);
+  --cy-cut: 6px;
+  --cy-cut-sm: 5px;
+}
+
+/* ---- numbers / IDs keep monospace ---- */
+.cy-mono, .cy-money, .cy-gauge-value, .cy-gauge-ring b, .cy-hex b, .cy-kv b, .cy-kpi, .cy-shell .kpi-value, .cy-count,
+.cy-hudtable .is-id, .cy-hudtable .is-num, .cy-hudtable .is-date, .cy-table .is-num, .cy-nav-count,
+.cy-qr input[type="number"], .cy-qr .empire-card table td:not(:first-child), .cy-num {
+  font-family: var(--cy-num) !important; font-variant-numeric: tabular-nums; }
+
+/* ---- kill sci-fi effects ---- */
+.cy-glitch, .cy-stage-scan, .cy-stage-floor, .cy-scan, .cy-floor, .cy-plate::after { display: none !important; }
+.cy-shell::before { background: none !important; }
+.cy-shell *, .cy-stage * { text-shadow: none !important; }
+.cy-btn.is-pulse, .cy-chip.is-live i, .cy-orb, .cy-gauge-arc.is-idle { animation: none !important; }
+.cy-gauge-arc { filter: none !important; }
+
+/* page backdrop: faint grid, no magenta bloom */
+.cy-stage { background:
+    radial-gradient(900px 480px at 70% -10%, rgba(0, 229, 255, 0.05), transparent 60%),
+    linear-gradient(rgba(0, 229, 255, 0.018) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(90deg, rgba(0, 229, 255, 0.018) 1px, transparent 1px) 0 0 / 48px 48px,
+    #03070b !important; }
+
+/* ---- brackets only on main panels ---- */
+.cy-hud::before, .cy-hud::after { display: none; }
+.cy-panel.cy-glass.cy-hud::before, .cy-panel.cy-glass.cy-hud::after { display: block; width: 10px; height: 10px; opacity: .55; border-color: var(--cy-cyan); }
+.cy-panel.cy-glass.cy-hud::before { border-width: 1.5px 0 0 1.5px; top: -1px; left: -1px; }
+.cy-panel.cy-glass.cy-hud::after { border-width: 0 1.5px 1.5px 0; bottom: -1px; right: -1px; }
+
+/* ---- surfaces: soft edge instead of bloom ---- */
+.cy-panel.cy-glass { background: linear-gradient(180deg, rgba(10, 28, 40, 0.72), rgba(5, 14, 21, 0.86)) !important;
+  border-color: rgba(120, 200, 220, 0.14) !important; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.28) !important; }
+.cy-panel.cy-glass > .cy-panel-head { border-bottom: 1px solid rgba(120, 200, 220, 0.1) !important; }
+.cy-panel-title { font: 600 13.5px/1.3 var(--cy-sans) !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--cy-text-strong) !important; }
+.cy-panel-title svg { color: var(--cy-cyan); }
+.cy-gauge { background: linear-gradient(180deg, rgba(10, 28, 40, 0.7), rgba(5, 14, 21, 0.85)) !important; border-color: rgba(120, 200, 220, 0.14) !important; }
+button.cy-gauge:hover, button.cy-gauge:focus-visible { box-shadow: 0 0 0 1px color-mix(in srgb, var(--g) 45%, transparent) !important; transform: none !important; }
+.cy-gauge-ticks { opacity: .18 !important; }
+.cy-gauge-track { stroke: rgba(120, 200, 220, 0.1) !important; }
+.cy-gauge-label { font: 600 11px/1.25 var(--cy-sans) !important; letter-spacing: .02em !important; text-transform: none !important; color: var(--cy-text-2) !important; }
+.cy-gauge-sub { font: 400 11.5px/1.4 var(--cy-sans) !important; color: var(--cy-muted) !important; }
+.cy-gauge-value { font-weight: 700 !important; color: #f2fbff !important; }
+.cy-gauge-ring .cy-gauge-ico svg { filter: none !important; }
+.cy-gauge-ring .cy-gauge-ico::before { border-style: solid !important; opacity: .5; }
+
+/* title plate: clean, sentence case */
+.cy-plate { background: rgba(120, 200, 220, 0.16) !important; }
+.cy-plate::before { background: linear-gradient(100deg, rgba(10, 30, 42, 0.97), rgba(5, 13, 20, 0.98) 70%) !important; }
+.cy-plate h1 { font: 650 clamp(18px, 2vw, 23px)/1.2 var(--cy-sans) !important; letter-spacing: -0.005em !important; text-transform: none !important; color: #f2fbff !important; }
+.cy-plate small { font: 400 12.5px/1.35 var(--cy-sans) !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--cy-text-2) !important; opacity: 1 !important; }
+.cy-plate-ico { box-shadow: none !important; border-color: rgba(0, 229, 255, 0.35) !important; }
+
+/* chips / pills */
+.cy-chip { font: 600 11px/1.2 var(--cy-sans) !important; letter-spacing: 0 !important; text-transform: none !important; }
+.cy-chip i { box-shadow: none !important; }
+.cy-spill { box-shadow: none !important; font-family: var(--cy-sans) !important; letter-spacing: .02em !important; }
+
+/* buttons: same shape, calm hover */
+.cy-btn { font: 600 12.5px/1 var(--cy-sans) !important; letter-spacing: 0.01em !important; text-transform: none !important; border-color: rgba(0, 229, 255, 0.4); }
+.cy-btn.is-sm { font-size: 11.5px !important; }
+.cy-btn:hover, .cy-btn:focus-visible { box-shadow: var(--cy-glow) !important; background: rgba(0, 229, 255, 0.14); }
+.cy-btn.is-primary:hover, .cy-btn.is-primary:focus-visible { background: #5fe9fb; }
+.cy-hudtable .cy-rowactions button:hover, .cy-hudtable .cy-rowactions a:hover { box-shadow: var(--cy-glow) !important; }
+.cy-backbtn, .cy-back { font: 600 12.5px/1 var(--cy-sans) !important; letter-spacing: 0 !important; text-transform: none !important; }
+
+/* angular tabs, cleaner */
+.cy-tab { font: 550 12.5px/1.15 var(--cy-sans) !important; letter-spacing: 0 !important; text-transform: none !important; background: rgba(120, 200, 220, 0.16); }
+.cy-tab::before { background: rgba(6, 16, 24, 0.96) !important; }
+.cy-tab::after { display: none !important; }
+.cy-tab:hover, .cy-tab:focus-visible { background: rgba(0, 229, 255, 0.4); }
+.cy-tab:hover::before, .cy-tab:focus-visible::before { background: rgba(10, 30, 42, 0.95) !important; }
+.cy-tab.is-active, .cy-tab[aria-current="page"] { background: rgba(0, 229, 255, 0.75); box-shadow: none !important; color: #fff; }
+.cy-tab.is-active::before, .cy-tab[aria-current="page"]::before { background: linear-gradient(90deg, rgba(0, 229, 255, 0.22), rgba(6, 30, 42, 0.96) 80%) !important; }
+.cy-tabgroup, .cy-shell .cy-nav-group { font: 600 10.5px/1 var(--cy-sans) !important; letter-spacing: .06em !important; }
+.cy-tabgroup::after { background: rgba(120, 200, 220, 0.12) !important; }
+.cy-shell .cy-nav-brand b { font: 700 16px/1 var(--cy-sans) !important; letter-spacing: .14em !important; }
+.cy-shell .cy-nav-brand small { font: 500 10px/1.4 var(--cy-sans) !important; letter-spacing: .04em !important; color: var(--cy-muted) !important; }
+.cy-shell .cy-logo { font-family: var(--cy-sans) !important; letter-spacing: .14em !important; }
+
+/* lists / rows / tables: soft highlight */
+.cy-row { border-left-color: rgba(120, 200, 220, 0.14) !important; background: rgba(120, 200, 220, 0.03) !important; }
+.cy-row:hover, .cy-row:focus-visible { background: rgba(0, 229, 255, 0.07) !important; border-color: rgba(0, 229, 255, 0.18) !important; border-left-color: var(--cy-cyan) !important; box-shadow: none !important; }
+.cy-row-sub { font: 400 11.5px/1.35 var(--cy-sans) !important; letter-spacing: 0 !important; }
+.cy-money { font-weight: 700 !important; }
+.cy-kv { font: 400 12.5px/1.3 var(--cy-sans) !important; border-bottom-color: rgba(120, 200, 220, 0.08) !important; border-bottom-style: solid !important; }
+.cy-hudtable th { font: 600 11px/1.2 var(--cy-sans) !important; letter-spacing: .02em !important; text-transform: none !important; color: var(--cy-text-2) !important; }
+.cy-hudtable td { border-bottom-color: rgba(120, 200, 220, 0.07) !important; }
+.cy-hudtable tbody tr:hover td { background: rgba(0, 229, 255, 0.06) !important; }
+.cy-hudtable tbody tr:hover td:first-child { box-shadow: inset 2px 0 0 var(--cy-cyan) !important; }
+.cy-hex { background: color-mix(in srgb, var(--g) 30%, transparent) !important; }
+button.cy-hex:hover, button.cy-hex:focus-visible { filter: none !important; background: color-mix(in srgb, var(--g) 65%, transparent) !important; }
+.cy-hex span { font: 600 10.5px/1.2 var(--cy-sans) !important; letter-spacing: 0 !important; text-transform: none !important; }
+.cy-sect { font-family: var(--cy-sans) !important; letter-spacing: .04em !important; }
+
+/* Max strip */
+.cy-maxstrip { border-color: rgba(164, 107, 255, 0.24) !important; background: linear-gradient(90deg, rgba(164, 107, 255, 0.07), rgba(5, 14, 21, 0.85) 45%) !important; }
+.cy-orb { box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.35) !important; font-family: var(--cy-sans) !important; }
+.cy-maxstrip-orb small { font: 600 10px/1 var(--cy-sans) !important; letter-spacing: .04em !important; text-transform: none !important; }
+.cy-sugg h4 { font: 600 12.5px/1.3 var(--cy-sans) !important; letter-spacing: 0 !important; text-transform: none !important; }
+.cy-sugg p { font-size: 12.5px !important; }
+.cy-sugg-src { font: 400 10.5px/1.2 var(--cy-sans) !important; }
+.cy-maxstrip-empty { font: 500 12.5px/1.4 var(--cy-sans) !important; letter-spacing: 0 !important; }
+
+/* quote review cards */
+.cy-qr .empire-card { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28) !important; border-color: rgba(120, 200, 220, 0.14) !important;
+  background: linear-gradient(180deg, rgba(10, 28, 40, 0.72), rgba(5, 14, 21, 0.86)) !important; }
+.cy-qr .empire-card table th { font: 600 11px/1.2 var(--cy-sans) !important; letter-spacing: .02em !important; text-transform: none !important; color: var(--cy-text-2) !important; }
+.cy-qr .empire-card table tbody tr:hover { background: rgba(0, 229, 255, 0.05) !important; box-shadow: inset 2px 0 0 var(--cy-cyan) !important; }
+.cy-qr-title { font: 600 14px/1.2 var(--cy-sans) !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--cy-text-strong) !important; }
+.cy-qr-title::before { box-shadow: none !important; width: 12px !important; }
+.cy-shell .empire-card:not(.cy-keep-light, .cy-keep-light *, svg *):hover { box-shadow: none !important; border-color: rgba(0, 229, 255, 0.3) !important; }
+.cy-shell .empire-card.active:not(.cy-keep-light, .cy-keep-light *, svg *) { box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.4) !important; }
+.cy-input:focus, .cy-qr input:focus, .cy-qr textarea:focus, .cy-qr select:focus { box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.55) !important; }
+
+/* 390px: the top bar's right cluster (model pill, language, bell, settings, avatar) was 1px
+   wider than the phone and pushed the logo off the left edge. Compact the model pill. */
+@media (max-width: 480px) {
+  .cy-shell > header, .cy-shell header.shrink-0 { gap: 6px; }
+  .cy-shell header > div.flex.items-center:last-child { gap: 5px; min-width: 0; flex-shrink: 1; }
+  .cy-shell header > div.flex.items-center:last-child > div.relative:first-child > button.empire-card { max-width: 84px; overflow: hidden; white-space: nowrap; }
+  .cy-shell header > div.flex.items-center:last-child > div.relative:first-child > button.empire-card > span:last-of-type { overflow: hidden; text-overflow: ellipsis; }
+  .cy-shell header .cy-logo { flex-shrink: 0; }
+}

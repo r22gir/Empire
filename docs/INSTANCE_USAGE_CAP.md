@@ -5,10 +5,12 @@ Family editions (`EMPIRE_EDITION=amp` and `EMPIRE_EDITION=maxine`) each track th
 ## Formula
 
 ```
-allowance = INSTANCE_USAGE_CAP_PCT / 100 × baseline
-ratio     = used this UTC month / allowance
-remaining = max(0, 100 − ratio × 100)
+allowance         = INSTANCE_USAGE_CAP_PCT / 100 × baseline
+used_percent      = instance used this UTC month / baseline × 100
+remaining_percent = max(0, cap_percent − used_percent)
 ```
+
+`used_percent` is this instance's **share of EmpireBox total**, not "percent of the 20% slice". The cap means Max-e / Maxine may use at most 20% of total. Example: 13.1% used + 20% cap + 6.9% remaining is healthy (`level=ok`). A reading of `used_percent=65.7` next to `cap_percent=20` was the old allowance-relative meter and is wrong.
 
 `INSTANCE_USAGE_CAP_PCT` defaults to 20.
 
@@ -36,16 +38,22 @@ Estimated USD, for display and for case 1:
 
 Simli avatar sessions write into the same table (`provider=simli`, `model=simli-avatar`, `kind=avatar`). Output tokens are the capped session seconds. There is no separate Simli price; the estimator above turns those seconds into the USD figure the cap already uses.
 
-`GET /api/v1/edition/usage` is owner-only and returns **percentages only** for this instance: `used_percent` (share of its 20% allowance), `remaining_percent`, `level`, `message`, plus the Spanish policy note. It does **not** include `baseline`, `baseline_basis`, `allowance`, or absolute token/cost totals — those would let anyone derive EmpireBox-wide usage (`allowance = 0.2 × total`). Enforcement still uses the internal totals.
+`GET /api/v1/edition/usage` is owner-only and returns **percentages only** for this instance: `used_percent` (share of EmpireBox total), `remaining_percent` (room left until the cap, also a share of total), `level`, `message`, plus the Spanish policy note. It does **not** include `baseline`, `baseline_basis`, `allowance`, or absolute token/cost totals — those would let anyone derive EmpireBox-wide usage (`allowance = 0.2 × total`). Enforcement still uses the internal totals.
 
-| used % of allowance | level | behavior |
+When `used_percent` is under the cap, `used_percent + remaining_percent = cap_percent`.
+
+| used % of EmpireBox total | level | behavior |
 | --- | --- | --- |
-| under 80% | `ok` | calls proceed |
-| 80% to under 100% | `warn` | calls proceed; the card shows remaining % in Spanish |
-| 100% or more of the 20% allowance | `blocked` | heavy work is refused in Spanish; a short chat reply still runs and is counted |
+| under 80% of the cap (under 16 when cap is 20) | `ok` | calls proceed |
+| 80% of the cap to under the cap (16 to under 20) | `warn` | calls proceed; the card shows remaining % of total in Spanish |
+| at or over the cap (`used_percent` ≥ `cap_percent`) | `blocked` | heavy work is refused in Spanish; a short chat reply still runs and is counted |
 | this instance used the whole baseline (`total_spend_hit`) | `blocked` | even short chats pause |
 
 A request is heavy when it is a desk job, a tool call, an image, a generation (`source=generate`), or the user text is longer than `INSTANCE_SHORT_REPLY_CHARS` (default 400). Anything shorter, with none of those, is a short reply.
+
+## Fail-open
+
+The cap is enforced when the checker runs. If the checker itself raises (missing usage DB, parse error, import failure), `_family_chat_prep` logs a **warning** (`usage cap check failed open; chat proceeds without a cap refusal`) and the chat continues. The outage does not fail closed. Short chats still count when the checker works; a broken checker must not silence Max-e.
 
 ## Model
 

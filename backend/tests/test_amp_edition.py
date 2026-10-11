@@ -210,6 +210,36 @@ def test_gate_rejects_anonymous_requests_when_amp(monkeypatch, tmp_path):
     assert open_health.status_code == 200
 
 
+def test_amp_open_access_ignored_in_production(monkeypatch, tmp_path):
+    _amp_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("AMP_OPEN_ACCESS", "1")
+    monkeypatch.setenv("EMPIRE_ENV", "production")
+    monkeypatch.setenv("AMP_PUBLIC_BASE_URL", "https://amp.empirebox.store")
+    from app.services import amp_access
+
+    assert amp_access.open_access_enabled() is False
+    email, via = amp_access.resolve_request_email({"headers": []})
+    assert email is None
+    assert via == ""
+    client = _client(monkeypatch, tmp_path)
+    denied = client.get("/api/v1/whoami")
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "sin_acceso"
+
+
+def test_amp_open_access_local_dev_only(monkeypatch, tmp_path):
+    _amp_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("AMP_OPEN_ACCESS", "1")
+    monkeypatch.setenv("EMPIRE_ENV", "development")
+    monkeypatch.setenv("AMP_PUBLIC_BASE_URL", "http://127.0.0.1:8011")
+    from app.services import amp_access
+
+    assert amp_access.open_access_enabled() is True
+    email, via = amp_access.resolve_request_email({"headers": []})
+    assert via == "open_access"
+    assert email
+
+
 def test_family_prompt_asks_for_short_spanish_and_search_first(monkeypatch, tmp_path):
     _amp_env(monkeypatch, tmp_path)
     from app.edition import edition_prompt_suffix

@@ -880,7 +880,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
           minHeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
         }}>
           {svgPreview ? (
-            <div dangerouslySetInnerHTML={{ __html: svgPreview }} style={{ width: '100%', padding: 16 }} />
+            <div className="cy-keep-light cy-paper" dangerouslySetInnerHTML={{ __html: svgPreview }} style={{ width: '100%', padding: 16 }} />
           ) : (
             <div style={{ textAlign: 'center', color: '#ccc', padding: 40 }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>&#9998;</div>

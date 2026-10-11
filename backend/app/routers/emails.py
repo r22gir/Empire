@@ -193,7 +193,7 @@ async def preview_template(template: Literal["quote", "invoice", "receipt"]):
             "project_description": "Custom roman shades for living room — 4 windows, blackout lining",
             "line_items": sample_items,
             "total": 1660.00,
-            "quote_url": "https://studio.empirebox.store/quotes/Q-2026-0042",
+            "quote_url": "https://workroom.empirebox.store/quotes/Q-2026-0042",
         })
     elif template == "invoice":
         html = render_invoice_sent({
@@ -203,7 +203,7 @@ async def preview_template(template: Literal["quote", "invoice", "receipt"]):
             "line_items": sample_items,
             "total": 1660.00,
             "balance_due": 830.00,
-            "payment_url": "https://studio.empirebox.store/pay/INV-2026-0078",
+            "payment_url": "https://workroom.empirebox.store/pay/INV-2026-0078",
             "payment_methods": "Check, Zelle, Cash, Credit Card, Crypto (USDT/BTC)",
         })
     else:
@@ -213,7 +213,7 @@ async def preview_template(template: Literal["quote", "invoice", "receipt"]):
             "amount_paid": 830.00,
             "payment_method": "Zelle",
             "payment_date": "March 14, 2026",
-            "receipt_url": "https://studio.empirebox.store/receipts/RCP-2026-0078",
+            "receipt_url": "https://workroom.empirebox.store/receipts/RCP-2026-0078",
         })
 
     from fastapi.responses import HTMLResponse

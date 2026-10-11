@@ -41,7 +41,17 @@ interface Props {
   onNewChat: () => void;
 }
 
-type Tab = 'all' | 'web' | 'telegram' | 'email';
+type Tab = 'all' | 'sessions' | 'web' | 'telegram' | 'email';
+
+interface SessionEntry {
+  id: string;
+  channel: string;
+  startedAt: string;
+  updatedAt: string;
+  turns: number;
+  withAttachments: number;
+  firstText: string;
+}
 
 export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat }: Props) {
   const [tab, setTab] = useState<Tab>('all');
@@ -49,13 +59,14 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
   const [webChats, setWebChats] = useState<ChatEntry[]>([]);
   const [telegramChats, setTelegramChats] = useState<ChatEntry[]>([]);
   const [emails, setEmails] = useState<EmailEntry[]>([]);
+  const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
 
   const fetchWebChats = useCallback(async () => {
     try {
-      const res = await fetch(API + '/chats/list');
+      const res = await fetch(API + '/chats/list?limit=200');
       if (res.ok) {
         const data = await res.json();
         setWebChats((data.chats || []).map((c: any) => ({
@@ -86,6 +97,26 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
           summary: m.summary || m.message_text || m.body || '',
           timestamp: m.created_at || '',
           threadId: m.thread_id,
+        })));
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  // Full Max session log (studio chat, Telegram, live voice) from the
+  // session journal — every turn, images archived. Click to reopen.
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await fetch(API + '/max/sessions?days=30&limit=150');
+      if (res.ok) {
+        const data = await res.json();
+        setSessions((data.sessions || []).map((s: any) => ({
+          id: s.conversation_id,
+          channel: s.channel || 'studio',
+          startedAt: s.started_at || '',
+          updatedAt: s.updated_at || '',
+          turns: s.turns || 0,
+          withAttachments: s.with_attachments || 0,
+          firstText: s.first_user_text || '',
         })));
       }
     } catch { /* silent */ }
@@ -143,9 +174,10 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
     // Load each tab independently — don't let one hang block others
     fetchAllChannels().finally(() => setLoading(false));
     fetchWebChats();
+    fetchSessions();
     fetchTelegramChats();
     fetchEmails();
-  }, [open, fetchAllChannels, fetchWebChats, fetchTelegramChats, fetchEmails]);
+  }, [open, fetchAllChannels, fetchWebChats, fetchSessions, fetchTelegramChats, fetchEmails]);
 
   const handleSearch = useCallback(async () => {
     if (!search.trim()) { fetchWebChats(); return; }
@@ -199,6 +231,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
 
   const TABS: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: 'all', label: 'ALL', icon: MessageSquare, count: allChannelItems.length },
+    { key: 'sessions', label: 'LOG', icon: Clock, count: sessions.length },
     { key: 'web', label: 'WEB', icon: MessageSquare, count: webChats.length },
     { key: 'telegram', label: 'TG ONLY', icon: MessageSquare, count: telegramChats.length },
     { key: 'email', label: 'EMAIL', icon: Mail, count: unreadCount },
@@ -471,6 +504,36 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
         {tab === 'web' && !loading && webChats.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: '#555', fontSize: 13 }}>
             No conversations yet
+          </div>
+        )}
+
+        {/* Full session log (journal) */}
+        {tab === 'sessions' && sessions.map(sess => (
+          <div
+            key={sess.id}
+            onClick={() => { onLoadChat(`session:${sess.id}`); onClose(); }}
+            style={{ padding: '12px 16px', borderBottom: '1px solid #1a1a1a', cursor: 'pointer', minHeight: 44 }}
+            onMouseEnter={e => (e.currentTarget.style.background = '#1a1a1a')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: sess.channel === 'telegram' ? '#38bdf8' : sess.channel === 'voice' ? '#a78bfa' : '#60a5fa' }}>
+                {sess.channel}
+              </span>
+              <span style={{ fontSize: 11, color: '#666' }}>{formatDate(sess.updatedAt)}</span>
+            </div>
+            <div style={{ fontSize: 13, color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {sess.firstText || '(no text)'}
+            </div>
+            <span style={{ fontSize: 11, color: '#555' }}>
+              {sess.turns} turns{sess.withAttachments > 0 ? ` · ${sess.withAttachments} with image/file` : ''}
+            </span>
+          </div>
+        ))}
+
+        {tab === 'sessions' && sessions.length === 0 && (
+          <div style={{ textAlign: 'center', padding: 40, color: '#555', fontSize: 13 }}>
+            No journaled sessions yet. New Max turns (studio, Telegram, voice) appear here with their images.
           </div>
         )}
 

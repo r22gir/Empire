@@ -131,10 +131,22 @@ def channel_status() -> dict:
         code = "partial_disabled_gateway" if missing else "closed"
     else:
         code = "ready"
-    if missing:
+    try:
+        from app.edition import is_family_edition as _family
+
+        family = bool(_family())
+    except Exception:
+        family = False
+    if missing and family:
+        reason_es = "WhatsApp todavía no está conectado. Cuando se conecte, aquí verás su estado."
+        reason_en = "WhatsApp is not connected yet."
+    elif missing:
         names = ", ".join(missing)
         reason_es = f"WhatsApp está apagado. Faltan: {names}."
         reason_en = f"WhatsApp is off. Missing: {names}."
+    elif not owners and family:
+        reason_es = "WhatsApp está conectado, pero todavía no hay números autorizados del dueño. Por ahora no acepto mensajes."
+        reason_en = "WhatsApp is connected, but no owner numbers are authorized yet. Inbound messages are refused."
     elif not owners:
         reason_es = "La API está configurada, pero no hay números del dueño en WHATSAPP_OWNER_NUMBERS. No acepto mensajes."
         reason_en = "The API is configured, but WHATSAPP_OWNER_NUMBERS is empty. Inbound messages are refused."

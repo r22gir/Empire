@@ -148,6 +148,37 @@ def _append_audit(
     return entry
 
 
+def _whatsapp_channel_view() -> dict[str, Any]:
+    """Live Cloud API status. Saved interface JSON cannot hide a disabled channel."""
+    try:
+        from app.services.whatsapp_cloud import channel_status
+
+        live = channel_status()
+    except Exception as exc:
+        live = {
+            "enabled": False,
+            "configured": False,
+            "status": "disabled",
+            "missing": [],
+            "reason": f"WhatsApp status unavailable ({exc.__class__.__name__}).",
+        }
+    return {
+        "channel": "whatsapp",
+        "status": live.get("status") or "disabled",
+        "enabled": bool(live.get("enabled")),
+        "interface_point": "/api/v1/whatsapp/webhook",
+        "transport_configured": bool(live.get("configured")),
+        "browser_assist_supported": False,
+        "autonomous_messaging_allowed": False,
+        "drafts_require_explicit_confirm": True,
+        "customer_care_window_hours": 24,
+        "allowlist": "founder_numbers_only",
+        "missing": list(live.get("missing") or []),
+        "reason": live.get("reason") or "WhatsApp is disabled.",
+        "reply_mode": live.get("reply_mode") or "voice_text",
+    }
+
+
 def _phase3_channel_defaults() -> dict[str, Any]:
     from app.services.whatsapp_cloud import channel_status
 

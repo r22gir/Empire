@@ -42,9 +42,9 @@ export default function UsoPage() {
       {usage ? (
         <>
           <p>
-            Tope {usage.cap_percent ?? 20}%
-            {typeof usage.used_percent === 'number' ? ` · ${usage.used_percent}% usado` : ''}
-            {typeof usage.remaining_percent === 'number' ? ` · queda ${usage.remaining_percent}%` : ''}
+            Tope {usage.cap_percent ?? 20}% del total
+            {typeof usage.used_percent === 'number' ? ` · ${usage.used_percent}% del total usado` : ''}
+            {typeof usage.remaining_percent === 'number' ? ` · queda ${usage.remaining_percent}% hasta el tope` : ''}
             {usage.level ? ` · ${usage.level}` : ''}
           </p>
           {usage.message ? <p>{usage.message}</p> : null}

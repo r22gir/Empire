@@ -14,13 +14,11 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from app.db.database import resolve_task_db_path
 
 # ── DB Setup ────────────────────────────────────────────────────────────
 
-DB_PATH = os.getenv(
-    "EMPIRE_TASK_DB",
-    str(Path.home() / "empire-data" / "empire.db"),
-)
+DB_PATH = resolve_task_db_path()
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -176,6 +174,23 @@ except Exception as e:
 
 # ── Template Rendering ──────────────────────────────────────────────────
 
+def _trade_profile():
+    """Family edition trade profile (Maxine / Max-e). None on Workroom."""
+    try:
+        from app.services.leadforge.trade_profile import trade_profile
+
+        return trade_profile()
+    except Exception:
+        return None
+
+
+def _default_angle() -> str:
+    prof = _trade_profile()
+    if prof:
+        return prof.get("default_angle") or ""
+    return "custom drapery, upholstery, and millwork"
+
+
 def render_template(template: str, prospect: dict) -> str:
     """Replace placeholders with prospect data. Safe fallbacks for all."""
     if not template:
@@ -187,7 +202,7 @@ def render_template(template: str, prospect: dict) -> str:
         "{first_name}": first_name,
         "{business}": prospect.get("business_name") or prospect.get("name") or "your company",
         "{location}": prospect.get("location") or prospect.get("city") or "your area",
-        "{angle}": prospect.get("angle") or "custom drapery, upholstery, and millwork",
+        "{angle}": prospect.get("angle") or _default_angle(),
         "{phone}": prospect.get("phone") or "",
         "{website}": prospect.get("website") or "",
     }
@@ -1169,8 +1184,66 @@ def _seed_default_templates():
         add_step(t3["id"], s)
 
 
+def _seed_family_templates(prof: dict) -> int:
+    """Seed the family edition's own templates. Idempotent and race-safe.
+
+    Two uvicorn workers import this module at the same time, so the whole
+    seed runs inside one BEGIN IMMEDIATE transaction (one writer at a time)
+    and each template is recorded in leadforge_seed_marks. A template the
+    owner deleted is not seeded again. Drapery templates are never seeded here.
+    """
+    conn = _get_conn()
+    conn.isolation_level = None
+    inserted = 0
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS leadforge_seed_marks (
+                       seed_key TEXT PRIMARY KEY,
+                       created_at TEXT DEFAULT (datetime('now'))
+                   )"""
+            )
+            names = {r["name"] for r in conn.execute("SELECT name FROM campaigns").fetchall()}
+            for camp in prof.get("campaigns") or []:
+                key = f"{prof.get('edition')}:campaign:{camp['name']}"
+                if conn.execute("SELECT 1 FROM leadforge_seed_marks WHERE seed_key = ?", (key,)).fetchone():
+                    continue
+                if camp["name"] not in names:
+                    cur = conn.execute(
+                        """INSERT INTO campaigns (name, description, business_unit, target_type, status)
+                           VALUES (?, ?, ?, ?, 'draft')""",
+                        (camp["name"], camp.get("description"), camp.get("business_unit") or prof.get("default_unit"),
+                         camp.get("target_type")),
+                    )
+                    cid = cur.lastrowid
+                    for st in camp.get("steps") or []:
+                        conn.execute(
+                            """INSERT INTO campaign_steps (campaign_id, step_number, step_type,
+                               subject, body_template, delay_days, is_manual)
+                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                            (cid, st.get("step_number", 1), st.get("step_type", "email"), st.get("subject"),
+                             st.get("body_template"), st.get("delay_days", 0), 1 if st.get("is_manual") else 0),
+                        )
+                    inserted += 1
+                conn.execute("INSERT OR IGNORE INTO leadforge_seed_marks (seed_key) VALUES (?)", (key,))
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    return inserted
+
+
 try:
-    _seed_default_templates()
+    _family_profile = _trade_profile()
+    if _family_profile:
+        # Family editions (Maxine / Max-e): their own trade, never the
+        # Workroom drapery / WoodCraft templates.
+        _seed_family_templates(_family_profile)
+    else:
+        _seed_default_templates()
 except Exception as e:
     print(f"[LeadForge Campaign Service] Seed warning: {e}")
 

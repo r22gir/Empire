@@ -46,6 +46,14 @@ EMPIRE_API_BASE=http://127.0.0.1:8012 \
 npx next start -p 3012
 ```
 
+After deploy, run the Spanish post-deploy check (memory recall, isolation including Argos Campestre legal details, usage percentages only). It never talks to Workroom or Max-e data:
+
+```bash
+deploy/family_post_deploy_check.sh maxine
+```
+
+See `deploy/FAMILY_POST_DEPLOY_CHECK.md` for the exact curls and expected Spanish replies.
+
 Login is the same `/login` session as Max-e. The setup interview creates a ConstructionForge project, phase, and only the lots the owner typed, then asks Confirmar datos (Publicar / Confidencial, default Confidencial).
 
 ## WhatsApp (draft only, this instance)

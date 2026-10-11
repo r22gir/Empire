@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { API } from '../../../lib/api';
+import JobHeader from '../../docs/JobHeader';
+import DocsTab from '../../docs/DocsTab';
 import {
   ClipboardList, Clock, Play, CheckCircle2, Plus, X, Loader2,
   AlertCircle, LayoutGrid, List, ChevronRight, Save,
@@ -656,6 +658,7 @@ export default function JobBoard() {
                 <X size={20} />
               </button>
             </div>
+            <JobHeader job={getJobId(selectedJob)} quote={selectedJob.quote_id || null} className="is-panel" />
 
             {/* Status breadcrumb */}
             <div className="mb-6">
@@ -729,6 +732,12 @@ export default function JobBoard() {
               {selectedJob.quote_id && (
                 <InfoRow icon={<FileText size={13} />} label="Quote ID" value={selectedJob.quote_id} />
               )}
+            </div>
+
+            {/* Documents (Final Docs hub): latest final estimate, presentation, invoice, drawings, photos */}
+            <div className="mb-6">
+              <div className="text-[10px] font-bold text-[#999] uppercase tracking-wider mb-2">Documents</div>
+              <DocsTab job={getJobId(selectedJob)} quote={selectedJob.quote_id || null} />
             </div>
 
             {/* Time tracking */}

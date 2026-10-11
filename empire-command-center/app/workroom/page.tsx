@@ -25,7 +25,7 @@ export default function WorkroomLanding() {
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f5f3ef', fontFamily: "'Outfit', 'Segoe UI', sans-serif" }}>
       <nav style={{ display: 'flex', gap: 14, alignItems: 'center', justifyContent: 'center', padding: '14px 20px', background: '#fff', borderBottom: '1px solid #e5e0d8' }}>
-        <a href="/max" style={{ color: '#1a1a2e', textDecoration: 'none', fontSize: 13, fontWeight: 800 }}>MAX</a>
+        <a href="/?screen=presentation" style={{ color: '#1a1a2e', textDecoration: 'none', fontSize: 13, fontWeight: 800 }}>MAX</a>
         <a href="/workroom" style={{ color: '#1a1a2e', textDecoration: 'none', fontSize: 13, fontWeight: 800 }}>Workroom</a>
         <a href="/woodcraft" style={{ color: '#1a1a2e', textDecoration: 'none', fontSize: 13, fontWeight: 800 }}>WoodCraft</a>
         <a href="/" style={{ color: '#1a1a2e', textDecoration: 'none', fontSize: 13, fontWeight: 800 }}>Command Center</a>

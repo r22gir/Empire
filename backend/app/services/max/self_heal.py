@@ -5,8 +5,9 @@ detect → snapshot → patch → canary → commit or revert → log
 from app.instance_url import empire_api_url
 import subprocess, os, json, sqlite3, shutil
 from datetime import datetime
+from app.db.database import resolve_task_db_path
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
+DB_PATH = resolve_task_db_path()
 REPO_PATH = os.path.expanduser("~/empire-repo")
 INCIDENT_DIR = os.path.join(REPO_PATH, ".session-artifacts/self-heal/incidents")
 

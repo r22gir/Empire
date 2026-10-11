@@ -51,8 +51,8 @@ export default function UsageCard() {
       <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, color: '#9a7b2f' }}>USO</div>
       <div style={{ marginTop: 6, fontSize: 12, color: '#5C5650' }}>
         {note}
-        {typeof usage?.used_percent === 'number' ? ` · ${usage.used_percent}% usado` : ''}
-        {typeof usage?.remaining_percent === 'number' ? ` · queda ${usage.remaining_percent}%` : ''}
+        {typeof usage?.used_percent === 'number' ? ` · ${usage.used_percent}% del total usado` : ''}
+        {typeof usage?.remaining_percent === 'number' ? ` · queda ${usage.remaining_percent}% hasta el tope` : ''}
       </div>
       <a href="/uso" style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: '#9a7b2f', fontWeight: 700 }}>
         Ver el uso del mes

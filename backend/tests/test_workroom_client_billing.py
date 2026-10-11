@@ -6,7 +6,10 @@ import io
 from app.config.workroom_billing import (
     BILLED_BY_EMPIRE,
     BILLED_BY_NELMA,
+    PUBLIC_CLIENT_HOST,
     billed_by_for_storage,
+    client_facing_origin,
+    client_facing_website,
     get_workroom_billing,
     normalize_billed_by,
     resolve_billing,
@@ -24,14 +27,27 @@ from app.services.quote_pdf_service import generate_quote_pdf_legacy_portrait
 def test_default_billing_is_empire_workroom():
     b = get_workroom_billing()
     assert b.name == "Empire Workroom"
+    assert b.website == PUBLIC_CLIENT_HOST
+    assert "studio.empirebox.store" not in b.website
     assert normalize_billed_by(None) == BILLED_BY_EMPIRE
     assert billed_by_for_storage(None) is None
+
+
+def test_client_docs_replace_internal_app_links():
+    assert client_facing_website("https://studio.empirebox.store") == PUBLIC_CLIENT_HOST
+    assert client_facing_website("https://api.empirebox.store/quotes/1") == PUBLIC_CLIENT_HOST
+    assert client_facing_website("http://localhost:3005/presentation/abc") == PUBLIC_CLIENT_HOST
+    assert client_facing_origin("https://studio.empirebox.store") == f"https://{PUBLIC_CLIENT_HOST}"
+    assert client_facing_origin("https://woodcraft.example") == "https://woodcraft.example"
 
 
 def test_nelmas_billing_option():
     b = get_workroom_billing(BILLED_BY_NELMA)
     assert b.name == "Nelma's Workroom"
-    assert "Frolich Lane" in b.address
+    assert "Frolich" in b.address
+    assert b.phone == "(703) 623-9203"
+    assert b.email == "workroom@empirebox.store"
+    assert b.website == PUBLIC_CLIENT_HOST
     assert billed_by_for_storage(BILLED_BY_NELMA) == BILLED_BY_NELMA
 
 
@@ -86,10 +102,33 @@ def test_invoice_html_empire_default_and_deposit_schedule():
     assert "<title>INVOICE</title>" in html
     assert "DRAFT INVOICE" not in html.upper()
     assert "Empire Workroom" in html
+    assert PUBLIC_CLIENT_HOST in html
+    assert "studio.empirebox.store" not in html
     assert "50% Deposit Due" in html
     assert JOB_DEPOSIT_SCHEDULE_NOTE in html
     assert "Split from INV" not in html
     assert client_visible_notes(inv["notes"]) is None
+
+
+def test_woodcraft_invoice_uses_public_website():
+    html = render_client_invoice_html(
+        {
+            "invoice_number": "INV-WC-1",
+            "invoice_date": "2026-10-01",
+            "due_date": "2026-10-31",
+            "terms": "Due on receipt",
+            "subtotal": 100.0,
+            "tax_rate": 0.0,
+            "tax_amount": 0.0,
+            "total": 100.0,
+            "client_name": "Test",
+            "line_items": [{"description": "Shelf", "quantity": 1, "unit": "ea", "unit_price": 100, "total": 100}],
+        },
+        is_woodcraft=True,
+    )
+    assert PUBLIC_CLIENT_HOST in html
+    assert "studio.empirebox.store" not in html
+    assert "api.empirebox.store" not in html
 
 
 def test_invoice_html_nelmas_when_billed_by_set():
@@ -153,3 +192,5 @@ def test_legacy_quote_pdf_respects_billed_by(monkeypatch, tmp_path):
         for page in PdfReader(io.BytesIO(pdf_empire)).pages
     )
     assert "Empire Workroom" in text_empire
+    assert PUBLIC_CLIENT_HOST in text_empire
+    assert "studio.empirebox.store" not in text_empire

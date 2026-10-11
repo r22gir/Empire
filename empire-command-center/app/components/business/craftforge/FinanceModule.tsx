@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import { API } from '../../../lib/api';
+import { openDocViewer } from '../../docs/viewerBus';
 import {
   DollarSign, TrendingUp, FileText, Receipt, CreditCard, Clock,
   Download, Send, CheckCircle, X, Loader2, Plus, Trash2, ShoppingCart
@@ -356,19 +357,9 @@ export default function FinanceModule() {
     setActionLoading(null);
   };
 
-  const handleDownloadInvoicePDF = async (invoice: any) => {
-    setActionLoading(`ipdf-${invoice.id}`);
-    try {
-      const res = await fetch(`${API}/finance/invoices/${invoice.id}/pdf`);
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `invoice-${invoice.invoice_number || invoice.id}.pdf`; a.click();
-        URL.revokeObjectURL(url);
-      }
-    } catch (e) { console.error('Invoice PDF download failed:', e); }
-    setActionLoading(null);
+  const handleDownloadInvoicePDF = (invoice: any) => {
+    // Shared in-page viewer (download is one tap away in its action bar).
+    openDocViewer({ src: `/api/v1/finance/invoices/${invoice.id}/pdf`, title: `${invoice.invoice_number || 'Invoice'}`, filename: `invoice-${invoice.invoice_number || invoice.id}.pdf`, kind: 'pdf' });
   };
 
   const openPaymentModal = (invoice: any) => {
@@ -462,7 +453,7 @@ export default function FinanceModule() {
         <div className="flex items-center gap-1.5 flex-wrap">
           <ActionBtn onClick={() => openPaymentModal(row)} icon={<CreditCard size={12} />} label="Record Payment" loadingKey={`pay-${row.id}`} color="#22c55e" />
           <ActionBtn onClick={() => handleSendInvoice(row)} icon={<Send size={12} />} label="Send" loadingKey={`send-${row.id}`} />
-          <ActionBtn onClick={() => handleDownloadInvoicePDF(row)} icon={<Download size={12} />} label="Download PDF" loadingKey={`ipdf-${row.id}`} color="#2563eb" />
+          <ActionBtn onClick={() => handleDownloadInvoicePDF(row)} icon={<Download size={12} />} label="View PDF" loadingKey={`ipdf-${row.id}`} color="#2563eb" />
         </div>
       ),
     },

@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from app.db.database import resolve_task_db_path
 
 JOB_TYPES = (
     "drapery_romans",
@@ -175,10 +176,7 @@ class CaptureError(Exception):
 
 
 def _db_path() -> str:
-    path = os.getenv(
-        "EMPIRE_TASK_DB",
-        str(Path.home() / "empire-data" / "empire.db"),
-    )
+    path = resolve_task_db_path()
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     try:
         from app.db import database

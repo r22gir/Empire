@@ -19,8 +19,10 @@ from app.edition import (
     set_active_business,
     sin_acceso_body,
 )
+from app.middleware.family_scrub import scrub_family_response
 from app.services import amp_allowlist
 from app.services.amp_access import (
+    apply_session_cookie,
     resolve_request_email,
     strip_client_identity_headers,
 )
@@ -59,9 +61,12 @@ async def amp_access_middleware(request, call_next):
         if request.method.upper() == "OPTIONS":
             return await call_next(request)
         if access_exempt(request.method, request.url.path):
-            return await call_next(request)
+            return await scrub_family_response(request, await call_next(request))
         if not email or not amp_allowlist.is_allowed(email=email):
             return JSONResponse(status_code=403, content=sin_acceso_body())
-        return await call_next(request)
+        response = await call_next(request)
+        if via == "session" and email and amp_allowlist.entry_role(email=email) == "owner":
+            apply_session_cookie(response, email)
+        return await scrub_family_response(request, response)
     finally:
         reset_active_business(token)

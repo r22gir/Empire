@@ -44,6 +44,15 @@ interface Transaction {
 
 interface BreakdownItem { cost: number; requests: number; input_tokens: number; output_tokens: number; [key: string]: unknown }
 
+/** Providers billed outside Empire (Grok Bot / Cursor). cost === null means Rafael has not entered an amount. */
+interface ManualProvider {
+  provider: string; label: string; source: 'manual'; status: 'entered' | 'not_entered';
+  cost: number | null; months: string[];
+  entries: { month: string; amount_usd: number; note?: string; entered_at?: string }[];
+  billing: string; billing_url: string;
+  usage: { cursor_builds: number | null; window_days: number };
+}
+
 interface BleedAlert {
   kind: string;
   source_module: string;
@@ -260,6 +269,9 @@ export default function CostTracker() {
   const [overview, setOverview] = useState<CostOverview | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [byProvider, setByProvider] = useState<BreakdownItem[]>([]);
+  const [manualProviders, setManualProviders] = useState<ManualProvider[]>([]);
+  const [manualForm, setManualForm] = useState<{ month: string; amount: string; note: string; saving: boolean; error: string }>(
+    { month: new Date().toISOString().slice(0, 7), amount: '', note: '', saving: false, error: '' });
   const [byFeature, setByFeature] = useState<BreakdownItem[]>([]);
   const [byBusiness, setByBusiness] = useState<BreakdownItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -303,6 +315,7 @@ export default function CostTracker() {
       setOverview(ov);
       setTransactions(ov?.transactions || tx?.transactions || tx || []);
       setByProvider(prov?.by_provider || []);
+      setManualProviders(prov?.manual || []);
       setByFeature(feat?.by_feature || []);
       setByBusiness(biz?.by_business || []);
       setBleedAlerts(bleed?.alerts || []);
@@ -618,6 +631,70 @@ export default function CostTracker() {
                 </div>
               </div>
 
+              {/* Billed outside Empire: Grok Bot (Chief e) / Cursor. Dollars only from Rafael's entries. */}
+              {manualProviders.map(mp => (
+                <div key={mp.provider} className="empire-card flat" style={{ padding: 20 }}>
+                  <span className="section-label" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <Info size={15} className="text-[#b8960c]" /> {mp.label}
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#fdf8eb] text-[#96750a] border border-[#ece8e0]">MANUAL ENTRY</span>
+                  </span>
+                  <div className="text-xs text-[#555] mb-2">{mp.billing}</div>
+                  <div className="flex flex-wrap items-baseline gap-4 mb-3">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wide text-[#777]">Last {mp.usage.window_days} days</div>
+                      <div className="text-lg font-bold text-[#1a1a1a]">
+                        {mp.cost === null ? <span className="text-sm font-medium text-[#777]">Not entered yet (no amount recorded)</span> : fmt(mp.cost)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wide text-[#777]">Cursor builds launched</div>
+                      <div className="text-lg font-bold text-[#1a1a1a]">{mp.usage.cursor_builds ?? '—'}</div>
+                    </div>
+                    <a href={mp.billing_url} target="_blank" rel="noopener noreferrer" className="text-xs text-[#96750a] font-bold flex items-center gap-1 ml-auto">
+                      Open Cursor dashboard <ExternalLink size={10} />
+                    </a>
+                  </div>
+                  {mp.entries.length > 0 && (
+                    <div className="text-[11px] text-[#555] mb-3">
+                      {mp.entries.slice(0, 6).map(e => <span key={e.month} className="mr-3">{e.month}: <b>{fmt(e.amount_usd)}</b></span>)}
+                    </div>
+                  )}
+                  <form className="flex flex-wrap items-end gap-2" onSubmit={async (ev) => {
+                    ev.preventDefault();
+                    const amt = parseFloat(manualForm.amount);
+                    if (!/^\d{4}-\d{2}$/.test(manualForm.month) || isNaN(amt) || amt < 0) {
+                      setManualForm(f => ({ ...f, error: 'Enter a month (YYYY-MM) and an amount from the Cursor dashboard.' })); return;
+                    }
+                    setManualForm(f => ({ ...f, saving: true, error: '' }));
+                    try {
+                      const res = await fetch(`${API}/costs/manual`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ provider: mp.provider, month: manualForm.month, amount_usd: amt, note: manualForm.note }) });
+                      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.detail || `HTTP ${res.status}`);
+                      setManualForm(f => ({ ...f, amount: '', note: '', saving: false }));
+                      load();
+                    } catch (err) {
+                      setManualForm(f => ({ ...f, saving: false, error: String((err as Error).message || err) }));
+                    }
+                  }}>
+                    <label className="text-[11px] text-[#555]">Month<br />
+                      <input type="month" value={manualForm.month} onChange={e => setManualForm(f => ({ ...f, month: e.target.value }))}
+                        className="border border-[#ece8e0] rounded-lg px-2 py-1 text-xs" /></label>
+                    <label className="text-[11px] text-[#555]">Amount (USD)<br />
+                      <input inputMode="decimal" value={manualForm.amount} placeholder="from Cursor dashboard"
+                        onChange={e => setManualForm(f => ({ ...f, amount: e.target.value }))}
+                        className="border border-[#ece8e0] rounded-lg px-2 py-1 text-xs w-36" /></label>
+                    <label className="text-[11px] text-[#555] flex-1 min-w-[140px]">Note<br />
+                      <input value={manualForm.note} onChange={e => setManualForm(f => ({ ...f, note: e.target.value }))}
+                        className="border border-[#ece8e0] rounded-lg px-2 py-1 text-xs w-full" /></label>
+                    <button type="submit" disabled={manualForm.saving}
+                      className="text-xs font-bold px-3 py-1.5 rounded-lg bg-[#b8960c] text-white cursor-pointer disabled:opacity-60">
+                      {manualForm.saving ? 'Saving…' : 'Save amount'}
+                    </button>
+                    {manualForm.error && <div className="w-full text-[11px] text-[#b91c1c]">{manualForm.error}</div>}
+                  </form>
+                </div>
+              ))}
+
               {/* Manage Providers */}
               <div className="empire-card flat" style={{ padding: 20 }}>
                 <span className="section-label" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -645,7 +722,12 @@ export default function CostTracker() {
           {/* ── Breakdown Tab ─────────────────────────────────────── */}
           {tab === 'breakdown' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <BreakdownCard title="By Provider" icon={PieChartIcon} data={byProvider} nameKey="provider" fmt={fmt} />
+              <BreakdownCard title="By Provider" icon={PieChartIcon} nameKey="provider" fmt={fmt} data={[
+                ...byProvider,
+                ...manualProviders.filter(m => m.cost !== null).map(m => ({
+                  provider: `${m.label} (manual entry)`, cost: m.cost as number, requests: 0, input_tokens: 0, output_tokens: 0,
+                })),
+              ]} />
               <BreakdownCard title="By Feature" icon={Zap} data={byFeature} nameKey="feature" fmt={fmt} />
               <BreakdownCard title="By Business" icon={BarChart3} data={byBusiness} nameKey="business" fmt={fmt} />
             </div>

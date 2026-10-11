@@ -1,0 +1,142 @@
+/* ==========================================================================
+   Empire design system v3 (Max v3 mockups, 2026-10-04). Tokens + primitives.
+   Scoped to .v3 so client-facing pages (intake, portal, docs, PDFs) never
+   change. Dark is the default; Gold applies with <html data-theme="gold">
+   (top-bar Dark/Gold toggle, saved per device).
+   Colors come from previews/max-ui/v3/src/lib3.py (TH dark / gold).
+   ========================================================================== */
+.v3 {
+  --v-page: #0b0f14; --v-ink: #e6edf3; --v-ink2: #c4ced8; --v-mut: #8b96a3; --v-mut2: #677380;
+  --v-acc: #22d3ee; --v-accink: #22d3ee; --v-acc-soft: rgba(34, 211, 238, 0.12);
+  --v-line: rgba(255, 255, 255, 0.09); --v-line2: rgba(255, 255, 255, 0.06);
+  --v-band: #0a0d11; --v-bandtx: #e6edf3; --v-bandmut: #7d8894; --v-bandline: #1d252f; --v-rule: rgba(34, 211, 238, 0.35);
+  --v-glass: rgba(19, 25, 33, 0.58); --v-glass2: rgba(22, 29, 38, 0.78); --v-solid: #121821; --v-gedge: rgba(255, 255, 255, 0.08);
+  --v-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 30px 60px -30px rgba(0, 0, 0, 0.7), 0 8px 18px -10px rgba(0, 0, 0, 0.5);
+  --v-blob1: rgba(34, 211, 238, 0.16); --v-blob2: rgba(56, 120, 190, 0.14); --v-blob3: rgba(34, 211, 238, 0.07);
+  --v-red: #f08a7a; --v-green: #5fc79a; --v-amber: #f2b45a; --v-blue: #7cb3f0; --v-violet: #b9a3f5;
+  --v-red-soft: rgba(240, 138, 122, 0.12); --v-green-soft: rgba(95, 199, 154, 0.12); --v-amber-soft: rgba(242, 180, 90, 0.12);
+  --v-onacc: #06222a; --v-chip: rgba(255, 255, 255, 0.05); --v-hover: rgba(255, 255, 255, 0.05);
+  --v-input: rgba(255, 255, 255, 0.04);
+  --v-sans: var(--font-inter, 'Inter'), 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --v-display: var(--font-inter-tight, 'Inter Tight'), 'Inter Tight', var(--font-inter, 'Inter'), 'Inter', sans-serif;
+  --v-dispw: 500; --v-track: -0.025em;
+  --v-mono: var(--font-plex-mono, 'IBM Plex Mono'), 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --v-o1: #e8fdff; --v-o2: #7fe7f7; --v-o3: #22a9c4; --v-o4: #0b2f3a; --v-orbline: rgba(230, 237, 243, 0.22);
+  --v-radius: 18px; --v-radius-sm: 12px; --v-radius-xs: 8px;
+  --v-band-h: 54px; --v-rail-w: 78px;
+  color-scheme: dark;
+}
+html[data-theme="gold"] .v3 {
+  --v-page: #f7f3ea; --v-ink: #20241f; --v-ink2: #3d3a33; --v-mut: #6b6457; --v-mut2: #8f8676;
+  --v-acc: #b8912f; --v-accink: #8a6a1c; --v-acc-soft: rgba(184, 145, 47, 0.12);
+  --v-line: rgba(160, 146, 116, 0.38); --v-line2: rgba(160, 146, 116, 0.22);
+  --v-band: #16191c; --v-bandtx: #f2ede2; --v-bandmut: #9d9686; --v-bandline: #2c3034; --v-rule: #b8912f;
+  --v-glass: rgba(252, 250, 245, 0.64); --v-glass2: rgba(252, 250, 245, 0.82); --v-solid: #fbf8f1; --v-gedge: rgba(184, 170, 140, 0.45);
+  --v-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 30px 60px -30px rgba(52, 44, 24, 0.28), 0 8px 18px -10px rgba(52, 44, 24, 0.12);
+  --v-blob1: rgba(214, 180, 96, 0.55); --v-blob2: rgba(184, 145, 47, 0.28); --v-blob3: rgba(120, 128, 110, 0.18);
+  --v-red: #a2462e; --v-green: #4f7a4a; --v-amber: #9a5a12; --v-blue: #2c5a85; --v-violet: #5e4590;
+  --v-red-soft: rgba(162, 70, 46, 0.1); --v-green-soft: rgba(79, 122, 74, 0.1); --v-amber-soft: rgba(154, 90, 18, 0.1);
+  --v-onacc: #16191c; --v-chip: rgba(32, 36, 31, 0.05); --v-hover: rgba(32, 36, 31, 0.04);
+  --v-input: rgba(255, 255, 255, 0.7);
+  --v-display: var(--font-playfair, 'Playfair Display'), 'Playfair Display', Georgia, serif; --v-dispw: 500; --v-track: -0.015em;
+  --v-o1: #fff7df; --v-o2: #ecd28b; --v-o3: #b8912f; --v-o4: #5e4614; --v-orbline: rgba(32, 36, 31, 0.28);
+  color-scheme: light;
+}
+
+/* ---------- base ---------- */
+.v3 { background: var(--v-page); color: var(--v-ink); font-family: var(--v-sans); -webkit-font-smoothing: antialiased; font-feature-settings: "cv11"; }
+.v3 *, .v3 *::before, .v3 *::after { box-sizing: border-box; }
+.v3 :focus-visible { outline: 2px solid var(--v-acc); outline-offset: 2px; }
+.v3-disp { font-family: var(--v-display); font-weight: var(--v-dispw); letter-spacing: var(--v-track); }
+.v3-mono { font-family: var(--v-mono); font-variant-numeric: tabular-nums; }
+.v3-kick { font-family: var(--v-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--v-mut); font-weight: 500; }
+.v3-mut { color: var(--v-mut); }
+.v3-ex { font-family: var(--v-mono); font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--v-mut); border: 1px solid var(--v-line); border-radius: 3px; padding: 1px 5px; font-weight: 500; white-space: nowrap; }
+.v3-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex: none; background: var(--v-mut); }
+.v3-dot.on { background: var(--v-acc); } .v3-dot.ok { background: var(--v-green); } .v3-dot.bad { background: var(--v-red); } .v3-dot.warn { background: var(--v-amber); }
+.v3-cnt { font-family: var(--v-mono); font-size: 10px; background: var(--v-acc); color: var(--v-onacc); border-radius: 9px; padding: 1px 7px; font-weight: 600; }
+
+/* ---------- surfaces ---------- */
+.v3-glass { background: var(--v-glass); -webkit-backdrop-filter: blur(26px) saturate(1.25); backdrop-filter: blur(26px) saturate(1.25);
+  border: 1px solid var(--v-gedge); border-radius: var(--v-radius); box-shadow: var(--v-shadow); }
+.v3-card { background: var(--v-glass2); border: 1px solid var(--v-line2); border-radius: var(--v-radius-sm); }
+.v3-panel { padding: 18px 20px; display: flex; flex-direction: column; min-width: 0; }
+.v3-ph { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; min-width: 0; }
+.v3-ph h2 { font-size: 22px; line-height: 1; margin: 0; }
+.v3-ph .r { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+/* section label inside a panel (GOALS · 2026, APPROVALS 4 …) */
+.v3-sec { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font: 500 10px/1.2 var(--v-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--v-mut); }
+.v3-sec .r { margin-left: auto; }
+.v3-chip { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--v-line); background: var(--v-chip);
+  color: var(--v-ink2); font: 400 12px/1 var(--v-sans); text-decoration: none; cursor: pointer; white-space: nowrap; }
+.v3-chip:hover { border-color: var(--v-acc); color: var(--v-ink); }
+
+/* backdrop: soft blobs + fine grain (no scan lines, no grid floor) */
+.v3-backdrop { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.v3-backdrop i { position: absolute; border-radius: 50%; display: block; }
+.v3-backdrop .b1 { width: 760px; height: 560px; left: 40px; top: -180px; background: radial-gradient(closest-side, var(--v-blob1), transparent); filter: blur(30px); }
+.v3-backdrop .b2 { width: 700px; height: 600px; right: -160px; top: 120px; background: radial-gradient(closest-side, var(--v-blob2), transparent); filter: blur(40px); }
+.v3-backdrop .b3 { width: 900px; height: 500px; left: 360px; bottom: -260px; background: radial-gradient(closest-side, var(--v-blob3), transparent); filter: blur(40px); }
+.v3-backdrop svg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.05; mix-blend-mode: screen; }
+html[data-theme="gold"] .v3-backdrop svg { opacity: 0.07; mix-blend-mode: multiply; }
+
+.v3-wave { display: flex; align-items: center; gap: 3px; }
+
+/* ---------- buttons ---------- */
+.v3-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 7px;
+  font: 500 11.5px/1 var(--v-sans); border: 1px solid var(--v-line); color: var(--v-ink); background: transparent; white-space: nowrap;
+  cursor: pointer; text-decoration: none; transition: background 0.15s, border-color 0.15s; }
+.v3-btn:hover { background: var(--v-hover); border-color: var(--v-mut2); }
+.v3-btn.pri { background: var(--v-ink); border-color: var(--v-ink); color: var(--v-page); }
+.v3-btn.pri:hover { opacity: 0.9; }
+.v3-btn.acc { background: var(--v-acc); border-color: var(--v-acc); color: var(--v-onacc); font-weight: 600; }
+.v3-btn.sm { height: 24px; font-size: 11px; padding: 0 9px; }
+.v3-btn:disabled, .v3-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.v3-ib { width: 26px; height: 26px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--v-line);
+  color: var(--v-mut); background: transparent; flex: none; cursor: pointer; text-decoration: none; }
+.v3-ib:hover { color: var(--v-ink); border-color: var(--v-mut2); }
+.v3-ib.ok { background: var(--v-ink); border-color: var(--v-ink); color: var(--v-page); }
+
+/* ---------- forms ---------- */
+.v3-input, .v3 .v3-field input, .v3 .v3-field select, .v3 .v3-field textarea {
+  height: 34px; border-radius: 9px; border: 1px solid var(--v-line); background: var(--v-input); color: var(--v-ink);
+  font: 400 13px/1.3 var(--v-sans); padding: 0 11px; min-width: 0; width: 100%; }
+.v3-input::placeholder { color: var(--v-mut); }
+.v3-input:focus { outline: none; border-color: var(--v-acc); box-shadow: 0 0 0 3px var(--v-acc-soft); }
+.v3-field { display: flex; flex-direction: column; gap: 5px; }
+.v3-field label { font: 500 10px/1 var(--v-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--v-mut); }
+
+/* ---------- progress ---------- */
+.v3-bar { height: 3px; border-radius: 2px; background: var(--v-line2); margin-top: 8px; overflow: hidden; position: relative; }
+.v3-bar > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: linear-gradient(90deg, var(--v-acc), var(--v-accink)); }
+.v3-bar.thick { height: 4px; }
+
+/* ---------- tables ---------- */
+.v3-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.v3-table th { text-align: left; font: 500 10px/1 var(--v-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--v-mut); padding: 9px 10px; border-bottom: 1px solid var(--v-line); }
+.v3-table td { padding: 10px; border-bottom: 1px solid var(--v-line2); }
+.v3-table tr:hover td { background: var(--v-hover); }
+.v3-table .num { text-align: right; font-family: var(--v-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- status pills (paid / overdue / draft stay distinguishable) ---------- */
+.v3-pill { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10.5px/1 var(--v-sans); border: 1px solid var(--v-line); color: var(--v-mut); }
+.v3-pill.ok { color: var(--v-green); background: var(--v-green-soft); border-color: transparent; }
+.v3-pill.bad { color: var(--v-red); background: var(--v-red-soft); border-color: transparent; }
+.v3-pill.warn { color: var(--v-amber); background: var(--v-amber-soft); border-color: transparent; }
+
+/* ---------- empty states ---------- */
+.v3-empty { border: 1px dashed var(--v-line); border-radius: var(--v-radius-sm); padding: 14px 14px 13px; color: var(--v-mut); font-size: 12px; line-height: 1.5; }
+.v3-empty b { color: var(--v-ink); font-weight: 600; display: block; font-size: 12.5px; margin-bottom: 2px; }
+.v3-empty .v3-btn { margin-top: 9px; }
+
+@media (prefers-reduced-motion: reduce) { .v3 * { animation: none !important; transition: none !important; } }
+
+/* Phones (2026-10-04): the blurred blobs and the full-screen SVG grain are big GPU layers at 3x
+   pixel density on iPhone Safari. Keep the soft gradients, drop the blur filters and the grain. */
+@media (max-width: 767px), (hover: none) {
+  .v3-backdrop svg { display: none; }
+  .v3-backdrop :is(.b1, .b2, .b3) { filter: none; opacity: 0.7; }
+  /* backdrop blur on every panel is the other big cost; panels keep their tinted background */
+  html body :is(.v3-glass, .v3-panel, .mh-col, .v3-tabbar) { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  html body .v3-tabbar { background: var(--v-solid); }
+}

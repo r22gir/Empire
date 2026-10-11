@@ -5,8 +5,9 @@ Mode persists across turns. Changes only on high-confidence intent detection.
 """
 import sqlite3, os
 from datetime import datetime
+from app.db.database import resolve_task_db_path
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
+DB_PATH = resolve_task_db_path()
 
 def _ensure_tables():
     conn = sqlite3.connect(DB_PATH)

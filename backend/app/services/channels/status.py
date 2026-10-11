@@ -22,7 +22,16 @@ STATUS_UNVERIFIED = "unverified"
 STATUS_DISABLED = "disabled"
 STATUS_PLANNED = "planned"
 
-CANONICAL_REPO = Path("/home/rg/empire-repo-main")
+def _live_workroom_checkout() -> Path:
+    """The checkout that contains this code, not the historical empire-repo-main path."""
+    try:
+        from app.services.drawing.canonical_path import resolve_canonical_root
+        return resolve_canonical_root()
+    except Exception:
+        return Path(__file__).resolve().parents[4]
+
+
+CANONICAL_REPO = _live_workroom_checkout()
 LEGACY_REPO = Path("/home/rg/empire-repo")
 CANONICAL_BACKEND = CANONICAL_REPO / "backend"
 LEGACY_BACKEND = LEGACY_REPO / "backend"

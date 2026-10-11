@@ -31,6 +31,50 @@ def assistant_announces_future_work(text: str | None) -> bool:
     return bool(_DANGLING_PROMISE_RE.search(body))
 
 
+# Announced-action guard (2026-10-04): a reply that says it is about to do something
+# ("Let me pull up the cost module...", "I'll submit the improvement request",
+# "Voy a revisar...") but called no tool in that response is not a final answer.
+# The loop continues once or twice with a nudge so Max either calls the tool now
+# or answers plainly. Questions back to Rafael (ending in "?") are allowed.
+ANNOUNCED_ACTION_MAX_ROUNDS = 2
+_ACTION_VERBS = (
+    r"check|look(?:\s+(?:into|up|at))?|pull(?:\s+up)?|find|investigate|search|open|grab|get|fetch|review|"
+    r"make\s+the\s+change|add|fix|change|build|file|submit|create|draft|prepare|"
+    r"set\s+up|dig\s+into|track\s+down"
+)
+_ANNOUNCED_ACTION_RE = re.compile(
+    r"(?i)(?:"
+    r"\blet\s+me\s+(?:go\s+ahead\s+and\s+|quickly\s+|now\s+|first\s+)?(?:" + _ACTION_VERBS + r")\b"
+    r"|\bi(?:'ll|\s+will|\s*'m\s+going\s+to|\s+am\s+going\s+to)\s+(?:now\s+|first\s+|quickly\s+|go\s+ahead\s+and\s+)?(?:" + _ACTION_VERBS + r")\b"
+    r"|\b(?:one|a)\s+(?:sec|second|moment)\b"
+    r"|\bvoy\s+a\s+(?:revisar|buscar|consultar|investigar|averiguar|hacer|agregar|añadir|arreglar|crear|preparar|abrir|mirar|ver)\b"
+    r"|\bd[ée]jame\s+(?:revisar|buscar|ver|consultar|mirar|averiguar)\b"
+    r"|\bun\s+(?:segundo|momento)\b"
+    r")"
+)
+
+
+def announces_action_without_tool(text: str | None) -> bool:
+    """True when the reply announces an imminent action (and is not just asking Rafael)."""
+    body = (text or "").strip()
+    if not body or len(body) > 1200:
+        return False
+    if body.rstrip().endswith("?"):
+        return False
+    return bool(_ANNOUNCED_ACTION_RE.search(body))
+
+
+def announced_action_nudge(assistant_text: str | None) -> str:
+    return (
+        "Your last reply announced an action but called no tool, so nothing happened. Do not narrate. "
+        "Either call the right tool now in a ```tool``` block (for a change to Empire itself, call "
+        "request_improvement with his words, then say it will be built on a test copy for his approval), "
+        "or, if no tool applies, give the direct answer or ask one short clarifying question. "
+        "Never say you don't edit your own code. This nudge never authorizes sending, approving, "
+        "paying or deleting anything; those still need Rafael's explicit yes."
+    )
+
+
 def strip_performative_closing(text: str) -> str:
     """Remove trailing sentences that only promise work not yet done."""
     if not text:
