@@ -242,11 +242,34 @@ if not isinstance(d.get("used_percent"), (int, float)):
     sys.exit("used_percent no es número")
 if not isinstance(d.get("remaining_percent"), (int, float)):
     sys.exit("remaining_percent no es número")
+used = float(d["used_percent"])
+cap = float(d["cap_percent"])
+remain = float(d["remaining_percent"])
+level = d.get("level")
+# used_percent = share of EmpireBox total. remaining = room until the cap.
+if remain > cap + 0.05:
+    sys.exit(
+        "remaining_percent > cap_percent — used_percent debe ser % del total "
+        "(no % del cupo). Dell 65.7 vs tope 20 era el medidor viejo."
+    )
+if used < cap - 0.05 and abs(used + remain - cap) > 0.25:
+    sys.exit("used_percent + remaining_percent debe igualar cap_percent")
+if used >= cap and remain > 0.05:
+    sys.exit("remaining_percent debe ser 0 al superar el tope")
+if used >= cap and level != "blocked":
+    sys.exit("level debe ser blocked cuando used_percent >= cap_percent")
+if used + 0.05 < 0.8 * cap and level not in (None, "", "ok"):
+    sys.exit("level debe ser ok cuando used_percent < 80% del tope")
+if 0.8 * cap - 0.05 <= used < cap and level != "warn":
+    sys.exit("level debe ser warn cuando used_percent está en el 80% del tope")
+msg = str(d.get("message") or "")
+if used >= cap and "tope" not in msg.lower():
+    sys.exit("mensaje de tope ausente")
 '; then
     fail "$label usage JSON inválido"
     return
   fi
-  pass "$label usage solo porcentajes (cap 20%)"
+  pass "$label usage solo porcentajes (used_percent = % del total, tope 20%)"
 }
 
 check_isolation_reply() {
@@ -297,27 +320,37 @@ run_edition() {
     check_home_v3 "$name" "$base" "$token" "$env_file" "/data/amp"
   fi
 
-  local probe="POSTDEPLOY-$(date +%s)-$RANDOM"
-  local store_conv="postdeploy-store-$probe"
-  local recall_conv="postdeploy-recall-$probe"
-  local store_q="Recuerda solo para esta prueba, no es un dato de negocio: el código POSTDEPLOY es ${probe}."
-  local recall_q="Nueva sesión. ¿Cuál es el código POSTDEPLOY de la prueba?"
+  local stamp="$(date +%s)-$RANDOM"
+  local company="Empresa Prueba ${stamp}"
+  local store_conv="postdeploy-store-$stamp"
+  local recall_conv="postdeploy-recall-$stamp"
+  local store_q="Recuerda que mi empresa se llama ${company}."
+  local recall_q="Nueva sesión. ¿Cómo se llama mi empresa?"
   local stored recalled
-  echo "  memoria: guardar $probe"
+  echo "  memoria: guardar '$company'"
   if stored="$(chat "$base" "$token" "$store_q" "$store_conv")"; then
     echo "  A1: $stored"
-    pass "$name chat guardó la frase"
+    pass "$name chat guardó el nombre de empresa"
+    if printf '%s' "$stored" | grep -Eqi 'scribd|github.com/.*/issues|\*\*Fuentes\*\*'; then
+      fail "$name adjuntó Fuentes irrelevantes en un mensaje de memoria"
+    fi
+    if printf '%s' "$stored" | grep -Eqi 'solo (para )?esta conversaci|not in persistent|only for this (chat|conversation)|no (hay|tengo) memoria persistente'; then
+      fail "$name dijo que no persistiría el dato"
+    fi
   else
-    fail "$name chat no guardó la frase"
+    fail "$name chat no guardó el nombre de empresa"
     stored=""
   fi
   echo "  memoria: nueva sesión, preguntar"
   if recalled="$(chat "$base" "$token" "$recall_q" "$recall_conv")"; then
     echo "  A2: $recalled"
-    if printf '%s' "$recalled" | grep -Fq "$probe"; then
-      pass "$name memoria: nueva sesión recordó $probe"
+    if printf '%s' "$recalled" | grep -Fq "$company"; then
+      pass "$name memoria: nueva sesión recordó $company"
     else
-      warn "$name memoria: la nueva sesión no devolvió $probe (reintenta; el modelo a veces omite el código)"
+      fail "$name memoria: la nueva sesión no devolvió $company"
+    fi
+    if printf '%s' "$recalled" | grep -Eqi 'scribd|\*\*Fuentes\*\*'; then
+      fail "$name adjuntó Fuentes en la pregunta de recuerdo"
     fi
   else
     fail "$name chat de recuerdo falló"

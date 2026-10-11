@@ -76,6 +76,24 @@ _CASUAL_SPANISH = (
     r'\bque\s+tal\b',
 )
 
+# Memory / persist / post-deploy probes are not public web lookups.
+# "Recuerda este código" must never trigger web_search or Fuentes.
+MEMORY_OR_TEST_PATTERNS = (
+    r'\brecuerd[aeo]\b',
+    r'\bremember\b',
+    r'\bmemoriza',
+    r'\bguarda(?:me|r)?\s+(?:esto|eso|que)\b',
+    r'\bmi\s+empresa\s+se\s+llama\b',
+    r'\bmi\s+negocio\s+se\s+llama\b',
+    r'\bmy\s+company\s+(?:is\s+called|is\s+named)\b',
+    r'\bpostdeploy\b',
+    r'\bsolo\s+para\s+esta\s+(?:prueba|conversacion)\b',
+    r'\bno\s+es\s+un\s+dato\s+de\s+negocio\b',
+    r'\bempresa\s+prueba\b',
+    r'\bnueva\s+sesion\b',
+    r'\bcomo\s+se\s+llama\s+mi\s+(?:empresa|negocio|compania)\b',
+)
+
 # Pure chit-chat should not incur a public web lookup.
 # These are whole-message greetings so "hola, qué pasó en Panamá" still searches.
 CHITCHAT_PATTERNS = (
@@ -127,6 +145,15 @@ def _is_chitchat(msg: str) -> bool:
     return any(re.search(pattern, folded, re.I) for pattern in CHITCHAT_PATTERNS)
 
 
+def is_memory_or_test_turn(message: str) -> bool:
+    """Owner asked to remember a fact, or this is a memory/test probe."""
+    raw = (message or "").strip()
+    if not raw:
+        return False
+    folded = _fold_accents(raw).lower()
+    return any(re.search(pattern, folded, re.I) for pattern in MEMORY_OR_TEST_PATTERNS)
+
+
 def _has_spanish_news_cue(msg: str) -> bool:
     return any(re.search(pattern, msg, re.I) for pattern in _SPANISH_NEWS_CUES)
 
@@ -147,6 +174,8 @@ def is_factual_question(message: str) -> bool:
     """Return whether a public factual answer needs web grounding."""
     raw = (message or '').strip()
     if not raw:
+        return False
+    if is_memory_or_test_turn(raw):
         return False
     msg = _fold_accents(raw).lower()
     if _is_internal_or_pricing(msg):

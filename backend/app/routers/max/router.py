@@ -2805,6 +2805,11 @@ async def _chat_with_max_service_impl(
     if not is_safe:
         logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
         return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+    try:
+        from app.services.max.family_memory import persist_user_stated_facts
+        persist_user_stated_facts(request.message)
+    except Exception:
+        pass
 
     # v6.0 unified sanitizer — audit logging + SQL/XSS checks
     sec_result = input_sanitizer.check(request.message, channel="chat", session_id=request.conversation_id or "")
@@ -3641,11 +3646,6 @@ async def _chat_with_max_service_impl(
             final_content = qr.cleaned
 
         final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
-        try:
-            from app.services.max.search_sources import attach_family_search_sources
-            final_content = attach_family_search_sources(final_content, tool_results_list)
-        except Exception:
-            pass
 
         # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
         # D52 H80: receipt suppression. tools_used_names feeds the
@@ -3711,6 +3711,13 @@ async def _chat_with_max_service_impl(
         # Guard: GPU safety output fail-safe — replace model output recommending risky commands
         final_content = _apply_gpu_safety_output_guardrail(request.message, final_content)
         final_content = _sanitize_internal_leakage_text(final_content)
+        try:
+            from app.services.max.search_sources import attach_family_search_sources
+            final_content = attach_family_search_sources(
+                final_content, tool_results_list, message=request.message,
+            )
+        except Exception:
+            pass
 
         # ── Code-mode honesty guardrail ─────────────────────────────────
         # If MAX's text claims a repo write action (e.g. "I just wrote the
@@ -4036,6 +4043,11 @@ async def _chat_stream_impl(request: ChatRequest):
             yield f"data: {_safe_dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
             yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
         return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+    try:
+        from app.services.max.family_memory import persist_user_stated_facts
+        persist_user_stated_facts(request.message)
+    except Exception:
+        pass
 
     # v6.0 — unified sanitizer check on streaming endpoint
     sec_result = input_sanitizer.check(request.message, channel="chat", session_id=request.conversation_id or "")
@@ -4792,7 +4804,9 @@ async def _chat_stream_impl(request: ChatRequest):
             full_response = _sanitize_internal_leakage_text(full_response)
             try:
                 from app.services.max.search_sources import attach_family_search_sources
-                full_response = attach_family_search_sources(full_response, tool_results_list)
+                full_response = attach_family_search_sources(
+                    full_response, tool_results_list, message=request.message,
+                )
             except Exception:
                 pass
 

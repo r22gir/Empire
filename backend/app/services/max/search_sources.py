@@ -83,6 +83,23 @@ _OFFICIAL_HOST_RE = re.compile(
 _FUENTES_HEADING_RE = re.compile(
     r"(?is)\n(?:#{1,6}\s*)?(?:\*\*)?(?:fuentes|sources|references)(?:\*\*)?\s*:?[ \t]*\n.*\Z",
 )
+_EXPLICIT_SEARCH_RE = re.compile(
+    r"(?i)\b(?:"
+    r"busca(?:r)?(?:\s+en\s+(?:la\s+)?web)?"
+    r"|search(?:\s+the\s+web)?"
+    r"|look\s+up|look\s+into"
+    r"|investiga(?:r)?"
+    r"|fuentes"
+    r"|google"
+    r")\b"
+)
+_STOP_TOKENS = frozenset({
+    "este", "esta", "esto", "estos", "estas", "that", "this", "those", "these",
+    "the", "and", "para", "como", "que", "una", "unos", "unas", "con", "por",
+    "del", "los", "las", "from", "with", "about", "your", "have", "been",
+    "remember", "recuerda", "recuerde", "codigo", "code", "solo", "esta",
+    "prueba", "test", "please", "hola", "gracias",
+})
 
 
 def _host(url: str) -> str:
@@ -303,17 +320,100 @@ def extract_web_search_results(tool_results: list[Any] | None) -> list[dict]:
     return found
 
 
+def _query_tokens(message: str) -> set[str]:
+    words = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{4,}", message or "")
+    return {word.casefold() for word in words if word.casefold() not in _STOP_TOKENS}
+
+
+def web_search_was_performed(tool_results: list[Any] | None) -> bool:
+    """True when this turn actually ran a successful web_search / web_read."""
+    return bool(extract_web_search_results(tool_results))
+
+
+def user_asked_for_web_search(message: str) -> bool:
+    return bool(_EXPLICIT_SEARCH_RE.search(message or ""))
+
+
+def relevant_search_results(
+    message: str,
+    results: list[dict] | None,
+    *,
+    official_hosts: Iterable[str] | None = None,
+) -> list[dict]:
+    """Keep hits that match the query or are official / news / registry."""
+    tokens = _query_tokens(message)
+    kept: list[dict] = []
+    for row in results or []:
+        if not isinstance(row, dict):
+            continue
+        url = str(row.get("url") or "")
+        title = str(row.get("title") or "")
+        snippet = str(row.get("snippet") or "")
+        bucket = source_bucket(url, title, official_hosts=official_hosts)
+        blob = f"{title} {url} {snippet}".casefold()
+        if bucket in {"official", "news", "registry"}:
+            kept.append(row)
+            continue
+        if tokens and any(token in blob for token in tokens):
+            kept.append(row)
+    return kept
+
+
+def should_attach_family_sources(
+    message: str,
+    tool_results: list[Any] | None,
+    *,
+    official_hosts: Iterable[str] | None = None,
+) -> bool:
+    """Fuentes only when a web search was needed, ran, and the hits matter.
+
+    Memory, chitchat, and post-deploy test turns never get a Fuentes block,
+    even if the model called web_search and returned Scribd / GitHub noise.
+    """
+    try:
+        from app.services.max.factual_guard import (
+            _is_casual_spanish,
+            _is_chitchat,
+            _is_spanish_greeting_lead,
+            is_factual_question,
+            is_memory_or_test_turn,
+        )
+    except Exception:
+        return False
+    raw = (message or "").strip()
+    if not raw:
+        return False
+    if is_memory_or_test_turn(raw):
+        return False
+    folded = raw.casefold()
+    if (_is_chitchat(folded) or _is_casual_spanish(folded) or _is_spanish_greeting_lead(folded)) and not user_asked_for_web_search(raw):
+        return False
+    needed = is_factual_question(raw) or user_asked_for_web_search(raw)
+    if not needed:
+        return False
+    rows = extract_web_search_results(tool_results)
+    if not rows:
+        return False
+    return bool(relevant_search_results(raw, rows, official_hosts=official_hosts))
+
+
 def attach_ranked_sources(
     answer: str,
     tool_results: list[Any] | None,
     *,
     official_hosts: Iterable[str] | None = None,
+    message: str = "",
 ) -> str:
     """Replace or append a Fuentes list of short clickable title links."""
     rows = rank_search_results(
         extract_web_search_results(tool_results),
         official_hosts=official_hosts,
     )
+    if message:
+        rows = rank_search_results(
+            relevant_search_results(message, rows, official_hosts=official_hosts),
+            official_hosts=official_hosts,
+        )
     if not rows:
         return answer or ""
     block = format_fuentes_markdown(rows, official_hosts=official_hosts)
@@ -324,11 +424,26 @@ def attach_ranked_sources(
     return text.rstrip() + "\n\n" + block
 
 
-def attach_family_search_sources(answer: str, tool_results: list[Any] | None) -> str:
+def attach_family_search_sources(
+    answer: str,
+    tool_results: list[Any] | None,
+    message: str = "",
+) -> str:
     try:
         from app.edition import is_family_edition
         if not is_family_edition():
             return answer
     except Exception:
         return answer
-    return attach_ranked_sources(answer, tool_results)
+    if not should_attach_family_sources(message, tool_results):
+        # Drop a model-invented Fuentes list on memory / chitchat / test turns.
+        text = answer or ""
+        if message and not web_search_was_performed(tool_results):
+            try:
+                from app.services.max.factual_guard import is_memory_or_test_turn
+                if is_memory_or_test_turn(message) and _FUENTES_HEADING_RE.search("\n" + text):
+                    return _FUENTES_HEADING_RE.sub("", "\n" + text).strip()
+            except Exception:
+                pass
+        return answer
+    return attach_ranked_sources(answer, tool_results, message=message)

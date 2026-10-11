@@ -13,6 +13,9 @@ def test_script_does_not_source_or_eval_env():
     assert 'source "$env_file"' not in text
     assert "backend/venv/bin/python" in text
     assert "read_env_key" in text
+    assert "mi empresa se llama" in text
+    assert "POSTDEPLOY-" not in text
+    assert "used_percent + remaining_percent debe igualar cap_percent" in text
 
 
 def test_self_test_parses_unquoted_smtp_from():

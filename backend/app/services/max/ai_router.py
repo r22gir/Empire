@@ -1249,6 +1249,11 @@ class AIRouter:
             if is_family_edition():
                 # These editions stay on MiniMax M3 via the routing state.
                 model = None
+                try:
+                    from app.services.max.family_memory import persist_last_user_message
+                    persist_last_user_message(messages)
+                except Exception:
+                    pass
             user_text = "\n".join(
                 (m.content or "") for m in (messages or []) if getattr(m, "role", "") != "system"
             )

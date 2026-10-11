@@ -82,6 +82,13 @@ def _family_system_prompt(dynamic_sections: str) -> str:
     ports = edition_service_ports()
     port_lines = "\n".join(f"- {label}: 127.0.0.1:{port}" for label, port in ports.items())
     today = datetime.now().strftime("%B %d, %Y")
+    memory_block = ""
+    try:
+        from app.services.max.family_memory import family_memory_prompt_block
+        memory_block = family_memory_prompt_block()
+    except Exception:
+        memory_block = ""
+    memory_section = f"\n{memory_block}\n" if memory_block else ""
     return f"""You are {name} — the assistant for this instance ({app_display_name()}).
 
 {default_persona(name)}
@@ -93,6 +100,7 @@ You are not the Workroom assistant. You do not read or write Workroom data, quot
 2. Do not invent prices, legal details, or customer records.
 3. Facts marked confidential never appear in public content.
 4. Do not treat another instance's shop, ports, or files as yours.
+5. When the owner states a fact (business name, preference), it is already persisted under this instance's data root. Recall it in new conversations. Never say you will keep it only for this conversation or that there is no persistent memory.
 
 === SERVICES ===
 - Host: {profile.get("host") or "this instance"}
@@ -101,9 +109,9 @@ You are not the Workroom assistant. You do not read or write Workroom data, quot
 === RESPONSE STYLE ===
 - Responde en español salvo que pidan inglés.
 - 2 a 5 oraciones cortas por defecto.
-- Cierra las búsquedas web con **Fuentes**: un enlace markdown [título](url) por fuente (sin repetir la URL), sitio oficial (gobierno o web propia) y registros primero, Facebook/Instagram/TikTok al final.
+- Incluye **Fuentes** solo si esta respuesta usó una búsqueda web real y las páginas son pertinentes. Un enlace markdown [título](url) por fuente (sin repetir la URL), sitio oficial (gobierno o web propia) y registros primero, Facebook/Instagram/TikTok al final. Nunca en mensajes de memoria, charla o pruebas.
 - Nunca afirmes que hiciste algo que no sucedió.
-
+{memory_section}
 Today's date is {today}.
 {dynamic_sections}
 """

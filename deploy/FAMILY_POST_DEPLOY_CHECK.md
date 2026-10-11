@@ -2,7 +2,7 @@
 
 Prueba corta, en español, **después** de levantar AMP. Este pase despliega **solo Max-e** desde `/home/rg/empire-amp` (`empire-amp` :8011, `empire-amp-frontend` :3011). No toca Workroom (`/home/rg/empire-repo`, :8000 / :3005). Maxine no se despliega aquí; el script aún acepta `maxine` si esa instancia ya corre.
 
-Lo único que escribe es una frase desechable (`POSTDEPLOY-…`) en la memoria **de esa instancia**. Aislamiento, home v3 y uso son solo lectura.
+Lo único que escribe es un nombre de empresa de prueba (`Empresa Prueba <stamp>`) en la memoria **de esa instancia**. Aislamiento, home v3 y uso son solo lectura.
 
 ## En el Dell (Max-e, este pase)
 
@@ -28,7 +28,7 @@ deploy/family_post_deploy_check.sh --self-test
 
 ## 1) Memoria — decir un dato, nueva sesión, preguntarlo
 
-El script envía un código único (`POSTDEPLOY-<epoch>-<n>`) y luego abre **otro** `conversation_id`.
+El script envía un hecho realista (`Recuerda que mi empresa se llama Empresa Prueba <stamp>`) y luego abre **otro** `conversation_id`. No uses un código tipo credencial (`POSTDEPLOY-…`, “remember this code”).
 
 Comandos equivalentes a mano (Max-e):
 
@@ -65,18 +65,23 @@ TOKEN="$(
   PYTHONPATH=backend "$PY" -c \
   'import os; from app.services.amp_access import create_session_token; print(create_session_token(os.environ["AMP_OWNER_EMAIL"]))'
 )"
-PROBE="POSTDEPLOY-$(date +%s)"
+COMPANY="Empresa Prueba $(date +%s)"
 
 curl -sS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d "{\"message\":\"Recuerda solo para esta prueba, no es un dato de negocio: el código POSTDEPLOY es ${PROBE}.\",\"history\":[],\"channel\":\"web\",\"conversation_id\":\"store-${PROBE}\"}" \
+  -d "{\"message\":\"Recuerda que mi empresa se llama ${COMPANY}.\",\"history\":[],\"channel\":\"web\",\"conversation_id\":\"store-${COMPANY}\"}" \
   http://127.0.0.1:8011/api/v1/max/chat
 
 curl -sS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d "{\"message\":\"Nueva sesión. ¿Cuál es el código POSTDEPLOY de la prueba?\",\"history\":[],\"channel\":\"web\",\"conversation_id\":\"recall-${PROBE}\"}" \
+  -d "{\"message\":\"Nueva sesión. ¿Cómo se llama mi empresa?\",\"history\":[],\"channel\":\"web\",\"conversation_id\":\"recall-${COMPANY}\"}" \
   http://127.0.0.1:8011/api/v1/max/chat
 ```
 
-**Esperado:** el segundo `response` incluye el mismo `PROBE`. Español, 2–5 oraciones. Si el modelo omite el código, el script marca `WARN` (reintenta); no es un fallo de aislamiento.
+**Esperado:**
+- Primera respuesta: confirma el nombre. **Sin** bloque `**Fuentes**`. No debe decir que lo guarda solo para esta conversación.
+- Segunda respuesta (otro `conversation_id`): incluye el mismo `COMPANY`. Español, 2–5 oraciones.
+- El dato queda en `/data/amp/assistant/memory.md` y `/data/amp/facts.json`.
+
+Si no lo recuerda, es **FAIL** (ya no es WARN).
 
 ## 2) Aislamiento — desconocido / rechazo
 
@@ -122,13 +127,17 @@ curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8011/api/v1/edition/
   "enforced": true,
   "edition": "amp",
   "cap_percent": 20,
-  "used_percent": 0.0,
-  "remaining_percent": 100.0,
+  "used_percent": 13.1,
+  "remaining_percent": 6.9,
   "level": "ok",
-  "message": "...",
+  "message": "Esta instancia ha usado el 13.1% del uso total de EmpireBox este mes. El tope es el 20%. Queda el 6.9% del total.",
   "limit_note_es": "Tu uso está limitado al 20% del uso total de MiniMax."
 }
 ```
+
+**Semántica (importante):** `used_percent` es la **parte de Max-e del uso total de EmpireBox**, no “cuánto del cupo del 20% ya gastó”. `cap_percent` es el máximo de esa parte (20). `remaining_percent` es lo que falta **hasta el tope**, también como % del total. Si `used_percent < cap_percent`, entonces `used_percent + remaining_percent = cap_percent`.
+
+Dell midió `used_percent=65.7` con `cap_percent=20` y `level=ok`: eso era el medidor viejo (65.7% **del cupo** ≈ 13.1% del total). Tras el fix debe verse ~`13.1` / tope `20` / queda `6.9` / `level=ok`. Si `remaining_percent > cap_percent`, el medidor sigue mal.
 
 **No debe aparecer:** `baseline`, `baseline_basis`, `allowance`, `used`, `day`, `month`, `ratio`, `tokens`, `cost`, `usd`.
 
