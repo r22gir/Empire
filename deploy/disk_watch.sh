@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# EmpireDell disk watch for / and /data.
+# EmpireDell disk watch for /, /data, and BACKUP1 (/media/rg/BACKUP1).
 # Warn at 80%, critical at 90%. Logs top space users and known growers.
 # Cleanup mode is dry-run only: it lists candidates and never deletes.
+# BACKUP1 is vfat and may be unplugged — an unmounted volume is a warning,
+# not a df of the empty /media/rg/BACKUP1 stub on the root disk.
 #
 # Env:
-#   DISK_WATCH_MOUNTS   Space-separated mounts (default "/ /data")
+#   DISK_WATCH_MOUNTS   Space-separated mounts (default "/ /data /media/rg/BACKUP1")
 #   WARN_PCT / CRIT_PCT Thresholds (default 80 / 90)
-#   DISK_USAGE_FILE     Mock df table for tests (lines: "<mount> <pct>")
+#   DISK_USAGE_FILE     Mock df table for tests (lines: "<mount> <pct|unmounted>")
 #   SCAN_ROOTS          Roots for du / grower scan (default: the mounts)
 #   MAX_NOTIFY_URL      Max internal notification endpoint
 #   ALERT_EMAIL         Forced to empirebox2026@gmail.com outside tests
@@ -24,7 +26,8 @@ umask 077
 LOG_PREFIX="[disk-watch]"
 WARN_PCT="${WARN_PCT:-80}"
 CRIT_PCT="${CRIT_PCT:-90}"
-DISK_WATCH_MOUNTS="${DISK_WATCH_MOUNTS:-/ /data}"
+DISK_WATCH_MOUNTS="${DISK_WATCH_MOUNTS:-/ /data /media/rg/BACKUP1}"
+BACKUP_WATCH_VOLUME="${BACKUP_WATCH_VOLUME:-/media/rg/BACKUP1}"
 SCAN_ROOTS="${SCAN_ROOTS:-$DISK_WATCH_MOUNTS}"
 DISK_USAGE_FILE="${DISK_USAGE_FILE:-}"
 MAX_NOTIFY_URL="${MAX_NOTIFY_URL:-http://127.0.0.1:8000/api/v1/notifications/internal}"
@@ -67,7 +70,7 @@ usage() {
   cat <<'EOF'
 Usage: disk_watch.sh [--cleanup] [--help]
 
-  (default)  Check / and /data. Warn at 80%, critical at 90%.
+  (default)  Check /, /data, and /media/rg/BACKUP1. Warn at 80%, critical at 90%.
   --cleanup  Dry-run only: list reclaim candidates, do not delete.
 
 Alerts go to Max notifications / Max email (empirebox2026@gmail.com)
@@ -156,11 +159,31 @@ deliver_alert() {
   return 1
 }
 
+volume_is_mounted() {
+  local vol="$1"
+  if [[ -n "${MOUNTPOINT_BIN:-}" ]]; then
+    "$MOUNTPOINT_BIN" -q "$vol"
+    return $?
+  fi
+  if command -v mountpoint >/dev/null 2>&1; then
+    mountpoint -q "$vol"
+    return $?
+  fi
+  findmnt -n --target "$vol" >/dev/null 2>&1
+}
+
 mount_pct() {
   local mount="$1"
   if [[ -n "$DISK_USAGE_FILE" ]]; then
     awk -v m="$mount" '$1==m {print $2; found=1} END{if(!found) exit 1}' "$DISK_USAGE_FILE"
     return
+  fi
+  # Never df the BACKUP1 stub directory on / — that reports root-disk usage.
+  if [[ "$mount" == "$BACKUP_WATCH_VOLUME" ]] || [[ "$mount" == /media/rg/BACKUP1 ]]; then
+    if ! volume_is_mounted "$mount"; then
+      printf '%s\n' "unmounted"
+      return 0
+    fi
   fi
   df -P "$mount" | awk 'NR==2 { gsub(/%/,"",$5); print $5 }'
 }
@@ -168,6 +191,14 @@ mount_pct() {
 log_top_space_users() {
   local root="$1"
   [[ -d "$root" ]] || { log "skip du: $root is not a directory"; return 0; }
+  if [[ "${EMPIRE_OPS_TEST_MODE:-}" != "1" ]]; then
+    if [[ "$root" == "$BACKUP_WATCH_VOLUME" || "$root" == /media/rg/BACKUP1 ]]; then
+      if ! volume_is_mounted "$root"; then
+        log "skip du: $root is not mounted"
+        return 0
+      fi
+    fi
+  fi
   log "top ${TOP_N} space users under $root"
   # -x stays on one filesystem; failures on unreadable dirs are ignored.
   du -x -d 2 "$root" 2>/dev/null | sort -nr | head -n "$TOP_N" | while IFS= read -r line; do
@@ -250,6 +281,14 @@ check_mounts() {
   for mount in $DISK_WATCH_MOUNTS; do
     if ! pct="$(mount_pct "$mount")"; then
       die "could not read usage for $mount"
+    fi
+    if [[ "$pct" == "unmounted" ]]; then
+      log "WARN: $mount is not mounted (BACKUP1 absent — not writing/reading the root-disk stub)"
+      warnings+=("$mount unmounted")
+      if [[ "$status" != "critical" ]]; then
+        status="warn"
+      fi
+      continue
     fi
     log "usage $mount ${pct}%"
     if (( pct >= CRIT_PCT )); then

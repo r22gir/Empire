@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=%h/empire-repo
-Environment=BACKUP_DIR=/mnt/backup
+Environment=BACKUP_DIR=/media/rg/BACKUP1/family-backups
 EnvironmentFile=-%h/.config/empire/family-backup.env
 ExecStart=%h/empire-repo/deploy/backup_family_data.sh
 Nice=10

@@ -12,9 +12,16 @@ Install steps: [`deploy/README.md`](../../deploy/README.md).
 | `/data/minimax-meter` | MiniMax meter state |
 | `/data/family-help` | Family help; `memory.md` and `conversations.db` |
 
-Nightly backup writes `$BACKUP_DIR/daily/family-data-*.tar.zst` (default
-`/mnt/backup`), restore-tests the archive, keeps 14 dailies and 8 Sunday
-weeklies, and copies offsite when `RCLONE_REMOTE` is set.
+Nightly backup writes encrypted archives to
+`/media/rg/BACKUP1/family-backups` on the external **BACKUP1** drive
+(~931G, vfat/FAT32). It restore-tests (decrypt + list + extract), keeps 14
+dailies and 8 Sunday weeklies, and copies offsite when `RCLONE_REMOTE` is set.
+
+BACKUP1 has no Unix permissions (so archives are encrypted with
+`~/.config/empire-backup/key`), a 4GiB−1 file-size cap (large blobs are
+split), and colon-free names. If the drive is unplugged, `/media/rg/BACKUP1`
+is usually an empty directory on `/` — the backup **fails** instead of
+writing onto the root disk.
 
 ## Daily checks
 
@@ -22,12 +29,17 @@ weeklies, and copies offsite when `RCLONE_REMOTE` is set.
 systemctl --user status empire-family-backup.timer empire-disk-watch.timer
 journalctl --user -u empire-family-backup.service -n 50 --no-pager
 journalctl --user -u empire-disk-watch.service -n 50 --no-pager
-df -h / /data /mnt/backup
-ls -lt /mnt/backup/daily | head
+findmnt /media/rg/BACKUP1
+df -h / /data /media/rg/BACKUP1
+ls -lt /media/rg/BACKUP1/family-backups/daily | head
 ```
 
-Disk watch warns at 80% and is critical at 90% on `/` and `/data`. Cleanup
-is list-only:
+If `findmnt` shows nothing, plug BACKUP1 in and wait for the desktop/usbmount
+to attach it. Do not `mkdir` backups under the empty stub.
+
+Disk watch warns at 80% and is critical at 90% on `/`, `/data`, and
+`/media/rg/BACKUP1`. An unmounted BACKUP1 is a warning (not a `df` of `/`).
+Cleanup is list-only:
 
 ```bash
 ./deploy/disk_watch.sh --cleanup
@@ -38,20 +50,26 @@ they are caches or rebuildable artifacts.
 
 ## Restore one tree
 
-1. Stop anything writing that tree (family-help / Maxine / AMP / meter).
-2. Follow **Restore** in `deploy/README.md` (extract to `/tmp/family-restore` first).
-3. `rsync -aH --delete` the staged tree onto `/data/<name>/`.
-4. Confirm `memory.md` and `conversations.db` if those files belong to the tree.
-5. Start services and spot-check a conversation or AMP record.
+1. Confirm BACKUP1 is mounted and you have `~/.config/empire-backup/key`.
+2. Stop anything writing that tree (family-help / Maxine / AMP / meter).
+3. Follow **Restore** in `deploy/README.md` (decrypt, then extract to
+   `/tmp/family-restore` first). Join `.partNN` files with `cat` before decrypt
+   if the archive was split for FAT32.
+4. `rsync -aH --delete` the staged tree onto `/data/<name>/`.
+5. Confirm `memory.md` and `conversations.db` if those files belong to the tree.
+6. Start services and spot-check a conversation or AMP record.
 
 ## Move `/data` to a larger drive
 
-Do this on a maintenance window. Keep `/mnt/backup` on a **different** disk
-than the new `/data` so a disk failure does not take both copies.
+Do this on a maintenance window. Keep BACKUP1 (`/media/rg/BACKUP1`) on a
+**different** disk than the new `/data` so a disk failure does not take both
+copies.
 
 1. Attach the new disk, partition, and filesystem (example: `ext4` on `/dev/sdX1`).
-2. Take a backup **and** wait for `empire-family-backup.service` to finish
-   successfully (`systemctl --user status`).
+   Prefer ext4/xfs for `/data` — not FAT32 (4GiB file cap, no Unix perms).
+2. Confirm BACKUP1 is mounted. Take a backup **and** wait for
+   `empire-family-backup.service` to finish successfully
+   (`systemctl --user status`).
 3. Stop writers:
 
    ```bash
@@ -100,10 +118,12 @@ Caches listed by `disk_watch.sh --cleanup` are a temporary reclaim only.
 
 - The unit must stay failed (`systemctl --user status` non-zero). Do not mark it
   successful by hand.
-- Common causes: `/mnt/backup` unmounted, `zstd` missing, a source tree
-  vanished, rclone remote misconfigured.
-- Fix the cause and run `BACKUP_DIR=/mnt/backup ./deploy/backup_family_data.sh`
-  once interactively before re-enabling the timer.
+- Common causes: BACKUP1 unplugged/unmounted, missing
+  `~/.config/empire-backup/key`, `zstd`/`gpg` missing, a source tree vanished,
+  rclone remote misconfigured.
+- Plug the drive in, `findmnt /media/rg/BACKUP1`, then run
+  `./deploy/backup_family_data.sh` once interactively before re-enabling the
+  timer.
 
 ## Alerts
 

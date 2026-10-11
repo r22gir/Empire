@@ -31,7 +31,7 @@ assert_temp_path() {
 assert_not_live_host_path() {
   local p="$1"
   case "$p" in
-    /data|/data/*|/mnt/backup|/mnt/backup/*|/)
+    /data|/data/*|/mnt/backup|/mnt/backup/*|/media/rg/BACKUP1|/media/rg/BACKUP1/*|/)
       echo "REFUSING live host path: $p" >&2
       exit 99
       ;;

@@ -39,14 +39,18 @@ chmod +x "$HOOK"
 
 export EMPIRE_OPS_TEST_MODE=1
 export SCAN_ROOTS="$SCAN"
-export DISK_WATCH_MOUNTS="/ /data"
+export DISK_WATCH_MOUNTS="/ /data /media/rg/BACKUP1"
 export DISK_USAGE_FILE="$USAGE"
 export MAX_ALERT_HOOK="$HOOK"
 export TMPDIR="$ROOT"
 export TOP_N=5
 
+echo "== disk_watch: defaults include BACKUP1 =="
+expect_file_contains "$SCRIPT" '/media/rg/BACKUP1' \
+  "default mounts include /media/rg/BACKUP1"
+
 echo "== disk_watch: below warn exits 0, no alert =="
-printf '/ 10\n/data 20\n' >"$USAGE"
+printf '/ 10\n/data 20\n/media/rg/BACKUP1 15\n' >"$USAGE"
 set +e
 "$SCRIPT" >"$ROOT/ok.log" 2>&1
 rc=$?
@@ -61,7 +65,7 @@ expect_file_contains "$ROOT/ok.log" "top 5 space users under $SCAN" "logs du top
 expect_file_contains "$ROOT/ok.log" "node_modules" "logs node_modules grower"
 
 echo "== disk_watch: 80% warn exits 1 and alerts =="
-printf '/ 80\n/data 40\n' >"$USAGE"
+printf '/ 80\n/data 40\n/media/rg/BACKUP1 15\n' >"$USAGE"
 set +e
 "$SCRIPT" >"$ROOT/warn.log" 2>&1
 rc=$?
@@ -70,7 +74,7 @@ expect_eq "$rc" "1" "80% warn exits 1"
 expect_file_contains "$ROOT/alerts.log" "EmpireDell disk warn" "warn alert delivered via hook"
 
 echo "== disk_watch: 90% critical on /data exits 2 =="
-printf '/ 10\n/data 90\n' >"$USAGE"
+printf '/ 10\n/data 90\n/media/rg/BACKUP1 15\n' >"$USAGE"
 set +e
 "$SCRIPT" >"$ROOT/crit.log" 2>&1
 rc=$?
@@ -79,7 +83,7 @@ expect_eq "$rc" "2" "90% critical exits 2"
 expect_file_contains "$ROOT/alerts.log" "EmpireDell disk critical" "critical alert delivered"
 
 echo "== disk_watch: missing alert mechanism logs and exits non-zero =="
-printf '/ 85\n/data 10\n' >"$USAGE"
+printf '/ 85\n/data 10\n/media/rg/BACKUP1 15\n' >"$USAGE"
 set +e
 MAX_ALERT_HOOK="$ROOT/missing-hook" \
   "$SCRIPT" >"$ROOT/no-alert.log" 2>&1
@@ -94,6 +98,24 @@ expect_file_contains "$ROOT/no-alert.log" "no Max notification/email mechanism a
   "logs when Max notify/email is absent"
 expect_file_contains "$ROOT/no-alert.log" "empirebox2026@gmail.com" \
   "logged alert names empirebox2026@gmail.com"
+
+echo "== disk_watch: BACKUP1 90% is critical =="
+printf '/ 10\n/data 10\n/media/rg/BACKUP1 90\n' >"$USAGE"
+set +e
+"$SCRIPT" >"$ROOT/backup1-crit.log" 2>&1
+rc=$?
+set -e
+expect_eq "$rc" "2" "BACKUP1 90% exits 2"
+expect_file_contains "$ROOT/backup1-crit.log" "/media/rg/BACKUP1 90%" "logs BACKUP1 usage"
+
+echo "== disk_watch: unmounted BACKUP1 is a warning =="
+printf '/ 10\n/data 10\n/media/rg/BACKUP1 unmounted\n' >"$USAGE"
+set +e
+"$SCRIPT" >"$ROOT/backup1-unmounted.log" 2>&1
+rc=$?
+set -e
+expect_eq "$rc" "1" "unmounted BACKUP1 exits 1 (warn)"
+expect_file_contains "$ROOT/backup1-unmounted.log" "not mounted" "logs BACKUP1 unmounted"
 
 echo "== disk_watch: cleanup is dry-run and does not delete =="
 set +e
