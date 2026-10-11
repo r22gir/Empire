@@ -50,6 +50,107 @@ PR does not include them and deploy must not overwrite them:
 
 Use `git stash` for those three (below). Do not merge-then-restore.
 
+## Origin vs the Dell’s 22 local commits
+
+`origin/deploy/pr82-84-85` **does not have** the Dell’s local commits.
+
+| Ref | SHA | On GitHub? |
+|---|---|---|
+| `origin/deploy/pr82-84-85` | `86f5889a` (`docs: deploy runbook for deploy/pr82-84-85`) | yes |
+| Dell live HEAD | `92e3aeab` (`Merge PR #94 follow-up 9c34d3eb (family alias gate) locally`) | **no** |
+| PR #94 follow-up | `9c34d3eb` (`Keep family editions off Rafael's repo aliases.`) | yes, only on `cursor/whatsapp-phase0-folders-8454` |
+
+Checked 2026-10-11: `git cat-file` / GitHub API return no object for `92e3aeab`. `9c34d3eb` is not an ancestor of `origin/deploy/pr82-84-85`. PR #94 itself does **not** touch the three portal files — it is backend WhatsApp / alias-gate only. The three-file conflicts come from the Dell being **22 commits ahead of origin** (local merges + any other local portal edits on those hot files), not from GitHub.
+
+Do **not** `git pull origin deploy/pr82-84-85` on the Dell before merging this PR: that would rewind or fight the 22 local commits. Stay on local `deploy/pr82-84-85` (`92e3aeab`) and merge the PR branch into it.
+
+This PR now touches those three files only with **one-line hooks**. Screens, nav items, and screen ids live in:
+
+- `empire-command-center/app/lib/founderScreens.ts`
+- `empire-command-center/app/lib/founderPortal.tsx`
+
+## Exact Dell conflict resolution (if merge still flags the three files)
+
+Take **the Dell’s copy** of each file, then apply only the hunks below. Do not drop Dell-only screens / nav rows / union members.
+
+### 1. `empire-command-center/app/lib/types.ts`
+
+At the top of the file (first line):
+
+```ts
+import type { FounderScreenMode } from './founderScreens';
+```
+
+On the `ScreenMode` union, keep every Dell member and append `| FounderScreenMode`.
+
+Origin-shaped line (if Dell did not add members):
+
+```ts
+export type ScreenMode = 'chat' | 'quote' | 'docs' | 'research' | 'video' | 'dashboard' | 'desks' | 'inbox' | 'memory-bank' | 'report' | 'tickets' | 'shipping' | 'costs' | 'mail' | 'tasks' | 'calendar' | 'telegram' | 'product-docs' | 'pricing' | 'pricing-studio' | 'business-profile' | 'presentation' | 'dev' | 'jobs' | 'invoices' | 'final-docs' | 'invoice' | FounderScreenMode;
+```
+
+If Dell already added members (example: `'whatsapp'`), resolved form is:
+
+```ts
+export type ScreenMode = 'chat' | /* …Dell members… */ | 'invoice' | 'whatsapp' | FounderScreenMode;
+```
+
+Do **not** replace Dell’s union with this PR’s origin-shaped list.
+
+### 2. `empire-command-center/app/components/layout/LeftNav.tsx`
+
+Keep the Dell `NAV_GROUPS` array unchanged (do not insert rows inside Command). Add the import next to the other local imports:
+
+```ts
+import { hookFounderNav } from '../../lib/founderPortal';
+```
+
+Immediately after the `NAV_GROUPS` closing `];`:
+
+```ts
+hookFounderNav(NAV_GROUPS);
+```
+
+That injects **Ayuda de ediciones familiares** and **Uso MiniMax** after `owner` without editing the Command items list. Safe if Dell already added other Command rows.
+
+If a conflict marker lands inside the lucide import or the Command `items: [` block, take the Dell side of that block and keep only the two hook lines above.
+
+### 3. `empire-command-center/app/CommandCenterApp.tsx`
+
+Keep Dell’s screen import list and the long `if (activeScreen === …)` chain. Add one import under the types import:
+
+```ts
+import { hookFounderDeepLinks, renderFounderScreen } from './lib/founderPortal';
+```
+
+Immediately after `NAV_SCREEN_IDS` is created (after its closing `]);`):
+
+```ts
+hookFounderDeepLinks(SCREEN_DEEP_LINKS as Record<string, string>, NAV_SCREEN_IDS);
+```
+
+First lines of `renderCenterContent`:
+
+```ts
+  const renderCenterContent = () => {
+    const founderScreen = renderFounderScreen(activeScreen);
+    if (founderScreen) return founderScreen;
+    // Dashboard renders product-specific pages
+```
+
+If conflict markers appear on the `SCREEN_DEEP_LINKS` / `NAV_SCREEN_IDS` literals or the inbox/memory-bank `if` chain, take the Dell side and keep only the three hook lines above. Do not add `FamilyHelpInbox` / `MinimaxUsageScreen` imports into this file.
+
+Ready-to-run after the three files are resolved:
+
+```bash
+cd /home/rg/empire-repo-main
+git add \
+  empire-command-center/app/lib/types.ts \
+  empire-command-center/app/components/layout/LeftNav.tsx \
+  empire-command-center/app/CommandCenterApp.tsx
+git status -sb   # expect the new founderScreens/founderPortal files from the PR, plus these three
+```
+
 ## Exact Dell deploy steps (after Rafael approves)
 
 On the Dell checkout `/home/rg/empire-repo-main`, edition studio,
@@ -69,12 +170,16 @@ git stash push -u -m "dell-local-before-family-help" -- \
   backend/app/config/client_aliases.json \
   max/memory.md
 
-# 3. Fetch and merge this draft branch into deploy/pr82-84-85
-#    (only after Rafael says to). Do NOT checkout the family branch.
+# 3. Fetch and merge this draft branch into the Dell's local
+#    deploy/pr82-84-85 (22 commits ahead of origin, HEAD 92e3aeab).
+#    Do NOT git pull origin deploy/pr82-84-85 — that would rewind
+#    the local commits. Do NOT checkout the family branch.
 git fetch origin
 git checkout deploy/pr82-84-85
-git pull origin deploy/pr82-84-85
+git log -1 --oneline    # expect 92e3aeab (or later local HEAD)
 git merge --no-ff origin/cursor/personal-max-family-meter-753b
+# If the three portal files conflict, apply the hunks in
+# "Exact Dell conflict resolution" above, then git add those files.
 
 # 4. Put the three local files back
 git stash pop
@@ -112,7 +217,7 @@ Do **not** start a second uvicorn on :8000.
 
 ```bash
 cd backend && PYTHONPATH=. pytest tests/test_family_help.py tests/test_minimax_meter.py tests/test_minimax_meter_gates.py -q
-cd empire-command-center && node --experimental-strip-types --test app/lib/familyHelp.test.ts app/lib/minimaxUsage.test.ts
+cd empire-command-center && node --experimental-strip-types --test app/lib/familyHelp.test.ts app/lib/minimaxUsage.test.ts app/lib/founderScreens.test.ts
 ```
 
 Studio click-through after deploy:
