@@ -4665,6 +4665,9 @@ def _web_search(params: dict, desk: Optional[str] = None) -> ToolResult:
         except Exception as e:
             logger.warning(f"[web_search] Brave also failed: {type(e).__name__}: {e}")
 
+    from app.services.max.search_sources import rank_search_results
+
+    results = rank_search_results(results)
     logger.info(f"[web_search] query='{query}' returned {len(results)} results via {source}")
     return ToolResult(tool="web_search", success=True, result={
         "query": query, "results": results, "count": len(results), "source": source,

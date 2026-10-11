@@ -112,7 +112,7 @@ export default function ChatMarkdown({ text, question = '', onQuoteNumber, onBui
     if (i === srcIdx && (b.t === 'ul' || b.t === 'ol')) {
       nodes.push(
         <details key={i} className="cm-sources">
-          <summary>Sources ({b.items.length})</summary>
+          <summary>{/fuentes/i.test(text) ? 'Fuentes' : 'Sources'} ({b.items.length})</summary>
           <ol>{b.items.map((it, k) => <Html key={k} as="li" html={inline(it, question)} />)}</ol>
         </details>,
       );

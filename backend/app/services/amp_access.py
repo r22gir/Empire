@@ -42,10 +42,23 @@ OWNER_SESSION_TTL_DAYS = max(1, int(os.getenv("AMP_OWNER_SESSION_TTL_DAYS", "365
 MAX_CODE_ATTEMPTS = 5
 
 
+def _is_production_runtime() -> bool:
+    """Public family hosts and EMPIRE_ENV=production are production."""
+    for key in ("EMPIRE_ENV", "ENVIRONMENT", "AMP_ENV"):
+        if os.getenv(key, "").strip().lower() in {"production", "prod"}:
+            return True
+    public = (os.getenv("AMP_PUBLIC_BASE_URL") or "").strip().lower()
+    return "amp.empirebox.store" in public or "maxine.empirebox.store" in public
+
+
 def open_access_enabled() -> bool:
-    """Temporary family-site mode; disabled unless explicitly enabled."""
+    """Local Dell convenience only. Never honor AMP_OPEN_ACCESS in production."""
     raw = os.getenv("AMP_OPEN_ACCESS", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    if raw not in {"1", "true", "yes", "on"}:
+        return False
+    if _is_production_runtime():
+        return False
+    return True
 
 
 def open_access_owner_email() -> str:

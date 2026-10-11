@@ -205,11 +205,13 @@ def read_search_results(
     Each wave runs in parallel. The first wave is the top ``target_max`` hits;
     a shortfall triggers one more parallel wave.
     """
+    from app.services.max.search_sources import rank_search_results
+
     fetch_fn = fetch or default_fetch
     undated = undated_source_label(question)
     skip = {item.rstrip("/") for item in (skip_urls or set())}
     candidates: list[dict] = []
-    for item in results or []:
+    for item in rank_search_results(results or []):
         if not isinstance(item, dict):
             continue
         url = str(item.get("url") or "").strip()

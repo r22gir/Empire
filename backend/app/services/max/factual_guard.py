@@ -176,6 +176,19 @@ def undated_source_label(message: str | None) -> str:
 
 def grounding_directive(message: str | None = None) -> str:
     """Prompt contract for numbered citations, Sources, and fact/inference split."""
+    try:
+        from app.edition import is_family_edition
+        if is_family_edition():
+            return (
+                "Responde en 2 a 5 oraciones cortas en español. Usa solo las páginas "
+                "ya leídas. Cita con enlaces markdown [título](url). Termina con "
+                "**Fuentes**: lista numerada de enlaces clicables (título + URL). "
+                "Orden: sitio oficial y registros/listados primero, noticias de "
+                "referencia después, Facebook / Instagram / TikTok al final. "
+                "No inventes fechas ni fuentes."
+            )
+    except Exception:
+        pass
     undated = undated_source_label(message)
     recommend = ""
     if message and re.search(
