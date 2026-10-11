@@ -1,0 +1,130 @@
+import { API } from './api';
+import { editionFromEnv, isFamilyEdition } from './edition';
+export { familyHelpLabels } from './familyHelpCopy';
+
+export function isFamilyHelpSurface(edition = editionFromEnv()): boolean {
+  return isFamilyEdition(edition);
+}
+
+export type HelpStatus = 'new' | 'answered' | 'closed';
+
+export type HelpAttachment = {
+  id: string;
+  kind: string;
+  filename: string;
+  content_type?: string;
+  size?: number;
+};
+
+export type HelpReply = {
+  id: string;
+  author: string;
+  body: string;
+  created_at: string;
+  usage_tokens?: number;
+};
+
+export type HelpUsage = {
+  reply_tokens?: number;
+  charged_to?: string;
+  note?: string;
+};
+
+export type HelpTicket = {
+  id: string;
+  edition: string;
+  sender: string;
+  message: string;
+  transcript?: string;
+  transcript_pending?: boolean;
+  attachments_hidden?: boolean;
+  attachments_revealed?: boolean;
+  attachment_count?: number;
+  context?: Array<{ role: string; content: string }>;
+  status: HelpStatus;
+  created_at: string;
+  updated_at: string;
+  attachments?: HelpAttachment[];
+  replies?: HelpReply[];
+  drafts?: HelpReply[];
+  usage?: HelpUsage;
+};
+
+export function attachmentUrl(ticketId: string, attachmentId: string, founder: boolean): string {
+  const base = founder
+    ? `${API}/family-help/inbox/${ticketId}/attachments/${attachmentId}`
+    : `${API}/family-help/tickets/${ticketId}/attachments/${attachmentId}`;
+  return `${base}?_v=${Date.now()}`;
+}
+
+export async function fetchHelpStatus(): Promise<any> {
+  const res = await fetch(`${API}/family-help/status`, { cache: 'no-store', credentials: 'include' });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function fetchOwnTickets(): Promise<HelpTicket[]> {
+  const res = await fetch(`${API}/family-help/tickets`, { cache: 'no-store', credentials: 'include' });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.tickets || [];
+}
+
+export async function fetchInbox(edition?: string): Promise<HelpTicket[]> {
+  const q = edition ? `?edition=${encodeURIComponent(edition)}` : '';
+  const res = await fetch(`${API}/family-help/inbox${q}`, { cache: 'no-store', credentials: 'include' });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.tickets || [];
+}
+
+export async function retryTranscript(ticketId: string, founder: boolean, language?: string): Promise<HelpTicket | null> {
+  const path = founder
+    ? `${API}/family-help/inbox/${ticketId}/transcribe`
+    : `${API}/family-help/tickets/${ticketId}/transcribe`;
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ language: language || null }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return null;
+  return data.ticket || null;
+}
+
+export async function revealInboxAttachments(ticketId: string): Promise<HelpTicket | null> {
+  const res = await fetch(`${API}/family-help/inbox/${ticketId}/reveal-attachments`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return null;
+  return data.ticket || null;
+}
+
+export async function createHelpTicket(input: {
+  message: string;
+  history: Array<{ role: string; content: string }>;
+  files: File[];
+  voice?: Blob | null;
+  voiceName?: string;
+  language?: string | null;
+}): Promise<{ ok: boolean; ticket?: HelpTicket; detail?: string }> {
+  const body = new FormData();
+  body.append('message', input.message || '');
+  body.append('history_json', JSON.stringify(input.history || []));
+  if (input.language) body.append('language', input.language);
+  if (input.voice) {
+    body.append('voice', input.voice, input.voiceName || 'recording.webm');
+  }
+  for (const file of input.files) body.append('files', file, file.name);
+  const res = await fetch(`${API}/family-help/tickets`, {
+    method: 'POST',
+    body,
+    credentials: 'include',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, detail: data.detail || `HTTP ${res.status}` };
+  return { ok: true, ticket: data.ticket };
+}

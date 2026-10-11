@@ -212,6 +212,11 @@ load_router("app.routers.intake_auth", "/api/v1/intake", ["intake"])
 # AMP — Actitud Mental Positiva platform
 load_router("app.routers.amp", "/api/v1/amp", ["amp"])
 
+# Founder inbox for Max-e / Maxine help tickets (reads /data/family-help)
+load_router("app.routers.family_help", "/api/v1", ["family-help"])
+# Shared MiniMax meter + H3 approval (founder aggregator)
+load_router("app.routers.minimax_meter", "/api/v1", ["minimax-meter"])
+
 # LLC Factory — Business formation services (DC/MD/VA)
 load_router("app.routers.llcfactory", "/api/v1", ["llcfactory"])
 
@@ -396,6 +401,14 @@ async def start_background_services():
         print(f"✓ MAX startup health: commit={record.get('running_commit_hash')} registry={record.get('registry_version')}")
     except Exception as e:
         print(f"✗ MAX startup health record: {e}")
+
+    try:
+        from app.services.minimax_m31_flash import maybe_startup_probe
+        probe = maybe_startup_probe()
+        if probe.get("live"):
+            print(f"✓ MiniMax-M3.1-Flash-Preview probe: {probe.get('reason')}")
+    except Exception as e:
+        print(f"✗ MiniMax-M3.1-Flash-Preview probe: {e}")
 
     # D28 2a/2b — code-task sweep + rehydrate. Order is load-bearing:
     # sweep MUST run first so every persisted row has a terminal state

@@ -1,3 +1,5 @@
+import type { FounderScreenMode } from './founderScreens';
+
 // Ecosystem product = left nav item
 export type EcosystemProduct = 'owner' | 'workroom' | 'craft' | 'social' | 'platform' | 'openclaw' | 'vendorops' | 'recovery' | 'luxe' | 'hardware' | 'system' | 'tokens' | 'max-continuity' | 'market' | 'contractor' | 'support' | 'lead' | 'ship' | 'crm' | 'relist' | 'llc' | 'apost' | 'assist' | 'pay' | 'amp' | 'vetforge' | 'petforge' | 'vision' | 'max-avatar' | 'dev' | 'drawings' | 'construction' | 'storefront' | 'archive' | 'transcript' | 'improvements';
 
@@ -5,7 +7,7 @@ export type EcosystemProduct = 'owner' | 'workroom' | 'craft' | 'social' | 'plat
 export type BusinessTab = 'max' | 'workroom' | 'craft' | 'social' | 'platform' | 'tickets' | 'shipping';
 
 // What's shown in center content area
-export type ScreenMode = 'chat' | 'quote' | 'docs' | 'research' | 'video' | 'dashboard' | 'desks' | 'inbox' | 'memory-bank' | 'report' | 'tickets' | 'shipping' | 'costs' | 'mail' | 'tasks' | 'calendar' | 'telegram' | 'product-docs' | 'pricing' | 'pricing-studio' | 'business-profile' | 'presentation' | 'dev' | 'jobs' | 'invoices' | 'final-docs' | 'invoice';
+export type ScreenMode = 'chat' | 'quote' | 'docs' | 'research' | 'video' | 'dashboard' | 'desks' | 'inbox' | 'memory-bank' | 'report' | 'tickets' | 'shipping' | 'costs' | 'mail' | 'tasks' | 'calendar' | 'telegram' | 'product-docs' | 'pricing' | 'pricing-studio' | 'business-profile' | 'presentation' | 'dev' | 'jobs' | 'invoices' | 'final-docs' | 'invoice' | FounderScreenMode;
 
 export type SidebarIcon = 'chat' | 'dashboard' | 'desks' | 'inbox' | 'files' | 'search' | 'voice' | 'settings';
 export type RightTab = 'desks' | 'inbox' | 'system' | 'memory';
