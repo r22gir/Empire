@@ -11,6 +11,7 @@ import {
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
+  Video, MessageCircle,
   ChevronDown, ChevronRight, LayoutGrid, CalendarCheck,
   FileStack,
 } from 'lucide-react';
@@ -56,6 +57,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'daily-summary', name: 'Daily Summary', icon: <LayoutDashboard size={16} />, status: 'active', color: '#7c3aed', kind: 'daily-summary' },
       // Final Docs hub: latest final estimate / presentation / invoice / drawings / photos per job.
       { id: 'final-docs', name: 'Final Docs', icon: <FileStack size={16} />, status: 'active', color: '#00e5ff', screen: 'final-docs' as ScreenMode, kind: 'screen' },
+      { id: 'max-avatar', name: 'MAX Avatar', icon: <Monitor size={16} />, status: 'active', color: '#b8960c', screen: 'presentation' as ScreenMode, kind: 'screen' },
     ],
   },
   {
@@ -132,6 +134,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'vetforge', name: 'VetForge', icon: <Heart size={16} />, status: 'planned', color: '#ef4444', kind: 'product' },
       { id: 'petforge', name: 'PetForge', icon: <PawPrint size={16} />, status: 'planned', color: '#ef4444', kind: 'product' },
       { id: 'dev', name: 'Developer Panel', icon: <Monitor size={16} />, status: 'dev', color: '#b8960c', kind: 'product' },
+      { id: 'video', name: 'Video Call', icon: <Video size={16} />, status: 'active', color: '#16a34a', screen: 'video' as ScreenMode, kind: 'screen' },
+      { id: 'telegram', name: 'Telegram', icon: <MessageCircle size={16} />, status: 'active', color: '#2563eb', screen: 'telegram' as ScreenMode, kind: 'screen' },
+      { id: 'memory-bank', name: 'Memory Bank', icon: <Archive size={16} />, status: 'active', color: '#7c3aed', screen: 'memory-bank' as ScreenMode, kind: 'screen' },
     ],
   },
 ];

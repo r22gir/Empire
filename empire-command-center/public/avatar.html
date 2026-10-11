@@ -51,7 +51,15 @@ import { TalkingHead } from '/talkinghead/talkinghead.mjs';
 import { mp3Base64ToPcm16, pcm16FromFloat, startSimliFace } from '/simli-face.js';
 
 const params = new URLSearchParams(location.search);
-const edition = (params.get('edition') || 'workroom').toLowerCase().replace('-', '_');
+function normalizeEdition(raw) {
+  const key = String(raw || '').toLowerCase().replace(/-/g, '_');
+  if (key === 'amp' || key === 'maxe' || key === 'max_e') return 'max_e';
+  if (key === 'maxine') return 'maxine';
+  if (key === 'workroom' || key === 'empire' || key === 'max') return 'workroom';
+  return key || 'workroom';
+}
+const edition = normalizeEdition(params.get('edition'));
+const fallback = (params.get('fallback') || 'talkinghead').toLowerCase();
 const EDITION_GLB = {
   workroom: { url: '/avatars/workroom.glb', body: 'M' },
   max_e: { url: '/avatars/max-e.glb', body: 'M' },
@@ -147,6 +155,13 @@ async function init() {
     showBadge('');
     tellParent({ success: true, renderer: 'simli', placeholder: false, placeholderNote: '' });
     window.parent.postMessage({ type: 'avatar-loaded', success: true, renderer: 'simli' }, '*');
+    return;
+  }
+  if (fallback === 'none') {
+    renderer = 'none';
+    loading.style.display = 'none';
+    tellParent({ success: false, renderer: 'none', placeholder: false, placeholderNote: '', reason: fallbackReason });
+    window.parent.postMessage({ type: 'avatar-loaded', success: false, renderer: 'none' }, '*');
     return;
   }
   try {

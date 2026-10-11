@@ -286,6 +286,8 @@ def test_avatar_html_edition_and_placeholder_contract():
     assert "body: 'F'" in html
     assert "startSimliFace" in html
     assert "live-pcm" in html
+    assert "normalizeEdition" in html
+    assert "fallback === 'none'" in html
     client = (root / "simli-face.js").read_text(encoding="utf-8")
     assert "x-simli-api-key" not in client
     assert "SIMLI_API_KEY" not in client
@@ -298,7 +300,8 @@ def test_avatar_html_edition_and_placeholder_contract():
         / "screens"
         / "PresentationScreen.tsx"
     ).read_text(encoding="utf-8")
-    assert "/avatar.html?edition=workroom" in screen
+    assert "avatarFrameSrc(edition)" in screen
+    assert 'src="/avatar.html?edition=workroom"' not in screen
     assert "max-live-pcm" in screen
     assert "Simli off — TalkingHead" in screen
     page = (
