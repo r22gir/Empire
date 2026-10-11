@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BusinessTab, ScreenMode, EcosystemProduct } from './lib/types';
+import { hookFounderDeepLinks, renderFounderScreen } from './lib/founderPortal';
 import { useChat } from './hooks/useChat';
 import { useSystemData } from './hooks/useSystemData';
 import { API } from './lib/api';
@@ -147,6 +148,7 @@ const NAV_SCREEN_IDS = new Set<string>([
   'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
   'report', 'desks', 'memory-bank', 'telegram', 'whatsapp', 'docs', 'research', 'final-docs', 'invoice',
 ]);
+hookFounderDeepLinks(SCREEN_DEEP_LINKS as Record<string, string>, NAV_SCREEN_IDS);
 function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
   if (product === 'owner') return 'chat';
   if (product === 'max-avatar') return 'presentation';
@@ -597,6 +599,8 @@ export default function CommandCenter() {
   }, [activeProduct, activeScreen, activeSection, handleScreenChange, pushHistory]);
 
   const renderCenterContent = () => {
+    const founderScreen = renderFounderScreen(activeScreen);
+    if (founderScreen) return founderScreen;
     // Dashboard renders product-specific pages
     if (activeScreen === 'dashboard') {
       switch (activeProduct) {

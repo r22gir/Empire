@@ -14,6 +14,7 @@ import {
   ChevronDown, ChevronRight, LayoutGrid, CalendarCheck,
   FileStack, MessageCircle,
 } from 'lucide-react';
+import { hookFounderNav } from '../../lib/founderPortal';
 
 export interface NavItem {
   id: string;
@@ -136,6 +137,7 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
 ];
+hookFounderNav(NAV_GROUPS);
 
 interface Props {
   activeProduct: EcosystemProduct;
