@@ -12,7 +12,7 @@ import {
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
   ChevronDown, ChevronRight, LayoutGrid, CalendarCheck,
-  FileStack,
+  FileStack, LifeBuoy, Gauge,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -49,6 +49,8 @@ export const NAV_GROUPS: NavGroup[] = [
     defaultExpanded: true, // always expanded per Founder
     items: [
       { id: 'owner', name: "Owner's Desk", icon: <Crown size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
+      { id: 'family-help', name: 'Ayuda de ediciones familiares', icon: <LifeBuoy size={16} />, status: 'active', color: '#b8960c', screen: 'family-help' as ScreenMode, kind: 'screen' },
+      { id: 'minimax-usage', name: 'Uso MiniMax', icon: <Gauge size={16} />, status: 'active', color: '#b8960c', screen: 'minimax-usage' as ScreenMode, kind: 'screen' },
       { id: 'workroom', name: 'Empire Workroom', icon: <Scissors size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
       { id: 'schedule', name: 'Schedule Control', icon: <CalendarCheck size={16} />, status: 'active', color: '#b8960c', screen: 'calendar' as ScreenMode, kind: 'screen' },
       { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04', kind: 'product' },

@@ -42,6 +42,8 @@ import ForgeCRMPage from './components/screens/ForgeCRMPage';
 import BusinessProfileScreen from './components/screens/BusinessProfileScreen';
 import DesksScreen from './components/screens/DesksScreen';
 import InboxScreen from './components/screens/InboxScreen';
+import FamilyHelpInbox from './components/screens/FamilyHelpInbox';
+import MinimaxUsageScreen from './components/screens/MinimaxUsageScreen';
 import SystemReportScreen from './components/screens/SystemReportScreen';
 import TelegramScreen from './components/screens/TelegramScreen';
 import MemoryBankScreen from './components/screens/MemoryBankScreen';
@@ -119,6 +121,8 @@ const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'jobs': 'jobs',
   calendar: 'calendar',
   schedule: 'calendar',
+  'family-help': 'family-help',
+  'minimax-usage': 'minimax-usage',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -145,6 +149,7 @@ const NAV_PRODUCT_IDS = new Set<string>([
 const NAV_SCREEN_IDS = new Set<string>([
   'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
   'report', 'desks', 'memory-bank', 'telegram', 'docs', 'research', 'final-docs', 'invoice',
+  'family-help', 'minimax-usage',
 ]);
 function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
   if (product === 'owner') return 'chat';
@@ -666,6 +671,8 @@ export default function CommandCenter() {
     if (activeScreen === 'pricing-studio') return <PricingStudioScreen />;
     if (activeScreen === 'desks') return <DesksScreen desks={sys.desks} onSendTask={handleSendMessage} />;
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;
+    if (activeScreen === 'family-help') return <FamilyHelpInbox />;
+    if (activeScreen === 'minimax-usage') return <MinimaxUsageScreen />;
     if (activeScreen === 'memory-bank') return <MemoryBankScreen />;
     if (activeScreen === 'telegram') return <TelegramScreen />;
     if (activeScreen === 'calendar') return <ScheduleControl />;

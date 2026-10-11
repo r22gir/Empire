@@ -212,6 +212,11 @@ load_router("app.routers.intake_auth", "/api/v1/intake", ["intake"])
 # AMP — Actitud Mental Positiva platform
 load_router("app.routers.amp", "/api/v1/amp", ["amp"])
 
+# Founder inbox for Max-e / Maxine help tickets (reads /data/family-help)
+load_router("app.routers.family_help", "/api/v1", ["family-help"])
+# Shared MiniMax meter + H3 approval (founder aggregator)
+load_router("app.routers.minimax_meter", "/api/v1", ["minimax-meter"])
+
 # LLC Factory — Business formation services (DC/MD/VA)
 load_router("app.routers.llcfactory", "/api/v1", ["llcfactory"])
 
