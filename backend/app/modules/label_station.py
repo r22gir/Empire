@@ -37,8 +37,9 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+from app.db.database import resolve_task_db_path
 
-DB_PATH = os.environ.get("EMPIRE_DB", "/home/rg/empire-data/empire.db")
+DB_PATH = os.environ.get("EMPIRE_DB") or resolve_task_db_path()
 APP_DIR = Path(os.environ.get("LABEL_STATION_DIR", Path(__file__).parent / "static"))
 DEFAULT_BUSINESS = os.environ.get("LABEL_STATION_BUSINESS", "empire_workroom")
 

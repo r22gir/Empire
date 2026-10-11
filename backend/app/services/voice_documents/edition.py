@@ -22,6 +22,8 @@ DOCUMENT_KINDS = (
     "notes",
 )
 
+# Files a family edition copies as-is, then points edition config at
+# its own adapter. Listed here so a port does not grow a second engine.
 PORTABLE_CORE = (
     "backend/app/services/voice_documents/extract.py",
     "backend/app/services/voice_documents/session.py",
@@ -56,6 +58,7 @@ class EditionConfig:
 
 
 def _owner_tokens() -> tuple[str, ...]:
+    """Names that must never land on a client document."""
     tokens = {"rafael"}
     try:
         from app.edition import is_founder_edition, workroom_business_config

@@ -71,7 +71,53 @@ const WOODCRAFT_TYPES = [
   { value: 'custom_build', label: 'Custom Build / Millwork' },
 ];
 
+const FAMILY_EDITION_KEY = (process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').trim().toLowerCase();
+
+function FamilyPricingStudio() {
+  const maxine = FAMILY_EDITION_KEY === 'maxine';
+  const card: React.CSSProperties = { background: '#fff', border: '1px solid #ece8e0', borderRadius: 14, padding: 18 };
+  return (
+    <div style={{ padding: 20, maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: '#1a1a1a', margin: 0 }}>Estudio de precios</h1>
+        <p style={{ fontSize: 14, color: '#666', marginTop: 6 }}>
+          {maxine
+            ? 'Aquí vas a armar los precios de tus proyectos: lotes, casas y unidades.'
+            : 'Aquí vas a armar los precios de tus programas, talleres y sesiones.'}
+        </p>
+      </div>
+      <div style={card}>
+        <h2 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 8px' }}>Dónde están tus precios hoy</h2>
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14, color: '#333', lineHeight: 1.7 }}>
+          {maxine ? (
+            <>
+              <li>El precio de cada lote o unidad se guarda en ConstructionForge, dentro del proyecto.</li>
+              <li>Los planes de pago de cada venta están en Planes de pago.</li>
+              <li>El sitio público de ventas no muestra precios, salvo que un lote o un proyecto se marque como público.</li>
+            </>
+          ) : (
+            <>
+              <li>Los precios de programas y talleres se guardan con cada programa.</li>
+              <li>Los cobros y pagos están en Pagos.</li>
+            </>
+          )}
+        </ul>
+      </div>
+      <div style={{ ...card, background: '#faf9f7' }}>
+        <p style={{ margin: 0, fontSize: 13, color: '#666' }}>
+          ¿Quieres calcular un precio ahora? Pídeselo a tu asistente en el chat con los datos y te ayuda a armarlo.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function PricingStudioScreen() {
+  if (FAMILY_EDITION_KEY === 'amp' || FAMILY_EDITION_KEY === 'maxine') return <FamilyPricingStudio />;
+  return <WorkroomPricingStudio />;
+}
+
+function WorkroomPricingStudio() {
   const [status, setStatus] = useState<PricingStatus | null>(null);
   const [laborRates, setLaborRates] = useState<LaborRate[]>([]);
   const [activeTab, setActiveTab] = useState<'engine' | 'workroom' | 'woodcraft' | 'override' | 'audit' | 'docs'>('engine');

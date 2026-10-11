@@ -87,10 +87,10 @@ HARDWARE = {
 # ---------------------------------------------------------------------------
 LINING = {
     "none": {"name": "No Lining", "multiplier": 1.0, "add_per_yard": 0},
-    "standard": {"name": "Standard Lining", "multiplier": 1.15, "add_per_yard": 8},
+    "standard": {"name": "Standard Lining", "multiplier": 1.15, "add_per_yard": 10.50},  # workroom sell rate, Rafael 10/4/2026
     "blackout": {"name": "Blackout Lining", "multiplier": 1.25, "add_per_yard": 14},
     "thermal": {"name": "Thermal Lining", "multiplier": 1.20, "add_per_yard": 12},
-    "interlining": {"name": "Interlining", "multiplier": 1.30, "add_per_yard": 18},
+    "interlining": {"name": "Interlining", "multiplier": 1.30, "add_per_yard": 12.50},  # napped lining, Rafael 10/4/2026
 }
 
 # ---------------------------------------------------------------------------

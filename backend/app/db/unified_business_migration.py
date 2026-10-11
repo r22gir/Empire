@@ -16,13 +16,11 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from app.services.data_paths import quotes_data_dir
+from app.db.database import resolve_task_db_path
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.getenv(
-    "EMPIRE_TASK_DB",
-    str(Path.home() / "empire-data" / "empire.db"),
-)
+DB_PATH = resolve_task_db_path()
 
 QUOTES_DIR = str(quotes_data_dir())
 
@@ -33,9 +31,7 @@ def get_conn():
     # Falls back to ~/empire-data/empire.db (the canonical live DB path)
     # for legacy/dev callers. backend/data/empire.db is no longer used
     # (it was the stale mirror path; deleted in sprint 1d Phase C).
-    db_path = os.getenv("EMPIRE_TASK_DB") or str(
-        Path.home() / "empire-data" / "empire.db"
-    )
+    db_path = resolve_task_db_path()
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

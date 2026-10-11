@@ -1,0 +1,47 @@
+flowchart LR
+  subgraph FIND["Find"]
+    PF["LeadForge Prospect Finder<br/>Brave + Google Places + Yelp"]
+    EN["Free contact lookup<br/>own site, robots.txt"]
+  end
+  subgraph WORK["Work the pipeline"]
+    PP["prospect_pipeline"]
+    LL["lf_leads (Pipeline tab)<br/>reminders / follow-ups"]
+    CMP["LeadForge campaigns<br/>sequences, review queue"]
+    DR["prospect_outreach_drafts<br/>email / IG DM (draft only)"]
+  end
+  subgraph WIN["Win and get paid"]
+    LX["LuxeForge / Workroom intake"]
+    CRM["ForgeCRM customers"]
+    PS["Pricing Studio / workroom quote<br/>quotes_v2"]
+    EP["EmpirePay deposit link"]
+    INV["Invoices / QuickBooks history"]
+  end
+  subgraph GROW["Proof, referrals, repeat"]
+    SF["SocialForge posts"]
+    RE["Reactivation list<br/>past clients + designers"]
+    BP["Business Profile / portfolio"]
+  end
+  subgraph OTHER["Not wired yet"]
+    CF["ContractorForge"]
+    VO["VendorOps (51 vendors)"]
+    ST["StoreFront Forge customers"]
+    MF["MarketForge (marketplace listings)"]
+  end
+  MAX(("Max<br/>14 acquisition tools<br/>+ read-only module_call"))
+
+  PF --> EN --> PP --> LL --> CRM
+  PP --> DR
+  LL --> CMP
+  LX --> LL
+  LX --> CRM
+  LL --> PS --> EP
+  INV --> RE
+  PS -. "quotes waiting" .-> LL
+  PF -. "prospect-targets (read-only)" .-> SF
+  MAX --- PF & EN & PP & LL & DR & RE & SF
+  MAX -. "read-only GET" .- CRM & PS & INV & CF & VO & ST & MF & BP
+  EP -. "GAP: paid deposit does not mark lead won" .-> LL
+  BP -. "GAP: portfolio not used in drafts/posts" .-> SF
+  CF -. "GAP: referral partners" .-> PP
+  VO -. "GAP: rep referrals" .-> PP
+  ST -. "GAP: buyers to reactivation" .-> RE

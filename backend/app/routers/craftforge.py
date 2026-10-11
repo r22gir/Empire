@@ -758,7 +758,8 @@ async def generate_design_pdf(design_id: str):
     biz_phone = cfg.get("business_phone", "")
     biz_email = cfg.get("business_email", "")
     biz_address = cfg.get("business_address", "")
-    biz_website = cfg.get("business_website", "")
+    from app.config.workroom_billing import client_facing_website
+    biz_website = client_facing_website(cfg.get("business_website", ""))
     biz_contact_lines = [l for l in [biz_tagline, biz_phone, biz_email, biz_address, biz_website] if l]
 
     design_number = design.get("design_number", "CF-000")

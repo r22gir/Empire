@@ -1,10 +1,11 @@
 'use client';
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Message, ToolResult } from '../lib/types';
+import { Message, PinPrompt, ToolResult } from '../lib/types';
 import { API } from '../lib/api';
 import { useAssistantName } from '../lib/assistant';
 import { editionFromEnv } from '../lib/edition';
 import { chatWelcome } from '../lib/familyChrome';
+import { asksForFounderPin, redactSecret, toolResultPreview } from '../lib/founderPin';
 
 function welcomeMessage(assistantName: string): Message {
   return {
@@ -110,6 +111,7 @@ export function useChat() {
       role: 'user',
       content: input,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      ...(imageFilename ? { image: imageFilename } : {}),
     };
     const current = messagesRef.current;
     const newMsgs = [...current, userMsg];
@@ -156,6 +158,7 @@ export function useChat() {
       const decoder = new TextDecoder();
       let buf = '';
       const toolResults: ToolResult[] = [];
+      const pinPrompts: PinPrompt[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -173,6 +176,12 @@ export function useChat() {
               setStreamingContent(accumulated);
             } else if (ev.type === 'progress' && ev.phase === 'tool' && ev.message) {
               setStreamingSteps(prev => (prev.includes(ev.message) ? prev : [...prev, ev.message]));
+            } else if (ev.type === 'pin_required' && ev.resume_id) {
+              pinPrompts.push({
+                resumeId: String(ev.resume_id),
+                tool: String(ev.tool || 'tool'),
+                status: 'needed',
+              });
             } else if (ev.type === 'tool_result') {
               toolResults.push({ tool: ev.tool || 'unknown', success: ev.success ?? false, result: ev.result, error: ev.error });
             } else if (ev.type === 'done') {
@@ -189,13 +198,22 @@ export function useChat() {
         }
       }
 
+      const assistantId = (Date.now() + 1).toString();
+      if (pinPrompts.length === 0 && asksForFounderPin(accumulated)) {
+        pinPrompts.push({
+          resumeId: `verify:${assistantId}`,
+          tool: 'founder PIN',
+          status: 'needed',
+        });
+      }
       const assistantMsg: Message = {
-        id: (Date.now() + 1).toString(),
+        id: assistantId,
         role: 'assistant',
         content: accumulated || 'No response.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         model: modelUsed,
         toolResults: toolResults.length > 0 ? toolResults : undefined,
+        pinPrompts: pinPrompts.length > 0 ? pinPrompts : undefined,
         quality: qualityBadge,
         metadata: responseMetadata,
       };
@@ -228,6 +246,89 @@ export function useChat() {
     }
   }, [updateMessages]);
 
+  const submitFounderPin = useCallback(async (messageId: string, resumeId: string, pin: string) => {
+    const secret = pin;
+    const mark = (patch: Partial<PinPrompt>) => {
+      updateMessages(prev => prev.map(msg => {
+        if (msg.id !== messageId || !msg.pinPrompts) return msg;
+        return {
+          ...msg,
+          pinPrompts: msg.pinPrompts.map(prompt => (
+            prompt.resumeId === resumeId ? { ...prompt, ...patch } : prompt
+          )),
+        };
+      }));
+    };
+    mark({ status: 'submitting', detail: undefined });
+    try {
+      const verifyOnly = resumeId.startsWith('verify:');
+      const verify = await fetch(API + '/max/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: secret }),
+      });
+      if (verify.status === 403) {
+        mark({ status: 'needed', detail: 'That PIN was not accepted.' });
+        return;
+      }
+      if (!verify.ok) {
+        mark({ status: 'error', detail: 'PIN check failed. Try again.' });
+        return;
+      }
+      if (verifyOnly) {
+        mark({ status: 'done', detail: 'PIN accepted.' });
+        return;
+      }
+      const resume = await fetch(API + '/max/resume-restricted-tool', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resume_id: resumeId, pin: secret }),
+      });
+      const data = await resume.json().catch(() => ({}));
+      if (resume.status === 403) {
+        mark({ status: 'needed', detail: 'That PIN was not accepted.' });
+        return;
+      }
+      if (resume.status === 404) {
+        mark({ status: 'error', detail: 'That approval expired. Ask Max to run the tool again.' });
+        return;
+      }
+      if (!resume.ok) {
+        mark({ status: 'error', detail: 'Could not resume the tool.' });
+        return;
+      }
+      const preview = toolResultPreview(data, secret);
+      const toolName = String(data.tool || 'tool');
+      const note = redactSecret(`\n\nApproved in the portal. ${toolName} finished.\n${preview}`, secret);
+      updateMessages(prev => prev.map(msg => {
+        if (msg.id !== messageId) return msg;
+        return {
+          ...msg,
+          content: redactSecret(msg.content, secret) + note,
+          pinPrompts: (msg.pinPrompts || []).map(prompt => (
+            prompt.resumeId === resumeId
+              ? { ...prompt, status: 'done' as const, tool: toolName, detail: preview }
+              : prompt
+          )),
+        };
+      }));
+    } catch {
+      mark({ status: 'error', detail: 'Could not reach the server.' });
+    }
+  }, [updateMessages]);
+
+  const cancelFounderPin = useCallback((messageId: string, resumeId: string) => {
+    updateMessages(prev => prev.map(msg => {
+      if (msg.id !== messageId || !msg.pinPrompts) return msg;
+      return {
+        ...msg,
+        pinPrompts: msg.pinPrompts.map(prompt => (
+          prompt.resumeId === resumeId ? { ...prompt, status: 'cancelled' as const, detail: undefined } : prompt
+        )),
+      };
+    }));
+  }, [updateMessages]);
+
   const stopStreaming = useCallback(() => { abortRef.current?.abort(); }, []);
 
   const onMessageCompleteRef = useRef<((msg: Message) => void) | null>(null);
@@ -237,7 +338,7 @@ export function useChat() {
 
   return {
     messages, isStreaming, streamingContent, streamingSteps, streamingModel,
-    sendMessage, stopStreaming, loadMessages, setOnMessageComplete,
+    sendMessage, stopStreaming, loadMessages, setOnMessageComplete, submitFounderPin, cancelFounderPin,
     chatId: chatIdRef.current,
   };
 }

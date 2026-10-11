@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   familyHomeRedirect,
+  isFamilyChatsPath,
   isFamilyHost,
   isFamilyPublicPath,
 } from './familyChrome.mjs';
@@ -23,6 +24,19 @@ test('anonymous AMP root and dashboard redirect to /login', () => {
   assert.equal(isFamilyPublicPath('/login'), true);
   assert.equal(isFamilyPublicPath('/amp/login'), true);
   assert.equal(isFamilyPublicPath('/'), false);
+});
+
+test('anonymous WhatsApp chats pages redirect to /login on amp and maxine', () => {
+  for (const edition of ['amp', 'maxine']) {
+    assert.equal(familyHomeRedirect(edition, '/amp/whatsapp/chats', false), '/login');
+    assert.equal(familyHomeRedirect(edition, '/whatsapp/chats', false), '/login');
+    assert.equal(familyHomeRedirect(edition, '/amp/whatsapp/chats', true), null);
+    assert.equal(familyHomeRedirect(edition, '/whatsapp/chats', true), null);
+  }
+  assert.equal(isFamilyChatsPath('/amp/whatsapp/chats'), true);
+  assert.equal(isFamilyChatsPath('/whatsapp/chats'), true);
+  assert.equal(familyHomeRedirect('amp', '/amp/whatsapp', false), '/login');
+  assert.equal(familyHomeRedirect('workroom', '/whatsapp/chats', false), null);
 });
 
 test('family gate uses host when NEXT_PUBLIC_EMPIRE_EDITION was not baked', () => {

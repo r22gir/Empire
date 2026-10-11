@@ -409,7 +409,7 @@ export default function TemplateModule() {
                       </div>
                       {piece.svg ? (
                         <div
-                          className="flex items-center justify-center min-h-[100px]"
+                          className="cy-keep-light cy-paper flex items-center justify-center min-h-[100px]"
                           dangerouslySetInnerHTML={{ __html: piece.svg }}
                         />
                       ) : (
@@ -564,7 +564,7 @@ export default function TemplateModule() {
                   <div className="border-b border-[#e8e4dc] rounded-t-xl bg-[#faf9f7] flex items-center justify-center min-h-[120px] p-3 overflow-hidden">
                     {firstPiece?.svg ? (
                       <div
-                        className="max-w-full max-h-[100px] flex items-center justify-center [&_svg]:max-w-full [&_svg]:max-h-[100px]"
+                        className="cy-keep-light cy-paper max-w-full max-h-[100px] flex items-center justify-center [&_svg]:max-w-full [&_svg]:max-h-[100px]"
                         dangerouslySetInnerHTML={{ __html: firstPiece.svg }}
                       />
                     ) : (

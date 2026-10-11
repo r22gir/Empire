@@ -131,10 +131,22 @@ def channel_status() -> dict:
         code = "partial_disabled_gateway" if missing else "closed"
     else:
         code = "ready"
-    if missing:
+    try:
+        from app.edition import is_family_edition as _family
+
+        family = bool(_family())
+    except Exception:
+        family = False
+    if missing and family:
+        reason_es = "WhatsApp todavía no está conectado. Cuando se conecte, aquí verás su estado."
+        reason_en = "WhatsApp is not connected yet."
+    elif missing:
         names = ", ".join(missing)
         reason_es = f"WhatsApp está apagado. Faltan: {names}."
         reason_en = f"WhatsApp is off. Missing: {names}."
+    elif not owners and family:
+        reason_es = "WhatsApp está conectado, pero todavía no hay números autorizados del dueño. Por ahora no acepto mensajes."
+        reason_en = "WhatsApp is connected, but no owner numbers are authorized yet. Inbound messages are refused."
     elif not owners:
         reason_es = "La API está configurada, pero no hay números del dueño en WHATSAPP_OWNER_NUMBERS. No acepto mensajes."
         reason_en = "The API is configured, but WHATSAPP_OWNER_NUMBERS is empty. Inbound messages are refused."
@@ -673,6 +685,17 @@ def _default_transcribe(path: Path) -> str:
     return stt_service.transcribe_sync(path, language=None)
 
 
+def _usage_capped_reply(wa_id: str, *, now: int, inbound_kind: str, synthesize=None) -> dict | None:
+    """Spanish cap refusal to the owner only. None means the model path may run."""
+    from app.services.instance_usage import enforce_whatsapp_model_cap
+
+    refusal = enforce_whatsapp_model_cap()
+    if not refusal:
+        return None
+    send_reply(wa_id, refusal, now=now, inbound_kind=inbound_kind, synthesize=synthesize)
+    return {"handled": True, "document": False, "reply": refusal, "usage_capped": True}
+
+
 def _reply_pipeline(wa_id: str, transcript: str, *, now: int, inbound_kind: str = "text", synthesize=None) -> dict:
     from app.services.voice_doc import format_session_reply, ingest_transcript
     from app.services.voice_doc.extract import choice_from_text
@@ -690,6 +713,9 @@ def _reply_pipeline(wa_id: str, transcript: str, *, now: int, inbound_kind: str 
             text = delivered.get("reason") or "No envié el PDF."
         send_reply(wa_id, text, now=now, inbound_kind=inbound_kind, synthesize=synthesize)
         return {"handled": True, "document": bool(delivered.get("document")), "reply": text, "draft_id": draft.get("id")}
+    capped = _usage_capped_reply(wa_id, now=now, inbound_kind=inbound_kind, synthesize=synthesize)
+    if capped:
+        return capped
     view = ingest_transcript(transcript, channel="whatsapp", edition=edition_label(), choice_id=choice_from_text(transcript))
     reply = format_session_reply(view)
     send_reply(wa_id, reply, now=now, inbound_kind=inbound_kind, synthesize=synthesize)
@@ -752,6 +778,13 @@ def handle_webhook(body: bytes, signature: str, *, transcribe=None, synthesize=N
                         folder.mkdir(parents=True, exist_ok=True)
                         path = folder / f"{uuid.uuid4().hex}.ogg"
                         path.write_bytes(raw)
+                    capped = _usage_capped_reply(sender, now=timestamp, inbound_kind=kind, synthesize=synthesize)
+                    if capped:
+                        if not keep_media:
+                            path.unlink(missing_ok=True)
+                        last = capped
+                        processed += 1
+                        continue
                     try:
                         reader = transcribe or _default_transcribe
                         transcript = reader(path)
@@ -807,4 +840,6 @@ def handle_webhook(body: bytes, signature: str, *, transcribe=None, synthesize=N
         "edition": edition_label(),
         "document": bool(last.get("document")),
         "draft_id": last.get("draft_id"),
+        "reply": last.get("reply"),
+        "usage_capped": bool(last.get("usage_capped")),
     }

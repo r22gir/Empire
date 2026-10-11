@@ -3,9 +3,10 @@ Fabric Library CRUD router.
 Dual-mode: owner endpoints (full data) + client-safe endpoints (no pricing/supplier).
 Yardage calculator included.
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import Optional, List
+import json
 import sqlite3
 import os
 import logging
@@ -396,6 +397,48 @@ class IntakeFabricCreate(BaseModel):
     material_type: Optional[str] = None
     yards_available: Optional[float] = None
     client_notes: Optional[str] = None
+    swatch_files: Optional[list] = None
+
+
+def _swatch_files_json(payload: IntakeFabricCreate) -> Optional[str]:
+    files = payload.swatch_files
+    if not files:
+        return None
+    return json.dumps(files)
+
+
+def _fabric_response(row) -> dict:
+    item = dict_row(row)
+    raw = item.get("swatch_files")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            item["swatch_files"] = json.loads(raw)
+        except json.JSONDecodeError:
+            item["swatch_files"] = []
+    elif raw in (None, ""):
+        item["swatch_files"] = []
+    return item
+
+
+def _insert_intake_fabric(conn, intake_id: str, payload: IntakeFabricCreate) -> dict:
+    conn.execute(
+        """INSERT INTO intake_fabrics
+           (intake_id, scope, room_name, item_name, fabric_preference,
+            fabric_name, color_pattern, fabric_code, supplier_url,
+            swatch_photo_path, vertical_repeat, horizontal_repeat,
+            fabric_width, material_type, yards_available, client_notes,
+            swatch_files)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (intake_id, payload.scope, payload.room_name, payload.item_name,
+         payload.fabric_preference, payload.fabric_name, payload.color_pattern,
+         payload.fabric_code, payload.supplier_url, payload.swatch_photo_path,
+         payload.vertical_repeat, payload.horizontal_repeat, payload.fabric_width,
+         payload.material_type, payload.yards_available, payload.client_notes,
+         _swatch_files_json(payload)),
+    )
+    row_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    row = conn.execute("SELECT * FROM intake_fabrics WHERE id = ?", (row_id,)).fetchone()
+    return _fabric_response(row)
 
 
 def _init_intake_fabrics_table():
@@ -422,9 +465,14 @@ def _init_intake_fabrics_table():
                 client_notes TEXT,
                 owner_matched_fabric_id INTEGER,
                 owner_notes TEXT,
+                swatch_files TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
+        try:
+            conn.execute("ALTER TABLE intake_fabrics ADD COLUMN swatch_files TEXT")
+        except Exception:
+            pass
 
 
 try:
@@ -433,41 +481,59 @@ except Exception as e:
     logger.warning(f"intake_fabrics table init: {e}")
 
 
+# Writes stay open only for the designer who owns the project, and only
+# while it is still a draft. A bare intake UUID is not a credential.
+_EDITABLE_INTAKE_STATUSES = {"", "draft", "new", "in-progress", "in_progress"}
+
+
+def _intake_editor(intake_id: str, request: Request, *, write: bool):
+    from app.routers.intake_auth import decode_token, get_db as intake_db
+
+    header = request.headers.get("authorization") or ""
+    token = header.split(" ", 1)[1].strip() if header.lower().startswith("bearer ") else ""
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    payload = decode_token(token)
+    user_id = str(payload.get("sub") or "")
+    conn = intake_db()
+    try:
+        row = conn.execute(
+            "SELECT user_id, status FROM intake_projects WHERE id = ? AND deleted_at IS NULL",
+            (intake_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or str(row["user_id"] or "") != user_id:
+        raise HTTPException(404, "Project not found")
+    status = str(row["status"] or "").strip().lower()
+    if write and status not in _EDITABLE_INTAKE_STATUSES:
+        raise HTTPException(409, "This intake is already submitted")
+    return row
+
+
 @router.post("/intake-project/{intake_id}/fabrics")
-async def save_intake_fabric(intake_id: str, payload: IntakeFabricCreate):
+async def save_intake_fabric(intake_id: str, payload: IntakeFabricCreate, request: Request):
     """Save fabric info for an intake project (room or item level)."""
+    _intake_editor(intake_id, request, write=True)
     with get_db() as conn:
-        conn.execute(
-            """INSERT INTO intake_fabrics
-               (intake_id, scope, room_name, item_name, fabric_preference,
-                fabric_name, color_pattern, fabric_code, supplier_url,
-                swatch_photo_path, vertical_repeat, horizontal_repeat,
-                fabric_width, material_type, yards_available, client_notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (intake_id, payload.scope, payload.room_name, payload.item_name,
-             payload.fabric_preference, payload.fabric_name, payload.color_pattern,
-             payload.fabric_code, payload.supplier_url, payload.swatch_photo_path,
-             payload.vertical_repeat, payload.horizontal_repeat, payload.fabric_width,
-             payload.material_type, payload.yards_available, payload.client_notes),
-        )
-        row_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-        row = conn.execute("SELECT * FROM intake_fabrics WHERE id = ?", (row_id,)).fetchone()
-        return dict_row(row)
+        return _insert_intake_fabric(conn, intake_id, payload)
 
 
 @router.get("/intake-project/{intake_id}/fabrics")
-async def get_intake_fabrics(intake_id: str):
+async def get_intake_fabrics(intake_id: str, request: Request):
     """Get all fabric info for an intake project."""
+    _intake_editor(intake_id, request, write=False)
     with get_db() as conn:
         rows = conn.execute(
             "SELECT * FROM intake_fabrics WHERE intake_id = ? ORDER BY id", (intake_id,)
         ).fetchall()
-        return dict_rows(rows)
+        return [_fabric_response(row) for row in rows]
 
 
 @router.put("/intake-project/{intake_id}/fabrics/{fabric_id}")
-async def update_intake_fabric(intake_id: str, fabric_id: int, payload: IntakeFabricCreate):
+async def update_intake_fabric(intake_id: str, fabric_id: int, payload: IntakeFabricCreate, request: Request):
     """Update a fabric entry."""
+    _intake_editor(intake_id, request, write=True)
     with get_db() as conn:
         existing = conn.execute(
             "SELECT id FROM intake_fabrics WHERE id = ? AND intake_id = ?", (fabric_id, intake_id)
@@ -479,22 +545,45 @@ async def update_intake_fabric(intake_id: str, fabric_id: int, payload: IntakeFa
                scope=?, room_name=?, item_name=?, fabric_preference=?,
                fabric_name=?, color_pattern=?, fabric_code=?, supplier_url=?,
                swatch_photo_path=?, vertical_repeat=?, horizontal_repeat=?,
-               fabric_width=?, material_type=?, yards_available=?, client_notes=?
+               fabric_width=?, material_type=?, yards_available=?, client_notes=?,
+               swatch_files=?
                WHERE id=? AND intake_id=?""",
             (payload.scope, payload.room_name, payload.item_name,
              payload.fabric_preference, payload.fabric_name, payload.color_pattern,
              payload.fabric_code, payload.supplier_url, payload.swatch_photo_path,
              payload.vertical_repeat, payload.horizontal_repeat, payload.fabric_width,
              payload.material_type, payload.yards_available, payload.client_notes,
+             _swatch_files_json(payload),
              fabric_id, intake_id),
         )
         row = conn.execute("SELECT * FROM intake_fabrics WHERE id = ?", (fabric_id,)).fetchone()
-        return dict_row(row)
+        return _fabric_response(row)
+
+
+class IntakeFabricBatch(BaseModel):
+    fabrics: List[IntakeFabricCreate] = Field(default_factory=list)
+
+
+@router.put("/intake-project/{intake_id}/fabrics")
+async def replace_intake_fabrics(intake_id: str, payload: IntakeFabricBatch, request: Request):
+    """Replace the fabric rows for one project.
+
+    The designer wizard saves on each step and again on submit. Replacing
+    the set keeps one row per item instead of appending a duplicate.
+    """
+    _intake_editor(intake_id, request, write=True)
+    saved = []
+    with get_db() as conn:
+        conn.execute("DELETE FROM intake_fabrics WHERE intake_id = ?", (intake_id,))
+        for item in payload.fabrics:
+            saved.append(_insert_intake_fabric(conn, intake_id, item))
+    return saved
 
 
 @router.delete("/intake-project/{intake_id}/fabrics/{fabric_id}")
-async def delete_intake_fabric(intake_id: str, fabric_id: int):
+async def delete_intake_fabric(intake_id: str, fabric_id: int, request: Request):
     """Remove a fabric entry."""
+    _intake_editor(intake_id, request, write=True)
     with get_db() as conn:
         result = conn.execute(
             "DELETE FROM intake_fabrics WHERE id = ? AND intake_id = ?", (fabric_id, intake_id)

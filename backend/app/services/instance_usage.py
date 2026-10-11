@@ -6,7 +6,21 @@ Each family instance (EMPIRE_EDITION=amp, maxine, …) records its own
 calls: input tokens, output tokens, and an estimated USD cost, rolled
 up by UTC day and calendar month in ``EMPIRE_DATA_DIR/usage/usage.db``.
 
-The allowance is a share of EmpireBox's measured AI use for the month:
+The cap means this instance may use **at most**
+``INSTANCE_USAGE_CAP_PCT`` of EmpireBox's measured AI use for the
+month (default 20). Public percentages are shares of that total pie,
+not "percent of the 20% slice":
+
+    used_percent      = instance_used / baseline × 100
+    remaining_percent = max(0, cap_percent − used_percent)
+
+So ``used_percent=13.1``, ``cap_percent=20``, ``remaining_percent=6.9``
+means Max-e has used 13.1% of EmpireBox total and may use 6.9% more
+before hitting the 20% cap. A reading of ``used_percent=65.7`` next
+to ``cap_percent=20`` was the old (wrong) "percent of allowance"
+meter and must not come back.
+
+Internal enforcement still uses an allowance:
 
     allowance = INSTANCE_USAGE_CAP_PCT / 100 * baseline
 
@@ -23,24 +37,34 @@ is enforced with no baseline env. Baseline, first match wins:
    ``EMPIRE_USAGE_PEER_DATA_DIRS``). All providers in those files
    count. The baseline is ``max(recorded_total, default_floor)``.
    The floor (``EMPIRE_USAGE_DEFAULT_BASELINE_TOKENS``, default
-   10_000_000) covers a cold month so 20% is a real allowance.
+   5_000_000) covers a cold month so 20% is a real allowance
+   (1_000_000 tokens per family instance). Why 5M: token basis
+   matches stored MiniMax use; 5M ≈ $1.50 at $0.30/M, so 20% =
+   1M tokens (~$0.30) per instance — daily WhatsApp and short
+   chat, not a runaway loop. Do not ask Rafael for an invoice.
    Workroom often writes no ``usage.db``: ``data_root_or_none()`` is
    ``None`` when ``EMPIRE_DATA_DIR`` is unset, so Workroom is absent
    from the pie and the floor applies until other edition files have
-   more than 10M tokens this month.
+   more than 5M tokens this month. Inbound WhatsApp that would call a
+   model is always heavy and fails closed if usage cannot be read.
 
 USD for display and for case 1 is:
 
     tokens / 1_000_000 * MINIMAX_USD_PER_MILLION_TOKENS
 
-At 80% of the allowance the API reports ``level=warn`` and remaining
-percent. At 100%, heavy work is refused in Spanish; a short chat
-reply still runs unless this instance has used the whole baseline
+``level`` is compared to the cap as a share of total:
+
+- ``ok``     — ``used_percent`` < 80% of ``cap_percent`` (under 16 when cap is 20)
+- ``warn``   — at least 80% of the cap, still under the cap
+- ``blocked``— ``used_percent`` ≥ ``cap_percent``, or this instance used the whole baseline
+
+At ``blocked``, heavy work is refused in Spanish; a short chat reply
+still runs unless this instance has used the whole baseline
 (the total spend limit).
 
 ``GET /api/v1/edition/usage`` is ``public_usage_summary()``: used
-percent of this instance's allowance, remaining percent, level, and
-the Spanish message. It does not include baseline, allowance, or
+percent of EmpireBox total, remaining percent until the cap, level,
+and the Spanish message. It does not include baseline, allowance, or
 absolute token/cost totals (those would reveal EmpireBox-wide usage).
 """
 from __future__ import annotations
@@ -50,8 +74,9 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy"})
-DEFAULT_BASELINE_MONTHLY_TOKENS = 10_000_000.0
+HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy", "whatsapp"})
+DEFAULT_BASELINE_MONTHLY_TOKENS = 5_000_000.0
+DEFAULT_FAMILY_BASELINE_MONTHLY_TOKENS = DEFAULT_BASELINE_MONTHLY_TOKENS
 
 
 def _now() -> datetime:
@@ -186,14 +211,17 @@ def recorded_usage_across_editions(month: Optional[str] = None) -> dict:
     }
 
 
-def _baseline() -> tuple[str, float]:
-    """Return (basis, baseline). Family editions always get a number."""
+def _baseline() -> tuple[str, float, str]:
+    """Return (basis, baseline, source). Family editions always get a number."""
     kind, value = _env_baseline()
     if value is not None:
-        return kind, float(value)
+        return kind, float(value), "env"
     recorded = recorded_usage_across_editions()
     floor = default_baseline_tokens()
-    return "recorded_tokens", max(float(recorded["tokens"]), floor)
+    tokens = float(recorded["tokens"])
+    if tokens > floor:
+        return "recorded_tokens", tokens, "recorded"
+    return "recorded_tokens", floor, "default"
 
 
 def usage_db_path():
@@ -311,7 +339,7 @@ def usage_summary() -> dict:
     now = _now()
     family = is_family_edition()
     pct = cap_percent()
-    basis, baseline = _baseline() if family else ("none", None)
+    basis, baseline, source = _baseline() if family else ("none", None, "none")
     allowance = None if baseline is None else round(float(baseline) * pct / 100.0, 6)
     empty = {
         "enforced": bool(family and allowance is not None),
@@ -320,6 +348,7 @@ def usage_summary() -> dict:
         "provider": "minimax",
         "cap_percent": pct,
         "baseline_basis": basis,
+        "baseline_source": source,
         "baseline": baseline,
         "allowance": allowance,
         "day": {"tokens": 0, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0},
@@ -327,7 +356,7 @@ def usage_summary() -> dict:
         "used": 0.0,
         "used_percent": 0.0 if family else None,
         "ratio": None,
-        "remaining_percent": 100.0 if family else None,
+        "remaining_percent": pct if family else None,
         "total_spend_hit": False,
         "level": "ok",
         "message": "",
@@ -346,36 +375,45 @@ def usage_summary() -> dict:
         conn.close()
     used = month["cost_usd"] if basis == "usd" else float(month["tokens"])
     ratio = None
-    remaining_percent = 100.0 if family else None
+    remaining_percent = pct if family else None
     used_percent = 0.0 if family else None
     level = "ok"
     message = ""
     total_spend_hit = bool(baseline is not None and baseline > 0 and used >= float(baseline))
-    if allowance and allowance > 0:
-        ratio = round(used / allowance, 4)
-        remaining_percent = max(0.0, round((1.0 - ratio) * 100.0, 1))
-        used_percent = min(100.0, round(ratio * 100.0, 1))
-        used_pct = round(ratio * 100)
+    if baseline and float(baseline) > 0 and family:
+        # Public meter: share of EmpireBox total, not share of the 20% slice.
+        share = used / float(baseline)
+        ratio = round(share, 4)
+        used_percent = round(share * 100.0, 1)
+        remaining_percent = max(0.0, round(pct - used_percent, 1))
+        warn_at = pct * 0.8
         if total_spend_hit:
             level = "blocked"
             message = (
                 "Llegamos al tope total de uso de EmpireBox este mes. "
                 "También los mensajes cortos quedan en pausa."
             )
-        elif ratio >= 1:
+        elif used_percent >= pct:
             level = "blocked"
             message = (
-                f"Llegamos al tope de uso de esta instancia "
-                f"({pct:g}% del uso de EmpireBox este mes). "
+                f"Llegamos al tope de esta instancia "
+                f"({pct:g}% del uso total de EmpireBox este mes). "
+                f"Esta instancia ya usó el {used_percent:g}% del total. "
                 "Los trabajos largos quedan en pausa. "
                 "Puedo seguir contestando mensajes cortos."
             )
-        elif ratio >= 0.8:
+        elif used_percent >= warn_at:
             level = "warn"
             message = (
-                f"Esta instancia ya usó el {used_pct:g}% de su tope "
-                f"({pct:g}% del uso de EmpireBox este mes). "
-                f"Queda el {remaining_percent:g}%."
+                f"Esta instancia ya usó el {used_percent:g}% del uso total "
+                f"de EmpireBox este mes. El tope es el {pct:g}%. "
+                f"Queda el {remaining_percent:g}% del total antes del tope."
+            )
+        else:
+            message = (
+                f"Esta instancia ha usado el {used_percent:g}% del uso total "
+                f"de EmpireBox este mes. El tope es el {pct:g}%. "
+                f"Queda el {remaining_percent:g}% del total."
             )
     empty.update({
         "day": day,
@@ -404,7 +442,12 @@ PUBLIC_USAGE_KEYS = (
 
 
 def public_usage_summary() -> dict:
-    """Owner-facing meter. Percentages only — no EmpireBox-wide totals."""
+    """Owner-facing meter. Percentages only — no EmpireBox-wide totals.
+
+    used_percent is this instance's share of EmpireBox total (the pie).
+    remaining_percent is how much of that pie is left before the cap.
+    cap_percent is the maximum share this instance may use (default 20).
+    """
     summary = usage_summary()
     return {key: summary.get(key) for key in PUBLIC_USAGE_KEYS}
 
@@ -440,3 +483,38 @@ def enforce_usage_cap(
     if not is_heavy_request(kind=kind, text=text, desk=desk, tools=tools, source=source, image=image):
         return None
     return summary["message"]
+
+
+def whatsapp_cap_reply_es() -> str:
+    """Friendly Spanish refusal for an inbound WhatsApp model call at the cap."""
+    pct = cap_percent()
+    return (
+        f"Llegamos al tope de uso de esta instancia "
+        f"({pct:g}% del uso de EmpireBox este mes). "
+        "No generé una respuesta nueva. "
+        "Cuando haya cupo, escríbeme de nuevo."
+    )
+
+
+def enforce_whatsapp_model_cap() -> Optional[str]:
+    """Refuse a WhatsApp model call at or over the instance cap. Family only.
+
+    Inbound WhatsApp that would call a model is always heavy. Unreadable
+    usage data fails closed (Spanish refusal, no model). Chat still
+    fail-opens if its own checker raises.
+    """
+    from app.edition import is_family_edition
+
+    try:
+        if not is_family_edition():
+            return None
+        conn = _connect()
+        if conn is None:
+            return whatsapp_cap_reply_es()
+        conn.close()
+        summary = usage_summary()
+    except Exception:
+        return whatsapp_cap_reply_es()
+    if summary["level"] != "blocked":
+        return None
+    return whatsapp_cap_reply_es()

@@ -29,8 +29,8 @@ const ACCENT_BORDER = '#93c5fd';
 
 // ============ UI CONFIG ============
 
-import { API_BASE } from '../../lib/api';
-const SHIPPING_API = `${API_BASE}/shipping`;
+import { API } from '../../lib/api';
+const SHIPPING_API = `${API}/shipping`;
 
 const CARRIERS = ['USPS', 'UPS', 'FedEx', 'DHL'] as const;
 type Carrier = typeof CARRIERS[number];

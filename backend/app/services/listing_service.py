@@ -237,24 +237,11 @@ async def publish_listing(
         # For now, return mock results
         result = PublishResult(
             marketplace=marketplace,
-            status="success",
-            listing_url=f"https://{marketplace}.com/listing/{listing.id}",
-            error=None
+            status="needs_keys" if marketplace in {"ebay", "amazon"} else "not_connected",
+            listing_url=None,
+            error=f"{marketplace} is not connected. Nothing was published.",
         )
         results.append(result)
-        
-        # Update listing marketplace_listings
-        if not listing.marketplace_listings:
-            listing.marketplace_listings = {}
-        
-        listing.marketplace_listings[marketplace] = {
-            "id": str(listing.id),
-            "url": result.listing_url,
-            "status": "active"
-        }
-    
-    # Update listing status to active
-    listing.status = "active"
     
     await db.commit()
     await db.refresh(listing)

@@ -739,7 +739,7 @@ export default function CustomShapeBuilder({ onSave, initialPreset }: CustomShap
           </div>
 
           <div
-            className="flex items-center justify-center min-h-[300px]"
+            className="cy-keep-light cy-paper flex items-center justify-center min-h-[300px]"
             dangerouslySetInnerHTML={{ __html: result?.svg || previewSvg }}
           />
 

@@ -22,9 +22,11 @@ class EbayService(MarketplaceService):
         # Would use eBay API credentials from config
         
         return {
-            "access_token": "mock_ebay_token",
-            "refresh_token": "mock_refresh_token",
-            "expires_at": "2024-12-31T23:59:59Z"
+            "connected": False,
+            "status": "needs_keys",
+            "access_token": None,
+            "refresh_token": None,
+            "error": "eBay is not connected. API keys are not configured.",
         }
     
     async def publish_listing(self, listing_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -40,12 +42,11 @@ class EbayService(MarketplaceService):
         # TODO: Implement actual eBay API call
         # Would use Trading API or Inventory API
         
-        mock_id = "ebay123456789"
-        
         return {
-            "external_id": mock_id,
-            "url": f"https://www.ebay.com/itm/{mock_id}",
-            "status": "active"
+            "external_id": None,
+            "url": None,
+            "status": "needs_keys",
+            "error": "eBay publishing is not connected.",
         }
     
     async def fetch_messages(self) -> list:
@@ -69,5 +70,5 @@ class EbayService(MarketplaceService):
         Returns:
             Success status
         """
-        # TODO: Implement actual eBay messaging
-        return True
+        # Messaging is not connected.
+        return False

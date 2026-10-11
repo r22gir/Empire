@@ -207,10 +207,21 @@ def create_invoice_from_quote(quote_id: str, changed_by: str = "system") -> dict
 
         # Get line items for the invoice
         items = conn.execute(
-            "SELECT description, quantity, unit_price, subtotal, category FROM quote_line_items WHERE quote_id = ?",
+            "SELECT description, room, quantity, unit, unit_price, subtotal, category FROM quote_line_items "
+            "WHERE quote_id = ? ORDER BY line_number, rowid",
             (quote_id,)
         ).fetchall()
-        line_items_json = json.dumps([dict(i) for i in items], default=str)
+        # carry rooms + unit over so the invoice page / PDF keeps the quote's room sections;
+        # "amount" mirrors subtotal so invoice consumers that read amount see the quoted price.
+        _li = []
+        for i in items:
+            d = dict(i)
+            d["room"] = d.get("room") or ""
+            d["unit"] = d.get("unit") or "ea"
+            if d.get("subtotal") is not None:
+                d["amount"] = d["subtotal"]
+            _li.append(d)
+        line_items_json = json.dumps(_li, default=str)
 
         deposit_paid = q.get('deposit_paid', 0) or 0
         balance = round((q.get('total', 0) or 0) - deposit_paid, 2)

@@ -121,8 +121,10 @@ async def delete_listing(listing_id: int):
 
 @router.post("/{listing_id}/publish")
 async def publish_listing(listing_id: int):
-    """Publish a listing to selected platforms (stub — marks as active)."""
-    with get_db() as db:
-        db.execute("UPDATE listings SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (listing_id,))
-        db.commit()
-    return {"id": listing_id, "status": "active", "message": "Listing published (platform sync not yet connected)"}
+    """Refuse to mark a listing active when no marketplace is connected."""
+    return {
+        "id": listing_id,
+        "status": "not_connected",
+        "listing_url": None,
+        "message": "Listing was not published. Marketplace sync is not connected.",
+    }

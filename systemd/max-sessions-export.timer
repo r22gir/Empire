@@ -1,0 +1,11 @@
+[Unit]
+Description=Export Max sessions nightly (00:20 America/New_York: finalizes yesterday, starts today)
+
+[Timer]
+OnCalendar=*-*-* 00:20:00 America/New_York
+OnCalendar=*-*-* 23:55:00 America/New_York
+Persistent=true
+Unit=max-sessions-export.service
+
+[Install]
+WantedBy=timers.target

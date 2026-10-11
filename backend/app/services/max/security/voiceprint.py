@@ -27,8 +27,32 @@ import numpy as np
 
 logger = logging.getLogger("max.security.voiceprint")
 
+# Workroom checkout path. Tests may monkeypatch this. Never mkdir at import.
 VOICEPRINT_DIR = Path.home() / "empire-repo" / "backend" / "data" / "security" / "voiceprints"
-VOICEPRINT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _voiceprint_dir(*, create: bool = False) -> Path:
+    """Voiceprint directory for this instance. Family / EMPIRE_DATA_DIR first."""
+    try:
+        from app.edition import is_family_edition, require_data_root
+
+        if is_family_edition():
+            path = require_data_root() / "security" / "voiceprints"
+            if create:
+                path.mkdir(parents=True, exist_ok=True)
+            return path
+    except Exception:
+        pass
+    env = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    if env:
+        path = Path(env).expanduser() / "security" / "voiceprints"
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
+        return path
+    path = Path(VOICEPRINT_DIR)
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
 
 # Similarity threshold for voice verification (0.0 - 1.0)
 # Higher = stricter. 0.75 is a good balance for single-speaker verification.
@@ -74,7 +98,10 @@ class VoiceprintVerifier:
 
     def _load_enrolled_profiles(self):
         """Load all enrolled voiceprints from disk."""
-        for f in VOICEPRINT_DIR.glob("*.npy"):
+        d = _voiceprint_dir(create=False)
+        if not d.exists():
+            return
+        for f in d.glob("*.npy"):
             user_id = f.stem
             try:
                 embedding = np.load(f)
@@ -163,7 +190,7 @@ class VoiceprintVerifier:
             }
 
         # Save embedding
-        npy_path = VOICEPRINT_DIR / f"{user_id}.npy"
+        npy_path = _voiceprint_dir(create=True) / f"{user_id}.npy"
         np.save(npy_path, embedding)
         self._enrolled_profiles[user_id] = embedding
 
@@ -243,7 +270,7 @@ class VoiceprintVerifier:
 
     def delete_profile(self, user_id: str) -> bool:
         """Delete an enrolled voiceprint."""
-        npy_path = VOICEPRINT_DIR / f"{user_id}.npy"
+        npy_path = _voiceprint_dir(create=False) / f"{user_id}.npy"
         if npy_path.exists():
             npy_path.unlink()
         if user_id in self._enrolled_profiles:
@@ -255,8 +282,8 @@ class VoiceprintVerifier:
     def _log_failed_verification(self, user_id: str, similarity: float):
         """Log failed verification to security audit."""
         try:
-            from .sanitizer import AUDIT_DIR
-            log_path = AUDIT_DIR / "audit_log.jsonl"
+            from .sanitizer import audit_dir
+            log_path = audit_dir() / "audit_log.jsonl"
             entry = {
                 "timestamp": __import__("datetime").datetime.now(
                     __import__("datetime").timezone.utc

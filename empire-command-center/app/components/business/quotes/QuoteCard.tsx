@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Check, FileDown, Star, Crown, Gem, Loader2, ExternalLink } from 'lucide-react';
 import { API } from '../../../lib/api';
+import { openDocViewer } from '../../docs/viewerBus';
 
 const TIERS = [
   { key: 'A', label: 'Essential', color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0', icon: Star },
@@ -32,6 +33,11 @@ export default function QuoteCard({ result, onScreenChange, onSend }: QuoteCardP
 
   const handleDownloadPDF = async () => {
     if (!pdf_url) return;
+    const src = pdf_url.startsWith('/api/v1/') ? pdf_url : `/api/v1${pdf_url.startsWith('/') ? '' : '/'}${pdf_url}`;
+    if (/^\/api\/v1\/quotes-v2\/[\w-]+\/pdf$/.test(src)) {
+      openDocViewer({ src, title: `${quote_number || 'Quote'} estimate`, filename: `${quote_number}.pdf`, kind: 'pdf' });
+      return;
+    }
     try {
       const res = await fetch(`${API}${pdf_url}`);
       if (!res.ok) throw new Error('Failed');

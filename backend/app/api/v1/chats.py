@@ -135,7 +135,16 @@ async def update_chat(chat_id: str, req: UpdateChatRequest, user_id: str = "foun
 
 
 @router.get("/list")
-async def list_chats(user_id: str = "founder"):
+async def list_chats(user_id: str = "founder", limit: int = 200, offset: int = 0):
+    """Newest chats first (pinned on top), one page at a time.
+
+    2026-10-04: the full list had grown to 2,812 chats / 687KB and was fetched on every
+    studio page load (a suspect in the iPhone Safari tab crash). Default page = 200;
+    pass limit=0 for everything. ``count`` is still the total.
+
+    Family editions read EMPIRE_DATA_DIR/chats via ``_chats_dir()`` so Max-e
+    and Maxine never list Rafael's Workroom history.
+    """
     user_dir = _chats_dir() / user_id
     if not user_dir.exists():
         return {"chats": [], "count": 0}
@@ -163,7 +172,10 @@ async def list_chats(user_id: str = "founder"):
     chats.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
     chats.sort(key=lambda x: x.get("pinned", False), reverse=True)
 
-    return {"chats": chats, "count": len(chats)}
+    total = len(chats)
+    offset = max(0, int(offset or 0))
+    page = chats[offset:offset + limit] if limit and limit > 0 else chats[offset:]
+    return {"chats": page, "count": total, "offset": offset, "has_more": offset + len(page) < total}
 
 
 @router.get("/search")
