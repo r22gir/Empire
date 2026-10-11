@@ -13,6 +13,8 @@ def _env(monkeypatch, tmp_path, edition="amp"):
     monkeypatch.setenv("EMPIRE_EDITION", edition)
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ASSISTANT_NAME", "Max-e" if edition == "amp" else "Maxine")
+    monkeypatch.setenv("MINIMAX_METER_DIR", str(tmp_path / "minimax-meter"))
+    monkeypatch.setenv("MINIMAX_REMAINS_STUB", "ok")
     monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_USD", raising=False)
     monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", raising=False)
     monkeypatch.delenv("EMPIRE_USAGE_PEER_DATA_DIRS", raising=False)

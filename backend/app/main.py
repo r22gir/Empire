@@ -245,6 +245,9 @@ load_router("app.routers.edition", "/api/v1", ["edition"])
 # Family editions → personal Max help inbox (amp / maxine write; founder reads)
 load_router("app.routers.family_help", "/api/v1", ["family-help"])
 
+# Shared MiniMax meter (all editions) + H3 approval queue (founder only)
+load_router("app.routers.minimax_meter", "/api/v1", ["minimax-meter"])
+
 # LLC Factory — Business formation services (DC/MD/VA)
 load_router("app.routers.llcfactory", "/api/v1", ["llcfactory"])
 

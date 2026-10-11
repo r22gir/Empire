@@ -272,6 +272,71 @@ if used >= cap and "tope" not in msg.lower():
   pass "$label usage solo porcentajes (used_percent = % del total, tope 20%)"
 }
 
+check_minimax_meter() {
+  local label="$1" base="$2" token="$3" edition="$4" env_file="$5"
+  local raw status keys
+  raw="$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $token" "$base/api/v1/minimax-meter/usage")"
+  status="${raw##*$'\n'}"
+  echo "  minimax-meter /usage → $status"
+  if [ "$status" = "403" ]; then
+    pass "$label minimax-meter /usage denegado (solo Max personal)"
+  else
+    fail "$label minimax-meter /usage debía ser 403, fue $status"
+  fi
+
+  raw="$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $token" "$base/api/v1/minimax-meter/me")"
+  status="${raw##*$'\n'}"
+  raw="${raw%$'\n'*}"
+  echo "  minimax-meter /me → $status"
+  if [ "$status" != "200" ]; then
+    fail "$label minimax-meter /me HTTP $status"
+    return
+  fi
+  if printf '%s' "$raw" | grep -Eqi 'MINIMAX_API_KEY|Bearer [A-Za-z0-9]{8,}'; then
+    fail "$label minimax-meter /me filtró la clave"
+    return
+  fi
+  if ! EXPECT_EDITION="$edition" METER_JSON="$raw" "$PYTHON" -c '
+import json, os, sys
+d = json.loads(os.environ["METER_JSON"])
+need = {"edition", "text_cap_pct", "image_daily_cap", "tts_daily_cap", "video_weekly_cap", "message"}
+missing = need - set(d)
+if missing:
+    sys.exit("faltan " + ",".join(sorted(missing)))
+if d.get("edition") != os.environ["EXPECT_EDITION"]:
+    sys.exit("edition=" + repr(d.get("edition")))
+if float(d.get("text_cap_pct") or 0) != 20:
+    sys.exit("text_cap_pct debe ser 20 (cada edición familiar, sin tope combinado)")
+if int(d.get("image_daily_cap") or 0) != 5:
+    sys.exit("image_daily_cap=" + repr(d.get("image_daily_cap")))
+if int(d.get("tts_daily_cap") or 0) != 20:
+    sys.exit("tts_daily_cap=" + repr(d.get("tts_daily_cap")))
+if "editions" in d:
+    sys.exit("family /me no debe listar otras ediciones")
+if "baseline" in d or "allowance" in d:
+    sys.exit("family /me no debe exponer totales")
+'; then
+    fail "$label minimax-meter /me JSON inválido"
+    return
+  fi
+  pass "$label minimax-meter /me (20% texto por edición, 5 imágenes, 20 TTS, sin clave)"
+
+  local tts_flag h3_flag
+  tts_flag="$(read_env_key "$env_file" MINIMAX_FAMILY_TTS || true)"
+  h3_flag="$(read_env_key "$env_file" MINIMAX_H3_ENABLED || true)"
+  echo "  MINIMAX_FAMILY_TTS=${tts_flag:-unset} MINIMAX_H3_ENABLED=${h3_flag:-unset}"
+  if [ -n "$tts_flag" ] && [ "$tts_flag" != "0" ] && [ "$tts_flag" != "false" ]; then
+    warn "$label voz familiar encendida (MINIMAX_FAMILY_TTS=$tts_flag)"
+  else
+    pass "$label voz familiar apagada por defecto"
+  fi
+  if [ -n "$h3_flag" ] && [ "$h3_flag" != "0" ] && [ "$h3_flag" != "false" ]; then
+    warn "$label H3 encendido (MINIMAX_H3_ENABLED=$h3_flag)"
+  else
+    pass "$label H3 apagado por defecto"
+  fi
+}
+
 check_isolation_reply() {
   local label="$1" question="$2" reply="$3"
   echo "  Q: $question"
@@ -315,6 +380,7 @@ run_edition() {
   fi
 
   check_usage "$name" "$base" "$token"
+  check_minimax_meter "$name" "$base" "$token" "$edition" "$env_file"
 
   if [ "$edition" = "amp" ]; then
     check_home_v3 "$name" "$base" "$token" "$env_file" "/data/amp"

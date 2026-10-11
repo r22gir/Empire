@@ -966,6 +966,20 @@ class AIRouter:
                 model=model or "MiniMax-M3",
                 kind=feature or "chat",
             )
+            if "minimax" in (model or "").lower() or (model or "").lower().startswith("m3"):
+                from app.services.minimax_meter import active_reservation_id, reconcile as reconcile_minimax, record as record_minimax
+                in_tok = token_tracker.estimate_tokens(input_text)
+                out_tok = token_tracker.estimate_tokens(response)
+                rid = active_reservation_id()
+                if rid:
+                    reconcile_minimax(rid, input_tokens=in_tok, output_tokens=out_tok)
+                else:
+                    record_minimax(
+                        kind="text",
+                        model=model or "MiniMax-M3",
+                        input_tokens=in_tok,
+                        output_tokens=out_tok,
+                    )
         except Exception as e:
             logger.debug(f"Cost logging failed: {e}")
 
@@ -1051,11 +1065,18 @@ class AIRouter:
 
             elif provider_type == "minimax":
                 logger.info(f"[MAX] Chat via MiniMax ({self.minimax_model}){' (fallback)' if fallback else ''}")
-                resp = await self._minimax_chat(full_messages, image_path=image_path)
+                from app.services.minimax_meter import MeterBlocked
+                try:
+                    resp = await self._minimax_chat(full_messages, image_path=image_path)
+                except MeterBlocked as exc:
+                    return AIResponse(content=exc.message, model_used="minimax-meter", fallback_used=False)
                 self._log_chat_cost(full_messages, resp, self.minimax_model, feature, business, tenant_id)
                 return AIResponse(content=resp, model_used=f"minimax-{self.minimax_model}", fallback_used=fallback)
 
         except Exception as e:
+            from app.services.minimax_meter import MeterBlocked
+            if isinstance(e, MeterBlocked):
+                return AIResponse(content=e.message, model_used="minimax-meter", fallback_used=False)
             logger.warning(f"{provider_type} failed: {type(e).__name__}: {e}")
             self._record_provider_error(canonical or provider_type, e)
         return None
@@ -1265,7 +1286,20 @@ class AIRouter:
                 source=source,
                 image=bool(image_filename),
             )
-            return model, refusal
+            if refusal:
+                return model, refusal
+            try:
+                from app.services.minimax_meter import enforce as enforce_minimax
+                meter_refusal = enforce_minimax(kind="text", input_tokens=max(1, len(user_text) // 4))
+                if meter_refusal:
+                    return model, meter_refusal
+            except Exception:
+                logger.warning("minimax meter check failed closed; refusing MiniMax spend", exc_info=True)
+                return model, (
+                    "No pude confirmar el cupo MiniMax. No gasto créditos de regalo. / "
+                    "Could not confirm MiniMax quota. Gift credits will not be spent."
+                )
+            return model, None
         except Exception:
             logger.warning(
                 "usage cap check failed open; chat proceeds without a cap refusal",
@@ -1411,6 +1445,9 @@ class AIRouter:
                 self._log_chat_cost(full_messages, resp, self.minimax_model, feature, business, tenant_id)
                 return AIResponse(content=resp, model_used=f"minimax-{self.minimax_model}", fallback_used=False)
             except Exception as e:
+                from app.services.minimax_meter import MeterBlocked
+                if isinstance(e, MeterBlocked):
+                    return AIResponse(content=e.message, model_used="minimax-meter", fallback_used=False)
                 logger.warning(f"MiniMax failed: {type(e).__name__}: {e}")
                 self._record_provider_error("minimax", e)
                 use_model = AIModel.GROK  # fallback to Grok
@@ -1635,6 +1672,10 @@ class AIRouter:
                         return
 
                 except Exception as e:
+                    from app.services.minimax_meter import MeterBlocked
+                    if isinstance(e, MeterBlocked):
+                        yield e.message, "minimax-meter"
+                        return
                     logger.warning(f"{provider_type} stream failed: {type(e).__name__}: {e}")
                     self._record_provider_error(provider_type, e)
 
@@ -1689,6 +1730,10 @@ class AIRouter:
                 self._log_chat_cost(full_messages, "".join(collected), self.minimax_model, feature, business, tenant_id)
                 return
             except Exception as e:
+                from app.services.minimax_meter import MeterBlocked
+                if isinstance(e, MeterBlocked):
+                    yield e.message, "minimax-meter"
+                    return
                 logger.warning(f"MiniMax stream failed: {type(e).__name__}: {e}")
                 self._record_provider_error("minimax", e)
                 use_model = AIModel.GROK
@@ -2243,11 +2288,48 @@ class AIRouter:
                 pass
         return 120.0
 
+    def _reserve_minimax_text(self, messages: List[AIMessage]) -> Any:
+        """Reserve founder + family MiniMax text under the exclusive meter lock."""
+        from app.services.minimax_meter import MeterBlocked, pop_plan_warning, reserve
+
+        input_text = " ".join((m.content or "") for m in (messages or []) if getattr(m, "content", None))
+        estimate = max(1, len(input_text) // 4)
+        reservation = reserve(
+            kind="text",
+            model=self.minimax_model or "MiniMax-M3",
+            input_tokens=estimate,
+            output_tokens=0,
+        )
+        if reservation.blocked:
+            raise MeterBlocked(reservation.message)
+        warning = reservation.warning or pop_plan_warning()
+        reservation.warning = warning
+        return reservation
+
+    def _reconcile_minimax_failure(self, reservation: Any, *, billed: bool, error: str) -> None:
+        if reservation is None:
+            return
+        try:
+            from app.services.minimax_meter import reconcile
+
+            reconcile(
+                reservation,
+                billed_unknown=bool(billed),
+                input_tokens=reservation.reserved.get("input_tokens", 0) if billed else 0,
+                output_tokens=0,
+                error=error[:200],
+            )
+        except Exception:
+            logger.warning("minimax reconcile after failure failed", exc_info=True)
+
     async def _minimax_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
         """Chat via MiniMax M1 API. Overloaded and connect failures are retried."""
         from app.services.max.minimax_retry import request_with_retry
+        from app.services.minimax_meter import MeterBlocked
 
+        reservation = self._reserve_minimax_text(messages)
         api_messages = self._prepare_openai_messages(messages, image_path)
+        billed = False
 
         async def once():
             async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
@@ -2257,20 +2339,42 @@ class AIRouter:
                     json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens}
                 )
 
-        resp = await request_with_retry(once)
+        try:
+            resp = await request_with_retry(once)
+            billed = True
+        except MeterBlocked:
+            raise
+        except Exception as exc:
+            self._reconcile_minimax_failure(reservation, billed=billed, error=str(exc))
+            raise
         if resp.status_code != 200:
+            self._reconcile_minimax_failure(
+                reservation,
+                billed=True,
+                error=f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}",
+            )
             raise Exception(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
         self._record_provider_success("minimax")
-        return self._sanitize_minimax_content(resp.json()["choices"][0]["message"]["content"])
+        content = self._sanitize_minimax_content(resp.json()["choices"][0]["message"]["content"])
+        warning = getattr(reservation, "warning", "") or ""
+        if warning:
+            content = f"{warning}\n\n{content}"
+        return content
 
     async def _minimax_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
         """Stream chat via MiniMax M1 API. The open is retried; a started body is not."""
         import asyncio
         import random
         from app.services.max.minimax_retry import ATTEMPTS, WAIT_SECONDS, _jitter, is_connect_failure, is_retryable_status
+        from app.services.minimax_meter import MeterBlocked
 
+        reservation = self._reserve_minimax_text(messages)
         api_messages = self._prepare_openai_messages(messages, image_path)
         rng = random.Random()
+        billed = False
+        warning = getattr(reservation, "warning", "") or ""
+        if warning:
+            yield warning + "\n\n"
         for attempt in range(ATTEMPTS):
             try:
                 async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
@@ -2280,6 +2384,7 @@ class AIRouter:
                         headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
                         json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens, "stream": True}
                     ) as response:
+                        billed = True
                         if is_retryable_status(response.status_code) and attempt < ATTEMPTS - 1:
                             await response.aread()
                             await asyncio.sleep(_jitter(WAIT_SECONDS[attempt], rng))
@@ -2307,11 +2412,15 @@ class AIRouter:
                         if cleaned:
                             yield cleaned
                         return
+            except MeterBlocked:
+                raise
             except Exception as exc:
                 if is_connect_failure(exc) and attempt < ATTEMPTS - 1:
                     await asyncio.sleep(_jitter(WAIT_SECONDS[attempt], rng))
                     continue
+                self._reconcile_minimax_failure(reservation, billed=billed, error=str(exc))
                 raise
+        self._reconcile_minimax_failure(reservation, billed=billed, error="minimax stream exhausted")
 
     # ── OpenClaw ──────────────────────────────────────────────────────
 

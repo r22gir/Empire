@@ -19,6 +19,9 @@ def test_script_does_not_source_or_eval_env():
     assert "check_family_help" in text
     assert "family-help /inbox denegado" in text
     assert "can_read_inbox" in text
+    assert "check_minimax_meter" in text
+    assert "minimax-meter /usage denegado" in text
+    assert "minimax-meter /me" in text
 
 
 def test_self_test_parses_unquoted_smtp_from():
