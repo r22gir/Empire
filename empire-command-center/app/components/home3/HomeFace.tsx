@@ -18,7 +18,7 @@ const HomeFace = forwardRef<HomeFaceHandle, { size?: number }>(function HomeFace
   const edition = resolveAvatarEdition(null, EDITION);
   const [phase, setPhase] = useState<Phase>('orb');
   const [minutes, setMinutes] = useState('');
-  const [hint, setHint] = useState('Tap to start face');
+  const [hint, setHint] = useState('');
   const started = useRef(false);
 
   useEffect(() => {
