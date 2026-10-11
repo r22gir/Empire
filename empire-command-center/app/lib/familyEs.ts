@@ -187,6 +187,11 @@ export const FAMILY_ES: Record<string, string> = {
 
   // ── EmpireAssist / pets ──
   'Coachees': 'Coachees',
+
+  // ── Family help (personal Max inbox) ──
+  'Family help': 'Ayuda de ediciones familiares',
+  'Ask Max for help': 'Pedir ayuda a Max',
+  'Pedir ayuda a Max': 'Pedir ayuda a Max',
 };
 
 /** Regex rules for text that carries numbers or short variable parts. */
