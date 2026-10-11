@@ -214,6 +214,158 @@ def test_whatsapp_inbound_usage_cap_under_at_over_both_editions(monkeypatch, tmp
         assert len(graph_calls) == before
 
 
+def test_family_default_baseline_enforces_without_env_both_editions(monkeypatch, tmp_path):
+    """No EMPIRE_USAGE_BASELINE_* — built-in 5M tokens, 20% = 1M, enforced."""
+    from app.services import whatsapp_cloud as wa
+    from app.services.instance_usage import (
+        DEFAULT_FAMILY_BASELINE_MONTHLY_TOKENS,
+        enforce_whatsapp_model_cap,
+        record_usage,
+        usage_summary,
+        whatsapp_cap_reply_es,
+    )
+
+    ingest_calls = []
+    graph_calls = []
+
+    def fake_ingest(transcript, **kwargs):
+        ingest_calls.append(transcript)
+        return {"draft": {"id": "draft-default"}, "session_id": "sess-default"}
+
+    def fake_format(_view):
+        return "respuesta de prueba del modelo"
+
+    def fake_graph(method, url, token="", body=None, headers=None):
+        graph_calls.append({"url": url, "body": body or b""})
+        if url.endswith("/messages"):
+            return 200, b'{"messages":[{"id":"wamid.out"}]}'
+        raise AssertionError(url)
+
+    monkeypatch.setattr("app.services.voice_doc.ingest_transcript", fake_ingest)
+    monkeypatch.setattr("app.services.voice_doc.format_session_reply", fake_format)
+    monkeypatch.setattr(wa, "graph_request", fake_graph)
+
+    assert DEFAULT_FAMILY_BASELINE_MONTHLY_TOKENS == 5_000_000
+    default_allowance = DEFAULT_FAMILY_BASELINE_MONTHLY_TOKENS * 0.20
+
+    for edition in ("amp", "maxine"):
+        root = tmp_path / f"{edition}-default"
+        root.mkdir()
+        _family_env(monkeypatch, root, edition)
+        monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_USD", raising=False)
+        monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", raising=False)
+
+        summary = usage_summary()
+        assert summary["enforced"] is True
+        assert summary["baseline_source"] == "default"
+        assert summary["baseline_basis"] == "tokens"
+        assert summary["baseline"] == DEFAULT_FAMILY_BASELINE_MONTHLY_TOKENS
+        assert summary["allowance"] == default_allowance
+        assert summary["level"] == "ok"
+        assert summary["cap_percent"] == 20
+        assert enforce_whatsapp_model_cap() is None
+
+        ingest_calls.clear()
+        graph_calls.clear()
+        body = _payload("Cotiza con el tope por defecto", f"wamid.{edition}.default.under")
+        result = wa.handle_webhook(body, _sign(body))
+        assert result["processed"] == 1
+        assert ingest_calls
+        assert not result.get("usage_capped")
+
+        record_usage(input_tokens=int(default_allowance), output_tokens=0, model="MiniMax-M3")
+        blocked = usage_summary()
+        assert blocked["level"] == "blocked"
+        assert blocked["used"] >= blocked["allowance"]
+        assert enforce_whatsapp_model_cap() == whatsapp_cap_reply_es()
+
+        ingest_calls.clear()
+        graph_calls.clear()
+        body = _payload("Otra cotización al tope", f"wamid.{edition}.default.at")
+        result = wa.handle_webhook(body, _sign(body))
+        assert result.get("usage_capped") is True
+        assert ingest_calls == []
+        outbound = [json.loads(call["body"]) for call in graph_calls if call["url"].endswith("/messages")]
+        assert outbound and outbound[0]["to"] == "573001112233"
+        assert outbound[0]["text"]["body"] == whatsapp_cap_reply_es()
+
+
+def test_family_baseline_env_overrides_default_both_editions(monkeypatch, tmp_path):
+    from app.services.instance_usage import (
+        DEFAULT_FAMILY_BASELINE_MONTHLY_TOKENS,
+        record_usage,
+        usage_summary,
+    )
+
+    for edition in ("amp", "maxine"):
+        root = tmp_path / f"{edition}-override"
+        root.mkdir()
+        _family_env(monkeypatch, root, edition)
+        monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_USD", raising=False)
+        monkeypatch.setenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", "1000")
+        summary = usage_summary()
+        assert summary["enforced"] is True
+        assert summary["baseline_source"] == "env"
+        assert summary["baseline"] == 1000
+        assert summary["allowance"] == 200
+        assert summary["baseline"] != DEFAULT_FAMILY_BASELINE_MONTHLY_TOKENS
+        record_usage(input_tokens=200, output_tokens=0, model="MiniMax-M3")
+        assert usage_summary()["level"] == "blocked"
+
+        monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", raising=False)
+        monkeypatch.setenv("EMPIRE_USAGE_BASELINE_MONTHLY_USD", "10")
+        monkeypatch.setenv("MINIMAX_USD_PER_MILLION_TOKENS", "1")
+        usd = usage_summary()
+        assert usd["baseline_source"] == "env"
+        assert usd["baseline_basis"] == "usd"
+        assert usd["baseline"] == 10
+        assert usd["allowance"] == 2
+
+
+def test_whatsapp_fail_closed_when_usage_unreadable(monkeypatch, tmp_path):
+    from app.services import whatsapp_cloud as wa
+    from app.services.instance_usage import enforce_whatsapp_model_cap, whatsapp_cap_reply_es
+
+    ingest_calls = []
+    graph_calls = []
+
+    def fake_ingest(transcript, **kwargs):
+        ingest_calls.append(transcript)
+        return {"draft": {"id": "nope"}, "session_id": "nope"}
+
+    def fake_graph(method, url, token="", body=None, headers=None):
+        graph_calls.append({"url": url, "body": body or b""})
+        if url.endswith("/messages"):
+            return 200, b'{"messages":[{"id":"wamid.out"}]}'
+        raise AssertionError(url)
+
+    monkeypatch.setattr("app.services.voice_doc.ingest_transcript", fake_ingest)
+    monkeypatch.setattr("app.services.voice_doc.format_session_reply", lambda _view: "no")
+    monkeypatch.setattr(wa, "graph_request", fake_graph)
+    monkeypatch.setattr(
+        "app.services.instance_usage._connect",
+        lambda: (_ for _ in ()).throw(RuntimeError("usage db unreadable")),
+    )
+
+    for edition in ("amp", "maxine"):
+        root = tmp_path / f"{edition}-fail"
+        root.mkdir()
+        _family_env(monkeypatch, root, edition)
+        monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_USD", raising=False)
+        monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", raising=False)
+        refusal = whatsapp_cap_reply_es()
+        assert enforce_whatsapp_model_cap() == refusal
+        ingest_calls.clear()
+        graph_calls.clear()
+        body = _payload("Dicta aunque no se lea el uso", f"wamid.{edition}.failclosed")
+        result = wa.handle_webhook(body, _sign(body))
+        assert result.get("usage_capped") is True
+        assert ingest_calls == []
+        outbound = [json.loads(call["body"]) for call in graph_calls if call["url"].endswith("/messages")]
+        assert outbound and outbound[0]["to"] == "573001112233"
+        assert outbound[0]["text"]["body"] == refusal
+
+
 def test_tutorial_routes_linked_from_dashboard_and_help():
     root = Path(__file__).resolve().parents[2]
     help_menu = (root / "empire-command-center" / "app" / "components" / "voice" / "HelpMenu.tsx").read_text(encoding="utf-8")
