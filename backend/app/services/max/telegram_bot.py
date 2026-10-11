@@ -139,13 +139,32 @@ def _auto_save_exchange_to_memory(
 
 # ── Per-chat conversation history — persisted to disk ──
 _MAX_HISTORY = 30  # Keep last 30 exchanges per chat (was 10)
+# Legacy Workroom path only. Family editions never mkdir this at import.
 _TELEGRAM_CHAT_DIR = Path.home() / "empire-repo" / "backend" / "data" / "chats" / "telegram"
-_TELEGRAM_CHAT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _telegram_chat_dir() -> Path:
+    try:
+        from app.edition import is_family_edition, require_data_root
+        if is_family_edition():
+            path = require_data_root() / "chats" / "telegram"
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+    except Exception:
+        pass
+    env = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    if env:
+        path = Path(env).expanduser() / "chats" / "telegram"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    path = Path(_TELEGRAM_CHAT_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _load_telegram_history(chat_id: str) -> list[dict]:
     """Load conversation history from disk for a chat."""
-    path = _TELEGRAM_CHAT_DIR / f"{chat_id}.json"
+    path = _telegram_chat_dir() / f"{chat_id}.json"
     if path.exists():
         try:
             data = _json.loads(path.read_text())
@@ -157,7 +176,7 @@ def _load_telegram_history(chat_id: str) -> list[dict]:
 
 def _save_telegram_history(chat_id: str, messages: list[dict]):
     """Persist conversation history to disk."""
-    path = _TELEGRAM_CHAT_DIR / f"{chat_id}.json"
+    path = _telegram_chat_dir() / f"{chat_id}.json"
     try:
         data = {"chat_id": chat_id, "updated_at": __import__('datetime').datetime.utcnow().isoformat(), "messages": messages}
         path.write_text(_json.dumps(data, indent=2, default=str))

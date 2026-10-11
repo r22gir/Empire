@@ -31,7 +31,7 @@ from app.services.max.guardrails import (
     GPU_VERIFICATION_COMMANDS,
     is_imperative_action_request,
 )
-from app.services.max.security.sanitizer import sanitizer as input_sanitizer
+from app.services.max.security.sanitizer import sanitizer as input_sanitizer, audit_dir as security_audit_dir
 from app.services.max.tool_executor import parse_tool_blocks, parse_tool_blocks_with_errors, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
 from app.services.max.minimax_tools import minimax_tools_status
 from app.services.max.tool_result_normalizer import (
@@ -111,9 +111,29 @@ from app.services.max.routing_state import canonical_provider
 from pathlib import Path as _Path
 
 # ── Chat history persistence ─────────────────────────────────────────────────
+# Workroom checkout path. Family editions never mkdir or read it.
 # Must go 4 parents up: router.py → max → routers → app → backend
 _ROUTER_CHATS_DIR = _Path(__file__).parent.parent.parent.parent / "data" / "chats"
-_ROUTER_CHATS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _router_chats_dir() -> _Path:
+    try:
+        from app.edition import is_family_edition, require_data_root
+
+        if is_family_edition():
+            path = require_data_root() / "chats"
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+    except Exception:
+        pass
+    env = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    if env:
+        path = _Path(env).expanduser() / "chats"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    path = _Path(_ROUTER_CHATS_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 try:
     from app.services.max.access_control import access_controller
@@ -3768,7 +3788,7 @@ async def _chat_with_max_service_impl(
         if _nc not in ("telegram", "phone"):
             try:
                 import datetime as _dt
-                _nc_user_dir = _ROUTER_CHATS_DIR / "founder"
+                _nc_user_dir = _router_chats_dir() / "founder"
                 _nc_user_dir.mkdir(exist_ok=True)
                 _nc_chat_id = conv_id[:8]
                 _nc_chat_file = _nc_user_dir / f"{_nc_chat_id}.json"
@@ -4823,7 +4843,7 @@ async def _chat_stream_impl(request: ChatRequest):
             if _save_channel not in ("telegram", "phone"):
                 try:
                     import datetime as _dt
-                    _chat_user_dir = _ROUTER_CHATS_DIR / "founder"
+                    _chat_user_dir = _router_chats_dir() / "founder"
                     _chat_user_dir.mkdir(exist_ok=True)
                     _chat_id_short = conv_id[:8]
                     _chat_file = _chat_user_dir / f"{_chat_id_short}.json"
@@ -5345,7 +5365,7 @@ async def security_stats():
     """Get security layer stats — blocked inputs, rate limits, audit counts."""
     stats = input_sanitizer.get_stats()
     # Count audit log entries
-    audit_path = Path.home() / "empire-repo" / "backend" / "data" / "security" / "audit_log.jsonl"
+    audit_path = security_audit_dir() / "audit_log.jsonl"
     audit_count = 0
     if audit_path.exists():
         with open(audit_path) as f:
@@ -5357,7 +5377,7 @@ async def security_stats():
 @router.get("/security/audit")
 async def security_audit(limit: int = 50):
     """Get recent security audit log entries."""
-    audit_path = Path.home() / "empire-repo" / "backend" / "data" / "security" / "audit_log.jsonl"
+    audit_path = security_audit_dir() / "audit_log.jsonl"
     if not audit_path.exists():
         return {"entries": [], "total": 0}
     entries = []
