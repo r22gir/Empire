@@ -1,0 +1,44 @@
+{
+  "edition": "amp",
+  "assistant": "Max-e",
+  "deck_version": 1,
+  "interval_ms": 8000,
+  "slides": [
+    {
+      "id": "hola",
+      "title": "Hola, soy Max-e",
+      "body": "Bienvenido a la familia. Este centro de mando es tuyo: privado, en español y separado del de tus hermanos.",
+      "image": null
+    },
+    {
+      "id": "empirebox",
+      "title": "EmpireBox, en breve",
+      "body": "Rafael y sus hermanos están construyendo EmpireBox juntos. Cada uno tiene su propio asistente y su propio espacio. Aquí no hay papeles de empresa: solo la herramienta para trabajar y organizarte.",
+      "image": null
+    },
+    {
+      "id": "asistente",
+      "title": "Lo que hago por ti",
+      "body": "Hablo contigo por chat o por voz, recuerdo lo que me pides guardar, busco en la web cuando hace falta y te ayudo a redactar y organizar. No publico nada ni toco tus cuentas sin que tú lo apruebes.",
+      "image": null
+    },
+    {
+      "id": "uso",
+      "title": "Cómo usarlo",
+      "body": "Entras con tu correo. Escribes en el chat, usas voz, adjuntas archivos y pides una búsqueda web. Recuerdo lo que me pides guardar. Si necesitas a Rafael, usa el botón Pedir ayuda a Max.",
+      "image": null
+    },
+    {
+      "id": "reglas",
+      "title": "Reglas de esta edición",
+      "body": "Tus datos viven solo aquí; no se mezclan con las ediciones de tus hermanos. Nada se publica sin tu aprobación. El uso de esta instancia está limitado al 20% del total.",
+      "image": null
+    },
+    {
+      "id": "pasos",
+      "title": "Primeros pasos",
+      "body": "Prueba el chat, dile algo que deba recordar y abre Ayuda si quieres voz o WhatsApp. Puedes volver a ver esta bienvenida cuando quieras: Ayuda → Ver bienvenida.",
+      "image": null
+    }
+  ]
+}

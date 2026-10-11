@@ -1073,3 +1073,5 @@ def paths_touched_by_provision(root: Path) -> Iterable[Path]:
     yield root / "assistant" / "history" / "conversations.db"
     yield root / "logs" / "amp.log"
     yield root / "businesses" / "amp" / "business.json"
+    yield root / "welcome" / "seen.json"
+    yield root / "welcome" / "slides.json"
