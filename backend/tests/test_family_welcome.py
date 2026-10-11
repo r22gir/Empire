@@ -129,7 +129,6 @@ def test_workroom_and_founder_never_get_welcome(monkeypatch, tmp_path):
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path / "workroom"))
     monkeypatch.delenv("ASSISTANT_NAME", raising=False)
     client = _client()
-    _cookie(client)
     missing = client.get("/api/v1/welcome")
     assert missing.status_code == 404
     assert client.post("/api/v1/welcome/seen").status_code == 404
@@ -171,7 +170,11 @@ def test_help_menu_and_layout_wire_replay():
     assert "FamilyWelcomeReplayButton" in ayuda
     assert "FamilyWelcomeHost" in layout
     overlay = (REPO / "empire-command-center" / "app" / "components" / "family" / "FamilyWelcomeOverlay.tsx").read_text(encoding="utf-8")
-    assert "prefers-reduced-motion" in (REPO / "empire-command-center" / "app" / "components" / "family" / "familyWelcome.css").read_text(encoding="utf-8")
-    assert "Saltar" in overlay
-    assert "Saltar / Skip" in overlay
-    assert "max-width: 720px" in (REPO / "empire-command-center" / "app" / "components" / "family" / "familyWelcome.css").read_text(encoding="utf-8")
+    copy = (REPO / "empire-command-center" / "app" / "lib" / "familyWelcome.mjs").read_text(encoding="utf-8")
+    css = (REPO / "empire-command-center" / "app" / "components" / "family" / "familyWelcome.css").read_text(encoding="utf-8")
+    assert "prefers-reduced-motion" in css
+    assert "WELCOME_SKIP_LABEL" in overlay
+    assert "WELCOME_SKIP_ARIA" in overlay
+    assert 'Saltar' in copy
+    assert "Saltar / Skip" in copy
+    assert "max-width: 720px" in css
