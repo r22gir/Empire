@@ -1,205 +1,453 @@
 'use client';
-import { useState } from 'react';
-import Navbar from '../components/Navbar';
-import Footer from '../components/Footer';
-import { getTodayAffirmation, getTodayMeditation, PILLAR_CONFIG, COURSES } from '../lib/data';
-import { Sun, Play, ArrowRight, Star, Users, BookOpen, Check, Sparkles } from 'lucide-react';
 
-export default function LandingPage() {
-  const [email, setEmail] = useState('');
-  const [subscribed, setSubscribed] = useState(false);
-  const affirmation = getTodayAffirmation();
-  const meditation = getTodayMeditation();
+import React, { useState } from 'react';
+import Link from 'next/link';
+import { useAudio } from '@/context/AudioContext';
+import { SAMPLE_TRACKS, COACHES, PROGRAMS, THEME_CATEGORIES } from '@/lib/amp-content';
+import {
+  Sparkles, Play, ArrowRight,
+  Compass, Star, Users, Clock, BookOpen
+} from 'lucide-react';
 
-  const handleSubscribe = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (email.includes('@')) {
-      setSubscribed(true);
-      setEmail('');
-    }
+const MOOD_OPTIONS = [
+  { key: 'feliz', label: 'Feliz & Radiante', emoji: '😊', theme: 'abundancia' },
+  { key: 'en_paz', label: 'En Paz & Calma', emoji: '😌', theme: 'gratitud' },
+  { key: 'ansioso', label: 'Ansioso / Con Prisa', emoji: '😰', theme: 'ansiedad' },
+  { key: 'triste', label: 'Nostálgico / Triste', emoji: '😔', theme: 'duelo' },
+  { key: 'motivado', label: 'Con Energía / Motivado', emoji: '💪', theme: 'liderazgo' },
+];
+
+const PRESS_LOGOS = [
+  { name: '[Enfoque Metodológico]', desc: '[Dato a confirmar]' },
+  { name: '[Acompañamiento]', desc: '[Estándar a confirmar]' },
+  { name: '[Espacio Sonoro]', desc: '[Contenido a confirmar]' },
+  { name: '[Comunidad]', desc: '[Métrica a confirmar]' },
+];
+
+export default function HomePage() {
+  const { playTrack } = useAudio();
+  const [selectedMood, setSelectedMood] = useState<string | null>(null);
+  const [recommendedTrack, setRecommendedTrack] = useState<typeof SAMPLE_TRACKS[0] | null>(null);
+
+  const handleMoodSelect = (moodKey: string, theme: string) => {
+    setSelectedMood(moodKey);
+    const matched = SAMPLE_TRACKS.find(t => t.theme === theme) || SAMPLE_TRACKS[0];
+    setRecommendedTrack(matched);
   };
 
+  const featuredTrack = SAMPLE_TRACKS[0];
+
   return (
-    <div className="min-h-screen flex flex-col">
-      <Navbar />
+    <div className="flex flex-col min-h-screen">
+      {/* ── 1. FULL-BLEED CINEMATIC HERO (Mindvalley / Calm style) ── */}
+      <section className="relative overflow-hidden pt-12 pb-24 md:pt-20 md:pb-32 border-b border-[#EFE6D8] dark:border-[#2B254E]">
+        {/* Cinematic Background Layer with Overlay & Strong Scrim */}
+        <div className="absolute inset-0 -z-20 overflow-hidden">
+          <div
+            className="w-full h-full bg-cover bg-center transition-transform duration-1000 scale-105"
+            style={{ backgroundImage: `url('/hero/sunrise-hero.jpg')` }}
+          />
+          {/* Multi-layered gradient scrim ensuring robust WCAG AA contrast (4.5:1+) for text on mobile & desktop */}
+          <div className="absolute inset-0 bg-[#FFFDF9]/95 dark:bg-[#0A0817]/95 sm:bg-[#FFFDF9]/90 sm:dark:bg-[#0E0C1C]/92 md:bg-gradient-to-b md:from-[#FFFDF9]/94 md:via-[#FFFDF9]/88 md:to-[#FFFDF9] md:dark:from-[#0A0817]/96 md:dark:via-[#0E0C1C]/92 md:dark:to-[#0E0C1C]" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#E0A526]/10 via-transparent to-[#F28C6B]/15" />
+        </div>
 
-      {/* ── Hero ── */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-gold-light/30 via-warmwhite to-sage-light/20" />
-        <div className="absolute top-20 right-10 w-72 h-72 bg-sunrise/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-10 left-10 w-60 h-60 bg-lavender/10 rounded-full blur-3xl" />
+        {/* Ambient floating orbs */}
+        <div className="absolute -top-32 right-1/4 w-96 h-96 bg-[#F28C6B]/20 rounded-full blur-3xl pointer-events-none -z-10 breathe-orb" />
+        <div className="absolute -bottom-24 left-1/4 w-96 h-96 bg-[#E0A526]/20 rounded-full blur-3xl pointer-events-none -z-10 breathe-orb" />
 
-        <div className="relative max-w-5xl mx-auto px-4 py-16 md:py-24 text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold/10 border border-gold/20 text-sm font-semibold text-gold-dark mb-6">
-            <Sparkles size={16} />
-            El Portal de la Alegría
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
+          {/* Eyebrow badge */}
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#8E5600]/10 dark:bg-[#1A1633]/90 backdrop-blur-md border border-[#8E5600]/30 text-xs font-black uppercase tracking-wider text-[#734300] dark:text-[#F6D06F] shadow-sm mb-6 animate-fade-up">
+            <Sparkles size={14} className="text-[#8E5600] dark:text-[#F6D06F]" /> El Portal de la Alegría · Actitud Mental Positiva
           </div>
 
-          <h1 className="font-serif text-4xl md:text-6xl font-bold leading-tight mb-6 text-[#2D2A26]">
-            Transforma tu mente,<br />
-            <span className="gradient-text">transforma tu vida</span>
+          <h1 className="font-serif text-4xl sm:text-6xl md:text-7xl font-black tracking-tight text-[#16120E] dark:text-[#FFFFFF] leading-[1.15] mb-6 max-w-4xl mx-auto">
+            Transforma tu mente, <br className="hidden sm:inline" />
+            <span className="text-[#8E4400] dark:text-[#F8B338]">un día a la vez.</span>
           </h1>
 
-          <p className="text-lg md:text-xl text-[#5C5650] max-w-2xl mx-auto mb-8 leading-relaxed">
-            Una plataforma para ayudarte a generar un cambio mental positivo, manifestar bienestar
-            y compartir herramientas maravillosas de aprendizaje y sanación.
+          <p className="text-lg sm:text-xl md:text-2xl text-[#2B231D] dark:text-[#E2DCED] font-medium max-w-3xl mx-auto leading-relaxed mb-10">
+            La profundidad transformadora del coaching de vida y la serenidad diaria de la meditación guiada en español. Sin algoritmos fríos: guiado por mentores reales que caminan a tu lado.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-12">
-            <a href="/daily"
-              className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-gradient-to-r from-gold to-sunrise text-white font-bold text-lg shadow-lg shadow-gold/25 hover:shadow-xl hover:shadow-gold/30 transition-all hover:scale-[1.02] no-underline">
-              Comienza Hoy <ArrowRight size={20} />
-            </a>
-            <a href="/retos"
-              className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl border-2 border-gold/30 text-gold-dark font-bold text-lg hover:bg-gold/5 transition-all no-underline">
-              Ver Retos <BookOpen size={20} />
-            </a>
+          {/* Action buttons */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+            <Link
+              href="/onboarding"
+              className="w-full sm:w-auto px-8 py-4 rounded-full bg-gradient-to-r from-[#E0A526] via-[#F28C6B] to-[#E0A526] bg-[length:200%_auto] hover:bg-right text-white font-bold text-base shadow-xl shadow-[#E0A526]/30 hover:scale-105 active:scale-95 transition-all duration-300 no-underline inline-flex items-center justify-center gap-2"
+            >
+              Comienza tu Camino Gratis <ArrowRight size={18} />
+            </Link>
+
+            <button
+              onClick={() => playTrack(featuredTrack)}
+              className="w-full sm:w-auto px-7 py-4 rounded-full bg-white/90 dark:bg-white/10 backdrop-blur-md border border-[#E0A526]/40 hover:border-[#E0A526] text-[#1E1A17] dark:text-[#F6F3EE] font-bold text-base shadow-md hover:bg-[#E0A526]/10 transition-all duration-200 inline-flex items-center justify-center gap-3"
+            >
+              <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#E0A526] to-[#F28C6B] flex items-center justify-center text-white">
+                <Play size={14} className="ml-0.5 fill-current" />
+              </div>
+              <span>Escuchar Meditación Destacada (5 min)</span>
+            </button>
           </div>
 
-          {/* Daily preview card */}
-          <div className="max-w-lg mx-auto bg-white rounded-3xl shadow-lg shadow-gold/10 border border-gold-light/40 p-6 text-left">
-            <p className="text-xs font-bold text-gold tracking-wider mb-2">AFIRMACIÓN DEL DÍA</p>
-            <p className="font-serif text-lg italic text-[#2D2A26] leading-relaxed mb-4">&ldquo;{affirmation}&rdquo;</p>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-sage-dark font-semibold">
-                <Play size={14} className="text-sage" /> {meditation.title} · {meditation.duration}
+          {/* ── DIRECT HERO CHECK-IN: ¿CÓMO TE SIENTES HOY? ── */}
+          <div className="max-w-2xl mx-auto glass-card rounded-3xl p-6 sm:p-8 shadow-2xl border border-white/40 dark:border-white/10 text-left">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <span className="text-[11px] font-extrabold uppercase tracking-widest text-[#E0A526] block">
+                  Práctica del Momento
+                </span>
+                <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#1E1A17] dark:text-[#F6F3EE]">
+                  ¿Cómo te sientes hoy?
+                </h2>
               </div>
-              <a href="/daily" className="text-xs font-bold text-gold hover:text-gold-dark no-underline">Ir al Diario →</a>
+              <span className="text-xs px-3 py-1 rounded-full bg-black/5 dark:bg-white/10 text-[#5C544D] dark:text-[#B4ACC5] font-semibold">
+                Sin registro previo
+              </span>
             </div>
+
+            <p className="text-xs sm:text-sm text-[#5C544D] dark:text-[#B4ACC5] mb-5">
+              Elige tu estado interior actual y te recomendaremos la práctica sonora ideal para transformar tu energía en minutos:
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-6">
+              {MOOD_OPTIONS.map((mood) => {
+                const isSelected = selectedMood === mood.key;
+                return (
+                  <button
+                    key={mood.key}
+                    onClick={() => handleMoodSelect(mood.key, mood.theme)}
+                    className={`flex items-center gap-2.5 p-3 rounded-2xl border text-xs sm:text-sm font-semibold transition-all duration-200 ${
+                      isSelected
+                        ? 'border-[#E0A526] bg-[#E0A526]/15 text-[#C68C14] dark:text-[#F2C14E] shadow-sm scale-102'
+                        : 'border-[#EFE6D8] dark:border-[#2B254E] hover:border-[#E0A526]/50 bg-white/60 dark:bg-white/5 text-[#1E1A17] dark:text-[#F6F3EE]'
+                    }`}
+                  >
+                    <span className="text-lg">{mood.emoji}</span>
+                    <span className="truncate">{mood.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Immediate recommendation preview */}
+            {recommendedTrack && (
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-[#E0A526]/10 via-[#F28C6B]/10 to-transparent border border-[#E0A526]/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-up">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#E0A526] to-[#F28C6B] flex items-center justify-center text-white shrink-0">
+                    <Sparkles size={18} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-[#E0A526]">
+                      Sugerencia para ti:
+                    </p>
+                    <p className="text-sm font-bold text-[#1E1A17] dark:text-[#F6F3EE]">
+                      {recommendedTrack.title}
+                    </p>
+                    <p className="text-xs text-[#5C544D] dark:text-[#B4ACC5]">
+                      Por {recommendedTrack.coach} · {recommendedTrack.durationLabel}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => playTrack(recommendedTrack)}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-full bg-[#E0A526] hover:bg-[#C68C14] text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-md transition-colors"
+                >
+                  <Play size={14} className="fill-current" /> Reproducir Ahora
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </section>
 
-      {/* ── Mission ── */}
-      <section className="py-12 bg-gradient-to-b from-cream to-warmwhite">
-        <div className="max-w-3xl mx-auto px-4 text-center">
-          <h2 className="font-serif text-2xl md:text-3xl font-bold text-[#2D2A26] mb-4">Nuestra Misión</h2>
-          <p className="text-[#5C5650] leading-relaxed text-lg">
-            Motivar e inspirar a cada persona del mundo para que alcance su máximo potencial
-            a través de contenido de crecimiento personal de alta calidad, guiándolas en los momentos difíciles,
-            facilitándoles procesos de automotivación para que avancen hacia un siguiente nivel de plenitud
-            y prosperidad en las diferentes áreas de sus vidas.
+      {/* ── 2. SOCIAL PROOF & CREDIBILITY BAND (PLACEHOLDER) ── */}
+      <section className="py-10 bg-[#FDF8F0] dark:bg-[#141129] border-b border-[#EFE6D8] dark:border-[#2B254E]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <p className="text-center text-xs font-bold uppercase tracking-widest text-[#5C544D] dark:text-[#B4ACC5] mb-6">
+            [Espacio reservado para avales, medios o hitos comunitarios confirmados por Juan]
           </p>
-          <div className="flex flex-wrap justify-center gap-3 mt-6">
-            {['Confianza', 'Empatía', 'Gratitud', 'Autenticidad', 'Amor Propio', 'Optimismo', 'Crecimiento'].map(v => (
-              <span key={v} className="px-3 py-1.5 rounded-full text-xs font-semibold bg-gold/10 text-gold-dark border border-gold/20">{v}</span>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── 3 Pillars ── */}
-      <section className="py-16 md:py-20">
-        <div className="max-w-5xl mx-auto px-4">
-          <h2 className="font-serif text-3xl md:text-4xl font-bold text-center mb-3 text-[#2D2A26]">Los 3 Pilares</h2>
-          <p className="text-center text-[#9B9590] mb-10 text-lg">La base de tu transformación personal</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {(Object.entries(PILLAR_CONFIG) as [string, typeof PILLAR_CONFIG.mentalidad][]).map(([key, p]) => (
-              <div key={key} className={`rounded-3xl p-8 bg-gradient-to-br ${p.gradient} border border-white/60 hover:shadow-lg transition-all hover:scale-[1.02]`}>
-                <span className="text-4xl mb-4 block">{p.icon}</span>
-                <h3 className="font-serif text-2xl font-bold mb-2" style={{ color: p.color }}>{p.label}</h3>
-                <p className="text-[#5C5650] leading-relaxed">{p.desc}</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+            {PRESS_LOGOS.map((item, idx) => (
+              <div key={idx} className="p-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-[#E0A526]/30">
+                <div className="font-serif font-bold text-base md:text-lg text-[#1E1A17] dark:text-[#F6F3EE]">
+                  {item.name}
+                </div>
+                <div className="text-xs text-[#E0A526] font-semibold mt-0.5">
+                  {item.desc}
+                </div>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── Featured Courses ── */}
-      <section className="py-16 bg-gradient-to-b from-warmwhite to-cream">
-        <div className="max-w-5xl mx-auto px-4">
-          <h2 className="font-serif text-3xl md:text-4xl font-bold text-center mb-3 text-[#2D2A26]">Retos AMP</h2>
-          <p className="text-center text-[#9B9590] mb-10 text-lg">Desafíos de 21 días que transforman tu vida</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {COURSES.slice(0, 3).map(c => {
-              const pillar = PILLAR_CONFIG[c.pillar as keyof typeof PILLAR_CONFIG];
-              return (
-                <a href={`/retos?id=${c.id}`} key={c.id}
-                  className="bg-white rounded-3xl p-6 border border-gold-light/30 hover:shadow-lg hover:border-gold/30 transition-all group no-underline">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-xl">{pillar.icon}</span>
-                    <span className="text-xs font-bold px-2 py-1 rounded-full" style={{ color: pillar.color, background: pillar.color + '15' }}>{pillar.label}</span>
-                    {c.premium && <span className="text-xs font-bold text-sunrise bg-sunrise/10 px-2 py-1 rounded-full ml-auto">Premium</span>}
-                  </div>
-                  <h3 className="font-serif text-xl font-bold text-[#2D2A26] mb-2 group-hover:text-gold-dark transition-colors">{c.title}</h3>
-                  <p className="text-sm text-[#9B9590] mb-4 leading-relaxed">{c.description}</p>
-                  <div className="flex items-center gap-4 text-xs text-[#9B9590]">
-                    <span className="flex items-center gap-1"><BookOpen size={12} /> {c.days} días</span>
-                    <span className="flex items-center gap-1"><Users size={12} /> {c.enrolled.toLocaleString()}</span>
-                    <span className="flex items-center gap-1"><Star size={12} className="text-gold" /> {c.rating}</span>
-                  </div>
-                </a>
-              );
-            })}
+      {/* ── 3. TEACHER-FORWARD ROSTER (Mindvalley Style) ── */}
+      <section className="py-20 md:py-28 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center max-w-3xl mx-auto mb-16">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#E0A526]/15 border border-[#E0A526]/30 text-xs font-bold uppercase tracking-wider text-[#C68C14] dark:text-[#F2C14E] mb-3">
+            <Users size={14} /> Equipo de Guías y Mentores
           </div>
-          <div className="text-center mt-8">
-            <a href="/retos" className="inline-flex items-center gap-2 text-gold-dark font-bold hover:text-gold transition-colors no-underline">
-              Ver todos los retos <ArrowRight size={16} />
-            </a>
-          </div>
+          <h2 className="font-serif text-3xl sm:text-5xl font-bold text-[#1E1A17] dark:text-[#F6F3EE] mb-4">
+            Aprende con Mentores con Experiencia Real de Vida
+          </h2>
+          <p className="text-base text-[#5C544D] dark:text-[#B4ACC5]">
+            Cada uno de nuestros cuatro coaches aporta una maestría particular para acompañarte en cada estación de tu desarrollo personal.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+          {COACHES.map((coach) => (
+            <div
+              key={coach.id}
+              className="glass-card rounded-3xl overflow-hidden border border-[#EFE6D8] dark:border-[#2B254E] hover:border-[#E0A526]/50 shadow-lg hover:shadow-2xl transition-all duration-300 flex flex-col group"
+            >
+              {/* Photo with overlay & badge */}
+              <div className="relative aspect-[4/5] overflow-hidden bg-gray-100 dark:bg-gray-800">
+                <img
+                  src={coach.photoLocal}
+                  alt={`Retrato de ${coach.name}`}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                <div className="absolute bottom-4 left-4 right-4 text-white">
+                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#E0A526] text-white mb-1">
+                    {coach.id === 'juan-diego' ? 'Fundador' : 'Mentora'}
+                  </span>
+                  <h3 className="font-serif text-xl font-bold leading-tight">
+                    {coach.name}
+                  </h3>
+                  <p className="text-xs text-[#FFE3B3] font-medium line-clamp-1">
+                    {coach.role}
+                  </p>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="p-5 flex-1 flex flex-col justify-between">
+                <p className="text-xs text-[#5C544D] dark:text-[#B4ACC5] italic mb-4 line-clamp-2">
+                  &ldquo;{coach.tagline}&rdquo;
+                </p>
+
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-1">
+                    {coach.specialties.slice(0, 2).map((s, idx) => (
+                      <span key={idx} className="text-[10px] px-2 py-0.5 rounded-md bg-black/5 dark:bg-white/10 text-[#1E1A17] dark:text-[#F6F3EE] font-medium">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+
+                  <Link
+                    href={`/conocenos#${coach.id}`}
+                    className="w-full py-2.5 rounded-xl border border-[#E0A526]/40 hover:bg-[#E0A526] hover:text-white text-[#C68C14] dark:text-[#F2C14E] text-xs font-bold uppercase tracking-wider text-center block transition-all no-underline"
+                  >
+                    Ver Perfil & Biografía
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 
-      {/* ── Nuestro Equipo ── */}
-      <section className="py-16">
-        <div className="max-w-5xl mx-auto px-4">
-          <h2 className="font-serif text-3xl md:text-4xl font-bold text-center mb-3 text-[#2D2A26]">Nuestro Equipo</h2>
-          <p className="text-center text-[#9B9590] mb-10 text-lg">Coaches certificados comprometidos con tu transformación</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {[
-              { name: "Andrea Silva", role: "Mentora de Padres (0-12 años)", color: "#D4A030", icon: "🌻",
-                bio: "Profesional en Marketing y Negocios Internacionales. Certificada en Coaching Espiritual, Coaching Ontológico, PNL, Familias Conscientes (Mindvalley) y Liderazgo John C. Maxwell.",
-                focus: "Crianza consciente y desarrollo familiar" },
-              { name: "Dericielo Jimenez", role: "Coach de Vida para Mujeres", color: "#7CB98B", icon: "🌿",
-                bio: "Especialista en recuperación de trauma, sanación del abuso y reconstrucción de autoestima. Herramientas: PNL, meditación interior, danza y coaching espiritual.",
-                focus: "Sanación del abandono, abuso emocional y físico" },
-              { name: "Lina Valencia Trivino", role: "Coach de Vida (Duelo y Relaciones)", color: "#9B8EC4", icon: "💫",
-                bio: "ICF International Master Coach, Ingeniera Industrial, Máster en Ciencias Económicas y Sociales. Certificada en Coaching Espiritual, Coaching de Personalidad y PNL.",
-                focus: "Duelo, pérdida, conflictos de relación y transiciones de vida" },
-              { name: "Juan Diego Giraldo", role: "Coach de Negocios y Vida", color: "#D4A030", icon: "⚡",
-                bio: "Ingeniero de Sistemas, especializado en Gestión de Proyectos TI y Ciberseguridad. Certificado en Coaching de Personalidad, PNL y Propósito de Vida.",
-                focus: "Profesionales, emprendedores y bloqueo creativo" },
-            ].map((t, i) => (
-              <div key={i} className="bg-white rounded-3xl p-6 border border-gold-light/30 shadow-sm hover:shadow-md transition-all">
-                <div className="flex items-start gap-4 mb-3">
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shrink-0"
-                    style={{ background: t.color + '15' }}>
-                    {t.icon}
+      {/* ── 4. PROGRAMAS & RETOS (Mindvalley Course Cards) ── */}
+      <section className="py-20 bg-[#FDF8F0] dark:bg-[#120F26] border-y border-[#EFE6D8] dark:border-[#2B254E]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col md:flex-row md:items-end justify-between mb-14">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#E0A526]/15 border border-[#E0A526]/30 text-xs font-bold uppercase tracking-wider text-[#C68C14] dark:text-[#F2C14E] mb-3">
+                <BookOpen size={14} /> Programas Estructurados
+              </div>
+              <h2 className="font-serif text-3xl sm:text-4xl md:text-5xl font-bold text-[#1E1A17] dark:text-[#F6F3EE]">
+                Cursos & Retos de 21 Días
+              </h2>
+            </div>
+            <Link
+              href="/biblioteca"
+              className="mt-4 md:mt-0 text-sm font-bold text-[#E0A526] hover:text-[#C68C14] inline-flex items-center gap-1 no-underline"
+            >
+              Explorar todo el catálogo <ArrowRight size={16} />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {PROGRAMS.map((prog) => (
+              <div
+                key={prog.id}
+                className="glass-card rounded-3xl overflow-hidden border border-[#EFE6D8] dark:border-[#2B254E] hover:border-[#E0A526] shadow-md hover:shadow-xl transition-all duration-300 flex flex-col group"
+              >
+                {/* Cover art */}
+                <div className="relative aspect-video overflow-hidden">
+                  <img
+                    src={prog.coverImage}
+                    alt={prog.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                  <div className="absolute top-3 left-3">
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-black/60 text-white backdrop-blur-md">
+                      {prog.level}
+                    </span>
                   </div>
+                  <div className="absolute bottom-3 left-3 right-3 flex justify-between text-xs text-white font-medium">
+                    <span className="flex items-center gap-1"><Clock size={12} /> {prog.durationWeeks} semanas</span>
+                    <span className="flex items-center gap-1"><BookOpen size={12} /> {prog.lessonsCount} lecciones</span>
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="p-5 flex-1 flex flex-col justify-between">
                   <div>
-                    <div className="font-serif font-bold text-lg text-[#2D2A26]">{t.name}</div>
-                    <div className="text-sm font-semibold" style={{ color: t.color }}>{t.role}</div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-[#E0A526] mb-1">
+                      Mentor: {prog.coach}
+                    </p>
+                    <h3 className="font-serif font-bold text-lg text-[#1E1A17] dark:text-[#F6F3EE] mb-2 leading-snug">
+                      {prog.title}
+                    </h3>
+                    <p className="text-xs text-[#5C544D] dark:text-[#B4ACC5] line-clamp-2">
+                      {prog.tagline}
+                    </p>
+                  </div>
+
+                  <div className="pt-4 mt-4 border-t border-black/5 dark:border-white/5">
+                    <Link
+                      href="/membresia"
+                      className="text-xs font-bold text-[#E0A526] hover:text-[#C68C14] flex items-center justify-between no-underline"
+                    >
+                      <span>Incluido en Membresía</span>
+                      <ArrowRight size={14} />
+                    </Link>
                   </div>
                 </div>
-                <p className="text-sm text-[#5C5650] leading-relaxed mb-2">{t.bio}</p>
-                <p className="text-xs text-[#9B9590]"><span className="font-bold">Enfoque:</span> {t.focus}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── Testimonios ── */}
-      <section className="py-16 bg-gradient-to-b from-warmwhite to-cream">
-        <div className="max-w-5xl mx-auto px-4">
-          <h2 className="font-serif text-3xl font-bold text-center mb-10 text-[#2D2A26]">Historias de Transformación</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* ── 5. BIBLIOTECA CATEGORIES TILES (Calm / Headspace photographic tiles) ── */}
+      <section className="py-20 md:py-28 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center max-w-3xl mx-auto mb-16">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#E0A526]/15 border border-[#E0A526]/30 text-xs font-bold uppercase tracking-wider text-[#C68C14] dark:text-[#F2C14E] mb-3">
+            <Compass size={14} /> Biblioteca Temática
+          </div>
+          <h2 className="font-serif text-3xl sm:text-5xl font-bold text-[#1E1A17] dark:text-[#F6F3EE] mb-4">
+            Audios Guiados por Estado de Vida
+          </h2>
+          <p className="text-base text-[#5C544D] dark:text-[#B4ACC5]">
+            Navega por las categorías sonoras diseñadas para sostener tu mente a lo largo de las horas del día y la noche.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {THEME_CATEGORIES.map((cat) => (
+            <Link
+              key={cat.key}
+              href={`/biblioteca?tema=${cat.key}`}
+              className="group relative rounded-3xl overflow-hidden aspect-[16/10] shadow-lg hover:shadow-2xl transition-all duration-300 no-underline"
+            >
+              {/* Background photo */}
+              <img
+                src={cat.image}
+                alt={cat.title}
+                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+              />
+              {/* Overlay Gradient */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+
+              {/* Text */}
+              <div className="absolute inset-0 p-6 flex flex-col justify-end text-white">
+                <span className="text-[11px] font-extrabold uppercase tracking-widest text-[#FFE3B3] mb-1">
+                  {cat.trackCount} prácticas grabadas
+                </span>
+                <h3 className="font-serif text-2xl font-bold mb-1 group-hover:text-[#FFE3B3] transition-colors">
+                  {cat.title}
+                </h3>
+                <p className="text-xs text-gray-200 line-clamp-2">
+                  {cat.description}
+                </p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* ── 6. TESTIMONIOS (PLACEHOLDER PARA CASOS REALES DE JUAN) ── */}
+      <section className="py-20 bg-[#FDF8F0] dark:bg-[#120F26] border-t border-[#EFE6D8] dark:border-[#2B254E]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-2xl mx-auto mb-16">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#E0A526]/15 border border-[#E0A526]/30 text-xs font-bold uppercase tracking-wider text-[#C68C14] dark:text-[#F2C14E] mb-3">
+              <Star size={14} /> Espacio de Testimonios
+            </div>
+            <h2 className="font-serif text-3xl sm:text-4xl font-bold text-[#1E1A17] dark:text-[#F6F3EE] mb-3">
+              Historias de Transformación
+            </h2>
+            <p className="text-sm text-[#5C544D] dark:text-[#B4ACC5]">
+              [Sección de testimonios en maqueta — a sustituir por testimonios y citas reales proporcionadas por Juan Diego y sus clientes]
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
-              { name: "María Elena", loc: "Bogotá, Colombia", text: "AMP me ayudó a salir de un momento muy difícil. Las meditaciones diarias se convirtieron en mi refugio de paz.", avatar: "🌸" },
-              { name: "Carlos R.", loc: "Ciudad de México", text: "El reto de 21 días de gratitud cambió mi perspectiva completamente. Ahora veo oportunidades donde antes veía problemas.", avatar: "🌟" },
-              { name: "Ana Lucía", loc: "Buenos Aires, Argentina", text: "Como líder de equipo, el contenido de liderazgo me dio herramientas que uso todos los días. Genuino y profundo.", avatar: "💫" },
-            ].map((t, i) => (
-              <div key={i} className="bg-white rounded-3xl p-6 border border-gold-light/30 shadow-sm">
-                <div className="flex items-center gap-3 mb-4">
-                  <span className="text-2xl w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center">{t.avatar}</span>
-                  <div>
-                    <div className="font-bold text-sm text-[#2D2A26]">{t.name}</div>
-                    <div className="text-xs text-[#9B9590]">{t.loc}</div>
+              {
+                quote: "[Testimonio real de Juan a confirmar: experiencia de coaching en liderazgo personal y claridad de propósito].",
+                author: "[Nombre de alumno / cliente]",
+                role: "[Profesión / Emprendimiento]",
+                city: "[Ciudad]",
+                avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80",
+              },
+              {
+                quote: "[Testimonio real de acompañamiento a confirmar: experiencia con talleres y herramientas para la familia].",
+                author: "[Nombre de alumna / cliente]",
+                role: "[Rol familiar / Docencia]",
+                city: "[Ciudad]",
+                avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80",
+              },
+              {
+                quote: "[Testimonio real de proceso emocional a confirmar: experiencia en sesiones de sanación y reconstrucción personal].",
+                author: "[Nombre de alumna / cliente]",
+                role: "[Profesión / Actividad]",
+                city: "[Ciudad]",
+                avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80",
+              },
+            ].map((t, idx) => (
+              <div
+                key={idx}
+                className="glass-card rounded-3xl p-6 sm:p-8 border border-dashed border-[#E0A526]/40 dark:border-[#2B254E] flex flex-col justify-between shadow-md"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex gap-1 text-[#E0A526]">
+                      {[...Array(5)].map((_, i) => (
+                        <Star key={i} size={16} className="fill-current" />
+                      ))}
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#E0A526]/10 text-[#C68C14] dark:text-[#F2C14E]">
+                      Placeholder
+                    </span>
                   </div>
+                  <p className="text-sm text-[#5C544D] dark:text-[#B4ACC5] leading-relaxed italic mb-6">
+                    &ldquo;{t.quote}&rdquo;
+                  </p>
                 </div>
-                <p className="text-sm text-[#5C5650] italic leading-relaxed">&ldquo;{t.text}&rdquo;</p>
-                <div className="flex gap-0.5 mt-3">
-                  {[...Array(5)].map((_, j) => <Star key={j} size={14} className="text-gold fill-gold" />)}
+
+                <div className="flex items-center gap-3 pt-4 border-t border-black/5 dark:border-white/5">
+                  <img
+                    src={t.avatar}
+                    alt={t.author}
+                    className="w-11 h-11 rounded-full object-cover ring-2 ring-[#E0A526]/30 opacity-75"
+                  />
+                  <div>
+                    <p className="text-sm font-bold text-[#1E1A17] dark:text-[#F6F3EE]">
+                      {t.author}
+                    </p>
+                    <p className="text-xs text-[#5C544D] dark:text-[#B4ACC5]">
+                      {t.role} · {t.city}
+                    </p>
+                  </div>
                 </div>
               </div>
             ))}
@@ -207,79 +455,50 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Pricing ── */}
-      <section className="py-16 bg-gradient-to-b from-warmwhite to-cream">
-        <div className="max-w-4xl mx-auto px-4">
-          <h2 className="font-serif text-3xl md:text-4xl font-bold text-center mb-3 text-[#2D2A26]">Tu Camino Comienza Aquí</h2>
-          <p className="text-center text-[#9B9590] mb-10 text-lg">Contenido gratuito para empezar. Premium para profundizar.</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl mx-auto">
-            {/* Free */}
-            <div className="bg-white rounded-3xl p-8 border border-gold-light/30 shadow-sm">
-              <h3 className="font-serif text-2xl font-bold text-[#2D2A26] mb-1">Gratis</h3>
-              <p className="text-[#9B9590] text-sm mb-6">Para siempre</p>
-              <div className="text-4xl font-bold text-[#2D2A26] mb-6">$0<span className="text-lg text-[#9B9590] font-normal">/mes</span></div>
-              <ul className="space-y-3 mb-8">
-                {["Afirmación diaria", "1 meditación por día", "Seguimiento de ánimo", "Acceso a la comunidad", "Reto de 21 Días de Gratitud"].map(f => (
-                  <li key={f} className="flex items-start gap-2 text-sm text-[#5C5650]">
-                    <Check size={16} className="text-sage mt-0.5 shrink-0" /> {f}
-                  </li>
-                ))}
-              </ul>
-              <a href="/daily" className="block text-center py-3 rounded-2xl border-2 border-gold/30 text-gold-dark font-bold hover:bg-gold/5 transition-all no-underline">
-                Comenzar Gratis
-              </a>
-            </div>
+      {/* ── 7. STICKY MOBILE CTA BANNER ── */}
+      <div className="md:hidden fixed bottom-16 left-0 right-0 z-30 p-3 bg-white/95 dark:bg-[#14122B]/95 backdrop-blur-md border-t border-[#EFE6D8] dark:border-[#2B254E] shadow-lg flex items-center justify-between gap-3">
+        <div className="text-left">
+          <p className="text-xs font-bold text-[#1E1A17] dark:text-[#F6F3EE]">El Portal de la Alegría</p>
+          <p className="text-[10px] text-[#E0A526] font-semibold">Prueba gratuita de 7 días</p>
+        </div>
+        <Link
+          href="/onboarding"
+          className="px-4 py-2 rounded-full bg-gradient-to-r from-[#E0A526] to-[#F28C6B] text-white text-xs font-bold uppercase tracking-wider no-underline shadow-md"
+        >
+          Empezar Gratis
+        </Link>
+      </div>
 
-            {/* Premium */}
-            <div className="bg-white rounded-3xl p-8 border-2 border-gold shadow-lg shadow-gold/15 relative">
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-gold to-sunrise text-white text-xs font-bold px-4 py-1 rounded-full">
-                Más Popular
-              </div>
-              <h3 className="font-serif text-2xl font-bold text-[#2D2A26] mb-1">Premium</h3>
-              <p className="text-[#9B9590] text-sm mb-6">Acceso completo</p>
-              <div className="text-4xl font-bold text-[#2D2A26] mb-1">$9.99<span className="text-lg text-[#9B9590] font-normal">/mes</span></div>
-              <p className="text-xs text-sage-dark font-semibold mb-6">o $79.99/año (ahorra 33%)</p>
-              <ul className="space-y-3 mb-8">
-                {["Todo lo gratuito", "Biblioteca completa de meditaciones", "Todos los retos de 21 días", "Micro-lecciones diarias", "Sesiones en vivo mensuales", "Diario de reflexión", "Estadísticas de progreso", "Sin anuncios"].map(f => (
-                  <li key={f} className="flex items-start gap-2 text-sm text-[#5C5650]">
-                    <Check size={16} className="text-gold mt-0.5 shrink-0" /> {f}
-                  </li>
-                ))}
-              </ul>
-              <button className="w-full py-3 rounded-2xl bg-gradient-to-r from-gold to-sunrise text-white font-bold shadow-md shadow-gold/20 hover:shadow-lg transition-all hover:scale-[1.02]">
-                Comenzar Premium
-              </button>
-            </div>
+      {/* ── 8. FINAL CALL TO ACTION ── */}
+      <section className="py-24 relative overflow-hidden bg-gradient-to-br from-[#14122B] via-[#1E1B3A] to-[#2B254E] text-white text-center">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 relative z-10">
+          <div className="w-16 h-16 mx-auto rounded-3xl bg-gradient-to-tr from-[#E0A526] to-[#F28C6B] flex items-center justify-center mb-6 shadow-2xl breathe-orb">
+            <Sparkles size={32} />
+          </div>
+
+          <h2 className="font-serif text-3xl sm:text-5xl md:text-6xl font-bold mb-6">
+            Tu tranquilidad no puede esperar a que todo sea perfecto.
+          </h2>
+          <p className="text-base sm:text-xl text-[#B9B2C9] max-w-2xl mx-auto mb-10 leading-relaxed font-normal">
+            Únete a la membresía de Actitud Mental Positiva hoy mismo. Empieza con 7 días sin costo y descubre el poder de una mente en paz.
+          </p>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <Link
+              href="/membresia"
+              className="w-full sm:w-auto px-8 py-4 rounded-full bg-gradient-to-r from-[#E0A526] to-[#F28C6B] text-white font-bold text-base shadow-xl hover:scale-105 active:scale-95 transition-all no-underline"
+            >
+              Comenzar Membresía con 7 Días Gratis
+            </Link>
+            <Link
+              href="/conocenos"
+              className="w-full sm:w-auto px-7 py-4 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-base transition-all no-underline"
+            >
+              Conoce a los Mentores
+            </Link>
           </div>
         </div>
       </section>
-
-      {/* ── Email Capture ── */}
-      <section className="py-16">
-        <div className="max-w-2xl mx-auto px-4 text-center">
-          <Sun size={40} className="text-gold mx-auto mb-4" />
-          <h2 className="font-serif text-3xl font-bold mb-3 text-[#2D2A26]">Únete al Portal de la Alegría</h2>
-          <p className="text-[#9B9590] mb-8">Recibe la afirmación del día y contenido exclusivo en tu correo. Sin spam, solo alegría.</p>
-          {subscribed ? (
-            <div className="bg-sage-light rounded-2xl p-6 border border-sage/30">
-              <p className="text-sage-dark font-bold text-lg">🎉 ¡Bienvenido/a al Portal!</p>
-              <p className="text-sage-dark/70 text-sm mt-1">Revisa tu correo para confirmar tu suscripción.</p>
-            </div>
-          ) : (
-            <form onSubmit={handleSubscribe} className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="tu@correo.com" required
-                className="flex-1 px-5 py-3.5 rounded-2xl border border-gold-light bg-white text-[#2D2A26] placeholder:text-[#ccc] focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 text-sm" />
-              <button type="submit"
-                className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-gold to-sunrise text-white font-bold shadow-md shadow-gold/20 hover:shadow-lg transition-all hover:scale-[1.02] whitespace-nowrap">
-                Suscribirme
-              </button>
-            </form>
-          )}
-        </div>
-      </section>
-
-      <Footer />
     </div>
   );
 }

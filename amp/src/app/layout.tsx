@@ -1,15 +1,29 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { ThemeProvider } from "@/context/ThemeContext";
+import { AudioProvider } from "@/context/AudioContext";
+import SiteHeader from "@/components/SiteHeader";
+import SiteFooter from "@/components/SiteFooter";
+import GlobalAudioPlayer from "@/components/GlobalAudioPlayer";
+import MobileBottomNav from "@/components/MobileBottomNav";
 
 export const metadata: Metadata = {
-  title: "AMP — El Portal de la Alegría | Actitud Mental Positiva",
-  description: "Transforma tu mente, transforma tu vida. Plataforma en español para desarrollo personal, meditación guiada, bienestar y liderazgo. Tu portal de la alegría.",
-  keywords: ["actitud mental positiva", "portal de la alegría", "meditación", "bienestar", "liderazgo", "desarrollo personal", "mentalidad"],
+  title: "AMP — El Portal de la Alegría | Actitud Mental Positiva · Juan Diego Giraldo",
+  description: "Transforma tu mente, transforma tu vida. El nuevo portal en español de Actitud Mental Positiva: meditaciones guiadas, check-in diario de ánimo, coaching y membresía.",
+  keywords: [
+    "actitud mental positiva",
+    "el portal de la alegria",
+    "juan diego giraldo",
+    "meditacion en espanol",
+    "bienestar",
+    "crecimiento personal",
+    "mindfulness"
+  ],
   openGraph: {
     title: "AMP — El Portal de la Alegría",
-    description: "Transforma tu mente, transforma tu vida. Meditación, bienestar y liderazgo en español.",
+    description: "Herramientas reales para transformar tu mente, un día a la vez. Meditaciones guiadas y coaching en español.",
     url: "https://www.actitudmentalpositiva.com",
-    siteName: "AMP — Actitud Mental Positiva",
+    siteName: "Actitud Mental Positiva",
     locale: "es_ES",
     type: "website",
   },
@@ -19,13 +33,25 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#D4A030",
+  themeColor: "#E0A526",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es" className="scroll-smooth">
-      <body className="antialiased min-h-screen">{children}</body>
+      <body className="antialiased min-h-screen flex flex-col bg-[#FFFDF9] dark:bg-[#0E0C1C] text-[#1E1A17] dark:text-[#F6F3EE] transition-colors duration-300">
+        <ThemeProvider>
+          <AudioProvider>
+            <SiteHeader />
+            <main className="flex-1 pb-20 md:pb-24">
+              {children}
+            </main>
+            <SiteFooter />
+            <GlobalAudioPlayer />
+            <MobileBottomNav />
+          </AudioProvider>
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
