@@ -38,9 +38,61 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
   color: var(--text);
+  /* 100vh on iOS Safari is the large viewport (taller than visible). The
+     Command Center then clips the composer and cannot scroll to it because
+     overflow is hidden. 100dvh is the visible viewport; 100vh is the fallback. */
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
+
+/* Max home (/) is a long document. The root already has data-max-home;
+   without this unlock the body lock above freezes the whole page. */
+body:has([data-max-home]) {
+  overflow: auto;
+  height: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Command Center app-shell scroll contract.
+   Body stays overflow:hidden so TopBar, left rail, Daily Summary, and the
+   chat composer stay sticky. The center column and chat list are the
+   scrollports. min-height:0 lets flex children shrink so overflow-y:auto
+   actually scrolls (flex default min-height:auto is content-sized). */
+.cy-shell.v3 {
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+.cy-shell.v3 > .v3-body {
+  min-height: 0;
+}
+.cy-shell.v3 [data-cc-scroll="main"] {
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.cy-shell.v3 [data-cc-scroll="main"] > * {
+  min-height: 0;
+}
+.cy-shell.v3 [data-cc-chat] {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.cy-shell.v3 [data-testid="chat-message-list"] {
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* MANUAL CHECK (studio.empirebox.store, Dark/Gold):
+   1. /  — Max home scrolls through Research / Growth / Today; tab clicks scrollIntoView.
+   2. /?product=owner — Max chat: message list scrolls; composer + Voice/Code bar stay visible;
+      new replies still auto-scroll to the bottom.
+   3. /?product=owner&screen=dashboard — owner dashboard scrolls in the center pane.
+   4. /?product=workroom — Workroom inner pane scrolls; left rail stays put.
+   5. iPhone Safari: composer is not under the browser chrome (100dvh, not 100vh). */
 
 /* ═══ UNIFIED CARD SYSTEM ═══ */
 .empire-card {

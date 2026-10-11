@@ -152,7 +152,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col sm:flex-row overflow-hidden">
+    <div className="flex-1 flex flex-col sm:flex-row min-h-0 overflow-hidden">
       {/* Sidebar nav — angular neon tabs */}
       <nav className="cy-subnav sm:w-[200px] w-full sm:border-r border-b sm:border-b-0" style={{ flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
         <div className="cy-subnav-brand">

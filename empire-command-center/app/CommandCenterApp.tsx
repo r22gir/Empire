@@ -718,7 +718,7 @@ export default function CommandCenter() {
   };
 
   return (
-    <div className="cy-shell v3 h-screen flex flex-col">
+    <div className="cy-shell v3 h-dvh flex flex-col min-h-0 overflow-hidden">
       {clientView && (
         <div className="bg-[#16a34a] text-white text-center py-2 text-xs font-bold tracking-widest flex items-center justify-center gap-3 shadow-[0_2px_8px_rgba(22,163,74,0.3)]">
           <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
@@ -746,7 +746,7 @@ export default function CommandCenter() {
 
       <ActiveJobBanner />
 
-      <div className="flex-1 flex overflow-hidden v3-body">
+      <div className="flex-1 flex min-h-0 overflow-hidden v3-body">
         <LeftNav
           activeProduct={activeProduct}
           activeScreen={activeScreen}
@@ -764,7 +764,7 @@ export default function CommandCenter() {
           }}
         />
 
-        <div className="flex-1 flex flex-col overflow-y-auto min-h-0 bg-[var(--chat-bg)]">
+        <div data-cc-scroll="main" className="flex-1 flex flex-col overflow-y-auto min-h-0 bg-[var(--chat-bg)]">
           {renderCenterContent()}
         </div>
 
