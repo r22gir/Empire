@@ -48,7 +48,7 @@ _ORCH = re.compile(
 # Trivial lookups Max should answer (existing shortcuts / prelookup)
 _LOOKUP = re.compile(
     r"\b(?:quote|estimate|cotizaci|"
-    r"weather|forecast|"
+    r"weather(?:\s+forecast)?|"
     r"brief(?:\s+me)?|rundown|agenda|"
     r"check\s+(?:my\s+)?(?:email|inbox|gmail)|"
     r"what(?:'s| is)\s+(?:the\s+)?(?:latest|status|total)|"

@@ -7,6 +7,7 @@ rebuilds the constraint and tracks retry_count / next_retry_at.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Iterable
 
@@ -48,45 +49,44 @@ def next_retry_iso(retry_count: int, now: datetime | None = None) -> str:
 
 def migrate_task_status_constraint(conn) -> None:
     """Allow failed/escalated on tasks.status. Safe to re-run."""
-    _ensure_retry_columns(conn)
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
     ).fetchone()
     sql = (row[0] if row else "") or ""
-    if "'failed'" in sql and "'escalated'" in sql:
-        return
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
-    if not cols:
-        return
-    try:
-        _rebuild_tasks_status_check(conn, cols)
-    except Exception as exc:
-        logger.warning("tasks.status CHECK rebuild failed (retry columns still added): %s", exc)
+    if not ("'failed'" in sql and "'escalated'" in sql):
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+        if cols:
+            try:
+                _rebuild_tasks_status_check(conn, cols)
+            except Exception as exc:
+                logger.warning("tasks.status CHECK rebuild failed: %s", exc)
+    _ensure_retry_columns(conn)
 
 
 def _rebuild_tasks_status_check(conn, cols: list[str]) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
+    ).fetchone()
+    sql = (row[0] if row else "") or ""
+    new_sql = re.sub(
+        r"CHECK\s*\(\s*status\s+IN\s*\([^)]*\)\s*\)",
+        "CHECK (status IN ('todo', 'in_progress', 'waiting', 'done', 'cancelled', 'failed', 'escalated'))",
+        sql,
+        count=1,
+        flags=re.I,
+    )
+    if new_sql == sql:
+        raise RuntimeError("tasks.status CHECK clause not found")
+    new_sql = re.sub(
+        r"CREATE\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?(\"?tasks\"?)",
+        "CREATE TABLE tasks_status_mig",
+        new_sql,
+        count=1,
+        flags=re.I,
+    )
     col_list = ", ".join(f'"{c}"' for c in cols)
-    # Rebuild with the expanded CHECK. Keep every existing column.
-    create_cols = []
-    for name, typ, notnull, default, pk in (
-        (r[1], r[2], r[3], r[4], r[5]) for r in conn.execute("PRAGMA table_info(tasks)")
-    ):
-        piece = f'"{name}" {typ or "TEXT"}'
-        if name == "status":
-            piece = (
-                "status TEXT NOT NULL DEFAULT 'todo' "
-                "CHECK (status IN ('todo','in_progress','waiting','done','cancelled','failed','escalated'))"
-            )
-        else:
-            if pk:
-                piece += " PRIMARY KEY"
-            if notnull and name != "id" and name != "status":
-                piece += " NOT NULL"
-            if default is not None and name != "status":
-                piece += f" DEFAULT {default}"
-        create_cols.append(piece)
     conn.execute("PRAGMA foreign_keys=OFF")
-    conn.execute(f"CREATE TABLE tasks_status_mig ({', '.join(create_cols)})")
+    conn.execute(new_sql)
     conn.execute(f"INSERT INTO tasks_status_mig ({col_list}) SELECT {col_list} FROM tasks")
     conn.execute("DROP TABLE tasks")
     conn.execute("ALTER TABLE tasks_status_mig RENAME TO tasks")
