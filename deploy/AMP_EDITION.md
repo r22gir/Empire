@@ -58,8 +58,11 @@ After deploy, run the Spanish post-deploy check from this checkout (memory, isol
 
 ```bash
 cd /home/rg/empire-amp
+deploy/family_post_deploy_check.sh --self-test   # parser + backend/venv/bin/python (jose)
 deploy/family_post_deploy_check.sh amp
 ```
+
+The script reads `/home/rg/empire-amp.env` as `KEY=VALUE` lines (it does not `source` it — `SMTP_FROM=Empire <…>` is unquoted). It uses `backend/venv/bin/python`, not system `python3`.
 
 See `deploy/FAMILY_POST_DEPLOY_CHECK.md` for the exact curls and expected Spanish replies.
 

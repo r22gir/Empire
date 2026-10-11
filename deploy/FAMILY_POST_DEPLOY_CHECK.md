@@ -17,7 +17,14 @@ AMP_BASE=http://127.0.0.1:8011 \
 
 No `cd /home/rg/empire-repo`. No `systemctl` a Workroom. No levantar Maxine.
 
-El script firma un `amp_session` de owner con `AMP_JWT_SECRET` + `AMP_OWNER_EMAIL` del env (no imprime el secreto). Habla solo a loopback.
+El script **no hace `source` / `eval` del env**. Lee líneas `KEY=VALUE` (soporta `SMTP_FROM=Empire <empirebox2026@gmail.com>` sin comillas). Firma un `amp_session` de owner con `AMP_JWT_SECRET` + `AMP_OWNER_EMAIL` (no imprime el secreto). Usa `backend/venv/bin/python` (jose); si no hay venv, cae a `python3` del PATH. Habla solo a loopback.
+
+Comprueba el parser y el python:
+
+```bash
+deploy/family_post_deploy_check.sh --self-test
+# Esperado: self-test ok  python=/home/rg/empire-amp/backend/venv/bin/python
+```
 
 ## 1) Memoria — decir un dato, nueva sesión, preguntarlo
 
@@ -26,9 +33,38 @@ El script envía un código único (`POSTDEPLOY-<epoch>-<n>`) y luego abre **otr
 Comandos equivalentes a mano (Max-e):
 
 ```bash
-set -a; . /home/rg/empire-amp.env; set +a
-cd /home/rg/empire-amp/backend
-TOKEN="$(PYTHONPATH=. ./venv/bin/python3 -c 'import os; from app.services.amp_access import create_session_token; print(create_session_token(os.environ["AMP_OWNER_EMAIL"]))')"
+# No sources /home/rg/empire-amp.env (SMTP_FROM tiene <...> sin comillas).
+cd /home/rg/empire-amp
+PY=backend/venv/bin/python
+ENV=/home/rg/empire-amp.env
+kv() { "$PY" - "$ENV" "$1" <<'PY'
+import sys
+path, want = sys.argv[1], sys.argv[2]
+found = ""
+for raw in open(path, encoding="utf-8", errors="replace"):
+    line = raw.replace("\r", "").strip()
+    if not line or line.startswith("#"):
+        continue
+    if line.startswith("export "):
+        line = line[7:].lstrip()
+    if "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    if key.strip() != want:
+        continue
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    found = value
+print(found, end="")
+PY
+}
+TOKEN="$(
+  AMP_JWT_SECRET="$(kv AMP_JWT_SECRET)" \
+  AMP_OWNER_EMAIL="$(kv AMP_OWNER_EMAIL)" \
+  PYTHONPATH=backend "$PY" -c \
+  'import os; from app.services.amp_access import create_session_token; print(create_session_token(os.environ["AMP_OWNER_EMAIL"]))'
+)"
 PROBE="POSTDEPLOY-$(date +%s)"
 
 curl -sS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

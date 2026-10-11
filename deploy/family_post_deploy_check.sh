@@ -2,12 +2,26 @@
 # Read-only post-deploy check for Max-e (amp) and Maxine.
 # Loopback only. Never talks to Workroom :8000 / :3005.
 # The only write is one disposable memory phrase on THIS instance.
+# Do not source the env file. Prefer backend/venv/bin/python (jose).
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BACKEND="$ROOT/backend"
 PYTHONPATH_VALUE="${PYTHONPATH:-}:$BACKEND"
 export PYTHONPATH="$PYTHONPATH_VALUE"
+
+# jose lives in the instance venv. System python3 on the Dell does not.
+if [ -x "$ROOT/backend/venv/bin/python" ]; then
+  PYTHON="$ROOT/backend/venv/bin/python"
+elif [ -x "$ROOT/backend/venv/bin/python3" ]; then
+  PYTHON="$ROOT/backend/venv/bin/python3"
+else
+  PYTHON="$(command -v python3 || command -v python || true)"
+fi
+if [ -z "${PYTHON}" ]; then
+  echo "no hay python (backend/venv/bin/python ni PATH)" >&2
+  exit 2
+fi
 
 AMP_ENV_FILE="${AMP_ENV_FILE:-/home/rg/empire-amp.env}"
 MAXINE_ENV_FILE="${MAXINE_ENV_FILE:-/home/rg/empire-maxine.env}"
@@ -17,13 +31,13 @@ CHAT_TIMEOUT="${CHAT_TIMEOUT:-120}"
 
 TARGET="${1:-both}"
 case "$TARGET" in
-  amp|maxine|both) ;;
+  amp|maxine|both|--self-test) ;;
   -h|--help)
-    echo "uso: deploy/family_post_deploy_check.sh [amp|maxine|both]" >&2
+    echo "uso: deploy/family_post_deploy_check.sh [amp|maxine|both|--self-test]" >&2
     exit 0
     ;;
   *)
-    echo "uso: deploy/family_post_deploy_check.sh [amp|maxine|both]" >&2
+    echo "uso: deploy/family_post_deploy_check.sh [amp|maxine|both|--self-test]" >&2
     exit 2
     ;;
 esac
@@ -36,41 +50,71 @@ pass() { PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"; }
 fail() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n' "$1"; }
 warn() { WARN=$((WARN + 1)); printf '  WARN  %s\n' "$1"; }
 
+# KEY=VALUE only. Never source/eval the env file (SMTP_FROM=Name <addr>
+# is unquoted on the Dell and breaks bash). Last assignment wins.
+read_env_key() {
+  local file="$1" want="$2"
+  if [ ! -f "$file" ]; then
+    return 1
+  fi
+  "$PYTHON" - "$file" "$want" <<'PY'
+import sys
+path, want = sys.argv[1], sys.argv[2]
+found = ""
+with open(path, "r", encoding="utf-8", errors="replace") as fh:
+    for raw in fh:
+        line = raw.replace("\r", "").strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key != want:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        found = value
+print(found, end="")
+PY
+}
+
 json_get() {
-  python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get(sys.argv[1],""))' "$1"
+  "$PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d.get(sys.argv[1],""))' "$1"
 }
 
 json_keys() {
-  python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin).keys())))'
+  "$PYTHON" -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin).keys())))'
 }
 
 mint_token() {
   local env_file="$1"
+  local secret email
   if [ ! -f "$env_file" ]; then
     echo "no existe $env_file" >&2
     return 1
   fi
-  (
-    set -a
-    # shellcheck disable=SC1090
-    . "$env_file"
-    set +a
-    if [ -z "${AMP_JWT_SECRET:-}" ]; then
-      echo "AMP_JWT_SECRET vacío en $env_file" >&2
-      exit 1
-    fi
-    if [ -z "${AMP_OWNER_EMAIL:-}" ]; then
-      echo "AMP_OWNER_EMAIL vacío en $env_file" >&2
-      exit 1
-    fi
-    PYTHONPATH="$BACKEND${PYTHONPATH:+:$PYTHONPATH}" python3 -c \
-      'import os; from app.services.amp_access import create_session_token; print(create_session_token(os.environ["AMP_OWNER_EMAIL"]))'
-  )
+  secret="$(read_env_key "$env_file" AMP_JWT_SECRET || true)"
+  email="$(read_env_key "$env_file" AMP_OWNER_EMAIL || true)"
+  if [ -z "${secret}" ]; then
+    echo "AMP_JWT_SECRET vacío en $env_file" >&2
+    return 1
+  fi
+  if [ -z "${email}" ]; then
+    echo "AMP_OWNER_EMAIL vacío en $env_file" >&2
+    return 1
+  fi
+  AMP_JWT_SECRET="$secret" AMP_OWNER_EMAIL="$email" \
+    PYTHONPATH="$BACKEND${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" -c \
+    'import os; from app.services.amp_access import create_session_token; print(create_session_token(os.environ["AMP_OWNER_EMAIL"]))'
 }
 
 chat() {
   local base="$1" token="$2" message="$3" conv="$4"
-  python3 - "$base" "$token" "$message" "$conv" "$CHAT_TIMEOUT" <<'PY'
+  "$PYTHON" - "$base" "$token" "$message" "$conv" "$CHAT_TIMEOUT" <<'PY'
 import json, sys, urllib.error, urllib.request
 base, token, message, conv, timeout = sys.argv[1:6]
 req = urllib.request.Request(
@@ -120,21 +164,10 @@ scan_workroom_records() {
   contains_any "$blob" "${WORKROOM_RECORD_LEAKS[@]}"
 }
 
-env_value() {
-  local env_file="$1" key="$2"
-  (
-    set -a
-    # shellcheck disable=SC1090
-    . "$env_file"
-    set +a
-    python3 -c 'import os,sys; print(os.environ.get(sys.argv[1],""))' "$key"
-  )
-}
-
 check_home_v3() {
   local label="$1" base="$2" token="$3" env_file="$4" expected_root="$5"
   local data_dir ed raw path status
-  data_dir="$(env_value "$env_file" EMPIRE_DATA_DIR)"
+  data_dir="$(read_env_key "$env_file" EMPIRE_DATA_DIR || true)"
   echo "  EMPIRE_DATA_DIR=$data_dir"
   if [ "$data_dir" != "$expected_root" ]; then
     fail "$label EMPIRE_DATA_DIR debe ser $expected_root"
@@ -143,7 +176,7 @@ check_home_v3() {
   fi
 
   ed="$(curl -sS -H "Authorization: Bearer $token" "$base/api/v1/edition")"
-  path="$(printf '%s' "$ed" | python3 -c 'import json,sys; d=json.load(sys.stdin); a=d.get("assistant") or {}; print(a.get("memory_path") or a.get("history_path") or "")')"
+  path="$(printf '%s' "$ed" | "$PYTHON" -c 'import json,sys; d=json.load(sys.stdin); a=d.get("assistant") or {}; print(a.get("memory_path") or a.get("history_path") or "")')"
   if [ -n "$path" ]; then
     echo "  edition memory_path: $path"
     if printf '%s' "$path" | grep -q "^$expected_root"; then
@@ -172,7 +205,7 @@ check_home_v3() {
       fail "$label home v3 $ep HTTP $status"
       continue
     fi
-    if ! printf '%s' "$raw" | python3 -c 'import json,sys; json.load(sys.stdin)' >/dev/null 2>&1; then
+    if ! printf '%s' "$raw" | "$PYTHON" -c 'import json,sys; json.load(sys.stdin)' >/dev/null 2>&1; then
       fail "$label home v3 $ep no es JSON"
       continue
     fi
@@ -188,7 +221,7 @@ check_usage() {
   local label="$1" base="$2" token="$3"
   local raw keys
   raw="$(curl -sS -H "Authorization: Bearer $token" "$base/api/v1/edition/usage")"
-  echo "$raw" | python3 -c 'import json,sys; json.load(sys.stdin)' >/dev/null
+  echo "$raw" | "$PYTHON" -c 'import json,sys; json.load(sys.stdin)' >/dev/null
   keys="$(printf '%s' "$raw" | json_keys)"
   echo "  usage keys: $keys"
   echo "  usage body: $raw"
@@ -196,7 +229,7 @@ check_usage() {
     fail "$label usage expone totales (solo porcentajes)"
     return
   fi
-  if ! USAGE_JSON="$raw" python3 -c '
+  if ! USAGE_JSON="$raw" "$PYTHON" -c '
 import json, os, sys
 d = json.loads(os.environ["USAGE_JSON"])
 need = {"enforced", "edition", "cap_percent", "used_percent", "remaining_percent", "level", "message", "limit_note_es"}
@@ -316,8 +349,57 @@ run_edition() {
   fi
 }
 
+self_test() {
+  local tmp got
+  tmp="$(mktemp)"
+  trap 'rm -f "$tmp"' RETURN
+  printf '%s\n' \
+    '# comment' \
+    'AMP_JWT_SECRET=test-secret' \
+    'AMP_OWNER_EMAIL=owner@example.com' \
+    'SMTP_FROM=Empire <empirebox2026@gmail.com>' \
+    'export EMPIRE_DATA_DIR=/data/amp' \
+    'QUOTED="hello world"' \
+    'AMP_JWT_SECRET=last-wins' \
+    > "$tmp"
+  got="$(read_env_key "$tmp" SMTP_FROM)"
+  if [ "$got" != "Empire <empirebox2026@gmail.com>" ]; then
+    echo "self-test SMTP_FROM got: $got" >&2
+    return 1
+  fi
+  got="$(read_env_key "$tmp" AMP_JWT_SECRET)"
+  if [ "$got" != "last-wins" ]; then
+    echo "self-test AMP_JWT_SECRET got: $got" >&2
+    return 1
+  fi
+  got="$(read_env_key "$tmp" EMPIRE_DATA_DIR)"
+  if [ "$got" != "/data/amp" ]; then
+    echo "self-test EMPIRE_DATA_DIR got: $got" >&2
+    return 1
+  fi
+  got="$(read_env_key "$tmp" QUOTED)"
+  if [ "$got" != "hello world" ]; then
+    echo "self-test QUOTED got: $got" >&2
+    return 1
+  fi
+  if ! "$PYTHON" -c 'import jose' >/dev/null 2>&1; then
+    if [ -x "$ROOT/backend/venv/bin/python" ] || [ -x "$ROOT/backend/venv/bin/python3" ]; then
+      echo "self-test: $PYTHON no importa jose (venv roto)" >&2
+      return 1
+    fi
+    echo "self-test: PATH python sin jose (ok si no hay venv)"
+  fi
+  echo "self-test ok  python=$PYTHON"
+}
+
 echo "Chequeo post-deploy (solo lectura de Workroom; loopback)."
 echo "Repo: $ROOT"
+echo "Python: $PYTHON"
+
+if [ "$TARGET" = "--self-test" ]; then
+  self_test
+  exit $?
+fi
 
 if [ "$TARGET" = "amp" ] || [ "$TARGET" = "both" ]; then
   run_edition amp "$AMP_ENV_FILE" "$AMP_BASE" "Max-e" "Maxine"
