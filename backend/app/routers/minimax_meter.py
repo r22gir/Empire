@@ -72,8 +72,9 @@ async def my_usage(request: Request):
 
 
 @router.post("/image")
-async def generate_image(body: ImageBody):
-    """image-01 through the meter. Family prompts are sanitized."""
+async def generate_image(body: ImageBody, request: Request):
+    """image-01 through the meter. Family owners/admins only; prompts sanitized."""
+    _require_admin(request)
     from app.services.minimax_media import generate_image
 
     result = await generate_image(body.prompt, aspect_ratio=body.aspect_ratio)
@@ -83,7 +84,9 @@ async def generate_image(body: ImageBody):
 
 
 @router.post("/video/drafts")
-async def create_video_draft(body: VideoDraftBody):
+async def create_video_draft(body: VideoDraftBody, request: Request):
+    """Draft only. Family owners/admins only. Generation is founder UI."""
+    _require_admin(request)
     from app.services.minimax_prompts import PromptRejected
     from app.services.minimax_video import create_draft
 
@@ -139,7 +142,7 @@ async def generate_video(approval_id: str, request: Request, body: ConfirmBody |
             detail="Rafael debe pulsar Aprobar otra vez para generar. / Rafael must confirm again to generate.",
         )
     try:
-        return await generate_approved_clip(approval_id)
+        return await generate_approved_clip(approval_id, caller_edition=edition_name())
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except FileNotFoundError as exc:

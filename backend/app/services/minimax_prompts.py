@@ -14,8 +14,11 @@ _PATH_RE = re.compile(
     r"(?:"
     r"/home/rg\S*"
     r"|~/empire\S*"
-    r"|/data/(?:amp|maxine|empire|images|backups|workroom)\S*"
+    r"|/data/(?:amp|maxine|empire|images|backups|workroom|photos)\S*"
     r"|empire-repo\S*"
+    r"|empire-data/photos\S*"
+    r"|/api/v1/photos/\S*"
+    r"|workroom-showroom/photos\S*"
     r")"
 )
 _DATA_URI_RE = re.compile(r"data:image/[^;]+;base64,[A-Za-z0-9+/=\s]+", re.I)
@@ -38,6 +41,26 @@ WORKROOM_MARKERS = (
     "rg's drapery",
 )
 
+# Host paths to Workroom client photos. Family image prompts must reject
+# these outright — redacting is not enough (the model still saw the leak).
+WORKROOM_PHOTO_MARKERS = (
+    "/home/rg/empire-repo/backend/data/photos",
+    "~/empire-repo/backend/data/photos",
+    "empire-repo/backend/data/photos",
+    "/data/photos/",
+    "empire-data/photos",
+    "/api/v1/photos/",
+    "/photos/quote/",
+    "/photos/fabric/",
+    "/photos/serve/",
+    "/photos/intake/",
+    "photos/quote/",
+    "photos/fabric/",
+    "photos/intake/",
+    "workroom-showroom/photos",
+    "backend/data/photos",
+)
+
 
 class PromptRejected(ValueError):
     """Prompt still contains client / Workroom data after sanitizing."""
@@ -53,6 +76,9 @@ def sanitize_prompt(text: str, *, edition: Optional[str] = None, max_len: int = 
         for marker in WORKROOM_MARKERS:
             if marker in lowered:
                 raise PromptRejected("workroom data is not allowed in family prompts")
+        for marker in WORKROOM_PHOTO_MARKERS:
+            if marker.lower() in lowered:
+                raise PromptRejected("workroom photo path is not allowed in family prompts")
     out = _DATA_URI_RE.sub("[image omitted]", out)
     out = _SECRET_RE.sub("[redacted]", out)
     out = _EMAIL_RE.sub("[redacted]", out)

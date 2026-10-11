@@ -18,7 +18,11 @@ export function minimaxUsageLabels(locale: string = 'es') {
     aiLabel: es ? 'Generado por IA. No publicado.' : 'AI-generated. Not posted.',
     denied: es ? 'Solo el Max personal de Rafael ve este medidor.' : 'Only Rafael\'s personal Max can see this meter.',
     credits: es
-      ? 'Los créditos de regalo no se usan. Si la barra del plan llega al 80%, todos los agentes se detienen.'
-      : 'Gift credits are not used. If the plan bar reaches 80%, every agent stops.',
+      ? 'Los créditos de regalo no se usan. Si la barra del plan llega al 80%, todos los agentes se detienen. Si remains no responde, se bloquea (imágenes, voz, video, texto familiar). Apaga Auto credit usage en MiniMax.'
+      : 'Gift credits are not used. If the plan bar reaches 80%, every agent stops. If remains is down, we block (images, voice, video, family text). Turn off Auto credit usage on MiniMax.',
+    remainsDown: es
+      ? 'No hay lectura de /token_plan/remains. Bloqueo cerrado. El texto personal sigue solo con la estimación local. Recomendación: apaga Auto credit usage.'
+      : 'Could not read /token_plan/remains. Fail closed. Personal text continues only on the local estimate. Recommendation: turn off Auto credit usage.',
+    generate: es ? 'Generar (aprobar)' : 'Generate (approve)',
   };
 }

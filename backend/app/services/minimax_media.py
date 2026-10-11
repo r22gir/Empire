@@ -6,10 +6,11 @@ from typing import Any, Optional
 from app.services.minimax_meter import (
     bilingual,
     current_edition,
-    enforce,
     family_tts_enabled,
     is_family,
-    record,
+    pop_plan_warning,
+    reconcile,
+    reserve,
 )
 from app.services.minimax_prompts import PromptRejected, family_blocks_reference_image, sanitize_prompt
 
@@ -34,35 +35,41 @@ async def generate_image(
             ),
         }
     count = max(1, min(int(n or 1), 1 if is_family(ed) else 4))
-    refusal = enforce(kind="image", edition=ed, images=count)
-    if refusal:
-        record(kind="image", edition=ed, model="image-01", images=0, blocked=True, reason=refusal)
-        return {"success": False, "blocked": True, "error": refusal}
+    reservation = reserve(kind="image", edition=ed, model="image-01", images=count)
+    if reservation.blocked:
+        return {"success": False, "blocked": True, "error": reservation.message}
     from app.services.max.minimax_tools import minimax_text_to_image
 
-    result = await minimax_text_to_image(
-        prompt=cleaned,
-        aspect_ratio=aspect_ratio or "1:1",
-        n=count,
-        prompt_optimizer=True,
-        model="image-01",
-    )
+    try:
+        result = await minimax_text_to_image(
+            prompt=cleaned,
+            aspect_ratio=aspect_ratio or "1:1",
+            n=count,
+            prompt_optimizer=True,
+            model="image-01",
+        )
+    except Exception as exc:
+        reconcile(reservation, billed_unknown=True, images=count, error=str(exc)[:200])
+        return {"success": False, "blocked": False, "error": str(exc)[:200]}
     ok = bool(result.get("success"))
     made = int((result.get("data") or {}).get("count") or 0) if ok else 0
-    record(
-        kind="image",
-        edition=ed,
-        model="image-01",
-        images=made or (count if ok else 0),
-        blocked=not ok,
-        reason="" if ok else str(result.get("error") or "")[:200],
-    )
     if ok:
+        reconcile(reservation, images=made or count)
         data = dict(result.get("data") or {})
         data["ai_generated"] = True
         data["label_es"] = "Imagen generada por IA (MiniMax image-01)."
         data["label_en"] = "AI-generated image (MiniMax image-01)."
+        warning = reservation.warning or pop_plan_warning()
+        if warning:
+            data["warning"] = warning
         result["data"] = data
+    else:
+        reconcile(
+            reservation,
+            billed_unknown=True,
+            images=count,
+            error=str(result.get("error") or "")[:200],
+        )
     return result
 
 
@@ -80,28 +87,38 @@ async def generate_speech(
         )
         return {"success": False, "blocked": True, "error": msg}
     clean = (text or "").strip()
-    refusal = enforce(kind="tts", edition=ed, tts_chars=len(clean), tts_replies=1)
-    if refusal:
-        record(kind="tts", edition=ed, model="speech-2.8-turbo", tts_chars=0, blocked=True, reason=refusal)
-        return {"success": False, "blocked": True, "error": refusal}
-    from app.services.max.minimax_tools import minimax_tts
-
-    voice = "Spanish_Persuasive_Lady" if (language or "").startswith("es") or is_family(ed) else ""
-    result = await minimax_tts(
-        text=clean,
-        voice_id=voice or "English_Persuasive_Man",
-        speed=1.0,
-        output_format="mp3",
-    )
-    ok = bool(result.get("success"))
-    record(
+    reservation = reserve(
         kind="tts",
         edition=ed,
         model="speech-2.8-turbo",
-        tts_chars=len(clean) if ok else 0,
-        blocked=not ok,
-        reason="" if ok else str(result.get("error") or "")[:200],
+        tts_chars=len(clean),
+        tts_replies=1,
     )
+    if reservation.blocked:
+        return {"success": False, "blocked": True, "error": reservation.message}
+    from app.services.max.minimax_tools import minimax_tts
+
+    voice = "Spanish_Persuasive_Lady" if (language or "").startswith("es") or is_family(ed) else ""
+    try:
+        result = await minimax_tts(
+            text=clean,
+            voice_id=voice or "English_Persuasive_Man",
+            speed=1.0,
+            output_format="mp3",
+        )
+    except Exception as exc:
+        reconcile(reservation, billed_unknown=True, tts_chars=len(clean), error=str(exc)[:200])
+        return {"success": False, "blocked": False, "error": str(exc)[:200]}
+    ok = bool(result.get("success"))
+    if ok:
+        reconcile(reservation, tts_chars=len(clean))
+    else:
+        reconcile(
+            reservation,
+            billed_unknown=True,
+            tts_chars=len(clean),
+            error=str(result.get("error") or "")[:200],
+        )
     return result
 
 

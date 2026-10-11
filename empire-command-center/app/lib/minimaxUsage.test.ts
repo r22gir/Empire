@@ -8,9 +8,13 @@ test('MiniMax usage view is bilingual and founder-only', () => {
   assert.match(es.intro, /10%/);
   assert.match(es.intro, /20%/);
   assert.match(es.credits, /créditos de regalo/);
+  assert.match(es.credits, /Auto credit usage/);
+  assert.match(es.remainsDown, /bloque/i);
   assert.equal(es.denied, 'Solo el Max personal de Rafael ve este medidor.');
   const en = minimaxUsageLabels('en');
   assert.equal(en.nav, 'MiniMax usage');
   assert.match(en.credits, /Gift credits/);
+  assert.match(en.credits, /Auto credit usage/);
+  assert.match(en.remainsDown, /Fail closed/);
   assert.match(en.aiLabel, /AI-generated/);
 });

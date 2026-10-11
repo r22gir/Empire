@@ -515,7 +515,8 @@ No hay envíos a clientes. Los borradores se quedan en esta instancia.
 No uses nombres ni direcciones de otro taller.
 Puedes generar una imagen con MiniMax image-01 (minimax_text_to_image) a partir de un aviso de texto.
 Nunca pongas fotos de clientes, correos, teléfonos, rutas del Workroom ni datos de otra edición en el aviso.
-La voz speech-2.8 solo si está encendida. El video H3 requiere la aprobación explícita de Rafael; no se publica.
+La voz speech-2.8 solo si está encendida. El video H3 solo crea un borrador; Rafael genera desde Max personal
+con X-Minimax-Video-Confirm: aprobar. Esta herramienta no genera clips ni acepta approval_id.
 """
 
 
@@ -7633,50 +7634,54 @@ def _minimax_music_generate(params: dict, desk: Optional[str] = None) -> ToolRes
 
 
 async def _minimax_video_async(params: dict) -> ToolResult:
-    """H3 video — draft only unless Rafael already approved this clip."""
-    from app.services.minimax_meter import enforce, h3_enabled
+    """H3 video — LLM tool may only create drafts. Never generate."""
+    from app.services.minimax_meter import h3_enabled
     from app.services.minimax_video import create_draft
 
     approval_id = (params.get("approval_id") or params.get("approval") or "").strip()
+    if approval_id:
+        return ToolResult(
+            tool="minimax_video_generate",
+            success=False,
+            error=(
+                "The LLM tool cannot generate clips. Rafael generates from personal Max "
+                "with header X-Minimax-Video-Confirm: aprobar. / "
+                "La herramienta no genera clips; Rafael genera desde Max personal "
+                "con X-Minimax-Video-Confirm: aprobar."
+            ),
+        )
     if not h3_enabled():
         return ToolResult(
             tool="minimax_video_generate",
             success=False,
             error="H3 video is disabled (MINIMAX_H3_ENABLED). / El video H3 está apagado.",
         )
-    if not approval_id:
-        try:
-            draft = create_draft(params.get("prompt", ""), duration=int(params.get("duration", 5) or 5))
-        except Exception as exc:
-            return ToolResult(tool="minimax_video_generate", success=False, error=str(exc)[:300])
-        return ToolResult(
-            tool="minimax_video_generate",
-            success=True,
-            result={
-                "status": "draft",
-                "approval_id": draft["id"],
-                "ai_generated": True,
-                "posted": False,
-                "note": "Draft queued. Rafael must approve before one weekly clip is generated. Nothing is posted.",
-            },
-        )
-    refusal = enforce(kind="video", approval_id=approval_id, video_clips=1)
-    if refusal:
-        return ToolResult(tool="minimax_video_generate", success=False, error=refusal)
-    from app.services.minimax_video import generate_approved_clip
-    row = await generate_approved_clip(approval_id)
-    return ToolResult(tool="minimax_video_generate", success=True, result=row)
+    try:
+        draft = create_draft(params.get("prompt", ""), duration=int(params.get("duration", 5) or 5))
+    except Exception as exc:
+        return ToolResult(tool="minimax_video_generate", success=False, error=str(exc)[:300])
+    return ToolResult(
+        tool="minimax_video_generate",
+        success=True,
+        result={
+            "status": "draft",
+            "approval_id": draft["id"],
+            "ai_generated": True,
+            "posted": False,
+            "note": "Draft queued. Only Rafael's founder UI can generate, with X-Minimax-Video-Confirm: aprobar.",
+        },
+    )
 
 
 @tool("minimax_h3_video")
 def _minimax_h3_video(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """H3 video draft/generate. Flag MINIMAX_H3_ENABLED. Requires Rafael approval_id. Never posts."""
+    """H3 video draft only. Flag MINIMAX_H3_ENABLED. Never generates. Never posts."""
     return _minimax_video_generate(params, desk=desk)
 
 
 @tool("minimax_video_generate")
 def _minimax_video_generate(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """H3 / MiniMax video. Drafts to Rafael's queue. Params: prompt, duration, approval_id."""
+    """H3 / MiniMax video drafts only. Params: prompt, duration. approval_id is rejected."""
     import asyncio
     try:
         loop = asyncio.get_event_loop()

@@ -29,6 +29,10 @@ type Usage = {
     remaining_pct?: number | null;
     used_pct?: number | null;
     hard_stopped?: boolean;
+    fail_closed_when_unread?: boolean;
+    local_used_pct?: number | null;
+    recommend_disable_auto_credits?: boolean;
+    warning?: string;
     message?: string;
   };
   message?: string;
@@ -68,7 +72,7 @@ export default function MinimaxUsageScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const act = async (id: string, path: 'approve' | 'reject') => {
+  const act = async (id: string, path: 'approve' | 'reject' | 'generate') => {
     const res = await fetch(`${API}/minimax-meter/video/${id}/${path}`, {
       method: 'POST',
       credentials: 'include',
@@ -98,7 +102,10 @@ export default function MinimaxUsageScreen() {
           {usage.plan.hard_stopped ? ` · ${usage.plan.message}` : ''}
         </p>
       ) : (
-        <p style={{ fontSize: 13, color: '#5C5650' }}>{t.plan}: local meter (remains endpoint not available)</p>
+        <p style={{ fontSize: 13, color: '#9a7b2f' }}>
+          {usage?.plan?.warning || usage?.plan?.message || t.remainsDown}
+          {usage?.plan?.local_used_pct != null ? ` · local ${usage.plan.local_used_pct}%` : ''}
+        </p>
       )}
       <p>
         {t.family}: {usage?.family_text_share_used_pct ?? 0}% / {usage?.family_text_share_pct ?? 20}%
@@ -132,6 +139,12 @@ export default function MinimaxUsageScreen() {
           {item.status === 'draft' ? (
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" onClick={() => act(item.id, 'approve')}>{t.approve}</button>
+              <button type="button" onClick={() => act(item.id, 'reject')}>{t.reject}</button>
+            </div>
+          ) : null}
+          {item.status === 'approved' ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" onClick={() => act(item.id, 'generate')}>{t.generate}</button>
               <button type="button" onClick={() => act(item.id, 'reject')}>{t.reject}</button>
             </div>
           ) : null}

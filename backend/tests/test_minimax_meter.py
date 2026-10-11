@@ -21,7 +21,9 @@ def _env(monkeypatch, tmp_path, edition="amp"):
     monkeypatch.setenv("MINIMAX_PLAN_HARD_STOP_PCT", "80")
     monkeypatch.setenv("MINIMAX_FAMILY_TTS", "1")
     monkeypatch.setenv("MINIMAX_H3_ENABLED", "1")
+    monkeypatch.setenv("MINIMAX_H3_MODEL", "MiniMax-H3-test")
     monkeypatch.setenv("MINIMAX_REMAINS_PROBE", "0")
+    monkeypatch.setenv("MINIMAX_REMAINS_STUB", "ok")
     monkeypatch.setenv("MINIMAX_API_KEY", "test-mm-key")
     monkeypatch.delenv("INSTANCE_USAGE_CAP_PCT", raising=False)
     (tmp_path / edition).mkdir(parents=True, exist_ok=True)
@@ -227,6 +229,20 @@ def test_prompt_sanitizer_strips_workroom_and_client_data(monkeypatch, tmp_path)
     out = sanitize_prompt("send to jane@client.com at +1 202 555 0100")
     assert "jane@client.com" not in out
     assert "+1 202 555 0100" not in out
+
+
+def test_workroom_photo_path_blocked_for_family_image_prompts(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path, "amp")
+    from app.services.minimax_prompts import PromptRejected, sanitize_prompt
+
+    with pytest.raises(PromptRejected, match="photo path"):
+        sanitize_prompt("use /home/rg/empire-repo/backend/data/photos/quote/52/cc.jpeg")
+    with pytest.raises(PromptRejected, match="photo path"):
+        sanitize_prompt("see /api/v1/photos/serve/quote/3/room.jpg")
+    with pytest.raises(PromptRejected, match="photo path"):
+        sanitize_prompt("workroom-showroom/photos/bed-cognac-panel-headboard.jpg")
+    ok = sanitize_prompt("a navy drapery panel, no people")
+    assert "navy" in ok
 
 
 def test_family_image_to_image_blocked(monkeypatch, tmp_path):

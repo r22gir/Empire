@@ -1,8 +1,14 @@
 """H3 video drafts, Rafael's approval gate, and one-clip generation.
 
-Drafts go to an approval queue. Nothing is posted. Social keys are never
-read. Every clip is labeled AI-generated. Generation runs only after an
-explicit founder confirmation header and only through the shared meter.
+Family drafts live under that edition's 0700 dir. The founder video_queue
+is founder-only (0700). Nothing is posted. Social keys are never read.
+Every clip is labeled AI-generated.
+
+Generation runs only from the founder router endpoint after
+X-Minimax-Video-Confirm: aprobar. The LLM tool may only create drafts.
+
+Reserve the weekly cap and set status=generating BEFORE the HTTP call.
+If the API errors after it may have billed, keep the reserved cost.
 """
 from __future__ import annotations
 
@@ -17,14 +23,20 @@ from typing import Any, Optional
 import httpx
 
 from app.services.minimax_meter import (
+    FAMILY_EDITIONS,
+    KNOWN_EDITIONS,
     bilingual,
+    current_edition,
+    founder_video_queue_dir,
     h3_enabled,
     h3_model,
-    meter_dir,
-    record,
+    normalize_edition,
     redact,
+    reserve,
+    reconcile,
+    video_drafts_dir,
 )
-from app.services.minimax_prompts import PromptRejected, sanitize_prompt
+from app.services.minimax_prompts import sanitize_prompt
 from app.services.minimax_quota import fetch_credits, fetch_remains, redact_secret
 
 logger = logging.getLogger("max.minimax_video")
@@ -43,46 +55,106 @@ def _iso() -> str:
     return _now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _chmod(path: Path, mode: int) -> None:
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
+
 def queue_dir() -> Path:
-    path = meter_dir() / "video_queue"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def _path(approval_id: str) -> Path:
-    safe = re_id(approval_id)
-    return queue_dir() / f"{safe}.json"
+    """Founder-only approval queue (0700)."""
+    return founder_video_queue_dir()
 
 
 def re_id(approval_id: str) -> str:
     raw = (approval_id or "").strip()
-    if not raw or any(ch in raw for ch in "/\\.."):
+    if not raw or any(ch in raw for ch in "/\\") or ".." in raw:
         raise ValueError("invalid approval id")
     return "".join(ch for ch in raw if ch.isalnum() or ch in "-_")[:40]
 
 
+def _draft_dir(edition: str) -> Path:
+    ed = normalize_edition(edition)
+    if ed in FAMILY_EDITIONS:
+        return video_drafts_dir(ed)
+    return founder_video_queue_dir()
+
+
+def _candidate_paths(approval_id: str) -> list[Path]:
+    safe = re_id(approval_id)
+    paths = [founder_video_queue_dir() / f"{safe}.json"]
+    for ed in KNOWN_EDITIONS:
+        paths.append(video_drafts_dir(ed) / f"{safe}.json")
+    # de-dupe while keeping order
+    seen: set[str] = set()
+    out: list[Path] = []
+    for path in paths:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            out.append(path)
+    return out
+
+
+def _path_for_new(approval_id: str, edition: str) -> Path:
+    return _draft_dir(edition) / f"{re_id(approval_id)}.json"
+
+
+def _locate(approval_id: str) -> Path:
+    for path in _candidate_paths(approval_id):
+        if path.is_file():
+            return path
+    raise FileNotFoundError(approval_id)
+
+
 def _read(approval_id: str) -> dict[str, Any]:
-    path = _path(approval_id)
-    if not path.is_file():
-        raise FileNotFoundError(approval_id)
+    path = _locate(approval_id)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _write(row: dict[str, Any]) -> dict[str, Any]:
-    path = _path(row["id"])
+def get_draft(approval_id: str) -> dict[str, Any]:
+    return _read(approval_id)
+
+
+def _write_at(path: Path, row: dict[str, Any]) -> dict[str, Any]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _chmod(path.parent, 0o700)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(row, ensure_ascii=False, indent=2), encoding="utf-8")
+    _chmod(tmp, 0o600)
     tmp.replace(path)
+    _chmod(path, 0o600)
     return row
 
 
+def _write(row: dict[str, Any]) -> dict[str, Any]:
+    try:
+        path = _locate(row["id"])
+    except FileNotFoundError:
+        path = _path_for_new(row["id"], row.get("edition") or current_edition())
+    return _write_at(path, row)
+
+
 def list_queue(*, status: Optional[str] = None) -> list[dict[str, Any]]:
+    """Founder aggregator: founder queue + every edition's drafts."""
     rows = []
-    for path in sorted(queue_dir().glob("*.json")):
+    seen: set[str] = set()
+    paths: list[Path] = []
+    paths.extend(founder_video_queue_dir().glob("*.json"))
+    for ed in KNOWN_EDITIONS:
+        paths.extend(video_drafts_dir(ed).glob("*.json"))
+    for path in paths:
+        if path.suffix != ".json" or path.name.endswith(".tmp"):
+            continue
         try:
             row = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        rid = str(row.get("id") or path.stem)
+        if rid in seen:
+            continue
+        seen.add(rid)
         if status and row.get("status") != status:
             continue
         rows.append(row)
@@ -98,7 +170,7 @@ def create_draft(
 ) -> dict[str, Any]:
     from app.edition import edition_name
 
-    ed = edition or edition_name()
+    ed = normalize_edition(edition or edition_name())
     cleaned = sanitize_prompt(prompt, edition=ed, max_len=1000)
     row = {
         "id": uuid.uuid4().hex[:16],
@@ -114,10 +186,12 @@ def create_draft(
         "social_keys_used": False,
         "created_at": _iso(),
         "approved_at": None,
+        "generating_at": None,
         "generated_at": None,
         "result": None,
     }
-    return _write(row)
+    path = _path_for_new(row["id"], ed)
+    return _write_at(path, row)
 
 
 def approval_is_live(approval_id: str) -> bool:
@@ -125,7 +199,8 @@ def approval_is_live(approval_id: str) -> bool:
         row = _read(approval_id)
     except (FileNotFoundError, ValueError, json.JSONDecodeError):
         return False
-    return row.get("status") == "approved" and not row.get("generated_at")
+    status = row.get("status")
+    return status in {"approved", "generating"} and not row.get("generated_at")
 
 
 def explicit_yes(request, body_flag: bool = False) -> bool:
@@ -171,39 +246,76 @@ def _api_key() -> str:
     return (os.getenv("MINIMAX_API_KEY") or "").strip()
 
 
-async def generate_approved_clip(approval_id: str) -> dict[str, Any]:
-    """Spend one weekly clip. Caller must have already passed meter.enforce."""
-    from app.services.minimax_meter import enforce
+def _assert_caller_edition(row: dict[str, Any], caller_edition: Optional[str]) -> str:
+    caller = normalize_edition(caller_edition or current_edition())
+    row_ed = normalize_edition(row.get("edition"))
+    if caller in FAMILY_EDITIONS and row_ed != caller:
+        raise PermissionError(
+            bilingual(
+                "Este borrador no pertenece a esta edición.",
+                "This draft does not belong to this edition.",
+            )
+        )
+    return caller
 
+
+async def generate_approved_clip(
+    approval_id: str,
+    *,
+    caller_edition: Optional[str] = None,
+) -> dict[str, Any]:
+    """Spend one weekly clip. Reserve + generating MUST happen before HTTP."""
     row = _read(approval_id)
-    if row.get("status") != "approved":
-        raise PermissionError("clip is not approved")
-    if row.get("generated_at"):
+    _assert_caller_edition(row, caller_edition)
+    if row.get("generated_at") and row.get("status") == "generated":
         return row
+    if row.get("status") not in {"approved", "generating"}:
+        raise PermissionError("clip is not approved")
     if not h3_enabled():
         raise PermissionError("H3 disabled")
-    refusal = enforce(kind="video", edition=row.get("edition"), approval_id=approval_id, video_clips=1)
-    if refusal:
-        record(
-            kind="video",
-            edition=row.get("edition"),
-            model=row.get("model") or h3_model(),
-            video_clips=0,
-            blocked=True,
-            reason=refusal,
-            approval_id=approval_id,
+    model = (row.get("model") or h3_model() or "").strip()
+    if not model:
+        raise PermissionError(
+            bilingual(
+                "No hay MINIMAX_H3_MODEL. No usamos Hailuo-02 en silencio.",
+                "MINIMAX_H3_MODEL is unset. Hailuo-02 is not a silent default.",
+            )
         )
-        raise PermissionError(refusal)
+
+    # Mark generating first so a concurrent caller cannot start a second HTTP.
+    row["status"] = "generating"
+    row["generating_at"] = _iso()
+    row["model"] = model
+    _write(row)
+
+    reservation = reserve(
+        kind="video",
+        edition=row.get("edition"),
+        model=model,
+        approval_id=approval_id,
+        video_clips=1,
+    )
+    if reservation.blocked:
+        row["status"] = "approved"
+        row["block_reason"] = reservation.message
+        _write(row)
+        raise PermissionError(reservation.message)
+
     key = _api_key()
     if not key:
+        reconcile(reservation, video_clips=0, error="MINIMAX_API_KEY not set")
+        row["status"] = "approved"
+        row["block_reason"] = "MINIMAX_API_KEY not set"
+        _write(row)
         raise RuntimeError("MINIMAX_API_KEY not set")
-    model = row.get("model") or h3_model()
+
     prompt = f"{row.get('prompt')}\n\n[{AI_LABEL_EN} / {AI_LABEL_ES}]"
     payload = {
         "model": model,
         "prompt": prompt[:1200],
         "duration": row.get("duration") or 5,
     }
+    billed = False
     try:
         async with httpx.AsyncClient(timeout=180.0) as client:
             resp = await client.post(
@@ -211,32 +323,51 @@ async def generate_approved_clip(approval_id: str) -> dict[str, Any]:
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                 json=payload,
             )
-            body = {}
+            billed = True
+            body: dict[str, Any] = {}
             try:
                 body = resp.json()
             except Exception:
                 body = {"raw": redact_secret(resp.text[:200])}
     except Exception as exc:
+        reconcile(
+            reservation,
+            billed_unknown=True,
+            video_clips=1,
+            error=redact_secret(f"{type(exc).__name__}"),
+        )
+        row["status"] = "error"
+        row["result"] = {"error": redact_secret(str(exc))[:200], "billed_unknown": True}
+        _write(row)
         raise RuntimeError(redact_secret(f"{type(exc).__name__}")) from None
+
     if resp.status_code != 200:
+        reconcile(
+            reservation,
+            billed_unknown=True,
+            video_clips=1,
+            error=redact_secret(f"MiniMax HTTP {resp.status_code}"),
+        )
+        row["status"] = "error"
+        row["result"] = {
+            "error": redact_secret(f"MiniMax HTTP {resp.status_code}"),
+            "billed_unknown": True,
+        }
+        _write(row)
         raise RuntimeError(redact_secret(f"MiniMax HTTP {resp.status_code}"))
+
     row["status"] = "generated"
     row["generated_at"] = _iso()
     row["result"] = {
         "task_id": body.get("task_id") or body.get("id") or (body.get("data") or {}).get("task_id"),
         "ai_generated": True,
         "posted": False,
+        "billed": billed,
         "label_es": AI_LABEL_ES,
         "label_en": AI_LABEL_EN,
     }
     _write(row)
-    record(
-        kind="video",
-        edition=row.get("edition"),
-        model=model,
-        video_clips=1,
-        approval_id=approval_id,
-    )
+    reconcile(reservation, video_clips=1)
     return row
 
 

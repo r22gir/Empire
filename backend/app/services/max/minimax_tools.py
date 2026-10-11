@@ -764,76 +764,21 @@ async def minimax_video_generate(
     prompt: str,
     duration: int = 5,
 ) -> dict[str, Any]:
-    """
-    Generate video via MiniMax video model. Gated by MINIMAX_VIDEO_ENABLED=1.
+    """Legacy video-01 path. Does not generate. H3 is MINIMAX_H3_ENABLED only.
 
-    Returns unavailable status unless MINIMAX_VIDEO_ENABLED is set and quota verified.
+    MINIMAX_VIDEO_ENABLED must not enable H3 or any silent paid video spend.
+    Drafts go through minimax_video.create_draft; generation is founder UI only.
     """
     _load_runtime_env()
-    if not os.getenv("MINIMAX_API_KEY"):
-        return _build_result(False, "minimax_video_generate",
-                             error="MINIMAX_API_KEY not set")
-
-    if not MINIMAX_VIDEO_ENABLED:
-        return _build_result(False, "minimax_video_generate",
-                             error="Video generation is disabled. Set MINIMAX_VIDEO_ENABLED=1 to enable.")
-
-    model = "video-01"
-    base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
-    api_key = os.getenv("MINIMAX_API_KEY", "")
-
-    try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            resp = await client.post(
-                f"{base_url}/videos/generations",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": model,
-                    "prompt": prompt[:1000],
-                    "duration": min(duration, 10),
-                },
-            )
-    except Exception as e:
-        return _build_result(False, "minimax_video_generate", error=f"{type(e).__name__}: {e}")
-
-    if resp.status_code != 200:
-        return _build_result(False, "minimax_video_generate", model=model,
-                             error=f"MiniMax HTTP {resp.status_code}: {resp.text[:300]}")
-
-    # Video responses typically include a URL or job ID to poll
-    try:
-        rj = resp.json()
-        video_url = rj.get("data", [{}])[0].get("url") or rj.get("url")
-        if video_url:
-            # Fetch the video bytes
-            vid_resp = await client.get(video_url, timeout=120)
-            video_data = vid_resp.content
-        else:
-            job_id = rj.get("job_id") or rj.get("id")
-            return _build_result(True, "minimax_video_generate", model=model, data={
-                "job_id": job_id,
-                "status": "processing",
-                "note": "Video generation started — poll for completion",
-            })
-    except Exception as e:
-        return _build_result(False, "minimax_video_generate", model=model,
-                             error=f"video fetch/parse failed: {e}")
-
-    if not video_data or len(video_data) < 10000:
-        return _build_result(False, "minimax_video_generate", model=model,
-                             error="video data too small or empty")
-
-    serve_url, file_path = _save_bytes(video_data, "mm-video", ext="mp4")
-    if not _verify_file(file_path, min_bytes=10000):
-        return _build_result(False, "minimax_video_generate", model=model,
-                             error="file save verification failed")
-
-    return _build_result(True, "minimax_video_generate", model=model, data={
-        "video_url": serve_url,
-        "local_path": str(file_path),
-        "size_bytes": len(video_data),
-        "duration_seconds": duration,
-    })
+    return _build_result(
+        False,
+        "minimax_video_generate",
+        error=(
+            "LLM video generate is disabled. Create a draft; Rafael generates from "
+            "personal Max with X-Minimax-Video-Confirm: aprobar. "
+            "MINIMAX_VIDEO_ENABLED does not enable H3 (use MINIMAX_H3_ENABLED after the probe)."
+        ),
+    )
 
 
 # ── Room Redesign ─────────────────────────────────────────────────────────────
