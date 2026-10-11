@@ -38,6 +38,7 @@ Campestre legal or company details. Model is **grok-4.6** only.
 15. ICS download opens a `.ics`. Subscribe-token note is read-only. Google Calendar status says no connector exists.
 16. People: add anyone this life needs (family, friend, doctor, teacher, crew). Assign them on an event; map/call links work.
 17. Hitting the edition usage cap shows a 429 toast and does not write.
+18. **Pending messages** card (sidebar) and **messages** view list unanswered/waiting mail from this edition's connected Gmail/Outlook only. Each row shows area / job / person when linked, plus a suggested reply. **Open** opens the mailbox. **Draft reply** queues a draft (approval queue). **Snooze** hides it. **To-do / Follow-up** saves an Organizer item. Nothing is sent without **Approve & Send**. Maxine never shows Argos Campestre mail. Another edition's mailboxes never appear.
 
 ## iPhone (Safari, 390-wide)
 
@@ -54,6 +55,18 @@ Campestre legal or company details. Model is **grok-4.6** only.
 3. Switch `EMPIRE_EDITION` to `max_e` or `maxine`: that backend sees only its own board. Rafael's Workroom jobs and Argos Campestre strings do not appear. An unknown `EMPIRE_EDITION` is isolated (fail-closed), never `main`.
 4. Creating “Argos Campestre …” on Maxine is rejected (400). A family to-do on Maxine saves.
 5. Each edition has its own daily usage caps. Crossing the cap returns 429.
+
+## Pending messages (read-only email)
+
+Reuses `gmail_reader.check_inbox` (`gmail.readonly`) and `outlook_reader.search_messages` (`Mail.Read`, GET only). Each edition reads only its own token files (`GMAIL_TOKEN_PATH` / `OUTLOOK_TOKEN_PATH` on Max; `GMAIL_TOKEN_PATH_{ED}` / `OUTLOOK_TOKEN_PATH_{ED}` or `~/.config/empirebox/{ed}/…` on Max-e / Maxine). A family edition pointing at Rafael's token is refused.
+
+1. Command Center → Organizer → **messages**. Empty state if this edition has no connected mailbox.
+2. With a connected mailbox: unanswered and waiting threads appear across Gmail and Outlook. Each row names the area, and a job/person when one matches.
+3. Suggested reply is a draft for review (owner's name). **Open** is a mailbox link only.
+4. **Draft reply** creates an approval-queue item (`source=organizer_mail`, `sent=false`). Status stays pending until the owner taps Approve & Send. The Organizer never calls Gmail/Outlook send or reply APIs.
+5. **Snooze** hides the row until the snooze time. **Turn into to-do** / **follow-up** writes an Organizer item in this edition and removes it from Pending.
+6. Switch `EMPIRE_EDITION` to `maxine`: Rafael's inbox is not read. Argos Campestre subjects/senders are dropped. Juan's Max-e mailbox is not visible either.
+7. Unknown `EMPIRE_EDITION` has no mailbox sources and never falls through to `main`.
 
 ## Max / Max-e / Maxine chat
 

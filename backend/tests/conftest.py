@@ -144,6 +144,7 @@ _DATA_TABLES = [
     "organizer_checkins",
     "organizer_spaces",
     "organizer_usage",
+    "organizer_mail_state",
     "approval_queue",
 ]
 

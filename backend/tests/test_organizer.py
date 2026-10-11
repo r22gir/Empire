@@ -661,6 +661,223 @@ def test_usage_cap_returns_429(client, isolated_empire_db, monkeypatch):
     assert detail["bucket"] == "items"
 
 
+def _seed_inbox(rows):
+    import app.services.organizer.mail as mailmod
+    mailmod.TEST_INBOX = rows
+    return mailmod
+
+
+def _clear_inbox():
+    import app.services.organizer.mail as mailmod
+    mailmod.TEST_INBOX = None
+
+
+def _sample_inbox():
+    return [
+        {
+            "source": "gmail",
+            "message_id": "m1",
+            "from": "Marley <marley@example.com>",
+            "to": "rafael@example.com",
+            "subject": "Install date?",
+            "date": "2026-10-10T12:00:00",
+            "preview": "Can we move the drapery install?",
+            "unread": True,
+            "account": "gmail",
+        },
+        {
+            "source": "outlook",
+            "message_id": "o1",
+            "from": "School Office <office@school.edu>",
+            "subject": "Permission slip",
+            "date": "2026-10-09T09:00:00",
+            "preview": "Please sign for the kids field trip.",
+            "unread": False,
+            "account": "outlook",
+        },
+        {
+            "source": "gmail",
+            "message_id": "argos1",
+            "from": "Counsel <legal@argos-campestre.com>",
+            "subject": "Argos Campestre filing",
+            "date": "2026-10-08T08:00:00",
+            "preview": "Legal packet for Campestre",
+            "unread": True,
+            "account": "gmail",
+        },
+    ]
+
+
+def test_pending_mail_lists_and_links_job(client, isolated_empire_db):
+    _customer_and_job(client, "Marley")
+    mailmod = _seed_inbox(_sample_inbox())
+    try:
+        meta = client.get("/api/v1/organizer/meta").json()
+        assert meta["mail"]["read_only"] is True
+        assert meta["mail"]["pending_path"] == "/api/v1/organizer/pending-mail"
+        res = client.get("/api/v1/organizer/pending-mail")
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["read_only"] is True
+        assert body["sent"] is False
+        ids = {i["message_id"] for i in body["items"]}
+        assert ids == {"m1", "o1", "argos1"}
+        marley = next(i for i in body["items"] if i["message_id"] == "m1")
+        assert marley["job_title"]
+        assert marley["space_id"] == "workroom"
+        assert marley["waiting"] == "unanswered"
+        assert "sent" not in (marley.get("suggested_reply") or "").lower()
+        assert marley["suggested_reply"].startswith("Hi Marley")
+        assert "Rafael" in marley["suggested_reply"]
+        assert {a["id"] for a in marley["actions"]} == {"open", "draft_reply", "snooze", "todo", "followup"}
+        school = next(i for i in body["items"] if i["message_id"] == "o1")
+        assert school["space_id"] == "family"
+        assert school["waiting"] == "waiting"
+    finally:
+        mailmod.TEST_INBOX = None
+
+
+def test_draft_reply_goes_to_approval_queue_not_sent(client, isolated_empire_db):
+    mailmod = _seed_inbox(_sample_inbox())
+    try:
+        res = client.post(
+            "/api/v1/organizer/pending-mail/actions",
+            json={
+                "action": "draft_reply",
+                "source": "gmail",
+                "message_id": "m1",
+                "confirm": True,
+            },
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["sent"] is False
+        assert body["requires_confirm"] is True
+        assert body["approval"]["status"] == "pending"
+        assert body["approval"]["source"] == "organizer_mail"
+        queue = list_queue()
+        drafts = [i for i in queue["items"] if i.get("source") == "organizer_mail"]
+        assert drafts
+        assert all(i["status"] == "pending" for i in drafts)
+        assert all(i.get("sent_at") in (None, "") for i in drafts)
+        assert "install" in (drafts[0].get("body") or "").lower()
+    finally:
+        mailmod.TEST_INBOX = None
+
+
+def test_snooze_hides_and_todo_creates_item(client, isolated_empire_db):
+    mailmod = _seed_inbox(_sample_inbox())
+    try:
+        snooze = client.post(
+            "/api/v1/organizer/pending-mail/actions",
+            json={
+                "action": "snooze",
+                "source": "gmail",
+                "message_id": "m1",
+                "snooze_until": "2099-01-01T00:00:00",
+            },
+        )
+        assert snooze.status_code == 200, snooze.text
+        assert snooze.json()["sent"] is False
+        listed = client.get("/api/v1/organizer/pending-mail").json()
+        assert "m1" not in {i["message_id"] for i in listed["items"]}
+
+        todo = client.post(
+            "/api/v1/organizer/pending-mail/actions",
+            json={"action": "todo", "source": "outlook", "message_id": "o1"},
+        )
+        assert todo.status_code == 200, todo.text
+        created = todo.json()["created"]
+        assert created["kind"] == "todo"
+        assert "Permission slip" in created["title"]
+        assert todo.json()["sent"] is False
+        listed2 = client.get("/api/v1/organizer/pending-mail").json()
+        assert "o1" not in {i["message_id"] for i in listed2["items"]}
+        board = client.get("/api/v1/organizer/board").json()
+        assert any(i["title"] == created["title"] for i in board["items"])
+
+        follow = client.post(
+            "/api/v1/organizer/pending-mail/actions",
+            json={"action": "followup", "source": "gmail", "message_id": "argos1"},
+        )
+        assert follow.status_code == 200, follow.text
+        assert follow.json()["created"]["kind"] == "followup"
+        missing = client.post(
+            "/api/v1/organizer/pending-mail/actions",
+            json={"action": "todo", "source": "gmail", "message_id": "nope"},
+        )
+        assert missing.status_code == 404
+    finally:
+        mailmod.TEST_INBOX = None
+
+
+def test_maxine_pending_mail_drops_argos_and_never_reads_main(client, isolated_empire_db, monkeypatch):
+    called = {"gmail": 0, "outlook": 0}
+
+    def fake_gmail(**_kw):
+        called["gmail"] += 1
+        return {"success": True, "emails": [{"id": "r1", "from": "Rafael", "subject": "Workroom", "preview": "x"}]}
+
+    def fake_outlook(**_kw):
+        called["outlook"] += 1
+        return {"success": True, "emails": []}
+
+    monkeypatch.setenv("EMPIRE_EDITION", "maxine")
+    monkeypatch.delenv("GMAIL_TOKEN_PATH_MAXINE", raising=False)
+    monkeypatch.delenv("OUTLOOK_TOKEN_PATH_MAXINE", raising=False)
+    monkeypatch.setattr("app.services.max.gmail_reader.check_inbox", fake_gmail)
+    monkeypatch.setattr("app.services.max.outlook_reader.search_messages", fake_outlook)
+    _clear_inbox()
+    empty = client.get("/api/v1/organizer/pending-mail")
+    assert empty.status_code == 200
+    assert empty.json()["items"] == []
+    assert empty.json()["accounts"]["edition"] == "maxine"
+    assert empty.json()["accounts"]["connected"] == []
+    assert called["gmail"] == 0
+    assert called["outlook"] == 0
+
+    mailmod = _seed_inbox(_sample_inbox())
+    try:
+        body = client.get("/api/v1/organizer/pending-mail").json()
+        blob = str(body).lower()
+        assert "argos" not in blob
+        assert "campestre" not in blob
+        ids = {i["message_id"] for i in body["items"]}
+        assert "argos1" not in ids
+        assert "o1" in ids
+        assert body["read_only"] is True
+        assert called["gmail"] == 0
+    finally:
+        mailmod.TEST_INBOX = None
+
+
+def test_mailbox_token_paths_refuse_main_token(tmp_path, monkeypatch):
+    main_token = tmp_path / "rafael_gmail.json"
+    main_token.write_text("{}")
+    family_token = tmp_path / "camilo_gmail.json"
+    family_token.write_text("{}")
+    monkeypatch.setenv("GMAIL_TOKEN_PATH", str(main_token))
+    monkeypatch.setenv("GMAIL_TOKEN_PATH_MAXINE", str(main_token))
+    from app.services.organizer.edition import mailbox_token_paths
+    leaked = mailbox_token_paths("maxine")
+    assert leaked["gmail"] is None
+    assert "gmail" not in leaked["sources"]
+    assert leaked["edition"] == "maxine"
+
+    monkeypatch.setenv("GMAIL_TOKEN_PATH_MAXINE", str(family_token))
+    own = mailbox_token_paths("maxine")
+    assert own["gmail"] == family_token.resolve()
+    assert "gmail" in own["sources"]
+
+    unknown = mailbox_token_paths("staging-xyz")
+    assert unknown["edition"] == "unknown"
+    assert unknown["sources"] == []
+    assert unknown["gmail"] is None
+
+    main = mailbox_token_paths("main")
+    assert main["gmail"] == main_token.resolve()
+
+
 def test_organizer_package_uses_grok_46_only():
     from pathlib import Path
     from app.services.organizer.edition import ORGANIZER_MODEL

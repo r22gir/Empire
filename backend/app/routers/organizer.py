@@ -163,6 +163,15 @@ class CommandIn(BaseModel):
     confirm: bool = False
 
 
+class MailActionIn(BaseModel):
+    action: str
+    source: str = "gmail"
+    message_id: str
+    body: Optional[str] = None
+    snooze_until: Optional[str] = None
+    confirm: bool = False
+
+
 def _usage_http(exc: UsageCapExceeded):
     raise HTTPException(
         status_code=429,
@@ -401,7 +410,12 @@ def organizer_meta():
             "navigate", "call", "text", "email",
             "send_quote", "order_fabric", "request_deposit", "book_install",
             "approve_send", "attach_file", "ask_max", "notify_crew",
+            "open", "draft_reply", "snooze", "todo", "followup",
         ],
+        "mail": {
+            "read_only": True,
+            "pending_path": "/api/v1/organizer/pending-mail",
+        },
     }
 
 
@@ -1329,3 +1343,34 @@ def organizer_usage():
 @router.get("/edition")
 def organizer_edition():
     return edition_public()
+
+
+@router.get("/pending-mail")
+def pending_mail(limit: int = 40):
+    """Unanswered / waiting mail for this edition's owner only. Read-only."""
+    from app.services.organizer.mail import list_pending
+    with get_db() as conn:
+        ensure_schema(conn)
+        return list_pending(conn, limit=limit)
+
+
+@router.post("/pending-mail/actions")
+def pending_mail_action(req: MailActionIn):
+    """Open / draft reply / snooze / turn into to-do or follow-up. Never sends."""
+    from app.services.organizer.mail import run_mail_action
+    with get_db() as conn:
+        ensure_schema(conn)
+        try:
+            consume(conn, "actions")
+        except UsageCapExceeded as exc:
+            _usage_http(exc)
+        result = run_mail_action(
+            conn,
+            action=req.action,
+            source=req.source,
+            message_id=req.message_id,
+            extra={"body": req.body, "snooze_until": req.snooze_until, "confirm": req.confirm},
+        )
+        if not result.get("ok"):
+            raise HTTPException(404 if "not found" in (result.get("message") or "").lower() else 400, result.get("message"))
+        return result

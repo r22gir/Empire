@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import Optional
 
 ORGANIZER_MODEL = "grok-4.6"
@@ -236,6 +237,66 @@ def reject_if_blocked(*parts: Optional[str], edition: Optional[str] = None) -> O
     if any(contains_blocked_term(p, edition) for p in parts):
         return "This edition cannot store or show that content."
     return None
+
+
+def _configured_main_token_paths() -> dict:
+    """Rafael's configured token locations — used to refuse leaks, even if missing."""
+    gmail = outlook = None
+    try:
+        from app.services.max.gmail_reader import get_oauth_paths
+        p = get_oauth_paths().get("token_path")
+        if p:
+            gmail = Path(p).expanduser().resolve()
+    except Exception:
+        pass
+    try:
+        from app.services.max.outlook_reader import token_path
+        p = token_path()
+        if p:
+            outlook = Path(p).expanduser().resolve()
+    except Exception:
+        pass
+    return {"gmail": gmail, "outlook": outlook}
+
+
+def _existing(path) -> Optional[Path]:
+    if not path:
+        return None
+    p = Path(path)
+    return p if p.exists() else None
+
+
+def mailbox_token_paths(edition: Optional[str] = None) -> dict:
+    """Token files this edition may read. Never falls back to another edition's mail."""
+    ed = edition or process_edition()
+    empty = {"edition": ed, "gmail": None, "outlook": None, "sources": []}
+    if ed not in EDITIONS:
+        return {**empty, "edition": "unknown"}
+    main = _configured_main_token_paths()
+    if ed == "main":
+        gmail = _existing(main.get("gmail"))
+        outlook = _existing(main.get("outlook"))
+        sources = [name for name, val in (("gmail", gmail), ("outlook", outlook)) if val]
+        return {"edition": ed, "gmail": gmail, "outlook": outlook, "sources": sources}
+
+    env_g = os.getenv(f"GMAIL_TOKEN_PATH_{ed.upper()}")
+    env_o = os.getenv(f"OUTLOOK_TOKEN_PATH_{ed.upper()}")
+    base = Path.home() / ".config" / "empirebox" / ed
+    gmail_path = Path(env_g).expanduser() if env_g else (base / "gmail" / "token.json")
+    outlook_path = Path(env_o).expanduser() if env_o else (base / "outlook" / "token.json")
+
+    def _own(path: Path, other):
+        if not path.exists():
+            return None
+        resolved = path.resolve()
+        if other is not None and resolved == Path(other).resolve():
+            return None
+        return resolved
+
+    gmail = _own(gmail_path, main.get("gmail"))
+    outlook = _own(outlook_path, main.get("outlook"))
+    sources = [name for name, val in (("gmail", gmail), ("outlook", outlook)) if val]
+    return {"edition": ed, "gmail": gmail, "outlook": outlook, "sources": sources}
 
 
 def edition_public() -> dict:

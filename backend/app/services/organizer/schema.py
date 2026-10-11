@@ -211,6 +211,29 @@ def migrate_organizer_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organizer_mail_state (
+            id TEXT PRIMARY KEY,
+            edition TEXT NOT NULL,
+            source TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            snooze_until TEXT,
+            space_id TEXT,
+            job_id TEXT,
+            resource_id TEXT,
+            approval_id TEXT,
+            item_id TEXT,
+            notes TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_org_mail_ed_src_id ON organizer_mail_state(edition, source, message_id)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_cap_job ON organizer_captures(job_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_cap_ed ON organizer_captures(edition)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_crew_tok ON organizer_crew_tokens(token)")

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   addMinutesIso, DAY_START_MIN, eventLayout, filterItems, groupActions, itemsOnDay,
   isOrganizerCommand, monthCells, overdueItems, parseOrganizerCommand, parseQuickAddClient,
-  PX_PER_MIN, shouldOfferCrewDraft, showsWorkroomJobs, snapMinutes, timeFromOffset, weekDays,
+  filterPendingMail, pendingMailVisible, PX_PER_MIN, shouldOfferCrewDraft, showsWorkroomJobs, snapMinutes,
+  timeFromOffset, weekDays,
 } from './organizer-logic.ts';
 
 test('filter by job, person, kind', () => {
@@ -93,4 +94,15 @@ test('action groups and crew-draft after drag', () => {
   assert.equal(showsWorkroomJobs({ allows_workroom_jobs: true }, ''), true);
   assert.equal(showsWorkroomJobs({ allows_workroom_jobs: true }, 'family'), false);
   assert.equal(showsWorkroomJobs({ allows_workroom_jobs: false }, 'workroom'), false);
+});
+
+test('pending mail hides snoozed ids', () => {
+  const rows = [
+    { id: 'gmail:1', source: 'gmail', message_id: '1', subject: 'Quote?', space_id: 'workroom' },
+    { id: 'outlook:2', source: 'outlook', message_id: '2', subject: 'School', space_id: 'family', from_name: 'Office' },
+  ];
+  assert.equal(pendingMailVisible(rows).length, 2);
+  assert.deepEqual(pendingMailVisible(rows, ['gmail:1']).map((m) => m.id), ['outlook:2']);
+  assert.deepEqual(filterPendingMail(rows, { spaceId: 'family' }).map((m) => m.id), ['outlook:2']);
+  assert.deepEqual(filterPendingMail(rows, { query: 'school' }).map((m) => m.id), ['outlook:2']);
 });

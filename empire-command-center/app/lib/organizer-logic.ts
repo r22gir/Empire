@@ -252,3 +252,39 @@ export function showsWorkroomJobs(edition: { allows_workroom_jobs?: boolean } | 
   if (!edition?.allows_workroom_jobs) return false;
   return !spaceId || spaceId === 'workroom';
 }
+
+export type PendingMail = {
+  id: string;
+  source: string;
+  message_id: string;
+  account?: string;
+  from_name?: string;
+  from_email?: string;
+  subject: string;
+  preview?: string;
+  waiting?: string;
+  space_id?: string;
+  job_title?: string;
+  person_name?: string;
+  suggested_reply?: string;
+  open_href?: string;
+  unread?: boolean;
+};
+
+export function pendingMailVisible(items: PendingMail[], snoozedIds: string[] = []): PendingMail[] {
+  const hidden = new Set(snoozedIds);
+  return items.filter((m) => !hidden.has(m.id));
+}
+
+export function filterPendingMail(
+  items: PendingMail[],
+  opts: { spaceId?: string; query?: string; snoozedIds?: string[] } = {},
+): PendingMail[] {
+  const q = (opts.query || '').trim().toLowerCase();
+  return pendingMailVisible(items, opts.snoozedIds).filter((m) => {
+    if (opts.spaceId && m.space_id && m.space_id !== opts.spaceId) return false;
+    if (!q) return true;
+    const blob = `${m.subject} ${m.from_name || ''} ${m.from_email || ''} ${m.preview || ''} ${m.person_name || ''} ${m.job_title || ''}`.toLowerCase();
+    return blob.includes(q);
+  });
+}

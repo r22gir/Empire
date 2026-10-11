@@ -121,3 +121,17 @@
   background: var(--org-gold); color: #111; font-weight: 700; font-size: 12px;
   border: 0; border-radius: 8px; padding: 8px 12px; text-decoration: none;
 }
+.org-mail { display: flex; flex-direction: column; gap: 8px; }
+.org-mail-item {
+  padding: 10px 0; border-bottom: 1px solid #f3efe8;
+}
+.org-mail-item:last-child { border-bottom: 0; }
+.org-mail-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.org-wait {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  color: #854d0e; background: #fefce8; border-radius: 999px; padding: 2px 8px;
+}
+.org-mail-reply {
+  white-space: pre-wrap; background: #f5f2ed; border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; margin: 8px 0 4px; font-family: inherit;
+}

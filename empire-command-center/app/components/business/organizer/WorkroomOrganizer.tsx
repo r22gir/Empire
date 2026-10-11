@@ -3,14 +3,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API } from '../../../lib/api';
 import {
-  addMinutesIso, DAY_END_MIN, DAY_START_MIN, eventLayout, filterItems, groupActions, itemsOnDay,
-  isOrganizerCommand, KIND_COLOR, KIND_LABEL, monthCells, overdueItems, PX_PER_MIN,
-  shouldOfferCrewDraft, showsWorkroomJobs, timeFromOffset, weekDays, ymd,
+  addMinutesIso, DAY_END_MIN, DAY_START_MIN, eventLayout, filterItems, filterPendingMail,
+  groupActions, itemsOnDay, isOrganizerCommand, KIND_COLOR, KIND_LABEL, monthCells, overdueItems,
+  PX_PER_MIN, shouldOfferCrewDraft, showsWorkroomJobs, timeFromOffset, weekDays, ymd,
   type OrganizerAction, type OrganizerItem,
 } from '../../../lib/organizer-logic';
 import './organizer.css';
 
-type View = 'day' | 'week' | 'month' | 'lanes' | 'agenda';
+type View = 'day' | 'week' | 'month' | 'lanes' | 'agenda' | 'mail';
 
 const KINDS = Object.keys(KIND_LABEL);
 
@@ -48,6 +48,9 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   const [toast, setToast] = useState('');
   const [crewPrompt, setCrewPrompt] = useState<OrganizerItem | null>(null);
   const [captures, setCaptures] = useState<any[]>([]);
+  const [pendingMail, setPendingMail] = useState<any[]>([]);
+  const [mailNote, setMailNote] = useState('');
+  const [mailAccounts, setMailAccounts] = useState<any>(null);
   const dragRef = useRef<{ id: string; mode: 'move' | 'resize'; startY: number; origStart: string; origEnd: string } | null>(null);
 
   const day = ymd(anchor);
@@ -65,13 +68,17 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     }),
     [board, jobFilter, personFilter, kindFilter, q, spaceFilter],
   );
+  const mailRows = useMemo(
+    () => filterPendingMail(pendingMail, { spaceId: spaceFilter || undefined, query: q || undefined }),
+    [pendingMail, spaceFilter, q],
+  );
 
   const load = useCallback(async () => {
     const from = new Date(anchor); from.setDate(from.getDate() - 31);
     const to = new Date(anchor); to.setDate(to.getDate() + 40);
     const spaceQs = spaceFilter ? `&space_id=${encodeURIComponent(spaceFilter)}` : '';
     const qs = `start_date=${ymd(from)}&end_date=${ymd(to)}${spaceQs}`;
-    const [b, r, p, rt, m, caps, u] = await Promise.all([
+    const [b, r, p, rt, m, caps, u, pm] = await Promise.all([
       fetch(`${API}/organizer/board?${qs}`).then((x) => x.json()).catch(() => ({ items: [], overdue: [] })),
       fetch(`${API}/organizer/resources`).then((x) => x.json()).catch(() => ({ resources: [] })),
       fetch(`${API}/organizer/day-plan?plan_date=${day}`).then((x) => x.json()).catch(() => null),
@@ -79,6 +86,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
       fetch(`${API}/organizer/meta`).then((x) => x.json()).catch(() => null),
       fetch(`${API}/organizer/captures`).then((x) => x.json()).catch(() => ({ captures: [] })),
       fetch(`${API}/organizer/usage`).then((x) => x.json()).catch(() => null),
+      fetch(`${API}/organizer/pending-mail`).then((x) => x.json()).catch(() => ({ items: [] })),
     ]);
     const allowsJobs = !!(m?.edition?.allows_workroom_jobs);
     const jobSpace = showsWorkroomJobs(m?.edition, spaceFilter);
@@ -96,6 +104,9 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     setMeta(m);
     setCaptures(caps.captures || []);
     setUsage(u);
+    setPendingMail(pm.items || []);
+    setMailNote(pm.note || '');
+    setMailAccounts(pm.accounts || null);
     if (jobFilter && jobSpace) {
       const tl = await fetch(`${API}/organizer/jobs/${jobFilter}/timeline`).then((x) => x.ok ? x.json() : null).catch(() => null);
       setTimeline(tl);
@@ -171,6 +182,29 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     if (data.href && action !== 'attach_file') window.open(data.href, action === 'call' ? '_self' : '_blank');
     setToast(data.message || (data.sent ? 'Sent after founder tap.' : 'Draft ready. Approve & Send still required for anything outbound.'));
     setCrewPrompt(null);
+    await load();
+    return data;
+  }
+
+  async function runMailAction(action: string, item: any) {
+    if (action === 'open' && item.open_href) {
+      window.open(item.open_href, '_blank');
+      return;
+    }
+    const res = await fetch(`${API}/organizer/pending-mail/actions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action, source: item.source, message_id: item.message_id,
+        body: item.suggested_reply,
+      }),
+    });
+    if (res.status === 429) {
+      const err = await res.json();
+      setToast(err.detail?.message || 'Usage cap reached for this edition.');
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setToast(data.message || (data.sent ? 'Sent after owner tap.' : 'Draft only. Nothing sent.'));
     await load();
     return data;
   }
@@ -330,8 +364,8 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
           ))}
         </div>
         <div className="org-toolbar">
-          {(['day', 'week', 'month', 'lanes', 'agenda'] as View[]).map((v) => (
-            <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{v}</button>
+          {(['day', 'week', 'month', 'lanes', 'agenda', 'mail'] as View[]).map((v) => (
+            <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{v === 'mail' ? 'messages' : v}</button>
           ))}
           <button onClick={() => setAnchor(new Date())}>Today</button>
           <button onClick={() => setAnchor((d) => { const n = new Date(d); n.setDate(n.getDate() - (view === 'month' ? 30 : view === 'week' ? 7 : 1)); return n; })}>‹</button>
@@ -400,6 +434,31 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
               {plan?.approved ? 'Approved' : 'Approve today'}
             </button>
             <div className="org-note">{plan?.note}</div>
+          </div>
+          <div className="org-card">
+            <h3>Pending messages</h3>
+            <div className="org-note">{mailNote || 'Unanswered or waiting mail from this edition’s connected accounts. Reading only.'}</div>
+            {mailRows.length === 0 && <div className="org-note">Nothing waiting.</div>}
+            {mailRows.slice(0, 6).map((m) => (
+              <div className="org-row" key={m.id}>
+                <span className="tm">{m.account || m.source}</span>
+                <span>
+                  <b>{m.subject}</b>
+                  <small>{m.from_name || m.from} · {m.space_id}{m.job_title ? ` · ${m.job_title}` : ''}{m.person_name ? ` · ${m.person_name}` : ''}</small>
+                  {m.suggested_reply && <small>{String(m.suggested_reply).slice(0, 120)}</small>}
+                  <div className="org-abar" onClick={(e) => e.stopPropagation()}>
+                    {m.open_href && <a href={m.open_href} target="_blank" rel="noreferrer">Open</a>}
+                    <button onClick={() => runMailAction('draft_reply', m)}>Draft reply</button>
+                    <button onClick={() => runMailAction('snooze', m)}>Snooze</button>
+                    <button onClick={() => runMailAction('todo', m)}>To-do</button>
+                    <button onClick={() => runMailAction('followup', m)}>Follow-up</button>
+                  </div>
+                </span>
+              </div>
+            ))}
+            {mailRows.length > 6 && (
+              <button className="org-home-btn" onClick={() => setView('mail')}>See all {mailRows.length}</button>
+            )}
           </div>
           <div className="org-card">
             <h3>Overdue</h3>
@@ -575,6 +634,41 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
                   </span>
                 </div>
               ))}
+            </div>
+          )}
+          {view === 'mail' && (
+            <div className="org-mail org-card">
+              <h3>Pending messages</h3>
+              <div className="org-note">
+                Reading only. {edition.assistant || 'This edition'} sees only {edition.owner || 'this owner'}&apos;s connected mailboxes
+                {mailAccounts?.connected?.length ? ` (${mailAccounts.connected.join(', ')})` : ' (none connected yet)'}.
+                Draft reply goes to the approval queue — nothing is sent without {edition.owner || 'the owner'}&apos;s tap.
+              </div>
+              {mailRows.length === 0 && <div className="org-note">Nothing waiting in this area.</div>}
+              {mailRows.map((m) => (
+                <div className="org-mail-item" key={m.id}>
+                  <div className="org-mail-head">
+                    <span className="org-wait">{m.waiting || (m.unread ? 'unanswered' : 'waiting')}</span>
+                    <span className="tm">{m.account || m.source}</span>
+                  </div>
+                  <b>{m.subject}</b>
+                  <small>
+                    {m.from_name || m.from}{m.from_email ? ` · ${m.from_email}` : ''} · {m.space_id || 'area'}
+                    {m.job_title ? ` · ${m.job_title}` : ''}
+                    {m.person_name ? ` · ${m.person_name}` : ''}
+                  </small>
+                  {m.preview && <small>{m.preview}</small>}
+                  {m.suggested_reply && <pre className="org-mail-reply">{m.suggested_reply}</pre>}
+                  <div className="org-abar" onClick={(e) => e.stopPropagation()}>
+                    {m.open_href && <a href={m.open_href} target="_blank" rel="noreferrer">Open</a>}
+                    <button onClick={() => runMailAction('draft_reply', m)}>Draft reply</button>
+                    <button onClick={() => runMailAction('snooze', m)}>Snooze</button>
+                    <button onClick={() => runMailAction('todo', m)}>Turn into to-do</button>
+                    <button onClick={() => runMailAction('followup', m)}>Turn into follow-up</button>
+                  </div>
+                </div>
+              ))}
+              <div className="org-note">{mailNote}</div>
             </div>
           )}
           <div className="org-note">{meta?.google_calendar?.note} {meta?.outbound_policy} {usage ? `Today ${edition.assistant || 'this edition'}: ${usage.used?.items || 0}/${usage.caps?.items || 0} items.` : ''}</div>
