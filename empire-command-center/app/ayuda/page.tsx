@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import FamilyWelcomeReplayButton from '../components/family/FamilyWelcomeReplayButton';
 
 const ARTICLES = [
   { href: '/ayuda/voz', title: 'Cómo usar la voz', note: 'Dicta, revisa y aprueba el borrador.' },
@@ -12,6 +13,12 @@ export default function AyudaMenu() {
       <p style={{ fontSize: 12, letterSpacing: 0.4, color: '#b8960c', fontWeight: 700, margin: 0 }}>CENTRO DE MANDO</p>
       <h1 style={{ fontSize: 32, margin: '8px 0' }}>Ayuda</h1>
       <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+        <li style={{ borderTop: '1px solid #e5e2dc', padding: '14px 0' }}>
+          <FamilyWelcomeReplayButton style={{ color: '#1a1a1a', fontWeight: 700, fontSize: 18 }} />
+          <p style={{ margin: '6px 0 0', color: '#444' }}>
+            Repite la presentación de bienvenida en español.
+          </p>
+        </li>
         {ARTICLES.map((article) => (
           <li key={article.href} style={{ borderTop: '1px solid #e5e2dc', padding: '14px 0' }}>
             <Link href={article.href} style={{ color: '#1a1a1a', fontWeight: 700, fontSize: 18 }}>

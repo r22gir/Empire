@@ -242,6 +242,9 @@ load_router("app.routers.amp", "/api/v1/amp", ["amp"])
 # Edition manifest, allowlist, and Nueva empresa (no-op routes on Workroom)
 load_router("app.routers.edition", "/api/v1", ["edition"])
 
+# Family first-login welcome (404 on Workroom / founder Max)
+load_router("app.routers.family_welcome", "/api/v1", ["family-welcome"])
+
 # LLC Factory — Business formation services (DC/MD/VA)
 load_router("app.routers.llcfactory", "/api/v1", ["llcfactory"])
 
