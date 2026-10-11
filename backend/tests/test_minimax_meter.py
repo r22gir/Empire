@@ -343,6 +343,107 @@ def test_probe_script_refuses_live_without_flag(monkeypatch, tmp_path):
     assert _load_probe().main(["--live"]) == 2
 
 
+def test_probe_script_refuses_hard_stop(monkeypatch, tmp_path, capsys):
+    _env(monkeypatch, tmp_path, "workroom")
+    monkeypatch.setenv("MINIMAX_H3_PROBE_LIVE", "1")
+    monkeypatch.setenv("MINIMAX_REMAINS_STUB", "hot")
+    code = _load_probe().main(["--live"])
+    assert code == 3
+    err = capsys.readouterr().err
+    assert "80" in err or "gift" in err.lower() or "créditos" in err.lower() or "hard" in err.lower() or "tope" in err.lower()
+
+
+def _last_json_object(text: str):
+    decoder = json.JSONDecoder()
+    idx = 0
+    last = None
+    while True:
+        start = text.find("{", idx)
+        if start < 0:
+            return last
+        try:
+            obj, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            idx = start + 1
+            continue
+        last = obj
+        idx = start + end
+
+
+def test_probe_generated_false_without_clip_file(monkeypatch, tmp_path, capsys):
+    """generated:true must not follow an approval_id with a null task_id."""
+    _env(monkeypatch, tmp_path, "workroom")
+    monkeypatch.setenv("MINIMAX_H3_PROBE_LIVE", "1")
+    monkeypatch.setenv("MINIMAX_H3_MODEL", "MiniMax-H3")
+
+    async def fake_generate(approval_id, caller_edition=None):
+        return {
+            "id": approval_id,
+            "status": "generated",
+            "result": {"task_id": None, "posted": False},
+        }
+
+    monkeypatch.setattr("app.services.minimax_video.generate_approved_clip", fake_generate)
+    code = _load_probe().main(["--live"])
+    assert code == 1
+    parsed = _last_json_object(capsys.readouterr().out)
+    assert parsed is not None
+    assert parsed["generated"] is False
+    assert parsed.get("task_id") in (None, "")
+    assert parsed.get("approval_id")
+
+
+def test_probe_generated_true_only_with_clip_and_task(monkeypatch, tmp_path, capsys):
+    _env(monkeypatch, tmp_path, "workroom")
+    monkeypatch.setenv("MINIMAX_H3_PROBE_LIVE", "1")
+    monkeypatch.setenv("MINIMAX_H3_MODEL", "MiniMax-H3")
+    from app.services.minimax_meter import founder_video_queue_dir
+
+    async def fake_generate(approval_id, caller_edition=None):
+        dest = founder_video_queue_dir() / f"{approval_id}.mp4"
+        dest.write_bytes(b"\x00\x00fake-mp4")
+        return {
+            "id": approval_id,
+            "status": "generated",
+            "result": {
+                "task_id": "task-live-1",
+                "clip_path": str(dest),
+                "clip_bytes": dest.stat().st_size,
+                "posted": False,
+                "cost_estimate": {"usd": 0.32, "duration_seconds": 4, "resolution": "768P"},
+            },
+        }
+
+    monkeypatch.setattr("app.services.minimax_video.generate_approved_clip", fake_generate)
+    code = _load_probe().main(["--live"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"generated": true' in out or '"generated":true' in out
+    assert "task-live-1" in out
+    assert "0.32" in out
+
+
+def test_estimate_h3_cost_cheapest_clip():
+    from app.services.minimax_video import estimate_h3_cost
+
+    cost = estimate_h3_cost(model="MiniMax-H3", duration=4, resolution="768P")
+    assert cost["usd"] == 0.32
+    assert cost["duration_seconds"] == 4
+    assert cost["resolution"] == "768P"
+
+
+def test_create_draft_clamps_h3_duration(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path, "workroom")
+    from app.services.minimax_video import create_draft
+
+    short = create_draft("a spinning wooden clock", edition="workroom", duration=2)
+    assert short["duration"] == 4
+    assert short["resolution"] == "768P"
+    assert short["ratio"] == "16:9"
+    long = create_draft("a spinning wooden clock", edition="workroom", duration=40)
+    assert long["duration"] == 15
+
+
 def test_quota_parser_auth_failure():
     from app.services.minimax_quota import QuotaUnavailable, parse_remains
 
