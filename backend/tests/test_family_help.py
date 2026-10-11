@@ -652,11 +652,16 @@ def test_inbox_star_covered_by_founder_studio_auth(monkeypatch, tmp_path):
 
     _family(monkeypatch, tmp_path, "amp")
     from fastapi import FastAPI
-    from app.middleware.edition_gate import amp_access_middleware
+    import importlib.util
+
+    gate_path = Path(__file__).resolve().parents[1] / "app" / "middleware" / "edition_gate.py"
+    spec = importlib.util.spec_from_file_location("family_help_edition_gate", gate_path)
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
     from app.routers.family_help import router
 
     app = FastAPI()
-    app.middleware("http")(amp_access_middleware)
+    app.middleware("http")(gate.amp_access_middleware)
     app.include_router(router, prefix="/api/v1")
     client = TestClient(app)
     for path in ("/api/v1/family-help/inbox", "/api/v1/family-help/inbox/x"):
