@@ -42,6 +42,9 @@ from app.edition import (
 )
 
 HELP_EDITIONS = frozenset({"amp", "maxine"})
+# Founder inbox hides these until Rafael clicks «Abrir adjuntos».
+# Their files must never ride the notify email.
+HIDDEN_ATTACHMENT_EDITIONS = frozenset({"maxine"})
 STATUSES = ("new", "answered", "closed")
 DEFAULT_DAILY_LIMIT = 20
 CONTEXT_TURNS = 8
@@ -545,6 +548,11 @@ def fallback_filename(name: str, content_type: str, kind: str = "file") -> str:
     return raw
 
 
+def attachments_hidden_until_reveal(edition: Optional[str]) -> bool:
+    """True for Maxine (and any edition marked hidden-attachments)."""
+    return (edition or "").strip().lower() in HIDDEN_ATTACHMENT_EDITIONS
+
+
 def inbox_path_requires_founder_studio_auth(path: str) -> bool:
     """``/inbox*`` is founder-only and sits behind studio / family auth."""
     clean = (path or "").split("?", 1)[0]
@@ -744,14 +752,14 @@ def _load_children(conn: sqlite3.Connection, ticket: dict) -> dict:
         "SELECT id, kind, filename, content_type, size FROM attachments WHERE ticket_id = ? ORDER BY filename",
         (ticket_id,),
     ).fetchall()
-    hide_maxine = (
+    hide_attachments = (
         is_founder_edition()
-        and ticket.get("edition") == "maxine"
+        and attachments_hidden_until_reveal(ticket.get("edition"))
         and not ticket.get("attachments_revealed")
     )
     ticket["attachment_count"] = len(atts)
-    ticket["attachments_hidden"] = bool(hide_maxine and atts)
-    if hide_maxine:
+    ticket["attachments_hidden"] = bool(hide_attachments and atts)
+    if hide_attachments:
         ticket["attachments"] = []
     else:
         ticket["attachments"] = [
@@ -1391,8 +1399,16 @@ def load_notify_files(ticket: dict) -> list[dict]:
     return out
 
 
-def split_email_attachments(files: list[dict]) -> tuple[list[dict], list[dict]]:
-    """Attach small files; mention the rest. Never emit a URL."""
+def split_email_attachments(
+    files: list[dict],
+    *,
+    allow_attach: bool = True,
+) -> tuple[list[dict], list[dict]]:
+    """Attach small files when allowed; mention the rest. Never emit a URL.
+
+    Hidden-attachment editions (Maxine) always take the mention path so
+    file bytes never leave the inbox until Rafael clicks «Abrir adjuntos».
+    """
     attach: list[dict] = []
     mention: list[dict] = []
     total = 0
@@ -1410,7 +1426,8 @@ def split_email_attachments(files: list[dict]) -> tuple[list[dict], list[dict]]:
             "kind": item.get("kind") or "file",
         }
         if (
-            not unsafe
+            allow_attach
+            and not unsafe
             and data
             and size <= EMAIL_ATTACH_MAX_BYTES
             and total + size <= EMAIL_ATTACH_TOTAL_MAX_BYTES
@@ -1422,14 +1439,48 @@ def split_email_attachments(files: list[dict]) -> tuple[list[dict], list[dict]]:
     return attach, mention
 
 
+def _notify_mention_note(*, hidden: bool, oversized: bool) -> str:
+    if hidden:
+        return (
+            "— Ábrelo en el Max personal → Ayuda de ediciones familiares "
+            "(Abrir adjuntos). No hay enlace público."
+        )
+    if oversized:
+        return (
+            "— demasiado grande para el correo. Ábrelo en el Max personal → "
+            "Ayuda de ediciones familiares. No hay enlace público."
+        )
+    return (
+        "— Ábrelo en el Max personal → Ayuda de ediciones familiares. "
+        "No hay enlace público."
+    )
+
+
 def build_notify_email(ticket: dict) -> dict:
     """Founder-only notify: text + attachment bytes or an inbox mention. No URLs."""
     edition = ticket.get("edition")
+    hidden = attachments_hidden_until_reveal(edition)
     label = "Max-e" if edition == "amp" else "Maxine"
     title = f"Ayuda de {label}: {ticket.get('sender') or edition_owner_name(edition)}"
     preview = (ticket.get("message") or ticket.get("transcript") or "").strip()[:400]
-    stored = load_notify_files(ticket)
-    attach, mention = split_email_attachments(stored)
+    if hidden:
+        # Metadata only — do not read Maxine file bytes for email.
+        stored = []
+        try:
+            for row in _raw_attachment_rows(str(ticket.get("id") or ""), str(edition or "")):
+                stored.append({
+                    "filename": row["filename"],
+                    "size": int(row["size"] or 0),
+                    "kind": row["kind"],
+                    "content_type": row["content_type"] or "",
+                    "data": b"",
+                })
+        except PermissionError:
+            stored = []
+        attach, mention = [], stored
+    else:
+        stored = load_notify_files(ticket)
+        attach, mention = split_email_attachments(stored, allow_attach=True)
     if not attach and not mention and stored:
         mention = [
             {
@@ -1450,12 +1501,12 @@ def build_notify_email(ticket: dict) -> dict:
             "</li>"
         )
     for item in mention:
+        size = int(item.get("size") or 0)
         rows_html.append(
             "<li>"
             f"{html.escape(str(item['filename']), quote=True)} "
-            f"({html.escape(format_byte_size(item.get('size') or 0), quote=True)}) "
-            "— demasiado grande para el correo. Ábrelo en el Max personal → "
-            "Ayuda de ediciones familiares. No hay enlace público."
+            f"({html.escape(format_byte_size(size), quote=True)}) "
+            f"{_notify_mention_note(hidden=hidden, oversized=size > EMAIL_ATTACH_MAX_BYTES)}"
             "</li>"
         )
     if stored and not rows_html:
