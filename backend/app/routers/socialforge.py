@@ -52,12 +52,8 @@ def _profile_file() -> str:
     return os.path.join(_storage_root(), "business_profile.json")
 
 
-# Workroom keeps creating the legacy directory at import. The AMP edition
-# resolves a directory under its own data root at call time instead.
-if os.getenv("EMPIRE_EDITION", "").strip().lower() not in ("amp", "maxine"):
-    _legacy = os.path.expanduser("~/empire-repo/backend/data/socialforge")
-    for _d in (os.path.join(_legacy, "posts"), os.path.join(_legacy, "campaigns")):
-        os.makedirs(_d, exist_ok=True)
+# Never mkdir ~/empire-repo at import. Family editions resolve under
+# EMPIRE_DATA_DIR via socialforge_storage_dir(); Workroom mkdirs on first write.
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
