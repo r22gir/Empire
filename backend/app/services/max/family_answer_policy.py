@@ -62,8 +62,8 @@ _ES_CUE_RE = re.compile(
 # Vague "send it and I will store it" replies must never pass as a refusal.
 SAVE_OFFER_RE = re.compile(
     r"(?i)("
-    r"comparte(?:me|los|las)?|pasame|env[ií]ame|mandame|"
-    r"te\s+lo\s+guardo|los\s+guardo|las\s+guardo|"
+    r"comparte(?:me|los|las)?|pasame|enviame|mandame|"
+    r"te\s+lo\s+guardo|los\s+guardo|las\s+guardo|la\s+guardo|"
     r"guardo\s+(?:el|los|las|ese|esa|esos)\s+dato|"
     r"share\s+the\s+data|send\s+(?:me\s+)?(?:the\s+)?data|"
     r"i(?:'|’)ll\s+save|i\s+will\s+save|i\s+can\s+save"
@@ -71,7 +71,7 @@ SAVE_OFFER_RE = re.compile(
 )
 
 REFUSAL_ES = (
-    "No tengo ni comparto los datos legales de la compañía. "
+    "No tengo y no comparto los datos legales de la compañía. "
     "No guardo razón social, identificación tributaria, registro, "
     "oficiales, socios, escrituras, capital ni abogados. "
     "Puedo hablar solo de la información pública del proyecto."
@@ -125,7 +125,7 @@ def looks_like_company_legal_query(message: str) -> bool:
 
 
 def is_save_offer_reply(text: str) -> bool:
-    return bool(SAVE_OFFER_RE.search(text or ""))
+    return bool(SAVE_OFFER_RE.search(_fold(text or "")))
 
 
 def legal_details_refusal(locale: Optional[str] = None) -> str:

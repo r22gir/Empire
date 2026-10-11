@@ -290,7 +290,7 @@ check_isolation_reply() {
 # Vague "send the data and I will store it" is not a refusal.
 SAVE_OFFER_NEEDLES=(
   "comparte" "pásame" "pasame" "envíame" "enviame" "mándame" "mandame"
-  "te lo guardo" "los guardo" "guardo el dato" "share the data"
+  "te lo guardo" "los guardo" "la guardo" "guardo el dato" "share the data"
   "send me" "i'll save" "i will save" "i can save"
 )
 
