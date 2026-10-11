@@ -315,6 +315,19 @@ _VISUAL = re.compile(
 _VISUAL_ASK = re.compile(r"\b(?:show|see|send|share|give|get|pull|mockup|mock|mick|drawing|drwing|visual|bisual|reference)\w*", re.I)
 _DOC = re.compile(
     r"\b(?:docs?|documents?|pdfs?|files?|addendum|invoices?|led|lighting|spec\w*|photos?|contract|final)\b|\bwall\s+unit\b", re.I)
+# Explicit document-search words. "give me a link here" / "there are no links" must NOT match.
+# Coordinates with PR #105: "show me X docs" / "wall unit led docs" stay a document lookup.
+_DOC_SEARCH = re.compile(
+    r"\b(?:docs?|documents?|pdfs?|addendum|invoices?|spec(?:s|ification)?s?|photos?|contract|"
+    r"final(?:\s+estimate)?|drawings?|layouts?|comparison|led\s+docs?|lighting\s+docs?)\b|"
+    r"\bwall\s+unit\b",
+    re.I,
+)
+_NOT_DOC_SEARCH = re.compile(
+    r"\b(?:give\s+me\s+a\s+link|send\s+(?:me\s+)?(?:the\s+)?link|there\s+are\s+no\s+links|"
+    r"link\s+here|no\s+links?)\b",
+    re.I,
+)
 _QUOTEY = re.compile(r"\b(?:quotes?|estimates?|cotizaci[oó]n\w*|total|phase|status|latest|last|deposit|price|draft)\b", re.I)
 _WEATHER = re.compile(r"\b(?:weather|forecast|rain\w*|temperature|clima|lluvia)\b", re.I)
 _WEATHER_CITY = re.compile(r"\b(?:in|en|for)\s+([A-Z][A-Za-z.]+(?:[ ,]+[A-Z][A-Za-z.]+)?)")
@@ -342,6 +355,14 @@ def is_job_visual_request(message: Optional[str], history: Any = None) -> bool:
         return False
     return bool(_VISUAL_ASK.search(t)) and bool(_clients_in(t) or _clients_in(_recent_context(history)) or
                                                 re.search(r"\b(?:job|client|seat\s*back|banquette)\b", t, re.I))
+
+
+def wants_document_search(message: Optional[str]) -> bool:
+    """True only when the message has document words. 'give me a link here' is False."""
+    t = message or ""
+    if not t.strip() or _NOT_DOC_SEARCH.search(t):
+        return False
+    return bool(_DOC_SEARCH.search(t))
 
 
 def prelookup_calls(message: Optional[str], history: Any = None, channel: Optional[str] = None) -> list[dict]:
@@ -374,7 +395,7 @@ def prelookup_calls(message: Optional[str], history: Any = None, channel: Option
                   {"tool": "pipeline_followups"}]
         return calls
     for sq, ff in clients[:2]:
-        if _DOC.search(t):
+        if wants_document_search(t):
             words = " ".join(dict.fromkeys(w.lower() for w in _DOC_WORDS.findall(t)))
             calls.append({"tool": "find_files", "query": f"{ff} {words}".strip(), "limit": 10})
             if _QUOTEY.search(t):

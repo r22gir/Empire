@@ -248,6 +248,7 @@ export default function PresentationScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [sessionCost, setSessionCost] = useState(0);
   const [connected, setConnected] = useState(false);
+  const [deskCount, setDeskCount] = useState<number | null>(null);
   const [simliCard, setSimliCard] = useState<{ minutes?: number; simli_enabled?: boolean; reason?: string } | null>(null);
   const [avatarPlaceholder, setAvatarPlaceholder] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -282,7 +283,7 @@ export default function PresentationScreen() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Check backend connectivity
+  // Check backend connectivity + live desk count from the registry
   useEffect(() => {
     const check = async () => {
       try {
@@ -290,7 +291,17 @@ export default function PresentationScreen() {
         setConnected(resp.ok);
       } catch { setConnected(false); }
     };
+    const desks = async () => {
+      try {
+        const resp = await fetch(`${API}/max/desks`, { signal: AbortSignal.timeout(4000) });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const n = Number(data.desk_count ?? data.desks?.length);
+        if (Number.isFinite(n) && n > 0) setDeskCount(n);
+      } catch { /* keep last */ }
+    };
     check();
+    desks();
     const iv = setInterval(check, 15000);
     return () => clearInterval(iv);
   }, []);
@@ -880,7 +891,7 @@ export default function PresentationScreen() {
             {connected ? <Wifi size={10} color="#22c55e" /> : <WifiOff size={10} color="#ef4444" />}
             {connected ? 'Connected' : 'Disconnected'}
           </span>
-          <span>18 desks</span>
+          <span>{deskCount ?? '…'} desks</span>
           <span>Grok TTS Rex</span>
           <span>Quality engine active</span>
           {avatarPlaceholder && <span>Placeholder brunette (CC BY-NC 4.0, body M)</span>}

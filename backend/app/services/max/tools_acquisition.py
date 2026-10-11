@@ -353,11 +353,16 @@ def _request_improvement(params: dict, desk: Optional[str] = None) -> ToolResult
             affected_modules=params.get("affected_modules") or [], risk=params.get("risk") or "medium",
             acceptance=params.get("acceptance") or "", requested_via=params.get("requested_via") or "chat",
             requested_text=params.get("requested_text") or "")
+        link = req.get("approval_url") or ""
         return ToolResult(tool="request_improvement", success=True, result={
             "id": req["id"], "title": req["title"], "status": req["status"], "risk": req["risk"],
+            "approval_url": link,
             "next_step": "Rafael reviews it in Studio → Improvements and taps Approve to start the build. "
                          "Nothing is built, merged or deployed before that, and merge needs a second approval.",
-            "say": f"Filed as improvement #{req['id']}. It'll be built on a test copy for your approval."})
+            "say": (
+                f"Filed as improvement IMP-{int(req['id']):04d}. "
+                f"Approve here (your tap only): {link}"
+            )})
     except Exception as e:
         return _err("request_improvement", e)
 

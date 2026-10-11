@@ -143,6 +143,20 @@ class DeskScheduler:
                         self._last_run["pipeline_tick"] = pl_tick
                         asyncio.create_task(self._run_pipeline_executor())
 
+                # Desk follow-up sweeper (every 10 min)
+                if now.minute % 10 == 0:
+                    sw_tick = f"{today}:{now.hour}:{now.minute}"
+                    if self._last_run.get("desk_sweeper") != sw_tick:
+                        self._last_run["desk_sweeper"] = sw_tick
+                        asyncio.create_task(self._run_desk_sweeper())
+
+                # Daily founder desk digest: 7:45 AM
+                if now.hour == 7 and now.minute == 45:
+                    digest_key = f"desk_digest:{today}"
+                    if self._last_run.get("desk_digest") != digest_key:
+                        self._last_run["desk_digest"] = digest_key
+                        asyncio.create_task(self._send_desk_digest())
+
             except Exception as e:
                 logger.warning(f"Scheduler tick error: {e}")
 
@@ -151,6 +165,20 @@ class DeskScheduler:
     def stop(self):
         self._running = False
         logger.info("Desk scheduler stopped")
+
+    async def _run_desk_sweeper(self):
+        try:
+            from .desk_sweeper import sweep_once
+            sweep_once()
+        except Exception as e:
+            logger.warning(f"Desk sweeper error: {e}")
+
+    async def _send_desk_digest(self):
+        try:
+            from .desk_sweeper import send_daily_digest
+            await send_daily_digest()
+        except Exception as e:
+            logger.warning(f"Desk digest error: {e}")
 
     async def _execute_desk_task(self, desk_id: str, title: str, description: str, source: str = "scheduler"):
         """Execute a task directly through the desk manager — no HTTP roundtrip."""

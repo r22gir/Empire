@@ -92,6 +92,15 @@ export default function ImprovementsPage() {
   const mobile = useIsMobile();
   const load = useCallback(() => { fetch(G).then(r => r.json()).then(setData).catch(() => {}); }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('id');
+    if (!id || !data.items?.length) return;
+    const el = document.querySelector(`[data-imp-id="${id}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      (el as HTMLElement).style.outline = '2px solid #7c3aed';
+    }
+  }, [data.items]);
   const create = async () => {
     await post(G, { ...f, affected_modules: f.affected_modules.split(',').map(s => s.trim()).filter(Boolean), requested_via: 'studio' });
     setF({ title: '', problem: '', proposed_change: '', affected_modules: '', risk: 'medium' }); setOpen(false); load();

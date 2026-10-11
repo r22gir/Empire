@@ -560,6 +560,7 @@ async def _task_auto_worker():
                        FROM tasks
                        WHERE status = 'todo'
                          AND (created_by = 'max' OR metadata LIKE '%"auto_execute"%')
+                         AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))
                        ORDER BY
                            CASE priority
                                WHEN 'urgent' THEN 0 WHEN 'high' THEN 1
@@ -592,6 +593,7 @@ async def _task_auto_worker():
                             priority=task_row.get("priority", "normal"),
                             source="task_worker",
                             db_task_id=tid,
+                            desk_id=task_row.get("desk") if task_row.get("desk") not in (None, "", "unassigned") else None,
                         ),
                         timeout=60.0,
                     )
@@ -613,11 +615,9 @@ async def _task_auto_worker():
 
                 except asyncio.TimeoutError:
                     with get_db() as conn:
-                        conn.execute(
-                            "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE id = ?",
-                            (tid,),
-                        )
-                    print(f"{logger_prefix}: {title} — timed out, reset to todo")
+                        from app.services.max.desks.task_lifecycle import record_timeout_retry
+                        outcome = record_timeout_retry(conn, tid)
+                    print(f"{logger_prefix}: {title} — timed out, retry={outcome}")
                 except Exception as e:
                     print(f"{logger_prefix}: {title} — error: {e}")
 

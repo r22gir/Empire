@@ -197,6 +197,7 @@ def generate_operating_context(channel: str = "web", compact: bool = False) -> s
         "- Existing Codex skills are inventoried for policy only. Do not claim MAX can invoke Skill Creator, Skill Installer, OpenAI Docs, Image Gen, or Plugin Creator directly.",
         "",
         "### Delegation Rules",
+        f"- Delegate to a registered desk (never OpenClaw): {', '.join(policy.get('delegate_to_desk', []))}",
         f"- Runtime truth check required for: {', '.join(policy.get('runtime_truth_check_required', []))}",
         "- Runtime truth callable: `empire_runtime_truth_check` is implemented as inspect-only. It checks backend/frontend status, local/public freshness, current commit, route health, and whether restart looks required. It does not restart services.",
         f"- Regression review required for: {', '.join(policy.get('regression_review_required', []))}",

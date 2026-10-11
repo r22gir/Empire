@@ -324,7 +324,7 @@
   "delegation_policy": {
     "answer_directly": ["general explanation", "repo-truth summary already in operating context", "no action required"],
     "use_skill_or_policy": ["capability claim", "surface/device continuity complaint", "dead path suspicion", "regression complaint", "product status question"],
-    "delegate_to_openclaw": ["bounded execution task", "external/browser-assisted check", "queueable product operation"],
+    "delegate_to_desk": ["bounded execution task", "domain work owned by a registered desk", "queueable product operation"],
     "refuse_truthfully": ["requested capability is dead", "requested action is illegal/unsafe", "requested product route is not implemented"],
     "ask_founder_confirmation": ["destructive data changes", "external spend", "client-facing send when not explicitly requested"],
     "runtime_truth_check_required": ["website not loading", "service health", "route-dependent claim", "OpenClaw status", "payment success", "email delivery"],

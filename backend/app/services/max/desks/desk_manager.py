@@ -92,10 +92,12 @@ class AIDeskManager:
         source: str = "max",
         conversation_id: str | None = None,
         db_task_id: str | None = None,
+        desk_id: str | None = None,
     ) -> DeskTask:
         """Create and route a task to the appropriate desk.
 
         If db_task_id is provided, updates the existing tasks table row with results.
+        If desk_id is provided, honor it (async delegation must not bounce to Atlas).
         """
         self.initialize()
 
@@ -109,42 +111,86 @@ class AIDeskManager:
             conversation_id=conversation_id,
         )
 
-        # Route to a desk
-        desk_id, reason = await self.router.route_task(task)
+        chosen = (desk_id or "").strip() or None
+        if chosen and chosen in self.router._desks:
+            reason = f"caller chose desk {chosen}"
+            self.router._log_routing(task, chosen, reason, method="specified")
+        else:
+            chosen, reason = await self.router.route_task(task)
 
-        if desk_id:
-            desk = self.router.get_desk(desk_id)
+        if chosen:
+            desk = self.router.get_desk(chosen)
             logger.info(f"Task '{title}' → {desk.desk_name}: {reason}")
             try:
                 result = await asyncio.wait_for(desk.handle_task(task), timeout=60.0)
-                # H76 STEP 3a: deliverable gate. A task that completed without
-                # a real artifact is downgraded to FAILED with a reason that
-                # names the gate. The tasks table row will reflect the truthful
-                # state (was previously "done" with a fake-quality template).
                 try:
                     from app.services.max.tool_executor import _enforce_deliverable_gate
-                    _enforce_deliverable_gate(result, desk_id)
+                    _enforce_deliverable_gate(result, chosen)
                 except Exception as _gate_err:
                     logger.debug(f"deliverable gate import/run failed (non-fatal): {_gate_err}")
-                # Sync result back to SQLite tasks table
-                self._sync_task_to_db(result, desk_id)
+                result = await self._review_before_done(result, chosen, title, description)
+                self._sync_task_to_db(result, chosen)
                 return result
             except asyncio.TimeoutError:
                 task.state = TaskState.FAILED
-                task.result = "Task timed out — try a simpler request or use Claude Code for complex tasks"
+                task.result = "Task timed out — retry cap applies; I will not reset forever"
                 task.completed_at = datetime.utcnow().isoformat()
                 if task in desk.active_tasks:
                     desk.active_tasks.remove(task)
                 logger.error(f"Task '{title}' TIMED OUT after 60s on {desk.desk_name}")
-                self._sync_task_to_db(task, desk_id)
+                self._sync_task_to_db(task, chosen)
                 return task
         else:
-            # No desk matched — send to founder inbox
             task.state = TaskState.ESCALATED
             task.escalation_reason = reason
             self.founder_inbox.append(task)
+            self._persist_inbox(task, reason)
+            self._sync_task_to_db(task, "")
             logger.info(f"Task '{title}' → founder inbox: {reason}")
             return task
+
+    async def _review_before_done(self, task: DeskTask, desk_id: str, title: str, description: str) -> DeskTask:
+        """Second pass: template-only output is draft-only, not done."""
+        if task.state != TaskState.COMPLETED:
+            return task
+        try:
+            from .desk_review import review_desk_output
+            review = await review_desk_output(
+                original_request=description or title,
+                desk_id=desk_id,
+                result_text=task.result,
+                title=title,
+            )
+        except Exception as exc:
+            logger.debug("desk review skipped: %s", exc)
+            return task
+        verdict = review.get("verdict")
+        if verdict == "draft_only":
+            task.result = review.get("report") or task.result
+            from .base_desk import DeskAction
+            task.actions.append(DeskAction(
+                action="reviewed", detail="draft only — template or incomplete output",
+            ))
+        elif verdict == "failed":
+            task.state = TaskState.FAILED
+            task.result = f"FAILED (review): {review.get('reason')}\n{task.result or ''}"
+        return task
+
+    def _persist_inbox(self, task: DeskTask, reason: str) -> None:
+        try:
+            from . import founder_inbox
+            founder_inbox.add(
+                task_id=task.id,
+                title=task.title,
+                description=task.description,
+                priority=task.priority.value if hasattr(task.priority, "value") else str(task.priority),
+                reason=reason,
+                source=task.source,
+                customer_name=task.customer_name,
+                conversation_id=task.conversation_id,
+            )
+        except Exception as exc:
+            logger.warning("persist founder inbox failed: %s", exc)
 
     def _sync_task_to_db(self, task: DeskTask, desk_id: str = ""):
         """Sync DeskTask result back to the SQLite tasks table."""
@@ -152,14 +198,19 @@ class AIDeskManager:
             import sqlite3, os
             db_path = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
             conn = sqlite3.connect(db_path)
+            try:
+                from .task_lifecycle import migrate_task_status_constraint, allowed_status
+                migrate_task_status_constraint(conn)
+            except Exception:
+                allowed_status = lambda s: s  # noqa: E731
             state_map = {
                 TaskState.COMPLETED: "done",
                 TaskState.FAILED: "failed",
                 TaskState.IN_PROGRESS: "in_progress",
                 TaskState.PENDING: "todo",
-                TaskState.ESCALATED: "waiting",
+                TaskState.ESCALATED: "escalated",
             }
-            status = state_map.get(task.state, "todo")
+            status = allowed_status(state_map.get(task.state, "todo"))
             result_text = task.result or ""
             # Update existing row if task.id matches, otherwise insert
             existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task.id,)).fetchone()
@@ -220,11 +271,24 @@ class AIDeskManager:
                 lines.append("")
 
         # Founder inbox section
-        if self.founder_inbox:
+        try:
+            from . import founder_inbox
+            persisted = founder_inbox.list_open(5)
+            n = founder_inbox.count_open()
+        except Exception:
+            persisted, n = [], len(self.founder_inbox)
+        if n or self.founder_inbox:
             lines.append("### Founder Inbox")
-            lines.append(f"- {len(self.founder_inbox)} unrouted task(s) need your attention")
-            for t in self.founder_inbox[:5]:
-                lines.append(f"  - [{t.priority.value}] {t.title}: {t.escalation_reason}")
+            lines.append(f"- {n or len(self.founder_inbox)} unrouted task(s) need your attention")
+            shown = persisted or [
+                {"priority": t.priority.value, "title": t.title, "reason": t.escalation_reason}
+                for t in self.founder_inbox[:5]
+            ]
+            for t in shown[:5]:
+                pri = t.get("priority") if isinstance(t, dict) else getattr(t, "priority", "")
+                title = t.get("title") if isinstance(t, dict) else getattr(t, "title", "")
+                reason = t.get("reason") if isinstance(t, dict) else getattr(t, "escalation_reason", "")
+                lines.append(f"  - [{pri}] {title}: {reason}")
         else:
             lines.append("### Founder Inbox")
             lines.append("- Empty — all tasks routed successfully")
@@ -239,7 +303,7 @@ class AIDeskManager:
         report = {
             "date": today,
             "desks": {},
-            "founder_inbox": len(self.founder_inbox),
+            "founder_inbox": self._inbox_count(),
             "summary": "",
         }
 
@@ -255,12 +319,19 @@ class AIDeskManager:
 
         report["summary"] = (
             f"{total_completed} tasks completed, {total_escalated} escalated, "
-            f"{len(self.founder_inbox)} in founder inbox"
+            f"{self._inbox_count()} in founder inbox"
         )
 
         return report
 
     # ── Backward-compatible API (replaces legacy DeskManager) ────────────
+
+    def _inbox_count(self) -> int:
+        try:
+            from . import founder_inbox
+            return founder_inbox.count_open()
+        except Exception:
+            return len(self.founder_inbox)
 
     def _get_db_task_counts(self) -> dict:
         """Fetch task counts per desk from DB."""
