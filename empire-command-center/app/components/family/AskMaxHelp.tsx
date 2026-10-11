@@ -5,12 +5,16 @@ import { LifeBuoy, Mic, Paperclip, Square, X } from 'lucide-react';
 import { Message } from '../../lib/types';
 import { filenameForMime, recorderFormat, sttLanguage } from '../../lib/voiceCapture';
 import {
+  HELP_FILE_ACCEPT,
+  HELP_MAX_FILES,
   HelpTicket,
   attachmentUrl,
   createHelpTicket,
   familyHelpLabels,
   fetchOwnTickets,
+  formatHelpBytes,
   retryTranscript,
+  validateHelpFile,
 } from '../../lib/familyHelp';
 
 type Props = {
@@ -185,8 +189,20 @@ export default function AskMaxHelp({ locale, messages, onReply }: Props) {
                   type="file"
                   multiple
                   hidden
-                  accept="image/*,.pdf,.txt,.md,.csv,.doc,.docx,application/pdf"
-                  onChange={(e) => setFiles(Array.from(e.target.files || []))}
+                  accept={HELP_FILE_ACCEPT}
+                  onChange={(e) => {
+                    const picked = Array.from(e.target.files || []);
+                    const kept: File[] = [];
+                    const errors: string[] = [];
+                    for (const file of picked) {
+                      const check = validateHelpFile(file);
+                      if (check.ok) kept.push(file);
+                      else errors.push(`${file.name}: ${check.reason}`);
+                    }
+                    setFiles((prev) => [...prev, ...kept].slice(0, HELP_MAX_FILES));
+                    setError(errors.length ? errors.join(' ') : null);
+                    e.target.value = '';
+                  }}
                 />
               </label>
               <button type="button" onClick={submit} disabled={busy} style={{ ...chipStyle, background: '#d4a017', color: '#000', border: 'none' }}>
@@ -194,7 +210,11 @@ export default function AskMaxHelp({ locale, messages, onReply }: Props) {
               </button>
             </div>
             {voice && <div style={{ fontSize: 12 }}>{t.transcript}: {voiceName} ({Math.round(voice.size / 1024)} KB)</div>}
-            {files.length > 0 && <div style={{ fontSize: 12 }}>{files.map((f) => f.name).join(', ')}</div>}
+            {files.length > 0 && (
+              <div style={{ fontSize: 12 }}>
+                {files.map((f) => `${f.name} (${formatHelpBytes(f.size)})`).join(', ')}
+              </div>
+            )}
             {error && <div style={{ color: '#f87171', fontSize: 13 }}>{error}</div>}
             <h4 style={{ margin: '16px 0 8px' }}>{t.replies}</h4>
             {tickets.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t.empty}</p>}
