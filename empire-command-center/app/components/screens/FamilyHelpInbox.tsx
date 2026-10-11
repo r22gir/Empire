@@ -106,6 +106,11 @@ export default function FamilyHelpInbox() {
             <div style={{ fontSize: 12, opacity: 0.7 }}>{EDITION_LABEL[ticket.edition] || ticket.edition} · {ticket.status}</div>
             <div style={{ fontWeight: 600 }}>{ticket.sender}</div>
             <div style={{ fontSize: 13 }}>{(ticket.message || ticket.transcript || '').slice(0, 90)}</div>
+            {(ticket.attachment_count || ticket.attachments?.length) ? (
+              <div style={{ fontSize: 11, opacity: 0.75, marginTop: 4 }}>
+                {t.files}: {ticket.attachment_count || ticket.attachments?.length}
+              </div>
+            ) : null}
           </button>
         ))}
       </aside>
@@ -138,7 +143,9 @@ export default function FamilyHelpInbox() {
                       <div style={{ fontSize: 12 }}>{t.play}</div>
                       <audio controls src={attachmentUrl(active.id, att.id, true)} style={{ width: '100%' }} />
                     </div>
-                  : <a key={att.id} href={attachmentUrl(active.id, att.id, true)} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 6 }}>{att.filename}</a>
+                  : <a key={att.id} href={attachmentUrl(active.id, att.id, true)} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 6 }}>
+                      {att.filename}{att.size ? ` (${Math.round(att.size / 1024)} KB)` : ''}
+                    </a>
               ))
             )}
             {(active.context || []).length > 0 && (

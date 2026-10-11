@@ -368,8 +368,8 @@ def test_notify_email_only_founder_address(monkeypatch, tmp_path):
     _family(monkeypatch, tmp_path, "amp")
     sent = []
 
-    async def _fake_send(to, subject, html):
-        sent.append((to, subject, html))
+    async def _fake_send(to, subject, html, attachments=None):
+        sent.append((to, subject, html, attachments))
         return True
 
     monkeypatch.setattr("app.services.email.sender.send_email", _fake_send)
@@ -378,7 +378,7 @@ def test_notify_email_only_founder_address(monkeypatch, tmp_path):
 
     assert founder_notify_email() == FOUNDER_NOTIFY_EMAIL
     create_ticket(message="avísale a Max", notify=True)
-    for to, _subject, _html in sent:
+    for to, _subject, _html, _atts in sent:
         assert to == FOUNDER_NOTIFY_EMAIL
         assert "cliente@example.com" not in to
 
@@ -558,8 +558,8 @@ def test_notify_email_escapes_html_and_skips_telegram(monkeypatch, tmp_path):
     _family(monkeypatch, tmp_path, "amp")
     sent = []
 
-    async def _fake_send(to, subject, html):
-        sent.append((to, subject, html))
+    async def _fake_send(to, subject, html, attachments=None):
+        sent.append((to, subject, html, attachments))
         return True
 
     monkeypatch.setattr("app.services.email.sender.send_email", _fake_send)
@@ -576,7 +576,7 @@ def test_notify_email_escapes_html_and_skips_telegram(monkeypatch, tmp_path):
         notify=True,
     )
     assert sent
-    _to, _subject, html = sent[0]
+    _to, _subject, html, _atts = sent[0]
     assert _to == FOUNDER_NOTIFY_EMAIL
     assert "<img src" not in html
     assert "&lt;img" in html
@@ -780,3 +780,226 @@ def test_shared_inbox_chmod_stt_pending_and_reply_usage(monkeypatch, tmp_path):
     for text in (env_amp, env_max, env_be):
         assert "FAMILY_HELP_INBOX_DIR=/data/family-help" in text
         assert "700" in text
+
+
+def _assert_no_public_url(html: str) -> None:
+    lower = (html or "").lower()
+    for needle in ("http://", "https://", "www.", "signed", "s3.", "storage.googleapis"):
+        assert needle not in lower, html
+
+
+def test_ticket_with_attachment_reaches_founder_inbox_and_email(monkeypatch, tmp_path):
+    """fh-style ticket: file is stored, visible in personal Max, and emailed."""
+    inbox = tmp_path / "shared-inbox"
+    inbox.mkdir()
+    _family(monkeypatch, tmp_path, "amp", inbox)
+    sent = []
+
+    async def _fake_send(to, subject, html, attachments=None):
+        sent.append({"to": to, "subject": subject, "html": html, "attachments": attachments or []})
+        return True
+
+    monkeypatch.setattr("app.services.email.sender.send_email", _fake_send)
+    png = b"\x89PNG\r\n\x1a\n" + b"ticket-photo" + b"\x00" * 80
+    client = _client()
+    res = client.post(
+        "/api/v1/family-help/tickets",
+        data={"message": "mira esta captura", "history_json": "[]"},
+        files=[("files", ("captura.png", io.BytesIO(png), "image/png"))],
+    )
+    assert res.status_code == 200, res.text
+    ticket = res.json()["ticket"]
+    assert ticket["id"].startswith("fh-")
+    assert ticket["attachments"]
+    att = ticket["attachments"][0]
+    assert att["filename"] == "captura.png"
+    assert att["size"] == len(png)
+
+    own = client.get(f"/api/v1/family-help/tickets/{ticket['id']}/attachments/{att['id']}")
+    assert own.status_code == 200
+    assert own.content == png
+
+    _founder(monkeypatch, tmp_path, inbox)
+    founder = _client()
+    listed = founder.get("/api/v1/family-help/inbox")
+    assert listed.status_code == 200
+    row = next(t for t in listed.json()["tickets"] if t["id"] == ticket["id"])
+    assert row["attachments"]
+    assert row["attachments"][0]["filename"] == "captura.png"
+    assert row["attachments_hidden"] is False
+    downloaded = founder.get(
+        f"/api/v1/family-help/inbox/{ticket['id']}/attachments/{att['id']}"
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.content == png
+    assert "attachment" in (downloaded.headers.get("content-disposition") or "").lower()
+
+    assert sent, "el correo de aviso debe enviarse"
+    mail = sent[0]
+    from app.services.family_help import FOUNDER_NOTIFY_EMAIL
+    assert mail["to"] == FOUNDER_NOTIFY_EMAIL
+    assert "mira esta captura" in mail["html"]
+    assert "captura.png" in mail["html"]
+    assert "incluido en este correo" in mail["html"]
+    _assert_no_public_url(mail["html"])
+    assert len(mail["attachments"]) == 1
+    assert mail["attachments"][0]["filename"] == "captura.png"
+    assert mail["attachments"][0]["data"] == png
+    assert mail["attachments"][0]["content_type"] == "image/png"
+
+
+def test_maxine_attachment_email_mentions_only_never_attaches(monkeypatch, tmp_path):
+    """Maxine files stay inbox-hidden; notify mail must not attach bytes."""
+    inbox = tmp_path / "shared-inbox"
+    inbox.mkdir()
+    _family(monkeypatch, tmp_path, "maxine", inbox)
+    sent = []
+
+    async def _fake_send(to, subject, html, attachments=None):
+        sent.append({"to": to, "subject": subject, "html": html, "attachments": attachments or []})
+        return True
+
+    monkeypatch.setattr("app.services.email.sender.send_email", _fake_send)
+    from app.services.family_help import (
+        attachments_hidden_until_reveal,
+        create_ticket,
+        format_byte_size,
+        get_ticket,
+        split_email_attachments,
+    )
+
+    assert attachments_hidden_until_reveal("maxine") is True
+    assert attachments_hidden_until_reveal("amp") is False
+    png = b"\x89PNG\r\n\x1a\n" + b"maxine-secret" + b"\x00" * 40
+    attach, mention = split_email_attachments(
+        [{"filename": "secreto.png", "content_type": "image/png", "data": png, "size": len(png), "kind": "image"}],
+        allow_attach=False,
+    )
+    assert attach == []
+    assert mention and mention[0]["filename"] == "secreto.png"
+
+    ticket = create_ticket(
+        message="mira el archivo",
+        attachments=[{
+            "filename": "secreto.png",
+            "content_type": "image/png",
+            "data": png,
+            "kind": "file",
+        }],
+        notify=True,
+    )
+    assert ticket["attachments"]
+    assert sent
+    mail = sent[0]
+    assert mail["attachments"] == []
+    assert "secreto.png" in mail["html"]
+    assert format_byte_size(len(png)) in mail["html"]
+    assert "Abrir adjuntos" in mail["html"]
+    assert "incluido en este correo" not in mail["html"]
+    _assert_no_public_url(mail["html"])
+    blob = (mail["html"] or "") + str(mail["attachments"])
+    assert b"maxine-secret" not in blob.encode("utf-8", errors="ignore")
+    assert png not in (mail["attachments"] or [])
+
+    _founder(monkeypatch, tmp_path, inbox)
+    hidden = get_ticket(ticket["id"])
+    assert hidden["attachments_hidden"] is True
+    assert hidden["attachments"] == []
+
+
+def test_large_attachment_email_mentions_inbox_without_url(monkeypatch, tmp_path):
+    inbox = tmp_path / "shared-inbox"
+    inbox.mkdir()
+    _family(monkeypatch, tmp_path, "amp", inbox)
+    sent = []
+
+    async def _fake_send(to, subject, html, attachments=None):
+        sent.append({"to": to, "subject": subject, "html": html, "attachments": attachments or []})
+        return True
+
+    monkeypatch.setattr("app.services.email.sender.send_email", _fake_send)
+    from app.services.family_help import EMAIL_ATTACH_MAX_BYTES, create_ticket, format_byte_size
+
+    blob = b"%PDF-1.4\n" + b"L" * (EMAIL_ATTACH_MAX_BYTES + 2048)
+    ticket = create_ticket(
+        message="documento grande",
+        attachments=[{
+            "filename": "informe.pdf",
+            "content_type": "application/pdf",
+            "data": blob,
+            "kind": "file",
+        }],
+        notify=True,
+    )
+    assert ticket["attachments"][0]["size"] == len(blob)
+    assert sent
+    mail = sent[0]
+    assert mail["attachments"] == []
+    assert "informe.pdf" in mail["html"]
+    assert format_byte_size(len(blob)) in mail["html"]
+    assert "Ayuda de ediciones familiares" in mail["html"]
+    assert "enlace público" in mail["html"]
+    _assert_no_public_url(mail["html"])
+
+
+def test_mime_aliases_and_empty_filename_are_kept(monkeypatch, tmp_path):
+    _family(monkeypatch, tmp_path, "amp")
+    from app.services.family_help import create_ticket, fallback_filename, infer_mime, validate_upload
+
+    assert infer_mime("phone.jpg", "image/jpg") == "image/jpeg"
+    assert infer_mime("shot.png", "application/octet-stream") == "image/png"
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
+    assert validate_upload(
+        filename="phone.jpg", content_type="image/jpg", data=png, kind="file"
+    ) == "image"
+    assert validate_upload(
+        filename="shot.png", content_type="application/octet-stream", data=png, kind="file"
+    ) == "image"
+    assert fallback_filename("", "image/png") == "file.png"
+    assert fallback_filename("captura", "image/jpeg") == "captura.jpg"
+
+    unnamed = create_ticket(
+        message="sin nombre",
+        attachments=[{
+            "filename": "",
+            "content_type": "image/png",
+            "data": png,
+            "kind": "file",
+        }],
+        notify=False,
+    )
+    assert unnamed["attachments"][0]["filename"].endswith(".png")
+    assert unnamed["attachments"][0]["size"] == len(png)
+
+    client = _client()
+    res = client.post(
+        "/api/v1/family-help/tickets",
+        data={"message": "alias mime", "history_json": "[]"},
+        files=[("file", ("captura", io.BytesIO(png), "image/png"))],
+    )
+    assert res.status_code == 200, res.text
+    atts = res.json()["ticket"]["attachments"]
+    assert atts
+    assert atts[0]["size"] == len(png)
+    assert atts[0]["filename"].endswith(".png")
+
+
+def test_chat_intent_keeps_chat_attachment(monkeypatch, tmp_path):
+    _family(monkeypatch, tmp_path, "amp")
+    from app.services.family_help import handle_chat_intent, get_ticket
+
+    png = b"\x89PNG\r\n\x1a\n" + b"chat" + b"\x00" * 20
+    hit = handle_chat_intent(
+        "pide ayuda a Max con esta foto",
+        attachments=[{
+            "filename": "chat.png",
+            "content_type": "image/png",
+            "data": png,
+            "kind": "file",
+        }],
+        sender="Juan",
+    )
+    assert hit is not None
+    ticket = get_ticket(hit["ticket"]["id"], edition="amp")
+    assert ticket["attachments"]
+    assert ticket["attachments"][0]["filename"] == "chat.png"

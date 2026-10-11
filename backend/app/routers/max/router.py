@@ -2341,9 +2341,20 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
         from app.services.family_help import handle_chat_intent
         from app.edition import is_family_edition
         if is_family_edition() and not request.desk:
+            chat_atts = []
+            if request.image_filename:
+                path = _attachment_upload_path(request.image_filename)
+                if path is not None and path.is_file():
+                    chat_atts.append({
+                        "filename": path.name,
+                        "content_type": "",
+                        "data": path.read_bytes(),
+                        "kind": "file",
+                    })
             hit = handle_chat_intent(
                 request.message or "",
                 history=list(request.history or []),
+                attachments=chat_atts or None,
             )
             if hit:
                 return ChatResponse(

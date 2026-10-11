@@ -142,7 +142,8 @@ async def create_ticket(
     history_json: str = Form("[]"),
     language: Optional[str] = Form(None),
     voice: Optional[UploadFile] = File(None),
-    files: list[UploadFile] = File(default=[]),
+    files: Optional[list[UploadFile]] = File(None),
+    file: Optional[UploadFile] = File(None),
 ):
     from app.services.family_help import create_ticket as create
 
@@ -159,28 +160,36 @@ async def create_ticket(
 
     attachments = []
     transcript = ""
-    if voice is not None and (voice.filename or voice.content_type):
+    if voice is not None:
         raw = await _read_upload(voice, kind="voice")
-        attachments.append({
-            "filename": voice.filename or "recording.webm",
-            "content_type": voice.content_type or "",
-            "data": raw,
-            "kind": "voice",
-        })
-        transcript = await _transcribe_bytes(
-            raw,
-            voice.filename or "recording.webm",
-            voice.content_type or "audio/webm",
-            language,
-        )
+        if raw:
+            attachments.append({
+                "filename": voice.filename or "recording.webm",
+                "content_type": voice.content_type or "",
+                "data": raw,
+                "kind": "voice",
+            })
+            transcript = await _transcribe_bytes(
+                raw,
+                voice.filename or "recording.webm",
+                voice.content_type or "audio/webm",
+                language,
+            )
 
-    for upload in files or []:
-        if not upload or not (upload.filename or upload.content_type):
+    uploads: list[UploadFile] = []
+    for item in files or []:
+        if item is not None:
+            uploads.append(item)
+    if file is not None:
+        uploads.append(file)
+    for upload in uploads:
+        raw = await _read_upload(upload, kind="file")
+        if not raw:
             continue
         attachments.append({
-            "filename": upload.filename or "file",
+            "filename": upload.filename or "",
             "content_type": upload.content_type or "",
-            "data": await _read_upload(upload, kind="file"),
+            "data": raw,
             "kind": "file",
         })
 
@@ -388,13 +397,17 @@ async def founder_retry_transcript(ticket_id: str, body: TranscribeBody | None =
 
 @router.get("/inbox/{ticket_id}/attachments/{attachment_id}")
 async def founder_attachment(ticket_id: str, attachment_id: str):
-    from app.services.family_help import attachment_path, get_ticket
+    from app.services.family_help import (
+        attachment_path,
+        attachments_hidden_until_reveal,
+        get_ticket,
+    )
 
     _founder_or_403()
     ticket = get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
-    if ticket.get("edition") == "maxine" and not ticket.get("attachments_revealed"):
+    if attachments_hidden_until_reveal(ticket.get("edition")) and not ticket.get("attachments_revealed"):
         raise HTTPException(status_code=403, detail="Abre los adjuntos de Maxine primero.")
     att = next((a for a in (ticket.get("attachments") or []) if a["id"] == attachment_id), None)
     path = attachment_path(ticket_id, attachment_id)
