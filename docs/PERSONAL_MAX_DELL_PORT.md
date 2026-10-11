@@ -213,6 +213,8 @@ systemctl --user status empire-portal --no-pager
 
 Do **not** start a second uvicorn on :8000.
 
+After this PR’s MiniMax-M3.1-Flash-Preview commit: `systemctl --user restart empire-backend` (no portal rebuild; UI files unchanged — the dropdown reads the registry).
+
 ## How to test (before Dell)
 
 ```bash

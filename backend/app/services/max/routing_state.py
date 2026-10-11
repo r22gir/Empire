@@ -50,8 +50,15 @@ PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "openclaw": "OpenClaw",
 }
 
+# Official MiniMax text ids: https://platform.minimax.io/docs/guides/models-intro
+# MiniMax-M3.1-Flash-Preview is M Plan / MiniMax Code only. H3 is video — not here.
+MINIMAX_M3_MODEL = "MiniMax-M3"
+MINIMAX_M31_FLASH_MODEL = "MiniMax-M3.1-Flash-Preview"
+MINIMAX_M31_FLASH_DISPLAY = "MiniMax-M3.1-Flash-Preview"
+MINIMAX_VIDEO_MODEL_MARKERS = ("h3", "hailuo")
+
 PROVIDER_DEFAULT_MODELS: dict[str, str] = {
-    "minimax": "MiniMax-M3",
+    "minimax": MINIMAX_M3_MODEL,
     "deepseek": "deepseek-v4-flash",
     "qwen": "qwen-plus",
     "openrouter": "openai/gpt-4o-mini",
@@ -120,8 +127,36 @@ CLOUD_PROVIDERS: set[str] = {
     "xai",
 }
 
+MINIMAX_MODEL_META: dict[str, dict[str, str | bool]] = {
+    MINIMAX_M3_MODEL: {
+        "display": "MiniMax-M3",
+        "tier": "m_plan",
+        "founder_only": False,
+    },
+    "MiniMax-M2.7": {
+        "display": "MiniMax-M2.7",
+        "tier": "m_plan",
+        "founder_only": False,
+    },
+    "MiniMax-M2.7-highspeed": {
+        "display": "MiniMax-M2.7-highspeed",
+        "tier": "m_plan",
+        "founder_only": False,
+    },
+    MINIMAX_M31_FLASH_MODEL: {
+        "display": MINIMAX_M31_FLASH_DISPLAY,
+        "tier": "m_plan_code",
+        "founder_only": True,
+    },
+}
+
 KNOWN_MODELS: dict[str, list[str]] = {
-    "minimax": ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
+    "minimax": [
+        MINIMAX_M3_MODEL,
+        MINIMAX_M31_FLASH_MODEL,
+        "MiniMax-M2.7",
+        "MiniMax-M2.7-highspeed",
+    ],
     "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
     "qwen": ["qwen-plus", "qwen-max", "qwen-turbo"],
     "openrouter": [
@@ -167,6 +202,49 @@ def env_flag(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def minimax_model_display_name(model: str) -> str:
+    meta = MINIMAX_MODEL_META.get((model or "").strip())
+    if meta and meta.get("display"):
+        return str(meta["display"])
+    return (model or "").strip() or MINIMAX_M3_MODEL
+
+
+def is_minimax_video_model(model: str) -> bool:
+    key = (model or "").strip().lower()
+    return any(marker in key for marker in MINIMAX_VIDEO_MODEL_MARKERS)
+
+
+def family_minimax_flash_enabled() -> bool:
+    return env_flag("MINIMAX_M31_FLASH_FAMILY", False)
+
+
+def minimax_flash_allowed_for_edition() -> bool:
+    """Flash-Preview is founder-only unless MINIMAX_M31_FLASH_FAMILY is on."""
+    try:
+        from app.edition import is_founder_edition
+
+        if is_founder_edition():
+            return True
+    except Exception:
+        pass
+    return family_minimax_flash_enabled()
+
+
+def filter_minimax_text_models(models: list[str]) -> list[str]:
+    """Keep text models only. Drop H3/Hailuo. Gate Flash-Preview by edition."""
+    allow_flash = minimax_flash_allowed_for_edition()
+    out: list[str] = []
+    for model in models:
+        name = (model or "").strip()
+        if not name or is_minimax_video_model(name):
+            continue
+        if name == MINIMAX_M31_FLASH_MODEL and not allow_flash:
+            continue
+        if name not in out:
+            out.append(name)
+    return out or [MINIMAX_M3_MODEL]
 
 
 def canonical_provider(provider: str | None) -> str:
@@ -249,6 +327,8 @@ def provider_model_choices(provider: str) -> list[str]:
         for model in [item.strip() for item in env_models.split(",") if item.strip()]:
             if model not in choices:
                 choices.append(model)
+    if canonical == "minimax":
+        choices = filter_minimax_text_models(choices)
     if not choices:
         fallback = provider_default_model(canonical)
         choices = [fallback] if fallback else []
