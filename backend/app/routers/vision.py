@@ -29,9 +29,21 @@ VISION_MODEL = "grok-4-fast-non-reasoning"
 VISION_INPUT_DIR = data_root() / "vision_inputs"
 MEASUREMENTS_DIR = data_root() / "measurements"
 
-# Where generated images are saved for serving
+# Where generated images are saved for serving.
+# Never mkdir at import — family / EMPIRE_DATA_DIR must not create the
+# checkout backend/data/generated tree.
 GENERATED_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "generated"
-GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _generated_dir() -> Path:
+    env = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    if env:
+        path = Path(env).expanduser() / "generated"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    path = Path(GENERATED_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class ImageRequest(BaseModel):
@@ -216,7 +228,7 @@ def _resolve_generated_image_path(image: str) -> Optional[Path]:
     if not image.startswith(prefix):
         return None
     filename = Path(image[len(prefix):]).name
-    return GENERATED_DIR / filename
+    return _generated_dir() / filename
 
 
 def _materialize_image_input(image: str) -> str:
@@ -875,7 +887,7 @@ async def call_vision(
 def _save_image_bytes(data: bytes, prefix: str = "gen") -> str:
     """Save raw image bytes to disk, return the serve URL path."""
     fname = f"{prefix}-{int(time.time())}-{uuid.uuid4().hex[:6]}.png"
-    (GENERATED_DIR / fname).write_bytes(data)
+    (_generated_dir() / fname).write_bytes(data)
     return f"/api/v1/vision/images/{fname}"
 
 
@@ -1384,7 +1396,7 @@ from datetime import datetime
 
 @router.get("/images/{filename}")
 async def serve_image(filename: str):
-    path = GENERATED_DIR / filename
+    path = _generated_dir() / filename
     if not path.exists() or not path.is_file():
         raise HTTPException(404, "Image not found")
     return FileResponse(path, media_type="image/png")
