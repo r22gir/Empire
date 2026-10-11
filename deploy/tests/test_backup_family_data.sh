@@ -20,6 +20,7 @@ DATA_ROOT="$ROOT/data"
 BACKUP_VOLUME="$ROOT/BACKUP1"
 BACKUP_DIR="$BACKUP_VOLUME/family-backups"
 KEY_FILE="$ROOT/empire-backup-key"
+KEY_MARKER="$ROOT/key-copied"
 mkdir -p \
   "$DATA_ROOT/amp/records" \
   "$DATA_ROOT/maxine" \
@@ -33,7 +34,12 @@ printf 'amp-row\n' >"$DATA_ROOT/amp/records/item.txt"
 printf '# maxine memory\n' >"$DATA_ROOT/maxine/memory.md"
 printf 'meter\n' >"$DATA_ROOT/minimax-meter/state/ok"
 printf '# family memory\n' >"$DATA_ROOT/family-help/memory.md"
-printf 'sqlite-placeholder\n' >"$DATA_ROOT/family-help/conversations.db"
+sqlite3 "$DATA_ROOT/family-help/conversations.db" \
+  "CREATE TABLE convos (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO convos(body) VALUES ('family-hello');"
+sqlite3 "$DATA_ROOT/maxine/conversations.db" \
+  "CREATE TABLE convos (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO convos(body) VALUES ('maxine-hello');"
+sqlite3 "$DATA_ROOT/amp/records/amp.db" \
+  "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO items(name) VALUES ('amp-row');"
 
 decrypt_to() {
   local src="$1" dest="$2"
@@ -44,6 +50,7 @@ decrypt_to() {
 export EMPIRE_OPS_TEST_MODE=1
 export DATA_ROOT BACKUP_DIR BACKUP_VOLUME
 export BACKUP_KEY_FILE="$KEY_FILE"
+export BACKUP_KEY_COPY_MARKER="$KEY_MARKER"
 export TMPDIR="$ROOT"
 
 echo "== backup: defaults target BACKUP1 family-backups =="
@@ -92,6 +99,19 @@ expect_file "$EXTRACT/family-help/conversations.db" "extract restores conversati
 expect_file_contains "$ROOT/run1.log" "restore-test: passed" "restore-test logged pass"
 expect_file_contains "$ROOT/run1.log" "skip weekly promote" "weekday 1 does not promote weekly"
 expect_file_contains "$ROOT/run1.log" "encrypting" "encrypt step ran"
+expect_file_contains "$ROOT/run1.log" "sqlite hot-copy" "live .db files were sqlite hot-copied"
+expect_file_contains "$ROOT/run1.log" "PRAGMA integrity_check ok" "restore-test ran PRAGMA integrity_check"
+expect_file_contains "$ROOT/run1.log" "no key-copy marker" "warns when key-copy marker is missing"
+expect_file_contains "$ROOT/run1.log" "BACKUP_INCLUDE_MAX is off" "Max/Workroom archive is off by default"
+if [[ ! -e "$BACKUP_VOLUME/max-backups/daily" ]]; then
+  pass "no max-backups dest when INCLUDE_MAX is off"
+else
+  fail "must not write max-backups unless INCLUDE_MAX=1"
+fi
+row="$(sqlite3 "$EXTRACT/family-help/conversations.db" "SELECT body FROM convos;")"
+expect_eq "$row" "family-hello" "restored conversations.db still has rows"
+
+date -Iseconds >"$KEY_MARKER"
 
 echo "== backup: Sunday weekly promote =="
 BACKUP_STAMP=20261012T031500 BACKUP_WEEKDAY=7 BACKUP_WEEK_NAME=family-data-week-2026-W41 \
@@ -224,7 +244,7 @@ if [[ "$rc" -ne 0 ]]; then
 else
   fail "missing key should fail"
 fi
-expect_file_contains "$ROOT/run-nokey.log" "backup key missing" "missing-key message"
+expect_file_contains "$ROOT/run-nokey.log" "key missing" "missing-key message"
 
 echo "== backup: test mode refuses live paths =="
 set +e
@@ -250,5 +270,115 @@ if [[ "$rc" -ne 0 ]]; then
 else
   fail "test mode must refuse /media/rg/BACKUP1"
 fi
+
+echo "== backup: key-copy marker silences the warn =="
+BACKUP_STAMP=20261106T031500 BACKUP_WEEKDAY=1 \
+  "$SCRIPT" >"$ROOT/run-marker.log" 2>&1
+expect_file_contains "$ROOT/run-marker.log" "key-copy marker present" "marker acknowledged"
+if grep -q "no key-copy marker for family" "$ROOT/run-marker.log"; then
+  fail "should not warn after marker exists"
+else
+  pass "no family key-copy warn after marker"
+fi
+
+echo "== backup: Max/Workroom optional set is separate archive + key =="
+MAX_DATA="$ROOT/maxdata"
+MAX_DIR="$BACKUP_VOLUME/max-backups"
+MAX_KEY="$ROOT/max-key"
+MAX_MARKER="$ROOT/max-key-copied"
+mkdir -p "$MAX_DATA/workroom/files" "$MAX_DATA/empire"
+printf 'workroom-note\n' >"$MAX_DATA/workroom/files/note.txt"
+sqlite3 "$MAX_DATA/workroom/jobs.db" \
+  "CREATE TABLE jobs (id INTEGER PRIMARY KEY, title TEXT); INSERT INTO jobs(title) VALUES ('drape');"
+sqlite3 "$ROOT/empire-live.db" \
+  "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO customers(name) VALUES ('pat');"
+openssl rand -base64 32 >"$MAX_KEY"
+date -Iseconds >"$MAX_MARKER"
+
+set +e
+BACKUP_INCLUDE_MAX=1 \
+  MAX_DATA_ROOT="$MAX_DATA" \
+  MAX_BACKUP_DIR="$MAX_DIR" \
+  MAX_KEY_FILE="$MAX_KEY" \
+  MAX_KEY_COPY_MARKER="$MAX_MARKER" \
+  MAX_DB_PATHS="$ROOT/empire-live.db" \
+  BACKUP_STAMP=20261107T031500 BACKUP_WEEKDAY=1 \
+  "$SCRIPT" >"$ROOT/run-max.log" 2>&1
+rc=$?
+set -e
+if [[ "$rc" -ne 0 ]]; then
+  echo "---- run-max.log ----"
+  cat "$ROOT/run-max.log"
+  echo "---- end ----"
+fi
+expect_eq "$rc" "0" "include-max backup exits 0"
+expect_file "$BACKUP_DIR/daily/family-data-20261107T031500.tar.zst.gpg" \
+  "family archive still written"
+expect_file "$MAX_DIR/daily/max-data-20261107T031500.tar.zst.gpg" \
+  "separate max-data archive written"
+expect_file_contains "$ROOT/run-max.log" "start set=max-data" "max set ran"
+expect_file_contains "$ROOT/run-max.log" "PRAGMA integrity_check ok" "max restore-test checks sqlite"
+
+MAX_PLAIN="$ROOT/max-plain.tar.zst"
+gpg --batch --yes --quiet --decrypt --pinentry-mode loopback \
+  --passphrase-file "$MAX_KEY" \
+  -o "$MAX_PLAIN" "$MAX_DIR/daily/max-data-20261107T031500.tar.zst.gpg" 2>/dev/null
+MAX_EXTRACT="$ROOT/max-extract"
+mkdir -p "$MAX_EXTRACT"
+tar --zstd -xf "$MAX_PLAIN" -C "$MAX_EXTRACT"
+expect_file "$MAX_EXTRACT/workroom/files/note.txt" "max archive has workroom files"
+expect_file "$MAX_EXTRACT/db/empire-live.db" "max archive has extra workroom db under db/"
+max_row="$(sqlite3 "$MAX_EXTRACT/workroom/jobs.db" "SELECT title FROM jobs;")"
+expect_eq "$max_row" "drape" "max workroom db rows survive"
+emp_row="$(sqlite3 "$MAX_EXTRACT/db/empire-live.db" "SELECT name FROM customers;")"
+expect_eq "$emp_row" "pat" "extra empire.db rows survive"
+
+# Family key must not decrypt the max archive.
+set +e
+gpg --batch --yes --quiet --decrypt --pinentry-mode loopback \
+  --passphrase-file "$KEY_FILE" \
+  -o "$ROOT/should-fail.tar.zst" \
+  "$MAX_DIR/daily/max-data-20261107T031500.tar.zst.gpg" 2>"$ROOT/wrong-key.err"
+wrong_rc=$?
+set -e
+if [[ "$wrong_rc" -ne 0 ]]; then
+  pass "family key cannot decrypt the max archive"
+else
+  fail "max archive must not open with the family key"
+fi
+
+echo "== backup: Max set refuses the family key file =="
+set +e
+BACKUP_INCLUDE_MAX=1 \
+  MAX_DATA_ROOT="$MAX_DATA" \
+  MAX_BACKUP_DIR="$MAX_DIR" \
+  MAX_KEY_FILE="$KEY_FILE" \
+  MAX_KEY_COPY_MARKER="$MAX_MARKER" \
+  MAX_DB_PATHS="$ROOT/empire-live.db" \
+  BACKUP_STAMP=20261108T031500 \
+  "$SCRIPT" >"$ROOT/run-same-key.log" 2>&1
+rc=$?
+set -e
+if [[ "$rc" -ne 0 ]]; then
+  pass "same key file for max is rejected"
+else
+  fail "MAX_KEY_FILE must not be the family key"
+fi
+expect_file_contains "$ROOT/run-same-key.log" "SEPARATE" "same-key error mentions SEPARATE"
+
+echo "== backup: --include-max CLI enables the max set =="
+set +e
+MAX_DATA_ROOT="$MAX_DATA" \
+  MAX_BACKUP_DIR="$MAX_DIR" \
+  MAX_KEY_FILE="$MAX_KEY" \
+  MAX_KEY_COPY_MARKER="$MAX_MARKER" \
+  MAX_DB_PATHS="$ROOT/empire-live.db" \
+  BACKUP_STAMP=20261109T031500 BACKUP_WEEKDAY=1 \
+  "$SCRIPT" --include-max >"$ROOT/run-cli-max.log" 2>&1
+rc=$?
+set -e
+expect_eq "$rc" "0" "--include-max exits 0"
+expect_file "$MAX_DIR/daily/max-data-20261109T031500.tar.zst.gpg" \
+  "--include-max wrote max-data archive"
 
 finish

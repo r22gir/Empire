@@ -42,9 +42,11 @@ backend/data/journey_review_queue.json
 # Max temp files
 /max
 
-# EmpireDell family-backup key (never commit; lives in ~/.config/empire-backup/key)
+# EmpireDell backup keys (never commit)
 .config/empire-backup/key
+.config/empire-backup/max-key
 **/.config/empire-backup/key
+**/.config/empire-backup/max-key
 
 # Environment files with secrets
 .env.local

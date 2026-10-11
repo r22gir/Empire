@@ -14,14 +14,25 @@ Install steps: [`deploy/README.md`](../../deploy/README.md).
 
 Nightly backup writes encrypted archives to
 `/media/rg/BACKUP1/family-backups` on the external **BACKUP1** drive
-(~931G, vfat/FAT32). It restore-tests (decrypt + list + extract), keeps 14
-dailies and 8 Sunday weeklies, and copies offsite when `RCLONE_REMOTE` is set.
+(~931G, vfat/FAT32). Live `*.db` files (including `conversations.db`) are
+snapshotted with `sqlite3 .backup` / `VACUUM INTO` before tar. Restore-test
+decrypts, lists, extracts, and runs `PRAGMA integrity_check` on each
+restored database. It keeps 14 dailies and 8 Sunday weeklies, and copies
+offsite when `RCLONE_REMOTE` is set.
 
 BACKUP1 has no Unix permissions (so archives are encrypted with
 `~/.config/empire-backup/key`), a 4GiB−1 file-size cap (large blobs are
 split), and colon-free names. If the drive is unplugged, `/media/rg/BACKUP1`
 is usually an empty directory on `/` — the backup **fails** instead of
 writing onto the root disk.
+
+**One-time:** copy `~/.config/empire-backup/key` to a second safe place
+(not BACKUP1), then `date -Iseconds > ~/.config/empire-backup/key-copied`.
+The job warns if that marker is missing.
+
+Personal Max / Workroom data is **not** in the family archive. Enable a
+separate `max-backups` set + `max-key` only if you set `BACKUP_INCLUDE_MAX=1`
+(see `deploy/README.md`).
 
 ## Daily checks
 
@@ -57,6 +68,7 @@ they are caches or rebuildable artifacts.
    if the archive was split for FAT32.
 4. `rsync -aH --delete` the staged tree onto `/data/<name>/`.
 5. Confirm `memory.md` and `conversations.db` if those files belong to the tree.
+   Run `sqlite3 <restored>.db 'PRAGMA integrity_check;'` (must print `ok`).
 6. Start services and spot-check a conversation or AMP record.
 
 ## Move `/data` to a larger drive

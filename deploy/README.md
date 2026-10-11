@@ -47,8 +47,10 @@ Also packed when they exist: `family-help/memory.md`, `family-help/conversations
 `maxine/memory.md`, `maxine/conversations.db`.
 
 Plain `tar.zst` is built in a local temp dir, encrypted, then copied onto
-BACKUP1. Restore-test decrypts the dest file (re-joining parts if needed),
-lists contents, and extracts to a throwaway dir.
+BACKUP1. Every `*.db` is snapshotted with `sqlite3 .backup` (or `VACUUM INTO`)
+so a live backend cannot tear `conversations.db`. Restore-test decrypts the
+dest file (re-joining parts if needed), lists contents, extracts to a
+throwaway dir, and runs `PRAGMA integrity_check` on each restored database.
 
 ## Encryption key (never commit)
 
@@ -65,19 +67,64 @@ uses `age` when the file looks like an identity.
 Override with `BACKUP_KEY_FILE`. The path is gitignored. If the key is
 missing, the backup exits non-zero with setup instructions.
 
+### One-time: copy the key to a second safe place
+
+BACKUP1 is FAT32 (no Unix permissions) and can be lost or stolen. The
+archive is only as safe as this key. **Once**, copy
+`~/.config/empire-backup/key` somewhere that is **not** BACKUP1:
+
+- a password manager
+- paper in a safe
+- a second encrypted USB that does not stay plugged into EmpireDell
+
+Then record that you did it (the script only checks this marker; it does
+not verify the second copy):
+
+```bash
+date -Iseconds > ~/.config/empire-backup/key-copied
+```
+
+If the marker is missing the backup still runs, but it logs a **WARN**.
+Do not skip this step.
+
+## Optional: personal Max / Workroom (off by default)
+
+Family backups never include personal Max or Workroom data. To also write
+a **separate** archive with a **separate** key:
+
+```bash
+openssl rand -base64 32 > ~/.config/empire-backup/max-key
+chmod 600 ~/.config/empire-backup/max-key
+# copy max-key off-box, then:
+date -Iseconds > ~/.config/empire-backup/max-key-copied
+
+# env (or pass --include-max)
+BACKUP_INCLUDE_MAX=1
+MAX_BACKUP_DIR=/media/rg/BACKUP1/max-backups
+MAX_KEY_FILE=~/.config/empire-backup/max-key
+MAX_DATA_ROOT=/data          # workroom, empire, max trees when present
+MAX_DB_PATHS=~/empire-data/empire.db
+```
+
+That set goes to `/media/rg/BACKUP1/max-backups/` as `max-data-*.tar.zst.gpg`.
+It is skipped unless `BACKUP_INCLUDE_MAX=1` or `--include-max`. The Max key
+must not be the same file as the family key.
+
 ## Install (backup)
 
-Dependencies: `tar`, `zstd`, `gpg` (or `age` + `age-keygen`). Optional: `rclone`.
+Dependencies: `tar`, `zstd`, `sqlite3`, `gpg` (or `age` + `age-keygen`). Optional: `rclone`.
 
 ```bash
 # 1. Plug in BACKUP1 and confirm the mount (vfat, ~931G)
 findmnt /media/rg/BACKUP1
 # SOURCE … /media/rg/BACKUP1  vfat
 
-# 2. Key (once). Never commit it.
+# 2. Key (once). Never commit it. Then copy it off-box (see above).
 mkdir -p ~/.config/empire-backup
 openssl rand -base64 32 > ~/.config/empire-backup/key
 chmod 600 ~/.config/empire-backup/key
+# …copy ~/.config/empire-backup/key to a second safe place, then:
+date -Iseconds > ~/.config/empire-backup/key-copied
 
 # 3. Optional env (rclone). BACKUP_DIR already defaults correctly.
 mkdir -p ~/.config/empire
@@ -181,8 +228,9 @@ tar --zstd -tf /tmp/family.tar.zst | less
 mkdir -p /tmp/family-restore
 tar --zstd -xf /tmp/family.tar.zst -C /tmp/family-restore
 
-# 5. Confirm memory.md / conversations.db
+# 5. Confirm memory.md / conversations.db and SQLite integrity
 find /tmp/family-restore -name memory.md -o -name conversations.db
+find /tmp/family-restore -name '*.db' -exec sqlite3 {} 'PRAGMA integrity_check;' \;
 
 # 6. Stop family services, then replace trees
 #    (see docs/runbooks/empiredell-family-data.md)
