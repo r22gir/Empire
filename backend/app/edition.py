@@ -419,17 +419,15 @@ def amp_app_dir() -> Path:
         path = root / "amp"
         path.mkdir(parents=True, exist_ok=True)
         return path
-    path = _legacy_amp_db().parent / "amp"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    # Workroom historical path. Do not mkdir ~/empire-repo at call time —
+    # tests and family processes must never create that tree.
+    return _legacy_amp_db().parent / "amp"
 
 
 def amp_sqlite_path() -> Path:
     if is_family_edition():
         return amp_app_dir() / "amp.db"
-    path = _legacy_amp_db()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    return _legacy_amp_db()
 
 
 def amp_audio_dir() -> Path:
