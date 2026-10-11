@@ -34,8 +34,26 @@ const VENV_TRACE_EXCLUDES = [
   '**/*venv*/**',
 ];
 
+// Family editions (AMP / Maxine) must not ship Empire's internal docs list.
+// Swap app/lib/docs-registry.ts for the empty family registry in those builds.
+const FAMILY_EDITION = ['amp', 'maxine'].includes(
+  String(process.env.NEXT_PUBLIC_EMPIRE_EDITION || process.env.EMPIRE_EDITION || '').trim().toLowerCase(),
+);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  webpack(config, { webpack }) {
+    if (FAMILY_EDITION) {
+      const path = require('path');
+      const familyRegistry = path.join(__dirname, 'app/lib/docs-registry.family.ts');
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(/[\\/]lib[\\/]docs-registry(\.ts)?$/, (res) => {
+          res.request = familyRegistry;
+        }),
+      );
+    }
+    return config;
+  },
   experimental: {
     proxyTimeout: VISION_PROXY_TIMEOUT_MS,
     proxyClientMaxBodySize: VISION_PROXY_BODY_LIMIT,

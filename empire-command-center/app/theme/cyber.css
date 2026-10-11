@@ -1,0 +1,188 @@
+/* ==========================================================================
+   Empire "cyber" theme — shared design tokens + components (2026-10-03).
+   Same visual language as the module ring home (components/ring/ring.css):
+   black background, cyan glow, magenta alerts, glass panels with HUD
+   brackets, angular neon tabs. Everything is cy-* prefixed, so importing
+   this file never changes an existing page by itself. The Command Center
+   shell opts in with class "cy-shell" (see cyber-shell.css).
+   ========================================================================== */
+
+:root {
+  /* palette */
+  --cy-bg: #010306;
+  --cy-bg-2: #030a10;
+  --cy-cyan: #00e5ff;
+  --cy-cyan-soft: rgba(0, 229, 255, 0.55);
+  --cy-cyan-dim: rgba(0, 229, 255, 0.12);
+  --cy-mag: #ff2bd6;
+  --cy-mag-text: #ff7ae6;
+  --cy-mag-dim: rgba(255, 43, 214, 0.14);
+  --cy-amber: #ffc857;
+  --cy-amber-dim: rgba(255, 200, 87, 0.12);
+  --cy-teal: #14f1c6;
+  --cy-teal-dim: rgba(20, 241, 198, 0.12);
+  --cy-blue: #5cc8ff;
+  --cy-blue-dim: rgba(92, 200, 255, 0.12);
+  --cy-violet: #b98cff;
+  --cy-violet-dim: rgba(164, 107, 255, 0.14);
+  /* text */
+  --cy-text: #d9f8ff;
+  --cy-text-strong: #f0ffff;
+  --cy-text-2: #a9c7d3;
+  --cy-muted: #7fa3b2;
+  --cy-faint: #4f7486;
+  /* surfaces */
+  --cy-panel: rgba(3, 14, 22, 0.82);
+  --cy-panel-solid: #04121b;
+  --cy-panel-2: rgba(6, 22, 33, 0.9);
+  --cy-hover: rgba(0, 229, 255, 0.08);
+  --cy-line: rgba(0, 229, 255, 0.22);
+  --cy-line-strong: rgba(0, 229, 255, 0.5);
+  --cy-glow: 0 0 18px rgba(0, 229, 255, 0.35);
+  --cy-glow-mag: 0 0 22px rgba(255, 43, 214, 0.35);
+  /* type + shape */
+  --cy-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+  --cy-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --cy-cut: 10px;
+  --cy-cut-sm: 7px;
+  --cy-radius: 3px;
+}
+
+/* ---------- backdrop helpers ---------- */
+.cy-bg {
+  background: radial-gradient(1100px 680px at 50% 30%, rgba(0, 229, 255, 0.07), transparent 65%), var(--cy-bg);
+  color: var(--cy-text);
+}
+.cy-floor { position: fixed; left: -20%; right: -20%; bottom: -8%; height: 45vh; pointer-events: none; z-index: 0;
+  background-image: linear-gradient(rgba(0, 229, 255, 0.16) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 229, 255, 0.16) 1px, transparent 1px);
+  background-size: 60px 60px; transform: perspective(420px) rotateX(64deg); transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.75), transparent 80%); mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.75), transparent 80%); }
+.cy-scan { position: fixed; inset: 0; pointer-events: none; z-index: 0; background: repeating-linear-gradient(180deg, rgba(0, 229, 255, 0.02) 0 1px, transparent 1px 3px); }
+
+/* ---------- glass panel with HUD brackets ---------- */
+.cy-panel { position: relative; background: var(--cy-panel); border: 1px solid var(--cy-line); border-radius: var(--cy-radius);
+  padding: 14px; color: var(--cy-text); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.cy-hud::before, .cy-hud::after { content: ''; position: absolute; width: 14px; height: 14px; border: solid var(--cy-cyan); opacity: 0.9; pointer-events: none; }
+.cy-hud::before { top: -2px; left: -2px; border-width: 2px 0 0 2px; }
+.cy-hud::after { bottom: -2px; right: -2px; border-width: 0 2px 2px 0; }
+.cy-panel.is-alert, .cy-card.is-alert { border-color: rgba(255, 43, 214, 0.55);
+  background: linear-gradient(160deg, rgba(255, 43, 214, 0.12), rgba(20, 2, 16, 0.85)); box-shadow: var(--cy-glow-mag), inset 0 0 24px rgba(255, 43, 214, 0.08); }
+.cy-panel.is-alert.cy-hud::before, .cy-panel.is-alert.cy-hud::after, .cy-card.is-alert.cy-hud::before, .cy-card.is-alert.cy-hud::after { border-color: var(--cy-mag); }
+.cy-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
+.cy-panel-title { margin: 0; display: flex; align-items: center; gap: 7px; font: 700 11px/1.2 var(--cy-mono); letter-spacing: 0.18em; color: var(--cy-cyan); text-transform: uppercase; }
+.is-alert .cy-panel-title { color: var(--cy-mag-text); }
+.cy-src { font: 500 9px/1.3 var(--cy-mono); color: var(--cy-muted); letter-spacing: 0.03em; }
+
+/* ---------- card ---------- */
+.cy-card { position: relative; display: block; background: var(--cy-panel-2); border: 1px solid var(--cy-line); border-radius: var(--cy-radius);
+  padding: 12px; color: var(--cy-text); transition: border-color .15s, box-shadow .15s, background .15s; }
+a.cy-card, button.cy-card { cursor: pointer; text-align: left; width: 100%; font: inherit; }
+a.cy-card:hover, button.cy-card:hover, a.cy-card:focus-visible, button.cy-card:focus-visible { border-color: var(--cy-line-strong); box-shadow: var(--cy-glow); outline: none; }
+.cy-card.is-active { border-color: var(--cy-cyan); box-shadow: var(--cy-glow), inset 0 0 18px rgba(0, 229, 255, 0.1); }
+.cy-kpi { font: 800 28px/1.05 var(--cy-mono); color: var(--cy-text-strong); text-shadow: 0 0 14px rgba(0, 229, 255, 0.55); font-variant-numeric: tabular-nums; }
+.cy-kpi-label { font: 700 10px/1.2 var(--cy-mono); letter-spacing: 0.16em; color: var(--cy-muted); text-transform: uppercase; }
+.is-alert .cy-kpi { color: #ffe1f8; text-shadow: 0 0 16px rgba(255, 43, 214, 0.8); }
+
+/* ---------- angular neon tab ---------- */
+.cy-tab { position: relative; display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 12px 0 14px; width: 100%;
+  color: var(--cy-text); background: var(--cy-line); border: 0; cursor: pointer; text-align: left; text-decoration: none;
+  font: 700 11px/1.1 var(--cy-mono); letter-spacing: 0.12em; text-transform: uppercase;
+  clip-path: polygon(var(--cy-cut) 0, 100% 0, 100% calc(100% - var(--cy-cut)), calc(100% - var(--cy-cut)) 100%, 0 100%, 0 var(--cy-cut));
+  transition: background .15s, box-shadow .15s; }
+.cy-tab::before { content: ''; position: absolute; inset: 1px; z-index: 0; background: linear-gradient(90deg, rgba(0, 229, 255, 0.06), rgba(2, 10, 16, 0.96) 60%);
+  clip-path: polygon(calc(var(--cy-cut) - 0.5px) 0, 100% 0, 100% calc(100% - var(--cy-cut) + 0.5px), calc(100% - var(--cy-cut) + 0.5px) 100%, 0 100%, 0 calc(var(--cy-cut) - 0.5px)); }
+.cy-tab > * { position: relative; z-index: 1; }
+.cy-tab:hover, .cy-tab:focus-visible { background: var(--cy-cyan-soft); outline: none; }
+.cy-tab:hover::before, .cy-tab:focus-visible::before { background: linear-gradient(90deg, rgba(0, 229, 255, 0.2), rgba(2, 10, 16, 0.92) 70%); }
+.cy-tab.is-active, .cy-tab[aria-current="page"] { background: var(--cy-cyan); box-shadow: 0 0 18px rgba(0, 229, 255, 0.5); }
+.cy-tab.is-active::before, .cy-tab[aria-current="page"]::before { background: linear-gradient(90deg, rgba(0, 229, 255, 0.38), rgba(0, 60, 80, 0.92)); }
+.cy-tab.is-active, .cy-tab[aria-current="page"] { color: #fff; text-shadow: 0 0 8px rgba(0, 229, 255, 0.9); }
+.cy-tab.is-alert { background: rgba(255, 43, 214, 0.6); }
+.cy-tab-ico { color: var(--cy-cyan); display: flex; flex-shrink: 0; }
+.cy-tab-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cy-tab-badge { font-size: 8px; letter-spacing: 0.1em; color: var(--cy-amber); }
+/* horizontal tab strip */
+.cy-tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.cy-tabs::-webkit-scrollbar { display: none; }
+.cy-tabs .cy-tab { width: auto; flex: 0 0 auto; min-height: 32px; }
+
+/* ---------- buttons ---------- */
+.cy-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 8px 13px;
+  border: 1px solid var(--cy-cyan-soft); background: rgba(0, 229, 255, 0.07); color: var(--cy-cyan); cursor: pointer; text-decoration: none;
+  font: 700 11px/1 var(--cy-mono); letter-spacing: 0.14em; text-transform: uppercase;
+  clip-path: polygon(var(--cy-cut-sm) 0, 100% 0, 100% calc(100% - var(--cy-cut-sm)), calc(100% - var(--cy-cut-sm)) 100%, 0 100%, 0 var(--cy-cut-sm));
+  transition: background .15s, box-shadow .15s, color .15s; }
+.cy-btn:hover, .cy-btn:focus-visible { background: rgba(0, 229, 255, 0.2); box-shadow: var(--cy-glow); outline: none; }
+.cy-btn:disabled, .cy-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.cy-btn.is-primary { background: var(--cy-cyan); color: #001018; border-color: var(--cy-cyan); }
+.cy-btn.is-primary:hover, .cy-btn.is-primary:focus-visible { background: #6ff2ff; }
+.cy-btn.is-danger { border-color: rgba(255, 43, 214, 0.65); background: rgba(255, 43, 214, 0.1); color: var(--cy-mag-text); }
+.cy-btn.is-danger:hover, .cy-btn.is-danger:focus-visible { background: rgba(255, 43, 214, 0.22); box-shadow: var(--cy-glow-mag); }
+.cy-btn.is-ghost { border-color: transparent; background: transparent; color: var(--cy-text-2); }
+.cy-btn.is-ghost:hover, .cy-btn.is-ghost:focus-visible { color: var(--cy-cyan); background: var(--cy-hover); box-shadow: none; }
+.cy-btn.is-sm { min-height: 28px; padding: 6px 9px; font-size: 10px; }
+
+/* ---------- inputs ---------- */
+.cy-field { display: flex; flex-direction: column; gap: 5px; }
+.cy-label { font: 700 10px/1.2 var(--cy-mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--cy-muted); }
+.cy-input { width: 100%; min-height: 38px; padding: 9px 12px; background: rgba(0, 12, 20, 0.85); color: var(--cy-text);
+  border: 1px solid var(--cy-line); border-radius: var(--cy-radius); font: 500 13px/1.4 var(--cy-sans); outline: none;
+  transition: border-color .15s, box-shadow .15s; }
+.cy-input::placeholder { color: var(--cy-faint); }
+.cy-input:focus { border-color: var(--cy-cyan); box-shadow: 0 0 0 1px var(--cy-cyan), 0 0 14px rgba(0, 229, 255, 0.3); }
+.cy-input:disabled { opacity: 0.5; }
+select.cy-input option { background: var(--cy-panel-solid); color: var(--cy-text); }
+.cy-hint { font: 500 10px/1.3 var(--cy-mono); color: var(--cy-muted); }
+.cy-hint.is-error { color: var(--cy-mag-text); }
+
+/* ---------- tables ---------- */
+.cy-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--cy-line); border-radius: var(--cy-radius); background: var(--cy-panel); }
+.cy-table { width: 100%; border-collapse: collapse; font: 500 12px/1.45 var(--cy-sans); color: var(--cy-text); }
+.cy-table th { text-align: left; padding: 9px 12px; font: 700 10px/1.2 var(--cy-mono); letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--cy-cyan); background: rgba(0, 229, 255, 0.06); border-bottom: 1px solid var(--cy-line-strong); white-space: nowrap; }
+.cy-table td { padding: 9px 12px; border-bottom: 1px solid rgba(0, 229, 255, 0.1); }
+.cy-table tbody tr:hover td { background: var(--cy-hover); }
+.cy-table .is-num { text-align: right; font-family: var(--cy-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- pills ---------- */
+.cy-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--cy-line); border-radius: 2px;
+  font: 700 9.5px/1.5 var(--cy-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--cy-cyan); background: var(--cy-cyan-dim); }
+.cy-pill.is-ok { color: var(--cy-teal); border-color: rgba(20, 241, 198, 0.4); background: var(--cy-teal-dim); }
+.cy-pill.is-warn { color: var(--cy-amber); border-color: rgba(255, 200, 87, 0.4); background: var(--cy-amber-dim); }
+.cy-pill.is-alert { color: var(--cy-mag-text); border-color: rgba(255, 43, 214, 0.45); background: var(--cy-mag-dim); }
+.cy-pill.is-muted { color: var(--cy-muted); border-color: rgba(127, 163, 178, 0.3); background: transparent; }
+
+/* ---------- no-data block (real data only) ---------- */
+.cy-nodata { display: flex; flex-direction: column; gap: 3px; padding: 10px 8px; border: 1px dashed rgba(255, 200, 87, 0.5); color: var(--cy-amber);
+  font: 700 11px/1.3 var(--cy-mono); letter-spacing: 0.14em; text-align: center; }
+.cy-nodata span { font-weight: 500; letter-spacing: 0.03em; font-size: 10px; color: var(--cy-muted); }
+
+/* ---------- modal ---------- */
+.cy-modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: rgba(0, 4, 8, 0.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.cy-modal { position: relative; width: min(560px, 100%); max-height: calc(100dvh - 32px); overflow: auto; background: var(--cy-panel-solid);
+  border: 1px solid var(--cy-line-strong); border-radius: var(--cy-radius); box-shadow: 0 0 40px rgba(0, 229, 255, 0.18); color: var(--cy-text); }
+.cy-modal-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 14px; background: var(--cy-panel-solid); border-bottom: 1px solid var(--cy-line); }
+.cy-modal-body { padding: 14px; }
+.cy-modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--cy-line); }
+
+/* ---------- back link ---------- */
+.cy-back { display: inline-flex; align-items: center; gap: 6px; font: 700 10px/1 var(--cy-mono); letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--cy-cyan); text-decoration: none; padding: 6px 2px; }
+.cy-back:hover, .cy-back:focus-visible { text-shadow: 0 0 8px rgba(0, 229, 255, 0.8); outline: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cy-tab, .cy-btn, .cy-card, .cy-input { transition: none; }
+}
+
+/* tick marks + glitch accent on every angular tab (matches the ring menu) */
+.cy-tab::after { content: ''; position: absolute; left: 4px; top: 9px; bottom: 9px; width: 3px; z-index: 1;
+  background: repeating-linear-gradient(180deg, rgba(0, 229, 255, 0.7) 0 1px, transparent 1px 4px); opacity: 0.7; pointer-events: none; }
+.cy-tab.is-active::after, .cy-tab[aria-current="page"]::after { background: repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0 1px, transparent 1px 4px); }
+.cy-glitch { position: absolute; right: 14px; top: 50%; width: 18px; height: 2px; z-index: 1; pointer-events: none; background: var(--cy-mag); box-shadow: 6px 3px 0 var(--cy-cyan);
+  opacity: 0; animation: cy-glitch 7s steps(1) infinite; }
+.cy-tabgroup { display: flex; align-items: center; gap: 6px; font: 700 8.5px/1 var(--cy-mono); letter-spacing: 0.26em; color: var(--cy-muted); text-transform: uppercase; }
+.cy-tabgroup::after { content: ''; flex: 1; height: 1px; background: repeating-linear-gradient(90deg, var(--cy-line) 0 4px, transparent 4px 7px); }
+@keyframes cy-glitch { 0%, 91%, 100% { opacity: 0; transform: translate(0, -50%); } 92% { opacity: 1; transform: translate(-3px, -50%); } 94% { opacity: .6; transform: translate(2px, -40%); } 96% { opacity: 1; transform: translate(0, -60%); } }
+@media (prefers-reduced-motion: reduce) { .cy-glitch { animation: none; } }

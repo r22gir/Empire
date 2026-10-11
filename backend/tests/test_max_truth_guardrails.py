@@ -368,8 +368,47 @@ def test_email_dry_run_reads_routing_state(monkeypatch):
     monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+    monkeypatch.delenv("MAX_SELECTED_PROVIDER", raising=False)
+    monkeypatch.delenv("MAX_SELECTED_MODEL", raising=False)
 
     from app.services.max.email_service import generate_email_reply_draft
+    from app.services.max.routing_state import RoutingState
+
+    # The live routing file and MINIMAX env must not leak into this assertion.
+    monkeypatch.setattr(
+        "app.services.max.routing_state.load_routing_state",
+        lambda: RoutingState(
+            selected_provider="deepseek",
+            selected_model="deepseek-v4-flash",
+            fallback_enabled=False,
+            ai_calls_disabled=False,
+            lane="test",
+            updated_at="2026-01-01T00:00:00+00:00",
+            updated_by="test",
+            last_switch_reason="test_isolation",
+        ),
+    )
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            return _Resp()
+
+    monkeypatch.setattr("app.services.max.email_service.httpx.Client", _Client)
 
     draft = generate_email_reply_draft(
         sender="empirebox2026@gmail.com",

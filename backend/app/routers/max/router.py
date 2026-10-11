@@ -3,6 +3,7 @@ MAX API Router - Endpoints for AI Assistant Manager.
 """
 from app.instance_url import empire_api_url
 
+from app.db.database import resolve_task_db_path
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Response, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -30,7 +31,7 @@ from app.services.max.guardrails import (
     GPU_VERIFICATION_COMMANDS,
     is_imperative_action_request,
 )
-from app.services.max.security.sanitizer import sanitizer as input_sanitizer
+from app.services.max.security.sanitizer import sanitizer as input_sanitizer, audit_dir as security_audit_dir
 from app.services.max.tool_executor import parse_tool_blocks, parse_tool_blocks_with_errors, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
 from app.services.max.minimax_tools import minimax_tools_status
 from app.services.max.tool_result_normalizer import (
@@ -58,7 +59,11 @@ from app.services.max.factual_guard import (
     search_unavailable_reply,
 )
 from app.services.max.answer_quality import (
-    detect_quality_flags, freshness_directive, needs_continuation, strip_empty_sections,
+    COMPLETENESS_RECOVERY_INSTRUCTION,
+    detect_quality_flags,
+    freshness_directive,
+    needs_continuation,
+    repair_reply_structure,
 )
 from app.services.max.finance_readiness_lane import (
     finance_system_preamble,
@@ -78,6 +83,9 @@ from app.services.max.founder_action_continuation import (
     format_tool_progress_message,
     founder_continuation_system_nudge,
     should_force_founder_action_continuation,
+    ANNOUNCED_ACTION_MAX_ROUNDS,
+    announced_action_nudge,
+    announces_action_without_tool,
 )
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.runtime_truth_check import (
@@ -103,9 +111,29 @@ from app.services.max.routing_state import canonical_provider
 from pathlib import Path as _Path
 
 # ── Chat history persistence ─────────────────────────────────────────────────
+# Workroom checkout path. Family editions never mkdir or read it.
 # Must go 4 parents up: router.py → max → routers → app → backend
 _ROUTER_CHATS_DIR = _Path(__file__).parent.parent.parent.parent / "data" / "chats"
-_ROUTER_CHATS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _router_chats_dir() -> _Path:
+    try:
+        from app.edition import is_family_edition, require_data_root
+
+        if is_family_edition():
+            path = require_data_root() / "chats"
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+    except Exception:
+        pass
+    env = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    if env:
+        path = _Path(env).expanduser() / "chats"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    path = _Path(_ROUTER_CHATS_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 try:
     from app.services.max.access_control import access_controller
@@ -113,7 +141,17 @@ except ImportError:
     access_controller = None
 
 logger = logging.getLogger("max.api")
-router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
+try:  # max-sessions: tag automated/test chats in the session journal
+    from fastapi import Depends as _Depends, Request as _Request
+
+    async def _journal_capture_client(request: _Request) -> None:
+        from app.services.max.session_journal import capture_client
+        await capture_client(request)
+
+    _ROUTER_DEPS = [_Depends(_journal_capture_client)]
+except Exception:  # pragma: no cover
+    _ROUTER_DEPS = []
+router = APIRouter(prefix="/max", tags=["MAX AI Assistant"], dependencies=_ROUTER_DEPS)
 
 
 def _safe_dumps(obj, **kwargs):
@@ -269,7 +307,7 @@ def _log_quality_metric(quality_result, model_used: str, channel: str, response_
     """Log quality gate result + response time to database for metrics."""
     try:
         import sqlite3
-        db_path = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
+        db_path = resolve_task_db_path()
         conn = sqlite3.connect(db_path)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS quality_metrics (
@@ -381,8 +419,17 @@ def _db_query_cap_reached(message: str | None, tool_results: list[Any] | None) -
     return count >= _DRAWING_DB_QUERY_CAP
 
 
+_TEXT_DRAWING_DIMS = frozenset({
+    "shape", "panel_style", "mount", "construction", "fabric_mode",
+    "control", "draw", "draw_direction", "masters", "master",
+    "carrier", "carrier_no", "carrier_number", "align",
+    "coverage_align", "track_align", "layer", "fabric_layer",
+    "mount_type", "fabric",
+})
+
+
 def _dims_for_render_shop(handoff) -> tuple[dict, str, str]:
-    numeric: dict[str, float] = {}
+    numeric: dict = {}
     shape = ""
     construction = ""
     for k, v in (getattr(handoff, "translated_dims", None) or {}).items():
@@ -393,6 +440,9 @@ def _dims_for_render_shop(handoff) -> tuple[dict, str, str]:
             continue
         if k in ("construction", "fabric_mode"):
             construction = str(v).strip()
+            continue
+        if k in _TEXT_DRAWING_DIMS:
+            numeric[k] = str(v).strip()
             continue
         try:
             numeric[k] = float(str(v).rstrip('"').rstrip("ft").strip())
@@ -778,6 +828,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     channel: Optional[str] = None  # "telegram", "web", etc.
     chat_id: Optional[str] = None  # Telegram chat ID for founder detection
+    presentation: bool = False  # Presentation Mode: short speech, detail on the stage
 
 
 class RoutingStateUpdateRequest(BaseModel):
@@ -1798,6 +1849,54 @@ def _normalize_tool_result_entry(item: Any) -> dict[str, Any]:
     }
 
 
+def _should_read_research_pages(question: str | None) -> bool:
+    """Factual and explicit research questions get full-page reads, not snippets."""
+    text = question or ""
+    if _is_local_finance_readiness_request(text):
+        return False
+    return is_factual_question(text) or _is_performative_web_search_request(text)
+
+
+async def _ground_search_payload(question: str, payload: dict, read_urls: set[str]) -> dict:
+    """Fetch top pages for a web_search payload off the event loop."""
+    from app.services.max.web_research import ground_web_search
+
+    if not isinstance(payload, dict):
+        payload = {}
+    grounded = await asyncio.to_thread(
+        ground_web_search, question, payload, skip_urls=set(read_urls),
+    )
+    for entry in grounded.get("tool_entries") or []:
+        url = str((entry.get("result") or {}).get("url") or "").strip()
+        if url:
+            read_urls.add(url.rstrip("/"))
+    return grounded
+
+
+async def _attach_research_page_reads(
+    question: str,
+    round_results: list[dict],
+    tool_results_list: list[dict],
+    read_urls: set[str],
+) -> list[dict]:
+    """After web_search in this round, read unread pages and record them as web_read."""
+    if not _should_read_research_pages(question):
+        return []
+    added: list[dict] = []
+    for entry in list(round_results):
+        if entry.get("tool") != "web_search" or not entry.get("success"):
+            continue
+        payload = entry.get("result")
+        if not isinstance(payload, dict):
+            continue
+        grounded = await _ground_search_payload(question, payload, read_urls)
+        for page_entry in grounded.get("tool_entries") or []:
+            round_results.append(page_entry)
+            tool_results_list.append(page_entry)
+            added.append(page_entry)
+    return added
+
+
 def _has_verified_email_send_result(tool_results: list[Any] | None) -> bool:
     for item in tool_results or []:
         entry = _normalize_tool_result_entry(item)
@@ -2237,6 +2336,23 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
 
 
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
+    # 2026-10-04: greetings, "where are my docs" and existing-quote status answer directly
+    # (no tools, no status dumps, no internal-doc citations). Image messages go to the model.
+    if not request.desk:
+        try:
+            from app.services.max.quick_replies import direct_reply
+            _qr = direct_reply(request.message or "", channel=request.channel or "web",
+                               has_image=bool(request.image_filename))
+        except Exception as _qr_err:
+            logger.debug(f"quick reply skipped: {_qr_err}")
+            _qr = None
+        if _qr:
+            return ChatResponse(
+                response=_qr["text"],
+                model_used=f"quick-reply:{_qr['skill']}",
+                fallback_used=False,
+                metadata=_response_metadata(request.channel, skill_used=_qr["skill"]),
+            )
     if not request.desk and not request.image_filename:
         # Runtime truth / health / boundary questions must route to the live
         # truth check (async handler at line ~2030), not to module knowledge
@@ -2439,18 +2555,58 @@ def _stream_immediate_response(response: ChatResponse, conversation_id: str | No
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
-def _image_upload_path(image_filename: str | None) -> Path | None:
+_IMAGE_ATTACHMENT_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".heic", ".heif", ".bmp"}
+_DOCUMENT_ATTACHMENT_EXTS = {
+    ".pdf", ".txt", ".md", ".csv", ".json",
+    ".doc", ".docx", ".xls", ".xlsx",
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".sh", ".yaml", ".yml",
+}
+_UPLOAD_CATEGORIES = ("images", "documents", "audio", "other", "code")
+
+
+def _attachment_upload_path(image_filename: str | None) -> Path | None:
+    """Resolve an uploaded chat attachment across image/document/audio/code dirs.
+
+    Chat still sends every attachment as ``image_filename``; PDFs and other
+    non-images land under uploads/documents (see /files/upload), so the old
+    images-only lookup falsely returned IMAGE_NOT_AVAILABLE.
+
+    Family editions only search data_root()/uploads (EMPIRE_DATA_DIR), never
+    the Workroom ~/empire-repo or ~/empire-data upload trees.
+    """
     if not image_filename:
         return None
     safe = Path(image_filename).name
-    candidates = [
-        data_root() / "uploads" / "images" / safe,
-        data_root() / "uploads" / safe,
-        Path.home() / "empire-repo" / "backend" / "data" / "uploads" / "images" / safe,
-        Path.home() / "empire-repo" / "uploads" / "images" / safe,
-        Path.home() / "empire-repo" / "backend" / "data" / "uploads" / safe,
-    ]
+    roots = [data_root() / "uploads"]
+    candidates: list[Path] = []
+    for root in roots:
+        for cat in _UPLOAD_CATEGORIES:
+            candidates.append(root / cat / safe)
+        candidates.append(root / safe)
     return next((path for path in candidates if path.exists() and path.is_file()), None)
+
+
+def _image_upload_path(image_filename: str | None) -> Path | None:
+    """Backward-compatible alias — resolves any attachment category."""
+    return _attachment_upload_path(image_filename)
+
+
+def _attachment_looks_like_image(filename: str | None) -> bool:
+    if not filename:
+        return False
+    return Path(filename).suffix.lower() in _IMAGE_ATTACHMENT_EXTS
+
+
+def _unavailable_attachment_response(filename: str | None) -> tuple[str, str, str]:
+    """Return (message, model_used, skill_used) for a missing attachment."""
+    safe = Path(filename or "attachment").name
+    if _attachment_looks_like_image(filename):
+        return "IMAGE_NOT_AVAILABLE", "image-availability-check", "image_availability_check"
+    return (
+        f"I couldn't read that file ({safe}). It may be missing, empty, or in a format I can't parse yet.",
+        "attachment-availability-check",
+        "attachment_availability_check",
+    )
 
 
 def _explicit_no_drawing_router(message: str | None) -> bool:
@@ -2514,6 +2670,85 @@ async def _chat_with_max_service(
     _chat_start: Optional[float] = None,
     _response_id: str = "",
 ) -> ChatResponse:
+    """Journaling wrapper around the shared chat core (max-sessions 2026-10-04).
+
+    Every caller (/chat, Telegram in-process, avatar, WhatsApp) goes
+    through here, so every exchange — including early returns, refusals
+    and exceptions — lands in the session journal with the image copied.
+    Best-effort: journal failures never change the response.
+    """
+    from datetime import datetime as _jdt, timezone as _jtz
+    _j_start = _jdt.now(_jtz.utc)
+    _j_message = request.message
+    _j_image = request.image_filename
+    _j_raw_channel = request.channel
+    _j_conv = request.conversation_id
+    _j_channel = canonical_channel if canonical_channel in ("telegram", "whatsapp") else (_j_raw_channel or canonical_channel)
+    try:
+        resp = await _chat_with_max_service_impl(
+            request,
+            canonical_channel=canonical_channel,
+            canonical_chat_id=canonical_chat_id,
+            canonical_founder=canonical_founder,
+            background_tasks=background_tasks,
+            _chat_start=_chat_start,
+            _response_id=_response_id,
+        )
+    except Exception as _j_exc:
+        _journal_service_exchange(_j_conv, _j_channel, _j_message, _j_image, _j_start,
+                                  text=f"[error] {type(_j_exc).__name__}: {str(_j_exc)[:300]}",
+                                  tool_results=None, model=None, status="error",
+                                  raw_channel=_j_raw_channel, presentation=request.presentation)
+        raise
+    try:  # 2026-10-04: internal spec/doc files are never shown to Rafael as sources
+        from app.services.max.quick_replies import scrub_internal_sources
+        if isinstance(resp, dict) and isinstance(resp.get("response"), str):
+            resp["response"] = scrub_internal_sources(resp["response"])
+        elif isinstance(getattr(resp, "response", None), str):
+            resp.response = scrub_internal_sources(resp.response)
+    except Exception:
+        pass
+    _journal_service_exchange(
+        _j_conv, _j_channel, _j_message, _j_image, _j_start,
+        text=getattr(resp, "response", None) if not isinstance(resp, dict) else resp.get("response"),
+        tool_results=getattr(resp, "tool_results", None) if not isinstance(resp, dict) else resp.get("tool_results"),
+        model=getattr(resp, "model_used", None) if not isinstance(resp, dict) else resp.get("model_used"),
+        status="ok", raw_channel=_j_raw_channel, presentation=request.presentation,
+    )
+    return resp
+
+
+def _journal_service_exchange(conv_id, channel, message, image_filename, started_at, *, text, tool_results,
+                              model, status, raw_channel=None, presentation=False) -> None:
+    try:
+        from app.services.max.session_journal import record_exchange
+        record_exchange(
+            conversation_id=conv_id or f"studio-{uuid.uuid4().hex[:12]}",
+            channel=channel,
+            user_text=message,
+            assistant_text=text or "",
+            image_filename=image_filename,
+            tool_results=tool_results,
+            model=model,
+            started_at=started_at,
+            endpoint="/max/chat" if channel not in ("telegram", "whatsapp") else f"{channel}:in-process",
+            status=status,
+            user_metadata={"raw_channel": raw_channel, "presentation": bool(presentation)},
+        )
+    except Exception as exc:
+        logger.debug(f"[session_journal] /chat journal failed: {exc}")
+
+
+async def _chat_with_max_service_impl(
+    request: ChatRequest,
+    *,
+    canonical_channel: str,
+    canonical_chat_id: Optional[str],
+    canonical_founder: bool,
+    background_tasks: Optional[BackgroundTasks] = None,
+    _chat_start: Optional[float] = None,
+    _response_id: str = "",
+) -> ChatResponse:
     """D45 commit 2 — shared chat core for /chat (HTTP) and the Telegram
     in-process path.
 
@@ -2530,6 +2765,9 @@ async def _chat_with_max_service(
     # this body — which reads request.channel / request.chat_id
     # extensively — sees the declared channel, not the body field.
     import time as _time_mod
+    # Avatar and other in-process callers omit the timer. None crashes latency math.
+    if _chat_start is None:
+        _chat_start = _time_mod.time()
 
     # Option E (D45 commit 3): spoof-detection warning. The body
     # channel is dead weight under Option A; ANY caller claiming
@@ -2764,13 +3002,14 @@ async def _chat_with_max_service(
             metadata=_response_metadata(request.channel, skill_used="inventory_ambiguity_gate"),
         )
 
-    if request.image_filename and _image_upload_path(request.image_filename) is None:
+    if request.image_filename and _attachment_upload_path(request.image_filename) is None:
+        _unavail_msg, _unavail_model, _unavail_skill = _unavailable_attachment_response(request.image_filename)
         return ChatResponse(
-            response="IMAGE_NOT_AVAILABLE",
-            model_used="image-availability-check",
+            response=_unavail_msg,
+            model_used=_unavail_model,
             fallback_used=False,
             tool_results=[],
-            metadata=_response_metadata(request.channel, skill_used="image_availability_check"),
+            metadata=_response_metadata(request.channel, skill_used=_unavail_skill),
         )
 
     # Sprint 1d Phase A Fix #3 — clear any stale handoff state at the start
@@ -2856,6 +3095,8 @@ async def _chat_with_max_service(
             b1 = continuation_ctx["b1_product_type"]
             dims = _extract_dimensions(request.message, item_type=b1)
             translated = _translate_dims_for_b1_product(dims, b1)
+            from app.services.max.drawing_intent import enrich_b1_message_dims
+            translated = enrich_b1_message_dims(request.message, b1, translated)
             still_missing = _compute_missing_template_keys(translated, b1)
             handoff = _SN(
                 is_drawing_intent=True,
@@ -2967,6 +3208,9 @@ async def _chat_with_max_service(
         # Append channel-specific directives
         if request.channel == "telegram" and enriched_prompt:
             enriched_prompt += TELEGRAM_DIRECTIVE
+        if getattr(request, "presentation", False) and enriched_prompt:
+            from app.services.max.presentation_stage import PRESENTATION_DIRECTIVE
+            enriched_prompt += PRESENTATION_DIRECTIVE
         _freshness = freshness_directive(request.message)
         if _freshness:
             enriched_prompt = (enriched_prompt or "") + "\n\n" + _freshness
@@ -2992,6 +3236,8 @@ async def _chat_with_max_service(
         #     context) and H53 (if the block is empty, append NOTHING).
         _pre_search_executed = False
         _pre_search_entry = None
+        _research_page_entries: list[dict[str, Any]] = []
+        _research_read_urls: set[str] = set()
         _family_search_failed = False
         _finance_prefetch_entries: list[dict[str, Any]] = []
         if _is_local_finance_readiness_request(request.message):
@@ -3025,17 +3271,11 @@ async def _chat_with_max_service(
             _pre_search_entry = _normalize_tool_result_entry(search_result)
             _pre_search_executed = True
             if search_result.success and search_result.result:
-                tool_summary = (
-                    f"[web_search] Result:\n"
-                    f"{_safe_dumps(search_result.result, indent=2, default=str)[:4000]}"
+                _grounded = await _ground_search_payload(
+                    request.message, search_result.result, _research_read_urls,
                 )
-                messages.insert(-1, AIMessage(role="system", content=(
-                    "You must answer using only the verified web search data below. "
-                    "Do not fall back to training data. " + grounding_directive(request.message) + "\n\n"
-                    "Do not call web_read; answer directly from the verified search-result snippets. "
-                    "If the search returned no relevant results, say so honestly.\n\n"
-                    f"{tool_summary}\n\nQuestion: {request.message}"
-                )))
+                _research_page_entries = list(_grounded.get("tool_entries") or [])
+                messages.insert(-1, AIMessage(role="system", content=_grounded["message"]))
             elif _is_family_edition():
                 # Search first, then return the user-facing ChatResponse.response.
                 # Do not hand a .content stub to the model pipeline — the client
@@ -3084,6 +3324,7 @@ async def _chat_with_max_service(
         tool_results_list = list(_finance_prefetch_entries)
         if _pre_search_entry:
             tool_results_list.append(_pre_search_entry)
+        tool_results_list.extend(_research_page_entries)
         final_content = response.content
         loop_messages = list(messages)
         current_response = response
@@ -3180,12 +3421,18 @@ async def _chat_with_max_service(
                 _force_continue, _nudge_tools = should_force_founder_action_continuation(
                     request.message, tool_results_list, _asst_plain,
                 )
+                # Announced-action guard: "Let me pull up..." with no tool call is not an answer.
+                _announce_nudge = None
+                if (not _force_continue and _tool_round < 2
+                        and _founder_continuation_rounds < ANNOUNCED_ACTION_MAX_ROUNDS
+                        and announces_action_without_tool(_asst_plain)):
+                    _force_continue, _announce_nudge = True, announced_action_nudge(_asst_plain)
                 if _force_continue and _founder_continuation_rounds < FOUNDER_CONTINUATION_MAX_ROUNDS:
                     _founder_continuation_rounds += 1
                     loop_messages.append(AIMessage(role="assistant", content=_asst_plain))
                     loop_messages.append(AIMessage(
                         role="system",
-                        content=founder_continuation_system_nudge(_nudge_tools, _asst_plain),
+                        content=_announce_nudge or founder_continuation_system_nudge(_nudge_tools, _asst_plain),
                     ))
                     current_response = await ai_router.chat(
                         loop_messages, model=model, desk=request.desk,
@@ -3278,6 +3525,10 @@ async def _chat_with_max_service(
                 round_results.append(entry)
                 tool_results_list.append(entry)
 
+            research_entries = await _attach_research_page_reads(
+                request.message, round_results, tool_results_list, _research_read_urls,
+            )
+
             # D52 H80: round-aware halt. Round 0 is free — the model sees the
             # tool error and may self-correct (e.g., a typo'd column name).
             # Rounds 1 and 2 halt on any verification failure, so a db_query
@@ -3311,6 +3562,8 @@ async def _chat_with_max_service(
                     "Never use IDs from session handoff, active task state, or prior history."
                 )
 
+            if research_entries:
+                tool_summary += "\n\n" + grounding_directive(request.message)
             is_last_round = _tool_round >= 2
             followup_instruction = (
                 "Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks."
@@ -3338,12 +3591,7 @@ async def _chat_with_max_service(
                 )
                 _final_msgs = list(messages)
                 _final_msgs.append(AIMessage(role="system", content=(
-                    "The previous draft was incomplete or a tool failed. Do NOT call tools. "
-                    "Using only the successful verified context below, return the complete final "
-                    "answer now. Include numbered inline citations, a Sources list, and clearly "
-                    "label Verified facts versus Max's inference. Never mention tool errors. "
-                    "Every Phase heading must include concrete steps or deliverables, not only a Goal line.\n\n"
-                    + _verified_context
+                    COMPLETENESS_RECOVERY_INSTRUCTION + "\n\n" + _verified_context
                 )))
                 _final_resp = await ai_router.chat(
                     _final_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
@@ -3356,7 +3604,7 @@ async def _chat_with_max_service(
                     response.model_used = _final_resp.model_used
             except Exception as _final_err:
                 logger.warning(f"[chat] completeness recovery failed: {type(_final_err).__name__}: {_final_err}")
-            final_content = strip_empty_sections(final_content)
+            final_content = repair_reply_structure(final_content)
             if not final_content.strip():
                 _ok = [str(r.get("tool")) for r in tool_results_list if r.get("success")]
                 _bad = [f"{r.get('tool')} ({r.get('error')})" for r in tool_results_list if not r.get("success")]
@@ -3393,6 +3641,11 @@ async def _chat_with_max_service(
             final_content = qr.cleaned
 
         final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
+        try:
+            from app.services.max.search_sources import attach_family_search_sources
+            final_content = attach_family_search_sources(final_content, tool_results_list)
+        except Exception:
+            pass
 
         # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
         # D52 H80: receipt suppression. tools_used_names feeds the
@@ -3438,14 +3691,13 @@ async def _chat_with_max_service(
             # stands; the guard's purpose was to catch the hallucination, but
             # we cannot fix it with data we do not have.
             if search_result.success and search_result.result:
-                # Build grounding context and re-query AI with verified data
-                tool_summary = f"[web_search] Result:\n{_safe_dumps(search_result.result, indent=2, default=str)[:4000]}"
+                # Read the pages, then re-query from that text rather than snippets.
+                _fg_grounded = await _ground_search_payload(
+                    request.message, search_result.result, _research_read_urls,
+                )
+                tool_results_list.extend(_fg_grounded.get("tool_entries") or [])
                 grounded_messages = list(messages)
-                grounded_messages.append(AIMessage(role="system", content=(
-                    "You must answer using only the verified web search data below. "
-                    "Do not fall back to training data. Cite sources from the search results.\n\n"
-                    f"{tool_summary}\n\nQuestion: {request.message}"
-                )))
+                grounded_messages.append(AIMessage(role="system", content=_fg_grounded["message"]))
                 grounded_response = await ai_router.chat(
                     grounded_messages, model=model, desk=request.desk,
                     system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools
@@ -3536,7 +3788,7 @@ async def _chat_with_max_service(
         if _nc not in ("telegram", "phone"):
             try:
                 import datetime as _dt
-                _nc_user_dir = _ROUTER_CHATS_DIR / "founder"
+                _nc_user_dir = _router_chats_dir() / "founder"
                 _nc_user_dir.mkdir(exist_ok=True)
                 _nc_chat_id = conv_id[:8]
                 _nc_chat_file = _nc_user_dir / f"{_nc_chat_id}.json"
@@ -3750,7 +4002,28 @@ async def _chat_with_max_service(
 
 @router.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
-    """SSE streaming endpoint for MAX chat with brain context."""
+    """SSE streaming endpoint for MAX chat with brain context.
+
+    max-sessions 2026-10-04: every response path (including guardrail
+    refusals and early returns) is wrapped so the exchange is journaled
+    with what the founder actually saw, the tool summaries and a copy of
+    any attached image. The stream itself is passed through unchanged.
+    """
+    from datetime import datetime as _jdt, timezone as _jtz
+    _j_start = _jdt.now(_jtz.utc)
+    _j_req = request.model_copy() if hasattr(request, "model_copy") else request.copy()
+    resp = await _chat_stream_impl(request)
+    try:
+        if isinstance(resp, StreamingResponse):
+            from app.services.max.session_journal import journal_stream
+            resp.body_iterator = journal_stream(resp.body_iterator, request=_j_req, started_at=_j_start)
+    except Exception as exc:
+        logger.debug(f"[session_journal] stream wrap failed: {exc}")
+    return resp
+
+
+async def _chat_stream_impl(request: ChatRequest):
+    """SSE streaming endpoint body (see chat_stream)."""
     msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
     founder = is_founder_message(msg_ctx)
     if founder:
@@ -3831,10 +4104,11 @@ async def chat_stream(request: ChatRequest):
 
         return StreamingResponse(clarification_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    if request.image_filename and _image_upload_path(request.image_filename) is None:
+    if request.image_filename and _attachment_upload_path(request.image_filename) is None:
+        _unavail_msg, _unavail_model, _unavail_skill = _unavailable_attachment_response(request.image_filename)
         async def image_unavailable_gen():
-            yield f"data: {_safe_dumps({'type': 'text', 'content': 'IMAGE_NOT_AVAILABLE'})}\n\n"
-            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'image-availability-check', 'metadata': _response_metadata(request.channel, skill_used='image_availability_check')})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'text', 'content': _unavail_msg})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': _unavail_model, 'metadata': _response_metadata(request.channel, skill_used=_unavail_skill)})}\n\n"
         return StreamingResponse(image_unavailable_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     # H57 FIX M-bM-^@M-^T stream door: also release pending on non-continuation
@@ -3891,6 +4165,8 @@ async def chat_stream(request: ChatRequest):
             b1 = continuation_ctx["b1_product_type"]
             dims = _extract_dimensions(request.message, item_type=b1)
             translated = _translate_dims_for_b1_product(dims, b1)
+            from app.services.max.drawing_intent import enrich_b1_message_dims
+            translated = enrich_b1_message_dims(request.message, b1, translated)
             still_missing = _compute_missing_template_keys(translated, b1)
             handoff = _SN(
                 is_drawing_intent=True,
@@ -4067,6 +4343,8 @@ async def chat_stream(request: ChatRequest):
         full_response = ""
         # Guard: Pre-execute web_search for performative search requests before streaming
         _stream_pre_search_entry = None
+        _stream_page_entries: list[dict[str, Any]] = []
+        _stream_read_urls: set[str] = set()
         _stream_finance_entries = []
         if _is_local_finance_readiness_request(request.message):
             yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'finance', 'message': 'Loading finance counts and dollar totals'})}\n\n"
@@ -4098,17 +4376,11 @@ async def chat_stream(request: ChatRequest):
             # structurally identical to the H53 replay block. Append on
             # role="system"; suppress the empty-result branch entirely.
             if search_result.success and search_result.result:
-                tool_summary = (
-                    f"[web_search] Result:\n"
-                    f"{_safe_dumps(search_result.result, indent=2, default=str)[:4000]}"
+                _stream_grounded = await _ground_search_payload(
+                    request.message, search_result.result, _stream_read_urls,
                 )
-                messages.insert(-1, AIMessage(role="system", content=(
-                    "You must answer using only the verified web search data below. "
-                    "Do not fall back to training data. " + grounding_directive(request.message) + "\n\n"
-                    "Do not call web_read; answer directly from the verified search-result snippets. "
-                    "If the search returned no relevant results, say so honestly.\n\n"
-                    f"{tool_summary}\n\nQuestion: {request.message}"
-                )))
+                _stream_page_entries = list(_stream_grounded.get("tool_entries") or [])
+                messages.insert(-1, AIMessage(role="system", content=_stream_grounded["message"]))
             elif _is_family_edition():
                 # Search first, then a short Spanish failure — never "no tengo información".
                 _fail = search_unavailable_reply()
@@ -4141,6 +4413,7 @@ async def chat_stream(request: ChatRequest):
             tool_results_list = list(_stream_finance_entries)
             if _stream_pre_search_entry:
                 tool_results_list.append(_stream_pre_search_entry)
+            tool_results_list.extend(_stream_page_entries)
             loop_messages = list(messages)
             current_text = full_response
             _seen_send_tool_calls: set[str] = set()
@@ -4189,12 +4462,18 @@ async def chat_stream(request: ChatRequest):
                     _force_continue, _nudge_tools = should_force_founder_action_continuation(
                         request.message, tool_results_list, _asst_plain,
                     )
+                    # Announced-action guard (see non-streaming path).
+                    _announce_nudge = None
+                    if (not _force_continue and _tool_round < 2
+                            and _founder_continuation_rounds < ANNOUNCED_ACTION_MAX_ROUNDS
+                            and announces_action_without_tool(_asst_plain)):
+                        _force_continue, _announce_nudge = True, announced_action_nudge(_asst_plain)
                     if _force_continue and _founder_continuation_rounds < FOUNDER_CONTINUATION_MAX_ROUNDS:
                         _founder_continuation_rounds += 1
                         loop_messages.append(AIMessage(role="assistant", content=_asst_plain))
                         loop_messages.append(AIMessage(
                             role="system",
-                            content=founder_continuation_system_nudge(_nudge_tools, _asst_plain),
+                            content=_announce_nudge or founder_continuation_system_nudge(_nudge_tools, _asst_plain),
                         ))
                         followup_text = ""
                         _action_followup_iter = ai_router.chat_stream(
@@ -4306,8 +4585,28 @@ async def chat_stream(request: ChatRequest):
                     progress_line = format_tool_progress_message(entry)
                     _stream_step_lines.append(progress_line)
                     yield f"data: {_safe_dumps(_tool_progress_event(entry))}\n\n"
+                    from app.services.max.restricted_tool_resume import (
+                        needs_founder_pin_card,
+                        stash_restricted_call,
+                    )
+                    if needs_founder_pin_card(str(entry.get("error") or "")):
+                        resume_id = stash_restricted_call(
+                            tool_call=tc,
+                            desk=request.desk,
+                            founder=founder,
+                            channel=request.channel,
+                        )
+                        yield f"data: {_safe_dumps({'type': 'pin_required', 'resume_id': resume_id, 'tool': entry.get('tool') or tc.get('tool') or 'tool'})}\n\n"
                     if entry.get("success"):
                         yield f"data: {_safe_dumps({'type': 'tool_result', **entry})}\n\n"
+
+                stream_research_entries = await _attach_research_page_reads(
+                    request.message, round_results, tool_results_list, _stream_read_urls,
+                )
+                if stream_research_entries:
+                    yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'research', 'message': f'Read {len(stream_research_entries)} source pages'})}\n\n"
+                    for research_entry in stream_research_entries:
+                        yield f"data: {_safe_dumps({'type': 'tool_result', **research_entry})}\n\n"
 
                 # D52 H80: same round-aware halt as the chat path above.
                 if _tool_round >= 1 and should_halt_after_tool_failure(round_results, user_message=request.message):
@@ -4322,7 +4621,9 @@ async def chat_stream(request: ChatRequest):
                     tool_res = _r.get("result", "")
                     tool_err = _r.get("error", "Unknown")
                     if _r.get("success") and tool_res:
-                        tool_summary_parts.append(f"[{tool_key}] Result:\n{_safe_dumps(tool_res, indent=2, default=str)[:3000]}")
+                        # web_read carries the page text the answer has to cite.
+                        _limit = 5000 if tool_key == "web_read" else 3000
+                        tool_summary_parts.append(f"[{tool_key}] Result:\n{_safe_dumps(tool_res, indent=2, default=str)[:_limit]}")
                     else:
                         tool_summary_parts.append(f"[{tool_key}] Error: {tool_err}")
                 tool_summary = "\n\n".join(tool_summary_parts)
@@ -4338,6 +4639,8 @@ async def chat_stream(request: ChatRequest):
                         "Never use IDs from session handoff, active task state, or prior history."
                     )
 
+                if stream_research_entries:
+                    tool_summary += "\n\n" + grounding_directive(request.message)
                 is_last_round = _tool_round >= 2
                 followup_instruction = (
                     "Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks."
@@ -4383,28 +4686,24 @@ async def chat_stream(request: ChatRequest):
                     )
                     _complete_msgs = list(messages)
                     _complete_msgs.append(AIMessage(role="system", content=(
-                        "The streamed draft was incomplete or a tool failed. Do NOT call tools; "
-                        "using only the successful verified context below, return the complete "
-                        "answer with citations, Sources, and Verified versus Max's inference. "
-                        "Every Phase heading must include concrete steps or deliverables, not only a Goal line. "
-                        "Never mention tool errors.\n\n" + _verified_context
+                        COMPLETENESS_RECOVERY_INSTRUCTION + "\n\n" + _verified_context
                     )))
                     _complete_resp = await ai_router.chat(
                         _complete_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
                         conversation_id=request.conversation_id or "",
                     )
-                    _replacement = strip_empty_sections(strip_tool_blocks(_complete_resp.content or ""))
+                    _replacement = repair_reply_structure(strip_tool_blocks(_complete_resp.content or ""))
                     if _replacement:
                         full_response = _replacement
                     if getattr(_complete_resp, "model_used", None):
                         model_used = _complete_resp.model_used
                 except Exception as _complete_err:
                     logger.warning("[stream] completeness recovery failed: %s", _complete_err)
-            full_response = strip_empty_sections(full_response)
+            full_response = repair_reply_structure(full_response)
             truth_checked_response = _apply_truth_guardrails(request.message, full_response, tool_results_list)
             if truth_checked_response != full_response:
                 full_response = truth_checked_response
-            full_response = strip_empty_sections(strip_tool_blocks(_sanitize_internal_leakage_text(full_response)))
+            full_response = repair_reply_structure(strip_tool_blocks(_sanitize_internal_leakage_text(full_response)))
 
             # Save assistant response to unified cross-channel store
             try:
@@ -4491,6 +4790,11 @@ async def chat_stream(request: ChatRequest):
                 full_response = _gpu_guard_resp
                 yield f"data: {_safe_dumps({'type': 'gpu_safety_replace', 'replacement': full_response})}\n\n"
             full_response = _sanitize_internal_leakage_text(full_response)
+            try:
+                from app.services.max.search_sources import attach_family_search_sources
+                full_response = attach_family_search_sources(full_response, tool_results_list)
+            except Exception:
+                pass
 
             # Emit grounding events (after quality engine so all fixes are sequential)
             for _ge in _grounding_events:
@@ -4539,7 +4843,7 @@ async def chat_stream(request: ChatRequest):
             if _save_channel not in ("telegram", "phone"):
                 try:
                     import datetime as _dt
-                    _chat_user_dir = _ROUTER_CHATS_DIR / "founder"
+                    _chat_user_dir = _router_chats_dir() / "founder"
                     _chat_user_dir.mkdir(exist_ok=True)
                     _chat_id_short = conv_id[:8]
                     _chat_file = _chat_user_dir / f"{_chat_id_short}.json"
@@ -4610,6 +4914,11 @@ async def chat_stream(request: ChatRequest):
             full_response, _stream_step_lines, _ = finalize_founder_action_reply(
                 request.message, tool_results_list, full_response,
             )
+            try:  # 2026-10-04: no internal spec/doc files as sources
+                from app.services.max.quick_replies import scrub_internal_sources
+                full_response = scrub_internal_sources(full_response)
+            except Exception:
+                pass
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
             conversation_tracker.add_message(conv_id, "assistant", full_response)
@@ -5056,7 +5365,7 @@ async def security_stats():
     """Get security layer stats — blocked inputs, rate limits, audit counts."""
     stats = input_sanitizer.get_stats()
     # Count audit log entries
-    audit_path = Path.home() / "empire-repo" / "backend" / "data" / "security" / "audit_log.jsonl"
+    audit_path = security_audit_dir() / "audit_log.jsonl"
     audit_count = 0
     if audit_path.exists():
         with open(audit_path) as f:
@@ -5068,7 +5377,7 @@ async def security_stats():
 @router.get("/security/audit")
 async def security_audit(limit: int = 50):
     """Get recent security audit log entries."""
-    audit_path = Path.home() / "empire-repo" / "backend" / "data" / "security" / "audit_log.jsonl"
+    audit_path = security_audit_dir() / "audit_log.jsonl"
     if not audit_path.exists():
         return {"entries": [], "total": 0}
     entries = []
@@ -5837,7 +6146,7 @@ async def get_desk_daily_report():
 async def get_quality_metrics():
     """Get quality gate metrics for today."""
     import sqlite3
-    db_path = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
+    db_path = resolve_task_db_path()
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -5986,6 +6295,8 @@ async def verify_pin(request: VerifyPinRequest):
     """Verify founder PIN without performing any action. Used by Code Mode toggle."""
     import os
     # H62 FIX (2026-08-22): empty default — pre-fix this was "7777" (privilege-escalation literal). HOTFIX 4.2 only fixed tool_executor.py.
+    from app.services.max.restricted_tool_resume import founder_pin_matches
+
     founder_pin = os.getenv("FOUNDER_PIN", "")
     if not founder_pin:
         logger.critical(
@@ -5993,8 +6304,34 @@ async def verify_pin(request: VerifyPinRequest):
             "operator configures the systemd drop-in. Pre-fix this silently "
             "defaulted to a privilege-escalation literal. (H62 FIX, 2026-08-22)"
         )
-    if not founder_pin or str(request.pin) != founder_pin:
+    if not founder_pin_matches(request.pin):
         raise HTTPException(status_code=403, detail="Invalid PIN")
+
+
+class ResumeRestrictedRequest(BaseModel):
+    resume_id: str
+    pin: str
+
+
+@router.post("/resume-restricted-tool")
+async def resume_restricted_tool(body: ResumeRestrictedRequest):
+    """Re-run a PIN-gated tool after the Chat PIN card verified the PIN.
+
+    The PIN is read from this body only. It is not stored on the chat
+    message and is not written to logs.
+    """
+    from app.services.max.restricted_tool_resume import resume_restricted_tool as _resume
+
+    outcome = _resume(body.resume_id, body.pin)
+    status = outcome.get("status")
+    if status == "invalid_pin":
+        raise HTTPException(status_code=403, detail="Invalid PIN")
+    if status == "missing":
+        raise HTTPException(
+            status_code=404,
+            detail="That approval expired. Ask Max to run the tool again.",
+        )
+    return outcome
 
 
 # ── TTS (Text-to-Speech) ─────────────────────────────────────────────
@@ -6644,3 +6981,10 @@ async def get_memory_status_endpoint():
     """
     from app.services.max.control_plane import get_memory_status
     return get_memory_status()
+
+
+# max-sessions 2026-10-04 — session log + daily export endpoints
+# (/max/sessions, /max/sessions/{id}, /max/sessions/attachment/{sha},
+#  POST /max/sessions/export?date=YYYY-MM-DD). See app/routers/max/sessions.py.
+from app.routers.max.sessions import router as _sessions_router  # noqa: E402
+router.include_router(_sessions_router)

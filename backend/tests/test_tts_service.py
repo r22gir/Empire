@@ -271,3 +271,40 @@ def test_get_status_surfaces_both_providers(monkeypatch):
     assert "voice" in status["providers"]["minimax"]
     assert "model" in status["providers"]["minimax"]
     assert status["providers"]["xai"]["voice"] == "rex"
+
+
+def test_whatsapp_voice_is_ogg_opus(tmp_path, monkeypatch):
+    """Existing TTS audio is re-encoded to OGG/Opus for WhatsApp voice notes."""
+    import wave
+
+    import app.services.max.tts_service as tts_mod
+
+    wav = tmp_path / "speech.wav"
+    with wave.open(str(wav), "w") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16000)
+        handle.writeframes(b"\x00\x00" * 1600)
+
+    ogg = tts_mod.encode_ogg_opus(wav)
+    assert ogg is not None
+    assert ogg.read_bytes().startswith(b"OggS")
+    probe = __import__("subprocess").run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(ogg)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert probe.stdout.strip() == "opus"
+
+    svc = tts_mod.TTSService()
+
+    async def _fake_synthesize(text, voice=None, output_format="mp3"):
+        assert "banquette" in text
+        return wav
+
+    monkeypatch.setattr(svc, "synthesize", _fake_synthesize)
+    rendered = asyncio.run(svc.synthesize_for_whatsapp("banquette quote, not sent"))
+    assert rendered is not None
+    assert rendered.read_bytes().startswith(b"OggS")
+    rendered.unlink(missing_ok=True)

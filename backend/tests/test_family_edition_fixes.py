@@ -82,6 +82,16 @@ def test_presentation_layout_keeps_a_square_uncropped_face():
     assert "viewportFit: 'cover'" in layout
 
 
+def test_amp_unit_uses_empire_amp_not_workroom_checkout():
+    text = (ROOT / "deploy" / "empire-amp.service").read_text(encoding="utf-8")
+    assert "WorkingDirectory=/home/rg/empire-amp/backend" in text
+    assert "ExecStart=/home/rg/empire-amp/backend/venv/bin/python3" in text
+    assert "WorkingDirectory=/home/rg/empire-repo" not in text
+    assert "ExecStart=/home/rg/empire-repo" not in text
+    assert "127.0.0.1 --port 8011" in text
+    assert "EnvironmentFile=/home/rg/empire-amp.env" in text
+
+
 def test_maxine_unit_uses_its_tree_lock_and_secondary_worker():
     text = (ROOT / "deploy" / "empire-maxine.service").read_text(encoding="utf-8")
     assert "WorkingDirectory=/home/rg/empire-maxine/backend" in text

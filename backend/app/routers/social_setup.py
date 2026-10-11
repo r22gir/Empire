@@ -17,15 +17,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import httpx
+from app.db.database import resolve_task_db_path
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["social-setup"])
 
-DB_PATH = os.getenv(
-    "EMPIRE_TASK_DB",
-    str(Path.home() / "empire-data" / "empire.db"),
-)
+DB_PATH = resolve_task_db_path()
 ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 GRAPH_API = "https://graph.facebook.com/v21.0"
 
@@ -207,17 +205,38 @@ def _init_tables():
 
         conn.commit()
 
-        # Seed business profiles if empty. Family editions skip Workroom /
-        # WoodCraft rows so 5124 Frolich never lands in their DB.
+        # Seed business profiles if empty. Family editions (Maxine / Max-e)
+        # seed their own businesses, never the Workroom / WoodCraft rows
+        # (5124 Frolich must never land in their DB).
         existing = conn.execute("SELECT COUNT(*) FROM business_profiles").fetchone()[0]
+        family = False
         try:
             from app.edition import is_family_edition
-
-            if is_family_edition():
-                existing = max(existing, 1)
+            family = is_family_edition()
         except Exception:
-            pass
-        if existing == 0:
+            family = False
+        family_seed = None
+        if family:
+            try:
+                from app.services.leadforge.trade_profile import trade_profile
+
+                _prof = trade_profile()
+                if _prof:
+                    family_seed = _prof["social"].get("business_profiles") or []
+            except Exception:
+                family_seed = None
+            if family_seed:
+                for bp in family_seed:
+                    conn.execute(
+                        """INSERT OR IGNORE INTO business_profiles
+                               (business_key, business_name, tagline, bio_short, category, city, state)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (bp["business_key"], bp["business_name"], bp.get("tagline"), bp.get("bio_short"),
+                         bp.get("category"), bp.get("city"), bp.get("state")),
+                    )
+                conn.commit()
+            # Family editions never fall through to the Workroom seed below.
+        elif existing == 0:
             conn.execute("""
                 INSERT INTO business_profiles
                     (business_key, business_name, tagline, bio_short, category, email, phone, address, city, state, zip, website, social_handles)
@@ -267,13 +286,39 @@ def get_publish_credentials(business_key: str, platform: str) -> dict | None:
         if not row:
             return None
         d = _dict(row)
-        if not d.get("access_token"):
+        token = d.get("access_token") or ""
+        if not token:
             return None
-        # Normalize to common keys used by publish logic
+        if token.startswith("vault:"):
+            from app.services.accounts.vault import VaultNotConfigured, open_secret, require_vault
+            try:
+                opened = open_secret(conn, require_vault(), token.split(":", 1)[1])
+            except VaultNotConfigured:
+                return None
+            if not opened:
+                return None
+            try:
+                payload = json.loads(opened)
+                token = payload.get("access_token", opened) if isinstance(payload, dict) else opened
+            except json.JSONDecodeError:
+                token = opened
+        else:
+            from app.services.accounts.vault import VaultNotConfigured, put_secret, require_vault
+            try:
+                vault = require_vault()
+                secret_id = f"social:{business_key}:{platform}"
+                put_secret(conn, vault, secret_id, token)
+                conn.execute(
+                    "UPDATE social_accounts SET access_token = ? WHERE business_unit = ? AND platform = ?",
+                    (f"vault:{secret_id}", business_key, platform),
+                )
+                conn.commit()
+            except VaultNotConfigured:
+                pass
         return {
-            "token": d["access_token"],
+            "token": token,
             "account_id": d.get("account_id", ""),
-            "page_id": d.get("account_id", ""),  # for FB, account_id stores the page_id
+            "page_id": d.get("account_id", ""),
             "account_name": d.get("account_name", ""),
         }
     finally:
@@ -587,6 +632,24 @@ def _upsert_social_account(conn: sqlite3.Connection, business_key: str, platform
         mapped["account_id"] = mapped.pop("page_id")
     elif "page_id" in mapped:
         mapped.pop("page_id")  # instagram stores its own account_id separately
+
+    if mapped.get("access_token") and not str(mapped["access_token"]).startswith("vault:"):
+        from app.services.accounts.vault import VaultNotConfigured, put_secret, require_vault
+        secret_id = f"social:{business_key}:{platform}"
+        try:
+            put_secret(conn, require_vault(), secret_id, str(mapped["access_token"]))
+        except VaultNotConfigured:
+            raise
+        mapped["access_token"] = f"vault:{secret_id}"
+        try:
+            from app.services.accounts.store import connect as hub_connect, mark_connected
+            hub = hub_connect()
+            try:
+                mark_connected(hub, business_key, platform, secret_id)
+            finally:
+                hub.close()
+        except Exception:
+            pass
 
     existing = conn.execute(
         "SELECT id FROM social_accounts WHERE business_unit = ? AND platform = ?",
@@ -967,9 +1030,17 @@ async def socialforge_status():
     conn = _get_conn()
     try:
         # All social accounts
-        accounts = _dicts(conn.execute(
+        rows = conn.execute(
             "SELECT * FROM social_accounts ORDER BY business_unit, platform"
-        ).fetchall())
+        ).fetchall()
+        from app.services.accounts.vault import redact_account
+        accounts = []
+        for row in rows:
+            account = _dict(row)
+            has_secret = bool(account.get("access_token"))
+            public = redact_account(account)
+            public["has_credentials"] = has_secret
+            accounts.append(public)
 
         # Recent publish results
         results = _dicts(conn.execute(
@@ -993,11 +1064,11 @@ async def socialforge_status():
                 "connected": len(connected),
                 "platforms": {a["platform"]: a.get("status", "unknown") for a in bk_accounts},
                 "can_publish_facebook": any(
-                    a["platform"] == "facebook" and a.get("status") in ("connected", "active") and a.get("access_token")
+                    a["platform"] == "facebook" and a.get("status") in ("connected", "active") and a.get("has_credentials")
                     for a in bk_accounts
                 ),
                 "can_publish_instagram": any(
-                    a["platform"] == "instagram" and a.get("status") in ("connected", "active") and a.get("access_token")
+                    a["platform"] == "instagram" and a.get("status") in ("connected", "active") and a.get("has_credentials")
                     for a in bk_accounts
                 ),
             }

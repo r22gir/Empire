@@ -33,8 +33,35 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("max.security.sanitizer")
 
+# Workroom checkout path. Tests may monkeypatch this. Never mkdir at import —
+# family editions and EMPIRE_DATA_DIR must not touch ~/empire-repo.
 AUDIT_DIR = Path.home() / "empire-repo" / "backend" / "data" / "security"
-AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def audit_dir() -> Path:
+    """Security audit directory for this instance.
+
+    Family editions write under EMPIRE_DATA_DIR/security. Tests that set
+    EMPIRE_DATA_DIR also land there. Workroom without EMPIRE_DATA_DIR keeps
+    the historical ~/empire-repo path. Directory is created on first use.
+    """
+    try:
+        from app.edition import is_family_edition, require_data_root
+
+        if is_family_edition():
+            path = require_data_root() / "security"
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+    except Exception:
+        pass
+    env = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    if env:
+        path = Path(env).expanduser() / "security"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    path = Path(AUDIT_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 # ── Injection Patterns ───────────────────────────────────────────────────
@@ -276,7 +303,7 @@ class InputSanitizer:
         )
 
         try:
-            log_path = AUDIT_DIR / "audit_log.jsonl"
+            log_path = audit_dir() / "audit_log.jsonl"
             with open(log_path, "a") as f:
                 f.write(json.dumps(entry) + "\n")
         except Exception as e:

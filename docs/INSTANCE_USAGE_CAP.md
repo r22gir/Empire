@@ -47,6 +47,10 @@ Simli avatar sessions write into the same table (`provider=simli`, `model=simli-
 
 A request is heavy when it is a desk job, a tool call, an image, a generation (`source=generate`), or the user text is longer than `INSTANCE_SHORT_REPLY_CHARS` (default 400). Anything shorter, with none of those, is a short reply.
 
+## Fail-open
+
+The cap is enforced when the checker runs. If the checker itself raises (missing usage DB, parse error, import failure), `_family_chat_prep` logs a **warning** (`usage cap check failed open; chat proceeds without a cap refusal`) and the chat continues. The outage does not fail closed. Short chats still count when the checker works; a broken checker must not silence Max-e.
+
 ## Model
 
 Family editions force the selector to MiniMax, model `MiniMax-M3` (`MINIMAX_MODEL` overrides the model id only). Fallback to other providers is off for that process.

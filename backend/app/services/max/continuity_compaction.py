@@ -110,7 +110,8 @@ def _task_db_path() -> Path:
 
 
 def _active_task_state() -> dict[str, Any]:
-    db_path = str(_task_db_path())
+    from app.db.database import resolve_task_db_path
+    db_path = resolve_task_db_path()
     try:
         import sqlite3
         with sqlite3.connect(db_path) as conn:

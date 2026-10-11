@@ -148,13 +148,21 @@ const STATUS_CONFIG = {
   planned: { label: 'Planned', color: '#6b7280', bg: '#f3f4f6' },
 };
 
+const IS_FAMILY_EDITION = ['amp', 'maxine'].includes(
+  String(process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').trim().toLowerCase(),
+);
+
 export default function EcosystemProductPage({
   productId,
   productName,
   productColor,
   productIcon,
 }: EcosystemProductPageProps) {
-  const product = PRODUCT_MAP[productId];
+  const rawProduct = PRODUCT_MAP[productId];
+  // Family editions (AMP / Maxine) do not show Empire API endpoints or ports.
+  const product = rawProduct && IS_FAMILY_EDITION
+    ? { ...rawProduct, endpoints: undefined, port: undefined }
+    : rawProduct;
   const info = product || {
     name: productName,
     description: 'No additional information available for this product.',

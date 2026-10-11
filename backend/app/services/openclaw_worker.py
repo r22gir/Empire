@@ -21,10 +21,11 @@ from typing import Any
 
 import httpx
 from app.services.max.openclaw_gate import check_openclaw_gate, write_openclaw_worker_heartbeat
+from app.db.database import resolve_task_db_path
 
 log = logging.getLogger("openclaw_worker")
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
+DB_PATH = resolve_task_db_path()
 OPENCLAW_URL = "http://localhost:7878"
 OPENCLAW_TIMEOUT = 300  # 5 min per task
 CODE_TASK_TIMEOUT = int(os.getenv("OPENCLAW_CODE_TASK_TIMEOUT", str(OPENCLAW_TIMEOUT)))

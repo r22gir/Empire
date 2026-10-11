@@ -6,6 +6,7 @@ import {
   Loader2, Crown, TrendingUp, UserPlus, DollarSign, Activity, BookOpen, CreditCard,
 } from 'lucide-react';
 import { API } from '../../lib/api';
+import { isFamilyEdition } from '../../lib/edition';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
 
@@ -89,7 +90,7 @@ export default function ForgeCRMPage() {
       case 'customers':
         return (
           <Suspense fallback={<Loading />}>
-            <CustomerList onSelectCustomer={(id) => setSelectedCustomerId(id)} business="woodcraft" />
+            <CustomerList onSelectCustomer={(id) => setSelectedCustomerId(id)} business={isFamilyEdition() ? undefined : 'woodcraft'} />
           </Suspense>
         );
 
@@ -306,10 +307,10 @@ export default function ForgeCRMPage() {
   };
 
   return (
-    <div className="flex-1 flex overflow-hidden">
+    <div className="cy-module flex-1 flex overflow-hidden">
       {/* Sidebar */}
       <div
-        className="border-r border-[var(--border)] bg-[var(--panel)] shrink-0 overflow-y-auto"
+        className="cy-module-nav border-r border-[var(--border)] bg-[var(--panel)] shrink-0 overflow-y-auto"
         style={{ width: 210, padding: '16px 10px' }}
       >
         <div className="flex items-center gap-2 px-2 mb-4">
@@ -342,7 +343,7 @@ export default function ForgeCRMPage() {
         })}
 
         {/* Quick Stats */}
-        <div style={{ marginTop: 20, padding: '12px', borderRadius: 10, background: '#fdf8e8', border: '1px solid #fde68a' }}>
+        <div className="cy-module-aside" style={{ marginTop: 20, padding: '12px', borderRadius: 10, background: '#fdf8e8', border: '1px solid #fde68a' }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
             Quick Stats
           </div>
@@ -364,7 +365,7 @@ export default function ForgeCRMPage() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: '24px 36px' }}>
+      <div className="cy-module-main flex-1 overflow-y-auto" style={{ padding: '24px 36px' }}>
         {renderSection()}
       </div>
     </div>

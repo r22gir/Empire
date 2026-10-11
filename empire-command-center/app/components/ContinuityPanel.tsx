@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { API } from '../lib/api';
+import { isFamilyEdition } from '../lib/edition';
 
 type Tone = 'ok' | 'warn' | 'bad' | 'neutral';
 
@@ -39,7 +40,13 @@ interface ContinuityPanelProps {
   onOpenContinuity?: () => void;
 }
 
-export default function ContinuityPanel({ mode = 'full', onOpenContinuity }: ContinuityPanelProps) {
+/** Family editions (Maxine, Max-e) never show Empire continuity / OpenClaw internals. */
+export default function ContinuityPanel(props: ContinuityPanelProps) {
+  if (isFamilyEdition()) return null;
+  return <ContinuityPanelInner {...props} />;
+}
+
+function ContinuityPanelInner({ mode = 'full', onOpenContinuity }: ContinuityPanelProps) {
   const [status, setStatus] = useState<any>(null);
   const [audit, setAudit] = useState<any>(null);
   const [openclawHealth, setOpenclawHealth] = useState<any>(null);
@@ -83,8 +90,10 @@ export default function ContinuityPanel({ mode = 'full', onOpenContinuity }: Con
     setLastCheckedAt(checkedAtLabel());
   };
 
+  // Status only on mount. The continuity audit is a real Max chat turn (it is journaled),
+  // so it runs only when the user taps "Run Continuity Audit", never on page load.
   useEffect(() => {
-    load().catch(() => {});
+    load(false).catch(() => {});
   }, []);
 
   const auditResult = audit?.tool_results?.[0]?.result || {};

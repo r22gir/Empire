@@ -139,13 +139,32 @@ def _auto_save_exchange_to_memory(
 
 # ── Per-chat conversation history — persisted to disk ──
 _MAX_HISTORY = 30  # Keep last 30 exchanges per chat (was 10)
+# Legacy Workroom path only. Family editions never mkdir this at import.
 _TELEGRAM_CHAT_DIR = Path.home() / "empire-repo" / "backend" / "data" / "chats" / "telegram"
-_TELEGRAM_CHAT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _telegram_chat_dir() -> Path:
+    try:
+        from app.edition import is_family_edition, require_data_root
+        if is_family_edition():
+            path = require_data_root() / "chats" / "telegram"
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+    except Exception:
+        pass
+    env = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
+    if env:
+        path = Path(env).expanduser() / "chats" / "telegram"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    path = Path(_TELEGRAM_CHAT_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _load_telegram_history(chat_id: str) -> list[dict]:
     """Load conversation history from disk for a chat."""
-    path = _TELEGRAM_CHAT_DIR / f"{chat_id}.json"
+    path = _telegram_chat_dir() / f"{chat_id}.json"
     if path.exists():
         try:
             data = _json.loads(path.read_text())
@@ -157,7 +176,7 @@ def _load_telegram_history(chat_id: str) -> list[dict]:
 
 def _save_telegram_history(chat_id: str, messages: list[dict]):
     """Persist conversation history to disk."""
-    path = _TELEGRAM_CHAT_DIR / f"{chat_id}.json"
+    path = _telegram_chat_dir() / f"{chat_id}.json"
     try:
         data = {"chat_id": chat_id, "updated_at": __import__('datetime').datetime.utcnow().isoformat(), "messages": messages}
         path.write_text(_json.dumps(data, indent=2, default=str))
@@ -253,6 +272,8 @@ class TelegramBot:
             logger.warning("Telegram not configured, message not sent")
             return False
         target_chat = chat_id or self.founder_chat_id
+        from app.services.max.telegram_text import sanitize_telegram_text
+        text = sanitize_telegram_text(text)
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 payload: Dict[str, Any] = {"chat_id": target_chat, "text": text, "parse_mode": parse_mode}
@@ -1052,18 +1073,22 @@ class TelegramBot:
 
             await update.message.reply_html(f"📝 <b>Transcript:</b>\n<i>{transcript}</i>")
 
+            voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
             try:
-                from app.services.voice_doc import format_session_reply, ingest_transcript
-
-                view = ingest_transcript(transcript, channel="telegram")
-                if view.get("handled") or view.get("draft"):
-                    await update.message.reply_text(format_session_reply(view))
-                    return
+                from app.services.voice_documents.pipeline import ingest_telegram_voice_transcript
+                draft = ingest_telegram_voice_transcript(transcript, voice_chat_id or "")
             except Exception as draft_err:
-                logger.warning(f"Voice draft pipeline skipped: {draft_err}")
+                logger.warning("voice document pipeline skipped: %s", draft_err)
+                draft = {"handled": False}
+            if draft.get("handled"):
+                reply = (draft.get("reply_text") or "Draft updated. Not sent.")[:4000]
+                await update.message.reply_text(reply)
+                _auto_save_exchange_to_memory(
+                    transcript, reply, source="telegram", chat_id=voice_chat_id or "",
+                )
+                return
 
             await update.message.reply_chat_action("typing")
-            voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
             html_response, plain_text, _ = await self._chat_with_max(
                 transcript,
                 chat_id=voice_chat_id,
@@ -1325,6 +1350,8 @@ class TelegramBot:
         except ImportError:
             logger.error("python-telegram-bot not installed. Run: pip install python-telegram-bot")
             return
+        from app.services.max.telegram_text import install_outbound_sanitizer
+        install_outbound_sanitizer()
 
 
         # Build and run the bot — increase timeouts for reliability
@@ -1453,6 +1480,8 @@ class TelegramBot:
         """
         from telegram.request import HTTPXRequest
         from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+        from app.services.max.telegram_text import install_outbound_sanitizer
+        install_outbound_sanitizer()
 
         self._webhook_ready = asyncio.Event()
 

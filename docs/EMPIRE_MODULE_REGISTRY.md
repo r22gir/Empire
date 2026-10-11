@@ -623,33 +623,32 @@ approved / corrected_and_approved / rejected
 
 ## SocialForge
 
-**Status**: partial
-**Purpose**: Social media management and automation
-**Last verified**: da3fdf4
+**Status**: partial — account hub, vault, and OAuth shell are real; most platforms still need keys
+**Purpose**: Owner of every online account (social, marketplace, email, directories, Canva, domain email) and of scheduled publishing
+**Last verified**: feature/drawing-standard
 
 ### Frontend
 - `app/components/screens/SocialForgePage.tsx`
 
 ### Backend
-- `backend/app/routers/socialforge.py` — main router
-- `backend/app/routers/social_setup.py` — setup router
-- `backend/app/services/social_service.py` — social media service
+- `backend/app/routers/socialforge.py` — posts, campaigns, and the account hub
+- `backend/app/routers/account_hub.py` — hub, OAuth start/callback, founder publish controls
+- `backend/app/routers/social_setup.py` — setup wizard; tokens are sealed instead of stored in plaintext
+- `backend/app/services/accounts/` — catalog, hub store, Fernet vault, OAuth, publisher
+- `backend/app/services/social_service.py` — Graph publish helpers
 
-### Integrations
-- Instagram: `INSTAGRAM_API_TOKEN` configured
-- Facebook: `FACEBOOK_PAGE_TOKEN` configured
-
-### Approach
-- Semi-automatic (user confirms each platform creation)
-- Content calendar and scheduling (planned)
+### What is real
+- `GET /api/v1/socialforge/accounts/hub` lists every platform per business with status, owner, and last sync
+- Credential vault (`EMPIRE_VAULT_KEY`). Refuses to start without it. Secrets are not returned to the client
+- Meta, Pinterest, and LinkedIn OAuth. Each stays `needs_keys` until its env id and secret are set
+- Facebook and Instagram scheduled publish with retries, per-post status, and a pause switch. Default is draft-only until the founder sets auto-publish on that account
 
 ### Docs
-- `docs/social/instagram_setup_plan.md`
-- `docs/social/facebook_content_plan.md`
+- `docs/socialforge-status.md` — redirect URIs and env keys
 
 ### Gaps
-- Posting not wired to live Instagram/Facebook APIs
-- Content calendar not operational
+- TikTok, X, and the directory/email/Canva accounts are tracked only
+- A publish still requires the founder to turn on auto-publish and the provider keys to be present
 
 ---
 
@@ -692,34 +691,34 @@ approved / corrected_and_approved / rejected
 
 ## MarketForge
 
-**Status**: partial
-**Purpose**: Multi-marketplace listing creation, photo enhancement, AI descriptions
-**Last verified**: da3fdf4
+**Status**: partial — Etsy Open API v3 is real; other marketplaces are explicitly not connected
+**Purpose**: Marketplace connect, draft listings, and read-only order sync
+**Last verified**: feature/drawing-standard
 
 ### Frontend
 - `app/components/screens/MarketForgePage.tsx`
 
 ### Backend
+- `backend/app/routers/marketforge_connect.py` — Etsy connect and honest states for the others
 - `backend/app/routers/marketforge_products.py`
-- `backend/app/routers/marketplaces.py`
+- `backend/app/routers/marketplaces.py` — no longer reports a fake connect
+- `backend/app/services/accounts/etsy.py` — OAuth PKCE, draft listings, read-only listings and orders
 - `backend/app/routers/listings.py`
 - `backend/app/routers/relist.py`
-- `backend/app/services/listing_service.py`
-- `backend/app/services/marketplace/` — marketplace services
+- `backend/app/services/listing_service.py` — publish returns `needs_keys` / `not_connected` and no listing URL
+- `backend/app/services/marketplace/` — eBay authenticate/publish no longer return mock tokens or item URLs
 
-### Recent
-- `489053f` — feat(archiveforge): wire MarketForge product publish route
+### What is real
+- Etsy OAuth PKCE (`ETSY_CLIENT_ID`), shop connect, create listing as `draft` only, GET listings and receipts
+- eBay, Amazon, Facebook Marketplace, and Craigslist return `needs_keys` or `not_connected` with no success URL
 
 ### Docs
+- `docs/socialforge-status.md` — Etsy redirect URI and env key
 - `docs/MARKETF_OVERVIEW.md`
-- `docs/MARKETF_AMAZON_SPEC.md`
-- `docs/MARKETF_API.md`
-- `docs/MARKETF_FEES.md`
-- `docs/MARKETF_SELLER_GUIDE.md`
 
 ### Gaps
-- eBay API not integrated
-- Listing optimization incomplete
+- eBay and Amazon OAuth are not implemented
+- Live listing create still needs a connected Etsy shop and the vault key
 
 ---
 

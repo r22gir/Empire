@@ -162,17 +162,66 @@ def is_factual_question(message: str) -> bool:
     return any(re.search(p, msg, re.I) for p in EVERGREEN_FACTUAL_PATTERNS)
 
 
+def undated_source_label(message: str | None) -> str:
+    """Label used only when a fetched page has no publication or updated date."""
+    text = message or ""
+    if re.search(
+        r"[¿¡]|\b(?:tela|telas|cuál|cual|recomienda|fuentes|comparación|comparacion|compara|precio)\b",
+        text,
+        re.I,
+    ):
+        return "fecha no indicada"
+    return "date not shown"
+
+
 def grounding_directive(message: str | None = None) -> str:
     """Prompt contract for numbered citations, Sources, and fact/inference split."""
+    try:
+        from app.edition import is_family_edition
+        if is_family_edition():
+            return (
+                "Responde en 2 a 5 oraciones cortas en español. Usa solo las páginas "
+                "ya leídas. Cita con enlaces markdown [título](url). Termina con "
+                "**Fuentes**: lista numerada de un enlace clicable por fuente "
+                "(solo el título, sin repetir la URL). "
+                "Orden: sitio oficial (gobierno o web propia del negocio) y "
+                "registros/listados primero, noticias de referencia después, "
+                "Facebook / Instagram / TikTok al final. "
+                "No inventes fechas ni fuentes."
+            )
+    except Exception:
+        pass
+    undated = undated_source_label(message)
+    recommend = ""
+    if message and re.search(
+        r"\b(compare|comparison|vs\.?|versus|which|recommend|better|best)\b",
+        message,
+        re.I,
+    ):
+        recommend = (
+            " The question asks for a comparison or a choice: state a clear recommendation "
+            "and name the option you would use."
+        )
     return (
-        "Public factual-answer grounding requirement: use the web results and cite every "
-        "factual claim with a numbered inline markdown citation immediately after it, "
-        "such as [1](https://example.com). End with a numbered Sources list whose links "
-        "match those citations. Include two clearly labeled sections: `Verified` for "
-        "claims supported by the fetched sources, and `Max's inference` for conclusions "
-        "or recommendations drawn from them. Mark inference explicitly and never present "
-        "it as source fact. For evergreen questions, use the best authoritative sources "
-        "of any age; do not impose a date limit. Do not invent dates, sources, or citations."
+        "Public factual-answer grounding requirement: the full text of the top relevant "
+        "pages has already been fetched. Answer from that page text, not from search "
+        "snippets alone. Cite every factual claim with a numbered inline markdown citation "
+        "immediately after it, such as [1](https://example.com). End with a numbered Sources "
+        "list whose links match those citations and include each source's publication or "
+        f"updated date. If a page truly has no date, write exactly '{undated}'. "
+        "Include two clearly labeled sections: `Verified` for claims supported by the fetched "
+        "pages, and `Max's inference` for conclusions or recommendations drawn from them. "
+        "Mark inference explicitly and never present it as source fact. For evergreen "
+        "questions, use the best authoritative sources of any age; do not impose a date limit. "
+        "Do not invent dates, sources, or citations. Quote concrete figures that appear in "
+        "the page text (ratings, prices, cleaning methods, dimensions) when the question "
+        "asks for them. Do not leave an empty heading or a colon introduction with no items "
+        "under it. Do not offer to open, read, or fetch the articles — that lookup is already done. "
+        "Keep it short: lead with the direct answer in 1-2 sentences, keep `Verified` and "
+        "`Max's inference` to a few bullets each, stay under about 200 words before the Sources "
+        "list unless the user asked for a detailed report, and write each source as one line: "
+        "`N. Title — site (date)`."
+        + recommend
     )
 
 

@@ -413,7 +413,8 @@ def calculate_full_price(
     fabric_total = round(yardage * fabric_price_per_yard, 2)
 
     # Lining cost
-    lining_prices = {"none": 0, "standard": 8, "blackout": 14, "interlining": 18}
+    # Workroom sell rates (Rafael 10/4/2026): lining $10.50/yd, napped lining (interlining) $12.50/yd.
+    lining_prices = {"none": 0, "standard": 10.50, "blackout": 14, "interlining": 12.50}
     lining_price_per_yard = lining_prices.get(lining_type, 0)
     lining_yards = round(yardage * 0.9, 2) if lining_type != "none" else 0
     lining_cost = round(lining_yards * lining_price_per_yard, 2)

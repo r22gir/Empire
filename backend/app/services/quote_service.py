@@ -606,6 +606,45 @@ def _quote_to_dict(row) -> dict:
     return d
 
 
+def _ensure_supplier_url_column(conn) -> None:
+    """Intake fabric lines carry the supplier link next to name, code, and width."""
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(quote_line_items)").fetchall()}
+    except Exception:
+        return
+    if "supplier_url" not in cols:
+        try:
+            conn.execute("ALTER TABLE quote_line_items ADD COLUMN supplier_url TEXT")
+        except Exception:
+            pass
+
+
+def _store_line_fabric_fields(conn, quote_id: str, line_number: int, line: dict) -> None:
+    """Copy structured fabric fields onto a line. Window width is left alone."""
+    if not isinstance(line, dict):
+        return
+    name = line.get("fabric_name")
+    code = line.get("fabric_code")
+    width = line.get("fabric_width")
+    supplier = line.get("supplier_url") or line.get("supplier_link")
+    if name in (None, "") and code in (None, "") and width in (None, "") and supplier in (None, ""):
+        return
+    _ensure_supplier_url_column(conn)
+    if width not in (None, ""):
+        try:
+            width = float(width)
+        except (TypeError, ValueError):
+            width = None
+    else:
+        width = None
+    conn.execute(
+        """UPDATE quote_line_items
+           SET fabric_name = ?, fabric_code = ?, fabric_width = ?, supplier_url = ?
+           WHERE quote_id = ? AND line_number = ?""",
+        (name or "", code or "", width, supplier or "", quote_id, line_number),
+    )
+
+
 def _ensure_idea_diagram_column(conn) -> None:
     """Additive column for idea-diagram metadata. Safe on already-migrated DBs."""
     try:
@@ -798,11 +837,25 @@ def get_quote_by_number(quote_number: str) -> dict | None:
         return _align_flat_financials(q)
 
 
+def ensure_project_address_schema(conn) -> None:
+    """Additive project/site address on quotes_v2. Does not rewrite rows."""
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(quotes_v2)").fetchall()}
+    except Exception:
+        return
+    if "project_address" not in cols:
+        try:
+            conn.execute("ALTER TABLE quotes_v2 ADD COLUMN project_address TEXT")
+        except Exception:
+            pass
+
+
 def create_quote(data: dict) -> dict:
     from app.config.workroom_billing import billed_by_for_storage, ensure_billed_by_schema
 
     with get_db() as conn:
         ensure_billed_by_schema(conn)
+        ensure_project_address_schema(conn)
         import uuid
         quote_id = str(uuid.uuid4())[:8]
         billed_by = billed_by_for_storage(data.get("billed_by"))
@@ -867,6 +920,12 @@ def create_quote(data: dict) -> dict:
                 "UPDATE quotes_v2 SET billed_by = ? WHERE id = ?",
                 (billed_by, quote_id),
             )
+        project_address = (data.get("project_address") or "").strip()
+        if project_address:
+            conn.execute(
+                "UPDATE quotes_v2 SET project_address = ? WHERE id = ?",
+                (project_address, quote_id),
+            )
 
         _ensure_idea_diagram_column(conn)
 
@@ -922,6 +981,7 @@ def create_quote(data: dict) -> dict:
                 idea["drawing_svg"],
                 idea["idea_diagram_json"],
             ))
+            _store_line_fabric_fields(conn, quote_id, idx + 1, li)
 
         _recalculate_totals(conn, quote_id, 'api')
         _audit_log(conn, 'quote', quote_id, 'created', None, None, quote_number, 'api')
@@ -933,13 +993,14 @@ def create_quote(data: dict) -> dict:
 
 def update_quote(quote_id: str, data: dict) -> dict:
     with get_db() as conn:
+        ensure_project_address_schema(conn)
         existing = conn.execute("SELECT * FROM quotes_v2 WHERE id = ?", (quote_id,)).fetchone()
         if not existing:
             return None
 
         updatable = [
             'customer_name', 'customer_email', 'customer_phone', 'customer_address',
-            'business_unit', 'project_name', 'project_description',
+            'business_unit', 'project_name', 'project_description', 'project_address',
             # HOTFIX 4.1 (2026-07-16): 'status' was REMOVED from this
             # whitelist so PATCH can never silently set a customer-side
             # status (e.g. status='accepted') and bypass the founder
@@ -1005,13 +1066,15 @@ def update_quote(quote_id: str, data: dict) -> dict:
                 )
                 conn.execute("""
                     INSERT INTO quote_line_items (
-                        quote_id, line_number, description, quantity, unit, unit_price, subtotal,
+                        quote_id, line_number, description, room, quantity, unit, unit_price, subtotal,
                         category, rate_source, pricing_snapshot_json,
                         proposed_price, final_price, price_overridden, business_unit, computed_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     quote_id, idx + 1,
                     li.get("description", ""),
+                    # Keep the room on save (rooms grouping in QuoteReview); it was dropped here before.
+                    str(li.get("room") or ""),
                     qty,
                     li.get("unit", "ea"),
                     pricing["unit_price"],
@@ -1026,6 +1089,7 @@ def update_quote(quote_id: str, data: dict) -> dict:
                     pricing["business_unit"],
                     pricing["computed_json"],
                 ))
+                _store_line_fabric_fields(conn, quote_id, idx + 1, li)
             _audit_log(conn, "quote", quote_id, "updated", "line_items", None,
                        f"{len(items)} items", "api")
 

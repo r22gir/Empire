@@ -5,6 +5,8 @@ import { API } from '../../lib/api';
 import { useEdition } from '../../lib/edition';
 import { searchPlaceholder } from '../../lib/familyChrome';
 import LanguageSwitcher from '../LanguageSwitcher';
+import ThemeToggle from '../ThemeToggle';
+import { EDITION } from '../../v3/edition';
 
 type ProviderRow = {
   id: string;
@@ -200,13 +202,9 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
     return `${Math.floor(hrs / 24)}d`;
   };
 
-  // Fallback notifications if API returns none
-  const displayNotifs = notifications.length > 0 ? notifications : [
-    { id: '1', title: 'Maria — New Quote', message: 'Request for living room valances', category: 'quote', source: 'Empire', created_at: '', read: false },
-    { id: '2', title: 'Emily — Shipping', message: 'Valance order picked up', category: 'shipping', source: 'Empire', created_at: '', read: false },
-    { id: '3', title: 'Aria Desk', message: 'Instagram post drafted', category: 'desk', source: 'Empire', created_at: '', read: true },
-    { id: '4', title: 'System', message: 'All services healthy', category: 'system', source: 'Empire', created_at: '', read: true },
-  ];
+  // Real notifications only (the old sample "Maria — New Quote" placeholders are gone;
+  // an empty list shows "No notifications").
+  const displayNotifs = notifications;
 
   const catColor = (cat: string): string => {
     const c = cat.toLowerCase();
@@ -219,11 +217,10 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
   };
 
   return (
-    <header className="h-[56px] bg-[var(--panel)] border-b border-[var(--border)] flex items-center justify-between px-3 md:px-6 shrink-0 z-50">
-      {/* Logo */}
-      <div className="text-[16px] font-bold tracking-[3px] text-[var(--text)]">
-        <span className="text-[var(--gold)]">E</span>MPIRE
-      </div>
+    <header className="v3-band app">
+      {/* Logo: mono-E + wordmark (design system v3). "/" is the Max home. */}
+      <a href="/" className="logo" title={`${EDITION.assistantName} home`} aria-label={`${EDITION.wordmark} — ${EDITION.assistantName} home`}><span className="v3-mono-e">{EDITION.wordmark.charAt(0)}</span></a>
+      <a href="/" className="v3-wm" tabIndex={-1} aria-hidden="true">{EDITION.wordmark}</a>
 
       {/* N2: Global Back button. Always visible per Founder spec.
           - Desktop: text label "← Back"
@@ -234,48 +231,40 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
       {onBack && (
         <button
           onClick={onBack}
-          className="flex items-center gap-1 md:gap-1.5 bg-transparent border border-transparent rounded-[var(--radius)] px-1.5 md:px-2.5 py-[6px] md:py-[7px] text-[12px] font-semibold cursor-pointer transition-all"
-          style={{
-            color: canGoBack ? '#666' : '#bbb',
-            opacity: canGoBack ? 1 : 0.55,
-          }}
-          onMouseEnter={e => { if (canGoBack) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; e.currentTarget.style.color = '#1a1a1a'; } }}
-          onMouseLeave={e => { if (canGoBack) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.color = '#666'; } }}
-          title={canGoBack ? 'Back to previous screen' : 'No previous screen — clicking returns to Owner’s Desk'}
-          aria-label="Back"
+          className={`v3-back${canGoBack ? '' : ' is-off'}`}
+          title={(edition === 'maxine' || edition === 'amp')
+            ? (canGoBack ? 'Volver a la pantalla anterior' : 'No hay pantalla anterior — vuelve al Centro de mando')
+            : (canGoBack ? 'Back to previous screen' : 'No previous screen — clicking returns to Owner’s Desk')}
+          aria-label={(edition === 'maxine' || edition === 'amp') ? 'Volver' : 'Back'}
         >
           <ArrowLeft size={14} />
-          <span className="hidden sm:inline">Back</span>
+          <span className="lbl">{(edition === 'maxine' || edition === 'amp') ? 'Volver' : 'Back'}</span>
         </button>
       )}
 
       {/* Search — hidden on mobile */}
       <button
         onClick={onQuickSwitch}
-        className="hidden md:flex items-center gap-2 bg-[#f5f3ef] border border-[var(--border)] rounded-[var(--radius)] px-5 py-[10px] w-[320px] text-[13px] text-[var(--faint)] cursor-pointer hover:border-[var(--border-h)] transition-colors"
+        className="v3-search"
       >
-        <span className="text-[11px] font-mono">⌘K</span>
         <span>{searchPlaceholder(edition)}</span>
+        <kbd>⌘K</kbd>
       </button>
 
       {/* Right controls */}
-      <div className="flex items-center gap-2 md:gap-3">
+      <div className="br">
         {/* Model selector — visible on all widths (compact on mobile) */}
         <div ref={modelRef} className="relative">
           <button
             onClick={() => setShowModelPicker(!showModelPicker)}
-            className="empire-card flex items-center gap-1.5 md:gap-2 !py-2 !px-2 md:!px-3 text-[11px] font-bold font-mono"
+            className="v3-modelbtn"
             aria-label={`Current model: ${selectedProvider} ${selectedModelName}. Click to switch.`}
             title={`${selectedProvider} · ${selectedModelName}`}
           >
             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: PROVIDER_COLORS[selectedProvider] || '#b8960c' }} />
-            <span className="hidden sm:inline" style={{ color: PROVIDER_COLORS[selectedProvider] || '#b8960c' }}>
-              {selectedProvider}
-            </span>
-            <span style={{ color: PROVIDER_COLORS[selectedProvider] || '#b8960c' }}>
-              · {selectedModelName}
-            </span>
-            <ChevronDown size={12} className="text-[var(--faint)] shrink-0" />
+            <span className="prov">{selectedProvider}</span>
+            <span className="mdl">· {selectedModelName}</span>
+            <ChevronDown size={12} className="chev" />
           </button>
           {showModelPicker && (
             <div className="absolute top-[46px] right-0 w-[calc(100vw-24px)] md:w-[320px] max-w-[380px] bg-[var(--panel)] border border-[var(--border)] rounded-[var(--radius)] shadow-[0_8px_30px_rgba(0,0,0,0.12)] z-[200] overflow-hidden py-1">
@@ -314,6 +303,9 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
           )}
         </div>
 
+        {/* Dark / Gold theme (per device) */}
+        <ThemeToggle />
+
         {/* Language Switcher */}
         <LanguageSwitcher />
 
@@ -321,12 +313,11 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
         <div ref={notifRef} className="relative">
           <button
             onClick={() => setShowNotifs(!showNotifs)}
-            className="empire-card !p-2 relative"
+            className="icon-btn"
+            aria-label={`Notifications${unreadCount ? `: ${unreadCount} unread` : ''}`}
           >
-            <Bell size={16} className="text-[var(--dim)]" />
-            {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 bg-[#dc2626] text-white text-[8px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{unreadCount}</span>
-            )}
+            <Bell size={17} strokeWidth={1.5} />
+            {unreadCount > 0 && <span className="badge">{unreadCount > 9 ? '9+' : unreadCount}</span>}
           </button>
           {showNotifs && (
             <div className="absolute top-[46px] right-0 w-[calc(100vw-24px)] md:w-[380px] max-w-[380px] bg-[var(--panel)] border border-[var(--border)] rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] z-[200] overflow-hidden">
@@ -411,16 +402,14 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
         </div>
 
         {/* Settings */}
-        <button onClick={onClientView} className="empire-card !p-2">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--dim)]">
+        <button onClick={onClientView} className="icon-btn hide-sm" aria-label="Client view (hide internal data)" title="Client view">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
           </svg>
         </button>
 
         {/* Avatar */}
-        <div className="w-[36px] h-[36px] rounded-[12px] bg-[var(--gold)] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer">
-          RG
-        </div>
+        <span className="v3-av" aria-label={EDITION.ownerFullName} title={EDITION.family ? EDITION.ownerFullName : undefined}>{EDITION.ownerInitials}</span>
       </div>
     </header>
   );

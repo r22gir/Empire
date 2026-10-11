@@ -14,6 +14,13 @@ export function clearToken() {
   localStorage.removeItem('intake_token');
 }
 
+export function intakeAuthHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...(extra || {}) };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
 export async function intakeFetch<T = any>(path: string, opts?: RequestInit): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...opts?.headers as Record<string, string> };

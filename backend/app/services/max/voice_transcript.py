@@ -90,6 +90,23 @@ class VoiceTranscript:
             except Exception as exc:  # never break the call over persistence
                 self.errors.append(f"unified:{type(exc).__name__}")
                 logger.warning("voice_transcript[%s]: unified write failed: %s", self.call_id, exc)
+            # max-sessions 2026-10-04: mirror into the full session journal
+            # (daily export for review). Best-effort, same ordered writer.
+            try:
+                from app.services.max.session_journal import record_turn, summarize_tool_calls
+                calls = None
+                if kind == "tool_call":
+                    calls = summarize_tool_calls([{
+                        "tool": extra.get("tool"), "success": extra.get("ok"),
+                        "args": extra.get("args"), "result": content,
+                        "error": None if extra.get("ok") else content,
+                    }])
+                record_turn(self.conversation_id, CHANNEL, role, content, model=self.model or None,
+                            tool_calls=calls, endpoint="voice_live", input_channel="voice_live",
+                            metadata={"kind": kind, "call_id": self.call_id,
+                                      **{k: v for k, v in extra.items() if k in ("interrupted", "item_id", "response_id")}})
+            except Exception as exc:
+                logger.debug("voice_transcript[%s]: journal write failed: %s", self.call_id, exc)
         _writer.submit(job)
 
     def start(self) -> None:

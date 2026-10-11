@@ -87,8 +87,9 @@ def parse_bench_fabrication_from_text(text: str) -> dict[str, Any]:
     if m:
         out["back_sections"] = int(m.group(1))
 
+    # Require an inch unit. "3 seat cushions" is a section count, not 3" thick.
     cush = re.search(
-        r"(\d+(?:\.\d+)?)\s*(?:\"|in|inch(?:es)?)?\s*(?:foam\s+)?(?:seat\s+)?cushion(?:\s+thickness)?",
+        r"(\d+(?:\.\d+)?)\s*(?:\"|in|inch(?:es)?)\s*(?:thick\s+)?(?:foam\s+)?(?:seat\s+)?cushion(?:\s+thickness)?",
         t,
     )
     if not cush:
@@ -119,9 +120,14 @@ def parse_bench_fabrication_from_text(text: str) -> dict[str, Any]:
         r"raked\s+back\s+(\d+(?:\.\d+)?)\s*(?:deg(?:rees)?)?",
         t,
     )
+    if not m:
+        m = re.search(
+            r"back\s+raked\s+(?:at\s+)?(\d+(?:\.\d+)?)\s*(?:deg(?:rees)?)?",
+            t,
+        )
     if m:
         out["back_angle_deg"] = float(m.group(1))
-    elif re.search(r"\braked\s+back\b|\breclined\b|back\s+lean", t):
+    elif re.search(r"\braked\s+back\b|\bback\s+raked\b|\breclined\b|back\s+lean", t):
         deg = re.search(
             r"(?:raked|recline|lean)\s*(?:back\s*)?(?:@|at)?\s*(\d+(?:\.\d+)?)\s*(?:deg|degree)",
             t,

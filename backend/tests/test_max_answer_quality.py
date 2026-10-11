@@ -66,6 +66,19 @@ def test_factual_guard_exempts_chitchat_and_internal_data():
     assert not is_factual_question("What is our founder pricing rule for goblet pleats?")
 
 
+def test_snippet_only_empty_section_and_lookup_offer_force_continuation():
+    from app.services.max.answer_quality import validate_reply_structure
+
+    draft = (
+        "I am not able to confirm from these snippets alone:\n\n"
+        "Want me to open the articles?"
+    )
+    issues = validate_reply_structure(draft)
+    assert "dangling_colon" in issues
+    assert "lookup_offer" in issues
+    assert needs_continuation(draft)
+
+
 def test_colon_intro_without_list_is_incomplete_but_colon_with_list_is_complete():
     from app.services.max.answer_quality import needs_continuation, strip_empty_sections
 

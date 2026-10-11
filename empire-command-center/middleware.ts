@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { familyHomeRedirect } from "./app/lib/familyChrome.mjs";
 import { workroomHostDecision } from "./app/lib/workroomHost";
+import { applyTailscaleHeaderPolicy } from "./app/lib/tailscaleProxy";
+
+function continueWith(request: NextRequest) {
+  return NextResponse.next({
+    request: { headers: applyTailscaleHeaderPolicy(request.headers) },
+  });
+}
 
 // Public Luxe hostnames. Keep this allowlist in sync with
 // backend/app/security/luxe_public_edge.py. Cloudflare currently tunnels
@@ -95,17 +102,40 @@ function isApexPathAllowed(pathname: string): boolean {
 export function middleware(request: NextRequest) {
   const host = (request.headers.get("host") || "").split(":")[0].toLowerCase();
   const { pathname } = request.nextUrl;
+  const edition = (process.env.NEXT_PUBLIC_EMPIRE_EDITION || "").trim().toLowerCase();
+  const familyEdition = edition === "amp" || edition === "maxine";
+  const openAccessRequested = ["1", "true", "yes", "on"].includes(
+    (process.env.AMP_OPEN_ACCESS || "").trim().toLowerCase(),
+  );
+  const productionRuntime = ["production", "prod"].includes(
+    (process.env.NODE_ENV || process.env.EMPIRE_ENV || "").trim().toLowerCase(),
+  );
+  // Local Dell convenience only. Never skip the login gate in production.
+  const honorOpenAccess = openAccessRequested && !productionRuntime;
+  const familyResponse = (response: NextResponse) => {
+    if (familyEdition) response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+    return response;
+  };
+
+  // DATA ISOLATION (2026-10-03): family editions never serve Next-side
+  // file routes (/api/docs/*). Those read the owner's home directory.
+  // Only /api/v1/* (the edition's own backend) is reachable under /api/.
+  if (familyEdition && pathname.startsWith("/api/") && !pathname.startsWith("/api/v1/")) {
+    return familyResponse(
+      NextResponse.json({ detail: "Not found" }, { status: 404, headers: { "Cache-Control": "no-store" } }),
+    );
+  }
 
   const home = familyHomeRedirect(
     process.env.NEXT_PUBLIC_EMPIRE_EDITION || "",
     pathname,
-    Boolean(request.cookies.get("amp_session")?.value),
+    Boolean(request.cookies.get("amp_session")?.value) || honorOpenAccess,
     host,
   );
   if (home) {
     const url = request.nextUrl.clone();
     url.pathname = home;
-    return NextResponse.redirect(url);
+    return familyResponse(NextResponse.redirect(url));
   }
 
   // --- R1X-PUB-EMPIREBOX: public apex host block ---
@@ -133,7 +163,7 @@ export function middleware(request: NextRequest) {
       });
     }
 
-    return NextResponse.next();
+    return continueWith(request);
   }
 
   // --- WORKROOM showroom host: public Style B landing (read-only) ---
@@ -161,7 +191,7 @@ export function middleware(request: NextRequest) {
     });
   }
   if (workroom.action === "next") {
-    return NextResponse.next();
+    return continueWith(request);
   }
 
   // --- LUXE bucket: HARD-SCOPED to intake ---
@@ -193,7 +223,7 @@ export function middleware(request: NextRequest) {
       url.search = "";
       return NextResponse.redirect(url);
     }
-    return NextResponse.next();
+    return continueWith(request);
   }
 
   // --- FORGE block: operator platform infrastructure surface ---
@@ -208,5 +238,5 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  return NextResponse.next();
+  return familyResponse(continueWith(request));
 }

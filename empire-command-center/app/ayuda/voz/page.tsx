@@ -12,6 +12,10 @@ const STEPS = [
 export default function ComoUsarLaVoz() {
   return (
     <main style={{ maxWidth: 720, margin: '0 auto', padding: '32px 20px', fontFamily: 'Inter, sans-serif', color: '#1a1a1a' }}>
+      <nav aria-label="Navegación de ayuda" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24, fontSize: 14 }}>
+        <Link href="/ayuda" style={{ color: '#b8960c', fontWeight: 700 }}>← Volver a Ayuda</Link>
+        <Link href="/" style={{ color: '#444', fontWeight: 600 }}>Centro de mando</Link>
+      </nav>
       <p style={{ fontSize: 12, letterSpacing: 0.4, color: '#b8960c', fontWeight: 700, margin: 0 }}>CENTRO DE MANDO</p>
       <h1 style={{ fontSize: 32, margin: '8px 0' }}>Cómo usar la voz</h1>
       <p style={{ fontSize: 16, lineHeight: 1.5 }}>

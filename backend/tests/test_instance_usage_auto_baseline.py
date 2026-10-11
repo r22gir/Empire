@@ -219,4 +219,5 @@ def test_usage_cap_check_logs_warning(monkeypatch, tmp_path, caplog):
             model=None,
         )
     assert refusal is None
-    assert "usage cap check skipped" in caplog.text
+    assert "usage cap check failed open" in caplog.text
+    assert "chat proceeds without a cap refusal" in caplog.text

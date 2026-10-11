@@ -13,12 +13,13 @@ import json
 import uuid
 import os
 import logging
+from app.db.database import resolve_task_db_path
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/storefront", tags=["storefront"])
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
+DB_PATH = resolve_task_db_path()
 
 
 # ── Database helpers ────────────────────────────────────────────

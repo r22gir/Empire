@@ -17,8 +17,9 @@ import sqlite3
 import subprocess
 from datetime import datetime, date
 from typing import Optional
+from app.db.database import resolve_task_db_path
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
+DB_PATH = resolve_task_db_path()
 REPO_PATH = os.path.expanduser("~/empire-repo")
 ROADMAP_PATH = os.path.join(REPO_PATH, ".session-artifacts/audit/productivity_roadmap.md")
 

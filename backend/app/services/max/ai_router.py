@@ -272,6 +272,7 @@ class AIRouter:
             from app.edition import family_file_search_roots, is_family_edition
 
             if is_family_edition():
+                # Only this edition's EMPIRE_DATA_DIR trees — never Workroom uploads.
                 self.upload_dirs = list(family_file_search_roots())
             else:
                 self.upload_dirs = [
@@ -282,8 +283,6 @@ class AIRouter:
         except Exception:
             self.upload_dirs = [
                 data_root() / "uploads",
-                Path.home() / "empire-repo" / "backend" / "data" / "uploads",
-                Path.home() / "empire-repo" / "uploads",
             ]
         self.upload_dir = self.upload_dirs[0]
         providers = []
@@ -638,6 +637,7 @@ class AIRouter:
 
     AUDIO_EXTS = {'.m4a', '.mp3', '.wav', '.ogg', '.flac', '.wma', '.aac'}
     TEXT_EXTS = {'.txt', '.md', '.csv', '.json'}
+    OFFICE_EXTS = {'.docx', '.doc'}
     CODE_EXTS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.sh', '.yaml', '.yml'}
 
     def _find_file(self, filename: str) -> Optional[Path]:
@@ -693,6 +693,29 @@ class AIRouter:
             pass
         return "[Could not extract PDF text — pdftotext not available]"
 
+    def _is_office_doc(self, path: Path) -> bool:
+        return path.suffix.lower() in self.OFFICE_EXTS
+
+    def _read_docx(self, path: Path, max_chars: int = 50000) -> str:
+        """Extract text from a .docx (and best-effort .doc) file."""
+        try:
+            import docx  # python-docx
+            document = docx.Document(str(path))
+            parts = [p.text for p in document.paragraphs if (p.text or "").strip()]
+            for table in document.tables:
+                for row in table.rows:
+                    cells = [c.text.strip() for c in row.cells if c.text and c.text.strip()]
+                    if cells:
+                        parts.append(" | ".join(cells))
+            text = "\n".join(parts).strip()
+            if not text:
+                return "[Could not extract text from document — file appears empty]"
+            if len(text) > max_chars:
+                text = text[:max_chars] + f"\n\n[Truncated — showing first {max_chars} chars]"
+            return text
+        except Exception as e:
+            return f"[Could not read document: {e}]"
+
     def _process_attachment(self, filename: str) -> Tuple[Optional[Path], Optional[str]]:
         """Process an attached file. Returns (image_path, attachment_text).
         For images: returns the path for vision API.
@@ -709,11 +732,17 @@ class AIRouter:
         elif self._is_pdf(path):
             text = self._read_pdf(path)
             return None, f"[Contents of {filename}]\n{text}"
+        elif self._is_office_doc(path):
+            text = self._read_docx(path)
+            return None, f"[Contents of {filename}]\n{text}"
         elif self._is_readable_text(path):
             text = self._read_text_file(path)
             return None, f"[Contents of {filename}]\n{text}"
         else:
-            return None, f"[Unsupported file type: {path.suffix}]"
+            return None, (
+                f"[I couldn't read that file ({filename}). "
+                f"Unsupported or unreadable type: {path.suffix or 'unknown'}]"
+            )
 
     async def _prepend_local_vision_triage(self, messages: List[AIMessage], image_path: Optional[Path]) -> List[AIMessage]:
         """Run lightweight local Ollama vision triage before cloud escalation."""
@@ -808,7 +837,9 @@ class AIRouter:
             "Transport: mmx_cli\n"
             "Quota bucket: mcp_understand_image\n"
             "Image generation used: false\n"
-            "Instruction: Answer the user directly from the description. Do not narrate your thought process or use self-talk such as Wait, Actually, or Let me.\n"
+            "Instruction: Answer the user directly from the description. The user attached this image to the message below. Base the answer on what it shows: "
+            "first say in one line what you see (for a screenshot: the page and any error or message on it), then answer about that. "
+            "Do not give generic instructions that ignore the image. Do not narrate your thought process or use self-talk such as Wait, Actually, or Let me.\n"
             f"Description:\n{description}\n\n"
         )
         updated = list(messages)
@@ -1090,6 +1121,11 @@ class AIRouter:
         name = getattr(requested, "value", requested)
         canon = self._legacy_canonical(requested)
         err = self.last_provider_errors.get(canon) or self.last_provider_errors.get(str(name)) or "unknown error"
+        if "minimax" in str(name).lower() or canon == "minimax":
+            from app.services.max.minimax_retry import user_message_for_minimax
+            friendly = user_message_for_minimax(str(err))
+            if friendly:
+                return friendly
         return (
             f"Requested provider '{name}' failed and fallback is disabled "
             f"(MAX_ALLOW_FALLBACK=false), so no other provider was called. "
@@ -1158,20 +1194,28 @@ class AIRouter:
 
             error_text = self.last_provider_errors.get(provider) or self.last_provider_errors.get("grok" if provider == "xai" else provider)
             if self._is_circuit_break_error(error_text):
+                content = (
+                    f"Selected provider '{provider}' failed with a circuit-break error ({error_text or 'auth/quota'}) "
+                    "so routing stopped without fallback. Fix provider auth/quota or switch provider."
+                )
+                if provider == "minimax":
+                    from app.services.max.minimax_retry import user_message_for_minimax
+                    content = user_message_for_minimax(error_text) or content
                 return AIResponse(
-                    content=(
-                        f"Selected provider '{provider}' failed with a circuit-break error ({error_text or 'auth/quota'}) "
-                        "so routing stopped without fallback. Fix provider auth/quota or switch provider."
-                    ),
+                    content=content,
                     model_used=provider,
                     fallback_used=fallback,
                 )
             if not state.fallback_enabled:
+                content = (
+                    f"Selected provider '{provider}' failed and fallback is disabled. "
+                    "No other provider was called."
+                )
+                if provider == "minimax":
+                    from app.services.max.minimax_retry import user_message_for_minimax
+                    content = user_message_for_minimax(error_text) or content
                 return AIResponse(
-                    content=(
-                        f"Selected provider '{provider}' failed and fallback is disabled. "
-                        "No other provider was called."
-                    ),
+                    content=content,
                     model_used=provider,
                     fallback_used=False,
                 )
@@ -1218,7 +1262,10 @@ class AIRouter:
             )
             return model, refusal
         except Exception:
-            logger.warning("usage cap check skipped", exc_info=True)
+            logger.warning(
+                "usage cap check failed open; chat proceeds without a cap refusal",
+                exc_info=True,
+            )
             return model, None
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
@@ -2192,51 +2239,74 @@ class AIRouter:
         return 120.0
 
     async def _minimax_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
-        """Chat via MiniMax M1 API."""
+        """Chat via MiniMax M1 API. Overloaded and connect failures are retried."""
+        from app.services.max.minimax_retry import request_with_retry
+
         api_messages = self._prepare_openai_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
-            resp = await client.post(
-                f"{self.minimax_base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
-                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens}
-            )
-            if resp.status_code != 200:
-                raise Exception(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
-            self._record_provider_success("minimax")
-            return self._sanitize_minimax_content(resp.json()["choices"][0]["message"]["content"])
+
+        async def once():
+            async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
+                return await client.post(
+                    f"{self.minimax_base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
+                    json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens}
+                )
+
+        resp = await request_with_retry(once)
+        if resp.status_code != 200:
+            raise Exception(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
+        self._record_provider_success("minimax")
+        return self._sanitize_minimax_content(resp.json()["choices"][0]["message"]["content"])
 
     async def _minimax_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
-        """Stream chat via MiniMax M1 API."""
+        """Stream chat via MiniMax M1 API. The open is retried; a started body is not."""
+        import asyncio
+        import random
+        from app.services.max.minimax_retry import ATTEMPTS, WAIT_SECONDS, _jitter, is_connect_failure, is_retryable_status
+
         api_messages = self._prepare_openai_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
-            async with client.stream(
-                "POST",
-                f"{self.minimax_base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
-                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens, "stream": True}
-            ) as response:
-                if response.status_code != 200:
-                    error_body = await response.aread()
-                    raise Exception(f"MiniMax HTTP {response.status_code}: {error_body.decode()[:200]}")
-                self._record_provider_success("minimax")
-                collected = []
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:].strip()
-                    if data_str == "[DONE]":
+        rng = random.Random()
+        for attempt in range(ATTEMPTS):
+            try:
+                async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{self.minimax_base_url}/chat/completions",
+                        headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
+                        json={"model": self.minimax_model, "messages": api_messages, "max_tokens": self.minimax_max_tokens, "stream": True}
+                    ) as response:
+                        if is_retryable_status(response.status_code) and attempt < ATTEMPTS - 1:
+                            await response.aread()
+                            await asyncio.sleep(_jitter(WAIT_SECONDS[attempt], rng))
+                            continue
+                        if response.status_code != 200:
+                            error_body = await response.aread()
+                            raise Exception(f"MiniMax HTTP {response.status_code}: {error_body.decode()[:200]}")
+                        self._record_provider_success("minimax")
+                        collected = []
+                        async for line in response.aiter_lines():
+                            if not line.startswith("data: "):
+                                continue
+                            data_str = line[6:].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                data = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
+                            delta = data.get("choices", [{}])[0].get("delta", {})
+                            text = delta.get("content", "")
+                            if text:
+                                collected.append(text)
+                        cleaned = self._sanitize_minimax_content("".join(collected))
+                        if cleaned:
+                            yield cleaned
                         return
-                    try:
-                        data = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    delta = data.get("choices", [{}])[0].get("delta", {})
-                    text = delta.get("content", "")
-                    if text:
-                        collected.append(text)
-                cleaned = self._sanitize_minimax_content("".join(collected))
-                if cleaned:
-                    yield cleaned
+            except Exception as exc:
+                if is_connect_failure(exc) and attempt < ATTEMPTS - 1:
+                    await asyncio.sleep(_jitter(WAIT_SECONDS[attempt], rng))
+                    continue
+                raise
 
     # ── OpenClaw ──────────────────────────────────────────────────────
 

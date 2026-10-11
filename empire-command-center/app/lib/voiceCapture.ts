@@ -9,6 +9,7 @@ export function clipTooShort(elapsedMs: number): boolean {
   return elapsedMs < MIN_RECORDING_MS;
 }
 
+/** Touch: a second tap stops. Mouse: press starts, release stops. */
 export function pointerDownAction(input: {
   touchDevice: boolean;
   alreadyRecording: boolean;
@@ -18,6 +19,11 @@ export function pointerDownAction(input: {
   return 'start';
 }
 
+/**
+ * The pointerup that follows a tap must not stop the take.
+ * Holding past HOLD_ARM_MS opts into hold-to-talk, and a mouse
+ * press is hold-to-talk already.
+ */
 export function shouldStopOnPointerUp(input: {
   touchDevice: boolean;
   holdArmed: boolean;
@@ -57,6 +63,7 @@ export function filenameForMime(mimeType: string): string {
   return 'recording.webm';
 }
 
+/** UI Spanish is passed through. English and unknown locales auto-detect. */
 export function sttLanguage(locale: string | null | undefined): string | null {
   const lang = (locale || '').toLowerCase();
   if (lang.startsWith('es')) return 'es';

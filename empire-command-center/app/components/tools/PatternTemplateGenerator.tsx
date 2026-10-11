@@ -393,7 +393,7 @@ export default function PatternTemplateGenerator({ onSave }: PatternTemplateGene
                   </div>
                   {piece.svg ? (
                     <div
-                      className="flex items-center justify-center min-h-[120px]"
+                      className="cy-keep-light cy-paper flex items-center justify-center min-h-[120px]"
                       dangerouslySetInnerHTML={{ __html: piece.svg }}
                     />
                   ) : (

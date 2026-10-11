@@ -20,13 +20,11 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
+from app.db.database import resolve_task_db_path
 
 # ── Configuration ────────────────────────────────────────────────────────
 
-DB_PATH = os.getenv(
-    "EMPIRE_TASK_DB",
-    str(Path.home() / "empire-data" / "empire.db"),
-)
+DB_PATH = resolve_task_db_path()
 
 # Read at call time, not import time (dotenv may not be loaded yet at import)
 def _get_brave_key(): return os.getenv("BRAVE_API_KEY", "")
@@ -66,6 +64,7 @@ def _dict(row) -> Optional[dict]:
     for k in (
         "expanded_locations", "providers_attempted", "providers_succeeded",
         "providers_failed", "categories", "matched_keywords", "recommended_units",
+        "enrichment_pages",
     ):
         if k in d and isinstance(d[k], str):
             try:
@@ -77,6 +76,96 @@ def _dict(row) -> Optional[dict]:
 
 def _dicts(rows) -> list:
     return [_dict(r) for r in rows]
+
+
+# ── Display helpers (who is this business?) ──────────────────────────────
+
+DIRECTORY_DOMAINS = (
+    "yelp.", "houzz.", "facebook.", "instagram.", "linkedin.", "angi.", "angieslist.",
+    "thumbtack.", "bbb.org", "homeadvisor.", "porch.com", "nextdoor.", "yellowpages.",
+    "mapquest.", "tripadvisor.", "pinterest.", "youtube.", "reddit.", "manta.com",
+    "chamberofcommerce.", "buildzoom.", "expertise.com", "google.", "bing.",
+)
+
+_GENERIC_PLACE_TYPES = {"establishment", "point_of_interest", "store", "premise"}
+
+
+def is_directory_url(url: Optional[str]) -> bool:
+    host = (urlparse(url or "").netloc or "").lower()
+    if not host:
+        return False
+    return any(d in host for d in DIRECTORY_DOMAINS)
+
+
+def clean_display_name(name: Optional[str], source: Optional[str] = None) -> str:
+    """Web-search results use the page title as the name. Keep the business part."""
+    n = (name or "").strip()
+    if not n:
+        return "—"
+    if source == "brave":
+        for sep in (" | ", " - ", " – ", " — ", " :: "):
+            if sep in n:
+                head = n.split(sep)[0].strip()
+                if len(head) >= 3:
+                    n = head
+                    break
+    return n[:80]
+
+
+def display_city(p: dict) -> Optional[str]:
+    """Real city for the row. Google rows used to store the street in `city`."""
+    addr = p.get("address") or ""
+    parts = [x.strip() for x in addr.split(",") if x.strip()]
+    if p.get("source") == "google_places" and len(parts) >= 3:
+        city = parts[-3]
+        st = (parts[-2].split() or [""])[0]
+        return f"{city}, {st}".strip(", ")
+    loc = (p.get("location") or "").strip()
+    if loc:
+        bits = loc.split()
+        if len(bits) >= 2 and len(bits[-1]) == 2 and bits[-1].isupper():
+            return f"{' '.join(bits[:-1])}, {bits[-1]}"
+        return loc
+    city = p.get("city")
+    return city or None
+
+
+def maps_url(p: dict) -> Optional[str]:
+    """Free Google Maps link: place_id when we have one, else a name+address search."""
+    from urllib.parse import quote_plus
+    name = clean_display_name(p.get("name") or p.get("business_name"), p.get("source"))
+    q = " ".join(x for x in (name, p.get("address") or display_city(p) or "") if x and x != "—")
+    if not q:
+        return None
+    url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(q)}"
+    if p.get("source") == "google_places" and p.get("external_id"):
+        url += f"&query_place_id={quote_plus(str(p['external_id']))}"
+    return url
+
+
+def display_category(p: dict) -> Optional[str]:
+    cats = p.get("categories") or []
+    if isinstance(cats, str):
+        try:
+            cats = json.loads(cats)
+        except Exception:
+            cats = [cats]
+    nice = [str(c).replace("_", " ") for c in cats if c and str(c) not in _GENERIC_PLACE_TYPES]
+    if nice:
+        return ", ".join(nice[:3])
+    return (p.get("client_type") or None)
+
+
+def decorate_prospect(p: Optional[dict]) -> Optional[dict]:
+    if not p:
+        return p
+    p["display_name"] = clean_display_name(p.get("name") or p.get("business_name"), p.get("source"))
+    p["display_city"] = display_city(p)
+    p["maps_url"] = maps_url(p)
+    p["category"] = display_category(p)
+    p["is_directory_page"] = bool(p.get("source") == "brave" and is_directory_url(p.get("website")))
+    p["has_contact"] = bool(p.get("contact_name") or p.get("contact_email") or p.get("email"))
+    return p
 
 
 # ── Table creation (runs on import) ─────────────────────────────────────
@@ -152,6 +241,19 @@ CREATE TABLE IF NOT EXISTS prospects (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS prospect_outreach_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prospect_id INTEGER NOT NULL REFERENCES prospects(id) ON DELETE CASCADE,
+    channel TEXT NOT NULL DEFAULT 'email',
+    to_name TEXT,
+    to_address TEXT,
+    subject TEXT,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_by TEXT DEFAULT 'max',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS prospect_pipeline (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     prospect_id INTEGER NOT NULL UNIQUE REFERENCES prospects(id) ON DELETE CASCADE,
@@ -165,10 +267,34 @@ CREATE TABLE IF NOT EXISTS prospect_pipeline (
 """
 
 
+# Free contact lookup results (contact_enrich.py). Nullable, safe to re-run.
+_ENRICH_COLUMNS = {
+    "contact_name": "TEXT",
+    "contact_title": "TEXT",
+    "contact_email": "TEXT",
+    "contact_phone": "TEXT",
+    "instagram": "TEXT",
+    "facebook": "TEXT",
+    "linkedin": "TEXT",
+    "enrichment_status": "TEXT",
+    "enrichment_pages": "TEXT",
+    "enrichment_note": "TEXT",
+    "enriched_at": "TEXT",
+}
+
+
+def _migrate_enrichment_columns(conn):
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(prospects)").fetchall()}
+    for name, decl in _ENRICH_COLUMNS.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE prospects ADD COLUMN {name} {decl}")
+
+
 def _init_tables():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with _db() as conn:
         conn.executescript(_SCHEMA)
+        _migrate_enrichment_columns(conn)
 
 
 try:
@@ -283,11 +409,24 @@ DMV_INDICATORS = [
 # ── Scoring ──────────────────────────────────────────────────────────────
 
 
+def _family_trade_profile():
+    """Maxine / Max-e trade profile. None on Workroom (drapery scoring stays)."""
+    try:
+        from app.services.leadforge.trade_profile import trade_profile
+
+        return trade_profile()
+    except Exception:
+        return None
+
+
 def _score_prospect(raw: dict, search_location: str) -> dict:
     """
     Score a raw prospect dict and return it with all score breakdown fields.
     Score range: 0-100.
     """
+    prof = _family_trade_profile()
+    if prof:
+        return _score_prospect_family(raw, search_location, prof)
     name_lower = (raw.get("name") or raw.get("business_name") or "").lower()
     cats_str = " ".join(raw.get("categories") or []).lower()
     desc_lower = (raw.get("description") or "").lower()
@@ -442,6 +581,100 @@ def _score_prospect(raw: dict, search_location: str) -> dict:
         "recommended_angle": angle,
         "outreach_priority": priority,
         "card_summary": card_summary,
+    }
+
+
+def _score_prospect_family(raw: dict, search_location: str, prof: dict) -> dict:
+    """Family edition scoring: same 0-100 scale, the edition's own trade terms.
+
+    Drapery fit columns stay 0; trade fit tags go in matched_keywords.
+    """
+    name_lower = (raw.get("name") or raw.get("business_name") or "").lower()
+    cats_str = " ".join(raw.get("categories") or []).lower()
+    desc_lower = (raw.get("description") or "").lower()
+    combined = f"{name_lower} {cats_str} {desc_lower}"
+
+    rating = float(raw.get("rating") or 0)
+    rating_points = round((rating / 5.0) * 40, 2) if rating > 0 else 0
+    reviews = int(raw.get("review_count") or 0)
+    review_points = round(min(30, (math.log10(min(reviews, 500) + 1) / math.log10(501)) * 30), 2) if reviews > 0 else 0
+
+    relevance_points = 0.0
+    matched = []
+    for kw, pts in (prof.get("relevance_keywords") or {}).items():
+        if kw in combined:
+            relevance_points += pts
+            matched.append(kw)
+    relevance_points = round(min(20, relevance_points), 2)
+
+    loc_combined = f"{combined} {(raw.get('location') or '').lower()} {(raw.get('address') or '').lower()} {(raw.get('city') or '').lower()} {(raw.get('state') or '').lower()}"
+    proximity_points = 0.0
+    for ind in prof.get("proximity") or []:
+        if ind in loc_combined or ind in (search_location or "").lower():
+            proximity_points = 10.0
+            break
+
+    keyword_bonus = round(min(10, sum(2.5 for t in (prof.get("keyword_terms") or []) if t in combined)), 2)
+    source = (raw.get("source") or "").lower()
+    source_bonus = {"google": 5, "google_places": 5, "yelp": 4, "brave": 2}.get(source, 1)
+    total = round(min(100, rating_points + review_points + relevance_points + proximity_points + keyword_bonus + source_bonus))
+
+    has_phone = 1 if raw.get("phone") else 0
+    has_website = 1 if raw.get("website") else 0
+    has_address = 1 if (raw.get("address") or raw.get("city")) else 0
+    has_reviews = 1 if reviews > 0 else 0
+    confidence = (has_phone + has_website + has_address + has_reviews) * 25
+
+    tags = [t for t in prof.get("fit_tags") or [] if any(k in combined for k in t["keywords"])]
+    units = []
+    for t in tags:
+        u = t.get("unit") or prof.get("default_unit")
+        if u and u not in units:
+            units.append(u)
+    first = tags[0]["key"] if tags else None
+    client_type = (prof.get("client_types") or {}).get(first, prof.get("default_client_type", "")) if first else prof.get("default_client_type", "")
+    angle = (prof.get("angles") or {}).get(first) if first else None
+
+    if raw.get("email"):
+        best_contact = "email"
+    elif raw.get("phone"):
+        best_contact = "phone"
+    elif raw.get("website"):
+        best_contact = "website_form"
+    else:
+        best_contact = "social"
+
+    card_parts = [raw.get("business_name") or raw.get("name") or "Sin nombre"]
+    if raw.get("city"):
+        card_parts.append(raw["city"])
+    if rating > 0:
+        card_parts.append(f"{rating}★")
+    if reviews > 0:
+        card_parts.append(f"{reviews} reseñas")
+
+    return {
+        **raw,
+        "score": total,
+        "rating_points": rating_points,
+        "review_points": review_points,
+        "relevance_points": relevance_points,
+        "proximity_points": proximity_points,
+        "keyword_bonus": keyword_bonus,
+        "source_bonus": source_bonus,
+        "confidence_score": confidence,
+        "has_phone": has_phone,
+        "has_website": has_website,
+        "has_address": has_address,
+        "has_reviews": has_reviews,
+        "matched_keywords": matched + [f"fit:{t['key']}" for t in tags],
+        **{k: 0 for k in FIT_RULES},
+        "recommended_units": units or [prof.get("default_unit")],
+        "client_type": client_type,
+        "outreach_ready": 1 if confidence >= 50 and total >= 30 else 0,
+        "best_contact_method": best_contact,
+        "recommended_angle": angle or prof.get("default_angle", ""),
+        "outreach_priority": "high" if total >= 70 else "medium" if total >= 40 else "low",
+        "card_summary": " | ".join(card_parts),
     }
 
 
@@ -603,7 +836,7 @@ async def _search_brave(query: str, location: str, count: int = 20) -> List[dict
             "name": title,
             "business_name": title,
             "address": None,
-            "city": location.split(",")[0].split()[-1] if "," in location else location.split()[-2] if len(location.split()) > 1 else location,
+            "city": location.split(",")[0].strip() if "," in location else " ".join(location.split()[:-1]) if len(location.split()) > 1 else location,
             "state": location.split()[-1] if len(location.split()) > 1 else None,
             "zip": None,
             "phone": phone,
@@ -642,7 +875,7 @@ async def _search_google_places(query: str, location: str) -> List[dict]:
 
     for place in (data.get("results") or []):
         addr_parts = (place.get("formatted_address") or "").split(",")
-        city = addr_parts[0].strip() if len(addr_parts) > 1 else None
+        city = addr_parts[-3].strip() if len(addr_parts) >= 3 else (addr_parts[0].strip() if len(addr_parts) > 1 else None)
         state_zip = addr_parts[-2].strip() if len(addr_parts) > 2 else None
         state = state_zip.split()[0] if state_zip else None
         zipcode = state_zip.split()[1] if state_zip and len(state_zip.split()) > 1 else None
@@ -732,6 +965,9 @@ TARGET_QUERIES = {
 
 
 def _build_query(target_type: str) -> str:
+    prof = _family_trade_profile()
+    if prof:
+        return (prof.get("target_queries") or {}).get(target_type.lower(), target_type)
     return TARGET_QUERIES.get(target_type.lower(), target_type)
 
 
@@ -1055,7 +1291,7 @@ def get_prospects(
             f"SELECT * FROM prospects{where} ORDER BY score DESC LIMIT ? OFFSET ?",
             params,
         ).fetchall()
-        return _dicts(rows)
+        return [decorate_prospect(d) for d in _dicts(rows)]
 
 
 def get_prospect(prospect_id: int) -> Optional[dict]:
@@ -1064,15 +1300,18 @@ def get_prospect(prospect_id: int) -> Optional[dict]:
         row = conn.execute(
             "SELECT * FROM prospects WHERE id = ?", (prospect_id,)
         ).fetchone()
-        return _dict(row)
+        return decorate_prospect(_dict(row))
 
 
 def get_pipeline(status: str = None, limit: int = 50) -> List[dict]:
     """Fetch pipeline entries with prospect details."""
     if status:
         query = """
-            SELECT pp.*, p.name, p.business_name, p.score, p.card_summary,
-                   p.outreach_priority, p.best_contact_method
+            SELECT pp.id, pp.prospect_id, COALESCE(pp.status, 'new') AS status, pp.notes,
+                   pp.next_action, pp.assigned_unit, pp.created_at, pp.updated_at,
+                   p.name, p.business_name, p.score, p.card_summary,
+                   p.outreach_priority, p.best_contact_method, p.phone, p.website,
+                   p.contact_name, p.contact_email, p.instagram
             FROM prospect_pipeline pp
             JOIN prospects p ON pp.prospect_id = p.id
             WHERE pp.status = ?
@@ -1081,8 +1320,11 @@ def get_pipeline(status: str = None, limit: int = 50) -> List[dict]:
         params = (status, limit)
     else:
         query = """
-            SELECT pp.*, p.name, p.business_name, p.score, p.card_summary,
-                   p.outreach_priority, p.best_contact_method
+            SELECT pp.id, pp.prospect_id, COALESCE(pp.status, 'new') AS status, pp.notes,
+                   pp.next_action, pp.assigned_unit, pp.created_at, pp.updated_at,
+                   p.name, p.business_name, p.score, p.card_summary,
+                   p.outreach_priority, p.best_contact_method, p.phone, p.website,
+                   p.contact_name, p.contact_email, p.instagram
             FROM prospect_pipeline pp
             JOIN prospects p ON pp.prospect_id = p.id
             ORDER BY p.score DESC LIMIT ?

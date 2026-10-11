@@ -9,6 +9,8 @@ import { useAssistantName } from '../../lib/assistant';
 import { simliFaceEdition, useEdition } from '../../lib/edition';
 import { presentationChrome } from '../../lib/familyChrome';
 import LiveVoiceCall from '../LiveVoiceCall';
+import PresentationStage, { type StageArtifact } from './PresentationStage';
+import { T } from '../../v3/edition';
 
 type PresentationMode = 'presentation' | 'compact' | 'text';
 
@@ -28,6 +30,7 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition, loa
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [avatarLine, setAvatarLine] = useState('');
+  const [showFaceCaption, setShowFaceCaption] = useState(false);
 
   // Listen for messages from avatar iframe
   useEffect(() => {
@@ -48,6 +51,12 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition, loa
           ? (event.data.placeholderNote || "Placeholder. TalkingHead female brunette sample (CC BY-NC 4.0, non-commercial), loaded with body M.")
           : '';
         setAvatarLine([renderer, event.data.reason, flag].filter(Boolean).join(' · '));
+        if (renderer === simliCaption) {
+          setShowFaceCaption(true);
+          window.setTimeout(() => setShowFaceCaption(false), 4000);
+        } else {
+          setShowFaceCaption(false);
+        }
         if (event.data.success !== false) setLoaded(true);
       }
     };
@@ -57,20 +66,15 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition, loa
 
   if (mode !== 'presentation') return null;
 
-  return (
-    <div className="presentation-face-wrap">
-    <div className="presentation-face">
-      {/* Gold glow border effect */}
-      <div style={{
-        position: 'absolute', inset: 0,
-        border: '2px solid rgba(184, 150, 12, 0.3)',
-        borderRadius: 0,
-        boxShadow: 'inset 0 0 60px rgba(184, 150, 12, 0.05)',
-        pointerEvents: 'none',
-        zIndex: 2,
-      }} />
+  const licenseNote = avatarLine.includes('CC BY-NC') ? avatarLine : '';
+  const faceCaption = showFaceCaption && avatarLine.includes(simliCaption)
+    ? avatarLine.replace(licenseNote, '').replace(/^ · | · $/g, '').trim()
+    : '';
 
-      {/* Avatar canvas or placeholder */}
+  return (
+    <div className="avatar-slot">
+      <div className="avatar-fit">
+      <div className="avatar-square">
       {error === 'placeholder' ? (
         <div style={{
           width: 280, height: 360,
@@ -137,12 +141,13 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition, loa
         />
       )}
       </div>
+      </div>
 
-      {(avatarLine || (!loaded && !error)) && (
-        <div className="presentation-caption">
-          {avatarLine || loadingLabel}
-        </div>
+      {!loaded && !error && (
+        <div className="presentation-caption">{loadingLabel}</div>
       )}
+      {faceCaption && <div className="presentation-caption avatar-caption-fade">{faceCaption}</div>}
+      {licenseNote && <div className="presentation-caption">{licenseNote}</div>}
 
     </div>
   );
@@ -241,6 +246,12 @@ export default function PresentationScreen() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [stageArtifact, setStageArtifact] = useState<StageArtifact | null>(null);
+  const [stageHistory, setStageHistory] = useState<StageArtifact[]>([]);
+  const [stageSlides, setStageSlides] = useState<StageArtifact[]>([]);
+  const [slideIndex, setSlideIndex] = useState(0);
+  const pendingSlides = useRef<StageArtifact[]>([]);
+  const slideCursor = useRef(0);
 
   // Persist mode
   useEffect(() => {
@@ -328,15 +339,93 @@ export default function PresentationScreen() {
     }
   }, []);
 
+  const showArtifact = useCallback((artifact: StageArtifact, index = 0) => {
+    setStageArtifact(artifact);
+    setSlideIndex(index);
+  }, []);
+
+  const speakNarration = useCallback(async (text: string) => {
+    const line = (text || '').trim();
+    if (!line || mode !== 'presentation') return;
+    try {
+      const resp = await fetch(`${API}/avatar/speak`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: line, mode: 'presentation', emotion: 'neutral' }),
+      });
+      const data = await resp.json();
+      if (data.audio) {
+        const audio = new Audio(`data:audio/mp3;base64,${data.audio}`);
+        audioRef.current = audio;
+        setIsSpeaking(true);
+        audio.onended = () => {
+          setIsSpeaking(false);
+          const next = pendingSlides.current.shift();
+          if (next) {
+            slideCursor.current += 1;
+            showArtifact(next, slideCursor.current);
+            void speakNarration(next.narration || next.title);
+          }
+        };
+        audio.onerror = () => setIsSpeaking(false);
+        iframeRef.current?.contentWindow?.postMessage({ type: 'speak-audio', audio: data.audio }, '*');
+        audio.play().catch(() => setIsSpeaking(false));
+      } else {
+        iframeRef.current?.contentWindow?.postMessage({ type: 'speak-text', text: line }, '*');
+      }
+    } catch {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'speak-text', text: line }, '*');
+    }
+  }, [mode, showArtifact]);
+
   const playAudio = useCallback((audioB64: string) => {
     if (!audioB64) return;
     const audio = new Audio(`data:audio/mp3;base64,${audioB64}`);
     audioRef.current = audio;
     setIsSpeaking(true);
-    audio.onended = () => setIsSpeaking(false);
+    const advance = () => {
+      setIsSpeaking(false);
+      const next = pendingSlides.current.shift();
+      if (!next) return;
+      slideCursor.current += 1;
+      showArtifact(next, slideCursor.current);
+      void speakNarration(next.narration || next.title);
+    };
+    audio.onended = advance;
     audio.onerror = () => setIsSpeaking(false);
     audio.play().catch(() => setIsSpeaking(false));
-  }, []);
+  }, [showArtifact, speakNarration]);
+
+  const takeStage = useCallback((data: { artifacts?: StageArtifact[]; slides?: { artifact?: StageArtifact; narration?: string }[] }, narrateRest: boolean) => {
+    const artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
+    const slides = (Array.isArray(data.slides) ? data.slides : [])
+      .map((slide) => slide.artifact)
+      .filter((item): item is StageArtifact => !!item);
+    if (!artifacts.length && !slides.length) return;
+    const first = slides[0] || artifacts[0];
+    setStageHistory((prev) => {
+      const merged = [...artifacts, ...prev];
+      const seen = new Set<string>();
+      return merged.filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      }).slice(0, 12);
+    });
+    setStageSlides(slides);
+    slideCursor.current = 0;
+    showArtifact(first, 0);
+    pendingSlides.current = narrateRest ? slides.slice(1) : [];
+  }, [showArtifact]);
+
+  useEffect(() => {
+    const onStage = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      takeStage(detail, false);
+    };
+    window.addEventListener('max-stage-artifacts', onStage);
+    return () => window.removeEventListener('max-stage-artifacts', onStage);
+  }, [takeStage]);
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
@@ -363,30 +452,31 @@ export default function PresentationScreen() {
       });
       const data = await resp.json();
 
+      const spoken = data.spoken || data.response || data.detail || 'No response';
       const assistMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: data.response || data.detail || 'No response',
+        content: spoken,
         timestamp: new Date().toISOString(),
         desk: data.desk,
         model: data.model_used,
         hasAudio: !!data.audio,
+        toolResults: data.tool_results,
       };
       setMessages(prev => [...prev, assistMsg]);
+      takeStage(data, true);
 
-      // Play audio in presentation mode + lip-sync avatar
+      // Play audio in presentation mode + lip-sync avatar. Slide 0 is this line.
       if (mode === 'presentation') {
         if (data.audio) {
           playAudio(data.audio);
-          // Send audio to avatar for lip-sync
           iframeRef.current?.contentWindow?.postMessage(
             { type: 'speak-audio', audio: data.audio }, '*'
           );
-          setSessionCost(prev => prev + 0.015); // ~$0.015 per TTS call
-        } else if (assistMsg.content) {
-          // No audio — use TalkingHead's built-in TTS for lip-sync
+          setSessionCost(prev => prev + 0.015);
+        } else if (spoken) {
           iframeRef.current?.contentWindow?.postMessage(
-            { type: 'speak-text', text: assistMsg.content }, '*'
+            { type: 'speak-text', text: spoken }, '*'
           );
         }
       }
@@ -400,7 +490,7 @@ export default function PresentationScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [mode, isLoading, playAudio]);
+  }, [mode, isLoading, playAudio, takeStage]);
 
   // Voice recording — Web Speech API primary (mobile), MediaRecorder fallback (desktop)
   const toggleRecording = useCallback(async () => {
@@ -447,15 +537,18 @@ export default function PresentationScreen() {
               body: JSON.stringify({ message: transcript, voice: mode === 'presentation', channel: 'avatar', mode }),
             });
             const data = await resp.json();
-            if (data.response) {
+            const spoken = data.spoken || data.response;
+            if (spoken) {
               setMessages(prev => [...prev, {
                 id: (Date.now() + 1).toString(),
                 role: 'assistant',
-                content: data.response,
+                content: spoken,
                 timestamp: new Date().toISOString(),
                 model: data.model_used,
                 hasAudio: !!data.audio,
+                toolResults: data.tool_results,
               }]);
+              takeStage(data, true);
               if (mode === 'presentation') {
                 if (data.audio) {
                   playAudio(data.audio);
@@ -463,9 +556,9 @@ export default function PresentationScreen() {
                     { type: 'speak-audio', audio: data.audio }, '*'
                   );
                   setSessionCost(prev => prev + 0.015);
-                } else if (data.response) {
+                } else {
                   iframeRef.current?.contentWindow?.postMessage(
-                    { type: 'speak-text', text: data.response }, '*'
+                    { type: 'speak-text', text: spoken }, '*'
                   );
                 }
               }
@@ -527,15 +620,18 @@ export default function PresentationScreen() {
               timestamp: new Date().toISOString(),
             }]);
           }
-          if (data.response) {
+          const spoken = data.spoken || data.response;
+          if (spoken) {
             setMessages(prev => [...prev, {
               id: (Date.now() + 1).toString(),
               role: 'assistant',
-              content: data.response,
+              content: spoken,
               timestamp: new Date().toISOString(),
               model: data.model_used,
               hasAudio: !!data.audio,
+              toolResults: data.tool_results,
             }]);
+            takeStage(data, true);
             if (mode === 'presentation') {
               if (data.audio) {
                 playAudio(data.audio);
@@ -543,9 +639,9 @@ export default function PresentationScreen() {
                   { type: 'speak-audio', audio: data.audio }, '*'
                 );
                 setSessionCost(prev => prev + 0.015);
-              } else if (data.response) {
+              } else {
                 iframeRef.current?.contentWindow?.postMessage(
-                  { type: 'speak-text', text: data.response }, '*'
+                  { type: 'speak-text', text: spoken }, '*'
                 );
               }
             }
@@ -571,11 +667,11 @@ export default function PresentationScreen() {
     } catch (err) {
       console.error('Microphone access denied:', err);
     }
-  }, [isRecording, mode, playAudio]);
+  }, [isRecording, mode, playAudio, takeStage]);
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
-    <div className="presentation-root" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="presentation-root">
       {/* Top bar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -590,8 +686,7 @@ export default function PresentationScreen() {
         <ModeToggle mode={mode} onChange={handleModeChange} labels={chrome} />
       </div>
 
-      {/* Portrait: face on top, chat below. Landscape: face left, chat right. */}
-      <div className="presentation-stage">
+      <div className="presentation-body">
         <AvatarPanel
           mode={mode}
           isSpeaking={isSpeaking}
@@ -602,12 +697,17 @@ export default function PresentationScreen() {
           simliCaption={chrome.simliFace}
           mark={chrome.header}
         />
+        {mode === 'presentation' && (
+          <PresentationStage
+            artifact={stageArtifact}
+            history={stageHistory}
+            slideLabel={stageSlides.length > 1 ? `${T('Slide')} ${slideIndex + 1} ${T('of')} ${stageSlides.length}` : undefined}
+            onSelect={(item) => { pendingSlides.current = []; showArtifact(item, 0); }}
+            onClose={() => setStageArtifact(null)}
+          />
+        )}
 
-        {/* Chat panel */}
-        <div className="presentation-chat" style={{
-          background: 'var(--chat-bg)',
-          position: 'relative',
-        }}>
+        <div className="presentation-chat">
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
             {messages.length === 0 && (
@@ -813,73 +913,68 @@ export default function PresentationScreen() {
 
       <style>{`
         .presentation-root {
+          display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden;
+          box-sizing: border-box;
           padding-top: env(safe-area-inset-top);
-          padding-left: env(safe-area-inset-left);
           padding-right: env(safe-area-inset-right);
+          padding-bottom: env(safe-area-inset-bottom);
+          padding-left: env(safe-area-inset-left);
+        }
+        .presentation-body {
+          flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+        }
+        .avatar-slot {
+          flex: 0 0 42%; min-height: 0; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; overflow: hidden;
+          background: linear-gradient(180deg, #1a1812 0%, #0d0b08 100%);
+          border-bottom: 2px solid #b8960c;
+        }
+        .avatar-fit {
+          flex: 1 1 auto; min-height: 0; width: 100%;
+          container-type: size;
+          display: flex; align-items: center; justify-content: center;
+        }
+        .avatar-square {
+          width: min(100cqw, 100cqh); height: min(100cqw, 100cqh);
+          aspect-ratio: 1 / 1;
+          position: relative; overflow: hidden;
+        }
+        .avatar-caption,
+        .presentation-caption {
+          flex: 0 0 auto; max-width: 100%; box-sizing: border-box;
+          font-size: 11px; line-height: 1.35; color: #f4e7b3; text-align: center;
+          padding: 4px 10px 6px;
         }
         .presentation-stage {
-          flex: 1;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
+          flex: 1; min-height: 120px; min-width: 0; display: flex; flex-direction: column;
+          padding: 10px 12px; background: #f7f4ee; border-bottom: 1px solid #e5e2dc; overflow: hidden;
+        }
+        .presentation-stage-full {
+          position: fixed; inset: 0; z-index: 80; min-height: 0;
+          padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
         }
         .presentation-chat {
-          flex: 1;
-          min-width: 0;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-        }
-        .presentation-face-wrap {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: flex-start;
-          flex-shrink: 0;
-          width: 100%;
-          padding: 8px 12px 0;
-          background: linear-gradient(180deg, #1a1812 0%, #0d0b08 100%);
-        }
-        .presentation-face {
-          position: relative;
-          width: min(512px, 100%, 46vh);
-          aspect-ratio: 1 / 1;
-          overflow: hidden;
-          flex-shrink: 0;
-          background: #111;
-        }
-        .presentation-caption {
-          position: static;
-          width: min(512px, 100%);
-          margin: 6px auto 8px;
-          font-size: 11px;
-          line-height: 1.35;
-          color: #f4e7b3;
-          background: rgba(20, 16, 8, 0.82);
-          border: 1px solid rgba(184, 150, 12, 0.45);
-          border-radius: 6px;
-          padding: 6px 8px;
+          flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column;
+          background: var(--chat-bg); position: relative;
         }
         @media (orientation: portrait) and (max-height: 740px) {
           .presentation-caption { display: none; }
         }
-        @media (orientation: landscape) {
-          .presentation-stage {
-            flex-direction: row;
-            align-items: stretch;
+        @media (orientation: landscape) and (max-width: 1099px) {
+          .presentation-body { flex-direction: row; }
+          .avatar-slot {
+            flex: 0 0 auto; width: 42%; height: 100%; border-bottom: 0; border-right: 2px solid #b8960c;
           }
-          .presentation-face-wrap {
-            width: auto;
-            height: 100%;
-            justify-content: center;
-            padding: 8px;
+          .presentation-stage { flex: 1; border-bottom: 0; border-right: 1px solid #e5e2dc; }
+          .presentation-chat { flex: 1; }
+        }
+        @media (min-width: 1100px) {
+          .presentation-body { flex-direction: row; }
+          .avatar-slot {
+            flex: 0 0 auto; width: min(42vh, 38%); height: 100%; border-bottom: 0; border-right: 2px solid #b8960c;
           }
-          .presentation-face {
-            width: min(512px, 42vw, 100%);
-            max-height: 100%;
-          }
-          .presentation-caption { display: block; max-width: min(512px, 42vw); }
+          .presentation-stage { flex: 2 1 0; border-bottom: 0; border-right: 1px solid #e5e2dc; }
+          .presentation-chat { flex: 1 1 240px; width: auto; min-width: 240px; }
         }
         @keyframes dot-bounce {
           0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }

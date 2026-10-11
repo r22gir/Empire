@@ -4,7 +4,12 @@ import { useEffect, useState } from 'react';
 import { API_BASE } from './api';
 
 /** Hidden in Juan's instance. Shared base modules stay. */
-export const AMP_HIDDEN_NAV = new Set(['workroom', 'craft', 'luxe', 'drawings']);
+export const AMP_HIDDEN_NAV = new Set([
+  'workroom', 'craft', 'luxe', 'drawings',
+  // Empire internals (host stats, endpoints, git/build info, infra) stay off family sites.
+  // Improvements (Cursor builds on the Empire repo) and the System rail stay main-only.
+  'platform', 'system', 'hardware', 'openclaw', 'recovery', 'dev', 'max-continuity', 'improvements',
+]);
 
 /** Maxine's shell hides the same workroom tools, and the AMP product is not her home. */
 export const MAXINE_HIDDEN_NAV = new Set<string>([...AMP_HIDDEN_NAV, 'amp']);

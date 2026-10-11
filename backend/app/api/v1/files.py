@@ -12,9 +12,12 @@ from PIL import Image
 
 router = APIRouter(prefix="/files", tags=["files"])
 
-# Founder/Workroom legacy paths. Family editions never mkdir these.
-UPLOAD_DIR = Path.home() / "empire-repo" / "backend" / "data" / "uploads"
-LOG_DIR = Path.home() / "empire-repo" / "backend" / "data" / "logs" / "file_access"
+from app.services.data_paths import data_root
+
+# Honor EMPIRE_DATA_DIR. Family editions never mkdir Workroom checkout paths;
+# ``_upload_dir()`` also routes them to require_data_root()/uploads.
+UPLOAD_DIR = data_root() / "uploads"
+LOG_DIR = data_root() / "logs" / "file_access"
 
 
 def _upload_dir() -> Path:
@@ -48,7 +51,7 @@ def _log_dir() -> Path:
 
 def get_category(filename: str) -> str:
     ext = filename.lower().split('.')[-1] if '.' in filename else ''
-    if ext in ['pdf', 'txt', 'md', 'doc', 'docx', 'csv', 'json']:
+    if ext in ['pdf', 'txt', 'md', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'json']:
         return 'documents'
     elif ext in ['py', 'js', 'ts', 'tsx', 'jsx', 'html', 'css', 'sh', 'yaml', 'yml']:
         return 'code'

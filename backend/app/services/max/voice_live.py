@@ -52,6 +52,7 @@ import base64
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -71,9 +72,11 @@ VOICE_READ_ONLY_TOOLS = (
     "get_tasks", "get_desk_status", "get_services_health", "get_system_stats",
     "check_email", "list_job_images", "search_conversations", "get_weather",
     "list_quotes_awaiting_review", "show_quote_for_review",
+    "get_revenue_chart", "web_search",
 )
 QUEUE_TOOL = "queue_for_founder_approval"
-VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL,))
+IMPROVE_TOOL = "request_improvement"  # writes a change request only; builds need Rafael's tap in the studio
+VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL))
 READ_ONLY_TOOLS = VOICE_READ_ONLY_TOOLS  # backwards-compatible name
 # Explicitly named so logs/tests are clear; the allowlist above is what enforces.
 VOICE_DENIED_EXAMPLES = frozenset({
@@ -162,6 +165,58 @@ async def fresh_instructions() -> tuple[str, dict]:
         return build_instructions(), {"fallback": True, "error": type(exc).__name__}
 
 
+# ── Language (2026-10-04) ───────────────────────────────────────────
+_ES_RE = re.compile(r"[áéíóúñ¿¡]|\b(que|qué|quiero|cuál|cuáles|dónde|cómo|hola|gracias|por|favor|el|la|los|las|de|en|un|una|es|está|noticias|necesito|puedes|dime|mis?|sí|también|ahora|hoy|esto|eso|para|con|hay)\b", re.I)
+_EN_RE = re.compile(r"\b(the|what|is|are|my|me|please|can|you|how|where|show|tell|hey|hi|i|need|want|this|that|it|to|of|and|for|with|today|now)\b", re.I)
+
+
+def detect_language(text: str) -> Optional[str]:
+    """'es' / 'en' for a short utterance, None when unclear."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    es, en = len(_ES_RE.findall(t)), len(_EN_RE.findall(t))
+    if es == en:
+        return None
+    return "es" if es > en else "en"
+
+
+def last_call_language(db_path: Optional[str] = None) -> Optional[str]:
+    """Language of Rafael's most recent voice call (from the session journal, read-only)."""
+    try:
+        import sqlite3
+        from app.services.max import session_journal as sj
+        path = str(db_path or sj.journal_db_path())
+        if not os.path.exists(path):
+            return None
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
+        try:
+            row = conn.execute(
+                "SELECT conversation_id FROM max_session_turns WHERE channel='voice' AND role='user' "
+                "AND edition=? ORDER BY id DESC LIMIT 1", (sj.edition(),)).fetchone()
+            if not row:
+                return None
+            texts = [r[0] or "" for r in conn.execute(
+                "SELECT content FROM max_session_turns WHERE conversation_id=? AND role='user' "
+                "ORDER BY id DESC LIMIT 6", (row[0],)).fetchall()]
+        finally:
+            conn.close()
+        return detect_language(" ".join(texts))
+    except Exception as exc:  # never block a call on this
+        logger.debug("voice_live: last call language unavailable (%s)", type(exc).__name__)
+        return None
+
+
+def language_section(last_lang: Optional[str]) -> str:
+    name = {"es": "Spanish", "en": "English"}.get(last_lang or "")
+    fallback = (f"If his first words are unclear, use {name}: his last call was in {name}." if name
+                else "If his first words are unclear, ask in both, briefly: '¿Español o English?'.")
+    return ("\n\n# Language\n"
+            "Your FIRST reply must be in the language of Rafael's first words. " + fallback +
+            " After that, always answer in the language of his latest words. Lookup fillers too: "
+            "'un segundo' in Spanish, 'one sec' in English. Never switch to English while he speaks Spanish.")
+
+
 # ── Tools ───────────────────────────────────────────────────────────
 
 def _obj(props: dict, required: list | None = None) -> dict:
@@ -244,6 +299,14 @@ _FALLBACK_TOOL_SCHEMAS = {
         "description": "Current weather (Open-Meteo). Default city Washington DC. Read-only.",
         "parameters": _obj({"city": {"type": "string", "description": "City (default Washington DC)"}}),
     },
+    "web_search": {
+        "description": "Read-only web search (DuckDuckGo, Brave fallback) for current news, local events, prices or any public fact. For news, put the topic and place in the query (e.g. 'noticias Cartago Valle del Cauca hoy'). Speak a short summary of the top headlines; never read URLs aloud. Sends nothing.",
+        "parameters": _obj({"query": {"type": "string", "description": "Search query, in the language of the place"}}, ["query"]),
+    },
+    "get_revenue_chart": {
+        "description": "Read-only revenue totals by month from recorded payments. Use for 'last month's revenue' or 'this week's numbers'. Returns a chart. Never invents amounts. Does not send anything.",
+        "parameters": _obj({}),
+    },
     "list_quotes_awaiting_review": {
         "description": "Quotes waiting for Rafael's review/approval (founder_review, plus legacy proposal quotes). Test quotes are hidden. Read-only — you cannot approve or reject from voice.",
         "parameters": _obj({"business_unit": {"type": "string", "description": "Optional business unit filter"}}),
@@ -258,6 +321,16 @@ _FALLBACK_TOOL_SCHEMAS = {
             "action": {"type": "string", "description": "Short imperative description, e.g. 'Send Max the transcript of this voice call'"},
             "details": {"type": "string", "description": "Everything needed to do it later: who, what, which quote/customer, wording"},
         }, ["action"]),
+    },
+    IMPROVE_TOOL: {
+        "description": "When Rafael asks for a SYSTEM improvement (a new feature, a fix, a change to how Empire or Max works), write ONE structured change request to the Improvements page. Builds nothing; Rafael approves it in the studio, and merge/deploy needs a second approval. Tell him it is on the Improvements page waiting for his tap.",
+        "parameters": _obj({
+            "title": {"type": "string", "description": "Short name of the change"},
+            "problem": {"type": "string", "description": "What is wrong or missing today, in Rafael's words"},
+            "proposed_change": {"type": "string", "description": "What to build or change, concretely"},
+            "affected_modules": {"type": "array", "items": {"type": "string"}, "description": "e.g. LeadForge, Quotes, Max"},
+            "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+        }, ["title", "problem", "proposed_change"]),
     },
 }
 
@@ -321,6 +394,11 @@ def _compact_for_voice(name: str, data: dict[str, Any]) -> dict[str, Any]:
                              if k in ("type", "role", "content", "summary", "channel", "date", "subject",
                                       "conversation_id", "started_at", "lines")})
         out["result"] = {"query": res.get("query"), "count": res.get("count", len(rows)), "results": rows}
+    elif name == "web_search":
+        hits = [{"title": str(r.get("title") or "")[:160], "snippet": str(r.get("snippet") or r.get("body") or "")[:260],
+                 "site": (str(r.get("url") or r.get("link") or "").split("/")[2:3] or [""])[0]}
+                for r in (res.get("results") or [])[:6] if isinstance(r, dict)]
+        out["result"] = {"query": res.get("query"), "count": len(hits), "results": hits, "source": res.get("source")}
     elif name == "get_tasks":
         tasks = [{k: t.get(k) for k in ("id", "title", "status", "priority", "desk", "due_date", "created_at")}
                  for t in (res.get("tasks") or [])[:15] if isinstance(t, dict)]
@@ -344,7 +422,7 @@ def realtime_tool_definitions() -> list[dict[str, Any]]:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("voice_live: canonical tool schemas unavailable: %s", exc)
     out = []
-    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL,):
+    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL):
         fn = canonical.get(name) or _FALLBACK_TOOL_SCHEMAS[name]
         out.append({
             "type": "function",
@@ -422,6 +500,22 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
     if name == QUEUE_TOOL:
         return queue_for_founder_approval(call.get("action", ""), call.get("details", ""),
                                           call_id=call_id, conversation_id=conversation_id)
+    if name == IMPROVE_TOOL:
+        try:
+            from app.services.max import improvements
+            req = improvements.create_request(
+                title=call.get("title", ""), problem=call.get("problem", ""),
+                proposed_change=call.get("proposed_change", ""), affected_modules=call.get("affected_modules") or [],
+                risk=call.get("risk") or "medium", requested_via="voice",
+                requested_text=f"voice call {call_id or '-'} / conversation {conversation_id or '-'}")
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        return {"success": True, "tool": IMPROVE_TOOL, "result": {
+            "id": req["id"], "title": req["title"], "status": req["status"], "executed": False,
+            "note": "On the Improvements page waiting for Rafael's Approve tap. Nothing was built or deployed."}}
+    if name == "get_revenue_chart":
+        from app.services.max.presentation_stage import revenue_tool_result
+        return revenue_tool_result()
     from app.services.max.tool_executor import TOOL_REGISTRY, execute_tool
     if name not in TOOL_REGISTRY:
         return {"success": False, "error": f"Tool '{name}' is not registered."}
@@ -453,6 +547,8 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
         call["limit"] = min(int(call.get("limit") or 8), 20)
     elif name == "get_weather":
         call["city"] = call.get("city") or "Washington DC"
+    elif name == "web_search":
+        call = {"tool": name, "query": str(call.get("query") or "")[:300], "num_results": 6}
     result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
     return _compact_for_voice(name, result.to_dict())
 
@@ -551,6 +647,7 @@ class LiveCall:
         self.instructions_meta: dict[str, Any] = {}
         self._assistant_partial: dict[str, list[str]] = {}
         self._assistant_final: set[str] = set()
+        self.last_user_text = ""
         self.transcript = None
         try:
             from app.services.max.voice_transcript import VoiceTranscript
@@ -708,6 +805,7 @@ class LiveCall:
             await self.send_client_json({"type": "speech_stopped"})
             return
         if etype == "conversation.item.input_audio_transcription.completed":
+            self.last_user_text = str(event.get("transcript") or "")
             self._record("add_user", event.get("transcript", ""), event.get("item_id"))
             await self.send_client_json({"type": "transcript", "role": "user",
                                          "text": event.get("transcript", ""), "final": True,
@@ -809,7 +907,12 @@ class LiveCall:
         logger.info("voice_live[%s]: tool %s ok=%s in %dms", self.call_id, name, ok,
                     int((time.monotonic() - started) * 1000))
         self._record("add_tool", name, args, ok, _tool_note(name, data))
-        await self.send_client_json({"type": "tool", "name": name, "status": "done", "ok": ok})
+        from app.services.max.presentation_stage import stage_event
+        stage = stage_event(name, data if isinstance(data, dict) else {}, self.last_user_text)
+        await self.send_client_json({
+            "type": "tool", "name": name, "status": "done", "ok": ok,
+            "artifacts": stage["artifacts"], "slides": stage["slides"],
+        })
         return call_id, _tool_output_text(data)
 
     async def heartbeat(self) -> None:
@@ -869,6 +972,9 @@ class LiveCall:
             instr_task.cancel()
             return
         instructions, self.instructions_meta = await instr_task
+        _lang = last_call_language()
+        self.instructions_meta["last_call_language"] = _lang
+        instructions += language_section(_lang)
         logger.info("voice_live[%s]: instructions %s chars (~%s tokens, cached=%s, fallback=%s)",
                     self.call_id, len(instructions), len(instructions) // 4,
                     self.instructions_meta.get("cached"), self.instructions_meta.get("fallback", False))
@@ -1003,6 +1109,58 @@ def verify_access_jwt(token: str) -> tuple[bool, str, str]:
         return False, f"invalid access token ({type(exc).__name__})", ""
 
 
+def tailscale_allowed_logins() -> set[str]:
+    """Comma-separated TAILSCALE_ALLOWED_LOGINS. Empty means nobody."""
+    raw = os.getenv("TAILSCALE_ALLOWED_LOGINS") or ""
+    return {part.strip().lower() for part in raw.split(",") if part.strip()}
+
+
+def _normalize_peer(host: str) -> str:
+    host = (host or "").strip().lower()
+    if host.startswith("::ffff:"):
+        host = host[7:]
+    return host
+
+
+def _peer_host(ws) -> str:
+    client = getattr(ws, "client", None)
+    return _normalize_peer(str(getattr(client, "host", "") or ""))
+
+
+def proxy_secret_ok(headers) -> bool:
+    """True when Next stamped this hop with EMPIRE_PROXY_AUTH_SECRET.
+
+    The header is set only inside the Next server, from the socket peer, and
+    any client-supplied value is overwritten first. A missing env denies.
+    """
+    import hmac
+    expected = os.getenv("EMPIRE_PROXY_AUTH_SECRET") or ""
+    if not expected:
+        return False
+    got = (headers.get("x-empire-proxy-secret") or "").strip()
+    if len(got) != len(expected):
+        return False
+    return hmac.compare_digest(got, expected)
+
+
+def _tailscale_hop_trusted(headers, peer: str) -> bool:
+    """Tailscale-User-Login is real only from a loopback socket or from Next.
+
+    uvicorn --proxy-headers (the default) replaces the loopback peer with
+    X-Forwarded-For, so the raw 127.0.0.1 is gone by the time we run. Next
+    records that its own socket was loopback by setting
+    x-empire-tailscale-verified together with the shared secret.
+    """
+    if peer in ("127.0.0.1", "::1"):
+        return True
+    verified = (headers.get("x-empire-tailscale-verified") or "").strip() == "1"
+    return verified and proxy_secret_ok(headers)
+
+
+def _cloudflare_proxied(headers) -> bool:
+    return any(headers.get(name) for name in ("cf-ray", "cf-connecting-ip"))
+
+
 def _ws_cookie(ws, name: str) -> str:
     cookies = getattr(ws, "cookies", None) or {}
     value = cookies.get(name) if hasattr(cookies, "get") else None
@@ -1048,16 +1206,23 @@ def _authorize_amp_session(ws) -> tuple[bool, str, str]:
     return True, "amp_session", email
 
 
-def authorize_websocket(ws) -> tuple[bool, str, str]:
-    """Same trust model as the Command Center, plus AMP session on family editions.
+def authorize_websocket(ws, *, surface: str = "live") -> tuple[bool, str, str]:
+    """Who may open Live Voice and the other Presentation Mode avatar routes.
 
     * Family edition (EMPIRE_EDITION=amp / maxine): accept the httpOnly
       ``amp_session`` cookie (or the same token as a bearer). Cloudflare
       Access JWT still works when present.
-    * Workroom via the tunnel (proxy headers present): require a valid
-      Access JWT (Cf-Access-Jwt-Assertion header or CF_Authorization cookie).
-    * Direct local connection (loopback peer, no proxy headers): allowed —
-      that is the Command Center on this box and the local test harness.
+    * Cloudflare Access JWT (header or CF_Authorization cookie) is checked
+      next, including on loopback. A Cloudflare tunnel request without a
+      valid JWT stays denied.
+    * Direct local connection (loopback peer, no proxy headers, no Tailscale
+      identity header): allowed. That is the Command Center on this box.
+    * `tailscale serve` reaches Next from 127.0.0.1. Next keeps
+      Tailscale-User-Login only in that case, stamps a shared secret, and
+      forwards to uvicorn. Accept the login when that stamp is present and
+      the login is in TAILSCALE_ALLOWED_LOGINS. An empty allowlist denies.
+    * HTTP avatar and Simli routes (surface="http") are also allowed when
+      Next's secret matches and this is not a Cloudflare tunnel request.
     """
     headers = ws.headers
     host = (headers.get("host") or "").split(":")[0].lower()
@@ -1076,8 +1241,20 @@ def authorize_websocket(ws) -> tuple[bool, str, str]:
     token = headers.get("cf-access-jwt-assertion") or _ws_cookie(ws, "CF_Authorization")
     if token:
         return verify_access_jwt(token)
+    peer = _peer_host(ws)
+    login = (headers.get("tailscale-user-login") or "").strip()
+    if login:
+        # Identity header present: decide here. Do not fall through to the
+        # open loopback or local-proxy allowance.
+        if not _tailscale_hop_trusted(headers, peer):
+            return False, "tailscale header from non-loopback", ""
+        allowed = tailscale_allowed_logins()
+        if login.lower() not in allowed:
+            return False, "tailscale login not allowed", ""
+        return True, "tailscale", login
+    if surface == "http" and proxy_secret_ok(headers) and not _cloudflare_proxied(headers):
+        return True, "local-proxy", ""
     proxied = any(headers.get(h) for h in _PROXY_HEADERS)
-    peer = getattr(ws.client, "host", "") if ws.client else ""
     if not proxied and peer in ("127.0.0.1", "::1", "localhost"):
         return True, "loopback", ""
     if family:
