@@ -643,7 +643,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   };
 
   return (
-    <div data-cc-chat style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', minHeight: 0, overflow: 'hidden', background: 'var(--chat-bg)' }}>
+    <div data-cc-chat style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', background: 'var(--chat-bg)' }}>
 
       {/* MAX Header — compact bold line */}
       <div style={{
