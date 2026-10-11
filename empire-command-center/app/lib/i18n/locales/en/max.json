@@ -20,7 +20,9 @@
     "regenerate": "Regenerate",
     "stop": "Stop",
     "voice_input": "Voice Input",
-    "attach_file": "Attach File"
+    "attach_file": "Attach File",
+    "ask_max_help": "Ask Max for help",
+    "family_help_inbox": "Family help"
   },
   "desks": {
     "active_desk": "Active Desk",

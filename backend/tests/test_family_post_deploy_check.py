@@ -16,6 +16,9 @@ def test_script_does_not_source_or_eval_env():
     assert "mi empresa se llama" in text
     assert "POSTDEPLOY-" not in text
     assert "used_percent + remaining_percent debe igualar cap_percent" in text
+    assert "check_family_help" in text
+    assert "family-help /inbox denegado" in text
+    assert "can_read_inbox" in text
 
 
 def test_self_test_parses_unquoted_smtp_from():

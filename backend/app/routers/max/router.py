@@ -2336,6 +2336,37 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
 
 
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
+    # Family editions: "pide ayuda a Max" / "ask Max for help" becomes a ticket.
+    try:
+        from app.services.family_help import handle_chat_intent
+        from app.edition import is_family_edition
+        if is_family_edition() and not request.desk:
+            hit = handle_chat_intent(
+                request.message or "",
+                history=list(request.history or []),
+            )
+            if hit:
+                return ChatResponse(
+                    response=hit["response"],
+                    model_used="family-help",
+                    fallback_used=False,
+                    tool_results=[{
+                        "tool": "family_help",
+                        "success": True,
+                        "result": {"ticket_id": (hit.get("ticket") or {}).get("id")},
+                    }],
+                    metadata=_response_metadata(request.channel, skill_used="family_help"),
+                )
+    except PermissionError as exc:
+        return ChatResponse(
+            response=str(exc),
+            model_used="family-help",
+            fallback_used=False,
+            metadata=_response_metadata(request.channel, skill_used="family_help"),
+        )
+    except Exception as exc:
+        logger.debug("family help intent skipped: %s", exc)
+
     # 2026-10-04: greetings, "where are my docs" and existing-quote status answer directly
     # (no tools, no status dumps, no internal-doc citations). Image messages go to the model.
     if not request.desk:

@@ -171,6 +171,23 @@ curl -sS -H "Authorization: Bearer $TOKEN" \
 
 **Esperado:** HTTP 200 + JSON. Listas vacías están bien (instancia nueva). **FAIL** si el cuerpo menciona `Frolich`, `Hyattsville`, `5124`, `workroom@`, `Nelma`, `Dahlia`, `Nehal`, `The Willard`, `McLean Whittington`, `Empire Workroom`. Eso serían filas del taller, no de AMP.
 
+## 5) Pedir ayuda a Max — ticket hacia el Max personal
+
+Owner only. No crea un ticket real (no manda correo a Rafael). Solo comprueba que la edición puede escribir y no puede leer el buzón de Rafael ni datos del Workroom.
+
+```bash
+curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8011/api/v1/family-help/status
+# Esperado: can_create=true, can_read_inbox=false, edition=amp (o maxine)
+
+curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8011/api/v1/family-help/tickets
+# Esperado: HTTP 200, JSON con tickets propios. Sin Frolich / Hyattsville / workroom@
+
+curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8011/api/v1/family-help/inbox
+# Esperado: HTTP 403. Juan y Camilo no leen el inbox de Rafael ni el del otro.
+```
+
+En el chat, el botón **Pedir ayuda a Max** y el texto `pide ayuda a Max` crean un ticket (texto, voz o archivos). Eso sí notifica a `empirebox2026@gmail.com` y cuenta para el tope del 20%. No lo dispares en este chequeo.
+
 ## Qué no hace
 
 - No curl a `:8000` / `:3005`.

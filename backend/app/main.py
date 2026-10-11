@@ -242,6 +242,9 @@ load_router("app.routers.amp", "/api/v1/amp", ["amp"])
 # Edition manifest, allowlist, and Nueva empresa (no-op routes on Workroom)
 load_router("app.routers.edition", "/api/v1", ["edition"])
 
+# Family editions → personal Max help inbox (amp / maxine write; founder reads)
+load_router("app.routers.family_help", "/api/v1", ["family-help"])
+
 # LLC Factory — Business formation services (DC/MD/VA)
 load_router("app.routers.llcfactory", "/api/v1", ["llcfactory"])
 

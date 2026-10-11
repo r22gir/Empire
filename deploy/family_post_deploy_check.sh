@@ -380,6 +380,60 @@ run_edition() {
       fail "$name chat Argos Campestre falló"
     fi
   fi
+
+  check_family_help "$name" "$base" "$token" "$edition"
+}
+
+check_family_help() {
+  local label="$1" base="$2" token="$3" edition="$4"
+  local raw status
+  raw="$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $token" "$base/api/v1/family-help/status")"
+  status="${raw##*$'\n'}"
+  raw="${raw%$'\n'*}"
+  echo "  family-help status → $status $raw"
+  if [ "$status" != "200" ]; then
+    fail "$label family-help /status HTTP $status"
+    return
+  fi
+  if ! EXPECT_EDITION="$edition" FAMILY_HELP_JSON="$raw" "$PYTHON" -c '
+import json, os, sys
+d = json.loads(os.environ["FAMILY_HELP_JSON"])
+need = {"can_create", "can_read_inbox", "edition"}
+missing = need - set(d)
+if missing:
+    sys.exit("faltan " + ",".join(sorted(missing)))
+if d.get("can_create") is not True:
+    sys.exit("can_create debe ser true")
+if d.get("can_read_inbox"):
+    sys.exit("el buzón de Rafael no debe leerse desde esta edición")
+if d.get("edition") != os.environ["EXPECT_EDITION"]:
+    sys.exit("edition=" + repr(d.get("edition")))
+'; then
+    fail "$label family-help /status inválido"
+    return
+  fi
+  pass "$label family-help /status (puede crear, no lee el inbox de Rafael)"
+
+  raw="$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $token" "$base/api/v1/family-help/tickets")"
+  status="${raw##*$'\n'}"
+  raw="${raw%$'\n'*}"
+  echo "  family-help tickets → $status"
+  if [ "$status" != "200" ]; then
+    fail "$label family-help /tickets HTTP $status"
+  elif scan_workroom_records "$raw"; then
+    fail "$label family-help /tickets filtró datos del Workroom"
+  else
+    pass "$label family-help /tickets solo los propios (sin Workroom)"
+  fi
+
+  raw="$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $token" "$base/api/v1/family-help/inbox")"
+  status="${raw##*$'\n'}"
+  echo "  family-help inbox → $status"
+  if [ "$status" = "403" ]; then
+    pass "$label family-help /inbox denegado (solo Max personal)"
+  else
+    fail "$label family-help /inbox debía ser 403, fue $status"
+  fi
 }
 
 self_test() {

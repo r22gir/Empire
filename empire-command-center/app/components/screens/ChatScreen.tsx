@@ -2,7 +2,7 @@
 import MaxDocCard from '../docs/MaxDocCard';
 import MaxRecordCard from '../docs/MaxRecordCard';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X, Copy, Check, ExternalLink } from 'lucide-react';
+import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X, Copy, Check, ExternalLink, LifeBuoy } from 'lucide-react';
 import ChatHistoryPanel from '../ChatHistoryPanel';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
@@ -31,6 +31,9 @@ import {
   sttLanguage,
   transcriptIsFailure,
 } from '../../lib/voiceCapture';
+import { editionFromEnv, isFamilyEdition } from '../../lib/edition';
+import AskMaxHelp from '../family/AskMaxHelp';
+import { familyHelpLabels } from '../../lib/familyHelp';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -143,6 +146,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { locale } = useTranslation();
   const localeRef = useRef(locale);
+  const familyHelp = isFamilyEdition(editionFromEnv());
+  const helpCopy = familyHelpLabels(locale);
+  const [helpNotes, setHelpNotes] = useState<Message[]>([]);
   useEffect(() => { localeRef.current = locale; }, [locale]);
   useEffect(() => { recordingRef.current = recording; }, [recording]);
   useEffect(() => {
@@ -655,6 +661,48 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           {assistantName}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {familyHelp && (
+          <AskMaxHelp
+            locale={locale}
+            messages={messages}
+            onReply={(ticketId, body, author) => {
+              setHelpNotes((prev) => [
+                ...prev,
+                {
+                  id: `help-${ticketId}-${Date.now()}`,
+                  role: 'assistant',
+                  content: `[Family help ${ticketId}] ${author}: ${body}`,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  model: 'family-help',
+                },
+              ]);
+            }}
+          />
+        )}
+        {!familyHelp && onScreenChange && (
+          <button
+            type="button"
+            onClick={() => onScreenChange('family-help')}
+            title={helpCopy.inbox}
+            style={{
+              background: 'none',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              color: 'var(--text)',
+              cursor: 'pointer',
+              padding: '6px 8px',
+              minHeight: 44,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            <LifeBuoy size={14} />
+            {helpCopy.inbox}
+          </button>
+        )}
         <a
           className="cm-chiefe-btn"
           href={chiefEHref([...messages].reverse().find(m => m.role === 'user')?.content)}
@@ -816,7 +864,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         padding: '8px 10px',
       }}
       className="sm:!px-9 sm:!py-6 pb-10 md:!pb-6">
-        {messages.map((msg, i) => (
+        {[...messages, ...helpNotes].map((msg, i) => (
           <div key={msg.id || i} className="cm-msg" style={{
             marginBottom: 16,
             maxWidth: '90%',
