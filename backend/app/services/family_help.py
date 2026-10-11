@@ -42,12 +42,18 @@ from app.edition import (
 )
 
 HELP_EDITIONS = frozenset({"amp", "maxine"})
+# Founder inbox hides these until Rafael clicks «Abrir adjuntos».
+# Their files must never ride the notify email.
+HIDDEN_ATTACHMENT_EDITIONS = frozenset({"maxine"})
 STATUSES = ("new", "answered", "closed")
 DEFAULT_DAILY_LIMIT = 20
 CONTEXT_TURNS = 8
 MAX_FILES = 5
 MAX_FILE_BYTES = 8 * 1024 * 1024  # 8 MiB
 MAX_VOICE_BYTES = 12 * 1024 * 1024  # 12 MiB
+# Gmail/SMTP often choke near 10–25 MiB. Attach small files; mention the rest.
+EMAIL_ATTACH_MAX_BYTES = 6 * 1024 * 1024
+EMAIL_ATTACH_TOTAL_MAX_BYTES = 8 * 1024 * 1024
 
 ALLOWED_FILE_EXT = frozenset({
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".txt", ".md",
@@ -85,6 +91,27 @@ HTML_LIKE_MIME = frozenset({
     "text/html", "application/xhtml+xml", "image/svg+xml",
     "text/xml", "application/xml", "text/javascript",
     "application/javascript", "application/x-javascript",
+})
+MIME_ALIASES = {
+    "image/jpg": "image/jpeg",
+    "image/pjpeg": "image/jpeg",
+    "image/x-png": "image/png",
+    "image/x-citrix-pjpeg": "image/jpeg",
+    "application/x-pdf": "application/pdf",
+    "application/acrobat": "application/pdf",
+    "application/x-csv": "text/csv",
+    "text/x-markdown": "text/markdown",
+    "text/x-csv": "text/csv",
+    "audio/wave": "audio/wav",
+    "audio/x-wav": "audio/wav",
+    "audio/vnd.wave": "audio/wav",
+}
+UNKNOWN_MIME = frozenset({
+    "",
+    "application/octet-stream",
+    "binary/octet-stream",
+    "application/download",
+    "application/force-download",
 })
 EXT_TO_MIME = {
     ".png": "image/png",
@@ -497,11 +524,33 @@ def _norm_mime(content_type: str) -> str:
 
 
 def infer_mime(filename: str, content_type: str) -> str:
-    mime = _norm_mime(content_type)
-    if mime:
+    """Normalize browser aliases and infer from extension when MIME is empty/generic."""
+    mime = MIME_ALIASES.get(_norm_mime(content_type), _norm_mime(content_type))
+    if mime not in UNKNOWN_MIME:
         return mime
     ext = Path(filename or "").suffix.lower()
-    return EXT_TO_MIME.get(ext, "")
+    return EXT_TO_MIME.get(ext, mime if mime not in UNKNOWN_MIME else "")
+
+
+MIME_TO_EXT = {mime: ext for ext, mime in EXT_TO_MIME.items()}
+MIME_TO_EXT["image/jpeg"] = ".jpg"
+
+
+def fallback_filename(name: str, content_type: str, kind: str = "file") -> str:
+    """Keep uploads that arrive without a name (some Android browsers)."""
+    raw = Path(name or "").name.strip() or kind
+    if Path(raw).suffix:
+        return raw
+    mime = infer_mime(raw, content_type)
+    ext = MIME_TO_EXT.get(mime) or ""
+    if ext:
+        return f"{raw}{ext}"
+    return raw
+
+
+def attachments_hidden_until_reveal(edition: Optional[str]) -> bool:
+    """True for Maxine (and any edition marked hidden-attachments)."""
+    return (edition or "").strip().lower() in HIDDEN_ATTACHMENT_EDITIONS
 
 
 def inbox_path_requires_founder_studio_auth(path: str) -> bool:
@@ -703,14 +752,14 @@ def _load_children(conn: sqlite3.Connection, ticket: dict) -> dict:
         "SELECT id, kind, filename, content_type, size FROM attachments WHERE ticket_id = ? ORDER BY filename",
         (ticket_id,),
     ).fetchall()
-    hide_maxine = (
+    hide_attachments = (
         is_founder_edition()
-        and ticket.get("edition") == "maxine"
+        and attachments_hidden_until_reveal(ticket.get("edition"))
         and not ticket.get("attachments_revealed")
     )
     ticket["attachment_count"] = len(atts)
-    ticket["attachments_hidden"] = bool(hide_maxine and atts)
-    if hide_maxine:
+    ticket["attachments_hidden"] = bool(hide_attachments and atts)
+    if hide_attachments:
         ticket["attachments"] = []
     else:
         ticket["attachments"] = [
@@ -858,7 +907,11 @@ def create_ticket(
     prepared = []
     for item in files:
         data = item.get("data") or b""
-        raw_name = item.get("filename") or ""
+        raw_name = fallback_filename(
+            item.get("filename") or "",
+            item.get("content_type") or "",
+            item.get("kind") or "file",
+        )
         kind = validate_upload(
             filename=raw_name,
             content_type=item.get("content_type") or "",
@@ -1289,13 +1342,223 @@ def _record_peer_usage(edition: str, text: str) -> None:
             continue
 
 
-def notify_new_ticket(ticket: dict) -> dict:
-    """In-app notice + email to empirebox2026@gmail.com only."""
-    result = {"notification": None, "email": "skipped"}
+def format_byte_size(n: int) -> str:
+    try:
+        size = int(n or 0)
+    except (TypeError, ValueError):
+        size = 0
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
+
+
+def _raw_attachment_rows(ticket_id: str, edition: str) -> list[sqlite3.Row]:
+    """DB rows even when the founder inbox still hides Maxine files."""
+    conn = _connect(edition)
+    try:
+        return list(
+            conn.execute(
+                "SELECT id, kind, filename, content_type, size, stored_name "
+                "FROM attachments WHERE ticket_id = ? ORDER BY filename",
+                (ticket_id,),
+            )
+        )
+    finally:
+        conn.close()
+
+
+def load_notify_files(ticket: dict) -> list[dict]:
+    """Read stored attachment bytes for the founder email. No URLs."""
+    ticket_id = str(ticket.get("id") or "")
+    edition = str(ticket.get("edition") or "")
+    if not ticket_id or edition not in HELP_EDITIONS:
+        return []
+    out = []
+    try:
+        rows = _raw_attachment_rows(ticket_id, edition)
+    except PermissionError:
+        return []
+    for row in rows:
+        path = _files_dir(edition, ticket_id) / row["stored_name"]
+        if not path.is_file():
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        out.append({
+            "id": row["id"],
+            "kind": row["kind"],
+            "filename": row["filename"],
+            "content_type": row["content_type"] or infer_mime(row["filename"], ""),
+            "size": int(row["size"] or len(data)),
+            "data": data,
+        })
+    return out
+
+
+def split_email_attachments(
+    files: list[dict],
+    *,
+    allow_attach: bool = True,
+) -> tuple[list[dict], list[dict]]:
+    """Attach small files when allowed; mention the rest. Never emit a URL.
+
+    Hidden-attachment editions (Maxine) always take the mention path so
+    file bytes never leave the inbox until Rafael clicks «Abrir adjuntos».
+    """
+    attach: list[dict] = []
+    mention: list[dict] = []
+    total = 0
+    for item in files:
+        data = item.get("data") or b""
+        size = int(item.get("size") or len(data) or 0)
+        filename = item.get("filename") or "archivo"
+        mime = infer_mime(filename, item.get("content_type") or "")
+        ext = Path(filename).suffix.lower()
+        unsafe = ext in HTML_LIKE_EXT or mime in HTML_LIKE_MIME
+        payload = {
+            "filename": filename,
+            "content_type": mime or "application/octet-stream",
+            "size": size,
+            "kind": item.get("kind") or "file",
+        }
+        if (
+            allow_attach
+            and not unsafe
+            and data
+            and size <= EMAIL_ATTACH_MAX_BYTES
+            and total + size <= EMAIL_ATTACH_TOTAL_MAX_BYTES
+        ):
+            attach.append({**payload, "data": data})
+            total += size
+        else:
+            mention.append(payload)
+    return attach, mention
+
+
+def _notify_mention_note(*, hidden: bool, oversized: bool) -> str:
+    if hidden:
+        return (
+            "— Ábrelo en el Max personal → Ayuda de ediciones familiares "
+            "(Abrir adjuntos). No hay enlace público."
+        )
+    if oversized:
+        return (
+            "— demasiado grande para el correo. Ábrelo en el Max personal → "
+            "Ayuda de ediciones familiares. No hay enlace público."
+        )
+    return (
+        "— Ábrelo en el Max personal → Ayuda de ediciones familiares. "
+        "No hay enlace público."
+    )
+
+
+def build_notify_email(ticket: dict) -> dict:
+    """Founder-only notify: text + attachment bytes or an inbox mention. No URLs."""
     edition = ticket.get("edition")
+    hidden = attachments_hidden_until_reveal(edition)
     label = "Max-e" if edition == "amp" else "Maxine"
     title = f"Ayuda de {label}: {ticket.get('sender') or edition_owner_name(edition)}"
     preview = (ticket.get("message") or ticket.get("transcript") or "").strip()[:400]
+    if hidden:
+        # Metadata only — do not read Maxine file bytes for email.
+        stored = []
+        try:
+            for row in _raw_attachment_rows(str(ticket.get("id") or ""), str(edition or "")):
+                stored.append({
+                    "filename": row["filename"],
+                    "size": int(row["size"] or 0),
+                    "kind": row["kind"],
+                    "content_type": row["content_type"] or "",
+                    "data": b"",
+                })
+        except PermissionError:
+            stored = []
+        attach, mention = [], stored
+    else:
+        stored = load_notify_files(ticket)
+        attach, mention = split_email_attachments(stored, allow_attach=True)
+    if not attach and not mention and stored:
+        mention = [
+            {
+                "filename": item.get("filename") or "archivo",
+                "size": int(item.get("size") or 0),
+                "kind": item.get("kind") or "file",
+            }
+            for item in stored
+        ]
+
+    rows_html = []
+    for item in attach:
+        rows_html.append(
+            "<li>"
+            f"{html.escape(str(item['filename']), quote=True)} "
+            f"({html.escape(format_byte_size(item['size']), quote=True)}) "
+            "— incluido en este correo."
+            "</li>"
+        )
+    for item in mention:
+        size = int(item.get("size") or 0)
+        rows_html.append(
+            "<li>"
+            f"{html.escape(str(item['filename']), quote=True)} "
+            f"({html.escape(format_byte_size(size), quote=True)}) "
+            f"{_notify_mention_note(hidden=hidden, oversized=size > EMAIL_ATTACH_MAX_BYTES)}"
+            "</li>"
+        )
+    if stored and not rows_html:
+        rows_html.append("<li>Hay un adjunto. Ábrelo en el buzón de ayuda familiar. No hay enlace público.</li>")
+
+    att_block = ""
+    if rows_html:
+        att_block = (
+            "<p><strong>Adjuntos</strong></p><ul>"
+            + "".join(rows_html)
+            + "</ul>"
+        )
+    elif ticket.get("attachment_count") or ticket.get("attachments"):
+        att_block = (
+            "<p><strong>Adjuntos</strong></p>"
+            "<p>Hay un archivo en el ticket. Ábrelo en el Max personal → "
+            "Ayuda de ediciones familiares. No hay enlace público.</p>"
+        )
+
+    html_body = (
+        f"<p><strong>{html.escape(title, quote=True)}</strong></p>"
+        f"<p>Ticket <code>{html.escape(str(ticket.get('id') or ''), quote=True)}</code></p>"
+        f"<p>{html.escape(preview or 'Audio o archivo adjunto.', quote=True)}</p>"
+        f"{att_block}"
+        "<p>Responde desde el Max personal (no el módulo Workroom). Sin Telegram. "
+        "Sin enlace público ni URL firmada.</p>"
+    )
+    return {
+        "subject": title,
+        "html": html_body,
+        "attachments": [
+            {
+                "filename": item["filename"],
+                "content_type": item.get("content_type") or "application/octet-stream",
+                "data": item["data"],
+            }
+            for item in attach
+        ],
+        "mentioned": mention,
+        "preview": preview,
+        "label": label,
+    }
+
+
+def notify_new_ticket(ticket: dict) -> dict:
+    """In-app notice + email to empirebox2026@gmail.com only."""
+    result = {"notification": None, "email": "skipped", "email_attachments": 0, "email_mentioned": 0}
+    built = build_notify_email(ticket)
+    edition = ticket.get("edition")
+    label = built["label"]
+    title = built["subject"]
+    preview = built["preview"]
     message = (
         f"{label} · ticket {ticket.get('id')}\n"
         f"{preview or '(audio o archivo sin texto)'}\n"
@@ -1332,18 +1595,16 @@ def notify_new_ticket(ticket: dict) -> dict:
             result["email"] = "blocked"
             return result
 
-    html_body = (
-        f"<p><strong>{html.escape(title, quote=True)}</strong></p>"
-        f"<p>Ticket <code>{html.escape(str(ticket.get('id') or ''), quote=True)}</code></p>"
-        f"<p>{html.escape(preview or 'Audio o archivo adjunto.', quote=True)}</p>"
-        "<p>Responde desde el Max personal (no el módulo Workroom). Sin Telegram.</p>"
-    )
+    html_body = built["html"]
+    email_atts = built["attachments"]
+    result["email_attachments"] = len(email_atts)
+    result["email_mentioned"] = len(built["mentioned"])
     try:
         import asyncio
         from app.services.email.sender import send_email
 
         async def _send():
-            return await send_email(to, title, html_body)
+            return await send_email(to, title, html_body, attachments=email_atts)
 
         try:
             loop = asyncio.get_running_loop()
@@ -1365,16 +1626,30 @@ def handle_chat_intent(
     *,
     history: Optional[list[dict]] = None,
     sender: Optional[str] = None,
+    attachments: Optional[list[dict]] = None,
 ) -> Optional[dict]:
     """If the chat text is a help-to-Max command, file the ticket."""
     if not is_family_edition() or not is_help_intent(message):
         return None
     leftover = leftover_after_intent(message)
     body = leftover or "El usuario pidió ayuda a Max desde el chat."
+    kept = []
+    for item in attachments or []:
+        try:
+            validate_upload(
+                filename=item.get("filename") or "",
+                content_type=item.get("content_type") or "",
+                data=item.get("data") or b"",
+                kind=item.get("kind") or "file",
+            )
+            kept.append(item)
+        except ValueError:
+            continue
     ticket = create_ticket(
         message=body,
         sender=sender,
         history=history,
+        attachments=kept or None,
         notify=True,
     )
     locale_es = True

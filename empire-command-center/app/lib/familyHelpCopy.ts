@@ -30,6 +30,8 @@ export function familyHelpLabels(locale: string) {
     retryTranscript: es ? 'Reintentar transcripción' : 'Retry transcription',
     context: es ? 'Contexto del chat' : 'Chat context',
     files: es ? 'Archivos' : 'Files',
+    fileTooBig: es ? 'El archivo supera 8 MB' : 'File is larger than 8 MB',
+    fileTypeBlocked: es ? 'Tipo de archivo no permitido' : 'File type not allowed',
     attachmentWarning: es
       ? 'Aviso: el contenido de los adjuntos no se redacta. Solo se ocultan datos en el texto, la transcripción y el nombre del archivo.'
       : 'Warning: attachment contents are not redacted. Only the message, transcript, and filename are scrubbed.',
