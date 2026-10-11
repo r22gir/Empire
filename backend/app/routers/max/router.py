@@ -6422,6 +6422,8 @@ async def text_to_speech(request: TTSRequest):
 
     audio_bytes = await tts_service.synthesize_for_web(request.text)
     if not audio_bytes:
+        if getattr(tts_service, "last_status", "") == "blocked":
+            raise HTTPException(status_code=429, detail=tts_service.last_error or "MiniMax TTS blocked by the shared meter")
         raise HTTPException(status_code=500, detail="TTS synthesis failed")
 
     from fastapi.responses import Response

@@ -966,6 +966,14 @@ class AIRouter:
                 model=model or "MiniMax-M3",
                 kind=feature or "chat",
             )
+            if "minimax" in (model or "").lower() or (model or "").lower().startswith("m3"):
+                from app.services.minimax_meter import record as record_minimax
+                record_minimax(
+                    kind="text",
+                    model=model or "MiniMax-M3",
+                    input_tokens=token_tracker.estimate_tokens(input_text),
+                    output_tokens=token_tracker.estimate_tokens(response),
+                )
         except Exception as e:
             logger.debug(f"Cost logging failed: {e}")
 
@@ -1265,7 +1273,20 @@ class AIRouter:
                 source=source,
                 image=bool(image_filename),
             )
-            return model, refusal
+            if refusal:
+                return model, refusal
+            try:
+                from app.services.minimax_meter import enforce as enforce_minimax
+                meter_refusal = enforce_minimax(kind="text", input_tokens=max(1, len(user_text) // 4))
+                if meter_refusal:
+                    return model, meter_refusal
+            except Exception:
+                logger.warning("minimax meter check failed closed; refusing MiniMax spend", exc_info=True)
+                return model, (
+                    "No pude confirmar el cupo MiniMax. No gasto créditos de regalo. / "
+                    "Could not confirm MiniMax quota. Gift credits will not be spent."
+                )
+            return model, None
         except Exception:
             logger.warning(
                 "usage cap check failed open; chat proceeds without a cap refusal",

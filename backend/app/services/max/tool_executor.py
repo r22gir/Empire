@@ -513,6 +513,9 @@ FAMILY_TOOLS_DOC = """## Herramientas de esta instancia
 Usa solo datos de este centro de mando. No leas el Workroom, cotizaciones EST del fundador, ni carpetas de otros.
 No hay envíos a clientes. Los borradores se quedan en esta instancia.
 No uses nombres ni direcciones de otro taller.
+Puedes generar una imagen con MiniMax image-01 (minimax_text_to_image) a partir de un aviso de texto.
+Nunca pongas fotos de clientes, correos, teléfonos, rutas del Workroom ni datos de otra edición en el aviso.
+La voz speech-2.8 solo si está encendida. El video H3 requiere la aprobación explícita de Rafael; no se publica.
 """
 
 
@@ -7461,13 +7464,11 @@ def _search_conversations(params: dict, desk: Optional[str] = None) -> ToolResul
 
 async def _minimax_text_to_image_async(params: dict) -> ToolResult:
     """minimax_text_to_image — generate images via MiniMax image-01."""
-    from app.services.max.minimax_tools import minimax_text_to_image as _mm_t2i
-    result = await _mm_t2i(
-        prompt=params.get("prompt", ""),
+    from app.services.minimax_media import generate_image
+    result = await generate_image(
+        params.get("prompt", ""),
         aspect_ratio=params.get("aspect_ratio", "1:1"),
         n=min(int(params.get("n", 1)), 4),
-        prompt_optimizer=params.get("prompt_optimizer", True),
-        model=params.get("model", ""),
     )
     return ToolResult(
         tool="minimax_text_to_image",
@@ -7497,6 +7498,10 @@ def _minimax_text_to_image(params: dict, desk: Optional[str] = None) -> ToolResu
 
 async def _minimax_image_to_image_async(params: dict) -> ToolResult:
     """minimax_image_to_image — transform image via MiniMax."""
+    from app.services.minimax_media import reject_family_image_to_image
+    blocked = reject_family_image_to_image()
+    if blocked:
+        return ToolResult(tool="minimax_image_to_image", success=False, error=blocked)
     from app.services.max.minimax_tools import minimax_image_to_image as _mm_i2i
     result = await _mm_i2i(
         image=params.get("image", ""),
@@ -7566,13 +7571,8 @@ def _minimax_understand_image(params: dict, desk: Optional[str] = None) -> ToolR
 
 async def _minimax_tts_async(params: dict) -> ToolResult:
     """minimax_tts — generate speech via MiniMax TTS."""
-    from app.services.max.minimax_tools import minimax_tts as _mm_tts
-    result = await _mm_tts(
-        text=params.get("text", ""),
-        voice_id=params.get("voice_id", "male-qn-qingque"),
-        speed=float(params.get("speed", 1.0)),
-        output_format=params.get("output_format", "mp3"),
-    )
+    from app.services.minimax_media import generate_speech
+    result = await generate_speech(params.get("text", ""))
     return ToolResult(
         tool="minimax_tts",
         success=result.get("success", False),
@@ -7633,23 +7633,50 @@ def _minimax_music_generate(params: dict, desk: Optional[str] = None) -> ToolRes
 
 
 async def _minimax_video_async(params: dict) -> ToolResult:
-    """minimax_video_generate — generate video via MiniMax (gated)."""
-    from app.services.max.minimax_tools import minimax_video_generate as _mm_vid
-    result = await _mm_vid(
-        prompt=params.get("prompt", ""),
-        duration=int(params.get("duration", 5)),
-    )
-    return ToolResult(
-        tool="minimax_video_generate",
-        success=result.get("success", False),
-        result=result.get("data"),
-        error=result.get("error"),
-    )
+    """H3 video — draft only unless Rafael already approved this clip."""
+    from app.services.minimax_meter import enforce, h3_enabled
+    from app.services.minimax_video import create_draft
+
+    approval_id = (params.get("approval_id") or params.get("approval") or "").strip()
+    if not h3_enabled():
+        return ToolResult(
+            tool="minimax_video_generate",
+            success=False,
+            error="H3 video is disabled (MINIMAX_H3_ENABLED). / El video H3 está apagado.",
+        )
+    if not approval_id:
+        try:
+            draft = create_draft(params.get("prompt", ""), duration=int(params.get("duration", 5) or 5))
+        except Exception as exc:
+            return ToolResult(tool="minimax_video_generate", success=False, error=str(exc)[:300])
+        return ToolResult(
+            tool="minimax_video_generate",
+            success=True,
+            result={
+                "status": "draft",
+                "approval_id": draft["id"],
+                "ai_generated": True,
+                "posted": False,
+                "note": "Draft queued. Rafael must approve before one weekly clip is generated. Nothing is posted.",
+            },
+        )
+    refusal = enforce(kind="video", approval_id=approval_id, video_clips=1)
+    if refusal:
+        return ToolResult(tool="minimax_video_generate", success=False, error=refusal)
+    from app.services.minimax_video import generate_approved_clip
+    row = await generate_approved_clip(approval_id)
+    return ToolResult(tool="minimax_video_generate", success=True, result=row)
+
+
+@tool("minimax_h3_video")
+def _minimax_h3_video(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """H3 video draft/generate. Flag MINIMAX_H3_ENABLED. Requires Rafael approval_id. Never posts."""
+    return _minimax_video_generate(params, desk=desk)
 
 
 @tool("minimax_video_generate")
 def _minimax_video_generate(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Generate video via MiniMax (requires MINIMAX_VIDEO_ENABLED=1). Params: prompt, duration (seconds)."""
+    """H3 / MiniMax video. Drafts to Rafael's queue. Params: prompt, duration, approval_id."""
     import asyncio
     try:
         loop = asyncio.get_event_loop()

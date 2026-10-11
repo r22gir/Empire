@@ -267,6 +267,39 @@ class TTSService:
         minimax_voice = voice or os.getenv("MINIMAX_TTS_VOICE", MINIMAX_TTS_DEFAULT_VOICE)
         xai_voice = TTS_VOICE  # "rex" — historical xAI default
 
+        # Family speech-2.8 is behind MINIMAX_FAMILY_TTS. All MiniMax TTS
+        # goes through the shared meter so gift credits are never spent.
+        try:
+            from app.services.minimax_meter import enforce as enforce_minimax
+            from app.services.minimax_meter import family_tts_enabled, is_family, record as record_minimax
+
+            if is_family() and not family_tts_enabled():
+                self.last_status = "blocked"
+                self.last_error = "MINIMAX_FAMILY_TTS is off"
+                self.last_provider = None
+                return None
+            refusal = enforce_minimax(kind="tts", tts_chars=len(text.strip()), tts_replies=1)
+            if refusal:
+                self.last_status = "blocked"
+                self.last_error = refusal
+                self.last_provider = None
+                record_minimax(
+                    kind="tts",
+                    model=os.getenv("MINIMAX_TTS_MODEL", MINIMAX_TTS_DEFAULT_MODEL),
+                    tts_chars=0,
+                    blocked=True,
+                    reason=refusal,
+                )
+                return None
+        except Exception as exc:
+            if "blocked" in type(exc).__name__.lower():
+                raise
+            logger.warning("minimax TTS meter check failed closed: %s", exc)
+            self.last_status = "blocked"
+            self.last_error = "minimax meter unavailable"
+            self.last_provider = None
+            return None
+
         # Primary attempt: MiniMax
         if self.is_minimax_configured:
             result = await self._synthesize_minimax(text, minimax_voice, output_format, language)
@@ -274,6 +307,15 @@ class TTSService:
                 self.last_status = "ok"
                 self.last_error = ""
                 self.last_provider = "minimax"
+                try:
+                    from app.services.minimax_meter import record as record_minimax
+                    record_minimax(
+                        kind="tts",
+                        model=os.getenv("MINIMAX_TTS_MODEL", MINIMAX_TTS_DEFAULT_MODEL),
+                        tts_chars=len(text.strip()),
+                    )
+                except Exception:
+                    pass
                 return result
             logger.info("MiniMax TTS failed; falling back to xAI")
 
