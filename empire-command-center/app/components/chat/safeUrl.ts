@@ -1,8 +1,11 @@
 /** URLs Max chat may turn into clickable links / buttons. */
 export function safeUrl(u: string): string {
-  if (/^https?:\/\//i.test(u)) return u;
-  if (/^\/api\/v1\/files\/found\?/i.test(u)) return u;
-  if (/^\/docs\/view\?/i.test(u)) return u;
+  const t = (u || '').trim();
+  if (!t) return '';
+  if (/^(javascript|data|vbscript|file):/i.test(t)) return '';
+  if (/^https?:\/\//i.test(t)) return t;
+  if (/^\/api\/v1\/files\/found\?/i.test(t)) return t;
+  if (/^\/docs\/view\?/i.test(t)) return t;
   return '';
 }
 

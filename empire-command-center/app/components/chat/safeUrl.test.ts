@@ -13,3 +13,11 @@ test('studio file links render as clickable hrefs; relative job paths do not', (
   const firstReply = `Here are the wall unit LED docs.\n\nSources\n1. [Wall-Unit-LED-Spec.pdf](${abs})\n2. [Layout](${found})`;
   assert.equal(markdownLinkCount(firstReply) >= 2, true);
 });
+
+test('safeUrl rejects javascript: and data: hrefs', () => {
+  assert.equal(safeUrl('javascript:alert(1)'), '');
+  assert.equal(safeUrl('JAVASCRIPT:alert(1)'), '');
+  assert.equal(safeUrl('data:text/html,<script>alert(1)</script>'), '');
+  assert.equal(safeUrl('vbscript:msgbox(1)'), '');
+  assert.equal(safeUrl('file:///etc/passwd'), '');
+});

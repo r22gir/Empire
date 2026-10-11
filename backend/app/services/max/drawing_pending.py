@@ -212,6 +212,12 @@ def is_continuation_reply(text: str, missing_keys: list) -> bool:
     # Fallback: numeric + any dim keyword (rough signal)
     if DIM_KEYWORDS.search(text):
         return True
+    try:
+        from app.services.max.drawing_intent import looks_like_dimension_reply
+        if looks_like_dimension_reply(text):
+            return True
+    except Exception:
+        pass
     # Mention missing key directly
     if missing_keys:
         for key in missing_keys:

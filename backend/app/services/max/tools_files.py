@@ -79,10 +79,10 @@ def _find_files(params: dict, desk: Optional[str] = None) -> ToolResult:
             f'No file matched "{q}" in the places searched. ' + (f"Closest names: {near}. " if near else "No close names either. ")
             + note_txt.strip() + (" " if note_txt else "")
             + "Say so plainly, and if a source was not searched, say that instead of claiming the file does not exist."))
+    from app.services.max.doc_links import first_reply_link_instruction
     res["message"] = (f"{res['total']} match(es) for \"{q}\", best first"
                       + (f" (showing {len(res['matches'])})" if res['total'] > len(res['matches']) else "")
-                      + ". Paste each markdown_link in the FIRST reply as [Title](https://studio.empirebox.store/...). "
-                        "Never use relative paths." + note_txt)
+                      + ". " + first_reply_link_instruction() + note_txt)
     links = [m.get("markdown_link") for m in res["matches"] if m.get("markdown_link")]
     if links:
         res["first_reply_links"] = links
@@ -164,6 +164,12 @@ def _share_file(params: dict, desk: Optional[str] = None) -> ToolResult:
     if via == "studio":
         from app.services.max.doc_links import studio_found_url
         url = studio_found_url(path)
+        if not url:
+            return ToolResult(tool="share_file", success=True, result={
+                "action": "open_file", "via": "studio", "name": name, "path": shown,
+                "size": ff._human_size(size),
+                "message": f"{name} — {shown} ({ff._human_size(size)}).",
+            })
         return ToolResult(tool="share_file", success=True, result={
             "action": "open_file", "via": "studio", "name": name, "path": shown, "size": ff._human_size(size),
             "viewer_url": url, "download_url": url + "&download=1", "expires_in_hours": 24,
@@ -211,7 +217,9 @@ def _share_file(params: dict, desk: Optional[str] = None) -> ToolResult:
         "message": f"Sent {name} to Rafael on WhatsApp."})
 
 
-FILE_TOOLS_DOC = """
+def file_tools_doc() -> str:
+    from app.services.max.doc_links import first_reply_link_instruction
+    return f"""
 ### Rafael's files (read-only search + share to Rafael)
 - **max_status** — What you (Max) are building, what shipped recently and what's next / waiting on Rafael, from the
   real improvements queue, recent commits, tasks and approvals. Use for "what are you building / working on",
@@ -224,17 +232,32 @@ FILE_TOOLS_DOC = """
   Credentials, databases and family-edition (AMP/Maxine) data are never searchable. If the result says
   "Gmail needs re-auth" or Drive is not connected, tell Rafael that source was not searched (do not say the file
   does not exist) and give him the one command from the note.
-  `{"tool": "find_files", "query": "Nehal final estimate"}`
-  Each match includes viewer_url and markdown_link already as an absolute
-  https://studio.empirebox.store/api/v1/files/found?t=... URL. "Show me X docs"
-  means list those markdown_link values in the FIRST reply (titled clickable
-  links). Never paste relative paths or /api/... without the studio host.
+  `{{"tool": "find_files", "query": "Nehal final estimate"}}`
+  {first_reply_link_instruction()}
 - **share_file** — Show or send one found file to Rafael: via "studio" (chat link, 24 h), "email" (his own
   addresses only, sent right away) or "whatsapp" (his number). Never to anyone else.
-  `{"tool": "share_file", "file_id": "<from find_files>", "via": "studio"}`
+  `{{"tool": "share_file", "file_id": "<from find_files>", "via": "studio"}}`
 - List ALL relevant matches (e.g. both Nehal phases), not just the first. Never say you found or sent a file
   without a successful find_files / share_file result. If nothing matched, say so and name the closest files.
 """
+
+
+class _FileToolsDoc(str):
+    """Import-time TOOLS_DOC concat still works; str() is live so family editions stay empty-safe."""
+    def __new__(cls):
+        return str.__new__(cls, file_tools_doc())
+
+    def __str__(self) -> str:
+        return file_tools_doc()
+
+    def __add__(self, other):
+        return file_tools_doc() + other
+
+    def __radd__(self, other):
+        return other + file_tools_doc()
+
+
+FILE_TOOLS_DOC = _FileToolsDoc()
 
 try:
     ff.warm_index_async()

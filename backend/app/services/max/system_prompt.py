@@ -772,7 +772,7 @@ async def get_system_prompt_with_brain(
     try:
         from app.services.max import answer_policy
         if answer_policy.model_first():
-            base_prompt += answer_policy.STYLE_DIRECTIVE
+            base_prompt += answer_policy.style_directive()
     except Exception as e:
         logger.debug(f"answer policy directive unavailable: {e}")
 

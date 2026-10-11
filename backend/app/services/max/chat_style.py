@@ -30,7 +30,7 @@ REPLY_STYLE = """
 - Attached image or screenshot: read it first. Say in one line what it shows (an error on screen, a page, a photo) and answer about that, not generically.
 - A bare greeting ("Hi", "Hey Max") gets a one-line greeting back. No tools, no system status, no reports.
 - "Where are my docs / finished documents": answer with the Final Docs link (/?screen=final-docs) and the latest finals; do not explain tools.
-- "Show me X docs" / find_files hits: the FIRST reply must list each title as a full absolute markdown link [Title](https://studio.empirebox.store/api/v1/files/found?t=...). Never relative paths. That is not a drawing request.
+- "Show me X docs" / find_files hits: list each title using the tool's markdown_link (public base URL). Never relative paths. That is not a drawing request. Never paste those URLs on voice or Telegram. Family editions do not emit a public host.
 - A question about an existing quote, job or client ("status on the last Marley's quote", "send me the last quote") is a lookup: give number, client, total, status and next step. Sending something to the user himself is a reply, not an outbound send.
 - One reply answers one message. Do not restate earlier answers.
 - Own records first: when the user says "this house", "my house", "my bills", "my electric bill", a claim (for example an insurance claim), a client, a job or a quote, check their own data first (claims, bills, documents, jobs, quotes, customers, memory) and answer from it. Use web research only for the general part, and say which part came from their records.
@@ -65,4 +65,21 @@ def _is_family() -> bool:
 
 
 def render_chat_style_section() -> str:
-    return REPLY_STYLE + ("" if _is_family() else WHO_AM_I + CHANGE_REQUESTS + CHIEF_E)
+    try:
+        from app.services.max.doc_links import FOUND_PATH, first_reply_link_instruction, public_base
+        base = public_base()
+        style = REPLY_STYLE
+        generic = "list each title using the tool's markdown_link (public base URL). Never relative paths."
+        if base:
+            style = style.replace(
+                generic,
+                f"the FIRST reply must list each title as [Title]({base}{FOUND_PATH}?t=...). Never relative paths.",
+            )
+        else:
+            style = style.replace(
+                generic + " That is not a drawing request. Never paste those URLs on voice or Telegram. Family editions do not emit a public host.",
+                first_reply_link_instruction(),
+            )
+    except Exception:
+        style = REPLY_STYLE
+    return style + ("" if _is_family() else WHO_AM_I + CHANGE_REQUESTS + CHIEF_E)

@@ -69,7 +69,28 @@ _SHORT_FOLLOWUP = {
     "what do you mean", "there are no links", "no links", "regenerate where",
     "the links", "relative links", "relative links aren't rendering as buttons",
     "relative links arent rendering as buttons",
+    "y", "que", "qué", "como", "cómo", "no hay links", "no hay enlaces",
 }
+
+_EXPLICIT_DRAW_PHRASES = (
+    "draw a ", "draw me ", "draw it ", "draw the ", "draw this ",
+    "shop drawing", "generate drawing", "generate the b1",
+    "make it 4-view", "make it four-view", "make it a 4-view",
+    "dibuja un ", "dibuja una ", "dibuja el ", "dibuja la ", "dibuja este ",
+    "dibújame ", "dibujame ", "dibujar un ", "dibujar una ", "dibujar el ",
+    "haz un dibujo", "hazme un dibujo", "hazme el dibujo",
+    "rehaz el dibujo", "rehaz la ", "rehace el dibujo",
+    "redibuja ", "regenera el dibujo", "regenera la ",
+)
+
+_DIM_REPLY = re.compile(
+    r"(?:"
+    r"\b\d+(?:\s+\d+/\d+)?(?:\.\d+)?\s*(?:by|x|×|por)\s*\d+"
+    r"|\b\d+(?:\s+\d+/\d+)?\s*(?:in(?:ch(?:es)?)?|wide|long|high|tall|deep|drop|"
+    r"ancho|alto|largo|fondo)\b"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def clear_handoff_state() -> None:
@@ -517,10 +538,7 @@ def is_explicit_drawing_request(text: str) -> bool:
     if not text:
         return False
     lowered = text.lower()
-    if any(p in lowered for p in (
-        "draw a ", "draw me ", "draw it ", "draw the ", "draw this ",
-        "shop drawing", "generate drawing", "generate the b1",
-    )):
+    if any(p in lowered for p in _EXPLICIT_DRAW_PHRASES):
         return True
     if is_text_measurement_drawing_request(text):
         return True
@@ -532,6 +550,17 @@ def is_explicit_drawing_request(text: str) -> bool:
         if re.search(r"(?<![A-Za-z0-9])" + re.escape(keyword) + r"(?![A-Za-z0-9])", lowered):
             return True
     return _weak_redraw_with_companion(lowered)
+
+
+def looks_like_dimension_reply(text: str) -> bool:
+    """Compact measurement replies used to resume a pending drawing ('36 by 18')."""
+    if not text or not str(text).strip():
+        return False
+    return bool(_DIM_REPLY.search(text))
+
+
+def is_named_non_drawing_followup(text: str) -> bool:
+    return _normalized_followup(text) in _SHORT_FOLLOWUP
 
 
 def _weak_redraw_with_companion(lowered: str) -> bool:
@@ -551,7 +580,7 @@ def is_short_non_drawing_followup(text: str) -> bool:
     return False
 
 
-def is_drawing_intent(text: str, history: Any = None) -> bool:
+def is_drawing_intent(text: str, history: Any = None, pending_drawing: bool = False) -> bool:
     """Returns True if text requests a drawing/rendering action.
 
     H57 FIX (2026-08-19): route on INTENT TO GENERATE, never on
@@ -583,17 +612,33 @@ def is_drawing_intent(text: str, history: Any = None) -> bool:
         )
         if is_document_lookup_request(text) and not is_explicit_drawing_request(text):
             return False
-        if history and recent_context_is_documents(history) and not is_explicit_drawing_request(text):
+        # History guard: only suppress when there is no pending drawing
+        # and no explicit draw verb (doc-thread follow-ups stay in chat).
+        if (
+            history
+            and recent_context_is_documents(history)
+            and not is_explicit_drawing_request(text)
+            and not pending_drawing
+        ):
             return False
     except Exception:
         if re.search(
-            r"\b(?:show|find|get|pull|open|list)\b.{0,60}\b(?:docs?|documents?|pdfs?|files?)\b",
+            r"\b(?:show|find|get|pull|open|list|muestra|busca)\b.{0,60}\b"
+            r"(?:docs?|documents?|pdfs?|files?|documentos?)\b",
             lowered,
         ) and not is_explicit_drawing_request(text):
             return False
 
-    if is_short_non_drawing_followup(text) and not is_explicit_drawing_request(text):
+    if is_named_non_drawing_followup(text) and not is_explicit_drawing_request(text):
         return False
+    if (
+        is_short_non_drawing_followup(text)
+        and not is_explicit_drawing_request(text)
+        and not (pending_drawing and looks_like_dimension_reply(text))
+    ):
+        return False
+    if pending_drawing and looks_like_dimension_reply(text) and not is_named_non_drawing_followup(text):
+        return True
 
     # Strip negation patterns (pre-existing). User explicitly rejects.
     negation_patterns = (
@@ -616,19 +661,17 @@ def is_drawing_intent(text: str, history: Any = None) -> bool:
         "i need no drawing",
         "need no drawing",
         "no drawing needed",
+        "no necesito dibujo",
+        "no necesito un dibujo",
+        "no quiero dibujo",
+        "no quiero un dibujo",
     )
     if any(neg in lowered for neg in negation_patterns):
         return False
 
     # Strong fabrication signals beat billing vocabulary (e.g. TEST ONLY: do not
     # create quotes … + draw a banquette with dims).
-    if any(pattern in lowered for pattern in (
-        "draw a ",
-        "draw me ",
-        "draw it ",
-        "draw the ",
-        "draw this ",
-    )):
+    if any(pattern in lowered for pattern in _EXPLICIT_DRAW_PHRASES):
         return True
 
     if is_business_document_intent(text):
@@ -693,16 +736,8 @@ def is_drawing_intent(text: str, history: Any = None) -> bool:
     if any(pat in lowered for pat in plan_mode_patterns):
         return False
 
-    # Strong drawing patterns: "draw a <thing>" or "draw me"
-    # These are unambiguous — user is requesting creation of something
-    strong_draw_patterns = (
-        "draw a ",
-        "draw me ",
-        "draw it ",
-        "draw the ",
-        "draw this ",
-    )
-    if any(pattern in lowered for pattern in strong_draw_patterns):
+    # Strong drawing patterns: "draw a <thing>" / Spanish "dibuja un"
+    if any(pattern in lowered for pattern in _EXPLICIT_DRAW_PHRASES):
         return True
 
     if is_text_measurement_drawing_request(text):
@@ -1464,13 +1499,31 @@ def enrich_b1_message_dims(message: str, b1_product_type: str | None, dims: dict
     return dict(dims or {})
 
 
+def pending_should_resume(message: str, pending: dict | None, history: Any = None) -> bool:
+    """True when a pending drawing job should merge this turn (dims or new draw)."""
+    if not pending:
+        return False
+    if is_named_non_drawing_followup(message) and not is_explicit_drawing_request(message):
+        return False
+    if looks_like_dimension_reply(message):
+        return True
+    try:
+        from app.services.max.drawing_pending import is_continuation_reply
+        if is_continuation_reply(message, pending.get("missing") or []):
+            return True
+    except Exception:
+        pass
+    return is_drawing_intent(message, history=history, pending_drawing=True)
+
+
 def build_drawing_handoff(
     message: str,
     *,
     image_filename: str | None = None,
     history: Any = None,
+    pending_drawing: bool = False,
 ) -> DrawingHandoff:
-    if not is_drawing_intent(message, history=history):
+    if not is_drawing_intent(message, history=history, pending_drawing=pending_drawing):
         # Even when the message is not a drawing intent, classify it for
         # log visibility. D3: routes that the MAX router logs "intent_mode
         # = unknown" for non-drawing messages.

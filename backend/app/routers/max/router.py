@@ -2771,6 +2771,8 @@ def _explicit_no_drawing_router(message: str | None) -> bool:
         or "no drawing-router" in text
         or "i need no drawing" in text
         or "need no drawing" in text
+        or "no necesito dibujo" in text
+        or "no quiero dibujo" in text
     )
 
 
@@ -3238,8 +3240,15 @@ async def _chat_with_max_service_impl(
             # it alive across turns. The user must never be trapped
             # in a solicitation loop with no exit.
             pending = get_pending(request.conversation_id, request.channel)
-            if pending and is_drawing_intent(msg_text, history=request.history):
-                if is_continuation_reply(msg_text, pending.get("missing", [])):
+            from app.services.max.drawing_intent import (
+                looks_like_dimension_reply,
+                pending_should_resume,
+            )
+            if pending and pending_should_resume(msg_text, pending, request.history):
+                if (
+                    is_continuation_reply(msg_text, pending.get("missing", []))
+                    or looks_like_dimension_reply(msg_text)
+                ):
                     merged_handoff = merge_founder_reply(pending, msg_text)
                 else:
                     # Non-continuation with drawing intent — release
@@ -3248,7 +3257,7 @@ async def _chat_with_max_service_impl(
             # If pending exists but this turn is NOT drawing intent
             # (e.g. founder said something unrelated), the pending is
             # abandoned — release it so it can't fire next turn.
-            elif pending and not is_drawing_intent(msg_text, history=request.history):
+            elif pending:
                 clear_pending(request.conversation_id, request.channel)
         except Exception as exc:
             logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
@@ -4174,7 +4183,9 @@ async def _chat_with_max_service_impl(
         final_content = answer_policy.clean_reply(final_content, request.message)
         try:
             from app.services.max.doc_links import ensure_absolute_doc_links
-            final_content = ensure_absolute_doc_links(final_content, tool_results_list)
+            final_content = ensure_absolute_doc_links(
+                final_content, tool_results_list, channel=request.channel,
+            )
         except Exception:
             pass
 
@@ -4498,12 +4509,19 @@ async def _chat_stream_impl(request: ChatRequest):
             if is_cancel_message(msg_text):
                 clear_pending(request.conversation_id, request.channel)
             pending = get_pending(request.conversation_id, request.channel)
-            if pending and is_drawing_intent(msg_text, history=request.history):
-                if is_continuation_reply(msg_text, pending.get("missing", [])):
+            from app.services.max.drawing_intent import (
+                looks_like_dimension_reply,
+                pending_should_resume,
+            )
+            if pending and pending_should_resume(msg_text, pending, request.history):
+                if (
+                    is_continuation_reply(msg_text, pending.get("missing", []))
+                    or looks_like_dimension_reply(msg_text)
+                ):
                     merged_handoff = merge_founder_reply(pending, msg_text)
                 else:
                     clear_pending(request.conversation_id, request.channel)
-            elif pending and not is_drawing_intent(msg_text, history=request.history):
+            elif pending:
                 clear_pending(request.conversation_id, request.channel)
         except Exception as exc:
             logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
@@ -5344,7 +5362,9 @@ async def _chat_stream_impl(request: ChatRequest):
             full_response = answer_policy.clean_reply(full_response, request.message)
             try:
                 from app.services.max.doc_links import ensure_absolute_doc_links
-                full_response = ensure_absolute_doc_links(full_response, tool_results_list)
+                full_response = ensure_absolute_doc_links(
+                    full_response, tool_results_list, channel=request.channel,
+                )
             except Exception:
                 pass
             if full_response:
