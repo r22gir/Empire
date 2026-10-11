@@ -402,6 +402,14 @@ async def start_background_services():
     except Exception as e:
         print(f"✗ MAX startup health record: {e}")
 
+    try:
+        from app.services.minimax_m31_flash import maybe_startup_probe
+        probe = maybe_startup_probe()
+        if probe.get("live"):
+            print(f"✓ MiniMax-M3.1-Flash-Preview probe: {probe.get('reason')}")
+    except Exception as e:
+        print(f"✗ MiniMax-M3.1-Flash-Preview probe: {e}")
+
     # D28 2a/2b — code-task sweep + rehydrate. Order is load-bearing:
     # sweep MUST run first so every persisted row has a terminal state
     # before rehydrate populates the in-memory dict (a rehydrated task

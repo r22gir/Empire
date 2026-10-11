@@ -116,6 +116,10 @@ MODEL_PROVIDER_HINTS = {
 MODEL_ALIASES = {
     "minimax-minimax-m2.7": "MiniMax-M2.7",
     "minimax-m2.7": "MiniMax-M2.7",
+    "minimax-minimax-m3": "MiniMax-M3",
+    "minimax-m3": "MiniMax-M3",
+    "minimax-minimax-m3.1-flash-preview": "MiniMax-M3.1-Flash-Preview",
+    "minimax-m3.1-flash-preview": "MiniMax-M3.1-Flash-Preview",
     "grok-3-fast": "grok-4-fast-non-reasoning",
     "grok": "grok-4-fast-non-reasoning",
     "ollama-llama3.1": "llama3.1:8b",
@@ -248,8 +252,12 @@ class TokenTracker:
         key = raw.lower()
         if key in MODEL_ALIASES:
             return MODEL_ALIASES[key]
+        if key.startswith("minimax-") and "m3.1-flash" in key:
+            return "MiniMax-M3.1-Flash-Preview"
         if key.startswith("minimax-") and "m2.7" in key:
             return "MiniMax-M2.7"
+        if key.startswith("minimax-") and "m3" in key:
+            return "MiniMax-M3"
         return raw
 
     @staticmethod
