@@ -1,0 +1,14 @@
+[Unit]
+Description=EmpireDell disk watch for / and /data
+Documentation=file://%h/empire-repo/deploy/README.md
+Documentation=file://%h/empire-repo/docs/runbooks/empiredell-family-data.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/empire-repo
+EnvironmentFile=-%h/.config/empire/disk-watch.env
+ExecStart=%h/empire-repo/deploy/disk_watch.sh
+Nice=10
+
+[Install]
+WantedBy=default.target
