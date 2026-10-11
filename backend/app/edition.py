@@ -25,7 +25,9 @@ FAMILY_DATA_DIR_ALIASES = {
     "maxe": AMP_EDITION,
     "maxine": MAXINE_EDITION,
 }
-FOUNDER_EDITION_VALUES = frozenset({"", "main", "workroom"})
+# Live Dell studio: EMPIRE_EDITION is often unset or "studio".
+# All of these are Rafael's personal Max, not a family edition.
+FOUNDER_EDITION_VALUES = frozenset({"", "main", "workroom", "studio"})
 
 WORKROOM_ASSISTANT_NAME = "Max"
 AMP_ASSISTANT_NAME = "Max-e"
@@ -87,7 +89,7 @@ def edition_name() -> str:
     inferred = _family_from_data_dir()
     if inferred:
         return inferred
-    if raw in {"", "main"}:
+    if raw in FOUNDER_EDITION_VALUES:
         return WORKROOM_EDITION
     return raw or WORKROOM_EDITION
 
@@ -105,10 +107,17 @@ def is_family_edition() -> bool:
 
 
 def is_founder_edition() -> bool:
+    """True for Rafael's personal Max (unset, main, workroom, studio).
+
+    Live Dell: EMPIRE_EDITION is unset and EMPIRE_DATA_DIR=/home/rg/empire-data.
+    That basename is not a family alias, so this stays founder.
+    """
     if is_family_edition():
         return False
     raw = (os.getenv("EMPIRE_EDITION") or "").strip().lower()
-    return raw in FOUNDER_EDITION_VALUES
+    if raw in FOUNDER_EDITION_VALUES:
+        return True
+    return edition_name() == WORKROOM_EDITION
 
 
 def edition_profile() -> dict:

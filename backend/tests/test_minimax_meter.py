@@ -89,6 +89,33 @@ def test_no_combined_family_text_cap(monkeypatch, tmp_path):
     assert "Family cap" not in blocked
 
 
+def test_meter_normalizes_unset_and_studio_to_workroom(monkeypatch, tmp_path):
+    data_dir = tmp_path / "empire-data"
+    data_dir.mkdir()
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("MINIMAX_METER_DIR", str(tmp_path / "meter"))
+    monkeypatch.setenv("MINIMAX_REMAINS_PROBE", "0")
+    monkeypatch.setenv("MINIMAX_REMAINS_STUB", "ok")
+    (tmp_path / "meter").mkdir(parents=True, exist_ok=True)
+    from app.services.minimax_meter import current_edition, log_path, normalize_edition, record
+
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
+    assert normalize_edition(None) == "workroom"
+    assert normalize_edition("") == "workroom"
+    assert normalize_edition("studio") == "workroom"
+    assert current_edition() == "workroom"
+    record(kind="text", input_tokens=4, model="MiniMax-M3")
+    assert log_path().name == "calls-workroom.jsonl"
+    assert not (tmp_path / "meter" / "studio").exists()
+
+    monkeypatch.setenv("EMPIRE_EDITION", "studio")
+    assert current_edition() == "workroom"
+    record(kind="text", input_tokens=2, model="MiniMax-M3")
+    assert log_path("studio") == log_path("workroom")
+    assert log_path("workroom").name == "calls-workroom.jsonl"
+    assert not (tmp_path / "meter" / "studio").exists()
+
+
 def test_studio_instance_usage_cap_not_enforced(monkeypatch, tmp_path):
     """Studio / Workroom must not inherit the family 20% INSTANCE_USAGE_CAP_PCT."""
     monkeypatch.setenv("EMPIRE_EDITION", "workroom")

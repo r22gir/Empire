@@ -22,8 +22,8 @@ export function minimaxUsageLabels(locale: string = 'es') {
       ? 'Los créditos de regalo no se usan. Si la barra del plan llega al 80%, todos los agentes se detienen. Si remains no responde, se bloquea (imágenes, voz, video, texto familiar). Apaga Auto credit usage en MiniMax.'
       : 'Gift credits are not used. If the plan bar reaches 80%, every agent stops. If remains is down, we block (images, voice, video, family text). Turn off Auto credit usage on MiniMax.',
     remainsDown: es
-      ? 'No hay lectura de /token_plan/remains. Bloqueo cerrado. El texto personal sigue solo con la estimación local. Recomendación: apaga Auto credit usage.'
-      : 'Could not read /token_plan/remains. Fail closed. Personal text continues only on the local estimate. Recommendation: turn off Auto credit usage.',
+      ? 'No hay lectura de /token_plan/remains. Aviso visible. El texto personal sigue. Imágenes, voz y video se bloquean. Recomendación: apaga Auto credit usage.'
+      : 'Could not read /token_plan/remains. Visible warning. Personal text continues. Images, voice, and video stay blocked. Recommendation: turn off Auto credit usage.',
     generate: es ? 'Generar (aprobar)' : 'Generate (approve)',
   };
 }

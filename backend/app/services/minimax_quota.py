@@ -27,7 +27,10 @@ _KEY_RE = re.compile(
 _BEARER_RE = re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+")
 
 AUTH_FAILURE_CODES = frozenset({1004, 2049})
-DEFAULT_TTL_SECONDS = 60
+DEFAULT_SUCCESS_TTL_SECONDS = 15  # 10–30s brief positive cache
+DEFAULT_FAILURE_TTL_SECONDS = 45  # 30–60s negative cache
+DEFAULT_PROBE_TIMEOUT_SECONDS = 3.0
+MAX_PROBE_TIMEOUT_SECONDS = 3.0
 
 # Docs + observed hosts. First match with a usable envelope wins.
 REMAINS_PATHS = (
@@ -178,22 +181,78 @@ def parse_remains(payload: dict) -> dict:
     }
 
 
-_cache: dict[str, Any] = {"at": 0.0, "remains": None, "credits": None}
+_cache: dict[str, Any] = {
+    "remains": None,
+    "remains_at": 0.0,
+    "credits": None,
+    "credits_at": 0.0,
+}
 
 
 def cache_ttl() -> int:
+    """Legacy single TTL. Prefer success/failure TTLs below."""
     raw = (os.getenv("MINIMAX_REMAINS_TTL_SECONDS") or "").strip()
     try:
-        return max(5, int(raw)) if raw else DEFAULT_TTL_SECONDS
+        return max(5, int(raw)) if raw else DEFAULT_SUCCESS_TTL_SECONDS
     except ValueError:
-        return DEFAULT_TTL_SECONDS
+        return DEFAULT_SUCCESS_TTL_SECONDS
 
 
-def _get_json(url: str, timeout: float = 12.0) -> dict:
+def success_ttl() -> float:
+    raw = (os.getenv("MINIMAX_REMAINS_SUCCESS_TTL") or "").strip()
+    try:
+        value = float(raw) if raw else DEFAULT_SUCCESS_TTL_SECONDS
+    except ValueError:
+        value = DEFAULT_SUCCESS_TTL_SECONDS
+    return min(30.0, max(10.0, value))
+
+
+def failure_ttl() -> float:
+    raw = (os.getenv("MINIMAX_REMAINS_FAILURE_TTL") or "").strip()
+    try:
+        value = float(raw) if raw else DEFAULT_FAILURE_TTL_SECONDS
+    except ValueError:
+        value = DEFAULT_FAILURE_TTL_SECONDS
+    return min(60.0, max(30.0, value))
+
+
+def probe_timeout() -> float:
+    raw = (os.getenv("MINIMAX_REMAINS_TIMEOUT") or "").strip()
+    try:
+        value = float(raw) if raw else DEFAULT_PROBE_TIMEOUT_SECONDS
+    except ValueError:
+        value = DEFAULT_PROBE_TIMEOUT_SECONDS
+    return min(MAX_PROBE_TIMEOUT_SECONDS, max(0.2, value))
+
+
+def _ttl_for(payload: Optional[dict]) -> float:
+    if payload and payload.get("available"):
+        return success_ttl()
+    return failure_ttl()
+
+
+def _cache_fresh(key: str) -> Optional[dict]:
+    row = _cache.get(key)
+    at = float(_cache.get(f"{key}_at") or 0)
+    if not row or at <= 0:
+        return None
+    if time.time() - at >= _ttl_for(row):
+        return None
+    return dict(row)
+
+
+def _store_cache(key: str, payload: dict) -> dict:
+    _cache[key] = payload
+    _cache[f"{key}_at"] = time.time()
+    return dict(payload)
+
+
+def _get_json(url: str, timeout: Optional[float] = None) -> dict:
     if not _api_key():
         raise QuotaUnavailable("MINIMAX_API_KEY not set")
+    limit = probe_timeout() if timeout is None else min(probe_timeout(), max(0.1, float(timeout)))
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=limit) as client:
             resp = client.get(url, headers=_headers())
     except Exception as exc:
         raise QuotaUnavailable(redact_secret(f"{type(exc).__name__}")) from None
@@ -219,7 +278,11 @@ def remains_probe_enabled() -> bool:
 
 
 def fetch_remains(*, force: bool = False) -> dict:
-    """Best-effort remains snapshot. Never logs the key."""
+    """Best-effort remains snapshot. Never logs the key.
+
+    One overall budget of ``probe_timeout()`` (≤ 3s). Successes cache
+    10–30s; failures cache 30–60s so a down endpoint does not stall chat.
+    """
     if not remains_probe_enabled() and not force:
         return {
             "ok": False,
@@ -229,49 +292,59 @@ def fetch_remains(*, force: bool = False) -> dict:
             "windows": [],
             "reason": "remains probe disabled (tests / placeholder key)",
         }
-    now = time.time()
-    cached = _cache.get("remains")
-    if not force and cached and now - float(_cache.get("at") or 0) < cache_ttl():
-        return dict(cached)
+    if not force:
+        cached = _cache_fresh("remains")
+        if cached is not None:
+            return cached
     errors: list[str] = []
+    deadline = time.monotonic() + probe_timeout()
     for host in _hosts():
         for path in REMAINS_PATHS:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                errors.append("probe budget exhausted")
+                break
             url = f"{host}{path}"
             try:
-                parsed = parse_remains(_get_json(url))
+                parsed = parse_remains(_get_json(url, timeout=remaining))
                 parsed["endpoint"] = path
                 parsed["host"] = urlparse(host).netloc
-                _cache["remains"] = parsed
-                _cache["at"] = now
-                return dict(parsed)
+                return _store_cache("remains", parsed)
             except QuotaUnavailable as exc:
                 errors.append(f"{path}: {exc}")
                 continue
+        else:
+            continue
+        break
     logger.info("minimax remains unavailable: %s", "; ".join(redact_secret(e) for e in errors[:6]))
-    return {
+    return _store_cache("remains", {
         "ok": False,
         "available": False,
         "remaining_pct": None,
         "used_pct": None,
         "windows": [],
         "reason": "remains endpoint unavailable; using local meter only",
-    }
+    })
 
 
 def fetch_credits(*, force: bool = False) -> dict:
     """Best-effort credit balance. Absence is not spendable room."""
     if not remains_probe_enabled() and not force:
         return {"ok": False, "available": False, "balance": None, "reason": "probe disabled"}
-    now = time.time()
-    cached = _cache.get("credits")
-    if not force and cached and now - float(_cache.get("at") or 0) < cache_ttl():
-        return dict(cached)
+    if not force:
+        cached = _cache_fresh("credits")
+        if cached is not None:
+            return cached
     if not _api_key():
-        return {"ok": False, "available": False, "balance": None, "reason": "no key"}
+        return _store_cache("credits", {"ok": False, "available": False, "balance": None, "reason": "no key"})
+    deadline = time.monotonic() + probe_timeout()
     for host in _hosts():
         for path in CREDIT_PATHS:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                data = _get_json(f"{host}{path}")
+                data = _get_json(f"{host}{path}", timeout=remaining)
             except QuotaUnavailable:
                 continue
             balance = _walk_credits(data)
@@ -284,21 +357,22 @@ def fetch_credits(*, force: bool = False) -> dict:
                 "endpoint": path,
                 "host": urlparse(host).netloc,
             }
-            _cache["credits"] = parsed
-            _cache["at"] = now
-            return dict(parsed)
-    remains = fetch_remains(force=force)
+            return _store_cache("credits", parsed)
+    remains = _cache_fresh("remains") or fetch_remains(force=force)
     hint = remains.get("credit_hint")
     if hint is not None:
         parsed = {"ok": True, "available": True, "balance": hint, "endpoint": "remains.credit_hint"}
-        _cache["credits"] = parsed
-        return dict(parsed)
-    empty = {"ok": False, "available": False, "balance": None, "reason": "credit endpoint not found"}
-    _cache["credits"] = empty
-    return dict(empty)
+        return _store_cache("credits", parsed)
+    return _store_cache("credits", {
+        "ok": False,
+        "available": False,
+        "balance": None,
+        "reason": "credit endpoint not found",
+    })
 
 
 def clear_quota_cache() -> None:
-    _cache["at"] = 0.0
+    _cache["remains_at"] = 0.0
+    _cache["credits_at"] = 0.0
     _cache["remains"] = None
     _cache["credits"] = None

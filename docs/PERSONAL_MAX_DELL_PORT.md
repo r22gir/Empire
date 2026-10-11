@@ -23,6 +23,10 @@ Review fixes from #101 / #102 are kept: extension+MIME upload checks,
 `html.escape` on notify HTML, fail-closed quota, reservation locks, no
 LLM-triggered spend.
 
+`is_founder_edition()` treats unset, `main`, `workroom`, and `studio` as
+Rafael’s Max. The meter logs all of those as `workroom`. Live Dell:
+`EMPIRE_EDITION` is unset, `EMPIRE_DATA_DIR=/home/rg/empire-data`.
+
 ## What this branch does **not** bring
 
 - Family login gate / Cloudflare AMP session middleware
@@ -42,15 +46,16 @@ PR does not include them and deploy must not overwrite them:
 
 - `backend/app/config/business.json`
 - `backend/app/config/client_aliases.json`
-- `backend/app/services/max/memory.md` (or the live `max/memory.md` path)
+- `max/memory.md`
 
-If `git pull` reports a conflict on those three, abort and keep the Dell
-copies.
+Use `git stash` for those three (below). Do not merge-then-restore.
 
 ## Exact Dell deploy steps (after Rafael approves)
 
-On the Dell checkout `/home/rg/empire-repo-main`, edition `studio`,
-port 8000, branch currently `deploy/pr82-84-85`:
+On the Dell checkout `/home/rg/empire-repo-main`, edition studio,
+port 8000, branch currently `deploy/pr82-84-85`. Founder process runs
+as user `rg`. `/data/family-help` and `/data/minimax-meter` are owned
+by `rg` with mode `700`.
 
 ```bash
 # 1. Backup the live branch (do not switch to the family lane)
@@ -58,11 +63,11 @@ cd /home/rg/empire-repo-main
 git status -sb
 git branch backup/pr82-84-85-before-family-help-$(date +%Y%m%d)
 
-# 2. Stash or copy the three local files if they are dirty
-cp -a backend/app/config/business.json /tmp/dell-business.json
-cp -a backend/app/config/client_aliases.json /tmp/dell-client_aliases.json
-# memory.md path as it exists on the box:
-cp -a backend/app/services/max/memory.md /tmp/dell-max-memory.md 2>/dev/null || true
+# 2. Stash the three local files (do not copy/merge/restore)
+git stash push -u -m "dell-local-before-family-help" -- \
+  backend/app/config/business.json \
+  backend/app/config/client_aliases.json \
+  max/memory.md
 
 # 3. Fetch and merge this draft branch into deploy/pr82-84-85
 #    (only after Rafael says to). Do NOT checkout the family branch.
@@ -71,24 +76,23 @@ git checkout deploy/pr82-84-85
 git pull origin deploy/pr82-84-85
 git merge --no-ff origin/cursor/personal-max-family-meter-753b
 
-# 4. Restore local files if git touched them
-cp -a /tmp/dell-business.json backend/app/config/business.json
-cp -a /tmp/dell-client_aliases.json backend/app/config/client_aliases.json
-cp -a /tmp/dell-max-memory.md backend/app/services/max/memory.md 2>/dev/null || true
+# 4. Put the three local files back
+git stash pop
 
 # 5. Env on the studio unit (systemd drop-in or backend/.env)
 #    FAMILY_HELP_INBOX_DIR=/data/family-help
 #    MINIMAX_METER_DIR=/data/minimax-meter
 #    MINIMAX_H3_ENABLED=0
 #    MINIMAX_FAMILY_TTS=0
-#    EMPIRE_EDITION=workroom   # or unset / main — never amp/maxine
-sudo mkdir -p /data/family-help/amp /data/family-help/maxine /data/minimax-meter
-sudo chmod 700 /data/family-help /data/family-help/amp /data/family-help/maxine /data/minimax-meter
+#    EMPIRE_EDITION may stay unset (founder). Never amp/maxine.
+# Dirs already exist on the Dell: owner rg, mode 700.
+# mkdir -p /data/family-help/amp /data/family-help/maxine /data/minimax-meter
+# chmod 700 /data/family-help /data/family-help/amp /data/family-help/maxine /data/minimax-meter
+# chown rg:rg /data/family-help /data/minimax-meter
 
-# 6. Python deps (no new pins expected; still run it)
+# 6. Python deps in the live venv on this checkout
 cd /home/rg/empire-repo-main/backend
-# use the live venv on the box
-source /home/rg/empire-repo/backend/venv/bin/activate
+source /home/rg/empire-repo-main/backend/venv/bin/activate
 pip install -r requirements.txt
 
 # 7. Restart backend (one service at a time)
@@ -117,15 +121,13 @@ Studio click-through after deploy:
    Maxine have not filed tickets yet. A Maxine ticket must hide attachments
    until **Abrir adjuntos**. Reply only via **Sí, enviar**.
 2. **Uso MiniMax** shows workroom / amp / maxine rows. Plan bar warning if
-   `/token_plan/remains` is unread. H3 generate needs **Aprobar**.
+   `/token_plan/remains` is unread (founder text still works). H3 generate
+   needs **Aprobar**.
 3. Workroom jobs/quotes/invoices unchanged. Chat still works.
 
 ## Open questions
 
-- Live `/data/family-help` and `/data/minimax-meter` ownership on the Dell
-  (which OS user runs empire-backend vs amp vs maxine). Founder process
-  must be able to read both edition folders.
-- Whether Auto credit usage is still ON in the MiniMax console (recommend
-  OFF). H3/TTS stay off until `scripts/minimax_h3_probe.py --live`.
+- MiniMax console Auto credit usage still ON (recommend OFF). H3/TTS stay
+  off until `scripts/minimax_h3_probe.py --live`.
 - Cloudflare Access already fronts studio.empirebox.store; this PR does
   not add a second login gate.

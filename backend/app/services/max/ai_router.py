@@ -1,6 +1,7 @@
 """MAX AI Router - Multi-provider tiered routing: xAI Grok, Claude, Gemini, OpenAI, Groq, OpenClaw, Ollama with streaming & vision."""
 import os
 import json
+import asyncio
 import httpx
 import base64
 import subprocess
@@ -2325,7 +2326,7 @@ class AIRouter:
         from app.services.max.minimax_retry import request_with_retry
         from app.services.minimax_meter import MeterBlocked
 
-        reservation = self._reserve_minimax_text(messages)
+        reservation = await asyncio.to_thread(self._reserve_minimax_text, messages)
         api_messages = self._prepare_openai_messages(messages, image_path)
         billed = False
 
@@ -2365,7 +2366,7 @@ class AIRouter:
         import random
         from app.services.max.minimax_retry import ATTEMPTS, WAIT_SECONDS, _jitter, is_connect_failure, is_retryable_status
 
-        reservation = self._reserve_minimax_text(messages)
+        reservation = await asyncio.to_thread(self._reserve_minimax_text, messages)
         api_messages = self._prepare_openai_messages(messages, image_path)
         rng = random.Random()
         billed = False

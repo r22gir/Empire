@@ -275,13 +275,14 @@ class TTSService:
                     self.last_provider = None
                     return None
         except Exception as exc:
-            if "blocked" in type(exc).__name__.lower():
-                raise
-            logger.warning("minimax TTS meter check failed closed: %s", exc)
-            self.last_status = "blocked"
-            self.last_error = "minimax meter unavailable"
-            self.last_provider = None
-            return None
+            if type(exc).__name__ == "MeterBlocked":
+                self.last_status = "blocked"
+                self.last_error = getattr(exc, "message", None) or str(exc)
+                self.last_provider = None
+                return None
+            logger.warning("minimax TTS meter check failed; keeping previous provider path: %s", exc)
+            reservation = None
+            reconcile_minimax = None
 
         # Primary attempt: MiniMax
         if self.is_minimax_configured:

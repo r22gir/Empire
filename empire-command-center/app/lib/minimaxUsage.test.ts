@@ -18,6 +18,7 @@ test('MiniMax usage view is bilingual and founder-only', () => {
   assert.match(en.intro, /No combined family cap/);
   assert.match(en.credits, /Gift credits/);
   assert.match(en.credits, /Auto credit usage/);
-  assert.match(en.remainsDown, /Fail closed/);
+  assert.match(en.remainsDown, /Personal text continues/);
+  assert.match(en.remainsDown, /blocked/);
   assert.match(en.aiLabel, /AI-generated/);
 });

@@ -11,8 +11,8 @@ Caps:
 * Video: 1 clip/week, founder approval only.
 * All agents hard-stop near 80% of the plan bar when remains is readable.
 * If /token_plan/remains cannot be read: fail CLOSED for images, TTS,
-  video, and family text. Founder text may continue only up to the local
-  estimate, with a visible warning. Auto credit usage is ON — never rely
+  video, and family text. Founder text is never paused by a local guess —
+  warn visibly and allow. Auto credit usage is ON — never rely
   on MiniMax to stop spend.
 
 Gift credits are never treated as room. Messages are Spanish + English.
@@ -156,8 +156,9 @@ def current_edition() -> str:
 
 
 def normalize_edition(raw: Optional[str]) -> str:
+    """Map founder aliases (unset, main, studio, workroom) to one log name."""
     name = (raw or "").strip().lower()
-    if name in {"", "main"}:
+    if name in {"", "main", "studio", "workroom"}:
         return "workroom"
     if name in KNOWN_EDITIONS:
         return name
@@ -445,14 +446,19 @@ def _stub_snapshot() -> Optional[dict[str, Any]]:
 
 
 def _plan_snapshot() -> dict[str, Any]:
+    """One remains read. Credits come from cache only — no second HTTP."""
     stub = _stub_snapshot()
     if stub is not None:
         return stub
     try:
-        from app.services.minimax_quota import fetch_credits, fetch_remains
+        from app.services.minimax_quota import fetch_remains, _cache_fresh
 
         remains = fetch_remains()
-        credits = fetch_credits()
+        credits = _cache_fresh("credits") or {
+            "ok": False,
+            "available": False,
+            "balance": None,
+        }
     except Exception as exc:
         logger.info("minimax remains probe failed: %s", redact(str(exc)))
         remains = {"ok": False, "available": False, "remaining_pct": None, "used_pct": None}
@@ -481,10 +487,10 @@ def remains_down_message() -> str:
 
 def founder_remains_warning() -> str:
     return bilingual(
-        "Aviso: no hay lectura del cupo MiniMax. El texto personal sigue solo con la estimación "
-        "local. Recomendación: apaga Auto credit usage en MiniMax.",
-        "Warning: MiniMax remaining-quota is unread. Personal text continues only on the local "
-        "estimate. Recommendation: turn off Auto credit usage on MiniMax.",
+        "Aviso: no hay lectura de /token_plan/remains. El texto personal de Rafael sigue. "
+        "Imágenes, voz y video siguen bloqueados. Recomendación: apaga Auto credit usage en MiniMax.",
+        "Warning: /token_plan/remains is unread. Rafael's personal text continues. "
+        "Images, voice, and video stay blocked. Recommendation: turn off Auto credit usage on MiniMax.",
     )
 
 
@@ -508,7 +514,7 @@ def plan_hard_stopped(
     edition: Optional[str] = None,
     rows: Optional[list[dict[str, Any]]] = None,
 ) -> Optional[str]:
-    """Fail CLOSED when remains is unread. Founder text may continue on local estimate."""
+    """Fail CLOSED when remains is unread. Founder text is never paused by a local guess."""
     snap = snapshot or _plan_snapshot()
     remains = snap.get("remains") or {}
     ed = normalize_edition(edition or current_edition())
@@ -524,15 +530,10 @@ def plan_hard_stopped(
             return _plan_block_message()
         return None
 
-    # Remains unread: never fail-open into Auto credits.
+    # Remains unread: never fail-open into Auto credits for spend.
+    # Founder text is never paused by a local guess — warn, then allow.
     if kind in NONESSENTIAL_KINDS or ed in FAMILY_EDITIONS:
         return remains_down_message()
-    local = local_plan_used_pct(rows)
-    if local >= stop:
-        return bilingual(
-            f"Estimación local del plan ≥ {stop:g}% y no hay lectura de remains. Texto personal en pausa.",
-            f"Local plan estimate ≥ {stop:g}% and remains is unread. Personal text is paused.",
-        )
     return None
 
 
@@ -610,6 +611,7 @@ def _eval_caps(
     video_clips: int,
     approval_id: Optional[str],
     rows: list[dict[str, Any]],
+    snapshot: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[str], str]:
     now = _now()
     day = now.strftime("%Y-%m-%d")
@@ -617,10 +619,10 @@ def _eval_caps(
     week = _iso_week(now)
     warning = ""
 
-    plan_msg = plan_hard_stopped(kind=kind, edition=edition, rows=rows)
+    snap = snapshot if snapshot is not None else _plan_snapshot()
+    plan_msg = plan_hard_stopped(snap, kind=kind, edition=edition, rows=rows)
     if plan_msg:
         return plan_msg, warning
-    snap = _plan_snapshot()
     if not (snap.get("remains") or {}).get("available") and edition not in FAMILY_EDITIONS and kind == "text":
         warning = founder_remains_warning()
 
@@ -689,6 +691,7 @@ def check(
 ) -> Optional[str]:
     """Read-only cap peek (tests). Production callers use reserve()."""
     ed = normalize_edition(edition or current_edition())
+    snap = _plan_snapshot()
     handle = _with_exclusive_lock()
     try:
         rows = _read_records_unlocked(aggregator=True)
@@ -703,6 +706,7 @@ def check(
             video_clips=video_clips,
             approval_id=approval_id,
             rows=rows,
+            snapshot=snap,
         )
         if warning:
             _plan_warning.set(warning)
@@ -737,9 +741,14 @@ def reserve(
     video_clips: int = 0,
     approval_id: Optional[str] = None,
 ) -> Reservation:
-    """Atomically check caps and append a reserved row under one exclusive lock."""
+    """Atomically check caps and append a reserved row under one exclusive lock.
+
+    The remains probe runs once, outside the lock (and off the event loop
+    when the chat path uses ``asyncio.to_thread``).
+    """
     ed = normalize_edition(edition or current_edition())
     kind = (kind or "text").strip().lower()
+    snap = _plan_snapshot()
     handle = _with_exclusive_lock()
     try:
         rows = _read_records_unlocked(aggregator=True)
@@ -754,6 +763,7 @@ def reserve(
             video_clips=video_clips,
             approval_id=approval_id,
             rows=rows,
+            snapshot=snap,
         )
         if warning:
             _plan_warning.set(warning)

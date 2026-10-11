@@ -59,6 +59,44 @@ def _client():
     return TestClient(app)
 
 
+def test_unset_and_studio_are_founder_inbox(monkeypatch, tmp_path):
+    """Live Dell: EMPIRE_EDITION unset or studio; EMPIRE_DATA_DIR=.../empire-data."""
+    inbox = tmp_path / "family-help"
+    inbox.mkdir()
+    _family(monkeypatch, tmp_path, "amp", inbox)
+    from app.services.family_help import create_ticket
+
+    ticket = create_ticket(message="no abre el chat", sender="Juan", notify=False)
+
+    data_dir = tmp_path / "empire-data"
+    data_dir.mkdir()
+    for value in (None, "studio"):
+        if value is None:
+            monkeypatch.delenv("EMPIRE_EDITION", raising=False)
+        else:
+            monkeypatch.setenv("EMPIRE_EDITION", value)
+        monkeypatch.setenv("EMPIRE_DATA_DIR", str(data_dir))
+        monkeypatch.setenv("FAMILY_HELP_INBOX_DIR", str(inbox))
+        monkeypatch.setenv("ASSISTANT_NAME", "Max")
+        from app.edition import edition_name, is_founder_edition
+
+        assert is_founder_edition(), value
+        assert edition_name() == "workroom", value
+        client = _client()
+        listed = client.get("/api/v1/family-help/inbox")
+        assert listed.status_code == 200, (value, listed.text)
+        ids = [row["id"] for row in listed.json()["tickets"]]
+        assert ticket["id"] in ids
+        from app.routers import minimax_meter as routes
+        import asyncio
+
+        usage = asyncio.run(routes.founder_usage())
+        assert usage.get("editions")
+        names = {row["edition"] for row in usage["editions"]}
+        assert "workroom" in names
+        assert "studio" not in names
+
+
 def test_is_help_intent_spanish_and_english():
     from app.services.family_help import is_help_intent, leftover_after_intent
 
