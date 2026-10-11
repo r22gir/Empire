@@ -266,7 +266,13 @@ def test_usage_counted_on_request_and_reply(monkeypatch, tmp_path):
     _founder(monkeypatch, tmp_path, inbox)
     from app.services.family_help import add_reply
 
-    add_reply(ticket["id"], "Prueba esto en tu chat.", author="Rafael", explicit_yes=True)
+    add_reply(
+        ticket["id"],
+        "Prueba esto en tu chat.",
+        author="Rafael",
+        explicit_yes=True,
+        source="ui_confirm_button",
+    )
     usage_db = amp_root / "usage" / "usage.db"
     # Peer recorder writes to profile data_dir or store parent. Fall back to scan.
     found = list((tmp_path).rglob("usage.db"))
@@ -336,7 +342,8 @@ def test_founder_inbox_reply_requires_yes_and_never_applies(monkeypatch, tmp_pat
 
     sent = client.post(
         f"/api/v1/family-help/inbox/{ticket['id']}/reply",
-        json={"body": "Prueba recargar el chat.", "explicit_yes": True, "author": "Rafael"},
+        json={"body": "Prueba recargar el chat.", "author": "Rafael"},
+        headers={"X-Family-Help-Confirm": "si-enviar"},
     )
     assert sent.status_code == 200
     assert sent.json()["ticket"]["status"] == "answered"
@@ -421,3 +428,350 @@ def test_family_http_upload_roundtrip(monkeypatch, tmp_path):
     )
     assert file_res.status_code == 200
     assert file_res.content == png
+    assert "attachment" in (file_res.headers.get("content-disposition") or "").lower()
+    assert file_res.headers.get("x-content-type-options") == "nosniff"
+    assert "text/html" not in (file_res.headers.get("content-type") or "").lower()
+
+
+def test_upload_requires_both_ext_and_mime_blocks_html(monkeypatch, tmp_path):
+    """HIGH: a good MIME must not let .html / .svg through."""
+    from app.services.family_help import validate_upload
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
+    for filename, mime in (
+        ("x.html", "image/png"),
+        ("x.svg", "image/png"),
+        ("x.png", "text/html"),
+        ("note.svg", "image/svg+xml"),
+        ("page.htm", "text/plain"),
+    ):
+        try:
+            validate_upload(filename=filename, content_type=mime, data=png, kind="file")
+            raise AssertionError(f"{filename} + {mime} debe rechazarse")
+        except ValueError:
+            pass
+
+    assert validate_upload(
+        filename="ok.png", content_type="image/png", data=png, kind="file"
+    ) == "image"
+
+    _family(monkeypatch, tmp_path, "amp")
+    client = _client()
+    blocked = client.post(
+        "/api/v1/family-help/tickets",
+        data={"message": "xss", "history_json": "[]"},
+        files=[("files", ("x.html", io.BytesIO(b"<script>alert(1)</script>"), "image/png"))],
+    )
+    assert blocked.status_code == 400
+
+
+def test_upload_stream_enforces_size_before_full_read(monkeypatch, tmp_path):
+    import asyncio
+    from app.services.family_help import MAX_FILE_BYTES, read_upload_limited
+
+    class _Fat:
+        def __init__(self):
+            self.reads = 0
+            self.size = MAX_FILE_BYTES + 50
+
+        async def read(self, n=-1):
+            self.reads += 1
+            return b"x" * min(n if n and n > 0 else 64 * 1024, 64 * 1024)
+
+    fat = _Fat()
+    try:
+        asyncio.run(read_upload_limited(fat, limit=MAX_FILE_BYTES, content_length=fat.size))
+        raise AssertionError("Content-Length sobre el tope debe fallar sin leer")
+    except ValueError:
+        pass
+    assert fat.reads == 0
+
+    class _Stream:
+        def __init__(self):
+            self.sent = 0
+
+        async def read(self, n=-1):
+            if self.sent > MAX_FILE_BYTES + 10:
+                return b""
+            self.sent += 64 * 1024
+            return b"y" * (64 * 1024)
+
+    try:
+        asyncio.run(read_upload_limited(_Stream(), limit=MAX_FILE_BYTES))
+        raise AssertionError("el stream debe cortarse al tope")
+    except ValueError:
+        pass
+
+
+def test_validate_before_charge_and_cleanup_on_failure(monkeypatch, tmp_path):
+    _family(monkeypatch, tmp_path, "amp")
+    from app.services.family_help import create_ticket
+    from app.services.instance_usage import usage_summary
+
+    before = usage_summary()["month"]["tokens"]
+    try:
+        create_ticket(
+            message="adjunto malo",
+            attachments=[{
+                "filename": "x.html",
+                "content_type": "image/png",
+                "data": b"<html>xss</html>",
+                "kind": "file",
+            }],
+            notify=False,
+        )
+        raise AssertionError("html no debe crear ticket ni cobrar")
+    except ValueError:
+        pass
+    after_bad = usage_summary()["month"]["tokens"]
+    assert after_bad == before
+
+    written = []
+    real_write = type(tmp_path).joinpath
+
+    def boom_write(self, data):  # noqa: ARG001
+        written.append(str(self))
+        raise OSError("disk full")
+
+    monkeypatch.setattr("pathlib.Path.write_bytes", boom_write)
+    try:
+        create_ticket(
+            message="falla al guardar",
+            attachments=[{
+                "filename": "ok.png",
+                "content_type": "image/png",
+                "data": b"\x89PNG\r\n\x1a\n" + b"\x00" * 20,
+                "kind": "file",
+            }],
+            notify=False,
+        )
+        raise AssertionError("write failure must surface")
+    except OSError:
+        pass
+    after_fail = usage_summary()["month"]["tokens"]
+    assert after_fail == before
+    leftover = list((tmp_path / "amp").rglob("fa-*"))
+    assert leftover == []
+
+
+def test_notify_email_escapes_html_and_skips_telegram(monkeypatch, tmp_path):
+    _family(monkeypatch, tmp_path, "amp")
+    sent = []
+
+    async def _fake_send(to, subject, html):
+        sent.append((to, subject, html))
+        return True
+
+    monkeypatch.setattr("app.services.email.sender.send_email", _fake_send)
+
+    from app.services.family_help import FOUNDER_NOTIFY_EMAIL, create_ticket, notify_new_ticket
+
+    src = Path(__file__).resolve().parents[1] / "app" / "services" / "family_help.py"
+    text = src.read_text(encoding="utf-8")
+    assert "html.escape" in text
+    assert "telegram" not in text.lower() or "Sin Telegram" in text
+
+    create_ticket(
+        message='<img src=x onerror=alert(1)> titulo "peligro"',
+        notify=True,
+    )
+    assert sent
+    _to, _subject, html = sent[0]
+    assert _to == FOUNDER_NOTIFY_EMAIL
+    assert "<img src" not in html
+    assert "&lt;img" in html
+    assert "Sin Telegram" in html
+    notify_new_ticket({"id": "fh-x", "edition": "amp", "sender": "<b>xss</b>", "message": "<script>"})
+    assert any("&lt;b&gt;" in row[2] or "&lt;script&gt;" in row[2] for row in sent)
+
+
+def test_filename_redacted_and_maxine_attachments_hidden(monkeypatch, tmp_path):
+    inbox = tmp_path / "shared-inbox"
+    inbox.mkdir()
+    _family(monkeypatch, tmp_path, "maxine", inbox)
+    from app.services.family_help import create_ticket, get_ticket, reveal_attachments
+
+    ticket = create_ticket(
+        message="mira esto",
+        attachments=[{
+            "filename": "workroom@empirebox.store.png",
+            "content_type": "image/png",
+            "data": b"\x89PNG\r\n\x1a\n" + b"\x00" * 20,
+            "kind": "file",
+        }],
+        notify=False,
+    )
+    stored_name = ticket["attachments"][0]["filename"]
+    assert "workroom@empirebox.store" not in stored_name
+    assert "workroom@" not in stored_name
+    assert "oculto" in stored_name.lower()
+
+    _founder(monkeypatch, tmp_path, inbox)
+    hidden = get_ticket(ticket["id"])
+    assert hidden["attachments_hidden"] is True
+    assert hidden["attachments"] == []
+    assert hidden["attachment_count"] == 1
+
+    client = _client()
+    listed = client.get("/api/v1/family-help/inbox")
+    assert listed.status_code == 200
+    row = next(t for t in listed.json()["tickets"] if t["id"] == ticket["id"])
+    assert row["attachments"] == []
+    att_id = ticket["attachments"][0]["id"]
+    assert client.get(
+        f"/api/v1/family-help/inbox/{ticket['id']}/attachments/{att_id}"
+    ).status_code == 403
+
+    opened = reveal_attachments(ticket["id"])
+    assert opened["attachments_hidden"] is False
+    assert opened["attachments"][0]["id"] == att_id
+    assert client.get(
+        f"/api/v1/family-help/inbox/{ticket['id']}/attachments/{att_id}"
+    ).status_code == 200
+
+
+def test_inbox_star_covered_by_founder_studio_auth(monkeypatch, tmp_path):
+    from app.edition import access_exempt
+    from app.services.family_help import inbox_path_requires_founder_studio_auth
+
+    paths = [
+        "/api/v1/family-help/inbox",
+        "/api/v1/family-help/inbox/fh-1",
+        "/api/v1/family-help/inbox/fh-1/reply",
+        "/api/v1/family-help/inbox/fh-1/draft",
+        "/api/v1/family-help/inbox/fh-1/close",
+        "/api/v1/family-help/inbox/fh-1/apply",
+        "/api/v1/family-help/inbox/fh-1/attachments/fa-1",
+        "/api/v1/family-help/inbox/fh-1/reveal-attachments",
+        "/api/v1/family-help/inbox/fh-1/transcribe",
+    ]
+    for path in paths:
+        assert inbox_path_requires_founder_studio_auth(path)
+        for method in ("GET", "POST", "PUT", "DELETE"):
+            assert not access_exempt(method, path), (method, path)
+
+    _family(monkeypatch, tmp_path, "amp")
+    from fastapi import FastAPI
+    from app.middleware.edition_gate import amp_access_middleware
+    from app.routers.family_help import router
+
+    app = FastAPI()
+    app.middleware("http")(amp_access_middleware)
+    app.include_router(router, prefix="/api/v1")
+    client = TestClient(app)
+    for path in ("/api/v1/family-help/inbox", "/api/v1/family-help/inbox/x"):
+        res = client.get(path)
+        assert res.status_code == 403
+
+    _family(monkeypatch, tmp_path, "maxine")
+    client = TestClient(app)
+    assert client.get("/api/v1/family-help/inbox").status_code == 403
+
+
+def test_explicit_yes_only_from_si_enviar_button_not_llm_tool(monkeypatch, tmp_path):
+    inbox = tmp_path / "shared-inbox"
+    inbox.mkdir()
+    _family(monkeypatch, tmp_path, "amp", inbox)
+    from app.services.family_help import (
+        add_reply,
+        create_ticket,
+        explicit_yes_from_ui,
+        tool_source_can_set_explicit_yes,
+    )
+
+    ticket = create_ticket(message="login roto", notify=False)
+    _founder(monkeypatch, tmp_path, inbox)
+
+    class _Req:
+        def __init__(self, headers):
+            self.headers = headers
+
+    assert explicit_yes_from_ui(_Req({"x-family-help-confirm": "si-enviar"}), True) is True
+    assert explicit_yes_from_ui(_Req({}), True) is False
+    assert tool_source_can_set_explicit_yes("max_tool") is False
+    assert tool_source_can_set_explicit_yes("llm") is False
+    assert tool_source_can_set_explicit_yes("tool_executor") is False
+    assert tool_source_can_set_explicit_yes("ui_confirm_button") is True
+
+    try:
+        add_reply(ticket["id"], "desde el LLM", explicit_yes=True, source="max_tool")
+        raise AssertionError("el tool path no puede enviar")
+    except PermissionError:
+        pass
+    try:
+        add_reply(ticket["id"], "desde api", explicit_yes=True, source="api")
+        raise AssertionError("sin el botón no se envía")
+    except PermissionError:
+        pass
+
+    client = _client()
+    denied = client.post(
+        f"/api/v1/family-help/inbox/{ticket['id']}/reply",
+        json={"body": "el LLM pone explicit_yes", "explicit_yes": True},
+    )
+    assert denied.status_code == 403
+
+    sent = client.post(
+        f"/api/v1/family-help/inbox/{ticket['id']}/reply",
+        json={"body": "ok desde el botón"},
+        headers={"X-Family-Help-Confirm": "si-enviar"},
+    )
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["ticket"]["replies"][-1]["usage_tokens"] > 0
+    assert "estimación" in (sent.json()["ticket"]["usage"]["note"] or "")
+
+    from pathlib import Path as P
+    tool_src = (P(__file__).resolve().parents[1] / "app" / "services" / "max" / "tool_executor.py").read_text(encoding="utf-8")
+    assert "family-help/inbox" in tool_src
+    assert "Sí, enviar" in tool_src
+    router_src = (P(__file__).resolve().parents[1] / "app" / "routers" / "max" / "router.py").read_text(encoding="utf-8")
+    assert "add_reply" not in router_src or "family_help" in router_src
+    assert "explicit_yes" not in router_src.split("handle_chat_intent")[1][:800]
+
+
+def test_shared_inbox_chmod_stt_pending_and_reply_usage(monkeypatch, tmp_path):
+    inbox = tmp_path / "family-help"
+    inbox.mkdir()
+    _family(monkeypatch, tmp_path, "amp", inbox)
+    from app.services.family_help import (
+        SHARED_INBOX_DEFAULT,
+        create_ticket,
+        edition_store_dir,
+        set_transcript,
+    )
+
+    assert str(SHARED_INBOX_DEFAULT) == "/data/family-help"
+    store = edition_store_dir("amp")
+    assert store.parent.resolve() == inbox.resolve()
+    mode = store.stat().st_mode & 0o777
+    assert mode == 0o700
+
+    voice = b"RIFF" + b"\x00" * 80
+    ticket = create_ticket(
+        message="",
+        transcript="",
+        attachments=[{
+            "filename": "nota.webm",
+            "content_type": "audio/webm",
+            "data": voice,
+            "kind": "voice",
+        }],
+        notify=False,
+    )
+    assert ticket["transcript_pending"] is True
+    assert ticket["transcript"] == ""
+    assert any(a["kind"] == "voice" for a in ticket["attachments"])
+
+    still = set_transcript(ticket["id"], "", pending=True)
+    assert still["transcript_pending"] is True
+    done = set_transcript(ticket["id"], "ahora sí se oye", pending=False)
+    assert done["transcript_pending"] is False
+    assert done["transcript"] == "ahora sí se oye"
+
+    root = Path(__file__).resolve().parents[2]
+    env_amp = (root / "deploy" / "empire-amp.env.example").read_text(encoding="utf-8")
+    env_max = (root / "deploy" / "empire-maxine.env.example").read_text(encoding="utf-8")
+    env_be = (root / "backend" / ".env.example").read_text(encoding="utf-8")
+    for text in (env_amp, env_max, env_be):
+        assert "FAMILY_HELP_INBOX_DIR=/data/family-help" in text
+        assert "700" in text

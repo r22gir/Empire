@@ -184,9 +184,12 @@ curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8011/api/v1/family-h
 
 curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8011/api/v1/family-help/inbox
 # Esperado: HTTP 403. Juan y Camilo no leen el inbox de Rafael ni el del otro.
+# Lo cubre amp_access_middleware (no está en access_exempt) + _founder_or_403.
 ```
 
-En el chat, el botón **Pedir ayuda a Max** y el texto `pide ayuda a Max` crean un ticket (texto, voz o archivos). Eso sí notifica a `empirebox2026@gmail.com` y cuenta para el tope del 20%. No lo dispares en este chequeo.
+En el chat, el botón **Pedir ayuda a Max** y el texto `pide ayuda a Max` crean un ticket (texto, voz o archivos). Eso sí notifica a `empirebox2026@gmail.com` y cuenta para el tope del 20% (estimación de tokens). No lo dispares en este chequeo. Si STT está caído, el audio se guarda y la UI muestra «transcripción pendiente».
+
+Click-through post-merge (amp, maxine, studio): ticket de amp invisible en maxine; `/inbox` 403 en ambas ediciones familiares; `.html` bloqueado.
 
 ## Qué no hace
 

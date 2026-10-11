@@ -18,9 +18,11 @@ PR.
 """
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
+import shutil
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -69,6 +71,48 @@ ALLOWED_VOICE_MIME = frozenset({
 })
 
 FOUNDER_NOTIFY_EMAIL = "empirebox2026@gmail.com"
+SHARED_INBOX_DEFAULT = Path("/data/family-help")
+UI_CONFIRM_HEADER = "x-family-help-confirm"
+UI_CONFIRM_VALUE = "si-enviar"
+USAGE_ESTIMATE_NOTE = (
+    "El tope del 20% usa una estimación de tokens "
+    "(caracteres ÷ 4 + sobrecosto de archivo/voz), no el conteo del proveedor."
+)
+HTML_LIKE_EXT = frozenset({
+    ".html", ".htm", ".shtml", ".xhtml", ".svg", ".xml", ".js", ".mjs",
+})
+HTML_LIKE_MIME = frozenset({
+    "text/html", "application/xhtml+xml", "image/svg+xml",
+    "text/xml", "application/xml", "text/javascript",
+    "application/javascript", "application/x-javascript",
+})
+EXT_TO_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".csv": "text/csv",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".webm": "audio/webm",
+    ".mp4": "audio/mp4",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+}
+INBOX_AUTH_PREFIXES = ("/api/v1/family-help/inbox",)
+TOOL_EXPLICIT_YES_SOURCES = frozenset({
+    "max_tool", "llm", "tool_executor", "chat", "openclaw", "telegram",
+})
 
 WORKROOM_LEAKS = (
     "5124 Frolich", "Frolich", "Hyattsville", "workroom@empirebox.store",
@@ -238,32 +282,41 @@ def _unique_paths(paths: Iterable[Path]) -> list[Path]:
     return out
 
 
-def inbox_base() -> Path:
-    raw = os.getenv("FAMILY_HELP_INBOX_DIR", "").strip()
-    if raw:
-        path = Path(raw).expanduser()
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-    if is_family_edition():
-        path = require_data_root() / "family-help"
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-    # Founder fallback: a dedicated tree, never Workroom quotes/jobs DBs.
-    path = Path(os.getenv("FAMILY_HELP_FOUNDER_INBOX", "/data/family-help")).expanduser()
+def _secure_mkdir(path: Path) -> Path:
+    """Create ``path`` and chmod 700 so sibling edition users cannot peek."""
+    path.mkdir(parents=True, exist_ok=True)
     try:
-        path.mkdir(parents=True, exist_ok=True)
+        os.chmod(path, 0o700)
     except OSError:
         pass
     return path
+
+
+def inbox_base() -> Path:
+    """Shared tree ``FAMILY_HELP_INBOX_DIR`` (prod: ``/data/family-help``).
+
+    All three processes must set the same base. Per-edition subfolders
+    (``amp/``, ``maxine/``) are chmod 700 so sibling OS users cannot peek.
+    Unset in tests: family instances stay under ``EMPIRE_DATA_DIR``.
+    """
+    raw = os.getenv("FAMILY_HELP_INBOX_DIR", "").strip()
+    if raw:
+        return _secure_mkdir(Path(raw).expanduser())
+    if is_family_edition():
+        return _secure_mkdir(require_data_root() / "family-help")
+    founder = (os.getenv("FAMILY_HELP_FOUNDER_INBOX") or "").strip()
+    path = Path(founder or str(SHARED_INBOX_DEFAULT)).expanduser()
+    try:
+        return _secure_mkdir(path)
+    except OSError:
+        return path
 
 
 def edition_store_dir(edition: str) -> Path:
     key = (edition or "").strip().lower()
     if key not in HELP_EDITIONS:
         raise ValueError("edición de ayuda no válida")
-    path = inbox_base() / key
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return _secure_mkdir(inbox_base() / key)
 
 
 def _peer_store_dirs() -> dict[str, Path]:
@@ -387,6 +440,20 @@ def _connect(edition: str) -> sqlite3.Connection:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_help_tickets_day ON tickets(created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_help_att_ticket ON attachments(ticket_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_help_reply_ticket ON replies(ticket_id)")
+    ticket_cols = {row[1] for row in conn.execute("PRAGMA table_info(tickets)")}
+    if "attachments_revealed" not in ticket_cols:
+        conn.execute(
+            "ALTER TABLE tickets ADD COLUMN attachments_revealed INTEGER NOT NULL DEFAULT 0"
+        )
+    if "transcript_pending" not in ticket_cols:
+        conn.execute(
+            "ALTER TABLE tickets ADD COLUMN transcript_pending INTEGER NOT NULL DEFAULT 0"
+        )
+    reply_cols = {row[1] for row in conn.execute("PRAGMA table_info(replies)")}
+    if "usage_tokens" not in reply_cols:
+        conn.execute(
+            "ALTER TABLE replies ADD COLUMN usage_tokens INTEGER NOT NULL DEFAULT 0"
+        )
     return conn
 
 
@@ -425,6 +492,67 @@ def _safe_filename(name: str, fallback: str) -> str:
     return cleaned[:120]
 
 
+def _norm_mime(content_type: str) -> str:
+    return (content_type or "").split(";")[0].strip().lower()
+
+
+def infer_mime(filename: str, content_type: str) -> str:
+    mime = _norm_mime(content_type)
+    if mime:
+        return mime
+    ext = Path(filename or "").suffix.lower()
+    return EXT_TO_MIME.get(ext, "")
+
+
+def inbox_path_requires_founder_studio_auth(path: str) -> bool:
+    """``/inbox*`` is founder-only and sits behind studio / family auth."""
+    clean = (path or "").split("?", 1)[0]
+    return any(clean == prefix or clean.startswith(prefix + "/") for prefix in INBOX_AUTH_PREFIXES)
+
+
+def explicit_yes_from_ui(request, body_flag: bool = False) -> bool:
+    """True only when the inbox «Sí, enviar» button sent the confirm header.
+
+    JSON ``explicit_yes`` from Max's LLM / tool path is ignored.
+    """
+    header = ""
+    if request is not None:
+        header = (request.headers.get(UI_CONFIRM_HEADER) or "").strip().lower()
+    return header == UI_CONFIRM_VALUE
+
+
+def tool_source_can_set_explicit_yes(source: str) -> bool:
+    return (source or "").strip().lower() not in TOOL_EXPLICIT_YES_SOURCES
+
+
+async def read_upload_limited(
+    upload,
+    *,
+    limit: int,
+    content_length: Optional[int] = None,
+) -> bytes:
+    """Read an UploadFile while enforcing ``limit``. Never slurp past the cap."""
+    declared = content_length
+    if declared is None:
+        size = getattr(upload, "size", None)
+        if size is not None:
+            try:
+                declared = int(size)
+            except (TypeError, ValueError):
+                declared = None
+    if declared is not None and declared > limit:
+        raise ValueError("el archivo supera el tamaño permitido")
+    buf = bytearray()
+    while True:
+        chunk = await upload.read(64 * 1024)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > limit:
+            raise ValueError("el archivo supera el tamaño permitido")
+    return bytes(buf)
+
+
 def validate_upload(
     *,
     filename: str,
@@ -432,25 +560,40 @@ def validate_upload(
     data: bytes,
     kind: str,
 ) -> str:
+    """Require BOTH an allowed extension AND an allowed MIME. HTML/SVG never pass."""
     if not data:
         raise ValueError("archivo vacío")
     limit = MAX_VOICE_BYTES if kind == "voice" else MAX_FILE_BYTES
     if len(data) > limit:
         raise ValueError("el archivo supera el tamaño permitido")
     ext = Path(filename or "").suffix.lower()
-    mime = (content_type or "").split(";")[0].strip().lower()
+    mime = infer_mime(filename, content_type)
+    if ext in HTML_LIKE_EXT or mime in HTML_LIKE_MIME:
+        raise ValueError("tipo de archivo no permitido")
     if kind == "voice":
-        allowed_ext, allowed_mime = ALLOWED_VOICE_EXT, ALLOWED_VOICE_MIME
-        if ext not in allowed_ext and mime not in allowed_mime:
+        if ext not in ALLOWED_VOICE_EXT or mime not in ALLOWED_VOICE_MIME:
             raise ValueError("tipo de audio no permitido")
         return "voice"
-    if ext not in ALLOWED_FILE_EXT and mime not in ALLOWED_FILE_MIME:
+    if ext not in ALLOWED_FILE_EXT or mime not in ALLOWED_FILE_MIME:
         raise ValueError("tipo de archivo no permitido")
-    if ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"} or mime.startswith("image/"):
+    if ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
         return "image"
-    if ext == ".pdf" or mime == "application/pdf":
+    if ext == ".pdf":
         return "pdf"
     return "file"
+
+
+def safe_download_headers(filename: str, content_type: str) -> dict[str, str]:
+    """Never serve uploads inline as HTML. Force download + nosniff."""
+    mime = infer_mime(filename, content_type)
+    if mime in HTML_LIKE_MIME or not mime or mime.startswith("text/html"):
+        mime = "application/octet-stream"
+    safe_name = _safe_filename(filename, "download")
+    return {
+        "Content-Disposition": f'attachment; filename="{safe_name}"',
+        "X-Content-Type-Options": "nosniff",
+        "Content-Type": mime,
+    }
 
 
 def tickets_today(edition: str) -> int:
@@ -479,6 +622,22 @@ def estimate_help_tokens(*, text: str = "", transcript: str = "", files: int = 0
     return tokens
 
 
+def check_help_cap(
+    *,
+    text: str = "",
+    transcript: str = "",
+    kind: str = "family_help",
+) -> Optional[str]:
+    from app.services.instance_usage import enforce_usage_cap
+
+    return enforce_usage_cap(
+        kind=kind,
+        text=text or transcript or "help",
+        source="family_help",
+        tools=True,
+    )
+
+
 def record_help_usage(
     *,
     edition: str,
@@ -487,18 +646,15 @@ def record_help_usage(
     files: int = 0,
     voice: bool = False,
     kind: str = "family_help",
+    check_cap: bool = True,
 ) -> Optional[str]:
-    from app.services.instance_usage import enforce_usage_cap, record_usage
+    from app.services.instance_usage import record_usage
 
+    if check_cap:
+        refusal = check_help_cap(text=text, transcript=transcript, kind=kind)
+        if refusal:
+            return refusal
     tokens = estimate_help_tokens(text=text, transcript=transcript, files=files, voice=voice)
-    refusal = enforce_usage_cap(
-        kind=kind,
-        text=text or transcript or "help",
-        source="family_help",
-        tools=True,
-    )
-    if refusal:
-        return refusal
     record_usage(
         input_tokens=tokens,
         output_tokens=0,
@@ -515,18 +671,26 @@ def _row_ticket(row: sqlite3.Row, *, include_private: bool = False) -> dict:
         context = json.loads(row["context_json"] or "[]")
     except json.JSONDecodeError:
         context = []
+    keys = row.keys()
     payload = {
         "id": row["id"],
         "edition": row["edition"],
         "sender": row["sender"],
         "message": row["message"],
         "transcript": row["transcript"] or "",
+        "transcript_pending": bool(row["transcript_pending"]) if "transcript_pending" in keys else False,
+        "attachments_revealed": bool(row["attachments_revealed"]) if "attachments_revealed" in keys else False,
         "context": context,
         "status": row["status"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "attachments": [],
         "replies": [],
+        "usage": {
+            "reply_tokens": 0,
+            "charged_to": row["edition"],
+            "note": USAGE_ESTIMATE_NOTE,
+        },
     }
     if not include_private:
         return payload
@@ -539,29 +703,56 @@ def _load_children(conn: sqlite3.Connection, ticket: dict) -> dict:
         "SELECT id, kind, filename, content_type, size FROM attachments WHERE ticket_id = ? ORDER BY filename",
         (ticket_id,),
     ).fetchall()
-    ticket["attachments"] = [
-        {
-            "id": a["id"],
-            "kind": a["kind"],
-            "filename": a["filename"],
-            "content_type": a["content_type"],
-            "size": a["size"],
-        }
-        for a in atts
-    ]
+    hide_maxine = (
+        is_founder_edition()
+        and ticket.get("edition") == "maxine"
+        and not ticket.get("attachments_revealed")
+    )
+    ticket["attachment_count"] = len(atts)
+    ticket["attachments_hidden"] = bool(hide_maxine and atts)
+    if hide_maxine:
+        ticket["attachments"] = []
+    else:
+        ticket["attachments"] = [
+            {
+                "id": a["id"],
+                "kind": a["kind"],
+                "filename": a["filename"],
+                "content_type": a["content_type"],
+                "size": a["size"],
+            }
+            for a in atts
+        ]
+    reply_cols = {row[1] for row in conn.execute("PRAGMA table_info(replies)")}
+    has_usage = "usage_tokens" in reply_cols
+    usage_sql = (
+        "SELECT id, author, body, draft, created_at, usage_tokens FROM replies "
+        if has_usage
+        else "SELECT id, author, body, draft, created_at FROM replies "
+    )
     replies = conn.execute(
-        "SELECT id, author, body, draft, created_at FROM replies WHERE ticket_id = ? AND draft = 0 ORDER BY created_at",
+        usage_sql + "WHERE ticket_id = ? AND draft = 0 ORDER BY created_at",
         (ticket_id,),
     ).fetchall()
-    ticket["replies"] = [
-        {
-            "id": r["id"],
-            "author": r["author"],
-            "body": r["body"],
-            "created_at": r["created_at"],
-        }
-        for r in replies
-    ]
+    reply_tokens = 0
+    ticket["replies"] = []
+    for r in replies:
+        tokens = int(r["usage_tokens"]) if has_usage else 0
+        reply_tokens += tokens
+        ticket["replies"].append(
+            {
+                "id": r["id"],
+                "author": r["author"],
+                "body": r["body"],
+                "created_at": r["created_at"],
+                "usage_tokens": tokens,
+            }
+        )
+    ticket["usage"] = {
+        "reply_tokens": reply_tokens,
+        "charged_to": ticket.get("edition"),
+        "note": USAGE_ESTIMATE_NOTE,
+    }
     drafts = conn.execute(
         "SELECT id, author, body, created_at FROM replies WHERE ticket_id = ? AND draft = 1 ORDER BY created_at DESC LIMIT 3",
         (ticket_id,),
@@ -664,14 +855,32 @@ def create_ticket(
     if len(files) > MAX_FILES + 1:  # +1 voice
         raise ValueError(f"máximo {MAX_FILES} archivos más un audio")
 
-    refusal = record_help_usage(
-        edition=mine,
-        text=text,
-        transcript=voice_text,
-        files=len(files),
-        voice=any(f.get("kind") == "voice" for f in files),
-        kind="family_help_request",
-    )
+    prepared = []
+    for item in files:
+        data = item.get("data") or b""
+        raw_name = item.get("filename") or ""
+        kind = validate_upload(
+            filename=raw_name,
+            content_type=item.get("content_type") or "",
+            data=data,
+            kind=item.get("kind") or "file",
+        )
+        redacted_name = redact_text(raw_name or kind, edition=mine) or kind
+        display = _safe_filename(redacted_name, kind)
+        prepared.append({
+            "data": data,
+            "kind": kind,
+            "filename": display,
+            "content_type": infer_mime(raw_name, item.get("content_type") or ""),
+        })
+
+    if not text and not voice_text and not prepared:
+        raise ValueError("escribe un mensaje, graba voz o adjunta un archivo")
+
+    has_voice = any(item["kind"] == "voice" for item in prepared)
+    pending = bool(has_voice and not voice_text)
+
+    refusal = check_help_cap(text=text, transcript=voice_text, kind="family_help_request")
     if refusal:
         raise PermissionError(refusal)
 
@@ -680,33 +889,29 @@ def create_ticket(
     now = _iso()
     sender_name = (sender or "").strip() or edition_owner_name(mine)
     context = sanitize_context_turns(history, edition=mine)
+    files_root = None
     conn = _connect(mine)
+    saved_files = []
     try:
         conn.execute(
             """
             INSERT INTO tickets (
                 id, edition, sender, message, transcript, context_json,
-                status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?)
+                status, created_at, updated_at, attachments_revealed, transcript_pending
+            ) VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, 0, ?)
             """,
             (
                 ticket_id, mine, sender_name, text, voice_text,
                 json.dumps(context, ensure_ascii=False), now, now,
+                1 if pending else 0,
             ),
         )
-        saved_files = []
-        for item in files:
-            data = item.get("data") or b""
-            kind = validate_upload(
-                filename=item.get("filename") or "",
-                content_type=item.get("content_type") or "",
-                data=data,
-                kind=item.get("kind") or "file",
-            )
+        for item in prepared:
             att_id = f"fa-{uuid.uuid4().hex[:10]}"
-            stored = _safe_filename(item.get("filename") or kind, f"{kind}-{att_id}")
-            dest = _files_dir(mine, ticket_id) / f"{att_id}-{stored}"
-            dest.write_bytes(data)
+            stored = _safe_filename(item["filename"], f"{item['kind']}-{att_id}")
+            files_root = _files_dir(mine, ticket_id)
+            dest = files_root / f"{att_id}-{stored}"
+            dest.write_bytes(item["data"])
             conn.execute(
                 """
                 INSERT INTO attachments (
@@ -714,21 +919,36 @@ def create_ticket(
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    att_id, ticket_id, kind, stored,
-                    (item.get("content_type") or "")[:120],
-                    len(data), dest.name,
+                    att_id, ticket_id, item["kind"], stored,
+                    (item["content_type"] or "")[:120],
+                    len(item["data"]), dest.name,
                 ),
             )
             saved_files.append({
                 "id": att_id,
-                "kind": kind,
+                "kind": item["kind"],
                 "filename": stored,
-                "content_type": item.get("content_type") or "",
-                "size": len(data),
+                "content_type": item["content_type"],
+                "size": len(item["data"]),
             })
         conn.commit()
+    except Exception:
+        conn.rollback()
+        if files_root is not None:
+            shutil.rmtree(files_root, ignore_errors=True)
+        raise
     finally:
         conn.close()
+
+    record_help_usage(
+        edition=mine,
+        text=text,
+        transcript=voice_text,
+        files=len(prepared),
+        voice=has_voice,
+        kind="family_help_request",
+        check_cap=False,
+    )
 
     ticket = get_ticket(ticket_id, edition=mine) or {
         "id": ticket_id,
@@ -778,6 +998,7 @@ def add_reply(
     author: str = "Max",
     draft: bool = False,
     explicit_yes: bool = False,
+    source: str = "api",
 ) -> dict:
     if is_family_edition():
         raise PermissionError("las ediciones familiares no responden el buzón de Max")
@@ -789,13 +1010,20 @@ def add_reply(
     text = redact_text((body or "").strip(), edition=ticket["edition"])
     if not text:
         raise ValueError("la respuesta está vacía")
-    if not draft and not explicit_yes:
-        raise PermissionError(
-            "Max no envía ni aplica cambios sin el sí explícito de Rafael"
-        )
+    if not draft:
+        if not tool_source_can_set_explicit_yes(source):
+            raise PermissionError(
+                "Max no envía ni aplica cambios desde una herramienta o el LLM"
+            )
+        if source != "ui_confirm_button" or not explicit_yes:
+            raise PermissionError(
+                "Max no envía ni aplica cambios sin el sí explícito de Rafael"
+            )
 
+    tokens = 0
     if not draft:
         # Charge the family edition's 20% cap, not Workroom's meter.
+        tokens = estimate_help_tokens(text=text)
         _record_peer_usage(ticket["edition"], text)
 
     now = _iso()
@@ -804,10 +1032,10 @@ def add_reply(
     try:
         conn.execute(
             """
-            INSERT INTO replies (id, ticket_id, author, body, draft, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO replies (id, ticket_id, author, body, draft, created_at, usage_tokens)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (reply_id, ticket_id, author, text, 1 if draft else 0, now),
+            (reply_id, ticket_id, author, text, 1 if draft else 0, now, tokens),
         )
         if not draft:
             conn.execute(
@@ -823,6 +1051,74 @@ def add_reply(
     finally:
         conn.close()
     return get_ticket(ticket_id) or ticket
+
+
+def reveal_attachments(ticket_id: str) -> dict:
+    """Founder-only: Rafael opens Maxine attachments after the warning."""
+    if is_family_edition() or not is_founder_edition():
+        raise PermissionError("solo el Max personal de Rafael puede abrir adjuntos")
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        raise FileNotFoundError("ticket no encontrado")
+    now = _iso()
+    conn = _connect(ticket["edition"])
+    try:
+        conn.execute(
+            "UPDATE tickets SET attachments_revealed = 1, updated_at = ? WHERE id = ?",
+            (now, ticket_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_ticket(ticket_id) or ticket
+
+
+def voice_attachment(ticket: dict) -> Optional[dict]:
+    for item in ticket.get("attachments") or []:
+        if item.get("kind") == "voice":
+            return item
+    if ticket.get("attachments_hidden"):
+        # Founder may retry STT without revealing other files.
+        ed = ticket["edition"]
+        conn = _connect(ed)
+        try:
+            row = conn.execute(
+                "SELECT id, kind, filename, content_type, size FROM attachments "
+                "WHERE ticket_id = ? AND kind = 'voice' LIMIT 1",
+                (ticket["id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row:
+            return {
+                "id": row["id"],
+                "kind": row["kind"],
+                "filename": row["filename"],
+                "content_type": row["content_type"],
+                "size": row["size"],
+            }
+    return None
+
+
+def set_transcript(ticket_id: str, text: str, *, pending: bool) -> dict:
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        raise FileNotFoundError("ticket no encontrado")
+    ed = ticket["edition"]
+    if is_family_edition() and ed != edition_name():
+        raise PermissionError("esta edición no puede abrir el buzón de otra")
+    cleaned = redact_text((text or "").strip(), edition=ed)
+    now = _iso()
+    conn = _connect(ed)
+    try:
+        conn.execute(
+            "UPDATE tickets SET transcript = ?, transcript_pending = ?, updated_at = ? WHERE id = ?",
+            (cleaned, 1 if pending else 0, now, ticket_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_ticket(ticket_id, edition=ed) or ticket
 
 
 def close_ticket(ticket_id: str) -> dict:
@@ -874,7 +1170,8 @@ def draft_reply(ticket_id: str) -> dict:
         body,
         author="Max (borrador)",
         draft=True,
-        explicit_yes=True,
+        explicit_yes=False,
+        source="draft",
     )
     latest = (saved.get("drafts") or [{}])[0]
     return {
@@ -1035,18 +1332,18 @@ def notify_new_ticket(ticket: dict) -> dict:
             result["email"] = "blocked"
             return result
 
-    html = (
-        f"<p><strong>{title}</strong></p>"
-        f"<p>Ticket <code>{ticket.get('id')}</code></p>"
-        f"<p>{preview or 'Audio o archivo adjunto.'}</p>"
-        "<p>Responde desde el Max personal (no el módulo Workroom).</p>"
+    html_body = (
+        f"<p><strong>{html.escape(title, quote=True)}</strong></p>"
+        f"<p>Ticket <code>{html.escape(str(ticket.get('id') or ''), quote=True)}</code></p>"
+        f"<p>{html.escape(preview or 'Audio o archivo adjunto.', quote=True)}</p>"
+        "<p>Responde desde el Max personal (no el módulo Workroom). Sin Telegram.</p>"
     )
     try:
         import asyncio
         from app.services.email.sender import send_email
 
         async def _send():
-            return await send_email(to, title, html)
+            return await send_email(to, title, html_body)
 
         try:
             loop = asyncio.get_running_loop()

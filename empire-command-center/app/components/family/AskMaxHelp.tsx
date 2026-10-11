@@ -10,6 +10,7 @@ import {
   createHelpTicket,
   familyHelpLabels,
   fetchOwnTickets,
+  retryTranscript,
 } from '../../lib/familyHelp';
 
 type Props = {
@@ -165,6 +166,7 @@ export default function AskMaxHelp({ locale, messages, onReply }: Props) {
               </button>
             </div>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0 }}>{t.hint}</p>
+            <p style={{ fontSize: 12, color: '#d4a017' }}>{t.attachmentWarning}</p>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
@@ -201,6 +203,21 @@ export default function AskMaxHelp({ locale, messages, onReply }: Props) {
                 <div style={{ fontSize: 12, opacity: 0.7 }}>{ticket.id} · {ticket.status}</div>
                 <div>{ticket.message}</div>
                 {ticket.transcript ? <div style={{ fontSize: 13 }}><em>{t.transcript}:</em> {ticket.transcript}</div> : null}
+                {ticket.transcript_pending ? (
+                  <div style={{ fontSize: 13, marginTop: 6 }}>
+                    <em>{t.transcriptPending}</em>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await retryTranscript(ticket.id, false, locale);
+                        await refresh();
+                      }}
+                      style={{ marginLeft: 8 }}
+                    >
+                      {t.retryTranscript}
+                    </button>
+                  </div>
+                ) : null}
                 {(ticket.attachments || []).map((att) => (
                   att.kind === 'voice'
                     ? <audio key={att.id} controls src={attachmentUrl(ticket.id, att.id, false)} style={{ width: '100%', marginTop: 6 }} />

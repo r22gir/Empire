@@ -26,8 +26,21 @@ export function familyHelpLabels(locale: string) {
     confirm: es ? 'Sí, enviar' : 'Yes, send',
     play: es ? 'Reproducir audio' : 'Play audio',
     transcript: es ? 'Transcripción' : 'Transcript',
+    transcriptPending: es ? 'Transcripción pendiente' : 'Transcription pending',
+    retryTranscript: es ? 'Reintentar transcripción' : 'Retry transcription',
     context: es ? 'Contexto del chat' : 'Chat context',
     files: es ? 'Archivos' : 'Files',
+    attachmentWarning: es
+      ? 'Aviso: el contenido de los adjuntos no se redacta. Solo se ocultan datos en el texto, la transcripción y el nombre del archivo.'
+      : 'Warning: attachment contents are not redacted. Only the message, transcript, and filename are scrubbed.',
+    hiddenAttachments: es
+      ? 'Adjuntos de Maxine ocultos. Ábrelos solo cuando Rafael los revise.'
+      : 'Maxine attachments are hidden until Rafael opens them.',
+    openAttachments: es ? 'Abrir adjuntos' : 'Open attachments',
+    usageNote: es
+      ? 'El tope del 20% usa una estimación de tokens (caracteres ÷ 4 + archivo/voz), no el conteo del proveedor.'
+      : 'The 20% cap uses a token estimate (characters ÷ 4 + file/voice overhead), not the provider count.',
+    replyUsage: es ? 'Uso de respuestas cobrado a esta edición' : 'Reply usage charged to this edition',
     needYes: es
       ? 'Max no envía ni cambia nada sin tu sí explícito.'
       : 'Max will not send or change anything without your explicit yes.',

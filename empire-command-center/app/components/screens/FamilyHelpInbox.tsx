@@ -8,6 +8,8 @@ import {
   attachmentUrl,
   familyHelpLabels,
   fetchInbox,
+  revealInboxAttachments,
+  retryTranscript,
 } from '../../lib/familyHelp';
 import { API } from '../../lib/api';
 
@@ -15,6 +17,8 @@ const EDITION_LABEL: Record<string, string> = {
   amp: 'Max-e · Juan',
   maxine: 'Maxine · Camilo',
 };
+
+const CONFIRM_HEADER = { 'X-Family-Help-Confirm': 'si-enviar' };
 
 export default function FamilyHelpInbox() {
   const { locale } = useTranslation();
@@ -34,10 +38,13 @@ export default function FamilyHelpInbox() {
 
   useEffect(() => { load(); }, [load]);
 
-  const post = async (path: string, body: any) => {
+  const post = async (path: string, body: any, confirm = false) => {
     const res = await fetch(`${API}/family-help/inbox/${active?.id}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(confirm ? CONFIRM_HEADER : {}),
+      },
       credentials: 'include',
       body: JSON.stringify(body),
     });
@@ -49,6 +56,20 @@ export default function FamilyHelpInbox() {
     setError(null);
     if (data.draft) setDraft(data.draft);
     if (data.ticket) setActive(data.ticket);
+    await load();
+  };
+
+  const openAttachments = async () => {
+    if (!active) return;
+    const ticket = await revealInboxAttachments(active.id);
+    if (ticket) setActive(ticket);
+    await load();
+  };
+
+  const retry = async () => {
+    if (!active) return;
+    const ticket = await retryTranscript(active.id, true, locale);
+    if (ticket) setActive(ticket);
     await load();
   };
 
@@ -98,14 +119,28 @@ export default function FamilyHelpInbox() {
             {active.transcript ? (
               <p><strong>{t.transcript}:</strong> {active.transcript}</p>
             ) : null}
-            {(active.attachments || []).map((att) => (
-              att.kind === 'voice'
-                ? <div key={att.id} style={{ margin: '10px 0' }}>
-                    <div style={{ fontSize: 12 }}>{t.play}</div>
-                    <audio controls src={attachmentUrl(active.id, att.id, true)} style={{ width: '100%' }} />
-                  </div>
-                : <a key={att.id} href={attachmentUrl(active.id, att.id, true)} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 6 }}>{att.filename}</a>
-            ))}
+            {active.transcript_pending ? (
+              <div style={{ margin: '10px 0' }}>
+                <strong>{t.transcriptPending}</strong>
+                <button type="button" onClick={retry} style={{ marginLeft: 8 }}>{t.retryTranscript}</button>
+              </div>
+            ) : null}
+            <p style={{ fontSize: 13, color: '#d4a017' }}>{t.attachmentWarning}</p>
+            {active.attachments_hidden ? (
+              <div style={{ margin: '10px 0' }}>
+                <p>{t.hiddenAttachments} ({active.attachment_count || 0})</p>
+                <button type="button" onClick={openAttachments}>{t.openAttachments}</button>
+              </div>
+            ) : (
+              (active.attachments || []).map((att) => (
+                att.kind === 'voice'
+                  ? <div key={att.id} style={{ margin: '10px 0' }}>
+                      <div style={{ fontSize: 12 }}>{t.play}</div>
+                      <audio controls src={attachmentUrl(active.id, att.id, true)} style={{ width: '100%' }} />
+                    </div>
+                  : <a key={att.id} href={attachmentUrl(active.id, att.id, true)} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 6 }}>{att.filename}</a>
+              ))
+            )}
             {(active.context || []).length > 0 && (
               <details style={{ margin: '12px 0' }}>
                 <summary>{t.context}</summary>
@@ -118,8 +153,18 @@ export default function FamilyHelpInbox() {
               <div key={item.id} style={{ padding: 10, borderRadius: 8, background: 'rgba(212,160,23,0.12)', marginBottom: 8 }}>
                 <strong>{item.author}</strong>
                 <div>{item.body}</div>
+                {item.usage_tokens ? (
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>{t.replyUsage}: ~{item.usage_tokens}</div>
+                ) : null}
               </div>
             ))}
+            {active.usage ? (
+              <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                {t.replyUsage}: ~{active.usage.reply_tokens || 0} ({EDITION_LABEL[active.usage.charged_to || active.edition] || active.edition}). {t.usageNote}
+              </p>
+            ) : (
+              <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t.usageNote}</p>
+            )}
             <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t.needYes}</p>
             <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t.noApply}</p>
             {draft && (
@@ -137,7 +182,8 @@ export default function FamilyHelpInbox() {
               <button type="button" onClick={() => post('/draft', {})}>{t.draft}</button>
               <button
                 type="button"
-                onClick={() => post('/reply', { body: draft || reply, author: 'Max', explicit_yes: true })}
+                data-family-help-confirm="si-enviar"
+                onClick={() => post('/reply', { body: draft || reply, author: 'Max' }, true)}
                 disabled={!(draft || reply).trim()}
               >
                 {t.confirm}

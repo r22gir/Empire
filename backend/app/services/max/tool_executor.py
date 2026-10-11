@@ -7016,8 +7016,15 @@ def _test_runner(params: dict, desk: Optional[str] = None) -> ToolResult:
     failed = 0
 
     if command == "endpoint" and url:
+        blocked_url = url if url.startswith("http") else empire_api_url(f"{url}")
+        if "family-help/inbox" in blocked_url and str(method).upper() not in {"GET", "HEAD"}:
+            return ToolResult(
+                tool="test_runner",
+                success=False,
+                error="family-help inbox writes are blocked from Max tools. Use the Sí, enviar button.",
+            )
         try:
-            r = httpx.request(method, url if url.startswith("http") else empire_api_url(f"{url}"), timeout=10)
+            r = httpx.request(method, blocked_url, timeout=10)
             ok = 200 <= r.status_code < 500
             results.append({
                 "url": url, "status": r.status_code, "ok": ok,

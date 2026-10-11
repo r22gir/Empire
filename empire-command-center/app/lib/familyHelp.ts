@@ -21,6 +21,13 @@ export type HelpReply = {
   author: string;
   body: string;
   created_at: string;
+  usage_tokens?: number;
+};
+
+export type HelpUsage = {
+  reply_tokens?: number;
+  charged_to?: string;
+  note?: string;
 };
 
 export type HelpTicket = {
@@ -29,6 +36,10 @@ export type HelpTicket = {
   sender: string;
   message: string;
   transcript?: string;
+  transcript_pending?: boolean;
+  attachments_hidden?: boolean;
+  attachments_revealed?: boolean;
+  attachment_count?: number;
   context?: Array<{ role: string; content: string }>;
   status: HelpStatus;
   created_at: string;
@@ -36,50 +47,8 @@ export type HelpTicket = {
   attachments?: HelpAttachment[];
   replies?: HelpReply[];
   drafts?: HelpReply[];
+  usage?: HelpUsage;
 };
-
-export function familyHelpLabels(locale: string) {
-  const es = (locale || 'es').toLowerCase().startsWith('es');
-  return {
-    ask: es ? 'Pedir ayuda a Max' : 'Ask Max for help',
-    inbox: es ? 'Ayuda de ediciones familiares' : 'Family help',
-    title: es ? 'Pedir ayuda a Max' : 'Ask Max for help',
-    hint: es
-      ? 'Escribe, graba un audio o adjunta una captura. Max (el de Rafael) lo verá. No se envían datos del Workroom.'
-      : 'Type, record audio, or attach a screenshot. Rafael’s Max will see it. Workroom data is never sent.',
-    message: es ? '¿Qué necesitas?' : 'What do you need?',
-    send: es ? 'Enviar a Max' : 'Send to Max',
-    sending: es ? 'Enviando…' : 'Sending…',
-    voice: es ? 'Grabar audio' : 'Record audio',
-    stopVoice: es ? 'Detener' : 'Stop',
-    attach: es ? 'Adjuntar' : 'Attach',
-    close: es ? 'Cerrar' : 'Close',
-    sent: es ? 'Pedido enviado' : 'Request sent',
-    replies: es ? 'Respuestas de Max' : 'Replies from Max',
-    empty: es ? 'Aún no hay pedidos.' : 'No requests yet.',
-    new: es ? 'Nuevo' : 'New',
-    answered: es ? 'Respondido' : 'Answered',
-    closedStatus: es ? 'Cerrado' : 'Closed',
-    reply: es ? 'Responder' : 'Reply',
-    sendReply: es ? 'Enviar respuesta' : 'Send reply',
-    draft: es ? 'Borrador de Max' : 'Max draft',
-    confirm: es ? 'Sí, enviar' : 'Yes, send',
-    play: es ? 'Reproducir audio' : 'Play audio',
-    transcript: es ? 'Transcripción' : 'Transcript',
-    context: es ? 'Contexto del chat' : 'Chat context',
-    files: es ? 'Archivos' : 'Files',
-    needYes: es
-      ? 'Max no envía ni cambia nada sin tu sí explícito.'
-      : 'Max will not send or change anything without your explicit yes.',
-    noApply: es
-      ? 'Los arreglos de código van por un PR de cloud-agent. Este ticket no escribe en la edición familiar.'
-      : 'Code fixes go through a cloud-agent PR. This ticket does not write to the family edition.',
-  };
-}
-
-export function isFamilyHelpSurface(edition = editionFromEnv()): boolean {
-  return isFamilyEdition(edition);
-}
 
 export function attachmentUrl(ticketId: string, attachmentId: string, founder: boolean): string {
   const base = founder
@@ -107,6 +76,31 @@ export async function fetchInbox(edition?: string): Promise<HelpTicket[]> {
   if (!res.ok) return [];
   const data = await res.json();
   return data.tickets || [];
+}
+
+export async function retryTranscript(ticketId: string, founder: boolean, language?: string): Promise<HelpTicket | null> {
+  const path = founder
+    ? `${API}/family-help/inbox/${ticketId}/transcribe`
+    : `${API}/family-help/tickets/${ticketId}/transcribe`;
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ language: language || null }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return null;
+  return data.ticket || null;
+}
+
+export async function revealInboxAttachments(ticketId: string): Promise<HelpTicket | null> {
+  const res = await fetch(`${API}/family-help/inbox/${ticketId}/reveal-attachments`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return null;
+  return data.ticket || null;
 }
 
 export async function createHelpTicket(input: {
