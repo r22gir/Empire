@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -102,6 +103,44 @@ def test_reserved_counts_until_reconcile_and_billed_unknown_keeps_cap(monkeypatc
     assert check(kind="image", edition="amp", images=1)
 
 
+class _FakeResp:
+    def __init__(self, status_code=200, payload=None, content=b"", text=""):
+        self.status_code = status_code
+        self._payload = payload if payload is not None else {}
+        self.content = content if content or payload is None else json_bytes(payload)
+        self.text = text or ("" if payload is None else str(payload))
+
+    def json(self):
+        if isinstance(self._payload, Exception):
+            raise self._payload
+        return self._payload
+
+
+def json_bytes(payload):
+    import json as _json
+
+    return _json.dumps(payload).encode()
+
+
+class _RecordingClient:
+    """AsyncClient stand-in that records one POST and optional GET polls/downloads."""
+
+    def __init__(self, *args, **kwargs):
+        self.kwargs = kwargs
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def post(self, url, headers=None, json=None, **kwargs):
+        raise NotImplementedError
+
+    async def get(self, url, headers=None, **kwargs):
+        raise NotImplementedError
+
+
 def test_video_generating_reserve_before_http_records_on_error(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path, "workroom")
     from app.services.minimax_meter import totals
@@ -140,6 +179,159 @@ def test_video_generating_reserve_before_http_records_on_error(monkeypatch, tmp_
     row = get_draft(draft["id"])
     assert row["status"] == "error"
     assert (row.get("result") or {}).get("billed_unknown") is True
+
+
+def test_generate_v2_polls_and_downloads_clip(monkeypatch, tmp_path):
+    """One POST /v2/video_generation (content[], 4s, 768P, 16:9), poll, download."""
+    _env(monkeypatch, tmp_path, "workroom")
+    monkeypatch.setenv("MINIMAX_H3_MODEL", "MiniMax-H3")
+    monkeypatch.setenv("MINIMAX_H3_POLL_INTERVAL", "0")
+    monkeypatch.setenv("MINIMAX_H3_POLL_TIMEOUT", "5")
+    monkeypatch.setenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
+    from app.services.minimax_meter import totals
+    from app.services.minimax_video import (
+        approve,
+        clip_was_produced,
+        create_draft,
+        generate_approved_clip,
+        get_draft,
+    )
+
+    draft = create_draft(
+        "a spinning wooden clock",
+        edition="workroom",
+        duration=4,
+        resolution="768P",
+        ratio="16:9",
+    )
+    approve(draft["id"], confirmed=True)
+    posts: list[dict] = []
+    gets: list[str] = []
+    queries = {"n": 0}
+
+    class FakeClient(_RecordingClient):
+        async def post(self, url, headers=None, json=None, **kwargs):
+            posts.append({"url": url, "json": json})
+            row = get_draft(draft["id"])
+            assert row["status"] == "generating"
+            assert totals(kind="video")["video_clips"] >= 1
+            return _FakeResp(200, {"task_id": "task-abc-1"})
+
+        async def get(self, url, headers=None, **kwargs):
+            gets.append(url)
+            if "/v2/query/video_generation/" in url:
+                queries["n"] += 1
+                if queries["n"] == 1:
+                    return _FakeResp(200, {"task": {"status": "processing"}})
+                return _FakeResp(
+                    200,
+                    {"task": {"status": "succeeded", "content": {"url": "https://cdn.example/clip.mp4"}}},
+                )
+            return _FakeResp(200, payload=None, content=b"\x00\x00real-mp4-bytes")
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+    row = asyncio.run(generate_approved_clip(draft["id"], caller_edition="workroom"))
+    assert len(posts) == 1
+    assert posts[0]["url"] == "https://api.minimax.io/v2/video_generation"
+    payload = posts[0]["json"]
+    assert payload["model"] == "MiniMax-H3"
+    assert payload["duration"] == 4
+    assert payload["resolution"] == "768P"
+    assert payload["ratio"] == "16:9"
+    assert payload["content"][0]["type"] == "text"
+    assert "prompt" not in payload
+    assert any("/v2/query/video_generation/task-abc-1" in url for url in gets)
+    assert clip_was_produced(row) is True
+    assert row["status"] == "generated"
+    assert row["posted"] is False
+    assert (row.get("result") or {}).get("task_id") == "task-abc-1"
+    dest = Path((row.get("result") or {})["clip_path"])
+    assert dest.is_file()
+    assert dest.read_bytes() == b"\x00\x00real-mp4-bytes"
+    assert (row.get("result") or {}).get("cost_estimate", {}).get("usd") == 0.32
+
+
+def test_generate_200_without_task_id_is_not_generated(monkeypatch, tmp_path):
+    """Legacy v1 Hailuo-shaped 200 must not set generated:true."""
+    _env(monkeypatch, tmp_path, "workroom")
+    monkeypatch.setenv("MINIMAX_H3_POLL_INTERVAL", "0")
+    from app.services.minimax_video import (
+        H3GenerationError,
+        approve,
+        clip_was_produced,
+        create_draft,
+        generate_approved_clip,
+        get_draft,
+    )
+
+    draft = create_draft("a spinning wooden clock", edition="workroom", duration=4)
+    approve(draft["id"], confirmed=True)
+
+    class FakeClient(_RecordingClient):
+        posts = 0
+
+        async def post(self, url, headers=None, json=None, **kwargs):
+            FakeClient.posts += 1
+            return _FakeResp(200, {"base_resp": {"status_code": 0, "status_msg": "success"}})
+
+        async def get(self, *args, **kwargs):
+            raise AssertionError("must not poll without a task_id")
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+    with pytest.raises(H3GenerationError):
+        asyncio.run(generate_approved_clip(draft["id"], caller_edition="workroom"))
+    assert FakeClient.posts == 1
+    row = get_draft(draft["id"])
+    assert row["status"] == "error"
+    assert clip_was_produced(row) is False
+    assert (row.get("result") or {}).get("task_id") in (None, "")
+
+
+def test_generate_subscription_reject_reports_and_does_not_retry(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path, "workroom")
+    from app.services.minimax_meter import totals
+    from app.services.minimax_video import (
+        SubscriptionKeyRejected,
+        approve,
+        clip_was_produced,
+        create_draft,
+        generate_approved_clip,
+        get_draft,
+    )
+
+    draft = create_draft("a spinning wooden clock", edition="workroom", duration=4)
+    approve(draft["id"], confirmed=True)
+
+    class FakeClient(_RecordingClient):
+        posts = 0
+
+        async def post(self, url, headers=None, json=None, **kwargs):
+            FakeClient.posts += 1
+            return _FakeResp(
+                200,
+                {
+                    "base_resp": {
+                        "status_code": 1008,
+                        "status_msg": "this model requires pay-as-you-go, key sk-live-meter-secret-999",
+                    }
+                },
+            )
+
+        async def get(self, *args, **kwargs):
+            raise AssertionError("must not poll after subscription reject")
+
+    monkeypatch.setenv("MINIMAX_API_KEY", "sk-live-meter-secret-999")
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+    with pytest.raises(SubscriptionKeyRejected, match="1008") as exc:
+        asyncio.run(generate_approved_clip(draft["id"], caller_edition="workroom"))
+    assert FakeClient.posts == 1
+    assert "sk-live-meter-secret-999" not in str(exc.value)
+    assert "[KEY_REDACTED]" in str(exc.value)
+    row = get_draft(draft["id"])
+    assert row["status"] == "error"
+    assert clip_was_produced(row) is False
+    assert (row.get("result") or {}).get("subscription_rejected") is True
+    assert totals(kind="video")["video_clips"] == 0
 
 
 def test_generate_rejects_edition_mismatch(monkeypatch, tmp_path):

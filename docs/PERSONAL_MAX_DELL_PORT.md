@@ -236,5 +236,12 @@ Studio click-through after deploy:
 
 - MiniMax console Auto credit usage still ON (recommend OFF). H3/TTS stay
   off until `scripts/minimax_h3_probe.py --live`.
+- H3 live probe uses the Pay-as-you-go v2 API: one POST
+  `/v2/video_generation` (`content[]`, duration 4, 768P, 16:9), poll
+  `/v2/query/video_generation/{task_id}` ~every 10s, download to the
+  drafts folder (never post). `generated: true` means a real clip file
+  exists. A subscription-key reject is printed (key redacted) and not
+  retried. If credits cannot be read, the probe says so and records the
+  local $0.32 / 4s 768P estimate.
 - Cloudflare Access already fronts studio.empirebox.store; this PR does
   not add a second login gate.
