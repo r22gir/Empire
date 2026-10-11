@@ -142,7 +142,8 @@ async def create_ticket(
     history_json: str = Form("[]"),
     language: Optional[str] = Form(None),
     voice: Optional[UploadFile] = File(None),
-    files: list[UploadFile] = File(default=[]),
+    files: Optional[list[UploadFile]] = File(None),
+    file: Optional[UploadFile] = File(None),
 ):
     from app.services.family_help import create_ticket as create
 
@@ -159,28 +160,36 @@ async def create_ticket(
 
     attachments = []
     transcript = ""
-    if voice is not None and (voice.filename or voice.content_type):
+    if voice is not None:
         raw = await _read_upload(voice, kind="voice")
-        attachments.append({
-            "filename": voice.filename or "recording.webm",
-            "content_type": voice.content_type or "",
-            "data": raw,
-            "kind": "voice",
-        })
-        transcript = await _transcribe_bytes(
-            raw,
-            voice.filename or "recording.webm",
-            voice.content_type or "audio/webm",
-            language,
-        )
+        if raw:
+            attachments.append({
+                "filename": voice.filename or "recording.webm",
+                "content_type": voice.content_type or "",
+                "data": raw,
+                "kind": "voice",
+            })
+            transcript = await _transcribe_bytes(
+                raw,
+                voice.filename or "recording.webm",
+                voice.content_type or "audio/webm",
+                language,
+            )
 
-    for upload in files or []:
-        if not upload or not (upload.filename or upload.content_type):
+    uploads: list[UploadFile] = []
+    for item in files or []:
+        if item is not None:
+            uploads.append(item)
+    if file is not None:
+        uploads.append(file)
+    for upload in uploads:
+        raw = await _read_upload(upload, kind="file")
+        if not raw:
             continue
         attachments.append({
-            "filename": upload.filename or "file",
+            "filename": upload.filename or "",
             "content_type": upload.content_type or "",
-            "data": await _read_upload(upload, kind="file"),
+            "data": raw,
             "kind": "file",
         })
 

@@ -1,6 +1,21 @@
 import { API } from './api';
 import { editionFromEnv, isFamilyEdition } from './edition';
 export { familyHelpLabels } from './familyHelpCopy';
+export {
+  HELP_FILE_ACCEPT,
+  HELP_MAX_FILE_BYTES,
+  HELP_MAX_FILES,
+  HELP_MAX_VOICE_BYTES,
+  formatHelpBytes,
+  inferHelpMime,
+  validateHelpFile,
+} from './familyHelpUpload';
+import {
+  HELP_MAX_FILES,
+  HELP_MAX_VOICE_BYTES,
+  formatHelpBytes,
+  validateHelpFile,
+} from './familyHelpUpload';
 
 export function isFamilyHelpSurface(edition = editionFromEnv()): boolean {
   return isFamilyEdition(edition);
@@ -111,6 +126,22 @@ export async function createHelpTicket(input: {
   voiceName?: string;
   language?: string | null;
 }): Promise<{ ok: boolean; ticket?: HelpTicket; detail?: string }> {
+  const rejected: string[] = [];
+  const kept: File[] = [];
+  for (const file of input.files || []) {
+    const check = validateHelpFile(file);
+    if (check.ok) kept.push(file);
+    else rejected.push(`${file.name}: ${check.reason}`);
+  }
+  if (input.voice && input.voice.size > HELP_MAX_VOICE_BYTES) {
+    return { ok: false, detail: `el audio supera ${formatHelpBytes(HELP_MAX_VOICE_BYTES)}` };
+  }
+  if (kept.length > HELP_MAX_FILES) {
+    return { ok: false, detail: `máximo ${HELP_MAX_FILES} archivos` };
+  }
+  if (rejected.length && !kept.length && (input.files || []).length) {
+    return { ok: false, detail: rejected.join(' ') };
+  }
   const body = new FormData();
   body.append('message', input.message || '');
   body.append('history_json', JSON.stringify(input.history || []));
@@ -118,7 +149,7 @@ export async function createHelpTicket(input: {
   if (input.voice) {
     body.append('voice', input.voice, input.voiceName || 'recording.webm');
   }
-  for (const file of input.files) body.append('files', file, file.name);
+  for (const file of kept) body.append('files', file, file.name);
   const res = await fetch(`${API}/family-help/tickets`, {
     method: 'POST',
     body,
