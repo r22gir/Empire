@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from app.services.organizer.constants import DEFAULT_EVENT_MINUTES, FOLLOWUP_KINDS, ITEM_KINDS
+from app.services.organizer.edition import normalize_space
 
 _WEEKDAYS = {
     "monday": 0,
@@ -33,6 +34,11 @@ _KIND_KEYWORDS = [
     ("meeting", ("meeting", "meet with")),
     ("call", ("call", "phone", "ring")),
     ("appointment", ("appointment", "appt")),
+    ("travel", ("flight", "travel", "airport")),
+    ("medical", ("doctor", "dentist", "medical", "clinic")),
+    ("school", ("school", "pickup kids", "recital")),
+    ("legal", ("notary", "lawyer", "legal")),
+    ("admin", ("paperwork", "renew", "admin")),
     ("todo", ("todo", "to-do", "to do", "task")),
 ]
 
@@ -145,6 +151,23 @@ def resolve_time_phrase(text: str) -> Optional[str]:
     return None
 
 
+def infer_space(text: str) -> str:
+    raw = (text or "").lower()
+    if re.search(r"\b(workroom|install|fabric|drapery|measure)\b", raw):
+        return normalize_space("workroom")
+    if re.search(r"\b(empire|studio|platform)\b", raw):
+        return normalize_space("empire")
+    if re.search(r"\b(family|kids|school|mom|dad)\b", raw):
+        return normalize_space("family")
+    if re.search(r"\b(amp|coaching|juan)\b", raw):
+        return normalize_space("amp")
+    if re.search(r"\b(venture|llc|side project)\b", raw):
+        return normalize_space("ventures")
+    if re.search(r"\b(personal|dentist|doctor|gym|myself)\b", raw):
+        return normalize_space("personal")
+    return normalize_space(None)
+
+
 def infer_kind(text: str) -> str:
     raw = text.lower()
     for kind, keys in _KIND_KEYWORDS:
@@ -244,6 +267,7 @@ def parse_quick_add(text: str, *, today: Optional[date] = None) -> dict:
         "notes": f"Draft from quick-add: {cleaned}",
         "outbound_blocked": True,
         "reminder_only": kind == "reminder",
+        "space_id": infer_space(cleaned),
     }
 
 

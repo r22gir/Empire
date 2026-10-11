@@ -1,4 +1,4 @@
-"""Workroom Organizer — unified calendar, people, tasks, and reminders."""
+"""Empire Organizer — one calendar for every life and business area."""
 
 from app.services.organizer.constants import (
     CALENDAR_EVENT_TYPES,

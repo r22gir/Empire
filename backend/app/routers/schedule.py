@@ -14,9 +14,15 @@ from app.db.database import get_db, dict_row, dict_rows
 from app.services.organizer.constants import CALENDAR_EVENT_TYPES, ITEM_KINDS
 from app.services.organizer.parse import parse_quick_add, parse_quick_add_lines
 from app.services.organizer.resolve import attach_matches
+from app.services.organizer.edition import (
+    edition_sql,
+    normalize_space,
+    reject_if_blocked,
+)
 from app.services.organizer.store import (
     conflicts_for_payload,
     ensure_schema,
+    event_select_sql,
     hydrate_event_row,
     insert_schedule_event,
     load_event,
@@ -24,6 +30,7 @@ from app.services.organizer.store import (
     parse_ids,
     replace_assignments,
 )
+from app.services.organizer.usage import UsageCapExceeded, consume
 
 def get_schedule_db() -> str:
     from app.db.database import DB_PATH
@@ -57,6 +64,7 @@ class ScheduleEventCreate(BaseModel):
     travel_minutes: Optional[int] = None
     reminder_draft: Optional[str] = None
     confirm_conflicts: bool = False
+    space_id: Optional[str] = None
 
 class ScheduleEventUpdate(BaseModel):
     title: Optional[str] = None
@@ -74,6 +82,7 @@ class ScheduleEventUpdate(BaseModel):
     travel_minutes: Optional[int] = None
     reminder_draft: Optional[str] = None
     confirm_conflicts: bool = False
+    space_id: Optional[str] = None
 
 
 class ScheduleEventMove(BaseModel):
@@ -125,16 +134,9 @@ def list_schedule_events(
     limit: int = 100
 ):
     """List schedule events by date range, job_id, type, or status."""
-    query = """
-        SELECT e.*, j.title as job_title, j.customer_id, c.name as customer_name,
-               c.phone as customer_phone, c.address as customer_address, j.address as job_address,
-               j.client_name
-        FROM schedule_events e
-        LEFT JOIN jobs j ON e.job_id = j.id
-        LEFT JOIN customers c ON COALESCE(e.customer_id, j.customer_id) = c.id
-        WHERE 1=1
-    """
-    params = []
+    clause, eparams = edition_sql("e")
+    query = event_select_sql() + f" WHERE {clause}"
+    params = list(eparams)
 
     if start_date:
         query += " AND e.start_time >= ?"
@@ -202,12 +204,26 @@ def create_schedule_event(req: ScheduleEventCreate):
 
     payload = req.model_dump()
     payload["kind"] = req.type
+    payload["space_id"] = normalize_space(payload.get("space_id"))
+    blocked = reject_if_blocked(payload.get("title"), payload.get("notes"), payload.get("location_address"))
+    if blocked:
+        raise HTTPException(status_code=400, detail={"code": "edition_blocked", "message": blocked})
     with get_db() as conn:
         ensure_schema(conn)
+        try:
+            consume(conn, "items")
+        except UsageCapExceeded as exc:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "usage_cap", "bucket": exc.bucket, "used": exc.used, "cap": exc.cap, "message": str(exc)},
+            )
         conflicts = conflicts_for_payload(conn, payload)
         if conflicts and not req.confirm_conflicts:
             _conflict_http(conflicts)
-        event = insert_schedule_event(conn, payload)
+        try:
+            event = insert_schedule_event(conn, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"code": "edition_blocked", "message": str(exc)})
         event["conflicts"] = []
         return event
 
@@ -217,11 +233,14 @@ def update_schedule_event(event_id: str, req: ScheduleEventUpdate):
     """Update a schedule event. Conflicts refuse the write unless confirm_conflicts=true."""
     with get_db() as conn:
         ensure_schema(conn)
-        existing = conn.execute("SELECT * FROM schedule_events WHERE id = ?", (event_id,)).fetchone()
+        existing = load_event(conn, event_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Schedule event not found")
 
         cur = dict(existing)
+        blocked = reject_if_blocked(req.title, req.notes, req.location_address)
+        if blocked:
+            raise HTTPException(status_code=400, detail={"code": "edition_blocked", "message": blocked})
         updates = []
         params = []
 
@@ -291,6 +310,12 @@ def update_schedule_event(event_id: str, req: ScheduleEventUpdate):
             updates.append("reminder_draft = ?")
             params.append(req.reminder_draft)
 
+        if req.space_id is not None:
+            space = normalize_space(req.space_id)
+            updates.append("space_id = ?")
+            params.append(space)
+            cur["space_id"] = space
+
         if req.assigned_resource_ids is not None:
             replace_assignments(conn, parse_ids(req.assigned_resource_ids), event_id=event_id)
             cur["assigned_resource_ids"] = parse_ids(req.assigned_resource_ids)
@@ -305,10 +330,15 @@ def update_schedule_event(event_id: str, req: ScheduleEventUpdate):
             _conflict_http(conflicts)
 
         if updates:
+            clause, eparams = edition_sql()
             updates.append("updated_at = ?")
             params.append(now_iso())
             params.append(event_id)
-            conn.execute(f"UPDATE schedule_events SET {', '.join(updates)} WHERE id = ?", params)
+            params.extend(eparams)
+            conn.execute(
+                f"UPDATE schedule_events SET {', '.join(updates)} WHERE id = ? AND {clause}",
+                params,
+            )
 
         event = load_event(conn, event_id)
         event["conflicts"] = []
@@ -340,7 +370,7 @@ async def move_schedule_event(event_id: str, req: ScheduleEventMove):
 def delete_schedule_event(event_id: str):
     """Delete a schedule event."""
     with get_db() as conn:
-        existing = conn.execute("SELECT id FROM schedule_events WHERE id = ?", (event_id,)).fetchone()
+        existing = load_event(conn, event_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Schedule event not found")
 

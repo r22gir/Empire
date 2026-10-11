@@ -8531,7 +8531,7 @@ def _draft_organizer_item(params: dict, desk: Optional[str] = None) -> ToolResul
                 "sent": False,
                 "outbound_policy": OUTBOUND_POLICY,
                 "echo_confirmation": echo,
-                "notice": "DRAFT ONLY. Present this to Rafael. Do not tell him it is already on the calendar.",
+                "notice": "DRAFT ONLY. Present this to the owner. Do not tell them it is already on the calendar.",
             },
         )
     except Exception as e:

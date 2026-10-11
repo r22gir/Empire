@@ -22,8 +22,18 @@
   border-bottom: 1px solid var(--org-line);
   padding: 10px 12px 8px;
 }
-.org-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; }
+.org-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; flex-wrap: wrap; }
 .org-title span { font-size: 11px; font-weight: 500; color: var(--org-mut); }
+.org-ed {
+  font-size: 10px; font-weight: 700; background: #111; color: #fff;
+  border-radius: 999px; padding: 2px 8px; letter-spacing: .02em;
+}
+.org-spaces { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.org-spaces button {
+  border: 1px solid var(--org-line); background: #fff; border-radius: 999px;
+  padding: 4px 10px; font-size: 11px; font-weight: 600; color: var(--org-ink);
+}
+.org-spaces button.on { background: var(--org-gold); border-color: #9a7d0a; }
 .org-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
 .org-toolbar button, .org-toolbar select, .org-toolbar input, .org-qa input {
   border: 1px solid var(--org-line); background: #fff; border-radius: 8px;

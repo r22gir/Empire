@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   addMinutesIso, DAY_START_MIN, eventLayout, filterItems, groupActions, itemsOnDay,
   isOrganizerCommand, monthCells, overdueItems, parseOrganizerCommand, parseQuickAddClient,
-  PX_PER_MIN, shouldOfferCrewDraft, snapMinutes, timeFromOffset, weekDays,
+  PX_PER_MIN, shouldOfferCrewDraft, showsWorkroomJobs, snapMinutes, timeFromOffset, weekDays,
 } from './organizer-logic.ts';
 
 test('filter by job, person, kind', () => {
@@ -15,6 +15,11 @@ test('filter by job, person, kind', () => {
   assert.equal(filterItems(items, { resourceId: 'r2' })[0].id, '2');
   assert.equal(filterItems(items, { kind: 'install' })[0].title.includes('Marley'), true);
   assert.equal(filterItems(items, { query: 'ana' })[0].id, '2');
+  const mixed = [
+    ...items,
+    { id: '3', title: 'Kids recital', kind: 'school', space_id: 'family' },
+  ];
+  assert.equal(filterItems(mixed, { spaceId: 'family' })[0].id, '3');
 });
 
 test('overdue vs today', () => {
@@ -85,4 +90,7 @@ test('action groups and crew-draft after drag', () => {
   assert.equal(groups.followup[0].requires_confirm, true);
   assert.equal(shouldOfferCrewDraft(true, false), true);
   assert.equal(shouldOfferCrewDraft(true, true), false);
+  assert.equal(showsWorkroomJobs({ allows_workroom_jobs: true }, ''), true);
+  assert.equal(showsWorkroomJobs({ allows_workroom_jobs: true }, 'family'), false);
+  assert.equal(showsWorkroomJobs({ allows_workroom_jobs: false }, 'workroom'), false);
 });

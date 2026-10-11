@@ -27,6 +27,12 @@ CALENDAR_EVENT_TYPES = {
     "fabric_pickup",
     "loading_dock",
     "errand",
+    "travel",
+    "medical",
+    "school",
+    "legal",
+    "admin",
+    "social",
     "other",
 }
 
@@ -54,6 +60,14 @@ RESOURCE_ROLES = {
     "vendor",
     "supplier",
     "inspector",
+    "family",
+    "friend",
+    "doctor",
+    "teacher",
+    "coach",
+    "teammate",
+    "partner",
+    "other",
 }
 
 # Roles we hydrate from existing customers / contacts / vendors.
@@ -77,6 +91,12 @@ KIND_TO_LEGACY_TYPE = {
     "material_order": "other",
     "call": "errand",
     "deadline": "other",
+    "travel": "errand",
+    "medical": "other",
+    "school": "other",
+    "legal": "other",
+    "admin": "other",
+    "social": "other",
 }
 
 ITEM_STATUSES = {"open", "planned", "confirmed", "done", "cancelled", "snoozed"}
@@ -85,7 +105,7 @@ EVENT_STATUSES = {"planned", "confirmed", "done", "cancelled"}
 DEFAULT_TRAVEL_GAP_MINUTES = 30
 DEFAULT_EVENT_MINUTES = 60
 
-# Never auto-send anything to a customer. Reminders stay drafts.
+# Never auto-send. The owner's tap is required on every edition.
 OUTBOUND_POLICY = (
-    "Draft only. Nothing is sent to a customer without founder approval."
+    "Draft only. Nothing is sent without the owner's tap."
 )

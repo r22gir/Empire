@@ -4,7 +4,7 @@ export type OrganizerKind =
   | 'job_milestone' | 'measure' | 'install' | 'pickup' | 'drop_off' | 'fitting'
   | 'delivery' | 'meeting' | 'appointment' | 'todo' | 'reminder' | 'followup'
   | 'material_order' | 'call' | 'deadline' | 'fabric_pickup' | 'loading_dock'
-  | 'errand' | 'other';
+  | 'errand' | 'travel' | 'medical' | 'school' | 'legal' | 'admin' | 'social' | 'other';
 
 export type OrganizerItem = {
   id: string;
@@ -30,6 +30,7 @@ export type OrganizerItem = {
   job_title?: string | null;
   capture_id?: string | null;
   reminder_draft?: string | null;
+  space_id?: string | null;
   actions?: OrganizerAction[];
 };
 
@@ -49,7 +50,8 @@ export const KIND_LABEL: Record<string, string> = {
   meeting: 'Meeting', appointment: 'Appointment', todo: 'To-do', reminder: 'Reminder',
   followup: 'Follow-up', material_order: 'Material / ETA', call: 'Call',
   deadline: 'Deadline', fabric_pickup: 'Fabric pickup', loading_dock: 'Loading dock',
-  errand: 'Errand', other: 'Other',
+  errand: 'Errand', travel: 'Travel', medical: 'Medical', school: 'School',
+  legal: 'Legal', admin: 'Admin', social: 'Social', other: 'Other',
 };
 
 export const KIND_COLOR: Record<string, string> = {
@@ -57,7 +59,9 @@ export const KIND_COLOR: Record<string, string> = {
   delivery: '#ca8a04', fitting: '#7c3aed', meeting: '#4f46e5', appointment: '#0f766e',
   call: '#be185d', todo: '#57534e', reminder: '#b45309', followup: '#c2410c',
   deadline: '#b91c1c', material_order: '#7e22ce', job_milestone: '#334155',
-  fabric_pickup: '#9333ea', loading_dock: '#dc2626', errand: '#6b7280', other: '#52525b',
+  fabric_pickup: '#9333ea', loading_dock: '#dc2626', errand: '#6b7280',
+  travel: '#0369a1', medical: '#be123c', school: '#15803d', legal: '#1e293b',
+  admin: '#57534e', social: '#c026d3', other: '#52525b',
 };
 
 export function ymd(d: Date): string {
@@ -137,12 +141,13 @@ export function monthCells(anchor: Date): { date: Date | null; dateStr: string; 
 
 export function filterItems(
   items: OrganizerItem[],
-  opts: { jobId?: string; resourceId?: string; kind?: string; query?: string },
+  opts: { jobId?: string; resourceId?: string; kind?: string; query?: string; spaceId?: string },
 ): OrganizerItem[] {
   return items.filter((it) => {
     if (opts.jobId && String(it.job_id || '') !== String(opts.jobId)) return false;
     if (opts.resourceId && !(it.assigned_resource_ids || []).includes(opts.resourceId)) return false;
     if (opts.kind && (it.kind || it.type) !== opts.kind) return false;
+    if (opts.spaceId && String(it.space_id || '') !== String(opts.spaceId)) return false;
     if (opts.query) {
       const q = opts.query.toLowerCase();
       const blob = `${it.title} ${it.customer_vendor || ''} ${it.location_address || ''} ${it.job_title || ''}`.toLowerCase();
@@ -174,6 +179,9 @@ export function parseQuickAddClient(text: string, today = new Date()): { kind: s
     ['install', ['install']], ['call', ['call']], ['pickup', ['pick up', 'pickup']],
     ['measure', ['measure']], ['followup', ['follow up', 'follow-up']],
     ['reminder', ['remind']], ['todo', ['todo', 'to-do', 'task']],
+    ['medical', ['dentist', 'doctor', 'medical']], ['school', ['school', 'recital']],
+    ['travel', ['flight', 'travel']], ['meeting', ['meeting']],
+    ['legal', ['lawyer', 'notary', 'legal']],
   ];
   let kind = 'appointment';
   for (const [k, keys] of kinds) {
@@ -238,4 +246,9 @@ export function isOrganizerCommand(text: string): boolean {
 
 export function shouldOfferCrewDraft(moved: boolean, hadConflict: boolean): boolean {
   return !!moved && !hadConflict;
+}
+
+export function showsWorkroomJobs(edition: { allows_workroom_jobs?: boolean } | null | undefined, spaceId?: string): boolean {
+  if (!edition?.allows_workroom_jobs) return false;
+  return !spaceId || spaceId === 'workroom';
 }

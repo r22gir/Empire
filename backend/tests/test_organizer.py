@@ -1,4 +1,4 @@
-"""Workroom Organizer: create/move/conflict, day plan, follow-ups, capture, crew."""
+"""Empire Organizer: spaces, editions, create/move/conflict, day plan, capture, crew."""
 
 from __future__ import annotations
 
@@ -275,7 +275,7 @@ def test_capture_edition_isolation_and_crew(client, isolated_empire_db, tmp_path
     body = res.json()
     assert body["public_url"] is None
     assert body["public_url_blocked"] is True
-    assert body["edition"] == "workroom"
+    assert body["edition"] == "main"
 
     rejected = client.post(
         "/api/v1/organizer/captures/ingest",
@@ -364,6 +364,9 @@ def test_available_actions_stop_and_job():
     job = {"id": "j1", "client_name": "Marley", "customer_phone": "2025550199", "customer_email": "a@b.com"}
     ids = {a["id"] for a in available_actions(item, job)}
     assert {"navigate", "call", "text", "send_quote", "order_fabric", "request_deposit", "book_install", "notify_crew"} <= ids
+    family = available_actions({**item, "space_id": "family"}, job)
+    assert "send_quote" not in {a["id"] for a in family}
+    assert "book_install" not in {a["id"] for a in family}
 
 
 def test_board_actions_and_job_buttons(client, isolated_empire_db):
@@ -497,3 +500,176 @@ def test_move_with_notify_crew_flag(client, isolated_empire_db):
     assert body["start_time"].startswith("2026-10-20T09:00")
     assert body.get("crew_draft")
     assert body.get("sent") is False
+
+
+def test_fail_closed_unknown_edition_never_reads_main(monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "staging-xyz")
+    from app.services.organizer.edition import (
+        edition_sql,
+        process_edition,
+        read_edition_keys,
+        ORGANIZER_MODEL,
+    )
+    assert process_edition() == "unknown"
+    assert read_edition_keys() == ("unknown",)
+    clause, keys = edition_sql()
+    assert "main" not in keys
+    assert "workroom" not in keys
+    assert keys == ["unknown"]
+    assert ORGANIZER_MODEL == "grok-4.6"
+    assert "IN" in clause
+
+
+def test_spaces_unified_view_is_not_job_only(client, isolated_empire_db):
+    family = client.post(
+        "/api/v1/organizer/items",
+        json={"kind": "school", "title": "Kids recital", "space_id": "family", "start_time": "2026-10-22T18:00:00"},
+    )
+    personal = client.post(
+        "/api/v1/organizer/items",
+        json={"kind": "medical", "title": "Dentist", "space_id": "personal", "start_time": "2026-10-22T09:00:00"},
+    )
+    empire = client.post(
+        "/api/v1/organizer/items",
+        json={"kind": "meeting", "title": "Studio standup", "space_id": "empire", "start_time": "2026-10-22T11:00:00"},
+    )
+    assert family.status_code == 200, family.text
+    assert personal.status_code == 200, personal.text
+    assert empire.status_code == 200, empire.text
+    board = client.get("/api/v1/organizer/board?start_date=2026-10-22&end_date=2026-10-22")
+    assert board.status_code == 200
+    items = board.json()["items"]
+    titles = [i["title"] for i in items]
+    assert "Kids recital" in titles
+    assert "Dentist" in titles
+    assert "Studio standup" in titles
+    recital = next(i for i in items if i["title"] == "Kids recital")
+    assert not recital.get("job_id")
+    assert recital.get("space_id") == "family"
+    assert "send_quote" not in {a["id"] for a in recital.get("actions") or []}
+    fam = client.get("/api/v1/organizer/board?space_id=family&start_date=2026-10-22&end_date=2026-10-22").json()
+    assert all((i.get("space_id") == "family") or i.get("read_only") for i in fam["items"])
+    spaces = client.get("/api/v1/organizer/spaces").json()
+    slugs = {s["slug"] for s in spaces["spaces"]}
+    assert slugs >= {"workroom", "empire", "family", "personal", "ventures"}
+    assert spaces["unified"] is True
+    meta = client.get("/api/v1/organizer/meta").json()
+    assert meta["model"] == "grok-4.6"
+    assert meta["edition"]["edition"] == "main"
+    assert meta["edition"]["assistant"] == "Max"
+
+
+def test_maxine_hides_argos_and_workroom(client, isolated_empire_db, monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    _customer_and_job(client, "Argos")
+    monkeypatch.setenv("EMPIRE_EDITION", "maxine")
+    blocked = client.post(
+        "/api/v1/organizer/items",
+        json={"kind": "todo", "title": "Argos Campestre legal filing"},
+    )
+    assert blocked.status_code == 400
+    ok = client.post(
+        "/api/v1/organizer/items",
+        json={"kind": "todo", "title": "School pickup", "space_id": "family"},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["item"]["space_id"] == "family"
+    board = client.get("/api/v1/organizer/board").json()
+    blob = str(board).lower()
+    assert "argos" not in blob
+    assert "campestre" not in blob
+    titles = [i["title"] for i in board["items"]]
+    assert "School pickup" in titles
+    resources = client.get("/api/v1/organizer/resources").json()
+    assert resources["directory"] == []
+    follow = client.get("/api/v1/organizer/follow-ups").json()
+    assert follow["drafts"] == []
+    meta = client.get("/api/v1/organizer/meta").json()
+    assert meta["edition"]["edition"] == "maxine"
+    assert meta["edition"]["allows_workroom_jobs"] is False
+    slugs = {s["slug"] for s in meta["spaces"]}
+    assert "workroom" not in slugs
+    assert "argos" not in slugs
+    assert meta["model"] == "grok-4.6"
+
+
+def test_cross_edition_isolation(client, isolated_empire_db, monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    main_item = client.post(
+        "/api/v1/organizer/items",
+        json={"kind": "todo", "title": "Workroom fabric order", "space_id": "workroom"},
+    )
+    assert main_item.status_code == 200, main_item.text
+    from app.db.database import get_db
+    from app.services.organizer.store import new_id, now_iso
+    stamp = now_iso()
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO organizer_items
+               (id, kind, title, status, outbound_blocked, created_by, created_at, updated_at, edition, space_id)
+               VALUES (?, 'todo', ?, 'open', 1, 'manual', ?, ?, 'maxine', 'personal')""",
+            (new_id(), "Maxine dentist", stamp, stamp),
+        )
+        conn.execute(
+            """INSERT INTO schedule_events
+               (id, type, title, start_time, status, created_by, created_at, updated_at, edition, space_id, event_kind)
+               VALUES (?, 'other', ?, '2026-10-20T10:00:00', 'planned', 'manual', ?, ?, 'maxine', 'personal', 'legal')""",
+            (new_id(), "Argos Campestre legal", stamp, stamp),
+        )
+    board = client.get("/api/v1/organizer/board").json()["items"]
+    titles = [i["title"] for i in board]
+    assert "Workroom fabric order" in titles
+    assert "Maxine dentist" not in titles
+    assert "Argos Campestre legal" not in titles
+    monkeypatch.setenv("EMPIRE_EDITION", "maxine")
+    board2 = client.get("/api/v1/organizer/board").json()
+    titles2 = [i["title"] for i in board2["items"]]
+    assert "Workroom fabric order" not in titles2
+    assert "Maxine dentist" in titles2
+    assert "argos" not in str(board2).lower()
+    assert "campestre" not in str(board2).lower()
+
+
+def test_max_e_has_full_organizer(client, isolated_empire_db, monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "max_e")
+    meta = client.get("/api/v1/organizer/meta").json()
+    assert meta["edition"]["assistant"] == "Max-e"
+    assert meta["edition"]["owner"] == "Juan"
+    assert meta["edition"]["allows_workroom_jobs"] is False
+    slugs = {s["slug"] for s in meta["spaces"]}
+    assert "amp" in slugs
+    assert "workroom" not in slugs
+    res = client.post(
+        "/api/v1/organizer/items",
+        json={"kind": "todo", "title": "AMP coaching prep", "space_id": "amp"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["item"]["space_id"] == "amp"
+    board = client.get("/api/v1/organizer/board").json()
+    assert any(i["title"] == "AMP coaching prep" for i in board["items"])
+
+
+def test_usage_cap_returns_429(client, isolated_empire_db, monkeypatch):
+    from app.services.organizer import edition as edmod
+    monkeypatch.setitem(edmod.USAGE_CAPS, "main", {"items": 1, "captures": 1, "actions": 1})
+    first = client.post("/api/v1/organizer/items", json={"kind": "todo", "title": "one"})
+    assert first.status_code == 200, first.text
+    second = client.post("/api/v1/organizer/items", json={"kind": "todo", "title": "two"})
+    assert second.status_code == 429
+    detail = second.json()["detail"]
+    assert detail["code"] == "usage_cap"
+    assert detail["bucket"] == "items"
+
+
+def test_organizer_package_uses_grok_46_only():
+    from pathlib import Path
+    from app.services.organizer.edition import ORGANIZER_MODEL
+    assert ORGANIZER_MODEL == "grok-4.6"
+    root = Path(__file__).resolve().parents[1] / "app" / "services" / "organizer"
+    banned = ("gpt-", "claude-", "grok-3", "grok-4-fast", "llama", "gemini")
+    for path in root.glob("*.py"):
+        text = path.read_text()
+        for needle in banned:
+            assert needle not in text, f"{path.name} mentions {needle}"
+        if "model" in text.lower() and "ORGANIZER_MODEL" in text:
+            assert "grok-4.6" in text

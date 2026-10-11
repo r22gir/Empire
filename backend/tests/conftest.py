@@ -142,6 +142,8 @@ _DATA_TABLES = [
     "organizer_captures",
     "organizer_crew_tokens",
     "organizer_checkins",
+    "organizer_spaces",
+    "organizer_usage",
     "approval_queue",
 ]
 

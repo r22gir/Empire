@@ -5,7 +5,8 @@ import { API } from '../../../lib/api';
 import {
   addMinutesIso, DAY_END_MIN, DAY_START_MIN, eventLayout, filterItems, groupActions, itemsOnDay,
   isOrganizerCommand, KIND_COLOR, KIND_LABEL, monthCells, overdueItems, PX_PER_MIN,
-  shouldOfferCrewDraft, timeFromOffset, weekDays, ymd, type OrganizerAction, type OrganizerItem,
+  shouldOfferCrewDraft, showsWorkroomJobs, timeFromOffset, weekDays, ymd,
+  type OrganizerAction, type OrganizerItem,
 } from '../../../lib/organizer-logic';
 import './organizer.css';
 
@@ -32,6 +33,8 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   const [jobFilter, setJobFilter] = useState(initialJobId || initialJob());
   const [personFilter, setPersonFilter] = useState('');
   const [kindFilter, setKindFilter] = useState('');
+  const [spaceFilter, setSpaceFilter] = useState('');
+  const [usage, setUsage] = useState<any>(null);
   const [q, setQ] = useState('');
   const [quick, setQuick] = useState('');
   const [drafts, setDrafts] = useState<any[]>([]);
@@ -40,7 +43,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   const [timeline, setTimeline] = useState<any>(null);
   const [icsNote, setIcsNote] = useState('');
   const [peopleOpen, setPeopleOpen] = useState(false);
-  const [personForm, setPersonForm] = useState({ name: '', role: 'installer', phone: '', availability_json: '{"days":["mon","tue","wed","thu","fri"],"start":"08:00","end":"17:00"}' });
+  const [personForm, setPersonForm] = useState({ name: '', role: 'other', phone: '', availability_json: '{"days":["mon","tue","wed","thu","fri"],"start":"08:00","end":"17:00"}' });
   const [listening, setListening] = useState(false);
   const [toast, setToast] = useState('');
   const [crewPrompt, setCrewPrompt] = useState<OrganizerItem | null>(null);
@@ -48,24 +51,40 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   const dragRef = useRef<{ id: string; mode: 'move' | 'resize'; startY: number; origStart: string; origEnd: string } | null>(null);
 
   const day = ymd(anchor);
+  const edition = meta?.edition || {};
+  const spaces = edition.spaces || meta?.spaces || [];
+  const showJobs = showsWorkroomJobs(edition, spaceFilter);
+  const assistant = edition.assistant || 'Max';
   const filtered = useMemo(
-    () => filterItems(board, { jobId: jobFilter || undefined, resourceId: personFilter || undefined, kind: kindFilter || undefined, query: q || undefined }),
-    [board, jobFilter, personFilter, kindFilter, q],
+    () => filterItems(board, {
+      jobId: jobFilter || undefined,
+      resourceId: personFilter || undefined,
+      kind: kindFilter || undefined,
+      query: q || undefined,
+      spaceId: spaceFilter || undefined,
+    }),
+    [board, jobFilter, personFilter, kindFilter, q, spaceFilter],
   );
 
   const load = useCallback(async () => {
     const from = new Date(anchor); from.setDate(from.getDate() - 31);
     const to = new Date(anchor); to.setDate(to.getDate() + 40);
-    const qs = `start_date=${ymd(from)}&end_date=${ymd(to)}`;
-    const [b, r, j, p, rt, f, m, caps] = await Promise.all([
+    const spaceQs = spaceFilter ? `&space_id=${encodeURIComponent(spaceFilter)}` : '';
+    const qs = `start_date=${ymd(from)}&end_date=${ymd(to)}${spaceQs}`;
+    const [b, r, p, rt, m, caps, u] = await Promise.all([
       fetch(`${API}/organizer/board?${qs}`).then((x) => x.json()).catch(() => ({ items: [], overdue: [] })),
       fetch(`${API}/organizer/resources`).then((x) => x.json()).catch(() => ({ resources: [] })),
-      fetch(`${API}/jobs?limit=200`).then((x) => x.json()).catch(() => ({ jobs: [] })),
       fetch(`${API}/organizer/day-plan?plan_date=${day}`).then((x) => x.json()).catch(() => null),
       fetch(`${API}/organizer/route?plan_date=${day}`).then((x) => x.json()).catch(() => null),
-      fetch(`${API}/organizer/follow-ups`).then((x) => x.json()).catch(() => ({ drafts: [] })),
       fetch(`${API}/organizer/meta`).then((x) => x.json()).catch(() => null),
       fetch(`${API}/organizer/captures`).then((x) => x.json()).catch(() => ({ captures: [] })),
+      fetch(`${API}/organizer/usage`).then((x) => x.json()).catch(() => null),
+    ]);
+    const allowsJobs = !!(m?.edition?.allows_workroom_jobs);
+    const jobSpace = showsWorkroomJobs(m?.edition, spaceFilter);
+    const [j, f] = await Promise.all([
+      jobSpace ? fetch(`${API}/jobs?limit=200`).then((x) => x.json()).catch(() => ({ jobs: [] })) : Promise.resolve({ jobs: [] }),
+      allowsJobs ? fetch(`${API}/organizer/follow-ups`).then((x) => x.json()).catch(() => ({ drafts: [] })) : Promise.resolve({ drafts: [] }),
     ]);
     setBoard(b.items || []);
     setOverdue(b.overdue || overdueItems(b.items || [], `${day}T00:00:00`));
@@ -76,22 +95,28 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     setFollowups(f.drafts || []);
     setMeta(m);
     setCaptures(caps.captures || []);
-    if (jobFilter) {
+    setUsage(u);
+    if (jobFilter && jobSpace) {
       const tl = await fetch(`${API}/organizer/jobs/${jobFilter}/timeline`).then((x) => x.ok ? x.json() : null).catch(() => null);
       setTimeline(tl);
     } else setTimeline(null);
-  }, [anchor, day, jobFilter]);
+  }, [anchor, day, jobFilter, spaceFilter]);
 
   useEffect(() => { load(); }, [load]);
 
   async function saveEvent(payload: any, confirm = false) {
-    const body = { ...payload, confirm_conflicts: confirm };
+    const body = { ...payload, confirm_conflicts: confirm, space_id: payload.space_id || spaceFilter || undefined };
     const isNew = !payload.id || String(payload.id).startsWith('new');
     const url = isNew ? `${API}/schedule/events` : `${API}/schedule/events/${payload.id}`;
     const res = await fetch(url, { method: isNew ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (res.status === 409) {
       const err = await res.json();
       setConflict({ payload: body, detail: err.detail || err });
+      return null;
+    }
+    if (res.status === 429) {
+      const err = await res.json();
+      setToast(err.detail?.message || 'Usage cap reached for this edition.');
       return null;
     }
     if (!res.ok) throw new Error(await res.text());
@@ -135,6 +160,11 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     if (res.status === 409) {
       const err = await res.json();
       setConflict({ payload: { ...item, ...extra, action }, detail: err.detail || err, action: true });
+      return;
+    }
+    if (res.status === 429) {
+      const err = await res.json();
+      setToast(err.detail?.message || 'Usage cap reached for this edition.');
       return;
     }
     const data = await res.json();
@@ -286,7 +316,19 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   return (
     <div className="org-root" data-organizer>
       <div className="org-top">
-        <div className="org-title">Organizer <span>see, click, go and do · drafts until you tap Approve & Send</span></div>
+        <div className="org-title">
+          Organizer
+          {edition.label && <span className="org-ed">{edition.label}</span>}
+          <span>all life &amp; business areas · nothing sent without {edition.owner || 'the owner'}&apos;s tap</span>
+        </div>
+        <div className="org-spaces" role="tablist" aria-label="Areas">
+          <button className={!spaceFilter ? 'on' : ''} onClick={() => setSpaceFilter('')}>All areas</button>
+          {spaces.map((s: any) => (
+            <button key={s.slug} className={spaceFilter === s.slug ? 'on' : ''} onClick={() => setSpaceFilter(s.slug)}>
+              {s.label}
+            </button>
+          ))}
+        </div>
         <div className="org-toolbar">
           {(['day', 'week', 'month', 'lanes', 'agenda'] as View[]).map((v) => (
             <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{v}</button>
@@ -295,10 +337,12 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
           <button onClick={() => setAnchor((d) => { const n = new Date(d); n.setDate(n.getDate() - (view === 'month' ? 30 : view === 'week' ? 7 : 1)); return n; })}>‹</button>
           <button onClick={() => setAnchor((d) => { const n = new Date(d); n.setDate(n.getDate() + (view === 'month' ? 30 : view === 'week' ? 7 : 1)); return n; })}>›</button>
           <span style={{ fontSize: 12, fontWeight: 600 }}>{anchor.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
-          <select value={jobFilter} onChange={(e) => setJobFilter(e.target.value)}>
-            <option value="">All jobs</option>
-            {jobs.map((j) => <option key={j.id} value={j.id}>{j.client_name || j.title || j.job_number}</option>)}
-          </select>
+          {showJobs && (
+            <select value={jobFilter} onChange={(e) => setJobFilter(e.target.value)}>
+              <option value="">All jobs</option>
+              {jobs.map((j) => <option key={j.id} value={j.id}>{j.client_name || j.title || j.job_number}</option>)}
+            </select>
+          )}
           <select value={personFilter} onChange={(e) => setPersonFilter(e.target.value)}>
             <option value="">All people</option>
             {resources.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.role}</option>)}
@@ -310,7 +354,8 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
           <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
           <button className="org-btn-gold" onClick={() => setForm({
             title: '', type: 'appointment', start_time: `${day}T10:00:00`, end_time: `${day}T11:00:00`,
-            job_id: jobFilter, assigned_resource_ids: personFilter ? [personFilter] : [],
+            job_id: showJobs ? jobFilter : '', assigned_resource_ids: personFilter ? [personFilter] : [],
+            space_id: spaceFilter || (spaces[0]?.slug),
           })}>+ Add</button>
           <button onClick={() => setPeopleOpen(true)}>People</button>
           <button onClick={exportIcs}>ICS</button>
@@ -346,7 +391,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
       <div className="org-body">
         <aside className="org-side">
           <div className="org-card">
-            <h3>Max’s proposed day</h3>
+            <h3>{assistant}’s proposed day</h3>
             <div style={{ fontSize: 12 }}>{plan?.headline || 'Loading…'}</div>
             {(plan?.proposed_order || []).slice(0, 6).map((s: any) => (
               <div className="org-row" key={s.id || s.title}><span className="tm">{(s.suggested_start || '').slice(11, 16)}</span><span><b>{s.title}</b><small>{s.location_address}</small></span></div>
@@ -393,7 +438,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             ))}
             {route?.maps_url && <a className="org-home-btn" href={route.maps_url} target="_blank" rel="noreferrer">Open maps</a>}
           </div>
-          {timeline && (
+          {showJobs && timeline && (
             <div className="org-card">
               <h3>Job timeline</h3>
               <div className="org-strip">
@@ -414,9 +459,10 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
               {(timeline.blockers || []).map((b: any, i: number) => <div key={i} className="org-warn" style={{ margin: '6px 0' }}>{b.message}</div>)}
             </div>
           )}
+          {showJobs && (
           <div className="org-card">
             <h3>Smart follow-ups</h3>
-            <div className="org-note">Pre-written nudge. Approve & Send is the founder tap — nothing goes out without it.</div>
+            <div className="org-note">Pre-written nudge. Approve & Send is the owner&apos;s tap — nothing goes out without it.</div>
             {followups.slice(0, 6).map((d, i) => (
               <div className="org-row" key={i}>
                 <span className="tm">{d.followup_kind}</span>
@@ -428,9 +474,10 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
               </div>
             ))}
           </div>
+          )}
           <div className="org-card">
             <h3>Files</h3>
-            <div className="org-note">Attach to an email/quote draft or ask Max. No public links.</div>
+            <div className="org-note">Attach to an email/quote draft or ask {assistant}. No public links.</div>
             {captures.length === 0 && <div className="org-note">No captures yet.</div>}
             {captures.slice(0, 6).map((c) => (
               <div className="org-row" key={c.id}>
@@ -441,7 +488,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
                     id: c.id, capture_id: c.id, title: c.caption || c.filename, kind: 'material_order', job_id: c.job_id,
                     actions: [
                       { id: 'attach_file', label: 'Attach to email/quote', group: 'file', draft: true },
-                      { id: 'ask_max', label: 'Ask Max', group: 'file', href: `/?product=owner&ask=${encodeURIComponent(c.caption || c.filename || 'this file')}` },
+                      { id: 'ask_max', label: `Ask ${assistant}`, group: 'file', href: `/?product=owner&ask=${encodeURIComponent(c.caption || c.filename || 'this file')}` },
                     ],
                   }} />
                 </span>
@@ -455,7 +502,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             <div className="org-grid-day" onDoubleClick={(e) => {
               const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
               const start = timeFromOffset(day, e.clientY - rect.top - 8);
-              setForm({ title: '', type: 'appointment', start_time: start, end_time: addMinutesIso(start, 60), job_id: jobFilter });
+              setForm({ title: '', type: 'appointment', start_time: start, end_time: addMinutesIso(start, 60), job_id: showJobs ? jobFilter : '', space_id: spaceFilter || spaces[0]?.slug });
             }}>
               <div className="org-hours" style={{ height: (DAY_END_MIN - DAY_START_MIN) * PX_PER_MIN }}>
                 {hours.map((h) => <div key={h} className="org-hour">{h}:00</div>)}
@@ -530,7 +577,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
               ))}
             </div>
           )}
-          <div className="org-note">{meta?.google_calendar?.note} {meta?.outbound_policy}</div>
+          <div className="org-note">{meta?.google_calendar?.note} {meta?.outbound_policy} {usage ? `Today ${edition.assistant || 'this edition'}: ${usage.used?.items || 0}/${usage.caps?.items || 0} items.` : ''}</div>
           {icsNote && <div className="org-note">{icsNote}</div>}
         </section>
       </div>
@@ -561,11 +608,19 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             <select value={form.type || form.kind || 'appointment'} onChange={(e) => setForm({ ...form, type: e.target.value, kind: e.target.value })}>
               {KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
             </select>
-            <label>Job</label>
-            <select value={form.job_id || ''} onChange={(e) => setForm({ ...form, job_id: e.target.value })}>
-              <option value="">—</option>
-              {jobs.map((j) => <option key={j.id} value={j.id}>{j.client_name || j.title}</option>)}
+            <label>Area</label>
+            <select value={form.space_id || spaceFilter || spaces[0]?.slug || ''} onChange={(e) => setForm({ ...form, space_id: e.target.value })}>
+              {spaces.map((s: any) => <option key={s.slug} value={s.slug}>{s.label}</option>)}
             </select>
+            {showJobs && (
+              <>
+                <label>Job</label>
+                <select value={form.job_id || ''} onChange={(e) => setForm({ ...form, job_id: e.target.value })}>
+                  <option value="">—</option>
+                  {jobs.map((j) => <option key={j.id} value={j.id}>{j.client_name || j.title}</option>)}
+                </select>
+              </>
+            )}
             <label>Person</label>
             <select value={(form.assigned_resource_ids || [])[0] || ''} onChange={(e) => setForm({ ...form, assigned_resource_ids: e.target.value ? [e.target.value] : [] })}>
               <option value="">—</option>
@@ -612,14 +667,14 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
         <div className="org-modal" onClick={() => setPeopleOpen(false)}>
           <div className="org-sheet" onClick={(e) => e.stopPropagation()}>
             <h3>People</h3>
-            <p className="org-note">Installers, seamstresses, upholsterers, drivers, designers, clients, vendors, suppliers, inspectors.</p>
+            <p className="org-note">Anyone this edition needs: family, friends, crew, doctors, teachers, partners. Isolated to {edition.label || 'this edition'}.</p>
             {resources.filter((r) => !r.directory).map((r) => (
               <div className="org-row" key={r.id}><span className="tm">{r.role}</span><span><b>{r.name}</b><small>{r.phone}</small></span></div>
             ))}
             <label>Name</label><input value={personForm.name} onChange={(e) => setPersonForm({ ...personForm, name: e.target.value })} />
             <label>Role</label>
             <select value={personForm.role} onChange={(e) => setPersonForm({ ...personForm, role: e.target.value })}>
-              {['installer', 'seamstress', 'upholsterer', 'driver', 'designer', 'client', 'vendor', 'supplier', 'inspector'].map((r) => <option key={r}>{r}</option>)}
+              {(meta?.roles || ['family', 'friend', 'partner', 'doctor', 'teacher', 'coach', 'teammate', 'installer', 'other']).map((r: string) => <option key={r}>{r}</option>)}
             </select>
             <label>Phone</label><input value={personForm.phone} onChange={(e) => setPersonForm({ ...personForm, phone: e.target.value })} />
             <div className="org-actions">

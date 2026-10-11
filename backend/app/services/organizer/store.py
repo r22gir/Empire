@@ -19,12 +19,35 @@ from app.services.organizer.constants import (
     OUTBOUND_POLICY,
 )
 from app.services.organizer.conflicts import detect_conflicts
-from app.services.organizer.edition import process_edition
+from app.services.organizer.edition import (
+    can_read_workroom_jobs,
+    default_space_slug,
+    default_spaces,
+    edition_sql,
+    normalize_space,
+    process_edition,
+    redact_blocked,
+    reject_if_blocked,
+)
 from app.services.organizer.schema import migrate_organizer_tables
 
 
 def ensure_schema(conn) -> None:
     migrate_organizer_tables(conn)
+    seed_spaces(conn)
+
+
+def seed_spaces(conn) -> None:
+    stamp = now_iso()
+    for i, space in enumerate(default_spaces()):
+        sid = f"{process_edition()}:{space['slug']}"
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO organizer_spaces (id, edition, slug, label, kind, sort_order, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (sid, process_edition(), space["slug"], space["label"], space["kind"], i, stamp),
+        )
 
 
 def new_id() -> str:
@@ -145,6 +168,10 @@ def enrich_links(item: dict) -> dict:
     out = dict(item)
     out["kind"] = public_kind(out)
     out["type"] = out["kind"]
+    out["space_id"] = out.get("space_id") or default_space_slug()
+    for key in ("title", "notes", "reminder_draft", "location_address", "customer_vendor", "job_title"):
+        if out.get(key):
+            out[key] = redact_blocked(str(out[key]))
     out["map_link"] = map_link(out.get("location_address"))
     out["call_link"] = call_link(out.get("phone"))
     out["outbound_blocked"] = True
@@ -190,17 +217,10 @@ def enrich_item(conn, row: dict) -> dict:
 
 
 def load_event(conn, event_id: str) -> Optional[dict]:
+    clause, params = edition_sql("e")
     row = conn.execute(
-        """
-        SELECT e.*, j.title as job_title, j.client_name, j.address as job_address,
-               j.customer_id as job_customer_id, c.name as customer_name,
-               c.phone as customer_phone, c.address as customer_address
-        FROM schedule_events e
-        LEFT JOIN jobs j ON e.job_id = j.id
-        LEFT JOIN customers c ON COALESCE(e.customer_id, j.customer_id) = c.id
-        WHERE e.id = ?
-        """,
-        (event_id,),
+        event_select_sql() + f" WHERE e.id = ? AND {clause}",
+        (event_id, *params),
     ).fetchone()
     if not row:
         return None
@@ -215,13 +235,14 @@ def load_event(conn, event_id: str) -> Optional[dict]:
 
 
 def list_timed_for_conflicts(conn, start: Optional[str], end: Optional[str], exclude_id: Optional[str] = None) -> list[dict]:
-    query = """
+    clause, eparams = edition_sql("e")
+    query = f"""
         SELECT e.id, e.title, e.start_time, e.end_time, e.location_address,
                e.status, e.travel_minutes, e.event_kind, e.type
         FROM schedule_events e
-        WHERE e.status != 'cancelled'
+        WHERE e.status != 'cancelled' AND {clause}
     """
-    params: list = []
+    params: list = list(eparams)
     if start:
         query += " AND COALESCE(e.end_time, e.start_time) >= ?"
         params.append(start)
@@ -260,6 +281,13 @@ def conflicts_for_payload(conn, payload: dict, *, exclude_id: Optional[str] = No
 
 
 def event_select_sql() -> str:
+    if not can_read_workroom_jobs():
+        return """
+            SELECT e.*, NULL as job_title, NULL as client_name, NULL as job_address,
+                   NULL as job_customer_id, NULL as customer_name,
+                   NULL as customer_phone, NULL as customer_address
+            FROM schedule_events e
+        """
     return """
         SELECT e.*, j.title as job_title, j.client_name, j.address as job_address,
                j.customer_id as job_customer_id, c.name as customer_name,
@@ -283,6 +311,9 @@ def hydrate_event_row(conn, row) -> dict:
 
 def insert_schedule_event(conn, payload: dict) -> dict:
     ensure_schema(conn)
+    blocked = reject_if_blocked(payload.get("title"), payload.get("notes"), payload.get("location_address"))
+    if blocked:
+        raise ValueError(blocked)
     kind = payload.get("kind") or payload.get("type") or "other"
     if kind not in ITEM_KINDS:
         kind = "other"
@@ -293,8 +324,8 @@ def insert_schedule_event(conn, payload: dict) -> dict:
         INSERT INTO schedule_events
             (id, type, title, job_id, customer_vendor, location_address, start_time, end_time,
              status, notes, created_by, created_at, updated_at, phone, customer_id, event_kind,
-             travel_minutes, reminder_draft, all_day, edition)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             travel_minutes, reminder_draft, all_day, edition, space_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             event_id,
@@ -316,7 +347,8 @@ def insert_schedule_event(conn, payload: dict) -> dict:
             payload.get("travel_minutes"),
             payload.get("reminder_draft"),
             1 if payload.get("all_day") else 0,
-            payload.get("edition") or process_edition(),
+            process_edition(),
+            normalize_space(payload.get("space_id") or payload.get("space")),
         ),
     )
     replace_assignments(conn, parse_ids(payload.get("assigned_resource_ids")), event_id=event_id)
@@ -329,6 +361,9 @@ def is_calendar_kind(kind: str) -> bool:
 
 def insert_item(conn, payload: dict) -> dict:
     ensure_schema(conn)
+    blocked = reject_if_blocked(payload.get("title"), payload.get("notes"), payload.get("reminder_draft"))
+    if blocked:
+        raise ValueError(blocked)
     kind = payload.get("kind") or payload.get("type") or "todo"
     if kind not in ITEM_KINDS:
         kind = "todo"
@@ -342,8 +377,8 @@ def insert_item(conn, payload: dict) -> dict:
             id, kind, title, job_id, customer_id, resource_id, due_at, start_time, end_time,
             status, followup_kind, phone, location_address, material_eta, order_ref,
             reminder_draft, outbound_blocked, notes, schedule_event_id, created_by,
-            created_at, updated_at, edition
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+            created_at, updated_at, edition, space_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             item_id,
@@ -367,16 +402,34 @@ def insert_item(conn, payload: dict) -> dict:
             payload.get("created_by") if payload.get("created_by") in ("max", "manual") else "manual",
             stamp,
             stamp,
-            payload.get("edition") or process_edition(),
+            process_edition(),
+            normalize_space(payload.get("space_id") or payload.get("space")),
         ),
     )
     replace_assignments(conn, resource_ids or ([primary] if primary else []), item_id=item_id)
-    row = conn.execute("SELECT * FROM organizer_items WHERE id = ?", (item_id,)).fetchone()
+    clause, params = edition_sql()
+    row = conn.execute(
+        f"SELECT * FROM organizer_items WHERE id = ? AND {clause}",
+        (item_id, *params),
+    ).fetchone()
+    return enrich_item(conn, dict(row)) if row else None
+
+
+def load_item(conn, item_id: str) -> Optional[dict]:
+    clause, params = edition_sql()
+    row = conn.execute(
+        f"SELECT * FROM organizer_items WHERE id = ? AND {clause}",
+        (item_id, *params),
+    ).fetchone()
+    if not row:
+        return None
     return enrich_item(conn, dict(row))
 
 
 def project_job_dates(conn) -> list[dict]:
-    """Read-only projections of job milestone dates so they appear in the organizer."""
+    """Read-only projections of job milestone dates. Main edition only."""
+    if not can_read_workroom_jobs():
+        return []
     cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
     fields = [
         ("install_date", "install", "Install"),
@@ -429,6 +482,7 @@ def project_job_dates(conn) -> list[dict]:
                         "status": "planned" if str(data.get("status") or "") not in ("completed", "cancelled") else "done",
                         "assigned_resource_ids": [],
                         "assignments": [],
+                        "space_id": "workroom",
                     }
                 )
             )

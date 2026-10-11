@@ -1,4 +1,4 @@
-"""Additive SQLite migrations for the Workroom Organizer. Safe to re-run."""
+"""Additive SQLite migrations for the Empire Organizer. Safe to re-run."""
 
 from __future__ import annotations
 
@@ -183,6 +183,34 @@ def migrate_organizer_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organizer_spaces (
+            id TEXT PRIMARY KEY,
+            edition TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            label TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'life',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_org_spaces_ed_slug ON organizer_spaces(edition, slug)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organizer_usage (
+            edition TEXT NOT NULL,
+            day TEXT NOT NULL,
+            items INTEGER NOT NULL DEFAULT 0,
+            captures INTEGER NOT NULL DEFAULT 0,
+            actions INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (edition, day)
+        )
+        """
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_cap_job ON organizer_captures(job_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_cap_ed ON organizer_captures(edition)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_crew_tok ON organizer_crew_tokens(token)")
@@ -194,16 +222,21 @@ def migrate_organizer_tables(conn: sqlite3.Connection) -> None:
         _add_column(conn, "schedule_events", "travel_minutes", "INTEGER")
         _add_column(conn, "schedule_events", "reminder_draft", "TEXT")
         _add_column(conn, "schedule_events", "all_day", "INTEGER DEFAULT 0")
-        _add_column(conn, "schedule_events", "edition", "TEXT DEFAULT 'workroom'")
+        _add_column(conn, "schedule_events", "edition", "TEXT DEFAULT 'main'")
+        _add_column(conn, "schedule_events", "space_id", "TEXT")
 
     for table in (
         "organizer_resources",
         "organizer_items",
         "organizer_assignments",
         "organizer_ics_tokens",
+        "organizer_captures",
     ):
-        if table in tables or True:
-            try:
-                _add_column(conn, table, "edition", "TEXT DEFAULT 'workroom'")
-            except Exception:
-                pass
+        try:
+            _add_column(conn, table, "edition", "TEXT DEFAULT 'main'")
+        except Exception:
+            pass
+        try:
+            _add_column(conn, table, "space_id", "TEXT")
+        except Exception:
+            pass

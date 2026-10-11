@@ -23,7 +23,8 @@ from app.services.organizer.timeutil import event_window, to_iso
 
 
 def _job_row(conn, job_id: Optional[str]) -> Optional[dict]:
-    if not job_id:
+    from app.services.organizer.edition import can_read_workroom_jobs
+    if not job_id or not can_read_workroom_jobs():
         return None
     try:
         row = conn.execute(
@@ -44,13 +45,19 @@ def load_board_item(conn, item_id: Optional[str]) -> Optional[dict]:
     if ev:
         return ev
     try:
-        row = conn.execute("SELECT * FROM organizer_items WHERE id = ?", (item_id,)).fetchone()
-        if row:
-            return enrich_item(conn, dict(row))
+        from app.services.organizer.store import load_item
+        item = load_item(conn, item_id)
+        if item:
+            return item
     except Exception:
         pass
     try:
-        cap = conn.execute("SELECT * FROM organizer_captures WHERE id = ?", (item_id,)).fetchone()
+        from app.services.organizer.edition import edition_sql
+        clause, params = edition_sql()
+        cap = conn.execute(
+            f"SELECT * FROM organizer_captures WHERE id = ? AND {clause}",
+            (item_id, *params),
+        ).fetchone()
         if cap:
             data = dict(cap)
             data["kind"] = "material_order"
@@ -143,7 +150,9 @@ def available_actions(item: dict, job: Optional[dict] = None, *, quote: Optional
             "performs": "draft_email",
         })
 
-    if job:
+    from app.services.organizer.edition import can_read_workroom_jobs, edition_meta
+    space = (item.get("space_id") or "").lower()
+    if job and can_read_workroom_jobs() and space in {"", "workroom"}:
         actions.append({"id": "send_quote", "label": "Send quote", "group": "job", "draft": True, "performs": "draft_quote_email"})
         actions.append({"id": "order_fabric", "label": "Order fabric", "group": "job", "draft": True, "performs": "order_fabric"})
         actions.append({"id": "request_deposit", "label": "Request deposit", "group": "job", "draft": True, "performs": "request_deposit"})
@@ -161,7 +170,14 @@ def available_actions(item: dict, job: Optional[dict] = None, *, quote: Optional
 
     if item.get("capture_id") or item.get("relpath") or kind in {"material_order"}:
         actions.append({"id": "attach_file", "label": "Attach to email/quote", "group": "file", "draft": True, "performs": "attach_file"})
-    actions.append({"id": "ask_max", "label": "Ask Max", "group": "file", "href": f"/?product=owner&ask={urlquote((item.get('title') or 'this item')[:200])}", "performs": "ask_max"})
+    assistant = edition_meta().get("assistant") or "Max"
+    actions.append({
+        "id": "ask_max",
+        "label": f"Ask {assistant}",
+        "group": "file",
+        "href": f"/?product=owner&ask={urlquote((item.get('title') or 'this item')[:200])}",
+        "performs": "ask_max",
+    })
 
     if item.get("start_time") and not item.get("read_only"):
         actions.append({"id": "notify_crew", "label": "Notify crew (draft)", "group": "move", "draft": True, "performs": "notify_crew"})

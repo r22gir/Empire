@@ -1,6 +1,7 @@
 """
-Workroom Organizer API — unified calendar, people, tasks, reminders.
-Draft-only outbound: nothing is sent to a customer without founder approval.
+Organizer API — one calendar for every life and business area.
+Draft-only outbound: nothing is sent without the owner's tap.
+Editions (Max / Max-e / Maxine) are isolated. EMPIRE_EDITION is fail-closed.
 """
 
 from __future__ import annotations
@@ -28,7 +29,16 @@ from app.services.organizer.google_sync import google_sync_push, google_sync_sta
 from app.services.organizer.ics import build_calendar
 from app.services.organizer.parse import parse_quick_add, parse_quick_add_lines
 from app.services.organizer.resolve import attach_matches
-from app.services.organizer.edition import process_edition
+from app.services.organizer.edition import (
+    can_read_business_directory,
+    can_read_workroom_jobs,
+    edition_public,
+    edition_sql,
+    normalize_space,
+    process_edition,
+    reject_if_blocked,
+)
+from app.services.organizer.usage import UsageCapExceeded, consume, snapshot as usage_snapshot
 from app.services.organizer.store import (
     assignment_ids,
     conflicts_for_payload,
@@ -85,6 +95,7 @@ class ItemIn(BaseModel):
     notes: Optional[str] = None
     confirm_conflicts: bool = False
     created_by: str = "manual"
+    space_id: Optional[str] = None
 
 
 class ItemUpdate(BaseModel):
@@ -106,12 +117,14 @@ class ItemUpdate(BaseModel):
     reminder_draft: Optional[str] = None
     notes: Optional[str] = None
     confirm_conflicts: bool = False
+    space_id: Optional[str] = None
 
 
 class QuickAddIn(BaseModel):
     text: str
     confirm: bool = False
     created_by: str = "manual"
+    space_id: Optional[str] = None
 
 
 class ReminderDraftIn(BaseModel):
@@ -150,6 +163,24 @@ class CommandIn(BaseModel):
     confirm: bool = False
 
 
+def _usage_http(exc: UsageCapExceeded):
+    raise HTTPException(
+        status_code=429,
+        detail={
+            "code": "usage_cap",
+            "bucket": exc.bucket,
+            "used": exc.used,
+            "cap": exc.cap,
+            "message": str(exc),
+            "edition": process_edition(),
+        },
+    )
+
+
+def _blocked_http(message: str):
+    raise HTTPException(status_code=400, detail={"code": "edition_blocked", "message": message})
+
+
 def _conflict_response(conflicts: list[dict]):
     raise HTTPException(
         status_code=409,
@@ -164,6 +195,8 @@ def _conflict_response(conflicts: list[dict]):
 
 
 def _directory_people(conn) -> list[dict]:
+    if not can_read_business_directory():
+        return []
     people = []
     # Customers
     try:
@@ -249,9 +282,10 @@ def _resource_row(conn, resource_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
-def _list_events(conn, start_date=None, end_date=None, job_id=None, kind=None, status=None, resource_id=None, limit=400):
-    query = event_select_sql() + " WHERE COALESCE(e.edition, 'workroom') = ?"
-    params: list = [process_edition()]
+def _list_events(conn, start_date=None, end_date=None, job_id=None, kind=None, status=None, resource_id=None, space_id=None, limit=400):
+    clause, eparams = edition_sql("e")
+    query = event_select_sql() + f" WHERE {clause}"
+    params: list = list(eparams)
     if start_date:
         query += " AND COALESCE(e.end_time, e.start_time) >= ?"
         params.append(start_date)
@@ -265,6 +299,9 @@ def _list_events(conn, start_date=None, end_date=None, job_id=None, kind=None, s
     if kind:
         query += " AND (e.event_kind = ? OR e.type = ?)"
         params.extend([kind, kind])
+    if space_id:
+        query += " AND COALESCE(e.space_id, '') = ?"
+        params.append(normalize_space(space_id))
     if status:
         query += " AND e.status = ?"
         params.append(status)
@@ -276,9 +313,10 @@ def _list_events(conn, start_date=None, end_date=None, job_id=None, kind=None, s
     return events
 
 
-def _list_items(conn, start_date=None, end_date=None, job_id=None, kind=None, status=None, resource_id=None, limit=400):
-    query = "SELECT * FROM organizer_items WHERE COALESCE(edition, 'workroom') = ?"
-    params: list = [process_edition()]
+def _list_items(conn, start_date=None, end_date=None, job_id=None, kind=None, status=None, resource_id=None, space_id=None, limit=400):
+    clause, eparams = edition_sql()
+    query = f"SELECT * FROM organizer_items WHERE {clause}"
+    params: list = list(eparams)
     if job_id:
         query += " AND job_id = ?"
         params.append(job_id)
@@ -291,6 +329,9 @@ def _list_items(conn, start_date=None, end_date=None, job_id=None, kind=None, st
     if resource_id:
         query += " AND (resource_id = ? OR id IN (SELECT item_id FROM organizer_assignments WHERE resource_id = ?))"
         params.extend([resource_id, resource_id])
+    if space_id:
+        query += " AND COALESCE(space_id, '') = ?"
+        params.append(normalize_space(space_id))
     if start_date or end_date:
         start = start_date or "0000-01-01"
         end = end_date or "9999-12-31"
@@ -313,14 +354,17 @@ def _decorate(conn, rows: list[dict]) -> list[dict]:
 
 def _unify(events, items, job_dates, *, include_job_dates=True):
     board = []
+    event_ids = set()
     for e in events:
+        event_ids.add(str(e.get("id")))
         board.append({**e, "source": "schedule_event", "board": "calendar"})
     for it in items:
+        linked = str(it.get("schedule_event_id") or "")
+        if linked and linked in event_ids:
+            continue
         board.append({**it, "source": "organizer_item", "board": "task" if it.get("kind") in ORGANIZER_ITEM_KINDS else "calendar"})
     if include_job_dates:
-        linked_jobs = {str(x.get("job_id")) for x in board if x.get("job_id")}
         for jd in job_dates:
-            # Always include job dates; they are the per-job milestones.
             board.append({**jd, "board": "calendar"})
     def sort_key(row):
         return row.get("start_time") or row.get("due_at") or "9999"
@@ -350,6 +394,9 @@ def organizer_meta():
         "outbound_policy": OUTBOUND_POLICY,
         "google_calendar": google_sync_status(),
         "default_travel_gap_minutes": DEFAULT_TRAVEL_GAP_MINUTES,
+        "spaces": edition_public()["spaces"],
+        "edition": edition_public(),
+        "model": "grok-4.6",
         "actions": [
             "navigate", "call", "text", "email",
             "send_quote", "order_fabric", "request_deposit", "book_install",
@@ -366,14 +413,17 @@ def organizer_board(
     resource_id: Optional[str] = None,
     kind: Optional[str] = None,
     status: Optional[str] = None,
+    space_id: Optional[str] = None,
     include_job_dates: bool = True,
     limit: int = 400,
 ):
     with get_db() as conn:
         ensure_schema(conn)
-        events = _list_events(conn, start_date, end_date, job_id, kind, status, resource_id, limit)
-        items = _list_items(conn, start_date, end_date, job_id, kind, status, resource_id, limit)
-        job_dates = project_job_dates(conn) if include_job_dates else []
+        events = _list_events(conn, start_date, end_date, job_id, kind, status, resource_id, space_id, limit)
+        items = _list_items(conn, start_date, end_date, job_id, kind, status, resource_id, space_id, limit)
+        job_dates = project_job_dates(conn) if include_job_dates and can_read_workroom_jobs() else []
+        if space_id and normalize_space(space_id) != "workroom":
+            job_dates = []
         if job_id:
             job_dates = [j for j in job_dates if str(j.get("job_id")) == str(job_id)]
         if kind:
@@ -418,8 +468,9 @@ def organizer_today():
 def list_resources(include_directory: bool = True, role: Optional[str] = None, active_only: bool = True):
     with get_db() as conn:
         ensure_schema(conn)
-        query = "SELECT * FROM organizer_resources WHERE COALESCE(edition, 'workroom') = ?"
-        params: list = [process_edition()]
+        clause, eparams = edition_sql()
+        query = f"SELECT * FROM organizer_resources WHERE {clause}"
+        params: list = list(eparams)
         if active_only:
             query += " AND active = 1"
         if role:
@@ -427,7 +478,7 @@ def list_resources(include_directory: bool = True, role: Optional[str] = None, a
             params.append(role)
         query += " ORDER BY role, name"
         crew = [dict(r) for r in conn.execute(query, params).fetchall()]
-        directory = _directory_people(conn) if include_directory and process_edition() == "workroom" else []
+        directory = _directory_people(conn) if include_directory and can_read_business_directory() else []
         if role:
             directory = [p for p in directory if p.get("role") == role]
         return {"resources": crew, "directory": directory, "roles": sorted(RESOURCE_ROLES)}
@@ -437,6 +488,9 @@ def list_resources(include_directory: bool = True, role: Optional[str] = None, a
 def create_resource(req: ResourceIn):
     if req.role not in RESOURCE_ROLES:
         raise HTTPException(400, f"Invalid role '{req.role}'. Valid: {', '.join(sorted(RESOURCE_ROLES))}")
+    blocked = reject_if_blocked(req.name, req.notes, req.address)
+    if blocked:
+        _blocked_http(blocked)
     rid = new_id()
     stamp = now_iso()
     with get_db() as conn:
@@ -497,9 +551,10 @@ def resource_lanes(date_from: Optional[str] = None, date_to: Optional[str] = Non
     end = date_to or day
     with get_db() as conn:
         ensure_schema(conn)
+        clause, eparams = edition_sql()
         resources = [dict(r) for r in conn.execute(
-            "SELECT * FROM organizer_resources WHERE active = 1 AND COALESCE(edition, 'workroom') = ? ORDER BY role, name",
-            (process_edition(),),
+            f"SELECT * FROM organizer_resources WHERE active = 1 AND {clause} ORDER BY role, name",
+            eparams,
         ).fetchall()]
         events = _list_events(conn, day, end)
         items = [i for i in _list_items(conn, day, end) if i.get("start_time")]
@@ -525,7 +580,7 @@ def list_items(
 ):
     with get_db() as conn:
         ensure_schema(conn)
-        return {"items": _decorate(conn, _list_items(conn, start_date, end_date, job_id, kind, status, resource_id, limit))}
+        return {"items": _decorate(conn, _list_items(conn, start_date, end_date, job_id, kind, status, resource_id, None, limit))}
 
 
 @router.post("/items")
@@ -535,31 +590,51 @@ def create_item(req: ItemIn):
     if req.followup_kind and req.followup_kind not in FOLLOWUP_KINDS:
         raise HTTPException(400, f"Invalid followup_kind '{req.followup_kind}'")
     payload = req.model_dump()
+    blocked = reject_if_blocked(payload.get("title"), payload.get("notes"), payload.get("reminder_draft"))
+    if blocked:
+        _blocked_http(blocked)
+    payload["space_id"] = normalize_space(payload.get("space_id"))
     with get_db() as conn:
         ensure_schema(conn)
+        try:
+            consume(conn, "items")
+        except UsageCapExceeded as exc:
+            _usage_http(exc)
         if payload.get("start_time"):
             conflicts = conflicts_for_payload(conn, payload)
             if conflicts and not req.confirm_conflicts:
                 _conflict_response(conflicts)
-        if is_calendar_kind(req.kind) and payload.get("start_time"):
-            payload["type"] = req.kind
-            payload["customer_vendor"] = None
-            event = insert_schedule_event(conn, payload)
-            item = insert_item(conn, {**payload, "schedule_event_id": event["id"], "status": "planned"})
-            return {"item": item, "event": event, "conflicts": []}
-        item = insert_item(conn, payload)
-        return {"item": item, "event": None, "conflicts": []}
+        try:
+            if is_calendar_kind(req.kind) and payload.get("start_time"):
+                payload["type"] = req.kind
+                payload["customer_vendor"] = None
+                event = insert_schedule_event(conn, payload)
+                item = insert_item(conn, {**payload, "schedule_event_id": event["id"], "status": "planned"})
+                return {"item": item, "event": event, "conflicts": []}
+            item = insert_item(conn, payload)
+            return {"item": item, "event": None, "conflicts": []}
+        except ValueError as exc:
+            _blocked_http(str(exc))
 
 
 @router.put("/items/{item_id}")
 def update_item(item_id: str, req: ItemUpdate):
     with get_db() as conn:
         ensure_schema(conn)
-        existing = conn.execute("SELECT * FROM organizer_items WHERE id = ?", (item_id,)).fetchone()
+        clause, eparams = edition_sql()
+        existing = conn.execute(
+            f"SELECT * FROM organizer_items WHERE id = ? AND {clause}",
+            (item_id, *eparams),
+        ).fetchone()
         if not existing:
             raise HTTPException(404, "Organizer item not found")
         row = dict(existing)
         updates = req.model_dump(exclude_unset=True)
+        blocked = reject_if_blocked(updates.get("title"), updates.get("notes"), updates.get("reminder_draft"))
+        if blocked:
+            _blocked_http(blocked)
+        if "space_id" in updates:
+            updates["space_id"] = normalize_space(updates.get("space_id"))
         updates.pop("confirm_conflicts", None)
         if "assigned_resource_ids" in updates:
             replace_assignments(conn, parse_ids(updates.pop("assigned_resource_ids")), item_id=item_id)
@@ -599,11 +674,15 @@ def update_item(item_id: str, req: ItemUpdate):
 def delete_item(item_id: str):
     with get_db() as conn:
         ensure_schema(conn)
-        existing = conn.execute("SELECT * FROM organizer_items WHERE id = ?", (item_id,)).fetchone()
+        clause, eparams = edition_sql()
+        existing = conn.execute(
+            f"SELECT * FROM organizer_items WHERE id = ? AND {clause}",
+            (item_id, *eparams),
+        ).fetchone()
         if not existing:
             raise HTTPException(404, "Organizer item not found")
         conn.execute("DELETE FROM organizer_assignments WHERE item_id = ?", (item_id,))
-        conn.execute("DELETE FROM organizer_items WHERE id = ?", (item_id,))
+        conn.execute(f"DELETE FROM organizer_items WHERE id = ? AND {clause}", (item_id, *eparams))
         return {"success": True, "deleted": True, "id": item_id}
 
 
@@ -657,7 +736,16 @@ def quick_add(req: QuickAddIn):
                 "notes": draft.get("notes"),
                 "created_by": req.created_by if req.created_by in ("max", "manual") else "manual",
                 "status": "planned" if draft.get("start_time") else "open",
+                "space_id": normalize_space(req.space_id or draft.get("space_id")),
             }
+            blocked = reject_if_blocked(payload.get("title"), payload.get("notes"))
+            if blocked:
+                created.append({"draft": draft, "saved": False, "blocked": blocked})
+                continue
+            try:
+                consume(conn, "items")
+            except UsageCapExceeded as exc:
+                _usage_http(exc)
             if draft.get("start_time"):
                 conflicts = conflicts_for_payload(conn, payload)
                 if conflicts:
@@ -748,6 +836,10 @@ async def perform_action(req: ActionIn):
             "confirm_conflicts": req.confirm_conflicts,
             "ask": req.ask,
         }
+        try:
+            consume(conn, "actions")
+        except UsageCapExceeded as exc:
+            _usage_http(exc)
         result = await run_action(conn, action=req.action, item=item, confirm=req.confirm, extra=extra)
         if result.get("conflicts") and not req.confirm_conflicts:
             _conflict_response(result["conflicts"])
@@ -840,10 +932,11 @@ def get_day_plan(plan_date: Optional[str] = None):
         from app.services.organizer.dayplan import propose_day
         events = _list_events(conn, day, day, limit=400)
         items = _list_items(conn, None, day, limit=400)
-        board = _unify(events, items, project_job_dates(conn))
+        board = _unify(events, items, project_job_dates(conn) if can_read_workroom_jobs() else [])
+        clause, eparams = edition_sql()
         resources = [dict(r) for r in conn.execute(
-            "SELECT * FROM organizer_resources WHERE active = 1 AND COALESCE(edition, 'workroom') = ?",
-            (process_edition(),),
+            f"SELECT * FROM organizer_resources WHERE active = 1 AND {clause}",
+            eparams,
         ).fetchall()]
         plan = propose_day(board, resources, day=day)
         row = conn.execute(
@@ -879,9 +972,10 @@ def approve_day_plan(plan_date: Optional[str] = None, apply_times: bool = True):
                 if stop.get("kept_existing_time") or stop.get("read_only"):
                     continue
                 if stop.get("source") == "schedule_event" and stop.get("id"):
+                    clause, eparams = edition_sql()
                     conn.execute(
-                        "UPDATE schedule_events SET start_time = ?, end_time = ?, updated_at = ? WHERE id = ? AND COALESCE(edition, 'workroom') = ?",
-                        (stop.get("suggested_start"), stop.get("suggested_end"), stamp, stop["id"], process_edition()),
+                        f"UPDATE schedule_events SET start_time = ?, end_time = ?, updated_at = ? WHERE id = ? AND {clause}",
+                        (stop.get("suggested_start"), stop.get("suggested_end"), stamp, stop["id"], *eparams),
                     )
                     applied.append(stop["id"])
         plan["approved"] = True
@@ -914,7 +1008,7 @@ def job_timeline(job_id: str):
         ).fetchone()
         if not row:
             raise HTTPException(404, "Job not found")
-        if process_edition() != "workroom":
+        if not can_read_workroom_jobs():
             raise HTTPException(404, "Job not found")
         items = _list_items(conn, job_id=job_id) + _list_events(conn, job_id=job_id)
         return build_job_timeline(dict(row), items)
@@ -928,7 +1022,7 @@ def smart_followups(persist_drafts: bool = False):
         from app.services.organizer.followups import detect_followups
         quotes = []
         jobs = []
-        if process_edition() == "workroom":
+        if can_read_workroom_jobs():
             try:
                 quotes = [dict(r) for r in conn.execute("SELECT * FROM quotes_v2").fetchall()]
             except Exception:
@@ -997,9 +1091,16 @@ def ingest_capture(req: dict):
     except CaptureRejected as exc:
         raise HTTPException(400, str(exc))
     caption = (req.get("caption") or req.get("text") or "").strip()
+    blocked = reject_if_blocked(caption, filename)
+    if blocked:
+        _blocked_http(blocked)
     with get_db() as conn:
         ensure_schema(conn)
-        draft = guess_links(conn, caption) if caption else {}
+        try:
+            consume(conn, "captures")
+        except UsageCapExceeded as exc:
+            _usage_http(exc)
+        draft = guess_links(conn, caption) if caption and can_read_workroom_jobs() else {}
         cap_id = new_id()
         conn.execute(
             """
@@ -1030,8 +1131,9 @@ def ingest_capture(req: dict):
 def list_captures(job_id: Optional[str] = None, limit: int = 80):
     with get_db() as conn:
         ensure_schema(conn)
-        q = "SELECT * FROM organizer_captures WHERE edition = ?"
-        params: list = [process_edition()]
+        clause, eparams = edition_sql()
+        q = f"SELECT * FROM organizer_captures WHERE {clause}"
+        params: list = list(eparams)
         if job_id:
             q += " AND job_id = ?"
             params.append(job_id)
@@ -1068,9 +1170,10 @@ def download_capture(capture_id: str):
 def issue_crew_token(resource_id: str, label: str = "crew"):
     with get_db() as conn:
         ensure_schema(conn)
+        clause, eparams = edition_sql()
         res = conn.execute(
-            "SELECT id, name FROM organizer_resources WHERE id = ? AND COALESCE(edition, 'workroom') = ?",
-            (resource_id, process_edition()),
+            f"SELECT id, name FROM organizer_resources WHERE id = ? AND {clause}",
+            (resource_id, *eparams),
         ).fetchone()
         if not res:
             raise HTTPException(404, "Resource not found")
@@ -1185,15 +1288,16 @@ def crew_done(token: str, req: dict):
                     event_id, item_id, now_iso(),
                 ),
             )
+        clause, eparams = edition_sql()
         if event_id:
             conn.execute(
-                "UPDATE schedule_events SET status = 'done', updated_at = ? WHERE id = ? AND COALESCE(edition, 'workroom') = ?",
-                (now_iso(), event_id, process_edition()),
+                f"UPDATE schedule_events SET status = 'done', updated_at = ? WHERE id = ? AND {clause}",
+                (now_iso(), event_id, *eparams),
             )
         if item_id:
             conn.execute(
-                "UPDATE organizer_items SET status = 'done', updated_at = ? WHERE id = ? AND COALESCE(edition, 'workroom') = ?",
-                (now_iso(), item_id, process_edition()),
+                f"UPDATE organizer_items SET status = 'done', updated_at = ? WHERE id = ? AND {clause}",
+                (now_iso(), item_id, *eparams),
             )
         conn.execute(
             """INSERT INTO organizer_checkins (id, edition, resource_id, event_id, item_id, kind, note, capture_id, created_at)
@@ -1203,11 +1307,25 @@ def crew_done(token: str, req: dict):
         return {"ok": True, "status": "done", "capture_id": capture_id, "public_url": None}
 
 
+@router.get("/spaces")
+def list_spaces():
+    with get_db() as conn:
+        ensure_schema(conn)
+        clause, eparams = edition_sql()
+        rows = [dict(r) for r in conn.execute(
+            f"SELECT * FROM organizer_spaces WHERE {clause} ORDER BY sort_order, slug",
+            eparams,
+        ).fetchall()]
+    return {"spaces": rows or edition_public()["spaces"], "unified": True, "edition": process_edition()}
+
+
+@router.get("/usage")
+def organizer_usage():
+    with get_db() as conn:
+        ensure_schema(conn)
+        return usage_snapshot(conn)
+
+
 @router.get("/edition")
 def organizer_edition():
-    return {
-        "edition": process_edition(),
-        "isolated": True,
-        "family_editions": ["max_e", "maxine"],
-        "note": "This Organizer only reads and writes its own edition store.",
-    }
+    return edition_public()

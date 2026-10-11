@@ -33,7 +33,7 @@ def event_to_vevent(item: dict) -> str:
     start, end = event_window(item.get("start_time") or item.get("due_at"), item.get("end_time"))
     if not start:
         return ""
-    uid = f"{item.get('id') or 'item'}@empire-workroom"
+    uid = f"{item.get('id') or 'item'}@empire-organizer"
     dtstamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     lines = [
         "BEGIN:VEVENT",
@@ -60,13 +60,13 @@ def event_to_vevent(item: dict) -> str:
     return "\r\n".join(lines)
 
 
-def build_calendar(items: Iterable[dict], *, calendar_name: str = "Empire Workroom Organizer") -> str:
+def build_calendar(items: Iterable[dict], *, calendar_name: str = "Empire Organizer") -> str:
     vevents = [event_to_vevent(it) for it in items]
     body = "\r\n".join(v for v in vevents if v)
     return (
         "BEGIN:VCALENDAR\r\n"
         "VERSION:2.0\r\n"
-        "PRODID:-//Empire Workroom//Organizer//EN\r\n"
+        "PRODID:-//Empire//Organizer//EN\r\n"
         "CALSCALE:GREGORIAN\r\n"
         "METHOD:PUBLISH\r\n"
         f"X-WR-CALNAME:{_esc(calendar_name)}\r\n"

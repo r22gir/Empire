@@ -18,7 +18,8 @@ def _name_variants(name: str) -> list[str]:
 
 
 def search_jobs(conn, name: str, limit: int = 8) -> list[dict]:
-    if not name:
+    from app.services.organizer.edition import can_read_workroom_jobs
+    if not name or not can_read_workroom_jobs():
         return []
     seen = set()
     out = []
@@ -50,7 +51,8 @@ def search_jobs(conn, name: str, limit: int = 8) -> list[dict]:
 
 
 def search_customers(conn, name: str, limit: int = 8) -> list[dict]:
-    if not name:
+    from app.services.organizer.edition import can_read_business_directory
+    if not name or not can_read_business_directory():
         return []
     q = f"%{name.strip()}%"
     rows = conn.execute(
@@ -67,18 +69,20 @@ def search_customers(conn, name: str, limit: int = 8) -> list[dict]:
 
 
 def search_resources(conn, name: str, limit: int = 8) -> list[dict]:
+    from app.services.organizer.edition import edition_sql
     if not name:
         return []
+    clause, eparams = edition_sql()
     q = f"%{name.strip()}%"
     rows = conn.execute(
-        """
+        f"""
         SELECT id, name, role, phone, email, address, source, source_id
         FROM organizer_resources
-        WHERE active = 1 AND (name LIKE ? OR role LIKE ?)
+        WHERE active = 1 AND {clause} AND (name LIKE ? OR role LIKE ?)
         ORDER BY name
         LIMIT ?
         """,
-        (q, q, limit),
+        (*eparams, q, q, limit),
     ).fetchall()
     return [dict(r) for r in rows]
 
