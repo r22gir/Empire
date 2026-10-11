@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Iterable, Optional
 
@@ -76,16 +77,21 @@ def backup_tasks_db(conn) -> Optional[str]:
     ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     dest = f"{src}.tasks-mig-{ts}.bak"
     try:
+        dest_conn = sqlite3.connect(dest)
         try:
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        except Exception:
-            pass
-        shutil.copy2(src, dest)
+            conn.backup(dest_conn)
+        finally:
+            dest_conn.close()
         logger.info("tasks migration backup: %s", dest)
         return dest
     except Exception as exc:
-        logger.warning("tasks migration backup failed: %s", exc)
-        return None
+        try:
+            shutil.copy2(src, dest)
+            logger.info("tasks migration backup (copy2): %s", dest)
+            return dest
+        except Exception as exc2:
+            logger.warning("tasks migration backup failed: %s / %s", exc, exc2)
+            return None
 
 
 def tasks_status_check_migrated(conn) -> bool:
@@ -142,12 +148,15 @@ def _rebuild_tasks_status_check(conn, cols: list[str]) -> None:
     conn.execute("ALTER TABLE tasks_status_mig RENAME TO tasks")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_desk ON tasks(desk)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to)")
-    try:
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_pipeline ON tasks(pipeline_id)")
-    except Exception:
-        pass
+    for idx_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date)",
+        "CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to)",
+        "CREATE INDEX IF NOT EXISTS idx_tasks_pipeline ON tasks(pipeline_id)",
+    ):
+        try:
+            conn.execute(idx_sql)
+        except Exception:
+            pass
     conn.execute("PRAGMA foreign_keys=ON")
     logger.info("Migrated tasks.status CHECK to include failed/escalated")
 
@@ -280,7 +289,7 @@ def approve_waiting_task(conn, task_id: str, *, approved_by: str = "founder") ->
     )
     try:
         from . import founder_inbox
-        founder_inbox.resolve(task_id)
+        founder_inbox.resolve(task_id, conn)
     except Exception as exc:
         logger.debug("founder_inbox resolve after approve failed: %s", exc)
     return {

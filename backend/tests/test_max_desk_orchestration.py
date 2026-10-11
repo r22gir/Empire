@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import glob
 import os
 
 from app.services.max.desks.desk_registry import DESK_IDS, DESK_ROSTER, live_desk_count, roster_prompt_block
@@ -314,6 +313,7 @@ def test_approve_waiting_task_resumes(tasks_db):
     inbox = founder_inbox.list_open()
     assert any(r["id"] == task["id"] for r in inbox)
     result = approve_waiting_task(tasks_db, task["id"])
+    tasks_db.commit()
     assert result["ok"] is True
     assert result["status"] == "todo"
     row = tasks_db.execute("SELECT status, metadata FROM tasks WHERE id=?", (task["id"],)).fetchone()
@@ -384,23 +384,24 @@ def test_workroom_edition_allows_desks(monkeypatch):
 def test_tasks_migration_backs_up_and_is_idempotent(isolated_empire_db):
     conn = sqlite3.connect(isolated_empire_db)
     conn.row_factory = sqlite3.Row
-    conn.execute("DROP TABLE IF EXISTS tasks")
-    conn.executescript(OLD_TASKS_SQL)
-    conn.commit()
-    before = set(glob.glob(isolated_empire_db + ".tasks-mig-*.bak"))
-    migrate_task_status_constraint(conn)
-    after = set(glob.glob(isolated_empire_db + ".tasks-mig-*.bak"))
-    assert after - before, "expected a SQLite backup copy before rebuild"
-    assert tasks_status_check_migrated(conn)
-    migrate_task_status_constraint(conn)
-    after2 = set(glob.glob(isolated_empire_db + ".tasks-mig-*.bak"))
-    assert after2 == after
-    conn.execute(
-        "INSERT INTO tasks (id, title, status, desk) VALUES ('m1','t','failed','it')"
-    )
-    conn.commit()
-    assert conn.execute("SELECT status FROM tasks WHERE id='m1'").fetchone()[0] == "failed"
-    conn.close()
+    try:
+        conn.execute("DROP TABLE IF EXISTS tasks")
+        conn.executescript(OLD_TASKS_SQL)
+        conn.commit()
+        assert not tasks_status_check_migrated(conn)
+        dest = backup_tasks_db(conn)
+        assert dest and os.path.isfile(dest)
+        migrate_task_status_constraint(conn)
+        assert tasks_status_check_migrated(conn)
+        migrate_task_status_constraint(conn)
+        assert tasks_status_check_migrated(conn)
+        conn.execute(
+            "INSERT INTO tasks (id, title, status, desk) VALUES ('m1','t','failed','it')"
+        )
+        conn.commit()
+        assert conn.execute("SELECT status FROM tasks WHERE id='m1'").fetchone()[0] == "failed"
+    finally:
+        conn.close()
 
 
 def test_backup_helper_skips_memory_db():

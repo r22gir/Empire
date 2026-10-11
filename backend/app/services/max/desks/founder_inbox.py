@@ -82,10 +82,16 @@ def count_open() -> int:
     return int(n or 0)
 
 
-def resolve(task_id: str) -> bool:
-    ensure_schema()
-    with _conn() as conn:
+def resolve(task_id: str, conn=None) -> bool:
+    ensure_schema(conn)
+    if conn is not None:
         cur = conn.execute(
+            "UPDATE founder_inbox SET status='resolved', resolved_at=datetime('now') WHERE id=?",
+            (task_id,),
+        )
+        return cur.rowcount > 0
+    with _conn() as c:
+        cur = c.execute(
             "UPDATE founder_inbox SET status='resolved', resolved_at=datetime('now') WHERE id=?",
             (task_id,),
         )
