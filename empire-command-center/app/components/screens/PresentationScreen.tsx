@@ -144,10 +144,10 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition, loa
       </div>
 
       {!loaded && !error && (
-        <div className="avatar-caption presentation-caption">{loadingLabel}</div>
+        <div className="presentation-caption">{loadingLabel}</div>
       )}
-      {faceCaption && <div className="avatar-caption presentation-caption avatar-caption-fade">{faceCaption}</div>}
-      {licenseNote && <div className="avatar-caption presentation-caption">{licenseNote}</div>}
+      {faceCaption && <div className="presentation-caption avatar-caption-fade">{faceCaption}</div>}
+      {licenseNote && <div className="presentation-caption">{licenseNote}</div>}
 
     </div>
   );
@@ -939,7 +939,8 @@ export default function PresentationScreen() {
           aspect-ratio: 1 / 1;
           position: relative; overflow: hidden;
         }
-        .avatar-caption {
+        .avatar-caption,
+        .presentation-caption {
           flex: 0 0 auto; max-width: 100%; box-sizing: border-box;
           font-size: 11px; line-height: 1.35; color: #f4e7b3; text-align: center;
           padding: 4px 10px 6px;
