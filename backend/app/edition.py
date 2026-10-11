@@ -432,7 +432,8 @@ def amp_sqlite_path() -> Path:
 
 def amp_audio_dir() -> Path:
     path = amp_app_dir() / "audio"
-    path.mkdir(parents=True, exist_ok=True)
+    if is_family_edition():
+        path.mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -739,9 +740,9 @@ def socialforge_storage_dir() -> Path:
     path = resolve_socialforge_root()
     if is_family_edition():
         path = assert_under_root(path)
-    path.mkdir(parents=True, exist_ok=True)
-    (path / "posts").mkdir(parents=True, exist_ok=True)
-    (path / "campaigns").mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "posts").mkdir(parents=True, exist_ok=True)
+        (path / "campaigns").mkdir(parents=True, exist_ok=True)
     return path
 
 

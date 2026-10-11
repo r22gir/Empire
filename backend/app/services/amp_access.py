@@ -274,9 +274,10 @@ def _load_challenges() -> dict:
 def _save_challenges(data: dict) -> None:
     from app.edition import assert_under_root, is_family_edition
 
+    if not is_family_edition():
+        return
     path = _challenges_path()
-    if is_family_edition():
-        assert_under_root(path)
+    assert_under_root(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     tmp = path.with_suffix(".tmp")
