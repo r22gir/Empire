@@ -144,10 +144,10 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, faceEdition, loa
       </div>
 
       {!loaded && !error && (
-        <div className="avatar-caption">{loadingLabel}</div>
+        <div className="avatar-caption presentation-caption">{loadingLabel}</div>
       )}
-      {faceCaption && <div className="avatar-caption avatar-caption-fade">{faceCaption}</div>}
-      {licenseNote && <div className="avatar-caption">{licenseNote}</div>}
+      {faceCaption && <div className="avatar-caption presentation-caption avatar-caption-fade">{faceCaption}</div>}
+      {licenseNote && <div className="avatar-caption presentation-caption">{licenseNote}</div>}
 
     </div>
   );
@@ -936,6 +936,7 @@ export default function PresentationScreen() {
         }
         .avatar-square {
           width: min(100cqw, 100cqh); height: min(100cqw, 100cqh);
+          aspect-ratio: 1 / 1;
           position: relative; overflow: hidden;
         }
         .avatar-caption {
@@ -954,6 +955,9 @@ export default function PresentationScreen() {
         .presentation-chat {
           flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column;
           background: var(--chat-bg); position: relative;
+        }
+        @media (orientation: portrait) and (max-height: 740px) {
+          .presentation-caption { display: none; }
         }
         @media (orientation: landscape) and (max-width: 1099px) {
           .presentation-body { flex-direction: row; }

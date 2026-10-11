@@ -151,7 +151,7 @@ def _append_audit(
 def _whatsapp_channel_view() -> dict[str, Any]:
     """Live Cloud API status. Saved interface JSON cannot hide a disabled channel."""
     try:
-        from app.services.max.whatsapp_channel import channel_status
+        from app.services.whatsapp_cloud import channel_status
 
         live = channel_status()
     except Exception as exc:
