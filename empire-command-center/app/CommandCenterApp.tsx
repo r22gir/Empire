@@ -147,6 +147,7 @@ const NAV_PRODUCT_IDS = new Set<string>([
 const NAV_SCREEN_IDS = new Set<string>([
   'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
   'report', 'desks', 'memory-bank', 'telegram', 'whatsapp', 'docs', 'research', 'final-docs', 'invoice',
+  'presentation', 'video',
 ]);
 hookFounderDeepLinks(SCREEN_DEEP_LINKS as Record<string, string>, NAV_SCREEN_IDS);
 function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
