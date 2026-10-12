@@ -335,11 +335,23 @@ def ground_web_search(
 ) -> dict[str, Any]:
     """Read pages for one web_search payload and build the grounded prompt."""
     payload = search_payload or {}
+    official = bool((search_payload or {}).get("official"))
+    try:
+        from app.services.max.official_search.intent import is_official_intent
+        official = official or is_official_intent(question)
+    except Exception:
+        pass
+    try:
+        from app.services.max.official_search.pipeline import official_page_char_cap
+        page_cap = official_page_char_cap(official_mode=official)
+    except Exception:
+        page_cap = 8000 if official else MAX_PAGE_CHARS
     report = read_search_results(
         payload.get("results") or [],
         fetch=fetch,
         question=question,
         skip_urls=skip_urls,
+        max_chars=page_cap,
     )
     return {
         "pages": report["pages"],
@@ -475,6 +487,13 @@ def _interpret_page(item: dict, outcome: dict, *, max_chars: int, undated_label:
     else:
         published, updated = extract_dates(raw)
         text = raw.strip()
+    try:
+        from app.services.max.official_search.pipeline import official_page_char_cap
+        from app.services.max.official_search.trust_tiers import TIER_OFFICIAL, classify_domain
+        if classify_domain(url) == TIER_OFFICIAL:
+            max_chars = max(max_chars, official_page_char_cap(url, official_mode=True))
+    except Exception:
+        pass
     text = _truncate(text, max_chars)
     if status in {401, 402, 451} or _looks_paywalled(status, text, raw):
         return {"ok": False, "reason": "paywalled"}
