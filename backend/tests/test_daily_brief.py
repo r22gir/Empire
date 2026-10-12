@@ -46,6 +46,7 @@ def test_brief_has_required_sections(seeded_db):
     assert "School pickup tomorrow" in text or "Family" in text
     assert "Today and this week" in text
     assert "Money" in text
+    assert "Founder to-dos" in text
     assert "Watch list" in text
 
 

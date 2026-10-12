@@ -36,6 +36,7 @@ SECTION_KEYS = (
     "quotes",
     "leads_and_mail",
     "decisions",
+    "founder_todos",
     "desk_report",
     "other_areas",
     "watch_list",
@@ -47,6 +48,7 @@ SECTION_TITLES = {
     "quotes": "Quotes needing follow-up",
     "leads_and_mail": "New leads and unanswered mail",
     "decisions": "Decisions waiting on Rafael",
+    "founder_todos": "Founder to-dos",
     "desk_report": "Desk report",
     "other_areas": "Other areas",
     "watch_list": "Watch list",
@@ -93,13 +95,17 @@ def _line_items(
             bits.append(str(i["customer"]))
         if i.get("amount") is not None and i.get("amount") != "":
             bits.append(f"${_money(i.get('amount')):,.2f}")
-        if i.get("age_days") is not None:
+        if i.get("priority"):
+            bits.append(str(i["priority"]))
+        if i.get("due_label"):
+            bits.append(str(i["due_label"]))
+        elif i.get("age_days") is not None:
             bits.append(f"{i['age_days']}d")
         if i.get("start_time"):
             bits.append(format_et(i["start_time"]))
         if i.get("account_label"):
             bits.append(str(i["account_label"]))
-        if i.get("status"):
+        if i.get("status") and i.get("kind") != "founder_todo":
             bits.append(str(i["status"]))
         if i.get("type"):
             bits.append(str(i["type"]))
@@ -172,6 +178,17 @@ def build_brief_sections(
     )
     stale_n = stale_task_count(stuck + (snap.get("open_tasks") or []))
 
+    founder_todos = list(snap.get("founder_todos") or [])
+    new_todos, _ = _diff_items(founder_todos, prev.get("founder_todo_items") or []) if has_prior else ([], [])
+    if mark_new:
+        new_names = _names(new_todos)
+        founder_todos = sorted(
+            founder_todos,
+            key=lambda t: (0 if str(t.get("name") or t.get("id") or "") in new_names or t.get("new_since_yesterday") else 1,
+                           str(t.get("priority") or "normal"),
+                           str(t.get("due_date") or "9999")),
+        )
+
     desk_rows = snap.get("desk_results") or []
     areas = snap.get("other_areas") or {}
 
@@ -240,6 +257,19 @@ def build_brief_sections(
             "text": _decisions_text(decisions, stale_n),
             "items": decisions,
         },
+        "founder_todos": {
+            "title": SECTION_TITLES["founder_todos"],
+            "summary": f"{len(founder_todos)} open",
+            "new_count": len(new_todos) if mark_new else 0,
+            "text": _line_items(
+                founder_todos,
+                "No founder to-dos.",
+                changed=new_todos,
+                limit=10,
+                mark_new=mark_new,
+            ),
+            "items": founder_todos[:10],
+        },
         "desk_report": {
             "title": SECTION_TITLES["desk_report"],
             "summary": f"{len(desk_rows)} desk job(s) since yesterday",
@@ -269,6 +299,7 @@ def build_brief_sections(
         "payment_items": payments,
         "quote_items": quotes,
         "mail_items": mail,
+        "founder_todo_items": founder_todos,
     }
     return sections
 

@@ -19,7 +19,10 @@ from app.services.max.brief_filters import (
     dedupe_mail,
     filter_followup_quotes,
     filter_real_money,
+    format_et,
+    founder_todo_sort_key,
     is_bank_notice,
+    is_founder_todo,
     is_promotional_mail,
     is_self_sent_mail,
     is_test_family_ticket,
@@ -503,6 +506,134 @@ def query_open_tasks(conn: sqlite3.Connection, desk: str | None = None) -> list[
     return findings
 
 
+def _parse_task_meta(raw: Any) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    try:
+        data = json.loads(raw or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _parse_task_tags(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(t) for t in raw]
+    try:
+        data = json.loads(raw or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return [str(raw)] if raw else []
+    if isinstance(data, list):
+        return [str(t) for t in data]
+    return [str(data)] if data else []
+
+
+def _founder_todo_link(conn: sqlite3.Connection, row: dict) -> tuple[str, str]:
+    """Return (client, estimate) from metadata or linked quote/customer rows."""
+    meta = _parse_task_meta(row.get("metadata"))
+    customer = str(
+        meta.get("customer") or meta.get("customer_name") or meta.get("client") or ""
+    ).strip()
+    estimate = str(
+        meta.get("quote_number") or meta.get("estimate") or meta.get("quote") or ""
+    ).strip()
+    quote_id = row.get("quote_id") or meta.get("quote_id") or meta.get("estimate_id")
+    customer_id = row.get("customer_id") or meta.get("customer_id")
+    if quote_id and _table_exists(conn, "quotes_v2"):
+        qcols = _cols(conn, "quotes_v2")
+        num = "quote_number" if "quote_number" in qcols else "id"
+        name = "customer_name" if "customer_name" in qcols else "NULL"
+        try:
+            qrow = conn.execute(
+                f"SELECT {num} AS quote_number, {name} AS customer_name FROM quotes_v2 WHERE id = ?",
+                (quote_id,),
+            ).fetchone()
+        except sqlite3.Error:
+            qrow = None
+        if qrow:
+            qd = _row_dict(qrow)
+            estimate = estimate or str(qd.get("quote_number") or "")
+            customer = customer or str(qd.get("customer_name") or "")
+    if not customer and customer_id and _table_exists(conn, "customers"):
+        try:
+            crow = conn.execute("SELECT name FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        except sqlite3.Error:
+            crow = None
+        if crow:
+            customer = str((_row_dict(crow).get("name") if isinstance(crow, sqlite3.Row) else crow[0]) or "")
+    return customer, estimate
+
+
+def query_founder_todos(conn: sqlite3.Connection, now: datetime | None = None) -> list[dict]:
+    """Open tasks assigned to the founder or tagged as a founder to-do."""
+    if not _table_exists(conn, "tasks"):
+        return []
+    now = _now(now)
+    yesterday = (now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1))
+    cols = _cols(conn, "tasks")
+    optional = {
+        "assigned_to": "assigned_to" if "assigned_to" in cols else "NULL AS assigned_to",
+        "priority": "priority" if "priority" in cols else "'normal' AS priority",
+        "tags": "tags" if "tags" in cols else "NULL AS tags",
+        "metadata": "metadata" if "metadata" in cols else "NULL AS metadata",
+        "quote_id": "quote_id" if "quote_id" in cols else "NULL AS quote_id",
+        "customer_id": "customer_id" if "customer_id" in cols else "NULL AS customer_id",
+        "due_date": "due_date" if "due_date" in cols else "NULL AS due_date",
+        "created_at": "created_at" if "created_at" in cols else "NULL AS created_at",
+        "desk": "desk" if "desk" in cols else "NULL AS desk",
+    }
+    sql = f"""
+        SELECT id, title, status,
+               {optional['assigned_to']}, {optional['priority']}, {optional['tags']},
+               {optional['metadata']}, {optional['quote_id']}, {optional['customer_id']},
+               {optional['due_date']}, {optional['created_at']}, {optional['desk']}
+        FROM tasks
+        WHERE status IN ({",".join("?" * len(OPEN_TASK_STATUSES))})
+    """
+    findings = []
+    for raw in conn.execute(sql, OPEN_TASK_STATUSES).fetchall():
+        row = _row_dict(raw)
+        tags = _parse_task_tags(row.get("tags"))
+        row["tags"] = tags
+        if not is_founder_todo(row):
+            continue
+        customer, estimate = _founder_todo_link(conn, row)
+        link = " / ".join(p for p in (estimate, customer) if p)
+        due = row.get("due_date")
+        age = _days_old(due or row.get("created_at"), now)
+        created = _parse_dt(row.get("created_at"))
+        new_since = bool(created and created >= yesterday)
+        due_label = ""
+        if due:
+            due_dt = _parse_dt(str(due))
+            if due_dt and (due_dt.hour or due_dt.minute):
+                due_label = format_et(due)
+            elif due_dt:
+                due_label = f"due {due_dt.strftime('%a %b')} {due_dt.day}"
+            else:
+                due_label = f"due {due}"
+        elif age is not None:
+            due_label = f"{age}d"
+        findings.append({
+            "kind": "founder_todo",
+            "id": row.get("id"),
+            "name": row.get("title") or row.get("id"),
+            "customer": link or customer,
+            "estimate": estimate,
+            "priority": row.get("priority") or "normal",
+            "due_date": due,
+            "due_label": due_label,
+            "age_days": None if due else age,
+            "status": row.get("status"),
+            "assigned_to": row.get("assigned_to"),
+            "tags": tags,
+            "created_at": row.get("created_at"),
+            "new_since_yesterday": new_since,
+        })
+    findings.sort(key=founder_todo_sort_key)
+    return findings
+
+
 def query_stuck_tasks(conn: sqlite3.Connection, older_than_days: int | None = None, now: datetime | None = None) -> list[dict]:
     if not _table_exists(conn, "tasks"):
         return []
@@ -946,6 +1077,7 @@ def snapshot(now: datetime | None = None) -> dict[str, Any]:
             "open_tasks": query_open_tasks(conn),
             "stuck_tasks": query_stuck_tasks(conn, None, now),
             "overdue_tasks": query_overdue_tasks(conn, now),
+            "founder_todos": query_founder_todos(conn, now),
             "pending_mail": pending_mail,
             "bank_notices": bank_notices,
             "approval_queue": query_approval_queue(conn),

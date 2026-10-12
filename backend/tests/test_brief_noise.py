@@ -15,6 +15,7 @@ from app.services.max.brief_filters import (
     format_et,
     is_bank_notice,
     is_flagged_test,
+    is_founder_todo,
     is_noise_client,
     is_promotional_mail,
     is_self_sent_mail,
@@ -162,7 +163,7 @@ def test_first_brief_seeds_baseline_without_new_tags(seeded_db):
     assert " NEW" not in first["text_plain"]
     assert " new" not in first["html"].lower() or "· 0 new" not in first["html"]
     sections = first["sections"]
-    for key in ("today_and_week", "money", "quotes", "leads_and_mail"):
+    for key in ("today_and_week", "money", "quotes", "leads_and_mail", "founder_todos"):
         assert sections[key].get("new_count", 0) == 0
 
 
@@ -669,6 +670,20 @@ def test_filter_helpers_unit():
         attachment_kinds=["voice"],
     ) == "Need a ride to practice this afternoon [voice]"
     assert is_test_family_ticket({"name": "un saludo de prueba", "message": "un saludo de prueba"})
+    assert is_test_family_ticket({"message": "Test"})
+    assert is_test_family_ticket({"message": "Test tres"})
+    assert not is_test_family_ticket({
+        "message": "Test",
+        "transcript": "Juan asked if we can move school pickup to 5pm today.",
+    })
+    assert not is_test_family_ticket({
+        "message": "un saludo de prueba",
+        "transcript": "Please sign the school form and send it back this week.",
+    })
+    assert not is_test_family_ticket({"message": "Test tres", "attachment_kinds": ["voice"]})
+    assert is_founder_todo({"assigned_to": "founder", "title": "Call Rowley"})
+    assert is_founder_todo({"assigned_to": "max", "tags": ["founder-todo"], "title": "Angel bump"})
+    assert not is_founder_todo({"assigned_to": "max", "tags": ["dev"], "title": "JWT"})
     money = filter_real_money([
         {"name": "A", "customer": "Nelma Rivera", "amount": 100, "age_days": 1},
         {"name": "B", "customer": "Test Client", "amount": 50, "age_days": 2},
@@ -711,3 +726,107 @@ def test_schedule_other_production_start_maps_to_production(seeded_db):
     assert prod["type"] == "production"
     text = render_brief_plain(build_brief_sections(snapshot(now), now=now, service_rows=[]), now)
     assert "production" in text
+
+
+def test_family_keeps_short_test_messages_when_transcript_or_attachments(
+    isolated_empire_db, tmp_path, seeded_db,
+):
+    from app.services.max.desks.family_help_store import list_open_tickets, write_ticket_for_tests
+
+    real = tmp_path / "amp" / "family-help" / "amp"
+    real.mkdir(parents=True)
+    base = tmp_path / "family-help"
+    base.mkdir()
+    (base / "amp").symlink_to(real)
+    stamp = seeded_db.strftime("%Y-%m-%dT%H:%M:%SZ")
+    write_ticket_for_tests(
+        edition="amp", ticket_id="fh-test-msg", sender="Amp",
+        message="Test",
+        transcript="Can you pick me up from practice at 5pm and bring the form?",
+        created_at=stamp, base=base,
+    )
+    write_ticket_for_tests(
+        edition="amp", ticket_id="fh-test-tres", sender="Amp",
+        message="Test tres",
+        created_at=stamp, base=base,
+        attachments=[{"kind": "image", "filename": "form.jpg"}],
+    )
+    write_ticket_for_tests(
+        edition="amp", ticket_id="fh-saludo", sender="Amp",
+        message="un saludo de prueba",
+        transcript="The school needs the permission slip signed before Friday morning.",
+        created_at=stamp, base=base,
+    )
+    write_ticket_for_tests(
+        edition="amp", ticket_id="fh-empty-test", sender="Amp",
+        message="Test", created_at=stamp, base=base,
+    )
+    items = list_open_tickets(base=base)
+    ids = [i["id"] for i in items]
+    assert "fh-test-msg" in ids
+    assert "fh-test-tres" in ids
+    assert "fh-saludo" in ids
+    assert "fh-empty-test" not in ids
+    titles = {i["id"]: i["name"] for i in items}
+    assert titles["fh-test-msg"].startswith("Can you pick me up from practice")
+    assert "[image]" in titles["fh-test-tres"]
+    assert "permission slip" in titles["fh-saludo"]
+
+
+def test_founder_todos_section_lists_assigned_and_tagged(seeded_db):
+    from app.db.database import get_db
+    import json
+
+    now = seeded_db
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO tasks
+               (id, title, description, status, priority, desk, assigned_to, created_by, due_date, tags, metadata, created_at)
+               VALUES ('ft-rowley', 'Rowley EZ Rise call', '', 'todo', 'high', 'sales', 'founder', 'rg', ?,
+                       ?, ?, ?)""",
+            (
+                now.strftime("%Y-%m-%d"),
+                json.dumps(["call"]),
+                json.dumps({"quote_id": "q-1"}),
+                now.isoformat(),
+            ),
+        )
+        conn.execute(
+            """INSERT INTO tasks
+               (id, title, description, status, priority, desk, assigned_to, created_by, due_date, tags, metadata, created_at)
+               VALUES ('ft-angel', 'Angel bump order', '', 'todo', 'urgent', 'forge', 'max', 'rg', NULL,
+                       ?, ?, ?)""",
+            (
+                json.dumps(["founder-todo"]),
+                json.dumps({"customer": "Angel"}),
+                (now - timedelta(days=3)).isoformat(),
+            ),
+        )
+        conn.execute(
+            """INSERT INTO tasks
+               (id, title, description, status, priority, desk, assigned_to, created_by, created_at)
+               VALUES ('ft-jwt', 'JWT auth rewrite', '', 'todo', 'low', 'codeforge', 'max', 'max', ?)""",
+            ((now - timedelta(days=40)).isoformat(),),
+        )
+        for i in range(10):
+            conn.execute(
+                """INSERT INTO tasks
+                   (id, title, description, status, priority, desk, assigned_to, created_by, created_at)
+                   VALUES (?, ?, '', 'todo', 'normal', 'forge', 'founder', 'rg', ?)""",
+                (f"ft-extra-{i}", f"Founder extra {i}", (now - timedelta(days=5)).isoformat()),
+            )
+    snap = snapshot(now)
+    names = [t["name"] for t in snap["founder_todos"]]
+    assert "Rowley EZ Rise call" in names
+    assert "Angel bump order" in names
+    assert "JWT auth rewrite" not in names
+    rowley = next(t for t in snap["founder_todos"] if t["id"] == "ft-rowley")
+    assert "EST-2026-088" in (rowley.get("customer") or "") or "Nelma" in (rowley.get("customer") or "")
+    assert rowley["new_since_yesterday"] is True
+    assert names.index("Rowley EZ Rise call") < names.index("Founder extra 0")
+    text = render_brief_plain(build_brief_sections(snap, now=now, service_rows=[]), now)
+    assert "Founder to-dos" in text
+    assert "Rowley EZ Rise call" in text
+    assert "Angel bump order" in text
+    assert "high" in text or "urgent" in text
+    assert "+2 more" in text or "+" in text and "more" in text.split("Founder to-dos")[1]

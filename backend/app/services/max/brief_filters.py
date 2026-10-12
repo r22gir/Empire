@@ -92,6 +92,15 @@ SELF_SEND_FROM = (
 FAMILY_TITLE_LEN = 60
 _SUBJECT_PREFIX_RE = re.compile(r"^(re|fwd|fw):\s*", re.I)
 
+FOUNDER_ASSIGNEES = frozenset({
+    "founder", "rafael", "rg", "rafa", "r22gir", "owner",
+})
+FOUNDER_TODO_TAG_HINTS = (
+    "founder to-do", "founder todo", "founder-todo", "founder_todo",
+    "founder-to-do",
+)
+PRIORITY_RANK = {"urgent": 0, "high": 1, "normal": 2, "medium": 2, "low": 3}
+
 
 def _blob(*parts: Any) -> str:
     return " ".join(str(p or "") for p in parts).strip()
@@ -145,6 +154,13 @@ def is_zero_amount(value: Any) -> bool:
         return True
 
 
+_TESTISH_WORDS = frozenset({
+    "test", "tests", "testing", "prueba", "pruebas", "mock", "sweep",
+    "tres", "uno", "dos", "hola", "saludo", "ticket",
+})
+_TESTISH_FILLER = frozenset({"un", "una", "de", "la", "el", "a", "the", "of"})
+
+
 def _obvious_test_body(text: str) -> bool:
     blob = str(text or "").strip()
     if not blob:
@@ -157,6 +173,29 @@ def _obvious_test_body(text: str) -> bool:
     if low.startswith("test ") or low == "test" or " test ticket" in low:
         return True
     return is_noise_client(blob)
+
+
+def _non_test_words(text: str) -> list[str]:
+    words = re.findall(r"[0-9a-záéíóúñü]+", str(text or "").casefold())
+    return [w for w in words if w not in _TESTISH_WORDS and w not in _TESTISH_FILLER]
+
+
+def has_real_family_transcript(text: Any) -> bool:
+    """Transcript is real if it is longer than ~30 chars and not just test words."""
+    raw = " ".join(str(text or "").split())
+    if len(raw) < 30:
+        return False
+    return len(" ".join(_non_test_words(raw))) >= 12
+
+
+def family_has_attachments(item: dict | None) -> bool:
+    if not item:
+        return False
+    kinds = item.get("attachment_kinds") or []
+    if kinds:
+        return True
+    atts = item.get("attachments") or []
+    return bool(atts)
 
 
 def family_ticket_title(
@@ -187,9 +226,16 @@ def family_ticket_title(
 
 
 def is_test_family_ticket(item: dict) -> bool:
-    """Obvious test tickets only. empirebox2026 is the founder inbox — keep those."""
-    sender = _blob(item.get("customer"), item.get("sender"))
-    body = _blob(item.get("name"), item.get("message"), item.get("subject"))
+    """Do not drop on a short test *message* if transcript or attachments are real.
+
+    Live tickets often have message "Test", "Test tres", or "un saludo de
+    prueba" and the real ask in the transcript or an attachment.
+    """
+    transcript = item.get("transcript") or ""
+    if has_real_family_transcript(transcript) or family_has_attachments(item):
+        return False
+    sender = _blob(item.get("sender"))
+    body = _blob(item.get("message"), item.get("subject"))
     founder_inbox = "empirebox2026" in sender.casefold()
     if founder_inbox:
         return _obvious_test_body(body)
@@ -374,6 +420,33 @@ def dedupe_named(items: Iterable[dict]) -> list[dict]:
         seen.add(key)
         out.append(item)
     return out
+
+
+def _task_tags(item: dict) -> str:
+    raw = item.get("tags")
+    if isinstance(raw, (list, tuple)):
+        return " ".join(str(t) for t in raw)
+    return str(raw or "")
+
+
+def is_founder_todo(item: dict | None) -> bool:
+    if not item:
+        return False
+    assigned = str(item.get("assigned_to") or "").strip().casefold()
+    if assigned in FOUNDER_ASSIGNEES:
+        return True
+    tags = _task_tags(item).casefold().replace("_", " ").replace("-", " ")
+    if any(h.replace("-", " ").replace("_", " ") in tags for h in FOUNDER_TODO_TAG_HINTS):
+        return True
+    if "founder" in tags and "todo" in tags:
+        return True
+    return False
+
+
+def founder_todo_sort_key(item: dict) -> tuple:
+    pri = PRIORITY_RANK.get(str(item.get("priority") or "normal").lower(), 2)
+    due = str(item.get("due_date") or "9999")
+    return (0 if item.get("new_since_yesterday") else 1, pri, due)
 
 
 def filter_real_money(items: Iterable[dict]) -> list[dict]:
