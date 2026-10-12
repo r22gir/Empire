@@ -2797,7 +2797,15 @@ def _unavailable_attachment_response(filename: str | None) -> tuple[str, str, st
 
 def _explicit_no_drawing_router(message: str | None) -> bool:
     text = (message or "").lower()
-    return "do not use drawing-router" in text or "don't use drawing-router" in text or "no drawing-router" in text
+    return (
+        "do not use drawing-router" in text
+        or "don't use drawing-router" in text
+        or "no drawing-router" in text
+        or "i need no drawing" in text
+        or "need no drawing" in text
+        or "no necesito dibujo" in text
+        or "no quiero dibujo" in text
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -3264,8 +3272,15 @@ async def _chat_with_max_service_impl(
             # it alive across turns. The user must never be trapped
             # in a solicitation loop with no exit.
             pending = get_pending(request.conversation_id, request.channel)
-            if pending and is_drawing_intent(msg_text):
-                if is_continuation_reply(msg_text, pending.get("missing", [])):
+            from app.services.max.drawing_intent import (
+                looks_like_dimension_reply,
+                pending_should_resume,
+            )
+            if pending and pending_should_resume(msg_text, pending, request.history):
+                if (
+                    is_continuation_reply(msg_text, pending.get("missing", []))
+                    or looks_like_dimension_reply(msg_text)
+                ):
                     merged_handoff = merge_founder_reply(pending, msg_text)
                 else:
                     # Non-continuation with drawing intent — release
@@ -3274,7 +3289,7 @@ async def _chat_with_max_service_impl(
             # If pending exists but this turn is NOT drawing intent
             # (e.g. founder said something unrelated), the pending is
             # abandoned — release it so it can't fire next turn.
-            elif pending and not is_drawing_intent(msg_text):
+            elif pending:
                 clear_pending(request.conversation_id, request.channel)
         except Exception as exc:
             logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
@@ -3283,7 +3298,11 @@ async def _chat_with_max_service_impl(
         merged_handoff
         if merged_handoff is not None
         else (
-            build_drawing_handoff(request.message, image_filename=request.image_filename)
+            build_drawing_handoff(
+                request.message,
+                image_filename=request.image_filename,
+                history=request.history,
+            )
             if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
             else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
         )
@@ -4202,6 +4221,13 @@ async def _chat_with_max_service_impl(
             request.message, tool_results_list, strip_tool_blocks(final_content),
         )
         final_content = answer_policy.clean_reply(final_content, request.message)
+        try:
+            from app.services.max.doc_links import ensure_absolute_doc_links
+            final_content = ensure_absolute_doc_links(
+                final_content, tool_results_list, channel=request.channel,
+            )
+        except Exception:
+            pass
 
         _quality_flags = detect_quality_flags(
             final_content, user_message=request.message, tool_results=normalize_tool_results(tool_results_list)
@@ -4523,12 +4549,19 @@ async def _chat_stream_impl(request: ChatRequest):
             if is_cancel_message(msg_text):
                 clear_pending(request.conversation_id, request.channel)
             pending = get_pending(request.conversation_id, request.channel)
-            if pending and is_drawing_intent(msg_text):
-                if is_continuation_reply(msg_text, pending.get("missing", [])):
+            from app.services.max.drawing_intent import (
+                looks_like_dimension_reply,
+                pending_should_resume,
+            )
+            if pending and pending_should_resume(msg_text, pending, request.history):
+                if (
+                    is_continuation_reply(msg_text, pending.get("missing", []))
+                    or looks_like_dimension_reply(msg_text)
+                ):
                     merged_handoff = merge_founder_reply(pending, msg_text)
                 else:
                     clear_pending(request.conversation_id, request.channel)
-            elif pending and not is_drawing_intent(msg_text):
+            elif pending:
                 clear_pending(request.conversation_id, request.channel)
         except Exception as exc:
             logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
@@ -4537,7 +4570,11 @@ async def _chat_stream_impl(request: ChatRequest):
         merged_handoff
         if merged_handoff is not None
         else (
-            build_drawing_handoff(request.message, image_filename=request.image_filename)
+            build_drawing_handoff(
+                request.message,
+                image_filename=request.image_filename,
+                history=request.history,
+            )
             if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
             else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
         )
@@ -5371,6 +5408,13 @@ async def _chat_stream_impl(request: ChatRequest):
             except Exception:
                 pass
             full_response = answer_policy.clean_reply(full_response, request.message)
+            try:
+                from app.services.max.doc_links import ensure_absolute_doc_links
+                full_response = ensure_absolute_doc_links(
+                    full_response, tool_results_list, channel=request.channel,
+                )
+            except Exception:
+                pass
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
             conversation_tracker.add_message(conv_id, "assistant", full_response)
