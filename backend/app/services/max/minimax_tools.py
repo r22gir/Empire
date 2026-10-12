@@ -970,6 +970,12 @@ async def minimax_web_search(
         query: the search query
         total_results: count
     """
+    # Official-sources research never uses MiniMax web_search (no domain filter).
+    from app.services.max.official_search.providers import minimax_research_enabled
+    if not minimax_research_enabled():
+        return _build_result(False, "minimax_web_search",
+                             error="MiniMax web_search is OFF for research (no domain filter)")
+
     mcp_cmd = os.getenv("MINIMAX_MCP_COMMAND", "/home/rg/bin/minimax-mcp")
     if not os.path.exists(mcp_cmd):
         return _build_result(False, "minimax_web_search",
@@ -1058,10 +1064,10 @@ def minimax_tools_status() -> dict[str, Any]:
             },
             "web_search": {
                 "configured": has_mcp,
-                "available": has_mcp,
+                "available": False,
                 "transport": "mcp_cli",
                 "quota_bucket": "mcp_web_search",
-                "reason": "MINIMAX_MCP not configured" if not has_mcp else ("MINIMAX_API_KEY not set" if not has_key else ""),
+                "reason": "Responses API server-tool web_search is OFF (slow, skips search, stale dates). Token Plan MCP POST /v1/coding_plan/search is the raw official-search provider.",
             },
             "image_generation": {
                 "configured": has_key,

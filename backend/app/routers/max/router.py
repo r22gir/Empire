@@ -3880,6 +3880,16 @@ async def _chat_with_max_service_impl(
                     )
                 except Exception as e:
                     logger.warning(f"Grounding verification failed: {e}")
+                try:
+                    from app.services.max.official_search.pipeline import finalize_from_tool_results
+                    final_content = finalize_from_tool_results(
+                        final_content,
+                        tool_results_list,
+                        question=request.message,
+                        channel=getattr(request, "channel", None),
+                    )
+                except Exception as e:
+                    logger.warning(f"Official sources footer failed: {e}")
 
         # Universal quality check on final response
         chat_channel = Channel.TELEGRAM if (hasattr(request, 'channel') and request.channel == 'telegram') else Channel.CHAT
@@ -5210,6 +5220,16 @@ async def _chat_stream_impl(request: ChatRequest):
                         )
                     except Exception as _gv_err:
                         logger.warning(f"[stream] Grounding verification failed: {_gv_err}")
+                    try:
+                        from app.services.max.official_search.pipeline import finalize_from_tool_results
+                        full_response = finalize_from_tool_results(
+                            full_response,
+                            _tool_dicts,
+                            question=request.message,
+                            channel=request.channel,
+                        )
+                    except Exception as _of_err:
+                        logger.warning(f"[stream] Official sources footer failed: {_of_err}")
 
             # 2. Quality engine validation
             try:

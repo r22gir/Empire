@@ -564,4 +564,9 @@ def get_all_free_tier_status(db_path: Optional[str] = None) -> list[dict[str, An
         item = spec.to_dict()
         item.update(status_info)
         res.append(item)
+    try:
+        from app.services.max.official_search.brave_budget import brave_free_tier_card
+        res.append(brave_free_tier_card())
+    except Exception as exc:
+        logger.warning("Brave free-tier card unavailable: %s", exc)
     return res

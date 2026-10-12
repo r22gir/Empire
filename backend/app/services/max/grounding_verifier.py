@@ -54,8 +54,22 @@ def verify_web_response(
     citations = _extract_citations(ai_response)
 
     if not citations:
-        # No citations to verify
-        return VerifiedResponse(original=ai_response, verified=ai_response)
+        # Still strip invented bare/markdown URLs that were never fetched.
+        try:
+            from app.services.max.official_search.citations import verify_citations
+            fetched = [
+                {"url": url, "text": content}
+                for url, content in source_content.items()
+            ]
+            checked = verify_citations(ai_response, fetched)
+            return VerifiedResponse(
+                original=ai_response,
+                verified=checked["text"],
+                phantom_citations_removed=checked["links_removed"],
+                claims_stripped=checked["quotes_removed"] + checked["links_removed"],
+            )
+        except Exception:
+            return VerifiedResponse(original=ai_response, verified=ai_response)
 
     # Step 3: Verify each citation against source content
     verified_text = ai_response
@@ -87,6 +101,16 @@ def verify_web_response(
             logger.warning(f"Ungrounded claim citing {url}: {claim_text[:80]}...")
             verified_text = _mark_unverified(verified_text, full_match)
             claims_stripped += 1
+
+    try:
+        from app.services.max.official_search.citations import verify_citations
+        fetched = [{"url": url, "text": content} for url, content in source_content.items()]
+        checked = verify_citations(verified_text, fetched)
+        verified_text = checked["text"]
+        phantom_removed += checked["links_removed"]
+        claims_stripped += checked["quotes_removed"] + checked["links_removed"]
+    except Exception:
+        pass
 
     return VerifiedResponse(
         original=ai_response,

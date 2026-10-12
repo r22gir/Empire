@@ -1008,8 +1008,8 @@ def test_web_search_boundary_answer_has_source_policy():
     assert "source policy" in answer_l
     assert "cite" in answer_l
     assert "official" in answer_l
-    # MiniMax search must not be marked verified
-    assert "configured_unverified" in answer_l
+    # MiniMax search stays OFF for research (no domain filter)
+    assert "off_for_research" in answer_l or "configured_unverified" in answer_l
     # Must not claim Brave is the best
     assert "adequate" in answer_l or "better" in answer_l or "deep research" in answer_l
 
