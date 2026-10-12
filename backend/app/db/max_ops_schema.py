@@ -88,6 +88,22 @@ CREATE TABLE IF NOT EXISTS family_help_tickets (
 
 def ensure_max_ops_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(MAX_OPS_SCHEMA_SQL)
+    # Pipeline columns live on tasks in production via init_db migration.
+    # Test DBs built from SCHEMA_SQL alone are missing them.
+    if conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'"
+    ).fetchone():
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+        for col, decl in (
+            ("result_summary", "TEXT"),
+            ("pipeline_id", "TEXT"),
+            ("channel", "TEXT DEFAULT 'system'"),
+        ):
+            if col not in existing:
+                try:
+                    conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {decl}")
+                except sqlite3.OperationalError:
+                    pass
 
 
 def ensure_max_ops_schema_on_default_db() -> None:

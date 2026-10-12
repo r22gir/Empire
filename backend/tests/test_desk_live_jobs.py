@@ -197,14 +197,8 @@ def test_review_gate_rejects_raw_tool_text():
     assert "tool" in verdict.reason
 
 
-def test_tool_blocks_are_executed(monkeypatch):
-    from app.services.max.desks.base_desk import BaseDesk
-
-    class Dummy(BaseDesk):
-        desk_id = "support"
-        desk_name = "Support"
-        async def _handle_task(self, task):
-            return task
+def test_tool_blocks_are_executed():
+    from app.services.max.desks.tool_blocks import execute_embedded_tool_blocks
 
     executed = {}
 
@@ -218,12 +212,17 @@ def test_tool_blocks_are_executed(monkeypatch):
         executed["desk"] = desk
         return R()
 
-    monkeypatch.setattr("app.services.max.tool_executor.execute_tool", fake_execute)
-    desk = Dummy()
     raw = 'Checking.\n```tool\n{"tool": "get_invoices"}\n```'
-    out = desk._execute_tool_blocks(raw)
+    out = execute_embedded_tool_blocks(
+        raw,
+        desk_id="support",
+        execute_fn=fake_execute,
+        parse_fn=lambda text: [{"tool": "get_invoices"}] if "```tool" in text else [],
+        strip_fn=lambda text: "Checking.",
+    )
     assert "```tool" not in out
     assert executed["tool"] == "get_invoices"
+    assert executed["desk"] == "support"
     assert "INV-2044" in out
 
 

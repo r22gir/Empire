@@ -422,12 +422,13 @@ def persist_task_row(
     if fail_reason and status == "failed":
         summary = f"FAILED: {fail_reason}\n{summary}"
     with get_db() as conn:
+        ensure_max_ops_schema(conn)
         existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
         if existing:
             conn.execute(
                 """UPDATE tasks SET status = ?, result_summary = ?, completed_at = ?,
                    updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
-                (db_status, summary[:2000], datetime.utcnow().isoformat(), task_id),
+                (db_status, summary[:2000], datetime.now().isoformat(), task_id),
             )
         else:
             conn.execute(
@@ -436,7 +437,7 @@ def persist_task_row(
                     completed_at, created_by, created_at, updated_at)
                    VALUES (?, ?, ?, ?, 'normal', ?, ?, ?, 'scheduler', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
                 (task_id, title, (description or "")[:500], db_status, desk_id,
-                 summary[:2000], datetime.utcnow().isoformat()),
+                 summary[:2000], datetime.now().isoformat()),
             )
         try:
             conn.execute(

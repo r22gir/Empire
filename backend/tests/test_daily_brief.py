@@ -80,6 +80,27 @@ def test_brief_persists_history(seeded_db):
         assert n == 2
 
 
+def test_sample_brief_render_from_fixtures(seeded_db, tmp_path):
+    """Keep a rendered sample so reviewers can see the brief shape."""
+    from app.services.max.daily_brief import build_brief_sections, render_brief_plain
+    from app.services.max.desks.live_data import snapshot
+
+    sections = build_brief_sections(
+        snapshot(seeded_db),
+        now=seeded_db,
+        service_rows=[
+            {"id": "empire-backend", "name": "empire-backend", "up": True, "detail": "port 8000 UP"},
+            {"id": "disk", "name": "disk", "up": True, "pct": 41, "detail": "41% used, 200 GB free"},
+        ],
+    )
+    text = render_brief_plain(sections, seeded_db)
+    sample = tmp_path / "sample_brief.txt"
+    sample.write_text(text, encoding="utf-8")
+    assert "INV-2044" in text
+    assert "EST-2026-088" in text
+    print("\n===== SAMPLE BRIEF =====\n" + text + "\n===== END SAMPLE =====\n")
+
+
 def test_brief_never_uses_empire_repo_path(seeded_db, monkeypatch):
     """Quotes/inbox/reports resolve through EMPIRE_DATA_DIR, not ~/empire-repo."""
     from app.services import data_paths

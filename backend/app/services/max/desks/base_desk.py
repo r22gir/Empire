@@ -318,41 +318,9 @@ class BaseDesk(ABC):
 
     def _execute_tool_blocks(self, content: str, task: Optional["DeskTask"] = None) -> str:
         """Parse ```tool blocks and actually execute them. Never return raw fences."""
-        if not content:
-            return content
-        try:
-            from app.services.max.tool_executor import (
-                execute_tool, parse_tool_blocks, strip_tool_blocks,
-            )
-        except Exception:
-            return content
-        actions = parse_tool_blocks(content)
-        if not actions:
-            return content
-        result_lines = []
-        for action in actions:
-            try:
-                result = execute_tool(action, desk=self.desk_id)
-                ok = bool(getattr(result, "success", False))
-                payload = getattr(result, "result", None)
-                if payload is None:
-                    payload = getattr(result, "error", "")
-                if task is not None:
-                    task.actions.append(DeskAction(
-                        action=str(action.get("tool") or "tool"),
-                        detail=str(payload)[:300],
-                        success=ok,
-                    ))
-                result_lines.append(
-                    f"Tool {action.get('tool')}: {'ok' if ok else 'error'} — {str(payload)[:400]}"
-                )
-            except Exception as e:
-                result_lines.append(f"Tool {action.get('tool')}: error — {e}")
-        cleaned = strip_tool_blocks(content).strip()
-        executed = "\n".join(result_lines)
-        if cleaned:
-            return f"{cleaned}\n\n{executed}"
-        return executed
+        from app.services.max.desks.tool_blocks import execute_embedded_tool_blocks
+
+        return execute_embedded_tool_blocks(content, desk_id=self.desk_id, task=task)
 
     # ── v6.0: Scoped File Operations ────────────────────────────
 
