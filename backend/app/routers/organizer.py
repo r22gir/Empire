@@ -380,7 +380,7 @@ def _resource_row(conn, resource_id: str) -> Optional[dict]:
 
 def _list_events(conn, start_date=None, end_date=None, job_id=None, kind=None, status=None, resource_id=None, space_id=None, limit=400):
     clause, eparams = edition_sql("e")
-    query = event_select_sql() + f" WHERE {clause}"
+    query = event_select_sql(conn) + f" WHERE {clause}"
     params: list = list(eparams)
     if start_date:
         query += " AND COALESCE(e.end_time, e.start_time) >= ?"

@@ -482,7 +482,7 @@ def enrich_item(conn, row: dict) -> dict:
 def load_event(conn, event_id: str) -> Optional[dict]:
     clause, params = edition_sql("e")
     row = conn.execute(
-        event_select_sql() + f" WHERE e.id = ? AND {clause}",
+        event_select_sql(conn) + f" WHERE e.id = ? AND {clause}",
         (event_id, *params),
     ).fetchone()
     if not row:
@@ -543,21 +543,35 @@ def conflicts_for_payload(conn, payload: dict, *, exclude_id: Optional[str] = No
     return detect_conflicts({**payload, "travel_minutes": travel}, existing)
 
 
-def event_select_sql() -> str:
-    if not can_read_workroom_jobs():
-        return """
+def event_select_sql(conn=None) -> str:
+    bare = """
             SELECT e.*, NULL as job_title, NULL as client_name, NULL as job_address,
                    NULL as job_customer_id, NULL as customer_name,
                    NULL as customer_phone, NULL as customer_address
             FROM schedule_events e
         """
-    return """
-        SELECT e.*, j.title as job_title, j.client_name, j.address as job_address,
-               j.customer_id as job_customer_id, c.name as customer_name,
+    if not can_read_workroom_jobs():
+        return bare
+    names: set[str] = set()
+    if conn is not None:
+        try:
+            names = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        except Exception:
+            names = set()
+        if not names:
+            return bare
+    title = "j.title" if (not names or "title" in names) else "NULL"
+    client = "j.client_name" if (not names or "client_name" in names) else "NULL"
+    addr = "j.address" if (not names or "address" in names) else "NULL"
+    cust = "j.customer_id" if (not names or "customer_id" in names) else "NULL"
+    join_cust = cust if cust != "NULL" else "NULL"
+    return f"""
+        SELECT e.*, {title} as job_title, {client} as client_name, {addr} as job_address,
+               {join_cust} as job_customer_id, c.name as customer_name,
                c.phone as customer_phone, c.address as customer_address
         FROM schedule_events e
         LEFT JOIN jobs j ON e.job_id = j.id
-        LEFT JOIN customers c ON COALESCE(e.customer_id, j.customer_id) = c.id
+        LEFT JOIN customers c ON COALESCE(e.customer_id, {join_cust}) = c.id
     """
 
 

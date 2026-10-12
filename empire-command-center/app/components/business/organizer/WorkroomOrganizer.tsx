@@ -58,6 +58,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   const [photoB64, setPhotoB64] = useState('');
   const [photoMime, setPhotoMime] = useState('image/jpeg');
   const [spaceEdit, setSpaceEdit] = useState<OrganizerSpace | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const dragRef = useRef<{ id: string; mode: 'move' | 'resize'; startY: number; origStart: string; origEnd: string } | null>(null);
   const cardDragRef = useRef<{ id: string } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -122,6 +123,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     setPendingMail(pm.items || []);
     setMailNote(pm.note || '');
     setMailAccounts(pm.accounts || null);
+    setLoaded(true);
     if (jobFilter && jobSpace) {
       const tl = await fetch(`${API}/organizer/jobs/${jobFilter}/timeline`).then((x) => x.ok ? x.json() : null).catch(() => null);
       setTimeline(tl);
@@ -507,7 +509,12 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   }
 
   return (
-    <div className="org-root" data-organizer>
+    <div
+      className="org-root"
+      data-organizer
+      data-organizer-loaded={loaded ? '1' : '0'}
+      data-today-count={todayPack.overdue.length + todayPack.today.length + todayPack.upcoming.length}
+    >
       <div className="org-top">
         <div className="org-title">
           Organizer

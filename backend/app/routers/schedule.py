@@ -135,37 +135,39 @@ def list_schedule_events(
 ):
     """List schedule events by date range, job_id, type, or status."""
     clause, eparams = edition_sql("e")
-    query = event_select_sql() + f" WHERE {clause}"
     params = list(eparams)
 
+    extra = ""
+    extra_params: list = []
     if start_date:
-        query += " AND e.start_time >= ?"
-        params.append(start_date)
+        extra += " AND e.start_time >= ?"
+        extra_params.append(start_date)
 
     if end_date:
         # If end_date is just a date like YYYY-MM-DD, include the entire day
         end_val = f"{end_date}T23:59:59" if len(end_date) == 10 else end_date
-        query += " AND e.start_time <= ?"
-        params.append(end_val)
+        extra += " AND e.start_time <= ?"
+        extra_params.append(end_val)
 
     if job_id:
-        query += " AND e.job_id = ?"
-        params.append(job_id)
+        extra += " AND e.job_id = ?"
+        extra_params.append(job_id)
 
     if type:
-        query += " AND (e.type = ? OR e.event_kind = ?)"
-        params.extend([type, type])
+        extra += " AND (e.type = ? OR e.event_kind = ?)"
+        extra_params.extend([type, type])
 
     if status:
-        query += " AND e.status = ?"
-        params.append(status)
+        extra += " AND e.status = ?"
+        extra_params.append(status)
 
-    query += " ORDER BY e.start_time ASC LIMIT ?"
-    params.append(limit)
+    extra += " ORDER BY e.start_time ASC LIMIT ?"
+    extra_params.append(limit)
 
     with get_db() as conn:
         ensure_schema(conn)
-        rows = conn.execute(query, params).fetchall()
+        query = event_select_sql(conn) + f" WHERE {clause}" + extra
+        rows = conn.execute(query, params + extra_params).fetchall()
         events_list = [hydrate_event_row(conn, r) for r in rows]
         return {
             "count": len(events_list),

@@ -878,6 +878,36 @@ def test_mailbox_token_paths_refuse_main_token(tmp_path, monkeypatch):
     assert main["gmail"] == main_token.resolve()
 
 
+def test_event_select_sql_nulls_missing_job_columns(isolated_empire_db):
+    """init_db jobs may lack client_name — listing events must not SELECT a missing col."""
+    import sqlite3
+    from app.services.organizer.store import event_select_sql
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE jobs (id TEXT, title TEXT)")
+    sql = event_select_sql(conn)
+    assert "j.client_name" not in sql
+    assert "NULL as client_name" in sql
+    assert "j.title as job_title" in sql
+    conn.close()
+
+
+def test_today_and_schedule_list_ok_on_isolated_schema(client, isolated_empire_db):
+    ev = client.post("/api/v1/schedule/events", json={
+        "title": "Lean-schema install",
+        "type": "install",
+        "start_time": date.today().isoformat() + "T09:00:00",
+        "end_time": date.today().isoformat() + "T10:00:00",
+        "status": "planned",
+    })
+    assert ev.status_code == 200, ev.text
+    today = client.get("/api/v1/organizer/today")
+    assert today.status_code == 200, today.text
+    listed = client.get("/api/v1/schedule/events")
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["count"] >= 1
+
+
 def test_spaces_have_icon_color_and_are_configurable(client, isolated_empire_db):
     spaces = client.get("/api/v1/organizer/spaces").json()["spaces"]
     slugs = {s["slug"]: s for s in spaces}
