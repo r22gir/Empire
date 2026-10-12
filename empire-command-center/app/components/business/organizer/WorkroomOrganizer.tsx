@@ -3,14 +3,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API } from '../../../lib/api';
 import {
-  addMinutesIso, DAY_END_MIN, DAY_START_MIN, eventLayout, filterItems, filterPendingMail,
-  groupActions, itemsOnDay, isOrganizerCommand, KIND_COLOR, KIND_LABEL, monthCells, overdueItems,
-  PX_PER_MIN, shouldOfferCrewDraft, showsWorkroomJobs, timeFromOffset, weekDays, ymd,
-  type OrganizerAction, type OrganizerItem,
+  addMinutesIso, DAY_END_MIN, DAY_START_MIN, eventLayout,
+  filterItems, filterPendingMail, groupActions, inferSpaceClient, itemsInColumn, itemsOnDay,
+  isOrganizerCommand, KIND_COLOR, KIND_LABEL, monthCells, overdueItems, PX_PER_MIN,
+  shouldOfferCrewDraft, showsWorkroomJobs, spaceStyle, STATUS_COLUMNS, timeFromOffset,
+  weekDays, ymd,
+  type OrganizerAction, type OrganizerItem, type OrganizerSpace, type TodayBucket,
 } from '../../../lib/organizer-logic';
 import './organizer.css';
 
-type View = 'day' | 'week' | 'month' | 'lanes' | 'agenda' | 'mail';
+type View = 'today' | 'board' | 'day' | 'week' | 'month' | 'lanes' | 'agenda' | 'mail';
 
 const KINDS = Object.keys(KIND_LABEL);
 
@@ -20,7 +22,7 @@ function initialJob(): string {
 }
 
 export default function WorkroomOrganizer({ business, initialJobId }: { business?: string; initialJobId?: string }) {
-  const [view, setView] = useState<View>('day');
+  const [view, setView] = useState<View>('today');
   const [anchor, setAnchor] = useState(() => new Date());
   const [board, setBoard] = useState<OrganizerItem[]>([]);
   const [overdue, setOverdue] = useState<OrganizerItem[]>([]);
@@ -51,11 +53,18 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   const [pendingMail, setPendingMail] = useState<any[]>([]);
   const [mailNote, setMailNote] = useState('');
   const [mailAccounts, setMailAccounts] = useState<any>(null);
+  const [todayPack, setTodayPack] = useState<{ overdue: OrganizerItem[]; today: OrganizerItem[]; upcoming: OrganizerItem[] }>({ overdue: [], today: [], upcoming: [] });
+  const [photoName, setPhotoName] = useState('');
+  const [photoB64, setPhotoB64] = useState('');
+  const [photoMime, setPhotoMime] = useState('image/jpeg');
+  const [spaceEdit, setSpaceEdit] = useState<OrganizerSpace | null>(null);
   const dragRef = useRef<{ id: string; mode: 'move' | 'resize'; startY: number; origStart: string; origEnd: string } | null>(null);
+  const cardDragRef = useRef<{ id: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const day = ymd(anchor);
   const edition = meta?.edition || {};
-  const spaces = edition.spaces || meta?.spaces || [];
+  const spaces: OrganizerSpace[] = edition.spaces || meta?.spaces || [];
   const showJobs = showsWorkroomJobs(edition, spaceFilter);
   const assistant = edition.assistant || 'Max';
   const filtered = useMemo(
@@ -78,7 +87,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     const to = new Date(anchor); to.setDate(to.getDate() + 40);
     const spaceQs = spaceFilter ? `&space_id=${encodeURIComponent(spaceFilter)}` : '';
     const qs = `start_date=${ymd(from)}&end_date=${ymd(to)}${spaceQs}`;
-    const [b, r, p, rt, m, caps, u, pm] = await Promise.all([
+    const [b, r, p, rt, m, caps, u, pm, td] = await Promise.all([
       fetch(`${API}/organizer/board?${qs}`).then((x) => x.json()).catch(() => ({ items: [], overdue: [] })),
       fetch(`${API}/organizer/resources`).then((x) => x.json()).catch(() => ({ resources: [] })),
       fetch(`${API}/organizer/day-plan?plan_date=${day}`).then((x) => x.json()).catch(() => null),
@@ -87,6 +96,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
       fetch(`${API}/organizer/captures`).then((x) => x.json()).catch(() => ({ captures: [] })),
       fetch(`${API}/organizer/usage`).then((x) => x.json()).catch(() => null),
       fetch(`${API}/organizer/pending-mail`).then((x) => x.json()).catch(() => ({ items: [] })),
+      fetch(`${API}/organizer/today`).then((x) => x.json()).catch(() => ({ overdue: [], today: [], upcoming: [], items: [] })),
     ]);
     const allowsJobs = !!(m?.edition?.allows_workroom_jobs);
     const jobSpace = showsWorkroomJobs(m?.edition, spaceFilter);
@@ -95,7 +105,12 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
       allowsJobs ? fetch(`${API}/organizer/follow-ups`).then((x) => x.json()).catch(() => ({ drafts: [] })) : Promise.resolve({ drafts: [] }),
     ]);
     setBoard(b.items || []);
-    setOverdue(b.overdue || overdueItems(b.items || [], `${day}T00:00:00`));
+    setOverdue(td.overdue || b.overdue || overdueItems(b.items || [], `${day}T00:00:00`));
+    setTodayPack({
+      overdue: td.overdue || [],
+      today: td.today || td.items || [],
+      upcoming: td.upcoming || [],
+    });
     setResources([...(r.resources || []), ...((r.directory || []).slice(0, 40))]);
     setJobs(j.jobs || []);
     setPlan(p);
@@ -118,7 +133,10 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   async function saveEvent(payload: any, confirm = false) {
     const body = { ...payload, confirm_conflicts: confirm, space_id: payload.space_id || spaceFilter || undefined };
     const isNew = !payload.id || String(payload.id).startsWith('new');
-    const url = isNew ? `${API}/schedule/events` : `${API}/schedule/events/${payload.id}`;
+    const asItem = !body.start_time || ['todo', 'reminder', 'deadline', 'followup'].includes(String(body.kind || body.type || ''));
+    const url = asItem
+      ? (isNew ? `${API}/organizer/items` : `${API}/organizer/items/${payload.id}`)
+      : (isNew ? `${API}/schedule/events` : `${API}/schedule/events/${payload.id}`);
     const res = await fetch(url, { method: isNew ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (res.status === 409) {
       const err = await res.json();
@@ -131,10 +149,26 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
       return null;
     }
     if (!res.ok) throw new Error(await res.text());
+    const saved = await res.json();
+    const item = saved.item || saved;
+    if (body.reminder_at || body.due_at) {
+      await fetch(`${API}/organizer/reminder-draft`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: body.title || 'Reminder',
+          due_at: body.reminder_at || body.due_at,
+          body: body.notes || body.title || 'Due in Organizer',
+          channel: 'max',
+          job_id: body.job_id || undefined,
+          space_id: body.space_id,
+          item_id: item?.id,
+        }),
+      }).catch(() => null);
+    }
     setConflict(null);
     setForm(null);
     await load();
-    return res.json();
+    return saved;
   }
 
   async function moveEvent(id: string, start: string, end: string, confirm = false) {
@@ -252,18 +286,115 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     else await moveEvent(d.id, d.origStart, addMinutesIso(d.origEnd, deltaMin));
   }
 
+  async function moveCard(id: string, column: string) {
+    const res = await fetch(`${API}/organizer/items/${encodeURIComponent(id)}/move`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ column }),
+    });
+    if (!res.ok) {
+      setToast('Could not move that card.');
+      return;
+    }
+    await load();
+  }
+
+  function onCardPointerDown(e: React.PointerEvent, id: string) {
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    cardDragRef.current = { id };
+    (e.currentTarget as HTMLElement).dataset.dragging = '1';
+  }
+  function onCardPointerUp(e: React.PointerEvent, column: string) {
+    const d = cardDragRef.current;
+    (e.currentTarget as HTMLElement).dataset.dragging = '';
+    if (!d) return;
+    cardDragRef.current = null;
+    if (d.id) moveCard(d.id, column);
+  }
+  function onColumnPointerUp(e: React.PointerEvent, column: string) {
+    const d = cardDragRef.current;
+    if (!d) return;
+    cardDragRef.current = null;
+    moveCard(d.id, column);
+  }
+
   async function submitQuick(text: string, confirm = false) {
-    if (isOrganizerCommand(text)) {
+    if (isOrganizerCommand(text) && !photoB64) {
       await runCommand(text, confirm);
       return;
     }
+    const guessed = inferSpaceClient(text, spaces.map((s) => s.slug));
     const res = await fetch(`${API}/organizer/quick-add`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, confirm }),
+      body: JSON.stringify({
+        text, confirm,
+        space_id: spaceFilter || guessed || undefined,
+        photo_b64: photoB64 || undefined,
+        filename: photoName || undefined,
+        mime: photoMime || undefined,
+      }),
     });
     const data = await res.json();
     if (!confirm) setDrafts(data.drafts || []);
-    else { setDrafts([]); setQuick(''); await load(); }
+    else {
+      setDrafts([]); setQuick(''); setPhotoB64(''); setPhotoName('');
+      await load();
+    }
+  }
+
+  function onPickPhoto(file: File | null) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      setPhotoB64(result.includes(',') ? result.split(',')[1] : result);
+      setPhotoName(file.name);
+      setPhotoMime(file.type || 'image/jpeg');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function RecordLinks({ item }: { item: Partial<OrganizerItem> }) {
+    const links = item.record_links || [];
+    if (!links.length) return null;
+    return (
+      <div className="org-links" onClick={(e) => e.stopPropagation()}>
+        {links.map((l) => (
+          <a key={`${l.kind}-${l.id}`} href={l.href}>{l.label}</a>
+        ))}
+      </div>
+    );
+  }
+
+  function ProgressBar({ item }: { item: Partial<OrganizerItem> }) {
+    const p = item.progress;
+    if (!p || !p.total) return null;
+    return (
+      <div className="org-progress" title={`${p.done} of ${p.total} tasks`}>
+        <span className="org-progress-bar"><i style={{ width: `${p.percent}%` }} /></span>
+        <em>{p.fraction}</em>
+      </div>
+    );
+  }
+
+  function OrgCard({ item, column }: { item: OrganizerItem; column: string }) {
+    const style = spaceStyle(spaces.find((s) => s.slug === item.space_id) || item.space_id);
+    return (
+      <div
+        className="org-kanban-card"
+        style={{ borderLeftColor: style.accent }}
+        draggable
+        onDragStart={(e) => { e.dataTransfer.setData('text/plain', item.id); e.dataTransfer.effectAllowed = 'move'; }}
+        onPointerDown={(e) => onCardPointerDown(e, item.id)}
+        onClick={() => setForm({ ...item, assigned_resource_ids: item.assigned_resource_ids || [] })}
+      >
+        <div className="org-kanban-space" style={{ color: style.accent }}>{style.icon} {style.label}</div>
+        <b>{item.title}</b>
+        <small>{KIND_LABEL[item.kind || item.type || ''] || item.kind} · {(item.start_time || item.due_at || '').slice(0, 16) || 'no date'}</small>
+        <ProgressBar item={item} />
+        <RecordLinks item={item} />
+        <ActionBar item={item} compact />
+      </div>
+    );
   }
 
   function ActionBar({ item, compact }: { item: Partial<OrganizerItem>; compact?: boolean }) {
@@ -288,9 +419,37 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     );
   }
 
-  function startVoice() {
+  async function startVoice() {
+    if (navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const rec = new MediaRecorder(stream);
+        const chunks: BlobPart[] = [];
+        rec.ondataavailable = (ev) => { if (ev.data.size) chunks.push(ev.data); };
+        rec.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          setListening(false);
+          const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+          const fd = new FormData();
+          fd.append('audio', blob, 'quick-add.webm');
+          const res = await fetch(`${API}/organizer/transcribe`, { method: 'POST', body: fd });
+          if (res.ok) {
+            const data = await res.json();
+            const said = data.text || data.transcript || '';
+            if (said) { setQuick(said); submitQuick(said); }
+            else setToast('Heard nothing. Type it instead.');
+            return;
+          }
+          setToast('Voice transcription is not configured. Type instead.');
+        };
+        setListening(true);
+        rec.start();
+        window.setTimeout(() => { try { rec.stop(); } catch { /* already stopped */ } }, 6000);
+        return;
+      } catch { /* fall through to browser STT */ }
+    }
     const SR: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { setQuick((t) => t || ''); alert('Voice typing is not available on this browser. Type instead.'); return; }
+    if (!SR) { setQuick((t) => t || ''); setToast('Voice typing is not available. Type instead.'); return; }
     const rec = new SR();
     rec.lang = 'en-US';
     rec.onresult = (ev: any) => {
@@ -357,14 +516,27 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
         </div>
         <div className="org-spaces" role="tablist" aria-label="Areas">
           <button className={!spaceFilter ? 'on' : ''} onClick={() => setSpaceFilter('')}>All areas</button>
-          {spaces.map((s: any) => (
-            <button key={s.slug} className={spaceFilter === s.slug ? 'on' : ''} onClick={() => setSpaceFilter(s.slug)}>
-              {s.label}
-            </button>
-          ))}
+          {spaces.map((s) => {
+            const st = spaceStyle(s);
+            return (
+              <button
+                key={s.slug}
+                className={spaceFilter === s.slug ? 'on' : ''}
+                style={{
+                  borderColor: st.accent,
+                  background: spaceFilter === s.slug ? st.accent : `${st.accent}18`,
+                  color: spaceFilter === s.slug ? '#fff' : '#1a1a1a',
+                }}
+                onClick={() => setSpaceFilter(s.slug)}
+                onDoubleClick={() => setSpaceEdit(s)}
+              >
+                <span aria-hidden>{st.icon}</span> {st.label}
+              </button>
+            );
+          })}
         </div>
         <div className="org-toolbar">
-          {(['day', 'week', 'month', 'lanes', 'agenda', 'mail'] as View[]).map((v) => (
+          {(['today', 'board', 'day', 'week', 'month', 'lanes', 'agenda', 'mail'] as View[]).map((v) => (
             <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{v === 'mail' ? 'messages' : v}</button>
           ))}
           <button onClick={() => setAnchor(new Date())}>Today</button>
@@ -398,10 +570,12 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
           <input
             value={quick}
             onChange={(e) => setQuick(e.target.value)}
-            placeholder="Quick-add or command: move Marley's install to Friday and tell the crew"
-            onKeyDown={(e) => { if (e.key === 'Enter' && quick.trim()) submitQuick(quick.trim()); }}
+            placeholder="Quick-add: text, voice, or a photo. Space is picked when it's obvious."
+            onKeyDown={(e) => { if (e.key === 'Enter' && (quick.trim() || photoB64)) submitQuick(quick.trim() || photoName || 'photo'); }}
           />
-          <button onClick={() => quick.trim() && submitQuick(quick.trim())}>Draft</button>
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => onPickPhoto(e.target.files?.[0] || null)} />
+          <button onClick={() => fileRef.current?.click()}>{photoName ? 'Photo ✓' : 'Photo'}</button>
+          <button onClick={() => (quick.trim() || photoB64) && submitQuick(quick.trim() || photoName || 'photo')}>Draft</button>
           <button onClick={startVoice}>{listening ? 'Listening…' : 'Voice'}</button>
         </div>
       </div>
@@ -466,7 +640,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             {overdue.slice(0, 8).map((it) => (
               <div className="org-row" key={it.id} onClick={() => setForm(it)}>
                 <span className="tm">!</span>
-                <span><b>{it.title}</b><small>{it.due_at || it.start_time}</small><ActionBar item={it} compact /></span>
+                <span><b>{it.title}</b><small>{it.due_at || it.start_time}</small><ProgressBar item={it} /><RecordLinks item={it} /><ActionBar item={it} compact /></span>
               </div>
             ))}
           </div>
@@ -475,7 +649,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             {itemsOnDay(filtered, day).map((it) => (
               <div className="org-row" key={it.id} onClick={() => setForm(it)}>
                 <span className="tm">{(it.start_time || it.due_at || '').slice(11, 16) || '—'}</span>
-                <span><b>{it.title}</b><small>{KIND_LABEL[it.kind || it.type || '']}</small><ActionBar item={it} compact /></span>
+                <span><b>{it.title}</b><small>{KIND_LABEL[it.kind || it.type || '']}</small><ProgressBar item={it} /><RecordLinks item={it} /><ActionBar item={it} compact /></span>
               </div>
             ))}
           </div>
@@ -557,6 +731,58 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
         </aside>
 
         <section>
+          {view === 'today' && (
+            <div className="org-kanban" data-today-board>
+              {([
+                ['overdue', 'Overdue', todayPack.overdue],
+                ['today', 'Today', todayPack.today],
+                ['upcoming', 'Upcoming', todayPack.upcoming],
+              ] as [TodayBucket, string, OrganizerItem[]][]).map(([col, label, rows]) => {
+                const shown = filterItems(rows, {
+                  jobId: jobFilter || undefined,
+                  resourceId: personFilter || undefined,
+                  kind: kindFilter || undefined,
+                  query: q || undefined,
+                  spaceId: spaceFilter || undefined,
+                });
+                return (
+                  <div
+                    key={col}
+                    className="org-kanban-col"
+                    data-column={col}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id) moveCard(id, col); }}
+                    onPointerUp={(e) => onColumnPointerUp(e, col)}
+                  >
+                    <h3>{label} <span>{shown.length}</span></h3>
+                    {shown.length === 0 && <div className="org-note">Nothing here.</div>}
+                    {shown.map((it) => <OrgCard key={it.id} item={it} column={col} />)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {view === 'board' && (
+            <div className="org-kanban" data-status-board>
+              {STATUS_COLUMNS.map((col) => {
+                const rows = itemsInColumn(filtered, col.id);
+                return (
+                  <div
+                    key={col.id}
+                    className="org-kanban-col"
+                    data-column={col.id}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id) moveCard(id, col.id); }}
+                    onPointerUp={(e) => onColumnPointerUp(e, col.id)}
+                  >
+                    <h3>{col.label} <span>{rows.length}</span></h3>
+                    {rows.length === 0 && <div className="org-note">Drop a card here.</div>}
+                    {rows.map((it) => <OrgCard key={it.id} item={it} column={col.id} />)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {view === 'day' && (
             <div className="org-grid-day" onDoubleClick={(e) => {
               const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -630,6 +856,8 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
                   <span>
                     <b>{it.title}</b>
                     <small>{it.customer_vendor} · {it.location_address}</small>
+                    <ProgressBar item={it} />
+                    <RecordLinks item={it} />
                     <ActionBar item={it} />
                   </span>
                 </div>
@@ -724,6 +952,12 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             <input value={(form.start_time || '').slice(0, 16)} type="datetime-local" onChange={(e) => setForm({ ...form, start_time: e.target.value.length === 16 ? `${e.target.value}:00` : e.target.value })} />
             <label>End</label>
             <input value={(form.end_time || '').slice(0, 16)} type="datetime-local" onChange={(e) => setForm({ ...form, end_time: e.target.value.length === 16 ? `${e.target.value}:00` : e.target.value })} />
+            <label>Due</label>
+            <input value={(form.due_at || '').slice(0, 16)} type="datetime-local" onChange={(e) => setForm({ ...form, due_at: e.target.value.length === 16 ? `${e.target.value}:00` : e.target.value })} />
+            <label>Remind Max at</label>
+            <input value={(form.reminder_at || form.due_at || '').slice(0, 16)} type="datetime-local" onChange={(e) => setForm({ ...form, reminder_at: e.target.value.length === 16 ? `${e.target.value}:00` : e.target.value })} />
+            <RecordLinks item={form} />
+            <ProgressBar item={form} />
             <label>Address</label>
             <input value={form.location_address || ''} onChange={(e) => setForm({ ...form, location_address: e.target.value })} />
             <label>Phone</label>
@@ -752,6 +986,32 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             <div className="org-actions">
               <button className="org-btn-gold" onClick={() => runAction('notify_crew', crewPrompt)}>Draft crew text</button>
               <button onClick={() => setCrewPrompt(null)}>Skip</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {spaceEdit && (
+        <div className="org-modal" onClick={() => setSpaceEdit(null)}>
+          <div className="org-sheet" onClick={(e) => e.stopPropagation()}>
+            <h3>Area look</h3>
+            <p className="org-note">Icon and accent color for this life or business area. Isolated to {edition.label || 'this edition'}.</p>
+            <label>Icon</label>
+            <input value={spaceEdit.icon || ''} onChange={(e) => setSpaceEdit({ ...spaceEdit, icon: e.target.value })} />
+            <label>Accent color</label>
+            <input value={spaceEdit.accent_color || ''} onChange={(e) => setSpaceEdit({ ...spaceEdit, accent_color: e.target.value })} />
+            <label>Label</label>
+            <input value={spaceEdit.label || ''} onChange={(e) => setSpaceEdit({ ...spaceEdit, label: e.target.value })} />
+            <div className="org-actions">
+              <button className="org-btn-gold" onClick={async () => {
+                await fetch(`${API}/organizer/spaces/${encodeURIComponent(spaceEdit.slug)}`, {
+                  method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ icon: spaceEdit.icon, accent_color: spaceEdit.accent_color, label: spaceEdit.label }),
+                });
+                setSpaceEdit(null);
+                await load();
+              }}>Save area</button>
+              <button onClick={() => setSpaceEdit(null)}>Cancel</button>
             </div>
           </div>
         </div>

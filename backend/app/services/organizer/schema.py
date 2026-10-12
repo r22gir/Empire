@@ -192,6 +192,8 @@ def migrate_organizer_tables(conn: sqlite3.Connection) -> None:
             label TEXT NOT NULL,
             kind TEXT NOT NULL DEFAULT 'life',
             sort_order INTEGER NOT NULL DEFAULT 0,
+            icon TEXT,
+            accent_color TEXT,
             created_at TEXT
         )
         """
@@ -234,6 +236,31 @@ def migrate_organizer_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_org_mail_ed_src_id ON organizer_mail_state(edition, source, message_id)"
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organizer_reminders (
+            id TEXT PRIMARY KEY,
+            edition TEXT NOT NULL,
+            item_id TEXT,
+            event_id TEXT,
+            due_at TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT,
+            channel TEXT NOT NULL DEFAULT 'max',
+            status TEXT NOT NULL DEFAULT 'pending',
+            notified_at TEXT,
+            notification_id TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_org_rem_due ON organizer_reminders(status, due_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_org_rem_item ON organizer_reminders(item_id)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_cap_job ON organizer_captures(job_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_cap_ed ON organizer_captures(edition)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_crew_tok ON organizer_crew_tokens(token)")
@@ -261,5 +288,21 @@ def migrate_organizer_tables(conn: sqlite3.Connection) -> None:
             pass
         try:
             _add_column(conn, table, "space_id", "TEXT")
+        except Exception:
+            pass
+
+    try:
+        _add_column(conn, "organizer_spaces", "icon", "TEXT")
+        _add_column(conn, "organizer_spaces", "accent_color", "TEXT")
+    except Exception:
+        pass
+    for name, decl in (
+        ("quote_id", "TEXT"),
+        ("reminder_at", "TEXT"),
+        ("capture_id", "TEXT"),
+        ("project_id", "TEXT"),
+    ):
+        try:
+            _add_column(conn, "organizer_items", name, decl)
         except Exception:
             pass

@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
 import json
+import uuid
 
 from app.db.database import get_db, dict_row, dict_rows
 
@@ -177,14 +178,16 @@ def list_tasks(
 
 @router.post("/")
 def create_task(task: TaskCreate):
-    """Create a new task."""
+    """Create a new task. Always returns the id that was just inserted."""
+    task_id = uuid.uuid4().hex
     with get_db() as conn:
-        cursor = conn.execute(
+        conn.execute(
             """INSERT INTO tasks
                (id, title, description, status, priority, desk, business, assigned_to,
                 created_by, due_date, tags, metadata, parent_task_id)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
+                task_id,
                 task.title,
                 task.description,
                 task.status,
@@ -200,11 +203,15 @@ def create_task(task: TaskCreate):
             ),
         )
 
-        # Get the created task by querying the last insert
         row = conn.execute(
-            "SELECT * FROM tasks ORDER BY created_at DESC LIMIT 1"
+            "SELECT * FROM tasks WHERE id = ?",
+            (task_id,),
         ).fetchone()
+        if not row:
+            raise HTTPException(status_code=500, detail="Task insert did not return the new id")
         created = _enrich_task(dict_row(row))
+        if created.get("id") != task_id:
+            raise HTTPException(status_code=500, detail="Task insert returned the wrong id")
 
         _log_activity(conn, created["id"], task.created_by, "created", f"Created task: {task.title}")
 

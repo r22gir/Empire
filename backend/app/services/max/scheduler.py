@@ -74,6 +74,14 @@ class MaxScheduler:
             name="Expire Stale Crypto Payments",
         )
 
+        # Every 5 minutes — Organizer due-date reminders through notify_founder
+        self.scheduler.add_job(
+            self.dispatch_organizer_reminders,
+            CronTrigger(minute="*/5"),
+            id="organizer_reminders",
+            name="Organizer Due Reminders",
+        )
+
         self.scheduler.start()
         jobs = self.scheduler.get_jobs()
         for job in jobs:
@@ -457,6 +465,18 @@ class MaxScheduler:
 
         except Exception as e:
             logger.error(f"Brain sync failed: {e}")
+
+    async def dispatch_organizer_reminders(self):
+        """Deliver persisted Organizer reminders through Max's notification system."""
+        try:
+            from app.db.database import get_db
+            from app.services.organizer.reminders import dispatch_due_reminders
+            with get_db() as conn:
+                fired = dispatch_due_reminders(conn)
+            if fired:
+                logger.info("Organizer reminders dispatched: %s", len(fired))
+        except Exception as e:
+            logger.error(f"Organizer reminder dispatch failed: {e}")
 
     async def expire_crypto_payments(self):
         """Run every 15 minutes to expire stale pending crypto payments."""

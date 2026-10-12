@@ -28,10 +28,41 @@ export type OrganizerItem = {
   notes?: string | null;
   customer_vendor?: string | null;
   job_title?: string | null;
-  capture_id?: string | null;
   reminder_draft?: string | null;
   space_id?: string | null;
+  column?: string | null;
+  quote_id?: string | null;
+  customer_id?: string | null;
+  schedule_event_id?: string | null;
+  reminder_at?: string | null;
+  capture_id?: string | null;
+  progress?: OrganizerProgress | null;
+  record_links?: OrganizerRecordLink[];
   actions?: OrganizerAction[];
+};
+
+export type OrganizerProgress = {
+  job_id?: string;
+  total: number;
+  done: number;
+  open?: number;
+  percent: number;
+  fraction: string;
+};
+
+export type OrganizerRecordLink = {
+  kind: 'estimate' | 'client' | 'job' | 'calendar' | string;
+  id: string;
+  label: string;
+  href: string;
+};
+
+export type OrganizerSpace = {
+  slug: string;
+  label: string;
+  kind?: string;
+  icon?: string;
+  accent_color?: string;
 };
 
 export type OrganizerAction = {
@@ -251,6 +282,105 @@ export function shouldOfferCrewDraft(moved: boolean, hadConflict: boolean): bool
 export function showsWorkroomJobs(edition: { allows_workroom_jobs?: boolean } | null | undefined, spaceId?: string): boolean {
   if (!edition?.allows_workroom_jobs) return false;
   return !spaceId || spaceId === 'workroom';
+}
+
+export const SPACE_STYLE: Record<string, { icon: string; accent: string }> = {
+  workroom: { icon: '🧵', accent: '#c2410c' },
+  empire: { icon: '👑', accent: '#7c3aed' },
+  family: { icon: '🏡', accent: '#16a34a' },
+  personal: { icon: '✦', accent: '#0891b2' },
+  ventures: { icon: '🚀', accent: '#d97706' },
+  amp: { icon: '🎯', accent: '#2563eb' },
+};
+
+export function spaceStyle(space?: OrganizerSpace | string | null): { icon: string; accent: string; label: string; slug: string } {
+  if (space && typeof space === 'object') {
+    const fallback = SPACE_STYLE[space.slug] || { icon: '●', accent: '#57534e' };
+    return {
+      slug: space.slug,
+      label: space.label || space.slug,
+      icon: space.icon || fallback.icon,
+      accent: space.accent_color || fallback.accent,
+    };
+  }
+  const slug = String(space || '');
+  const fallback = SPACE_STYLE[slug] || { icon: '●', accent: '#57534e' };
+  return { slug, label: slug, ...fallback };
+}
+
+export type TodayBucket = 'overdue' | 'today' | 'upcoming';
+
+export function todayBuckets(items: OrganizerItem[], today: string): Record<TodayBucket, OrganizerItem[]> {
+  const horizon = (() => {
+    const d = parseStamp(`${today}T00:00:00`) || new Date(`${today}T00:00:00`);
+    d.setDate(d.getDate() + 14);
+    return ymd(d);
+  })();
+  const overdue = overdueItems(items, `${today}T00:00:00`);
+  const overdueIds = new Set(overdue.map((i) => i.id));
+  const todayRows: OrganizerItem[] = [];
+  const upcoming: OrganizerItem[] = [];
+  for (const it of items) {
+    if (overdueIds.has(it.id)) continue;
+    if (['done', 'cancelled'].includes(String(it.status || ''))) continue;
+    const day = (it.start_time || it.due_at || '').slice(0, 10);
+    if (day === today) todayRows.push(it);
+    else if (day > today && day <= horizon) upcoming.push(it);
+  }
+  return { overdue, today: todayRows, upcoming };
+}
+
+export const STATUS_COLUMNS = [
+  { id: 'open', label: 'Open', statuses: ['open', 'planned', 'snoozed'] },
+  { id: 'doing', label: 'Doing', statuses: ['in_progress', 'confirmed'] },
+  { id: 'done', label: 'Done', statuses: ['done'] },
+] as const;
+
+export function columnForStatus(status?: string | null): string {
+  const key = String(status || 'open');
+  for (const col of STATUS_COLUMNS) {
+    if ((col.statuses as readonly string[]).includes(key)) return col.id;
+  }
+  return key === 'cancelled' ? 'done' : 'open';
+}
+
+export function itemsInColumn(items: OrganizerItem[], column: string): OrganizerItem[] {
+  return items.filter((it) => (it.column || columnForStatus(it.status)) === column);
+}
+
+export function dueForTodayColumn(column: TodayBucket, today: string): string {
+  if (column === 'today') return `${today}T09:00:00`;
+  const d = parseStamp(`${today}T00:00:00`) || new Date(`${today}T00:00:00`);
+  d.setDate(d.getDate() + (column === 'upcoming' ? 1 : -1));
+  return `${ymd(d)}T09:00:00`;
+}
+
+export function progressFromTasks(done: number, total: number): OrganizerProgress {
+  const safeTotal = Math.max(0, total);
+  const safeDone = Math.max(0, Math.min(done, safeTotal));
+  return {
+    total: safeTotal,
+    done: safeDone,
+    open: Math.max(0, safeTotal - safeDone),
+    percent: safeTotal ? Math.round((100 * safeDone) / safeTotal) : 0,
+    fraction: `${safeDone}/${safeTotal}`,
+  };
+}
+
+export function inferSpaceClient(text: string, allowed: string[] = []): string | null {
+  const raw = (text || '').toLowerCase();
+  const rules: [string, RegExp][] = [
+    ['workroom', /\b(workroom|install|fabric|drapery|measure|nelma)\b/],
+    ['empire', /\b(empire|studio|command center|max)\b/],
+    ['family', /\b(kids?|family|school|recital|soccer)\b/],
+    ['personal', /\b(dentist|doctor|personal|gym|myself)\b/],
+    ['ventures', /\b(venture|side project|other business)\b/],
+    ['amp', /\b(amp|coaching|juan)\b/],
+  ];
+  for (const [slug, re] of rules) {
+    if (re.test(raw) && (!allowed.length || allowed.includes(slug))) return slug;
+  }
+  return null;
 }
 
 export type PendingMail = {

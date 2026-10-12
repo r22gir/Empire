@@ -23,14 +23,15 @@ Campestre legal or company details. Model is **grok-4.6** only.
 
 1. Home (`/`) → Today card lists today’s Organizer items (or empty state) and **Open organizer** goes to `/?screen=calendar`.
 2. Left nav **Organizer** opens the same screen. Workroom → Organizer tab does too (Workroom is one area, not the whole app).
-3. Edition badge shows this process (Max · Rafael / Max-e · Juan / Maxine · Camilo). Area chips: **All areas** (unified) plus one chip per life/business space.
-4. Day / week / month views render. Drag an event to a new time; a double-booked person shows a **Not saved — conflict** banner (no silent overwrite). Cancel leaves the old time. “Keep anyway” writes after confirm. After a successful move, **Tell the crew?** offers a draft only.
+3. Edition badge shows this process (Max · Rafael / Max-e · Juan / Maxine · Camilo). Area chips: **All areas** (unified) plus one colorful chip per life/business space (icon + accent). Double-tap a chip to change its icon/color. Organizer is never Workroom-only.
+4. **Today** view (default) has three columns across every area: Overdue / Today / Upcoming. **Board** has Open / Doing / Done. Drag a card between columns on desktop (HTML5) and phone (pointer). Day / week / month still render. Drag an event to a new time; a double-booked person shows a **Not saved — conflict** banner (no silent overwrite). Cancel leaves the old time. “Keep anyway” writes after confirm. After a successful move, **Tell the crew?** offers a draft only.
 5. Resize handle changes duration and hits the same conflict path.
 6. Month: drag a chip to another day.
 7. Lanes: each person has a row; unassigned people do not leak another person’s stops.
 8. Filters (area / person / type / search, plus job only on Workroom + Max) update agenda + calendar together.
-9. Quick-add `call Marley Friday 2pm` (Workroom) or `dentist Thursday 3pm` (Personal) opens a confirm draft (not saved). Confirm writes it. Voice button drafts or says the browser cannot listen. Command `move Marley's install to Friday and tell the crew` moves the event and drafts the crew text (not sent).
-10. Job card **Schedule** (Max / Workroom only) opens `/?screen=calendar&job=<id>` with that job selected and the timeline strip visible. Family / Max-e / Maxine do not show job filters or job buttons.
+9. Quick-add `call Marley Friday 2pm` (Workroom) or `dentist Thursday 3pm` (Personal) opens a confirm draft (not saved). Confirm writes it. Space is picked when the words make it obvious. **Voice** uses `/organizer/transcribe` (existing Groq Whisper) and falls back to browser STT. **Photo** attaches via capture ingest. Command `move Marley's install to Friday and tell the crew` moves the event and drafts the crew text (not sent).
+10. Job card **Schedule** (Max / Workroom only) opens `/?screen=calendar&job=<id>` with that job selected, a progress bar (`done/total` of linked tasks), and one-tap links to estimate / client / job / calendar. Family / Max-e / Maxine do not show job filters or job buttons.
+11. Due dates save a row in `organizer_reminders`. Max’s notification system (`notify_founder`) fires when due. Nothing outbound is sent without the owner’s tap.
 11. **Approve today** on the assistant’s proposed day marks the plan approved and does not send anything.
 12. Route card lists stops + drive-minute estimates and **Open maps** uses Google Maps directions (no live-traffic claim).
 13. Smart follow-ups (Workroom / Max only) show a pre-written nudge plus **Approve & Send**. Tapping it is the owner's tap. Without that tap, nothing is sent.

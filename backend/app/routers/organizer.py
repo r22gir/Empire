@@ -11,7 +11,7 @@ import secrets
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -41,6 +41,8 @@ from app.services.organizer.edition import (
 from app.services.organizer.usage import UsageCapExceeded, consume, snapshot as usage_snapshot
 from app.services.organizer.store import (
     assignment_ids,
+    attach_progress,
+    board_columns,
     conflicts_for_payload,
     enrich_event,
     enrich_item,
@@ -51,12 +53,17 @@ from app.services.organizer.store import (
     insert_item,
     insert_schedule_event,
     is_calendar_kind,
+    job_progress,
+    list_spaces as store_list_spaces,
     load_event,
+    load_item,
     new_id,
     now_iso,
     parse_ids,
     project_job_dates,
     replace_assignments,
+    status_for_column,
+    update_space,
 )
 
 router = APIRouter(tags=["organizer"])
@@ -92,6 +99,9 @@ class ItemIn(BaseModel):
     material_eta: Optional[str] = None
     order_ref: Optional[str] = None
     reminder_draft: Optional[str] = None
+    reminder_at: Optional[str] = None
+    quote_id: Optional[str] = None
+    capture_id: Optional[str] = None
     notes: Optional[str] = None
     confirm_conflicts: bool = False
     created_by: str = "manual"
@@ -115,6 +125,9 @@ class ItemUpdate(BaseModel):
     material_eta: Optional[str] = None
     order_ref: Optional[str] = None
     reminder_draft: Optional[str] = None
+    reminder_at: Optional[str] = None
+    quote_id: Optional[str] = None
+    capture_id: Optional[str] = None
     notes: Optional[str] = None
     confirm_conflicts: bool = False
     space_id: Optional[str] = None
@@ -125,6 +138,11 @@ class QuickAddIn(BaseModel):
     confirm: bool = False
     created_by: str = "manual"
     space_id: Optional[str] = None
+    photo_b64: Optional[str] = None
+    filename: Optional[str] = None
+    mime: Optional[str] = None
+    reminder_at: Optional[str] = None
+    due_at: Optional[str] = None
 
 
 class ReminderDraftIn(BaseModel):
@@ -134,6 +152,22 @@ class ReminderDraftIn(BaseModel):
     due_at: Optional[str] = None
     body: str
     channel: str = "sms"
+    space_id: Optional[str] = None
+    item_id: Optional[str] = None
+
+
+class SpaceUpdateIn(BaseModel):
+    icon: Optional[str] = None
+    accent_color: Optional[str] = None
+    label: Optional[str] = None
+
+
+class ItemMoveIn(BaseModel):
+    column: Optional[str] = None
+    status: Optional[str] = None
+    due_at: Optional[str] = None
+    space_id: Optional[str] = None
+    confirm_conflicts: bool = False
 
 
 class MoveIn(BaseModel):
@@ -188,6 +222,59 @@ def _usage_http(exc: UsageCapExceeded):
 
 def _blocked_http(message: str):
     raise HTTPException(status_code=400, detail={"code": "edition_blocked", "message": message})
+
+
+def _maybe_remind(conn, item: Optional[dict], event_id: Optional[str] = None) -> Optional[dict]:
+    if not item:
+        return None
+    due = item.get("reminder_at") or item.get("due_at") or item.get("start_time")
+    if not due:
+        return None
+    from app.services.organizer.reminders import schedule_reminder
+    return schedule_reminder(
+        conn,
+        item_id=item.get("id"),
+        event_id=event_id or item.get("schedule_event_id"),
+        due_at=due,
+        title=item.get("title") or "Reminder",
+        body=item.get("reminder_draft") or item.get("notes"),
+        channel="max",
+    )
+
+
+def _store_photo(conn, *, content_b64: str, filename: str, mime: str, caption: str, item_id=None, job_id=None):
+    import base64
+    from app.services.organizer.capture import CaptureRejected, write_bytes
+    try:
+        raw = base64.b64decode(content_b64)
+    except Exception:
+        raise HTTPException(400, "photo_b64 is not valid base64")
+    try:
+        stored = write_bytes(raw, filename=filename, mime=mime, edition=process_edition())
+    except CaptureRejected as exc:
+        raise HTTPException(400, str(exc))
+    cap_id = new_id()
+    conn.execute(
+        """
+        INSERT INTO organizer_captures (
+            id, edition, source, source_ref, filename, mime, bytes, sha256, relpath,
+            job_id, resource_id, event_id, item_id, caption, public_url_blocked, created_at
+        ) VALUES (?, ?, 'quick-add', NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 1, ?)
+        """,
+        (
+            cap_id, process_edition(), stored["filename"], stored["mime"], stored["bytes"],
+            stored["sha256"], stored["relpath"], job_id, item_id, caption, now_iso(),
+        ),
+    )
+    if item_id:
+        try:
+            conn.execute(
+                "UPDATE organizer_items SET capture_id = ?, updated_at = ? WHERE id = ?",
+                (cap_id, now_iso(), item_id),
+            )
+        except Exception:
+            pass
+    return {"id": cap_id, **stored, "item_id": item_id, "job_id": job_id, "public_url": None}
 
 
 def _conflict_response(conflicts: list[dict]):
@@ -358,7 +445,25 @@ def _list_items(conn, start_date=None, end_date=None, job_id=None, kind=None, st
 
 def _decorate(conn, rows: list[dict]) -> list[dict]:
     from app.services.organizer.actions import attach_actions
-    return attach_actions(conn, rows)
+    return attach_actions(conn, attach_progress(conn, rows))
+
+
+def _today_buckets(board: list[dict], today: str) -> dict:
+    upcoming_end = (date.today() + timedelta(days=14)).isoformat()
+    overdue = _overdue(board, today)
+    overdue_ids = {str(r.get("id")) for r in overdue}
+    today_items, upcoming = [], []
+    for row in board:
+        if str(row.get("status") or "") in ("done", "cancelled"):
+            continue
+        if str(row.get("id")) in overdue_ids:
+            continue
+        stamp = (row.get("start_time") or row.get("due_at") or "")[:10]
+        if stamp == today:
+            today_items.append(row)
+        elif stamp > today and stamp <= upcoming_end:
+            upcoming.append(row)
+    return {"overdue": overdue, "today": today_items, "upcoming": upcoming}
 
 
 def _unify(events, items, job_dates, *, include_job_dates=True):
@@ -405,6 +510,12 @@ def organizer_meta():
         "default_travel_gap_minutes": DEFAULT_TRAVEL_GAP_MINUTES,
         "spaces": edition_public()["spaces"],
         "edition": edition_public(),
+        "columns": [
+            {"id": "open", "label": "Open"},
+            {"id": "doing", "label": "Doing"},
+            {"id": "done", "label": "Done"},
+        ],
+        "today_columns": ["overdue", "today", "upcoming"],
         "model": "grok-4.6",
         "actions": [
             "navigate", "call", "text", "email",
@@ -444,10 +555,13 @@ def organizer_board(
             job_dates = [j for j in job_dates if j.get("kind") == kind]
         board = _decorate(conn, _unify(events, items, job_dates, include_job_dates=include_job_dates))
         today = date.today().isoformat()
+        spaces = store_list_spaces(conn)
         return {
             "count": len(board),
             "items": board,
             "overdue": _overdue(board, today),
+            "columns": board_columns(board),
+            "spaces": spaces,
             "outbound_policy": OUTBOUND_POLICY,
         }
 
@@ -455,24 +569,28 @@ def organizer_board(
 @router.get("/today")
 def organizer_today():
     today = date.today().isoformat()
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    horizon = (date.today() + timedelta(days=14)).isoformat()
     with get_db() as conn:
         ensure_schema(conn)
-        events = _list_events(conn, today, today)
-        items = _list_items(conn, today, today)
-        job_dates = [j for j in project_job_dates(conn) if (j.get("start_time") or "")[:10] == today]
+        events = _list_events(conn, None, horizon)
+        items = _list_items(conn, None, horizon)
+        job_dates = project_job_dates(conn) if can_read_workroom_jobs() else []
         board = _decorate(conn, _unify(events, items, job_dates))
+        buckets = _today_buckets(board, today)
         week_end = (date.today() + timedelta(days=7)).isoformat()
-        upcoming = _list_events(conn, today, week_end)
+        upcoming_week = [
+            r for r in buckets["upcoming"]
+            if (r.get("start_time") or r.get("due_at") or "")[:10] <= week_end
+        ]
         return {
             "date": today,
-            "items": board,
-            "total_today": len(board),
-            "overdue": _overdue(
-                _unify(_list_events(conn, None, today), _list_items(conn, None, today), project_job_dates(conn)),
-                today,
-            ),
-            "upcoming_7_days_count": len(upcoming),
+            "items": buckets["today"],
+            "today": buckets["today"],
+            "overdue": buckets["overdue"],
+            "upcoming": buckets["upcoming"],
+            "total_today": len(buckets["today"]),
+            "upcoming_7_days_count": len(upcoming_week),
+            "spaces": store_list_spaces(conn),
             "open_organizer_href": "/?screen=calendar",
             "outbound_policy": OUTBOUND_POLICY,
         }
@@ -624,8 +742,10 @@ def create_item(req: ItemIn):
                 payload["customer_vendor"] = None
                 event = insert_schedule_event(conn, payload)
                 item = insert_item(conn, {**payload, "schedule_event_id": event["id"], "status": "planned"})
+                _maybe_remind(conn, item, event_id=event.get("id"))
                 return {"item": item, "event": event, "conflicts": []}
             item = insert_item(conn, payload)
+            _maybe_remind(conn, item)
             return {"item": item, "event": None, "conflicts": []}
         except ValueError as exc:
             _blocked_http(str(exc))
@@ -742,7 +862,8 @@ def quick_add(req: QuickAddIn):
                 "customer_id": draft.get("customer_id"),
                 "start_time": draft.get("start_time"),
                 "end_time": draft.get("end_time"),
-                "due_at": draft.get("due_at"),
+                "due_at": req.due_at or draft.get("due_at"),
+                "reminder_at": req.reminder_at,
                 "phone": draft.get("phone"),
                 "location_address": draft.get("location_address"),
                 "assigned_resource_ids": draft.get("assigned_resource_ids") or [],
@@ -768,16 +889,31 @@ def quick_add(req: QuickAddIn):
             if is_calendar_kind(payload["kind"]) and payload.get("start_time"):
                 event = insert_schedule_event(conn, payload)
                 item = insert_item(conn, {**payload, "schedule_event_id": event["id"]})
-                created.append({"item": item, "event": event, "saved": True, "conflicts": []})
+                _maybe_remind(conn, item, event_id=event.get("id"))
+                created.append({"item": item, "event": event, "saved": True, "conflicts": [], "id": item.get("id")})
             else:
                 item = insert_item(conn, payload)
-                created.append({"item": item, "event": None, "saved": True, "conflicts": []})
+                _maybe_remind(conn, item)
+                created.append({"item": item, "event": None, "saved": True, "conflicts": [], "id": item.get("id")})
+        if req.photo_b64 and created:
+            first = next((c for c in created if c.get("saved") and c.get("item")), None)
+            if first:
+                item = first.get("item") or {}
+                first["capture"] = _store_photo(
+                    conn,
+                    content_b64=req.photo_b64,
+                    filename=req.filename or "quick-add.jpg",
+                    mime=req.mime or "image/jpeg",
+                    caption=(req.text or "")[:80],
+                    item_id=item.get("id"),
+                    job_id=item.get("job_id"),
+                )
         return {"is_draft_only": False, "drafts": resolved, "created": created, "outbound_policy": OUTBOUND_POLICY}
 
 
 @router.post("/reminder-draft")
 def reminder_draft(req: ReminderDraftIn):
-    """Store a customer reminder as a draft. Never sends."""
+    """Store a reminder in the database. Delivery uses Max notifications; never auto-sends outbound."""
     with get_db() as conn:
         ensure_schema(conn)
         item = insert_item(
@@ -788,17 +924,21 @@ def reminder_draft(req: ReminderDraftIn):
                 "job_id": req.job_id,
                 "customer_id": req.customer_id,
                 "due_at": req.due_at,
+                "reminder_at": req.due_at,
                 "reminder_draft": f"[{req.channel}] {req.body}",
-                "notes": "Draft reminder — founder approval required before any send.",
+                "notes": "Reminder saved. Max will notify the owner when it is due. Outbound send still needs a tap.",
                 "status": "open",
+                "space_id": normalize_space(req.space_id),
             },
         )
+        reminder = _maybe_remind(conn, item)
         return {
             "item": item,
+            "reminder": reminder,
             "sent": False,
             "outbound_blocked": True,
             "outbound_policy": OUTBOUND_POLICY,
-            "message": "Reminder saved as a draft. It was not sent.",
+            "message": "Reminder saved in the database. Max will notify when it is due. It was not sent outbound.",
         }
 
 
@@ -1325,12 +1465,96 @@ def crew_done(token: str, req: dict):
 def list_spaces():
     with get_db() as conn:
         ensure_schema(conn)
-        clause, eparams = edition_sql()
-        rows = [dict(r) for r in conn.execute(
-            f"SELECT * FROM organizer_spaces WHERE {clause} ORDER BY sort_order, slug",
-            eparams,
-        ).fetchall()]
-    return {"spaces": rows or edition_public()["spaces"], "unified": True, "edition": process_edition()}
+        rows = store_list_spaces(conn)
+    return {"spaces": rows, "unified": True, "edition": process_edition(), "configurable": True}
+
+
+@router.patch("/spaces/{slug}")
+def patch_space(slug: str, req: SpaceUpdateIn):
+    with get_db() as conn:
+        ensure_schema(conn)
+        space = update_space(conn, slug, req.model_dump(exclude_unset=True))
+        if not space:
+            raise HTTPException(404, "Space not found for this edition")
+        return {"space": space, "spaces": store_list_spaces(conn)}
+
+
+@router.post("/items/{item_id}/move")
+def move_item_column(item_id: str, req: ItemMoveIn):
+    """Drag a card to another column (status or today bucket). Works for desktop and mobile clients."""
+    with get_db() as conn:
+        ensure_schema(conn)
+        item = load_item(conn, item_id)
+        if not item:
+            raise HTTPException(404, "Organizer item not found")
+        updates = {}
+        if req.column in ("open", "doing", "done", "in_progress"):
+            updates["status"] = status_for_column(req.column, item.get("status"))
+        elif req.column == "today":
+            updates["due_at"] = f"{date.today().isoformat()}T09:00:00"
+            if str(item.get("status") or "") in ("done", "cancelled"):
+                updates["status"] = "open"
+        elif req.column == "upcoming":
+            updates["due_at"] = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00:00"
+        elif req.column == "overdue":
+            updates["due_at"] = f"{(date.today() - timedelta(days=1)).isoformat()}T09:00:00"
+        if req.status:
+            if req.status not in ITEM_STATUSES:
+                raise HTTPException(400, f"Invalid status '{req.status}'")
+            updates["status"] = req.status
+        if req.due_at:
+            updates["due_at"] = req.due_at
+        if req.space_id:
+            updates["space_id"] = normalize_space(req.space_id)
+        if not updates:
+            return {"item": item, "moved": False}
+        fields = [f"{k} = ?" for k in updates]
+        fields.append("updated_at = ?")
+        conn.execute(
+            f"UPDATE organizer_items SET {', '.join(fields)} WHERE id = ?",
+            (*updates.values(), now_iso(), item_id),
+        )
+        if item.get("schedule_event_id") and updates.get("due_at"):
+            conn.execute(
+                "UPDATE schedule_events SET start_time = ?, updated_at = ? WHERE id = ?",
+                (updates["due_at"], now_iso(), item["schedule_event_id"]),
+            )
+        fresh = load_item(conn, item_id)
+        return {"item": fresh, "moved": True, "column": fresh.get("column")}
+
+
+@router.get("/jobs/{job_id}/progress")
+def job_progress_view(job_id: str):
+    with get_db() as conn:
+        ensure_schema(conn)
+        if not can_read_workroom_jobs():
+            raise HTTPException(404, "Job not found")
+        return job_progress(conn, job_id)
+
+
+@router.get("/reminders")
+def list_organizer_reminders(status: Optional[str] = None, limit: int = 80):
+    from app.services.organizer.reminders import list_reminders
+    with get_db() as conn:
+        ensure_schema(conn)
+        return {"reminders": list_reminders(conn, status=status, limit=limit)}
+
+
+@router.post("/reminders/dispatch")
+def dispatch_organizer_reminders():
+    """Run due reminders now (also hooked to Max scheduler). Uses notify_founder."""
+    from app.services.organizer.reminders import dispatch_due_reminders
+    with get_db() as conn:
+        ensure_schema(conn)
+        fired = dispatch_due_reminders(conn)
+        return {"dispatched": len(fired), "reminders": fired, "outbound_sent": False}
+
+
+@router.post("/transcribe")
+async def organizer_transcribe(audio: UploadFile = File(...), language: Optional[str] = None):
+    """Reuse Max's existing Groq Whisper STT for Organizer voice quick-add."""
+    from app.services.max.stt_http import transcribe_upload
+    return await transcribe_upload(audio, language)
 
 
 @router.get("/usage")

@@ -40,6 +40,22 @@ USAGE_CAPS = {
     "unknown": {"items": 10, "captures": 5, "actions": 10},
 }
 
+# Icon + accent for each life/business area. Owners can override in the DB.
+SPACE_STYLES = {
+    "workroom": {"icon": "🧵", "accent_color": "#c2410c"},
+    "empire": {"icon": "👑", "accent_color": "#7c3aed"},
+    "family": {"icon": "🏡", "accent_color": "#16a34a"},
+    "personal": {"icon": "✦", "accent_color": "#0891b2"},
+    "ventures": {"icon": "🚀", "accent_color": "#d97706"},
+    "amp": {"icon": "🎯", "accent_color": "#2563eb"},
+}
+
+
+def _space(slug: str, label: str, kind: str) -> dict:
+    style = SPACE_STYLES.get(slug) or {"icon": "●", "accent_color": "#57534e"}
+    return {"slug": slug, "label": label, "kind": kind, **style}
+
+
 _EDITION_META = {
     "main": {
         "id": "main",
@@ -49,11 +65,11 @@ _EDITION_META = {
         "allows_business_directory": True,
         "allows_workroom_jobs": True,
         "spaces": (
-            {"slug": "workroom", "label": "Workroom", "kind": "business"},
-            {"slug": "empire", "label": "Empire", "kind": "business"},
-            {"slug": "family", "label": "Family", "kind": "life"},
-            {"slug": "personal", "label": "Personal", "kind": "life"},
-            {"slug": "ventures", "label": "Ventures", "kind": "business"},
+            _space("workroom", "Workroom", "business"),
+            _space("empire", "Empire", "business"),
+            _space("family", "Family", "life"),
+            _space("personal", "Personal", "life"),
+            _space("ventures", "Ventures", "business"),
         ),
     },
     "max_e": {
@@ -64,10 +80,10 @@ _EDITION_META = {
         "allows_business_directory": False,
         "allows_workroom_jobs": False,
         "spaces": (
-            {"slug": "amp", "label": "AMP", "kind": "business"},
-            {"slug": "family", "label": "Family", "kind": "life"},
-            {"slug": "personal", "label": "Personal", "kind": "life"},
-            {"slug": "ventures", "label": "Ventures", "kind": "business"},
+            _space("amp", "AMP", "business"),
+            _space("family", "Family", "life"),
+            _space("personal", "Personal", "life"),
+            _space("ventures", "Ventures", "business"),
         ),
     },
     "maxine": {
@@ -78,9 +94,9 @@ _EDITION_META = {
         "allows_business_directory": False,
         "allows_workroom_jobs": False,
         "spaces": (
-            {"slug": "family", "label": "Family", "kind": "life"},
-            {"slug": "personal", "label": "Personal", "kind": "life"},
-            {"slug": "ventures", "label": "Ventures", "kind": "business"},
+            _space("family", "Family", "life"),
+            _space("personal", "Personal", "life"),
+            _space("ventures", "Ventures", "business"),
         ),
     },
     "unknown": {
@@ -90,7 +106,7 @@ _EDITION_META = {
         "label": "Unknown edition (fail-closed)",
         "allows_business_directory": False,
         "allows_workroom_jobs": False,
-        "spaces": ({"slug": "personal", "label": "Personal", "kind": "life"},),
+        "spaces": (_space("personal", "Personal", "life"),),
     },
 }
 

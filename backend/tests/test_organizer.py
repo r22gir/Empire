@@ -878,6 +878,127 @@ def test_mailbox_token_paths_refuse_main_token(tmp_path, monkeypatch):
     assert main["gmail"] == main_token.resolve()
 
 
+def test_spaces_have_icon_color_and_are_configurable(client, isolated_empire_db):
+    spaces = client.get("/api/v1/organizer/spaces").json()["spaces"]
+    slugs = {s["slug"]: s for s in spaces}
+    assert slugs["family"]["icon"]
+    assert slugs["family"]["accent_color"].startswith("#")
+    assert slugs["workroom"]["accent_color"].startswith("#")
+    patched = client.patch(
+        "/api/v1/organizer/spaces/family",
+        json={"icon": "🎈", "accent_color": "#db2777"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["space"]["icon"] == "🎈"
+    assert patched.json()["space"]["accent_color"] == "#db2777"
+    meta = client.get("/api/v1/organizer/meta").json()
+    assert "overdue" in meta["today_columns"]
+    assert {c["id"] for c in meta["columns"]} == {"open", "doing", "done"}
+
+
+def test_today_buckets_across_all_spaces(client, isolated_empire_db):
+    today = date.today()
+    client.post("/api/v1/organizer/items", json={
+        "kind": "todo", "title": "Late family form", "space_id": "family",
+        "due_at": (today - timedelta(days=2)).isoformat() + "T09:00:00",
+    })
+    client.post("/api/v1/organizer/items", json={
+        "kind": "todo", "title": "Empire standup", "space_id": "empire",
+        "due_at": today.isoformat() + "T10:00:00",
+    })
+    client.post("/api/v1/organizer/items", json={
+        "kind": "medical", "title": "Personal checkup", "space_id": "personal",
+        "start_time": (today + timedelta(days=3)).isoformat() + "T15:00:00",
+    })
+    body = client.get("/api/v1/organizer/today").json()
+    assert {i["title"] for i in body["overdue"]} >= {"Late family form"}
+    assert {i["title"] for i in body["today"]} >= {"Empire standup"}
+    assert {i["title"] for i in body["upcoming"]} >= {"Personal checkup"}
+    assert body["open_organizer_href"] == "/?screen=calendar"
+    assert any(s.get("icon") for s in body["spaces"])
+
+
+def test_create_several_items_returns_distinct_ids(client, isolated_empire_db):
+    ids = []
+    for i in range(5):
+        res = client.post("/api/v1/organizer/items", json={"kind": "todo", "title": f"Burst {i}"})
+        assert res.status_code == 200, res.text
+        item = res.json()["item"]
+        assert item["id"]
+        ids.append(item["id"])
+    assert len(set(ids)) == 5
+
+
+def test_column_move_and_job_progress_and_links(client, isolated_empire_db):
+    cid, job_id = _customer_and_job(client, "Marley")
+    a = client.post("/api/v1/organizer/items", json={
+        "kind": "todo", "title": "Cut fabric", "job_id": job_id, "space_id": "workroom",
+    })
+    b = client.post("/api/v1/organizer/items", json={
+        "kind": "todo", "title": "Sew panels", "job_id": job_id, "space_id": "workroom",
+    })
+    assert a.status_code == 200 and b.status_code == 200
+    aid, bid = a.json()["item"]["id"], b.json()["item"]["id"]
+    assert aid != bid
+    moved = client.post(f"/api/v1/organizer/items/{aid}/move", json={"column": "done"})
+    assert moved.status_code == 200
+    assert moved.json()["item"]["status"] == "done"
+    prog = client.get(f"/api/v1/organizer/jobs/{job_id}/progress").json()
+    assert prog["fraction"] == "1/2"
+    assert prog["percent"] == 50
+    item = b.json()["item"]
+    kinds = {l["kind"] for l in item.get("record_links") or []}
+    assert "job" in kinds
+    assert "client" in kinds
+    job_link = next(l for l in item["record_links"] if l["kind"] == "job")
+    assert "job=" in job_link["href"]
+    today_move = client.post(f"/api/v1/organizer/items/{bid}/move", json={"column": "today"})
+    assert today_move.status_code == 200
+    assert today_move.json()["item"]["due_at"].startswith(date.today().isoformat())
+
+
+def test_reminder_persisted_and_dispatched_through_notifications(client, isolated_empire_db):
+    past = (date.today() - timedelta(days=1)).isoformat() + "T08:00:00"
+    res = client.post("/api/v1/organizer/reminder-draft", json={
+        "title": "Call the school",
+        "due_at": past,
+        "body": "Remind Rafael",
+        "channel": "max",
+        "space_id": "family",
+    })
+    assert res.status_code == 200, res.text
+    assert res.json()["sent"] is False
+    assert res.json()["reminder"]["id"]
+    listed = client.get("/api/v1/organizer/reminders?status=pending").json()["reminders"]
+    assert any(r["title"] == "Call the school" for r in listed)
+    fired = client.post("/api/v1/organizer/reminders/dispatch").json()
+    assert fired["dispatched"] >= 1
+    assert fired["outbound_sent"] is False
+    from app.routers.notifications import notifications_db
+    assert any("Call the school" in (n.get("title") or "") for n in notifications_db)
+
+
+def test_quick_add_photo_attaches_capture(client, isolated_empire_db):
+    import base64
+    png = base64.b64encode(
+        b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    ).decode()
+    draft = client.post("/api/v1/organizer/quick-add", json={"text": "dentist Thursday 3pm"})
+    assert draft.status_code == 200
+    saved = client.post("/api/v1/organizer/quick-add", json={
+        "text": "dentist Thursday 3pm",
+        "confirm": True,
+        "photo_b64": png,
+        "filename": "tooth.png",
+        "mime": "image/png",
+    })
+    assert saved.status_code == 200, saved.text
+    created = saved.json()["created"]
+    assert created[0]["id"]
+    assert created[0]["item"]["id"] == created[0]["id"]
+    assert created[0].get("capture", {}).get("id")
+
+
 def test_organizer_package_uses_grok_46_only():
     from pathlib import Path
     from app.services.organizer.edition import ORGANIZER_MODEL

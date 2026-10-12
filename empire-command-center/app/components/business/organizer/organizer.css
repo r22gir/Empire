@@ -135,3 +135,33 @@
   white-space: pre-wrap; background: #f5f2ed; border-radius: 8px;
   padding: 8px 10px; font-size: 12px; margin: 8px 0 4px; font-family: inherit;
 }
+.org-kanban {
+  display: grid; grid-template-columns: 1fr; gap: 10px;
+}
+@media (min-width: 720px) {
+  .org-kanban { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.org-kanban-col {
+  background: #fff; border: 1px solid var(--org-line); border-radius: 12px;
+  padding: 10px; min-height: 180px; touch-action: none;
+}
+.org-kanban-col h3 {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; color: var(--org-mut);
+}
+.org-kanban-col h3 span { font-variant-numeric: tabular-nums; }
+.org-kanban-card {
+  border: 1px solid var(--org-line); border-left: 4px solid var(--org-gold);
+  border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; background: #fff;
+  cursor: grab; touch-action: none;
+}
+.org-kanban-card[data-dragging="1"] { opacity: .7; }
+.org-kanban-card b { display: block; font-size: 13px; }
+.org-kanban-card small { color: var(--org-mut); font-size: 11px; }
+.org-kanban-space { font-size: 10px; font-weight: 700; margin-bottom: 2px; }
+.org-progress { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.org-progress-bar {
+  flex: 1; height: 6px; background: #f3efe8; border-radius: 999px; overflow: hidden;
+}
+.org-progress-bar i { display: block; height: 100%; background: var(--org-gold); }
+.org-progress em { font-size: 10px; font-style: normal; font-variant-numeric: tabular-nums; color: var(--org-mut); }

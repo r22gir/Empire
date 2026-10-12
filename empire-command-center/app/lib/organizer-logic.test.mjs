@@ -4,7 +4,8 @@ import {
   addMinutesIso, DAY_START_MIN, eventLayout, filterItems, groupActions, itemsOnDay,
   isOrganizerCommand, monthCells, overdueItems, parseOrganizerCommand, parseQuickAddClient,
   filterPendingMail, pendingMailVisible, PX_PER_MIN, shouldOfferCrewDraft, showsWorkroomJobs, snapMinutes,
-  timeFromOffset, weekDays,
+  spaceStyle, todayBuckets, columnForStatus, itemsInColumn, dueForTodayColumn, progressFromTasks,
+  inferSpaceClient, timeFromOffset, weekDays,
 } from './organizer-logic.ts';
 
 test('filter by job, person, kind', () => {
@@ -94,6 +95,30 @@ test('action groups and crew-draft after drag', () => {
   assert.equal(showsWorkroomJobs({ allows_workroom_jobs: true }, ''), true);
   assert.equal(showsWorkroomJobs({ allows_workroom_jobs: true }, 'family'), false);
   assert.equal(showsWorkroomJobs({ allows_workroom_jobs: false }, 'workroom'), false);
+});
+
+test('spaces have icon and accent; today buckets and progress fractions', () => {
+  const styled = spaceStyle({ slug: 'family', label: 'Family', icon: '🏡', accent_color: '#16a34a' });
+  assert.equal(styled.icon, '🏡');
+  assert.equal(spaceStyle('workroom').accent, '#c2410c');
+  const items = [
+    { id: 'late', title: 'Late bill', due_at: '2026-10-01T09:00:00', status: 'open', space_id: 'personal' },
+    { id: 'now', title: 'Dentist', start_time: '2026-10-12T10:00:00', status: 'open', space_id: 'personal' },
+    { id: 'soon', title: 'Recital', start_time: '2026-10-15T18:00:00', status: 'open', space_id: 'family' },
+    { id: 'done', title: 'Old', due_at: '2026-10-01T09:00:00', status: 'done' },
+  ];
+  const buckets = todayBuckets(items, '2026-10-12');
+  assert.deepEqual(buckets.overdue.map((i) => i.id), ['late']);
+  assert.deepEqual(buckets.today.map((i) => i.id), ['now']);
+  assert.deepEqual(buckets.upcoming.map((i) => i.id), ['soon']);
+  assert.equal(columnForStatus('in_progress'), 'doing');
+  assert.equal(itemsInColumn([{ id: '1', title: 'x', status: 'open' }, { id: '2', title: 'y', status: 'done' }], 'open').length, 1);
+  assert.equal(dueForTodayColumn('today', '2026-10-12'), '2026-10-12T09:00:00');
+  const bar = progressFromTasks(3, 8);
+  assert.equal(bar.fraction, '3/8');
+  assert.equal(bar.percent, 38);
+  assert.equal(inferSpaceClient('kids recital Friday'), 'family');
+  assert.equal(inferSpaceClient('install drapery tomorrow'), 'workroom');
 });
 
 test('pending mail hides snoozed ids', () => {

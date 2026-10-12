@@ -147,7 +147,8 @@ export function useHomeData() {
             time: t ? t.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : null,
             title: String(e.title || 'Item'),
             detail: [e.kind || e.type, e.customer_vendor || e.job_title, e.location_address].filter(Boolean).join(' · '),
-            href: e.job_id ? jobHubHref({ job: e.job_id }) : '/?screen=calendar',
+            href: (Array.isArray(e.record_links) && e.record_links[0]?.href)
+              || (e.job_id ? jobHubHref({ job: e.job_id }) : '/?screen=calendar'),
             map_link: e.map_link || (e.location_address ? `https://maps.google.com/?q=${encodeURIComponent(e.location_address)}` : null),
             call_link: e.call_link || (e.phone ? `tel:${e.phone}` : null),
           };
