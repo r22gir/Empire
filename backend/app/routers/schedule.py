@@ -11,6 +11,26 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db.database import get_db, dict_row, dict_rows
+from app.services.organizer.constants import CALENDAR_EVENT_TYPES, ITEM_KINDS
+from app.services.organizer.parse import parse_quick_add, parse_quick_add_lines
+from app.services.organizer.resolve import attach_matches
+from app.services.organizer.edition import (
+    edition_sql,
+    normalize_space,
+    reject_if_blocked,
+)
+from app.services.organizer.store import (
+    conflicts_for_payload,
+    ensure_schema,
+    event_select_sql,
+    hydrate_event_row,
+    insert_schedule_event,
+    load_event,
+    now_iso,
+    parse_ids,
+    replace_assignments,
+)
+from app.services.organizer.usage import UsageCapExceeded, consume
 
 def get_schedule_db() -> str:
     from app.db.database import DB_PATH
@@ -19,11 +39,8 @@ def get_schedule_db() -> str:
 
 router = APIRouter(tags=["schedule"])
 
-# Supported event types and statuses
-VALID_EVENT_TYPES = {
-    'install', 'delivery', 'pickup', 'drop_off', 'fabric_pickup',
-    'measure', 'loading_dock', 'errand', 'other'
-}
+# Public calendar types (new kinds persist as event_kind; type stays CHECK-safe).
+VALID_EVENT_TYPES = set(CALENDAR_EVENT_TYPES)
 
 VALID_EVENT_STATUSES = {'planned', 'confirmed', 'done', 'cancelled'}
 VALID_LOG_DIRECTIONS = {'picked_up', 'dropped_off'}
@@ -34,24 +51,45 @@ class ScheduleEventCreate(BaseModel):
     title: str
     type: str = "other"
     job_id: Optional[str] = None
+    customer_id: Optional[str] = None
     customer_vendor: Optional[str] = None
     location_address: Optional[str] = None
+    phone: Optional[str] = None
     start_time: str
     end_time: Optional[str] = None
     status: str = "planned"
     notes: Optional[str] = None
     created_by: str = "manual"
+    assigned_resource_ids: Optional[List[str]] = None
+    travel_minutes: Optional[int] = None
+    reminder_draft: Optional[str] = None
+    confirm_conflicts: bool = False
+    space_id: Optional[str] = None
 
 class ScheduleEventUpdate(BaseModel):
     title: Optional[str] = None
     type: Optional[str] = None
     job_id: Optional[str] = None
+    customer_id: Optional[str] = None
     customer_vendor: Optional[str] = None
     location_address: Optional[str] = None
+    phone: Optional[str] = None
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+    assigned_resource_ids: Optional[List[str]] = None
+    travel_minutes: Optional[int] = None
+    reminder_draft: Optional[str] = None
+    confirm_conflicts: bool = False
+    space_id: Optional[str] = None
+
+
+class ScheduleEventMove(BaseModel):
+    start_time: str
+    end_time: Optional[str] = None
+    confirm_conflicts: bool = False
+    notify_crew: bool = False
 
 class PickupDropoffLogCreate(BaseModel):
     schedule_event_id: Optional[str] = None
@@ -71,6 +109,19 @@ def _enrich_event(event: dict) -> dict:
     return event
 
 
+def _conflict_http(conflicts: list):
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "schedule_conflict",
+            "message": "This change was not saved. Confirm the warning to keep it anyway.",
+            "conflicts": conflicts,
+            "silent_overwrite": False,
+            "hint": "Resubmit with confirm_conflicts=true if you still want this slot.",
+        },
+    )
+
+
 # ── Schedule Event Endpoints ────────────────────────────────────────
 
 @router.get("/events")
@@ -83,14 +134,9 @@ def list_schedule_events(
     limit: int = 100
 ):
     """List schedule events by date range, job_id, type, or status."""
-    query = """
-        SELECT e.*, j.title as job_title, j.customer_id, c.name as customer_name
-        FROM schedule_events e
-        LEFT JOIN jobs j ON e.job_id = j.id
-        LEFT JOIN customers c ON j.customer_id = c.id
-        WHERE 1=1
-    """
-    params = []
+    clause, eparams = edition_sql("e")
+    query = event_select_sql() + f" WHERE {clause}"
+    params = list(eparams)
 
     if start_date:
         query += " AND e.start_time >= ?"
@@ -107,8 +153,8 @@ def list_schedule_events(
         params.append(job_id)
 
     if type:
-        query += " AND e.type = ?"
-        params.append(type)
+        query += " AND (e.type = ? OR e.event_kind = ?)"
+        params.extend([type, type])
 
     if status:
         query += " AND e.status = ?"
@@ -118,8 +164,9 @@ def list_schedule_events(
     params.append(limit)
 
     with get_db() as conn:
+        ensure_schema(conn)
         rows = conn.execute(query, params).fetchall()
-        events_list = [_enrich_event(dict_row(r)) for r in rows]
+        events_list = [hydrate_event_row(conn, r) for r in rows]
         return {
             "count": len(events_list),
             "events": events_list,
@@ -130,20 +177,10 @@ def list_schedule_events(
 def get_schedule_event(event_id: str):
     """Get single schedule event with linked job and logs."""
     with get_db() as conn:
-        row = conn.execute(
-            """SELECT e.*, j.title as job_title, j.customer_id, c.name as customer_name
-               FROM schedule_events e
-               LEFT JOIN jobs j ON e.job_id = j.id
-               LEFT JOIN customers c ON j.customer_id = c.id
-               WHERE e.id = ?""",
-            (event_id,)
-        ).fetchone()
-
-        if not row:
+        ensure_schema(conn)
+        event = load_event(conn, event_id)
+        if not event:
             raise HTTPException(status_code=404, detail="Schedule event not found")
-
-        event = _enrich_event(dict_row(row))
-        # Get attached logs
         log_rows = conn.execute(
             "SELECT * FROM pickup_dropoff_logs WHERE schedule_event_id = ? ORDER BY timestamp DESC",
             (event_id,)
@@ -156,7 +193,7 @@ def get_schedule_event(event_id: str):
 @router.post("/events")
 def create_schedule_event(req: ScheduleEventCreate):
     """Create a new schedule event."""
-    if req.type not in VALID_EVENT_TYPES:
+    if req.type not in VALID_EVENT_TYPES and req.type not in ITEM_KINDS:
         raise HTTPException(status_code=400, detail=f"Invalid event type '{req.type}'. Valid types: {', '.join(sorted(VALID_EVENT_TYPES))}")
 
     if req.status not in VALID_EVENT_STATUSES:
@@ -165,73 +202,71 @@ def create_schedule_event(req: ScheduleEventCreate):
     if req.created_by not in ('max', 'manual'):
         req.created_by = 'manual'
 
-    event_id = str(uuid.uuid4())[:8]
-    now = datetime.now().isoformat()
-
+    payload = req.model_dump()
+    payload["kind"] = req.type
+    payload["space_id"] = normalize_space(payload.get("space_id"))
+    blocked = reject_if_blocked(payload.get("title"), payload.get("notes"), payload.get("location_address"))
+    if blocked:
+        raise HTTPException(status_code=400, detail={"code": "edition_blocked", "message": blocked})
     with get_db() as conn:
-        # Check job_id if provided
-        if req.job_id:
-            job_check = conn.execute("SELECT id FROM jobs WHERE id = ?", (req.job_id,)).fetchone()
-            if not job_check:
-                # If not found directly, check without raising to allow nullable/flexible linkage
-                pass
-
-        conn.execute(
-            """INSERT INTO schedule_events
-               (id, type, title, job_id, customer_vendor, location_address, start_time, end_time, status, notes, created_by, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                event_id,
-                req.type,
-                req.title.strip(),
-                req.job_id,
-                req.customer_vendor.strip() if req.customer_vendor else None,
-                req.location_address.strip() if req.location_address else None,
-                req.start_time.strip(),
-                req.end_time.strip() if req.end_time else None,
-                req.status,
-                req.notes.strip() if req.notes else None,
-                req.created_by,
-                now,
-                now,
+        ensure_schema(conn)
+        try:
+            consume(conn, "items")
+        except UsageCapExceeded as exc:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "usage_cap", "bucket": exc.bucket, "used": exc.used, "cap": exc.cap, "message": str(exc)},
             )
-        )
-
-        row = conn.execute(
-            """SELECT e.*, j.title as job_title, c.name as customer_name
-               FROM schedule_events e
-               LEFT JOIN jobs j ON e.job_id = j.id
-               LEFT JOIN customers c ON j.customer_id = c.id
-               WHERE e.id = ?""",
-            (event_id,)
-        ).fetchone()
-        return dict_row(row)
+        conflicts = conflicts_for_payload(conn, payload)
+        if conflicts and not req.confirm_conflicts:
+            _conflict_http(conflicts)
+        try:
+            event = insert_schedule_event(conn, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"code": "edition_blocked", "message": str(exc)})
+        event["conflicts"] = []
+        return event
 
 
 @router.put("/events/{event_id}")
 def update_schedule_event(event_id: str, req: ScheduleEventUpdate):
-    """Update a schedule event."""
+    """Update a schedule event. Conflicts refuse the write unless confirm_conflicts=true."""
     with get_db() as conn:
-        existing = conn.execute("SELECT * FROM schedule_events WHERE id = ?", (event_id,)).fetchone()
+        ensure_schema(conn)
+        existing = load_event(conn, event_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Schedule event not found")
 
+        cur = dict(existing)
+        blocked = reject_if_blocked(req.title, req.notes, req.location_address)
+        if blocked:
+            raise HTTPException(status_code=400, detail={"code": "edition_blocked", "message": blocked})
         updates = []
         params = []
 
         if req.title is not None:
             updates.append("title = ?")
             params.append(req.title.strip())
+            cur["title"] = req.title.strip()
 
         if req.type is not None:
-            if req.type not in VALID_EVENT_TYPES:
+            if req.type not in VALID_EVENT_TYPES and req.type not in ITEM_KINDS:
                 raise HTTPException(status_code=400, detail=f"Invalid event type '{req.type}'")
+            from app.services.organizer.store import legacy_type_for
             updates.append("type = ?")
+            params.append(legacy_type_for(req.type))
+            updates.append("event_kind = ?")
             params.append(req.type)
+            cur["type"] = req.type
+            cur["event_kind"] = req.type
 
         if req.job_id is not None:
             updates.append("job_id = ?")
             params.append(req.job_id if req.job_id != "" else None)
+
+        if req.customer_id is not None:
+            updates.append("customer_id = ?")
+            params.append(req.customer_id or None)
 
         if req.customer_vendor is not None:
             updates.append("customer_vendor = ?")
@@ -240,14 +275,21 @@ def update_schedule_event(event_id: str, req: ScheduleEventUpdate):
         if req.location_address is not None:
             updates.append("location_address = ?")
             params.append(req.location_address.strip() if req.location_address else None)
+            cur["location_address"] = req.location_address
+
+        if req.phone is not None:
+            updates.append("phone = ?")
+            params.append(req.phone.strip() if req.phone else None)
 
         if req.start_time is not None:
             updates.append("start_time = ?")
             params.append(req.start_time.strip())
+            cur["start_time"] = req.start_time.strip()
 
         if req.end_time is not None:
             updates.append("end_time = ?")
             params.append(req.end_time.strip() if req.end_time else None)
+            cur["end_time"] = req.end_time
 
         if req.status is not None:
             if req.status not in VALID_EVENT_STATUSES:
@@ -259,31 +301,83 @@ def update_schedule_event(event_id: str, req: ScheduleEventUpdate):
             updates.append("notes = ?")
             params.append(req.notes.strip() if req.notes else None)
 
-        if updates:
-            updates.append("updated_at = ?")
-            params.append(datetime.now().isoformat())
-            params.append(event_id)
-            conn.execute(f"UPDATE schedule_events SET {', '.join(updates)} WHERE id = ?", params)
+        if req.travel_minutes is not None:
+            updates.append("travel_minutes = ?")
+            params.append(req.travel_minutes)
+            cur["travel_minutes"] = req.travel_minutes
 
-        row = conn.execute(
-            """SELECT e.*, j.title as job_title, c.name as customer_name
-               FROM schedule_events e
-               LEFT JOIN jobs j ON e.job_id = j.id
-               LEFT JOIN customers c ON j.customer_id = c.id
-               WHERE e.id = ?""",
-            (event_id,)
-        ).fetchone()
-        return dict_row(row)
+        if req.reminder_draft is not None:
+            updates.append("reminder_draft = ?")
+            params.append(req.reminder_draft)
+
+        if req.space_id is not None:
+            space = normalize_space(req.space_id)
+            updates.append("space_id = ?")
+            params.append(space)
+            cur["space_id"] = space
+
+        if req.assigned_resource_ids is not None:
+            replace_assignments(conn, parse_ids(req.assigned_resource_ids), event_id=event_id)
+            cur["assigned_resource_ids"] = parse_ids(req.assigned_resource_ids)
+        else:
+            cur["assigned_resource_ids"] = parse_ids(cur.get("assigned_resource_ids")) or []
+            # load current assignments for conflict check
+            from app.services.organizer.store import assignment_ids
+            cur["assigned_resource_ids"] = assignment_ids(conn, event_id=event_id)
+
+        conflicts = conflicts_for_payload(conn, cur, exclude_id=event_id)
+        if conflicts and not req.confirm_conflicts:
+            _conflict_http(conflicts)
+
+        if updates:
+            clause, eparams = edition_sql()
+            updates.append("updated_at = ?")
+            params.append(now_iso())
+            params.append(event_id)
+            params.extend(eparams)
+            conn.execute(
+                f"UPDATE schedule_events SET {', '.join(updates)} WHERE id = ? AND {clause}",
+                params,
+            )
+
+        event = load_event(conn, event_id)
+        event["conflicts"] = []
+        return event
+
+
+@router.post("/events/{event_id}/move")
+async def move_schedule_event(event_id: str, req: ScheduleEventMove):
+    """Drag/resize an event. Refuses overlapping assignments unless confirm_conflicts=true."""
+    event = update_schedule_event(
+        event_id,
+        ScheduleEventUpdate(
+            start_time=req.start_time,
+            end_time=req.end_time,
+            confirm_conflicts=req.confirm_conflicts,
+        ),
+    )
+    if req.notify_crew:
+        from app.services.organizer.actions import run_action
+        with get_db() as conn:
+            notify = await run_action(conn, action="notify_crew", item=event)
+        event["crew_draft"] = notify
+        event["sent"] = False
+        event["message"] = "Calendar updated. Crew message drafted — Approve & Send required."
+    return event
 
 
 @router.delete("/events/{event_id}")
 def delete_schedule_event(event_id: str):
     """Delete a schedule event."""
     with get_db() as conn:
-        existing = conn.execute("SELECT id FROM schedule_events WHERE id = ?", (event_id,)).fetchone()
+        existing = load_event(conn, event_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Schedule event not found")
 
+        try:
+            conn.execute("DELETE FROM organizer_assignments WHERE event_id = ?", (event_id,))
+        except Exception:
+            pass
         conn.execute("DELETE FROM schedule_events WHERE id = ?", (event_id,))
         return {"success": True, "deleted": True, "deleted_id": event_id}
 
@@ -390,12 +484,14 @@ def get_today_summary():
     tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
 
     with get_db() as conn:
+        ensure_schema(conn)
         # Today's events
         today_events = conn.execute(
-            """SELECT e.*, j.title as job_title, c.name as customer_name
+            """SELECT e.*, j.title as job_title, c.name as customer_name,
+                      c.phone as customer_phone, j.address as job_address, j.client_name
                FROM schedule_events e
                LEFT JOIN jobs j ON e.job_id = j.id
-               LEFT JOIN customers c ON j.customer_id = c.id
+               LEFT JOIN customers c ON COALESCE(e.customer_id, j.customer_id) = c.id
                WHERE e.start_time >= ? AND e.start_time < ?
                ORDER BY e.start_time ASC""",
             (today_str, tomorrow_str)
@@ -427,21 +523,44 @@ def get_today_summary():
         return {
             "date": today_str,
             "total_events_today": len(today_events),
-            "events": [dict_row(r) for r in today_events],
+            "events": [hydrate_event_row(conn, r) for r in today_events],
             "counts_by_type": counts_by_type,
             "today_logs_count": len(today_logs),
             "today_logs": [dict_row(r) for r in today_logs],
-            "upcoming_7_days_count": upcoming_count
+            "upcoming_7_days_count": upcoming_count,
+            "open_organizer_href": "/?screen=calendar",
         }
 
 
 # ── Draft-Only Event Extraction / Proposal Helper ────────────────────
 
 def extract_draft_events_from_text(text: str) -> list:
-    text = text.strip()
+    text = (text or "").strip()
     if not text:
         return []
 
+    drafts = parse_quick_add_lines(text)
+    proposals = []
+    for d in drafts:
+        proposals.append({
+            "type": d.get("kind") or "other",
+            "kind": d.get("kind") or "other",
+            "title": d.get("title"),
+            "start_time": d.get("start_time"),
+            "end_time": d.get("end_time"),
+            "due_at": d.get("due_at"),
+            "subject_name": d.get("subject_name"),
+            "followup_kind": d.get("followup_kind"),
+            "original_snippet": d.get("original_text"),
+            "requires_confirmation": True,
+            "is_draft_only": True,
+            "notes": d.get("notes"),
+            "outbound_blocked": True,
+        })
+    if proposals:
+        return proposals
+
+    # Fallback: keep a single draft so callers always get something to confirm.
     proposals = []
     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
@@ -557,9 +676,12 @@ def propose_events_from_text(req: DraftEventProposalRequest):
         return {"proposals": [], "message": "No text provided"}
 
     proposals = extract_draft_events_from_text(text)
+    with get_db() as conn:
+        ensure_schema(conn)
+        proposals = [attach_matches(conn, p) for p in proposals]
     return {
         "is_draft_only": True,
         "requires_confirmation": True,
         "proposals": proposals,
-        "message": "These events are draft proposals only. Nothing has been scheduled or created without user confirmation."
+        "message": "These events are draft proposals only. Nothing has been scheduled or created without user confirmation. Nothing is sent to a customer."
     }
