@@ -82,7 +82,8 @@ def _portal_url() -> str:
 
 
 def public_base() -> str:
-    return os.getenv("EMPIRE_PUBLIC_BASE_URL", "https://studio.empirebox.store").rstrip("/")
+    from app.services.max.doc_links import public_base as _public_base
+    return _public_base()
 
 
 def latest_final_docs(limit: int = 5) -> list[dict[str, Any]]:

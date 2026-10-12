@@ -49,6 +49,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("MAX_CLIENT_ALIASES_PATH", str(aliases))
     monkeypatch.setenv("MAX_FILE_FINDER_ROOTS", str(h))
     monkeypatch.setenv("MAX_CLOUD_FILES_DISABLED", "1")  # no live Google calls from local-search tests
+    monkeypatch.setenv("EMPIRE_EDITION", "workroom")
     monkeypatch.setattr(ff, "_excluded_realpaths",
                         lambda: (str(fam), str(h / "empire-maxine"), str(h / ".ssh")))
     ff.INDEX.clear()
@@ -126,10 +127,14 @@ def test_find_files_tool_and_studio_share_link(home):
     assert "find_files" in TOOL_REGISTRY and "share_file" in TOOL_REGISTRY
     r = execute_tool({"tool": "find_files", "query": "Nehal final estimate"}).to_dict()
     assert r["success"] and r["result"]["total"] >= 2
-    fid = r["result"]["matches"][0]["file_id"]
+    first = r["result"]["matches"][0]
+    assert first["viewer_url"].startswith("https://studio.empirebox.store/api/v1/files/found?t=")
+    assert first["markdown_link"].startswith("[") and "https://studio.empirebox.store/" in first["markdown_link"]
+    fid = first["file_id"]
     s = execute_tool({"tool": "share_file", "file_id": fid, "via": "studio"}).to_dict()
-    assert s["success"] and s["result"]["viewer_url"].startswith("/api/v1/files/found?t=")
-    token = s["result"]["viewer_url"].split("t=", 1)[1]
+    url = s["result"]["viewer_url"]
+    assert s["success"] and url.startswith("https://") and "/api/v1/files/found?t=" in url
+    token = url.split("t=", 1)[1]
     real = ff.verify_share_token(token)
     assert real and real.endswith(".pdf")
     assert ff.verify_share_token(token[:-2] + "00") is None  # tampered
