@@ -5980,26 +5980,21 @@ async def security_audit(limit: int = 50):
 
 @router.get("/intelligence/brief")
 async def get_morning_brief():
-    """Get the latest morning brief (or generate on-demand)."""
-    import json as _json
-    brief_path = Path.home() / "empire-repo" / "backend" / "data" / "reports" / "morning_brief.json"
-    if brief_path.exists():
-        with open(brief_path) as f:
-            return _json.load(f)
-    # Generate on-demand if none exists
-    from app.services.max.desks.desk_scheduler import desk_scheduler
-    await desk_scheduler._generate_morning_brief()
-    if brief_path.exists():
-        with open(brief_path) as f:
-            return _json.load(f)
-    return {"date": None, "html": "No brief available yet.", "generated_at": None}
+    """Get the latest DB-backed brief (or generate on-demand, no send)."""
+    from app.services.max.daily_brief import build_and_persist_brief, latest_brief
+
+    existing = latest_brief()
+    if existing:
+        return existing
+    return build_and_persist_brief()
 
 
 @router.get("/intelligence/weekly")
 async def get_weekly_report():
     """Get the latest weekly report."""
     import json as _json
-    report_path = Path.home() / "empire-repo" / "backend" / "data" / "reports" / "weekly_report.json"
+    from app.services.data_paths import reports_dir
+    report_path = reports_dir() / "weekly_report.json"
     if report_path.exists():
         with open(report_path) as f:
             return _json.load(f)
@@ -6008,15 +6003,10 @@ async def get_weekly_report():
 
 @router.post("/intelligence/brief/generate")
 async def generate_morning_brief():
-    """Force-generate a fresh morning brief now."""
-    from app.services.max.desks.desk_scheduler import desk_scheduler
-    await desk_scheduler._generate_morning_brief()
-    import json as _json
-    brief_path = Path.home() / "empire-repo" / "backend" / "data" / "reports" / "morning_brief.json"
-    if brief_path.exists():
-        with open(brief_path) as f:
-            return _json.load(f)
-    return {"status": "generated"}
+    """Force-generate a fresh morning brief now (persist only, no extra send)."""
+    from app.services.max.daily_brief import build_and_persist_brief
+
+    return build_and_persist_brief()
 
 
 @router.post("/intelligence/weekly/generate")
@@ -6025,7 +6015,8 @@ async def generate_weekly_report():
     from app.services.max.desks.desk_scheduler import desk_scheduler
     await desk_scheduler._generate_weekly_report()
     import json as _json
-    report_path = Path.home() / "empire-repo" / "backend" / "data" / "reports" / "weekly_report.json"
+    from app.services.data_paths import reports_dir
+    report_path = reports_dir() / "weekly_report.json"
     if report_path.exists():
         with open(report_path) as f:
             return _json.load(f)

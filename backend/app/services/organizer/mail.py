@@ -137,12 +137,23 @@ def _edition_token_env(source: str):
 
 
 def _fetch_gmail() -> list[dict]:
+    """Business Gmail (empirebox2026 / workroom@, info@, max@).
+
+    Chat's check_inbox default is unread mail to max@. Do not use that
+    filter here. Main always tries the reader; family editions stay
+    gated on their own token so they cannot read Rafael's mailbox.
+    """
     paths = mailbox_token_paths()
-    if "gmail" not in paths["sources"]:
+    if process_edition() != "main" and "gmail" not in paths["sources"]:
         return []
     with _edition_token_env("gmail"):
         from app.services.max.gmail_reader import check_inbox
-        res = check_inbox(limit=20, unread_only=False, query="in:inbox newer_than:21d")
+        res = check_inbox(
+            limit=20,
+            unread_only=False,
+            query="in:inbox newer_than:21d",
+            disable_default_to_filter=True,
+        )
     if not res.get("success"):
         return []
     out = []
@@ -150,6 +161,7 @@ def _fetch_gmail() -> list[dict]:
         out.append({
             "source": "gmail",
             "message_id": em.get("id"),
+            "thread_id": em.get("thread_id") or em.get("threadId") or "",
             "from": em.get("from"),
             "to": em.get("to"),
             "subject": em.get("subject") or "(no subject)",
@@ -157,6 +169,8 @@ def _fetch_gmail() -> list[dict]:
             "preview": em.get("preview") or "",
             "unread": bool(em.get("unread")),
             "account": "gmail",
+            "labels": em.get("labels") or em.get("labelIds") or [],
+            "list_unsubscribe": em.get("list_unsubscribe") or "",
         })
     return out
 
@@ -175,6 +189,7 @@ def _fetch_outlook() -> list[dict]:
         out.append({
             "source": "outlook",
             "message_id": em.get("id"),
+            "thread_id": em.get("thread_id") or em.get("conversationId") or em.get("id") or "",
             "from": em.get("from"),
             "to": "",
             "subject": em.get("subject") or "(no subject)",
@@ -241,6 +256,14 @@ def decorate_message(conn, msg: dict, state: Optional[dict]) -> Optional[dict]:
     blob = " ".join(str(msg.get(k) or "") for k in ("from", "to", "subject", "preview"))
     if contains_blocked_term(blob):
         return None
+    from app.services.max.brief_filters import (
+        is_promotional_mail,
+        is_self_sent_mail,
+        mail_account_label,
+    )
+
+    if is_promotional_mail(msg) or is_self_sent_mail(msg):
+        return None
     linked = _link(conn, msg)
     space = normalize_space(state.get("space_id") if state and state.get("space_id") else linked.get("space_id"))
     name, email = parse_from(msg.get("from"))
@@ -252,7 +275,11 @@ def decorate_message(conn, msg: dict, state: Optional[dict]) -> Optional[dict]:
         "id": f"{source}:{mid}",
         "source": source,
         "message_id": mid,
+        "thread_id": msg.get("thread_id") or msg.get("threadId") or "",
         "account": msg.get("account") or source,
+        "account_label": mail_account_label(source),
+        "labels": msg.get("labels") or msg.get("labelIds") or [],
+        "list_unsubscribe": msg.get("list_unsubscribe") or "",
         "from": redact_blocked(msg.get("from") or ""),
         "from_name": redact_blocked(name),
         "from_email": email,

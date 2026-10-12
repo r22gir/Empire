@@ -536,6 +536,10 @@ def init_database():
         # Schedule Control & Pickup Log tables (safe to re-run)
         _migrate_schedule_tables(conn)
 
+        from app.db.max_ops_schema import ensure_max_ops_schema
+
+        ensure_max_ops_schema(conn)
+
         # Workroom Organizer tables + additive schedule_events columns
         try:
             from app.services.organizer.schema import migrate_organizer_tables

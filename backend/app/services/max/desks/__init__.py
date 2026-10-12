@@ -1,29 +1,10 @@
 """
 AI Desk Delegation System — autonomous task routing and execution.
 Each desk handles a specific domain and can operate independently.
-"""
 
-from .base_desk import BaseDesk, DeskTask, DeskAction
-from .forge_desk import ForgeDesk
-from .market_desk import MarketDesk
-from .marketing_desk import MarketingDesk
-from .support_desk import SupportDesk
-from .sales_desk import SalesDesk
-from .finance_desk import FinanceDesk
-from .clients_desk import ClientsDesk
-from .contractors_desk import ContractorsDesk
-from .it_desk import ITDesk
-from .website_desk import WebsiteDesk
-from .legal_desk import LegalDesk
-from .lab_desk import LabDesk
-from .innovation_desk import InnovationDesk
-from .intake_desk import IntakeDesk
-from .analytics_desk import AnalyticsDesk
-from .quality_desk import QualityDesk
-from .codeforge_desk import CodeForgeDesk
-from .desk_router import DeskRouter
-from .desk_manager import AIDeskManager, TaskStatus
-from .desk_registry import DESK_ROSTER, live_desk_count
+Imports are lazy so `from app.services.max.desks.live_data import …`
+does not load every desk (and tool_executor / inpaint) at collection time.
+"""
 
 __all__ = [
     "BaseDesk", "DeskTask", "DeskAction",
@@ -35,3 +16,42 @@ __all__ = [
     "DeskRouter", "AIDeskManager", "TaskStatus",
     "DESK_ROSTER", "live_desk_count",
 ]
+
+_LAZY = {
+    "BaseDesk": (".base_desk", "BaseDesk"),
+    "DeskTask": (".base_desk", "DeskTask"),
+    "DeskAction": (".base_desk", "DeskAction"),
+    "ForgeDesk": (".forge_desk", "ForgeDesk"),
+    "MarketDesk": (".market_desk", "MarketDesk"),
+    "MarketingDesk": (".marketing_desk", "MarketingDesk"),
+    "SupportDesk": (".support_desk", "SupportDesk"),
+    "SalesDesk": (".sales_desk", "SalesDesk"),
+    "FinanceDesk": (".finance_desk", "FinanceDesk"),
+    "ClientsDesk": (".clients_desk", "ClientsDesk"),
+    "ContractorsDesk": (".contractors_desk", "ContractorsDesk"),
+    "ITDesk": (".it_desk", "ITDesk"),
+    "WebsiteDesk": (".website_desk", "WebsiteDesk"),
+    "LegalDesk": (".legal_desk", "LegalDesk"),
+    "LabDesk": (".lab_desk", "LabDesk"),
+    "InnovationDesk": (".innovation_desk", "InnovationDesk"),
+    "IntakeDesk": (".intake_desk", "IntakeDesk"),
+    "AnalyticsDesk": (".analytics_desk", "AnalyticsDesk"),
+    "QualityDesk": (".quality_desk", "QualityDesk"),
+    "CodeForgeDesk": (".codeforge_desk", "CodeForgeDesk"),
+    "DeskRouter": (".desk_router", "DeskRouter"),
+    "AIDeskManager": (".desk_manager", "AIDeskManager"),
+    "TaskStatus": (".desk_manager", "TaskStatus"),
+    "DESK_ROSTER": (".desk_registry", "DESK_ROSTER"),
+    "live_desk_count": (".desk_registry", "live_desk_count"),
+}
+
+
+def __getattr__(name: str):
+    target = _LAZY.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+
+    value = getattr(import_module(target[0], __name__), target[1])
+    globals()[name] = value
+    return value

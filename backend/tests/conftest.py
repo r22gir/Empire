@@ -134,6 +134,12 @@ _DATA_TABLES = [
     "customers",
     "schedule_events",
     "pickup_dropoff_logs",
+    "desk_job_results",
+    "daily_briefs",
+    "founder_notifications",
+    "orchestrator_runs",
+    "pending_mail",
+    "family_help_tickets",
     "organizer_assignments",
     "organizer_items",
     "organizer_resources",
@@ -146,6 +152,8 @@ _DATA_TABLES = [
     "organizer_usage",
     "organizer_mail_state",
     "approval_queue",
+    "task_activity",
+    "tasks",
 ]
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -200,6 +208,15 @@ def _build_empty_empire_db(path: str) -> None:
         _migrate_schedule_tables(conn_sched)
         conn_sched.commit()
         conn_sched.close()
+    except Exception:
+        pass
+
+    try:
+        from app.services.organizer.schema import migrate_organizer_tables
+        conn_org = sqlite3.connect(path)
+        migrate_organizer_tables(conn_org)
+        conn_org.commit()
+        conn_org.close()
     except Exception:
         pass
 

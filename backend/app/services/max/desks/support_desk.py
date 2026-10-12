@@ -116,26 +116,27 @@ class SupportDesk(BaseDesk):
                 f"Support queue at {len(self.open_tickets)} open tickets — may need attention"
             )
 
-        # v6.0: Try AI-enhanced response
-        ai_result = await self.ai_call(
-            f"A customer support ticket needs your help.\n\n"
-            f"Customer: {task.customer_name or 'Unknown'}\n"
-            f"Subject: {task.title}\n"
-            f"Details: {task.description[:500]}\n"
-            f"Priority: {task.priority.value}\n"
-            f"{'Known issue match: ' + drapery_advice if drapery_advice else ''}\n\n"
-            f"Provide a professional support response. Include: diagnosis, next steps, timeline."
-        )
+        combined_title = f"{task.title} {task.description}".lower()
+        if any(w in combined_title for w in ("summary", "audit", "open ticket", "ticket summary")):
+            from app.services.max.desks.job_runner import job_support_tickets
+            from app.services.max.desks.live_data import snapshot
 
-        if ai_result and len(ai_result) > 50:
-            result = ai_result
+            result, _ = job_support_tickets(snapshot())
         else:
-            # Template fallback
-            result = (
-                f"Ticket created for {task.customer_name or 'customer'}: {task.title}. "
+            # Draft only — never send to the client. Tool blocks are executed.
+            ai_result = await self.ai_call(
+                f"Draft a support reply for Rafael to approve. Do not send it.\n\n"
+                f"Customer: {task.customer_name or 'Unknown'}\n"
+                f"Subject: {task.title}\n"
+                f"Details: {task.description[:500]}\n"
+                f"Priority: {task.priority.value}\n"
+                f"{'Known issue match: ' + drapery_advice if drapery_advice else ''}\n\n"
+                f"If you need data, emit a ```tool block. Do not invent invoice or quote numbers."
+            )
+            result = ai_result if ai_result and len(ai_result) > 50 else (
+                f"Draft ticket note for {task.customer_name or 'customer'}: {task.title}. "
                 f"{'Suggestion: ' + drapery_advice + ' ' if drapery_advice else ''}"
-                f"Priority: {task.priority.value}. Status: open. "
-                f"Open tickets: {len(self.open_tickets)}."
+                f"Not sent. Approve from the queue."
             )
 
         self._log_to_brain(

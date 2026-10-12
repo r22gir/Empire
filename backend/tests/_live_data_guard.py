@@ -43,7 +43,7 @@ import pytest
 HOME = Path(os.path.expanduser("~"))
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-HARD_ROOTS_RAW = [HOME / "empire-data", Path("/data/amp"), Path("/data/maxine")]
+HARD_ROOTS_RAW = [HOME / "empire-data", Path("/data/amp"), Path("/data/maxine"), Path("/data/family-help")]
 SOFT_ROOTS_RAW = [
     REPO_ROOT / "backend" / "data",
     HOME / "empire-repo" / "backend" / "data",
@@ -296,6 +296,7 @@ def redirect_env(tmp_root: Path) -> dict[str, str]:
         os.path.normpath(str(HOME / "empire-data")): str(data),
         "/data/amp": str(tmp_root / "family-amp"),
         "/data/maxine": str(tmp_root / "family-maxine"),
+        "/data/family-help": str(data / "family-help"),
     }
     changed: dict[str, str] = {}
     # 1) any env var whose value points into a protected tree
@@ -326,6 +327,7 @@ def redirect_env(tmp_root: Path) -> dict[str, str]:
         "MAX_IMPROVE_SPEC_DIR": str(data / "improvements"),
         "VOICE_DOC_SESSIONS_PATH": str(data / "voice_document_sessions.json"),
         "CHAT_BACKUP_DIR": str(tmp_root / "chat_backups"),
+        "FAMILY_HELP_INBOX_DIR": str(data / "family-help"),
     }
     for name, value in forced.items():
         if os.environ.get(name) != value:

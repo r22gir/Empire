@@ -10,9 +10,11 @@ import json
 import uuid
 import os
 
+from app.services.data_paths import inbox_dir as live_inbox_dir
+
 router = APIRouter(prefix="/inbox", tags=["inbox"])
 
-INBOX_DIR = os.path.expanduser("~/empire-repo/backend/data/inbox")
+INBOX_DIR = str(live_inbox_dir())
 os.makedirs(INBOX_DIR, exist_ok=True)
 
 
