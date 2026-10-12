@@ -15,8 +15,11 @@ from typing import Any
 
 from app.db.max_ops_schema import ensure_max_ops_schema
 from app.services.max.brief_filters import (
+    dedupe_mail,
     dedupe_named,
+    format_et,
     keep_founder_decision,
+    stale_task_count,
 )
 from app.services.max.channel_text import for_channel, strip_telegram_html
 from app.services.max.desks import live_data as ld
@@ -90,7 +93,7 @@ def _line_items(
         if i.get("age_days") is not None:
             bits.append(f"{i['age_days']}d")
         if i.get("start_time"):
-            bits.append(str(i["start_time"]))
+            bits.append(format_et(i["start_time"]))
         if i.get("account_label"):
             bits.append(str(i["account_label"]))
         if i.get("status"):
@@ -134,26 +137,31 @@ def build_brief_sections(
     mark_new = has_prior
 
     today = snap.get("schedule_today") or []
-    week = snap.get("schedule_week") or []
+    week_all = snap.get("schedule_week") or []
+    today_keys = {str(i.get("id") or i.get("name") or "") for i in today}
+    week = [i for i in week_all if str(i.get("id") or i.get("name") or "") not in today_keys]
     next14 = snap.get("schedule_next14") or []
     overdue_cal = snap.get("schedule_overdue") or []
     new_today, _ = _diff_items(today, prev.get("today_items") or []) if has_prior else ([], [])
 
     payments = snap.get("payments_since_yesterday") or []
     unpaid = snap.get("unpaid_invoices") or []
+    bank = snap.get("bank_notices") or []
     new_pay, _ = _diff_items(payments, prev.get("payment_items") or []) if has_prior else ([], [])
 
     quotes = snap.get("stale_quotes") or []
     new_quotes, _ = _diff_items(quotes, prev.get("quote_items") or []) if has_prior else ([], [])
 
-    mail = (snap.get("pending_mail") or []) + (snap.get("unreviewed_inbox") or [])
+    mail = dedupe_mail((snap.get("pending_mail") or []) + (snap.get("unreviewed_inbox") or []))
     new_mail, _ = _diff_items(mail, prev.get("mail_items") or []) if has_prior else ([], [])
 
     stuck = snap.get("stuck_tasks") or []
     waiting = [t for t in (snap.get("open_tasks") or []) if t.get("status") == "waiting"]
+    queue = snap.get("approval_queue") or []
     decisions = dedupe_named(
-        [t for t in (stuck + waiting) if keep_founder_decision(t)]
+        [t for t in (stuck + waiting + queue) if keep_founder_decision(t)]
     )
+    stale_n = stale_task_count(stuck + (snap.get("open_tasks") or []))
 
     desk_rows = snap.get("desk_results") or []
     areas = snap.get("other_areas") or {}
@@ -194,6 +202,11 @@ def build_brief_sections(
                 f"{_line_items(payments, 'No payments since yesterday.', changed=new_pay, mark_new=mark_new)}\n"
                 f"Unpaid invoices / deposits ({len(unpaid)}):\n"
                 f"{_line_items(unpaid, 'No unpaid invoices.', mark_new=False)}"
+                + (
+                    f"\nBank / transaction FYI ({len(bank)}):\n"
+                    f"{_line_items(bank, 'No bank notices.', mark_new=False)}"
+                    if bank else ""
+                )
             ),
             "items": unpaid,
         },
@@ -213,9 +226,9 @@ def build_brief_sections(
         },
         "decisions": {
             "title": SECTION_TITLES["decisions"],
-            "summary": f"{len(decisions)} waiting",
+            "summary": f"{len(decisions)} waiting" + (f", {stale_n} stale >30d" if stale_n else ""),
             "new_count": 0,
-            "text": _line_items(decisions, "Nothing waiting on Rafael.", mark_new=False),
+            "text": _decisions_text(decisions, stale_n),
             "items": decisions,
         },
         "desk_report": {
@@ -262,13 +275,24 @@ def _desk_report_text(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _decisions_text(decisions: list[dict], stale_n: int) -> str:
+    parts: list[str] = []
+    if decisions:
+        parts.append(_line_items(decisions, "", mark_new=False))
+    if stale_n:
+        parts.append(f"{stale_n} stale tasks >30d")
+    return "\n".join(p for p in parts if p) or "Nothing waiting on Rafael."
+
+
 def _other_areas_text(areas: dict[str, list[dict]]) -> str:
     lines = []
     for key in ("empire", "family", "personal", "ventures"):
         items = areas.get(key) or []
+        if not items:
+            continue
         lines.append(f"{key.title()}:")
         lines.append(_line_items(items, "(none)"))
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else "(nothing new)"
 
 
 def _watch_text(alerts: list[dict], all_rows: list[dict]) -> str:

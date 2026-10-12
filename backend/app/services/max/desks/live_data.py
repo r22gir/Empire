@@ -16,8 +16,10 @@ from typing import Any, Iterable
 from app.db.max_ops_schema import ensure_max_ops_schema
 from app.services.data_paths import inbox_dir
 from app.services.max.brief_filters import (
+    dedupe_mail,
     filter_followup_quotes,
     filter_real_money,
+    is_bank_notice,
     is_promotional_mail,
     is_test_family_ticket,
     mail_account_label,
@@ -231,9 +233,11 @@ def query_stale_quotes(conn: sqlite3.Connection, min_age_days: int = 0, now: dat
     cols = _cols(conn, "quotes_v2")
     sent_col = "sent_at" if "sent_at" in cols else "created_at"
     upd_col = "updated_at" if "updated_at" in cols else sent_col
+    test_sel = "is_test" if "is_test" in cols else "0 AS is_test"
     sql = f"""
         SELECT id, quote_number, customer_name, status, total,
-               {sent_col} AS sent_at, {upd_col} AS updated_at, created_at
+               {sent_col} AS sent_at, {upd_col} AS updated_at, created_at,
+               {test_sel}
         FROM quotes_v2
         WHERE status IN ({",".join("?" * len(OPEN_QUOTE_STATUSES))})
         ORDER BY COALESCE({upd_col}, {sent_col}, created_at) DESC
@@ -253,6 +257,7 @@ def query_stale_quotes(conn: sqlite3.Connection, min_age_days: int = 0, now: dat
             "age_days": sent_age,
             "window_age_days": window_age,
             "sent_at": row.get("sent_at") or row.get("created_at"),
+            "is_test": row.get("is_test"),
         })
     filtered = []
     for item in findings:
@@ -578,22 +583,32 @@ def list_unreviewed_inbox(inbox_path: Path | None = None) -> list[dict]:
     return items
 
 
-def query_pending_mail(conn: sqlite3.Connection) -> list[dict]:
-    """Unanswered mail from Organizer (Gmail + Outlook, read-only).
+def _mail_item(item: dict) -> dict:
+    source = item.get("source") or item.get("channel") or "email"
+    return {
+        "kind": item.get("kind") or "mail",
+        "id": item.get("id") or item.get("message_id"),
+        "name": item.get("subject") or item.get("name") or item.get("id"),
+        "customer": item.get("from_name") or item.get("from") or item.get("customer") or "Unknown",
+        "channel": source,
+        "account_label": item.get("account_label") or mail_account_label(source),
+        "status": item.get("waiting") or item.get("status") or "pending",
+        "source": source,
+        "preview": item.get("preview"),
+        "from": item.get("from") or item.get("from_email") or item.get("from_addr"),
+        "from_email": item.get("from_email") or item.get("from_addr"),
+        "subject": item.get("subject") or item.get("name"),
+        "thread_id": item.get("thread_id") or item.get("threadId"),
+        "message_id": item.get("message_id") or item.get("id"),
+        "labels": item.get("labels") or item.get("labelIds") or [],
+        "list_unsubscribe": item.get("list_unsubscribe") or "",
+        "read_only": True,
+        "sent": False,
+    }
 
-    Draft replies stay on the approval queue. Nothing is sent.
-    The pending_mail table is a fallback only.
-    """
+
+def _collect_mailbox(conn: sqlite3.Connection) -> list[dict]:
     findings: list[dict] = []
-    seen: set[str] = set()
-
-    def _add(item: dict) -> None:
-        key = str(item.get("id") or item.get("name") or "")
-        if not key or key in seen:
-            return
-        seen.add(key)
-        findings.append(item)
-
     try:
         from app.services.organizer.mail import list_pending
 
@@ -604,20 +619,7 @@ def query_pending_mail(conn: sqlite3.Connection) -> list[dict]:
                 continue
             if is_promotional_mail(item):
                 continue
-            source = item.get("source") or item.get("channel") or "email"
-            _add({
-                "kind": "mail",
-                "id": item.get("id"),
-                "name": item.get("subject") or item.get("id"),
-                "customer": item.get("from_name") or item.get("from") or "Unknown",
-                "channel": source,
-                "account_label": mail_account_label(source),
-                "status": item.get("waiting") or item.get("status") or "pending",
-                "source": source,
-                "preview": item.get("preview"),
-                "read_only": True,
-                "sent": False,
-            })
+            findings.append(_mail_item(item))
     except Exception as exc:
         logger.info("organizer mail skipped: %s", exc)
 
@@ -632,21 +634,65 @@ def query_pending_mail(conn: sqlite3.Connection) -> list[dict]:
         ).fetchall()
         for raw in rows:
             row = _row_dict(raw)
-            channel = row.get("channel") or "email"
-            fallback = {
-                "kind": "mail",
+            fallback = _mail_item({
                 "id": row.get("id"),
-                "name": row.get("subject") or row.get("id"),
-                "customer": row.get("from_name") or row.get("from_addr") or "Unknown",
-                "channel": channel,
-                "account_label": mail_account_label(channel),
+                "subject": row.get("subject") or row.get("id"),
+                "from_name": row.get("from_name"),
+                "from": row.get("from_addr"),
+                "from_addr": row.get("from_addr"),
+                "channel": row.get("channel") or "email",
                 "status": row.get("status"),
                 "created_at": row.get("created_at"),
-                "from": row.get("from_addr"),
-            }
+            })
             if is_promotional_mail(fallback):
                 continue
-            _add(fallback)
+            findings.append(fallback)
+    return dedupe_mail(findings)
+
+
+def query_pending_mail(conn: sqlite3.Connection) -> list[dict]:
+    """Unanswered human mail. Bank/transaction notices are not unanswered."""
+    return [m for m in _collect_mailbox(conn) if not is_bank_notice(m)]
+
+
+def query_bank_notices(conn: sqlite3.Connection) -> list[dict]:
+    """Zelle / deposit / statement / receipt FYI — Money, not unanswered."""
+    return [{**m, "kind": "bank_notice"} for m in _collect_mailbox(conn) if is_bank_notice(m)]
+
+
+def query_approval_queue(conn: sqlite3.Connection) -> list[dict]:
+    if not _table_exists(conn, "approval_queue"):
+        return []
+    cols = _cols(conn, "approval_queue")
+    title = "title" if "title" in cols else "NULL AS title"
+    subject = "subject" if "subject" in cols else "NULL AS subject"
+    kind = "kind" if "kind" in cols else "NULL AS kind"
+    status = "status" if "status" in cols else "'pending' AS status"
+    to_name = "to_name" if "to_name" in cols else "NULL AS to_name"
+    sql = f"""
+        SELECT id, {title}, {subject}, {kind}, {status}, {to_name}
+        FROM approval_queue
+        WHERE COALESCE(status, 'pending') = 'pending'
+        ORDER BY id DESC
+        LIMIT 20
+    """
+    findings = []
+    try:
+        rows = conn.execute(sql).fetchall()
+    except sqlite3.Error:
+        return []
+    for raw in rows:
+        row = _row_dict(raw)
+        findings.append({
+            "kind": "approval",
+            "id": row.get("id"),
+            "name": row.get("title") or row.get("subject") or f"Approval {row.get('id')}",
+            "customer": row.get("to_name") or "",
+            "status": row.get("status") or "pending",
+            "source": "approval_queue",
+            "needs_approval": True,
+            "decision_needed": True,
+        })
     return findings
 
 
@@ -923,6 +969,9 @@ def snapshot(now: datetime | None = None) -> dict[str, Any]:
     with _connect() as conn:
         ensure_max_ops_schema(conn)
         unpaid = query_unpaid_invoices(conn, now)
+        mailbox = _collect_mailbox(conn)
+        pending_mail = [m for m in mailbox if not is_bank_notice(m)]
+        bank_notices = [{**m, "kind": "bank_notice"} for m in mailbox if is_bank_notice(m)]
         return {
             "now": now,
             "unpaid_invoices": unpaid,
@@ -939,7 +988,9 @@ def snapshot(now: datetime | None = None) -> dict[str, Any]:
             "open_tasks": query_open_tasks(conn),
             "stuck_tasks": query_stuck_tasks(conn, None, now),
             "overdue_tasks": query_overdue_tasks(conn, now),
-            "pending_mail": query_pending_mail(conn),
+            "pending_mail": pending_mail,
+            "bank_notices": bank_notices,
+            "approval_queue": query_approval_queue(conn),
             "family_tickets": query_family_help_tickets(conn),
             "other_areas": query_other_areas(conn, now),
             "metrics": query_business_metrics(conn, now),
