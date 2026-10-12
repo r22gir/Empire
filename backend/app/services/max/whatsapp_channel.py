@@ -1627,6 +1627,26 @@ async def default_photo_handler(image: bytes, mime: str, caption: str, wa_id: st
 
 
 
+def _file_whatsapp_capture(raw: bytes, filename: str, mime: str, caption: str, wa_id: str, message_id: str, kind: str) -> None:
+    """Side-effect: file inbound WhatsApp media into this edition's Organizer store."""
+    try:
+        from app.db.database import get_db
+        from app.services.organizer.capture import ingest_whatsapp_media
+        with get_db() as conn:
+            ingest_whatsapp_media(
+                conn,
+                raw=raw,
+                filename=filename,
+                mime=mime or "application/octet-stream",
+                caption=caption or "",
+                wa_id=wa_id,
+                message_id=message_id,
+                kind=kind,
+            )
+    except Exception:
+        logger.warning("WhatsApp organizer capture skipped", exc_info=True)
+
+
 _SENDER_LOCKS: dict[str, asyncio.Lock] = {}
 _BATCH_FLUSH_TASKS: dict[str, asyncio.Task] = {}
 
@@ -1880,6 +1900,7 @@ async def process_webhook(
                     audio, mime = media_bytes, media_mime
                     if not audio and message.get("media_id"):
                         audio, mime = await download_media(message["media_id"], http_get=http_get)
+                    _file_whatsapp_capture(audio, "voice.ogg", mime or message["mime_type"], message.get("caption") or "", sender, message_id, "audio")
                     reply = await on_voice(audio, mime or message["mime_type"], sender)
                 elif message["type"] == "image":
                     # File-only default. One draft only when THIS photo's
@@ -1902,6 +1923,10 @@ async def process_webhook(
                         reply = ""
                 elif message["type"] == "document":
                     route = "file_document"
+                    doc, mime = media_bytes, media_mime
+                    if not doc and message.get("media_id"):
+                        doc, mime = await download_media(message["media_id"], http_get=http_get)
+                    _file_whatsapp_capture(doc, "whatsapp-doc.bin", mime or message["mime_type"], message.get("caption") or "", sender, message_id, "document")
                     reply = ""
                 elif message["type"] == "call":
                     route = "call"

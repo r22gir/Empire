@@ -656,6 +656,13 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "view_schedule": "list_schedule",
             "create_schedule_event": "add_schedule_event",
             "schedule_event": "add_schedule_event",
+            "draft_schedule": "draft_organizer_item",
+            "draft_schedule_event": "draft_organizer_item",
+            "schedule_install": "draft_organizer_item",
+            "quick_add": "draft_organizer_item",
+            "organizer_command": "run_organizer_command",
+            "move_install": "run_organizer_command",
+            "reschedule": "run_organizer_command",
             "pickup_dropoff": "log_pickup_dropoff",
             "log_pickup": "log_pickup_dropoff",
             "log_dropoff": "log_pickup_dropoff",
@@ -6375,12 +6382,16 @@ If a tool call fails with "Unknown tool", check the name against this list.
 ### Schedule & Custody Log Tools
 - **list_schedule** — Query schedule events by date range, job ID, or type (today, upcoming week, specific date).
   `{"tool": "list_schedule", "start_date": "2026-10-09", "end_date": "2026-10-16", "job_id": "...", "type": "install|delivery|pickup|drop_off|loading_dock"}`
-- **add_schedule_event** — Schedule an event (install, delivery, pickup, drop_off, fabric_pickup, measure, loading_dock, errand, other). Must confirm and echo the resolved date/time in the response.
+- **draft_organizer_item** — PREFERRED. Draft a calendar item, call, to-do, reminder, follow-up, or material ETA from chat (e.g. "schedule install for the Marley job Friday 10am", "call Marley Friday 2pm"). Resolves the job/person. Does NOT save until the founder confirms. Never sends anything to a customer.
+  `{"tool": "draft_organizer_item", "text": "schedule install for the Marley job Friday 10am"}`
+- **add_schedule_event** — Writes a calendar event after the founder confirmed a draft. Echo the resolved date/time. Prefer draft_organizer_item first.
   `{"tool": "add_schedule_event", "title": "...", "type": "pickup", "start_time": "2026-10-10T10:00:00", "end_time": "2026-10-10T11:00:00", "customer_vendor": "Whittington Design", "location_address": "123 Design St", "job_id": "...", "notes": "..."}`
 - **log_pickup_dropoff** — Record custody transfer for job items (what changed hands: drapery, cushion covers, fabric, etc.). When Rafael says 'picked up fabrics at Whittington Design and dropped off cushion covers', call this tool.
   `{"tool": "log_pickup_dropoff", "direction": "picked_up|dropped_off", "items": "fabrics", "party": "Whittington Design", "job_id": "...", "notes": "..."}`
 - **propose_schedule_from_text** — DRAFT-ONLY proposal helper. Analyzes unstructured text/email and returns proposed events without creating them in DB until confirmed.
   `{"tool": "propose_schedule_from_text", "text": "..."}`
+- **run_organizer_command** — Natural language Organizer action. Example: "move Marley's install to Friday and tell the crew". Updates the calendar when the event and time resolve; crew/client messages stay drafts. Never sends without a founder Approve & Send tap.
+  `{"tool": "run_organizer_command", "text": "move Marley's install to Friday and tell the crew"}`
 
 ### Action Tools
 - **deposit_pay_link** — Workroom or WoodCraft quote only. Creates (or reuses) a deposit invoice on the finance router and a Stripe Checkout link on the payments router. Client name/email/phone/address are copied from the quote. A second call returns the same invoice and the same open link. payment_status stays `link_ready` until Stripe reports paid — do not tell the founder the deposit is collected when status is not `paid`.
@@ -8491,19 +8502,120 @@ def _propose_schedule_from_text(params: dict, desk: Optional[str] = None) -> Too
 
     try:
         from app.routers.schedule import extract_draft_events_from_text
+        from app.db.database import get_db
+        from app.services.organizer.resolve import attach_matches
+        from app.services.organizer.store import ensure_schema
         proposals = extract_draft_events_from_text(text)
+        with get_db() as conn:
+            ensure_schema(conn)
+            proposals = [attach_matches(conn, p) for p in proposals]
         return ToolResult(
             tool="propose_schedule_from_text",
             success=True,
             result={
                 "proposals_count": len(proposals),
                 "draft_proposals": proposals,
-                "notice": "DRAFT ONLY: No events were created in the database. Present these proposals to Rafael for confirmation.",
+                "notice": "DRAFT ONLY: No events were created in the database. Present these proposals to Rafael for confirmation. Nothing is sent to a customer.",
             },
         )
     except Exception as e:
         logger.error(f"propose_schedule_from_text failed: {e}")
         return ToolResult(tool="propose_schedule_from_text", success=False, error=str(e))
+
+
+@tool("draft_organizer_item")
+def _draft_organizer_item(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Draft an Organizer item from chat. Does not write until the founder confirms."""
+    text = (params.get("text") or params.get("title") or "").strip()
+    if not text:
+        kind = (params.get("type") or params.get("kind") or "appointment").strip()
+        title = (params.get("title") or "").strip()
+        job = (params.get("job") or params.get("job_name") or "").strip()
+        when = (params.get("when") or params.get("start_time") or "").strip()
+        bits = [kind, title or job, when]
+        text = " ".join(b for b in bits if b).strip()
+    if not text:
+        return ToolResult(tool="draft_organizer_item", success=False, error="text is required (e.g. 'call Marley Friday 2pm')")
+
+    try:
+        from app.services.organizer.parse import parse_quick_add
+        from app.services.organizer.resolve import attach_matches
+        from app.services.organizer.store import ensure_schema
+        from app.db.database import get_db
+        from app.services.organizer.constants import OUTBOUND_POLICY
+        draft = parse_quick_add(text)
+        if params.get("type") or params.get("kind"):
+            draft["kind"] = params.get("kind") or params.get("type")
+        with get_db() as conn:
+            ensure_schema(conn)
+            draft = attach_matches(conn, draft)
+        echo = f"Draft {draft.get('kind')}: '{draft.get('title')}'"
+        if draft.get("start_time"):
+            echo += f" at {draft['start_time']}"
+        if draft.get("due_at") and not draft.get("start_time"):
+            echo += f" due {draft['due_at']}"
+        if draft.get("job_title") or draft.get("job_id"):
+            echo += f" for job {draft.get('job_title') or draft.get('job_id')}"
+        echo += ". Not saved. Confirm in the Organizer to create it."
+        return ToolResult(
+            tool="draft_organizer_item",
+            success=True,
+            result={
+                "draft": draft,
+                "requires_confirmation": True,
+                "is_draft_only": True,
+                "saved": False,
+                "sent": False,
+                "outbound_policy": OUTBOUND_POLICY,
+                "echo_confirmation": echo,
+                "notice": "DRAFT ONLY. Present this to the owner. Do not tell them it is already on the calendar.",
+            },
+        )
+    except Exception as e:
+        logger.error(f"draft_organizer_item failed: {e}")
+        return ToolResult(tool="draft_organizer_item", success=False, error=str(e))
+
+
+@tool("run_organizer_command")
+def _run_organizer_command(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Move / quote / deposit / fabric commands. Crew messages stay drafts."""
+    text = (params.get("text") or params.get("command") or "").strip()
+    if not text:
+        return ToolResult(tool="run_organizer_command", success=False, error="text is required (e.g. \"move Marley's install to Friday and tell the crew\")")
+    confirm = bool(params.get("confirm") or params.get("confirm_conflicts"))
+    try:
+        import asyncio
+        from app.db.database import get_db
+        from app.services.organizer.actions import run_command
+        from app.services.organizer.store import ensure_schema
+        from app.services.organizer.constants import OUTBOUND_POLICY
+
+        async def _go():
+            with get_db() as conn:
+                ensure_schema(conn)
+                return await run_command(conn, text, confirm=confirm)
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            result = asyncio.run(_go())
+        else:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(asyncio.run, _go()).result()
+        result = dict(result or {})
+        result.setdefault("sent", False)
+        result.setdefault("outbound_policy", OUTBOUND_POLICY)
+        echo = result.get("message") or "Organizer command ran. Nothing was sent."
+        return ToolResult(
+            tool="run_organizer_command",
+            success=bool(result.get("ok", True)),
+            result={**result, "echo_confirmation": echo, "notice": "Nothing outbound without a founder Approve & Send tap."},
+            error=None if result.get("ok", True) else result.get("message"),
+        )
+    except Exception as e:
+        logger.error(f"run_organizer_command failed: {e}")
+        return ToolResult(tool="run_organizer_command", success=False, error=str(e))
 
 
 # ── Tool count in TOOLS_DOC (2026-09-29) ───────────────────────────

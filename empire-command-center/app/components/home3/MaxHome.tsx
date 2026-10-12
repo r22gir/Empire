@@ -285,18 +285,26 @@ function Today({ d }: { d: ReturnType<typeof useHomeData> }) {
       <div className="v3-ph"><h2 className="v3-disp" id="h-today">Today</h2>
         <span className="r v3-mono mh-date">{now ? now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase() : ''}</span></div>
       <div className="mh-blk">
-        <div className="v3-sec">Schedule</div>
-        {d.schedule === null ? <div className="mh-mut">{d.errors.jobs ? 'No data' : 'Loading…'}</div>
-          : d.schedule.length === 0 ? <Empty title="No calendar connected">Nothing scheduled on jobs in the next 7 days.</Empty>
+        <div className="v3-sec">Schedule<a href="/?screen=calendar" className="mh-link r">Open organizer</a></div>
+        {d.schedule === null ? <div className="mh-mut">{d.errors.organizer || d.errors.jobs ? 'No data' : 'Loading…'}</div>
+          : d.schedule.length === 0 ? <Empty title="Nothing on today">No organizer items for today. Add one from the Organizer.</Empty>
           : <>
             {d.schedule.map(s => (
-              <a key={s.key} href={s.href} className="mh-ev">
-                <span className="tm v3-mono">{now ? (dayLabel(s.date, now) === 'Today' ? (s.time || 'Today') : dayLabel(s.date, now)) : s.date}</span>
-                <span className="b"><b>{s.title}</b><span>{s.detail}</span></span>
-              </a>
+              <div key={s.key}>
+                <a href={s.href} className="mh-ev">
+                  <span className="tm v3-mono">{now ? (dayLabel(s.date, now) === 'Today' ? (s.time || 'Today') : dayLabel(s.date, now)) : s.date}</span>
+                  <span className="b"><b>{s.title}</b><span>{s.detail}</span></span>
+                </a>
+                <div style={{ display: 'flex', gap: 10, padding: '0 0 8px 76px', fontSize: 12, fontWeight: 700 }}>
+                  {s.map_link && <a href={s.map_link} target="_blank" rel="noreferrer">Navigate</a>}
+                  {s.call_link && <a href={s.call_link}>Call</a>}
+                  <a href="/?screen=calendar">Do</a>
+                </div>
+              </div>
             ))}
-            <div className="mh-mut sm">From job dates · no calendar connected</div>
+            <div className="mh-mut sm">From the Organizer · drafts never go to customers</div>
           </>}
+        <a href="/?screen=calendar" className="mh-link" style={{ display: 'inline-flex', marginTop: 8 }}>Open organizer</a>
       </div>
       <div className="mh-blk">
         <div className="v3-sec">Approvals {d.approvals?.length ? <span className="v3-cnt">{d.approvals.length}</span> : null}

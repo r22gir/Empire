@@ -534,7 +534,7 @@ def search_organizer(query: str, *, edition: str, cap: int = PER_SOURCE_CAP) -> 
                 if not _keep_text(edition, title):
                     continue
                 oid = str(d.get("id") or "")
-                href = f"/?screen=tasks&item={oid}"
+                href = f"/?screen=calendar&item={oid}"
                 kindv = (d.get("kind") or "todo").replace("_", " ")
                 hits.append(SearchHit(
                     id=f"organizer:{oid}",
