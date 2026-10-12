@@ -14,6 +14,19 @@ test('studio file links render as clickable hrefs; relative job paths do not', (
   assert.equal(markdownLinkCount(firstReply) >= 2, true);
 });
 
+test('in-app deep links are clickable; job file paths stay plain text', () => {
+  assert.equal(safeUrl('/?screen=presentation'), '/?screen=presentation');
+  assert.equal(safeUrl('/?screen=presentation&mode=presentation'), '/?screen=presentation&mode=presentation');
+  assert.equal(safeUrl('/?product=improvements'), '/?product=improvements');
+  assert.equal(safeUrl('/'), '/');
+  assert.equal(safeUrl('/ayuda'), '/ayuda');
+  assert.equal(safeUrl('//evil.example'), '');
+  assert.equal(safeUrl('/jobs/wall-unit/led.pdf'), '');
+
+  const reply = 'Presentation mode is on MAX Home. [Open Presentation](/?screen=presentation)';
+  assert.equal(markdownLinkCount(reply) >= 1, true);
+});
+
 test('safeUrl rejects javascript: and data: hrefs', () => {
   assert.equal(safeUrl('javascript:alert(1)'), '');
   assert.equal(safeUrl('JAVASCRIPT:alert(1)'), '');
