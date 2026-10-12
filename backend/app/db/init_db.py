@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     title TEXT NOT NULL,
     description TEXT,
     status TEXT NOT NULL DEFAULT 'todo'
-        CHECK (status IN ('todo', 'in_progress', 'waiting', 'done', 'cancelled')),
+        CHECK (status IN ('todo', 'in_progress', 'waiting', 'done', 'cancelled', 'failed', 'escalated')),
     priority TEXT NOT NULL DEFAULT 'normal'
         CHECK (priority IN ('urgent', 'high', 'normal', 'low')),
     desk TEXT NOT NULL,
@@ -511,6 +511,18 @@ def init_database():
 
         # v6.0 Pipeline columns (additive migration — safe to re-run)
         _migrate_pipeline_columns(conn)
+
+        # Desk orchestration: failed/escalated statuses + retry cap + founder inbox
+        try:
+            from app.services.max.desks.task_lifecycle import migrate_task_status_constraint
+            migrate_task_status_constraint(conn)
+        except Exception as exc:
+            print(f"✗ Task status migration: {exc}")
+        try:
+            from app.services.max.desks.founder_inbox import ensure_schema
+            ensure_schema(conn)
+        except Exception as exc:
+            print(f"✗ Founder inbox schema: {exc}")
 
         # Access control tables migration
         _migrate_access_control(conn)

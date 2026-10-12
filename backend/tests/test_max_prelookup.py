@@ -36,6 +36,12 @@ def test_no_prelookup_for_small_talk_or_research():
     assert _tools("Research the latest on solar for the Travelers claim") == []
 
 
+def test_give_me_a_link_here_is_not_a_document_search():
+    assert ap.wants_document_search("give me a link here...") is False
+    assert "find_files" not in _tools("give me a link here...")
+    assert ap.wants_document_search("show me wall unit led docs") is True
+
+
 def test_minimax_sanitizer_keeps_bullet_lists():
     from app.services.max.ai_router import AIRouter
     r = AIRouter.__new__(AIRouter)

@@ -30,12 +30,22 @@ BASE_REF = os.getenv("MAX_IMPROVE_BASE_REF", "main")
 SPEC_DIR = Path(os.getenv("MAX_IMPROVE_SPEC_DIR", str(Path.home() / "empire-data" / "improvements")))
 RISKS = ("low", "medium", "high")
 API = "https://api.cursor.com"
-# Rafael's defaults (Oct 4, 2026): Muse Spark 1.3 at medium effort; Gemini 3.8 Flash for small fixes.
-# If the API refuses a model, the launch retries with the account default (no "model" field).
-DEFAULT_MODEL = os.getenv("MAX_IMPROVE_MODEL", "muse-spark-1.3")
+# Cloud-agent launches must include a model. Always grok-4.6 unless an
+# operator explicitly sets MAX_IMPROVE_MODEL. Leave that env unset by default
+# — do not write it, and do not treat getenv's default as a set env var.
+_LAUNCH_MODEL = "grok-4.6"
+
+
+def included_model() -> str:
+    override = (os.getenv("MAX_IMPROVE_MODEL") or "").strip()
+    return override or _LAUNCH_MODEL
+
+
+INCLUDED_MODEL = included_model()
+DEFAULT_MODEL = INCLUDED_MODEL
 DEFAULT_PARAMS = [{"id": "effort", "value": os.getenv("MAX_IMPROVE_EFFORT", "medium")}]
-SMALL_MODEL = os.getenv("MAX_IMPROVE_SMALL_MODEL", "gemini-3.8-flash")
-SMALL_PARAMS = [{"id": "reasoning_effort", "value": os.getenv("MAX_IMPROVE_SMALL_EFFORT", "medium")}]
+SMALL_MODEL = INCLUDED_MODEL
+SMALL_PARAMS = DEFAULT_PARAMS
 STATUSES = ("proposed", "awaiting_build", "building", "pr_open", "merge_approved", "rejected", "build_failed", "done")
 
 
@@ -61,6 +71,7 @@ def _row(r) -> dict:
         d["affected_modules"] = json.loads(d.get("affected_modules") or "[]")
     except Exception:
         d["affected_modules"] = [d.get("affected_modules")] if d.get("affected_modules") else []
+    d["approval_url"] = approval_deep_link(d.get("id"))
     d["next_step"] = {
         "proposed": "Rafael: Approve to start the build, or Reject.",
         "awaiting_build": "Spec is ready. Start it in Cursor (or add CURSOR_API_KEY and tap Build again).",
@@ -70,6 +81,23 @@ def _row(r) -> dict:
         "rejected": "Closed.", "build_failed": "See build note. Edit and approve again.", "done": "Merged.",
     }.get(d["status"], "")
     return d
+
+
+def studio_base() -> str:
+    try:
+        from app.services.max.quick_replies import public_base
+        return public_base()
+    except Exception:
+        return os.getenv("EMPIRE_PUBLIC_BASE_URL", "https://studio.empirebox.store").rstrip("/")
+
+
+def approval_deep_link(req_id) -> str:
+    """Stable Studio deep link Max can send in chat / WhatsApp. Approval still needs the founder tap."""
+    try:
+        n = int(req_id)
+    except (TypeError, ValueError):
+        n = req_id
+    return f"{studio_base()}/?screen=improvements&id={n}"
 
 
 def cursor_configured() -> bool:
@@ -171,9 +199,25 @@ def is_small_fix(req: dict) -> bool:
 
 
 def pick_model(req: dict) -> dict:
-    if is_small_fix(req):
-        return {"id": SMALL_MODEL, "params": SMALL_PARAMS}
-    return {"id": DEFAULT_MODEL, "params": DEFAULT_PARAMS}
+    """Always include a model id (grok-4.6 unless MAX_IMPROVE_MODEL is set)."""
+    return {"id": included_model(), "params": DEFAULT_PARAMS}
+
+
+def _is_usage_limit_exceeded(status_code: int, body: str) -> bool:
+    text = (body or "").lower()
+    return (
+        "usage_limit_exceeded" in text
+        or "usage limit" in text
+        or (status_code in (402, 429) and "limit" in text)
+    )
+
+
+def _usage_limit_message(body: str) -> str:
+    return (
+        "usage_limit_exceeded: Cursor usage limit reached. "
+        "Max cannot raise this limit. Retry later or raise it in Cursor billing. "
+        f"Detail: {(body or '')[:180]}"
+    )
 
 
 def _auth():
@@ -192,11 +236,10 @@ def _launch_cursor_agent(req: dict) -> dict:
             "model": model}
     r = httpx.post(f"{API}/v1/agents", json=body, auth=_auth(), timeout=60)
     used = model["id"]
-    if r.status_code in (400, 404, 422) and "model" in r.text.lower():
-        body.pop("model")  # account default
-        r = httpx.post(f"{API}/v1/agents", json=body, auth=_auth(), timeout=60)
-        used = "account default"
+    if _is_usage_limit_exceeded(r.status_code, r.text):
+        raise RuntimeError(_usage_limit_message(r.text))
     if r.status_code >= 400:
+        # Do not retry without a model. Do not try to raise the limit.
         raise RuntimeError(f"Cursor API HTTP {r.status_code}: {r.text[:300]}")
     j = r.json() or {}
     a = j.get("agent") or j

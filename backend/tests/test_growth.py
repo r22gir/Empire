@@ -304,14 +304,15 @@ def test_improvement_with_key_launches_cloud_agent_only_on_tap(g, monkeypatch):
     assert calls == []
 
     a = c.post(f"/api/v1/growth/improvements/{big['id']}/approve", json={"confirm": True}).json()
-    assert a["status"] == "building" and a["agent_id"] == "bc-1" and a["model"] == "muse-spark-1.3"
-    assert calls[-1][2]["model"] == {"id": "muse-spark-1.3", "params": [{"id": "effort", "value": "medium"}]}
+    assert a["status"] == "building" and a["agent_id"] == "bc-1" and a["model"] == "grok-4.6"
+    assert calls[-1][2]["model"] == {"id": "grok-4.6", "params": [{"id": "effort", "value": "medium"}]}
+    assert a.get("approval_url", "").endswith(f"?screen=improvements&id={big['id']}")
     n = len(calls)
     assert c.post(f"/api/v1/growth/improvements/{big['id']}/approve", json={"confirm": True}).status_code in (400, 409)
     assert len(calls) == n  # double tap: no second agent
 
     s = imp.approve_build(small["id"], confirm=True)
-    assert calls[-1][2]["model"]["id"] == "gemini-3.8-flash" and s["model"] == "gemini-3.8-flash"
+    assert calls[-1][2]["model"]["id"] == "grok-4.6" and s["model"] == "grok-4.6"
 
     assert c.post(f"/api/v1/growth/improvements/{big['id']}/approve-merge", json={"confirm": True}).status_code == 400
     r = c.post(f"/api/v1/growth/improvements/{big['id']}/refresh").json()
@@ -322,7 +323,7 @@ def test_improvement_with_key_launches_cloud_agent_only_on_tap(g, monkeypatch):
     assert len([x for x in calls if x[0] == "POST"]) == posts_before  # approving merge calls nothing (no merge, no deploy)
 
 
-def test_improvement_model_refused_falls_back_to_account_default(g, monkeypatch):
+def test_improvement_usage_limit_exceeded_is_plain_and_does_not_retry(g, monkeypatch):
     imp = g["imp"]
     import httpx
     monkeypatch.setenv("CURSOR_API_KEY", "test-not-a-real-key")
@@ -334,12 +335,13 @@ def test_improvement_model_refused_falls_back_to_account_default(g, monkeypatch)
 
     def fake_post(url, json=None, auth=None, timeout=None):
         bodies.append(dict(json))
-        if "model" in json:
-            return Resp(400, {"code": "validation_error", "message": "unknown model"})
-        return Resp(200, {"agent": {"id": "bc-2", "url": "u"}, "run": {"id": "run-2"}})
+        return Resp(429, {"error": {"code": "usage_limit_exceeded", "message": "plan limit"}})
 
     monkeypatch.setattr(httpx, "post", fake_post)
     r = imp.create_request("X", "p", "c", ["a", "b", "c"], "high")
     out = imp.approve_build(r["id"], confirm=True)
-    assert out["status"] == "building" and out["model"] == "account default"
-    assert "model" in bodies[0] and "model" not in bodies[1]
+    assert out["status"] == "build_failed"
+    assert "usage_limit_exceeded" in (out.get("build_note") or "")
+    assert "cannot raise this limit" in (out.get("build_note") or "")
+    assert len(bodies) == 1
+    assert bodies[0]["model"]["id"] == "grok-4.6"

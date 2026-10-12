@@ -264,7 +264,7 @@ export default function CommandCenter() {
         pendingDeepLinkScreen.current = null;
         setActiveProduct(p);
         setActiveScreen(screenParam && NAV_SCREEN_IDS.has(screenParam) ? (screenParam as ScreenMode) : defaultScreenForProduct(p));
-        setActiveSection(sectionParam);
+        setActiveSection(sectionParam || (p === 'improvements' ? params.get('id') : null));
         return;
       }
       // Generic screen-only deep link (e.g. /?screen=business-profile, /?screen=jobs).
@@ -280,6 +280,14 @@ export default function CommandCenter() {
         return;
       }
       const candidate = params.get('screen') || window.location.hash.replace(/^#/, '');
+      // Improvements one-tap: /?screen=improvements&id=N (Max chat / WhatsApp deep link)
+      if (candidate === 'improvements') {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct('improvements');
+        setActiveScreen('dashboard');
+        setActiveSection(params.get('id'));
+        return;
+      }
       // Presentation Mode (MAX Avatar): /?screen=presentation or /#presentation
       if (candidate === 'presentation' || candidate === 'max-avatar') {
         pendingDeepLinkScreen.current = null;

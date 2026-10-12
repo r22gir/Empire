@@ -104,7 +104,10 @@ function Hero({ d, interests }: { d: ReturnType<typeof useHomeData>; interests: 
           {q.trim() ? <button type="submit" className="mic" aria-label="Send"><Send size={15} /></button>
             : <a href="/?product=owner" className="mic" aria-label={`Open ${EDITION.assistantName} chat`}><Mic size={15} /></a>}
         </form>
-        <div className="mh-chips">{chips.map(c => <a key={c} href={askHref(c)} className="v3-chip">{c}</a>)}</div>
+        <div className="mh-chips">
+          <a href="/?screen=improvements" className="v3-chip" data-testid="home-improvements">Improvements</a>
+          {chips.map(c => <a key={c} href={askHref(c)} className="v3-chip">{c}</a>)}
+        </div>
         <div className="mh-hero-actions" data-testid="mh-hero-actions">
           <LiveVoiceCall variant="hero" label="Talk" onStart={() => faceRef.current?.start()} />
           <a href="/?screen=presentation&mode=presentation" className="v3-btn pri mh-hero-btn" data-testid="mh-presentation">Presentation mode</a>
@@ -259,11 +262,11 @@ function Growth({ st, save, d }: { st: Record<HomeKind, HomeItem[]>; save: (k: H
         ))}
       </div>
       <div className="mh-blk">
-        <div className="v3-sec">Improvements<a href="/?product=improvements" className="mh-link r">Open</a></div>
+        <div className="v3-sec">Improvements<a href="/?screen=improvements" className="mh-link r">Open</a></div>
         {d.improvements === null ? <div className="mh-mut">{d.errors.improvements ? 'No data' : 'Loading…'}</div>
           : d.improvements.length === 0 ? <div className="mh-mut">No improvement requests yet. {EDITION.assistantName} files them here; builds start only on your tap.</div>
           : d.improvements.slice(0, 3).map((i: any) => (
-            <a key={i.id} href="/?product=improvements" className="mh-row"><span>{i.title || 'Improvement'}</span><span className="v3-pill">{String(i.status || 'requested').replace(/_/g, ' ')}</span></a>
+            <a key={i.id} href={`/?screen=improvements&id=${i.id}`} className="mh-row"><span>{i.title || 'Improvement'}</span><span className="v3-pill">{String(i.status || 'requested').replace(/_/g, ' ')}</span></a>
           ))}
       </div>
     </section>

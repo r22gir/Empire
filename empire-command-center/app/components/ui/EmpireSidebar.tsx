@@ -1,7 +1,8 @@
 'use client';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { API } from '../../lib/api';
 import {
   LayoutDashboard, MessageSquare, Users, Package, Wrench,
   BarChart3, Settings, HelpCircle, ChevronLeft, ChevronRight,
@@ -19,7 +20,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/', icon: <LayoutDashboard size={18} /> },
-  { label: 'MAX AI', href: '/?screen=presentation', icon: <Bot size={18} />, badge: '18 desks' },
+  { label: 'MAX AI', href: '/?screen=presentation', icon: <Bot size={18} />, badge: 'desks' },
   { label: 'CRM', href: '/crm', icon: <Users size={18} /> },
   { label: 'Finance', href: '/finance', icon: <BarChart3 size={18} /> },
   { label: 'Workroom', href: '/workroom', icon: <Wrench size={18} /> },
@@ -43,6 +44,18 @@ interface EmpireSidebarProps {
 
 export function EmpireSidebar({ collapsed = false, onToggle }: EmpireSidebarProps) {
   const pathname = usePathname();
+  const [deskCount, setDeskCount] = useState<number | null>(null);
+  useEffect(() => {
+    let stop = false;
+    fetch(`${API}/max/desks`, { signal: AbortSignal.timeout(4000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        const n = Number(d?.desk_count ?? d?.desks?.length);
+        if (!stop && Number.isFinite(n) && n > 0) setDeskCount(n);
+      })
+      .catch(() => {});
+    return () => { stop = true; };
+  }, []);
 
   return (
     <div style={{
@@ -166,7 +179,7 @@ export function EmpireSidebar({ collapsed = false, onToggle }: EmpireSidebarProp
                         padding: '1px 7px',
                         borderRadius: 'var(--radius-full)',
                         fontWeight: 500,
-                      }}>{item.badge}</span>
+                      }}>{item.badge === 'desks' ? `${deskCount ?? '…'} desks` : item.badge}</span>
                     )}
                   </>
                 )}

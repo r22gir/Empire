@@ -16,6 +16,21 @@ OVERDUE_DAYS_WARNING = 30
 LARGE_INVOICE_THRESHOLD = 5000
 
 
+def _founder_approved_task(task: DeskTask) -> bool:
+    """True only after the founder tap that resumes a held waiting task."""
+    if getattr(task, "source", "") == "founder_approved":
+        return True
+    try:
+        from app.db.database import get_db
+        from app.services.max.desks.task_lifecycle import parse_task_metadata
+        with get_db() as conn:
+            row = conn.execute("SELECT metadata FROM tasks WHERE id=?", (task.id,)).fetchone()
+        meta = parse_task_metadata(row[0] if row else None)
+        return bool(meta.get("approval_granted"))
+    except Exception:
+        return False
+
+
 class FinanceDesk(BaseDesk):
     desk_id = "finance"
     desk_name = "FinanceDesk"
@@ -129,6 +144,12 @@ class FinanceDesk(BaseDesk):
             word in lowered for word in ("deposit", "pay link", "payment link", "checkout", "stripe")
         )
         if wants_link and quote_id:
+            if not _founder_approved_task(task):
+                return await self.escalate(
+                    task,
+                    f"Deposit pay link for quote {quote_id} is held for founder tap. "
+                    f"Approve the waiting task to resume; the link is not issued automatically.",
+                )
             from fastapi import HTTPException
             from app.routers.finance import create_quote_deposit_pay_link
 
