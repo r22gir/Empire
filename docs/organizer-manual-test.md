@@ -69,6 +69,18 @@ Reuses `gmail_reader.check_inbox` (`gmail.readonly`) and `outlook_reader.search_
 6. Switch `EMPIRE_EDITION` to `maxine`: Rafael's inbox is not read. Argos Campestre subjects/senders are dropped. Juan's Max-e mailbox is not visible either.
 7. Unknown `EMPIRE_EDITION` has no mailbox sources and never falls through to `main`.
 
+## Flow features (all three themes, every space)
+
+Keep `?orgTheme=a|b|c` (or the Luxe / Editorial / Command switcher). Each flow must work in every area. Family stays isolated to this edition.
+
+1. **Suggested tray** (sidebar): incoming mail, WhatsApp, voice notes, and approved estimates appear as suggestions. **Accept** creates a to-do. **Dismiss** drops it. Nothing is created silently. Harvest never writes a task on its own.
+2. **One-tap card actions**: Call (`tel:`), Open quote / Open invoice, **Build supplier cart** (prepares a list only — never checks out or pays), **Mark paid** (opens the existing invoice screen), Snooze, Remind. Waiting-on items also offer **Draft nudge**.
+3. **Plan my day**: toolbar button opens Max's proposed time blocks (installs, orders, follow-ups). **Approve & save blocks** writes times. Cancel leaves the calendar alone. Nothing is sent.
+4. **Waiting-on**: item sheet has who + nudge-after-N-days. When due, Max prepares a draft nudge for Rafael to review. Dispatch never sends.
+5. **Checklists / recurring**: Apply checklist (Job: order materials, cut, build, upholster, install, invoice, collect balance). Custom templates work in any space. Recurring daily/weekly/monthly spawns a copy when due — original stays.
+6. **Money on job cards**: deposit / paid / balance / margin, read-only from quotes + invoices, with a collected fraction (`paid/total` or `N/100`). Family editions do not show Workroom money.
+7. **Smart search** (2+ characters) covers items, jobs, clients, estimates. **Weekly review** view: slipped, stuck (no movement 7+ days), next week.
+
 ## Max / Max-e / Maxine chat
 
 1. “schedule install for the Marley job Friday 10am” (Max) or “dentist Thursday 3pm” (any edition) uses `draft_organizer_item` and says it is a draft, not already on the calendar.

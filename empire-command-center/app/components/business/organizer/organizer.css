@@ -217,6 +217,20 @@
 .org-ring .bg { stroke: var(--org-line); }
 .org-ring .fg { stroke: var(--org-gold); stroke-linecap: round; transition: stroke-dashoffset .4s ease; }
 .org-space-ico { display: inline-flex; align-items: center; justify-content: center; width: 1.1em; height: 1.1em; }
+.org-money {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+  font-size: 10px; font-variant-numeric: tabular-nums; color: var(--org-mut);
+}
+.org-money span {
+  background: color-mix(in srgb, var(--org-gold) 12%, var(--org-card));
+  border-radius: 999px; padding: 2px 6px; font-weight: 600;
+}
+.org-money em { font-style: normal; font-weight: 700; color: var(--org-ink); }
+.org-review { display: flex; flex-direction: column; gap: 12px; }
+.org-review-col h4 {
+  display: flex; justify-content: space-between; margin: 0 0 6px;
+  font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--org-mut);
+}
 @media (prefers-reduced-motion: reduce) {
   .org-kanban-card, .org-kanban-card:hover, .org-kanban-card.is-complete, .org-ring .fg {
     transition: none; animation: none; transform: none;

@@ -2,17 +2,18 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CalendarDays,   Camera, Check, Inbox, Mic, Plus, Scissors, Crown, Home,
+  CalendarDays, Camera, Check, Inbox, Mic, Plus, Scissors, Crown, Home,
   Sparkles, Rocket, Target, CircleDot, AlertTriangle, Banknote, Briefcase,
+  Search, Clock, ListChecks,
 } from 'lucide-react';
 import { API } from '../../../lib/api';
 import {
   addMinutesIso, DAY_END_MIN, DAY_START_MIN, eventLayout,
-  filterItems, filterPendingMail, formatOrganizerDate, formatOrganizerTime, groupActions,
+  filterItems, filterPendingMail, formatMoney, formatOrganizerDate, formatOrganizerTime, groupActions,
   inferSpaceClient, itemsInColumn, itemsOnDay, isOrganizerCommand, jobProgressFromItems,
   KIND_COLOR, KIND_LABEL, monthCells, ORG_THEME_STORAGE, ORG_THEMES, organizerKpis,
   overdueItems, PX_PER_MIN, resolveOrgTheme, shouldOfferCrewDraft, showsWorkroomJobs,
-  STATUS_COLUMNS, themedSpaceStyle, timeFromOffset, weekDays, ymd,
+  STATUS_COLUMNS, themedSpaceStyle, timeFromOffset, weekDays, weeklyReview, ymd,
   type OrganizerAction, type OrganizerItem, type OrganizerSpace, type OrgTheme, type TodayBucket,
 } from '../../../lib/organizer-logic';
 import './organizer.css';
@@ -29,7 +30,7 @@ function readTheme(): OrgTheme {
   return resolveOrgTheme(q, stored);
 }
 
-type View = 'today' | 'board' | 'day' | 'week' | 'month' | 'lanes' | 'agenda' | 'mail';
+type View = 'today' | 'board' | 'day' | 'week' | 'month' | 'lanes' | 'agenda' | 'mail' | 'review';
 
 const KINDS = Object.keys(KIND_LABEL);
 
@@ -79,6 +80,14 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   const [theme, setTheme] = useState<OrgTheme>('a');
   const [completedId, setCompletedId] = useState('');
   const [dragOverCol, setDragOverCol] = useState('');
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [review, setReview] = useState<any>(null);
+  const [searchHits, setSearchHits] = useState<any>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [cartPreview, setCartPreview] = useState<any>(null);
+  const [nudgeDraft, setNudgeDraft] = useState<any>(null);
   const dragRef = useRef<{ id: string; mode: 'move' | 'resize'; startY: number; origStart: string; origEnd: string } | null>(null);
   const cardDragRef = useRef<{ id: string } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -140,7 +149,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     const to = new Date(anchor); to.setDate(to.getDate() + 40);
     const spaceQs = spaceFilter ? `&space_id=${encodeURIComponent(spaceFilter)}` : '';
     const qs = `start_date=${ymd(from)}&end_date=${ymd(to)}${spaceQs}`;
-    const [b, r, p, rt, m, caps, u, pm, td] = await Promise.all([
+    const [b, r, p, rt, m, caps, u, pm, td, sg, tpl, rv] = await Promise.all([
       fetch(`${API}/organizer/board?${qs}`).then((x) => x.json()).catch(() => ({ items: [], overdue: [] })),
       fetch(`${API}/organizer/resources`).then((x) => x.json()).catch(() => ({ resources: [] })),
       fetch(`${API}/organizer/day-plan?plan_date=${day}`).then((x) => x.json()).catch(() => null),
@@ -150,6 +159,9 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
       fetch(`${API}/organizer/usage`).then((x) => x.json()).catch(() => null),
       fetch(`${API}/organizer/pending-mail`).then((x) => x.json()).catch(() => ({ items: [] })),
       fetch(`${API}/organizer/today`).then((x) => x.json()).catch(() => ({ overdue: [], today: [], upcoming: [], items: [] })),
+      fetch(`${API}/organizer/suggestions`).then((x) => x.json()).catch(() => ({ suggestions: [] })),
+      fetch(`${API}/organizer/templates`).then((x) => x.json()).catch(() => ({ templates: [] })),
+      fetch(`${API}/organizer/review/weekly`).then((x) => x.json()).catch(() => null),
     ]);
     const allowsJobs = !!(m?.edition?.allows_workroom_jobs);
     const jobSpace = showsWorkroomJobs(m?.edition, spaceFilter);
@@ -175,6 +187,9 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     setPendingMail(pm.items || []);
     setMailNote(pm.note || '');
     setMailAccounts(pm.accounts || null);
+    setSuggestions(sg.suggestions || []);
+    setTemplates(tpl.templates || []);
+    setReview(rv);
     setLoaded(true);
     if (jobFilter && jobSpace) {
       const tl = await fetch(`${API}/organizer/jobs/${jobFilter}/timeline`).then((x) => x.ok ? x.json() : null).catch(() => null);
@@ -183,6 +198,16 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   }, [anchor, day, jobFilter, spaceFilter]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) { setSearchHits(null); return; }
+    const t = window.setTimeout(async () => {
+      const data = await fetch(`${API}/organizer/search?q=${encodeURIComponent(query)}`).then((x) => x.json()).catch(() => null);
+      setSearchHits(data);
+    }, 220);
+    return () => window.clearTimeout(t);
+  }, [q]);
 
   async function saveEvent(payload: any, confirm = false) {
     const body = { ...payload, confirm_conflicts: confirm, space_id: payload.space_id || spaceFilter || undefined };
@@ -243,7 +268,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
 
   async function runAction(action: string, item: Partial<OrganizerItem>, extra: Record<string, any> = {}) {
     const act = (item.actions || []).find((a) => a.id === action);
-    if (act?.href && ['navigate', 'call', 'ask_max'].includes(action)) {
+    if (act?.href && ['navigate', 'call', 'ask_max', 'open_quote', 'open_invoice', 'mark_paid'].includes(action)) {
       window.open(act.href, action === 'call' ? '_self' : '_blank');
       return;
     }
@@ -267,7 +292,11 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
       return;
     }
     const data = await res.json();
-    if (data.href && action !== 'attach_file') window.open(data.href, action === 'call' ? '_self' : '_blank');
+    if (action === 'supplier_cart') setCartPreview(data.created || data);
+    if (action === 'waiting_nudge' || action === 'remind') setNudgeDraft(data.approval || data.created || data);
+    if (data.href && action !== 'attach_file' && !['supplier_cart', 'snooze', 'remind'].includes(action)) {
+      window.open(data.href, action === 'call' ? '_self' : '_blank');
+    }
     setToast(data.message || (data.sent ? 'Sent after founder tap.' : 'Draft ready. Approve & Send still required for anything outbound.'));
     setCrewPrompt(null);
     await load();
@@ -423,6 +452,30 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     );
   }
 
+  function MoneyStrip({ item }: { item: Partial<OrganizerItem> }) {
+    const mny = item.money;
+    if (!mny || !item.job_id) return null;
+    return (
+      <div className="org-money" data-money="1" title="Read-only from quotes and invoices">
+        <span>Dep {formatMoney(mny.deposit)}</span>
+        <span>Paid {formatMoney(mny.paid)}</span>
+        <span>Bal {formatMoney(mny.balance)}</span>
+        <span>Mgn {formatMoney(mny.margin)}</span>
+        <em>{mny.collected_fraction}</em>
+      </div>
+    );
+  }
+
+  function WaitingChip({ item }: { item: Partial<OrganizerItem> }) {
+    if (!item.waiting_on) return null;
+    return (
+      <div className="org-wait" data-waiting="1">
+        Waiting on {item.waiting_on}
+        {item.nudge_after_days ? ` · nudge ${item.nudge_after_days}d` : ''}
+      </div>
+    );
+  }
+
   function ProgressBar({ item }: { item: Partial<OrganizerItem> }) {
     const p = item.progress;
     if (!p || !p.total) return null;
@@ -483,7 +536,9 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
         </div>
         <b>{item.title}</b>
         <small>{KIND_LABEL[item.kind || item.type || ''] || item.kind} · {formatOrganizerTime(item.start_time || item.due_at) || 'no date'}</small>
+        <WaitingChip item={item} />
         <ProgressBar item={item} />
+        <MoneyStrip item={item} />
         <RecordLinks item={item} />
         <ActionBar item={item} compact />
       </div>
@@ -498,7 +553,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     return (
       <div className="org-abar" onClick={(e) => e.stopPropagation()}>
         {flat.map((a: OrganizerAction) => (
-          a.href && ['navigate', 'call', 'ask_max'].includes(a.id) ? (
+          a.href && ['navigate', 'call', 'ask_max', 'open_quote', 'open_invoice', 'mark_paid'].includes(a.id) ? (
             <a key={a.id} href={a.href} target={a.id === 'call' ? undefined : '_blank'} rel="noreferrer">{a.label}</a>
           ) : (
             <button
@@ -556,7 +611,46 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   }
 
   async function approvePlan() {
-    await fetch(`${API}/organizer/day-plan/approve?plan_date=${day}`, { method: 'POST' });
+    const res = await fetch(`${API}/organizer/day-plan/approve?plan_date=${day}`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    setToast(data.message || 'Plan saved. Nothing was sent.');
+    setPlanOpen(false);
+    await load();
+  }
+
+  async function acceptSuggestion(id: string) {
+    const res = await fetch(`${API}/organizer/suggestions/${encodeURIComponent(id)}/accept`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    setToast(data.message || 'To-do saved. Nothing was sent.');
+    await load();
+  }
+
+  async function dismissSuggestion(id: string) {
+    const res = await fetch(`${API}/organizer/suggestions/${encodeURIComponent(id)}/dismiss`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    setToast(data.message || 'Dismissed. Nothing was created.');
+    await load();
+  }
+
+  async function applyTemplate(id: string) {
+    const res = await fetch(`${API}/organizer/templates/${encodeURIComponent(id)}/apply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ space_id: spaceFilter || undefined, job_id: jobFilter || undefined }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setToast(data.fraction ? `Checklist ${data.fraction}. Nothing sent.` : (data.message || 'Template applied.'));
+    await load();
+  }
+
+  async function saveWaiting(item: any) {
+    if (!item?.id || !item.waiting_on) return;
+    const res = await fetch(`${API}/organizer/items/${encodeURIComponent(item.id)}/waiting`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ who: item.waiting_on, nudge_after_days: Number(item.nudge_after_days || 3) }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setForm(data.item || { ...item, status: 'waiting_on' });
+    setToast('Waiting-on saved. Draft nudge only — nothing sent.');
     await load();
   }
 
@@ -648,8 +742,8 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
           })}
         </div>
         <div className="org-toolbar">
-          {(['today', 'board', 'day', 'week', 'month', 'lanes', 'agenda', 'mail'] as View[]).map((v) => (
-            <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{v === 'mail' ? 'messages' : v}</button>
+          {(['today', 'board', 'day', 'week', 'month', 'lanes', 'agenda', 'mail', 'review'] as View[]).map((v) => (
+            <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{v === 'mail' ? 'messages' : v === 'review' ? 'weekly review' : v}</button>
           ))}
           <button onClick={() => setAnchor(new Date())}>Today</button>
           <button onClick={() => setAnchor((d) => { const n = new Date(d); n.setDate(n.getDate() - (view === 'month' ? 30 : view === 'week' ? 7 : 1)); return n; })}>‹</button>
@@ -669,7 +763,22 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             <option value="">All types</option>
             {KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
           </select>
-          <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input
+            placeholder="Search items, jobs, clients, estimates"
+            value={q}
+            onChange={(e) => { setQ(e.target.value); setSearchOpen(true); }}
+            onFocus={() => setSearchOpen(true)}
+            aria-label="Smart search"
+          />
+          <button className="org-btn-gold" onClick={() => { setPlanOpen(true); }} data-plan-open="1">
+            <CalendarDays size={14} /> Plan my day
+          </button>
+          {templates[0] && (
+            <select aria-label="Apply checklist" defaultValue="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); e.target.value = ''; }}>
+              <option value="">Apply checklist…</option>
+              {templates.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+          )}
           <button className="org-btn-gold" onClick={() => setForm({
             title: '', type: 'appointment', start_time: `${day}T10:00:00`, end_time: `${day}T11:00:00`,
             job_id: showJobs ? jobFilter : '', assigned_resource_ids: personFilter ? [personFilter] : [],
@@ -742,13 +851,34 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
 
       <div className="org-body">
         <aside className="org-side">
+          <div className="org-card" data-suggested-tray="1">
+            <h3>Suggested</h3>
+            <div className="org-note">From mail, WhatsApp, voice notes, and approved estimates. Accept or dismiss — nothing is created silently.</div>
+            {suggestions.length === 0 && <EmptyState title="No suggestions" body="Incoming mail and notes will appear here for a tap." icon={<Inbox size={18} />} />}
+            {suggestions.slice(0, 8).map((s) => (
+              <div className="org-row" key={s.id} data-suggestion={s.source}>
+                <span className="tm">{s.source}</span>
+                <span>
+                  <b>{s.title}</b>
+                  <small>{s.body}</small>
+                  <div className="org-abar" onClick={(e) => e.stopPropagation()}>
+                    <button className="gold" onClick={() => acceptSuggestion(s.id)}>Accept</button>
+                    <button onClick={() => dismissSuggestion(s.id)}>Dismiss</button>
+                  </div>
+                </span>
+              </div>
+            ))}
+          </div>
           <div className="org-card">
             <h3>{assistant}’s proposed day</h3>
             <div style={{ fontSize: 12 }}>{plan?.headline || 'Loading…'}</div>
             {(plan?.proposed_order || []).slice(0, 6).map((s: any) => (
               <div className="org-row" key={s.id || s.title}><span className="tm">{(s.suggested_start || '').slice(11, 16)}</span><span><b>{s.title}</b><small>{s.location_address}</small></span></div>
             ))}
-            <button className="org-btn-gold" style={{ marginTop: 8 }} disabled={plan?.approved} onClick={approvePlan}>
+            <button className="org-btn-gold" style={{ marginTop: 8 }} onClick={() => setPlanOpen(true)}>
+              Plan my day
+            </button>
+            <button className="org-home-btn" style={{ marginTop: 8 }} disabled={plan?.approved} onClick={approvePlan}>
               {plan?.approved ? 'Approved' : 'Approve today'}
             </button>
             <div className="org-note">{plan?.note}</div>
@@ -1057,6 +1187,34 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
               <div className="org-note">{mailNote}</div>
             </div>
           )}
+          {view === 'review' && (
+            <div className="org-review org-card" data-weekly-review="1">
+              <h3><ListChecks size={14} /> Weekly review</h3>
+              <div className="org-note">Slipped, stuck (no movement 7+ days), and next week — across every area. Family stays on this edition only.</div>
+              {(['slipped', 'stuck', 'next_week'] as const).map((bucket) => {
+                const rows = (review?.[bucket] || weeklyReview(filtered, day)[bucket]) as OrganizerItem[];
+                const label = bucket === 'next_week' ? 'Next week' : bucket === 'stuck' ? 'Stuck' : 'Slipped';
+                return (
+                  <div key={bucket} className="org-review-col" data-review={bucket}>
+                    <h4>{label} <span>{rows.length}</span></h4>
+                    {rows.length === 0 && <div className="org-note">None.</div>}
+                    {rows.map((it) => (
+                      <div className="org-row" key={it.id} onClick={() => setForm(it)}>
+                        <span className="tm">{(it.due_at || it.start_time || '').slice(5, 10) || '—'}</span>
+                        <span>
+                          <b>{it.title}</b>
+                          <small>{it.space_id} · {KIND_LABEL[it.kind || it.type || ''] || it.kind}</small>
+                          <WaitingChip item={it} />
+                          <MoneyStrip item={it} />
+                          <ActionBar item={it} compact />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="org-note">{meta?.google_calendar?.note} {meta?.outbound_policy} {usage ? `Today ${edition.assistant || 'this edition'}: ${usage.used?.items || 0}/${usage.caps?.items || 0} items.` : ''}</div>
           {icsNote && <div className="org-note">{icsNote}</div>}
         </section>
@@ -1114,8 +1272,34 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             <input value={(form.due_at || '').slice(0, 16)} type="datetime-local" onChange={(e) => setForm({ ...form, due_at: e.target.value.length === 16 ? `${e.target.value}:00` : e.target.value })} />
             <label>Remind Max at</label>
             <input value={(form.reminder_at || form.due_at || '').slice(0, 16)} type="datetime-local" onChange={(e) => setForm({ ...form, reminder_at: e.target.value.length === 16 ? `${e.target.value}:00` : e.target.value })} />
+            <label>Waiting on</label>
+            <input value={form.waiting_on || ''} placeholder="Who" onChange={(e) => setForm({ ...form, waiting_on: e.target.value })} />
+            <label>Nudge after (days)</label>
+            <input type="number" min={1} max={90} value={form.nudge_after_days || 3} onChange={(e) => setForm({ ...form, nudge_after_days: Number(e.target.value || 3) })} />
+            {form.id && form.waiting_on && (
+              <button onClick={() => saveWaiting(form)}>Save waiting-on (draft nudge only)</button>
+            )}
+            <label>Repeat</label>
+            <select value={form.recurrence_freq || ''} onChange={async (e) => {
+              const freq = e.target.value;
+              setForm({ ...form, recurrence_freq: freq });
+              if (form.id && freq) {
+                await fetch(`${API}/organizer/items/${encodeURIComponent(form.id)}/recurrence`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ freq }),
+                });
+                setToast('Recurring copy will spawn when due. Nothing sent.');
+              }
+            }}>
+              <option value="">One-time</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
             <RecordLinks item={form} />
             <ProgressBar item={form} />
+            <MoneyStrip item={form} />
+            <WaitingChip item={form} />
             <label>Address</label>
             <input value={form.location_address || ''} onChange={(e) => setForm({ ...form, location_address: e.target.value })} />
             <label>Phone</label>
@@ -1171,6 +1355,77 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
               }}>Save area</button>
               <button onClick={() => setSpaceEdit(null)}>Cancel</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {planOpen && (
+        <div className="org-modal" onClick={() => setPlanOpen(false)}>
+          <div className="org-sheet" data-plan-sheet="1" onClick={(e) => e.stopPropagation()}>
+            <h3>Plan my day</h3>
+            <p className="org-note">{assistant} proposes time blocks for installs, orders, and follow-ups. Approve to save. Nothing is sent.</p>
+            <div className="org-note">{plan?.headline}</div>
+            {(plan?.proposed_order || []).map((s: any) => (
+              <div className="org-row" key={s.id || s.title}>
+                <span className="tm">{(s.suggested_start || '').slice(11, 16)}</span>
+                <span><b>{s.title}</b><small>{s.kind || s.type} · {s.location_address || s.space_id || ''}</small></span>
+              </div>
+            ))}
+            {!(plan?.proposed_order || []).length && <EmptyState title="Nothing to place" body="Add installs, orders, or follow-ups and Max will propose blocks." icon={<Clock size={18} />} />}
+            <div className="org-actions">
+              <button className="org-btn-gold" disabled={plan?.approved} onClick={approvePlan}>{plan?.approved ? 'Already approved' : 'Approve & save blocks'}</button>
+              <button onClick={() => setPlanOpen(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {searchOpen && q.trim().length >= 2 && (
+        <div className="org-modal" onClick={() => setSearchOpen(false)}>
+          <div className="org-sheet" data-search-hits="1" onClick={(e) => e.stopPropagation()}>
+            <h3><Search size={16} /> Search</h3>
+            <p className="org-note">Items, jobs, clients, and estimates in this edition only.</p>
+            {(['items', 'jobs', 'clients', 'estimates'] as const).map((bucket) => (
+              <div key={bucket}>
+                <h4 style={{ textTransform: 'uppercase', fontSize: 11, color: 'var(--org-mut)' }}>{bucket}</h4>
+                {!(searchHits?.[bucket] || []).length && <div className="org-note">No {bucket}.</div>}
+                {(searchHits?.[bucket] || []).map((hit: any) => (
+                  <div className="org-row" key={`${bucket}-${hit.id}`}>
+                    <span className="tm">{bucket.slice(0, 3)}</span>
+                    <span>
+                      <b>{hit.title || hit.name || hit.quote_number || hit.id}</b>
+                      <small>{hit.status || hit.phone || hit.client_name || ''}</small>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))}
+            <div className="org-actions"><button onClick={() => setSearchOpen(false)}>Close</button></div>
+          </div>
+        </div>
+      )}
+
+      {cartPreview && (
+        <div className="org-modal" onClick={() => setCartPreview(null)}>
+          <div className="org-sheet" data-supplier-cart="1" onClick={(e) => e.stopPropagation()}>
+            <h3>Supplier cart</h3>
+            <p className="org-note">Prepared only. Never checks out or pays.</p>
+            {(cartPreview.lines || []).map((ln: any, i: number) => (
+              <div className="org-row" key={i}><span className="tm">{ln.qty || 1}</span><span><b>{ln.title}</b><small>{ln.note}</small></span></div>
+            ))}
+            <div className="org-note">checked_out={String(!!cartPreview.checked_out)} · paid={String(!!cartPreview.paid)}</div>
+            <div className="org-actions"><button onClick={() => setCartPreview(null)}>Close</button></div>
+          </div>
+        </div>
+      )}
+
+      {nudgeDraft && (
+        <div className="org-modal" onClick={() => setNudgeDraft(null)}>
+          <div className="org-sheet" data-nudge-draft="1" onClick={(e) => e.stopPropagation()}>
+            <h3>Draft for review</h3>
+            <p className="org-note">Nothing was sent. Approve & Send is still required for anything outbound.</p>
+            <pre className="org-mail-reply">{nudgeDraft.body || nudgeDraft.reminder_draft || JSON.stringify(nudgeDraft, null, 2)}</pre>
+            <div className="org-actions"><button onClick={() => setNudgeDraft(null)}>Close</button></div>
           </div>
         </div>
       )}

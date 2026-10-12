@@ -39,6 +39,11 @@ export type OrganizerItem = {
   progress?: OrganizerProgress | null;
   record_links?: OrganizerRecordLink[];
   actions?: OrganizerAction[];
+  money?: OrganizerMoney | null;
+  waiting_on?: string | null;
+  nudge_after_days?: number | null;
+  invoice_id?: string | null;
+  last_moved_at?: string | null;
 };
 
 export type OrganizerProgress = {
@@ -48,6 +53,21 @@ export type OrganizerProgress = {
   open?: number;
   percent: number;
   fraction: string;
+};
+
+export type OrganizerMoney = {
+  job_id?: string;
+  deposit: number;
+  paid: number;
+  balance: number;
+  margin?: number | null;
+  total?: number;
+  collected_fraction: string;
+  quote_id?: string | null;
+  invoice_id?: string | null;
+  quote_href?: string | null;
+  invoice_href?: string | null;
+  read_only?: boolean;
 };
 
 export type OrganizerRecordLink = {
@@ -332,7 +352,7 @@ export function todayBuckets(items: OrganizerItem[], today: string): Record<Toda
 
 export const STATUS_COLUMNS = [
   { id: 'open', label: 'Open', statuses: ['open', 'planned', 'snoozed'] },
-  { id: 'doing', label: 'Doing', statuses: ['in_progress', 'confirmed'] },
+  { id: 'doing', label: 'Doing', statuses: ['in_progress', 'confirmed', 'waiting_on'] },
   { id: 'done', label: 'Done', statuses: ['done'] },
 ] as const;
 
@@ -489,6 +509,41 @@ export function jobProgressFromItems(items: OrganizerItem[], jobId: string): Org
 
 export function formatOrganizerDate(d: Date): string {
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+export function weeklyReview(
+  items: OrganizerItem[],
+  today: string,
+): { slipped: OrganizerItem[]; stuck: OrganizerItem[]; next_week: OrganizerItem[]; counts: { slipped: number; stuck: number; next_week: number } } {
+  const start = parseStamp(`${today}T00:00:00`) || new Date(`${today}T00:00:00`);
+  const weekEnd = new Date(start);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  const stuckBefore = new Date(start);
+  stuckBefore.setDate(stuckBefore.getDate() - 7);
+  const weekEndY = ymd(weekEnd);
+  const stuckY = ymd(stuckBefore);
+  const slipped: OrganizerItem[] = [];
+  const stuck: OrganizerItem[] = [];
+  const nextWeek: OrganizerItem[] = [];
+  for (const it of items) {
+    if (['done', 'cancelled'].includes(String(it.status || ''))) continue;
+    const due = (it.due_at || it.start_time || '').slice(0, 10);
+    const moved = String(it.last_moved_at || it.due_at || it.start_time || '').slice(0, 10);
+    if (due && due < today) slipped.push(it);
+    else if (due && due > today && due <= weekEndY) nextWeek.push(it);
+    if (moved && moved <= stuckY) stuck.push(it);
+  }
+  return { slipped, stuck, next_week: nextWeek, counts: { slipped: slipped.length, stuck: stuck.length, next_week: nextWeek.length } };
+}
+
+export function formatMoney(n?: number | null): string {
+  if (n == null || Number.isNaN(Number(n))) return '—';
+  const v = Number(n);
+  const sign = v < 0 ? '-' : '';
+  const abs = Math.abs(v);
+  const dollars = Math.floor(abs);
+  const cents = Math.round((abs - dollars) * 100);
+  return cents ? `${sign}$${dollars}.${String(cents).padStart(2, '0')}` : `${sign}$${dollars}`;
 }
 
 export function formatOrganizerTime(iso?: string | null): string {

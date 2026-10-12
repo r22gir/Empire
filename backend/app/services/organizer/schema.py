@@ -301,8 +301,72 @@ def migrate_organizer_tables(conn: sqlite3.Connection) -> None:
         ("reminder_at", "TEXT"),
         ("capture_id", "TEXT"),
         ("project_id", "TEXT"),
+        ("waiting_on", "TEXT"),
+        ("nudge_after_days", "INTEGER"),
+        ("last_nudge_at", "TEXT"),
+        ("last_moved_at", "TEXT"),
+        ("recurrence_freq", "TEXT"),
+        ("template_id", "TEXT"),
+        ("parent_id", "TEXT"),
+        ("invoice_id", "TEXT"),
     ):
         try:
             _add_column(conn, "organizer_items", name, decl)
         except Exception:
             pass
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organizer_suggestions (
+            id TEXT PRIMARY KEY,
+            edition TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_ref TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT,
+            kind TEXT NOT NULL DEFAULT 'todo',
+            space_id TEXT,
+            job_id TEXT,
+            quote_id TEXT,
+            capture_id TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            payload_json TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_org_sug_ed_src ON organizer_suggestions(edition, source, source_ref)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organizer_templates (
+            id TEXT PRIMARY KEY,
+            edition TEXT NOT NULL,
+            space_id TEXT,
+            slug TEXT NOT NULL,
+            label TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'checklist',
+            steps_json TEXT NOT NULL,
+            created_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_org_tpl_ed_slug ON organizer_templates(edition, slug)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organizer_recurrence (
+            id TEXT PRIMARY KEY,
+            edition TEXT NOT NULL,
+            item_id TEXT,
+            template_id TEXT,
+            freq TEXT NOT NULL DEFAULT 'weekly',
+            next_due TEXT,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT
+        )
+        """
+    )

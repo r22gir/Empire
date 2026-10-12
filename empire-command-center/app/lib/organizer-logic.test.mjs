@@ -6,7 +6,7 @@ import {
   filterPendingMail, pendingMailVisible, PX_PER_MIN, shouldOfferCrewDraft, showsWorkroomJobs, snapMinutes,
   spaceStyle, todayBuckets, columnForStatus, itemsInColumn, dueForTodayColumn, progressFromTasks,
   inferSpaceClient, timeFromOffset, weekDays, parseOrgTheme, resolveOrgTheme, themedSpaceStyle,
-  organizerKpis, jobProgressFromItems, formatOrganizerTime,
+  organizerKpis, jobProgressFromItems, formatOrganizerTime, weeklyReview, formatMoney,
 } from './organizer-logic.ts';
 
 test('filter by job, person, kind', () => {
@@ -153,6 +153,22 @@ test('org themes parse from query aliases and recolor spaces', () => {
   ], 'j1');
   assert.equal(bar?.fraction, '1/2');
   assert.equal(formatOrganizerTime('2026-10-12T14:00:00'), '2 PM');
+});
+
+test('weekly review buckets slipped stuck next week', () => {
+  const pack = weeklyReview([
+    { id: 's', title: 'Late form', due_at: '2026-10-01T09:00:00', status: 'open' },
+    { id: 'k', title: 'Stuck sew', last_moved_at: '2026-09-20T09:00:00', status: 'in_progress' },
+    { id: 'n', title: 'Install next', start_time: '2026-10-16T10:00:00', status: 'planned' },
+    { id: 'd', title: 'Done late', due_at: '2026-10-01T09:00:00', status: 'done' },
+  ], '2026-10-12');
+  assert.deepEqual(pack.slipped.map((i) => i.id), ['s']);
+  assert.ok(pack.stuck.some((i) => i.id === 'k'));
+  assert.deepEqual(pack.next_week.map((i) => i.id), ['n']);
+  assert.equal(pack.counts.next_week, 1);
+  assert.equal(columnForStatus('waiting_on'), 'doing');
+  assert.equal(formatMoney(1200), '$1200');
+  assert.equal(formatMoney(50.5), '$50.50');
 });
 
 test('pending mail hides snoozed ids', () => {

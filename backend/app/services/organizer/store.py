@@ -475,6 +475,16 @@ def enrich_item(conn, row: dict) -> dict:
         item["quote_id"] = lookup_quote_id(
             conn, job_id=item.get("job_id"), customer_id=item.get("customer_id")
         )
+    if item.get("job_id") and can_read_workroom_jobs():
+        try:
+            from app.services.organizer.money import job_money
+            money = job_money(conn, item["job_id"])
+            if money:
+                item["money"] = money
+                item["invoice_id"] = item.get("invoice_id") or money.get("invoice_id")
+                item["quote_id"] = item.get("quote_id") or money.get("quote_id")
+        except Exception:
+            pass
     item["record_links"] = record_links(item)
     return item
 
@@ -648,14 +658,16 @@ def insert_item(conn, payload: dict) -> dict:
     stamp = now_iso()
     resource_ids = parse_ids(payload.get("assigned_resource_ids"))
     primary = payload.get("resource_id") or (resource_ids[0] if resource_ids else None)
+    status = payload.get("status") if payload.get("status") in ITEM_STATUSES else "open"
     conn.execute(
         """
         INSERT INTO organizer_items (
             id, kind, title, job_id, customer_id, resource_id, due_at, start_time, end_time,
             status, followup_kind, phone, location_address, material_eta, order_ref,
             reminder_draft, outbound_blocked, notes, schedule_event_id, created_by,
-            created_at, updated_at, edition, space_id, quote_id, reminder_at, capture_id, project_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, updated_at, edition, space_id, quote_id, reminder_at, capture_id, project_id,
+            waiting_on, nudge_after_days, last_moved_at, recurrence_freq, template_id, parent_id, invoice_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             item_id,
@@ -667,7 +679,7 @@ def insert_item(conn, payload: dict) -> dict:
             payload.get("due_at"),
             payload.get("start_time"),
             payload.get("end_time"),
-            payload.get("status") if payload.get("status") in ITEM_STATUSES else "open",
+            status,
             payload.get("followup_kind"),
             payload.get("phone"),
             payload.get("location_address"),
@@ -685,6 +697,13 @@ def insert_item(conn, payload: dict) -> dict:
             payload.get("reminder_at") or payload.get("due_at"),
             payload.get("capture_id") or None,
             payload.get("project_id") or payload.get("job_id") or None,
+            (payload.get("waiting_on") or "").strip() or None,
+            payload.get("nudge_after_days"),
+            stamp,
+            payload.get("recurrence_freq") or None,
+            payload.get("template_id") or None,
+            payload.get("parent_id") or None,
+            payload.get("invoice_id") or None,
         ),
     )
     replace_assignments(conn, resource_ids or ([primary] if primary else []), item_id=item_id)

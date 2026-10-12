@@ -473,6 +473,20 @@ class MaxScheduler:
             from app.services.organizer.reminders import dispatch_due_reminders
             with get_db() as conn:
                 fired = dispatch_due_reminders(conn)
+                try:
+                    from app.services.organizer.waiting import dispatch_waiting_nudges
+                    nudges = dispatch_waiting_nudges(conn)
+                    if nudges.get("dispatched"):
+                        logger.info("Organizer waiting drafts prepared: %s", nudges["dispatched"])
+                except Exception as inner:
+                    logger.error("Organizer waiting drafts failed: %s", inner)
+                try:
+                    from app.services.organizer.templates import spawn_due_recurring
+                    spawned = spawn_due_recurring(conn)
+                    if spawned.get("count"):
+                        logger.info("Organizer recurring copies: %s", spawned["count"])
+                except Exception as inner:
+                    logger.error("Organizer recurrence spawn failed: %s", inner)
             if fired:
                 logger.info("Organizer reminders dispatched: %s", len(fired))
         except Exception as e:

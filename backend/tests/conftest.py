@@ -145,6 +145,10 @@ _DATA_TABLES = [
     "organizer_spaces",
     "organizer_usage",
     "organizer_mail_state",
+    "organizer_reminders",
+    "organizer_suggestions",
+    "organizer_templates",
+    "organizer_recurrence",
     "approval_queue",
 ]
 

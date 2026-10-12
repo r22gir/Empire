@@ -106,6 +106,11 @@ class ItemIn(BaseModel):
     confirm_conflicts: bool = False
     created_by: str = "manual"
     space_id: Optional[str] = None
+    waiting_on: Optional[str] = None
+    nudge_after_days: Optional[int] = None
+    recurrence_freq: Optional[str] = None
+    template_id: Optional[str] = None
+    invoice_id: Optional[str] = None
 
 
 class ItemUpdate(BaseModel):
@@ -131,6 +136,10 @@ class ItemUpdate(BaseModel):
     notes: Optional[str] = None
     confirm_conflicts: bool = False
     space_id: Optional[str] = None
+    waiting_on: Optional[str] = None
+    nudge_after_days: Optional[int] = None
+    recurrence_freq: Optional[str] = None
+    invoice_id: Optional[str] = None
 
 
 class QuickAddIn(BaseModel):
@@ -190,6 +199,11 @@ class ActionIn(BaseModel):
     assigned_resource_ids: Optional[List[str]] = None
     job_id: Optional[str] = None
     ask: Optional[str] = None
+    who: Optional[str] = None
+    nudge_after_days: Optional[int] = None
+    due_at: Optional[str] = None
+    invoice_id: Optional[str] = None
+    lines: Optional[List[dict]] = None
 
 
 class CommandIn(BaseModel):
@@ -204,6 +218,29 @@ class MailActionIn(BaseModel):
     body: Optional[str] = None
     snooze_until: Optional[str] = None
     confirm: bool = False
+
+
+class TemplateIn(BaseModel):
+    label: str
+    steps: List[str]
+    space_id: Optional[str] = None
+    slug: Optional[str] = None
+    kind: str = "custom"
+
+
+class TemplateApplyIn(BaseModel):
+    space_id: Optional[str] = None
+    job_id: Optional[str] = None
+    title: Optional[str] = None
+
+
+class WaitingIn(BaseModel):
+    who: str
+    nudge_after_days: int = 3
+
+
+class RecurrenceIn(BaseModel):
+    freq: str = "weekly"
 
 
 def _usage_http(exc: UsageCapExceeded):
@@ -746,7 +783,7 @@ def create_item(req: ItemIn):
                 return {"item": item, "event": event, "conflicts": []}
             item = insert_item(conn, payload)
             _maybe_remind(conn, item)
-            return {"item": item, "event": None, "conflicts": []}
+            return {"item": _decorate(conn, [item])[0], "event": None, "conflicts": []}
         except ValueError as exc:
             _blocked_http(str(exc))
 
@@ -780,6 +817,9 @@ def update_item(item_id: str, req: ItemUpdate):
             fields.append(f"{key} = ?")
             params.append(val)
         if fields:
+            if "status" in updates:
+                fields.append("last_moved_at = ?")
+                params.append(now_iso())
             fields.append("updated_at = ?")
             params.append(now_iso())
             params.append(item_id)
@@ -961,6 +1001,13 @@ def list_item_actions(item_id: Optional[str] = None):
                     {"id": "attach_file", "label": "Attach to email/quote", "group": "file", "draft": True},
                     {"id": "ask_max", "label": "Ask Max", "group": "file"},
                     {"id": "notify_crew", "label": "Notify crew (draft)", "group": "move", "draft": True},
+                    {"id": "open_quote", "label": "Open quote", "group": "job"},
+                    {"id": "open_invoice", "label": "Open invoice", "group": "job"},
+                    {"id": "mark_paid", "label": "Mark paid", "group": "job"},
+                    {"id": "supplier_cart", "label": "Build supplier cart", "group": "job", "draft": True},
+                    {"id": "snooze", "label": "Snooze", "group": "move"},
+                    {"id": "remind", "label": "Remind", "group": "move", "draft": True},
+                    {"id": "waiting_nudge", "label": "Draft nudge", "group": "followup", "draft": True},
                 ],
                 "outbound_policy": OUTBOUND_POLICY,
             }
@@ -989,6 +1036,11 @@ async def perform_action(req: ActionIn):
             "assigned_resource_ids": req.assigned_resource_ids,
             "confirm_conflicts": req.confirm_conflicts,
             "ask": req.ask,
+            "who": req.who,
+            "nudge_after_days": req.nudge_after_days,
+            "due_at": req.due_at,
+            "invoice_id": req.invoice_id,
+            "lines": req.lines,
         }
         try:
             consume(conn, "actions")
@@ -1085,7 +1137,7 @@ def get_day_plan(plan_date: Optional[str] = None):
         ensure_schema(conn)
         from app.services.organizer.dayplan import propose_day
         events = _list_events(conn, day, day, limit=400)
-        items = _list_items(conn, None, day, limit=400)
+        items = _list_items(conn, limit=400)
         board = _unify(events, items, project_job_dates(conn) if can_read_workroom_jobs() else [])
         clause, eparams = edition_sql()
         resources = [dict(r) for r in conn.execute(
@@ -1122,20 +1174,37 @@ def approve_day_plan(plan_date: Optional[str] = None, apply_times: bool = True):
         )
         applied = []
         if apply_times:
+            clause, eparams = edition_sql()
             for stop in plan.get("proposed_order") or []:
                 if stop.get("kept_existing_time") or stop.get("read_only"):
                     continue
-                if stop.get("source") == "schedule_event" and stop.get("id"):
-                    clause, eparams = edition_sql()
+                sid = stop.get("id")
+                if not sid:
+                    continue
+                start, end = stop.get("suggested_start"), stop.get("suggested_end")
+                if stop.get("source") == "schedule_event":
                     conn.execute(
                         f"UPDATE schedule_events SET start_time = ?, end_time = ?, updated_at = ? WHERE id = ? AND {clause}",
-                        (stop.get("suggested_start"), stop.get("suggested_end"), stamp, stop["id"], *eparams),
+                        (start, end, stamp, sid, *eparams),
                     )
-                    applied.append(stop["id"])
+                    applied.append(sid)
+                    continue
+                conn.execute(
+                    f"""UPDATE organizer_items
+                           SET start_time = ?, end_time = ?, status = CASE
+                                 WHEN status IN ('done', 'cancelled') THEN status ELSE 'planned' END,
+                               last_moved_at = ?, updated_at = ?
+                         WHERE id = ? AND {clause}""",
+                    (start, end, stamp, stamp, sid, *eparams),
+                )
+                if conn.execute("SELECT changes()").fetchone()[0]:
+                    applied.append(sid)
         plan["approved"] = True
         plan["plan_id"] = pid
         plan["applied_ids"] = applied
         plan["sent"] = False
+        plan["outbound_blocked"] = True
+        plan["message"] = "Plan saved on the calendar. Nothing was sent."
         return plan
 
 
@@ -1508,11 +1577,13 @@ def move_item_column(item_id: str, req: ItemMoveIn):
             updates["space_id"] = normalize_space(req.space_id)
         if not updates:
             return {"item": item, "moved": False}
+        stamp = now_iso()
         fields = [f"{k} = ?" for k in updates]
+        fields.append("last_moved_at = ?")
         fields.append("updated_at = ?")
         conn.execute(
             f"UPDATE organizer_items SET {', '.join(fields)} WHERE id = ?",
-            (*updates.values(), now_iso(), item_id),
+            (*updates.values(), stamp, stamp, item_id),
         )
         if item.get("schedule_event_id") and updates.get("due_at"):
             conn.execute(
@@ -1544,10 +1615,21 @@ def list_organizer_reminders(status: Optional[str] = None, limit: int = 80):
 def dispatch_organizer_reminders():
     """Run due reminders now (also hooked to Max scheduler). Uses notify_founder."""
     from app.services.organizer.reminders import dispatch_due_reminders
+    from app.services.organizer.waiting import dispatch_waiting_nudges
+    from app.services.organizer.templates import spawn_due_recurring
     with get_db() as conn:
         ensure_schema(conn)
         fired = dispatch_due_reminders(conn)
-        return {"dispatched": len(fired), "reminders": fired, "outbound_sent": False}
+        nudges = dispatch_waiting_nudges(conn)
+        spawned = spawn_due_recurring(conn)
+        return {
+            "dispatched": len(fired),
+            "reminders": fired,
+            "waiting": nudges,
+            "recurring": spawned,
+            "outbound_sent": False,
+            "sent": False,
+        }
 
 
 @router.post("/transcribe")
@@ -1598,3 +1680,157 @@ def pending_mail_action(req: MailActionIn):
         if not result.get("ok"):
             raise HTTPException(404 if "not found" in (result.get("message") or "").lower() else 400, result.get("message"))
         return result
+
+
+@router.get("/suggestions")
+def list_suggestions(status: str = "pending"):
+    """Suggested tray. Harvest only — nothing becomes a to-do until Accept."""
+    from app.services.organizer.suggestions import list_suggestions as _list
+    with get_db() as conn:
+        ensure_schema(conn)
+        rows = _list(conn, status=status)
+        return {
+            "suggestions": rows,
+            "count": len(rows),
+            "created": False,
+            "sent": False,
+            "outbound_policy": OUTBOUND_POLICY,
+            "message": "Suggestions only. Accept or dismiss — nothing is created silently.",
+        }
+
+
+@router.post("/suggestions/{suggestion_id}/accept")
+def accept_suggestion(suggestion_id: str):
+    from app.services.organizer.suggestions import accept_suggestion as _accept
+    with get_db() as conn:
+        ensure_schema(conn)
+        try:
+            consume(conn, "items")
+        except UsageCapExceeded as exc:
+            _usage_http(exc)
+        result = _accept(conn, suggestion_id)
+        if not result.get("ok") and "not found" in (result.get("message") or "").lower():
+            raise HTTPException(404, result.get("message"))
+        return result
+
+
+@router.post("/suggestions/{suggestion_id}/dismiss")
+def dismiss_suggestion(suggestion_id: str):
+    from app.services.organizer.suggestions import dismiss_suggestion as _dismiss
+    with get_db() as conn:
+        ensure_schema(conn)
+        return _dismiss(conn, suggestion_id)
+
+
+@router.get("/templates")
+def list_templates():
+    from app.services.organizer.templates import list_templates as _list
+    with get_db() as conn:
+        ensure_schema(conn)
+        return {"templates": _list(conn)}
+
+
+@router.post("/templates")
+def create_template(req: TemplateIn):
+    from app.services.organizer.templates import save_template
+    if not req.steps:
+        raise HTTPException(400, "Template needs at least one step")
+    with get_db() as conn:
+        ensure_schema(conn)
+        tpl = save_template(
+            conn, label=req.label, steps=req.steps,
+            space_id=req.space_id, slug=req.slug, kind=req.kind,
+        )
+        return {"template": tpl, "sent": False}
+
+
+@router.post("/templates/{template_id}/apply")
+def apply_template(template_id: str, req: TemplateApplyIn):
+    from app.services.organizer.templates import apply_template as _apply
+    with get_db() as conn:
+        ensure_schema(conn)
+        result = _apply(
+            conn, template_id,
+            space_id=req.space_id, job_id=req.job_id, title=req.title,
+        )
+        if not result.get("ok"):
+            raise HTTPException(404, result.get("message"))
+        return result
+
+
+@router.post("/items/{item_id}/waiting")
+def mark_waiting(item_id: str, req: WaitingIn):
+    from app.services.organizer.waiting import set_waiting
+    with get_db() as conn:
+        ensure_schema(conn)
+        item = load_item(conn, item_id)
+        if not item:
+            raise HTTPException(404, "Organizer item not found")
+        result = set_waiting(conn, item_id, who=req.who, nudge_after_days=req.nudge_after_days)
+        result["item"] = load_item(conn, item_id) or result.get("item")
+        return result
+
+
+@router.post("/items/{item_id}/recurrence")
+def item_recurrence(item_id: str, req: RecurrenceIn):
+    from app.services.organizer.templates import set_recurrence
+    with get_db() as conn:
+        ensure_schema(conn)
+        if not load_item(conn, item_id):
+            raise HTTPException(404, "Organizer item not found")
+        return set_recurrence(conn, item_id=item_id, freq=req.freq)
+
+
+@router.post("/recurrence/spawn")
+def spawn_recurrence():
+    from app.services.organizer.templates import spawn_due_recurring
+    with get_db() as conn:
+        ensure_schema(conn)
+        return spawn_due_recurring(conn)
+
+
+@router.get("/search")
+def organizer_search(q: str = "", limit: int = 30):
+    from app.services.organizer.search import search_organizer
+    with get_db() as conn:
+        ensure_schema(conn)
+        return search_organizer(conn, q, limit=limit)
+
+
+@router.get("/review/weekly")
+def organizer_weekly_review():
+    from app.services.organizer.review import weekly_review
+    with get_db() as conn:
+        ensure_schema(conn)
+        items = _decorate(conn, _list_items(conn, limit=400))
+        events = _list_events(conn, limit=400)
+        board = _unify(events, items, [])
+        pack = weekly_review(board)
+        pack["sent"] = False
+        pack["outbound_policy"] = OUTBOUND_POLICY
+        return pack
+
+
+@router.get("/jobs/{job_id}/money")
+def job_money_view(job_id: str):
+    from app.services.organizer.money import job_money
+    with get_db() as conn:
+        ensure_schema(conn)
+        if not can_read_workroom_jobs():
+            raise HTTPException(404, "Job not found")
+        money = job_money(conn, job_id)
+        if not money:
+            return {
+                "job_id": job_id, "deposit": 0, "paid": 0, "balance": 0, "margin": None,
+                "total": 0, "collected_fraction": "0/0", "read_only": True,
+            }
+        return money
+
+
+@router.post("/waiting/dispatch")
+def dispatch_waiting():
+    """Prepare draft nudges for Rafael. Nothing is sent."""
+    from app.services.organizer.waiting import dispatch_waiting_nudges
+    with get_db() as conn:
+        ensure_schema(conn)
+        return dispatch_waiting_nudges(conn)
