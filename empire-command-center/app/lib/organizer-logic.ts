@@ -258,6 +258,7 @@ export type PendingMail = {
   source: string;
   message_id: string;
   account?: string;
+  from?: string;
   from_name?: string;
   from_email?: string;
   subject: string;
@@ -284,7 +285,7 @@ export function filterPendingMail(
   return pendingMailVisible(items, opts.snoozedIds).filter((m) => {
     if (opts.spaceId && m.space_id && m.space_id !== opts.spaceId) return false;
     if (!q) return true;
-    const blob = `${m.subject} ${m.from_name || ''} ${m.from_email || ''} ${m.preview || ''} ${m.person_name || ''} ${m.job_title || ''}`.toLowerCase();
+    const blob = `${m.subject} ${m.from_name || ''} ${m.from || ''} ${m.from_email || ''} ${m.preview || ''} ${m.person_name || ''} ${m.job_title || ''}`.toLowerCase();
     return blob.includes(q);
   });
 }
