@@ -211,6 +211,15 @@ def _build_empty_empire_db(path: str) -> None:
     except Exception:
         pass
 
+    try:
+        from app.services.organizer.schema import migrate_organizer_tables
+        conn_org = sqlite3.connect(path)
+        migrate_organizer_tables(conn_org)
+        conn_org.commit()
+        conn_org.close()
+    except Exception:
+        pass
+
 
 @pytest.fixture(scope="session")
 def isolated_empire_db():

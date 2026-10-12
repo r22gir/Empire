@@ -251,3 +251,38 @@ def test_orchestrator_records_idle_desk_runs(seeded_db):
     assert runs
     assert runs[0]["id"] == payload["run_id"]
     assert runs[0]["tasks_created"] >= 1
+
+
+def test_support_uses_organizer_mail_and_family_store(seeded_db):
+    import app.services.organizer.mail as mailmod
+    from app.services.max.desks.family_help_store import inbox_base, write_ticket_for_tests
+    from app.services.max.desks.job_runner import run_scheduled_job
+
+    mailmod.TEST_INBOX = [{
+        "source": "gmail",
+        "message_id": "gm-support",
+        "from": "Marley <marley@example.com>",
+        "subject": "Where is the deposit invoice?",
+        "date": "2026-10-11T12:00:00",
+        "preview": "Need the invoice copy",
+        "unread": True,
+        "account": "gmail",
+    }]
+    write_ticket_for_tests(
+        edition="amp",
+        ticket_id="fh-support-1",
+        sender="Amp",
+        message="School pickup tomorrow",
+        created_at=seeded_db.isoformat(),
+        base=inbox_base(),
+    )
+    try:
+        out = run_scheduled_job("support", "Open Ticket Summary", now=seeded_db)
+        assert out["status"] == "done"
+        assert "Where is the deposit invoice?" in out["result"]
+        assert "School pickup tomorrow" in out["result"]
+        assert "isolated" in out["result"].lower()
+        assert "Your order has been shipped" not in out["result"]
+    finally:
+        mailmod.TEST_INBOX = None
+

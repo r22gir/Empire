@@ -313,32 +313,96 @@ def query_jobs(conn: sqlite3.Connection, statuses: Iterable[str] | None = None) 
 
 
 def query_schedule(conn: sqlite3.Connection, start: datetime, end: datetime) -> list[dict]:
-    if not _table_exists(conn, "schedule_events"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT id, type, title, customer_vendor, location_address,
-               start_time, end_time, status
-        FROM schedule_events
-        WHERE status != 'cancelled'
-          AND start_time >= ? AND start_time < ?
-        ORDER BY start_time ASC
-        """,
-        (start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d %H:%M:%S")),
-    ).fetchall()
-    findings = []
-    for raw in rows:
-        row = _row_dict(raw)
-        findings.append({
-            "kind": "schedule",
-            "id": row.get("id"),
-            "name": row.get("title") or row.get("id"),
-            "customer": row.get("customer_vendor") or "Unknown",
-            "type": row.get("type"),
-            "start_time": row.get("start_time"),
-            "status": row.get("status"),
-            "location": row.get("location_address"),
-        })
+    """Today / this week from schedule_events (Organizer calendar) plus
+    organizer_items that have a start/due in the window and are not already
+    mirrored onto a schedule_event row.
+    """
+    findings: list[dict] = []
+    seen: set[str] = set()
+    start_s = start.strftime("%Y-%m-%d")
+    end_s = end.strftime("%Y-%m-%d %H:%M:%S")
+    if _table_exists(conn, "schedule_events"):
+        cols = _cols(conn, "schedule_events")
+        extra = ""
+        if "space_id" in cols:
+            extra += ", space_id"
+        if "event_kind" in cols:
+            extra += ", event_kind"
+        rows = conn.execute(
+            f"""
+            SELECT id, type, title, customer_vendor, location_address,
+                   start_time, end_time, status{extra}
+            FROM schedule_events
+            WHERE status != 'cancelled'
+              AND start_time >= ? AND start_time < ?
+            ORDER BY start_time ASC
+            """,
+            (start_s, end_s),
+        ).fetchall()
+        for raw in rows:
+            row = _row_dict(raw)
+            eid = str(row.get("id") or "")
+            seen.add(eid)
+            findings.append({
+                "kind": "schedule",
+                "id": row.get("id"),
+                "name": row.get("title") or row.get("id"),
+                "customer": row.get("customer_vendor") or "Unknown",
+                "type": row.get("event_kind") or row.get("type"),
+                "start_time": row.get("start_time"),
+                "status": row.get("status"),
+                "location": row.get("location_address"),
+                "space_id": row.get("space_id"),
+                "source": "schedule_events",
+            })
+    if _table_exists(conn, "organizer_items"):
+        cols = _cols(conn, "organizer_items")
+        time_col = "start_time" if "start_time" in cols else ("due_at" if "due_at" in cols else None)
+        if time_col:
+            space_sel = "space_id" if "space_id" in cols else "NULL AS space_id"
+            due_sel = "due_at" if "due_at" in cols else "NULL AS due_at"
+            ev_sel = "schedule_event_id" if "schedule_event_id" in cols else "NULL AS schedule_event_id"
+            rows = conn.execute(
+                f"""
+                SELECT id, title, kind, status, {time_col} AS start_time,
+                       {due_sel}, {space_sel}, {ev_sel}
+                FROM organizer_items
+                WHERE status NOT IN ('done','cancelled')
+                  AND COALESCE({time_col}, due_at) >= ?
+                  AND COALESCE({time_col}, due_at) < ?
+                """,
+                (start_s, end_s),
+            ).fetchall() if "due_at" in cols else conn.execute(
+                f"""
+                SELECT id, title, kind, status, {time_col} AS start_time,
+                       NULL AS due_at, {space_sel}, {ev_sel}
+                FROM organizer_items
+                WHERE status NOT IN ('done','cancelled')
+                  AND {time_col} >= ? AND {time_col} < ?
+                """,
+                (start_s, end_s),
+            ).fetchall()
+            for raw in rows:
+                row = _row_dict(raw)
+                linked = str(row.get("schedule_event_id") or "")
+                oid = str(row.get("id") or "")
+                if linked and linked in seen:
+                    continue
+                if oid in seen:
+                    continue
+                seen.add(oid)
+                findings.append({
+                    "kind": "schedule",
+                    "id": row.get("id"),
+                    "name": row.get("title") or row.get("id"),
+                    "customer": "Organizer",
+                    "type": row.get("kind"),
+                    "start_time": row.get("start_time") or row.get("due_at"),
+                    "status": row.get("status"),
+                    "space_id": row.get("space_id"),
+                    "source": "organizer_items",
+                })
+    findings.sort(key=lambda f: str(f.get("start_time") or ""))
     return findings
 
 
@@ -497,7 +561,44 @@ def list_unreviewed_inbox(inbox_path: Path | None = None) -> list[dict]:
 
 
 def query_pending_mail(conn: sqlite3.Connection) -> list[dict]:
+    """Unanswered mail from Organizer (Gmail + Outlook, read-only).
+
+    Draft replies stay on the approval queue. Nothing is sent.
+    The pending_mail table is a fallback only.
+    """
     findings: list[dict] = []
+    seen: set[str] = set()
+
+    def _add(item: dict) -> None:
+        key = str(item.get("id") or item.get("name") or "")
+        if not key or key in seen:
+            return
+        seen.add(key)
+        findings.append(item)
+
+    try:
+        from app.services.organizer.mail import list_pending
+
+        payload = list_pending(conn, limit=40)
+        items = payload.get("items") if isinstance(payload, dict) else payload
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            _add({
+                "kind": "mail",
+                "id": item.get("id"),
+                "name": item.get("subject") or item.get("id"),
+                "customer": item.get("from_name") or item.get("from") or "Unknown",
+                "channel": item.get("source") or item.get("channel") or "email",
+                "status": item.get("waiting") or item.get("status") or "pending",
+                "source": item.get("source"),
+                "preview": item.get("preview"),
+                "read_only": True,
+                "sent": False,
+            })
+    except Exception as exc:
+        logger.info("organizer mail skipped: %s", exc)
+
     if _table_exists(conn, "pending_mail"):
         rows = conn.execute(
             """
@@ -509,7 +610,7 @@ def query_pending_mail(conn: sqlite3.Connection) -> list[dict]:
         ).fetchall()
         for raw in rows:
             row = _row_dict(raw)
-            findings.append({
+            _add({
                 "kind": "mail",
                 "id": row.get("id"),
                 "name": row.get("subject") or row.get("id"),
@@ -518,30 +619,26 @@ def query_pending_mail(conn: sqlite3.Connection) -> list[dict]:
                 "status": row.get("status"),
                 "created_at": row.get("created_at"),
             })
-    try:
-        from app.services.organizer.mail import list_pending  # type: ignore
-
-        payload = list_pending(conn, limit=40)
-        items = payload.get("items") if isinstance(payload, dict) else payload
-        for item in items or []:
-            if not isinstance(item, dict):
-                continue
-            findings.append({
-                "kind": "mail",
-                "id": item.get("id"),
-                "name": item.get("subject") or item.get("id"),
-                "customer": item.get("from_name") or item.get("from") or "Unknown",
-                "channel": item.get("channel") or "email",
-                "status": item.get("status") or "pending",
-            })
-    except Exception:
-        pass
     return findings
 
 
 def query_family_help_tickets(conn: sqlite3.Connection) -> list[dict]:
-    """Family-help only. Never mixed into Workroom client work."""
+    """Family-help only. Primary source is /data/family-help/<ed>/help.db."""
     findings: list[dict] = []
+    seen: set[str] = set()
+    try:
+        from app.services.max.desks.family_help_store import list_open_tickets
+
+        for item in list_open_tickets():
+            key = str(item.get("id") or "")
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            findings.append(item)
+    except Exception as exc:
+        logger.info("family-help store skipped: %s", exc)
+
     if _table_exists(conn, "family_help_tickets"):
         rows = conn.execute(
             """
@@ -553,6 +650,11 @@ def query_family_help_tickets(conn: sqlite3.Connection) -> list[dict]:
         ).fetchall()
         for raw in rows:
             row = _row_dict(raw)
+            key = str(row.get("id") or "")
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
             findings.append({
                 "kind": "family_ticket",
                 "id": row.get("id"),
@@ -560,6 +662,7 @@ def query_family_help_tickets(conn: sqlite3.Connection) -> list[dict]:
                 "customer": row.get("requester") or "Family",
                 "status": row.get("status"),
                 "area": "family",
+                "isolated": True,
             })
     if _table_exists(conn, "tasks"):
         cols = _cols(conn, "tasks")
@@ -572,11 +675,13 @@ def query_family_help_tickets(conn: sqlite3.Connection) -> list[dict]:
                   AND desk IN ('family', 'family-help')
                 """
             ).fetchall()
-            seen = {f["id"] for f in findings}
             for raw in rows:
                 row = _row_dict(raw)
-                if row.get("id") in seen:
+                key = str(row.get("id") or "")
+                if key and key in seen:
                     continue
+                if key:
+                    seen.add(key)
                 findings.append({
                     "kind": "family_ticket",
                     "id": row.get("id"),
@@ -584,20 +689,99 @@ def query_family_help_tickets(conn: sqlite3.Connection) -> list[dict]:
                     "customer": "Family",
                     "status": row.get("status"),
                     "area": "family",
+                    "isolated": True,
                 })
     return findings
 
 
+def _space_bucket(space: str | None, blob: str = "") -> str | None:
+    """Map an Organizer space onto Empire / family / personal / ventures.
+
+    Workroom is Workroom — it does not belong in Other areas.
+    """
+    key = (space or "").strip().lower().replace(" ", "_")
+    if ":" in key:
+        key = key.split(":")[-1]
+    if key == "family":
+        return "family"
+    if key == "personal":
+        return "personal"
+    if key in ("ventures", "venture"):
+        return "ventures"
+    if key == "empire":
+        return "empire"
+    if key in ("workroom", "work", "amp"):
+        return None
+    text = (blob or "").lower()
+    if any(w in text for w in ("family", "amp", "maxine", "ayuda")):
+        return "family"
+    if any(w in text for w in ("personal", "dentist", "doctor", "school")):
+        return "personal"
+    if any(w in text for w in ("venture", "llc", "new biz", "side")):
+        return "ventures"
+    return None
+
+
 def query_other_areas(conn: sqlite3.Connection, now: datetime | None = None) -> dict[str, list[dict]]:
-    """Empire / family / personal / ventures from Organizer + schedule notes."""
+    """Empire / family / personal / ventures from Organizer items + family-help."""
     now = _now(now)
     buckets: dict[str, list[dict]] = {"empire": [], "family": [], "personal": [], "ventures": []}
     buckets["family"].extend(query_family_help_tickets(conn))
+    seen: set[str] = {str(i.get("id") or "") for i in buckets["family"]}
+
+    def _put(area: str | None, item: dict) -> None:
+        if not area or area not in buckets:
+            return
+        key = str(item.get("id") or "")
+        if key and key in seen:
+            return
+        if key:
+            seen.add(key)
+        buckets[area].append(item)
+
+    if _table_exists(conn, "organizer_items"):
+        try:
+            from app.services.organizer.schema import migrate_organizer_tables
+            migrate_organizer_tables(conn)
+        except Exception:
+            pass
+        cols = _cols(conn, "organizer_items")
+        if "title" in cols:
+            space_sel = "space_id" if "space_id" in cols else "NULL AS space_id"
+            due_sel = "due_at" if "due_at" in cols else "NULL AS due_at"
+            start_sel = "start_time" if "start_time" in cols else "NULL AS start_time"
+            rows = conn.execute(
+                f"""
+                SELECT id, title, kind, status, {space_sel}, {due_sel}, {start_sel}, notes
+                FROM organizer_items
+                WHERE status NOT IN ('done','cancelled')
+                LIMIT 80
+                """
+            ).fetchall()
+            for raw in rows:
+                row = _row_dict(raw)
+                blob = f"{row.get('title') or ''} {row.get('notes') or ''} {row.get('kind') or ''}"
+                area = _space_bucket(row.get("space_id"), blob)
+                if area is None and str(row.get("space_id") or "") in ("", "None"):
+                    area = _space_bucket(None, blob) or "empire"
+                _put(area, {
+                    "kind": "organizer",
+                    "id": row.get("id"),
+                    "name": row.get("title"),
+                    "status": row.get("status"),
+                    "start_time": row.get("start_time") or row.get("due_at"),
+                    "area": area,
+                    "space_id": row.get("space_id"),
+                })
+
     if _table_exists(conn, "schedule_events"):
+        cols = _cols(conn, "schedule_events")
         week_end = now + timedelta(days=7)
+        space_sel = "space_id" if "space_id" in cols else "NULL AS space_id"
+        notes_sel = "notes" if "notes" in cols else "NULL AS notes"
         rows = conn.execute(
-            """
-            SELECT id, type, title, notes, start_time, status
+            f"""
+            SELECT id, type, title, {notes_sel}, start_time, status, {space_sel}
             FROM schedule_events
             WHERE status != 'cancelled'
               AND start_time >= ? AND start_time < ?
@@ -606,41 +790,16 @@ def query_other_areas(conn: sqlite3.Connection, now: datetime | None = None) -> 
         ).fetchall()
         for raw in rows:
             row = _row_dict(raw)
-            blob = f"{row.get('title') or ''} {row.get('notes') or ''} {row.get('type') or ''}".lower()
-            area = "empire"
-            if any(w in blob for w in ("family", "amp", "maxine", "ayuda")):
-                area = "family"
-            elif any(w in blob for w in ("personal", "dentist", "doctor", "school")):
-                area = "personal"
-            elif any(w in blob for w in ("venture", "llc", "new biz", "side")):
-                area = "ventures"
-            if area != "empire":
-                buckets[area].append({
-                    "kind": "organizer",
-                    "id": row.get("id"),
-                    "name": row.get("title"),
-                    "start_time": row.get("start_time"),
-                    "area": area,
-                })
-    if _table_exists(conn, "organizer_items"):
-        cols = _cols(conn, "organizer_items")
-        area_col = "area" if "area" in cols else ("kind" if "kind" in cols else None)
-        title_col = "title" if "title" in cols else ("name" if "name" in cols else "id")
-        if area_col:
-            rows = conn.execute(
-                f"SELECT id, {title_col} AS title, {area_col} AS area FROM organizer_items LIMIT 40"
-            ).fetchall()
-            for raw in rows:
-                row = _row_dict(raw)
-                area = str(row.get("area") or "empire").lower()
-                if area not in buckets:
-                    area = "empire"
-                buckets[area].append({
-                    "kind": "organizer",
-                    "id": row.get("id"),
-                    "name": row.get("title"),
-                    "area": area,
-                })
+            blob = f"{row.get('title') or ''} {row.get('notes') or ''} {row.get('type') or ''}"
+            area = _space_bucket(row.get("space_id"), blob)
+            _put(area, {
+                "kind": "organizer",
+                "id": row.get("id"),
+                "name": row.get("title"),
+                "start_time": row.get("start_time"),
+                "area": area,
+                "space_id": row.get("space_id"),
+            })
     return buckets
 
 
