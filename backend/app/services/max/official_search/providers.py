@@ -2,8 +2,10 @@
 
 Dell live tests (2026-10): DuckDuckGo resets most connections. Brave is
 already keyed on studio and is the default raw provider when
-``BRAVE_API_KEY`` exists (Goggles + allowlist boosts). MiniMax Token Plan
-MCP ``POST /v1/coding_plan/search`` is a second raw source (no domain
+``BRAVE_API_KEY`` exists (Goggles + allowlist boosts) and the monthly
+free-credit cap is open (``BRAVE_MONTHLY_FREE_REQUESTS``, default 900).
+At the cap Brave is skipped automatically. MiniMax Token Plan MCP
+``POST /v1/coding_plan/search`` is a second raw source (no domain
 filter) merged/deduped with Brave, then run through the trust layer.
 
 Exa and Tavily are free fallbacks. DuckDuckGo is last. The MiniMax
@@ -85,10 +87,22 @@ def minimax_coding_plan_enabled() -> bool:
     return bool(minimax_api_key())
 
 
+def _brave_key_and_budget() -> bool:
+    """Brave is on only with a key AND remaining monthly free credit."""
+    if not edition_key("BRAVE_API_KEY"):
+        return False
+    from app.services.max.official_search.brave_budget import brave_budget_available
+    return brave_budget_available()
+
+
 def provider_fallback_order() -> list[str]:
-    """Enabled providers. Brave + MiniMax coding-plan merge first; DDG last."""
+    """Enabled providers. Brave + MiniMax coding-plan merge first; DDG last.
+
+    Brave drops out automatically at the monthly free-credit cap so
+    MiniMax Token Plan + Exa/Tavily + DuckDuckGo take over.
+    """
     names: list[str] = []
-    if edition_key("BRAVE_API_KEY"):
+    if _brave_key_and_budget():
         names.append("brave")
     if minimax_coding_plan_enabled():
         names.append("minimax_coding_plan")
@@ -263,12 +277,17 @@ class TavilyProvider(SearchProvider):
 
 
 class BraveProvider(SearchProvider):
-    """Pluggable Brave Search + Goggles adapter. Stays OFF until BRAVE_API_KEY."""
+    """Pluggable Brave Search + Goggles adapter.
+
+    Stays OFF without ``BRAVE_API_KEY`` and when the monthly free-credit
+    cap is reached. The reserve happens before any HTTP call so we never
+    exceed ``BRAVE_MONTHLY_FREE_REQUESTS``.
+    """
 
     name = "brave"
 
     def enabled(self) -> bool:
-        return bool(edition_key("BRAVE_API_KEY"))
+        return _brave_key_and_budget()
 
     def search(
         self,
@@ -283,6 +302,10 @@ class BraveProvider(SearchProvider):
     ) -> list[SearchHit]:
         key = edition_key("BRAVE_API_KEY")
         if not key:
+            return []
+        from app.services.max.official_search.brave_budget import reserve_brave_request
+        if not reserve_brave_request():
+            logger.info("[official_search] Brave monthly cap reached — skipping HTTP")
             return []
         params: dict = {"q": query, "count": max(num_results, 10), "extra_snippets": True}
         goggles = brave_goggles()

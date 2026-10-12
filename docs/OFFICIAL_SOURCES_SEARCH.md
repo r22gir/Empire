@@ -33,7 +33,7 @@ fell back). `BRAVE_API_KEY` is already set on the studio backend.
 
 | Order | Provider | Env | Notes |
 | --- | --- | --- | --- |
-| 1 | Brave Search | `BRAVE_API_KEY` | **On when the key exists.** Goggles + allowlist `site:` boosts + hard post-filter. |
+| 1 | Brave Search | `BRAVE_API_KEY` | **On when the key exists and the monthly free-credit cap is open.** Goggles + allowlist `site:` boosts + hard post-filter. Hard cap `BRAVE_MONTHLY_FREE_REQUESTS` (default **900**, inside Brave's $5 / ~1,000 req credit). Count is persisted per edition, UTC calendar month. At cap, Brave is skipped automatically. |
 | 1b | MiniMax Token Plan MCP | `MINIMAX_API_KEY` | `POST /v1/coding_plan/search` `{"q": query}`. Raw 10 hits, **no domain filter**. Merged/deduped with Brave, then trust-filtered. Included in plan quota. |
 | 2 | Exa Instant | `EXA_API_KEY` | Free $10/mo fallback. |
 | 3 | Tavily basic | `TAVILY_API_KEY` | 1,000 free credits/mo fallback. `include_domains` hard filter. |
@@ -57,6 +57,9 @@ may be cited. If no Tier 1 host remains: **No official source found.**
 
 Fail-closed: if every **enabled** provider errors, `web_search` returns
 `success=false`. An empty-but-healthy provider continues to the next.
+The Brave monthly counter never exceeds the cap (reserve-before-HTTP).
+A store error skips Brave rather than risking a paid overage. The
+usage screen Free-Tier Quotas tab shows this month's Brave count.
 
 ## Trust tiers
 

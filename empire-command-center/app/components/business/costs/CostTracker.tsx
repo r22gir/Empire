@@ -36,6 +36,10 @@ export interface FreeTierData {
   status?: string;
   warn?: boolean;
   exhausted?: boolean;
+  window?: string;
+  requests_month?: number;
+  monthly_limit?: number;
+  edition?: string;
 }
 
 interface CostOverview {
@@ -540,10 +544,11 @@ function FreeTierQuotaCards({ freeTiers }: { freeTiers: FreeTierData[] }) {
       {/* Grid of Quota Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {displayTiers.map((ft, idx) => {
+          const isMonthly = ft.window === 'month';
           const reqMin = ft.requests_minute || 0;
           const limMin = ft.rpm_limit || ft.rpm || 30;
-          const reqDay = ft.requests_day || 0;
-          const limDay = ft.rpd_limit || ft.rpd || 1000;
+          const reqDay = isMonthly ? (ft.requests_month ?? ft.requests_day ?? 0) : (ft.requests_day || 0);
+          const limDay = isMonthly ? (ft.monthly_limit ?? ft.rpd_limit ?? ft.rpd ?? 900) : (ft.rpd_limit || ft.rpd || 1000);
           const tokDay = ft.tokens_day || 0;
           const limTok = ft.tpd_limit || ft.tpd || 1_000_000;
 
@@ -624,21 +629,21 @@ function FreeTierQuotaCards({ freeTiers }: { freeTiers: FreeTierData[] }) {
                 {/* Quota Fractions (RPM, RPD, TPD) */}
                 <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-[#22262d] text-center font-mono">
                   <div className="p-1.5 rounded-xl bg-[#181b20]">
-                    <div className="text-[9px] text-[#777] uppercase">RPM Limit</div>
+                    <div className="text-[9px] text-[#777] uppercase">{isMonthly ? 'Edition' : 'RPM Limit'}</div>
                     <div className="text-[11px] font-bold text-white mt-0.5">
-                      {reqMin}/{limMin}
+                      {isMonthly ? (ft.edition || 'main') : `${reqMin}/${limMin}`}
                     </div>
                   </div>
                   <div className="p-1.5 rounded-xl bg-[#181b20]">
-                    <div className="text-[9px] text-[#777] uppercase">RPD Limit</div>
+                    <div className="text-[9px] text-[#777] uppercase">{isMonthly ? 'Month' : 'RPD Limit'}</div>
                     <div className="text-[11px] font-bold text-white mt-0.5">
                       {reqDay}/{limDay}
                     </div>
                   </div>
                   <div className="p-1.5 rounded-xl bg-[#181b20]">
-                    <div className="text-[9px] text-[#777] uppercase">TPD Limit</div>
+                    <div className="text-[9px] text-[#777] uppercase">{isMonthly ? 'At cap' : 'TPD Limit'}</div>
                     <div className="text-[11px] font-bold text-white mt-0.5">
-                      {fmtKTokens(tokDay)}/{fmtKTokens(limTok)}
+                      {isMonthly ? (isExhausted ? 'SKIP' : 'OK') : `${fmtKTokens(tokDay)}/${fmtKTokens(limTok)}`}
                     </div>
                   </div>
                 </div>

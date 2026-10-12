@@ -14,6 +14,9 @@ MAX_NUM_RESULTS = 10
 # Family editions may spend at most this share of EmpireBox monthly AI use.
 DEFAULT_FAMILY_CAP_PCT = 20.0
 
+# Brave $5 free credit is ~1,000 requests. Stay inside that credit.
+DEFAULT_BRAVE_MONTHLY_FREE_REQUESTS = 900
+
 # Paid / card-gated search products are never used.
 FORBIDDEN_PROVIDER_ENV = (
     "SERPAPI_API_KEY",
@@ -111,6 +114,15 @@ def sec_user_agent() -> str:
 
 def brave_goggles() -> str:
     return env_flag("BRAVE_GOGGLES_ID") or env_flag("BRAVE_GOGGLES_URL")
+
+
+def brave_monthly_free_requests() -> int:
+    """Hard monthly Brave request cap. Invalid values fall back to 900."""
+    raw = env_flag("BRAVE_MONTHLY_FREE_REQUESTS", str(DEFAULT_BRAVE_MONTHLY_FREE_REQUESTS))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return DEFAULT_BRAVE_MONTHLY_FREE_REQUESTS
 
 
 def today_iso() -> str:

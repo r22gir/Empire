@@ -27,6 +27,12 @@ from app.services.max.official_search.pipeline import (
     official_page_char_cap,
     run_web_search,
 )
+from app.services.max.official_search.brave_budget import (
+    brave_budget_available,
+    brave_budget_status,
+    brave_free_tier_card,
+    reserve_brave_request,
+)
 from app.services.max.official_search.providers import (
     PROVIDER_ORDER,
     BraveProvider,
@@ -53,6 +59,10 @@ __all__ = [
     "DuckDuckGoProvider",
     "ExaProvider",
     "PROVIDER_ORDER",
+    "brave_budget_available",
+    "brave_budget_status",
+    "brave_free_tier_card",
+    "reserve_brave_request",
     "TIER_OFFICIAL",
     "TIER_UNVERIFIED",
     "TIER_WIRE",

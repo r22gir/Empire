@@ -5110,7 +5110,7 @@ def _brave_search(query: str, num_results: int = 5) -> list[dict]:
 
 @tool("web_search")
 def _web_search(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Official-sources search: Exa/Tavily when keyed, Brave off until keyed, DDG last."""
+    """Official-sources search: Brave under monthly cap, then MiniMax/Exa/Tavily/DDG."""
     from app.services.max.official_search.pipeline import run_web_search
 
     payload = run_web_search(params, desk=desk)

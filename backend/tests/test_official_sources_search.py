@@ -448,3 +448,173 @@ def test_tool_executor_fail_closed_and_shape():
     assert payload["success"] is False
     assert payload["tool"] == "web_search"
     assert "results" in payload["result"]
+
+
+def test_brave_monthly_counter_increments_before_http(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    from app.services.max.official_search.brave_budget import (
+        brave_budget_status,
+        reserve_brave_request,
+    )
+
+    db = str(tmp_path / "brave_budget.db")
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "900")
+    jan = datetime(2026, 1, 15, tzinfo=timezone.utc)
+    assert reserve_brave_request(now=jan, db_path=db) is True
+    assert reserve_brave_request(now=jan, db_path=db) is True
+    status = brave_budget_status(now=jan, db_path=db)
+    assert status["requests_month"] == 2
+    assert status["monthly_limit"] == 900
+    assert status["window"] == "month"
+    assert status["window_date"] == "2026-01"
+    assert status["edition"] == "main"
+    assert status["available"] is True
+    assert status["exhausted"] is False
+
+
+def test_brave_monthly_rollover_at_month_start(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    from app.services.max.official_search.brave_budget import (
+        brave_budget_status,
+        reserve_brave_request,
+    )
+
+    db = str(tmp_path / "brave_budget.db")
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "900")
+    jan = datetime(2026, 1, 31, 23, 0, tzinfo=timezone.utc)
+    feb = datetime(2026, 2, 1, 0, 1, tzinfo=timezone.utc)
+    for _ in range(5):
+        assert reserve_brave_request(now=jan, db_path=db) is True
+    jan_status = brave_budget_status(now=jan, db_path=db)
+    feb_status = brave_budget_status(now=feb, db_path=db)
+    assert jan_status["requests_month"] == 5
+    assert jan_status["window_date"] == "2026-01"
+    assert feb_status["requests_month"] == 0
+    assert feb_status["window_date"] == "2026-02"
+    assert feb_status["available"] is True
+    assert reserve_brave_request(now=feb, db_path=db) is True
+    assert brave_budget_status(now=feb, db_path=db)["requests_month"] == 1
+    assert brave_budget_status(now=jan, db_path=db)["requests_month"] == 5
+
+
+def test_brave_cap_switches_to_free_fallbacks(monkeypatch, tmp_path):
+    from app.services.max.official_search.brave_budget import (
+        brave_budget_status,
+        reserve_brave_request,
+    )
+    from app.services.max.official_search.providers import BraveProvider
+
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    monkeypatch.setenv("BRAVE_API_KEY", "bs-key")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "1")
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-key")
+    monkeypatch.setenv("EXA_API_KEY", "exa-free")
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+
+    http_calls: list[str] = []
+
+    class _Resp:
+        status_code = 200
+        def json(self):
+            return {"web": {"results": [
+                {"title": "CDC", "url": "https://www.cdc.gov/flu", "description": "vax"},
+            ]}}
+
+    def fake_get(*args, **kwargs):
+        http_calls.append("brave")
+        return _Resp()
+
+    first = BraveProvider().search("flu", http_get=fake_get)
+    assert first and first[0].url == "https://www.cdc.gov/flu"
+    assert http_calls == ["brave"]
+    assert brave_budget_status()["requests_month"] == 1
+    assert BraveProvider().enabled() is False
+    assert "brave" not in provider_fallback_order()
+
+    http_calls.clear()
+    mm = _FakeProvider("minimax_coding_plan", [
+        SearchHit("NIH", "https://www.nih.gov/flu", "c", provider="minimax_coding_plan"),
+    ])
+    exa = _FakeProvider("exa", [NIH])
+    ddg = _FakeProvider("duckduckgo", [BLOG])
+    raw = run_providers("official flu", providers=[BraveProvider(), mm, exa, ddg], http_get=fake_get)
+    assert http_calls == []
+    assert raw["ok"] is True
+    assert raw["source"] == "minimax_coding_plan"
+    assert mm.calls == 1
+    assert BraveProvider().search("flu", http_get=fake_get) == []
+    assert http_calls == []
+    assert brave_budget_status()["requests_month"] == 1
+    assert brave_budget_status()["exhausted"] is True
+    assert reserve_brave_request() is False
+
+
+def test_brave_budget_is_per_edition(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    from app.services.max.official_search.brave_budget import (
+        brave_budget_status,
+        reserve_brave_request,
+    )
+
+    db = str(tmp_path / "brave_budget.db")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "2")
+    jan = datetime(2026, 1, 5, tzinfo=timezone.utc)
+    assert reserve_brave_request(edition="main", now=jan, db_path=db) is True
+    assert reserve_brave_request(edition="main", now=jan, db_path=db) is True
+    assert reserve_brave_request(edition="main", now=jan, db_path=db) is False
+    assert brave_budget_status(edition="maxine", now=jan, db_path=db)["requests_month"] == 0
+    assert reserve_brave_request(edition="maxine", now=jan, db_path=db) is True
+    assert brave_budget_status(edition="main", now=jan, db_path=db)["requests_month"] == 2
+    assert brave_budget_status(edition="maxine", now=jan, db_path=db)["requests_month"] == 1
+
+
+def test_brave_budget_store_error_fails_closed(monkeypatch):
+    from app.services.max.official_search.brave_budget import (
+        brave_budget_available,
+        reserve_brave_request,
+    )
+    from app.services.max.official_search import brave_budget as budget_mod
+
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(budget_mod, "_connect", boom)
+    monkeypatch.setenv("BRAVE_API_KEY", "bs-key")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "900")
+    assert reserve_brave_request() is False
+    assert brave_budget_available() is False
+    assert BraveProvider().enabled() is False
+    http_calls = []
+
+    def fake_get(*_a, **_k):
+        http_calls.append("brave")
+        raise AssertionError("Brave HTTP must not run when the store fails closed")
+
+    assert BraveProvider().search("flu", http_get=fake_get) == []
+    assert http_calls == []
+
+
+def test_brave_card_on_free_tier_status(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    from app.services.max.free_tiers import get_all_free_tier_status
+    from app.services.max.official_search.brave_budget import (
+        brave_month_key,
+        reserve_brave_request,
+    )
+
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "900")
+    assert reserve_brave_request() is True
+    cards = get_all_free_tier_status()
+    brave = next((c for c in cards if c.get("provider") == "brave"), None)
+    assert brave is not None
+    assert brave["model_pattern"] == "search.web"
+    assert brave["window"] == "month"
+    assert brave["requests_month"] == 1
+    assert brave["monthly_limit"] == 900
+    assert brave["window_date"] == brave_month_key()
+    assert brave["window_date"] == datetime.now(timezone.utc).strftime("%Y-%m")
