@@ -134,6 +134,14 @@ _DATA_TABLES = [
     "customers",
     "schedule_events",
     "pickup_dropoff_logs",
+    "desk_job_results",
+    "daily_briefs",
+    "founder_notifications",
+    "orchestrator_runs",
+    "pending_mail",
+    "family_help_tickets",
+    "task_activity",
+    "tasks",
 ]
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent

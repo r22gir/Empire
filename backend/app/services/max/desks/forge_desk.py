@@ -343,15 +343,19 @@ class ForgeDesk(BaseDesk):
             return False
 
     def _build_quote_response(self, task: DeskTask) -> str:
-        """Build a structured quote response."""
-        return (
-            f"Quote workflow initiated for {task.customer_name or 'customer'}. "
-            f"Process: Measure → Select fabric → Calculate yardage → "
-            f"Price labor (${self.LABOR_RATE}/hr) → Apply {self.FABRIC_MARKUP}x fabric markup → "
-            f"Add {self.DC_TAX_RATE*100:.0f}% DC tax → Present quote. "
-            f"Terms: 50% deposit at approval, balance at installation. "
-            f"3-day follow-up scheduled."
-        )
+        """Build a quote response from live quotes_v2 / jobs, not a canned workflow."""
+        try:
+            from app.services.max.desks.job_runner import job_forge_pipeline
+            from app.services.max.desks.live_data import snapshot
+
+            body, _ = job_forge_pipeline(snapshot())
+            who = task.customer_name or "customer"
+            return f"Pipeline for {who} (live DB):\n{body}"
+        except Exception:
+            return (
+                f"Could not read quotes_v2/jobs for {task.customer_name or 'customer'}. "
+                f"No quote was sent."
+            )
 
     async def report_status(self) -> dict:
         """Extended status with WorkroomForge-specific info."""

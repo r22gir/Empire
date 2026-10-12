@@ -435,6 +435,9 @@ def create_all_tables(conn: sqlite3.Connection):
     from app.config.workroom_billing import ensure_billed_by_schema
 
     ensure_billed_by_schema(conn)
+    from app.db.max_ops_schema import ensure_max_ops_schema
+
+    ensure_max_ops_schema(conn)
     conn.commit()
 
     logger.info("All unified business tables created successfully")

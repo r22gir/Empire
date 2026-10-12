@@ -59,19 +59,10 @@ class AnalyticsDesk(BaseDesk):
         task.state = TaskState.IN_PROGRESS
         task.actions.append(DeskAction(action="started", detail="Pulling metrics"))
 
-        metrics = await self._get_metrics()
+        from app.services.max.desks.job_runner import job_analytics_metrics
+        from app.services.max.desks.live_data import snapshot
 
-        report = (
-            f"Daily Metrics:\n"
-            f"  Customers: {metrics.get('customers', 0)}\n"
-            f"  Jobs: {metrics.get('jobs_pending', 0)} pending, {metrics.get('jobs_completed', 0)} completed\n"
-            f"  Invoices: {metrics.get('invoices_unpaid', 0)} unpaid, {metrics.get('invoices_paid', 0)} paid\n"
-            f"  Revenue: ${metrics.get('revenue', 0):,.2f}\n"
-            f"  Expenses: ${metrics.get('expenses', 0):,.2f}\n"
-            f"  Profit: ${metrics.get('profit', 0):,.2f}\n"
-            f"  Inventory: {metrics.get('inventory_items', 0)} items\n"
-            f"  Open tasks: {metrics.get('tasks_open', 0)}"
-        )
+        report, _ = job_analytics_metrics(snapshot())
 
         task.result = report
         task.state = TaskState.COMPLETED

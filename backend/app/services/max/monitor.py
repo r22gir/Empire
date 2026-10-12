@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 from app.config.business_config import biz
+from app.services.max.channel_text import for_channel, strip_telegram_html
+from app.services.max.desks.live_data import count_unreviewed_inbox, list_unreviewed_inbox, query_overdue_tasks
 
 logger = logging.getLogger("max.monitor")
 
@@ -123,45 +125,31 @@ class MaxMonitor:
         return None
 
     async def _check_overdue_tasks(self) -> str | None:
-        """Check for overdue tasks — lists task names."""
+        """Check for overdue tasks. Column is ``desk``, never ``desk_id``."""
         try:
             from app.db.database import get_db
-            now = datetime.now().strftime("%Y-%m-%d")
-            db = get_db()
-            cursor = db.execute(
-                "SELECT title, due_date, desk_id FROM tasks "
-                "WHERE status IN ('todo','in_progress') "
-                "AND due_date IS NOT NULL AND due_date < ? "
-                "ORDER BY due_date LIMIT 5",
-                (now,)
-            )
-            rows = cursor.fetchall()
+            with get_db() as conn:
+                rows = query_overdue_tasks(conn)
             if not rows:
                 return None
             lines = []
-            for row in rows:
-                title = row[0] if isinstance(row, (list, tuple)) else row["title"]
-                due = row[1] if isinstance(row, (list, tuple)) else row["due_date"]
-                desk = row[2] if isinstance(row, (list, tuple)) else row.get("desk_id", "")
-                desk_tag = f" [{desk}]" if desk else ""
-                lines.append(f"  • {title}{desk_tag} (due {due})")
-            extra = f"\n  + {len(rows)}+ more" if len(rows) == 5 else ""
+            for row in rows[:5]:
+                desk_tag = f" [{row.get('desk')}]" if row.get("desk") else ""
+                lines.append(f"  • {row.get('name')}{desk_tag} (due {row.get('due_date')})")
+            extra = f"\n  + {len(rows)}+ more" if len(rows) > 5 else ""
             return f"\n⏰ <b>{len(rows)} overdue task(s):</b>\n" + "\n".join(lines) + extra
         except Exception as e:
-            logger.debug(f"Overdue check error: {e}")
+            logger.warning(f"Overdue check error: {e}")
         return None
 
     def _check_inbox(self) -> str | None:
-        """Check for unread inbox items — only alert at 15+."""
+        """Alert only on unreviewed items from the live data path."""
         try:
-            inbox_dir = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
-            if not inbox_dir.exists():
-                return None
-            count = len(list(inbox_dir.glob("*.json")))
+            count = count_unreviewed_inbox()
             if count > 15:
-                return f"\n📥 <b>{count} inbox items</b> piling up — review when you can"
+                return f"\n📥 <b>{count} unreviewed inbox items</b> — review when you can"
         except Exception as e:
-            logger.debug(f"Inbox check error: {e}")
+            logger.warning(f"Inbox check error: {e}")
         return None
 
     def _check_system_health(self) -> str | None:
@@ -204,37 +192,32 @@ class MaxMonitor:
         # Tasks
         try:
             from app.db.database import get_db
-            db = get_db()
-            now = datetime.now().strftime("%Y-%m-%d")
-            overdue = db.execute(
-                "SELECT title, due_date, desk_id FROM tasks "
-                "WHERE status IN ('todo','in_progress') AND due_date IS NOT NULL AND due_date < ? "
-                "ORDER BY due_date LIMIT 10", (now,)
-            ).fetchall()
-            active = db.execute(
-                "SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')"
-            ).fetchone()[0]
+            with get_db() as db:
+                overdue = query_overdue_tasks(db)
+                active = db.execute(
+                    "SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')"
+                ).fetchone()[0]
             lines.append(f"\n<b>Tasks:</b> {active} active")
             if overdue:
                 lines.append(f"  ⏰ {len(overdue)} overdue:")
-                for row in overdue:
-                    t = row[0] if isinstance(row, (list, tuple)) else row["title"]
-                    d = row[1] if isinstance(row, (list, tuple)) else row["due_date"]
-                    desk = row[2] if isinstance(row, (list, tuple)) else row.get("desk_id", "")
+                for row in overdue[:10]:
+                    t = row.get("name")
+                    d = row.get("due_date")
+                    desk = row.get("desk") or ""
                     lines.append(f"    • {t} (due {d}){f' [{desk}]' if desk else ''}")
             else:
                 lines.append("  ✅ No overdue tasks")
         except Exception:
             lines.append("\n<b>Tasks:</b> unable to query")
 
-        # Inbox
-        inbox_dir = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
-        inbox_count = len(list(inbox_dir.glob("*.json"))) if inbox_dir.exists() else 0
-        lines.append(f"\n<b>Inbox:</b> {inbox_count} items")
+        # Inbox — unreviewed only, live path
+        inbox_count = count_unreviewed_inbox()
+        lines.append(f"\n<b>Inbox:</b> {inbox_count} unreviewed")
 
         # Quotes today
         try:
-            quotes_dir = Path.home() / "empire-repo" / "backend" / "data" / "quotes"
+            from app.services.data_paths import quotes_data_dir
+            quotes_dir = quotes_data_dir()
             today_str = datetime.now().strftime("%Y-%m-%d")
             today_quotes = 0
             if quotes_dir.exists():

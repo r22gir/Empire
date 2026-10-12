@@ -80,103 +80,31 @@ class MaxScheduler:
             logger.info(f"Scheduled: {job.name} → next run: {job.next_run_time}")
 
     async def send_daily_brief(self):
-        """Compile and send morning brief via Telegram."""
+        """ONE daily brief, built from the DB (yesterday's desk results + live data)."""
         try:
-            from app.services.max.telegram_bot import telegram_bot
-            if not telegram_bot.is_configured:
-                return
+            from app.services.max.daily_brief import send_consolidated_brief
 
-            # Gather stats
-            import psutil
-            from pathlib import Path
-            import json
-
-            now = datetime.now()
-            cpu = psutil.cpu_percent(interval=1)
-            ram = psutil.virtual_memory()
-            disk = psutil.disk_usage("/")
-
-            # Count open tasks
-            open_tasks = 0
-            overdue_tasks = 0
-            try:
-                from app.db.database import get_db
-                db = get_db()
-                cursor = db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')")
-                open_tasks = cursor.fetchone()[0]
-                cursor = db.execute(
-                    "SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress') "
-                    "AND due_date IS NOT NULL AND due_date < ?",
-                    (now.strftime("%Y-%m-%d"),)
-                )
-                overdue_tasks = cursor.fetchone()[0]
-            except Exception:
-                pass
-
-            # Count inbox items
-            inbox_count = 0
-            inbox_dir = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
-            if inbox_dir.exists():
-                inbox_count = len(list(inbox_dir.glob("*.json")))
-
-            brief = (
-                f"<b>☀️ {biz.business_name} Morning Brief</b>\n"
-                f"<i>{now.strftime('%A, %B %d, %Y')}</i>\n\n"
-                f"📋 <b>Tasks:</b> {open_tasks} open"
-            )
-            if overdue_tasks:
-                brief += f" ({overdue_tasks} overdue ⚠️)"
-            brief += (
-                f"\n📥 <b>Inbox:</b> {inbox_count} items\n"
-                f"💻 <b>System:</b> CPU {cpu}% | RAM {ram.percent}% | Disk {disk.percent}%\n"
-            )
-
-            if overdue_tasks:
-                brief += f"\n⚠️ {overdue_tasks} task(s) overdue — check /tasks"
-            if ram.percent > 85:
-                brief += f"\n⚠️ RAM usage high ({ram.percent}%)"
-            if disk.percent > 90:
-                brief += f"\n⚠️ Disk usage high ({disk.percent}%)"
-
-            # Log to notifications
-            from app.routers.notifications import notify_founder
-            notify_founder("MAX", "system_alert", "Morning Brief", brief, "low")
-            self._last_brief = brief
-
-            # Send morning brief email FROM max@empirebox.store TO founder
-            try:
-                from app.services.max.email_service import EmailService
-                svc = EmailService()
-                if svc.is_configured:
-                    founder_email = os.environ.get("FOUNDER_EMAIL", "empirebox2026@gmail.com")
-                    # Convert Telegram HTML to email-friendly HTML
-                    email_body = brief.replace("\n", "<br>")
-                    svc.send(
-                        to=founder_email,
-                        subject=f"☀️ Empire Morning Brief — {now.strftime('%A, %B %d')}",
-                        body_html=email_body,
-                    )
-                    logger.info(f"Morning brief emailed to {founder_email}")
-            except Exception as e:
-                logger.warning(f"Morning brief email failed: {e}")
-
+            payload = await send_consolidated_brief()
+            self._last_brief = payload.get("html") or payload.get("text_plain")
             logger.info("Daily brief generated and dispatched")
+            return payload
         except Exception as e:
             logger.error(f"Daily brief failed: {e}")
+            return None
 
     async def check_overdue_tasks(self):
         """Log overdue tasks to notification system (no auto-Telegram)."""
         try:
             from app.db.database import get_db
             now = datetime.now().strftime("%Y-%m-%d")
-            db = get_db()
-            cursor = db.execute(
-                "SELECT id, title, due_date, desk FROM tasks "
-                "WHERE status IN ('todo','in_progress') AND due_date IS NOT NULL AND due_date < ? "
-                "ORDER BY due_date LIMIT 10",
-                (now,)
-            )
-            overdue = cursor.fetchall()
+            with get_db() as db:
+                cursor = db.execute(
+                    "SELECT id, title, due_date, desk FROM tasks "
+                    "WHERE status IN ('todo','in_progress') AND due_date IS NOT NULL AND due_date < ? "
+                    "ORDER BY due_date LIMIT 10",
+                    (now,)
+                )
+                overdue = cursor.fetchall()
             if not overdue:
                 return
 
@@ -198,8 +126,9 @@ class MaxScheduler:
 
             from pathlib import Path
             import json
+            from app.services.data_paths import quotes_data_dir
 
-            quotes_dir = Path.home() / "empire-repo" / "backend" / "data" / "quotes"
+            quotes_dir = quotes_data_dir()
             if not quotes_dir.exists():
                 return
 
@@ -248,24 +177,17 @@ class MaxScheduler:
                 return
 
             from app.db.database import get_db
-            db = get_db()
-
-            # Tasks completed this week
             completed = 0
-            try:
-                cursor = db.execute(
-                    "SELECT COUNT(*) FROM tasks WHERE status = 'done' "
-                    "AND completed_at >= datetime('now', '-7 days')"
-                )
-                completed = cursor.fetchone()[0]
-            except Exception:
-                pass
-
-            # Tasks still open
             open_tasks = 0
             try:
-                cursor = db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')")
-                open_tasks = cursor.fetchone()[0]
+                with get_db() as db:
+                    completed = db.execute(
+                        "SELECT COUNT(*) FROM tasks WHERE status = 'done' "
+                        "AND completed_at >= datetime('now', '-7 days')"
+                    ).fetchone()[0]
+                    open_tasks = db.execute(
+                        "SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')"
+                    ).fetchone()[0]
             except Exception:
                 pass
 
@@ -334,19 +256,19 @@ class MaxScheduler:
             except Exception as e:
                 logger.error(f"Brain sync DB stats failed: {e}")
 
-            # Quote file count
-            quotes_dir = Path.home() / "empire-repo" / "backend" / "data" / "quotes"
+            from app.services.data_paths import quotes_data_dir, brain_dir
+            from app.services.max.desks.live_data import count_unreviewed_inbox
+
+            quotes_dir = quotes_data_dir()
             quote_count = len(list(quotes_dir.glob("*.json"))) if quotes_dir.exists() else 0
 
-            # Inbox count
-            inbox_dir = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
-            inbox_count = len(list(inbox_dir.glob("*.json"))) if inbox_dir.exists() else 0
+            inbox_count = count_unreviewed_inbox()
 
             # Brain memories count
             brain_memories = 0
             try:
                 import sqlite3
-                brain_db = Path.home() / "empire-repo" / "backend" / "data" / "brain" / "memories.db"
+                brain_db = brain_dir() / "memories.db"
                 if brain_db.exists():
                     bconn = sqlite3.connect(str(brain_db))
                     brain_memories = bconn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
@@ -368,7 +290,7 @@ class MaxScheduler:
             # Backend router count (approximate from main.py)
             router_count = 0
             try:
-                main_py = Path.home() / "empire-repo" / "backend" / "app" / "main.py"
+                main_py = Path(__file__).resolve().parents[3] / "main.py"
                 if main_py.exists():
                     router_count = main_py.read_text().count("load_router(")
             except Exception:

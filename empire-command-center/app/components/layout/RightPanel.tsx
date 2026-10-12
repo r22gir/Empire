@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Desk, ScreenMode, EcosystemProduct } from '../../lib/types';
 import { API } from '../../lib/api';
+import { stripTelegramHtml } from '../../lib/plainText';
 import {
   Plus, Check, X, Loader2, ChevronDown, ChevronUp, Package, AlertTriangle,
   DollarSign, Users, TrendingUp, ClipboardList, FileText, Flag, Calendar,
@@ -745,12 +746,12 @@ function IntelligenceCards({ collapsed, onToggle }: { collapsed: boolean; onTogg
                     <div key={key} style={{ marginBottom: 6 }}>
                       <div style={{ fontSize: 9, fontWeight: 700, color: '#999', textTransform: 'uppercase' }}>{key.replace(/_/g, ' ')}</div>
                       <div style={{ fontSize: 10, color: '#555' }}>
-                        {typeof val === 'string' ? val : typeof val === 'object' ? JSON.stringify(val, null, 1).slice(0, 200) : String(val)}
+                        {typeof val === 'string' ? stripTelegramHtml(val) : typeof val === 'object' && val?.text ? stripTelegramHtml(String(val.text)) : typeof val === 'object' ? JSON.stringify(val, null, 1).slice(0, 200) : String(val)}
                       </div>
                     </div>
                   ))
                 ) : brief.message ? (
-                  <div style={{ fontSize: 10, color: '#555' }}>{String(brief.message).slice(0, 300)}</div>
+                  <div style={{ fontSize: 10, color: '#555' }}>{stripTelegramHtml(String(brief.message)).slice(0, 300)}</div>
                 ) : (
                   <div style={{ fontSize: 10, color: '#999' }}>No brief data. Click Refresh to generate.</div>
                 )}

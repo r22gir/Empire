@@ -156,13 +156,12 @@ class SalesDesk(BaseDesk):
             except Exception:
                 pass
 
-        result = (
-            f"Follow-up prepared for {task.customer_name or 'customer'}. "
-            f"{'Context: ' + customer_context + '. ' if customer_context else ''}"
-            f"Recommended actions: Check pipeline stage, send personalized update, "
-            f"ask about timeline and decision factors."
-        )
+        from app.services.max.desks.job_runner import job_sales_stale_quotes
+        from app.services.max.desks.live_data import snapshot
 
+        result, _findings = job_sales_stale_quotes(snapshot())
+        if customer_context:
+            result = f"{result}\nContext: {customer_context}"
         return await self.complete_task(task, result)
 
     async def _handle_proposal(self, task: DeskTask) -> DeskTask:

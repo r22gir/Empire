@@ -92,10 +92,12 @@ class AIDeskManager:
         source: str = "max",
         conversation_id: str | None = None,
         db_task_id: str | None = None,
+        force_desk_id: str | None = None,
     ) -> DeskTask:
         """Create and route a task to the appropriate desk.
 
         If db_task_id is provided, updates the existing tasks table row with results.
+        If force_desk_id is provided, skip the LLM/keyword router.
         """
         self.initialize()
 
@@ -109,8 +111,11 @@ class AIDeskManager:
             conversation_id=conversation_id,
         )
 
-        # Route to a desk
-        desk_id, reason = await self.router.route_task(task)
+        # Route to a desk (or honor an explicit scheduled desk)
+        if force_desk_id and self.router.get_desk(force_desk_id):
+            desk_id, reason = force_desk_id, "forced"
+        else:
+            desk_id, reason = await self.router.route_task(task)
 
         if desk_id:
             desk = self.router.get_desk(desk_id)
@@ -126,6 +131,24 @@ class AIDeskManager:
                     _enforce_deliverable_gate(result, desk_id)
                 except Exception as _gate_err:
                     logger.debug(f"deliverable gate import/run failed (non-fatal): {_gate_err}")
+                from app.services.max.desks.review_gate import review_desk_output
+                from .base_desk import TaskState as _TS
+                verdict = review_desk_output(result.result, require_named=False)
+                if result.state == _TS.COMPLETED and not verdict.passed:
+                    # Retry once, then mark failed with the reason.
+                    try:
+                        result.state = _TS.PENDING
+                        result = await asyncio.wait_for(desk.handle_task(result), timeout=60.0)
+                        try:
+                            _enforce_deliverable_gate(result, desk_id)
+                        except Exception:
+                            pass
+                        verdict = review_desk_output(result.result, require_named=False)
+                    except Exception as retry_err:
+                        logger.warning("desk retry failed for %s: %s", title, retry_err)
+                    if result.state == _TS.COMPLETED and not verdict.passed:
+                        result.state = _TS.FAILED
+                        result.result = f"FAILED: {verdict.reason}\n{result.result or ''}"
                 # Sync result back to SQLite tasks table
                 self._sync_task_to_db(result, desk_id)
                 return result
@@ -149,9 +172,7 @@ class AIDeskManager:
     def _sync_task_to_db(self, task: DeskTask, desk_id: str = ""):
         """Sync DeskTask result back to the SQLite tasks table."""
         try:
-            import sqlite3, os
-            db_path = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
-            conn = sqlite3.connect(db_path)
+            from app.db.database import get_db
             state_map = {
                 TaskState.COMPLETED: "done",
                 TaskState.FAILED: "failed",
@@ -159,26 +180,26 @@ class AIDeskManager:
                 TaskState.PENDING: "todo",
                 TaskState.ESCALATED: "waiting",
             }
-            status = state_map.get(task.state, "todo")
+            raw_status = state_map.get(task.state, "todo")
+            # tasks.status CHECK has no 'failed'
+            status = "cancelled" if raw_status == "failed" else raw_status
             result_text = task.result or ""
-            # Update existing row if task.id matches, otherwise insert
-            existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task.id,)).fetchone()
-            if existing:
-                conn.execute(
-                    "UPDATE tasks SET status = ?, result_summary = ?, completed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (status, result_text[:2000], task.completed_at, task.id)
-                )
-            else:
-                conn.execute(
-                    """INSERT INTO tasks (id, title, description, status, priority, desk, result_summary,
-                       completed_at, created_by, source, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'max', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
-                    (task.id, task.title, task.description, status,
-                     task.priority.value if hasattr(task.priority, 'value') else str(task.priority),
-                     desk_id, result_text[:2000], task.completed_at, task.source)
-                )
-            conn.commit()
-            conn.close()
+            with get_db() as conn:
+                existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task.id,)).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE tasks SET status = ?, result_summary = ?, completed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (status, result_text[:2000], task.completed_at, task.id)
+                    )
+                else:
+                    conn.execute(
+                        """INSERT INTO tasks (id, title, description, status, priority, desk, result_summary,
+                           completed_at, created_by, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'max', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+                        (task.id, task.title, task.description, status,
+                         task.priority.value if hasattr(task.priority, 'value') else str(task.priority),
+                         desk_id, result_text[:2000], task.completed_at)
+                    )
             logger.info(f"Synced task {task.id} to DB: status={status}")
         except Exception as e:
             logger.error(f"Failed to sync task {task.id} to DB: {e}")

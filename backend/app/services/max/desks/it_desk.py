@@ -12,17 +12,11 @@ from .base_desk import BaseDesk, DeskTask, DeskAction, TaskPriority
 
 logger = logging.getLogger("max.desks.it")
 
-# Known Empire services and ports
-EMPIRE_SERVICES = {
-    "Backend API": 8000,
-    "Empire App": 3000,
-    "WorkroomForge": 3001,
-    "LuxeForge": 3002,
-    "Studio Portal": 3005,
-    "Founder Dashboard": 3009,
-    "OpenClaw": 7878,
-    "Ollama": 11434,
-}
+from app.services.max.desks.live_services import (
+    EMPIRE_SERVICES,
+    check_live_services,
+    format_health_report,
+)
 
 
 def _port_open(port: int, host: str = "127.0.0.1", timeout: float = 2.0) -> bool:
@@ -139,32 +133,15 @@ class ITDesk(BaseDesk):
     async def _handle_health_check(self, task: DeskTask) -> DeskTask:
         task.actions.append(DeskAction(action="health_check", detail="Running REAL port checks"))
 
-        # Actually test each port
-        results = []
-        up_count = 0
-        down_count = 0
-        for name, port in EMPIRE_SERVICES.items():
-            is_up = _port_open(port)
-            icon = "🟢" if is_up else "🔴"
-            results.append(f"  {icon} {name} (:{port})")
-            if is_up:
-                up_count += 1
-            else:
-                down_count += 1
-
-        # Get resources
+        rows = check_live_services()
+        up_count = sum(1 for r in rows if r.get("up"))
+        down_count = len(rows) - up_count
         resources = _get_system_resources()
         ram = resources.get("ram", {})
         disk = resources.get("disk", {})
         load = resources.get("load", {})
 
-        lines = [
-            f"Empire Service Health Check — {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            f"Services: {up_count} UP, {down_count} DOWN",
-            "",
-        ]
-        lines.extend(results)
-        lines.append("")
+        lines = [format_health_report(rows), ""]
         if "error" not in ram:
             lines.append(f"RAM: {ram['used_gb']}GB / {ram['total_gb']}GB ({ram['pct']}%)")
         if "error" not in disk:
@@ -173,7 +150,6 @@ class ITDesk(BaseDesk):
             cores = resources.get("cpu_cores", "?")
             lines.append(f"Load: {load['1min']} / {load['5min']} / {load['15min']} ({cores} cores)")
 
-        # Flag issues
         warnings = []
         if "error" not in ram and ram["pct"] > 80:
             warnings.append(f"⚠️ RAM usage high: {ram['pct']}%")
@@ -181,7 +157,6 @@ class ITDesk(BaseDesk):
             warnings.append(f"⚠️ Disk usage high: {disk['pct']}%")
         if down_count > 0:
             warnings.append(f"⚠️ {down_count} service(s) DOWN")
-
         if warnings:
             lines.append("")
             lines.append("WARNINGS:")

@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Bell, ChevronDown, Check, ArrowLeft, Search } from 'lucide-react';
 import { API } from '../../lib/api';
+import { stripTelegramHtml } from '../../lib/plainText';
 import LanguageSwitcher from '../LanguageSwitcher';
 import ThemeToggle from '../ThemeToggle';
 import { EDITION } from '../../v3/edition';
@@ -507,7 +508,7 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
                               {n.category || n.source || 'update'}
                             </span>
                           </div>
-                          <div className="text-[11px] text-[var(--dim)] leading-snug truncate">{n.message}</div>
+                          <div className="text-[11px] text-[var(--dim)] leading-snug truncate">{stripTelegramHtml(n.message)}</div>
                         </div>
 
                         {/* Time + read indicator */}
