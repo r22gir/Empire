@@ -300,7 +300,7 @@ def direct_reply(message: str, *, channel: str = "web", has_image: bool = False)
         return {"text": docs_location_reply(channel), "skill": "docs_location"}
     try:
         from app.services.max.ui_map import find_in_app_reply
-        _where = find_in_app_reply(message)
+        _where = find_in_app_reply(message, channel=channel)
     except Exception:
         _where = None
     if _where:

@@ -7,7 +7,7 @@
 // - EST-YYYY-NNN quote numbers and [Ask Chief e](chief-e:ask) become actions
 import { Fragment, type MouseEvent, type ReactNode } from 'react';
 import { chiefEHref } from '../../lib/chiefE';
-import { markdownLinkCount, safeUrl } from './safeUrl';
+import { isAppDeepLink, markdownLinkCount, safeUrl } from './safeUrl';
 
 type Block =
   | { t: 'h'; level: number; text: string }
@@ -73,6 +73,7 @@ function inline(raw: string, question: string): string {
     const u = safeUrl(url);
     if (!u) return esc(text);
     if (/^\d{1,2}$/.test(text.trim())) return keep(`<a class="cm-cite" href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="${esc(host(u))}">${esc(text.trim())}</a>`);
+    if (isAppDeepLink(u)) return keep(`<a class="cm-link cm-app" href="${esc(u)}">${esc(text)}</a>`);
     return keep(`<a class="cm-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`);
   });
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s)<]+[^\s)<.,;:!?'"])/g, (_, pre: string, u: string) => pre + keep(`<a class="cm-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(host(u))}</a>`));

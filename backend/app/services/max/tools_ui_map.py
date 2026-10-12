@@ -9,6 +9,7 @@ from typing import Optional
 
 from app.services.max.tool_executor import ToolResult, tool
 from app.services.max.ui_map import (
+    feature_markdown_link,
     find_in_app_reply,
     format_feature_reply,
     is_family_edition,
@@ -30,9 +31,10 @@ def _find_in_app(params: dict, desk: Optional[str] = None) -> ToolResult:
             error="Say what to find: Presentation mode, AI face, Talk, Improvements, …",
         )
     family = is_family_edition()
+    channel = params.get("_channel") or params.get("channel")
     feat = lookup_feature(q, family=family)
     if feat:
-        text = format_feature_reply(feat)
+        text = format_feature_reply(feat, channel=channel, family=family)
         return ToolResult(
             tool="find_in_app",
             success=True,
@@ -41,9 +43,10 @@ def _find_in_app(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "name": feat.name,
                 "where": feat.where,
                 "href": feat.href,
+                "markdown_link": feature_markdown_link(feat, channel=channel, family=family),
                 "text": text,
                 "workroom_only": feat.workroom_only,
-                "note": "Answer from this result only. Do not grep the repo or read .next builds.",
+                "note": "Answer from this result only. Include the markdown_link. Do not grep the repo or read .next builds.",
             },
         )
     fallback = find_in_app_reply(q, family=family) or (

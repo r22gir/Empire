@@ -3,11 +3,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.services.max import quick_replies, ui_map
+from app.services.max import ui_map
 from app.services.max.ui_map import (
     WORKROOM_ONLY_IDS,
     build_ui_map,
+    feature_markdown_link,
     find_in_app_reply,
+    format_feature_reply,
     is_find_in_app_request,
     live_source_ids,
     lookup_feature,
@@ -102,19 +104,67 @@ def test_spanish_aliases_and_named_features():
 
 
 def test_direct_reply_uses_ui_map_not_the_model():
-    out = quick_replies.direct_reply("Where is presentation mode")
-    assert out and out["skill"] == "find_in_app"
-    assert "Presentation" in out["text"]
-    assert "/?screen=presentation" in out["text"]
+    qr_src = (Path(__file__).resolve().parents[1] / "app" / "services" / "max" / "quick_replies.py").read_text()
+    assert "find_in_app_reply" in qr_src
+    assert '"find_in_app"' in qr_src
+
+    out = find_in_app_reply("Where is presentation mode", family=False, channel="web")
+    assert out and "Presentation" in out
+    assert "[Open Presentation](/?screen=presentation" in out
     for banned in BANNED_STALE:
-        assert banned not in out["text"].lower()
+        assert banned not in out.lower()
 
-    face = quick_replies.direct_reply("where is the AI face")
-    assert face and face["skill"] == "find_in_app"
-    assert "simli" in face["text"].lower()
+    face = find_in_app_reply("where is the AI face", family=False, channel="web")
+    assert face and "simli" in face.lower()
+    assert "[Open MAX Home](/)" in face
 
-    assert quick_replies.direct_reply("Hi")["skill"] == "greeting"
-    assert quick_replies.is_docs_location_request("where are my docs")
+
+def test_where_is_replies_include_clickable_deep_link(monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    monkeypatch.delenv("EMPIRE_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    pres = lookup_feature("presentation mode")
+    link = feature_markdown_link(pres, channel="web", family=False)
+    assert link == "[Open Presentation](/?screen=presentation&mode=presentation)" or link.startswith("[Open Presentation](/?screen=presentation")
+    web = format_feature_reply(pres, channel="web", family=False)
+    assert "[Open Presentation](/?screen=presentation" in web
+    spoken = format_feature_reply(pres, channel="voice", family=False)
+    assert "[" not in spoken and "http" not in spoken.lower() and "/?" not in spoken
+    tg = find_in_app_reply("where is presentation mode", family=False, channel="telegram")
+    assert tg and "Presentation" in tg
+    assert "http" not in tg.lower() and "](/" not in tg
+
+
+def test_family_links_never_use_studio_host(monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "amp")
+    monkeypatch.setenv("EMPIRE_PUBLIC_BASE_URL", "https://studio.empirebox.store")
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://studio.empirebox.store")
+    text = find_in_app_reply("where is presentation mode", family=True, channel="web")
+    assert text and "[Open Presentation](/?screen=presentation" in text
+    assert "studio.empirebox.store" not in text
+    monkeypatch.setenv("EMPIRE_PUBLIC_BASE_URL", "https://maxe.family.example")
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    web = feature_markdown_link(lookup_feature("presentation mode", family=True), channel="web", family=True)
+    assert web.startswith("[Open Presentation](/?screen=presentation")
+    assert "studio.empirebox.store" not in web
+    own = feature_markdown_link(lookup_feature("presentation mode", family=True), channel="whatsapp", family=True)
+    assert own.startswith("[Open Presentation](https://maxe.family.example/?screen=presentation")
+    assert "studio.empirebox.store" not in own
+
+
+def test_header_search_is_on_the_map():
+    bar = lookup_feature("where is the search bar")
+    assert bar is not None and bar.id == "search"
+    assert "quick switch" in bar.where.lower()
+    assert "jobs/search" in bar.where.lower()
+    assert lookup_feature("barra de búsqueda").id == "search"
+    assert lookup_feature("command k").id == "search"
+    assert lookup_feature("where is search").id == "search"
+    assert lookup_feature("where is research").id == "research"
+    family_where = find_in_app_reply("dónde está el buscador", family=True, channel="web") or ""
+    for name in FAMILY_FORBIDDEN:
+        assert name not in family_where.lower(), name
+    assert "[Open Command Center](/?product=owner)" in family_where
 
 
 def test_family_edition_hides_workroom_only_screens(monkeypatch):

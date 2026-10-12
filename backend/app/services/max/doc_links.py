@@ -24,7 +24,11 @@ SPOKEN_CHANNELS = frozenset({"voice", "telegram", "phone", "sms"})
 _WORKROOM_FOUNDER_EDITIONS = frozenset({"workroom", "founder", "main", "studio", "empire"})
 
 _MD_URL_LINK = re.compile(
-    r"\[([^\]]+)\]\((?:https?://[^)\s]+|/api/v1/files/found\?[^)\s]+|/docs/view\?[^)\s]+)\)",
+    r"\[([^\]]+)\]\((?:https?://[^)\s]+|/api/v1/files/found\?[^)\s]+|/docs/view\?[^)\s]+|/(?:\?[^)\s]*)?)\)",
+    re.IGNORECASE,
+)
+_MD_REL_APP_LINK = re.compile(
+    r"\[([^\]]+)\]\((/(?:ayuda|archivo|classic)?(?:\?[^)\s]*)?)\)",
     re.IGNORECASE,
 )
 _BARE_ABS_URL = re.compile(r"https?://[^\s)>\]]+", re.IGNORECASE)
@@ -251,6 +255,7 @@ def strip_spoken_urls(text: str | None) -> str:
     """Drop URLs from a voice/Telegram/phone/sms reply. Keep link titles."""
     out = text or ""
     out = _MD_URL_LINK.sub(r"\1", out)
+    out = _MD_REL_APP_LINK.sub(r"\1", out)
     out = _BARE_ABS_URL.sub("", out)
     out = _BARE_FOUND_PATH.sub("", out)
     out = _BARE_DOCS_VIEW.sub("", out)

@@ -87,6 +87,7 @@ class UiFeature:
     group: str = ""
     source_ids: tuple[str, ...] = ()
     extra: str = ""
+    where_family: str = ""
 
 
 @dataclass
@@ -425,6 +426,37 @@ _OVERLAYS: dict[str, dict] = {
         "aliases_es": ("investigacion", "investigación"),
         "workroom_only": False,
     },
+    "search": {
+        "name": "Header search",
+        "where": (
+            "On Command Center screens (not Max Home /): the top header bar labeled "
+            "'Search anything…' with ⌘K (hidden on phones). Click it or press Ctrl/⌘+K. "
+            "That opens Quick Switch — it is a jump palette, not a full-text search. "
+            "Type to filter a fixed list of screens (Chat, MAX Avatar, Dashboard, Tasks, "
+            "Quote Review, Documents, Research, Video Call, Workroom, WoodCraft, Platform, "
+            "Telegram, Dev Panel, RecoveryForge, Pricing Studio, RelistApp, ApostApp). "
+            "A letter shortcut jumps when the box is empty. After two characters it also "
+            "searches jobs via GET /jobs/search (client name, job number, title, "
+            "description, item names, fabric codes) and opens the job hub. It does not "
+            "search quotes, invoices, files, messages, or the full left nav."
+        ),
+        "where_family": (
+            "On Command Center screens (not Max Home): the top header bar labeled "
+            "'Search anything…' with ⌘K (hidden on phones). Click it or press Ctrl/⌘+K "
+            "to open Quick Switch and jump to a screen by name."
+        ),
+        "href": "/?product=owner",
+        "aliases_en": (
+            "search", "search bar", "search anything", "quick switch",
+            "command k", "cmd k", "ctrl k", "header search",
+        ),
+        "aliases_es": (
+            "buscador", "barra de busqueda", "barra de búsqueda", "buscar",
+            "busqueda", "búsqueda", "quick switch",
+        ),
+        "workroom_only": False,
+        "source_ids": ("search",),
+    },
 }
 
 
@@ -440,6 +472,7 @@ def _merge_overlay(base: UiFeature, overlay: dict) -> UiFeature:
         group=base.group,
         source_ids=tuple(overlay.get("source_ids", base.source_ids)),
         extra=overlay.get("extra", base.extra),
+        where_family=overlay.get("where_family", base.where_family),
     )
 
 
@@ -473,7 +506,7 @@ def build_ui_map(
 
     extras = [
         "presentation-mode", "ai-face", "talk", "family-help",
-        "minimax-usage", "organizer", "scheduler",
+        "minimax-usage", "organizer", "scheduler", "search",
     ]
     for key in extras:
         if key in seen:
@@ -489,6 +522,7 @@ def build_ui_map(
             workroom_only=bool(ov.get("workroom_only", False)),
             group="home",
             source_ids=tuple(ov.get("source_ids") or (key,)),
+            where_family=ov.get("where_family") or "",
         ))
         seen.add(key)
 
@@ -549,6 +583,15 @@ def _strip_find_prefix(query: str) -> str:
     return re.sub(r"\s+(in the app|en la app|en la aplicacion|button|boton)$", "", q).strip()
 
 
+def _query_fits_alias(q: str, alias: str) -> bool:
+    """Partial query against an alias. 'search' must not match 'research'."""
+    if not q or not alias:
+        return False
+    if alias.startswith(q):
+        return True
+    return any(part.startswith(q) for part in alias.split())
+
+
 def _best_match(query: str, features: list[UiFeature]) -> Optional[UiFeature]:
     q = _strip_find_prefix(query)
     if not q:
@@ -560,7 +603,7 @@ def _best_match(query: str, features: list[UiFeature]) -> Optional[UiFeature]:
             if alias and alias in q and len(alias) > best_len:
                 best = feat
                 best_len = len(alias)
-            if alias and q in alias and len(q) >= 4 and len(q) > best_len:
+            if alias and _query_fits_alias(q, alias) and len(q) >= 4 and len(q) > best_len:
                 best = feat
                 best_len = len(q)
     return best
@@ -577,8 +620,100 @@ def lookup_feature(query: str, family: bool | None = None) -> Optional[UiFeature
     return _best_match(query, features_for_edition(family))
 
 
-def format_feature_reply(feat: UiFeature) -> str:
-    return f"{feat.name}: {feat.where} Open: {feat.href}"
+def _spoken_channel(channel: str | None) -> bool:
+    try:
+        from app.services.max.doc_links import is_spoken_channel
+        return is_spoken_channel(channel)
+    except Exception:
+        return (channel or "").strip().lower() in {"voice", "telegram", "phone", "sms"}
+
+
+def _link_base(family: bool) -> str:
+    """Public origin for web links. Family never gets studio.empirebox.store."""
+    try:
+        from app.services.max.doc_links import public_base
+        base = public_base() or ""
+    except Exception:
+        base = ""
+    if family and "studio.empirebox.store" in base.lower():
+        return ""
+    return base.rstrip("/")
+
+
+def feature_href(feat: UiFeature, *, family: bool | None = None) -> str:
+    family = is_family_edition() if family is None else family
+    if family and feat.id == "family-help":
+        return "/ayuda"
+    return feat.href or "/"
+
+
+def feature_open_label(feat: UiFeature) -> str:
+    name = feat.name.split("(")[0].strip()
+    if feat.id == "search":
+        return "Open Command Center"
+    if feat.id == "presentation-mode":
+        return "Open Presentation"
+    if feat.id == "ai-face":
+        return "Open MAX Home"
+    return f"Open {name}"
+
+
+_IN_APP_CHANNELS = frozenset({
+    "", "web", "web_cc", "dashboard", "command_center",
+    "studio_browser", "mobile_browser",
+})
+
+
+def feature_markdown_link(
+    feat: UiFeature,
+    *,
+    channel: str | None = None,
+    family: bool | None = None,
+) -> str:
+    """Clickable deep link for web; empty on voice/Telegram (PR #105).
+
+    In-app chat uses a relative /? link so ChatMarkdown can open it same-origin.
+    Other text channels may use this edition's public host — never studio on family.
+    """
+    if _spoken_channel(channel):
+        return ""
+    family = is_family_edition() if family is None else family
+    href = feature_href(feat, family=family)
+    ch = (channel or "web").strip().lower()
+    base = "" if ch in _IN_APP_CHANNELS else _link_base(family)
+    url = f"{base}{href}" if base else href
+    return f"[{feature_open_label(feat)}]({url})"
+
+
+def feature_where(feat: UiFeature, *, family: bool | None = None) -> str:
+    family = is_family_edition() if family is None else family
+    if family and feat.where_family:
+        return feat.where_family
+    return feat.where
+
+
+def _spoken_where(where: str) -> str:
+    """Drop /? deep links from spoken copy (PR #105). Keep 'MAX Home (/)'."""
+    out = re.sub(r"/\?[\w.&=%-]+", "", where)
+    out = re.sub(r"\s{2,}", " ", out)
+    out = re.sub(r"\s+\.", ".", out)
+    return out.strip()
+
+
+def format_feature_reply(
+    feat: UiFeature,
+    *,
+    channel: str | None = None,
+    family: bool | None = None,
+) -> str:
+    family = is_family_edition() if family is None else family
+    where = feature_where(feat, family=family)
+    if _spoken_channel(channel):
+        return f"{feat.name}: {_spoken_where(where)}"
+    link = feature_markdown_link(feat, channel=channel, family=family)
+    if link:
+        return f"{feat.name}: {where} {link}"
+    return f"{feat.name}: {where}"
 
 
 def is_find_in_app_request(text: str) -> bool:
@@ -595,12 +730,16 @@ def is_find_in_app_request(text: str) -> bool:
     return True
 
 
-def find_in_app_reply(text: str, family: bool | None = None) -> Optional[str]:
+def find_in_app_reply(
+    text: str,
+    family: bool | None = None,
+    channel: str | None = None,
+) -> Optional[str]:
     if not is_find_in_app_request(text):
         return None
     feat = lookup_feature(text, family=family)
     if feat:
-        return format_feature_reply(feat)
+        return format_feature_reply(feat, channel=channel, family=family)
     return (
         "I answer that from the live UI map, not from repo search. "
         "Tell me the screen name (for example Presentation mode, Talk, "
@@ -622,6 +761,10 @@ def render_ui_map_section(family: bool | None = None) -> str:
         "lower-left Presentation button; 'no verified Presentation Mode button').",
         "Truth since PR #108: MAX Home (/) shows the Simli face with Talk and",
         "Presentation buttons; Presentation is also in the left nav (MAX Avatar).",
+        "Every where-is answer MUST include a markdown deep link like",
+        "[Open Presentation](/?screen=presentation) so ChatMarkdown makes it clickable.",
+        "Web: relative /? links (or this edition's public host). Family editions",
+        "never use studio.empirebox.store. Voice and Telegram: no URLs at all.",
     ]
     if family:
         lines.append(
@@ -632,7 +775,10 @@ def render_ui_map_section(family: bool | None = None) -> str:
     for feat in features_for_edition(family):
         aliases = ", ".join(a for a in (*feat.aliases_en[:4], *feat.aliases_es[:3]) if a)
         alias_bit = f" [also: {aliases}]" if aliases else ""
-        lines.append(f"- {feat.name}{alias_bit} — {feat.where} → {feat.href}")
+        where = feature_where(feat, family=family)
+        href = feature_href(feat, family=family)
+        link = feature_markdown_link(feat, family=family)
+        lines.append(f"- {feat.name}{alias_bit} — {where} → {link or href}")
     lines.append("")
     return "\n".join(lines)
 
