@@ -10,6 +10,7 @@ from app.services.max.official_search.config import (
     MAX_NUM_RESULTS,
     default_page_chars,
     official_page_chars,
+    today_iso,
 )
 from app.services.max.official_search.family import (
     family_search_guard,
@@ -128,9 +129,9 @@ def run_web_search(params: dict, desk: Optional[str] = None, **kwargs) -> dict:
     notice = ""
     if official and no_tier1:
         notice = (
-            "No se encontraron fuentes oficiales (Nivel 1) para esta consulta."
+            "No se encontró fuente oficial. No official source found."
             if language == "es"
-            else "No official (Tier 1) sources were found for this query."
+            else "No official source found."
         )
 
     return {
@@ -149,6 +150,7 @@ def run_web_search(params: dict, desk: Optional[str] = None, **kwargs) -> dict:
             "widened": filtered.get("widened"),
             "independent": filtered.get("independent"),
             "notice": notice,
+            "today": today_iso(),
             "minimax_research": False,
         },
     }

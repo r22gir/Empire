@@ -26,14 +26,23 @@ This module adds:
 9. MiniMax built-in `web_search` **off** for research
 10. Family-edition isolation (Max-e / Maxine) and the 20% usage cap
 
-## Provider order (free tiers)
+## Provider order (Dell live tests, 2026-10)
+
+DuckDuckGo HTML **resets connections from the Dell** (10 of 12 queries
+fell back). `BRAVE_API_KEY` is already set on the studio backend.
 
 | Order | Provider | Env | Notes |
 | --- | --- | --- | --- |
-| 1 | Exa Instant | `EXA_API_KEY` | Free $10/mo. `includeDomains` when official. |
-| 2 | Tavily basic | `TAVILY_API_KEY` | 1,000 free credits/mo. `include_domains` is a hard filter. |
-| 3 | Brave Search | `BRAVE_API_KEY` | **Off until a key is set.** Optional `BRAVE_GOGGLES_ID`. |
-| last | DuckDuckGo HTML | none | Last fallback. |
+| 1 | Brave Search | `BRAVE_API_KEY` | **On when the key exists.** Goggles + allowlist `site:` boosts + hard post-filter. |
+| 1b | MiniMax Token Plan MCP | `MINIMAX_API_KEY` | `POST /v1/coding_plan/search` `{"q": query}`. Raw 10 hits, **no domain filter**. Merged/deduped with Brave, then trust-filtered. Included in plan quota. |
+| 2 | Exa Instant | `EXA_API_KEY` | Free $10/mo fallback. |
+| 3 | Tavily basic | `TAVILY_API_KEY` | 1,000 free credits/mo fallback. `include_domains` hard filter. |
+| last | DuckDuckGo HTML | none | Last resort. Unreliable from Dell. |
+
+**Do not** use the MiniMax Responses API server-tool `web_search` as an
+answer engine: slow, sometimes skips searching, stale/memory answers.
+`MINIMAX_WEB_SEARCH_FOR_RESEARCH` stays off. Research prompts always
+include **today's calendar date** so the model cannot invent a stale year.
 
 Family editions do **not** inherit the workroom key:
 
@@ -41,9 +50,10 @@ Family editions do **not** inherit the workroom key:
 - Maxine: `EXA_API_KEY_MAXINE` / `TAVILY_API_KEY_MAXINE` / `BRAVE_API_KEY_MAXINE`
 
 `SERPAPI_API_KEY`, `GOOGLE_CSE_API_KEY`, and `BING_API_KEY` are unused
-(paid). MiniMax built-in web search stays off for research
-(`MINIMAX_WEB_SEARCH_FOR_RESEARCH` defaults to off) because it has no
-domain filter.
+(paid). Social / SEO / aggregator noise (Facebook, YouTube, Reddit,
+IndiaMART, Scribd, tax-prep sellers, rehab-center sites, MarketWatch-style
+aggregators) is blocked before tiering. Pages are fetched before they
+may be cited. If no Tier 1 host remains: **No official source found.**
 
 Fail-closed: if every **enabled** provider errors, `web_search` returns
 `success=false`. An empty-but-healthy provider continues to the next.

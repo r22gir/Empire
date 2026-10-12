@@ -1067,7 +1067,7 @@ def minimax_tools_status() -> dict[str, Any]:
                 "available": False,
                 "transport": "mcp_cli",
                 "quota_bucket": "mcp_web_search",
-                "reason": "OFF for research (no domain filter). Set MINIMAX_WEB_SEARCH_FOR_RESEARCH=on only for non-research experiments.",
+                "reason": "Responses API server-tool web_search is OFF (slow, skips search, stale dates). Token Plan MCP POST /v1/coding_plan/search is the raw official-search provider.",
             },
             "image_generation": {
                 "configured": has_key,

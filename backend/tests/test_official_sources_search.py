@@ -108,7 +108,7 @@ def test_no_tier1_says_so_and_labels_unverified():
     )
     assert payload["success"] is True
     assert payload["result"]["no_tier1"] is True
-    assert "No official (Tier 1)" in payload["result"]["notice"]
+    assert "No official source found" in payload["result"]["notice"]
     for row in payload["result"]["results"]:
         assert row["tier"] != 1
 
@@ -189,10 +189,11 @@ def test_citation_stripping_invented_and_quotes():
     assert "this quote is not" not in quoted
 
 
-def test_fallback_order_exa_tavily_brave_off_ddg(monkeypatch):
+def test_fallback_order_brave_first_when_keyed(monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
     monkeypatch.delenv("EXA_API_KEY_MAXINE", raising=False)
     monkeypatch.delenv("TAVILY_API_KEY_MAXINE", raising=False)
     monkeypatch.setenv("EMPIRE_EDITION", "main")
@@ -205,7 +206,15 @@ def test_fallback_order_exa_tavily_brave_off_ddg(monkeypatch):
     assert "brave" not in provider_fallback_order()
 
     monkeypatch.setenv("BRAVE_API_KEY", "bs-key")
-    assert provider_fallback_order() == ["exa", "tavily", "brave", "duckduckgo"]
+    assert provider_fallback_order()[0] == "brave"
+    assert provider_fallback_order() == ["brave", "exa", "tavily", "duckduckgo"]
+
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-key")
+    order = provider_fallback_order()
+    assert order[0] == "brave"
+    assert "minimax_coding_plan" in order
+    assert order.index("minimax_coding_plan") < order.index("exa")
+    assert order[-1] == "duckduckgo"
 
 
 def test_fail_closed_on_provider_errors():
@@ -238,9 +247,12 @@ def test_empty_from_primary_falls_through_to_next():
     assert ddg.calls == 1
 
 
-def test_minimax_research_stays_off(monkeypatch):
+def test_minimax_responses_api_stays_off_coding_plan_on(monkeypatch):
     monkeypatch.delenv("MINIMAX_WEB_SEARCH_FOR_RESEARCH", raising=False)
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-key")
+    from app.services.max.official_search.providers import minimax_coding_plan_enabled
     assert minimax_research_enabled() is False
+    assert minimax_coding_plan_enabled() is True
 
 
 def test_family_usage_cap_and_maxine_argos(monkeypatch):
@@ -338,6 +350,96 @@ def test_authoritative_tools_optional(monkeypatch):
     wiki = wikipedia_search({"query": "influenza"}, http_get=lambda *a, **k: _Wiki())
     assert wiki["ok"] is True
     assert wiki["results"][0]["url"].startswith("https://en.wikipedia.org/")
+
+
+def test_blocklist_drops_social_seo_aggregators():
+    from app.services.max.official_search.trust_tiers import is_blocked
+
+    for url in (
+        "https://www.facebook.com/cdcflu",
+        "https://youtube.com/watch?v=1",
+        "https://www.reddit.com/r/flu",
+        "https://www.indiamart.com/x",
+        "https://www.scribd.com/doc/1",
+        "https://www.marketwatch.com/story/x",
+        "https://turbotax.intuit.com/tax-tips",
+        "https://www.addictioncenter.com/rehab",
+    ):
+        assert is_blocked(url), url
+    assert not is_blocked("https://www.cdc.gov/flu")
+
+    mixed = [
+        {"url": "https://www.facebook.com/post", "title": "FB"},
+        {"url": "https://www.cdc.gov/flu", "title": "CDC"},
+        {"url": "https://www.marketwatch.com/x", "title": "MW"},
+    ]
+    out = filter_by_tiers(mixed, official=True, query="official flu")
+    urls = [r["url"] for r in out["results"]]
+    assert urls == ["https://www.cdc.gov/flu"]
+
+
+def test_brave_and_minimax_merge_dedupe():
+    brave = _FakeProvider("brave", [
+        SearchHit("CDC", "https://www.cdc.gov/flu", "a", provider="brave"),
+        SearchHit("Dup", "https://www.nih.gov/flu", "b", provider="brave"),
+    ])
+    mm = _FakeProvider("minimax_coding_plan", [
+        SearchHit("NIH", "https://www.nih.gov/flu/", "c", provider="minimax_coding_plan"),
+        SearchHit("FDA", "https://www.fda.gov/flu", "d", provider="minimax_coding_plan"),
+    ])
+    raw = run_providers("official flu", providers=[brave, mm])
+    assert raw["ok"] is True
+    urls = [r["url"].rstrip("/") for r in raw["results"]]
+    assert urls.count("https://www.nih.gov/flu") == 1
+    assert "https://www.cdc.gov/flu" in urls
+    assert "https://www.fda.gov/flu" in urls
+    assert brave.calls == 1 and mm.calls == 1
+    assert "brave" in raw["source"] and "minimax_coding_plan" in raw["source"]
+
+
+def test_research_prompt_includes_today():
+    from datetime import date
+    from app.services.max.web_research import build_grounded_search_message
+
+    msg = build_grounded_search_message(
+        "official flu schedule",
+        {"results": []},
+        [{
+            "url": "https://www.cdc.gov/flu",
+            "title": "CDC",
+            "text": "Annual influenza vaccination is recommended.",
+            "date_label": "2024-08-15",
+        }],
+    )
+    today = date.today().isoformat()
+    assert f"Today's date is {today}" in msg
+    assert "Cite only fetched pages" in msg
+    assert "Responses API does not know today's date" in msg
+
+
+def test_coding_plan_posts_q(monkeypatch):
+    from app.services.max.official_search.providers import MiniMaxCodingPlanProvider
+
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-key")
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+        def json(self):
+            return {"results": [
+                {"title": "CDC", "link": "https://www.cdc.gov/flu", "snippet": "vax", "date": "2024-08-15"},
+            ]}
+
+    def post(url, json=None, headers=None, timeout=None):
+        seen["url"] = url
+        seen["json"] = json
+        return _Resp()
+
+    hits = MiniMaxCodingPlanProvider().search("flu", http_post=post)
+    assert seen["url"].endswith("/coding_plan/search")
+    assert seen["json"] == {"q": "flu"}
+    assert hits[0].url == "https://www.cdc.gov/flu"
+    assert hits[0].provider == "minimax_coding_plan"
 
 
 def test_tool_executor_fail_closed_and_shape():

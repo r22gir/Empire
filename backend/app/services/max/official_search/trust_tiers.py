@@ -32,6 +32,29 @@ TIER1_HOSTS = frozenset({
     "pubmed.ncbi.nlm.nih.gov",
 })
 
+# Social / SEO / aggregator / seller noise. Dropped before tiering.
+BLOCKED_HOSTS = frozenset({
+    "facebook.com", "fb.com", "m.facebook.com", "l.facebook.com",
+    "youtube.com", "youtu.be", "m.youtube.com",
+    "reddit.com", "old.reddit.com", "np.reddit.com",
+    "twitter.com", "x.com", "t.co", "instagram.com", "tiktok.com",
+    "pinterest.com", "linkedin.com", "quora.com", "medium.com",
+    "tumblr.com", "threads.net",
+    "indiamart.com", "scribd.com", "slideshare.net", "issuu.com",
+    "marketwatch.com", "seekingalpha.com", "benzinga.com", "fool.com",
+    "yahoo.com", "finance.yahoo.com", "msn.com", "businessinsider.com",
+    "wikihow.com", "answers.com", "ehow.com",
+    "turbotax.intuit.com", "intuit.com", "hrblock.com", "taxact.com",
+    "freetaxusa.com", "jacksonhewitt.com", "taxslayer.com", "taxprep.com",
+    "rehab.com", "rehabs.com", "addictioncenter.com",
+    "americanaddictioncenters.org", "recovery.org", "rehabcenter.net",
+})
+
+_BLOCKED_NEEDLES = (
+    "indiamart", "scribd", "rehab", "addictioncenter", "taxprep", "tax-prep",
+    "tax-relief", "irs-help", "irshelp",
+)
+
 TIER2_HOSTS = frozenset({
     "reuters.com", "apnews.com", "ap.org", "bbc.com", "bbc.co.uk",
     "npr.org", "pbs.org", "nytimes.com", "wsj.com", "washingtonpost.com",
@@ -87,6 +110,17 @@ def registrable_domain(url: str) -> str:
     if len(parts) >= 2:
         return ".".join(parts[-2:])
     return host
+
+
+def is_blocked(url: str) -> bool:
+    """True for social / SEO / aggregator / seller noise hosts."""
+    host = hostname(url)
+    if not host:
+        return True
+    if any(host == b or host.endswith("." + b) for b in BLOCKED_HOSTS):
+        return True
+    blob = host.replace("-", "")
+    return any(needle.replace("-", "") in blob for needle in _BLOCKED_NEEDLES)
 
 
 def classify_domain(url: str, *, entity_domain: str | None = None) -> int:
@@ -180,7 +214,7 @@ def filter_by_tiers(
         if not isinstance(item, dict):
             continue
         url = str(item.get("url") or "").strip()
-        if not url:
+        if not url or is_blocked(url):
             continue
         row = dict(item)
         row["tier"] = classify_domain(url, entity_domain=entity_domain)

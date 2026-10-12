@@ -6503,7 +6503,7 @@ State machine: `draft → founder_review → sent → accepted → in_production
   Shapes: "straight", "l-shape", "u-shape". For U-shaped, add "multiplier": 2 if there are multiple booths.
 
 ### Research Tools
-- **web_search** — Official-sources web search. Exa and Tavily (free tiers) are primary when keys exist; DuckDuckGo is last fallback. Brave stays off unless BRAVE_API_KEY is set. MiniMax web_search is OFF for research.
+- **web_search** — Official-sources web search. Brave is primary when BRAVE_API_KEY exists (Dell studio). MiniMax Token Plan MCP (POST /v1/coding_plan/search) is a raw merge. Exa/Tavily are free fallbacks. DuckDuckGo is last (Dell often resets). MiniMax Responses API web_search is OFF.
   `{"tool": "web_search", "query": "CDC influenza vaccination schedule", "num_results": 5}`
   Official intent (official / oficial / gobierno / .gov / fuente oficial) enables strict Tier 1 mode.
   For a factual or research question the runtime reads the full text of the top relevant pages (skipping dead or paywalled ones) before you answer. Answer from that page text. Do not stop at snippets, and do not offer to open the articles.

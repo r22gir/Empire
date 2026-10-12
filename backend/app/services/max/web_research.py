@@ -285,8 +285,19 @@ def build_grounded_search_message(
 ) -> str:
     """System message: page text, dates, and the answer contract. Not snippets."""
     payload = search_payload or {}
+    try:
+        from app.services.max.official_search.config import today_iso
+        today = today_iso()
+    except Exception:
+        from datetime import date
+        today = date.today().isoformat()
     lines = [
         grounding_directive(question),
+        "",
+        f"Today's date is {today}. Use this date for recency. "
+        "The Responses API does not know today's date unless it is given here. "
+        "Do not answer from training-data memory or stale dates.",
+        "Cite only fetched pages below. Do not cite snippet-only or unread URLs.",
         "",
         "Do not call web_read or web_search again for these URLs. "
         "The pages below are already loaded. Answer now.",
@@ -305,8 +316,9 @@ def build_grounded_search_message(
             lines.append(page.get("text") or "")
     else:
         lines.append(
-            "None of the result pages could be read (dead or paywalled). "
-            "Say that plainly. Do not invent specifications, and do not offer to open the articles."
+            "No official source found. None of the result pages could be read "
+            "(dead, paywalled, or blocked noise). Say that plainly. "
+            "Do not invent specifications, and do not offer to open the articles."
         )
         undated = undated_source_label(question)
         for index, item in enumerate((payload.get("results") or [])[:5], start=1):
@@ -440,6 +452,12 @@ def _is_candidate_url(url: str) -> bool:
         return False
     if host.endswith("google.com") and parsed.path.startswith("/search"):
         return False
+    try:
+        from app.services.max.official_search.trust_tiers import is_blocked
+        if is_blocked(url):
+            return False
+    except Exception:
+        pass
     return True
 
 

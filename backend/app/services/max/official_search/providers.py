@@ -1,8 +1,13 @@
 """Free-tier search providers with a documented fallback order.
 
-Order when keys exist: Exa → Tavily → Brave (only if BRAVE_API_KEY) → DuckDuckGo.
-Brave stays OFF until a key is set. MiniMax built-in web_search is never used
-for research (no domain filter).
+Dell live tests (2026-10): DuckDuckGo resets most connections. Brave is
+already keyed on studio and is the default raw provider when
+``BRAVE_API_KEY`` exists (Goggles + allowlist boosts). MiniMax Token Plan
+MCP ``POST /v1/coding_plan/search`` is a second raw source (no domain
+filter) merged/deduped with Brave, then run through the trust layer.
+
+Exa and Tavily are free fallbacks. DuckDuckGo is last. The MiniMax
+Responses API server-tool ``web_search`` is never used as an answer engine.
 """
 from __future__ import annotations
 
@@ -16,6 +21,7 @@ from app.services.max.official_search.config import (
     brave_goggles,
     edition_key,
     env_bool,
+    env_flag,
 )
 
 logger = logging.getLogger("max.official_search.providers")
@@ -61,24 +67,41 @@ class ProviderAttempt:
 
 
 def minimax_research_enabled() -> bool:
-    """MiniMax built-in web_search stays OFF for research (no domain filter)."""
+    """MiniMax Responses API / server-tool web_search stays OFF as an answer engine."""
     return env_bool("MINIMAX_WEB_SEARCH_FOR_RESEARCH", False)
 
 
+def minimax_api_key() -> str:
+    """Edition-scoped MiniMax key, then the process MINIMAX_API_KEY (plan quota)."""
+    return edition_key("MINIMAX_API_KEY") or env_flag("MINIMAX_API_KEY")
+
+
+def minimax_coding_plan_enabled() -> bool:
+    """Token Plan MCP search is on when a MiniMax key exists (included in plan quota)."""
+    if env_bool("MINIMAX_CODING_PLAN_SEARCH", True) is False:
+        return False
+    if env_flag("MINIMAX_CODING_PLAN_SEARCH").lower() in {"off", "0", "false", "no"}:
+        return False
+    return bool(minimax_api_key())
+
+
 def provider_fallback_order() -> list[str]:
-    """Enabled providers in fail-over order. DDG is always last."""
+    """Enabled providers. Brave + MiniMax coding-plan merge first; DDG last."""
     names: list[str] = []
+    if edition_key("BRAVE_API_KEY"):
+        names.append("brave")
+    if minimax_coding_plan_enabled():
+        names.append("minimax_coding_plan")
     if edition_key("EXA_API_KEY"):
         names.append("exa")
     if edition_key("TAVILY_API_KEY"):
         names.append("tavily")
-    if edition_key("BRAVE_API_KEY"):
-        names.append("brave")
     names.append("duckduckgo")
     return names
 
 
-PROVIDER_ORDER = ("exa", "tavily", "brave", "duckduckgo")
+PROVIDER_ORDER = ("brave", "minimax_coding_plan", "exa", "tavily", "duckduckgo")
+MERGE_PROVIDERS = frozenset({"brave", "minimax_coding_plan"})
 
 
 def _httpx():
@@ -261,12 +284,12 @@ class BraveProvider(SearchProvider):
         key = edition_key("BRAVE_API_KEY")
         if not key:
             return []
-        params: dict = {"q": query, "count": num_results}
+        params: dict = {"q": query, "count": max(num_results, 10), "extra_snippets": True}
         goggles = brave_goggles()
         if goggles:
             params["goggles_id"] = goggles
         if include_domains:
-            # Brave has no hard include_domains; site: operators + post-filter.
+            # Allowlist boost: site: operators plus a hard post-filter below.
             params["q"] = query + " " + " OR ".join(f"site:{d}" for d in include_domains[:8])
         get = http_get or _httpx().get
         try:
@@ -295,7 +318,93 @@ class BraveProvider(SearchProvider):
                     published=row.get("page_age") or row.get("age"),
                     provider=self.name,
                 ))
+        if include_domains:
+            allowed = {d.lower().lstrip(".") for d in include_domains}
+            hits = [
+                h for h in hits
+                if any(
+                    (urlparse_host(h.url) == d or urlparse_host(h.url).endswith("." + d))
+                    for d in allowed
+                )
+            ]
         return hits[:num_results]
+
+
+def urlparse_host(url: str) -> str:
+    from urllib.parse import urlparse
+    host = (urlparse(url or "").hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+class MiniMaxCodingPlanProvider(SearchProvider):
+    """Token Plan MCP search: POST /v1/coding_plan/search {\"q\": query}.
+
+    Raw source only — no domain filter. Results go through the trust layer.
+    This is not the Responses API server-tool web_search.
+    """
+
+    name = "minimax_coding_plan"
+
+    def enabled(self) -> bool:
+        return minimax_coding_plan_enabled()
+
+    def search(
+        self,
+        query: str,
+        num_results: int = 5,
+        *,
+        include_domains: Optional[list[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        http_get: Optional[HttpGet] = None,
+        http_post: Optional[HttpPost] = None,
+    ) -> list[SearchHit]:
+        key = minimax_api_key()
+        if not key:
+            return []
+        base = env_flag("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
+        post = http_post or _httpx().post
+        try:
+            resp = post(
+                f"{base}/coding_plan/search",
+                json={"q": query},
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                timeout=8.0,
+            )
+            status = getattr(resp, "status_code", 200)
+            if status >= 400:
+                raise ProviderError(self.name, f"HTTP {status}")
+            data = resp.json() if hasattr(resp, "json") else {}
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise ProviderError(self.name, f"{type(exc).__name__}: {exc}") from exc
+        rows = (
+            data.get("results")
+            or data.get("data")
+            or data.get("items")
+            or (data.get("web") or {}).get("results")
+            or []
+        )
+        hits: list[SearchHit] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            url = str(row.get("url") or row.get("link") or row.get("href") or "")
+            title = str(row.get("title") or row.get("name") or url)
+            snippet = str(row.get("snippet") or row.get("content") or row.get("description") or "")
+            published = row.get("date") or row.get("published") or row.get("published_date")
+            if url and title:
+                hits.append(SearchHit(
+                    title=title, url=url, snippet=snippet[:400],
+                    published=str(published) if published else None,
+                    provider=self.name,
+                ))
+        return hits[: max(num_results, 10)]
 
 
 def parse_ddg_html(html: str, max_results: int) -> list[SearchHit]:
@@ -343,7 +452,7 @@ class DuckDuckGoProvider(SearchProvider):
                         "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                     ),
                 },
-                timeout=10,
+                timeout=6,
                 follow_redirects=True,
             )
             status = getattr(resp, "status_code", 200)
@@ -358,7 +467,54 @@ class DuckDuckGoProvider(SearchProvider):
 
 
 def default_providers() -> list[SearchProvider]:
-    return [ExaProvider(), TavilyProvider(), BraveProvider(), DuckDuckGoProvider()]
+    return [
+        BraveProvider(),
+        MiniMaxCodingPlanProvider(),
+        ExaProvider(),
+        TavilyProvider(),
+        DuckDuckGoProvider(),
+    ]
+
+
+def _norm_url(url: str) -> str:
+    return (url or "").strip().rstrip("/").lower()
+
+
+def merge_hits(groups: list[list[SearchHit]], limit: int = 10) -> list[SearchHit]:
+    """Dedupe by URL (Brave + MiniMax coding-plan raw merge)."""
+    seen: set[str] = set()
+    out: list[SearchHit] = []
+    for group in groups:
+        for hit in group:
+            key = _norm_url(hit.url)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(hit)
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def _search_one(
+    provider: SearchProvider,
+    query: str,
+    num_results: int,
+    include_domains,
+    start_date,
+    end_date,
+    http_get,
+    http_post,
+) -> list[SearchHit]:
+    return provider.search(
+        query,
+        num_results,
+        include_domains=include_domains,
+        start_date=start_date,
+        end_date=end_date,
+        http_get=http_get,
+        http_post=http_post,
+    )
 
 
 def run_providers(
@@ -372,41 +528,52 @@ def run_providers(
     http_get: Optional[HttpGet] = None,
     http_post: Optional[HttpPost] = None,
 ) -> dict:
-    """Try enabled providers in order. Fail closed when every attempt errors."""
+    """Brave + MiniMax coding-plan merge first; Exa/Tavily/DDG fallback.
+
+    Fail closed when every enabled provider errors.
+    """
     chain = providers or default_providers()
     attempts: list[ProviderAttempt] = []
     errors: list[str] = []
     last_empty_ok: Optional[str] = None
+    merge_groups: list[list[SearchHit]] = []
+    merge_sources: list[str] = []
+
+    def _record_error(name: str, message: str) -> None:
+        attempts.append(ProviderAttempt(name=name, enabled=True, ok=False, error=message))
+        errors.append(f"{name}: {message}")
 
     for provider in chain:
+        is_merge = provider.name in MERGE_PROVIDERS
+        if merge_groups and not is_merge:
+            # Already have raw merged hits — skip free/DDG fallbacks.
+            break
         enabled = bool(provider.enabled())
         if not enabled:
             attempts.append(ProviderAttempt(name=provider.name, enabled=False))
             continue
         try:
-            hits = provider.search(
-                query,
-                num_results,
-                include_domains=include_domains,
-                start_date=start_date,
-                end_date=end_date,
-                http_get=http_get,
-                http_post=http_post,
+            hits = _search_one(
+                provider, query, num_results, include_domains,
+                start_date, end_date, http_get, http_post,
             )
         except ProviderError as exc:
             logger.warning("[official_search] %s failed: %s", provider.name, exc.message)
-            attempts.append(ProviderAttempt(name=provider.name, enabled=True, ok=False, error=exc.message))
-            errors.append(str(exc))
+            _record_error(provider.name, exc.message)
             continue
         except Exception as exc:
             logger.warning("[official_search] %s failed: %s", provider.name, exc)
-            attempts.append(ProviderAttempt(
-                name=provider.name, enabled=True, ok=False, error=f"{type(exc).__name__}: {exc}",
-            ))
-            errors.append(f"{provider.name}: {type(exc).__name__}: {exc}")
+            _record_error(provider.name, f"{type(exc).__name__}: {exc}")
+            continue
+        attempts.append(ProviderAttempt(name=provider.name, enabled=True, ok=True, count=len(hits)))
+        if is_merge:
+            if hits:
+                merge_groups.append(hits)
+                merge_sources.append(provider.name)
+            else:
+                last_empty_ok = provider.name
             continue
         if hits:
-            attempts.append(ProviderAttempt(name=provider.name, enabled=True, ok=True, count=len(hits)))
             return {
                 "ok": True,
                 "results": [h.as_dict() for h in hits],
@@ -415,8 +582,16 @@ def run_providers(
                 "error": None,
             }
         last_empty_ok = provider.name
-        attempts.append(ProviderAttempt(name=provider.name, enabled=True, ok=True, count=0))
 
+    merged = merge_hits(merge_groups, limit=max(num_results, 10))
+    if merged:
+        return {
+            "ok": True,
+            "results": [h.as_dict() for h in merged],
+            "source": "+".join(merge_sources) if merge_sources else "merged",
+            "attempts": [a.__dict__ for a in attempts],
+            "error": None,
+        }
     if last_empty_ok:
         return {
             "ok": True,
@@ -425,7 +600,6 @@ def run_providers(
             "attempts": [a.__dict__ for a in attempts],
             "error": None,
         }
-    # Every enabled provider errored (or none were enabled — should not happen).
     return {
         "ok": False,
         "results": [],

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date as _date
 from typing import Optional
 
 # Free-tier page budgets. Official / long primary docs get 6–8k chars.
@@ -110,3 +111,8 @@ def sec_user_agent() -> str:
 
 def brave_goggles() -> str:
     return env_flag("BRAVE_GOGGLES_ID") or env_flag("BRAVE_GOGGLES_URL")
+
+
+def today_iso() -> str:
+    """Calendar date for research prompts. The Responses API does not know today."""
+    return _date.today().isoformat()

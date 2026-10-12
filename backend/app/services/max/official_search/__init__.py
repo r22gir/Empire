@@ -33,6 +33,8 @@ from app.services.max.official_search.providers import (
     DuckDuckGoProvider,
     ExaProvider,
     TavilyProvider,
+    MiniMaxCodingPlanProvider,
+    minimax_coding_plan_enabled,
     minimax_research_enabled,
     provider_fallback_order,
 )
@@ -42,6 +44,7 @@ from app.services.max.official_search.trust_tiers import (
     TIER_WIRE,
     classify_domain,
     filter_by_tiers,
+    is_blocked,
     topic_allowlist,
 )
 
@@ -54,6 +57,9 @@ __all__ = [
     "TIER_UNVERIFIED",
     "TIER_WIRE",
     "TavilyProvider",
+    "MiniMaxCodingPlanProvider",
+    "is_blocked",
+    "minimax_coding_plan_enabled",
     "attach_sources_footer",
     "build_sources_footer",
     "classify_domain",
