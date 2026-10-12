@@ -73,7 +73,7 @@ Reuses `gmail_reader.check_inbox` (`gmail.readonly`) and `outlook_reader.search_
 
 Keep `?orgTheme=a|b|c` (or the Luxe / Editorial / Command switcher). Each flow must work in every area. Family stays isolated to this edition.
 
-1. **Suggested tray** (sidebar): incoming mail, WhatsApp, voice notes, and approved estimates appear as suggestions. **Accept** creates a to-do. **Dismiss** drops it. Nothing is created silently. Harvest never writes a task on its own.
+1. **Suggested tray** (main board in every theme, plus sidebar on Editorial): incoming mail, WhatsApp, voice notes, and approved estimates appear as suggestions. **Accept** creates a to-do. **Dismiss** drops it. Nothing is created silently. Harvest never writes a task on its own. Screenshots: `docs/organizer-flow-shots/` (theme C each flow, plus one theme A).
 2. **One-tap card actions**: Call (`tel:`), Open quote / Open invoice, **Build supplier cart** (prepares a list only — never checks out or pays), **Mark paid** (opens the existing invoice screen), Snooze, Remind. Waiting-on items also offer **Draft nudge**.
 3. **Plan my day**: toolbar button opens Max's proposed time blocks (installs, orders, follow-ups). **Approve & save blocks** writes times. Cancel leaves the calendar alone. Nothing is sent.
 4. **Waiting-on**: item sheet has who + nudge-after-N-days. When due, Max prepares a draft nudge for Rafael to review. Dispatch never sends.

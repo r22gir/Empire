@@ -92,7 +92,20 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   const cardDragRef = useRef<{ id: string } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => { setTheme(readTheme()); }, []);
+  useEffect(() => {
+    setTheme(readTheme());
+    if (typeof window === 'undefined') return;
+    const qs = new URLSearchParams(window.location.search);
+    const v = qs.get('orgView');
+    if (v && ['today', 'board', 'day', 'week', 'month', 'lanes', 'agenda', 'mail', 'review'].includes(v)) {
+      setView(v as View);
+    }
+    const sheet = qs.get('orgSheet');
+    if (sheet === 'plan') setPlanOpen(true);
+    if (sheet === 'search') setSearchOpen(true);
+    const q0 = qs.get('orgQ');
+    if (q0) { setQ(q0); setSearchOpen(true); }
+  }, []);
 
   function applyTheme(next: OrgTheme) {
     setTheme(next);
@@ -1005,6 +1018,28 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
         </aside>
 
         <section>
+          {(view === 'today' || view === 'board' || view === 'agenda') && (
+            <div className="org-card org-suggested-main" data-suggested-tray="1">
+              <h3>Suggested</h3>
+              <div className="org-note">From mail, WhatsApp, voice notes, and approved estimates. Accept or dismiss — nothing is created silently.</div>
+              {suggestions.length === 0 && <div className="org-note">No suggestions waiting.</div>}
+              <div className="org-suggested-grid">
+                {suggestions.slice(0, 8).map((s) => (
+                  <div className="org-row" key={s.id} data-suggestion={s.source}>
+                    <span className="tm">{s.source}</span>
+                    <span>
+                      <b>{s.title}</b>
+                      <small>{s.body}</small>
+                      <div className="org-abar">
+                        <button className="gold" onClick={() => acceptSuggestion(s.id)}>Accept</button>
+                        <button onClick={() => dismissSuggestion(s.id)}>Dismiss</button>
+                      </div>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {view === 'today' && (
             <div className="org-kanban" data-today-board>
               {([

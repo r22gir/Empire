@@ -226,6 +226,11 @@
   border-radius: 999px; padding: 2px 6px; font-weight: 600;
 }
 .org-money em { font-style: normal; font-weight: 700; color: var(--org-ink); }
+.org-suggested-main { margin-bottom: 10px; }
+.org-suggested-grid { display: grid; gap: 4px; }
+@media (min-width: 720px) {
+  .org-suggested-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .org-review { display: flex; flex-direction: column; gap: 12px; }
 .org-review-col h4 {
   display: flex; justify-content: space-between; margin: 0 0 6px;
