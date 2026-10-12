@@ -5,6 +5,9 @@
   --org-gold: #b8960c;
   --org-paper: #faf8f4;
   --org-card: #fff;
+  --org-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --org-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --org-mono: var(--font-plex-mono), ui-monospace, monospace;
   display: flex;
   flex-direction: column;
   min-height: 100%;
@@ -13,8 +16,15 @@
   -webkit-overflow-scrolling: touch;
   background: var(--org-paper);
   color: var(--org-ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+  font-family: var(--org-sans);
+  font-feature-settings: "liga" 0, "calt" 0, "kern" 1, "dlig" 0, "swsh" 0;
+  font-variant-ligatures: none;
+  letter-spacing: 0;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
+.org-root, .org-root * { text-shadow: none !important; }
 .org-top {
   position: sticky; top: 0; z-index: 8;
   background: rgba(250,248,244,0.96);
@@ -61,8 +71,9 @@
 .org-row b { display: block; font-size: 13px; }
 .org-row small { color: var(--org-mut); }
 .org-chip { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; }
-.org-qa { display: flex; gap: 6px; }
+.org-qa { display: flex; gap: 6px; align-items: center; }
 .org-qa input { flex: 1; min-width: 0; }
+.org-qa button, .org-toolbar .org-btn-gold { display: inline-flex; align-items: center; gap: 6px; }
 .org-grid-day, .org-grid-week {
   position: relative; background: #fff; border: 1px solid var(--org-line); border-radius: 12px; overflow: hidden;
 }
@@ -134,4 +145,99 @@
 .org-mail-reply {
   white-space: pre-wrap; background: #f5f2ed; border-radius: 8px;
   padding: 8px 10px; font-size: 12px; margin: 8px 0 4px; font-family: inherit;
+}
+.org-kanban {
+  display: grid; grid-template-columns: 1fr; gap: 10px;
+}
+@media (min-width: 720px) {
+  .org-kanban { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.org-kanban-col {
+  background: #fff; border: 1px solid var(--org-line); border-radius: 12px;
+  padding: 10px; min-height: 180px; touch-action: none;
+}
+.org-kanban-col h3 {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; color: var(--org-mut);
+}
+.org-kanban-col h3 span { font-variant-numeric: tabular-nums; }
+.org-kanban-card {
+  border: 1px solid var(--org-line); border-left: 4px solid var(--org-gold);
+  border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; background: #fff;
+  cursor: grab; touch-action: none;
+}
+.org-kanban-card[data-dragging="1"] { opacity: .7; }
+.org-kanban-card b { display: block; font-size: 13px; }
+.org-kanban-card small { color: var(--org-mut); font-size: 11px; }
+.org-kanban-space { font-size: 10px; font-weight: 700; margin-bottom: 2px; }
+.org-progress { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.org-progress-bar {
+  flex: 1; height: 6px; background: #f3efe8; border-radius: 999px; overflow: hidden;
+}
+.org-progress-bar i { display: block; height: 100%; background: var(--org-gold); }
+.org-progress em { font-size: 10px; font-style: normal; font-variant-numeric: tabular-nums; color: var(--org-mut); }
+
+.org-themes { display: flex; gap: 4px; margin-left: auto; }
+.org-themes button {
+  border: 1px solid var(--org-line); background: var(--org-card); color: var(--org-ink);
+  border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.org-themes button.on { background: var(--org-gold); color: #111; border-color: transparent; }
+.org-themes button:focus-visible, .org-root button:focus-visible, .org-root a:focus-visible {
+  outline: 2px solid var(--org-gold); outline-offset: 2px;
+}
+.org-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 8px; padding: 28px 16px; color: var(--org-mut);
+}
+.org-empty b { color: var(--org-ink); font-size: 14px; font-weight: 600; }
+.org-empty p { margin: 0; font-size: 12px; max-width: 220px; line-height: 1.45; }
+.org-empty-ico {
+  width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--org-gold) 16%, var(--org-card));
+  color: var(--org-gold);
+}
+.org-hero { display: none; }
+.org-kpis { display: none; }
+.org-dayline { display: none; }
+.org-kanban-col.is-over { outline: 2px dashed var(--org-gold); outline-offset: 2px; }
+.org-kanban-card {
+  transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease, border-color .18s ease;
+}
+.org-kanban-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,.08); }
+.org-kanban-card[data-dragging="1"] { transform: scale(.98) rotate(-.4deg); opacity: .75; }
+.org-kanban-card.is-complete { animation: org-complete .55s ease; }
+@keyframes org-complete {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
+.org-ring { width: 44px; height: 44px; display: block; }
+.org-ring circle { fill: none; stroke-width: 4; }
+.org-ring .bg { stroke: var(--org-line); }
+.org-ring .fg { stroke: var(--org-gold); stroke-linecap: round; transition: stroke-dashoffset .4s ease; }
+.org-space-ico { display: inline-flex; align-items: center; justify-content: center; width: 1.1em; height: 1.1em; }
+.org-money {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+  font-size: 10px; font-variant-numeric: tabular-nums; color: var(--org-mut);
+}
+.org-money span {
+  background: color-mix(in srgb, var(--org-gold) 12%, var(--org-card));
+  border-radius: 999px; padding: 2px 6px; font-weight: 600;
+}
+.org-money em { font-style: normal; font-weight: 700; color: var(--org-ink); }
+.org-suggested-main { margin-bottom: 10px; }
+.org-suggested-grid { display: grid; gap: 4px; }
+@media (min-width: 720px) {
+  .org-suggested-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.org-review { display: flex; flex-direction: column; gap: 12px; }
+.org-review-col h4 {
+  display: flex; justify-content: space-between; margin: 0 0 6px;
+  font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--org-mut);
+}
+@media (prefers-reduced-motion: reduce) {
+  .org-kanban-card, .org-kanban-card:hover, .org-kanban-card.is-complete, .org-ring .fg {
+    transition: none; animation: none; transform: none;
+  }
 }

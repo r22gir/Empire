@@ -11,7 +11,7 @@ import secrets
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -41,6 +41,8 @@ from app.services.organizer.edition import (
 from app.services.organizer.usage import UsageCapExceeded, consume, snapshot as usage_snapshot
 from app.services.organizer.store import (
     assignment_ids,
+    attach_progress,
+    board_columns,
     conflicts_for_payload,
     enrich_event,
     enrich_item,
@@ -51,12 +53,17 @@ from app.services.organizer.store import (
     insert_item,
     insert_schedule_event,
     is_calendar_kind,
+    job_progress,
+    list_spaces as store_list_spaces,
     load_event,
+    load_item,
     new_id,
     now_iso,
     parse_ids,
     project_job_dates,
     replace_assignments,
+    status_for_column,
+    update_space,
 )
 
 router = APIRouter(tags=["organizer"])
@@ -92,10 +99,18 @@ class ItemIn(BaseModel):
     material_eta: Optional[str] = None
     order_ref: Optional[str] = None
     reminder_draft: Optional[str] = None
+    reminder_at: Optional[str] = None
+    quote_id: Optional[str] = None
+    capture_id: Optional[str] = None
     notes: Optional[str] = None
     confirm_conflicts: bool = False
     created_by: str = "manual"
     space_id: Optional[str] = None
+    waiting_on: Optional[str] = None
+    nudge_after_days: Optional[int] = None
+    recurrence_freq: Optional[str] = None
+    template_id: Optional[str] = None
+    invoice_id: Optional[str] = None
 
 
 class ItemUpdate(BaseModel):
@@ -115,9 +130,16 @@ class ItemUpdate(BaseModel):
     material_eta: Optional[str] = None
     order_ref: Optional[str] = None
     reminder_draft: Optional[str] = None
+    reminder_at: Optional[str] = None
+    quote_id: Optional[str] = None
+    capture_id: Optional[str] = None
     notes: Optional[str] = None
     confirm_conflicts: bool = False
     space_id: Optional[str] = None
+    waiting_on: Optional[str] = None
+    nudge_after_days: Optional[int] = None
+    recurrence_freq: Optional[str] = None
+    invoice_id: Optional[str] = None
 
 
 class QuickAddIn(BaseModel):
@@ -125,6 +147,11 @@ class QuickAddIn(BaseModel):
     confirm: bool = False
     created_by: str = "manual"
     space_id: Optional[str] = None
+    photo_b64: Optional[str] = None
+    filename: Optional[str] = None
+    mime: Optional[str] = None
+    reminder_at: Optional[str] = None
+    due_at: Optional[str] = None
 
 
 class ReminderDraftIn(BaseModel):
@@ -134,6 +161,22 @@ class ReminderDraftIn(BaseModel):
     due_at: Optional[str] = None
     body: str
     channel: str = "sms"
+    space_id: Optional[str] = None
+    item_id: Optional[str] = None
+
+
+class SpaceUpdateIn(BaseModel):
+    icon: Optional[str] = None
+    accent_color: Optional[str] = None
+    label: Optional[str] = None
+
+
+class ItemMoveIn(BaseModel):
+    column: Optional[str] = None
+    status: Optional[str] = None
+    due_at: Optional[str] = None
+    space_id: Optional[str] = None
+    confirm_conflicts: bool = False
 
 
 class MoveIn(BaseModel):
@@ -156,6 +199,11 @@ class ActionIn(BaseModel):
     assigned_resource_ids: Optional[List[str]] = None
     job_id: Optional[str] = None
     ask: Optional[str] = None
+    who: Optional[str] = None
+    nudge_after_days: Optional[int] = None
+    due_at: Optional[str] = None
+    invoice_id: Optional[str] = None
+    lines: Optional[List[dict]] = None
 
 
 class CommandIn(BaseModel):
@@ -170,6 +218,29 @@ class MailActionIn(BaseModel):
     body: Optional[str] = None
     snooze_until: Optional[str] = None
     confirm: bool = False
+
+
+class TemplateIn(BaseModel):
+    label: str
+    steps: List[str]
+    space_id: Optional[str] = None
+    slug: Optional[str] = None
+    kind: str = "custom"
+
+
+class TemplateApplyIn(BaseModel):
+    space_id: Optional[str] = None
+    job_id: Optional[str] = None
+    title: Optional[str] = None
+
+
+class WaitingIn(BaseModel):
+    who: str
+    nudge_after_days: int = 3
+
+
+class RecurrenceIn(BaseModel):
+    freq: str = "weekly"
 
 
 def _usage_http(exc: UsageCapExceeded):
@@ -188,6 +259,59 @@ def _usage_http(exc: UsageCapExceeded):
 
 def _blocked_http(message: str):
     raise HTTPException(status_code=400, detail={"code": "edition_blocked", "message": message})
+
+
+def _maybe_remind(conn, item: Optional[dict], event_id: Optional[str] = None) -> Optional[dict]:
+    if not item:
+        return None
+    due = item.get("reminder_at") or item.get("due_at") or item.get("start_time")
+    if not due:
+        return None
+    from app.services.organizer.reminders import schedule_reminder
+    return schedule_reminder(
+        conn,
+        item_id=item.get("id"),
+        event_id=event_id or item.get("schedule_event_id"),
+        due_at=due,
+        title=item.get("title") or "Reminder",
+        body=item.get("reminder_draft") or item.get("notes"),
+        channel="max",
+    )
+
+
+def _store_photo(conn, *, content_b64: str, filename: str, mime: str, caption: str, item_id=None, job_id=None):
+    import base64
+    from app.services.organizer.capture import CaptureRejected, write_bytes
+    try:
+        raw = base64.b64decode(content_b64)
+    except Exception:
+        raise HTTPException(400, "photo_b64 is not valid base64")
+    try:
+        stored = write_bytes(raw, filename=filename, mime=mime, edition=process_edition())
+    except CaptureRejected as exc:
+        raise HTTPException(400, str(exc))
+    cap_id = new_id()
+    conn.execute(
+        """
+        INSERT INTO organizer_captures (
+            id, edition, source, source_ref, filename, mime, bytes, sha256, relpath,
+            job_id, resource_id, event_id, item_id, caption, public_url_blocked, created_at
+        ) VALUES (?, ?, 'quick-add', NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 1, ?)
+        """,
+        (
+            cap_id, process_edition(), stored["filename"], stored["mime"], stored["bytes"],
+            stored["sha256"], stored["relpath"], job_id, item_id, caption, now_iso(),
+        ),
+    )
+    if item_id:
+        try:
+            conn.execute(
+                "UPDATE organizer_items SET capture_id = ?, updated_at = ? WHERE id = ?",
+                (cap_id, now_iso(), item_id),
+            )
+        except Exception:
+            pass
+    return {"id": cap_id, **stored, "item_id": item_id, "job_id": job_id, "public_url": None}
 
 
 def _conflict_response(conflicts: list[dict]):
@@ -293,7 +417,7 @@ def _resource_row(conn, resource_id: str) -> Optional[dict]:
 
 def _list_events(conn, start_date=None, end_date=None, job_id=None, kind=None, status=None, resource_id=None, space_id=None, limit=400):
     clause, eparams = edition_sql("e")
-    query = event_select_sql() + f" WHERE {clause}"
+    query = event_select_sql(conn) + f" WHERE {clause}"
     params: list = list(eparams)
     if start_date:
         query += " AND COALESCE(e.end_time, e.start_time) >= ?"
@@ -358,7 +482,25 @@ def _list_items(conn, start_date=None, end_date=None, job_id=None, kind=None, st
 
 def _decorate(conn, rows: list[dict]) -> list[dict]:
     from app.services.organizer.actions import attach_actions
-    return attach_actions(conn, rows)
+    return attach_actions(conn, attach_progress(conn, rows))
+
+
+def _today_buckets(board: list[dict], today: str) -> dict:
+    upcoming_end = (date.today() + timedelta(days=14)).isoformat()
+    overdue = _overdue(board, today)
+    overdue_ids = {str(r.get("id")) for r in overdue}
+    today_items, upcoming = [], []
+    for row in board:
+        if str(row.get("status") or "") in ("done", "cancelled"):
+            continue
+        if str(row.get("id")) in overdue_ids:
+            continue
+        stamp = (row.get("start_time") or row.get("due_at") or "")[:10]
+        if stamp == today:
+            today_items.append(row)
+        elif stamp > today and stamp <= upcoming_end:
+            upcoming.append(row)
+    return {"overdue": overdue, "today": today_items, "upcoming": upcoming}
 
 
 def _unify(events, items, job_dates, *, include_job_dates=True):
@@ -405,6 +547,12 @@ def organizer_meta():
         "default_travel_gap_minutes": DEFAULT_TRAVEL_GAP_MINUTES,
         "spaces": edition_public()["spaces"],
         "edition": edition_public(),
+        "columns": [
+            {"id": "open", "label": "Open"},
+            {"id": "doing", "label": "Doing"},
+            {"id": "done", "label": "Done"},
+        ],
+        "today_columns": ["overdue", "today", "upcoming"],
         "model": "grok-4.6",
         "actions": [
             "navigate", "call", "text", "email",
@@ -444,10 +592,13 @@ def organizer_board(
             job_dates = [j for j in job_dates if j.get("kind") == kind]
         board = _decorate(conn, _unify(events, items, job_dates, include_job_dates=include_job_dates))
         today = date.today().isoformat()
+        spaces = store_list_spaces(conn)
         return {
             "count": len(board),
             "items": board,
             "overdue": _overdue(board, today),
+            "columns": board_columns(board),
+            "spaces": spaces,
             "outbound_policy": OUTBOUND_POLICY,
         }
 
@@ -455,24 +606,28 @@ def organizer_board(
 @router.get("/today")
 def organizer_today():
     today = date.today().isoformat()
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    horizon = (date.today() + timedelta(days=14)).isoformat()
     with get_db() as conn:
         ensure_schema(conn)
-        events = _list_events(conn, today, today)
-        items = _list_items(conn, today, today)
-        job_dates = [j for j in project_job_dates(conn) if (j.get("start_time") or "")[:10] == today]
+        events = _list_events(conn, None, horizon)
+        items = _list_items(conn, None, horizon)
+        job_dates = project_job_dates(conn) if can_read_workroom_jobs() else []
         board = _decorate(conn, _unify(events, items, job_dates))
+        buckets = _today_buckets(board, today)
         week_end = (date.today() + timedelta(days=7)).isoformat()
-        upcoming = _list_events(conn, today, week_end)
+        upcoming_week = [
+            r for r in buckets["upcoming"]
+            if (r.get("start_time") or r.get("due_at") or "")[:10] <= week_end
+        ]
         return {
             "date": today,
-            "items": board,
-            "total_today": len(board),
-            "overdue": _overdue(
-                _unify(_list_events(conn, None, today), _list_items(conn, None, today), project_job_dates(conn)),
-                today,
-            ),
-            "upcoming_7_days_count": len(upcoming),
+            "items": buckets["today"],
+            "today": buckets["today"],
+            "overdue": buckets["overdue"],
+            "upcoming": buckets["upcoming"],
+            "total_today": len(buckets["today"]),
+            "upcoming_7_days_count": len(upcoming_week),
+            "spaces": store_list_spaces(conn),
             "open_organizer_href": "/?screen=calendar",
             "outbound_policy": OUTBOUND_POLICY,
         }
@@ -624,9 +779,11 @@ def create_item(req: ItemIn):
                 payload["customer_vendor"] = None
                 event = insert_schedule_event(conn, payload)
                 item = insert_item(conn, {**payload, "schedule_event_id": event["id"], "status": "planned"})
+                _maybe_remind(conn, item, event_id=event.get("id"))
                 return {"item": item, "event": event, "conflicts": []}
             item = insert_item(conn, payload)
-            return {"item": item, "event": None, "conflicts": []}
+            _maybe_remind(conn, item)
+            return {"item": _decorate(conn, [item])[0], "event": None, "conflicts": []}
         except ValueError as exc:
             _blocked_http(str(exc))
 
@@ -660,6 +817,9 @@ def update_item(item_id: str, req: ItemUpdate):
             fields.append(f"{key} = ?")
             params.append(val)
         if fields:
+            if "status" in updates:
+                fields.append("last_moved_at = ?")
+                params.append(now_iso())
             fields.append("updated_at = ?")
             params.append(now_iso())
             params.append(item_id)
@@ -742,7 +902,8 @@ def quick_add(req: QuickAddIn):
                 "customer_id": draft.get("customer_id"),
                 "start_time": draft.get("start_time"),
                 "end_time": draft.get("end_time"),
-                "due_at": draft.get("due_at"),
+                "due_at": req.due_at or draft.get("due_at"),
+                "reminder_at": req.reminder_at,
                 "phone": draft.get("phone"),
                 "location_address": draft.get("location_address"),
                 "assigned_resource_ids": draft.get("assigned_resource_ids") or [],
@@ -768,16 +929,31 @@ def quick_add(req: QuickAddIn):
             if is_calendar_kind(payload["kind"]) and payload.get("start_time"):
                 event = insert_schedule_event(conn, payload)
                 item = insert_item(conn, {**payload, "schedule_event_id": event["id"]})
-                created.append({"item": item, "event": event, "saved": True, "conflicts": []})
+                _maybe_remind(conn, item, event_id=event.get("id"))
+                created.append({"item": item, "event": event, "saved": True, "conflicts": [], "id": item.get("id")})
             else:
                 item = insert_item(conn, payload)
-                created.append({"item": item, "event": None, "saved": True, "conflicts": []})
+                _maybe_remind(conn, item)
+                created.append({"item": item, "event": None, "saved": True, "conflicts": [], "id": item.get("id")})
+        if req.photo_b64 and created:
+            first = next((c for c in created if c.get("saved") and c.get("item")), None)
+            if first:
+                item = first.get("item") or {}
+                first["capture"] = _store_photo(
+                    conn,
+                    content_b64=req.photo_b64,
+                    filename=req.filename or "quick-add.jpg",
+                    mime=req.mime or "image/jpeg",
+                    caption=(req.text or "")[:80],
+                    item_id=item.get("id"),
+                    job_id=item.get("job_id"),
+                )
         return {"is_draft_only": False, "drafts": resolved, "created": created, "outbound_policy": OUTBOUND_POLICY}
 
 
 @router.post("/reminder-draft")
 def reminder_draft(req: ReminderDraftIn):
-    """Store a customer reminder as a draft. Never sends."""
+    """Store a reminder in the database. Delivery uses Max notifications; never auto-sends outbound."""
     with get_db() as conn:
         ensure_schema(conn)
         item = insert_item(
@@ -788,17 +964,21 @@ def reminder_draft(req: ReminderDraftIn):
                 "job_id": req.job_id,
                 "customer_id": req.customer_id,
                 "due_at": req.due_at,
+                "reminder_at": req.due_at,
                 "reminder_draft": f"[{req.channel}] {req.body}",
-                "notes": "Draft reminder — founder approval required before any send.",
+                "notes": "Draft reminder — founder approval required before any outbound send. Max will notify when it is due.",
                 "status": "open",
+                "space_id": normalize_space(req.space_id),
             },
         )
+        reminder = _maybe_remind(conn, item)
         return {
             "item": item,
+            "reminder": reminder,
             "sent": False,
             "outbound_blocked": True,
             "outbound_policy": OUTBOUND_POLICY,
-            "message": "Reminder saved as a draft. It was not sent.",
+            "message": "Reminder saved as a draft in the database. Max will notify when it is due. It was not sent.",
         }
 
 
@@ -821,6 +1001,13 @@ def list_item_actions(item_id: Optional[str] = None):
                     {"id": "attach_file", "label": "Attach to email/quote", "group": "file", "draft": True},
                     {"id": "ask_max", "label": "Ask Max", "group": "file"},
                     {"id": "notify_crew", "label": "Notify crew (draft)", "group": "move", "draft": True},
+                    {"id": "open_quote", "label": "Open quote", "group": "job"},
+                    {"id": "open_invoice", "label": "Open invoice", "group": "job"},
+                    {"id": "mark_paid", "label": "Mark paid", "group": "job"},
+                    {"id": "supplier_cart", "label": "Build supplier cart", "group": "job", "draft": True},
+                    {"id": "snooze", "label": "Snooze", "group": "move"},
+                    {"id": "remind", "label": "Remind", "group": "move", "draft": True},
+                    {"id": "waiting_nudge", "label": "Draft nudge", "group": "followup", "draft": True},
                 ],
                 "outbound_policy": OUTBOUND_POLICY,
             }
@@ -849,6 +1036,11 @@ async def perform_action(req: ActionIn):
             "assigned_resource_ids": req.assigned_resource_ids,
             "confirm_conflicts": req.confirm_conflicts,
             "ask": req.ask,
+            "who": req.who,
+            "nudge_after_days": req.nudge_after_days,
+            "due_at": req.due_at,
+            "invoice_id": req.invoice_id,
+            "lines": req.lines,
         }
         try:
             consume(conn, "actions")
@@ -945,7 +1137,7 @@ def get_day_plan(plan_date: Optional[str] = None):
         ensure_schema(conn)
         from app.services.organizer.dayplan import propose_day
         events = _list_events(conn, day, day, limit=400)
-        items = _list_items(conn, None, day, limit=400)
+        items = _list_items(conn, limit=400)
         board = _unify(events, items, project_job_dates(conn) if can_read_workroom_jobs() else [])
         clause, eparams = edition_sql()
         resources = [dict(r) for r in conn.execute(
@@ -982,20 +1174,37 @@ def approve_day_plan(plan_date: Optional[str] = None, apply_times: bool = True):
         )
         applied = []
         if apply_times:
+            clause, eparams = edition_sql()
             for stop in plan.get("proposed_order") or []:
                 if stop.get("kept_existing_time") or stop.get("read_only"):
                     continue
-                if stop.get("source") == "schedule_event" and stop.get("id"):
-                    clause, eparams = edition_sql()
+                sid = stop.get("id")
+                if not sid:
+                    continue
+                start, end = stop.get("suggested_start"), stop.get("suggested_end")
+                if stop.get("source") == "schedule_event":
                     conn.execute(
                         f"UPDATE schedule_events SET start_time = ?, end_time = ?, updated_at = ? WHERE id = ? AND {clause}",
-                        (stop.get("suggested_start"), stop.get("suggested_end"), stamp, stop["id"], *eparams),
+                        (start, end, stamp, sid, *eparams),
                     )
-                    applied.append(stop["id"])
+                    applied.append(sid)
+                    continue
+                conn.execute(
+                    f"""UPDATE organizer_items
+                           SET start_time = ?, end_time = ?, status = CASE
+                                 WHEN status IN ('done', 'cancelled') THEN status ELSE 'planned' END,
+                               last_moved_at = ?, updated_at = ?
+                         WHERE id = ? AND {clause}""",
+                    (start, end, stamp, stamp, sid, *eparams),
+                )
+                if conn.execute("SELECT changes()").fetchone()[0]:
+                    applied.append(sid)
         plan["approved"] = True
         plan["plan_id"] = pid
         plan["applied_ids"] = applied
         plan["sent"] = False
+        plan["outbound_blocked"] = True
+        plan["message"] = "Plan saved on the calendar. Nothing was sent."
         return plan
 
 
@@ -1325,12 +1534,109 @@ def crew_done(token: str, req: dict):
 def list_spaces():
     with get_db() as conn:
         ensure_schema(conn)
-        clause, eparams = edition_sql()
-        rows = [dict(r) for r in conn.execute(
-            f"SELECT * FROM organizer_spaces WHERE {clause} ORDER BY sort_order, slug",
-            eparams,
-        ).fetchall()]
-    return {"spaces": rows or edition_public()["spaces"], "unified": True, "edition": process_edition()}
+        rows = store_list_spaces(conn)
+    return {"spaces": rows, "unified": True, "edition": process_edition(), "configurable": True}
+
+
+@router.patch("/spaces/{slug}")
+def patch_space(slug: str, req: SpaceUpdateIn):
+    with get_db() as conn:
+        ensure_schema(conn)
+        space = update_space(conn, slug, req.model_dump(exclude_unset=True))
+        if not space:
+            raise HTTPException(404, "Space not found for this edition")
+        return {"space": space, "spaces": store_list_spaces(conn)}
+
+
+@router.post("/items/{item_id}/move")
+def move_item_column(item_id: str, req: ItemMoveIn):
+    """Drag a card to another column (status or today bucket). Works for desktop and mobile clients."""
+    with get_db() as conn:
+        ensure_schema(conn)
+        item = load_item(conn, item_id)
+        if not item:
+            raise HTTPException(404, "Organizer item not found")
+        updates = {}
+        if req.column in ("open", "doing", "done", "in_progress"):
+            updates["status"] = status_for_column(req.column, item.get("status"))
+        elif req.column == "today":
+            updates["due_at"] = f"{date.today().isoformat()}T09:00:00"
+            if str(item.get("status") or "") in ("done", "cancelled"):
+                updates["status"] = "open"
+        elif req.column == "upcoming":
+            updates["due_at"] = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00:00"
+        elif req.column == "overdue":
+            updates["due_at"] = f"{(date.today() - timedelta(days=1)).isoformat()}T09:00:00"
+        if req.status:
+            if req.status not in ITEM_STATUSES:
+                raise HTTPException(400, f"Invalid status '{req.status}'")
+            updates["status"] = req.status
+        if req.due_at:
+            updates["due_at"] = req.due_at
+        if req.space_id:
+            updates["space_id"] = normalize_space(req.space_id)
+        if not updates:
+            return {"item": item, "moved": False}
+        stamp = now_iso()
+        fields = [f"{k} = ?" for k in updates]
+        fields.append("last_moved_at = ?")
+        fields.append("updated_at = ?")
+        conn.execute(
+            f"UPDATE organizer_items SET {', '.join(fields)} WHERE id = ?",
+            (*updates.values(), stamp, stamp, item_id),
+        )
+        if item.get("schedule_event_id") and updates.get("due_at"):
+            conn.execute(
+                "UPDATE schedule_events SET start_time = ?, updated_at = ? WHERE id = ?",
+                (updates["due_at"], now_iso(), item["schedule_event_id"]),
+            )
+        fresh = load_item(conn, item_id)
+        return {"item": fresh, "moved": True, "column": fresh.get("column")}
+
+
+@router.get("/jobs/{job_id}/progress")
+def job_progress_view(job_id: str):
+    with get_db() as conn:
+        ensure_schema(conn)
+        if not can_read_workroom_jobs():
+            raise HTTPException(404, "Job not found")
+        return job_progress(conn, job_id)
+
+
+@router.get("/reminders")
+def list_organizer_reminders(status: Optional[str] = None, limit: int = 80):
+    from app.services.organizer.reminders import list_reminders
+    with get_db() as conn:
+        ensure_schema(conn)
+        return {"reminders": list_reminders(conn, status=status, limit=limit)}
+
+
+@router.post("/reminders/dispatch")
+def dispatch_organizer_reminders():
+    """Run due reminders now (also hooked to Max scheduler). Uses notify_founder."""
+    from app.services.organizer.reminders import dispatch_due_reminders
+    from app.services.organizer.waiting import dispatch_waiting_nudges
+    from app.services.organizer.templates import spawn_due_recurring
+    with get_db() as conn:
+        ensure_schema(conn)
+        fired = dispatch_due_reminders(conn)
+        nudges = dispatch_waiting_nudges(conn)
+        spawned = spawn_due_recurring(conn)
+        return {
+            "dispatched": len(fired),
+            "reminders": fired,
+            "waiting": nudges,
+            "recurring": spawned,
+            "outbound_sent": False,
+            "sent": False,
+        }
+
+
+@router.post("/transcribe")
+async def organizer_transcribe(audio: UploadFile = File(...), language: Optional[str] = None):
+    """Reuse Max's existing Groq Whisper STT for Organizer voice quick-add."""
+    from app.services.max.stt_http import transcribe_upload
+    return await transcribe_upload(audio, language)
 
 
 @router.get("/usage")
@@ -1374,3 +1680,157 @@ def pending_mail_action(req: MailActionIn):
         if not result.get("ok"):
             raise HTTPException(404 if "not found" in (result.get("message") or "").lower() else 400, result.get("message"))
         return result
+
+
+@router.get("/suggestions")
+def list_suggestions(status: str = "pending"):
+    """Suggested tray. Harvest only — nothing becomes a to-do until Accept."""
+    from app.services.organizer.suggestions import list_suggestions as _list
+    with get_db() as conn:
+        ensure_schema(conn)
+        rows = _list(conn, status=status)
+        return {
+            "suggestions": rows,
+            "count": len(rows),
+            "created": False,
+            "sent": False,
+            "outbound_policy": OUTBOUND_POLICY,
+            "message": "Suggestions only. Accept or dismiss — nothing is created silently.",
+        }
+
+
+@router.post("/suggestions/{suggestion_id}/accept")
+def accept_suggestion(suggestion_id: str):
+    from app.services.organizer.suggestions import accept_suggestion as _accept
+    with get_db() as conn:
+        ensure_schema(conn)
+        try:
+            consume(conn, "items")
+        except UsageCapExceeded as exc:
+            _usage_http(exc)
+        result = _accept(conn, suggestion_id)
+        if not result.get("ok") and "not found" in (result.get("message") or "").lower():
+            raise HTTPException(404, result.get("message"))
+        return result
+
+
+@router.post("/suggestions/{suggestion_id}/dismiss")
+def dismiss_suggestion(suggestion_id: str):
+    from app.services.organizer.suggestions import dismiss_suggestion as _dismiss
+    with get_db() as conn:
+        ensure_schema(conn)
+        return _dismiss(conn, suggestion_id)
+
+
+@router.get("/templates")
+def list_templates():
+    from app.services.organizer.templates import list_templates as _list
+    with get_db() as conn:
+        ensure_schema(conn)
+        return {"templates": _list(conn)}
+
+
+@router.post("/templates")
+def create_template(req: TemplateIn):
+    from app.services.organizer.templates import save_template
+    if not req.steps:
+        raise HTTPException(400, "Template needs at least one step")
+    with get_db() as conn:
+        ensure_schema(conn)
+        tpl = save_template(
+            conn, label=req.label, steps=req.steps,
+            space_id=req.space_id, slug=req.slug, kind=req.kind,
+        )
+        return {"template": tpl, "sent": False}
+
+
+@router.post("/templates/{template_id}/apply")
+def apply_template(template_id: str, req: TemplateApplyIn):
+    from app.services.organizer.templates import apply_template as _apply
+    with get_db() as conn:
+        ensure_schema(conn)
+        result = _apply(
+            conn, template_id,
+            space_id=req.space_id, job_id=req.job_id, title=req.title,
+        )
+        if not result.get("ok"):
+            raise HTTPException(404, result.get("message"))
+        return result
+
+
+@router.post("/items/{item_id}/waiting")
+def mark_waiting(item_id: str, req: WaitingIn):
+    from app.services.organizer.waiting import set_waiting
+    with get_db() as conn:
+        ensure_schema(conn)
+        item = load_item(conn, item_id)
+        if not item:
+            raise HTTPException(404, "Organizer item not found")
+        result = set_waiting(conn, item_id, who=req.who, nudge_after_days=req.nudge_after_days)
+        result["item"] = load_item(conn, item_id) or result.get("item")
+        return result
+
+
+@router.post("/items/{item_id}/recurrence")
+def item_recurrence(item_id: str, req: RecurrenceIn):
+    from app.services.organizer.templates import set_recurrence
+    with get_db() as conn:
+        ensure_schema(conn)
+        if not load_item(conn, item_id):
+            raise HTTPException(404, "Organizer item not found")
+        return set_recurrence(conn, item_id=item_id, freq=req.freq)
+
+
+@router.post("/recurrence/spawn")
+def spawn_recurrence():
+    from app.services.organizer.templates import spawn_due_recurring
+    with get_db() as conn:
+        ensure_schema(conn)
+        return spawn_due_recurring(conn)
+
+
+@router.get("/search")
+def organizer_search(q: str = "", limit: int = 30):
+    from app.services.organizer.search import search_organizer
+    with get_db() as conn:
+        ensure_schema(conn)
+        return search_organizer(conn, q, limit=limit)
+
+
+@router.get("/review/weekly")
+def organizer_weekly_review():
+    from app.services.organizer.review import weekly_review
+    with get_db() as conn:
+        ensure_schema(conn)
+        items = _decorate(conn, _list_items(conn, limit=400))
+        events = _list_events(conn, limit=400)
+        board = _unify(events, items, [])
+        pack = weekly_review(board)
+        pack["sent"] = False
+        pack["outbound_policy"] = OUTBOUND_POLICY
+        return pack
+
+
+@router.get("/jobs/{job_id}/money")
+def job_money_view(job_id: str):
+    from app.services.organizer.money import job_money
+    with get_db() as conn:
+        ensure_schema(conn)
+        if not can_read_workroom_jobs():
+            raise HTTPException(404, "Job not found")
+        money = job_money(conn, job_id)
+        if not money:
+            return {
+                "job_id": job_id, "deposit": 0, "paid": 0, "balance": 0, "margin": None,
+                "total": 0, "collected_fraction": "0/0", "read_only": True,
+            }
+        return money
+
+
+@router.post("/waiting/dispatch")
+def dispatch_waiting():
+    """Prepare draft nudges for Rafael. Nothing is sent."""
+    from app.services.organizer.waiting import dispatch_waiting_nudges
+    with get_db() as conn:
+        ensure_schema(conn)
+        return dispatch_waiting_nudges(conn)

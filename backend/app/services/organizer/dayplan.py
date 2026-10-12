@@ -10,6 +10,7 @@ from app.services.organizer.timeutil import event_window, parse_dt, ranges_overl
 
 
 FIELD_KINDS = {"install", "pickup", "drop_off", "delivery", "measure", "fitting", "fabric_pickup"}
+PLAN_KINDS = FIELD_KINDS | {"material_order", "followup", "todo", "deadline", "call", "reminder"}
 SHOP_START = "08:30"
 TRAVEL_PAD = 25
 
@@ -72,11 +73,18 @@ def propose_day(board: list[dict], resources: list[dict], *, day: str | None = N
         if str(row.get("status") or "") in ("done", "cancelled"):
             continue
         when = (row.get("due_at") or row.get("start_time") or "")[:10]
+        kind = row.get("kind") or row.get("type")
         if when and when < day:
             due.append({**row, "bucket": "overdue"})
-        elif when == day or (not when and (row.get("kind") in FIELD_KINDS)):
+        elif when == day or (not when and kind in PLAN_KINDS):
             today_items.append({**row, "bucket": "today"})
-    stops = order_field_stops(today_items + [d for d in due if (d.get("kind") in FIELD_KINDS)])
+    field = order_field_stops(today_items + [d for d in due if (d.get("kind") in FIELD_KINDS)])
+    extras = [
+        i for i in (today_items + due)
+        if (i.get("kind") or i.get("type")) in PLAN_KINDS and i.get("id") not in {s.get("id") for s in field}
+    ]
+    extras.sort(key=lambda i: (0 if (i.get("kind") in {"material_order", "followup"}) else 1, i.get("title") or ""))
+    stops = field + extras
     cursor = datetime.fromisoformat(f"{day}T{SHOP_START}:00")
     suggested = []
     for stop in stops:

@@ -4,7 +4,9 @@ import {
   addMinutesIso, DAY_START_MIN, eventLayout, filterItems, groupActions, itemsOnDay,
   isOrganizerCommand, monthCells, overdueItems, parseOrganizerCommand, parseQuickAddClient,
   filterPendingMail, pendingMailVisible, PX_PER_MIN, shouldOfferCrewDraft, showsWorkroomJobs, snapMinutes,
-  timeFromOffset, weekDays,
+  spaceStyle, todayBuckets, columnForStatus, itemsInColumn, dueForTodayColumn, progressFromTasks,
+  inferSpaceClient, timeFromOffset, weekDays, parseOrgTheme, resolveOrgTheme, themedSpaceStyle,
+  organizerKpis, jobProgressFromItems, formatOrganizerTime, weeklyReview, formatMoney,
 } from './organizer-logic.ts';
 
 test('filter by job, person, kind', () => {
@@ -94,6 +96,79 @@ test('action groups and crew-draft after drag', () => {
   assert.equal(showsWorkroomJobs({ allows_workroom_jobs: true }, ''), true);
   assert.equal(showsWorkroomJobs({ allows_workroom_jobs: true }, 'family'), false);
   assert.equal(showsWorkroomJobs({ allows_workroom_jobs: false }, 'workroom'), false);
+});
+
+test('spaces have icon and accent; today buckets and progress fractions', () => {
+  const styled = spaceStyle({ slug: 'family', label: 'Family', icon: '🏡', accent_color: '#16a34a' });
+  assert.equal(styled.icon, '🏡');
+  assert.equal(spaceStyle('workroom').accent, '#c2410c');
+  const items = [
+    { id: 'late', title: 'Late bill', due_at: '2026-10-01T09:00:00', status: 'open', space_id: 'personal' },
+    { id: 'now', title: 'Dentist', start_time: '2026-10-12T10:00:00', status: 'open', space_id: 'personal' },
+    { id: 'soon', title: 'Recital', start_time: '2026-10-15T18:00:00', status: 'open', space_id: 'family' },
+    { id: 'done', title: 'Old', due_at: '2026-10-01T09:00:00', status: 'done' },
+  ];
+  const buckets = todayBuckets(items, '2026-10-12');
+  assert.deepEqual(buckets.overdue.map((i) => i.id), ['late']);
+  assert.deepEqual(buckets.today.map((i) => i.id), ['now']);
+  assert.deepEqual(buckets.upcoming.map((i) => i.id), ['soon']);
+  assert.equal(columnForStatus('in_progress'), 'doing');
+  assert.equal(itemsInColumn([{ id: '1', title: 'x', status: 'open' }, { id: '2', title: 'y', status: 'done' }], 'open').length, 1);
+  assert.equal(dueForTodayColumn('today', '2026-10-12'), '2026-10-12T09:00:00');
+  const bar = progressFromTasks(3, 8);
+  assert.equal(bar.fraction, '3/8');
+  assert.equal(bar.percent, 38);
+  assert.equal(inferSpaceClient('kids recital Friday'), 'family');
+  assert.equal(inferSpaceClient('install drapery tomorrow'), 'workroom');
+});
+
+test('org themes parse from query aliases and recolor spaces', () => {
+  assert.equal(parseOrgTheme('a'), 'a');
+  assert.equal(parseOrgTheme('editorial'), 'b');
+  assert.equal(parseOrgTheme('COMMAND'), 'c');
+  assert.equal(parseOrgTheme('nope'), null);
+  assert.equal(resolveOrgTheme(null, 'b'), 'b');
+  assert.equal(resolveOrgTheme('c', 'a'), 'c');
+  assert.equal(resolveOrgTheme(null, null), 'a');
+  const luxe = themedSpaceStyle({ slug: 'workroom', label: 'Workroom' }, 'a');
+  const edit = themedSpaceStyle({ slug: 'workroom', label: 'Workroom' }, 'b');
+  assert.equal(luxe.accent, '#d4a017');
+  assert.equal(edit.accent, '#8b5a3c');
+  const custom = themedSpaceStyle({ slug: 'family', label: 'Family', accent_color: '#db2777' }, 'a');
+  assert.equal(custom.accent, '#db2777');
+  const k = organizerKpis({
+    overdue: 1, today: 2,
+    followups: [{ followup_kind: 'deposit', title: 'Ask for deposit' }],
+    moneyItems: [{ title: 'Side-venture invoice' }],
+    doing: 1,
+    jobs: [{ status: 'scheduled' }, { status: 'done' }],
+  });
+  assert.equal(k.overdue, 1);
+  assert.equal(k.dueToday, 2);
+  assert.equal(k.moneyWaiting, 2);
+  assert.equal(k.jobsInProgress, 1);
+  const bar = jobProgressFromItems([
+    { id: '1', title: 'Cut', job_id: 'j1', status: 'done' },
+    { id: '2', title: 'Sew', job_id: 'j1', status: 'open' },
+  ], 'j1');
+  assert.equal(bar?.fraction, '1/2');
+  assert.equal(formatOrganizerTime('2026-10-12T14:00:00'), '2 PM');
+});
+
+test('weekly review buckets slipped stuck next week', () => {
+  const pack = weeklyReview([
+    { id: 's', title: 'Late form', due_at: '2026-10-01T09:00:00', status: 'open' },
+    { id: 'k', title: 'Stuck sew', last_moved_at: '2026-09-20T09:00:00', status: 'in_progress' },
+    { id: 'n', title: 'Install next', start_time: '2026-10-16T10:00:00', status: 'planned' },
+    { id: 'd', title: 'Done late', due_at: '2026-10-01T09:00:00', status: 'done' },
+  ], '2026-10-12');
+  assert.deepEqual(pack.slipped.map((i) => i.id), ['s']);
+  assert.ok(pack.stuck.some((i) => i.id === 'k'));
+  assert.deepEqual(pack.next_week.map((i) => i.id), ['n']);
+  assert.equal(pack.counts.next_week, 1);
+  assert.equal(columnForStatus('waiting_on'), 'doing');
+  assert.equal(formatMoney(1200), '$1200');
+  assert.equal(formatMoney(50.5), '$50.50');
 });
 
 test('pending mail hides snoozed ids', () => {

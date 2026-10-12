@@ -99,8 +99,15 @@ KIND_TO_LEGACY_TYPE = {
     "social": "other",
 }
 
-ITEM_STATUSES = {"open", "planned", "confirmed", "done", "cancelled", "snoozed"}
+ITEM_STATUSES = {"open", "planned", "confirmed", "in_progress", "waiting_on", "done", "cancelled", "snoozed"}
 EVENT_STATUSES = {"planned", "confirmed", "done", "cancelled"}
+
+BOARD_COLUMNS = (
+    {"id": "open", "label": "Open", "statuses": ("open", "planned", "snoozed")},
+    {"id": "doing", "label": "Doing", "statuses": ("in_progress", "confirmed", "waiting_on")},
+    {"id": "done", "label": "Done", "statuses": ("done",)},
+)
+TODAY_COLUMNS = ("overdue", "today", "upcoming")
 
 DEFAULT_TRAVEL_GAP_MINUTES = 30
 DEFAULT_EVENT_MINUTES = 60

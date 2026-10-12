@@ -187,6 +187,34 @@ def available_actions(item: dict, job: Optional[dict] = None, *, quote: Optional
     if item.get("start_time") and not item.get("read_only"):
         actions.append({"id": "notify_crew", "label": "Notify crew (draft)", "group": "move", "draft": True, "performs": "notify_crew"})
 
+    if item.get("quote_id") or (quote and quote.get("id")):
+        qid = item.get("quote_id") or quote.get("id")
+        actions.append({
+            "id": "open_quote", "label": "Open quote", "group": "job",
+            "href": f"/?screen=quote&id={qid}", "performs": "open_quote",
+        })
+    if item.get("invoice_id") or item.get("money", {}).get("invoice_id"):
+        iid = item.get("invoice_id") or item.get("money", {}).get("invoice_id")
+        actions.append({
+            "id": "open_invoice", "label": "Open invoice", "group": "job",
+            "href": f"/?screen=invoice&id={iid}", "performs": "open_invoice",
+        })
+        actions.append({
+            "id": "mark_paid", "label": "Mark paid", "group": "job",
+            "href": f"/?screen=invoice&id={iid}", "performs": "mark_paid",
+        })
+    actions.append({
+        "id": "supplier_cart", "label": "Build supplier cart", "group": "job",
+        "draft": True, "performs": "supplier_cart",
+    })
+    actions.append({"id": "snooze", "label": "Snooze", "group": "move", "performs": "snooze"})
+    actions.append({"id": "remind", "label": "Remind", "group": "move", "draft": True, "performs": "remind"})
+    if item.get("waiting_on") or kind == "followup":
+        actions.append({
+            "id": "waiting_nudge", "label": "Draft nudge", "group": "followup",
+            "draft": True, "performs": "waiting_nudge",
+        })
+
     # Dedup by id
     seen = set()
     out = []
@@ -370,6 +398,58 @@ async def run_action(conn, *, action: str, item: dict, confirm: bool = False, ex
     elif action == "ask_max":
         href = f"/?product=owner&ask={urlquote(extra.get('ask') or item.get('title') or 'Organizer item')}"
         performed.append("ask_max")
+    elif action == "open_quote":
+        qid = item.get("quote_id") or (quote or {}).get("id")
+        href = f"/?screen=quote&id={qid}" if qid else "/?product=workroom&section=quotes"
+        performed.append("open_quote")
+    elif action == "open_invoice":
+        iid = item.get("invoice_id") or extra.get("invoice_id")
+        href = f"/?screen=invoice&id={iid}" if iid else "/?screen=invoices"
+        performed.append("open_invoice")
+    elif action == "mark_paid":
+        iid = item.get("invoice_id") or extra.get("invoice_id") or (item.get("money") or {}).get("invoice_id")
+        href = f"/?screen=invoice&id={iid}" if iid else "/?screen=invoices"
+        performed.append("open_invoice_flow")
+    elif action == "supplier_cart":
+        lines = extra.get("lines") or [
+            {"title": item.get("title") or "Materials", "qty": "1", "note": "Prepare only"},
+        ]
+        created = {
+            "prepared": True,
+            "checked_out": False,
+            "paid": False,
+            "lines": lines,
+            "message": "Supplier cart prepared. Nothing was ordered or paid.",
+        }
+        performed.append("supplier_cart_prepared")
+    elif action == "snooze":
+        from datetime import timedelta
+        when = extra.get("due_at") or (date.today() + timedelta(days=1)).isoformat() + "T09:00:00"
+        if item.get("id"):
+            conn.execute(
+                "UPDATE organizer_items SET status = 'snoozed', due_at = ?, updated_at = ?, last_moved_at = ? WHERE id = ?",
+                (when, now_iso(), now_iso(), item["id"]),
+            )
+        performed.append("snoozed")
+        created = {"due_at": when, "status": "snoozed"}
+    elif action == "remind":
+        from app.services.organizer.reminders import schedule_reminder
+        due = extra.get("due_at") or extra.get("reminder_at") or item.get("due_at") or now_iso()
+        reminder = schedule_reminder(
+            conn,
+            title=item.get("title") or "Reminder",
+            due_at=due,
+            body=extra.get("body") or item.get("title") or "Due in Organizer",
+            item_id=item.get("id"),
+            channel="max",
+        )
+        created = reminder
+        performed.append("reminder_draft")
+    elif action == "waiting_nudge":
+        who = item.get("waiting_on") or extra.get("who") or "them"
+        msg = _draft_message("followup", item, job, extra.get("body") or f"Hi {who}, checking in about {item.get('title')}.")
+        approval = _save_draft(msg, job_id=item.get("job_id"), title=f"Nudge {who}")
+        performed.append("nudge_draft")
     elif action == "approve_send":
         msg = _draft_message("followup", item, job, extra.get("body") or item.get("reminder_draft") or "")
         approval = extra.get("approval_id")

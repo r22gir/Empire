@@ -9,6 +9,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from app.services.organizer.constants import (
+    BOARD_COLUMNS,
     DEFAULT_TRAVEL_GAP_MINUTES,
     EVENT_STATUSES,
     ITEM_KINDS,
@@ -52,23 +53,252 @@ def seed_spaces(conn) -> None:
     stamp = now_iso()
     for i, space in enumerate(default_spaces()):
         if space["slug"] in existing:
+            conn.execute(
+                """
+                UPDATE organizer_spaces
+                   SET icon = COALESCE(NULLIF(icon, ''), ?),
+                       accent_color = COALESCE(NULLIF(accent_color, ''), ?)
+                 WHERE edition = ? AND slug = ?
+                """,
+                (space.get("icon"), space.get("accent_color"), ed, space["slug"]),
+            )
             continue
         sid = f"{ed}:{space['slug']}"
         conn.execute(
             """
-            INSERT OR IGNORE INTO organizer_spaces (id, edition, slug, label, kind, sort_order, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO organizer_spaces
+                (id, edition, slug, label, kind, sort_order, icon, accent_color, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (sid, ed, space["slug"], space["label"], space["kind"], i, stamp),
+            (
+                sid, ed, space["slug"], space["label"], space["kind"], i,
+                space.get("icon"), space.get("accent_color"), stamp,
+            ),
         )
 
 
 def new_id() -> str:
-    return str(uuid.uuid4())[:8]
+    """Unique id for every insert. Never reuse a timestamp or last-row lookup."""
+    return uuid.uuid4().hex
 
 
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def column_for_status(status: Optional[str]) -> str:
+    key = (status or "open").strip()
+    for col in BOARD_COLUMNS:
+        if key in col["statuses"]:
+            return col["id"]
+    if key == "cancelled":
+        return "done"
+    return "open"
+
+
+def status_for_column(column: str, current: Optional[str] = None) -> str:
+    col = (column or "").strip().lower()
+    if col == "done":
+        return "done"
+    if col in ("doing", "in_progress"):
+        return "in_progress"
+    if col == "open":
+        return "open" if (current or "") != "planned" else "planned"
+    return current if current in ITEM_STATUSES else "open"
+
+
+def list_spaces(conn) -> list[dict]:
+    ensure_schema(conn)
+    clause, eparams = edition_sql()
+    rows = [dict(r) for r in conn.execute(
+        f"SELECT * FROM organizer_spaces WHERE {clause} ORDER BY sort_order, slug",
+        eparams,
+    ).fetchall()]
+    if rows:
+        return [style_space(r) for r in rows]
+    return [style_space(s) for s in default_spaces()]
+
+
+def style_space(row: dict) -> dict:
+    slug = row.get("slug") or default_space_slug()
+    defaults = next((s for s in default_spaces() if s["slug"] == slug), None) or {
+        "icon": "●",
+        "accent_color": "#57534e",
+        "label": slug,
+        "kind": "life",
+    }
+    return {
+        "id": row.get("id") or slug,
+        "slug": slug,
+        "label": row.get("label") or defaults.get("label") or slug,
+        "kind": row.get("kind") or defaults.get("kind") or "life",
+        "icon": row.get("icon") or defaults.get("icon") or "●",
+        "accent_color": row.get("accent_color") or defaults.get("accent_color") or "#57534e",
+        "sort_order": row.get("sort_order", 0),
+        "edition": row.get("edition") or process_edition(),
+    }
+
+
+def update_space(conn, slug: str, updates: dict) -> Optional[dict]:
+    ensure_schema(conn)
+    space = normalize_space(slug)
+    clause, eparams = edition_sql()
+    row = conn.execute(
+        f"SELECT * FROM organizer_spaces WHERE slug = ? AND {clause}",
+        (space, *eparams),
+    ).fetchone()
+    if not row:
+        return None
+    allowed = {"icon", "accent_color", "label"}
+    fields, params = [], []
+    for key, val in updates.items():
+        if key not in allowed or val is None:
+            continue
+        text = str(val).strip()
+        if not text:
+            continue
+        if key == "accent_color" and not text.startswith("#"):
+            continue
+        fields.append(f"{key} = ?")
+        params.append(text[:32] if key != "label" else text[:80])
+    if fields:
+        params.append(space)
+        conn.execute(
+            f"UPDATE organizer_spaces SET {', '.join(fields)} WHERE slug = ? AND edition = ?",
+            (*params, process_edition()),
+        )
+    return next((s for s in list_spaces(conn) if s["slug"] == space), None)
+
+
+def lookup_quote_id(conn, *, job_id=None, customer_id=None, quote_id=None) -> Optional[str]:
+    if quote_id:
+        return str(quote_id)
+    if not can_read_workroom_jobs():
+        return None
+    try:
+        if job_id:
+            row = conn.execute(
+                "SELECT quote_id FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if row and (row[0] if not hasattr(row, "keys") else row["quote_id"]):
+                return str(row[0] if not hasattr(row, "keys") else row["quote_id"])
+            row = conn.execute(
+                "SELECT id FROM quotes_v2 WHERE job_id = ? ORDER BY updated_at DESC LIMIT 1",
+                (job_id,),
+            ).fetchone()
+            if row:
+                return str(row[0] if not hasattr(row, "keys") else row["id"])
+        if customer_id:
+            row = conn.execute(
+                "SELECT id FROM quotes_v2 WHERE customer_id = ? ORDER BY updated_at DESC LIMIT 1",
+                (customer_id,),
+            ).fetchone()
+            if row:
+                return str(row[0] if not hasattr(row, "keys") else row["id"])
+    except Exception:
+        return None
+    return None
+
+
+def record_links(item: dict) -> list[dict]:
+    """One-tap hrefs: estimate, client, job, calendar event. Family editions skip Workroom records."""
+    links = []
+    job_id = item.get("job_id")
+    customer_id = item.get("customer_id")
+    quote_id = item.get("quote_id")
+    event_id = item.get("schedule_event_id")
+    if item.get("source") == "schedule_event" and item.get("id"):
+        event_id = event_id or item.get("id")
+    if job_id and can_read_workroom_jobs():
+        links.append({
+            "kind": "job",
+            "id": str(job_id),
+            "label": item.get("job_title") or "Job",
+            "href": f"/?product=workroom&section=jobhub&job={job_id}",
+        })
+    if customer_id:
+        links.append({
+            "kind": "client",
+            "id": str(customer_id),
+            "label": item.get("customer_vendor") or "Client",
+            "href": f"/?screen=calendar&customer={customer_id}",
+        })
+    if quote_id and can_read_workroom_jobs():
+        links.append({
+            "kind": "estimate",
+            "id": str(quote_id),
+            "label": "Estimate",
+            "href": f"/?screen=quote&id={quote_id}",
+        })
+    if event_id:
+        links.append({
+            "kind": "calendar",
+            "id": str(event_id),
+            "label": "Calendar",
+            "href": f"/?screen=calendar&event={event_id}",
+        })
+    return links
+
+
+def job_progress(conn, job_id: str) -> dict:
+    """Progress as a fraction of linked tasks (organizer items + desk tasks)."""
+    statuses: list[str] = []
+    clause, params = edition_sql()
+    try:
+        for r in conn.execute(
+            f"SELECT status FROM organizer_items WHERE job_id = ? AND {clause}",
+            (job_id, *params),
+        ).fetchall():
+            statuses.append((r[0] if not hasattr(r, "keys") else r["status"]) or "open")
+    except Exception:
+        pass
+    try:
+        for r in conn.execute(
+            "SELECT status, metadata FROM tasks WHERE metadata LIKE ?",
+            (f'%"{job_id}"%',),
+        ).fetchall():
+            meta_raw = r[1] if not hasattr(r, "keys") else r["metadata"]
+            try:
+                meta = json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
+            except json.JSONDecodeError:
+                meta = {}
+            if str(meta.get("job_id") or "") != str(job_id):
+                continue
+            statuses.append((r[0] if not hasattr(r, "keys") else r["status"]) or "open")
+    except Exception:
+        pass
+    total = len(statuses)
+    done = sum(1 for s in statuses if str(s) in ("done", "cancelled"))
+    return {
+        "job_id": job_id,
+        "total": total,
+        "done": done,
+        "open": max(0, total - done),
+        "percent": int(round(100 * done / total)) if total else 0,
+        "fraction": f"{done}/{total}" if total else "0/0",
+    }
+
+
+def attach_progress(conn, rows: list[dict]) -> list[dict]:
+    job_ids = {str(r.get("job_id")) for r in rows if r.get("job_id")}
+    cache = {jid: job_progress(conn, jid) for jid in job_ids}
+    for row in rows:
+        jid = str(row.get("job_id") or "")
+        if jid and jid in cache:
+            row["progress"] = cache[jid]
+    return rows
+
+
+def board_columns(rows: list[dict]) -> list[dict]:
+    grouped = {col["id"]: [] for col in BOARD_COLUMNS}
+    for row in rows:
+        col = column_for_status(row.get("status"))
+        grouped.setdefault(col, []).append(row["id"])
+        row["column"] = col
+    return [
+        {"id": col["id"], "label": col["label"], "item_ids": grouped.get(col["id"], [])}
+        for col in BOARD_COLUMNS
+    ]
 
 
 def public_kind(row: dict) -> str:
@@ -189,6 +419,8 @@ def enrich_links(item: dict) -> dict:
     out["call_link"] = call_link(out.get("phone"))
     out["outbound_blocked"] = True
     out["outbound_policy"] = OUTBOUND_POLICY
+    out["column"] = column_for_status(out.get("status"))
+    out["record_links"] = record_links(out)
     return out
 
 
@@ -226,13 +458,41 @@ def enrich_item(conn, row: dict) -> dict:
                 item["phone"] = a["phone"]
                 item["call_link"] = call_link(a["phone"])
                 break
+    if item.get("job_id") and (not item.get("customer_id") or not item.get("job_title")) and can_read_workroom_jobs():
+        try:
+            job = conn.execute(
+                "SELECT title, client_name, customer_id FROM jobs WHERE id = ?",
+                (item["job_id"],),
+            ).fetchone()
+            if job:
+                data = dict(job)
+                item["customer_id"] = item.get("customer_id") or data.get("customer_id")
+                item["job_title"] = item.get("job_title") or data.get("title")
+                item["customer_vendor"] = item.get("customer_vendor") or data.get("client_name")
+        except Exception:
+            pass
+    if not item.get("quote_id"):
+        item["quote_id"] = lookup_quote_id(
+            conn, job_id=item.get("job_id"), customer_id=item.get("customer_id")
+        )
+    if item.get("job_id") and can_read_workroom_jobs():
+        try:
+            from app.services.organizer.money import job_money
+            money = job_money(conn, item["job_id"])
+            if money:
+                item["money"] = money
+                item["invoice_id"] = item.get("invoice_id") or money.get("invoice_id")
+                item["quote_id"] = item.get("quote_id") or money.get("quote_id")
+        except Exception:
+            pass
+    item["record_links"] = record_links(item)
     return item
 
 
 def load_event(conn, event_id: str) -> Optional[dict]:
     clause, params = edition_sql("e")
     row = conn.execute(
-        event_select_sql() + f" WHERE e.id = ? AND {clause}",
+        event_select_sql(conn) + f" WHERE e.id = ? AND {clause}",
         (event_id, *params),
     ).fetchone()
     if not row:
@@ -293,21 +553,35 @@ def conflicts_for_payload(conn, payload: dict, *, exclude_id: Optional[str] = No
     return detect_conflicts({**payload, "travel_minutes": travel}, existing)
 
 
-def event_select_sql() -> str:
-    if not can_read_workroom_jobs():
-        return """
+def event_select_sql(conn=None) -> str:
+    bare = """
             SELECT e.*, NULL as job_title, NULL as client_name, NULL as job_address,
                    NULL as job_customer_id, NULL as customer_name,
                    NULL as customer_phone, NULL as customer_address
             FROM schedule_events e
         """
-    return """
-        SELECT e.*, j.title as job_title, j.client_name, j.address as job_address,
-               j.customer_id as job_customer_id, c.name as customer_name,
+    if not can_read_workroom_jobs():
+        return bare
+    names: set[str] = set()
+    if conn is not None:
+        try:
+            names = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        except Exception:
+            names = set()
+        if not names:
+            return bare
+    title = "j.title" if (not names or "title" in names) else "NULL"
+    client = "j.client_name" if (not names or "client_name" in names) else "NULL"
+    addr = "j.address" if (not names or "address" in names) else "NULL"
+    cust = "j.customer_id" if (not names or "customer_id" in names) else "NULL"
+    join_cust = cust if cust != "NULL" else "NULL"
+    return f"""
+        SELECT e.*, {title} as job_title, {client} as client_name, {addr} as job_address,
+               {join_cust} as job_customer_id, c.name as customer_name,
                c.phone as customer_phone, c.address as customer_address
         FROM schedule_events e
         LEFT JOIN jobs j ON e.job_id = j.id
-        LEFT JOIN customers c ON COALESCE(e.customer_id, j.customer_id) = c.id
+        LEFT JOIN customers c ON COALESCE(e.customer_id, {join_cust}) = c.id
     """
 
 
@@ -384,14 +658,16 @@ def insert_item(conn, payload: dict) -> dict:
     stamp = now_iso()
     resource_ids = parse_ids(payload.get("assigned_resource_ids"))
     primary = payload.get("resource_id") or (resource_ids[0] if resource_ids else None)
+    status = payload.get("status") if payload.get("status") in ITEM_STATUSES else "open"
     conn.execute(
         """
         INSERT INTO organizer_items (
             id, kind, title, job_id, customer_id, resource_id, due_at, start_time, end_time,
             status, followup_kind, phone, location_address, material_eta, order_ref,
             reminder_draft, outbound_blocked, notes, schedule_event_id, created_by,
-            created_at, updated_at, edition, space_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+            created_at, updated_at, edition, space_id, quote_id, reminder_at, capture_id, project_id,
+            waiting_on, nudge_after_days, last_moved_at, recurrence_freq, template_id, parent_id, invoice_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             item_id,
@@ -403,7 +679,7 @@ def insert_item(conn, payload: dict) -> dict:
             payload.get("due_at"),
             payload.get("start_time"),
             payload.get("end_time"),
-            payload.get("status") if payload.get("status") in ITEM_STATUSES else "open",
+            status,
             payload.get("followup_kind"),
             payload.get("phone"),
             payload.get("location_address"),
@@ -417,15 +693,27 @@ def insert_item(conn, payload: dict) -> dict:
             stamp,
             process_edition(),
             normalize_space(payload.get("space_id") or payload.get("space")),
+            payload.get("quote_id") or None,
+            payload.get("reminder_at") or payload.get("due_at"),
+            payload.get("capture_id") or None,
+            payload.get("project_id") or payload.get("job_id") or None,
+            (payload.get("waiting_on") or "").strip() or None,
+            payload.get("nudge_after_days"),
+            stamp,
+            payload.get("recurrence_freq") or None,
+            payload.get("template_id") or None,
+            payload.get("parent_id") or None,
+            payload.get("invoice_id") or None,
         ),
     )
     replace_assignments(conn, resource_ids or ([primary] if primary else []), item_id=item_id)
-    clause, params = edition_sql()
     row = conn.execute(
-        f"SELECT * FROM organizer_items WHERE id = ? AND {clause}",
-        (item_id, *params),
+        "SELECT * FROM organizer_items WHERE id = ?",
+        (item_id,),
     ).fetchone()
-    return enrich_item(conn, dict(row)) if row else None
+    if not row:
+        return enrich_item(conn, {"id": item_id, **payload, "kind": kind, "created_at": stamp})
+    return enrich_item(conn, dict(row))
 
 
 def load_item(conn, item_id: str) -> Optional[dict]:

@@ -23,14 +23,15 @@ Campestre legal or company details. Model is **grok-4.6** only.
 
 1. Home (`/`) → Today card lists today’s Organizer items (or empty state) and **Open organizer** goes to `/?screen=calendar`.
 2. Left nav **Organizer** opens the same screen. Workroom → Organizer tab does too (Workroom is one area, not the whole app).
-3. Edition badge shows this process (Max · Rafael / Max-e · Juan / Maxine · Camilo). Area chips: **All areas** (unified) plus one chip per life/business space.
-4. Day / week / month views render. Drag an event to a new time; a double-booked person shows a **Not saved — conflict** banner (no silent overwrite). Cancel leaves the old time. “Keep anyway” writes after confirm. After a successful move, **Tell the crew?** offers a draft only.
+3. Edition badge shows this process (Max · Rafael / Max-e · Juan / Maxine · Camilo). Area chips: **All areas** (unified) plus one colorful chip per life/business space (icon + accent). Double-tap a chip to change its icon/color. Organizer is never Workroom-only. Compare looks with `?orgTheme=a|b|c` or the Luxe / Editorial / Command switcher (persists in `localStorage`).
+4. **Today** view (default) has three columns across every area: Overdue / Today / Upcoming. **Board** has Open / Doing / Done. Drag a card between columns on desktop (HTML5) and phone (pointer). Day / week / month still render. Drag an event to a new time; a double-booked person shows a **Not saved — conflict** banner (no silent overwrite). Cancel leaves the old time. “Keep anyway” writes after confirm. After a successful move, **Tell the crew?** offers a draft only.
 5. Resize handle changes duration and hits the same conflict path.
 6. Month: drag a chip to another day.
 7. Lanes: each person has a row; unassigned people do not leak another person’s stops.
 8. Filters (area / person / type / search, plus job only on Workroom + Max) update agenda + calendar together.
-9. Quick-add `call Marley Friday 2pm` (Workroom) or `dentist Thursday 3pm` (Personal) opens a confirm draft (not saved). Confirm writes it. Voice button drafts or says the browser cannot listen. Command `move Marley's install to Friday and tell the crew` moves the event and drafts the crew text (not sent).
-10. Job card **Schedule** (Max / Workroom only) opens `/?screen=calendar&job=<id>` with that job selected and the timeline strip visible. Family / Max-e / Maxine do not show job filters or job buttons.
+9. Quick-add `call Marley Friday 2pm` (Workroom) or `dentist Thursday 3pm` (Personal) opens a confirm draft (not saved). Confirm writes it. Space is picked when the words make it obvious. **Voice** uses `/organizer/transcribe` (existing Groq Whisper) and falls back to browser STT. **Photo** attaches via capture ingest. Command `move Marley's install to Friday and tell the crew` moves the event and drafts the crew text (not sent).
+10. Job card **Schedule** (Max / Workroom only) opens `/?screen=calendar&job=<id>` with that job selected, a progress bar (`done/total` of linked tasks), and one-tap links to estimate / client / job / calendar. Family / Max-e / Maxine do not show job filters or job buttons.
+11. Due dates save a row in `organizer_reminders`. Max’s notification system (`notify_founder`) fires when due. Nothing outbound is sent without the owner’s tap.
 11. **Approve today** on the assistant’s proposed day marks the plan approved and does not send anything.
 12. Route card lists stops + drive-minute estimates and **Open maps** uses Google Maps directions (no live-traffic claim).
 13. Smart follow-ups (Workroom / Max only) show a pre-written nudge plus **Approve & Send**. Tapping it is the owner's tap. Without that tap, nothing is sent.
@@ -67,6 +68,18 @@ Reuses `gmail_reader.check_inbox` (`gmail.readonly`) and `outlook_reader.search_
 5. **Snooze** hides the row until the snooze time. **Turn into to-do** / **follow-up** writes an Organizer item in this edition and removes it from Pending.
 6. Switch `EMPIRE_EDITION` to `maxine`: Rafael's inbox is not read. Argos Campestre subjects/senders are dropped. Juan's Max-e mailbox is not visible either.
 7. Unknown `EMPIRE_EDITION` has no mailbox sources and never falls through to `main`.
+
+## Flow features (all three themes, every space)
+
+Keep `?orgTheme=a|b|c` (or the Luxe / Editorial / Command switcher). Each flow must work in every area. Family stays isolated to this edition.
+
+1. **Suggested tray** (main board in every theme, plus sidebar on Editorial): incoming mail, WhatsApp, voice notes, and approved estimates appear as suggestions. **Accept** creates a to-do. **Dismiss** drops it. Nothing is created silently. Harvest never writes a task on its own. Screenshots: `docs/organizer-flow-shots/` (theme C each flow, plus one theme A).
+2. **One-tap card actions**: Call (`tel:`), Open quote / Open invoice, **Build supplier cart** (prepares a list only — never checks out or pays), **Mark paid** (opens the existing invoice screen), Snooze, Remind. Waiting-on items also offer **Draft nudge**.
+3. **Plan my day**: toolbar button opens Max's proposed time blocks (installs, orders, follow-ups). **Approve & save blocks** writes times. Cancel leaves the calendar alone. Nothing is sent.
+4. **Waiting-on**: item sheet has who + nudge-after-N-days. When due, Max prepares a draft nudge for Rafael to review. Dispatch never sends.
+5. **Checklists / recurring**: Apply checklist (Job: order materials, cut, build, upholster, install, invoice, collect balance). Custom templates work in any space. Recurring daily/weekly/monthly spawns a copy when due — original stays.
+6. **Money on job cards**: deposit / paid / balance / margin, read-only from quotes + invoices, with a collected fraction (`paid/total` or `N/100`). Family editions do not show Workroom money.
+7. **Smart search** (2+ characters) covers items, jobs, clients, estimates. **Weekly review** view: slipped, stuck (no movement 7+ days), next week.
 
 ## Max / Max-e / Maxine chat
 
