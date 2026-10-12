@@ -13,7 +13,7 @@ import {
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
   Video, MessageCircle,
   ChevronDown, ChevronRight, LayoutGrid, CalendarCheck,
-  FileStack, MessageCircle,
+  FileStack,
 } from 'lucide-react';
 import { hookFounderNav } from '../../lib/founderPortal';
 
