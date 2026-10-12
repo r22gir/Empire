@@ -5109,47 +5109,16 @@ def _brave_search(query: str, num_results: int = 5) -> list[dict]:
 
 @tool("web_search")
 def _web_search(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Search the web via DuckDuckGo HTML with Brave Search API fallback."""
-    query = params.get("query", "").strip()
-    logger.info(f"[web_search] called with query='{query}'")
-    if not query:
-        return ToolResult(tool="web_search", success=False, error="Query is required")
+    """Official-sources search: Brave under monthly cap, then MiniMax/Exa/Tavily/DDG."""
+    from app.services.max.official_search.pipeline import run_web_search
 
-    num_results = min(int(params.get("num_results", 5)), 10)
-    source = "DuckDuckGo"
-    results = []
-
-    # Primary: DDG HTML endpoint (same method that worked on Beelink)
-    try:
-        resp = httpx.get(
-            "https://html.duckduckgo.com/html/",
-            params={"q": query},
-            headers={
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            },
-            timeout=10,
-            follow_redirects=True,
-        )
-        if resp.status_code == 200:
-            results = _parse_ddg_results(resp.text, num_results)
-    except Exception as e:
-        logger.warning(f"[web_search] DDG HTML failed: {e}")
-
-    # Fallback: Brave Search API
-    if not results:
-        try:
-            logger.info(f"[web_search] DDG returned 0, falling back to Brave Search")
-            results = _brave_search(query, num_results)
-            if results:
-                source = "Brave"
-        except Exception as e:
-            logger.warning(f"[web_search] Brave also failed: {type(e).__name__}: {e}")
-
-    logger.info(f"[web_search] query='{query}' returned {len(results)} results via {source}")
-    return ToolResult(tool="web_search", success=True, result={
-        "query": query, "results": results, "count": len(results), "source": source,
-    })
+    payload = run_web_search(params, desk=desk)
+    return ToolResult(
+        tool="web_search",
+        success=bool(payload.get("success")),
+        error=payload.get("error"),
+        result=payload.get("result"),
+    )
 
 
 @tool("web_read")
@@ -5185,6 +5154,24 @@ def _web_read(params: dict, desk: Optional[str] = None) -> ToolResult:
         })
     except Exception as e:
         return ToolResult(tool="web_read", success=False, error=f"Web read failed: {e}")
+
+
+def _authoritative_tool(name: str, fn):
+    def _handler(params: dict, desk: Optional[str] = None) -> ToolResult:
+        payload = fn(params or {})
+        return ToolResult(
+            tool=name,
+            success=bool(payload.get("ok")),
+            error=payload.get("error"),
+            result=payload,
+        )
+    return _handler
+
+
+from app.services.max.official_search.authoritative import AUTHORITATIVE_TOOLS as _OFFICIAL_API_TOOLS
+
+for _auth_name, _auth_fn in _OFFICIAL_API_TOOLS.items():
+    TOOL_REGISTRY[_auth_name] = _authoritative_tool(_auth_name, _auth_fn)
 
 
 def _html_to_text(html: str) -> str:
@@ -6508,12 +6495,13 @@ State machine: `draft → founder_review → sent → accepted → in_production
   Shapes: "straight", "l-shape", "u-shape". For U-shaped, add "multiplier": 2 if there are multiple booths.
 
 ### Research Tools
-- **web_search** — Search the web for current information, prices, suppliers, tutorials, or any topic. Returns titles, URLs, and snippets from DuckDuckGo.
-  `{"tool": "web_search", "query": "best fabric suppliers for drapery wholesale", "num_results": 5}`
-  Use for: research, current pricing, supplier info, industry news, competitor analysis, or any factual question needing live data.
+- **web_search** — Official-sources web search. Brave is primary when BRAVE_API_KEY exists (Dell studio). MiniMax Token Plan MCP (POST /v1/coding_plan/search) is a raw merge. Exa/Tavily are free fallbacks. DuckDuckGo is last (Dell often resets). MiniMax Responses API web_search is OFF.
+  `{"tool": "web_search", "query": "CDC influenza vaccination schedule", "num_results": 5}`
+  Official intent (official / oficial / gobierno / .gov / fuente oficial) enables strict Tier 1 mode.
   For a factual or research question the runtime reads the full text of the top relevant pages (skipping dead or paywalled ones) before you answer. Answer from that page text. Do not stop at snippets, and do not offer to open the articles.
-  After getting results, cite sources with numbered markdown links: [1](url)
+  Do not invent a Sources footer — the runtime builds Sources / Fuentes in code.
 - **web_read** — Fetch and read a web page. Returns extracted text content from any URL.
+- **congress_search** / **regulations_search** / **pubmed_search** / **sec_edgar_search** / **wikipedia_search** / **fact_check_search** — Free authoritative APIs. Use for bills, rules, papers, filings, encyclopedia, and fact checks.
   `{"tool": "web_read", "url": "https://example.com/article", "max_chars": 6000}`
   Use after web_search to read full articles, or when the user shares a URL. Combine with web_search for deep research.
 - **search_images** — Search for relevant images (Unsplash) to enhance your response. Embed results in markdown.

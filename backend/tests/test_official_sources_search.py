@@ -1,0 +1,620 @@
+"""Official-sources web search: providers, tiers, citations, footer, family."""
+from __future__ import annotations
+
+import pytest
+
+from app.services.max.official_search.citations import (
+    strip_invented_citations,
+    verify_citations,
+    verify_quoted_text,
+)
+from app.services.max.official_search.family import family_search_guard, maxine_blocks_query
+from app.services.max.official_search.footer import attach_sources_footer, build_sources_footer
+from app.services.max.official_search.intent import is_official_intent
+from app.services.max.official_search.pipeline import (
+    finalize_research_reply,
+    official_page_char_cap,
+    run_web_search,
+)
+from app.services.max.official_search.providers import (
+    BraveProvider,
+    ProviderError,
+    SearchHit,
+    SearchProvider,
+    TavilyProvider,
+    minimax_research_enabled,
+    provider_fallback_order,
+    run_providers,
+)
+from app.services.max.official_search.trust_tiers import classify_domain, filter_by_tiers
+
+
+class _FakeProvider(SearchProvider):
+    def __init__(self, name, hits=None, error=None, enabled=True):
+        self.name = name
+        self._hits = hits or []
+        self._error = error
+        self._enabled = enabled
+        self.calls = 0
+
+    def enabled(self):
+        return self._enabled
+
+    def search(self, query, num_results=5, **kwargs):
+        self.calls += 1
+        if self._error:
+            raise ProviderError(self.name, self._error)
+        return list(self._hits)[:num_results]
+
+
+CDC = SearchHit(
+    title="CDC Influenza",
+    url="https://www.cdc.gov/flu/prevent/index.htm",
+    snippet="Annual influenza vaccination is recommended.",
+    published="2024-08-15",
+    provider="exa",
+)
+NIH = SearchHit(
+    title="NIH Flu",
+    url="https://www.nih.gov/news-events/flu",
+    snippet="NIH influenza research.",
+    published="2024-07-01",
+    provider="exa",
+)
+BLOG = SearchHit(
+    title="Random blog",
+    url="https://random-blog.example/flu-cures",
+    snippet="Unverified claims.",
+    provider="ddg",
+)
+REUTERS = SearchHit(
+    title="Reuters flu",
+    url="https://www.reuters.com/health/flu",
+    snippet="Wire copy.",
+    provider="tavily",
+)
+
+
+def test_official_intent_en_and_es():
+    assert is_official_intent("official CDC flu guidance")
+    assert is_official_intent("fuente oficial del gobierno sobre vacunas")
+    assert is_official_intent("look this up on .gov")
+    assert is_official_intent("sitio oficial del IRS")
+    assert not is_official_intent("best restaurant booth fabric")
+
+
+def test_official_mode_returns_only_tier1_domains():
+    providers = [_FakeProvider("exa", [CDC, NIH, BLOG, REUTERS])]
+    payload = run_web_search(
+        {"query": "official CDC influenza schedule", "num_results": 10},
+        providers=providers,
+    )
+    assert payload["success"] is True
+    urls = [r["url"] for r in payload["result"]["results"]]
+    assert urls
+    for url in urls:
+        assert classify_domain(url) == 1
+        host = url.split("/")[2]
+        assert host.endswith(".gov") or host.endswith(".mil") or host.endswith(".edu")
+    assert "random-blog.example" not in " ".join(urls)
+    assert "reuters.com" not in " ".join(urls)
+
+
+def test_no_tier1_says_so_and_labels_unverified():
+    providers = [_FakeProvider("exa", [BLOG, REUTERS])]
+    payload = run_web_search(
+        {"query": "official source for this rumor", "num_results": 5},
+        providers=providers,
+    )
+    assert payload["success"] is True
+    assert payload["result"]["no_tier1"] is True
+    assert "No official source found" in payload["result"]["notice"]
+    for row in payload["result"]["results"]:
+        assert row["tier"] != 1
+
+
+def test_spanish_sources_footer():
+    pages = [{
+        "url": "https://www.cdc.gov/flu",
+        "title": "Gripe",
+        "published": "2024-08-15",
+        "text": "Vacuna anual recomendada por el CDC.",
+        "tier": 1,
+        "read": True,
+    }]
+    footer = build_sources_footer(pages, language="es")
+    assert footer.startswith("Fuentes")
+    assert "Oficial" in footer
+    assert "leído" in footer
+    assert "cdc.gov" in footer
+    attached = attach_sources_footer(
+        "La vacuna es anual.\n\n## Sources\n1. invented.com",
+        pages,
+        question="fuente oficial de la vacuna",
+    )
+    assert "Fuentes" in attached
+    assert attached.count("Fuentes") == 1
+    assert "invented.com" not in attached.split("Fuentes")[1] or "[Gripe]" in attached
+
+
+def test_no_urls_in_voice_output():
+    pages = [{
+        "url": "https://www.cdc.gov/flu/prevent/index.htm",
+        "title": "CDC Influenza",
+        "text": "Annual influenza vaccination is recommended for everyone 6 months and older.",
+        "published": "2024-08-15",
+        "tier": 1,
+        "read": True,
+    }]
+    draft = (
+        "CDC recommends an annual flu shot.\n\n"
+        "See [CDC Influenza](https://www.cdc.gov/flu/prevent/index.htm)\n"
+        "https://invented.example/not-real"
+    )
+    spoken = finalize_research_reply(
+        draft, pages=pages, question="official flu guidance", channel="voice", official=True,
+    )
+    assert "http" not in spoken.lower()
+    assert "cdc.gov" not in spoken.lower() or "http" not in spoken.lower()
+    assert "https://" not in spoken
+    assert "CDC Influenza" in spoken
+
+
+def test_citation_stripping_invented_and_quotes():
+    pages = [{
+        "url": "https://www.cdc.gov/flu",
+        "title": "CDC",
+        "text": "Annual influenza vaccination is recommended for most people.",
+    }]
+    text = (
+        'The CDC says "Annual influenza vaccination is recommended for most people" '
+        "([CDC](https://www.cdc.gov/flu)). "
+        'They also said "drink bleach daily" '
+        "(https://www.cdc.gov/flu). "
+        "See also [Blog](https://totally-fake.example/x)."
+    )
+    checked = verify_citations(text, pages)
+    assert "https://totally-fake.example/x" not in checked["text"]
+    assert checked["links_removed"] >= 1
+    assert "drink bleach daily" not in checked["text"]
+    assert checked["quotes_removed"] >= 1
+    cleaned, n = strip_invented_citations(
+        "Read https://never-fetched.example/a and [CDC](https://www.cdc.gov/flu)",
+        pages,
+    )
+    assert "never-fetched.example" not in cleaned
+    assert n >= 1
+    quoted, qn = verify_quoted_text('"this quote is not on the page at all now"', pages)
+    assert qn == 1
+    assert "this quote is not" not in quoted
+
+
+def test_fallback_order_brave_first_when_keyed(monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    monkeypatch.delenv("EXA_API_KEY_MAXINE", raising=False)
+    monkeypatch.delenv("TAVILY_API_KEY_MAXINE", raising=False)
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    assert provider_fallback_order() == ["duckduckgo"]
+    assert BraveProvider().enabled() is False
+
+    monkeypatch.setenv("EXA_API_KEY", "exa-free")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-free")
+    assert provider_fallback_order() == ["exa", "tavily", "duckduckgo"]
+    assert "brave" not in provider_fallback_order()
+
+    monkeypatch.setenv("BRAVE_API_KEY", "bs-key")
+    assert provider_fallback_order()[0] == "brave"
+    assert provider_fallback_order() == ["brave", "exa", "tavily", "duckduckgo"]
+
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-key")
+    order = provider_fallback_order()
+    assert order[0] == "brave"
+    assert "minimax_coding_plan" in order
+    assert order.index("minimax_coding_plan") < order.index("exa")
+    assert order[-1] == "duckduckgo"
+
+
+def test_fail_closed_on_provider_errors():
+    providers = [
+        _FakeProvider("exa", error="timeout", enabled=True),
+        _FakeProvider("tavily", error="http 500", enabled=True),
+        _FakeProvider("duckduckgo", error="blocked", enabled=True),
+    ]
+    raw = run_providers("official IRS standard mileage", providers=providers)
+    assert raw["ok"] is False
+    assert raw["results"] == []
+    assert raw["error"]
+
+    payload = run_web_search({"query": "official IRS mileage"}, providers=providers)
+    assert payload["success"] is False
+    assert payload["error"]
+    assert payload["result"]["results"] == []
+
+
+def test_empty_from_primary_falls_through_to_next():
+    ddg = _FakeProvider("duckduckgo", [CDC])
+    providers = [
+        _FakeProvider("exa", hits=[], enabled=True),
+        _FakeProvider("brave", enabled=False),
+        ddg,
+    ]
+    raw = run_providers("cdc flu", providers=providers)
+    assert raw["ok"] is True
+    assert raw["source"] == "duckduckgo"
+    assert ddg.calls == 1
+
+
+def test_minimax_responses_api_stays_off_coding_plan_on(monkeypatch):
+    monkeypatch.delenv("MINIMAX_WEB_SEARCH_FOR_RESEARCH", raising=False)
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-key")
+    from app.services.max.official_search.providers import minimax_coding_plan_enabled
+    assert minimax_research_enabled() is False
+    assert minimax_coding_plan_enabled() is True
+
+
+def test_family_usage_cap_and_maxine_argos(monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "maxine")
+    assert maxine_blocks_query("Argos Campestre NIT and bylaws") is True
+    blocked = run_web_search({"query": "Argos Campestre legal documents"})
+    assert blocked["success"] is False
+    assert blocked["error"] == "maxine_argos_blocked"
+    assert blocked["result"]["results"] == []
+
+    monkeypatch.setenv("OFFICIAL_SEARCH_USED_PCT", "20")
+    monkeypatch.setenv("INSTANCE_USAGE_CAP_PCT", "20")
+    guard = family_search_guard("web_search")
+    assert guard["ok"] is False
+    assert guard["error"] == "family_usage_cap"
+
+
+def test_family_keys_do_not_inherit_workroom(monkeypatch):
+    from app.services.max.official_search.config import edition_key
+
+    monkeypatch.setenv("EMPIRE_EDITION", "maxine")
+    monkeypatch.setenv("EXA_API_KEY", "workroom-key")
+    monkeypatch.delenv("EXA_API_KEY_MAXINE", raising=False)
+    assert edition_key("EXA_API_KEY") == ""
+    monkeypatch.setenv("EXA_API_KEY_MAXINE", "maxine-key")
+    assert edition_key("EXA_API_KEY") == "maxine-key"
+
+
+def test_official_page_cap_is_6_to_8k():
+    cap = official_page_char_cap("https://www.cdc.gov/flu", official_mode=True)
+    assert 6000 <= cap <= 8000
+    normal = official_page_char_cap("https://random-blog.example/x", official_mode=False)
+    assert normal == 2500
+
+
+def test_one_per_domain_and_independent():
+    dup = [
+        {"url": "https://www.cdc.gov/a", "title": "A"},
+        {"url": "https://www.cdc.gov/b", "title": "B"},
+        {"url": "https://www.nih.gov/c", "title": "C"},
+    ]
+    out = filter_by_tiers(dup, official=True, query="official flu")
+    domains = {r["domain"] for r in out["results"]}
+    assert "cdc.gov" in domains
+    assert len([r for r in out["results"] if r["domain"] == "cdc.gov"]) == 1
+    assert out["independent"] is True
+
+
+def test_tavily_include_domains_hard_filter():
+    seen = {}
+
+    class _Tavily(TavilyProvider):
+        def enabled(self):
+            return True
+
+        def search(self, query, num_results=5, **kwargs):
+            seen["include_domains"] = kwargs.get("include_domains")
+            return [CDC]
+
+    # Patch edition key so Tavily counts as enabled in order, then call via fake.
+    raw = run_providers(
+        "official flu",
+        include_domains=["cdc.gov", "nih.gov"],
+        providers=[_Tavily()],
+    )
+    assert raw["ok"] is True
+    assert "cdc.gov" in (seen.get("include_domains") or [])
+
+
+def test_authoritative_tools_optional(monkeypatch):
+    from app.services.max.official_search.authoritative import (
+        congress_search,
+        fact_check_search,
+        pubmed_search,
+        wikipedia_search,
+    )
+
+    monkeypatch.delenv("DATA_GOV_API_KEY", raising=False)
+    monkeypatch.delenv("CONGRESS_GOV_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_FACTCHECK_API_KEY", raising=False)
+
+    class _Resp:
+        status_code = 403
+        def json(self):
+            return {}
+
+    assert congress_search({"query": "chips act"}, http_get=lambda *a, **k: _Resp())["ok"] is False
+    assert fact_check_search({"query": "vaccines"})["disabled"] is True
+
+    class _Wiki:
+        status_code = 200
+        def json(self):
+            return {"query": {"search": [{"title": "Influenza", "snippet": "A virus"}]}, "search": []}
+
+    wiki = wikipedia_search({"query": "influenza"}, http_get=lambda *a, **k: _Wiki())
+    assert wiki["ok"] is True
+    assert wiki["results"][0]["url"].startswith("https://en.wikipedia.org/")
+
+
+def test_blocklist_drops_social_seo_aggregators():
+    from app.services.max.official_search.trust_tiers import is_blocked
+
+    for url in (
+        "https://www.facebook.com/cdcflu",
+        "https://youtube.com/watch?v=1",
+        "https://www.reddit.com/r/flu",
+        "https://www.indiamart.com/x",
+        "https://www.scribd.com/doc/1",
+        "https://www.marketwatch.com/story/x",
+        "https://turbotax.intuit.com/tax-tips",
+        "https://www.addictioncenter.com/rehab",
+    ):
+        assert is_blocked(url), url
+    assert not is_blocked("https://www.cdc.gov/flu")
+
+    mixed = [
+        {"url": "https://www.facebook.com/post", "title": "FB"},
+        {"url": "https://www.cdc.gov/flu", "title": "CDC"},
+        {"url": "https://www.marketwatch.com/x", "title": "MW"},
+    ]
+    out = filter_by_tiers(mixed, official=True, query="official flu")
+    urls = [r["url"] for r in out["results"]]
+    assert urls == ["https://www.cdc.gov/flu"]
+
+
+def test_brave_and_minimax_merge_dedupe():
+    brave = _FakeProvider("brave", [
+        SearchHit("CDC", "https://www.cdc.gov/flu", "a", provider="brave"),
+        SearchHit("Dup", "https://www.nih.gov/flu", "b", provider="brave"),
+    ])
+    mm = _FakeProvider("minimax_coding_plan", [
+        SearchHit("NIH", "https://www.nih.gov/flu/", "c", provider="minimax_coding_plan"),
+        SearchHit("FDA", "https://www.fda.gov/flu", "d", provider="minimax_coding_plan"),
+    ])
+    raw = run_providers("official flu", providers=[brave, mm])
+    assert raw["ok"] is True
+    urls = [r["url"].rstrip("/") for r in raw["results"]]
+    assert urls.count("https://www.nih.gov/flu") == 1
+    assert "https://www.cdc.gov/flu" in urls
+    assert "https://www.fda.gov/flu" in urls
+    assert brave.calls == 1 and mm.calls == 1
+    assert "brave" in raw["source"] and "minimax_coding_plan" in raw["source"]
+
+
+def test_research_prompt_includes_today():
+    from datetime import date
+    from app.services.max.web_research import build_grounded_search_message
+
+    msg = build_grounded_search_message(
+        "official flu schedule",
+        {"results": []},
+        [{
+            "url": "https://www.cdc.gov/flu",
+            "title": "CDC",
+            "text": "Annual influenza vaccination is recommended.",
+            "date_label": "2024-08-15",
+        }],
+    )
+    today = date.today().isoformat()
+    assert f"Today's date is {today}" in msg
+    assert "Cite only fetched pages" in msg
+    assert "Responses API does not know today's date" in msg
+
+
+def test_coding_plan_posts_q(monkeypatch):
+    from app.services.max.official_search.providers import MiniMaxCodingPlanProvider
+
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-key")
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+        def json(self):
+            return {"results": [
+                {"title": "CDC", "link": "https://www.cdc.gov/flu", "snippet": "vax", "date": "2024-08-15"},
+            ]}
+
+    def post(url, json=None, headers=None, timeout=None):
+        seen["url"] = url
+        seen["json"] = json
+        return _Resp()
+
+    hits = MiniMaxCodingPlanProvider().search("flu", http_post=post)
+    assert seen["url"].endswith("/coding_plan/search")
+    assert seen["json"] == {"q": "flu"}
+    assert hits[0].url == "https://www.cdc.gov/flu"
+    assert hits[0].provider == "minimax_coding_plan"
+
+
+def test_tool_executor_fail_closed_and_shape():
+    providers = [_FakeProvider("exa", error="boom"), _FakeProvider("duckduckgo", error="boom")]
+    payload = run_web_search({"query": "official IRS mileage rate"}, providers=providers)
+    assert payload["success"] is False
+    assert payload["tool"] == "web_search"
+    assert "results" in payload["result"]
+
+
+def test_brave_monthly_counter_increments_before_http(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    from app.services.max.official_search.brave_budget import (
+        brave_budget_status,
+        reserve_brave_request,
+    )
+
+    db = str(tmp_path / "brave_budget.db")
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "900")
+    jan = datetime(2026, 1, 15, tzinfo=timezone.utc)
+    assert reserve_brave_request(now=jan, db_path=db) is True
+    assert reserve_brave_request(now=jan, db_path=db) is True
+    status = brave_budget_status(now=jan, db_path=db)
+    assert status["requests_month"] == 2
+    assert status["monthly_limit"] == 900
+    assert status["window"] == "month"
+    assert status["window_date"] == "2026-01"
+    assert status["edition"] == "main"
+    assert status["available"] is True
+    assert status["exhausted"] is False
+
+
+def test_brave_monthly_rollover_at_month_start(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    from app.services.max.official_search.brave_budget import (
+        brave_budget_status,
+        reserve_brave_request,
+    )
+
+    db = str(tmp_path / "brave_budget.db")
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "900")
+    jan = datetime(2026, 1, 31, 23, 0, tzinfo=timezone.utc)
+    feb = datetime(2026, 2, 1, 0, 1, tzinfo=timezone.utc)
+    for _ in range(5):
+        assert reserve_brave_request(now=jan, db_path=db) is True
+    jan_status = brave_budget_status(now=jan, db_path=db)
+    feb_status = brave_budget_status(now=feb, db_path=db)
+    assert jan_status["requests_month"] == 5
+    assert jan_status["window_date"] == "2026-01"
+    assert feb_status["requests_month"] == 0
+    assert feb_status["window_date"] == "2026-02"
+    assert feb_status["available"] is True
+    assert reserve_brave_request(now=feb, db_path=db) is True
+    assert brave_budget_status(now=feb, db_path=db)["requests_month"] == 1
+    assert brave_budget_status(now=jan, db_path=db)["requests_month"] == 5
+
+
+def test_brave_cap_switches_to_free_fallbacks(monkeypatch, tmp_path):
+    from app.services.max.official_search.brave_budget import (
+        brave_budget_status,
+        reserve_brave_request,
+    )
+    from app.services.max.official_search.providers import BraveProvider
+
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    monkeypatch.setenv("BRAVE_API_KEY", "bs-key")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "1")
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-key")
+    monkeypatch.setenv("EXA_API_KEY", "exa-free")
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+
+    http_calls: list[str] = []
+
+    class _Resp:
+        status_code = 200
+        def json(self):
+            return {"web": {"results": [
+                {"title": "CDC", "url": "https://www.cdc.gov/flu", "description": "vax"},
+            ]}}
+
+    def fake_get(*args, **kwargs):
+        http_calls.append("brave")
+        return _Resp()
+
+    first = BraveProvider().search("flu", http_get=fake_get)
+    assert first and first[0].url == "https://www.cdc.gov/flu"
+    assert http_calls == ["brave"]
+    assert brave_budget_status()["requests_month"] == 1
+    assert BraveProvider().enabled() is False
+    assert "brave" not in provider_fallback_order()
+
+    http_calls.clear()
+    mm = _FakeProvider("minimax_coding_plan", [
+        SearchHit("NIH", "https://www.nih.gov/flu", "c", provider="minimax_coding_plan"),
+    ])
+    exa = _FakeProvider("exa", [NIH])
+    ddg = _FakeProvider("duckduckgo", [BLOG])
+    raw = run_providers("official flu", providers=[BraveProvider(), mm, exa, ddg], http_get=fake_get)
+    assert http_calls == []
+    assert raw["ok"] is True
+    assert raw["source"] == "minimax_coding_plan"
+    assert mm.calls == 1
+    assert BraveProvider().search("flu", http_get=fake_get) == []
+    assert http_calls == []
+    assert brave_budget_status()["requests_month"] == 1
+    assert brave_budget_status()["exhausted"] is True
+    assert reserve_brave_request() is False
+
+
+def test_brave_budget_is_per_edition(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    from app.services.max.official_search.brave_budget import (
+        brave_budget_status,
+        reserve_brave_request,
+    )
+
+    db = str(tmp_path / "brave_budget.db")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "2")
+    jan = datetime(2026, 1, 5, tzinfo=timezone.utc)
+    assert reserve_brave_request(edition="main", now=jan, db_path=db) is True
+    assert reserve_brave_request(edition="main", now=jan, db_path=db) is True
+    assert reserve_brave_request(edition="main", now=jan, db_path=db) is False
+    assert brave_budget_status(edition="maxine", now=jan, db_path=db)["requests_month"] == 0
+    assert reserve_brave_request(edition="maxine", now=jan, db_path=db) is True
+    assert brave_budget_status(edition="main", now=jan, db_path=db)["requests_month"] == 2
+    assert brave_budget_status(edition="maxine", now=jan, db_path=db)["requests_month"] == 1
+
+
+def test_brave_budget_store_error_fails_closed(monkeypatch):
+    from app.services.max.official_search.brave_budget import (
+        brave_budget_available,
+        reserve_brave_request,
+    )
+    from app.services.max.official_search import brave_budget as budget_mod
+
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(budget_mod, "_connect", boom)
+    monkeypatch.setenv("BRAVE_API_KEY", "bs-key")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "900")
+    assert reserve_brave_request() is False
+    assert brave_budget_available() is False
+    assert BraveProvider().enabled() is False
+    http_calls = []
+
+    def fake_get(*_a, **_k):
+        http_calls.append("brave")
+        raise AssertionError("Brave HTTP must not run when the store fails closed")
+
+    assert BraveProvider().search("flu", http_get=fake_get) == []
+    assert http_calls == []
+
+
+def test_brave_card_on_free_tier_status(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    from app.services.max.free_tiers import get_all_free_tier_status
+    from app.services.max.official_search.brave_budget import (
+        brave_month_key,
+        reserve_brave_request,
+    )
+
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    monkeypatch.setenv("BRAVE_MONTHLY_FREE_REQUESTS", "900")
+    assert reserve_brave_request() is True
+    cards = get_all_free_tier_status()
+    brave = next((c for c in cards if c.get("provider") == "brave"), None)
+    assert brave is not None
+    assert brave["model_pattern"] == "search.web"
+    assert brave["window"] == "month"
+    assert brave["requests_month"] == 1
+    assert brave["monthly_limit"] == 900
+    assert brave["window_date"] == brave_month_key()
+    assert brave["window_date"] == datetime.now(timezone.utc).strftime("%Y-%m")

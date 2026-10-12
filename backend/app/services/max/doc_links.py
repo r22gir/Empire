@@ -37,7 +37,7 @@ _BARE_FOUND_PATH = re.compile(
     re.IGNORECASE,
 )
 _BARE_DOCS_VIEW = re.compile(r"(?<![(\w/])(/docs/view\?[^\s)>\]]+)", re.IGNORECASE)
-_SOURCES_HEAD = re.compile(r"^\s*sources\s*$", re.IGNORECASE)
+_SOURCES_HEAD = re.compile(r"^\s*(?:sources|fuentes)\s*$", re.IGNORECASE)
 
 _RELATIVE_MD = re.compile(
     r"\]\((/api/v1/files/found\?t=[^)\s]+)\)",
@@ -274,7 +274,8 @@ def strip_spoken_urls(text: str | None) -> str:
                     block.append(item)
                 j += 1
             if block:
-                kept.append("Sources")
+                heading = "Fuentes" if "fuente" in lines[i].lower() else "Sources"
+                kept.append(heading)
                 kept.extend(f"{n}. {title}" for n, title in enumerate(block, 1))
             i = j
             continue
