@@ -552,6 +552,13 @@ Begin every new session by stating the configured founder email and checking Ope
     except Exception:
         pass
 
+    # Live UI map: "where is X" from real nav/home ids, never from .next greps.
+    try:
+        from .ui_map import render_ui_map_section
+        result += render_ui_map_section()
+    except Exception:
+        pass
+
     # Cache for 5 minutes
     _prompt_cache["prompt"] = result
     _prompt_cache["expires"] = time.time() + _CACHE_TTL
@@ -735,7 +742,26 @@ async def get_system_prompt_with_brain(
     plus get_max_brain_context() for always-on live state.
     All interfaces (Telegram, Web, CC) go through this.
     """
+    try:
+        from .ui_map import set_current_user_message
+        set_current_user_message(user_message)
+    except Exception:
+        pass
+
     base_prompt = get_system_prompt()
+
+    try:
+        from .ui_map import find_in_app_reply, is_find_in_app_request
+        if is_find_in_app_request(user_message or ""):
+            hit = find_in_app_reply(user_message or "")
+            if hit:
+                base_prompt += (
+                    "\n\n=== THIS TURN: WHERE-IS LOOKUP (live UI map, no repo search) ===\n"
+                    f"{hit}\n"
+                    "Answer from that line. Do not call shell_execute or grep.\n"
+                )
+    except Exception:
+        pass
 
     # Always-on live context (session updates, git, health, tasks)
     live_context = get_max_brain_context()
@@ -772,7 +798,7 @@ async def get_system_prompt_with_brain(
     try:
         from app.services.max import answer_policy
         if answer_policy.model_first():
-            base_prompt += answer_policy.STYLE_DIRECTIVE
+            base_prompt += answer_policy.style_directive()
     except Exception as e:
         logger.debug(f"answer policy directive unavailable: {e}")
 

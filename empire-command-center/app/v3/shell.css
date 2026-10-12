@@ -8,7 +8,11 @@
 .v3-mono-e { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--v-rule); display: flex; align-items: center; justify-content: center;
   font-family: var(--font-playfair, 'Playfair Display'), Georgia, serif; font-size: 17px; color: var(--v-acc); font-style: italic; }
 .v3-wm { font-family: var(--font-playfair, 'Playfair Display'), Georgia, serif; font-size: 17px; letter-spacing: 0.36em; font-weight: 500; margin-left: 4px; color: var(--v-bandtx); text-decoration: none; white-space: nowrap; }
-.v3-tabs { display: flex; gap: 4px; margin-left: 44px; }
+.v3-band .v3-search { margin-left: 16px; display: flex; align-items: center; gap: 10px; width: 220px; height: 32px; padding: 0 8px 0 12px; border-radius: 8px;
+  border: 1px solid var(--v-bandline); background: rgba(255, 255, 255, 0.03); color: var(--v-bandmut); font: 400 12.5px/1 var(--v-sans); cursor: pointer; }
+.v3-band .v3-search:hover { border-color: var(--v-rule); color: var(--v-bandtx); }
+.v3-band .v3-search kbd { margin-left: auto; font: 500 10px/1 var(--v-mono); border: 1px solid var(--v-bandline); border-radius: 4px; padding: 3px 5px; color: var(--v-bandmut); }
+.v3-tabs { display: flex; gap: 4px; margin-left: 18px; }
 .v3-tabs a, .v3-tabs button { height: 30px; padding: 0 13px; border-radius: 7px; display: flex; align-items: center; font: 400 12.5px/1 var(--v-sans);
   color: var(--v-bandmut); background: transparent; border: 0; cursor: pointer; text-decoration: none; }
 .v3-tabs a:hover, .v3-tabs button:hover { color: var(--v-bandtx); }
@@ -67,6 +71,10 @@
 
 /* ---------- phone tab bar ---------- */
 .v3-tabbar { display: none; }
+@media (max-width: 900px) {
+  .v3-band .v3-search { width: 36px; min-width: 36px; padding: 0; justify-content: center; }
+  .v3-band .v3-search .us-ph, .v3-band .v3-search kbd { display: none; }
+}
 @media (max-width: 760px) {
   .v3 { --v-band-h: 50px; }
   .v3-rail { display: none; }

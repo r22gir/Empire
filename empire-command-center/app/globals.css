@@ -38,8 +38,27 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
   color: var(--text);
+  /* 100vh on iOS Safari is the large viewport (taller than visible).
+     100dvh is the visible viewport; 100vh is the fallback. */
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+}
+
+/* Max home (/) is a long document and a SIBLING of .cy-shell.v3
+   (page.tsx: MaxHome vs CommandCenterApp). Unlock body only for home.
+   Do NOT force height:auto on every child of the Command Center main
+   pane — that breaks inner scroll on jobs kanban, split panes, lists. */
+body:has([data-max-home]) {
+  overflow: auto;
+  height: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.cy-shell.v3:has([data-max-home]) {
+  height: auto;
+  max-height: none;
+  overflow: auto;
 }
 
 /* ═══ UNIFIED CARD SYSTEM ═══ */

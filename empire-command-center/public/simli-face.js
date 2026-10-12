@@ -140,17 +140,28 @@ export async function startSimliFace({ edition, video, base, onStatus }) {
   ws.binaryType = 'arraybuffer';
   const started = Date.now();
   let closed = false;
+  const maxSession = Number(session.max_session_length) || 600;
+  const maxIdle = Number(session.max_idle_time) || 60;
+  let idleTimer = null;
+  const armIdle = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => stop('idle'), maxIdle * 1000);
+  };
+  const capTimer = setTimeout(() => stop('cap'), maxSession * 1000);
   const stop = (source) => {
     if (closed) return;
     closed = true;
+    if (idleTimer) clearTimeout(idleTimer);
+    clearTimeout(capTimer);
     const seconds = Math.min(
       (Date.now() - started) / 1000,
-      session.max_session_length || 600,
+      maxSession,
     );
     reportSimliMinutes(edition, seconds, source || 'simli', root);
     try { ws.close(); } catch { /* ignore */ }
     try { pc.close(); } catch { /* ignore */ }
   };
+  armIdle();
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Simli socket timed out')), 8000);
     ws.onopen = () => {
@@ -184,6 +195,7 @@ export async function startSimliFace({ edition, video, base, onStatus }) {
     stop,
     sendPcm16(int16) {
       if (closed || ws.readyState !== WebSocket.OPEN || !int16) return;
+      armIdle();
       const bytes = int16 instanceof ArrayBuffer ? int16 : int16.buffer;
       ws.send(bytes);
     },

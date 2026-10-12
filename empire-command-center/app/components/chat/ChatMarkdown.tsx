@@ -7,6 +7,7 @@
 // - EST-YYYY-NNN quote numbers and [Ask Chief e](chief-e:ask) become actions
 import { Fragment, type MouseEvent, type ReactNode } from 'react';
 import { chiefEHref } from '../../lib/chiefE';
+import { isAppDeepLink, markdownLinkCount, safeUrl } from './safeUrl';
 
 type Block =
   | { t: 'h'; level: number; text: string }
@@ -17,8 +18,7 @@ type Block =
   | { t: 'hr' };
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
-const safeUrl = (u: string) => /^https?:\/\//i.test(u) ? u : '';
+const host = (u: string) => { try { return new URL(u, 'https://studio.empirebox.store').hostname.replace(/^www\./, ''); } catch { return u; } };
 
 function parse(src: string): Block[] {
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
@@ -73,6 +73,7 @@ function inline(raw: string, question: string): string {
     const u = safeUrl(url);
     if (!u) return esc(text);
     if (/^\d{1,2}$/.test(text.trim())) return keep(`<a class="cm-cite" href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="${esc(host(u))}">${esc(text.trim())}</a>`);
+    if (isAppDeepLink(u)) return keep(`<a class="cm-link cm-app" href="${esc(u)}">${esc(text)}</a>`);
     return keep(`<a class="cm-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`);
   });
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s)<]+[^\s)<.,;:!?'"])/g, (_, pre: string, u: string) => pre + keep(`<a class="cm-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(host(u))}</a>`));
@@ -84,7 +85,7 @@ function inline(raw: string, question: string): string {
   return s.replace(/\u0000(\d+)\u0000/g, (_, n) => slots[Number(n)]);
 }
 
-const linkCount = (s: string) => (s.match(/\]\(https?:\/\//g) || []).length;
+const linkCount = (s: string) => markdownLinkCount(s);
 const isSourceList = (b: Block, idx: number, all: Block[]) =>
   (b.t === 'ul' || b.t === 'ol') && b.items.length >= 2 && idx >= all.length - 3
   && b.items.filter(it => linkCount(it) >= 1 && it.replace(/\[[^\]]*\]\([^)]*\)/g, '').length < 220).length >= Math.ceil(b.items.length * 0.8);

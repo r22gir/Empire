@@ -6,18 +6,24 @@
  * Growth (goals / learning / projects stored per user, Max suggestions and Improvements from real data),
  * Today (schedule from job dates, pending approvals, reminders from tasks). Businesses live in the rail.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ArrowRight, Send, Mic, Pencil, Plus, X, Check, Cpu, TrendingUp, Wrench, Home as HomeIcon, Heart, Layers, BookOpen, Target, Sparkles,
-  CalendarDays, Bell, Minus, Search, Globe,
+  CalendarDays, Bell, Minus, Search, Globe, Monitor, Video, MessageCircle, Archive,
 } from 'lucide-react';
 import { NAV_GROUPS } from '../layout/LeftNav';
 import type { NavItem } from '../layout/LeftNav';
-import { Orb, Wave, RingProgress, Backdrop, Empty } from '../../v3/ui';
+import { Wave, RingProgress, Backdrop, Empty } from '../../v3/ui';
 import { V3Band, V3Rail, BusinessesSheet, V3TabBar } from '../../v3/Shell';
+import UniversalSearch from '../search/UniversalSearch';
+import type { SearchHit } from '../../lib/universal-search';
+import { API } from '../../lib/api';
 import type { SheetGroup } from '../../v3/Shell';
 import { EDITION } from '../../v3/edition';
+import LiveVoiceCall from '../LiveVoiceCall';
+import HomeFace from './HomeFace';
+import type { HomeFaceHandle } from './HomeFace';
 import { useHomeData, dayLabel } from './useHomeData';
 import type { PulseItem } from './useHomeData';
 import { useHomeStore, newId } from './useHomeStore';
@@ -55,9 +61,20 @@ const pct = (it: HomeItem) => (it.total ? Math.min(1, (it.done || 0) / it.total)
 
 /* ---------------------------------------------------------------- hero */
 
+const HOME_QUICK: { id: string; label: string; href: string; icon: ReactNode }[] = [
+  { id: 'avatar', label: 'MAX Avatar', href: '/?screen=presentation', icon: <Monitor size={13} /> },
+  { id: 'presentation', label: 'Presentation', href: '/?screen=presentation&mode=presentation', icon: <Monitor size={13} /> },
+  { id: 'video', label: 'Video Call', href: '/?screen=video', icon: <Video size={13} /> },
+  { id: 'telegram', label: 'Telegram', href: '/?screen=telegram', icon: <MessageCircle size={13} /> },
+  { id: 'memory', label: 'Memory Bank', href: '/?screen=memory-bank', icon: <Archive size={13} /> },
+  { id: 'tasks', label: 'Tasks', href: '/?screen=tasks', icon: <CalendarDays size={13} /> },
+  { id: 'research', label: 'Research desk', href: '/?screen=research', icon: <Globe size={13} /> },
+];
+
 function Hero({ d, interests }: { d: ReturnType<typeof useHomeData>; interests: HomeItem[] }) {
   const [q, setQ] = useState('');
   const [narrow, setNarrow] = useState(false);
+  const faceRef = useRef<HomeFaceHandle>(null);
   useEffect(() => { const mq = window.matchMedia('(max-width: 760px)'); const on = () => setNarrow(mq.matches); on(); mq.addEventListener('change', on); return () => mq.removeEventListener('change', on); }, []);
   const f = d.figures;
   const brief: ReactNode[] = [];
@@ -73,7 +90,7 @@ function Hero({ d, interests }: { d: ReturnType<typeof useHomeData>; interests: 
   return (
     <div className="mh-hero-top">
       <div className="mh-orbcol">
-        <a href="/?product=owner" aria-label={`Talk to ${EDITION.assistantName}`} className="mh-orb"><Orb size={176} /></a>
+        <HomeFace ref={faceRef} size={narrow ? 84 : 176} />
         <Wave n={30} h={20} />
         <div className="mh-listen"><span className={`v3-dot ${d.maxOk === false ? 'bad' : d.maxOk ? 'on' : ''}`} />{EDITION.assistantName.toUpperCase()} · {status}</div>
       </div>
@@ -91,6 +108,17 @@ function Hero({ d, interests }: { d: ReturnType<typeof useHomeData>; interests: 
             : <a href="/?product=owner" className="mic" aria-label={`Open ${EDITION.assistantName} chat`}><Mic size={15} /></a>}
         </form>
         <div className="mh-chips">{chips.map(c => <a key={c} href={askHref(c)} className="v3-chip">{c}</a>)}</div>
+        <div className="mh-hero-actions" data-testid="mh-hero-actions">
+          <LiveVoiceCall variant="hero" label="Talk" onStart={() => faceRef.current?.start()} />
+          <a href="/?screen=presentation&mode=presentation" className="v3-btn pri mh-hero-btn" data-testid="mh-presentation">Presentation mode</a>
+        </div>
+        <nav className="mh-quick" aria-label="Quick actions" data-testid="mh-quick-actions">
+          {HOME_QUICK.map(item => (
+            <a key={item.id} href={item.href} className="v3-chip mh-quick-item">
+              {item.icon}{item.label}
+            </a>
+          ))}
+        </nav>
       </div>
       <aside className="mh-working" aria-label={`${EDITION.assistantName} is working on`}>
         <div className="mh-wh"><span className="v3-kick">{EDITION.assistantName} is working on</span></div>
@@ -309,6 +337,7 @@ export default function MaxHome() {
   const d = useHomeData();
   const store = useHomeStore(EDITION.homeUser);
   const [sheet, setSheet] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [tab, setTab] = useState('max');
   const closeSheet = useCallback(() => setSheet(false), []);
   // Old hash deep links (/#presentation, /#pricing-studio …) belong to the classic app.
@@ -321,10 +350,41 @@ export default function MaxHome() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   const badges = { finance: !!d.figures.overdueCount, lead: !!d.figures.approvals };
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setSearchOpen(v => !v);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+  const openHit = (hit: SearchHit) => {
+    if (hit.action?.kind === 'call' && hit.action.phone) {
+      window.location.href = `tel:${hit.action.phone}`;
+      return;
+    }
+    const href = hit.action?.href || hit.href;
+    if (href) window.location.assign(href);
+  };
+  const draftHit = async (hit: SearchHit) => {
+    try {
+      const res = await fetch(`${API}/universal-search/draft-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mail_id: hit.action?.mail_id || '', source: hit.action?.source || 'gmail' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      window.location.assign(data.href || '/?product=lead&section=approvals');
+    } catch {
+      window.location.assign('/?product=lead&section=approvals');
+    }
+  };
   return (
     <div className="v3 mh-root" data-max-home>
       <Backdrop />
-      <V3Band active={tab} notifications={d.figures.approvals || 0} tabs={[
+      <V3Band active={tab} notifications={d.figures.approvals || 0} onSearch={() => setSearchOpen(true)} tabs={[
         { key: 'max', label: EDITION.assistantName, onClick: () => go('max') },
         { key: 'research', label: 'Research', onClick: () => go('research') },
         { key: 'growth', label: 'Growth', onClick: () => go('growth') },
@@ -346,6 +406,12 @@ export default function MaxHome() {
       </main>
       <V3TabBar active={tab} onPick={go} todayBadge={d.figures.approvals || 0} />
       <BusinessesSheet open={sheet} onClose={closeSheet} groups={groups} />
+      <UniversalSearch
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onOpen={openHit}
+        onDraftReply={draftHit}
+      />
     </div>
   );
 }

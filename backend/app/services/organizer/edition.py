@@ -164,6 +164,12 @@ def resolve_edition(requested: Optional[str] = None) -> str:
     return current
 
 
+def is_family_edition(edition: Optional[str] = None) -> bool:
+    """Max-e, Maxine, and unknown editions — never Workroom / main data."""
+    ed = edition or process_edition()
+    return ed in ("max_e", "maxine", "unknown")
+
+
 def can_read_business_directory(edition: Optional[str] = None) -> bool:
     return bool(edition_meta(edition).get("allows_business_directory"))
 

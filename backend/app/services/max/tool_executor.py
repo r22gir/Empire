@@ -626,6 +626,13 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "open_invoice": "open_record",
             "show_quote": "open_record",
             "show_invoice": "open_record",
+            "where_is": "find_in_app",
+            "find_in_ui": "find_in_app",
+            "locate_screen": "find_in_app",
+            "find": "search",
+            "lookup": "search",
+            "universal_search": "search",
+            "find_record": "search",
             "edit_quote_line": "edit_quote_lines",
             "move_quote_line": "edit_quote_lines",
             "quote_to_invoice": "convert_quote_to_invoice",
@@ -695,6 +702,16 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             logger.info(f"Auto-corrected tool '{tool_name}' → '{corrected}'")
             tool_name = corrected
             tool_call["tool"] = corrected
+
+        if tool_name == "shell_execute":
+            try:
+                from app.services.max.ui_map import refuse_shell_search
+                _cmd = str(tool_call.get("command") or (tool_call.get("parameters") or {}).get("command") or "")
+                _blocked = refuse_shell_search(_cmd)
+            except Exception:
+                _blocked = None
+            if _blocked:
+                return ToolResult(tool="shell_execute", success=False, error=_blocked)
 
         # ── FOUNDER access_controller BYPASS only ──
         # H81 Phase 2 (2026-09-01): founder still bypasses the
@@ -5962,6 +5979,27 @@ def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
     founder = params.get("_founder", False)
     channel = params.get("_channel")
 
+    # Live UI map: never grep stale builds (.next / .next.prev / node_modules)
+    # for "where is X / how do I open X". Those answers come from ui_map.
+    try:
+        from app.services.max.ui_map import refuse_shell_search
+        blocked_search = refuse_shell_search(command)
+    except Exception:
+        blocked_search = None
+    if blocked_search:
+        tr = ToolResult(tool="shell_execute", success=False, error=blocked_search)
+        log_execution(
+            "shell_execute",
+            {"command": command},
+            "blocked:ui_map_search",
+            access_level=2,
+            desk=desk,
+            success=False,
+            channel=channel,
+            founder=founder,
+        )
+        return tr
+
     # Safety checks — block dangerous patterns (always enforced, even for founder)
     for blocked in BLOCKED_PATTERNS:
         if blocked in command:
@@ -8625,6 +8663,24 @@ try:
     TOOLS_DOC = TOOLS_DOC + _tools_outlook.OUTLOOK_TOOLS_DOC
 except Exception as _outlook_err:  # never take Max down over an optional tool pack
     logger.error(f"tools_outlook not loaded: {_outlook_err}")
+
+# Universal search — screens + owner records (quotes, jobs, people, mail).
+try:
+    _search_name = "app.services.max.tools_search"
+    _tools_search = (_importlib.reload(_sys.modules[_search_name]) if _search_name in _sys.modules
+                     else _importlib.import_module(_search_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_search.SEARCH_TOOLS_DOC
+except Exception as _search_err:
+    logger.error(f"tools_search not loaded: {_search_err}")
+
+# Live UI map — "where is X / how do I open X" (no repo grep).
+try:
+    _ui_map_name = "app.services.max.tools_ui_map"
+    _tools_ui_map = (_importlib.reload(_sys.modules[_ui_map_name]) if _ui_map_name in _sys.modules
+                     else _importlib.import_module(_ui_map_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_ui_map.UI_MAP_TOOLS_DOC
+except Exception as _ui_map_err:
+    logger.error(f"tools_ui_map not loaded: {_ui_map_err}")
 
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))

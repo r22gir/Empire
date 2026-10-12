@@ -26,7 +26,11 @@
 .v3-band.app .br > div > div.absolute { color: var(--text); font-family: var(--v-sans); }
 .v3-band.app select, .v3-band.app .br > div:not(.relative) button:not(.th-seg) { color: var(--v-bandtx); }
 @media (max-width: 1100px) { .v3-band.app .v3-search { width: 200px; } }
-@media (max-width: 900px) { .v3-band.app .v3-search { display: none; } .v3-band.app .v3-modelbtn .prov { display: none; } }
+@media (max-width: 900px) {
+  .v3-band.app .v3-search { display: inline-flex; width: 36px; min-width: 36px; padding: 0; justify-content: center; }
+  .v3-band.app .v3-search .us-ph, .v3-band.app .v3-search span, .v3-band.app .v3-search kbd { display: none; }
+  .v3-band.app .v3-modelbtn .prov { display: none; }
+}
 @media (max-width: 767px) {
   .v3-band.app { padding: 0 10px 0 12px; }
   .v3-band.app .logo { display: none; }
