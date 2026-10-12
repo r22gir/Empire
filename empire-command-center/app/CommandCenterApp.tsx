@@ -9,7 +9,8 @@ import TopBar from './components/layout/TopBar';
 import LeftNav from './components/layout/LeftNav';
 import RightPanel from './components/layout/RightPanel';
 import BottomBar from './components/layout/BottomBar';
-import QuickSwitch from './components/layout/QuickSwitch';
+import UniversalSearch from './components/search/UniversalSearch';
+import type { SearchHit } from './lib/universal-search';
 import ActiveJobBanner from './components/ActiveJobBanner';
 
 import ChatScreen from './components/screens/ChatScreen';
@@ -581,19 +582,32 @@ export default function CommandCenter() {
     setActiveScreen('chat');
   }, [chat, setActiveScreen]);
 
-  const handleQuickSwitchSelect = useCallback((screen: string) => {
-    // N2: capture current state before navigating via QuickSwitch.
+  const handleSearchOpen = useCallback((hit: SearchHit) => {
     pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
-    if (screen === 'workroom-page') { setActiveProduct('workroom'); setActiveScreen('dashboard'); }
-    else if (screen === 'craft-page') { setActiveProduct('craft'); setActiveScreen('dashboard'); }
-    else if (screen === 'platform-page') { setActiveProduct('platform'); setActiveScreen('dashboard'); }
-    else if (screen === 'presentation') { setActiveProduct('max-avatar'); setActiveScreen('presentation'); }
-    else if (screen === 'dev' || screen === 'dev-panel') { setActiveProduct('dev'); setActiveScreen('dev'); }
-    else if (screen === 'recovery') { setActiveProduct('recovery'); setActiveScreen('dashboard'); }
-    else if (screen === 'relist') { setActiveProduct('relist'); setActiveScreen('dashboard'); }
-    else if (screen === 'apost-page' || screen === 'apostapp') { setActiveProduct('apost'); setActiveScreen('dashboard'); }
-    else handleScreenChange(screen);
-  }, [activeProduct, activeScreen, activeSection, handleScreenChange, pushHistory]);
+    if (hit.action?.kind === 'call' && hit.action.phone) {
+      window.location.href = `tel:${hit.action.phone}`;
+      return;
+    }
+    const href = hit.action?.href || hit.href;
+    if (href) window.location.assign(href);
+  }, [activeProduct, activeScreen, activeSection, pushHistory]);
+
+  const handleSearchDraft = useCallback(async (hit: SearchHit) => {
+    try {
+      const res = await fetch(`${API}/universal-search/draft-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mail_id: hit.action?.mail_id || '',
+          source: hit.action?.source || 'gmail',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      window.location.assign(data.href || '/?product=lead&section=approvals');
+    } catch {
+      window.location.assign('/?product=lead&section=approvals');
+    }
+  }, []);
 
   const renderCenterContent = () => {
     // Dashboard renders product-specific pages
@@ -782,10 +796,11 @@ export default function CommandCenter() {
 
       <DocViewerHost />
 
-      <QuickSwitch
+      <UniversalSearch
         open={showQuickSwitch}
         onClose={() => setShowQuickSwitch(false)}
-        onSelect={handleQuickSwitchSelect}
+        onOpen={handleSearchOpen}
+        onDraftReply={handleSearchDraft}
       />
     </div>
   );

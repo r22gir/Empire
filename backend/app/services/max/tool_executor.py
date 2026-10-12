@@ -629,6 +629,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "where_is": "find_in_app",
             "find_in_ui": "find_in_app",
             "locate_screen": "find_in_app",
+            "find": "search",
+            "lookup": "search",
+            "universal_search": "search",
+            "find_record": "search",
             "edit_quote_line": "edit_quote_lines",
             "move_quote_line": "edit_quote_lines",
             "quote_to_invoice": "convert_quote_to_invoice",
@@ -8547,6 +8551,15 @@ try:
     TOOLS_DOC = TOOLS_DOC + _tools_outlook.OUTLOOK_TOOLS_DOC
 except Exception as _outlook_err:  # never take Max down over an optional tool pack
     logger.error(f"tools_outlook not loaded: {_outlook_err}")
+
+# Universal search — screens + owner records (quotes, jobs, people, mail).
+try:
+    _search_name = "app.services.max.tools_search"
+    _tools_search = (_importlib.reload(_sys.modules[_search_name]) if _search_name in _sys.modules
+                     else _importlib.import_module(_search_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_search.SEARCH_TOOLS_DOC
+except Exception as _search_err:
+    logger.error(f"tools_search not loaded: {_search_err}")
 
 # Live UI map — "where is X / how do I open X" (no repo grep).
 try:

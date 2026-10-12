@@ -16,6 +16,9 @@ import { NAV_GROUPS } from '../layout/LeftNav';
 import type { NavItem } from '../layout/LeftNav';
 import { Wave, RingProgress, Backdrop, Empty } from '../../v3/ui';
 import { V3Band, V3Rail, BusinessesSheet, V3TabBar } from '../../v3/Shell';
+import UniversalSearch from '../search/UniversalSearch';
+import type { SearchHit } from '../../lib/universal-search';
+import { API } from '../../lib/api';
 import type { SheetGroup } from '../../v3/Shell';
 import { EDITION } from '../../v3/edition';
 import LiveVoiceCall from '../LiveVoiceCall';
@@ -326,6 +329,7 @@ export default function MaxHome() {
   const d = useHomeData();
   const store = useHomeStore(EDITION.homeUser);
   const [sheet, setSheet] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [tab, setTab] = useState('max');
   const closeSheet = useCallback(() => setSheet(false), []);
   // Old hash deep links (/#presentation, /#pricing-studio …) belong to the classic app.
@@ -338,10 +342,41 @@ export default function MaxHome() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   const badges = { finance: !!d.figures.overdueCount, lead: !!d.figures.approvals };
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setSearchOpen(v => !v);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+  const openHit = (hit: SearchHit) => {
+    if (hit.action?.kind === 'call' && hit.action.phone) {
+      window.location.href = `tel:${hit.action.phone}`;
+      return;
+    }
+    const href = hit.action?.href || hit.href;
+    if (href) window.location.assign(href);
+  };
+  const draftHit = async (hit: SearchHit) => {
+    try {
+      const res = await fetch(`${API}/universal-search/draft-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mail_id: hit.action?.mail_id || '', source: hit.action?.source || 'gmail' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      window.location.assign(data.href || '/?product=lead&section=approvals');
+    } catch {
+      window.location.assign('/?product=lead&section=approvals');
+    }
+  };
   return (
     <div className="v3 mh-root" data-max-home>
       <Backdrop />
-      <V3Band active={tab} notifications={d.figures.approvals || 0} tabs={[
+      <V3Band active={tab} notifications={d.figures.approvals || 0} onSearch={() => setSearchOpen(true)} tabs={[
         { key: 'max', label: EDITION.assistantName, onClick: () => go('max') },
         { key: 'research', label: 'Research', onClick: () => go('research') },
         { key: 'growth', label: 'Growth', onClick: () => go('growth') },
@@ -363,6 +398,12 @@ export default function MaxHome() {
       </main>
       <V3TabBar active={tab} onPick={go} todayBadge={d.figures.approvals || 0} />
       <BusinessesSheet open={sheet} onClose={closeSheet} groups={groups} />
+      <UniversalSearch
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onOpen={openHit}
+        onDraftReply={draftHit}
+      />
     </div>
   );
 }
