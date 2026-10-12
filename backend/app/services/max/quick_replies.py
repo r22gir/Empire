@@ -298,6 +298,13 @@ def direct_reply(message: str, *, channel: str = "web", has_image: bool = False)
         return {"text": greeting_reply(), "skill": "greeting"}
     if is_docs_location_request(message):
         return {"text": docs_location_reply(channel), "skill": "docs_location"}
+    try:
+        from app.services.max.ui_map import find_in_app_reply
+        _where = find_in_app_reply(message)
+    except Exception:
+        _where = None
+    if _where:
+        return {"text": _where, "skill": "find_in_app"}
     try:  # 2026-10-06 model first: only an exact EST number is answered here; names go to the model + search_quotes
         from app.services.max import answer_policy
         if answer_policy.model_first() and not answer_policy.is_exact_quote_lookup(message):
