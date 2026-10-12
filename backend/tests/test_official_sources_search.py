@@ -18,8 +18,6 @@ from app.services.max.official_search.pipeline import (
 )
 from app.services.max.official_search.providers import (
     BraveProvider,
-    DuckDuckGoProvider,
-    ExaProvider,
     ProviderError,
     SearchHit,
     SearchProvider,

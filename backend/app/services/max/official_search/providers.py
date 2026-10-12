@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional
 from urllib.parse import unquote
 
@@ -16,7 +16,6 @@ from app.services.max.official_search.config import (
     brave_goggles,
     edition_key,
     env_bool,
-    env_flag,
 )
 
 logger = logging.getLogger("max.official_search.providers")
