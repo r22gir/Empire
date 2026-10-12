@@ -9,6 +9,7 @@ import pytest
 from app.services.max.brief_filters import (
     DEFAULT_TEST_CLIENT_PATTERNS,
     dedupe_mail,
+    family_ticket_title,
     filter_followup_quotes,
     filter_real_money,
     format_et,
@@ -16,6 +17,7 @@ from app.services.max.brief_filters import (
     is_flagged_test,
     is_noise_client,
     is_promotional_mail,
+    is_self_sent_mail,
     is_test_family_ticket,
     keep_founder_decision,
     mail_account_label,
@@ -174,6 +176,12 @@ def test_test_client_patterns_are_one_configurable_list():
     assert is_noise_client("MOCK-SWEEP-014")
     assert is_noise_client("Jane Smith")
     assert is_noise_client("Customer")
+    assert "LiveProof" in DEFAULT_TEST_CLIENT_PATTERNS
+    assert "ManualLine" in DEFAULT_TEST_CLIENT_PATTERNS
+    assert "MAX *" in DEFAULT_TEST_CLIENT_PATTERNS
+    assert is_noise_client("LiveProof")
+    assert is_noise_client("ManualLine")
+    assert is_noise_client("MAX drapery smoke")
     assert not is_noise_client("Nelma Rivera")
     assert is_flagged_test({"customer": "Woodcraft", "is_test": 1})
     assert not is_flagged_test({"customer": "Nelma Rivera", "is_test": 0})
@@ -291,6 +299,47 @@ def test_mail_filters_promo_bank_dedupe_and_labels_account(seeded_db):
             "unread": True,
             "account": "outlook",
         },
+        {
+            "source": "gmail",
+            "message_id": "brief-1",
+            "from": "MAX — Empire AI <max@empirebox.store>",
+            "subject": "Empire Morning Brief",
+            "date": "2026-10-12T08:00:00",
+            "preview": "Today and this week",
+        },
+        {
+            "source": "gmail",
+            "message_id": "amp-access",
+            "from": "empirebox2026@gmail.com",
+            "subject": "Tu acceso a AMP",
+            "date": "2026-10-11T03:00:00",
+            "preview": "Tu enlace",
+        },
+        {
+            "source": "gmail",
+            "message_id": "ayuda-1",
+            "from": "MAX — Empire AI <max@empirebox.store>",
+            "subject": "Ayuda de Max-e",
+            "date": "2026-10-11T02:00:00",
+            "preview": "Nueva solicitud",
+        },
+        {
+            "source": "gmail",
+            "message_id": "hpm-1",
+            "from": "High Point Market <invite@highpointmarket.org>",
+            "subject": "High Point Market — you're invited",
+            "date": "2026-10-10T12:00:00",
+            "preview": "Join us for market week",
+        },
+        {
+            "source": "outlook",
+            "message_id": "zelle-wait",
+            "from": "Bank of America <alerts@bofa.com>",
+            "subject": "You received a Zelle payment",
+            "date": "2026-10-11T05:05:00",
+            "preview": "Zelle from a customer",
+            "unread": False,
+        },
     ]
     try:
         snap = snapshot(seeded_db)
@@ -304,11 +353,16 @@ def test_mail_filters_promo_bank_dedupe_and_labels_account(seeded_db):
         assert "Pro Xtra rewards" not in subjects
         assert "You received a Zelle payment" not in subjects
         assert "Mobile deposit received" not in subjects
+        assert "Empire Morning Brief" not in subjects
+        assert "Tu acceso a AMP" not in subjects
+        assert "Ayuda de Max-e" not in subjects
+        assert "High Point Market — you're invited" not in subjects
         labels = {m["name"]: m.get("account_label") for m in snap["pending_mail"]}
         assert labels["Install date?"] == "Business Gmail"
         assert labels["Fabric confirmation"] == "Outlook/Nelma"
         bank_names = [m["name"] for m in snap["bank_notices"]]
         assert "You received a Zelle payment" in bank_names
+        assert bank_names.count("You received a Zelle payment") == 1
         assert "Mobile deposit received" in bank_names
         text = render_brief_plain(build_brief_sections(snap, now=seeded_db, service_rows=[]), seeded_db)
         assert "Business Gmail" in text
@@ -397,9 +451,10 @@ def test_decisions_dedupe_and_drop_backlog(seeded_db):
     assert "2 stale tasks >30d" in text
 
 
-def test_family_follows_exact_dell_symlinks_and_keeps_founder_inbox(
+def test_family_reads_help_db_new_only_and_ignores_empire_db(
     isolated_empire_db, tmp_path, seeded_db,
 ):
+    from app.db.database import get_db
     from app.services.max.desks.family_help_store import list_open_tickets, write_ticket_for_tests
 
     # Exact live layout: /data/family-help/amp → /data/amp/family-help/amp
@@ -412,39 +467,65 @@ def test_family_follows_exact_dell_symlinks_and_keeps_founder_inbox(
     (base / "amp").symlink_to(real_amp)
     (base / "maxine").symlink_to(real_max)
 
+    stamp = seeded_db.strftime("%Y-%m-%dT%H:%M:%SZ")
     write_ticket_for_tests(
         edition="amp", ticket_id="fh-78b2ef984df6", sender="Amp",
-        message="Need a ride to practice", created_at=seeded_db.isoformat(),
-        base=base,
+        message="ride",
+        transcript="Need a ride to practice this afternoon",
+        created_at=stamp, base=base,
+        attachments=[{"kind": "voice", "filename": "ride.webm"}],
     )
     write_ticket_for_tests(
-        edition="maxine", ticket_id="fh-297d9c540399", sender="Maxine",
-        message="Help with homework", created_at=seeded_db.isoformat(),
-        base=base,
+        edition="amp", ticket_id="fh-297d9c540399", sender="Amp",
+        message="homework help tonight please",
+        created_at=stamp, base=base,
     )
     write_ticket_for_tests(
         edition="amp", ticket_id="fh-d2f629e91a6d",
         sender="empirebox2026@gmail.com",
-        message="School form", created_at=seeded_db.isoformat(),
-        base=base, filename="fh-d2f629e91a6d.json",
+        message="form",
+        transcript="School form needs a signature",
+        created_at=stamp, base=base,
+        attachments=[{"kind": "image", "filename": "form.jpg"}],
+    )
+    write_ticket_for_tests(
+        edition="maxine", ticket_id="fh-max-answered", sender="Maxine",
+        message="Help with homework", status="answered",
+        created_at=stamp, base=base,
     )
     write_ticket_for_tests(
         edition="amp", ticket_id="fh-test-emp", sender="empirebox2026@gmail.com",
-        message="TEST family ticket", created_at=seeded_db.isoformat(),
-        base=base,
+        message="TEST family ticket", created_at=stamp, base=base,
     )
+    (real_amp / "noise.json").write_text(
+        '{"id":"fh-json","message":"un saludo de prueba","status":"new"}',
+        encoding="utf-8",
+    )
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO family_help_tickets (id, requester, subject, status, created_at)
+               VALUES ('emp-prueba', 'Gmail', 'un saludo de prueba', 'open', ?)""",
+            (stamp,),
+        )
+
     items = list_open_tickets(base=base)
-    ids = [i["id"] for i in items]
-    assert "fh-78b2ef984df6" in ids
-    assert "fh-297d9c540399" in ids
-    assert "fh-d2f629e91a6d" in ids
-    assert "fh-test-emp" not in ids
-    assert not is_test_family_ticket({
-        "id": "fh-d2f629e91a6d",
-        "customer": "empirebox2026@gmail.com",
-        "name": "School form",
-        "message": "School form",
-    })
+    amp_new = [i for i in items if i["edition"] == "amp" and i["status"] == "new"]
+    assert [i["id"] for i in amp_new] == [
+        "fh-78b2ef984df6", "fh-297d9c540399", "fh-d2f629e91a6d",
+    ]
+    assert all(i["edition_label"] == "Max-e" for i in amp_new)
+    assert all(i["customer"] == "Max-e" for i in amp_new)
+    assert not any(i["id"] == "fh-max-answered" for i in items)
+    assert not any("un saludo de prueba" in (i.get("name") or "") for i in items)
+    ride = next(i for i in amp_new if i["id"] == "fh-78b2ef984df6")
+    assert ride["name"] == "Need a ride to practice this afternoon [voice]"
+    form = next(i for i in amp_new if i["id"] == "fh-d2f629e91a6d")
+    assert form["name"] == "School form needs a signature [image]"
+
+    snap = snapshot(seeded_db)
+    names = [i["name"] for i in snap["family_tickets"]]
+    assert "un saludo de prueba" not in names
+    assert not any("prueba" in (n or "").lower() for n in names)
 
 
 def test_calendar_next_14_days_and_even_bullets(seeded_db):
@@ -566,12 +647,36 @@ def test_filter_helpers_unit():
     ]) == 1
     assert format_et("2026-10-13 09:00:00") == "Tue Oct 13, 9 AM"
     assert format_et(datetime(2026, 10, 13, 9, 30, 0)) == "Tue Oct 13, 9:30 AM"
+    assert is_noise_client("LiveProof")
+    assert is_noise_client("ManualLine")
+    assert is_noise_client("MAX drapery smoke")
+    assert is_promotional_mail({
+        "from": "invite@highpointmarket.org",
+        "subject": "High Point Market April",
+    })
+    assert is_self_sent_mail({
+        "from": "MAX — Empire AI <max@empirebox.store>",
+        "subject": "Empire Morning Brief",
+    })
+    assert is_self_sent_mail({
+        "from": "empirebox2026@gmail.com",
+        "subject": "Tu acceso a AMP",
+    })
+    assert not is_self_sent_mail({"from": "Marley <marley@example.com>", "subject": "Install"})
+    assert family_ticket_title(
+        transcript="Need a ride to practice this afternoon\nMore detail",
+        message="ride",
+        attachment_kinds=["voice"],
+    ) == "Need a ride to practice this afternoon [voice]"
+    assert is_test_family_ticket({"name": "un saludo de prueba", "message": "un saludo de prueba"})
     money = filter_real_money([
         {"name": "A", "customer": "Nelma Rivera", "amount": 100, "age_days": 1},
         {"name": "B", "customer": "Test Client", "amount": 50, "age_days": 2},
         {"name": "C", "customer": "Nelma Rivera", "amount": 0, "age_days": 3},
         {"name": "D", "customer": "Jane Smith", "amount": 80, "age_days": 1},
         {"name": "E", "customer": "Woodcraft", "amount": 90, "age_days": 1, "is_test": 1},
+        {"name": "F", "customer": "LiveProof", "amount": 70, "age_days": 1},
+        {"name": "G", "customer": "MAX drapery smoke", "amount": 60, "age_days": 1},
     ])
     assert [m["name"] for m in money] == ["A"]
     quotes = filter_followup_quotes([
@@ -585,4 +690,24 @@ def test_filter_helpers_unit():
         {"name": "A", "thread_id": "t1", "id": "1"},
         {"name": "B", "thread_id": "t1", "id": "2"},
         {"name": "C", "id": "3"},
-    ])] == ["A", "C"]
+        {"name": "Zelle payment", "id": "g1", "source": "gmail", "status": "unanswered"},
+        {"name": "Zelle payment", "id": "o1", "source": "outlook", "status": "waiting"},
+    ])] == ["A", "C", "Zelle payment"]
+
+
+def test_schedule_other_production_start_maps_to_production(seeded_db):
+    from app.db.database import get_db
+
+    now = seeded_db
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO schedule_events
+               (id, type, title, customer_vendor, start_time, status, created_by)
+               VALUES ('ev-prod', 'other', 'Nelma production start', 'Nelma Rivera', ?, 'confirmed', 'max')""",
+            ((now + timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+    items = snapshot(now)["schedule_today"]
+    prod = next(i for i in items if i["id"] == "ev-prod")
+    assert prod["type"] == "production"
+    text = render_brief_plain(build_brief_sections(snapshot(now), now=now, service_rows=[]), now)
+    assert "production" in text

@@ -60,10 +60,15 @@ def _seed(conn, now: datetime):
            VALUES ('mail-1', 'Carlos Vega', 'carlos@example.com', 'Fabric question', 'email', 'pending', ?)""",
         ((now - timedelta(days=1)).isoformat(),),
     )
-    conn.execute(
-        """INSERT INTO family_help_tickets (id, requester, subject, status, created_at)
-           VALUES ('fam-1', 'Amp', 'School pickup tomorrow', 'open', ?)""",
-        (now.isoformat(),),
+    from app.services.max.desks.family_help_store import inbox_base, write_ticket_for_tests
+
+    write_ticket_for_tests(
+        edition="amp",
+        ticket_id="fam-1",
+        sender="Amp",
+        message="School pickup tomorrow",
+        created_at=now.isoformat(),
+        base=inbox_base(),
     )
     conn.execute(
         """INSERT INTO tasks (id, title, description, status, priority, desk, created_by, created_at)

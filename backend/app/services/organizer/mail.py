@@ -256,9 +256,13 @@ def decorate_message(conn, msg: dict, state: Optional[dict]) -> Optional[dict]:
     blob = " ".join(str(msg.get(k) or "") for k in ("from", "to", "subject", "preview"))
     if contains_blocked_term(blob):
         return None
-    from app.services.max.brief_filters import is_promotional_mail, mail_account_label
+    from app.services.max.brief_filters import (
+        is_promotional_mail,
+        is_self_sent_mail,
+        mail_account_label,
+    )
 
-    if is_promotional_mail(msg):
+    if is_promotional_mail(msg) or is_self_sent_mail(msg):
         return None
     linked = _link(conn, msg)
     space = normalize_space(state.get("space_id") if state and state.get("space_id") else linked.get("space_id"))

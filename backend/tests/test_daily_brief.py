@@ -178,6 +178,8 @@ def test_brief_family_from_help_store(seeded_db):
     text = sections["other_areas"]["text"]
     assert "Need a ride to practice" in text
     assert "Help with homework" in text
+    assert "Max-e" in text
+    assert "Maxine" in text
     assert "Family:" in text
 
 

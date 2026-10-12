@@ -21,6 +21,7 @@ from app.services.max.brief_filters import (
     filter_real_money,
     is_bank_notice,
     is_promotional_mail,
+    is_self_sent_mail,
     is_test_family_ticket,
     mail_account_label,
 )
@@ -335,6 +336,14 @@ def query_jobs(conn: sqlite3.Connection, statuses: Iterable[str] | None = None) 
     return findings
 
 
+def _schedule_type(row: dict) -> str | None:
+    typ = row.get("event_kind") or row.get("type")
+    title = str(row.get("title") or row.get("name") or "")
+    if str(typ or "").lower() == "other" and "production start" in title.lower():
+        return "production"
+    return typ
+
+
 def query_schedule(conn: sqlite3.Connection, start: datetime, end: datetime) -> list[dict]:
     """Today / this week from schedule_events (Organizer calendar) plus
     organizer_items that have a start/due in the window and are not already
@@ -371,7 +380,7 @@ def query_schedule(conn: sqlite3.Connection, start: datetime, end: datetime) -> 
                 "id": row.get("id"),
                 "name": row.get("title") or row.get("id"),
                 "customer": row.get("customer_vendor") or "Unknown",
-                "type": row.get("event_kind") or row.get("type"),
+                "type": _schedule_type(row),
                 "start_time": row.get("start_time"),
                 "status": row.get("status"),
                 "location": row.get("location_address"),
@@ -443,16 +452,20 @@ def query_overdue_schedule(conn: sqlite3.Connection, now: datetime | None = None
         """,
         (now.strftime("%Y-%m-%d %H:%M:%S"),),
     ).fetchall()
-    return [{
-        "kind": "schedule_overdue",
-        "id": r["id"] if isinstance(r, sqlite3.Row) else r[0],
-        "name": (r["title"] if isinstance(r, sqlite3.Row) else r[2]) or "",
-        "customer": (r["customer_vendor"] if isinstance(r, sqlite3.Row) else r[3]) or "Unknown",
-        "type": r["type"] if isinstance(r, sqlite3.Row) else r[1],
-        "start_time": r["start_time"] if isinstance(r, sqlite3.Row) else r[4],
-        "status": r["status"] if isinstance(r, sqlite3.Row) else r[5],
-        "age_days": _days_old(r["start_time"] if isinstance(r, sqlite3.Row) else r[4], now),
-    } for r in rows]
+    findings = []
+    for raw in rows:
+        row = _row_dict(raw)
+        findings.append({
+            "kind": "schedule_overdue",
+            "id": row.get("id"),
+            "name": row.get("title") or "",
+            "customer": row.get("customer_vendor") or "Unknown",
+            "type": _schedule_type(row),
+            "start_time": row.get("start_time"),
+            "status": row.get("status"),
+            "age_days": _days_old(row.get("start_time"), now),
+        })
+    return findings
 
 
 # ── Tasks / stuck / approvals ─────────────────────────────────────
@@ -617,7 +630,7 @@ def _collect_mailbox(conn: sqlite3.Connection) -> list[dict]:
         for item in items or []:
             if not isinstance(item, dict):
                 continue
-            if is_promotional_mail(item):
+            if is_promotional_mail(item) or is_self_sent_mail(item):
                 continue
             findings.append(_mail_item(item))
     except Exception as exc:
@@ -644,7 +657,7 @@ def _collect_mailbox(conn: sqlite3.Connection) -> list[dict]:
                 "status": row.get("status"),
                 "created_at": row.get("created_at"),
             })
-            if is_promotional_mail(fallback):
+            if is_promotional_mail(fallback) or is_self_sent_mail(fallback):
                 continue
             findings.append(fallback)
     return dedupe_mail(findings)
@@ -697,75 +710,18 @@ def query_approval_queue(conn: sqlite3.Connection) -> list[dict]:
 
 
 def query_family_help_tickets(conn: sqlite3.Connection) -> list[dict]:
-    """Family-help only. Primary source is /data/family-help/<ed>/help.db."""
-    findings: list[dict] = []
-    seen: set[str] = set()
+    """Family-help only from inbox_base()/<ed>/help.db (status=new, read-only).
+
+    Does not read empire.db ``family_help_tickets`` or Gmail — those leaked
+    test greetings like "un saludo de prueba" that are not in help.db.
+    """
     try:
         from app.services.max.desks.family_help_store import list_open_tickets
 
-        for item in list_open_tickets():
-            key = str(item.get("id") or "")
-            if key and key in seen:
-                continue
-            if key:
-                seen.add(key)
-            findings.append(item)
+        return [item for item in list_open_tickets() if not is_test_family_ticket(item)]
     except Exception as exc:
         logger.info("family-help store skipped: %s", exc)
-
-    if _table_exists(conn, "family_help_tickets"):
-        rows = conn.execute(
-            """
-            SELECT id, requester, subject, status, created_at
-            FROM family_help_tickets
-            WHERE status NOT IN ('done', 'closed', 'resolved')
-            ORDER BY created_at ASC
-            """
-        ).fetchall()
-        for raw in rows:
-            row = _row_dict(raw)
-            key = str(row.get("id") or "")
-            if key and key in seen:
-                continue
-            if key:
-                seen.add(key)
-            findings.append({
-                "kind": "family_ticket",
-                "id": row.get("id"),
-                "name": row.get("subject") or row.get("id"),
-                "customer": row.get("requester") or "Family",
-                "status": row.get("status"),
-                "area": "family",
-                "isolated": True,
-            })
-    if _table_exists(conn, "tasks"):
-        cols = _cols(conn, "tasks")
-        if "desk" in cols:
-            rows = conn.execute(
-                """
-                SELECT id, title, status, desk
-                FROM tasks
-                WHERE status IN ('todo', 'in_progress', 'waiting')
-                  AND desk IN ('family', 'family-help')
-                """
-            ).fetchall()
-            for raw in rows:
-                row = _row_dict(raw)
-                key = str(row.get("id") or "")
-                if key and key in seen:
-                    continue
-                if key:
-                    seen.add(key)
-                findings.append({
-                    "kind": "family_ticket",
-                    "id": row.get("id"),
-                    "name": row.get("title") or row.get("id"),
-                    "customer": "Family",
-                    "status": row.get("status"),
-                    "area": "family",
-                    "isolated": True,
-                })
-    return [f for f in findings if not is_test_family_ticket(f)]
+        return []
 
 
 def _space_bucket(space: str | None, blob: str = "") -> str | None:
@@ -805,6 +761,8 @@ def query_other_areas(conn: sqlite3.Connection, now: datetime | None = None) -> 
 
     def _put(area: str | None, item: dict) -> None:
         if not area or area not in buckets:
+            return
+        if area == "family" and is_test_family_ticket(item):
             return
         key = str(item.get("id") or "")
         if key and key in seen:

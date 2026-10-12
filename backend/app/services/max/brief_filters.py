@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 from datetime import datetime
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
@@ -21,6 +22,9 @@ DEFAULT_TEST_CLIENT_PATTERNS = (
     "Customer",
     "purge candidate",
     "Empresa Prueba",
+    "LiveProof",
+    "ManualLine",
+    "MAX *",
 )
 
 ET = ZoneInfo("America/New_York")
@@ -43,6 +47,8 @@ MARKETING_KEYWORDS = (
     "webinar", "market invite", "invitation to", "% off", "percent off",
     "lookbook", "unsubscribe", "exclusive offer", "flash sale",
     "limited time", "shop now", "don't miss",
+    "high point market", "high point", "hpmkt", "trade show",
+    "tradeshow", "trade-show", "market week",
 )
 
 NOREPLY_HINTS = ("no-reply", "noreply", "no_reply", "donotreply", "do-not-reply")
@@ -63,6 +69,28 @@ BACKLOG_NOISE = (
 )
 
 APPROVAL_HINTS = ("approv", "voice", "founder pin", "waiting on rafael", "decision needed")
+
+SELF_SEND_ADDRS = (
+    "max@empirebox.store",
+    "max@empirebox",
+    "empirebox2026@gmail.com",
+    "noreply@empirebox",
+    "no-reply@empirebox",
+)
+SELF_SEND_SUBJECTS = (
+    "empire morning brief",
+    "tu acceso a amp",
+    "ayuda de max-e",
+    "ayuda de maxine",
+)
+SELF_SEND_FROM = (
+    "max — empire ai",
+    "max - empire ai",
+    "max- empire ai",
+    "empire ai",
+)
+FAMILY_TITLE_LEN = 60
+_SUBJECT_PREFIX_RE = re.compile(r"^(re|fwd|fw):\s*", re.I)
 
 
 def _blob(*parts: Any) -> str:
@@ -90,6 +118,8 @@ def is_noise_client(name: Any) -> bool:
     text = str(name or "").strip()
     if not text:
         return False
+    if text.casefold().startswith("max "):
+        return True
     return any(_matches_pattern(text, pat) for pat in test_client_patterns())
 
 
@@ -120,11 +150,40 @@ def _obvious_test_body(text: str) -> bool:
     if not blob:
         return False
     low = blob.casefold()
+    if "un saludo de prueba" in low:
+        return True
     if any(tok in low for tok in ("mock-sweep", "purge candidate", "trusttest")):
         return True
     if low.startswith("test ") or low == "test" or " test ticket" in low:
         return True
     return is_noise_client(blob)
+
+
+def family_ticket_title(
+    *,
+    transcript: str = "",
+    message: str = "",
+    attachment_kinds: Iterable[str] | None = None,
+) -> str:
+    """No title column: transcript, else short message, ~60 chars + attachment kinds."""
+    raw = ""
+    if (transcript or "").strip():
+        raw = next((ln.strip() for ln in str(transcript).splitlines() if ln.strip()), "")
+        raw = raw or str(transcript).strip()
+    if not raw:
+        raw = str(message or "").strip()
+    title = " ".join(raw.split())
+    if len(title) > FAMILY_TITLE_LEN:
+        title = title[: FAMILY_TITLE_LEN - 1].rstrip() + "…"
+    kinds: list[str] = []
+    for kind in attachment_kinds or []:
+        k = str(kind or "").strip()
+        if k and k not in kinds:
+            kinds.append(k)
+    if kinds:
+        suffix = f" [{', '.join(kinds)}]"
+        title = f"{title}{suffix}" if title else suffix.strip()
+    return title or "Family help"
 
 
 def is_test_family_ticket(item: dict) -> bool:
@@ -176,6 +235,25 @@ def format_et(value: Any) -> str:
     return f"{dt.strftime('%a %b')} {dt.day}, {hour} {ampm}"
 
 
+def is_self_sent_mail(msg: dict) -> bool:
+    """Max/Empire notifications and empirebox2026 self-sends — not unanswered mail."""
+    frm = _blob(msg.get("from"), msg.get("from_email"), msg.get("from_name"), msg.get("customer")).lower()
+    subj = _blob(msg.get("subject"), msg.get("name")).lower()
+    if any(addr in frm for addr in SELF_SEND_ADDRS):
+        return True
+    if any(tag in frm for tag in SELF_SEND_FROM):
+        return True
+    if any(s in subj for s in SELF_SEND_SUBJECTS):
+        return True
+    return False
+
+
+def normalize_mail_subject(msg: dict) -> str:
+    text = _blob(msg.get("subject"), msg.get("name"))
+    text = _SUBJECT_PREFIX_RE.sub("", text).strip().lower()
+    return re.sub(r"\s+", " ", text)
+
+
 def is_promotional_mail(msg: dict) -> bool:
     labels = {str(x) for x in (msg.get("labels") or msg.get("labelIds") or [])}
     if labels & PROMO_LABELS:
@@ -217,22 +295,32 @@ def mail_account_label(source: str | None) -> str:
     return source or "mail"
 
 
-def mail_dedupe_key(msg: dict) -> str:
+def mail_dedupe_keys(msg: dict) -> list[str]:
+    keys: list[str] = []
     for key in ("thread_id", "threadId", "message_id", "id"):
-        val = str(msg.get(key) or "").strip()
+        val = str(msg.get(key) or "").strip().casefold()
         if val:
-            return val.casefold()
-    return _blob(msg.get("name"), msg.get("subject"), msg.get("from")).casefold()
+            keys.append(f"id:{val}")
+    subj = normalize_mail_subject(msg)
+    if subj:
+        keys.append(f"subj:{subj}")
+    return keys
+
+
+def mail_dedupe_key(msg: dict) -> str:
+    keys = mail_dedupe_keys(msg)
+    return keys[0] if keys else ""
 
 
 def dedupe_mail(items: Iterable[dict]) -> list[dict]:
+    """Collapse repeats by thread/message id and by subject across sources/statuses."""
     seen: set[str] = set()
     out: list[dict] = []
     for item in items:
-        key = mail_dedupe_key(item)
-        if not key or key in seen:
+        keys = mail_dedupe_keys(item)
+        if not keys or any(k in seen for k in keys):
             continue
-        seen.add(key)
+        seen.update(keys)
         out.append(item)
     return out
 

@@ -18,6 +18,9 @@ from app.services.max.brief_filters import (
     dedupe_mail,
     dedupe_named,
     format_et,
+    is_bank_notice,
+    is_promotional_mail,
+    is_self_sent_mail,
     keep_founder_decision,
     stale_task_count,
 )
@@ -152,7 +155,13 @@ def build_brief_sections(
     quotes = snap.get("stale_quotes") or []
     new_quotes, _ = _diff_items(quotes, prev.get("quote_items") or []) if has_prior else ([], [])
 
-    mail = dedupe_mail((snap.get("pending_mail") or []) + (snap.get("unreviewed_inbox") or []))
+    raw_mail = [
+        m for m in (snap.get("pending_mail") or []) + (snap.get("unreviewed_inbox") or [])
+        if not is_self_sent_mail(m) and not is_promotional_mail(m)
+    ]
+    extra_bank = [m for m in raw_mail if is_bank_notice(m)]
+    mail = dedupe_mail([m for m in raw_mail if not is_bank_notice(m)])
+    bank = dedupe_mail(list(bank) + extra_bank)
     new_mail, _ = _diff_items(mail, prev.get("mail_items") or []) if has_prior else ([], [])
 
     stuck = snap.get("stuck_tasks") or []
