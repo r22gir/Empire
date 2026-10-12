@@ -14,6 +14,8 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable
 
+from app.services.max.brief_filters import is_test_family_ticket
+
 HELP_EDITIONS = ("amp", "maxine")
 CLOSED = frozenset({"done", "closed", "resolved", "cancelled"})
 TICKETS_DDL = """
@@ -69,6 +71,46 @@ def _help_db(edition: str, *, base: Path | None = None) -> Path:
     return edition_store_dir(edition, base=base) / "help.db"
 
 
+def _candidate_help_dbs(edition: str, *, base: Path | None = None) -> list[Path]:
+    """Follow /data/family-help/<ed> symlinks onto the amp/maxine trees."""
+    root = base or inbox_base()
+    link = root / edition
+    guesses = [
+        link / "help.db",
+        link / "family-help" / "help.db",
+        link / "family-help" / edition / "help.db",
+    ]
+    try:
+        resolved = link.resolve()
+    except OSError:
+        resolved = link
+    if resolved != link:
+        guesses.extend([
+            resolved / "help.db",
+            resolved / "family-help" / "help.db",
+            resolved / "family-help" / edition / "help.db",
+        ])
+    found: list[Path] = []
+    seen: set[str] = set()
+    for path in guesses:
+        try:
+            real = path.resolve() if path.exists() else path
+        except OSError:
+            real = path
+        if _under_test() and any(
+            str(real).startswith(p) for p in ("/data/amp", "/data/maxine", "/data/family-help")
+        ):
+            continue
+        if not real.is_file():
+            continue
+        key = str(real)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(real)
+    return found
+
+
 def write_ticket_for_tests(
     *,
     edition: str,
@@ -108,50 +150,48 @@ def list_open_tickets(
     want = list(editions or allowed)
     findings: list[dict] = []
     root = base or inbox_base()
+    seen_ids: set[str] = set()
     for edition in want:
         if edition not in allowed and allowed:
             continue
         if edition not in HELP_EDITIONS:
             continue
-        db = _help_db(edition, base=root)
-        if not db.is_file():
-            continue
-        try:
-            resolved = db.resolve()
-        except OSError:
-            resolved = db
-        # Never follow a symlink into a live family data tree during tests.
-        if _under_test() and any(
-            str(resolved).startswith(p) for p in ("/data/amp", "/data/maxine", "/data/family-help")
-        ):
-            continue
-        try:
-            conn = sqlite3.connect(f"file:{resolved}?mode=ro", uri=True)
-        except sqlite3.Error:
-            continue
-        try:
-            conn.row_factory = sqlite3.Row
+        for resolved in _candidate_help_dbs(edition, base=root):
             try:
-                rows = conn.execute(
-                    """SELECT id, edition, sender, message, status, created_at
-                       FROM tickets
-                       WHERE status NOT IN ('done','closed','resolved','cancelled')
-                       ORDER BY created_at ASC"""
-                ).fetchall()
+                conn = sqlite3.connect(f"file:{resolved}?mode=ro", uri=True)
             except sqlite3.Error:
                 continue
-            for row in rows:
-                findings.append({
-                    "kind": "family_ticket",
-                    "id": row["id"],
-                    "name": (row["message"] or row["id"])[:80],
-                    "customer": row["sender"] or "Family",
-                    "status": row["status"],
-                    "area": "family",
-                    "edition": row["edition"] or edition,
-                    "created_at": row["created_at"],
-                    "isolated": True,
-                })
-        finally:
-            conn.close()
+            try:
+                conn.row_factory = sqlite3.Row
+                try:
+                    rows = conn.execute(
+                        """SELECT id, edition, sender, message, status, created_at
+                           FROM tickets
+                           WHERE status NOT IN ('done','closed','resolved','cancelled')
+                           ORDER BY created_at ASC"""
+                    ).fetchall()
+                except sqlite3.Error:
+                    continue
+                for row in rows:
+                    item = {
+                        "kind": "family_ticket",
+                        "id": row["id"],
+                        "name": (row["message"] or row["id"])[:80],
+                        "customer": row["sender"] or "Family",
+                        "status": row["status"],
+                        "area": "family",
+                        "edition": row["edition"] or edition,
+                        "created_at": row["created_at"],
+                        "isolated": True,
+                    }
+                    if is_test_family_ticket(item):
+                        continue
+                    key = str(item["id"] or "")
+                    if key and key in seen_ids:
+                        continue
+                    if key:
+                        seen_ids.add(key)
+                    findings.append(item)
+            finally:
+                conn.close()
     return findings

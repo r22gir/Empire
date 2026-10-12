@@ -16,8 +16,8 @@ from typing import Any
 LIVE_SERVICES: list[dict[str, Any]] = [
     {"id": "empire-backend", "name": "empire-backend", "kind": "tcp", "port": 8000},
     {"id": "empire-portal", "name": "empire-portal", "kind": "tcp", "port": 3005},
-    {"id": "empire-amp", "name": "empire-amp", "kind": "container", "container": "empire-amp"},
-    {"id": "empire-maxine", "name": "empire-maxine", "kind": "container", "container": "empire-maxine"},
+    {"id": "empire-amp", "name": "empire-amp", "kind": "systemd", "unit": "empire-amp"},
+    {"id": "empire-maxine", "name": "empire-maxine", "kind": "systemd", "unit": "empire-maxine"},
     {"id": "tunnel", "name": "tunnel", "kind": "process", "process": "cloudflared"},
     {"id": "disk", "name": "disk", "kind": "disk", "path": "/"},
 ]
@@ -47,6 +47,23 @@ def _container_running(name: str) -> bool:
         return result.returncode == 0 and result.stdout.strip().lower() == "true"
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return False
+
+
+def _systemd_active(unit: str) -> bool:
+    """empire-amp / empire-maxine are systemd services (with frontends), not Docker."""
+    for args in (
+        ["systemctl", "--user", "is-active", "--quiet", unit],
+        ["systemctl", "is-active", "--quiet", unit],
+        ["systemctl", "--user", "is-active", "--quiet", f"{unit}.service"],
+        ["systemctl", "is-active", "--quiet", f"{unit}.service"],
+    ):
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+    return False
 
 
 def _process_running(name: str) -> bool:
@@ -80,6 +97,7 @@ def check_live_services(
     *,
     port_checker=port_open,
     container_checker=_container_running,
+    systemd_checker=_systemd_active,
     process_checker=_process_running,
     disk_checker=_disk_status,
 ) -> list[dict[str, Any]]:
@@ -94,12 +112,19 @@ def check_live_services(
                 "up": up,
                 "detail": f"port {svc['port']} {'UP' if up else 'DOWN'}",
             })
-        elif kind == "container":
-            up = bool(container_checker(svc["container"]))
+        elif kind == "systemd":
+            up = bool(systemd_checker(svc["unit"]))
             rows.append({
                 **svc,
                 "up": up,
-                "detail": f"container {svc['container']} {'running' if up else 'not running'}",
+                "detail": f"systemd {svc['unit']} {'active' if up else 'inactive'}",
+            })
+        elif kind == "container":
+            up = bool(container_checker(svc.get("container") or svc.get("unit")))
+            rows.append({
+                **svc,
+                "up": up,
+                "detail": f"container {svc.get('container')} {'running' if up else 'not running'}",
             })
         elif kind == "process":
             up = bool(process_checker(svc["process"]))

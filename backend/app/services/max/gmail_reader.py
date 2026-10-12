@@ -119,7 +119,7 @@ def _check_inbox_sync(
         for msg_ref in message_ids:
             msg = service.users().messages().get(
                 userId="me", id=msg_ref["id"], format="metadata",
-                metadataHeaders=["From", "To", "Subject", "Date"],
+                metadataHeaders=["From", "To", "Subject", "Date", "List-Unsubscribe", "List-Id"],
             ).execute()
 
             headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
@@ -133,6 +133,8 @@ def _check_inbox_sync(
                 "date": headers.get("Date", ""),
                 "preview": snippet[:200],
                 "unread": "UNREAD" in msg.get("labelIds", []),
+                "labels": msg.get("labelIds", []),
+                "list_unsubscribe": headers.get("List-Unsubscribe", ""),
             })
 
         unread_total = 0

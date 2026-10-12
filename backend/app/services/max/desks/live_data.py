@@ -15,6 +15,13 @@ from typing import Any, Iterable
 
 from app.db.max_ops_schema import ensure_max_ops_schema
 from app.services.data_paths import inbox_dir
+from app.services.max.brief_filters import (
+    filter_followup_quotes,
+    filter_real_money,
+    is_promotional_mail,
+    is_test_family_ticket,
+    mail_account_label,
+)
 from app.services.max.desks.live_services import stuck_task_days
 
 logger = logging.getLogger("max.desks.live_data")
@@ -138,7 +145,7 @@ def query_unpaid_invoices(conn: sqlite3.Connection, now: datetime | None = None)
             "due_date": due,
             "overdue": bool(age is not None and age > 0 and row.get("status") in ("sent", "partial", "overdue")),
         })
-    return findings
+    return filter_real_money(findings)
 
 
 def query_payments_since(conn: sqlite3.Connection, since: datetime, now: datetime | None = None) -> list[dict]:
@@ -210,30 +217,32 @@ def query_payments_since(conn: sqlite3.Connection, since: datetime, now: datetim
                 "processor": processor,
                 "date": row.get("payment_date"),
             })
-    return findings
+    return filter_real_money(findings)
 
 
 # ── Quotes ────────────────────────────────────────────────────────
 
 
-def query_stale_quotes(conn: sqlite3.Connection, min_age_days: int = 3, now: datetime | None = None) -> list[dict]:
+def query_stale_quotes(conn: sqlite3.Connection, min_age_days: int = 0, now: datetime | None = None) -> list[dict]:
+    """Quotes awaiting a reply, sent or updated within ~60 days. No $0/test/Customer."""
     if not _table_exists(conn, "quotes_v2"):
         return []
     now = _now(now)
     cols = _cols(conn, "quotes_v2")
-    cutoff = (now - timedelta(days=min_age_days)).strftime("%Y-%m-%d")
     sent_col = "sent_at" if "sent_at" in cols else "created_at"
+    upd_col = "updated_at" if "updated_at" in cols else sent_col
     sql = f"""
-        SELECT id, quote_number, customer_name, status, total, {sent_col} AS sent_at, created_at
+        SELECT id, quote_number, customer_name, status, total,
+               {sent_col} AS sent_at, {upd_col} AS updated_at, created_at
         FROM quotes_v2
         WHERE status IN ({",".join("?" * len(OPEN_QUOTE_STATUSES))})
-          AND COALESCE({sent_col}, created_at) <= ?
-        ORDER BY COALESCE({sent_col}, created_at) ASC
+        ORDER BY COALESCE({upd_col}, {sent_col}, created_at) DESC
     """
     findings = []
-    for raw in conn.execute(sql, (*OPEN_QUOTE_STATUSES, cutoff)).fetchall():
+    for raw in conn.execute(sql, OPEN_QUOTE_STATUSES).fetchall():
         row = _row_dict(raw)
-        age = _days_old(row.get("sent_at") or row.get("created_at"), now)
+        sent_age = _days_old(row.get("sent_at") or row.get("created_at"), now)
+        window_age = _days_old(row.get("updated_at") or row.get("sent_at") or row.get("created_at"), now)
         findings.append({
             "kind": "quote",
             "id": row.get("id"),
@@ -241,10 +250,19 @@ def query_stale_quotes(conn: sqlite3.Connection, min_age_days: int = 3, now: dat
             "customer": _customer_name(row),
             "amount": _money(row.get("total")),
             "status": row.get("status"),
-            "age_days": age,
+            "age_days": sent_age,
+            "window_age_days": window_age,
             "sent_at": row.get("sent_at") or row.get("created_at"),
         })
-    return findings
+    filtered = []
+    for item in findings:
+        window = item.get("window_age_days")
+        if window is not None and int(window) > 60:
+            continue
+        if min_age_days and (item.get("age_days") or 0) < min_age_days:
+            continue
+        filtered.append(item)
+    return filter_followup_quotes(filtered, max_age_days=60)
 
 
 def query_open_quotes(conn: sqlite3.Connection) -> list[dict]:
@@ -584,14 +602,18 @@ def query_pending_mail(conn: sqlite3.Connection) -> list[dict]:
         for item in items or []:
             if not isinstance(item, dict):
                 continue
+            if is_promotional_mail(item):
+                continue
+            source = item.get("source") or item.get("channel") or "email"
             _add({
                 "kind": "mail",
                 "id": item.get("id"),
                 "name": item.get("subject") or item.get("id"),
                 "customer": item.get("from_name") or item.get("from") or "Unknown",
-                "channel": item.get("source") or item.get("channel") or "email",
+                "channel": source,
+                "account_label": mail_account_label(source),
                 "status": item.get("waiting") or item.get("status") or "pending",
-                "source": item.get("source"),
+                "source": source,
                 "preview": item.get("preview"),
                 "read_only": True,
                 "sent": False,
@@ -610,15 +632,21 @@ def query_pending_mail(conn: sqlite3.Connection) -> list[dict]:
         ).fetchall()
         for raw in rows:
             row = _row_dict(raw)
-            _add({
+            channel = row.get("channel") or "email"
+            fallback = {
                 "kind": "mail",
                 "id": row.get("id"),
                 "name": row.get("subject") or row.get("id"),
                 "customer": row.get("from_name") or row.get("from_addr") or "Unknown",
-                "channel": row.get("channel") or "email",
+                "channel": channel,
+                "account_label": mail_account_label(channel),
                 "status": row.get("status"),
                 "created_at": row.get("created_at"),
-            })
+                "from": row.get("from_addr"),
+            }
+            if is_promotional_mail(fallback):
+                continue
+            _add(fallback)
     return findings
 
 
@@ -691,7 +719,7 @@ def query_family_help_tickets(conn: sqlite3.Connection) -> list[dict]:
                     "area": "family",
                     "isolated": True,
                 })
-    return findings
+    return [f for f in findings if not is_test_family_ticket(f)]
 
 
 def _space_bucket(space: str | None, blob: str = "") -> str | None:
@@ -906,6 +934,7 @@ def snapshot(now: datetime | None = None) -> dict[str, Any]:
             "jobs_active": query_jobs(conn, ("pending", "scheduled", "in_progress", "on_hold")),
             "schedule_today": query_schedule(conn, today_start, today_start + timedelta(days=1)),
             "schedule_week": query_schedule(conn, today_start, week_end),
+            "schedule_next14": query_schedule(conn, week_end, today_start + timedelta(days=15)),
             "schedule_overdue": query_overdue_schedule(conn, now),
             "open_tasks": query_open_tasks(conn),
             "stuck_tasks": query_stuck_tasks(conn, None, now),

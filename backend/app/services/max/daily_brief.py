@@ -14,6 +14,10 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from app.db.max_ops_schema import ensure_max_ops_schema
+from app.services.max.brief_filters import (
+    dedupe_named,
+    keep_founder_decision,
+)
 from app.services.max.channel_text import for_channel, strip_telegram_html
 from app.services.max.desks import live_data as ld
 from app.services.max.desks.live_services import check_live_services
@@ -62,14 +66,23 @@ def _diff_items(current: list[dict], previous: list[dict]) -> tuple[list[dict], 
     return new, gone
 
 
-def _line_items(items: list[dict], empty: str, *, changed: list[dict] | None = None) -> str:
+def _line_items(
+    items: list[dict],
+    empty: str,
+    *,
+    changed: list[dict] | None = None,
+    limit: int = 12,
+    mark_new: bool = True,
+) -> str:
     if not items:
         return empty
     lines = []
     changed_names = _names(changed or [])
-    for i in items[:12]:
-        flag = " NEW" if str(i.get("name") or i.get("id") or "") in changed_names else ""
-        bits = [str(i.get("name") or i.get("id"))]
+    shown = items[:limit]
+    for i in shown:
+        name = str(i.get("name") or i.get("id") or "")
+        flag = " NEW" if mark_new and name in changed_names else ""
+        bits = [name]
         if i.get("customer"):
             bits.append(str(i["customer"]))
         if i.get("amount") is not None and i.get("amount") != "":
@@ -78,11 +91,17 @@ def _line_items(items: list[dict], empty: str, *, changed: list[dict] | None = N
             bits.append(f"{i['age_days']}d")
         if i.get("start_time"):
             bits.append(str(i["start_time"]))
+        if i.get("account_label"):
+            bits.append(str(i["account_label"]))
         if i.get("status"):
             bits.append(str(i["status"]))
         if i.get("type"):
             bits.append(str(i["type"]))
-        lines.append("  • " + " — ".join(bits) + flag)
+        # No leading spaces — strip_telegram_html().trim() was flushing the first bullet left.
+        lines.append("• " + " — ".join(bits) + flag)
+    extra = len(items) - len(shown)
+    if extra > 0:
+        lines.append(f"+{extra} more")
     return "\n".join(lines)
 
 
@@ -110,26 +129,31 @@ def build_brief_sections(
 ) -> dict[str, Any]:
     now = now or datetime.now()
     snap = snap or ld.snapshot(now)
+    has_prior = previous is not None
     prev = previous or {}
+    mark_new = has_prior
 
     today = snap.get("schedule_today") or []
     week = snap.get("schedule_week") or []
+    next14 = snap.get("schedule_next14") or []
     overdue_cal = snap.get("schedule_overdue") or []
-    new_today, _ = _diff_items(today, prev.get("today_items") or [])
+    new_today, _ = _diff_items(today, prev.get("today_items") or []) if has_prior else ([], [])
 
     payments = snap.get("payments_since_yesterday") or []
     unpaid = snap.get("unpaid_invoices") or []
-    new_pay, _ = _diff_items(payments, prev.get("payment_items") or [])
+    new_pay, _ = _diff_items(payments, prev.get("payment_items") or []) if has_prior else ([], [])
 
     quotes = snap.get("stale_quotes") or []
-    new_quotes, _ = _diff_items(quotes, prev.get("quote_items") or [])
+    new_quotes, _ = _diff_items(quotes, prev.get("quote_items") or []) if has_prior else ([], [])
 
     mail = (snap.get("pending_mail") or []) + (snap.get("unreviewed_inbox") or [])
-    new_mail, _ = _diff_items(mail, prev.get("mail_items") or [])
+    new_mail, _ = _diff_items(mail, prev.get("mail_items") or []) if has_prior else ([], [])
 
     stuck = snap.get("stuck_tasks") or []
     waiting = [t for t in (snap.get("open_tasks") or []) if t.get("status") == "waiting"]
-    decisions = stuck + waiting
+    decisions = dedupe_named(
+        [t for t in (stuck + waiting) if keep_founder_decision(t)]
+    )
 
     desk_rows = snap.get("desk_results") or []
     areas = snap.get("other_areas") or {}
@@ -144,12 +168,16 @@ def build_brief_sections(
     sections = {
         "today_and_week": {
             "title": SECTION_TITLES["today_and_week"],
-            "summary": f"{len(today)} today, {len(week)} this week, {len(overdue_cal)} overdue",
-            "new_count": len(new_today),
+            "summary": (
+                f"{len(today)} today, {len(week)} this week, "
+                f"{len(next14)} next 14 days, {len(overdue_cal)} overdue"
+            ),
+            "new_count": len(new_today) if mark_new else 0,
             "text": (
-                f"Today ({len(today)}):\n{_line_items(today, '  Nothing on the calendar today.', changed=new_today)}\n"
-                f"This week ({len(week)}):\n{_line_items(week, '  Nothing scheduled this week.')}\n"
-                f"Overdue ({len(overdue_cal)}):\n{_line_items(overdue_cal, '  No overdue installs or deliveries.')}"
+                f"Today ({len(today)}):\n{_line_items(today, 'Nothing on the calendar today.', changed=new_today, mark_new=mark_new)}\n"
+                f"This week ({len(week)}):\n{_line_items(week, 'Nothing scheduled this week.', mark_new=False)}\n"
+                f"Next 14 days ({len(next14)}):\n{_line_items(next14, 'Nothing between next week and two weeks out.', mark_new=False)}\n"
+                f"Overdue ({len(overdue_cal)}):\n{_line_items(overdue_cal, 'No overdue installs or deliveries.', mark_new=False)}"
             ),
             "items": today,
         },
@@ -160,34 +188,34 @@ def build_brief_sections(
                 f"(${sum(_money(p.get('amount')) for p in payments):,.2f}); "
                 f"{len(unpaid)} unpaid"
             ),
-            "new_count": len(new_pay),
+            "new_count": len(new_pay) if mark_new else 0,
             "text": (
                 f"Received since yesterday ({len(payments)}):\n"
-                f"{_line_items(payments, '  No payments since yesterday.', changed=new_pay)}\n"
+                f"{_line_items(payments, 'No payments since yesterday.', changed=new_pay, mark_new=mark_new)}\n"
                 f"Unpaid invoices / deposits ({len(unpaid)}):\n"
-                f"{_line_items(unpaid, '  No unpaid invoices.')}"
+                f"{_line_items(unpaid, 'No unpaid invoices.', mark_new=False)}"
             ),
             "items": unpaid,
         },
         "quotes": {
             "title": SECTION_TITLES["quotes"],
-            "summary": f"{len(quotes)} quote(s) older than 3 days",
-            "new_count": len(new_quotes),
-            "text": _line_items(quotes, "  No stale quotes.", changed=new_quotes),
-            "items": quotes,
+            "summary": f"{len(quotes)} quote(s) awaiting a reply",
+            "new_count": len(new_quotes) if mark_new else 0,
+            "text": _line_items(quotes, "No quotes awaiting a reply.", changed=new_quotes, limit=10, mark_new=mark_new),
+            "items": quotes[:10],
         },
         "leads_and_mail": {
             "title": SECTION_TITLES["leads_and_mail"],
             "summary": f"{len(mail)} unanswered (drafts to approve, not sent)",
-            "new_count": len(new_mail),
-            "text": _line_items(mail, "  No unanswered client email or WhatsApp.", changed=new_mail),
+            "new_count": len(new_mail) if mark_new else 0,
+            "text": _line_items(mail, "No unanswered client email or WhatsApp.", changed=new_mail, mark_new=mark_new),
             "items": mail,
         },
         "decisions": {
             "title": SECTION_TITLES["decisions"],
             "summary": f"{len(decisions)} waiting",
             "new_count": 0,
-            "text": _line_items(decisions, "  Nothing waiting on Rafael."),
+            "text": _line_items(decisions, "Nothing waiting on Rafael.", mark_new=False),
             "items": decisions,
         },
         "desk_report": {
@@ -215,6 +243,7 @@ def build_brief_sections(
         },
         # raw lists for tomorrow's diff
         "today_items": today,
+        "next14_items": next14,
         "payment_items": payments,
         "quote_items": quotes,
         "mail_items": mail,
@@ -224,12 +253,12 @@ def build_brief_sections(
 
 def _desk_report_text(rows: list[dict]) -> str:
     if not rows:
-        return "  No desk jobs recorded since yesterday."
+        return "No desk jobs recorded since yesterday."
     lines = []
     for r in rows:
         status = r.get("status")
         reason = f" — {r.get('fail_reason')}" if status == "failed" and r.get("fail_reason") else ""
-        lines.append(f"  • {r.get('desk_id')}: {r.get('job_title')} [{status}]{reason}")
+        lines.append(f"• {r.get('desk_id')}: {r.get('job_title')} [{status}]{reason}")
     return "\n".join(lines)
 
 
@@ -238,16 +267,16 @@ def _other_areas_text(areas: dict[str, list[dict]]) -> str:
     for key in ("empire", "family", "personal", "ventures"):
         items = areas.get(key) or []
         lines.append(f"{key.title()}:")
-        lines.append(_line_items(items, "  (none)"))
+        lines.append(_line_items(items, "(none)"))
     return "\n".join(lines)
 
 
 def _watch_text(alerts: list[dict], all_rows: list[dict]) -> str:
     if not alerts:
-        return "  No service, disk, or usage alerts."
+        return "No service, disk, or usage alerts."
     lines = []
     for r in alerts:
-        lines.append(f"  • {r.get('name')}: {r.get('detail') or 'alert'}")
+        lines.append(f"• {r.get('name')}: {r.get('detail') or 'alert'}")
     return "\n".join(lines)
 
 

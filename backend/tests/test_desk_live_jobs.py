@@ -138,6 +138,7 @@ def test_it_health_uses_live_service_list_not_dead_ports(seeded_db):
         checkers={
             "port_checker": port_ok,
             "container_checker": lambda n: False,
+            "systemd_checker": lambda n: n in ("empire-amp", "empire-maxine"),
             "process_checker": lambda n: True,
             "disk_checker": lambda p="/": {
                 "id": "disk", "name": "disk", "kind": "disk", "up": True,
@@ -151,10 +152,17 @@ def test_it_health_uses_live_service_list_not_dead_ports(seeded_db):
     assert "WorkroomForge" not in out["result"]
     assert "3001" not in out["result"]
     assert "Ollama" not in out["result"]
+    assert "not running" not in out["result"]
+    assert "systemd empire-amp" in out["result"]
+    assert "systemd empire-maxine" in out["result"]
     names = [f["name"] for f in out["findings"]]
     assert "empire-backend" in names
     assert "disk" in names
     assert "tunnel" in names
+    from app.services.max.desks.live_services import LIVE_SERVICES
+    kinds = {s["id"]: s["kind"] for s in LIVE_SERVICES}
+    assert kinds["empire-amp"] == "systemd"
+    assert kinds["empire-maxine"] == "systemd"
 
 
 def test_done_only_when_review_passes(seeded_db):

@@ -157,6 +157,8 @@ def _fetch_gmail() -> list[dict]:
             "preview": em.get("preview") or "",
             "unread": bool(em.get("unread")),
             "account": "gmail",
+            "labels": em.get("labels") or em.get("labelIds") or [],
+            "list_unsubscribe": em.get("list_unsubscribe") or "",
         })
     return out
 
@@ -241,6 +243,10 @@ def decorate_message(conn, msg: dict, state: Optional[dict]) -> Optional[dict]:
     blob = " ".join(str(msg.get(k) or "") for k in ("from", "to", "subject", "preview"))
     if contains_blocked_term(blob):
         return None
+    from app.services.max.brief_filters import is_promotional_mail, mail_account_label
+
+    if is_promotional_mail(msg):
+        return None
     linked = _link(conn, msg)
     space = normalize_space(state.get("space_id") if state and state.get("space_id") else linked.get("space_id"))
     name, email = parse_from(msg.get("from"))
@@ -253,6 +259,9 @@ def decorate_message(conn, msg: dict, state: Optional[dict]) -> Optional[dict]:
         "source": source,
         "message_id": mid,
         "account": msg.get("account") or source,
+        "account_label": mail_account_label(source),
+        "labels": msg.get("labels") or msg.get("labelIds") or [],
+        "list_unsubscribe": msg.get("list_unsubscribe") or "",
         "from": redact_blocked(msg.get("from") or ""),
         "from_name": redact_blocked(name),
         "from_email": email,
