@@ -926,7 +926,7 @@ def reminder_draft(req: ReminderDraftIn):
                 "due_at": req.due_at,
                 "reminder_at": req.due_at,
                 "reminder_draft": f"[{req.channel}] {req.body}",
-                "notes": "Reminder saved. Max will notify the owner when it is due. Outbound send still needs a tap.",
+                "notes": "Draft reminder — founder approval required before any outbound send. Max will notify when it is due.",
                 "status": "open",
                 "space_id": normalize_space(req.space_id),
             },
@@ -938,7 +938,7 @@ def reminder_draft(req: ReminderDraftIn):
             "sent": False,
             "outbound_blocked": True,
             "outbound_policy": OUTBOUND_POLICY,
-            "message": "Reminder saved in the database. Max will notify when it is due. It was not sent outbound.",
+            "message": "Reminder saved as a draft in the database. Max will notify when it is due. It was not sent.",
         }
 
 
