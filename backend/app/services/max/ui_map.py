@@ -427,28 +427,25 @@ _OVERLAYS: dict[str, dict] = {
         "workroom_only": False,
     },
     "search": {
-        "name": "Header search",
+        "name": "Search",
         "where": (
-            "On Command Center screens (not Max Home /): the top header bar labeled "
-            "'Search anything…' with ⌘K (hidden on phones). Click it or press Ctrl/⌘+K. "
-            "That opens Quick Switch — it is a jump palette, not a full-text search. "
-            "Type to filter a fixed list of screens (Chat, MAX Avatar, Dashboard, Tasks, "
-            "Quote Review, Documents, Research, Video Call, Workroom, WoodCraft, Platform, "
-            "Telegram, Dev Panel, RecoveryForge, Pricing Studio, RelistApp, ApostApp). "
-            "A letter shortcut jumps when the box is empty. After two characters it also "
-            "searches jobs via GET /jobs/search (client name, job number, title, "
-            "description, item names, fabric codes) and opens the job hub. It does not "
-            "search quotes, invoices, files, messages, or the full left nav."
+            "Search is on MAX Home and every Command Center screen, desktop and phone. "
+            "Tap the search control in the top band or press Ctrl/⌘+K. "
+            "It searches screens (including Improvements, Tokens, Family help, "
+            "Organizer, MiniMax usage, Presentation), jobs, quotes, invoices, "
+            "people, files, organizer items, pending email, and chat memory. "
+            "Results group by type. Enter opens the top hit. Draft reply goes "
+            "to the approval queue — nothing is sent without your tap."
         ),
         "where_family": (
-            "On Command Center screens (not Max Home): the top header bar labeled "
-            "'Search anything…' with ⌘K (hidden on phones). Click it or press Ctrl/⌘+K "
-            "to open Quick Switch and jump to a screen by name."
+            "Search is on MAX Home and every screen, desktop and phone. "
+            "Tap the search control or press Ctrl/⌘+K. It finds screens and "
+            "your own records only — never Workroom jobs or another edition's data."
         ),
-        "href": "/?product=owner",
+        "href": "/",
         "aliases_en": (
             "search", "search bar", "search anything", "quick switch",
-            "command k", "cmd k", "ctrl k", "header search",
+            "command k", "cmd k", "ctrl k", "header search", "universal search",
         ),
         "aliases_es": (
             "buscador", "barra de busqueda", "barra de búsqueda", "buscar",

@@ -155,8 +155,11 @@ def test_family_links_never_use_studio_host(monkeypatch):
 def test_header_search_is_on_the_map():
     bar = lookup_feature("where is the search bar")
     assert bar is not None and bar.id == "search"
-    assert "quick switch" in bar.where.lower()
-    assert "jobs/search" in bar.where.lower()
+    where = bar.where.lower()
+    assert "max home" in where
+    assert "phone" in where or "desktop" in where
+    assert "improvements" in where
+    assert "quotes" in where
     assert lookup_feature("barra de búsqueda").id == "search"
     assert lookup_feature("command k").id == "search"
     assert lookup_feature("where is search").id == "search"
@@ -164,7 +167,7 @@ def test_header_search_is_on_the_map():
     family_where = find_in_app_reply("dónde está el buscador", family=True, channel="web") or ""
     for name in FAMILY_FORBIDDEN:
         assert name not in family_where.lower(), name
-    assert "[Open Command Center](/?product=owner)" in family_where
+    assert "](/)" in family_where or "[Open Search](/)" in family_where
 
 
 def test_family_edition_hides_workroom_only_screens(monkeypatch):

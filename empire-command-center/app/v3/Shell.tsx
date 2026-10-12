@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Scissors, TreePine, Building2, Cpu, Target, Share2, Megaphone, DollarSign, MessageSquare, FileText, Activity, LayoutGrid,
-  Bell, Layers, TrendingUp, CalendarDays, X,
+  Bell, Layers, TrendingUp, CalendarDays, X, Search,
 } from 'lucide-react';
 import { Orb } from './ui';
 import { EDITION, SYSTEM_ITEM } from './edition';
@@ -52,10 +52,17 @@ export function MaxPill({ href = '/?product=owner' }: { href?: string }) {
 export interface BandTab { key: string; label: string; href?: string; onClick?: () => void }
 
 /** Fixed top band for full-page v3 screens (the Max home). */
-export function V3Band({ tabs, active, notifications }: { tabs: BandTab[]; active: string; notifications?: number }) {
+export function V3Band({ tabs, active, notifications, onSearch }: { tabs: BandTab[]; active: string; notifications?: number; onSearch?: () => void }) {
   return (
     <header className="v3-band">
       <BandLogo />
+      {onSearch ? (
+        <button type="button" className="v3-search" onClick={onSearch} aria-label="Search (Control or Command K)" data-testid="universal-search-trigger">
+          <Search size={15} strokeWidth={1.8} aria-hidden="true" />
+          <span className="us-ph">Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+      ) : null}
       <nav className="v3-tabs" aria-label="Sections">
         {tabs.map(t => t.href
           ? <a key={t.key} href={t.href} className={active === t.key ? 'on' : ''} aria-current={active === t.key ? 'page' : undefined}>{t.label}</a>
