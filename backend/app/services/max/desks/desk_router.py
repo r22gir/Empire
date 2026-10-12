@@ -1,7 +1,8 @@
 """
 DeskRouter — routes incoming tasks to the appropriate AI desk.
-Uses local LLM (Ollama Mistral) to analyze task intent and select the best desk.
-Falls back to keyword matching if LLM is unavailable.
+
+Deterministic keyword rules run first (including analytics / quality / intake).
+LLM classification uses the *active* chat provider only — never disabled Ollama.
 """
 import json
 import logging
@@ -119,6 +120,25 @@ KEYWORD_MAP = {
             "upsell", "new product", "vetforge", "petforge",
         ],
     },
+    "analytics": {
+        "keywords": [
+            "analytics", "metrics", "kpi", "forecast", "revenue report",
+            "daily metrics", "weekly summary", "business intelligence",
+            "pipeline analysis", "dashboard numbers",
+        ],
+    },
+    "quality": {
+        "keywords": [
+            "quality audit", "quality digest", "accuracy report", "ai accuracy",
+            "quality check", "flagged responses", "quality desk",
+        ],
+    },
+    "intake": {
+        "keywords": [
+            "intake", "luxeforge", "new submission", "incoming project",
+            "client submission", "intake form", "new lead form",
+        ],
+    },
 }
 
 
@@ -132,13 +152,9 @@ class DeskRouter:
 
     @property
     def local_llm(self):
-        if self._local_llm is None:
-            try:
-                from app.services.max.brain.local_llm import LocalLLM
-                self._local_llm = LocalLLM()
-            except Exception:
-                pass
-        return self._local_llm
+        # Doctrine: never route via disabled Ollama. Keep the attribute so
+        # older callers do not explode, but do not construct LocalLLM.
+        return None
 
     @property
     def memory_store(self):
@@ -182,16 +198,16 @@ class DeskRouter:
                 self._log_routing(task, target, reason, method="alias")
                 return target, reason
 
-        # Try LLM-based routing first
-        desk_id, reason = await self._route_with_llm(task)
-        if desk_id:
-            self._log_routing(task, desk_id, reason, method="llm")
-            return desk_id, reason
-
-        # Fall back to keyword matching
+        # Deterministic keywords first (analytics / quality / intake included)
         desk_id, reason = self._route_with_keywords(task)
         if desk_id:
             self._log_routing(task, desk_id, reason, method="keyword")
+            return desk_id, reason
+
+        # Active-provider LLM only — never Ollama
+        desk_id, reason = await self._route_with_llm(task)
+        if desk_id:
+            self._log_routing(task, desk_id, reason, method="llm")
             return desk_id, reason
 
         # No match — founder inbox
@@ -200,9 +216,17 @@ class DeskRouter:
         return None, reason
 
     async def _route_with_llm(self, task: DeskTask) -> tuple[str | None, str]:
-        """Use local LLM to classify which desk should handle the task."""
-        if not self.local_llm:
+        """Classify via the active chat provider. Never Ollama."""
+        try:
+            from app.services.max.ai_router import ai_router, AIMessage
+            from app.services.max.routing_state import canonical_provider
+        except Exception:
             return None, "LLM unavailable"
+
+        state = ai_router.get_routing_state_payload()
+        provider = canonical_provider(str(state.get("selected_provider") or ""))
+        if not provider or provider == "ollama" or state.get("ai_calls_disabled"):
+            return None, f"active provider unusable ({provider})"
 
         desk_descriptions = "\n".join(
             f"- {d.desk_id}: {d.desk_name} — {d.desk_description}"
@@ -223,17 +247,19 @@ Respond in JSON only:
 {{"desk_id": "desk_id_here or null if none match", "confidence": 0.0-1.0, "reasoning": "brief explanation"}}"""
 
         try:
-            response = await self.local_llm.generate(
-                prompt,
-                system="You are a task router. Classify tasks to the correct desk. Respond only in valid JSON.",
-                max_tokens=200,
+            response = await ai_router.chat(
+                messages=[AIMessage(role="user", content=prompt)],
+                system_prompt="You are a task router. Classify tasks to the correct desk. JSON only.",
             )
-            result = json.loads(response)
+            if getattr(response, "provider_unavailable", False):
+                return None, "active provider unavailable"
+            raw = response.content or ""
+            start, end = raw.find("{"), raw.rfind("}")
+            result = json.loads(raw[start:end + 1] if start >= 0 and end > start else raw)
             desk_id = result.get("desk_id")
             confidence = result.get("confidence", 0)
             reasoning = result.get("reasoning", "LLM classification")
 
-            # Only accept high-confidence matches to registered desks
             if desk_id and desk_id in self._desks and confidence >= 0.6:
                 return desk_id, reasoning
             elif desk_id and desk_id not in self._desks:
@@ -242,7 +268,7 @@ Respond in JSON only:
                 return None, f"LLM confidence too low ({confidence})"
 
         except (json.JSONDecodeError, TypeError):
-            logger.debug("LLM routing returned non-JSON, falling back to keywords")
+            logger.debug("LLM routing returned non-JSON, falling back to unmatched")
             return None, "LLM response unparseable"
         except Exception as e:
             logger.warning(f"LLM routing failed: {e}")

@@ -127,7 +127,7 @@ export function useHomeData() {
       ...(tasks || []).filter(t => String(t.status).toLowerCase() === 'in_progress').slice(0, 3)
         .map(t => ({ key: `t-${t.id}`, title: String(t.title || 'Task'), detail: [t.desk, t.business].filter(Boolean).join(' · ') || 'task', status: 'in progress', href: '/?screen=tasks' })),
       ...(improvements || []).filter(i => !['merged', 'done', 'rejected', 'declined', 'closed'].includes(String(i.status || '').toLowerCase())).slice(0, 3)
-        .map(i => ({ key: `i-${i.id}`, title: String(i.title || 'Improvement'), detail: 'Improvement request', status: String(i.status || 'requested').replace(/_/g, ' '), href: '/?product=improvements' })),
+        .map(i => ({ key: `i-${i.id}`, title: String(i.title || 'Improvement'), detail: 'Improvement request', status: String(i.status || 'requested').replace(/_/g, ' '), href: `/?screen=improvements&id=${i.id}` })),
     ].slice(0, 4) : null;
 
     let schedule: ScheduleItem[] | null = null;

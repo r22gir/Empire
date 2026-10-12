@@ -23,6 +23,7 @@ from .quality_desk import QualityDesk
 from .codeforge_desk import CodeForgeDesk
 from .desk_router import DeskRouter
 from .desk_manager import AIDeskManager, TaskStatus
+from .desk_registry import DESK_ROSTER, live_desk_count
 
 __all__ = [
     "BaseDesk", "DeskTask", "DeskAction",
@@ -32,4 +33,5 @@ __all__ = [
     "InnovationDesk", "IntakeDesk", "AnalyticsDesk", "QualityDesk",
     "CodeForgeDesk",
     "DeskRouter", "AIDeskManager", "TaskStatus",
+    "DESK_ROSTER", "live_desk_count",
 ]

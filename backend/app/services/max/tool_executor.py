@@ -970,10 +970,9 @@ async def _auto_execute_new_task(task_id: str, title: str, description: str, pri
     except asyncio.TimeoutError:
         logger.warning(f"Auto-execute timed out for task {task_id}: {title}")
         with get_db() as conn:
-            conn.execute(
-                "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE id = ?",
-                (task_id,),
-            )
+            from app.services.max.desks.task_lifecycle import record_timeout_retry
+            outcome = record_timeout_retry(conn, task_id)
+            logger.warning("Auto-execute retry outcome for %s: %s", task_id, outcome)
     except Exception as e:
         logger.error(f"Auto-execute failed for task {task_id}: {e}")
 
@@ -5430,6 +5429,8 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
         import asyncio
         import concurrent.futures
 
+        chosen_desk = (params.get("desk") or desk or "").strip() or None
+
         async def _submit():
             from app.services.max.desks.desk_manager import desk_manager
             desk_manager.initialize()
@@ -5438,30 +5439,35 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
                 description=params.get("description", title),
                 priority=params.get("priority", "normal"),
                 source="max_tool",
+                desk_id=chosen_desk,
             )
+            routed = chosen_desk or getattr(task, "desk_id", None) or "auto"
             return {
                 "id": task.id,
                 "title": task.title,
                 "state": task.state.value if hasattr(task.state, "value") else str(task.state),
                 "result": task.result,
-                "desk": getattr(task, "desk_id", None) or "auto",
+                "desk": routed,
             }
 
         if async_mode:
-            # Async mode: submit to background, return immediately
+            # Async mode: honor the chosen desk — never force Atlas.
             task_id = uuid.uuid4().hex[:8]
             _log_async_task(task_id, title, "delegated")
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(_run_atlas_background(task_id, title, params))
+                loop.create_task(_run_desk_background(task_id, title, params, chosen_desk))
             except RuntimeError:
                 # No running loop — fall through to sync
                 pass
+            from app.services.max.desks.desk_registry import desk_label
+            label = desk_label(chosen_desk) if chosen_desk else "the owning desk"
             return ToolResult(tool="run_desk_task", success=True, result={
                 "task_id": task_id,
                 "title": title,
                 "status": "delegated",
-                "message": f"Task #{task_id} delegated to Atlas. Working in background. I'll notify you when it's done.",
+                "desk": chosen_desk or "auto",
+                "message": f"Task #{task_id} delegated to {label}. Working in background. I'll notify you when it's done.",
             })
 
         # Sync mode: block until complete (original behavior)
@@ -5475,41 +5481,25 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
         if data.get("state") == "completed":
             return ToolResult(tool="run_desk_task", success=True, result=data)
         else:
-            # Desk task didn't complete — also queue for OpenClaw as backup
-            try:
-                import httpx as _q_httpx
-                _q_httpx.post(
-                    "http://localhost:8000/api/v1/openclaw/tasks",
-                    json={
-                        "title": title,
-                        "description": params.get("description", title),
-                        "desk": data.get("desk", "general"),
-                        "priority": {"urgent": 1, "high": 3, "normal": 5, "low": 7}.get(
-                            params.get("priority", "normal"), 5
-                        ),
-                        "source": "desk_fallback",
-                    },
-                    timeout=5,
-                )
-                data["openclaw_queued"] = True
-            except Exception:
-                data["openclaw_queued"] = False
+            data["openclaw_queued"] = False
             return ToolResult(tool="run_desk_task", success=False,
-                            result=data, error=data.get("result", "Task did not complete — queued for OpenClaw"))
+                            result=data, error=data.get("result", "Task did not complete — OpenClaw is not a delegation target"))
     except Exception as e:
         return ToolResult(tool="run_desk_task", success=False, error=f"Desk task failed: {e}")
 
 
-async def _run_atlas_background(task_id: str, title: str, params: dict):
-    """Background: Atlas executes task, updates status, notifies founder."""
+async def _run_desk_background(task_id: str, title: str, params: dict, desk_id: str | None = None):
+    """Background: the chosen desk executes the task (Atlas only when CodeForge owns it)."""
     try:
         from app.services.max.desks.desk_manager import desk_manager
+        from app.services.max.desks.desk_registry import desk_label
         desk_manager.initialize()
         task = await desk_manager.submit_task(
             title=title,
             description=params.get("description", title),
             priority=params.get("priority", "normal"),
-            source="atlas_async",
+            source="desk_async",
+            desk_id=desk_id or params.get("desk"),
         )
         # H76 STEP 3a: deliverable gate runs AFTER the desk returns and BEFORE
         # the atlas_tasks row is written. A task that completed without a real
@@ -5524,10 +5514,11 @@ async def _run_atlas_background(task_id: str, title: str, params: dict):
         # H76 STEP 3b: notifier reads the deliverable-gate verdict, NOT just
         # task.state. A "completed" message must be backed by an artifact; a
         # "failed" message carries the gate's reason.
+        who = desk_label(desk_id or getattr(task, "desk_id", None) or params.get("desk"))
         if state == "completed":
-            _notify = f"Atlas task #{task_id} COMPLETED: {title}"
+            _notify = f"{who} task #{task_id} COMPLETED: {title}"
         else:
-            _notify = f"Atlas task #{task_id} FAILED: {title}"
+            _notify = f"{who} task #{task_id} FAILED: {title}"
         if task.result:
             _notify += f"\n{str(task.result)[:200]}"
         try:
@@ -5537,14 +5528,14 @@ async def _run_atlas_background(task_id: str, title: str, params: dict):
                 await telegram_bot.send_message(_notify)
         except Exception:
             pass
-        logger.info(f"Atlas background task #{task_id} {state}: {title}")
+        logger.info(f"Desk background task #{task_id} {state}: {title}")
     except Exception as e:
         _log_async_task(task_id, title, "failed", error=str(e))
-        logger.error(f"Atlas background task #{task_id} failed: {e}")
+        logger.error(f"Desk background task #{task_id} failed: {e}")
         try:
             from app.services.max.telegram_bot import telegram_bot
             if telegram_bot and telegram_bot.is_configured:
-                await telegram_bot.send_message(f"Atlas task #{task_id} FAILED: {str(e)[:150]}")
+                await telegram_bot.send_message(f"Desk task #{task_id} FAILED: {str(e)[:150]}")
         except Exception:
             pass
 
@@ -5673,8 +5664,9 @@ def _delegate_to_atlas(params: dict, desk: Optional[str] = None) -> ToolResult:
         "title": title,
         "description": params.get("description", title),
         "priority": params.get("priority", "normal"),
+        "desk": "codeforge",
         "async": True,
-    }, desk=desk)
+    }, desk="codeforge")
 
 
 # ── PRESENTATION PDF + TELEGRAM TOOL ──────────────────────────────
@@ -6601,7 +6593,7 @@ For simple single-tool tasks, use the tool DIRECTLY — do NOT delegate to a des
 - Git operations → git_ops
 - Database queries → db_query
 - .env management → env_get, env_set
-Only delegate to a desk (run_desk_task) for complex multi-step tasks that require AI reasoning.
+Delegate-first: use run_desk_task for desk-owned work (not only "complex" tasks). Max answers directly only for orchestration/status and trivial lookups. Pass desk= when you know the owner; async honors that desk (never force Atlas). Never delegate to OpenClaw.
 """
 
 

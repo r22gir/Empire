@@ -2517,6 +2517,51 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
     )
 
 
+async def _maybe_delegate_first_response(request: ChatRequest) -> ChatResponse | None:
+    """Chief-of-staff step: classify to a desk before the model answers.
+
+    Existing intent shortcuts already returned. Skip images and drawing asks.
+    """
+    if request.image_filename:
+        return None
+    try:
+        from app.services.max.desks.delegate_first import workroom_desks_allowed
+        if not workroom_desks_allowed():
+            return None
+    except Exception:
+        pass
+    try:
+        from app.services.max.drawing_intent import is_drawing_intent
+        if is_drawing_intent(request.message or ""):
+            return None
+    except Exception:
+        pass
+    try:
+        from app.services.max.desks.delegate_first import maybe_delegate
+        delegated = await maybe_delegate(
+            request.message or "",
+            specified_desk=request.desk,
+            conversation_id=request.conversation_id,
+            has_image=bool(request.image_filename),
+        )
+    except Exception as exc:
+        logger.debug("delegate-first skipped: %s", exc)
+        return None
+    if not delegated:
+        return None
+    return ChatResponse(
+        response=delegated["report"],
+        model_used="delegate-first",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "run_desk_task",
+            "success": True,
+            "result": delegated["task"],
+        }],
+        metadata=_response_metadata(request.channel, skill_used="delegate_first"),
+    )
+
+
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
     # Family editions: "pide ayuda a Max" / "ask Max for help" becomes a ticket.
     # No-op on studio / Workroom (is_family_edition is false).
@@ -3232,6 +3277,10 @@ async def _chat_with_max_service_impl(
             tool_results=[],
             metadata=_response_metadata(request.channel, skill_used="inventory_ambiguity_gate"),
         )
+
+    _delegated = await _maybe_delegate_first_response(request)
+    if _delegated is not None:
+        return _delegated
 
     if request.image_filename and _attachment_upload_path(request.image_filename) is None:
         _unavail_msg, _unavail_model, _unavail_skill = _unavailable_attachment_response(request.image_filename)
@@ -4529,6 +4578,10 @@ async def _chat_stream_impl(request: ChatRequest):
 
         return StreamingResponse(clarification_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
+    _delegated = await _maybe_delegate_first_response(request)
+    if _delegated is not None:
+        return _stream_immediate_response(_delegated, request.conversation_id)
+
     if request.image_filename and _attachment_upload_path(request.image_filename) is None:
         _unavail_msg, _unavail_model, _unavail_skill = _unavailable_attachment_response(request.image_filename)
         async def image_unavailable_gen():
@@ -5637,7 +5690,9 @@ async def provider_test(request: ProviderTestRequest):
 
 @router.get("/desks")
 async def get_all_desks():
-    return {"desks": desk_manager.get_all_desks()}
+    from app.services.max.desks.desk_registry import live_desk_count, registry_payload
+    desks = desk_manager.get_all_desks()
+    return {"desks": desks, "desk_count": live_desk_count(), "registry": registry_payload()}
 
 
 @router.get("/desks/desk-routing-policies")
@@ -5736,6 +5791,19 @@ async def complete_task(task_id: str, background_tasks: BackgroundTasks):
     if telegram_bot.is_configured:
         background_tasks.add_task(telegram_bot.send_task_update, task["title"], "completed", "", task["desk_id"])
     return {"status": "completed", "task_id": task_id}
+
+
+@router.post("/tasks/{task_id}/approve")
+async def approve_held_task(task_id: str):
+    """Founder tap: resume a waiting/held desk task (does not itself send or deploy)."""
+    from app.db.database import get_db
+    from app.services.max.desks.task_lifecycle import approve_waiting_task
+    with get_db() as conn:
+        result = approve_waiting_task(conn, task_id)
+    if not result.get("ok"):
+        code = 404 if result.get("error") == "not_found" else 400
+        raise HTTPException(status_code=code, detail=result)
+    return result
 
 
 @router.post("/tasks/{task_id}/fail")

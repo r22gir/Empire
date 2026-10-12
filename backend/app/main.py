@@ -569,10 +569,14 @@ async def _task_auto_worker():
         try:
             with get_db() as conn:
                 rows = conn.execute(
-                    """SELECT id, title, description, priority, desk, created_by
+                    """SELECT id, title, description, priority, desk, created_by, metadata
                        FROM tasks
                        WHERE status = 'todo'
                          AND (created_by = 'max' OR metadata LIKE '%"auto_execute"%')
+                         AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))
+                         AND (metadata IS NULL
+                              OR metadata NOT LIKE '%"approval_required": true%'
+                              OR metadata LIKE '%"approval_granted": true%')
                        ORDER BY
                            CASE priority
                                WHEN 'urgent' THEN 0 WHEN 'high' THEN 1
@@ -583,9 +587,15 @@ async def _task_auto_worker():
                 ).fetchall()
                 todo_tasks = dict_rows(rows) if rows else []
 
+            from app.services.max.desks.task_lifecycle import (
+                metadata_allows_auto_execute,
+                parse_task_metadata,
+            )
             for task_row in todo_tasks:
                 tid = task_row["id"]
                 title = task_row["title"]
+                if not metadata_allows_auto_execute(task_row.get("metadata")):
+                    continue
                 try:
                     # Mark in_progress immediately
                     with get_db() as conn:
@@ -598,13 +608,16 @@ async def _task_auto_worker():
                             (tid,),
                         )
 
+                    meta = parse_task_metadata(task_row.get("metadata"))
+                    worker_source = "founder_approved" if meta.get("approval_granted") else "task_worker"
                     result = await asyncio.wait_for(
                         desk_manager.submit_task(
                             title=title,
                             description=task_row.get("description") or title,
                             priority=task_row.get("priority", "normal"),
-                            source="task_worker",
+                            source=worker_source,
                             db_task_id=tid,
+                            desk_id=task_row.get("desk") if task_row.get("desk") not in (None, "", "unassigned") else None,
                         ),
                         timeout=60.0,
                     )
@@ -626,11 +639,9 @@ async def _task_auto_worker():
 
                 except asyncio.TimeoutError:
                     with get_db() as conn:
-                        conn.execute(
-                            "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE id = ?",
-                            (tid,),
-                        )
-                    print(f"{logger_prefix}: {title} — timed out, reset to todo")
+                        from app.services.max.desks.task_lifecycle import record_timeout_retry
+                        outcome = record_timeout_retry(conn, tid)
+                    print(f"{logger_prefix}: {title} — timed out, retry={outcome}")
                 except Exception as e:
                     print(f"{logger_prefix}: {title} — error: {e}")
 
