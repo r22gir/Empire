@@ -77,11 +77,37 @@ STYLE_DIRECTIVE = """
 - Voice-message or quick status asks: under 70 words (quote number, client, total, status, next step).
 - "Brief me / today / rundown / what's on my plate": one "- " line per active job from the Chief e brief (Marley's, Dahlia/Nehal, Philipp/Naomi, Willard, the Travelers claim, ...) with its next step, then what waits on his tap. Under 150 words.
 - Job visuals (mockup, drawing, diagram, picture, layout; typos like "mick up drwings"): run find_files, name the actual file and its folder, and share it with share_file (via="studio" link in Studio, this chat on WhatsApp; email only if he asked to email it). Never describe the design in words instead of the file.
+- When find_files / share_file returns documents, the FIRST reply must list each title as a full absolute markdown link using each match's markdown_link (host from the public base URL). Never relative paths. Never paste those URLs on voice or Telegram. Family editions do not emit a public host. "Show me X docs" is that list, not a drawing.
 - Weather: call get_weather (Empire Workroom is in Hyattsville, MD).
 - Measurements are always fractions of an inch, never decimals (26 3/4", not 26.75"). Channel cuts add 2 1/2" for board and foam, so a 12" channel is cut at least 18".
 - Upholstery estimates: group lines by area (U banquette, L banquette, material) with room=area, sq_ft and price_per_sqft per piece, measurements on the second description line in fractions; subtotal per area, then grand total, deposit, balance.
 - One quote per ask: never create a companion, split or alternate quote he did not ask for (offer it in one line instead). When he says go to a plan, run its tools in that same reply.
 """
+
+
+def style_directive() -> str:
+    """STYLE_DIRECTIVE with the live public_base() host (empty-safe on family editions)."""
+    try:
+        from app.services.max.doc_links import FOUND_PATH, first_reply_link_instruction, public_base
+        base = public_base()
+        text = STYLE_DIRECTIVE
+        placeholder = (
+            "using each match's markdown_link (host from the public base URL). "
+            "Never relative paths. Never paste those URLs on voice or Telegram. "
+            "Family editions do not emit a public host. "
+        )
+        if base:
+            return text.replace(
+                placeholder,
+                f"like [Title]({base}{FOUND_PATH}?t=...). Never relative paths. "
+                "Never paste those URLs on voice or Telegram. ",
+            )
+        return text.replace(
+            "the FIRST reply must list each title as a full absolute markdown link " + placeholder,
+            first_reply_link_instruction() + " ",
+        )
+    except Exception:
+        return STYLE_DIRECTIVE
 
 
 def model_first() -> bool:
@@ -250,6 +276,17 @@ def _drop_sources_block(text: str) -> str:
             while j < len(lines) and (not lines[j].strip() or re.match(r"^\s*(?:\d+[.)]|[-*•])\s", lines[j])):
                 block.append(lines[j])
                 j += 1
+            chunk = "\n".join(block)
+            try:
+                from app.services.max.doc_links import sources_chunk_is_public_file_list
+                keep_files = sources_chunk_is_public_file_list(chunk)
+            except Exception:
+                keep_files = False
+            if keep_files:
+                out.append(lines[i])
+                out.extend(block)
+                i = j
+                continue
             src = _first_source_line(block)
             if src and not _URL.search("\n".join(out)):
                 out.append(src)
@@ -428,6 +465,12 @@ def prelookup_message(message: Optional[str], results: list[tuple[str, str]], hi
         rules.append("This is a job visual request: name the actual file(s) found above (file name and folder) and share the "
                      "best one with share_file (path = the file path) if he asked to see or send it. Never describe the "
                      "design in words instead of the file, never use search_images or the web.")
+    if any(tool == "find_files" for tool, _body in results):
+        try:
+            from app.services.max.doc_links import first_reply_link_instruction
+            rules.append(first_reply_link_instruction())
+        except Exception:
+            rules.append("Name each found file. Do not emit relative paths.")
     if _BRIEF.search(message or ""):
         jobs = active_jobs_section()
         if jobs:

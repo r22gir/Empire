@@ -145,6 +145,7 @@ const NAV_PRODUCT_IDS = new Set<string>([
 const NAV_SCREEN_IDS = new Set<string>([
   'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
   'report', 'desks', 'memory-bank', 'telegram', 'docs', 'research', 'final-docs', 'invoice',
+  'presentation', 'video',
 ]);
 function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
   if (product === 'owner') return 'chat';

@@ -5,6 +5,8 @@ import { Mic, MicOff, Send, Monitor, Square, MessageSquare, Sparkles, Wifi, Wifi
 import InlineDrawing from '../InlineDrawing';
 
 import { API } from '../../lib/api';
+import { EDITION } from '../../v3/edition';
+import { avatarFrameSrc, editionFromLocation, resolveAvatarEdition } from '../../lib/avatarEdition';
 import LiveVoiceCall from '../LiveVoiceCall';
 import PresentationStage, { type StageArtifact } from './PresentationStage';
 
@@ -22,7 +24,7 @@ interface ChatMessage {
 }
 
 // ── TalkingHead Avatar Component (iframe-loaded) ────────────────────────
-function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef }: { mode: PresentationMode; isSpeaking: boolean; isThinking: boolean; iframeRef: React.RefObject<HTMLIFrameElement | null> }) {
+function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef, edition }: { mode: PresentationMode; isSpeaking: boolean; isThinking: boolean; iframeRef: React.RefObject<HTMLIFrameElement | null>; edition: string }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [avatarLine, setAvatarLine] = useState('');
@@ -120,7 +122,7 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef }: { mode: Presen
       ) : (
         <iframe
           ref={iframeRef}
-          src="/avatar.html?edition=workroom"
+          src={avatarFrameSrc(edition)}
           title="MAX avatar"
           style={{
             width: '100%', height: '100%',
@@ -235,8 +237,11 @@ function ModeToggle({ mode, onChange }: { mode: PresentationMode; onChange: (m: 
 
 // ── Main PresentationScreen ──────────────────────────────────────────
 export default function PresentationScreen() {
+  const edition = resolveAvatarEdition(typeof window === 'undefined' ? null : editionFromLocation(), EDITION);
   const [mode, setMode] = useState<PresentationMode>(() => {
     if (typeof window !== 'undefined') {
+      const fromUrl = new URLSearchParams(window.location.search).get('mode');
+      if (fromUrl === 'presentation' || fromUrl === 'compact' || fromUrl === 'text') return fromUrl;
       return (localStorage.getItem('empire-presentation-mode') as PresentationMode) || 'text';
     }
     return 'text';
@@ -311,7 +316,7 @@ export default function PresentationScreen() {
     let stop = false;
     const load = async () => {
       try {
-        const resp = await fetch(`${API}/avatar/simli/usage?edition=workroom`, { signal: AbortSignal.timeout(3000) });
+        const resp = await fetch(`${API}/avatar/simli/usage?edition=${encodeURIComponent(edition)}`, { signal: AbortSignal.timeout(3000) });
         if (!resp.ok) return;
         const data = await resp.json();
         if (!stop) setSimliCard(data);
@@ -320,7 +325,7 @@ export default function PresentationScreen() {
     load();
     const iv = setInterval(load, 20000);
     return () => { stop = true; clearInterval(iv); };
-  }, []);
+  }, [edition]);
 
   // xAI live-voice PCM (assistant only) and the placeholder flag from the iframe.
   useEffect(() => {
@@ -706,7 +711,7 @@ export default function PresentationScreen() {
       </div>
 
       <div className="presentation-body">
-        <AvatarPanel mode={mode} isSpeaking={isSpeaking} isThinking={isLoading} iframeRef={iframeRef} />
+        <AvatarPanel mode={mode} isSpeaking={isSpeaking} isThinking={isLoading} iframeRef={iframeRef} edition={edition} />
         {mode === 'presentation' && (
           <PresentationStage
             artifact={stageArtifact}

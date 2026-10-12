@@ -11,6 +11,8 @@ export interface EditionProfile {
   ownerInitials: string;
   assistantName: string;
   homeUser: string; // key for /home-center lists
+  /** Simli face. Family checkouts set amp/max_e or maxine — never workroom. */
+  avatarEdition?: 'workroom' | 'max_e' | 'maxine' | 'amp';
   rail: RailItem[];
   /** neutral starter topics the user can add with one tap (nothing is pre-filled) */
   interestSuggestions: { name: string; icon: string }[];
@@ -30,6 +32,7 @@ export const EDITION: EditionProfile = {
   ownerInitials: 'RG',
   assistantName: 'Max',
   homeUser: 'owner',
+  avatarEdition: 'workroom',
   rail: [
     item('workroom', 'Workroom', { product: 'workroom' }, 'Drapery & upholstery: jobs, quotes, invoices'),
     item('craft', 'WoodCraft', { product: 'craft' }, 'CNC and woodwork jobs'),

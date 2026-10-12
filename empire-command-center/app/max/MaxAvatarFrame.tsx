@@ -1,13 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { API } from '../lib/api';
+import { EDITION } from '../v3/edition';
+import { avatarFrameSrc, editionFromLocation, resolveAvatarEdition } from '../lib/avatarEdition';
 
 const PLACEHOLDER = "Placeholder. This is TalkingHead's female brunette sample (CC BY-NC 4.0, non-commercial), loaded with body M. Edition GLB files are not installed yet.";
 
 export default function MaxAvatarFrame() {
   const [note, setNote] = useState('Checking avatar…');
   const [minutes, setMinutes] = useState<string>('');
+  const edition = useMemo(() => resolveAvatarEdition(editionFromLocation(), EDITION), []);
 
   useEffect(() => {
     let stop = false;
@@ -23,8 +26,8 @@ export default function MaxAvatarFrame() {
     const load = async () => {
       try {
         const [statusRes, usageRes] = await Promise.all([
-          fetch(`${API}/avatar/simli/status?edition=workroom`, { signal: AbortSignal.timeout(4000) }),
-          fetch(`${API}/avatar/simli/usage?edition=workroom`, { signal: AbortSignal.timeout(4000) }),
+          fetch(`${API}/avatar/simli/status?edition=${encodeURIComponent(edition)}`, { signal: AbortSignal.timeout(4000) }),
+          fetch(`${API}/avatar/simli/usage?edition=${encodeURIComponent(edition)}`, { signal: AbortSignal.timeout(4000) }),
         ]);
         if (stop) return;
         if (statusRes.ok) {
@@ -50,12 +53,12 @@ export default function MaxAvatarFrame() {
       stop = true;
       window.removeEventListener('message', onMsg);
     };
-  }, []);
+  }, [edition]);
 
   return (
     <div style={{ border: '1px solid #d9ded5', borderRadius: 8, background: '#fff', overflow: 'hidden' }}>
       <iframe
-        src="/avatar.html?edition=workroom"
+        src={avatarFrameSrc(edition)}
         title="MAX avatar"
         style={{ width: '100%', height: 360, border: 0, display: 'block', background: '#111' }}
         allow="autoplay"

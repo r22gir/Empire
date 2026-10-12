@@ -25,10 +25,12 @@ Session limits are fixed in the module: `maxSessionLength` 600 seconds, `maxIdle
 
 ## HTTP
 
-- `GET /api/v1/avatar/simli/status?edition=workroom`
-- `POST /api/v1/avatar/simli/session` `{ "edition": "workroom" }` returns `session_token`, `webrtc_url`, and `ice_servers`
-- `GET /api/v1/avatar/simli/usage?edition=workroom` is the usage card (minutes)
-- `POST /api/v1/avatar/simli/usage` `{ "edition", "seconds", "source" }` logs a capped session
+Edition on these routes is the **running process** (`EMPIRE_EDITION` → workroom / max_e / maxine), not `?edition=` or the JSON body. One checkout cannot mint another's face or spend another's minutes. Older clients may still send `edition`; it is ignored.
+
+- `GET /api/v1/avatar/simli/status` (optional `?edition=` is ignored)
+- `POST /api/v1/avatar/simli/session` returns `session_token`, `webrtc_url`, and `ice_servers` for this process
+- `GET /api/v1/avatar/simli/usage` is the usage card (minutes) for this process
+- `POST /api/v1/avatar/simli/usage` `{ "seconds", "source" }` logs a capped session on this process
 
 The browser opens `wss://api.simli.ai/compose/webrtc/p2p?session_token=...` and sends PCM16 at 16 kHz. It does not call Simli with the API key.
 
