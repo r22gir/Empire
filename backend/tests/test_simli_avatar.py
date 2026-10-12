@@ -42,6 +42,7 @@ def _isolated(monkeypatch, tmp_path):
         "SIMLI_FACE_ID_WORKROOM",
         "SIMLI_FACE_ID_MAX_E",
         "SIMLI_FACE_ID_MAXINE",
+        "EMPIRE_EDITION",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(simli, "_usage_path", lambda: tmp_path / "simli_usage.json")
@@ -237,6 +238,104 @@ def test_usage_card_caps_minutes(monkeypatch):
     assert everything["seconds"] == 630
 
 
+def test_running_avatar_edition_from_process_env(monkeypatch):
+    assert simli.running_avatar_edition() == "workroom"
+    for raw, want in (
+        ("main", "workroom"),
+        ("empire", "workroom"),
+        ("MAX", "workroom"),
+        ("workroom", "workroom"),
+        ("amp", "max_e"),
+        ("max-e", "max_e"),
+        ("maxine", "maxine"),
+    ):
+        monkeypatch.setenv("EMPIRE_EDITION", raw)
+        assert simli.running_avatar_edition() == want, raw
+
+
+def test_router_binds_session_and_minutes_to_running_edition(monkeypatch):
+    """A client ?edition= / body.edition cannot spend another checkout's minutes or face."""
+    import app.services.max.token_tracker as tracker
+
+    monkeypatch.setattr(tracker.token_tracker, "log_usage", lambda **_k: None)
+    monkeypatch.setenv("EMPIRE_EDITION", "amp")
+    monkeypatch.setenv("SIMLI_API_KEY", FAKE_KEY)
+    seen = {}
+
+    def post(_url, body, _headers):
+        seen["face"] = body["faceId"]
+        return _Resp({"session_token": FAKE_TOKEN})
+
+    def get(_url, _headers):
+        return _Resp({"iceServers": [{"urls": "stun:example.invalid:19302"}]})
+
+    async def fake_session(edition, **_k):
+        return await simli.create_session(edition, http_post=post, http_get=get)
+
+    monkeypatch.setattr(simli_router, "create_session", fake_session)
+
+    app = FastAPI()
+    app.include_router(simli_router.router, prefix="/api/v1")
+    client = TestClient(app, client=("127.0.0.1", 9))
+
+    status = client.get("/api/v1/avatar/simli/status", params={"edition": "maxine"})
+    assert status.status_code == 200
+    assert status.json()["edition"] == "max_e"
+    assert status.json()["face_env"] == "default"
+    _no_secret(status.json())
+
+    session = client.post("/api/v1/avatar/simli/session", json={"edition": "maxine"})
+    assert session.status_code == 200
+    body = session.json()
+    assert body["edition"] == "max_e"
+    assert body["session_token"] == FAKE_TOKEN
+    assert seen["face"] == simli.DEFAULT_FACE_IDS["max_e"]
+    assert seen["face"] != simli.DEFAULT_FACE_IDS["maxine"]
+    assert seen["face"] != simli.DEFAULT_FACE_IDS["workroom"]
+    _no_secret(body)
+
+    logged = client.post(
+        "/api/v1/avatar/simli/usage",
+        json={"edition": "maxine", "seconds": 90, "source": "test"},
+    )
+    assert logged.status_code == 200
+    assert logged.json()["edition"] == "max_e"
+    stolen = simli.usage_card("maxine")
+    assert stolen["sessions"] == 0
+    card = client.get("/api/v1/avatar/simli/usage", params={"edition": "workroom"})
+    assert card.json()["edition"] == "max_e"
+    assert card.json()["sessions"] == 1
+    assert card.json()["minutes"] == 1.5
+    _no_secret(card.json())
+
+
+def test_router_workroom_process_cannot_mint_family_face(monkeypatch):
+    monkeypatch.setenv("SIMLI_API_KEY", FAKE_KEY)
+    seen = {}
+
+    def post(_url, body, _headers):
+        seen["face"] = body["faceId"]
+        return _Resp({"session_token": FAKE_TOKEN})
+
+    def get(_url, _headers):
+        return _Resp({})
+
+    async def fake_session(edition, **_k):
+        return await simli.create_session(edition, http_post=post, http_get=get)
+
+    monkeypatch.setattr(simli_router, "create_session", fake_session)
+    app = FastAPI()
+    app.include_router(simli_router.router, prefix="/api/v1")
+    client = TestClient(app, client=("127.0.0.1", 9))
+
+    session = client.post("/api/v1/avatar/simli/session", json={"edition": "maxine"})
+    assert session.status_code == 200
+    assert session.json()["edition"] == "workroom"
+    assert seen["face"] == simli.DEFAULT_FACE_IDS["workroom"]
+    assert seen["face"] != simli.DEFAULT_FACE_IDS["maxine"]
+    _no_secret(session.json())
+
+
 def test_router_status_session_and_usage(monkeypatch):
     import app.services.max.token_tracker as tracker
 
@@ -286,6 +385,12 @@ def test_avatar_html_edition_and_placeholder_contract():
     assert "body: 'F'" in html
     assert "startSimliFace" in html
     assert "live-pcm" in html
+    assert "normalizeEdition" in html
+    assert "fallback === 'none'" in html
+    assert "OWN_ORIGIN" in html
+    assert "window.location.origin" in html
+    assert "event.origin !== OWN_ORIGIN" in html
+    assert ", '*')" not in html
     client = (root / "simli-face.js").read_text(encoding="utf-8")
     assert "x-simli-api-key" not in client
     assert "SIMLI_API_KEY" not in client
@@ -298,7 +403,8 @@ def test_avatar_html_edition_and_placeholder_contract():
         / "screens"
         / "PresentationScreen.tsx"
     ).read_text(encoding="utf-8")
-    assert "/avatar.html?edition=workroom" in screen
+    assert "avatarFrameSrc(edition)" in screen
+    assert 'src="/avatar.html?edition=workroom"' not in screen
     assert "max-live-pcm" in screen
     assert "Simli off — TalkingHead" in screen
     page = (

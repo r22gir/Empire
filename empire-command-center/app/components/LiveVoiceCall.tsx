@@ -299,7 +299,15 @@ export function useLiveVoice() {
   return { state, lines, remaining, cap, status, error, speaking, start, stop };
 }
 
-export default function LiveVoiceCall({ variant = 'floating' }: { variant?: 'floating' | 'inline' }) {
+export default function LiveVoiceCall({
+  variant = 'floating',
+  label,
+  onStart,
+}: {
+  variant?: 'floating' | 'inline' | 'hero';
+  label?: string;
+  onStart?: () => void;
+}) {
   const v = useLiveVoice();
   const active = v.state === 'connecting' || v.state === 'live' || v.state === 'ending';
   const [open, setOpen] = useState(false);
@@ -308,21 +316,32 @@ export default function LiveVoiceCall({ variant = 'floating' }: { variant?: 'flo
   useEffect(() => { if (active) setOpen(true); }, [active]);
   useEffect(() => { scrollRef.current?.scrollTo({ top: 1e9 }); }, [v.lines]);
 
-  const onTap = () => { if (active) v.stop(); else { setOpen(true); v.start(); } };
-
-  const btnStyle: React.CSSProperties = {
-    width: 58, height: 58, borderRadius: '50%', border: 'none', cursor: 'pointer',
-    background: active ? '#dc2626' : 'linear-gradient(135deg,#b8860b,#d4af37)',
-    color: '#fff', boxShadow: active ? '0 0 0 6px rgba(220,38,38,0.25)' : '0 4px 14px rgba(0,0,0,0.35)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26,
-    touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent',
+  const onTap = () => {
+    if (active) {
+      v.stop();
+      return;
+    }
+    setOpen(true);
+    onStart?.();
+    v.start();
   };
+
+  const hero = variant === 'hero';
+  const btnStyle: React.CSSProperties = hero
+    ? {}
+    : {
+      width: 58, height: 58, borderRadius: '50%', border: 'none', cursor: 'pointer',
+      background: active ? '#dc2626' : 'linear-gradient(135deg,#b8860b,#d4af37)',
+      color: '#fff', boxShadow: active ? '0 0 0 6px rgba(220,38,38,0.25)' : '0 4px 14px rgba(0,0,0,0.35)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26,
+      touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent',
+    };
   const wrap: React.CSSProperties = variant === 'floating'
     ? { position: 'fixed', right: 16, bottom: 'calc(112px + env(safe-area-inset-bottom))', zIndex: 9990, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }
-    : { display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10, position: 'relative' };
+    : { display: 'inline-flex', flexDirection: 'column', alignItems: hero ? 'stretch' : 'flex-end', gap: 10, position: 'relative' };
 
   return (
-    <div style={wrap} data-testid="max-live-voice">
+    <div style={wrap} data-testid="max-live-voice" data-variant={variant}>
       {open && (
         <div style={{
           width: 'min(92vw, 360px)', maxHeight: '55vh', background: 'rgba(17,17,20,0.96)', color: '#eee',
@@ -352,8 +371,15 @@ export default function LiveVoiceCall({ variant = 'floating' }: { variant?: 'flo
           </div>
         </div>
       )}
-      <button onClick={onTap} style={btnStyle} aria-label={active ? 'End live call with Max' : 'Start live call with Max'} title={active ? 'End call' : 'Talk to Max (live)'}>
-        {active ? '■' : '🎙️'}
+      <button
+        onClick={onTap}
+        className={hero ? `v3-btn acc mh-hero-btn${active ? ' live' : ''}` : undefined}
+        style={hero ? undefined : btnStyle}
+        data-testid={hero ? 'mh-talk' : undefined}
+        aria-label={active ? 'End live call with Max' : (label || 'Start live call with Max')}
+        title={active ? 'End call' : (label || 'Talk to Max (live)')}
+      >
+        {hero ? (active ? 'End call' : (label || 'Talk')) : (active ? '■' : '🎙️')}
       </button>
     </div>
   );
