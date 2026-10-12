@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Bell, ChevronDown, Check, ArrowLeft } from 'lucide-react';
+import { Bell, ChevronDown, Check, ArrowLeft, Search } from 'lucide-react';
 import { API } from '../../lib/api';
 import LanguageSwitcher from '../LanguageSwitcher';
 import ThemeToggle from '../ThemeToggle';
@@ -279,12 +279,15 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
         </button>
       )}
 
-      {/* Search — hidden on mobile */}
       <button
+        type="button"
         onClick={onQuickSwitch}
         className="v3-search"
+        aria-label="Search (Control or Command K)"
+        data-testid="universal-search-trigger"
       >
-        <span>Search anything…</span>
+        <Search size={15} strokeWidth={1.8} aria-hidden="true" />
+        <span className="us-ph">Search</span>
         <kbd>⌘K</kbd>
       </button>
 
