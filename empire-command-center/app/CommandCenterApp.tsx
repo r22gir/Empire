@@ -69,7 +69,7 @@ import ProductDocs from './components/business/docs/ProductDocs';
 
 import TasksScreen from './components/screens/TasksScreen';
 import PresentationScreen from './components/screens/PresentationScreen';
-import ScheduleControl from './components/business/schedule/ScheduleControl';
+import WorkroomOrganizer from './components/business/organizer/WorkroomOrganizer';
 import LiveVoiceCall from './components/LiveVoiceCall';
 import './theme/cyber.css';
 import './theme/cyber-shell.css';
@@ -120,6 +120,7 @@ const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'jobs': 'jobs',
   calendar: 'calendar',
   schedule: 'calendar',
+  organizer: 'calendar',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -146,7 +147,7 @@ const NAV_PRODUCT_IDS = new Set<string>([
 const NAV_SCREEN_IDS = new Set<string>([
   'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
   'report', 'desks', 'memory-bank', 'telegram', 'docs', 'research', 'final-docs', 'invoice',
-  'presentation', 'video',
+  'calendar', 'presentation', 'video',
 ]);
 function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
   if (product === 'owner') return 'chat';
@@ -683,7 +684,10 @@ export default function CommandCenter() {
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;
     if (activeScreen === 'memory-bank') return <MemoryBankScreen />;
     if (activeScreen === 'telegram') return <TelegramScreen />;
-    if (activeScreen === 'calendar') return <ScheduleControl />;
+    if (activeScreen === 'calendar') {
+      const job = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('job') || '' : '';
+      return <WorkroomOrganizer initialJobId={job} />;
+    }
     if (activeScreen === 'report') return <SystemReportScreen />;
     if (activeScreen === 'tasks') return <TasksScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : activeProduct === 'owner' ? undefined : activeProduct} />;
     if (activeScreen === 'tickets') return <Suspense fallback={<Loading />}><TicketsPage /></Suspense>;

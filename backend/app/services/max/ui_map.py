@@ -345,22 +345,24 @@ _OVERLAYS: dict[str, dict] = {
     "organizer": {
         "name": "Organizer",
         "where": (
-            "MAX Home (/) → Today has reminders and the Tasks link. Full list: "
-            "home chip or /?screen=tasks."
+            "Left nav → Command → Organizer, and MAX Home (/) → Today → "
+            "Open organizer. Opens /?screen=calendar — calendar, people, "
+            "tasks, follow-ups, and pending mail for this edition."
         ),
-        "href": "/?screen=tasks",
+        "href": "/?screen=calendar",
         "aliases_en": ("organizer", "organiser", "photo organizer", "tasks list"),
         "aliases_es": ("organizador", "organizador de fotos", "tareas"),
         "workroom_only": False,
-        "source_ids": ("tasks", "organizer"),
+        "source_ids": ("tasks", "organizer", "calendar"),
     },
     "scheduler": {
         "name": "Scheduler",
         "where": (
-            "MAX Home (/) → Today → Schedule (job dates for the next 7 days). "
-            "Tasks and reminders: /?screen=tasks."
+            "MAX Home (/) → Today → Schedule. Full calendar: left nav → "
+            "Command → Organizer (/?screen=calendar). Tasks and reminders: "
+            "/?screen=tasks."
         ),
-        "href": "/",
+        "href": "/?screen=calendar",
         "aliases_en": ("scheduler", "schedule", "calendar", "today schedule"),
         "aliases_es": ("agenda", "calendario", "horario", "programador"),
         "workroom_only": False,
