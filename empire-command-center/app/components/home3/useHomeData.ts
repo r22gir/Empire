@@ -40,7 +40,7 @@ const OPEN_TASK = new Set(['todo', 'in_progress', 'waiting', 'blocked', 'open', 
 
 export type PulseItem = { key: string; label: string; value: string | null; tone?: 'bad' | 'warn' | 'ok'; href: string; why?: string };
 export type Suggestion = { key: string; tone: 'urgent' | 'warn' | 'info'; title: string; detail: string; href: string; action: string; src: string };
-export type ScheduleItem = { key: string; date: string; time: string | null; title: string; detail: string; href: string };
+export type ScheduleItem = { key: string; date: string; time: string | null; title: string; detail: string; href: string; map_link?: string | null; call_link?: string | null };
 export type Reminder = { id: string; title: string; due: string | null; priority: string; href: string };
 export type Working = { key: string; title: string; detail: string; status: string; href: string };
 export type Approval = { id: string; kind: string; channel: string; title: string; to: string };
@@ -66,6 +66,7 @@ export function useHomeData() {
       approvals: `${API}/growth/approvals?status=pending`,
       improvements: `${API}/growth/improvements`,
       tasks: `${origin}/api/v1/tasks?limit=200`,
+      organizerToday: `${API}/organizer/today`,
     };
     const entries = await Promise.all(Object.entries(eps).map(async ([k, u]) => [k, await getJson(u)] as const));
     setData(Object.fromEntries(entries));
@@ -134,7 +135,25 @@ export function useHomeData() {
     let suggestions: Suggestion[] | null = null;
     if (now) {
       const today = ymd(now), horizon = ymd(addDays(now, 7));
-      if (activeJobs) {
+      const orgToday = ok('organizerToday');
+      if (orgToday && Array.isArray(orgToday.items)) {
+        schedule = orgToday.items.slice(0, 8).map((e: any, i: number) => {
+          const when = String(e.start_time || e.due_at || '');
+          const d = when.slice(0, 10) || today;
+          const t = when.includes('T') ? parseDate(when) : null;
+          return {
+            key: String(e.id || `org-${i}`),
+            date: d,
+            time: t ? t.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : null,
+            title: String(e.title || 'Item'),
+            detail: [e.kind || e.type, e.customer_vendor || e.job_title, e.location_address].filter(Boolean).join(' · '),
+            href: (Array.isArray(e.record_links) && e.record_links[0]?.href)
+              || (e.job_id ? jobHubHref({ job: e.job_id }) : '/?screen=calendar'),
+            map_link: e.map_link || (e.location_address ? `https://maps.google.com/?q=${encodeURIComponent(e.location_address)}` : null),
+            call_link: e.call_link || (e.phone ? `tel:${e.phone}` : null),
+          };
+        });
+      } else if (activeJobs) {
         const up: ScheduleItem[] = [];
         activeJobs.forEach(j => (['install_date', 'site_visit_date', 'scheduled_date'] as const).forEach(f => {
           const v = j[f] ? String(j[f]) : ''; const d = v.slice(0, 10);
@@ -182,7 +201,7 @@ export function useHomeData() {
     return {
       loading, now, pulse, approvals, improvements, reminders, working, schedule, suggestions, maxOk,
       figures: { approvals: approvals?.length ?? null, overdueTotal: od ? overdueTotal : null, overdueCount, wrJobs: wrJobs?.length ?? null, installs: schedule?.filter(s => s.title.startsWith('Install')).length ?? null, openLeadCount },
-      errors: { approvals: err('approvals'), tasks: err('tasks'), improvements: err('improvements'), jobs: err('jobs') },
+      errors: { approvals: err('approvals'), tasks: err('tasks'), improvements: err('improvements'), jobs: err('jobs'), organizer: err('organizerToday') },
       reload: load,
     };
   }, [data, now, load]);

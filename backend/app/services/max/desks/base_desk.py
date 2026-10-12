@@ -7,6 +7,7 @@ and scoped file/git operations (v6.0).
 import logging
 import os
 import subprocess
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -680,13 +681,15 @@ class BaseDesk(ABC):
                 if not title:
                     continue
                 priority = f.get("priority", default_priority)
+                task_id = uuid.uuid4().hex
                 conn.execute(
                     """INSERT INTO tasks
                        (id, title, description, status, priority, desk,
                         assigned_to, created_by, due_date, follow_up_date,
                         recurrence, source, tags, metadata)
-                       VALUES (lower(hex(randomblob(8))), ?, ?, 'todo', ?, ?, ?, 'max', ?, ?, ?, 'desk_audit', ?, ?)""",
+                       VALUES (?, ?, ?, 'todo', ?, ?, ?, 'max', ?, ?, ?, 'desk_audit', ?, ?)""",
                     (
+                        task_id,
                         title,
                         f.get("description"),
                         priority,
@@ -700,7 +703,8 @@ class BaseDesk(ABC):
                     ),
                 )
                 row = conn.execute(
-                    "SELECT * FROM tasks ORDER BY created_at DESC LIMIT 1"
+                    "SELECT * FROM tasks WHERE id = ?",
+                    (task_id,),
                 ).fetchone()
                 if row:
                     created.append({

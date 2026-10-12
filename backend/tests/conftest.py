@@ -134,6 +134,22 @@ _DATA_TABLES = [
     "customers",
     "schedule_events",
     "pickup_dropoff_logs",
+    "organizer_assignments",
+    "organizer_items",
+    "organizer_resources",
+    "organizer_ics_tokens",
+    "organizer_day_plans",
+    "organizer_captures",
+    "organizer_crew_tokens",
+    "organizer_checkins",
+    "organizer_spaces",
+    "organizer_usage",
+    "organizer_mail_state",
+    "organizer_reminders",
+    "organizer_suggestions",
+    "organizer_templates",
+    "organizer_recurrence",
+    "approval_queue",
 ]
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
