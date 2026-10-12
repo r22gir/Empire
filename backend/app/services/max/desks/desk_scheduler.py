@@ -9,63 +9,44 @@ import logging
 import socket
 from datetime import datetime
 from .base_desk import TaskState
+from app.services.max.desks.live_services import EMPIRE_SERVICES, LIVE_SERVICES, check_live_services, format_health_report
 
 logger = logging.getLogger("max.desks.scheduler")
 
 # Schedule: (hour, minute, desk_id, task_title, task_description)
+# Each job queries live empire.db data via job_runner (named findings).
 DAILY_SCHEDULE = [
     (8, 0, "finance", "Morning Invoice Audit",
-     "Check all outstanding invoices. Flag any overdue more than 7 days. "
-     "List each by client name, amount, and days overdue. Suggest collection actions."),
+     "Check all outstanding invoices in empire.db. Flag overdue. "
+     "List each by invoice number, client name, amount, and days overdue."),
 
     (8, 30, "it", "Morning Service Health Check",
-     "Check which Empire services are actually running right now. "
-     "Test ports 8000, 3000, 3001, 3002, 3005, 3009, 7878, 11434. "
-     "Report which are UP and which are DOWN. Flag any issues."),
+     "Check live Empire services: empire-backend 8000, empire-portal 3005, "
+     "empire-amp, empire-maxine, tunnel, disk. Drop dead ports."),
 
     (9, 0, "sales", "Stale Quote Follow-Up Scan",
-     "Review all quotes and proposals older than 3 days without a client response. "
-     "For each stale quote, draft a polite follow-up message. "
-     "Prioritize by deal value. Include specific next actions."),
+     "Review quotes_v2 older than 3 days without a client response. "
+     "Draft follow-ups into the approval queue — do not send."),
 
     (9, 30, "support", "Open Ticket Summary",
-     "Audit all open support tickets and client issues. "
-     "Summarize status of each, flag urgent ones, suggest resolutions. "
-     "Note any tickets that have been open more than 48 hours."),
+     "Audit pending mail, unreviewed inbox, support tasks, and family-help "
+     "(family stays isolated). Drafts only — no outbound."),
 
     (10, 0, "marketing", "Daily Social Media Post",
-     "Draft an Instagram post for Empire Workroom today. "
-     "Topic: custom window treatments, home transformation, or client success. "
-     "Include a compelling caption, relevant hashtags (20-25), and posting time recommendation. "
-     "Make it specific and ready to post — not a template."),
+     "Draft an Instagram post from a named live job or quote. Approval only."),
 
     (10, 30, "forge", "Today's Pipeline Summary",
-     "Summarize today's quote pipeline for Empire Workroom. "
-     "List active quotes, pending measurements, upcoming installations, and production status. "
-     "Flag anything that needs immediate attention. Include revenue at stake."),
+     "Summarize open quotes_v2, active jobs, and today's schedule_events."),
 
     (11, 0, "analytics", "Daily Business Metrics",
-     "Pull key metrics from all databases: customers, jobs (pending/completed), "
-     "invoices (unpaid/paid), revenue, expenses, profit, inventory items, open tasks. "
-     "Generate a concise daily metrics summary."),
+     "Pull key metrics from empire.db: customers, jobs, invoices, payments, "
+     "expenses, inventory, open tasks. Named unpaid invoices."),
 
     (11, 30, "quality", "AI Quality Audit",
-     "Run quality audit on all MAX AI responses. Check accuracy rate from "
-     "max_response_audit table. Flag any accuracy below 90% threshold. "
-     "Generate quality report with total responses audited, flagged count, and accuracy percentage."),
+     "Report failed desk jobs, stuck tasks, and overdue work from the DB."),
 ]
 
-# Empire services to health-check
-EMPIRE_SERVICES = {
-    "Backend API": 8000,
-    "Empire App": 3000,
-    "WorkroomForge": 3001,
-    "LuxeForge": 3002,
-    "Studio Portal": 3005,
-    "Founder Dashboard": 3009,
-    "OpenClaw": 7878,
-    "Ollama": 11434,
-}
+# Live services only (empire-backend, empire-portal, amp, maxine, tunnel, disk).
 
 
 class DeskScheduler:
@@ -115,12 +96,8 @@ class DeskScheduler:
                         self._last_run["health_monitor_tick"] = f"{today}:{now.hour}:{now.minute}"
                         asyncio.create_task(self._check_service_health())
 
-                # v6.0 Morning brief: 7:30 AM daily
-                if now.hour == 7 and now.minute == 30:
-                    brief_key = f"morning_brief:{today}"
-                    if self._last_run.get("morning_brief") != brief_key:
-                        self._last_run["morning_brief"] = brief_key
-                        asyncio.create_task(self._generate_morning_brief())
+                # Consolidated brief lives in MaxScheduler (after desks / using
+                # yesterday's desk_job_results). Do not send a second 7:30 brief.
 
                 # v6.0 Weekly report: Monday 8:00 AM
                 if now.weekday() == 0 and now.hour == 8 and now.minute == 0:
@@ -143,6 +120,13 @@ class DeskScheduler:
                         self._last_run["pipeline_tick"] = pl_tick
                         asyncio.create_task(self._run_pipeline_executor())
 
+                # After the last scheduled desk job, route idle desks + record a run.
+                if now.hour == 12 and now.minute == 0:
+                    orch_key = f"orchestrator:{today}"
+                    if self._last_run.get("orchestrator") != orch_key:
+                        self._last_run["orchestrator"] = orch_key
+                        asyncio.create_task(self._run_idle_desk_orchestrator())
+
             except Exception as e:
                 logger.warning(f"Scheduler tick error: {e}")
 
@@ -153,61 +137,38 @@ class DeskScheduler:
         logger.info("Desk scheduler stopped")
 
     async def _execute_desk_task(self, desk_id: str, title: str, description: str, source: str = "scheduler"):
-        """Execute a task directly through the desk manager — no HTTP roundtrip."""
+        """Execute a scheduled job against live DB data. Done only if review passes."""
         logger.info(f"[Scheduler] Executing: {desk_id} → {title}")
 
         try:
-            task = await self.manager.submit_task(
+            from app.services.max.desks.job_runner import run_scheduled_job
+            from .base_desk import DeskTask, TaskPriority
+
+            out = run_scheduled_job(desk_id, title, description)
+            task = DeskTask(
+                id=out["id"],
                 title=title,
                 description=description,
-                priority="normal",
+                priority=TaskPriority.NORMAL,
                 source=source,
             )
+            if out["status"] == "done":
+                task.state = TaskState.COMPLETED
+            else:
+                task.state = TaskState.FAILED
+            task.result = out.get("result")
+            task.completed_at = datetime.now().isoformat()
+            if out.get("fail_reason"):
+                task.escalation_reason = out["fail_reason"]
 
-            # If the desk completed it with canned/short text, enhance with AI
-            if task.state.value == "completed" and source == "scheduler":
-                result_len = len(task.result or "")
-                if result_len < 500:
-                    try:
-                        desk = self.manager.get_desk(desk_id)
-                        if desk:
-                            ai_result = await desk.ai_execute_task(task)
-                            if ai_result and len(ai_result) > result_len:
-                                task.result = ai_result
-                    except Exception as e:
-                        logger.warning(f"AI enhancement failed for {desk_id}: {e}")
-
-            # If desk handler escalated or failed, try OpenClaw as fallback
-            if task.state.value in ("escalated", "failed"):
-                try:
-                    from app.routers.openclaw_bridge import dispatch_desk_task_to_openclaw
-                    logger.info(f"[Scheduler] Trying OpenClaw fallback for: {desk_id} → {title}")
-                    oc_result = await dispatch_desk_task_to_openclaw(
-                        desk_id=desk_id,
-                        task_title=title,
-                        task_description=description,
-                        timeout=120,
-                    )
-                    if oc_result.get("status") == "completed":
-                        task.state = TaskState.COMPLETED
-                        task.result = oc_result.get("summary", "Completed via OpenClaw fallback")
-                        task.completed_at = datetime.now().isoformat()
-                        logger.info(f"[Scheduler] OpenClaw fallback succeeded: {desk_id} → {title}")
-                except Exception as oc_err:
-                    logger.debug(f"[Scheduler] OpenClaw fallback unavailable: {oc_err}")
-                    # Keep original failure — OpenClaw is optional
-
-            # Store to database
-            await self._persist_task(desk_id, task)
-
-            # Send Telegram summary
             await self._notify_telegram(desk_id, title, task)
-
             logger.info(f"[Scheduler] Completed: {desk_id} → {title} ({task.state.value})")
+            return out
 
         except Exception as e:
             logger.error(f"[Scheduler] Failed: {desk_id} → {title}: {e}")
             await self._notify_telegram_error(desk_id, title, str(e))
+            return None
 
     async def _persist_task(self, desk_id: str, task):
         """Save task result to the SQLite tasks table."""
@@ -281,18 +242,16 @@ class DeskScheduler:
             pass
 
     async def _check_service_health(self):
-        """Check all Empire services — alert on status changes."""
+        """Check live Empire services — alert on status changes."""
         changes = []
-
-        for name, port in EMPIRE_SERVICES.items():
-            is_up = self._port_open(port)
+        for row in check_live_services():
+            name = row["name"]
+            is_up = bool(row.get("up"))
             was_up = self._service_status.get(name)
-
             if was_up is not None and was_up and not is_up:
-                changes.append(f"🔴 {name} (:{port}) went DOWN")
+                changes.append(f"DOWN {name}: {row.get('detail')}")
             elif was_up is not None and not was_up and is_up:
-                changes.append(f"🟢 {name} (:{port}) is back UP")
-
+                changes.append(f"UP {name}: {row.get('detail')}")
             self._service_status[name] = is_up
 
         if changes:
@@ -316,6 +275,19 @@ class DeskScheduler:
 
     # ── v6.0 Pipeline Executor ─────────────────────────────────────────
 
+    async def _run_idle_desk_orchestrator(self):
+        """Give idle desks real jobs and persist an orchestrator run record."""
+        try:
+            from app.services.max.orchestrator_runs import route_idle_desks
+
+            result = route_idle_desks()
+            logger.info(
+                "[Orchestrator] idle desks: %s tasks=%s run=%s",
+                result.get("desks_assigned"), result.get("tasks_created"), result.get("run_id"),
+            )
+        except Exception as e:
+            logger.warning("[Orchestrator] idle-desk routing failed: %s", e)
+
     async def _run_pipeline_executor(self):
         """Execute next ready subtasks from all active pipelines."""
         try:
@@ -330,97 +302,15 @@ class DeskScheduler:
     # ── v6.0 Morning Brief & Weekly Report ──────────────────────────────
 
     async def _generate_morning_brief(self):
-        """Generate and send morning briefing — all desk statuses, pipeline summary,
-        key metrics, and priority actions. Sent to Telegram + stored for CC dashboard."""
-        logger.info("[Scheduler] Generating morning brief")
+        """Build the ONE DB-backed brief. Does not send — MaxScheduler sends it."""
+        logger.info("[Scheduler] Generating consolidated morning brief (no send)")
         try:
-            from app.services.max.telegram_bot import telegram_bot
-            from app.services.max.pipeline import pipeline_engine
-            from app.services.max.security.sanitizer import sanitizer as input_sanitizer
+            from app.services.max.daily_brief import build_and_persist_brief
 
-            # 1. Desk statuses
-            statuses = await self.manager.get_all_statuses()
-            desk_lines = []
-            for s in statuses:
-                desk_id = s.get("desk_id", "?")
-                completed = s.get("completed_today", 0)
-                active = len(s.get("active_task_details", []))
-                escalated = s.get("escalated", 0)
-                icon = "🟢" if not escalated else "🟡"
-                desk_lines.append(f"{icon} <b>{desk_id}</b>: {completed} done, {active} active{f', {escalated} escalated' if escalated else ''}")
-
-            # 2. Pipeline summary
-            active_pipelines = pipeline_engine.get_active_pipelines()
-            review_tasks = pipeline_engine.get_review_tasks()
-
-            # 3. Service health
-            health_lines = []
-            for name, port in EMPIRE_SERVICES.items():
-                up = self._port_open(port)
-                health_lines.append(f"{'🟢' if up else '🔴'} {name} (:{port})")
-
-            # 4. Security stats
-            sec_stats = input_sanitizer.get_stats()
-
-            # 5. Quotes summary
-            quote_info = ""
-            try:
-                import json, os
-                quotes_dir = os.path.expanduser("~/empire-repo/backend/data/quotes")
-                open_quotes = 0
-                total_pipeline = 0
-                for f in os.listdir(quotes_dir):
-                    if f.endswith(".json") and not f.startswith("_"):
-                        with open(os.path.join(quotes_dir, f)) as qf:
-                            q = json.load(qf)
-                        if q.get("status") in ("draft", "sent"):
-                            open_quotes += 1
-                            total_pipeline += q.get("total", 0)
-                quote_info = f"💰 <b>Quotes:</b> {open_quotes} open (${total_pipeline:,.0f} pipeline)"
-            except Exception:
-                quote_info = "💰 <b>Quotes:</b> (unavailable)"
-
-            # Build brief
-            now = datetime.now()
-            brief = (
-                f"🌅 <b>Morning Brief — {now.strftime('%A, %B %d')}</b>\n\n"
-                f"<b>AI Desks ({len(statuses)})</b>\n"
-                + "\n".join(desk_lines) + "\n\n"
-                f"<b>Pipelines</b>\n"
-                f"📊 {len(active_pipelines)} active, {len(review_tasks)} awaiting review\n\n"
-                f"{quote_info}\n\n"
-                f"<b>Services</b>\n"
-                + "\n".join(health_lines) + "\n\n"
-                f"🛡 <b>Security:</b> {sec_stats['total_checks']} checks, "
-                f"{sec_stats['blocked_injection'] + sec_stats['blocked_sql'] + sec_stats['blocked_xss']} blocked"
-            )
-
-            # Send via Telegram
-            if telegram_bot.is_configured:
-                await telegram_bot.send_message(brief)
-
-            # Store for CC dashboard
-            try:
-                import json as _json
-                brief_path = os.path.expanduser("~/empire-repo/backend/data/reports/morning_brief.json")
-                os.makedirs(os.path.dirname(brief_path), exist_ok=True)
-                with open(brief_path, "w") as f:
-                    _json.dump({
-                        "date": now.strftime("%Y-%m-%d"),
-                        "generated_at": now.isoformat(),
-                        "html": brief,
-                        "desk_count": len(statuses),
-                        "active_pipelines": len(active_pipelines),
-                        "review_tasks": len(review_tasks),
-                        "security_stats": sec_stats,
-                    }, f, indent=2)
-            except Exception as e:
-                logger.warning(f"Failed to save morning brief: {e}")
-
-            logger.info("[Scheduler] Morning brief sent")
-
+            return build_and_persist_brief()
         except Exception as e:
             logger.error(f"[Scheduler] Morning brief failed: {e}")
+            return None
 
     async def _generate_weekly_report(self):
         """Generate weekly business intelligence report with monetization suggestions.
@@ -434,8 +324,9 @@ class DeskScheduler:
             now = datetime.now()
 
             # Gather weekly data
-            # Quote stats
-            quotes_dir = os.path.expanduser("~/empire-repo/backend/data/quotes")
+            # Quote stats from live data path (never ~/empire-repo)
+            from app.services.data_paths import quotes_data_dir
+            quotes_dir = str(quotes_data_dir())
             total_quotes = 0
             accepted = 0
             total_value = 0
@@ -499,7 +390,8 @@ class DeskScheduler:
             if telegram_bot.is_configured:
                 await telegram_bot.send_message(report)
 
-            report_path = os.path.expanduser("~/empire-repo/backend/data/reports/weekly_report.json")
+            from app.services.data_paths import reports_dir
+            report_path = str(reports_dir() / "weekly_report.json")
             os.makedirs(os.path.dirname(report_path), exist_ok=True)
             with open(report_path, "w") as f:
                 json.dump({

@@ -589,6 +589,26 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                               </div>
                             )}
 
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.location.href = `/?screen=calendar&job=${encodeURIComponent(String(job.id))}`;
+                              }}
+                              style={{
+                                alignSelf: 'flex-start',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                background: '#fefce8',
+                                color: '#854d0e',
+                                border: '1px solid #f5e7b2',
+                                borderRadius: 6,
+                                padding: '3px 8px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Schedule
+                            </button>
                             {/* Pickup / Delivery date chip */}
                             {(job.pickup_delivery_date || job.due_date || job.scheduled_date) && (
                               <div

@@ -524,6 +524,17 @@ def init_database():
         # Schedule Control & Pickup Log tables (safe to re-run)
         _migrate_schedule_tables(conn)
 
+        from app.db.max_ops_schema import ensure_max_ops_schema
+
+        ensure_max_ops_schema(conn)
+
+        # Workroom Organizer tables + additive schedule_events columns
+        try:
+            from app.services.organizer.schema import migrate_organizer_tables
+            migrate_organizer_tables(conn)
+        except Exception as e:
+            print(f"✗ Organizer migration failed (non-fatal): {e}")
+
         # Seed desk configs from desks.json if table is empty
         count = conn.execute("SELECT COUNT(*) FROM desk_configs").fetchone()[0]
         if count == 0 and DESKS_JSON_PATH.exists():
@@ -678,6 +689,11 @@ def _migrate_schedule_tables(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pickup_dropoff_job ON pickup_dropoff_logs(job_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pickup_dropoff_event ON pickup_dropoff_logs(schedule_event_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pickup_dropoff_timestamp ON pickup_dropoff_logs(timestamp)")
+    try:
+        from app.services.organizer.schema import migrate_organizer_tables
+        migrate_organizer_tables(conn)
+    except Exception:
+        pass
 
 
 def _seed_desks(conn):

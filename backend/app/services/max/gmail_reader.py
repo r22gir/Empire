@@ -74,12 +74,45 @@ def _get_service():
     return build("gmail", "v1", http=authed_http, cache_discovery=False)
 
 
+def build_gmail_query(
+    *,
+    unread_only: bool = True,
+    filter_to: Optional[str] = None,
+    from_sender: Optional[str] = None,
+    query: Optional[str] = None,
+    disable_default_to_filter: bool = False,
+) -> tuple[Optional[str], Optional[str]]:
+    """Return (gmail_q, to_filter). Chat default is unread mail to MAX_EMAIL.
+
+    The daily brief / Organizer pending list must pass
+    ``disable_default_to_filter=True`` so Business Gmail (empirebox2026,
+    which receives workroom@, info@, and max@) is not narrowed to max@.
+    """
+    searching = bool((from_sender or "").strip() or (query or "").strip())
+    if disable_default_to_filter:
+        max_email = (filter_to or "").strip() or None
+    else:
+        max_email = filter_to or (None if searching else os.getenv("MAX_EMAIL", "max@empirebox.store"))
+    parts: list[str] = []
+    if max_email:
+        parts.append(f"to:{max_email}")
+    if from_sender and from_sender.strip():
+        sender = from_sender.strip().replace('"', "")
+        parts.append(f'from:"{sender}"' if " " in sender else f"from:{sender}")
+    if query and query.strip():
+        parts.append(query.strip())
+    if unread_only:
+        parts.append("is:unread")
+    return (" ".join(parts) if parts else None, max_email)
+
+
 def _check_inbox_sync(
     limit: int = 10,
     unread_only: bool = True,
     filter_to: Optional[str] = None,
     from_sender: Optional[str] = None,
     query: Optional[str] = None,
+    disable_default_to_filter: bool = False,
 ) -> dict:
     """Internal sync implementation — always run in a thread.
 
@@ -88,27 +121,19 @@ def _check_inbox_sync(
     mail addressed to MAX_EMAIL.
     """
     limit = min(limit, 20)
-    searching = bool((from_sender or "").strip() or (query or "").strip())
-    max_email = filter_to or (None if searching else os.getenv("MAX_EMAIL", "max@empirebox.store"))
+    query, max_email = build_gmail_query(
+        unread_only=unread_only,
+        filter_to=filter_to,
+        from_sender=from_sender,
+        query=query,
+        disable_default_to_filter=disable_default_to_filter,
+    )
 
     # Set socket-level timeout as safety net
     old_timeout = socket.getdefaulttimeout()
     socket.setdefaulttimeout(_GMAIL_TIMEOUT)
     try:
         service = _get_service()
-
-        # Build Gmail search query
-        query_parts = []
-        if max_email:
-            query_parts.append(f"to:{max_email}")
-        if from_sender and from_sender.strip():
-            sender = from_sender.strip().replace('"', "")
-            query_parts.append(f'from:"{sender}"' if " " in sender else f"from:{sender}")
-        if query and query.strip():
-            query_parts.append(query.strip())
-        if unread_only:
-            query_parts.append("is:unread")
-        query = " ".join(query_parts) if query_parts else None
 
         results = service.users().messages().list(
             userId="me", q=query, maxResults=limit
@@ -119,7 +144,7 @@ def _check_inbox_sync(
         for msg_ref in message_ids:
             msg = service.users().messages().get(
                 userId="me", id=msg_ref["id"], format="metadata",
-                metadataHeaders=["From", "To", "Subject", "Date"],
+                metadataHeaders=["From", "To", "Subject", "Date", "List-Unsubscribe", "List-Id"],
             ).execute()
 
             headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
@@ -127,12 +152,15 @@ def _check_inbox_sync(
 
             emails.append({
                 "id": msg_ref["id"],
+                "thread_id": msg.get("threadId") or msg_ref.get("threadId") or "",
                 "from": headers.get("From", ""),
                 "to": headers.get("To", ""),
                 "subject": headers.get("Subject", "(no subject)"),
                 "date": headers.get("Date", ""),
                 "preview": snippet[:200],
                 "unread": "UNREAD" in msg.get("labelIds", []),
+                "labels": msg.get("labelIds", []),
+                "list_unsubscribe": headers.get("List-Unsubscribe", ""),
             })
 
         unread_total = 0
@@ -164,10 +192,14 @@ def check_inbox(
     filter_to: Optional[str] = None,
     from_sender: Optional[str] = None,
     query: Optional[str] = None,
+    disable_default_to_filter: bool = False,
 ) -> dict:
     """Fetch recent emails with a hard 15s timeout. Thread-safe, never blocks event loop."""
     try:
-        future = _executor.submit(_check_inbox_sync, limit, unread_only, filter_to, from_sender, query)
+        future = _executor.submit(
+            _check_inbox_sync, limit, unread_only, filter_to, from_sender, query,
+            disable_default_to_filter,
+        )
         return future.result(timeout=15)
     except FuturesTimeout:
         logger.error("Gmail check timed out after 15s")

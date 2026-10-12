@@ -255,7 +255,7 @@ class BaseDesk(ABC):
                 desk=self.desk_id,
                 content=response.content,
             )
-        return response.content
+        return self._execute_tool_blocks(response.content, task)
 
     # ── v6.0: AI Call with Cost Tracking ───────────────────────────
 
@@ -314,7 +314,13 @@ class BaseDesk(ABC):
                 desk=self.desk_name,
                 content=response.content,
             )
-        return response.content
+        return self._execute_tool_blocks(response.content)
+
+    def _execute_tool_blocks(self, content: str, task: Optional["DeskTask"] = None) -> str:
+        """Parse ```tool blocks and actually execute them. Never return raw fences."""
+        from app.services.max.desks.tool_blocks import execute_embedded_tool_blocks
+
+        return execute_embedded_tool_blocks(content, desk_id=self.desk_id, task=task)
 
     # ── v6.0: Scoped File Operations ────────────────────────────
 

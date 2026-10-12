@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { API } from '../../lib/api';
+import { stripTelegramHtml } from '../../lib/plainText';
 import { Inbox, Bell, CheckCircle, Clock, AlertTriangle, RefreshCw, Filter } from 'lucide-react';
 
 interface InboxItem {
@@ -36,7 +37,7 @@ export default function InboxScreen() {
           id: n.id || String(i),
           type: n.type || 'notification',
           title: n.title || n.subject || 'Notification',
-          body: n.body || n.message || n.content || '',
+          body: stripTelegramHtml(n.body || n.message || n.content || ''),
           timestamp: n.timestamp || n.created_at || new Date().toISOString(),
           read: n.read || false,
           priority: n.priority || 'normal',

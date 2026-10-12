@@ -1295,6 +1295,26 @@ async def default_photo_handler(image: bytes, mime: str, caption: str, wa_id: st
 
 
 
+def _file_whatsapp_capture(raw: bytes, filename: str, mime: str, caption: str, wa_id: str, message_id: str, kind: str) -> None:
+    """Side-effect: file inbound WhatsApp media into this edition's Organizer store."""
+    try:
+        from app.db.database import get_db
+        from app.services.organizer.capture import ingest_whatsapp_media
+        with get_db() as conn:
+            ingest_whatsapp_media(
+                conn,
+                raw=raw,
+                filename=filename,
+                mime=mime or "application/octet-stream",
+                caption=caption or "",
+                wa_id=wa_id,
+                message_id=message_id,
+                kind=kind,
+            )
+    except Exception:
+        logger.warning("WhatsApp organizer capture skipped", exc_info=True)
+
+
 _SENDER_LOCKS: dict[str, asyncio.Lock] = {}
 
 
@@ -1381,11 +1401,18 @@ async def process_webhook(
                 elif message["type"] == "audio" or message.get("voice"):
                     route = "voice_document"
                     audio, mime = await download_media(message["media_id"], http_get=http_get)
+                    _file_whatsapp_capture(audio, "voice.ogg", mime or message["mime_type"], message.get("caption") or "", sender, message_id, "audio")
                     reply = await on_voice(audio, mime or message["mime_type"], sender)
                 elif message["type"] == "image":
                     route = "photo_quote"
                     image, mime = await download_media(message["media_id"], http_get=http_get)
+                    _file_whatsapp_capture(image, "photo.jpg", mime or message["mime_type"], message.get("caption") or "", sender, message_id, "image")
                     reply = await on_photo(image, mime or message["mime_type"], message["caption"], sender)
+                elif message["type"] == "document":
+                    route = "organizer_capture"
+                    doc, mime = await download_media(message["media_id"], http_get=http_get)
+                    _file_whatsapp_capture(doc, "whatsapp-doc.bin", mime or message["mime_type"], message.get("caption") or "", sender, message_id, "document")
+                    reply = "Filed in the Organizer. Nothing sent to a customer."
                 else:
                     reply = "That message type is not handled. Nothing sent."
             except Exception:

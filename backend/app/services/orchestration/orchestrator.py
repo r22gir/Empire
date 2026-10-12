@@ -250,12 +250,28 @@ class EmpireOrchestrator:
                     priority="high",
                 )
 
-        return {
+        payload = {
             "cycle_at": cycle_start,
             "incidents": incidents_detected,
             "resolutions": resolutions,
             "status": "ok" if not incidents_detected else "incident_handled",
         }
+        try:
+            from app.services.max.orchestrator_runs import record_run
+            from datetime import datetime as _dt
+
+            started = _dt.fromisoformat(cycle_start)
+            record_run(
+                status=payload["status"],
+                desks_assigned=[],
+                tasks_created=0,
+                result=payload,
+                started_at=started,
+                finished_at=_dt.utcnow(),
+            )
+        except Exception as e:
+            logger.warning("orchestrator run persist failed: %s", e)
+        return payload
 
     async def start_autonomous_loop(self, interval_seconds: int = 300):
         """Background loop running every `interval_seconds`."""

@@ -271,29 +271,15 @@ class FinanceDesk(BaseDesk):
         return await self.complete_task(task, result)
 
     async def _handle_overdue(self, task: DeskTask) -> DeskTask:
-        """Handle overdue payment alerts."""
+        """Handle overdue payment alerts from empire.db invoices."""
         task.actions.append(DeskAction(
             action="overdue_check",
-            detail="Checking overdue invoices",
+            detail="Checking overdue invoices in empire.db",
         ))
+        from app.services.max.desks.job_runner import job_finance_invoice_audit
+        from app.services.max.desks.live_data import snapshot
 
-        # Flag overdue invoices and escalate
-        overdue = [i for i in self.invoices if i.get("status") in ("draft", "sent")]
-
-        if overdue:
-            await self.notify_telegram(
-                f"Overdue alert: {len(overdue)} invoice(s) need attention\n"
-                + "\n".join(f"- {i['customer']}: ${i.get('amount', 0) or 0:,.2f}" for i in overdue[:5])
-            )
-
-        result = (
-            f"Overdue check: {len(overdue)} invoice(s) outstanding. "
-            f"Recommended: Send payment reminders, escalate 30+ day overdue."
-        )
-
-        if any(task.priority == TaskPriority.URGENT for _ in [1]):
-            return await self.escalate(task, f"{len(overdue)} overdue invoices need founder attention")
-
+        result, _findings = job_finance_invoice_audit(snapshot())
         return await self.complete_task(task, result)
 
     async def _handle_subscription(self, task: DeskTask) -> DeskTask:
