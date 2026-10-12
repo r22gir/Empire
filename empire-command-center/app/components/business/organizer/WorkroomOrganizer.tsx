@@ -1,16 +1,33 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  CalendarDays,   Camera, Check, Inbox, Mic, Plus, Scissors, Crown, Home,
+  Sparkles, Rocket, Target, CircleDot, AlertTriangle, Banknote, Briefcase,
+} from 'lucide-react';
 import { API } from '../../../lib/api';
 import {
   addMinutesIso, DAY_END_MIN, DAY_START_MIN, eventLayout,
-  filterItems, filterPendingMail, groupActions, inferSpaceClient, itemsInColumn, itemsOnDay,
-  isOrganizerCommand, KIND_COLOR, KIND_LABEL, monthCells, overdueItems, PX_PER_MIN,
-  shouldOfferCrewDraft, showsWorkroomJobs, spaceStyle, STATUS_COLUMNS, timeFromOffset,
-  weekDays, ymd,
-  type OrganizerAction, type OrganizerItem, type OrganizerSpace, type TodayBucket,
+  filterItems, filterPendingMail, formatOrganizerDate, formatOrganizerTime, groupActions,
+  inferSpaceClient, itemsInColumn, itemsOnDay, isOrganizerCommand, jobProgressFromItems,
+  KIND_COLOR, KIND_LABEL, monthCells, ORG_THEME_STORAGE, ORG_THEMES, organizerKpis,
+  overdueItems, PX_PER_MIN, resolveOrgTheme, shouldOfferCrewDraft, showsWorkroomJobs,
+  STATUS_COLUMNS, themedSpaceStyle, timeFromOffset, weekDays, ymd,
+  type OrganizerAction, type OrganizerItem, type OrganizerSpace, type OrgTheme, type TodayBucket,
 } from '../../../lib/organizer-logic';
 import './organizer.css';
+import './organizer-themes.css';
+
+const SPACE_LUCIDE: Record<string, typeof Scissors> = {
+  workroom: Scissors, empire: Crown, family: Home, personal: Sparkles, ventures: Rocket, amp: Target,
+};
+
+function readTheme(): OrgTheme {
+  if (typeof window === 'undefined') return 'a';
+  const q = new URLSearchParams(window.location.search).get('orgTheme');
+  const stored = window.localStorage.getItem(ORG_THEME_STORAGE);
+  return resolveOrgTheme(q, stored);
+}
 
 type View = 'today' | 'board' | 'day' | 'week' | 'month' | 'lanes' | 'agenda' | 'mail';
 
@@ -59,9 +76,24 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   const [photoMime, setPhotoMime] = useState('image/jpeg');
   const [spaceEdit, setSpaceEdit] = useState<OrganizerSpace | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [theme, setTheme] = useState<OrgTheme>('a');
+  const [completedId, setCompletedId] = useState('');
+  const [dragOverCol, setDragOverCol] = useState('');
   const dragRef = useRef<{ id: string; mode: 'move' | 'resize'; startY: number; origStart: string; origEnd: string } | null>(null);
   const cardDragRef = useRef<{ id: string } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => { setTheme(readTheme()); }, []);
+
+  function applyTheme(next: OrgTheme) {
+    setTheme(next);
+    try { window.localStorage.setItem(ORG_THEME_STORAGE, next); } catch { /* ignore */ }
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('orgTheme', next);
+      window.history.replaceState({}, '', url);
+    }
+  }
 
   const day = ymd(anchor);
   const edition = meta?.edition || {};
@@ -78,6 +110,26 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     }),
     [board, jobFilter, personFilter, kindFilter, q, spaceFilter],
   );
+  const kpis = useMemo(() => organizerKpis({
+    overdue: todayPack.overdue.length,
+    today: todayPack.today.length,
+    followups,
+    doing: itemsInColumn(filtered, 'doing').length,
+    jobs,
+    moneyItems: [...todayPack.overdue, ...todayPack.today, ...todayPack.upcoming, ...board],
+  }), [todayPack, followups, filtered, jobs, board]);
+  const daylineItems = useMemo(() => {
+    const fromToday = (todayPack.today || []).filter((it) => !spaceFilter || it.space_id === spaceFilter);
+    return (fromToday.length ? fromToday : itemsOnDay(filtered, day)).slice(0, 8);
+  }, [todayPack.today, filtered, day, spaceFilter]);
+  const jobRings = useMemo(() => {
+    const ids = [...new Set(filtered.map((it) => it.job_id).filter(Boolean))] as string[];
+    return ids.slice(0, 4).map((id) => {
+      const job = jobs.find((j) => String(j.id) === String(id));
+      const prog = jobProgressFromItems(board, id);
+      return { id, label: job?.client_name || job?.title || 'Job', progress: prog };
+    }).filter((j) => j.progress);
+  }, [filtered, jobs, board]);
   const mailRows = useMemo(
     () => filterPendingMail(pendingMail, { spaceId: spaceFilter || undefined, query: q || undefined }),
     [pendingMail, spaceFilter, q],
@@ -297,6 +349,10 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
       setToast('Could not move that card.');
       return;
     }
+    if (column === 'done') {
+      setCompletedId(id);
+      window.setTimeout(() => setCompletedId((cur) => (cur === id ? '' : cur)), 700);
+    }
     await load();
   }
 
@@ -378,20 +434,55 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     );
   }
 
+  function SpaceGlyph({ slug, accent, size = 14 }: { slug: string; accent: string; size?: number }) {
+    const Icon = SPACE_LUCIDE[slug] || CircleDot;
+    return <span className="org-space-ico" style={{ color: accent }}><Icon size={size} strokeWidth={1.75} /></span>;
+  }
+
+  function EmptyState({ title, body, icon }: { title: string; body: string; icon?: React.ReactNode }) {
+    return (
+      <div className="org-empty">
+        <div className="org-empty-ico">{icon || <Inbox size={18} />}</div>
+        <b>{title}</b>
+        <p>{body}</p>
+      </div>
+    );
+  }
+
+  function ProgressRing({ percent, label, fraction }: { percent: number; label: string; fraction: string }) {
+    const r = 16;
+    const circ = 2 * Math.PI * r;
+    const offset = circ - (Math.max(0, Math.min(100, percent)) / 100) * circ;
+    return (
+      <div className="org-kpi" title={label}>
+        <svg className="org-ring" viewBox="0 0 44 44" aria-hidden>
+          <circle className="bg" cx="22" cy="22" r={r} />
+          <circle className="fg" cx="22" cy="22" r={r} strokeDasharray={circ} strokeDashoffset={offset} transform="rotate(-90 22 22)" />
+        </svg>
+        <div>
+          <strong>{fraction}</strong>
+          <span>{label}</span>
+        </div>
+      </div>
+    );
+  }
+
   function OrgCard({ item, column }: { item: OrganizerItem; column: string }) {
-    const style = spaceStyle(spaces.find((s) => s.slug === item.space_id) || item.space_id);
+    const style = themedSpaceStyle(spaces.find((s) => s.slug === item.space_id) || item.space_id, theme);
     return (
       <div
-        className="org-kanban-card"
+        className={`org-kanban-card${completedId === item.id ? ' is-complete' : ''}`}
         style={{ borderLeftColor: style.accent }}
         draggable
         onDragStart={(e) => { e.dataTransfer.setData('text/plain', item.id); e.dataTransfer.effectAllowed = 'move'; }}
         onPointerDown={(e) => onCardPointerDown(e, item.id)}
         onClick={() => setForm({ ...item, assigned_resource_ids: item.assigned_resource_ids || [] })}
       >
-        <div className="org-kanban-space" style={{ color: style.accent }}>{style.icon} {style.label}</div>
+        <div className="org-kanban-space" style={{ color: style.accent }}>
+          <SpaceGlyph slug={style.slug} accent={style.accent} /> {style.label}
+        </div>
         <b>{item.title}</b>
-        <small>{KIND_LABEL[item.kind || item.type || ''] || item.kind} · {(item.start_time || item.due_at || '').slice(0, 16) || 'no date'}</small>
+        <small>{KIND_LABEL[item.kind || item.type || ''] || item.kind} · {formatOrganizerTime(item.start_time || item.due_at) || 'no date'}</small>
         <ProgressBar item={item} />
         <RecordLinks item={item} />
         <ActionBar item={item} compact />
@@ -512,6 +603,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     <div
       className="org-root"
       data-organizer
+      data-org-theme={theme}
       data-organizer-loaded={loaded ? '1' : '0'}
       data-today-count={todayPack.overdue.length + todayPack.today.length + todayPack.upcoming.length}
     >
@@ -520,24 +612,37 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
           Organizer
           {edition.label && <span className="org-ed">{edition.label}</span>}
           <span>all life &amp; business areas · nothing sent without {edition.owner || 'the owner'}&apos;s tap</span>
+          <div className="org-themes" role="radiogroup" aria-label="Organizer look">
+            {ORG_THEMES.map((t) => (
+              <button
+                key={t.id}
+                role="radio"
+                aria-checked={theme === t.id}
+                className={theme === t.id ? 'on' : ''}
+                onClick={() => applyTheme(t.id)}
+                title={t.name}
+              >{t.label}</button>
+            ))}
+          </div>
         </div>
         <div className="org-spaces" role="tablist" aria-label="Areas">
           <button className={!spaceFilter ? 'on' : ''} onClick={() => setSpaceFilter('')}>All areas</button>
           {spaces.map((s) => {
-            const st = spaceStyle(s);
+            const st = themedSpaceStyle(s, theme);
+            const on = spaceFilter === s.slug;
             return (
               <button
                 key={s.slug}
-                className={spaceFilter === s.slug ? 'on' : ''}
+                className={on ? 'on' : ''}
                 style={{
                   borderColor: st.accent,
-                  background: spaceFilter === s.slug ? st.accent : `${st.accent}18`,
-                  color: spaceFilter === s.slug ? '#fff' : '#1a1a1a',
+                  background: on ? st.accent : `${st.accent}22`,
+                  color: on ? (theme === 'b' ? '#fffdf8' : '#0c0d11') : undefined,
                 }}
                 onClick={() => setSpaceFilter(s.slug)}
                 onDoubleClick={() => setSpaceEdit(s)}
               >
-                <span aria-hidden>{st.icon}</span> {st.label}
+                <SpaceGlyph slug={st.slug} accent={on ? (theme === 'b' ? '#fffdf8' : '#0c0d11') : st.accent} /> {st.label}
               </button>
             );
           })}
@@ -569,7 +674,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             title: '', type: 'appointment', start_time: `${day}T10:00:00`, end_time: `${day}T11:00:00`,
             job_id: showJobs ? jobFilter : '', assigned_resource_ids: personFilter ? [personFilter] : [],
             space_id: spaceFilter || (spaces[0]?.slug),
-          })}>+ Add</button>
+          })}><Plus size={14} /> Add</button>
           <button onClick={() => setPeopleOpen(true)}>People</button>
           <button onClick={exportIcs}>ICS</button>
         </div>
@@ -581,10 +686,42 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             onKeyDown={(e) => { if (e.key === 'Enter' && (quick.trim() || photoB64)) submitQuick(quick.trim() || photoName || 'photo'); }}
           />
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => onPickPhoto(e.target.files?.[0] || null)} />
-          <button onClick={() => fileRef.current?.click()}>{photoName ? 'Photo ✓' : 'Photo'}</button>
+          <button onClick={() => fileRef.current?.click()}>{photoName ? <><Check size={14} /> Photo</> : <><Camera size={14} /> Photo</>}</button>
           <button onClick={() => (quick.trim() || photoB64) && submitQuick(quick.trim() || photoName || 'photo')}>Draft</button>
-          <button onClick={startVoice}>{listening ? 'Listening…' : 'Voice'}</button>
+          <button onClick={startVoice}>{listening ? 'Listening…' : <><Mic size={14} /> Voice</>}</button>
         </div>
+      </div>
+
+      <div className="org-hero">
+        <h2>{formatOrganizerDate(anchor)}</h2>
+        <p>
+          {kpis.overdue ? `${kpis.overdue} overdue · ` : 'Caught up on overdue · '}
+          {kpis.dueToday} on the board today · nothing sent without {edition.owner || 'the owner'}&apos;s tap
+        </p>
+      </div>
+      <div className="org-kpis" aria-label="Today at a glance">
+        <div className="org-kpi"><AlertTriangle size={18} /><div><strong>{kpis.overdue}</strong><span>Overdue</span></div></div>
+        <div className="org-kpi"><CalendarDays size={18} /><div><strong>{kpis.dueToday}</strong><span>Due today</span></div></div>
+        <div className="org-kpi"><Banknote size={18} /><div><strong>{kpis.moneyWaiting}</strong><span>Money waiting</span></div></div>
+        {jobRings[0] ? (
+          <ProgressRing percent={jobRings[0].progress!.percent} label={jobRings[0].label} fraction={jobRings[0].progress!.fraction} />
+        ) : (
+          <div className="org-kpi"><Briefcase size={18} /><div><strong>{kpis.jobsInProgress}</strong><span>Jobs in progress</span></div></div>
+        )}
+      </div>
+      <div className="org-dayline" aria-label="Day timeline">
+        {daylineItems.length === 0 && (
+          <div className="org-dayline-slot"><em>Open</em><b>Quiet day</b></div>
+        )}
+        {daylineItems.map((it) => {
+          const st = themedSpaceStyle(spaces.find((s) => s.slug === it.space_id) || it.space_id, theme);
+          return (
+            <button key={it.id} className="org-dayline-slot" onClick={() => setForm({ ...it })} style={{ borderColor: st.accent }}>
+              <em>{formatOrganizerTime(it.start_time || it.due_at) || 'Anytime'}</em>
+              <b>{it.title}</b>
+            </button>
+          );
+        })}
       </div>
 
       {conflict && (
@@ -755,14 +892,21 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
                 return (
                   <div
                     key={col}
-                    className="org-kanban-col"
+                    className={`org-kanban-col${dragOverCol === col ? ' is-over' : ''}`}
                     data-column={col}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id) moveCard(id, col); }}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverCol(col); }}
+                    onDragLeave={() => setDragOverCol((c) => (c === col ? '' : c))}
+                    onDrop={(e) => { e.preventDefault(); setDragOverCol(''); const id = e.dataTransfer.getData('text/plain'); if (id) moveCard(id, col); }}
                     onPointerUp={(e) => onColumnPointerUp(e, col)}
                   >
                     <h3>{label} <span>{shown.length}</span></h3>
-                    {shown.length === 0 && <div className="org-note">Nothing here.</div>}
+                    {shown.length === 0 && (
+                      <EmptyState
+                        title={col === 'overdue' ? 'Caught up' : col === 'today' ? 'A clear day' : 'Nothing queued'}
+                        body={col === 'overdue' ? 'No overdue items across any area.' : col === 'today' ? 'Add a note, a photo, or a voice capture when something comes up.' : 'Upcoming work across Workroom, Empire, family and personal will land here.'}
+                        icon={col === 'overdue' ? <Sparkles size={18} /> : col === 'today' ? <CalendarDays size={18} /> : <Inbox size={18} />}
+                      />
+                    )}
                     {shown.map((it) => <OrgCard key={it.id} item={it} column={col} />)}
                   </div>
                 );
@@ -776,14 +920,21 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
                 return (
                   <div
                     key={col.id}
-                    className="org-kanban-col"
+                    className={`org-kanban-col${dragOverCol === col.id ? ' is-over' : ''}`}
                     data-column={col.id}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id) moveCard(id, col.id); }}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverCol(col.id); }}
+                    onDragLeave={() => setDragOverCol((c) => (c === col.id ? '' : c))}
+                    onDrop={(e) => { e.preventDefault(); setDragOverCol(''); const id = e.dataTransfer.getData('text/plain'); if (id) moveCard(id, col.id); }}
                     onPointerUp={(e) => onColumnPointerUp(e, col.id)}
                   >
                     <h3>{col.label} <span>{rows.length}</span></h3>
-                    {rows.length === 0 && <div className="org-note">Drop a card here.</div>}
+                    {rows.length === 0 && (
+                      <EmptyState
+                        title={col.id === 'done' ? 'Nothing finished yet' : 'Drop a card here'}
+                        body={col.id === 'doing' ? 'Drag work you have started. Progress updates from linked tasks.' : 'Cards from every area can live in this column.'}
+                        icon={col.id === 'done' ? <Check size={18} /> : <Inbox size={18} />}
+                      />
+                    )}
                     {rows.map((it) => <OrgCard key={it.id} item={it} column={col.id} />)}
                   </div>
                 );

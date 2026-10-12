@@ -407,6 +407,101 @@ export function pendingMailVisible(items: PendingMail[], snoozedIds: string[] = 
   return items.filter((m) => !hidden.has(m.id));
 }
 
+export type OrgTheme = 'a' | 'b' | 'c';
+
+export const ORG_THEMES: { id: OrgTheme; label: string; name: string }[] = [
+  { id: 'a', label: 'Luxe', name: 'Luxe dark' },
+  { id: 'b', label: 'Editorial', name: 'Editorial light' },
+  { id: 'c', label: 'Command', name: 'Command dashboard' },
+];
+
+export const ORG_THEME_STORAGE = 'empire.orgTheme';
+
+export function parseOrgTheme(value?: string | null): OrgTheme | null {
+  const v = String(value || '').trim().toLowerCase();
+  if (v === 'a' || v === 'luxe' || v === 'dark') return 'a';
+  if (v === 'b' || v === 'editorial' || v === 'light') return 'b';
+  if (v === 'c' || v === 'command' || v === 'dashboard') return 'c';
+  return null;
+}
+
+export function resolveOrgTheme(query?: string | null, stored?: string | null): OrgTheme {
+  return parseOrgTheme(query) || parseOrgTheme(stored) || 'a';
+}
+
+export const THEME_SPACE_ACCENTS: Record<OrgTheme, Record<string, string>> = {
+  a: {
+    workroom: '#d4a017', empire: '#c4b5fd', family: '#34d399',
+    personal: '#38bdf8', ventures: '#fb923c', amp: '#60a5fa',
+  },
+  b: {
+    workroom: '#8b5a3c', empire: '#6b5b7a', family: '#4f6f52',
+    personal: '#4a6670', ventures: '#8a6d3b', amp: '#3d5a80',
+  },
+  c: {
+    workroom: '#fb923c', empire: '#a78bfa', family: '#4ade80',
+    personal: '#22d3ee', ventures: '#fbbf24', amp: '#60a5fa',
+  },
+};
+
+export function themedSpaceStyle(
+  space: OrganizerSpace | string | null | undefined,
+  theme: OrgTheme = 'a',
+): { icon: string; accent: string; label: string; slug: string } {
+  const base = spaceStyle(space);
+  const configured = typeof space === 'object' && space?.accent_color
+    ? space.accent_color
+    : '';
+  const seeded = SPACE_STYLE[base.slug]?.accent;
+  const custom = configured && configured !== seeded;
+  return {
+    ...base,
+    accent: custom ? configured : (THEME_SPACE_ACCENTS[theme][base.slug] || base.accent),
+  };
+}
+
+export function organizerKpis(input: {
+  overdue: number;
+  today: number;
+  followups?: { followup_kind?: string; title?: string }[];
+  doing?: number;
+  jobs?: { status?: string }[];
+  moneyItems?: { title?: string; kind?: string }[];
+}): { overdue: number; dueToday: number; moneyWaiting: number; jobsInProgress: number } {
+  const moneyRe = /deposit|unpaid|invoice|balance|retainer/i;
+  const moneyFromFollow = (input.followups || []).filter((f) => moneyRe.test(`${f.followup_kind || ''} ${f.title || ''}`)).length;
+  const moneyFromItems = (input.moneyItems || []).filter((it) => moneyRe.test(`${it.title || ''} ${it.kind || ''}`)).length;
+  const jobsActive = (input.jobs || []).filter((j) => !['done', 'complete', 'cancelled', 'closed'].includes(String(j.status || '').toLowerCase())).length;
+  return {
+    overdue: input.overdue,
+    dueToday: input.today,
+    moneyWaiting: moneyFromFollow + moneyFromItems,
+    jobsInProgress: Math.max(input.doing || 0, jobsActive),
+  };
+}
+
+export function jobProgressFromItems(items: OrganizerItem[], jobId: string): OrganizerProgress | null {
+  const linked = items.filter((it) => String(it.job_id || '') === String(jobId));
+  if (!linked.length) return null;
+  const done = linked.filter((it) => String(it.status || '') === 'done').length;
+  return { ...progressFromTasks(done, linked.length), job_id: jobId };
+}
+
+export function formatOrganizerDate(d: Date): string {
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+export function formatOrganizerTime(iso?: string | null): string {
+  if (!iso) return '';
+  const t = iso.slice(11, 16);
+  if (!t) return iso.slice(0, 10);
+  const [h, m] = t.split(':').map((n) => parseInt(n, 10));
+  if (!Number.isFinite(h)) return t;
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const hr = ((h + 11) % 12) + 1;
+  return m ? `${hr}:${String(m).padStart(2, '0')} ${suffix}` : `${hr} ${suffix}`;
+}
+
 export function filterPendingMail(
   items: PendingMail[],
   opts: { spaceId?: string; query?: string; snoozedIds?: string[] } = {},

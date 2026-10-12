@@ -9,16 +9,17 @@ import "./theme/theme-toggle.css";
 // Empire design system v3 (Max v3): tokens + shell, scoped to .v3 (client pages and PDFs unaffected).
 import "./v3/tokens.css";
 import "./v3/shell.css";
-import { Inter, Inter_Tight, Playfair_Display, IBM_Plex_Mono } from "next/font/google";
+import { Inter, Inter_Tight, Playfair_Display, IBM_Plex_Mono, Newsreader } from "next/font/google";
 import { I18nWrapper } from "./components/I18nWrapper";
 import { COMMAND_CENTER_DOCUMENT_TITLE, documentTitleForHost } from "./lib/luxeDocumentTitle";
 
 // Self-hosted at build time by next/font; exposed as CSS variables used by v3/tokens.css.
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
-const interTight = Inter_Tight({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-inter-tight", display: "swap" });
-const playfair = Playfair_Display({ subsets: ["latin"], weight: ["400", "500", "600"], style: ["normal", "italic"], variable: "--font-playfair", display: "swap" });
-const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-plex-mono", display: "swap" });
-const fontVars = `${inter.variable} ${interTight.variable} ${playfair.variable} ${plexMono.variable}`;
+const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-inter", display: "swap", adjustFontFallback: false });
+const interTight = Inter_Tight({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-inter-tight", display: "swap", adjustFontFallback: false });
+const playfair = Playfair_Display({ subsets: ["latin"], weight: ["400", "500", "600"], style: ["normal", "italic"], variable: "--font-playfair", display: "swap", adjustFontFallback: false });
+const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-plex-mono", display: "swap", adjustFontFallback: false });
+const newsreader = Newsreader({ subsets: ["latin"], weight: ["400", "500", "600"], style: ["normal", "italic"], variable: "--font-newsreader", display: "swap", adjustFontFallback: false });
+const fontVars = `${inter.variable} ${interTight.variable} ${playfair.variable} ${plexMono.variable} ${newsreader.variable}`;
 
 export async function generateMetadata(): Promise<Metadata> {
   const headerList = await headers();
@@ -56,7 +57,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           if(localStorage.getItem('empire.theme')==='gold'){document.documentElement.setAttribute('data-theme','gold');}}catch(e){}})();
         `}} />
       </head>
-      <body className="antialiased"><I18nWrapper>{children}</I18nWrapper></body>
+      <body className={`${inter.className} antialiased`}><I18nWrapper>{children}</I18nWrapper></body>
     </html>
   );
 }

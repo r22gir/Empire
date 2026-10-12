@@ -5,7 +5,8 @@ import {
   isOrganizerCommand, monthCells, overdueItems, parseOrganizerCommand, parseQuickAddClient,
   filterPendingMail, pendingMailVisible, PX_PER_MIN, shouldOfferCrewDraft, showsWorkroomJobs, snapMinutes,
   spaceStyle, todayBuckets, columnForStatus, itemsInColumn, dueForTodayColumn, progressFromTasks,
-  inferSpaceClient, timeFromOffset, weekDays,
+  inferSpaceClient, timeFromOffset, weekDays, parseOrgTheme, resolveOrgTheme, themedSpaceStyle,
+  organizerKpis, jobProgressFromItems, formatOrganizerTime,
 } from './organizer-logic.ts';
 
 test('filter by job, person, kind', () => {
@@ -119,6 +120,39 @@ test('spaces have icon and accent; today buckets and progress fractions', () => 
   assert.equal(bar.percent, 38);
   assert.equal(inferSpaceClient('kids recital Friday'), 'family');
   assert.equal(inferSpaceClient('install drapery tomorrow'), 'workroom');
+});
+
+test('org themes parse from query aliases and recolor spaces', () => {
+  assert.equal(parseOrgTheme('a'), 'a');
+  assert.equal(parseOrgTheme('editorial'), 'b');
+  assert.equal(parseOrgTheme('COMMAND'), 'c');
+  assert.equal(parseOrgTheme('nope'), null);
+  assert.equal(resolveOrgTheme(null, 'b'), 'b');
+  assert.equal(resolveOrgTheme('c', 'a'), 'c');
+  assert.equal(resolveOrgTheme(null, null), 'a');
+  const luxe = themedSpaceStyle({ slug: 'workroom', label: 'Workroom' }, 'a');
+  const edit = themedSpaceStyle({ slug: 'workroom', label: 'Workroom' }, 'b');
+  assert.equal(luxe.accent, '#d4a017');
+  assert.equal(edit.accent, '#8b5a3c');
+  const custom = themedSpaceStyle({ slug: 'family', label: 'Family', accent_color: '#db2777' }, 'a');
+  assert.equal(custom.accent, '#db2777');
+  const k = organizerKpis({
+    overdue: 1, today: 2,
+    followups: [{ followup_kind: 'deposit', title: 'Ask for deposit' }],
+    moneyItems: [{ title: 'Side-venture invoice' }],
+    doing: 1,
+    jobs: [{ status: 'scheduled' }, { status: 'done' }],
+  });
+  assert.equal(k.overdue, 1);
+  assert.equal(k.dueToday, 2);
+  assert.equal(k.moneyWaiting, 2);
+  assert.equal(k.jobsInProgress, 1);
+  const bar = jobProgressFromItems([
+    { id: '1', title: 'Cut', job_id: 'j1', status: 'done' },
+    { id: '2', title: 'Sew', job_id: 'j1', status: 'open' },
+  ], 'j1');
+  assert.equal(bar?.fraction, '1/2');
+  assert.equal(formatOrganizerTime('2026-10-12T14:00:00'), '2 PM');
 });
 
 test('pending mail hides snoozed ids', () => {

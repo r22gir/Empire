@@ -23,7 +23,7 @@ Campestre legal or company details. Model is **grok-4.6** only.
 
 1. Home (`/`) → Today card lists today’s Organizer items (or empty state) and **Open organizer** goes to `/?screen=calendar`.
 2. Left nav **Organizer** opens the same screen. Workroom → Organizer tab does too (Workroom is one area, not the whole app).
-3. Edition badge shows this process (Max · Rafael / Max-e · Juan / Maxine · Camilo). Area chips: **All areas** (unified) plus one colorful chip per life/business space (icon + accent). Double-tap a chip to change its icon/color. Organizer is never Workroom-only.
+3. Edition badge shows this process (Max · Rafael / Max-e · Juan / Maxine · Camilo). Area chips: **All areas** (unified) plus one colorful chip per life/business space (icon + accent). Double-tap a chip to change its icon/color. Organizer is never Workroom-only. Compare looks with `?orgTheme=a|b|c` or the Luxe / Editorial / Command switcher (persists in `localStorage`).
 4. **Today** view (default) has three columns across every area: Overdue / Today / Upcoming. **Board** has Open / Doing / Done. Drag a card between columns on desktop (HTML5) and phone (pointer). Day / week / month still render. Drag an event to a new time; a double-booked person shows a **Not saved — conflict** banner (no silent overwrite). Cancel leaves the old time. “Keep anyway” writes after confirm. After a successful move, **Tell the crew?** offers a draft only.
 5. Resize handle changes duration and hits the same conflict path.
 6. Month: drag a chip to another day.
