@@ -65,6 +65,7 @@ import ProductDocs from './components/business/docs/ProductDocs';
 
 import TasksScreen from './components/screens/TasksScreen';
 import PresentationScreen from './components/screens/PresentationScreen';
+import OrganizerScreen from './components/screens/OrganizerScreen';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));
@@ -112,6 +113,9 @@ const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   invoices: 'invoices',
   'business-profile': 'business-profile',
   dashboard: 'dashboard',
+  calendar: 'calendar',
+  schedule: 'calendar',
+  organizer: 'calendar',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -125,7 +129,6 @@ const PRODUCT_DEEP_LINKS: Partial<Record<string, EcosystemProduct>> = {
   llcfactory: 'llc',
   workroom: 'workroom',
   vision: 'vision',
-  organizer: 'vision',
   quotes: 'workroom',
   craft: 'craft',
   owner: 'owner',
@@ -229,6 +232,18 @@ export default function CommandCenter() {
         if (productParam === 'max-avatar' || candidate === 'presentation') {
           setActiveProduct('max-avatar');
           setActiveScreen('presentation');
+        } else if (productParam === 'tokens') {
+          setActiveProduct('tokens');
+          setActiveScreen('costs');
+        } else if (productParam === 'system') {
+          setActiveProduct('system');
+          setActiveScreen('report');
+        } else if (productParam === 'dev') {
+          setActiveProduct('dev');
+          setActiveScreen('dev');
+        } else if (productParam === 'owner') {
+          setActiveProduct('owner');
+          setActiveScreen('chat');
         } else {
           setActiveProduct(aliased);
           setActiveScreen('dashboard');
@@ -238,11 +253,10 @@ export default function CommandCenter() {
       }
 
       // Aliases from the live screen-path map.
-      if (candidate === 'organizer') {
-        pendingDeepLinkScreen.current = null;
-        setActiveProduct('vision');
-        setActiveScreen('dashboard');
-        setActiveSection('analyzer');
+      if (candidate === 'organizer' || candidate === 'schedule' || candidate === 'calendar') {
+        pendingDeepLinkScreen.current = 'calendar';
+        setActiveScreen('calendar');
+        setActiveSection(null);
         return;
       }
       if (candidate === 'quotes') {
@@ -268,7 +282,7 @@ export default function CommandCenter() {
         pendingDeepLinkScreen.current = null;
         setActiveProduct(product);
         setActiveScreen('dashboard');
-        setActiveSection(candidate === 'organizer' ? 'analyzer' : candidate === 'quotes' ? 'quotes' : sectionParam);
+        setActiveSection(candidate === 'quotes' ? 'quotes' : sectionParam);
         return;
       }
       // Then check screen deep links (e.g. pricing-studio -> ScreenMode).
@@ -550,6 +564,7 @@ export default function CommandCenter() {
     if (activeScreen === 'telegram') return <TelegramScreen />;
     if (activeScreen === 'report') return <SystemReportScreen />;
     if (activeScreen === 'tasks') return <TasksScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : activeProduct === 'owner' ? undefined : activeProduct} />;
+    if (activeScreen === 'calendar') return <OrganizerScreen />;
     if (activeScreen === 'tickets') return <Suspense fallback={<Loading />}><TicketsPage /></Suspense>;
     if (activeScreen === 'shipping') return <Suspense fallback={<Loading />}><ShippingPage /></Suspense>;
     if (activeScreen === 'costs') return <Suspense fallback={<Loading />}><CostTracker /></Suspense>;

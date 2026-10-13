@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { EcosystemProduct, ScreenMode } from '../../lib/types';
 import RightPanel from './RightPanel';
 import {
-  Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
+  Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server, CalendarCheck,
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
@@ -45,6 +45,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'owner', name: "Owner's Desk", icon: <Crown size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
       { id: 'workroom', name: 'Empire Workroom', icon: <Scissors size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
+      { id: 'schedule', name: 'Organizer', icon: <CalendarCheck size={16} />, status: 'active', color: '#b8960c', screen: 'calendar' as ScreenMode, kind: 'screen' },
       { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04', kind: 'product' },
       // Daily Summary is the inline Dashboard panel (rightPanel) — toggled, not navigated.
       { id: 'daily-summary', name: 'Daily Summary', icon: <LayoutDashboard size={16} />, status: 'active', color: '#7c3aed', kind: 'daily-summary' },

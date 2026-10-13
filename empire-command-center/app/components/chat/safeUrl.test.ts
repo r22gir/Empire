@@ -5,6 +5,8 @@ import { isAppDeepLink, safeUrl } from "./safeUrl.ts";
 describe("safeUrl app deep links", () => {
   it("allows presentation / organizer / quotes hrefs from the screen-path map", () => {
     assert.equal(safeUrl("/?screen=presentation&mode=presentation"), "/?screen=presentation&mode=presentation");
+    assert.equal(safeUrl("/?screen=calendar"), "/?screen=calendar");
+    assert.equal(safeUrl("/?screen=calendar&orgTheme=b"), "/?screen=calendar&orgTheme=b");
     assert.equal(safeUrl("/?product=vision&section=analyzer"), "/?product=vision&section=analyzer");
     assert.equal(safeUrl("/?product=workroom&section=quotes"), "/?product=workroom&section=quotes");
     assert.equal(isAppDeepLink("/?screen=quote"), true);

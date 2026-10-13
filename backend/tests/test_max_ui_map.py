@@ -77,13 +77,22 @@ def test_where_is_organizer_has_tappable_link():
     assert is_find_in_app_request("where is the Organizer")
     feat = lookup_feature("where is the Organizer")
     assert feat is not None
-    assert feat.id == "organizer"
+    assert feat.id in {"organizer", "schedule"}
+    assert feat.href == "/?screen=calendar"
+    assert "vision" not in feat.href
     text = find_in_app_reply("where is Organizer", family=False, channel="web")
     assert text
-    assert "[Open Organizer](/?product=vision" in text
-    assert "photo" in text.lower() or "vision" in text.lower()
-    assert lookup_feature("organizador").id == "organizer"
-    assert lookup_feature("photo organizer").id == "organizer"
+    assert "[Open Organizer](/?screen=calendar)" in text
+    assert "vision" not in text.lower()
+    assert "photo queue" not in text.lower()
+    assert "orgtheme" in text.lower() or "orgTheme" in text
+    assert "/api/v1/organizer" in text
+    assert lookup_feature("organizador").id in {"organizer", "schedule"}
+    # Photo queue is AI Vision — not the founder Organizer.
+    photo = lookup_feature("photo organizer")
+    assert photo is not None
+    assert photo.id == "vision"
+    assert photo.href.startswith("/?product=vision")
 
 
 def test_where_are_quotes_has_tappable_link():
@@ -114,7 +123,7 @@ def test_where_is_replies_always_include_clickable_deep_link(monkeypatch):
     monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
     for question, label_part, href_part in (
         ("where is presentation mode", "Open Presentation", "/?screen=presentation"),
-        ("where is Organizer", "Open Organizer", "/?product=vision"),
+        ("where is Organizer", "Open Organizer", "/?screen=calendar"),
         ("where are quotes", "Open Quotes", "/?product=workroom&section=quotes"),
     ):
         web = find_in_app_reply(question, family=False, channel="web")
@@ -165,6 +174,52 @@ def test_page_deep_links_cover_presentation_organizer_quotes():
     # Deep-link handler must honor the tappable hrefs the map emits.
     assert "params.get('product')" in src or 'params.get("product")' in src
     assert "params.get('section')" in src or 'params.get("section")' in src
+    assert "organizer: 'calendar'" in src or 'organizer: "calendar"' in src
+    assert "organizer: 'vision'" not in src
+    assert "<OrganizerScreen" in src or "OrganizerScreen" in src
+
+
+def test_map_hrefs_match_live_screens_not_stale_aliases():
+    """Audit every map entry so Organizer-style mismatches cannot hide."""
+    nav = {i.id: i for i in parse_left_nav()}
+    screens = live_source_ids()["screens"]
+    products = live_source_ids()["products"]
+    mismatches = []
+    for feat in build_ui_map():
+        href = feat.href or ""
+        assert href.startswith("/"), f"{feat.id} href {href!r} is not in-app"
+        if feat.id in {"organizer", "schedule"}:
+            if href != "/?screen=calendar":
+                mismatches.append(f"{feat.id} must be /?screen=calendar, got {href}")
+            if "vision" in href or "analyzer" in href:
+                mismatches.append(f"{feat.id} incorrectly points at Vision: {href}")
+            continue
+        if feat.id == "presentation-mode":
+            if "screen=presentation" not in href:
+                mismatches.append(f"presentation-mode href {href}")
+            continue
+        if feat.id == "quotes":
+            if href != "/?product=workroom&section=quotes":
+                mismatches.append(f"quotes href {href}")
+            continue
+        if feat.id == "quote-review":
+            if href != "/?screen=quote":
+                mismatches.append(f"quote-review href {href}")
+            continue
+        if feat.id == "vision":
+            if not href.startswith("/?product=vision"):
+                mismatches.append(f"vision href {href}")
+            continue
+        if href.startswith("/?screen="):
+            screen = href.split("screen=", 1)[1].split("&", 1)[0]
+            aliases = {"apostapp": "apost", "pricing-studio": "pricing-studio"}
+            if screen not in screens and screen not in aliases and screen not in nav:
+                mismatches.append(f"{feat.id} unknown screen {screen} in {href}")
+        elif href.startswith("/?product="):
+            product = href.split("product=", 1)[1].split("&", 1)[0]
+            if product not in products and product not in nav:
+                mismatches.append(f"{feat.id} unknown product {product} in {href}")
+    assert not mismatches, "map mismatches:\n" + "\n".join(mismatches)
 
 
 def test_family_edition_hides_workroom_quotes(monkeypatch):
@@ -176,7 +231,7 @@ def test_family_edition_hides_workroom_quotes(monkeypatch):
 
 def test_nav_parse_matches_left_nav_file():
     nav = {i.id for i in parse_left_nav()}
-    assert {"owner", "workroom", "vision", "tokens"} <= nav
+    assert {"owner", "workroom", "vision", "tokens", "schedule"} <= nav
     quick = {q["screen"] for q in parse_quick_switch()}
     assert {"presentation", "quote"} <= quick
 
@@ -193,7 +248,7 @@ def test_chat_helper_answers_common_where_is_questions():
     """Same contract the router helper uses: map reply + tappable link, no model."""
     cases = (
         ("Where is presentation mode", "Open Presentation", "/?screen=presentation"),
-        ("where is Organizer", "Open Organizer", "/?product=vision"),
+        ("where is Organizer", "Open Organizer", "/?screen=calendar"),
         ("where are quotes", "Open Quotes", "/?product=workroom&section=quotes"),
     )
     for message, label, href in cases:

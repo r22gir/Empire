@@ -233,21 +233,33 @@ _OVERLAYS: dict[str, dict] = {
     "organizer": {
         "name": "Organizer",
         "where": (
-            "Left nav → Tools → AI Vision, then Photo Analyzer. "
-            "The Photo Gallery / Organizer (photo queue, Add Photos) lives on that page. "
-            "Open [Open Organizer](/?product=vision&section=analyzer)."
+            "Left nav → Command → Organizer. Founder task/planner "
+            "(spaces, today board, follow-ups) at /api/v1/organizer/*. "
+            "Screen route is /?screen=calendar. Themes switch with "
+            "?orgTheme=a|b|c. This is not the AI Vision photo queue."
         ),
-        "href": "/?product=vision&section=analyzer",
+        "href": "/?screen=calendar",
         "aliases_en": (
-            "organizer", "organiser", "photo organizer", "photo gallery",
-            "photo queue", "vision organizer",
+            "organizer", "organiser", "founder organizer",
+            "planner", "life organizer",
         ),
         "aliases_es": (
-            "organizador", "organizador de fotos", "galeria de fotos",
-            "galería de fotos",
+            "organizador", "planificador",
         ),
         "workroom_only": False,
-        "source_ids": ("organizer", "vision"),
+        "source_ids": ("organizer", "schedule", "calendar"),
+    },
+    "schedule": {
+        "name": "Organizer",
+        "where": (
+            "Left nav → Command → Organizer. Opens /?screen=calendar "
+            "(founder planner; /api/v1/organizer/*; orgTheme a|b|c)."
+        ),
+        "href": "/?screen=calendar",
+        "aliases_en": ("schedule", "calendar", "organizer screen"),
+        "aliases_es": ("agenda", "calendario"),
+        "workroom_only": False,
+        "source_ids": ("schedule", "calendar", "organizer"),
     },
     "quotes": {
         "name": "Quotes",
@@ -300,12 +312,16 @@ _OVERLAYS: dict[str, dict] = {
     "vision": {
         "name": "AI Vision",
         "where": (
-            "Left nav → Tools → AI Vision. Photo Analyzer + Photo Gallery / Organizer. "
+            "Left nav → Tools → AI Vision. Photo Analyzer and the photo "
+            "queue (Add Photos) live on that page — not the founder Organizer. "
             "[Open AI Vision](/?product=vision)."
         ),
         "href": "/?product=vision",
-        "aliases_en": ("ai vision", "vision", "photo analyzer"),
-        "aliases_es": ("vision ia", "visión ia"),
+        "aliases_en": (
+            "ai vision", "vision", "photo analyzer",
+            "photo organizer", "photo gallery", "photo queue",
+        ),
+        "aliases_es": ("vision ia", "visión ia", "galeria de fotos", "galería de fotos"),
         "workroom_only": False,
     },
     "workroom": {
