@@ -1797,6 +1797,21 @@ def organizer_search(q: str = "", limit: int = 30):
         return search_organizer(conn, q, limit=limit)
 
 
+class ShutdownMoveIn(BaseModel):
+    id: str
+    destination: str = "keep"
+    due_at: Optional[str] = None
+    later: Optional[str] = None
+
+
+class ShutdownCompleteIn(BaseModel):
+    date: Optional[str] = None
+    notes: Optional[str] = None
+    tomorrow_focus: Optional[str] = None
+    tomorrow_space_id: Optional[str] = None
+    moves: List[ShutdownMoveIn] = Field(default_factory=list)
+
+
 @router.get("/review/weekly")
 def organizer_weekly_review():
     from app.services.organizer.review import weekly_review
@@ -1809,6 +1824,63 @@ def organizer_weekly_review():
         pack["sent"] = False
         pack["outbound_policy"] = OUTBOUND_POLICY
         return pack
+
+
+@router.get("/review/shutdown")
+def organizer_evening_shutdown(plan_date: Optional[str] = None):
+    from app.services.organizer.review import evening_shutdown
+    with get_db() as conn:
+        ensure_schema(conn)
+        items = _decorate(conn, _list_items(conn, limit=400))
+        events = _list_events(conn, limit=400)
+        board = _unify(events, items, [])
+        pack = evening_shutdown(board, today=plan_date)
+        pack["sent"] = False
+        pack["wrote_live"] = False
+        pack["outbound_policy"] = OUTBOUND_POLICY
+        return pack
+
+
+@router.post("/review/shutdown/complete")
+def organizer_complete_shutdown(req: ShutdownCompleteIn):
+    """Move unfinished items and log the ritual. Nothing is sent."""
+    from app.services.organizer.review import evening_shutdown, persist_shutdown
+    today = req.date or date.today().isoformat()
+    with get_db() as conn:
+        ensure_schema(conn)
+        items = _decorate(conn, _list_items(conn, limit=400))
+        events = _list_events(conn, limit=400)
+        board = _unify(events, items, [])
+        pack = evening_shutdown(board, today=today)
+        result = persist_shutdown(
+            conn,
+            pack,
+            [m.model_dump() for m in req.moves],
+            notes=req.notes or "",
+        )
+        focus = (req.tomorrow_focus or "").strip()
+        created = None
+        if focus:
+            blocked = reject_if_blocked(focus)
+            if blocked:
+                _blocked_http(blocked)
+            tomorrow = (date.fromisoformat(today) + timedelta(days=1)).isoformat() + "T09:00:00"
+            created = insert_item(conn, {
+                "kind": "todo",
+                "title": focus[:120],
+                "due_at": tomorrow,
+                "space_id": normalize_space(req.tomorrow_space_id),
+                "created_by": "manual",
+                "notes": "From evening shutdown — plan tomorrow.",
+            })
+            result["tomorrow_item"] = created
+        result["pack"] = evening_shutdown(
+            _decorate(conn, _list_items(conn, limit=400)),
+            today=today,
+        )
+        result["sent"] = False
+        result["wrote_live"] = False
+        return result
 
 
 @router.get("/jobs/{job_id}/money")
