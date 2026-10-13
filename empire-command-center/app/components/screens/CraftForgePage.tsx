@@ -3,7 +3,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { API } from '../../lib/api';
 import {
   Hammer, PenTool, ClipboardList, Package, Users, DollarSign,
-  TrendingUp, Loader2, FileText, CreditCard, Wrench
+  TrendingUp, Loader2, FileText, CreditCard, Wrench, LayoutGrid, ShoppingCart
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
@@ -17,10 +17,14 @@ const InventoryModule = lazy(() => import('../business/craftforge/InventoryModul
 const CRMModule = lazy(() => import('../business/craftforge/CRMModule'));
 const FinanceModule = lazy(() => import('../business/craftforge/FinanceModule'));
 const JobsModule = lazy(() => import('../business/craftforge/JobsModule'));
+const CncNestingSection = lazy(() => import('../business/craftforge/CncNestingSection'));
+const SupplierCartSection = lazy(() => import('../business/craftforge/SupplierCartSection'));
 
 const NAV_SECTIONS = [
   { id: 'overview', label: 'Overview', icon: Hammer },
   { id: 'quotes', label: 'Quote Builder', icon: PenTool },
+  { id: 'cutlist', label: 'Cut List', icon: LayoutGrid },
+  { id: 'supplier', label: 'Supplier Cart', icon: ShoppingCart },
   { id: 'inventory', label: 'Inventory', icon: Package },
   { id: 'customers', label: 'Customers', icon: Users },
   { id: 'finance', label: 'Finance', icon: DollarSign },
@@ -52,6 +56,10 @@ export default function WoodCraftPage({ initialSection }: CraftForgePageProps) {
     switch (section) {
       case 'quotes':
         return <Suspense fallback={<Loading />}><QuoteBuilderSection /></Suspense>;
+      case 'cutlist':
+        return <Suspense fallback={<Loading />}><CncNestingSection /></Suspense>;
+      case 'supplier':
+        return <Suspense fallback={<Loading />}><SupplierCartSection /></Suspense>;
       case 'inventory':
         return <Suspense fallback={<Loading />}><InventoryModule /></Suspense>;
       case 'customers':
