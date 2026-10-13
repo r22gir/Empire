@@ -256,6 +256,16 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
     tool_name = tool_call.get("tool", "")
     try:
         # ── FOUNDER BYPASS: CC / Telegram founder = full access, no PIN ──
+        if tool_name == "shell_execute":
+            try:
+                from app.services.max.ui_map import refuse_shell_search
+                _cmd = str(tool_call.get("command") or (tool_call.get("parameters") or {}).get("command") or "")
+                _blocked = refuse_shell_search(_cmd)
+            except Exception:
+                _blocked = None
+            if _blocked:
+                return ToolResult(tool="shell_execute", success=False, error=_blocked)
+
         if founder:
             logger.info(f"Founder auto-auth — executing '{tool_name}' without PIN/access check")
             tool_call["_founder"] = True  # pass founder flag to tool handlers
@@ -369,6 +379,9 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "generate_presentation": "present",
             "make_presentation": "present",
             "presentation": "present",
+            "where_is": "find_in_app",
+            "find_in_ui": "find_in_app",
+            "locate_screen": "find_in_app",
         }
         if tool_name not in TOOL_REGISTRY and tool_name in TOOL_CORRECTIONS:
             corrected = TOOL_CORRECTIONS[tool_name]
@@ -3713,6 +3726,16 @@ def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not command:
         return ToolResult(tool="shell_execute", success=False, error="No command provided")
 
+    # Live screen-path map: never grep stale builds (.next / .next.prev / node_modules)
+    # for "where is X / how do I open X". Those answers come from ui_map.
+    try:
+        from app.services.max.ui_map import refuse_shell_search
+        blocked_search = refuse_shell_search(command)
+    except Exception:
+        blocked_search = None
+    if blocked_search:
+        return ToolResult(tool="shell_execute", success=False, error=blocked_search)
+
     # Safety checks — block dangerous patterns (always enforced, even for founder)
     for blocked in BLOCKED_PATTERNS:
         if blocked in command:
@@ -5554,3 +5577,18 @@ def _max_room_redesign(params: dict, desk: Optional[str] = None) -> ToolResult:
     except Exception as e:
         logger.error(f"max_room_redesign failed: {e}")
         return ToolResult(tool="max_room_redesign", success=False, error=str(e)[:300])
+
+
+# Live screen-path map — "where is X / how do I open X" (no repo grep).
+try:
+    import importlib as _importlib
+    import sys as _sys
+    _ui_map_name = "app.services.max.tools_ui_map"
+    _tools_ui_map = (
+        _importlib.reload(_sys.modules[_ui_map_name])
+        if _ui_map_name in _sys.modules
+        else _importlib.import_module(_ui_map_name)
+    )
+    TOOLS_DOC = TOOLS_DOC + _tools_ui_map.UI_MAP_TOOLS_DOC
+except Exception as _ui_map_err:
+    logger.error(f"tools_ui_map not loaded: {_ui_map_err}")

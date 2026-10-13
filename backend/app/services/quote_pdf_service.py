@@ -67,6 +67,12 @@ def _get_styles():
     return styles
 
 
+def _client_fabric_line(item: dict) -> str:
+    """Client-facing fabric line: code, color, specs — never brand or supplier."""
+    from app.services.fabric_codes import client_fabric_line
+    return client_fabric_line(item)
+
+
 def generate_quote_pdf(quote_id: str) -> bytes:
     """Generate a branded PDF for a quote. Returns PDF bytes."""
     quote = get_quote(quote_id)
@@ -157,8 +163,9 @@ def generate_quote_pdf(quote_id: str) -> bytes:
                 h = item.get('height', 0) or 0
                 if w or h:
                     desc_parts.append(f"Dimensions: {w}\" × {h}\"")
-            if item.get('fabric_name'):
-                desc_parts.append(f"Fabric: {item['fabric_name']}")
+            fabric_line = _client_fabric_line(item)
+            if fabric_line:
+                desc_parts.append(f"Fabric: {fabric_line}")
             if item.get('yards_needed') and float(item.get('yards_needed', 0) or 0) > 0:
                 yds = item['yards_needed']
                 ppyd = item.get('fabric_price_per_yard', 0) or 0

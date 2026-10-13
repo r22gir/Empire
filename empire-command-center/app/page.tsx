@@ -65,6 +65,7 @@ import ProductDocs from './components/business/docs/ProductDocs';
 
 import TasksScreen from './components/screens/TasksScreen';
 import PresentationScreen from './components/screens/PresentationScreen';
+import OrganizerScreen from './components/screens/OrganizerScreen';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));
@@ -99,6 +100,22 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
 
 const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'pricing-studio': 'pricing-studio',
+  presentation: 'presentation',
+  quote: 'quote',
+  chat: 'chat',
+  tasks: 'tasks',
+  docs: 'docs',
+  research: 'research',
+  video: 'video',
+  telegram: 'telegram',
+  'memory-bank': 'memory-bank',
+  jobs: 'jobs',
+  invoices: 'invoices',
+  'business-profile': 'business-profile',
+  dashboard: 'dashboard',
+  calendar: 'calendar',
+  schedule: 'calendar',
+  organizer: 'calendar',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -110,6 +127,15 @@ const PRODUCT_DEEP_LINKS: Partial<Record<string, EcosystemProduct>> = {
   apostapp: 'apost',
   llc: 'llc',
   llcfactory: 'llc',
+  workroom: 'workroom',
+  vision: 'vision',
+  quotes: 'workroom',
+  craft: 'craft',
+  owner: 'owner',
+  'max-avatar': 'max-avatar',
+  tokens: 'tokens',
+  recovery: 'recovery',
+  relist: 'relist',
 };
 
 export default function CommandCenter() {
@@ -195,7 +221,59 @@ export default function CommandCenter() {
   useEffect(() => {
     const applyDeepLink = () => {
       const params = new URLSearchParams(window.location.search);
+      const productParam = params.get('product');
+      const sectionParam = params.get('section');
       const candidate = params.get('screen') || window.location.hash.replace(/^#/, '');
+
+      // Explicit ?product= / ?section= (tappable Max "where is" links).
+      if (productParam) {
+        const aliased = PRODUCT_DEEP_LINKS[productParam] || (productParam as EcosystemProduct);
+        pendingDeepLinkScreen.current = null;
+        if (productParam === 'max-avatar' || candidate === 'presentation') {
+          setActiveProduct('max-avatar');
+          setActiveScreen('presentation');
+        } else if (productParam === 'tokens') {
+          setActiveProduct('tokens');
+          setActiveScreen('costs');
+        } else if (productParam === 'system') {
+          setActiveProduct('system');
+          setActiveScreen('report');
+        } else if (productParam === 'dev') {
+          setActiveProduct('dev');
+          setActiveScreen('dev');
+        } else if (productParam === 'owner') {
+          setActiveProduct('owner');
+          setActiveScreen('chat');
+        } else {
+          setActiveProduct(aliased);
+          setActiveScreen('dashboard');
+        }
+        setActiveSection(sectionParam);
+        return;
+      }
+
+      // Aliases from the live screen-path map.
+      if (candidate === 'organizer' || candidate === 'schedule' || candidate === 'calendar') {
+        pendingDeepLinkScreen.current = 'calendar';
+        setActiveScreen('calendar');
+        setActiveSection(null);
+        return;
+      }
+      if (candidate === 'quotes') {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct('workroom');
+        setActiveScreen('dashboard');
+        setActiveSection('quotes');
+        return;
+      }
+      if (candidate === 'presentation') {
+        pendingDeepLinkScreen.current = 'presentation';
+        setActiveProduct('max-avatar');
+        setActiveScreen('presentation');
+        setActiveSection(null);
+        return;
+      }
+
       // First check product deep links (e.g. apostapp -> activeProduct='apost').
       // This lets screens reached via activeProduct (ApostApp) be deep-linked
       // even though they are not in the ScreenMode enum.
@@ -204,15 +282,16 @@ export default function CommandCenter() {
         pendingDeepLinkScreen.current = null;
         setActiveProduct(product);
         setActiveScreen('dashboard');
-        setActiveSection(null);
+        setActiveSection(candidate === 'quotes' ? 'quotes' : sectionParam);
         return;
       }
       // Then check screen deep links (e.g. pricing-studio -> ScreenMode).
       const screen = candidate ? SCREEN_DEEP_LINKS[candidate] : null;
       if (screen) {
         pendingDeepLinkScreen.current = screen;
+        if (screen === 'presentation') setActiveProduct('max-avatar');
         setActiveScreen(screen);
-        setActiveSection(null);
+        setActiveSection(sectionParam);
       }
     };
 
@@ -470,7 +549,7 @@ export default function CommandCenter() {
         case 'transcript':
           return <TranscriptForgePage />;
         case 'vision':
-          return <VisionAnalysisPage />;
+          return <VisionAnalysisPage initialSection={activeSection || undefined} />;
         case 'drawings':
           return <DrawingStudioPage initialView={activeSection === 'catalog' ? 'catalog' : 'studio'} />;
         default: return <DashboardScreen activeTab={activeTab} />;
@@ -485,6 +564,7 @@ export default function CommandCenter() {
     if (activeScreen === 'telegram') return <TelegramScreen />;
     if (activeScreen === 'report') return <SystemReportScreen />;
     if (activeScreen === 'tasks') return <TasksScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : activeProduct === 'owner' ? undefined : activeProduct} />;
+    if (activeScreen === 'calendar') return <OrganizerScreen />;
     if (activeScreen === 'tickets') return <Suspense fallback={<Loading />}><TicketsPage /></Suspense>;
     if (activeScreen === 'shipping') return <Suspense fallback={<Loading />}><ShippingPage /></Suspense>;
     if (activeScreen === 'costs') return <Suspense fallback={<Loading />}><CostTracker /></Suspense>;

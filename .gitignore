@@ -50,6 +50,11 @@ backend/data/journey_review_queue.json
 
 # Environment files with secrets
 .env.local
+.env
+
+# Never commit live business / alias payloads
+backend/app/config/client_aliases.json
+client_aliases.json
 
 # OAuth credentials (Gmail, Google API)
 credentials.json

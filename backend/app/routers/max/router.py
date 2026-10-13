@@ -221,6 +221,32 @@ def _response_metadata(channel: str | None, skill_used: str | None = None, extra
     return base
 
 
+def _maybe_handle_where_is_request(request: "ChatRequest"):
+    """Answer 'where is X' from the live screen-path map — never the model or .next greps."""
+    try:
+        from app.services.max.ui_map import (
+            find_in_app_reply,
+            is_find_in_app_request,
+            set_current_user_message,
+        )
+        set_current_user_message(request.message)
+        if not is_find_in_app_request(request.message or ""):
+            return None
+        text = find_in_app_reply(request.message or "", channel=request.channel or "web")
+        if not text:
+            return None
+        return ChatResponse(
+            response=text,
+            model_used="ui-map",
+            fallback_used=False,
+            tool_results=[],
+            metadata=_response_metadata(request.channel, skill_used="find_in_app"),
+        )
+    except Exception:
+        logger.exception("where-is screen-path map lookup failed")
+        return None
+
+
 def _ledger_metadata(channel: str | None, extra: dict | None = None) -> dict:
     from app.services.max.surface_identity import build_ledger_metadata
     return build_ledger_metadata(channel, extra=extra)
@@ -1960,6 +1986,10 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         link_intel.response = sanitize_output(_sanitize_internal_leakage_text(link_intel.response))
         return link_intel
 
+    where_is = _maybe_handle_where_is_request(request)
+    if where_is is not None:
+        return where_is
+
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
         direct_route.response = sanitize_output(_sanitize_internal_leakage_text(direct_route.response))
@@ -2775,6 +2805,10 @@ async def chat_stream(request: ChatRequest):
     if link_intel is not None:
         link_intel.response = sanitize_output(_sanitize_internal_leakage_text(link_intel.response))
         return _stream_immediate_response(link_intel, request.conversation_id)
+
+    where_is = _maybe_handle_where_is_request(request)
+    if where_is is not None:
+        return _stream_immediate_response(where_is, request.conversation_id)
 
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:

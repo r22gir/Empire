@@ -43,6 +43,7 @@ def is_ordinary_text_request(message: str) -> bool:
         "test", "restart", "service", "openclaw", "desk", "delegate",
         "analyze", "analysis", "calculate", "price", "pricing", "yardage",
         "search", "find", "look up", "check my", "show my", "report",
+        "where is", "where are", "how do i open", "dónde está", "donde esta",
         "archiveforge", "life magazine", "issue lookup", "cover search",
         "browser assist", "browser action", "provider", "model", "runtime",
     ]
@@ -467,7 +468,14 @@ Hardware warnings: NO sensors-detect (crashes machine), NO pkill -f broad patter
 
 Begin every new session by stating the configured founder email and checking OpenClaw status if the channel is founder/web_cc. Do not call the email "verified" unless a live email capability check succeeded.
 
-{_get_tools_doc()}{dynamic_sections}"""
+    {_get_tools_doc()}{dynamic_sections}"""
+
+    # Live screen-path map: "where is X" from real nav/quick-switch ids, never from .next greps.
+    try:
+        from .ui_map import render_ui_map_section
+        result += render_ui_map_section()
+    except Exception:
+        pass
 
     # Cache for 5 minutes
     _prompt_cache["prompt"] = result
@@ -631,7 +639,26 @@ async def get_system_prompt_with_brain(
     plus get_max_brain_context() for always-on live state.
     All interfaces (Telegram, Web, CC) go through this.
     """
-    base_prompt = get_system_prompt()
+    try:
+        from .ui_map import set_current_user_message, find_in_app_reply, is_find_in_app_request
+        set_current_user_message(user_message)
+        if is_find_in_app_request(user_message or ""):
+            hit = find_in_app_reply(user_message or "")
+            if hit:
+                base_prompt = get_system_prompt()
+                base_prompt += (
+                    "\n\n=== THIS TURN: WHERE-IS LOOKUP (live screen-path map, no repo search) ===\n"
+                    f"{hit}\n"
+                    "Answer from that line. Include the markdown deep link. "
+                    "Do not call shell_execute or grep.\n"
+                )
+                # Continue into brain context below using this base.
+            else:
+                base_prompt = get_system_prompt()
+        else:
+            base_prompt = get_system_prompt()
+    except Exception:
+        base_prompt = get_system_prompt()
 
     # Always-on live context (session updates, git, health, tasks)
     live_context = get_max_brain_context()

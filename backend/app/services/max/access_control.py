@@ -61,6 +61,7 @@ def verify_founder_approval(channel: str, chat_id, founder_pin) -> bool:
 
 TOOL_LEVELS = {
     "get_tasks": 1, "get_desk_status": 1, "search_quotes": 1,
+    "find_in_app": 1,
     "get_quote": 1, "search_contacts": 1, "get_system_stats": 1,
     "get_weather": 1, "get_services_health": 1, "web_search": 1,
     "web_read": 1, "create_task": 1, "create_contact": 1,
