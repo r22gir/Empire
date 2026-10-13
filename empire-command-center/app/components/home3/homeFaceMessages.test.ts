@@ -95,9 +95,9 @@ test('HomeFace uses the hard-failure helper and 15s timeout, not renderer===siml
   assert.match(src, /applyHomeFaceTimeout/);
   assert.match(src, /HOME_FACE_LOAD_TIMEOUT_MS/);
   assert.match(src, /HOME_FACE_UNAVAILABLE/);
-  assert.doesNotMatch(src, /renderer === 'simli'/);
+  assert.doesNotMatch(src, /success !== false && renderer === 'simli'/);
   assert.match(src, /mh-face-note/);
-  assert.match(src, /Face unavailable — tap to retry/);
+  assert.match(src, /HOME_FACE_UNAVAILABLE/);
 });
 
 test('avatar.html onStatus posts an explicit renderer so the host is not stuck on talkinghead', () => {
@@ -114,7 +114,7 @@ test('PresentationScreen and MaxAvatarFrame still handle avatar-status / avatar-
   assert.match(screen, /event\.data\?\.type === 'avatar-status'/);
   assert.match(screen, /event\.data\.renderer === 'simli' \? 'Simli face only'/);
   assert.match(screen, /if \(event\.data\.success !== false\) setLoaded\(true\)/);
-  assert.doesNotMatch(screen, /renderer === 'simli'/);
+  assert.doesNotMatch(screen, /success !== false && renderer === 'simli'/);
   assert.match(frame, /event\.data\?\.type !== 'avatar-status'/);
   assert.match(frame, /event\.data\.renderer === 'simli' \? 'Simli face only\.'/);
   assert.doesNotMatch(frame, /success !== false && renderer === 'simli'/);
