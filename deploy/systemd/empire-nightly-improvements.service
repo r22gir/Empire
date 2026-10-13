@@ -1,0 +1,17 @@
+[Unit]
+Description=Empire nightly isolated backend+frontend tests → Max fix improvements
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/empire-repo/backend
+# Isolated temp data is created by the script. Outbound keys are cleared inside the script.
+Environment=EMPIRE_OUTBOUND_DISABLED=1
+Environment=EMPIRE_ALLOW_OUTBOUND=0
+# Point at the live task DB only for filing the resulting cards (never for the suite itself).
+# Environment=EMPIRE_TASK_DB=%h/empire-data/empire.db
+ExecStart=/usr/bin/python3 %h/empire-repo/backend/scripts/nightly_improvement_tests.py
+Nice=10
+
+[Install]
+WantedBy=default.target

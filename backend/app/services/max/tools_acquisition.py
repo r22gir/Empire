@@ -352,7 +352,8 @@ def _request_improvement(params: dict, desk: Optional[str] = None) -> ToolResult
             proposed_change=params.get("proposed_change") or params.get("change") or "",
             affected_modules=params.get("affected_modules") or [], risk=params.get("risk") or "medium",
             acceptance=params.get("acceptance") or "", requested_via=params.get("requested_via") or "chat",
-            requested_text=params.get("requested_text") or "")
+            requested_text=params.get("requested_text") or "",
+            kind=params.get("kind") or "growth")
         link = req.get("approval_url") or ""
         return ToolResult(tool="request_improvement", success=True, result={
             "id": req["id"], "title": req["title"], "status": req["status"], "risk": req["risk"],

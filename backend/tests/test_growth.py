@@ -239,109 +239,164 @@ def test_place_details_needs_key_then_fills_and_respects_free_cap(g, monkeypatch
 
 # ── 7. Max improves Max ──────────────────────────────────────────────────────
 def test_improvement_loop_needs_two_taps_and_never_builds_without_key(g):
-    from app.services.max import tool_executor, voice_live
-    importlib.reload(tool_executor)
-    r = tool_executor.execute_tool({"tool": "request_improvement", "title": "Bulk approve",
-                                    "problem": "Approving 20 IG drafts one by one is slow",
-                                    "proposed_change": "Add select-all + approve for copy-only items",
-                                    "affected_modules": ["LeadForge"], "risk": "low"}, founder=True)
-    assert r.success and r.result["status"] == "proposed"
-    rid = r.result["id"]
-    # Max has no tool that approves, builds, merges or deploys
-    assert not [t for t in tool_executor.TOOL_REGISTRY if "improve" in t and t not in ("request_improvement", "improvements_list")]
+    from app.services.max import improvement_queue as iq
+    created = g["imp"].create_request(
+        "Bulk approve",
+        "Approving 20 IG drafts one by one is slow",
+        "Add select-all + approve for copy-only items",
+        ["LeadForge"], "low", requested_via="chat",
+    )
+    assert created["status"] == "proposed"
+    rid = created["id"]
     c = g["client"]
     assert c.post(f"/api/v1/growth/improvements/{rid}/approve", json={}).status_code == 403
     a = c.post(f"/api/v1/growth/improvements/{rid}/approve", json={"confirm": True}).json()
-    assert a["status"] == "awaiting_build" and a["spec_path"].endswith(".md")
-    spec = open(a["spec_path"]).read()
-    assert "Do not merge. Do not deploy." in spec and "max/memory.md" in spec
+    assert a["status"] == "approved"
+    assert a.get("spec_path") in (None, "")
+    job = iq.latest_for(rid)
+    assert job and job["status"] == "queued"
     assert c.post(f"/api/v1/growth/improvements/{rid}/approve-merge", json={"confirm": True}).status_code == 400
     c.post(f"/api/v1/growth/improvements/{rid}/links", json={"pr_url": "https://github.com/r22gir/Empire/pull/1"})
     m = c.post(f"/api/v1/growth/improvements/{rid}/approve-merge", json={"confirm": True}).json()
     assert m["status"] == "merge_approved"
-    v = voice_live.run_voice_tool("request_improvement", {"title": "Voice ask", "problem": "p", "proposed_change": "c"})
-    assert v["success"] and v["result"]["executed"] is False
-    assert "request_improvement" in [t["name"] for t in voice_live.realtime_tool_definitions()]
+    d = c.post(f"/api/v1/growth/improvements/{rid}/mark-deployed", json={"confirm": True}).json()
+    assert d["status"] == "deployed"
 
 
 def test_improvement_with_key_launches_cloud_agent_only_on_tap(g, monkeypatch):
-    """With CURSOR_API_KEY: nothing is launched on create; Rafael's tap launches one agent (model per Rafael's
-    defaults); a double tap cannot launch twice; the PR still needs the second tap, which only records approval."""
+    """Approve only enqueues. Atlas worker may start grok-4.6 after the MiniMax plan.
+    A double tap cannot enqueue twice. Merge tap only records approval."""
     imp, c = g["imp"], g["client"]
     import httpx
+    from app.services.max import improvement_worker as worker
     monkeypatch.setenv("CURSOR_API_KEY", "test-not-a-real-key")
+    monkeypatch.setenv("MAX_IMPROVE_GITHUB_TOKEN", "test-gh")
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    monkeypatch.setenv("MAX_IMPROVE_ALLOW_TEST_KEY", "1")
     calls = []
 
     class Resp:
-        def __init__(self, code, data): self.status_code, self._d, self.text = code, data, str(data)
+        def __init__(self, code, data):
+            self.status_code, self._d, self.text = code, data, str(data)
+            self.headers = {"content-type": "application/json"}
         def json(self): return self._d
         def raise_for_status(self):
             if self.status_code >= 400: raise RuntimeError(self.status_code)
 
-    def fake_post(url, json=None, auth=None, timeout=None):
+    def fake_post(url, json=None, auth=None, timeout=None, headers=None):
         calls.append(("POST", url, json))
-        assert url.endswith("/v1/agents") and json["autoCreatePR"] is True and json["workOnCurrentBranch"] is False
-        assert json["repos"][0]["url"] == "https://github.com/r22gir/Empire"
-        assert "Do not merge" in json["prompt"]["text"] and "max/memory.md" in json["prompt"]["text"]
-        return Resp(200, {"agent": {"id": "bc-1", "url": "https://cursor.com/agents/bc-1", "latestRunId": "run-1"},
-                          "run": {"id": "run-1", "status": "CREATING"}})
+        if url.endswith("/chat/completions"):
+            assert json["model"] == "MiniMax-M2"
+            return Resp(200, {"choices": [{"message": {"content": "## Plan\nDo the change.\n## Proposed patch / spec\nedit files\n## Files to touch\na.py\n## Tests\npass\n## Rollback\nrevert"}}],
+                              "usage": {"prompt_tokens": 10, "completion_tokens": 20}})
+        if "/issues" in url and url.endswith("/issues"):
+            return Resp(201, {"html_url": "https://github.com/r22gir/Empire/issues/88", "number": 88})
+        if url.endswith("/v1/agents"):
+            assert json["autoCreatePR"] is True and json["workOnCurrentBranch"] is False
+            assert "Do not merge" in json["prompt"]["text"]
+            return Resp(200, {"agent": {"id": "bc-1", "url": "https://cursor.com/agents/bc-1", "latestRunId": "run-1"},
+                              "run": {"id": "run-1", "status": "CREATING"}})
+        if "/labels" in url:
+            return Resp(200, {"name": "max-improvement"})
+        return Resp(200, {})
 
-    def fake_get(url, auth=None, timeout=None):
+    def fake_get(url, auth=None, timeout=None, headers=None):
         calls.append(("GET", url, None))
         if url.endswith("/runs/run-1"):
             return Resp(200, {"id": "run-1", "status": "FINISHED", "git": {"branches": [
                 {"repoUrl": "github.com/r22gir/Empire", "branch": "cursor/imp-1", "prUrl": "https://github.com/r22gir/Empire/pull/9"}]}})
+        if "/labels/" in url:
+            return Resp(200, {"name": "max-improvement"})
         return Resp(200, {"id": "bc-1", "status": "IDLE", "latestRunId": "run-1"})
 
     monkeypatch.setattr(httpx, "post", fake_post)
     monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "Client", lambda **k: _FakeClient(fake_post, fake_get))
 
     big = imp.create_request("Queue bulk actions", "p", "c", ["a.py", "b.py", "c.tsx"], "medium")
-    small = imp.create_request("Fix label", "p", "c", ["a.tsx"], "low")
     assert calls == []  # creating a request never launches anything
     assert imp.list_requests()["cursor_configured"] is True
     assert c.post(f"/api/v1/growth/improvements/{big['id']}/approve", json={}).status_code == 403
     assert calls == []
 
     a = c.post(f"/api/v1/growth/improvements/{big['id']}/approve", json={"confirm": True}).json()
-    assert a["status"] == "building" and a["agent_id"] == "bc-1" and a["model"] == "grok-4.6"
-    assert calls[-1][2]["model"] == {"id": "grok-4.6", "params": [{"id": "effort", "value": "medium"}]}
+    assert a["status"] == "approved"
+    assert a.get("agent_id") in (None, "")
+    assert calls == []  # approve does not talk to MiniMax / GitHub / Cursor
     assert a.get("approval_url", "").endswith(f"?screen=improvements&id={big['id']}")
     n = len(calls)
     assert c.post(f"/api/v1/growth/improvements/{big['id']}/approve", json={"confirm": True}).status_code in (400, 409)
-    assert len(calls) == n  # double tap: no second agent
+    assert len(calls) == n  # double tap: no second enqueue / no agent
 
-    s = imp.approve_build(small["id"], confirm=True)
-    assert calls[-1][2]["model"]["id"] == "grok-4.6" and s["model"] == "grok-4.6"
+    processed = worker.process_one()
+    assert processed["issue_url"].endswith("/issues/88")
+    assert processed["merged"] is False and processed["deployed"] is False
+    agent_posts = [x for x in calls if x[0] == "POST" and str(x[1]).endswith("/v1/agents")]
+    assert agent_posts and agent_posts[0][2]["model"]["id"] == "grok-4.6"
 
-    assert c.post(f"/api/v1/growth/improvements/{big['id']}/approve-merge", json={"confirm": True}).status_code == 400
-    r = c.post(f"/api/v1/growth/improvements/{big['id']}/refresh").json()
-    assert r["status"] == "pr_open" and r["pr_url"].endswith("/pull/9") and r["branch"] == "cursor/imp-1"
+    got = imp.get(big["id"])
+    assert got["status"] == "pr_open" and got["issue_url"].endswith("/issues/88")
+
+    assert c.post(f"/api/v1/growth/improvements/{big['id']}/approve-merge", json={"confirm": True}).status_code == 200
     posts_before = len([x for x in calls if x[0] == "POST"])
-    m = c.post(f"/api/v1/growth/improvements/{big['id']}/approve-merge", json={"confirm": True}).json()
+    m = c.get(f"/api/v1/growth/improvements/{big['id']}").json()
     assert m["status"] == "merge_approved"
-    assert len([x for x in calls if x[0] == "POST"]) == posts_before  # approving merge calls nothing (no merge, no deploy)
+    assert len([x for x in calls if x[0] == "POST"]) == posts_before  # approving merge calls nothing
+
+
+class _FakeClient:
+    def __init__(self, post, get):
+        self._post, self._get = post, get
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def post(self, url, json=None, headers=None, **k):
+        return self._post(url, json=json, headers=headers)
+    def get(self, url, headers=None, **k):
+        return self._get(url, headers=headers)
 
 
 def test_improvement_usage_limit_exceeded_is_plain_and_does_not_retry(g, monkeypatch):
     imp = g["imp"]
     import httpx
+    from app.services.max import improvement_worker as worker
     monkeypatch.setenv("CURSOR_API_KEY", "test-not-a-real-key")
+    monkeypatch.setenv("MAX_IMPROVE_GITHUB_TOKEN", "test-gh")
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    monkeypatch.setenv("MAX_IMPROVE_ALLOW_TEST_KEY", "1")
     bodies = []
 
     class Resp:
-        def __init__(self, code, data): self.status_code, self._d, self.text = code, data, str(data)
+        def __init__(self, code, data):
+            self.status_code, self._d, self.text = code, data, str(data)
+            self.headers = {"content-type": "application/json"}
         def json(self): return self._d
 
-    def fake_post(url, json=None, auth=None, timeout=None):
-        bodies.append(dict(json))
-        return Resp(429, {"error": {"code": "usage_limit_exceeded", "message": "plan limit"}})
+    def fake_post(url, json=None, auth=None, timeout=None, headers=None):
+        bodies.append(("POST", url, dict(json or {})))
+        if url.endswith("/chat/completions"):
+            return Resp(200, {"choices": [{"message": {"content": "## Plan\nx\n## Proposed patch / spec\nx\n## Files to touch\n-\n## Tests\n-\n## Rollback\n-"}}],
+                              "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
+        if url.endswith("/issues"):
+            return Resp(201, {"html_url": "https://github.com/r22gir/Empire/issues/3", "number": 3})
+        if url.endswith("/v1/agents"):
+            return Resp(429, {"error": {"code": "usage_limit_exceeded", "message": "plan limit"}})
+        return Resp(200, {})
+
+    def fake_get(url, auth=None, timeout=None, headers=None):
+        return Resp(200, {"name": "max-improvement"})
 
     monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(httpx, "Client", lambda **k: _FakeClient(fake_post, fake_get))
     r = imp.create_request("X", "p", "c", ["a", "b", "c"], "high")
     out = imp.approve_build(r["id"], confirm=True)
-    assert out["status"] == "build_failed"
-    assert "usage_limit_exceeded" in (out.get("build_note") or "")
-    assert "cannot raise this limit" in (out.get("build_note") or "")
-    assert len(bodies) == 1
-    assert bodies[0]["model"]["id"] == "grok-4.6"
+    assert out["status"] == "approved"
+    worker.process_one()
+    got = imp.get(r["id"])
+    assert got["status"] == "pr_open"  # GitHub issue still opened
+    assert "usage_limit_exceeded" in (got.get("build_note") or "")
+    assert "cannot raise this limit" in (got.get("build_note") or "")
+    agent_bodies = [b for b in bodies if str(b[1]).endswith("/v1/agents")]
+    assert len(agent_bodies) == 1
+    assert agent_bodies[0][2]["model"]["id"] == "grok-4.6"
