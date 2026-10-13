@@ -37,11 +37,16 @@ is enforced with no baseline env. Baseline, first match wins:
    ``EMPIRE_USAGE_PEER_DATA_DIRS``). All providers in those files
    count. The baseline is ``max(recorded_total, default_floor)``.
    The floor (``EMPIRE_USAGE_DEFAULT_BASELINE_TOKENS``, default
-   10_000_000) covers a cold month so 20% is a real allowance.
+   5_000_000) covers a cold month so 20% is a real allowance
+   (1_000_000 tokens per family instance). Why 5M: token basis
+   matches stored MiniMax use; 5M ≈ $1.50 at $0.30/M, so 20% =
+   1M tokens (~$0.30) per instance — daily WhatsApp and short
+   chat, not a runaway loop. Do not ask Rafael for an invoice.
    Workroom often writes no ``usage.db``: ``data_root_or_none()`` is
    ``None`` when ``EMPIRE_DATA_DIR`` is unset, so Workroom is absent
    from the pie and the floor applies until other edition files have
-   more than 10M tokens this month.
+   more than 5M tokens this month. Inbound WhatsApp that would call a
+   model is always heavy and fails closed if usage cannot be read.
 
 USD for display and for case 1 is:
 
@@ -69,8 +74,9 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy"})
-DEFAULT_BASELINE_MONTHLY_TOKENS = 10_000_000.0
+HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy", "whatsapp"})
+DEFAULT_BASELINE_MONTHLY_TOKENS = 5_000_000.0
+DEFAULT_FAMILY_BASELINE_MONTHLY_TOKENS = DEFAULT_BASELINE_MONTHLY_TOKENS
 
 
 def _now() -> datetime:
@@ -205,14 +211,17 @@ def recorded_usage_across_editions(month: Optional[str] = None) -> dict:
     }
 
 
-def _baseline() -> tuple[str, float]:
-    """Return (basis, baseline). Family editions always get a number."""
+def _baseline() -> tuple[str, float, str]:
+    """Return (basis, baseline, source). Family editions always get a number."""
     kind, value = _env_baseline()
     if value is not None:
-        return kind, float(value)
+        return kind, float(value), "env"
     recorded = recorded_usage_across_editions()
     floor = default_baseline_tokens()
-    return "recorded_tokens", max(float(recorded["tokens"]), floor)
+    tokens = float(recorded["tokens"])
+    if tokens > floor:
+        return "recorded_tokens", tokens, "recorded"
+    return "recorded_tokens", floor, "default"
 
 
 def usage_db_path():
@@ -330,7 +339,7 @@ def usage_summary() -> dict:
     now = _now()
     family = is_family_edition()
     pct = cap_percent()
-    basis, baseline = _baseline() if family else ("none", None)
+    basis, baseline, source = _baseline() if family else ("none", None, "none")
     allowance = None if baseline is None else round(float(baseline) * pct / 100.0, 6)
     empty = {
         "enforced": bool(family and allowance is not None),
@@ -339,6 +348,7 @@ def usage_summary() -> dict:
         "provider": "minimax",
         "cap_percent": pct,
         "baseline_basis": basis,
+        "baseline_source": source,
         "baseline": baseline,
         "allowance": allowance,
         "day": {"tokens": 0, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0},
@@ -473,3 +483,38 @@ def enforce_usage_cap(
     if not is_heavy_request(kind=kind, text=text, desk=desk, tools=tools, source=source, image=image):
         return None
     return summary["message"]
+
+
+def whatsapp_cap_reply_es() -> str:
+    """Friendly Spanish refusal for an inbound WhatsApp model call at the cap."""
+    pct = cap_percent()
+    return (
+        f"Llegamos al tope de uso de esta instancia "
+        f"({pct:g}% del uso de EmpireBox este mes). "
+        "No generé una respuesta nueva. "
+        "Cuando haya cupo, escríbeme de nuevo."
+    )
+
+
+def enforce_whatsapp_model_cap() -> Optional[str]:
+    """Refuse a WhatsApp model call at or over the instance cap. Family only.
+
+    Inbound WhatsApp that would call a model is always heavy. Unreadable
+    usage data fails closed (Spanish refusal, no model). Chat still
+    fail-opens if its own checker raises.
+    """
+    from app.edition import is_family_edition
+
+    try:
+        if not is_family_edition():
+            return None
+        conn = _connect()
+        if conn is None:
+            return whatsapp_cap_reply_es()
+        conn.close()
+        summary = usage_summary()
+    except Exception:
+        return whatsapp_cap_reply_es()
+    if summary["level"] != "blocked":
+        return None
+    return whatsapp_cap_reply_es()

@@ -1,6 +1,6 @@
 # Instance usage cap
 
-Family editions (`EMPIRE_EDITION=amp` and `EMPIRE_EDITION=maxine`) each track their own LLM use and may spend at most a configured share of EmpireBox's measured AI use for the month. The default share is **20%**. The cap is enforced by default. No `EMPIRE_USAGE_BASELINE_*` variable is required.
+Family editions (`EMPIRE_EDITION=amp` and `EMPIRE_EDITION=maxine`) each track their own LLM use and may spend at most a configured share of EmpireBox's measured AI use for the month. The default share is **20%**. The cap is enforced by default. No `EMPIRE_USAGE_BASELINE_*` variable is required. Do not ask Rafael for a measured invoice.
 
 ## Formula
 
@@ -20,9 +20,9 @@ Baseline, first one that is set:
 2. `EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS` — optional override. `used` is this instance's input + output tokens.
 3. **Auto (default):** sum of recorded tokens this UTC month across every readable edition `usage/usage.db` (this instance, `/data/amp`, `/data/maxine`, Workroom `backend/data`, plus `EMPIRE_USAGE_PEER_DATA_DIRS`). Every provider in those files counts. The baseline is `max(recorded_total, floor)`.
 
-The floor is `EMPIRE_USAGE_DEFAULT_BASELINE_TOKENS` (default **10,000,000** tokens). It is only a cold-start pie so a month with no history still has a real 20% allowance. Once recorded EmpireBox usage exceeds the floor, the pie is the recorded total and each family instance stays at 20% of that total.
+The floor is `EMPIRE_USAGE_DEFAULT_BASELINE_TOKENS` (default **5,000,000** tokens). Why 5M: token basis matches stored MiniMax use; 5M ≈ $1.50 at the operator estimate $0.30/M, so 20% = **1,000,000 tokens (~$0.30) per instance** — daily WhatsApp and short chat, not a runaway loop. Conservative on purpose. Not a customer or lot price. Dell overrides with (1) or (2) when the real bill is known.
 
-Workroom often has no `usage/usage.db`. `data_root_or_none()` is `None` when `EMPIRE_DATA_DIR` is unset (the Workroom default), so `usage_db_path()` returns `None` and Workroom does not write a usage file. The auto baseline still reads `/data/amp`, `/data/maxine`, `backend/data`, `~/empire-repo/backend/data`, and `EMPIRE_USAGE_PEER_DATA_DIRS` when those files exist. If none of them exist — or they have no rows this UTC month — `recorded_total` is 0 and the baseline is the **10,000,000** token floor. Family instances then get a 2,000,000 token allowance (20% of 10M) until recorded EmpireBox usage exceeds the floor.
+Workroom often has no `usage/usage.db`. `data_root_or_none()` is `None` when `EMPIRE_DATA_DIR` is unset (the Workroom default), so `usage_db_path()` returns `None` and Workroom does not write a usage file. The auto baseline still reads `/data/amp`, `/data/maxine`, `backend/data`, `~/empire-repo/backend/data`, and `EMPIRE_USAGE_PEER_DATA_DIRS` when those files exist. If none of them exist — or they have no rows this UTC month — `recorded_total` is 0 and the baseline is the **5,000,000** token floor.
 
 Estimated USD, for display and for case 1:
 
@@ -49,11 +49,15 @@ When `used_percent` is under the cap, `used_percent + remaining_percent = cap_pe
 | at or over the cap (`used_percent` ≥ `cap_percent`) | `blocked` | heavy work is refused in Spanish; a short chat reply still runs and is counted |
 | this instance used the whole baseline (`total_spend_hit`) | `blocked` | even short chats pause |
 
-A request is heavy when it is a desk job, a tool call, an image, a generation (`source=generate`), or the user text is longer than `INSTANCE_SHORT_REPLY_CHARS` (default 400). Anything shorter, with none of those, is a short reply.
+A request is heavy when it is a desk job, a tool call, an image, a generation (`source=generate`), a WhatsApp model call, or the user text is longer than `INSTANCE_SHORT_REPLY_CHARS` (default 400). Anything shorter, with none of those, is a short reply.
 
-## Fail-open
+Inbound WhatsApp checks the cap **before ingest and before STT**. At or over the cap — or if usage data cannot be read — the owner gets a Spanish refusal and no model is called. Nothing is sent beyond the owner.
 
-The cap is enforced when the checker runs. If the checker itself raises (missing usage DB, parse error, import failure), `_family_chat_prep` logs a **warning** (`usage cap check failed open; chat proceeds without a cap refusal`) and the chat continues. The outage does not fail closed. Short chats still count when the checker works; a broken checker must not silence Max-e.
+## Fail-open (chat only)
+
+The chat cap is enforced when the checker runs. If the checker itself raises (missing usage DB, parse error, import failure), `_family_chat_prep` logs a **warning** (`usage cap check failed open; chat proceeds without a cap refusal`) and the chat continues. A broken checker must not silence Max-e chat.
+
+WhatsApp inbound that would call a model **fails closed** on the same outage.
 
 ## Model
 

@@ -63,7 +63,12 @@ async def amp_access_middleware(request, call_next):
         if access_exempt(request.method, request.url.path):
             return await scrub_family_response(request, await call_next(request))
         if not email or not amp_allowlist.is_allowed(email=email):
-            return JSONResponse(status_code=403, content=sin_acceso_body())
+            # Chats are a login surface: anonymous callers get 401.
+            # Other family routes keep 403 sin_acceso (allowlist miss).
+            path = request.url.path.split("?", 1)[0]
+            chats = path == "/api/v1/whatsapp/chats" or path.startswith("/api/v1/whatsapp/chats/")
+            status = 401 if chats else 403
+            return JSONResponse(status_code=status, content=sin_acceso_body())
         response = await call_next(request)
         if via == "session" and email and amp_allowlist.entry_role(email=email) == "owner":
             apply_session_cookie(response, email)

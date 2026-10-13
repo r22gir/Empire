@@ -138,11 +138,22 @@ export function isFamilyPublicPath(pathname) {
 /** Logged-out family home and operator pages go to /login. Workroom stays on the shell.
  *  Edition is NEXT_PUBLIC_EMPIRE_EDITION (baked at build). Host covers amp.empirebox.store
  *  even when that env was missing from an old build. */
+export function isFamilyChatsPath(pathname) {
+  const path = normalizeFamilyPath(pathname);
+  return (
+    path === '/whatsapp/chats'
+    || path.startsWith('/whatsapp/chats/')
+    || path === '/amp/whatsapp/chats'
+    || path.startsWith('/amp/whatsapp/chats/')
+  );
+}
+
 export function familyHomeRedirect(edition, pathname, hasSession, host) {
   if (!isFamilySurface(edition, host)) return null;
   if (hasSession) return null;
   const path = normalizeFamilyPath(pathname);
   if (isFamilyPublicPath(path)) return null;
   if (path === '/' || path.startsWith('/amp/')) return '/login';
+  if (isFamilyChatsPath(path) || path === '/whatsapp' || path.startsWith('/whatsapp/')) return '/login';
   return null;
 }
