@@ -112,6 +112,7 @@ load_router("app.routers.auth", "/auth", ["auth"])
 load_router("app.routers.users", "/users", ["users"])
 load_router("app.routers.listings", "/listings", ["listings"])
 load_router("app.routers.relistapp", "/api/v1", ["relistapp"])
+load_router("app.routers.relist_sale_detection", "/api/v1", ["relist-sale-detection"])
 # ArchiveForge — Photo-first intake for collectible print/media (V1: LIFE Magazine)
 load_router("app.routers.archiveforge", "/api/v1", ["archiveforge"])
 load_router("app.routers.relist", "/api/v1", ["relist"])
@@ -239,6 +240,8 @@ try:
     app.include_router(luxeforge_measurements.router, prefix="/api/luxeforge/measurements", tags=["luxeforge-measurements"])
 except ImportError:
     pass
+
+load_router("app.routers.luxeforge_mood_boards", "/api/v1", ["luxeforge-mood-boards"])
 
 # Create measurement table (avoid create_all due to JSONB in other models)
 try:

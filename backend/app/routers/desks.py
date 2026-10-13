@@ -8,6 +8,7 @@ import json
 
 from app.db.database import get_db, dict_row, dict_rows
 from app.db.init_db import init_database
+from app.services.max.desks.desk_registry import registry_payload
 
 router = APIRouter(prefix="/desks", tags=["desks"])
 
@@ -24,6 +25,12 @@ class DeskUpdate(BaseModel):
     layout: Optional[list] = None
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
+
+
+@router.get("/registry")
+def desk_registry():
+    """Canonical AI desk count and IDs. Source of truth for UI labels."""
+    return registry_payload()
 
 
 @router.get("/")

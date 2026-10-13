@@ -138,7 +138,7 @@ def seed():
                 )
             )
         conn.commit()
-        print(f"Seeded {len(SEED_TASKS)} tasks across 12 desks.")
+        print(f"Seeded {len(SEED_TASKS)} tasks across the desks registry.")
         return len(SEED_TASKS)
 
 

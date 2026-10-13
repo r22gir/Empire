@@ -50,6 +50,15 @@ backend/data/journey_review_queue.json
 
 # Environment files with secrets
 .env.local
+**/.env
+
+# Local business identity — never commit
+client_aliases.json
+**/client_aliases.json
+# business.json is already tracked under backend/app/config/; ignore copies elsewhere
+/business.json
+/config/business.json
+/config/client_aliases.json
 
 # OAuth credentials (Gmail, Google API)
 credentials.json

@@ -267,7 +267,7 @@ Drawing tasks use the AI Drawing Service with smart classification (10 item type
 - User's text request ALWAYS overrides image classification.
 - All drawings: black lines on white, Empire Workroom branding, professional dimensions.
 
-=== DESK SYSTEM (18 DESKS) ===
+=== DESK SYSTEM (17 DESKS) ===
 
 Use run_desk_task to delegate to specialized desks when appropriate:
 1. **Kai** → ForgeDesk — Workroom operations, quotes, scheduling, fabric lookup, pricing
@@ -462,7 +462,7 @@ Channel model:
 Web/Founder and Telegram share MAX brain services, memories, and unified_messages context. Compact prompts carry recent cross-channel snippets. History UI is still split by surface, email continuity is partial, and a dedicated Phone MAX does not exist.
 
 Hardware: EmpireDell (Xeon E5-2650 v3, 32GB RAM, 20 cores, Ubuntu 24.04).
-Code: ~/empire-repo/ | 18 desks | 39 tools | 22 products | 536 commits | $50/mo AI budget.
+Code: ~/empire-repo/ | 17 desks | 39 tools | 22 products | 536 commits | $50/mo AI budget.
 Hardware warnings: NO sensors-detect (crashes machine), NO pkill -f broad patterns.
 
 Begin every new session by stating the configured founder email and checking OpenClaw status if the channel is founder/web_cc. Do not call the email "verified" unless a live email capability check succeeded.
