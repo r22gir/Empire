@@ -282,7 +282,10 @@ def test_improvement_with_key_launches_cloud_agent_only_on_tap(g, monkeypatch):
         calls.append(("POST", url, json))
         assert url.endswith("/v1/agents") and json["autoCreatePR"] is True and json["workOnCurrentBranch"] is False
         assert json["repos"][0]["url"] == "https://github.com/r22gir/Empire"
+        assert json["repos"][0]["startingRef"] in ("dell/studio-batch-1013b", "dell/studio-batch-1013")
+        assert json["repos"][0]["startingRef"] not in ("main", "master")
         assert "Do not merge" in json["prompt"]["text"] and "max/memory.md" in json["prompt"]["text"]
+        assert "dell/studio-batch-1013" in json["prompt"]["text"]
         return Resp(200, {"agent": {"id": "bc-1", "url": "https://cursor.com/agents/bc-1", "latestRunId": "run-1"},
                           "run": {"id": "run-1", "status": "CREATING"}})
 
@@ -345,3 +348,23 @@ def test_improvement_usage_limit_exceeded_is_plain_and_does_not_retry(g, monkeyp
     assert "cannot raise this limit" in (out.get("build_note") or "")
     assert len(bodies) == 1
     assert bodies[0]["model"]["id"] == "grok-4.6"
+
+
+def test_improvement_refuses_main_as_base_ref(g, monkeypatch):
+    """Hard guard: env pointing at main must not launch a Cursor agent."""
+    imp = g["imp"]
+    import httpx
+    monkeypatch.setenv("CURSOR_API_KEY", "test-not-a-real-key")
+    monkeypatch.setenv("MAX_IMPROVE_BASE_REF", "main")
+    calls = []
+
+    def fake_post(url, json=None, auth=None, timeout=None):
+        calls.append(url)
+        raise AssertionError("must not launch against main")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    r = imp.create_request("X", "p", "c", ["a"], "low")
+    out = imp.approve_build(r["id"], confirm=True)
+    assert out["status"] == "build_failed"
+    assert "Refusing" in (out.get("build_note") or "")
+    assert calls == []
