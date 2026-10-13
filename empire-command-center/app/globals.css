@@ -807,3 +807,22 @@ body:has([data-platform-page]) {
   overflow: auto;
   height: auto;
 }
+
+/* Max Live transcript overlay — tokens so Gold + Dark themes both read */
+.max-live-transcript {
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  color: var(--text);
+  border-color: var(--gold-border);
+}
+html[data-theme='dark'] .max-live-transcript,
+[data-theme='dark'] .max-live-transcript,
+html.theme-dark .max-live-transcript,
+body.theme-dark .max-live-transcript {
+  background: color-mix(in srgb, #111114 94%, transparent) !important;
+  color: #eee !important;
+}
+@media (max-width: 430px) {
+  .max-live-transcript {
+    max-width: calc(100vw - 24px);
+  }
+}
