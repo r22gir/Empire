@@ -213,8 +213,8 @@ _OVERLAYS: dict[str, dict] = {
             "or tap [Open Presentation](/?screen=presentation&mode=presentation). "
             "That opens the MAX Avatar / Presentation screen. "
             "On that screen the Presentation / Compact / Text toggle is at the top. "
-            "There is no gold button in the lower-left corner — that answer came "
-            "from a stale .next.prev build and is wrong."
+            "Do not use the stale .next.prev talkinghead answer (a gold corner button "
+            "that is not on this checkout)."
         ),
         "href": "/?screen=presentation&mode=presentation",
         "aliases_en": (

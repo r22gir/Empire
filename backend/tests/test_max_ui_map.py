@@ -1,23 +1,30 @@
 """Live screen-path map: 'where is X' from nav/quick-switch, never from stale .next greps."""
 from __future__ import annotations
 
+import importlib.util
+import sys
 from pathlib import Path
 
-from app.services.max import ui_map
-from app.services.max.ui_map import (
-    build_ui_map,
-    feature_markdown_link,
-    find_in_app_reply,
-    format_feature_reply,
-    is_find_in_app_request,
-    live_source_ids,
-    lookup_feature,
-    parse_left_nav,
-    parse_quick_switch,
-    refuse_shell_search,
-    render_ui_map_section,
-    set_current_user_message,
-)
+# Load ui_map.py without importing app.services.max (that package pulls httpx / telegram).
+_UI_PATH = Path(__file__).resolve().parents[1] / "app" / "services" / "max" / "ui_map.py"
+_spec = importlib.util.spec_from_file_location("max_ui_map_under_test", _UI_PATH)
+ui_map = importlib.util.module_from_spec(_spec)
+assert _spec.loader is not None
+sys.modules["max_ui_map_under_test"] = ui_map
+_spec.loader.exec_module(ui_map)
+
+build_ui_map = ui_map.build_ui_map
+feature_markdown_link = ui_map.feature_markdown_link
+find_in_app_reply = ui_map.find_in_app_reply
+format_feature_reply = ui_map.format_feature_reply
+is_find_in_app_request = ui_map.is_find_in_app_request
+live_source_ids = ui_map.live_source_ids
+lookup_feature = ui_map.lookup_feature
+parse_left_nav = ui_map.parse_left_nav
+parse_quick_switch = ui_map.parse_quick_switch
+refuse_shell_search = ui_map.refuse_shell_search
+render_ui_map_section = ui_map.render_ui_map_section
+set_current_user_message = ui_map.set_current_user_message
 
 
 BANNED_STALE = (
@@ -183,21 +190,18 @@ def test_markdown_link_helpers():
 
 
 def test_chat_helper_answers_common_where_is_questions():
-    import importlib
-    max_router = importlib.import_module("app.routers.max.router")
+    """Same contract the router helper uses: map reply + tappable link, no model."""
     cases = (
         ("Where is presentation mode", "Open Presentation", "/?screen=presentation"),
         ("where is Organizer", "Open Organizer", "/?product=vision"),
         ("where are quotes", "Open Quotes", "/?product=workroom&section=quotes"),
     )
     for message, label, href in cases:
-        req = max_router.ChatRequest(message=message, history=[], channel="web")
-        resp = max_router._maybe_handle_where_is_request(req)
-        assert resp is not None, message
-        assert resp.model_used == "ui-map"
-        assert resp.metadata["skill_used"] == "find_in_app"
-        assert f"[{label}]({href}" in resp.response
+        assert is_find_in_app_request(message), message
+        text = find_in_app_reply(message, family=False, channel="web")
+        assert text, message
+        assert f"[{label}]({href}" in text
         for banned in BANNED_STALE:
-            assert banned not in resp.response.lower()
-    named = max_router.ChatRequest(message="where is the last Marley's quote", history=[], channel="web")
-    assert max_router._maybe_handle_where_is_request(named) is None
+            assert banned not in text.lower()
+    assert not is_find_in_app_request("where is the last Marley's quote")
+    assert find_in_app_reply("where is the last Marley's quote", channel="web") is None

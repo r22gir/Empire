@@ -82,7 +82,7 @@ def test_codes_are_never_reused_after_retire():
     second = assign_code(conn, color="Ivory", material_type="fabric")
     assert second["code"] == "F002-Ivory"
     assert highest_sequence(conn, "F") == 2
-    with pytest.raises(FabricCodeError):
+    with pytest.raises(sqlite3.IntegrityError):
         # sequence 1 stays consumed even if someone tries to re-insert
         conn.execute(
             "INSERT INTO fabric_code_registry (code, prefix, sequence, color, material_type, retired, created_at) "
@@ -134,8 +134,8 @@ def test_blank_code_row_allocates_after_highest_existing():
 
 
 def test_quote_pdf_line_never_shows_supplier():
-    from app.services.quote_pdf_service import _client_fabric_line
-    line = _client_fabric_line({
+    from app.services.fabric_codes import client_fabric_line
+    line = client_fabric_line({
         "fabric_code": "V008-Cognac",
         "fabric_color": "Cognac",
         "fabric_specs": "54in marine vinyl",

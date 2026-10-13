@@ -231,6 +231,33 @@ def internal_view(row: dict) -> dict:
     return {k: row.get(k) for k in keys}
 
 
+def client_fabric_line(item: dict) -> str:
+    """Client-facing fabric line for quotes / PDFs: code, color, specs only."""
+    line = format_client_material({
+        "code": item.get("fabric_code") or item.get("code"),
+        "color": item.get("fabric_color") or item.get("color_pattern") or item.get("color"),
+        "specs": item.get("fabric_specs") or item.get("specs"),
+        "width_inches": item.get("fabric_width") or item.get("width_inches"),
+        "material_type": item.get("material_type"),
+        "pattern_repeat_v": item.get("pattern_repeat_v"),
+        "pattern_repeat_h": item.get("pattern_repeat_h"),
+        "backing": item.get("backing"),
+        "brand": item.get("brand") or item.get("fabric_brand"),
+        "supplier": item.get("supplier"),
+    })
+    if line:
+        return line
+    code = item.get("fabric_code") or item.get("code") or ""
+    color = item.get("fabric_color") or item.get("color_pattern") or ""
+    if code or color:
+        return " ".join(p for p in (code, color) if p)
+    name = (item.get("fabric_name") or "").strip()
+    lowered = name.lower()
+    if name and not any(k in lowered for k in ("supplier", "brand", "kravet", "schumacher", "fabricut")):
+        return name
+    return ""
+
+
 def format_client_material(row: dict) -> str:
     """One-line client-safe material description for quotes / PDFs."""
     view = client_view(row)
