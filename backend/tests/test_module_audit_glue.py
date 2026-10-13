@@ -22,8 +22,11 @@ def test_schema_sql_includes_audit_indexes():
         "idx_customers_business",
         "idx_invoices_quote",
         "idx_invoices_due",
+        "idx_invoices_created_at",
         "idx_jobs_quote",
+        "idx_jobs_created_at",
         "idx_payments_customer",
+        "idx_tasks_status_desk",
     ):
         assert f"CREATE INDEX IF NOT EXISTS {name}" in SCHEMA_SQL
 

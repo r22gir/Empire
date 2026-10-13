@@ -74,6 +74,9 @@ def _init_marketforge_products() -> None:
             )
             """
         )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mf_products_created_at ON mf_products(created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mf_products_status ON mf_products(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mf_products_source ON mf_products(source)")
         conn.commit()
 
 

@@ -343,6 +343,20 @@ def _init_vendorops_schema(conn: sqlite3.Connection):
     _ensure_column(conn, "vo_activation", "activation_transition_source", "TEXT")
     _ensure_column(conn, "vo_renewal_alerts", "telegram_status", "TEXT NOT NULL DEFAULT 'queued_not_sent'")
     _ensure_column(conn, "vo_renewal_alerts", "email_status", "TEXT NOT NULL DEFAULT 'queued_not_sent'")
+    conn.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vo_accounts_tier ON vo_accounts(tier);
+        CREATE INDEX IF NOT EXISTS idx_vo_accounts_status ON vo_accounts(account_status);
+        CREATE INDEX IF NOT EXISTS idx_vo_accounts_renewal ON vo_accounts(renewal_date);
+        CREATE INDEX IF NOT EXISTS idx_vo_subscriptions_status ON vo_subscriptions(status);
+        CREATE INDEX IF NOT EXISTS idx_vo_subscriptions_renewal ON vo_subscriptions(renewal_date);
+        CREATE INDEX IF NOT EXISTS idx_vo_approvals_status ON vo_approvals(status);
+        CREATE INDEX IF NOT EXISTS idx_vo_audit_entity ON vo_audit_events(entity_type, entity_id);
+        CREATE INDEX IF NOT EXISTS idx_vo_audit_created ON vo_audit_events(created_at);
+        CREATE INDEX IF NOT EXISTS idx_vo_renewal_alerts_sub ON vo_renewal_alerts(subscription_id);
+        CREATE INDEX IF NOT EXISTS idx_vo_renewal_alerts_date ON vo_renewal_alerts(renewal_date);
+        """
+    )
     if conn.execute("SELECT COUNT(*) AS count FROM vo_activation WHERE id = 'default'").fetchone()["count"] == 0:
         conn.execute(
             """

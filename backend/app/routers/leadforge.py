@@ -178,7 +178,9 @@ def _init_tables():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_leads_status ON lf_leads(status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_leads_business ON lf_leads(business_unit)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_leads_customer ON lf_leads(customer_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_leads_updated ON lf_leads(updated_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_activities_lead ON lf_activities(lead_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_followup_scheduled ON lf_followup_queue(scheduled_for, sent)")
 
 
 _init_tables()

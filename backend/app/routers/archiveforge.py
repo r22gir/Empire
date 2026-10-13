@@ -1528,6 +1528,10 @@ def _init_tables():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_lifecycle_archive_id ON archive_item_lifecycle(archive_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_lifecycle_events_archive_id ON archive_item_lifecycle_events(archive_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ag_archives_created_at ON ag_archives(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ag_archives_processed_status ON ag_archives(processed_status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ag_archives_listing_status ON ag_archives(listing_status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ag_archive_photos_archive ON ag_archive_photos(archive_id)")
 
     conn.commit()
     conn.close()

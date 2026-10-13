@@ -179,6 +179,12 @@ def _init_tables():
     if "scout_confidence" not in existing_source_cols:
         cur.execute("ALTER TABLE ra_source_products ADD COLUMN scout_confidence REAL DEFAULT 0")
 
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_ra_source_created ON ra_source_products(created_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_ra_listings_status ON ra_listings(status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_ra_listings_platform ON ra_listings(platform)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_ra_orders_status ON ra_orders(status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_ra_orders_created ON ra_orders(created_at)")
+
     conn.commit()
     conn.close()
     log.info("RelistApp tables initialized")

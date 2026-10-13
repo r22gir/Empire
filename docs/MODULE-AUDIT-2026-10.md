@@ -2,7 +2,7 @@
 
 **Repo:** `/workspace` · **Branch:** `cursor/module-audit-safe-opts-bf05` · **Base:** `main`  
 **Date:** 2026-10-13  
-**Sources:** live code (not the 2026-06 registry copy), `EMPIRE-MODULE-READINESS-REGISTRY.md`, `REPORT-module-widget-crosswalk.md`  
+**Sources:** live code (not the 2026-06 registry copy), `EMPIRE-MODULE-READINESS-REGISTRY.md`, `REPORT-module-widget-crosswalk.md`, plus a second pass over routers/tests/CC nav.  
 **Scope:** 19 listed modules + integration map. Safe glue only in this PR. No live-data writes. No `client_aliases.json` / `business.json` / `.env`.
 
 **Status words:** `working` · `partial` · `broken`  
@@ -266,11 +266,37 @@ Do **not** treat this as a calendar. It is a dependency order.
 | LeftNav + QuickSwitch + `?screen=` / `?product=` map | Reachability; no quote/portal/Luxe/Organizer rewrite |
 | `get_daily_actions` `href` + `/workroom/ops` clicks + Daily Summary list | Read-only; does not touch `#119` scheduler |
 | Indexes on `customers`, `invoices`, `jobs`, `lf_leads` | Additive `IF NOT EXISTS` |
+| Later: `vo_*`, `mf_products`, `ra_*`, `ag_archives`, extra `lf_*`, `tasks(status,desk)` | Additive; not on SupportForge / quotes / Organizer / Luxe |
 | `lf_leads.customer_id` column + promote activity `type='note'` | Obvious promote bug |
 | Delete tracked `*.bak-*`, unused `RelistAppScreen.tsx` | Dead |
 | `LeadForgePage.tsx` → re-export | Duplicate consolidation |
+| `calendar` screen → `TasksScreen` | Was a blank center (`renderCenterContent` had no branch) |
+| Owner `DashboardScreen` cards click through | Were `cursor:pointer` with no `onClick` |
 
-**Not done (recommendations):** cascade auto-fire, Luxe/LIB merge, Organizer task create, CNC/PO, QB export, SocialForge job drafts, ShipForge EasyPost, SupportForge tickets, Drawing Studio quality.
+**Not done (recommendations):** cascade auto-fire, Luxe/LIB merge, Organizer task create, CNC/PO, QB export, SocialForge job drafts, ShipForge EasyPost, SupportForge tickets, Drawing Studio quality, delete unloaded `jobs.py` / `intake.py` / `recovery_forge.py` / `app/routers/marketplace/*`, untrack `backend/app/config/business.json` and `founder_dashboard/.env.local`.
+
+---
+
+## Follow-up inventory (second pass)
+
+These items were confirmed after the first commit and are now either done or left as recommendations.
+
+| Finding | State |
+|---|---|
+| Backend tests: **79** modules under `backend/tests/`; **0** frontend `*.test`/`*.spec` in Command Center | documented; glue test added |
+| Daily brief also has `GET /max/intelligence/brief` + file `morning_brief.json` (separate from `/lifecycle/daily-actions`) | documented; `#119` owns unification |
+| `RightPanel` `briefing` prop unused (Intelligence cards hit a different API) | recommendation — do not rewrite `#119` |
+| `calendar` ScreenMode mapped but **no render** → blank | **fixed** → TasksScreen |
+| Owner dashboard BizCards/KPIs looked clickable, did nothing | **fixed** |
+| Unloaded routers: `jobs.py`, `intake.py`, `recovery_forge.py`, `app/routers/marketplace/*` | leave files; recommend archive |
+| Dual mounts still live: `quotes`+`quotes_v2`, `finance`+`financial`, `relistapp`+`relist`, MAX at `""` and `/api/v1` | recommend; Sprint A owns quotes |
+| `marketplaces.py` still PLACEHOLDER (sibling of ShipForge stub) | recommend |
+| `EmpireSidebar` on `/orchestration` links to missing `/crm`, `/drawing`, `/relistapp`, … | recommend (other shell) |
+| `GlobalSidebar.tsx` never imported | recommend delete |
+| SupportForge ticket indexes (`sf_tickets.tenant_id, status`) | **other PR `#124`** |
+| `invoices.job_id` index only if column exists (added by later migration, not in base `CREATE TABLE`) | guarded in `init_database()` |
+| Tracked config risk: `backend/app/config/business.json`, `founder_dashboard/.env.local` | do **not** commit further; untrack on a hygiene PR |
+| `client_aliases.json` | not present in this workspace |
 
 ---
 

@@ -1,10 +1,10 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { API } from '../../lib/api';
-import { BusinessTab } from '../../lib/types';
+import { BusinessTab, EcosystemProduct } from '../../lib/types';
 import { Zap, Megaphone, Headphones, Users, Shield, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
 
-export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab }) {
+export default function DashboardScreen({ activeTab, onNavigate }: { activeTab: BusinessTab; onNavigate?: (product: EcosystemProduct) => void }) {
   const [accuracy, setAccuracy] = useState<any>(null);
   const [accuracyLoading, setAccuracyLoading] = useState(true);
 
@@ -30,21 +30,21 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
 
       {/* KPI Cards - Owner / Platform overview (no business data) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 mb-4">
-        <KPI icon={<Shield size={18} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Platform" value="Online" sub="All services running" />
-        <KPI icon={<Headphones size={18} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Support" value="0" sub="No open tickets" />
-        <KPI icon={<Megaphone size={18} />} iconBg="#fce7f3" iconColor="#ec4899" label="Social" value="--" sub="SocialForge status" />
-        <KPI icon={<Users size={18} />} iconBg="#dbeafe" iconColor="#2563eb" label="Leads" value="--" sub="New inquiries" />
+        <KPI icon={<Shield size={18} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Platform" value="Online" sub="All services running" onClick={() => onNavigate?.('platform')} />
+        <KPI icon={<Headphones size={18} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Support" value="0" sub="No open tickets" onClick={() => onNavigate?.('support')} />
+        <KPI icon={<Megaphone size={18} />} iconBg="#fce7f3" iconColor="#ec4899" label="Social" value="--" sub="SocialForge status" onClick={() => onNavigate?.('social')} />
+        <KPI icon={<Users size={18} />} iconBg="#dbeafe" iconColor="#2563eb" label="Leads" value="--" sub="New inquiries" onClick={() => onNavigate?.('lead')} />
       </div>
 
       {/* Business navigation cards (links only, no data leaks) */}
       <div className="section-label" style={{ marginBottom: 8 }}>Businesses</div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <BizCard name="Empire Workroom" icon="🏗" color="#16a34a"
-          stats={['Drapery & Upholstery', 'Open in left nav →']} />
+          stats={['Drapery & Upholstery', 'Open workroom →']} onClick={() => onNavigate?.('workroom')} />
         <BizCard name="WoodCraft" icon="🪵" color="#ca8a04"
-          stats={['CNC & Woodworking', 'Open in left nav →']} />
+          stats={['CNC & Woodworking', 'Open WoodCraft →']} onClick={() => onNavigate?.('craft')} />
         <BizCard name="Platform" icon="🌐" color="#2563eb"
-          stats={['All services monitored', 'AI routing active']} />
+          stats={['All services monitored', 'AI routing active']} onClick={() => onNavigate?.('platform')} />
       </div>
 
       {/* MAX Accuracy */}
@@ -132,9 +132,9 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
   );
 }
 
-function KPI({ icon, iconBg, iconColor, label, value, sub }: { icon: React.ReactNode; iconBg: string; iconColor: string; label: string; value: string; sub: string }) {
+function KPI({ icon, iconBg, iconColor, label, value, sub, onClick }: { icon: React.ReactNode; iconBg: string; iconColor: string; label: string; value: string; sub: string; onClick?: () => void }) {
   return (
-    <div className="empire-card" style={{ cursor: 'pointer' }}>
+    <div className="empire-card" style={{ cursor: onClick ? 'pointer' : 'default' }} onClick={onClick} role={onClick ? 'button' : undefined}>
       <div className="w-8 h-8 rounded-lg flex items-center justify-center mb-2" style={{ background: iconBg, color: iconColor }}>{icon}</div>
       <div className="kpi-value">{value}</div>
       <div className="kpi-label">{label}</div>
@@ -143,9 +143,9 @@ function KPI({ icon, iconBg, iconColor, label, value, sub }: { icon: React.React
   );
 }
 
-function BizCard({ name, icon, color, stats }: { name: string; icon: string; color: string; stats: string[] }) {
+function BizCard({ name, icon, color, stats, onClick }: { name: string; icon: string; color: string; stats: string[]; onClick?: () => void }) {
   return (
-    <div className="empire-card" style={{ cursor: 'pointer' }}>
+    <div className="empire-card" style={{ cursor: onClick ? 'pointer' : 'default' }} onClick={onClick} role={onClick ? 'button' : undefined}>
       <div className="flex items-center gap-2 mb-3">
         <span className="text-xl">{icon}</span>
         <span style={{ fontSize: 13, fontWeight: 700, color }}>{name}</span>

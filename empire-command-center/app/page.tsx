@@ -104,6 +104,7 @@ const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   invoices: 'invoices',
   desks: 'desks',
   tasks: 'tasks',
+  calendar: 'calendar',
   inbox: 'inbox',
   chat: 'chat',
   tickets: 'tickets',
@@ -481,7 +482,7 @@ export default function CommandCenter() {
         case 'craft': return <CraftForgePage initialSection={activeSection || undefined} />;
         case 'social': return <SocialForgePage />;
         case 'platform': return <PlatformPage />;
-        case 'owner': return <DashboardScreen activeTab={activeTab} />;
+        case 'owner': return <DashboardScreen activeTab={activeTab} onNavigate={handleProductChange} />;
         case 'luxe': return <LuxeForgePage onNavigate={(product, screen, section) => {
             setActiveProduct(product as EcosystemProduct);
             setActiveScreen(screen as ScreenMode);
@@ -535,7 +536,7 @@ export default function CommandCenter() {
           return <VisionAnalysisPage />;
         case 'drawings':
           return <DrawingStudioPage initialView={activeSection === 'catalog' ? 'catalog' : 'studio'} />;
-        default: return <DashboardScreen activeTab={activeTab} />;
+        default: return <DashboardScreen activeTab={activeTab} onNavigate={handleProductChange} />;
       }
     }
     if (activeScreen === 'business-profile') return <BusinessProfileScreen />;
@@ -546,7 +547,7 @@ export default function CommandCenter() {
     if (activeScreen === 'memory-bank') return <MemoryBankScreen />;
     if (activeScreen === 'telegram') return <TelegramScreen />;
     if (activeScreen === 'report') return <SystemReportScreen />;
-    if (activeScreen === 'tasks') return <TasksScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : activeProduct === 'owner' ? undefined : activeProduct} />;
+    if (activeScreen === 'tasks' || activeScreen === 'calendar') return <TasksScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : activeProduct === 'owner' ? undefined : activeProduct} />;
     if (activeScreen === 'tickets') return <Suspense fallback={<Loading />}><TicketsPage /></Suspense>;
     if (activeScreen === 'shipping') return <Suspense fallback={<Loading />}><ShippingPage /></Suspense>;
     if (activeScreen === 'costs') return <Suspense fallback={<Loading />}><CostTracker /></Suspense>;
