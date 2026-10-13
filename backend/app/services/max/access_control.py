@@ -67,7 +67,8 @@ TOOL_LEVELS = {
     "create_quick_quote": 1, "create_engine_quote": 1, "photo_to_quote": 1, "present": 1,
     "search_images": 1, "open_quote_builder": 1, "select_proposal": 1,
     "send_telegram": 1, "send_email": 1, "send_quote_telegram": 1,
-    "send_quote_email": 1, "run_desk_task": 1, "submit_desk_task": 1,
+    "send_quote_email": 1, "find_files": 1, "search_conversations": 1,
+    "run_desk_task": 1, "submit_desk_task": 1,
     # Sprint 1c — approval gate workflow:
     # agents propose (level 1); founder disposes (level 0)
     "submit_quote_for_review":      1,   # agents can submit their drafts
