@@ -113,6 +113,9 @@ export default function PortalPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
+  const [signerName, setSignerName] = useState('');
+  const [signatureData, setSignatureData] = useState('');
+  const [payMessage, setPayMessage] = useState('');
 
   useEffect(() => {
     if (!token) return;
@@ -133,16 +136,40 @@ export default function PortalPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  async function handleApprove() {
-    if (!confirm("Are you sure you want to approve this quote?")) return;
+  async function handleApproveAndPay() {
+    if (!signerName.trim() || signatureData.trim().length < 8) {
+      setPayMessage("Please type your name and sign before approving.");
+      return;
+    }
     setApproving(true);
+    setPayMessage("");
     try {
-      const r = await fetch(`${PORTAL_API}/${token}/approve`, { method: "POST" });
-      if (!r.ok) throw new Error();
-      const updated = await r.json();
-      setData((prev) => (prev ? { ...prev, ...updated } : prev));
-    } catch {
-      alert("Unable to approve at this time. Please try again or call us.");
+      const r = await fetch(`${API}/workroom/quotes-commerce/portal/${token}/approve-and-pay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signer_name: signerName.trim(),
+          signature_data: signatureData.trim(),
+        }),
+      });
+      const updated = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(updated.detail || "Unable to approve");
+      setData((prev) => (
+        prev && prev.quote
+          ? { ...prev, quote: { ...prev.quote, status: "approved" }, status: "approved" }
+          : prev
+      ));
+      if (updated.payment_url) {
+        window.location.href = updated.payment_url;
+        return;
+      }
+      setPayMessage(
+        updated.payment_link_reason === "stripe_unconfigured"
+          ? "Quote approved and signed. Deposit Payment Link will appear once Stripe is configured."
+          : "Quote approved and signed."
+      );
+    } catch (err: any) {
+      setPayMessage(err.message || "Unable to approve at this time. Please try again or call us.");
     } finally {
       setApproving(false);
     }
@@ -282,25 +309,49 @@ export default function PortalPage() {
                 </div>
                 <div className="flex justify-between w-48">
                   <span className="text-gray-500">Tax</span>
-                  <span style={{ color: "#1a1a2e" }}>{fmt(quote.tax)}</span>
+                  <span style={{ color: "#1a1a2e" }}>{fmt(quote.tax ?? (quote as any).tax_amount ?? 0)}</span>
                 </div>
                 <div className="flex justify-between w-48 pt-2 border-t font-bold text-base" style={{ borderColor: "#e0ddd6" }}>
                   <span style={{ color: "#1a1a2e" }}>Total</span>
                   <span style={{ color: "#1a1a2e" }}>{fmt(quote.total)}</span>
                 </div>
+                {(quote as any).deposit_amount || (quote as any).deposit?.deposit_amount ? (
+                  <div className="flex justify-between w-48 text-green-700 font-semibold">
+                    <span>Deposit</span>
+                    <span>{fmt((quote as any).deposit_amount || (quote as any).deposit?.deposit_amount)}</span>
+                  </div>
+                ) : null}
               </div>
             </div>
 
-            {/* Approve button */}
-            {data.can_approve_quote && quote.status === "sent" && (
-              <div className="px-5 sm:px-6 py-4 border-t" style={{ borderColor: "#eae7e0" }}>
+            {data.can_approve_quote && (quote.status === "sent" || quote.status === "draft") && (
+              <div className="px-5 sm:px-6 py-4 border-t space-y-3" style={{ borderColor: "#eae7e0" }}>
+                <p className="text-sm text-gray-600">
+                  Sign below, then tap Approve &amp; Pay Deposit. Your signature is captured before the non-expiring Stripe Payment Link opens.
+                </p>
+                <input
+                  value={signerName}
+                  onChange={(e) => setSignerName(e.target.value)}
+                  placeholder="Full legal name"
+                  className="w-full px-3 py-2 rounded-lg border text-sm"
+                  style={{ borderColor: "#e0ddd6", minHeight: 44 }}
+                />
+                <label className="block text-xs text-gray-500">Type your signature or initials</label>
+                <input
+                  value={signatureData}
+                  onChange={(e) => setSignatureData(e.target.value)}
+                  placeholder="Sign here"
+                  className="w-full px-3 py-3 rounded-lg border text-xl"
+                  style={{ borderColor: "#e0ddd6", minHeight: 56, fontFamily: "cursive" }}
+                />
+                {payMessage && <p className="text-sm" style={{ color: "#166534" }}>{payMessage}</p>}
                 <button
-                  onClick={handleApprove}
+                  onClick={handleApproveAndPay}
                   disabled={approving}
                   className="w-full sm:w-auto px-8 rounded-lg font-semibold text-white transition-opacity disabled:opacity-50"
                   style={{ background: "#b8960c", minHeight: 44 }}
                 >
-                  {approving ? "Approving..." : "Approve Quote"}
+                  {approving ? "Approving..." : "Approve & Pay Deposit"}
                 </button>
               </div>
             )}

@@ -1,0 +1,47 @@
+{
+  "id": "quote-fixture-001",
+  "quote_number": "EST-2026-0901",
+  "customer_id": "cust-ada",
+  "customer_name": "Ada Workroom",
+  "status": "sent",
+  "sent_at": "2026-04-01T12:00:00+00:00",
+  "tax_rate": 0.06,
+  "discount_amount": 0,
+  "discount_type": "dollar",
+  "deposit_percent": 50,
+  "deposit_paid": 0,
+  "line_items": [
+    {
+      "description": "Living room drapery pair",
+      "quantity": 1,
+      "unit": "ea",
+      "rate": 2400,
+      "amount": 2400
+    }
+  ],
+  "addons": [
+    {
+      "id": "addon-hardware",
+      "description": "Decorative hardware package",
+      "quantity": 1,
+      "unit": "ea",
+      "rate": 350,
+      "optional": true,
+      "selected": false
+    },
+    {
+      "id": "addon-install",
+      "description": "Saturday install window",
+      "quantity": 1,
+      "unit": "ea",
+      "rate": 175,
+      "optional": true,
+      "selected": false
+    }
+  ],
+  "measurements": {
+    "width": "84 1/2",
+    "height": "96 3/8",
+    "depth": "3 1/4"
+  }
+}

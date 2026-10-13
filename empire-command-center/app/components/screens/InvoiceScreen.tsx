@@ -5,6 +5,7 @@ import {
   FileText, Plus, Search, DollarSign, Send, Download, AlertTriangle,
   CheckCircle, Clock, CreditCard, Eye, Filter
 } from 'lucide-react';
+import ReviewRequestQueue from '../business/finance/ReviewRequestQueue';
 
 const STATUS_CONFIG: Record<string, { bg: string; color: string; label: string }> = {
   draft: { bg: '#f3f4f6', color: '#6b7280', label: 'Draft' },
@@ -49,6 +50,8 @@ export default function InvoiceScreen() {
           <Plus size={12} /> New Invoice
         </button>
       </div>
+
+      <ReviewRequestQueue />
 
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>

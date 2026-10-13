@@ -148,6 +148,7 @@ load_router("app.routers.inbox", "/api/v1", ["inbox"])
 
 # Client Portal — public token-based customer access
 load_router("app.routers.client_portal", "/api/v1", ["client-portal"])
+load_router("app.routers.workroom_quote_commerce", "/api/v1", ["workroom-quotes-commerce"])
 
 # CraftForge — CNC & 3D print business
 load_router("app.routers.craftforge", "/api/v1/craftforge", ["craftforge"])
