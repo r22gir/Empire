@@ -1316,7 +1316,7 @@ def _format_empire_priority_answer(result: dict[str, Any]) -> str:
         "   - Capability matrix separates text provider from specialty lanes",
         "",
         "5. AI desks and governed automation",
-        "   - 12 desks, 11 ready, 1 partial (Hermes)",
+        "   - 17 desks (desk_registry), 11 ready, 1 partial (Hermes)",
         "   - Founder-gated execution: no auto-reply, no auto-task, no auto-send",
         "   - OpenClaw for execution tasks; Hermes for memory bridge",
         "   - Channel verification keeps all surfaces accountable",

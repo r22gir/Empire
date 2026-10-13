@@ -17,12 +17,14 @@ from app.services.social_service import (
     post_to_facebook,
     get_social_accounts,
 )
+from app.services.data_paths import socialforge_dir
+from app.services.social_best_times import suggest_best_times
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["socialforge"])
 
-DATA_DIR = os.path.expanduser("~/empire-repo/backend/data/socialforge")
+DATA_DIR = str(socialforge_dir())
 POSTS_DIR = os.path.join(DATA_DIR, "posts")
 CAMPAIGNS_DIR = os.path.join(DATA_DIR, "campaigns")
 
@@ -336,6 +338,23 @@ async def dashboard():
         "by_platform": by_platform,
         "recent_posts": posts[:5],
         "campaigns": campaigns[:5],
+        "best_times": suggest_best_times(posted),
+    }
+
+
+@router.get("/best-times")
+async def best_times(platform: Optional[str] = None):
+    """Best-time-to-post windows from engagement history, with sane defaults."""
+    posts = _load_all(POSTS_DIR)
+    if platform:
+        return suggest_best_times(posts, platform=platform)
+    platforms = sorted({(p.get("platform") or "instagram").lower() for p in posts}) or [
+        "instagram", "facebook", "pinterest", "linkedin", "tiktok", "x",
+    ]
+    by_platform = {plat: suggest_best_times(posts, platform=plat) for plat in platforms}
+    return {
+        "all": suggest_best_times(posts),
+        "by_platform": by_platform,
     }
 
 

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Desk, ScreenMode, EcosystemProduct } from '../../lib/types';
 import { API } from '../../lib/api';
+import { CANONICAL_DESK_COUNT } from '../../lib/deskRegistry';
 import {
   Plus, Check, X, Loader2, ChevronDown, ChevronUp, Package, AlertTriangle,
   DollarSign, Users, TrendingUp, ClipboardList, FileText, Flag, Calendar,
@@ -354,7 +355,7 @@ function OwnerContext() {
       <div className="section-label mb-2">Owner Desk</div>
       <div className="grid grid-cols-2 gap-2 mb-2">
         <MiniKPI label="Businesses" value="3" color="#16a34a" />
-        <MiniKPI label="AI Desks" value="12" color="#7c3aed" />
+        <MiniKPI label="AI Desks" value={String(CANONICAL_DESK_COUNT)} color="#7c3aed" />
       </div>
       <div style={{ padding: '8px 10px', borderRadius: 10, background: '#fdf8eb', border: '1px solid #f0e6c0', fontSize: 10, color: '#b8960c', lineHeight: 1.4 }}>
         Personal desk — business data lives in each module. Switch to Workroom or WoodCraft in the left nav.

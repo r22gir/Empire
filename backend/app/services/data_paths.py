@@ -63,6 +63,10 @@ def notes_uploads_dir() -> Path:
 def socialforge_dir() -> Path:
     return data_root() / "socialforge"
 
+
+def luxeforge_mood_boards_dir() -> Path:
+    return data_root() / "luxeforge" / "mood_boards"
+
 def llcfactory_dir() -> Path:
     return data_root() / "llcfactory"
 

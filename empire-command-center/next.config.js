@@ -33,4 +33,8 @@ const nextConfig = {
   generateBuildId: async () => `build-${BUILD_TIMESTAMP}`,
 };
 
+if (process.env.NEXT_OUTPUT === 'standalone') {
+  nextConfig.output = 'standalone';
+}
+
 module.exports = nextConfig;

@@ -3494,7 +3494,14 @@ async def provider_test(request: ProviderTestRequest):
 
 @router.get("/desks")
 async def get_all_desks():
-    return {"desks": desk_manager.get_all_desks()}
+    from app.services.max.desks.desk_registry import CANONICAL_DESK_COUNT, registry_payload
+    desks = desk_manager.get_all_desks()
+    return {
+        "desks": desks,
+        "count": CANONICAL_DESK_COUNT,
+        "source": "desk_registry",
+        "registry": registry_payload(),
+    }
 
 
 @router.get("/desks/desk-routing-policies")

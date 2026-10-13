@@ -74,7 +74,15 @@ class AIDeskManager:
             self.router.register_desk(desk)
 
         self._initialized = True
-        logger.info(f"AIDeskManager initialized with {len(desks)} desks: {self.router.desk_ids}")
+        from .desk_registry import CANONICAL_DESK_COUNT, assert_matches_live
+        try:
+            assert_matches_live(self.router.desk_ids)
+        except RuntimeError as exc:
+            logger.error("Desk registry drifted from live manager: %s", exc)
+        logger.info(
+            f"AIDeskManager initialized with {len(desks)} desks "
+            f"(registry={CANONICAL_DESK_COUNT}): {self.router.desk_ids}"
+        )
 
     def get_desk(self, desk_id: str) -> BaseDesk | None:
         return self.router.get_desk(desk_id)

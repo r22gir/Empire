@@ -9,6 +9,7 @@ import {
   FileText, RefreshCw, Shield, Megaphone, ArrowRight,
   Cpu, Brain
 } from 'lucide-react';
+import { deskCountLabel } from '../../lib/deskRegistry';
 
 interface NavItem {
   label: string;
@@ -19,7 +20,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/', icon: <LayoutDashboard size={18} /> },
-  { label: 'MAX AI', href: '/max', icon: <Bot size={18} />, badge: '18 desks' },
+  { label: 'MAX AI', href: '/max', icon: <Bot size={18} />, badge: deskCountLabel() },
   { label: 'CRM', href: '/crm', icon: <Users size={18} /> },
   { label: 'Finance', href: '/finance', icon: <BarChart3 size={18} /> },
   { label: 'Workroom', href: '/workroom', icon: <Wrench size={18} /> },
