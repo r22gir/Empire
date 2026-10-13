@@ -148,6 +148,7 @@ class ImpCreate(BaseModel):
     risk: str = "medium"
     acceptance: str = ""
     requested_via: str = "studio"
+    kind: str = "growth"
 
 
 class Confirm(BaseModel):
@@ -163,6 +164,23 @@ class Links(BaseModel):
 @router.get("/improvements")
 def imp_list(status: Optional[str] = None):
     return imp.list_requests(status)
+
+
+@router.get("/improvements/usage")
+def imp_usage():
+    """MiniMax planner budget + queue (visible on the Improvements screen)."""
+    from app.services.max.improvement_planner import usage_snapshot
+    from app.services.max.improvement_queue import queue_counts
+    from app.services.max.improvement_github import github_configured
+    snap = usage_snapshot()
+    return {
+        **snap,
+        "queue": queue_counts(),
+        "github_configured": github_configured(),
+        "cursor_configured": imp.cursor_configured(),
+        "pipeline": list(imp.PIPELINE),
+        "auto_credits": False,
+    }
 
 
 @router.post("/improvements")
@@ -189,6 +207,11 @@ def imp_approve(req_id: int, body: Confirm):
     return _wrap(imp.approve_build, req_id, confirm=body.confirm)
 
 
+@router.post("/improvements/{req_id}/retry")
+def imp_retry(req_id: int, body: Confirm):
+    return _wrap(imp.retry_build, req_id, confirm=body.confirm)
+
+
 @router.post("/improvements/{req_id}/refresh")
 def imp_refresh(req_id: int):
     return imp.refresh_build(req_id)
@@ -202,6 +225,11 @@ def imp_links(req_id: int, body: Links):
 @router.post("/improvements/{req_id}/approve-merge")
 def imp_approve_merge(req_id: int, body: Confirm):
     return _wrap(imp.approve_merge, req_id, confirm=body.confirm)
+
+
+@router.post("/improvements/{req_id}/mark-deployed")
+def imp_mark_deployed(req_id: int, body: Confirm):
+    return _wrap(imp.mark_deployed, req_id, confirm=body.confirm, note=body.note)
 
 
 @router.post("/improvements/{req_id}/reject")

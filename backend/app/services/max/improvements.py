@@ -1,16 +1,16 @@
 """
-"Max improves Max" loop (approved by Rafael, Oct 4, 2026).
+"Max improves Max" loop (approved by Rafael, Oct 4, 2026; Atlas queue Oct 13, 2026).
 
   1. Rafael asks Max (chat or voice) for a system improvement.
   2. Max calls the tool `request_improvement` -> a structured change request lands in
-     max_improvements with status `proposed` (problem, proposed change, affected modules, risk).
-  3. Rafael taps Approve on the Improvements page -> approve_build():
-       * CURSOR_API_KEY set  -> a Cursor cloud agent starts on github.com/r22gir/Empire and opens a PR
-                                on its own branch (status `building`, then `pr_open`).
-       * no key              -> a ready-to-run spec file is written and status is `awaiting_build`.
-  4. Max shows the preview / PR link. Merge or deploy needs a SECOND tap (approve_merge), which only
-     records Rafael's approval; the merge itself is done by a human in GitHub. Nothing here merges,
-     deploys, restarts a service, or edits files in the running checkout.
+     max_improvements with status `proposed`.
+  3. Rafael taps Approve -> approve_build() ONLY enqueues a SQLite job for the
+     CodeForge desk (Atlas). It does not call MiniMax or GitHub itself.
+  4. Atlas (MiniMax-M2, included plan path) writes a plan + proposed patch/spec,
+     then opens a GitHub issue labeled max-improvement so a Cursor cloud agent
+     (grok-4.6) can open a draft PR. Never merges. Never deploys.
+  5. Rafael taps Approve merge after review. That only records approval.
+     Rafael approves deploys after Chief e review. Max never deploys.
 
 Max can only create and read requests. Max has no tool that approves, builds, merges or deploys.
 """
@@ -46,7 +46,14 @@ DEFAULT_MODEL = INCLUDED_MODEL
 DEFAULT_PARAMS = [{"id": "effort", "value": os.getenv("MAX_IMPROVE_EFFORT", "medium")}]
 SMALL_MODEL = INCLUDED_MODEL
 SMALL_PARAMS = DEFAULT_PARAMS
-STATUSES = ("proposed", "awaiting_build", "building", "pr_open", "merge_approved", "rejected", "build_failed", "done")
+PIPELINE = ("proposed", "approved", "planning", "pr_open", "deployed")
+STATUSES = (
+    "proposed", "approved", "planning", "awaiting_build", "building",
+    "pr_open", "merge_approved", "deployed", "rejected", "build_failed", "done",
+)
+KINDS = ("growth", "fix", "nightly")
+RETRYABLE = ("build_failed", "awaiting_build")
+APPROVEABLE = ("proposed", "build_failed", "awaiting_build")
 
 
 def _ensure(conn):
@@ -60,9 +67,15 @@ def _ensure(conn):
         build_note TEXT, created_at TEXT DEFAULT (datetime('now','localtime')),
         approved_at TEXT, merge_approved_at TEXT, decided_by TEXT)""")
     have = {r[1] for r in conn.execute("PRAGMA table_info(max_improvements)")}
-    for col in ("model", "run_id"):
+    for col, decl in (
+        ("model", "TEXT"),
+        ("run_id", "TEXT"),
+        ("kind", "TEXT DEFAULT 'growth'"),
+        ("issue_url", "TEXT"),
+        ("job_id", "INTEGER"),
+    ):
         if col not in have:
-            conn.execute(f"ALTER TABLE max_improvements ADD COLUMN {col} TEXT")
+            conn.execute(f"ALTER TABLE max_improvements ADD COLUMN {col} {decl}")
 
 
 def _row(r) -> dict:
@@ -73,13 +86,19 @@ def _row(r) -> dict:
         d["affected_modules"] = [d.get("affected_modules")] if d.get("affected_modules") else []
     d["approval_url"] = approval_deep_link(d.get("id"))
     d["next_step"] = {
-        "proposed": "Rafael: Approve to start the build, or Reject.",
-        "awaiting_build": "Spec is ready. Start it in Cursor (or add CURSOR_API_KEY and tap Build again).",
-        "building": "Cloud agent is working. Refresh to check for the PR.",
-        "pr_open": "Review the PR / preview. Tap Approve merge only after you have looked at it.",
-        "merge_approved": "Approved. A human merges and deploys; Max does not.",
-        "rejected": "Closed.", "build_failed": "See build note. Edit and approve again.", "done": "Merged.",
+        "proposed": "Rafael: Approve to enqueue Atlas (CodeForge), or Reject.",
+        "approved": "Queued for Atlas. MiniMax-M2 will write the plan, then a GitHub issue is opened.",
+        "planning": "Atlas is planning (MiniMax-M2) or a Cursor agent is opening a draft PR.",
+        "awaiting_build": "Plan/spec is ready. Add a GitHub token or Cursor key and tap Retry.",
+        "building": "Legacy: cloud agent is working. Refresh to check for the PR.",
+        "pr_open": "Review the issue / draft PR. Tap Approve merge only after you have looked at it.",
+        "merge_approved": "Merge approved. A human merges. Rafael approves deploys after Chief e review. Max does not.",
+        "deployed": "Recorded as deployed by Rafael. Max never deploys.",
+        "rejected": "Closed.",
+        "build_failed": "See build note. Tap Retry to re-enqueue Atlas.",
+        "done": "Merged (legacy). Deploy still needs Rafael after Chief e review.",
     }.get(d["status"], "")
+    d["pipeline"] = list(PIPELINE)
     return d
 
 
@@ -105,21 +124,25 @@ def cursor_configured() -> bool:
 
 
 def create_request(title: str, problem: str, proposed_change: str, affected_modules=None, risk: str = "medium",
-                   acceptance: str = "", requested_via: str = "chat", requested_text: str = "") -> dict:
+                   acceptance: str = "", requested_via: str = "chat", requested_text: str = "",
+                   kind: str = "growth") -> dict:
     if not (title or "").strip() or not (problem or "").strip() or not (proposed_change or "").strip():
         raise ValueError("title, problem and proposed_change are required")
     risk = (risk or "medium").lower()
     if risk not in RISKS:
         risk = "medium"
+    kind = (kind or "growth").lower()
+    if kind not in KINDS:
+        kind = "growth"
     mods = affected_modules if isinstance(affected_modules, list) else \
         [m.strip() for m in str(affected_modules or "").split(",") if m.strip()]
     with growth._db() as conn:
         _ensure(conn)
         cur = conn.execute(
             """INSERT INTO max_improvements (title, problem, proposed_change, affected_modules, risk, acceptance,
-                   requested_via, requested_text) VALUES (?,?,?,?,?,?,?,?)""",
+                   requested_via, requested_text, kind) VALUES (?,?,?,?,?,?,?,?,?)""",
             (title.strip()[:200], problem.strip(), proposed_change.strip(), json.dumps(mods), risk,
-             (acceptance or "").strip(), requested_via, (requested_text or "")[:2000]))
+             (acceptance or "").strip(), requested_via, (requested_text or "")[:2000], kind))
         return _row(conn.execute("SELECT * FROM max_improvements WHERE id=?", (cur.lastrowid,)).fetchone())
 
 
@@ -130,12 +153,24 @@ def list_requests(status: Optional[str] = None) -> dict:
             rows = conn.execute("SELECT * FROM max_improvements WHERE status=? ORDER BY id DESC", (status,)).fetchall()
         else:
             rows = conn.execute("SELECT * FROM max_improvements ORDER BY id DESC LIMIT 200").fetchall()
+    from app.services.max.improvement_planner import usage_snapshot
+    from app.services.max.improvement_queue import queue_counts
+    from app.services.max.improvement_github import github_configured
     return {"items": [_row(r) for r in rows], "cursor_configured": cursor_configured(),
+            "github_configured": github_configured(),
+            "minimax_configured": bool(os.getenv("MINIMAX_API_KEY")),
             "repo": REPO_URL, "base_ref": BASE_REF,
-            "models": {"default": f"{DEFAULT_MODEL} ({DEFAULT_PARAMS[0]['value']})",
+            "pipeline": list(PIPELINE),
+            "minimax": usage_snapshot(),
+            "queue": queue_counts(),
+            "models": {"planner": "MiniMax-M2 (included plan path)",
+                       "implementer": f"{DEFAULT_MODEL} ({DEFAULT_PARAMS[0]['value']})",
+                       "default": f"{DEFAULT_MODEL} ({DEFAULT_PARAMS[0]['value']})",
                        "small_fix": f"{SMALL_MODEL} ({SMALL_PARAMS[0]['value']})"},
-            "policy": "Max writes requests only. Build starts on Rafael's tap. Merge/deploy needs a second tap "
-                      "and is done by a human. Max never edits his own code or deploys."}
+            "policy": "Max writes requests only. Approve enqueues Atlas (CodeForge). "
+                      "MiniMax-M2 writes a plan, then a GitHub issue labeled max-improvement "
+                      "is opened for a grok-4.6 draft PR. Merge/deploy needs Rafael after Chief e review. "
+                      "Max never edits his own code or deploys. No auto-credits."}
 
 
 def get(req_id: int) -> Optional[dict]:
@@ -150,7 +185,9 @@ def _slug(s: str) -> str:
 
 
 def build_prompt(req: dict) -> str:
-    mods = ", ".join(req["affected_modules"]) or "(see proposed change)"
+    if req.get("spec_override"):
+        return str(req["spec_override"])
+    mods = ", ".join(req.get("affected_modules") or []) or "(see proposed change)"
     acceptance = req.get("acceptance") or ("- Behaviour described above works.\n"
                                            "- Existing tests pass; add a test for the new behaviour.")
     return f"""# Empire improvement IMP-{req['id']}: {req['title']}
@@ -175,7 +212,8 @@ titled "IMP-{req['id']:04d}: {req['title']}". Do not merge. Do not deploy. Do no
 
 ## House rules (must follow)
 - Never edit max/memory.md. Never touch OpenClaw, test-studio or willard data.
-- Never print or commit secrets or .env files.
+- Never print or commit secrets, .env, client_aliases.json, or business.json.
+- No amp/maxine code. No live-data writes in tests. No outbound email, WhatsApp, or SMS.
 - Outreach stays draft-only: nothing may send email, SMS, DMs or social posts without a founder tap.
 - Keep Dark and Gold themes working; check mobile at 390px for UI changes.
 - Back-end: FastAPI in backend/app; portal: Next.js in empire-command-center.
@@ -186,10 +224,12 @@ titled "IMP-{req['id']:04d}: {req['title']}". Do not merge. Do not deploy. Do no
 def write_spec(req: dict) -> str:
     SPEC_DIR.mkdir(parents=True, exist_ok=True)
     path = SPEC_DIR / f"IMP-{req['id']:04d}-{_slug(req['title'])}.md"
-    path.write_text(build_prompt(req) + f"\n\n---\nGenerated {datetime.now().isoformat(timespec='seconds')} "
-                    f"after Rafael approved. Status: awaiting build.\n"
-                    f"Run it: paste this file into a Cursor cloud agent on {REPO_URL}, or set CURSOR_API_KEY on the Dell "
-                    f"and tap Build on the Improvements page.\n")
+    body = req.get("spec_override") or build_prompt(req)
+    path.write_text(
+        body + f"\n\n---\nGenerated {datetime.now().isoformat(timespec='seconds')} "
+        f"by Atlas after Rafael approved. Do not merge. Do not deploy.\n"
+        f"GitHub issue label: max-improvement. Cursor implementer: grok-4.6 draft PR only.\n"
+    )
     return str(path)
 
 
@@ -228,7 +268,8 @@ def _launch_cursor_agent(req: dict) -> dict:
     """POST /v1/agents. Only called from approve_build (Rafael's tap). Never merges; the agent opens a PR."""
     import httpx
     model = pick_model(req)
-    body = {"prompt": {"text": build_prompt(req)},
+    prompt_text = req.get("_prompt_override") or build_prompt(req)
+    body = {"prompt": {"text": prompt_text},
             "name": f"IMP-{req['id']:04d} {req['title']}"[:100],
             "repos": [{"url": REPO_URL, "startingRef": BASE_REF}],
             "workOnCurrentBranch": False,   # new cursor/... branch, never the base branch
@@ -250,46 +291,43 @@ def _launch_cursor_agent(req: dict) -> dict:
 
 
 def approve_build(req_id: int, *, confirm: bool, by: str = "rafael") -> dict:
-    """Rafael's tap #1. Starts the build (cloud agent) or writes the spec."""
+    """Rafael's tap #1. Enqueues Atlas. Does not call MiniMax, GitHub, or Cursor."""
     if not confirm:
         raise PermissionError("confirm=true is required (Rafael's tap)")
     req = get(req_id)
     if not req:
         raise LookupError("not found")
-    if req["status"] not in ("proposed", "awaiting_build", "build_failed"):
+    if req["status"] not in APPROVEABLE:
         raise ValueError(f"request is {req['status']}")
-    # Claim the request atomically so a double tap can never launch two agents.
+    from app.services.max.improvement_queue import enqueue
+    # Claim atomically so a double tap cannot enqueue twice.
     with growth._db() as conn:
         _ensure(conn)
-        cur = conn.execute("UPDATE max_improvements SET status='building', build_note='starting' WHERE id=? "
-                           "AND status IN ('proposed','awaiting_build','build_failed')", (req_id,))
+        cur = conn.execute(
+            "UPDATE max_improvements SET status='approved', build_note=?, approved_at=?, decided_by=? "
+            "WHERE id=? AND status IN ('proposed','awaiting_build','build_failed')",
+            ("Queued for Atlas (CodeForge). MiniMax-M2 plans, then a max-improvement GitHub issue. "
+             "Nothing merges or deploys.",
+             datetime.now().isoformat(timespec="seconds"), by, req_id),
+        )
         if cur.rowcount != 1:
             raise ValueError("request is already being built")
-    try:
-        spec = write_spec(req)
-    except Exception as e:
-        with growth._db() as conn:
-            conn.execute("UPDATE max_improvements SET status='build_failed', build_note=? WHERE id=?",
-                         (f"Could not write spec: {e}"[:500], req_id))
-        raise
-    upd = {"spec_path": spec, "approved_at": datetime.now().isoformat(timespec="seconds"), "decided_by": by}
-    if cursor_configured():
-        try:
-            upd.update(_launch_cursor_agent(req))
-            upd["status"] = "building"
-            upd["build_note"] = (f"Cursor cloud agent started on {REPO_URL} (model: {upd.get('model')}). "
-                                 "It opens a PR on its own branch; nothing merges without your second tap.")
-        except Exception as e:
-            upd["status"] = "build_failed"
-            upd["build_note"] = str(e)[:500]
-    else:
-        upd["status"] = "awaiting_build"
-        upd["build_note"] = "No CURSOR_API_KEY on the Dell. Spec file written; ready to run."
+    job = enqueue(req_id, kind="retry" if req["status"] in RETRYABLE else "plan")
     with growth._db() as conn:
-        _ensure(conn)
-        conn.execute(f"UPDATE max_improvements SET {', '.join(k + '=?' for k in upd)} WHERE id=?",
-                     (*upd.values(), req_id))
+        conn.execute("UPDATE max_improvements SET job_id=? WHERE id=?", (job["id"], req_id))
     return get(req_id)
+
+
+def retry_build(req_id: int, *, confirm: bool, by: str = "rafael") -> dict:
+    """Re-enqueue a failed / awaiting request. Same confirm gate as approve."""
+    if not confirm:
+        raise PermissionError("confirm=true is required (Rafael's tap)")
+    req = get(req_id)
+    if not req:
+        raise LookupError("not found")
+    if req["status"] not in RETRYABLE:
+        raise ValueError(f"retry is only for {', '.join(RETRYABLE)} (got {req['status']})")
+    return approve_build(req_id, confirm=True, by=by)
 
 
 def refresh_build(req_id: int) -> dict:
@@ -352,11 +390,29 @@ def approve_merge(req_id: int, *, confirm: bool, by: str = "rafael") -> dict:
     req = get(req_id)
     if not req:
         raise LookupError("not found")
-    if req["status"] != "pr_open" or not (req.get("pr_url") or req.get("preview_url")):
-        raise ValueError("There is no PR or preview to approve yet.")
+    if req["status"] != "pr_open" or not (req.get("pr_url") or req.get("preview_url") or req.get("issue_url")):
+        raise ValueError("There is no PR, preview, or GitHub issue to approve yet.")
     with growth._db() as conn:
         conn.execute("UPDATE max_improvements SET status='merge_approved', merge_approved_at=?, decided_by=? WHERE id=?",
                      (datetime.now().isoformat(timespec="seconds"), by, req_id))
+    return get(req_id)
+
+
+def mark_deployed(req_id: int, *, confirm: bool, by: str = "rafael", note: str = "") -> dict:
+    """Record that Rafael deployed after Chief e review. Does NOT deploy anything."""
+    if not confirm:
+        raise PermissionError("confirm=true is required (Rafael's tap)")
+    req = get(req_id)
+    if not req:
+        raise LookupError("not found")
+    if req["status"] not in ("merge_approved", "done"):
+        raise ValueError("Deploy is recorded only after merge approval (Chief e review, then Rafael).")
+    extra = (note or "").strip()
+    with growth._db() as conn:
+        conn.execute(
+            "UPDATE max_improvements SET status='deployed', decided_by=?, build_note=? WHERE id=?",
+            (by, (extra or "Recorded as deployed by Rafael after Chief e review. Max did not deploy.")[:500], req_id),
+        )
     return get(req_id)
 
 
