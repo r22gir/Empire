@@ -364,6 +364,31 @@ def _phone_id() -> str:
     return phone_id
 
 
+def send_alert_text(wa_id: str, text: str) -> dict:
+    """One-way Cloud API text. Caller must already restrict the number.
+
+    Used only for Rafael family-help alerts. Does not use owner_numbers
+    (those are Juan / Camilo on family editions) and does not require
+    the 24-hour session window. Meta may still reject the send; the
+    caller then falls back to SMS.
+    """
+    if not configured():
+        return {"sent": False, "reason": "not_configured"}
+    number = _digits(wa_id)
+    if not number:
+        return {"sent": False, "reason": "no_number"}
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": number,
+        "type": "text",
+        "text": {"body": (text or "")[:4000]},
+    }
+    url = f"{GRAPH}/{_phone_id()}/messages"
+    result = _graph_json("POST", url, payload, _token())
+    return {"sent": True, "id": ((result.get("messages") or [{}])[0].get("id")), "kind": "alert"}
+
+
 def send_session_text(wa_id: str, text: str, *, now: int | None = None) -> dict:
     number = _digits(wa_id)
     if number not in owner_numbers():
