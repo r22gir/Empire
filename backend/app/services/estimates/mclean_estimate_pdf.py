@@ -32,6 +32,7 @@ from reportlab.pdfgen import canvas
 
 from app.config.workroom_billing import WorkroomBilling, get_workroom_billing
 from app.services.pricing.dimensions import quote_item_dimension_text
+from app.services.fabric_codes import client_fabric_line
 from app.services.drawing.max_sheet_chrome import (
     FTR_H,
     GOLD,
@@ -191,7 +192,7 @@ def _title_detail(it: Dict[str, Any]) -> Tuple[str, List[str]]:
     else:
         title, details = desc, []
 
-    fabric = it.get("fabric_name")
+    fabric = client_fabric_line(it)
     unit = (it.get("unit") or "").lower()
     qty = it.get("quantity")
     rate = it.get("unit_price")
@@ -544,7 +545,7 @@ def _draw_client_block(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> flo
     project = _client_project(quote)[1] if _client_safe(quote) else (quote.get("project_name") or "")
     material = ""
     for it in quote.get("line_items") or []:
-        fab = it.get("fabric_name")
+        fab = client_fabric_line(it)
         desc = (it.get("description") or "").lower()
         if fab:
             material = f"Material: {fab}"
@@ -1370,7 +1371,7 @@ def _description_lines(it: Dict[str, Any], max_width: float | None = None) -> Li
     lines = [plain_fractions(line) for line in lines]
     if dim and all(dim not in line for line in lines):
         lines.append(dim)
-    fabric = it.get("fabric_name")
+    fabric = client_fabric_line(it)
     if fabric:
         lines.append(f"Fabric: {fabric}")
     return lines

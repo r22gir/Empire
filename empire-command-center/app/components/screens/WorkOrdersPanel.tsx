@@ -292,7 +292,7 @@ export default function WorkOrdersPanel({ onClose, jobId }: { onClose?: () => vo
   const createMemo = async () => {
     setError(null);
     try {
-      const result = await postJson('/sprint-m/credits/memos', {
+      const result = await postJson<any>('/sprint-m/credits/memos', {
         customer_id: creditForm.customer_id,
         customer_name: selectedJob?.customer_name || 'Ada Client',
         amount: Number(creditForm.amount),
@@ -308,7 +308,7 @@ export default function WorkOrdersPanel({ onClose, jobId }: { onClose?: () => vo
   const applyCredit = async () => {
     setError(null);
     try {
-      const result = await postJson(`/sprint-m/credits/${creditForm.customer_id}/apply`, {
+      const result = await postJson<any>(`/sprint-m/credits/${creditForm.customer_id}/apply`, {
         invoice_id: creditForm.invoice_id,
       });
       setCredits(result);

@@ -26,6 +26,7 @@ from app.config.workroom_billing import get_workroom_billing, resolve_billing
 from app.services.quote_service import get_quote
 from app.services.data_paths import quote_pdf_dir
 from app.services.pricing.dimensions import quote_item_dimension_text
+from app.services.fabric_codes import client_fabric_line
 
 _workroom_billing = get_workroom_billing()
 
@@ -258,8 +259,9 @@ def generate_quote_pdf_legacy_portrait(quote_id: str) -> bytes:
             dim_text = quote_item_dimension_text(item)
             if dim_text:
                 desc_parts.append(f"Dimensions: {dim_text}")
-            if item.get('fabric_name'):
-                desc_parts.append(f"Fabric: {item['fabric_name']}")
+            fabric_line = client_fabric_line(item)
+            if fabric_line:
+                desc_parts.append(f"Fabric: {fabric_line}")
             if item.get('yards_needed') and float(item.get('yards_needed', 0) or 0) > 0:
                 yds = item['yards_needed']
                 ppyd = item.get('fabric_price_per_yard', 0) or 0

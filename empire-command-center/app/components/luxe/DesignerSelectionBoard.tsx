@@ -15,6 +15,11 @@ import {
 } from '../../lib/luxe-board-logic';
 import './designer-board.css';
 
+function catalogField(item: object, key: string): string {
+  const value = (item as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value : '';
+}
+
 export default function DesignerSelectionBoard() {
   const [catalog, setCatalog] = useState(HOUSE_CATALOG);
   const [tab, setTab] = useState<LuxeKind>('fabric');
@@ -55,7 +60,13 @@ export default function DesignerSelectionBoard() {
   const filtered = pool.filter((item) => {
     if (!query.trim()) return true;
     const q = query.toLowerCase();
-    return `${item.name} ${item.house || ''} ${item.color || ''} ${item.material || ''} ${item.room || ''}`.toLowerCase().includes(q);
+    const extra = [
+      'house' in item ? item.house : '',
+      'color' in item ? item.color : '',
+      'material' in item ? item.material : '',
+      'room' in item ? item.room : '',
+    ].filter(Boolean).join(' ');
+    return `${item.name} ${extra}`.toLowerCase().includes(q);
   });
 
   async function preview() {
@@ -120,7 +131,7 @@ export default function DesignerSelectionBoard() {
                 <span>
                   <b>{item.name}</b>
                   <small>
-                    {item.house || item.family || item.room} · {item.color || item.mood || item.material}
+                    {catalogField(item, 'house') || catalogField(item, 'family') || catalogField(item, 'room')} · {catalogField(item, 'color') || catalogField(item, 'mood') || catalogField(item, 'material')}
                     {item.kind === 'fabric' ? ` · ${money(item.price_per_yard || 0)} / yd` : item.kind === 'finish' ? ` · ${money(item.price || 0)}` : ''}
                   </small>
                 </span>
@@ -143,7 +154,7 @@ export default function DesignerSelectionBoard() {
                   <article key={sel.id} className="lxb-card">
                     <div className="lxb-swatch" style={{ background: item.swatch }} />
                     <b>{item.name}</b>
-                    <small>{item.house || item.family || item.room}</small>
+                    <small>{catalogField(item, 'house') || catalogField(item, 'family') || catalogField(item, 'room')}</small>
                     {item.kind !== 'photo' && (
                       <div>
                         <input
