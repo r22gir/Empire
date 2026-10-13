@@ -22,13 +22,20 @@ interface SupportTicket {
   id: string;
   ticket_number: number;
   subject: string;
-  customer_id: string;
-  assigned_agent_id: string | null;
+  content?: string | null;
+  customer_id?: string | null;
+  assigned_agent_id?: string | null;
   priority: Priority;
   status: TicketStatus;
   channel: string;
   tags: string[];
   category: string | null;
+  source?: string | null;
+  edition_id?: string | null;
+  proposed_action?: 'adjust' | 'fix' | 'create' | null;
+  proposed_action_summary?: string | null;
+  proposed_action_status?: string | null;
+  auto_build?: boolean;
   created_at: string;
   updated_at: string | null;
 }
@@ -382,7 +389,7 @@ function TicketsTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#faf9f7', borderBottom: '1px solid #ece8e0' }}>
-              {['ID', 'Subject', 'Channel', 'Priority', 'Status', 'Category', 'Date'].map(h => (
+              {['ID', 'Subject', 'Channel', 'Priority', 'Status', 'Proposal', 'Date'].map(h => (
                 <th key={h} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 600, color: '#999', textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
               ))}
             </tr>
@@ -395,7 +402,13 @@ function TicketsTab() {
                 <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>{t.channel || '--'}</td>
                 <td style={{ padding: '12px 16px' }}><Badge {...(PRIORITY_COLORS[t.priority] || PRIORITY_COLORS.medium)} /></td>
                 <td style={{ padding: '12px 16px' }}><Badge {...(STATUS_COLORS[t.status] || STATUS_COLORS.open)} /></td>
-                <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>{t.category || '--'}</td>
+                <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>
+                  {t.proposed_action ? (
+                    <span title={t.proposed_action_summary || ''}>
+                      {t.proposed_action} · {t.proposed_action_status || 'proposed'}
+                    </span>
+                  ) : (t.category || '--')}
+                </td>
                 <td style={{ padding: '12px 16px', fontSize: 13, color: '#999' }}>{formatDate(t.created_at)}</td>
               </tr>
             ))}

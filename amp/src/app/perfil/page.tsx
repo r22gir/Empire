@@ -5,6 +5,7 @@ import Footer from '../../components/Footer';
 import { COURSES, PILLAR_CONFIG } from '../../lib/data';
 import type { Pillar } from '../../lib/data';
 import { User, Trophy, Settings, Bell, Globe, LogOut, ChevronRight, Crown, Heart } from 'lucide-react';
+import PedirAyudaMax from '../../components/PedirAyudaMax';
 
 export default function PerfilPage() {
   const [name, setName] = useState('');
@@ -137,6 +138,8 @@ export default function PerfilPage() {
             </p>
           )}
         </section>
+
+        <PedirAyudaMax />
 
         {/* Upgrade CTA */}
         <section className="bg-gradient-to-r from-gold/10 to-sunrise/10 rounded-3xl p-6 border border-gold/20">

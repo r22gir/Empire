@@ -86,17 +86,18 @@ class FamilyHelpStore:
         self.root = Path(root) if root is not None else family_help_dir()
         self.ticket_store = ticket_store or SupportForgeTicketStore()
 
-    def edition_dir(self, edition_id: str) -> Path:
+    def edition_dir(self, edition_id: str, *, create: bool = False) -> Path:
         edition_id = _validate_edition(edition_id)
         path = self.root / edition_id
-        path.mkdir(parents=True, exist_ok=True)
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def edition_db_path(self, edition_id: str) -> Path:
-        return self.edition_dir(edition_id) / "requests.db"
+    def edition_db_path(self, edition_id: str, *, create: bool = False) -> Path:
+        return self.edition_dir(edition_id, create=create) / "requests.db"
 
     def _connect(self, edition_id: str) -> sqlite3.Connection:
-        path = self.edition_db_path(edition_id)
+        path = self.edition_db_path(edition_id, create=True)
         conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
