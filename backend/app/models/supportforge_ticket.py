@@ -1,6 +1,10 @@
 """
-SupportForge Ticket database model.
-Represents support tickets/conversations.
+SupportForge Ticket database model (legacy PostgreSQL ORM).
+
+The live SQLite table is created by app.db.supportforge_migration and
+served by app.services.supportforge_tickets_store. This ORM model is
+kept for the unused PostgreSQL path and is not the source of truth
+on empire.db.
 """
 from sqlalchemy import Column, String, Integer, DateTime, func, TIMESTAMP, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
