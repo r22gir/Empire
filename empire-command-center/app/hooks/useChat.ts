@@ -37,6 +37,12 @@ export function useChat() {
   const [streamingModel, setStreamingModel] = useState('');
   const abortRef = useRef<AbortController | null>(null);
   const chatIdRef = useRef<string | null>(null);
+  const [chatId, setChatId] = useState<string | null>(null);
+
+  const rememberChatId = useCallback((id: string | null) => {
+    chatIdRef.current = id;
+    setChatId(id);
+  }, []);
   const streamingRef = useRef(false);
   const messagesRef = useRef<Message[]>(welcomeRef.current ? [welcomeRef.current] : []);
   const contextPackRef = useRef<string>('');
@@ -95,8 +101,8 @@ export function useChat() {
     const next = msgs.length > 0 ? msgs : [welcomeRef.current];
     setMessages(next);
     messagesRef.current = next;
-    chatIdRef.current = chatId;
-  }, []);
+    rememberChatId(chatId);
+  }, [rememberChatId]);
 
   const sendMessage = useCallback(async (
     input: string,
@@ -136,6 +142,13 @@ export function useChat() {
         historySlice.unshift({ role: 'assistant', content: 'Context loaded. Ready.' });
       }
 
+      if (!chatIdRef.current) {
+        const minted = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        rememberChatId(minted);
+      }
+
       const body: Record<string, unknown> = {
         message: input,
         model: 'auto',
@@ -149,6 +162,7 @@ export function useChat() {
       const response = await fetch(API + '/max/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(body),
         signal: ctrl.signal,
       });
@@ -189,7 +203,7 @@ export function useChat() {
               setStreamingModel(modelUsed);
               if (ev.quality) qualityBadge = ev.quality;
               if (ev.metadata) responseMetadata = ev.metadata;
-              if (ev.conversation_id && !chatIdRef.current) chatIdRef.current = ev.conversation_id;
+              if (ev.conversation_id && !chatIdRef.current) rememberChatId(ev.conversation_id);
             } else if (ev.type === 'error') {
               accumulated += '\n\n*Error: ' + (ev.content || 'Unknown error') + '*';
               setStreamingContent(accumulated);
@@ -244,7 +258,7 @@ export function useChat() {
       streamingRef.current = false;
       abortRef.current = null;
     }
-  }, [updateMessages]);
+  }, [updateMessages, rememberChatId]);
 
   const submitFounderPin = useCallback(async (messageId: string, resumeId: string, pin: string) => {
     const secret = pin;
@@ -339,6 +353,6 @@ export function useChat() {
   return {
     messages, isStreaming, streamingContent, streamingSteps, streamingModel,
     sendMessage, stopStreaming, loadMessages, setOnMessageComplete, submitFounderPin, cancelFounderPin,
-    chatId: chatIdRef.current,
+    chatId,
   };
 }
