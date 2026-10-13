@@ -107,7 +107,10 @@ def normalize_color(color: str) -> str:
     raw = (color or "").strip()
     if not raw:
         raise FabricCodeError("color is required")
-    parts = re.split(r"[^A-Za-z0-9]+", raw)
+    # Same splitter as Sprint M: keep SoftGold / Soft Gold as SoftGold.
+    parts = re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+", raw)
+    if not parts:
+        parts = re.split(r"[^A-Za-z0-9]+", raw)
     cleaned = "".join(p[:1].upper() + p[1:].lower() for p in parts if p)
     if not cleaned:
         raise FabricCodeError(f"color {color!r} is empty after normalize")

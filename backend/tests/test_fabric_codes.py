@@ -90,6 +90,15 @@ def test_codes_are_never_reused_after_retire():
         )
 
 
+def test_soft_gold_stays_camel_case_like_sprint_m():
+    conn = _conn()
+    import_csv(conn, path=DEFAULT_CSV)
+    row = assign_code(conn, color="Soft Gold", material_type="vinyl")
+    assert row["code"] == "V008-SoftGold"
+    again = assign_code(conn, color="SoftGold", material_type="fabric")
+    assert again["code"] == "F001-SoftGold"
+
+
 def test_leather_and_vinyl_prefixes_are_independent():
     conn = _conn()
     import_csv(conn, path=DEFAULT_CSV)

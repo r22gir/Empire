@@ -11,6 +11,7 @@ import sqlite3
 import os
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from app.db.database import get_db, dict_row, dict_rows
 
@@ -274,13 +275,18 @@ def _registry_rows_readonly():
     ensure_registry(mem)
     if DEFAULT_CSV.exists():
         import_csv(mem, path=DEFAULT_CSV)
-    try:
-        with get_db() as conn:
-            exists = conn.execute(
+    from app.db.database import DB_PATH
+    live_path = Path(DB_PATH)
+    if live_path.exists() and live_path.stat().st_size > 0:
+        live = None
+        try:
+            live = sqlite3.connect(f"file:{live_path}?mode=ro", uri=True)
+            live.row_factory = sqlite3.Row
+            exists = live.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='fabric_code_registry'"
             ).fetchone()
             if exists:
-                for row in conn.execute("SELECT * FROM fabric_code_registry"):
+                for row in live.execute("SELECT * FROM fabric_code_registry"):
                     data = dict(row)
                     mem.execute(
                         """INSERT OR IGNORE INTO fabric_code_registry
@@ -298,8 +304,11 @@ def _registry_rows_readonly():
                             data.get("retired") or 0, data.get("created_at") or "",
                         ),
                     )
-    except Exception:
-        logger.exception("fabric registry live-table read skipped")
+        except Exception:
+            logger.exception("fabric registry live-table read skipped")
+        finally:
+            if live is not None:
+                live.close()
     rows = [dict(r) for r in mem.execute(
         "SELECT * FROM fabric_code_registry ORDER BY prefix, sequence"
     )]

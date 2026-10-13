@@ -318,6 +318,23 @@ def lookup_or_assign(
             supplier_sku=parsed.get("supplier_sku") or None,
             notes="Assigned on Sprint M intake; supplier SKU stored internally only",
         )
+        # Keep brand/SKU on the local internal table. Client views never read it.
+        seed_reserved_codes(conn)
+        prefix, seq, color_n = fc.parse_code(assigned["code"])
+        conn.execute(
+            """INSERT OR IGNORE INTO sm_fabric_codes
+               (code, prefix, sequence, color, material_type, brand, supplier_sku, retired)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 0)""",
+            (
+                assigned["code"],
+                prefix,
+                seq,
+                assigned.get("color") or color_n,
+                assigned.get("material_type") or kind,
+                parsed.get("brand") or None,
+                parsed.get("supplier_sku") or None,
+            ),
+        )
         return _client_view(assigned)
 
     return _assign_local(

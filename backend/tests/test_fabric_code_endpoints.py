@@ -40,17 +40,13 @@ def test_catalog_lists_reserved_codes_and_hides_supplier():
 
 def test_list_codes_does_not_write_live_db(tmp_path, monkeypatch):
     live = tmp_path / "live-empire.db"
-    live.touch()
+    live.write_bytes(b"")
     monkeypatch.setattr("app.db.database.DB_PATH", str(live))
-    before = live.stat().st_mtime_ns
+    before = live.read_bytes()
     rows = asyncio.run(list_fabric_codes(internal=False))
-    after = live.stat().st_mtime_ns
     assert rows
-    assert before == after
-    conn = sqlite3.connect(live)
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    conn.close()
-    assert "fabric_code_registry" not in tables
+    assert live.read_bytes() == before
+    assert live.stat().st_size == 0
 
 
 def test_assign_starts_at_v008_on_isolated_db(tmp_path, monkeypatch):
