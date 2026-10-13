@@ -105,7 +105,7 @@ class BenchModel:
                  panel_style="vertical_channels", channel_count=6,
                  client="", project="", quote_num="", has_back=True,
                  bench_type="straight", long=0, short=0, back=0,
-                 left=0, right=0, side=0):
+                 left=0, right=0, side=0, foam_thickness_in=None):
         self.name = name
         self.width = width
         self.depth = depth
@@ -125,6 +125,8 @@ class BenchModel:
         self.left = left
         self.right = right
         self.side = side
+        # Cut-list fabric allowance only. None = unknown — never guess.
+        self.foam_thickness_in = foam_thickness_in
         self.date = datetime.now().strftime("%m/%d/%Y")
 
     @property

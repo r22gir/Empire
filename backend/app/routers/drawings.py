@@ -429,6 +429,23 @@ class BenchRequest(BaseModel):
     back_length: float = 0          # outer BACK run
     left_depth: float = 0           # LEFT WING LENGTH (along room), NOT thickness
     right_depth: float = 0          # legacy return seat-depth; prefer side_right for wing LENGTH
+    # Cut-list fabric allowance. None / omitted = unknown. Never invent a default.
+    foam_thickness_in: Optional[float] = None
+    foam_thickness: Optional[float] = None  # alias (quote options.foam_thickness)
+
+
+def _req_foam_thickness_in(req: BenchRequest) -> Optional[float]:
+    """Explicit foam thickness only. Empty / missing stays unknown — no 2\" default."""
+    for raw in (req.foam_thickness_in, req.foam_thickness):
+        if raw in (None, ""):
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
 
 
 def _cut_list_model(req: BenchRequest):
@@ -453,6 +470,7 @@ def _cut_list_model(req: BenchRequest):
         left=resolved.side_in,
         right=resolved.side_in,
         side=resolved.side_in,
+        foam_thickness_in=_req_foam_thickness_in(req),
     )
 
 

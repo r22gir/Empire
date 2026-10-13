@@ -139,11 +139,14 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
   const [backLength, setBackLength] = useState(0);
   const [leftDepth, setLeftDepth] = useState(0);
   const [rightDepth, setRightDepth] = useState(0);
+  const [foamThicknessIn, setFoamThicknessIn] = useState('');
   const [cutList, setCutList] = useState<{
     wood?: Array<{ name: string; qty: number; size: string; label: string; note: string }>;
     foam?: Array<{ name: string; qty: number; size: string; label: string; note: string }>;
     fabric?: Array<{ name: string; qty: number; size: string; label: string; note: string }>;
     rules?: string[];
+    fabric_allowance_status?: string;
+    fabric_allowance_label?: string;
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -157,6 +160,8 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
     const params = new URLSearchParams(window.location.search);
     const quote = params.get('quote');
     if (quote) setQuoteNum(quote);
+    const foam = params.get('foam');
+    if (foam && Number(foam) > 0) setFoamThicknessIn(foam);
   }, []);
 
   const showStatus = (msg: string, duration = 4000) => {
@@ -424,6 +429,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
           back_length: benchType === 'u_shape' ? backLength : 0,
           left_depth: benchType === 'u_shape' ? leftDepth : 0,
           right_depth: benchType === 'u_shape' ? rightDepth : 0,
+          foam_thickness_in: foamThicknessIn ? Number(foamThicknessIn) : null,
         },
       };
     }
@@ -442,7 +448,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
         quote_num: quoteNum,
       },
     };
-  }, [backLength, benchType, catalogTemplate, dimensions, itemType, leftDepth, leg1, leg2, lf, name, notes, parseDimVal, quoteNum, rightDepth]);
+  }, [backLength, benchType, catalogTemplate, dimensions, foamThicknessIn, itemType, leftDepth, leg1, leg2, lf, name, notes, parseDimVal, quoteNum, rightDepth]);
 
   const currentPreviewSignature = stableSerialize(buildDrawingRequest().body);
   const previewIsCurrent = Boolean(svgPreview && previewSignature === currentPreviewSignature);
@@ -822,8 +828,23 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
                   </div>
                 </div>
               )}
+              <label style={{ ...labelStyle, marginTop: 10 }}>Foam thickness (fabric cut)</label>
+              <select
+                value={foamThicknessIn}
+                onChange={e => setFoamThicknessIn(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">Unknown — fabric cut will say “needs foam thickness”</option>
+                <option value="1">1&quot;</option>
+                <option value="1.5">1 1/2&quot;</option>
+                <option value="2">2&quot;</option>
+                <option value="3">3&quot;</option>
+                <option value="4">4&quot;</option>
+                <option value="5">5&quot;</option>
+                <option value="6">6&quot;</option>
+              </select>
               <p style={{ fontSize: 11, color: '#999', margin: '8px 0 0' }}>
-                L and U plans use the live Drawing Studio renderer. Dimensions print as fractions (22-1/2&quot;), never 22.5&quot;.
+                Wood is true size. Foam matches wood. Fabric allowance comes from foam thickness — never a fixed seam. Leave blank if unknown. Shop sizes print as 22 1/2&quot;, never 22-1/2&quot; or 22.5&quot;.
               </p>
             </div>
           )}
@@ -947,7 +968,10 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
           </div>
           {cutList && (
             <div style={{ marginTop: 12, background: '#fff', border: '1px solid #ece8e0', borderRadius: 14, padding: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Cut list — wood true size, foam matches, fabric separate</div>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Cut list — wood true size, foam matches wood, fabric labeled separately</div>
+              {cutList.fabric_allowance_label && (
+                <div style={{ fontSize: 11, color: '#96750a', marginBottom: 8 }}>{cutList.fabric_allowance_label}</div>
+              )}
               {(['wood', 'foam', 'fabric'] as const).map(group => (
                 <div key={group} style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase' }}>{group}</div>

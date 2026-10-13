@@ -1,28 +1,53 @@
 """Presentation cut lists for Drawing Studio / quote benches.
 
-Wood is true size. Foam matches wood length × width. Fabric is labeled
-separately with a seam allowance. Every printed size uses shop fractions
-from the live drawing inch formatter — never decimal inches.
+Rafael's rule:
+- Wood / board cut is true size.
+- Foam cut equals the wood cut.
+- Fabric cut is a separately labeled size. Allowance comes from the
+  foam-thickness table in app.config.fabric_cut_allowance — never a
+  single fixed seam. Unknown thickness prints “needs foam thickness”.
+
+Printed sizes use spaced fractions (22 1/2"), never 22-1/2" or decimals.
 """
 from __future__ import annotations
 
-from app.services.drawing.inches import format_inches
+from math import gcd
 
-FABRIC_SEAM_IN = 4.0
+from app.config.fabric_cut_allowance import (
+    CONFIRM_WITH_RAFAEL,
+    NEEDS_FOAM_THICKNESS,
+    lookup_fabric_allowance,
+)
 
 WOOD_LABEL = "WOOD CUT — TRUE SIZE"
 FOAM_LABEL = "FOAM CUT — MATCHES WOOD"
 FABRIC_LABEL = "FABRIC CUT — LABELED SEPARATELY"
 
 RULES = [
-    "Wood is true size.",
-    "Foam matches wood length × width.",
-    "Fabric is labeled separately and includes a 4\" seam allowance.",
+    "Wood / board cut is true size.",
+    "Foam cut equals the wood cut.",
+    "Fabric cut is labeled separately. Allowance depends on foam thickness (config table).",
+    "If foam thickness is unknown, fabric cut is “needs foam thickness” — never guessed.",
 ]
 
 
+def format_cut_inches(value: float) -> str:
+    """Shop fraction with a space: 22.5 → 22 1/2\". Never hyphen or decimal."""
+    sixteenths = round(float(value) * 16)
+    whole = sixteenths // 16
+    rem = sixteenths - whole * 16
+    if rem == 0:
+        return f'{whole}"' if whole else '0"'
+    g = gcd(rem, 16)
+    n = rem // g
+    d = 16 // g
+    if whole:
+        return f'{whole} {n}/{d}"'
+    return f'{n}/{d}"'
+
+
 def _size(width: float, length: float) -> str:
-    return f"{format_inches(width)} × {format_inches(length)}"
+    return f"{format_cut_inches(width)} × {format_cut_inches(length)}"
 
 
 def _runs(model) -> list[tuple[str, float, float]]:
@@ -40,8 +65,23 @@ def _runs(model) -> list[tuple[str, float, float]]:
     return [("Seat", float(getattr(model, "width", 0) or 0), depth)]
 
 
+def _foam_thickness(model) -> float | None:
+    raw = getattr(model, "foam_thickness_in", None)
+    if raw in (None, ""):
+        raw = getattr(model, "foam_thickness", None)
+    if raw in (None, ""):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def generate_cut_list(model) -> dict:
-    """Wood / foam / fabric rows. Sizes are fraction strings with no decimals."""
+    """Wood / foam / fabric rows. Fabric size is table-driven or “needs foam thickness”."""
+    allowance = lookup_fabric_allowance(_foam_thickness(model))
+    extra = allowance.get("allowance_in")
     wood: list[dict] = []
     foam: list[dict] = []
     fabric: list[dict] = []
@@ -64,27 +104,49 @@ def generate_cut_list(model) -> dict:
             "length": length,
             "size": _size(width, length),
             "label": FOAM_LABEL,
-            "note": "Matches wood length × width.",
+            "note": "Equals the wood cut.",
         })
-        fabric.append({
-            "name": f"{name} fabric",
-            "qty": 1,
-            "width": width + FABRIC_SEAM_IN,
-            "length": length + FABRIC_SEAM_IN,
-            "size": _size(width + FABRIC_SEAM_IN, length + FABRIC_SEAM_IN),
-            "label": FABRIC_LABEL,
-            "note": "Fabric cut — labeled separately; includes 4\" seam allowance.",
-        })
+        if extra is None:
+            fabric.append({
+                "name": f"{name} fabric",
+                "qty": 1,
+                "width": None,
+                "length": None,
+                "size": NEEDS_FOAM_THICKNESS,
+                "label": FABRIC_LABEL,
+                "note": allowance.get("label") or "Needs foam thickness. Do not guess an allowance.",
+            })
+        else:
+            note = (
+                f"Fabric cut — labeled separately. "
+                f"Allowance {format_cut_inches(extra)} from the foam-thickness table"
+            )
+            if allowance.get("status") == CONFIRM_WITH_RAFAEL:
+                note += " (confirm with Rafael)"
+            note += "."
+            fabric.append({
+                "name": f"{name} fabric",
+                "qty": 1,
+                "width": width + extra,
+                "length": length + extra,
+                "size": _size(width + extra, length + extra),
+                "label": FABRIC_LABEL,
+                "note": note,
+            })
     return {
         "wood": wood,
         "foam": foam,
         "fabric": fabric,
         "rules": list(RULES),
+        "foam_thickness_in": allowance.get("foam_thickness_in"),
+        "fabric_allowance_in": extra,
+        "fabric_allowance_status": allowance.get("status"),
+        "fabric_allowance_label": allowance.get("label"),
     }
 
 
 def render_cut_list_sheet(cuts: dict, name: str = "", quote_num: str = "") -> str:
-    """Simple SVG shop sheet. Fraction sizes only — no decimal inch labels."""
+    """Simple SVG shop sheet. Spaced fractions only — no decimal inch labels."""
     rows = []
     y = 70
     for group, heading in (

@@ -105,6 +105,8 @@ interface DrawingAsset {
     foam?: Array<{ name: string; qty: number; size: string }>;
     fabric?: Array<{ name: string; qty: number; size: string }>;
     rules?: string[];
+    fabric_allowance_status?: string;
+    fabric_allowance_label?: string;
   };
 }
 
@@ -1454,6 +1456,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
             <StepRooms
               rooms={rooms} photos={photos} scan3DFiles={scan3DFiles} apiBase={API_BASE}
               quoteNum={editQuoteId || ''}
+              foamThickness={options.foamThickness}
               addRoom={addRoom} removeRoom={removeRoom} moveRoom={moveRoom} updateRoomName={updateRoomName}
               addItem={addItem} moveItem={moveItem} removeItem={removeItem} updateItem={updateItem}
               onBrowseCatalog={(roomId) => { setCatalogTargetRoom(roomId); setShowCatalog(true); }}
@@ -2758,8 +2761,8 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
   );
 }
 
-function StepRooms({ rooms, photos, scan3DFiles, apiBase, quoteNum, addRoom, removeRoom, moveRoom, updateRoomName, addItem, moveItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder, onView3D, onSelectFabric, onAssignPhotoToItem }: {
-  rooms: Room[]; photos?: PhotoFile[]; scan3DFiles?: Scan3DFile[]; apiBase?: string; quoteNum?: string;
+function StepRooms({ rooms, photos, scan3DFiles, apiBase, quoteNum, foamThickness, addRoom, removeRoom, moveRoom, updateRoomName, addItem, moveItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder, onView3D, onSelectFabric, onAssignPhotoToItem }: {
+  rooms: Room[]; photos?: PhotoFile[]; scan3DFiles?: Scan3DFile[]; apiBase?: string; quoteNum?: string; foamThickness?: number;
   addRoom: () => void; removeRoom: (id: string) => void; moveRoom: (id: string, dir: 'up' | 'down') => void; updateRoomName: (id: string, name: string) => void;
   addItem: (roomId: string, category?: ItemCategory) => void; moveItem: (roomId: string, itemId: string, dir: 'up' | 'down') => void; removeItem: (roomId: string, itemId: string) => void;
   updateItem: (roomId: string, itemId: string, field: keyof RoomItem, value: any) => void;
@@ -2800,6 +2803,7 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, quoteNum, addRoom, rem
             leg1_length: isL ? widthIn : 0,
             leg2_length: isL && depthIn > 24 ? depthIn : 0,
             back_length: isU ? widthIn : 0,
+            foam_thickness_in: foamThickness && foamThickness > 0 ? foamThickness : null,
           }
         : {
             name: itemName,
@@ -3295,7 +3299,7 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, quoteNum, addRoom, rem
                           {drawingItemId === item.id ? 'Generating Drawing...' : 'Generate Drawing'}
                         </button>
                         <a
-                          href={`/?product=drawings${quoteNum ? `&quote=${encodeURIComponent(quoteNum)}` : ''}`}
+                          href={`/?product=drawings${quoteNum ? `&quote=${encodeURIComponent(quoteNum)}` : ''}${foamThickness ? `&foam=${foamThickness}` : ''}`}
                           style={{
                             padding: '5px 10px', borderRadius: 7, border: '1.5px solid #ece8e0',
                             background: '#fff', color: '#b8960c', fontSize: 10, fontWeight: 700,
@@ -3311,7 +3315,7 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, quoteNum, addRoom, rem
                               background: '#f0fdf4', color: '#15803d', fontSize: 10, fontWeight: 700,
                               textDecoration: 'none', minHeight: 32, display: 'inline-flex', alignItems: 'center',
                             }}>
-                            Drawing Attached{drawing.cut_list?.wood?.length ? ` · ${drawing.cut_list.wood[0].size}` : ''}
+                            Drawing Attached{drawing.cut_list?.wood?.[0]?.size ? ` · wood ${drawing.cut_list.wood[0].size}` : ''}{drawing.cut_list?.fabric?.[0]?.size ? ` · fabric ${drawing.cut_list.fabric[0].size}` : ''}
                           </a>
                         ))}
                       </div>

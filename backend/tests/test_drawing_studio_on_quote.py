@@ -1,46 +1,107 @@
-"""Drawing Studio on quote — cut lists, fractions, live renderer, no uploads writes."""
+"""Drawing Studio on quote — cut lists, spaced fractions, live renderer, no uploads writes."""
 from __future__ import annotations
 
 import asyncio
 import tempfile
 
+from app.config.fabric_cut_allowance import (
+    CONFIRM_WITH_RAFAEL,
+    NEEDS_FOAM_THICKNESS,
+    lookup_fabric_allowance,
+)
 from app.routers import drawings
 from app.services.drawing.inches import format_inches
-from app.services.vision.bench_cut_list import generate_cut_list, render_cut_list_sheet
+from app.services.vision.bench_cut_list import (
+    format_cut_inches,
+    generate_cut_list,
+    render_cut_list_sheet,
+)
 from app.services.vision.bench_renderer import BenchModel
 
 
 def test_live_inch_formatter_uses_fractions_not_decimals():
+    """Title-block / Helvetica path keeps the live hyphen contract."""
     assert format_inches(22.5) == '22-1/2"'
     assert format_inches(18) == '18"'
     assert "." not in format_inches(22.5)
     assert "." not in format_inches(6.25)
 
 
-def test_cut_list_wood_true_size_foam_matches_fabric_separate():
+def test_cut_list_prints_spaced_fractions_never_hyphen_or_decimal():
+    assert format_cut_inches(22.5) == '22 1/2"'
+    assert format_cut_inches(18) == '18"'
+    assert format_cut_inches(0.5) == '1/2"'
+    assert format_cut_inches(6.25) == '6 1/4"'
+    assert "-" not in format_cut_inches(22.5)
+    assert "." not in format_cut_inches(22.5)
+    assert "." not in format_cut_inches(6.25)
+
+
+def test_cut_list_wood_true_size_foam_matches_fabric_needs_thickness_when_unknown():
     model = BenchModel(
-        name="L Banquette", width=96, depth=22, seat_h=18, back_h=18,
+        name="L Banquette", width=96, depth=22.5, seat_h=18, back_h=18,
         bench_type="l_shape", long=96, short=60,
     )
     cuts = generate_cut_list(model)
     assert cuts["wood"] and cuts["foam"] and cuts["fabric"]
-    for wood, foam in zip(cuts["wood"], cuts["foam"]):
-        assert wood["width"] == foam["width"]
+    assert cuts["fabric_allowance_status"] == NEEDS_FOAM_THICKNESS
+    assert cuts["fabric_allowance_in"] is None
+    for wood, foam, fabric in zip(cuts["wood"], cuts["foam"], cuts["fabric"]):
+        assert wood["width"] == foam["width"] == 22.5
         assert wood["length"] == foam["length"]
         assert wood["label"] == "WOOD CUT — TRUE SIZE"
         assert foam["label"] == "FOAM CUT — MATCHES WOOD"
-        assert "." not in wood["size"]
-        assert "." not in foam["size"]
-    for fabric, wood in zip(cuts["fabric"], cuts["wood"]):
-        assert fabric["width"] == wood["width"] + 4
-        assert fabric["length"] == wood["length"] + 4
+        assert wood["size"] == '22 1/2" × 96"'
+        assert foam["size"] == wood["size"]
+        assert fabric["size"] == NEEDS_FOAM_THICKNESS
+        assert fabric["width"] is None
+        assert fabric["length"] is None
         assert fabric["label"] == "FABRIC CUT — LABELED SEPARATELY"
-        assert "Fabric cut" in fabric["note"]
-        assert "." not in fabric["size"]
+        assert "needs foam thickness" in fabric["note"].lower()
+        assert fabric["width"] != wood["width"] + 4
+        assert "-" not in wood["size"]
+        assert "." not in wood["size"]
     svg = render_cut_list_sheet(cuts, name="L Banquette", quote_num="EST-L")
     assert "WOOD CUT — TRUE SIZE" in svg
-    assert "22-1/2" not in svg or True
-    assert "22\"" in svg or '22"' in svg
+    assert NEEDS_FOAM_THICKNESS in svg
+    assert "22-1/2" not in svg
+    assert "22.5" not in svg
+
+
+def test_cut_list_fabric_allowance_from_foam_thickness_table():
+    model = BenchModel(
+        name="Straight", width=96, depth=22.5, seat_h=18, back_h=18,
+        foam_thickness_in=2.0,
+    )
+    row = lookup_fabric_allowance(2.0)
+    extra = row["allowance_in"]
+    assert extra == 5.0
+    assert extra != 4
+    assert row["status"] == CONFIRM_WITH_RAFAEL
+    assert "confirm with Rafael" in row["label"]
+
+    cuts = generate_cut_list(model)
+    wood = cuts["wood"][0]
+    fabric = cuts["fabric"][0]
+    assert cuts["foam_thickness_in"] == 2.0
+    assert cuts["fabric_allowance_in"] == extra
+    assert cuts["fabric_allowance_status"] == CONFIRM_WITH_RAFAEL
+    assert fabric["width"] == wood["width"] + extra
+    assert fabric["length"] == wood["length"] + extra
+    assert fabric["size"] == '27 1/2" × 101"'
+    assert "confirm with Rafael" in fabric["note"]
+    assert "+" not in fabric["size"]
+    assert "-" not in fabric["size"]
+    assert "." not in fabric["size"]
+
+
+def test_cut_list_unmatched_foam_thickness_does_not_guess():
+    model = BenchModel(name="Odd foam", width=48, depth=18, foam_thickness_in=2.25)
+    cuts = generate_cut_list(model)
+    assert cuts["fabric_allowance_status"] == NEEDS_FOAM_THICKNESS
+    assert cuts["fabric_allowance_in"] is None
+    assert cuts["fabric"][0]["size"] == NEEDS_FOAM_THICKNESS
+    assert cuts["wood"][0]["width"] == cuts["foam"][0]["width"] == 18
 
 
 def test_bench_api_returns_cut_list_and_pdf_is_multipage():
@@ -59,6 +120,8 @@ def test_bench_api_returns_cut_list_and_pdf_is_multipage():
     assert preview["cut_list"]["wood"]
     assert preview["cut_list"]["foam"]
     assert preview["cut_list"]["fabric"]
+    assert preview["cut_list"]["fabric_allowance_status"] == NEEDS_FOAM_THICKNESS
+    assert preview["cut_list"]["fabric"][0]["size"] == NEEDS_FOAM_THICKNESS
     assert preview["quote_num"] == "EST-Q"
     svg = preview["svg"]
     assert format_inches(22.5).replace('"', "&quot;") in svg or format_inches(22.5) in svg
@@ -67,6 +130,28 @@ def test_bench_api_returns_cut_list_and_pdf_is_multipage():
     assert pdf.media_type == "application/pdf"
     assert pdf.body.startswith(b"%PDF")
     assert len(pdf.body) > 8000
+
+
+def test_bench_api_passes_foam_thickness_into_fabric_cut():
+    req = drawings.BenchRequest(
+        name="Quote Bench",
+        lf=96,
+        length_unit="in",
+        seat_depth=22.5,
+        bench_type="straight",
+        foam_thickness=4.0,
+    )
+    preview = asyncio.run(drawings.generate_bench_svg(req))
+    cuts = preview["cut_list"]
+    extra = lookup_fabric_allowance(4.0)["allowance_in"]
+    assert extra == 9.0
+    wood = cuts["wood"][0]
+    fabric = cuts["fabric"][0]
+    assert cuts["foam_thickness_in"] == 4.0
+    assert fabric["width"] == wood["width"] + extra
+    assert fabric["size"] == format_cut_inches(wood["width"] + extra) + " × " + format_cut_inches(wood["length"] + extra)
+    assert "22 1/2" in wood["size"]
+    assert "22-1/2" not in wood["size"]
 
 
 def test_l_shape_api_uses_live_leg_lengths():
