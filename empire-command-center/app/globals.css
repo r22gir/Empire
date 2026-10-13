@@ -267,6 +267,13 @@ body:has([data-intake-page]) {
   height: auto;
 }
 
+/* Public Link-in-Bio + LeadForge quote intake */
+body:has([data-bio-page]),
+body:has([data-quote-intake-page]) {
+  overflow: auto;
+  height: auto;
+}
+
 /* Allow scrolling on standalone channel verification page */
 body:has([data-channel-page]) {
   overflow: auto;

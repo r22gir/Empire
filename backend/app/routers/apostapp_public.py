@@ -30,18 +30,51 @@ import hashlib
 from datetime import datetime
 
 from app.middleware.rate_limiter import limiter
+from app.services.apostapp_status_emails import (
+    approve_draft,
+    draft_status_email,
+    get_draft,
+    list_drafts,
+    reject_draft,
+    send_approved_draft,
+)
+from app.services.stripe_test_checkout import (
+    LiveStripeKeyRefused,
+    create_test_checkout_session,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/apostapp/public", tags=["apostapp-public"])
 
-# ── Storage (read from the same JSON store as apostapp.py) ──────────
+# Checkout client injected by tests. Production leaves this None.
+_CHECKOUT_CLIENT = None
+
+
+def _data_root() -> str:
+    return os.environ.get(
+        "APOSTAPP_DATA_DIR",
+        os.path.expanduser("~/empire-repo/backend/data/apostapp"),
+    )
+
+
+def _orders_dir() -> str:
+    path = os.path.join(_data_root(), "orders")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _customers_dir() -> str:
+    path = os.path.join(_data_root(), "customers")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+# Back-compat names used by older helpers/tests. Resolved at call time via
+# the functions above; these defaults are unused when APOSTAPP_DATA_DIR is set.
 BASE_DIR = os.path.expanduser("~/empire-repo/backend/data/apostapp")
 ORDERS_DIR = os.path.join(BASE_DIR, "orders")
 CUSTOMERS_DIR = os.path.join(BASE_DIR, "customers")
-
-for _d in (ORDERS_DIR, CUSTOMERS_DIR):
-    os.makedirs(_d, exist_ok=True)
 
 # ── Package catalog (configurable; Founder to set real prices) ──────
 # Use $0 placeholders so Stripe Checkout can be wired but no real money
@@ -188,6 +221,7 @@ def _verify_email(stored: str, provided: str) -> bool:
 
 
 def _save_json(directory: str, filename: str, data: dict):
+    os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, filename)
     with open(path, "w") as f:
         json.dump(data, f, indent=2, default=str)
@@ -199,6 +233,30 @@ def _load_json(directory: str, filename: str) -> Optional[dict]:
         return None
     with open(path) as f:
         return json.load(f)
+
+
+def _checkout_for_order(order: dict, pkg: dict) -> dict:
+    """Create a test-mode Stripe Checkout session. Never uses a live key."""
+    try:
+        return create_test_checkout_session(
+            order_id=order["id"],
+            package_id=pkg["id"],
+            amount_cents=pkg["price_cents"],
+            customer_email=order.get("customer_email"),
+            stripe_client=_CHECKOUT_CLIENT,
+        )
+    except LiveStripeKeyRefused as exc:
+        logger.error("[apostapp-public] live Stripe key refused: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("[apostapp-public] checkout create failed: %s", exc)
+        return {
+            "checkout_url": None,
+            "session_id": None,
+            "checkout_available": False,
+            "reason": "checkout_create_failed",
+            "test_mode": True,
+        }
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -354,7 +412,7 @@ def _create_internal_order(req: PublicIntakeRequest, package_id: str) -> dict:
         "orders": [order_id],
         "created_at": now,
     }
-    _save_json(CUSTOMERS_DIR, f"{customer_id}.json", customer_data)
+    _save_json(_customers_dir(), f"{customer_id}.json", customer_data)
 
     # Order record
     order_data = {
@@ -400,7 +458,7 @@ def _create_internal_order(req: PublicIntakeRequest, package_id: str) -> dict:
         nav_metadata["nav_source"] = "service_navigator_v2"
         order_data["metadata"].update(nav_metadata)
 
-    _save_json(ORDERS_DIR, f"{order_id}.json", order_data)
+    _save_json(_orders_dir(), f"{order_id}.json", order_data)
 
     logger.info(f"[apostapp-public] intake created: order={order_id} pkg={package_id} email={req.email}")
     return order_data
@@ -430,6 +488,22 @@ async def public_intake(request: Request, req: PublicIntakeRequest):
     order = _create_internal_order(req, req.service_level)
     pkg = next(p for p in APOSTILLE_PACKAGES if p["id"] == req.service_level)
 
+    # Draft the "received" client email. Never auto-send.
+    draft_status_email(order, trigger="received")
+
+    checkout = _checkout_for_order(order, pkg)
+    if checkout.get("session_id"):
+        order.setdefault("metadata", {})
+        order["metadata"]["checkout_session_id"] = checkout["session_id"]
+        order["metadata"]["checkout_url"] = checkout.get("checkout_url")
+        _save_json(_orders_dir(), f"{order['id']}.json", order)
+
+    message = "Request received. Use the order ID to check status at /apostille/status."
+    if checkout.get("checkout_url"):
+        message = "Request received. Continue to Stripe Checkout (test mode) to pay."
+    elif checkout.get("reason") == "stripe_test_key_missing":
+        message = "Request received. Stripe test checkout is not configured yet — pay later from the confirmation page."
+
     return PublicIntakeResponse(
         order_id=order["id"],
         package_id=req.service_level,
@@ -437,8 +511,8 @@ async def public_intake(request: Request, req: PublicIntakeRequest):
         status="received",
         paid=False,
         test_mode=_is_test_mode(),
-        checkout_url=None,  # Wired in R1B+ — public /apostille page calls /api/v1/payments/checkout separately
-        message="Request received. Use the order ID to check status at /apostille/status.",
+        checkout_url=checkout.get("checkout_url"),
+        message=message,
     )
 
 
@@ -450,7 +524,7 @@ async def public_verify(request: Request, req: PublicVerifyRequest):
     Returns generic 404 for both "no such order" and "wrong email" to
     prevent enumeration.
     """
-    order = _load_json(ORDERS_DIR, f"{req.order_id}.json")
+    order = _load_json(_orders_dir(), f"{req.order_id}.json")
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -492,4 +566,106 @@ async def public_config():
     flag — used by the frontend to render the test-mode banner."""
     return {
         "test_mode": _is_test_mode(),
+        "checkout_mode": "test",
+        "client_emails_auto_send": False,
+    }
+
+
+class PublicCheckoutRequest(BaseModel):
+    order_id: str = Field(..., min_length=4, max_length=20)
+    email: str = Field(..., min_length=3, max_length=200)
+
+
+@limiter.limit("10/minute")
+@router.post("/checkout")
+async def public_checkout(request: Request, req: PublicCheckoutRequest):
+    """Create (or recreate) a test-mode Stripe Checkout session for an order.
+
+    Requires the same order_id + email verifier as /verify. Refuses live keys.
+    """
+    order = _load_json(_orders_dir(), f"{req.order_id}.json")
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    stored_email = order.get("customer_email", "")
+    if not stored_email or not _verify_email(stored_email, req.email):
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("paid"):
+        return {
+            "order_id": order["id"],
+            "paid": True,
+            "checkout_url": None,
+            "message": "Order is already marked paid.",
+            "test_mode": _is_test_mode(),
+        }
+    package_id = order.get("metadata", {}).get("package_id", "standard")
+    pkg = next((p for p in APOSTILLE_PACKAGES if p["id"] == package_id), APOSTILLE_PACKAGES[1])
+    checkout = _checkout_for_order(order, pkg)
+    return {
+        "order_id": order["id"],
+        "paid": False,
+        "test_mode": True,
+        **checkout,
+    }
+
+
+@router.get("/email-drafts")
+async def list_email_drafts(order_id: Optional[str] = None, status: Optional[str] = None):
+    """Owner-facing list of drafted client status emails. Never auto-sent."""
+    drafts = list_drafts(order_id=order_id, status=status)
+    return {
+        "drafts": drafts,
+        "auto_send": False,
+        "send_requires_owner_approval": True,
+    }
+
+
+@router.get("/email-drafts/{draft_id}")
+async def get_email_draft(draft_id: str):
+    draft = get_draft(draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    return draft
+
+
+class EmailDraftAction(BaseModel):
+    actor: str = "owner"
+
+
+@router.post("/email-drafts/{draft_id}/approve")
+async def approve_email_draft(draft_id: str, body: EmailDraftAction = EmailDraftAction()):
+    """Owner approval only. Does not send the email."""
+    try:
+        draft = approve_draft(draft_id, approved_by=body.actor)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"draft": draft, "sent": False, "auto_sent": False}
+
+
+@router.post("/email-drafts/{draft_id}/reject")
+async def reject_email_draft(draft_id: str, body: EmailDraftAction = EmailDraftAction()):
+    try:
+        draft = reject_draft(draft_id, rejected_by=body.actor)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"draft": draft, "sent": False}
+
+
+@router.post("/email-drafts/{draft_id}/send")
+async def send_email_draft(draft_id: str, body: EmailDraftAction = EmailDraftAction()):
+    """Explicit owner send of an already-approved draft. Never auto-called."""
+    try:
+        draft = await send_approved_draft(draft_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    return {
+        "draft": draft,
+        "sent": draft.get("status") == "sent",
+        "auto_sent": False,
+        "actor": body.actor,
     }

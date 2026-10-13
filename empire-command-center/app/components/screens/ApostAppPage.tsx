@@ -201,6 +201,7 @@ const NAV_SECTIONS = [
   { id: 'e-sign', label: 'E-Signatures', icon: CheckCircle },
   { id: 'couriers', label: 'Couriers', icon: Truck },
   { id: 'payments', label: 'Payments', icon: DollarSign },
+  { id: 'emails', label: 'Status Emails', icon: Mail },
   { id: 'docs', label: 'Docs', icon: BookOpen },
   { id: 'transcript', label: 'TranscriptForge', icon: FileAudio },
 ] as const;
@@ -304,6 +305,8 @@ export default function ApostAppPage({ onNavigate }: { onNavigate?: (product: st
   const [courierSearch, setCourierSearch] = useState('');
   const [courierStateFilter, setCourierStateFilter] = useState('all');
   const [courierServiceFilter, setCourierServiceFilter] = useState('all');
+  const [emailDrafts, setEmailDrafts] = useState<any[]>([]);
+  const [emailDraftsError, setEmailDraftsError] = useState<string | null>(null);
 
   // Load saved clients from localStorage
   useEffect(() => {
@@ -312,6 +315,10 @@ export default function ApostAppPage({ onNavigate }: { onNavigate?: (product: st
       if (stored) setSavedClients(JSON.parse(stored));
     } catch {}
   }, []);
+
+  useEffect(() => {
+    if (activeSection === 'emails') loadEmailDrafts();
+  }, [activeSection]);
 
   // New Order form state
   const [newOrder, setNewOrder] = useState({
@@ -2242,6 +2249,52 @@ ${selectedForm.fields.map(f => `${f.replace(/_/g, ' ').toUpperCase()}: ${aiFillF
     );
   };
 
+  const loadEmailDrafts = async () => {
+    setEmailDraftsError(null);
+    try {
+      const res = await fetch(`${API}/apostapp/public/email-drafts`);
+      if (!res.ok) throw new Error('Could not load email drafts');
+      const data = await res.json();
+      setEmailDrafts(data.drafts || []);
+    } catch (err: any) {
+      setEmailDraftsError(err.message || 'Could not load email drafts');
+    }
+  };
+
+  const renderStatusEmails = () => (
+    <div style={{ padding: 24 }} data-testid="apostapp-email-drafts">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div>
+          <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Status emails</h2>
+          <p style={{ fontSize: 13, color: '#6b7280', margin: '6px 0 0' }}>
+            Drafted for owner approval. Never auto-sent to clients.
+          </p>
+        </div>
+        <button type="button" onClick={loadEmailDrafts} style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #e5e5e5', background: '#fff', cursor: 'pointer', fontWeight: 600 }}>Refresh</button>
+      </div>
+      {emailDraftsError && <div style={{ color: '#b91c1c', fontSize: 13, marginBottom: 12 }}>{emailDraftsError}</div>}
+      {emailDrafts.length === 0 && <div style={{ padding: 24, color: '#6b7280', fontSize: 13 }}>No drafts yet. Public intake creates a &quot;received&quot; draft automatically.</div>}
+      {emailDrafts.map((draft) => (
+        <div key={draft.id} style={{ border: '1px solid #e5e5e5', borderRadius: 8, padding: 14, marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>{draft.subject}</div>
+          <div style={{ fontSize: 12, color: '#6b7280', margin: '4px 0 8px' }}>Order {draft.order_id} · {draft.to_email} · {draft.status}</div>
+          <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 13, margin: 0, color: '#374151' }}>{draft.body}</pre>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            {draft.status === 'drafted' && (
+              <button type="button" onClick={async () => { await fetch(`${API}/apostapp/public/email-drafts/${draft.id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actor: 'owner' }) }); loadEmailDrafts(); }} style={{ padding: '6px 10px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Approve</button>
+            )}
+            {draft.status === 'approved' && (
+              <button type="button" onClick={async () => { await fetch(`${API}/apostapp/public/email-drafts/${draft.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actor: 'owner' }) }); loadEmailDrafts(); }} style={{ padding: '6px 10px', background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Queue send</button>
+            )}
+            {draft.status === 'drafted' && (
+              <button type="button" onClick={async () => { await fetch(`${API}/apostapp/public/email-drafts/${draft.id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actor: 'owner' }) }); loadEmailDrafts(); }} style={{ padding: '6px 10px', background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Reject</button>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
   // ============ MAIN RENDER ============
 
   const renderContent = () => {
@@ -2261,6 +2314,7 @@ ${selectedForm.fields.map(f => `${f.replace(/_/g, ' ').toUpperCase()}: ${aiFillF
       case 'e-sign': return renderESign();
       case 'couriers': return renderCouriers();
       case 'payments': return <div style={{ padding: 24 }}><PaymentModule product="apost" amount={0} /></div>;
+      case 'emails': return renderStatusEmails();
       case 'docs': return <div style={{ padding: 24 }}><ProductDocs product="apost" /></div>;
       case 'transcript':
         if (onNavigate) { onNavigate('transcript', 'dashboard'); }
