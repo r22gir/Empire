@@ -11,6 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+FOUNDER_PIN = "test-founder-pin"
+
+
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     from app.db import database
@@ -18,12 +21,26 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "biz_signup_test.db"))
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_dummy_businessops")
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_dummy")
+    monkeypatch.setenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", "true")
     monkeypatch.setattr(signup_mod, "_hash_password", lambda password: "test-hash:" + password)
     from app.main import app
     return TestClient(app)
 
 
-def _signup(client, *, email="owner@alpha.test", package_id="pkg_starter", name="Alpha Co"):
+@pytest.fixture
+def locked_client(monkeypatch, tmp_path):
+    """Public signup off (the launch default). Temp DB only."""
+    from app.db import database
+    import app.services.business.signup as signup_mod
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "biz_signup_locked.db"))
+    monkeypatch.delenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", raising=False)
+    monkeypatch.setenv("FOUNDER_PIN", FOUNDER_PIN)
+    monkeypatch.setattr(signup_mod, "_hash_password", lambda password: "test-hash:" + password)
+    from app.main import app
+    return TestClient(app)
+
+
+def _signup(client, *, email="owner@alpha.test", package_id="pkg_starter", name="Alpha Co", headers=None):
     return client.post(
         "/api/v1/businessops/signup",
         json={
@@ -33,6 +50,7 @@ def _signup(client, *, email="owner@alpha.test", package_id="pkg_starter", name=
             "business_name": name,
             "package_id": package_id,
         },
+        headers=headers or {},
     )
 
 
@@ -221,3 +239,51 @@ def test_tenant_slug_unique(client):
     first = _signup(client, email="one@co.test", name="Same Name").json()
     second = _signup(client, email="two@co.test", name="Same Name").json()
     assert first["business"]["slug"] != second["business"]["slug"]
+
+
+def test_public_signup_disabled_by_default_returns_404(locked_client):
+    r = _signup(locked_client)
+    assert r.status_code == 404
+    health = locked_client.get("/api/v1/businessops/health")
+    assert health.status_code == 200
+    assert health.json()["tables"]["bo_businesses"] == 0
+    assert health.json()["tables"]["bo_tenants"] == 0
+    assert health.json()["tables"]["bo_business_users"] == 0
+
+
+def test_public_signup_explicitly_off_returns_404(locked_client, monkeypatch):
+    monkeypatch.setenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", "false")
+    r = _signup(locked_client)
+    assert r.status_code == 404
+
+
+def test_internal_signup_without_founder_pin_is_404(locked_client):
+    r = _signup(locked_client, headers={})
+    assert r.status_code == 404
+
+
+def test_internal_signup_wrong_founder_pin_is_403(locked_client):
+    r = _signup(locked_client, headers={"X-Founder-Pin": "wrong-pin"})
+    assert r.status_code == 403
+    health = locked_client.get("/api/v1/businessops/health")
+    assert health.json()["tables"]["bo_businesses"] == 0
+
+
+def test_internal_signup_with_founder_pin_creates_prospect(locked_client):
+    r = _signup(locked_client, headers={"X-Founder-Pin": FOUNDER_PIN})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["business"]["status"] == "prospect"
+    assert body["next_step"] == "checkout"
+
+
+def test_info_reports_public_signup_off_by_default(locked_client):
+    r = locked_client.get("/api/v1/businessops/info")
+    assert r.status_code == 200
+    assert r.json()["public_signup_enabled"] is False
+
+
+def test_info_reports_public_signup_when_enabled(client):
+    r = client.get("/api/v1/businessops/info")
+    assert r.status_code == 200
+    assert r.json()["public_signup_enabled"] is True
