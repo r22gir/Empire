@@ -11,10 +11,13 @@ studio page **System → Improvements** (`/?product=improvements`).
    On voice the same tool is allowlisted (it only writes the request). Status: `proposed`.
 3. **Rafael taps Approve build** on the Improvements page (`POST .../{id}/approve` with `confirm: true`).
    * If `CURSOR_API_KEY` is set on the Dell (it is, since Oct 4, 2026): a Cursor cloud agent starts on
-     `https://github.com/r22gir/Empire` (base `main`, override with `MAX_IMPROVE_REPO` / `MAX_IMPROVE_BASE_REF`)
-     via `POST /v1/agents` with `autoCreatePR: true` and `workOnCurrentBranch: false`, so it works on its own
-     `cursor/...` branch and opens a PR. Status `building`, then `pr_open` ("Check for PR" polls the agent and
-     its latest run read-only). A double tap cannot start two agents (the request is claimed atomically).
+     `https://github.com/r22gir/Empire` (base **`dell/studio-batch-1013b`**, falling back to
+     `dell/studio-batch-1013` if that branch is missing; set `MAX_IMPROVE_BASE_REF` to pin it).
+     **Never `main` or `master`.** Amp/maxine branches are refused. Override repo with `MAX_IMPROVE_REPO`.
+     Launch is `POST /v1/agents` with `autoCreatePR: true` and `workOnCurrentBranch: false`, so it works
+     on its own `cursor/...` branch and opens a PR. Status `building`, then `pr_open` ("Check for PR"
+     polls the agent and its latest run read-only). A double tap cannot start two agents
+     (the request is claimed atomically).
    * Model (Rafael's defaults): **Muse Spark 1.3, effort medium**. Small fixes (risk low and at most two
      affected modules) use **Gemini 3.8 Flash, reasoning effort medium**. If the API refuses a model the launch
      retries with the account default. Overrides: `MAX_IMPROVE_MODEL`, `MAX_IMPROVE_EFFORT`,
@@ -44,3 +47,7 @@ Also `rejected` and `build_failed` (the build note says why; Approve again retri
 `CURSOR_API_KEY` (Cloud Agents API key "Empire Max Improvements", owner rafa22) lives in
 `~/.config/empirebox/empire-backend.env` on the Dell (chmod 600). Never print it. Without the key, approved
 requests stop at `awaiting_build` with a spec file instead.
+
+`MAX_IMPROVE_BASE_REF` is required-with-safe-default: `dell/studio-batch-1013b`, then
+`dell/studio-batch-1013`. The worker / Cursor launch **refuses** `main`, `master`, and any
+`amp` / `maxine` branch. Do not set it to those.

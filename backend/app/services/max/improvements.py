@@ -24,10 +24,15 @@ from pathlib import Path
 from typing import Optional
 
 from app.services.leadforge import growth
+from app.services.max.improve_base_ref import UnsafeBaseRef, resolve_base_ref
 
 REPO_URL = os.getenv("MAX_IMPROVE_REPO", "https://github.com/r22gir/Empire")
-BASE_REF = os.getenv("MAX_IMPROVE_BASE_REF", "main")
 SPEC_DIR = Path(os.getenv("MAX_IMPROVE_SPEC_DIR", str(Path.home() / "empire-data" / "improvements")))
+
+
+def base_ref() -> str:
+    """Live Studio line. Never main. See improve_base_ref.resolve_base_ref."""
+    return resolve_base_ref()
 RISKS = ("low", "medium", "high")
 API = "https://api.cursor.com"
 # Cloud-agent launches must include a model. Always grok-4.6 unless an
@@ -131,7 +136,7 @@ def list_requests(status: Optional[str] = None) -> dict:
         else:
             rows = conn.execute("SELECT * FROM max_improvements ORDER BY id DESC LIMIT 200").fetchall()
     return {"items": [_row(r) for r in rows], "cursor_configured": cursor_configured(),
-            "repo": REPO_URL, "base_ref": BASE_REF,
+            "repo": REPO_URL, "base_ref": base_ref(),
             "models": {"default": f"{DEFAULT_MODEL} ({DEFAULT_PARAMS[0]['value']})",
                        "small_fix": f"{SMALL_MODEL} ({SMALL_PARAMS[0]['value']})"},
             "policy": "Max writes requests only. Build starts on Rafael's tap. Merge/deploy needs a second tap "
@@ -153,10 +158,12 @@ def build_prompt(req: dict) -> str:
     mods = ", ".join(req["affected_modules"]) or "(see proposed change)"
     acceptance = req.get("acceptance") or ("- Behaviour described above works.\n"
                                            "- Existing tests pass; add a test for the new behaviour.")
+    ref = base_ref()
     return f"""# Empire improvement IMP-{req['id']}: {req['title']}
 
-Repository: {REPO_URL} (base: {BASE_REF}). Work on a NEW branch (never {BASE_REF}) and open a pull request
-titled "IMP-{req['id']:04d}: {req['title']}". Do not merge. Do not deploy. Do not push to {BASE_REF}.
+Repository: {REPO_URL} (base: {ref}). Work on a NEW branch (never {ref}) and open a pull request
+titled "IMP-{req['id']:04d}: {req['title']}". Do not merge. Do not deploy. Do not push to {ref}.
+Do not target main, master, or any amp/maxine branch.
 
 ## Problem
 {req['problem']}
@@ -227,10 +234,13 @@ def _auth():
 def _launch_cursor_agent(req: dict) -> dict:
     """POST /v1/agents. Only called from approve_build (Rafael's tap). Never merges; the agent opens a PR."""
     import httpx
+    from app.services.max.improve_base_ref import assert_safe_improve_base_ref
+
+    ref = assert_safe_improve_base_ref(base_ref())
     model = pick_model(req)
     body = {"prompt": {"text": build_prompt(req)},
             "name": f"IMP-{req['id']:04d} {req['title']}"[:100],
-            "repos": [{"url": REPO_URL, "startingRef": BASE_REF}],
+            "repos": [{"url": REPO_URL, "startingRef": ref}],
             "workOnCurrentBranch": False,   # new cursor/... branch, never the base branch
             "autoCreatePR": True,
             "model": model}
@@ -271,6 +281,8 @@ def approve_build(req_id: int, *, confirm: bool, by: str = "rafael") -> dict:
         with growth._db() as conn:
             conn.execute("UPDATE max_improvements SET status='build_failed', build_note=? WHERE id=?",
                          (f"Could not write spec: {e}"[:500], req_id))
+        if isinstance(e, UnsafeBaseRef):
+            return get(req_id)
         raise
     upd = {"spec_path": spec, "approved_at": datetime.now().isoformat(timespec="seconds"), "decided_by": by}
     if cursor_configured():
