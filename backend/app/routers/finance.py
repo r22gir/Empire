@@ -11,7 +11,10 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime, date, timedelta
 
-from app.db.database import get_db, dict_row, dict_rows
+from app.db.database import DB_PATH, get_db, dict_row, dict_rows
+import logging
+
+logger = logging.getLogger(__name__)
 from app.middleware.rate_limiter import limiter
 from app.services.pricing import (
     PRICING_ENGINE_VERSION,
@@ -1809,7 +1812,28 @@ def record_payment(request: Request, invoice_id: str, payment: PaymentCreate):
             )
 
         updated_inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
-        return {"invoice": _enrich_invoice(dict_row(updated_inv))}
+        invoice = _enrich_invoice(dict_row(updated_inv))
+        if invoice.get("status") == "paid":
+            try:
+                from app.services.workroom_quote_commerce import (
+                    FixtureStore,
+                    queue_review_request_after_paid,
+                )
+                store = FixtureStore(db_path=DB_PATH)
+                store.init()
+                request = queue_review_request_after_paid(
+                    invoice,
+                    review_url=os.getenv("GOOGLE_REVIEW_URL", ""),
+                )
+                store.save_review_request(request)
+                invoice["review_request"] = {
+                    "id": request["id"],
+                    "status": request["status"],
+                    "sendable": False,
+                }
+            except Exception:
+                logger.exception("Paid invoice review request was not queued")
+        return {"invoice": invoice}
 
 
 @limiter.limit("30/minute")

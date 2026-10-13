@@ -1,0 +1,11 @@
+{
+  "id": "inv-fixture-001",
+  "invoice_number": "INV-2026-0901",
+  "customer_id": "cust-ada",
+  "quote_id": "quote-fixture-001",
+  "status": "paid",
+  "paid_at": "2026-04-10T15:00:00+00:00",
+  "total": 3101.5,
+  "amount_paid": 3101.5,
+  "balance_due": 0
+}

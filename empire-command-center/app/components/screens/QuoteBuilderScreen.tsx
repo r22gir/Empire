@@ -7,6 +7,9 @@ import {
   Eye, Download, Sparkles, ImageIcon, FolderOpen, CheckSquare, Edit3, Box, Ruler, CheckCircle, BookOpen, Printer
 } from 'lucide-react';
 import MeasurementDiagram from '../business/quotes/MeasurementDiagram';
+import EstimateAddOns from '../business/quotes/EstimateAddOns';
+import { formatFractionInches, formatMeasurementTriple, parseFractionInches } from '../../lib/measurements';
+import type { EstimateAddon } from '../../lib/estimate-totals';
 import dynamic from 'next/dynamic';
 import { DiagramCatalog, DiagramViewer, findDiagramMatch, DIAGRAM_MAP } from '../business/catalog';
 
@@ -599,6 +602,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     // Shared
     rushOrder: false, delivery: false, installationIncluded: false,
   });
+  const [addons, setAddons] = useState<EstimateAddon[]>([]);
 
   // Intake project loading
   const [intakeProjects, setIntakeProjects] = useState<any[]>([]);
@@ -726,6 +730,9 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
               ...(w.backing_yards_needed ? { backingYards: w.backing_yards_needed } : {}),
             })),
           })));
+        }
+        if (Array.isArray(q.addons) && q.addons.length) {
+          setAddons(q.addons);
         }
         // Pre-fill options if they exist
         if (q.options) {
@@ -1276,6 +1283,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
       if (editQuoteId) {
         (payload as any).quote_id = editQuoteId;
       }
+      (payload as any).addons = addons;
       // Use from-rooms endpoint which runs full pricing pipeline (yardage + tiers)
       const res = await fetch(API + '/quotes/from-rooms', {
         method: 'POST',
@@ -1574,7 +1582,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         {step === 5 && !result && (
           <StepReview customer={customer} photos={photos} rooms={rooms} options={options} totalItems={totalItems} />
         )}
-        {step === 5 && result && <ResultView result={result} />}
+        {step === 5 && result && <ResultView result={result} addons={addons} onAddonsChange={setAddons} />}
         {error && <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: 13 }}>{error}</div>}
       </div>
 
@@ -2133,7 +2141,7 @@ function StepPhotos({ photos, onAdd, onAddServerPhotos, onRemove, fileInputRef, 
 
 function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
   const [itemType, setItemType] = useState<ManualItemType>('window');
-  const [m, setM] = useState({ width_inches: 0, height_inches: 0, depth_inches: 0, sill_depth: 0, stack_space: 0 });
+  const [m, setM] = useState({ width_inches: '', height_inches: '', depth_inches: '', sill_depth: '', stack_space: '' });
   const [opts, setOpts] = useState({ mount_type: 'inside', treatment: '', lining: '', notes: '' });
   const [addedCount, setAddedCount] = useState(0);
   const [showCushionBuilder, setShowCushionBuilder] = useState(false);
@@ -2141,15 +2149,18 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
   const isWindow = ['window', 'drapery', 'cornice', 'valance', 'roman_shade', 'swag'].includes(itemType);
   const isFurniture = ['sofa', 'loveseat', 'chair', 'sectional', 'ottoman', 'bench', 'headboard', 'banquette'].includes(itemType);
   const isCushion = ['cushion', 'pillow'].includes(itemType);
+  const widthInches = parseFractionInches(m.width_inches);
+  const heightInches = parseFractionInches(m.height_inches);
+  const depthInches = parseFractionInches(m.depth_inches);
 
   const updateM = (key: string, val: string) => {
-    setM(prev => ({ ...prev, [key]: parseFloat(val) || 0 }));
+    setM(prev => ({ ...prev, [key]: val }));
   };
 
   const currentItem = {
     type: itemType,
     subtype: opts.treatment || undefined,
-    measurements: { width_inches: m.width_inches, height_inches: m.height_inches, depth_inches: m.depth_inches || undefined },
+    measurements: { width_inches: widthInches, height_inches: heightInches, depth_inches: depthInches || undefined },
     treatment: opts.treatment || itemType,
     mount_type: opts.mount_type || undefined,
     lining: opts.lining || undefined,
@@ -2164,12 +2175,12 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
   };
 
   const addItem = () => {
-    if (!m.width_inches && !m.height_inches) return;
+    if (!widthInches && !heightInches) return;
     onAddItem({
       type: manualToItemType(itemType),
-      width: m.width_inches ? `${m.width_inches}"` : '',
-      height: m.height_inches ? `${m.height_inches}"` : '',
-      depth: m.depth_inches ? `${m.depth_inches}"` : '',
+      width: widthInches ? `${formatFractionInches(widthInches)}"` : '',
+      height: heightInches ? `${formatFractionInches(heightInches)}"` : '',
+      depth: depthInches ? `${formatFractionInches(depthInches)}"` : '',
       description: [
         MANUAL_ITEM_TYPES.find(t => t.key === itemType)?.label || itemType,
         opts.treatment ? opts.treatment.replace(/_/g, ' ') : '',
@@ -2179,7 +2190,7 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
       ].filter(Boolean).join(' · '),
     });
     setAddedCount(c => c + 1);
-    setM({ width_inches: 0, height_inches: 0, depth_inches: 0, sill_depth: 0, stack_space: 0 });
+    setM({ width_inches: '', height_inches: '', depth_inches: '', sill_depth: '', stack_space: '' });
     setOpts({ mount_type: 'inside', treatment: '', lining: '', notes: '' });
   };
 
@@ -2272,20 +2283,21 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <label style={{ fontSize: 12 }}>
               <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Width (in)</span>
-              <input type="number" value={m.width_inches || ''} onChange={e => updateM('width_inches', e.target.value)}
-                placeholder="e.g. 72" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+              <input type="text" value={m.width_inches || ''} onChange={e => updateM('width_inches', e.target.value)}
+                placeholder="e.g. 72 1/2" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
             </label>
             <label style={{ fontSize: 12 }}>
               <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Height (in)</span>
-              <input type="number" value={m.height_inches || ''} onChange={e => updateM('height_inches', e.target.value)}
-                placeholder="e.g. 96" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+              <input type="text" value={m.height_inches || ''} onChange={e => updateM('height_inches', e.target.value)}
+                placeholder="e.g. 96 3/8" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
             </label>
           </div>
 
           {(isFurniture || isCushion) && (
             <label style={{ fontSize: 12 }}>
               <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Depth (in)</span>
-              <input type="number" value={m.depth_inches || ''} onChange={e => updateM('depth_inches', e.target.value)}
+              <input type="text" value={m.depth_inches || ''} onChange={e => updateM('depth_inches', e.target.value)}
+                placeholder="e.g. 3 1/4"
                 style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
             </label>
           )}
@@ -2343,12 +2355,12 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
 
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
             <button onClick={addItem}
-              disabled={!m.width_inches && !m.height_inches}
+              disabled={!widthInches && !heightInches}
               className="flex items-center gap-2 cursor-pointer transition-all hover:brightness-110 disabled:opacity-50"
               style={{ flex: 1, padding: '12px 20px', borderRadius: 10, background: '#b8960c', color: '#fff', fontSize: 13, fontWeight: 700, border: 'none', minHeight: 48 }}>
               <CheckCircle size={16} /> Add to Room 1
             </button>
-            <button onClick={() => { setM({width_inches:0,height_inches:0,depth_inches:0,sill_depth:0,stack_space:0}); setOpts({mount_type:'inside',treatment:'',lining:'',notes:''}); }}
+            <button onClick={() => { setM({width_inches:'',height_inches:'',depth_inches:'',sill_depth:'',stack_space:''}); setOpts({mount_type:'inside',treatment:'',lining:'',notes:''}); }}
               className="cursor-pointer transition-all hover:bg-[#f0ede8]"
               style={{ padding: '12px 16px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 13, fontWeight: 600, color: '#777', minHeight: 48 }}>
               Clear
@@ -2358,7 +2370,7 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
 
         {/* Right: live SVG diagram */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-          {(m.width_inches > 0 || m.height_inches > 0) ? (
+          {(widthInches > 0 || heightInches > 0) ? (
             <>
               <div style={{ border: '1px solid #ece8e0', borderRadius: 12, overflow: 'hidden', background: '#fff', padding: 8, width: '100%' }}>
                 <MeasurementDiagram item={currentItem as any} width={380} height={300} />
@@ -2438,7 +2450,7 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
         name: it.type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
         type: it.type,
         dimensions: {
-          width: parseFloat(it.width || '0') || 0,
+          width: parseFractionInches(it.width || '0') || 0,
           height: parseFloat(it.height || '0') || 0,
           depth: parseFloat(it.depth || '0') || 0,
         },
@@ -2566,7 +2578,7 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
                       const idx = items.indexOf(item);
                       const diagKey = findDiagramMatch(item.type);
                       const dims = {
-                        width: parseFloat(item.width || '0') || undefined,
+                        width: parseFractionInches(item.width || '0') || undefined,
                         height: parseFloat(item.height || '0') || undefined,
                         depth: parseFloat(item.depth || '0') || undefined,
                       };
@@ -2764,10 +2776,10 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
         ? {
             bench_type: item.type.includes('_u') || item.type.includes('u_') ? 'u_shape' : item.type.includes('_l') || item.type.includes('l_') ? 'l_shape' : 'straight',
             name: itemName,
-            lf: Math.max((parseFloat(item.width) || 0) / 12, 1),
-            seat_depth: parseFloat(item.depth) || 20,
-            seat_height: parseFloat(item.height) || 18,
-            back_height: parseFloat(item.height) || 18,
+            lf: Math.max((parseFractionInches(item.width) || 0) / 12, 1),
+            seat_depth: parseFractionInches(item.depth) || 20,
+            seat_height: parseFractionInches(item.height) || 18,
+            back_height: parseFractionInches(item.height) || 18,
             panel_style: item.panelConfig?.style || 'vertical_channels',
           }
         : {
@@ -3195,19 +3207,19 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
                     <div>
                       <label style={{ fontSize: 9, fontWeight: 600, color: '#999', display: 'block', marginBottom: 2 }}>W</label>
                       <input value={item.width} onChange={e => updateItem(room.id, item.id, 'width', e.target.value)}
-                        placeholder={cat === 'drapery' ? '48"' : '72"'} className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
+                        placeholder={cat === 'drapery' ? '48 1/2' : '72 1/2'} className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
                     {/* H */}
                     <div>
                       <label style={{ fontSize: 9, fontWeight: 600, color: '#999', display: 'block', marginBottom: 2 }}>H</label>
                       <input value={item.height} onChange={e => updateItem(room.id, item.id, 'height', e.target.value)}
-                        placeholder={cat === 'drapery' ? '84"' : '36"'} className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
+                        placeholder={cat === 'drapery' ? '84 3/8' : '36 1/4'} className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
                     {/* D */}
                     <div>
                       <label style={{ fontSize: 9, fontWeight: 600, color: '#999', display: 'block', marginBottom: 2 }}>{cat === 'drapery' ? 'PROJ' : 'D'}</label>
                       <input value={item.depth} onChange={e => updateItem(room.id, item.id, 'depth', e.target.value)}
-                        placeholder={cat === 'drapery' ? '6"' : '32"'} className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
+                        placeholder={cat === 'drapery' ? '3 1/4' : '32 1/2'} className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
                     {/* Qty */}
                     <div>
@@ -3383,8 +3395,8 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
                   {(isBenchType(item.type) || ['sofa', 'loveseat', 'sectional', 'sectional_l', 'sectional_u', 'headboard', 'headboard_custom', 'banquette'].some(t => item.type.startsWith(t) || item.type === t)) && (
                     <div style={{ gridColumn: '1 / -1', marginTop: -4 }}>
                       <PanelConfigurator
-                        backWidth={parseFloat(item.width) || 0}
-                        backHeight={parseFloat(item.height) || 0}
+                        backWidth={parseFractionInches(item.width) || 0}
+                        backHeight={parseFractionInches(item.height) || 0}
                         config={item.panelConfig || DEFAULT_PANEL_CONFIG}
                         onChange={(pc) => updateItem(room.id, item.id, 'panelConfig', pc)}
                         itemType={item.type}
@@ -3920,7 +3932,7 @@ function StepReview({ customer, photos, rooms, options, totalItems }: {
               <div key={item.id} style={{ padding: '4px 0', fontSize: 12, color: '#555' }}>
                 <div className="flex items-center justify-between">
                   <span>{formatItemType(item.type)}
-                    {item.width || item.height ? ` (${[item.width, item.height, item.depth].filter(Boolean).join(' x ')})` : ''}
+                    {item.width || item.height ? ` (${formatMeasurementTriple(item.width, item.height, item.depth)})` : ''}
                   </span>
                   <span style={{ fontWeight: 600 }}>x{item.quantity}</span>
                 </div>
@@ -3992,11 +4004,22 @@ function StepReview({ customer, photos, rooms, options, totalItems }: {
 // ═══════════════════════════════════════════════════════════════
 /* 3-tier TIERS and CATEGORY_STYLES disabled — kept for future re-enablement */
 
-function ResultView({ result }: { result: any }) {
+function ResultView({ result, addons = [], onAddonsChange }: { result: any; addons?: EstimateAddon[]; onAddonsChange?: (next: EstimateAddon[]) => void }) {
   const quoteNumber = result.quote_number || result.id || 'NEW';
-  const flatTotal = result.total || result.subtotal || 0;
   const flatLineItems = result.line_items || [];
   const flatDeposit = result.deposit;
+
+  useEffect(() => {
+    if (!result?.id) return;
+    const timer = setTimeout(() => {
+      fetch(`${API}/quotes/${result.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addons }),
+      }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [addons, result?.id]);
 
   return (
     <div>
@@ -4010,14 +4033,14 @@ function ResultView({ result }: { result: any }) {
         </div>
       </div>
 
-      {/* Total display */}
-      <div style={{ padding: '16px', borderRadius: 12, border: '2px solid #b8960c', background: '#fdf8eb', marginBottom: 12, textAlign: 'center' }}>
-        <div style={{ fontSize: 28, fontWeight: 700, color: '#b8960c' }}>${flatTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-        {flatDeposit?.deposit_amount && (
-          <div style={{ fontSize: 12, color: '#16a34a', fontWeight: 600, marginTop: 4 }}>
-            Deposit ({flatDeposit.deposit_percent || 50}%): ${flatDeposit.deposit_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </div>
-        )}
+      <div style={{ marginBottom: 12 }}>
+        <EstimateAddOns
+          lineItems={flatLineItems}
+          addons={addons}
+          onChange={onAddonsChange || (() => {})}
+          taxRate={result.tax_rate || 0}
+          depositPercent={flatDeposit?.deposit_percent || result.deposit_percent || 50}
+        />
       </div>
 
       {/* Line items */}
