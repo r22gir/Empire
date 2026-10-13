@@ -134,12 +134,35 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
   // Bench-specific
   const [benchType, setBenchType] = useState('straight');
   const [lf, setLf] = useState(0);
+  const [leg1, setLeg1] = useState(0);
+  const [leg2, setLeg2] = useState(0);
+  const [backLength, setBackLength] = useState(0);
+  const [leftDepth, setLeftDepth] = useState(0);
+  const [rightDepth, setRightDepth] = useState(0);
+  const [foamThicknessIn, setFoamThicknessIn] = useState('');
+  const [cutList, setCutList] = useState<{
+    wood?: Array<{ name: string; qty: number; size: string; label: string; note: string }>;
+    foam?: Array<{ name: string; qty: number; size: string; label: string; note: string }>;
+    fabric?: Array<{ name: string; qty: number; size: string; label: string; note: string }>;
+    rules?: string[];
+    fabric_allowance_status?: string;
+    fabric_allowance_label?: string;
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setView(initialView);
   }, [initialView]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const quote = params.get('quote');
+    if (quote) setQuoteNum(quote);
+    const foam = params.get('foam');
+    if (foam && Number(foam) > 0) setFoamThicknessIn(foam);
+  }, []);
 
   const showStatus = (msg: string, duration = 4000) => {
     setStatusMsg(msg);
@@ -401,6 +424,12 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
           back_height: parseDimVal('back_height', 18),
           panel_style: 'vertical_channels',
           quote_num: quoteNum,
+          leg1_length: benchType === 'l_shape' ? leg1 : 0,
+          leg2_length: benchType === 'l_shape' ? leg2 : 0,
+          back_length: benchType === 'u_shape' ? backLength : 0,
+          left_depth: benchType === 'u_shape' ? leftDepth : 0,
+          right_depth: benchType === 'u_shape' ? rightDepth : 0,
+          foam_thickness_in: foamThicknessIn ? Number(foamThicknessIn) : null,
         },
       };
     }
@@ -419,7 +448,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
         quote_num: quoteNum,
       },
     };
-  }, [benchType, catalogTemplate, dimensions, itemType, lf, name, notes, parseDimVal, quoteNum]);
+  }, [backLength, benchType, catalogTemplate, dimensions, foamThicknessIn, itemType, leftDepth, leg1, leg2, lf, name, notes, parseDimVal, quoteNum, rightDepth]);
 
   const currentPreviewSignature = stableSerialize(buildDrawingRequest().body);
   const previewIsCurrent = Boolean(svgPreview && previewSignature === currentPreviewSignature);
@@ -438,6 +467,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
       if (!res.ok) throw new Error(`Preview failed: ${res.status}`);
       const data = await res.json();
       setSvgPreview(data.svg || '');
+      setCutList(data.cut_list || null);
       if (data.svg) {
         setPreviewSignature(stableSerialize(drawingRequest.body));
         setStatusMsg('');
@@ -770,6 +800,52 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
               </div>
               <label style={labelStyle}>Total Linear Feet</label>
               <input type="number" value={lf || ''} onChange={e => setLf(Number(e.target.value))} placeholder="0" style={inputStyle} />
+              {benchType === 'l_shape' && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Long run (ft)</label>
+                    <input type="number" value={leg1 || ''} onChange={e => setLeg1(Number(e.target.value))} placeholder="e.g. 8" style={inputStyle} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Short run (ft)</label>
+                    <input type="number" value={leg2 || ''} onChange={e => setLeg2(Number(e.target.value))} placeholder="e.g. 5" style={inputStyle} />
+                  </div>
+                </div>
+              )}
+              {benchType === 'u_shape' && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Back (ft)</label>
+                    <input type="number" value={backLength || ''} onChange={e => setBackLength(Number(e.target.value))} placeholder="e.g. 6" style={inputStyle} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Left (ft)</label>
+                    <input type="number" value={leftDepth || ''} onChange={e => setLeftDepth(Number(e.target.value))} placeholder="e.g. 4" style={inputStyle} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Right (ft)</label>
+                    <input type="number" value={rightDepth || ''} onChange={e => setRightDepth(Number(e.target.value))} placeholder="e.g. 4" style={inputStyle} />
+                  </div>
+                </div>
+              )}
+              <label style={{ ...labelStyle, marginTop: 10 }}>Foam thickness (fabric cut)</label>
+              <select
+                value={foamThicknessIn}
+                onChange={e => setFoamThicknessIn(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">Unknown — fabric cut will say “needs foam thickness”</option>
+                <option value="1">1&quot;</option>
+                <option value="1.5">1 1/2&quot;</option>
+                <option value="2">2&quot;</option>
+                <option value="3">3&quot;</option>
+                <option value="4">4&quot;</option>
+                <option value="5">5&quot;</option>
+                <option value="6">6&quot;</option>
+              </select>
+              <p style={{ fontSize: 11, color: '#999', margin: '8px 0 0' }}>
+                Wood is true size. Foam matches wood. Fabric allowance comes from foam thickness — never a fixed seam. Leave blank if unknown. Shop sizes print as 22 1/2&quot;, never 22-1/2&quot; or 22.5&quot;.
+              </p>
             </div>
           )}
 
@@ -875,17 +951,40 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
         </div>
 
         {/* ── Right: Preview ── */}
-        <div style={{
-          background: '#fff', borderRadius: 14, border: '1px solid #ece8e0',
-          minHeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-        }}>
-          {svgPreview ? (
-            <div className="cy-keep-light cy-paper" dangerouslySetInnerHTML={{ __html: svgPreview }} style={{ width: '100%', padding: 16 }} />
-          ) : (
-            <div style={{ textAlign: 'center', color: '#ccc', padding: 40 }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>&#9998;</div>
-              <div style={{ fontSize: 15, fontWeight: 600 }}>Upload a sketch or enter dimensions</div>
-              <div style={{ fontSize: 13, marginTop: 6 }}>AI generates professional drawings for any item type</div>
+        <div>
+          <div style={{
+            background: '#fff', borderRadius: 14, border: '1px solid #ece8e0',
+            minHeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+          }}>
+            {svgPreview ? (
+              <div className="cy-keep-light cy-paper" dangerouslySetInnerHTML={{ __html: svgPreview }} style={{ width: '100%', padding: 16 }} />
+            ) : (
+              <div style={{ textAlign: 'center', color: '#ccc', padding: 40 }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>&#9998;</div>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>Upload a sketch or enter dimensions</div>
+                <div style={{ fontSize: 13, marginTop: 6 }}>Plan, elevation, branded title block, fraction sizes, and PDF export</div>
+              </div>
+            )}
+          </div>
+          {cutList && (
+            <div style={{ marginTop: 12, background: '#fff', border: '1px solid #ece8e0', borderRadius: 14, padding: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Cut list — wood true size, foam matches wood, fabric labeled separately</div>
+              {cutList.fabric_allowance_label && (
+                <div style={{ fontSize: 11, color: '#96750a', marginBottom: 8 }}>{cutList.fabric_allowance_label}</div>
+              )}
+              {(['wood', 'foam', 'fabric'] as const).map(group => (
+                <div key={group} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase' }}>{group}</div>
+                  {(cutList[group] || []).map((row, idx) => (
+                    <div key={`${group}-${idx}`} style={{ fontSize: 12, color: '#444' }}>
+                      {row.qty} × {row.name} — {row.size}
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {(cutList.rules || []).map(rule => (
+                <div key={rule} style={{ fontSize: 11, color: '#888' }}>{rule}</div>
+              ))}
             </div>
           )}
         </div>

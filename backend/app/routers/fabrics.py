@@ -11,6 +11,7 @@ import sqlite3
 import os
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from app.db.database import get_db, dict_row, dict_rows
 
@@ -76,6 +77,20 @@ class YardageRequest(BaseModel):
     pattern_repeat_v: float = 0
     seam_allowance: float = 1
     waste_percent: float = 10
+
+
+class FabricCodeAssign(BaseModel):
+    color: str
+    material_type: str
+    width_inches: Optional[float] = None
+    pattern_repeat_v: Optional[float] = None
+    pattern_repeat_h: Optional[float] = None
+    backing: Optional[str] = None
+    specs: Optional[str] = None
+    brand: Optional[str] = None
+    supplier: Optional[str] = None
+    supplier_sku: Optional[str] = None
+    notes: Optional[str] = None
 
 
 # ── Helper: ensure fabrics table exists ───────────────────────
@@ -249,6 +264,89 @@ async def fabric_catalog(search: Optional[str] = None):
             f["has_backing"] = bool(f.pop("backing_fabric_id", None))
 
         return fabrics
+
+
+def _registry_rows_readonly():
+    """CSV + any already-assigned live rows. GET paths never write empire.db."""
+    from app.services.fabric_codes import DEFAULT_CSV, ensure_registry, import_csv
+
+    mem = sqlite3.connect(":memory:")
+    mem.row_factory = sqlite3.Row
+    ensure_registry(mem)
+    if DEFAULT_CSV.exists():
+        import_csv(mem, path=DEFAULT_CSV)
+    from app.db.database import DB_PATH
+    live_path = Path(DB_PATH)
+    if live_path.exists() and live_path.stat().st_size > 0:
+        live = None
+        try:
+            live = sqlite3.connect(f"file:{live_path}?mode=ro", uri=True)
+            live.row_factory = sqlite3.Row
+            exists = live.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='fabric_code_registry'"
+            ).fetchone()
+            if exists:
+                for row in live.execute("SELECT * FROM fabric_code_registry"):
+                    data = dict(row)
+                    mem.execute(
+                        """INSERT OR IGNORE INTO fabric_code_registry
+                           (code, prefix, sequence, color, material_type, width_inches,
+                            pattern_repeat_v, pattern_repeat_h, backing, specs, brand,
+                            supplier, supplier_sku, notes, retired, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            data.get("code"), data.get("prefix"), data.get("sequence"),
+                            data.get("color"), data.get("material_type"),
+                            data.get("width_inches"), data.get("pattern_repeat_v"),
+                            data.get("pattern_repeat_h"), data.get("backing"),
+                            data.get("specs"), data.get("brand"), data.get("supplier"),
+                            data.get("supplier_sku"), data.get("notes"),
+                            data.get("retired") or 0, data.get("created_at") or "",
+                        ),
+                    )
+        except Exception:
+            logger.exception("fabric registry live-table read skipped")
+        finally:
+            if live is not None:
+                live.close()
+    rows = [dict(r) for r in mem.execute(
+        "SELECT * FROM fabric_code_registry ORDER BY prefix, sequence"
+    )]
+    mem.close()
+    return rows
+
+
+@router.get("/codes")
+async def list_fabric_codes(internal: bool = False):
+    """List registry codes. Default is client-safe (no brand/supplier)."""
+    from app.services.fabric_codes import client_view, internal_view
+    view = internal_view if internal else client_view
+    return [view(row) for row in _registry_rows_readonly()]
+
+
+@router.get("/codes/catalog")
+async def fabric_code_catalog():
+    """Client-facing registry: code, color, specs only."""
+    return await list_fabric_codes(internal=False)
+
+
+@router.post("/codes/assign")
+async def assign_fabric_code(data: FabricCodeAssign):
+    """Allocate the next sequential internal code. Never reuses a prior number."""
+    from app.services.fabric_codes import DEFAULT_CSV, assign_code, import_csv
+    with get_db() as conn:
+        if DEFAULT_CSV.exists():
+            import_csv(conn, path=DEFAULT_CSV)
+        return assign_code(conn, **data.model_dump())
+
+
+@router.post("/codes/import")
+async def import_fabric_codes(file: UploadFile = File(...)):
+    """Import a CSV whose header matches docs/FABRIC_CODES.csv. Existing codes are skipped."""
+    from app.services.fabric_codes import import_csv
+    raw = (await file.read()).decode("utf-8")
+    with get_db() as conn:
+        return import_csv(conn, csv_text=raw)
 
 
 # iX-day R1X-INT-FIX: `/client-submit` and `/client-submit/photo` REMOVED.
