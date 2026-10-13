@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -223,3 +224,150 @@ def test_tests_never_point_at_live_data_root():
     assert "EMPIRE_DATA_DIR" in here
     assert "tmp_path" in here
     assert 'require_data_root() / "chats"' in store
+    migrate = (ROOT / "backend" / "scripts" / "migrate_founder_chats.py").read_text(encoding="utf-8")
+    assert "Dry-run by default" in migrate
+    assert "--apply" in migrate
+    assert "never delete" in migrate.lower() or "not deleted" in migrate
+
+
+def _write_founder_chat(tmp_path, chat_id, title="Chat de Juan"):
+    folder = tmp_path / "chats" / "founder"
+    folder.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "id": chat_id,
+        "title": title,
+        "preview": title,
+        "messages": [{"role": "user", "content": title}],
+        "updated_at": "2026-10-13T10:00:00-04:00",
+    }
+    (folder / f"{chat_id}.json").write_text(json.dumps(payload), encoding="utf-8")
+    return folder / f"{chat_id}.json"
+
+
+def test_primary_user_sees_founder_chats_read_only_until_migrated(monkeypatch, tmp_path):
+    _family_env(monkeypatch, tmp_path, "amp")
+    monkeypatch.setenv("AMP_OWNER_EMAIL", "juan@example.com")
+    from app.services.amp_allowlist import add_entry
+
+    add_entry(email="juan@example.com", role="owner")
+    add_entry(email="lina@example.com", role="member")
+    chat_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    founder_file = _write_founder_chat(tmp_path, chat_id, "Hoy con Max-e")
+    original = founder_file.read_text(encoding="utf-8")
+    client = _client(tmp_path)
+
+    _cookie(client, "juan@example.com")
+    listed = client.get("/api/v1/chats/list")
+    assert listed.status_code == 200
+    assert listed.json()["count"] == 1
+    row = listed.json()["chats"][0]
+    assert row["id"] == chat_id
+    assert row["legacy"] is True
+    assert row["read_only"] is True
+    loaded = client.get(f"/api/v1/chats/{chat_id}")
+    assert loaded.status_code == 200
+    assert loaded.json()["read_only"] is True
+    assert client.patch(f"/api/v1/chats/{chat_id}/pin", json={"pinned": True}).status_code == 409
+    assert client.delete(f"/api/v1/chats/{chat_id}").status_code == 409
+    assert founder_file.read_text(encoding="utf-8") == original
+
+    _cookie(client, "lina@example.com")
+    hidden = client.get("/api/v1/chats/list")
+    assert hidden.status_code == 200
+    assert hidden.json()["count"] == 0
+    assert client.get(f"/api/v1/chats/{chat_id}").status_code == 404
+
+
+def test_legacy_owner_override_is_per_edition(monkeypatch, tmp_path):
+    _family_env(monkeypatch, tmp_path, "amp")
+    monkeypatch.setenv("AMP_OWNER_EMAIL", "owner@example.com")
+    monkeypatch.setenv("AMP_LEGACY_CHAT_EMAIL", "juan@example.com")
+    from app.services.amp_allowlist import add_entry
+    from app.services.chat_history_store import primary_legacy_email
+
+    add_entry(email="juan@example.com", role="member")
+    assert primary_legacy_email("amp") == "juan@example.com"
+    _write_founder_chat(tmp_path, "bbbbbbbb-cccc-dddd-eeee-ffffffffffff")
+    client = _client(tmp_path)
+    _cookie(client, "owner@example.com")
+    assert client.get("/api/v1/chats/list").json()["count"] == 0
+    _cookie(client, "juan@example.com")
+    assert client.get("/api/v1/chats/list").json()["count"] == 1
+
+
+def test_founder_migration_is_dry_run_until_apply(tmp_path, monkeypatch):
+    _family_env(monkeypatch, tmp_path, "amp")
+    monkeypatch.setenv("AMP_OWNER_EMAIL", "juan@example.com")
+    chat_id = "cccccccc-dddd-eeee-ffff-000000000001"
+    source = _write_founder_chat(tmp_path, chat_id, "Migrar")
+    chats_root = tmp_path / "chats"
+    script = ROOT / "backend" / "scripts" / "migrate_founder_chats.py"
+    env = {**os.environ, "EMPIRE_EDITION": "amp", "AMP_OWNER_EMAIL": "juan@example.com", "EMPIRE_DATA_DIR": str(tmp_path)}
+    dry = subprocess.run(
+        [sys.executable, str(script), "--dir", str(chats_root), "--email", "juan@example.com"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(ROOT / "backend"),
+    )
+    plan = json.loads(dry.stdout)
+    assert plan["dry_run"] is True
+    assert plan["applied"] is False
+    assert plan["would_copy"] == 1
+    dest = chats_root / "juan_at_example.com" / f"{chat_id}.json"
+    assert not dest.exists()
+    assert source.is_file()
+
+    applied = subprocess.run(
+        [sys.executable, str(script), "--dir", str(chats_root), "--email", "juan@example.com", "--apply"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(ROOT / "backend"),
+    )
+    report = json.loads(applied.stdout)
+    assert report["applied"] is True
+    assert report["copied"] == 1
+    assert dest.is_file()
+    assert source.is_file()
+    copied = json.loads(dest.read_text(encoding="utf-8"))
+    assert copied["owner"] == "juan_at_example.com"
+    assert copied["id"] == chat_id
+    again = subprocess.run(
+        [sys.executable, str(script), "--dir", str(chats_root), "--email", "juan@example.com", "--apply"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(ROOT / "backend"),
+    )
+    skipped = json.loads(again.stdout)
+    assert skipped["copied"] == 0
+    assert skipped["skipped"] == 1
+
+
+def test_put_on_legacy_id_copies_forward_without_touching_founder(monkeypatch, tmp_path):
+    _family_env(monkeypatch, tmp_path, "amp")
+    monkeypatch.setenv("AMP_OWNER_EMAIL", "juan@example.com")
+    from app.services.amp_allowlist import add_entry
+
+    add_entry(email="juan@example.com", role="owner")
+    chat_id = "dddddddd-eeee-ffff-0000-111111111111"
+    founder_file = _write_founder_chat(tmp_path, chat_id, "Original")
+    before = founder_file.read_text(encoding="utf-8")
+    client = _client(tmp_path)
+    _cookie(client, "juan@example.com")
+    res = client.put(
+        f"/api/v1/chats/{chat_id}",
+        json={"messages": [{"role": "user", "content": "sigo aquí"}]},
+    )
+    assert res.status_code == 200
+    assert founder_file.read_text(encoding="utf-8") == before
+    own = tmp_path / "chats" / "juan_at_example.com" / f"{chat_id}.json"
+    assert own.is_file()
+    listed = client.get("/api/v1/chats/list").json()["chats"]
+    assert len(listed) == 1
+    assert listed[0].get("read_only") is not True
+    assert listed[0]["id"] == chat_id
