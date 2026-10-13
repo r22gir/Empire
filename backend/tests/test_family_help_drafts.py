@@ -107,11 +107,11 @@ def test_related_features_come_from_ui_map():
     assert "jobs" not in ids
 
 
-@pytest.mark.asyncio
-async def test_generate_reply_is_draft_only(api):
+def test_generate_reply_is_draft_only(api):
+    import asyncio
     from app.services.family_help_store import get_ticket
     ticket = get_ticket("fh-juan1")
-    draft = await api["drafts"].generate_reply(ticket, generate_fn=_fake_reply)
+    draft = asyncio.run(api["drafts"].generate_reply(ticket, generate_fn=_fake_reply))
     assert draft["kind"] == "reply"
     assert draft["would_send"] is False
     assert draft["saved"] is False
@@ -121,11 +121,11 @@ async def test_generate_reply_is_draft_only(api):
     assert "juan" not in draft["body"].lower()
 
 
-@pytest.mark.asyncio
-async def test_generate_manual_injects_ui_map_links(api):
+def test_generate_manual_injects_ui_map_links(api):
+    import asyncio
     from app.services.family_help_store import get_ticket
     ticket = get_ticket("fh-camilo1")
-    draft = await api["drafts"].generate_manual(ticket, generate_fn=_fake_manual)
+    draft = asyncio.run(api["drafts"].generate_manual(ticket, generate_fn=_fake_manual))
     assert draft["kind"] == "manual"
     assert draft["would_send"] is False
     assert draft["saved"] is False
