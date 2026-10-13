@@ -15,6 +15,8 @@ import {
   ChevronDown, ChevronRight, LayoutGrid, CalendarCheck,
   FileStack,
 } from 'lucide-react';
+import { hookFounderNav } from '../../lib/founderPortal';
+import { fetchUnreadCount } from '../../lib/familyHelp';
 
 export interface NavItem {
   id: string;
@@ -130,7 +132,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'relist', name: 'RelistApp', icon: <Repeat size={16} />, status: 'active', color: '#06b6d4', kind: 'product' },
       { id: 'llc', name: 'LLCFactory', icon: <Globe size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
       { id: 'apost', name: 'ApostApp', icon: <FileText size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
-      { id: 'assist', name: 'EmpireAssist', icon: <Sparkles size={16} />, status: 'dev', color: '#b8960c', kind: 'product' },
+      { id: 'assist', name: 'Empire Assist: Family Requests', icon: <Sparkles size={16} />, status: 'active', color: '#b8960c', kind: 'product', screen: 'family-help' as ScreenMode },
       { id: 'vetforge', name: 'VetForge', icon: <Heart size={16} />, status: 'planned', color: '#ef4444', kind: 'product' },
       { id: 'petforge', name: 'PetForge', icon: <PawPrint size={16} />, status: 'planned', color: '#ef4444', kind: 'product' },
       { id: 'dev', name: 'Developer Panel', icon: <Monitor size={16} />, status: 'dev', color: '#b8960c', kind: 'product' },
@@ -140,6 +142,7 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
 ];
+hookFounderNav(NAV_GROUPS);
 
 interface Props {
   activeProduct: EcosystemProduct;
@@ -170,6 +173,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
   const [sheet, setSheet] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
+  const [familyUnread, setFamilyUnread] = useState(0);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -178,8 +182,21 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
     return () => window.removeEventListener('resize', check);
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    const pull = () => fetchUnreadCount().then((n) => { if (alive) setFamilyUnread(n); }).catch(() => {});
+    pull();
+    const t = window.setInterval(pull, 30_000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, []);
+
   const handleNavClick = useCallback((item: NavItem) => {
     if (item.kind === 'daily-summary') { setShowDashboard(s => !s); return; }
+    if (item.id === 'assist' || item.id === 'family-help') {
+      onProductChange('assist');
+      if (onScreenChange) onScreenChange('family-help');
+      return;
+    }
     if (item.screen && onScreenChange) onScreenChange(item.screen);
     else onProductChange(item.id as EcosystemProduct);
   }, [onProductChange, onScreenChange]);
@@ -188,11 +205,12 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
     key: g.key, label: g.label,
     items: g.items.map(it => ({
       id: it.id, name: it.name, icon: it.icon, status: it.status,
-      href: it.kind === 'screen' && it.screen ? `/?screen=${it.screen}` : it.kind === 'daily-summary' ? '/?product=owner&screen=dashboard' : `/?product=${it.id}`,
-      on: it.kind === 'daily-summary' ? showDashboard : (it.screen ? activeScreen === it.screen : activeProduct === it.id),
+      href: it.id === 'assist' ? '/empireassist' : it.kind === 'screen' && it.screen ? `/?screen=${it.screen}` : it.kind === 'daily-summary' ? '/?product=owner&screen=dashboard' : `/?product=${it.id}`,
+      on: it.kind === 'daily-summary' ? showDashboard : (it.id === 'assist' || it.id === 'family-help' ? (activeProduct === 'assist' || activeScreen === 'family-help') : (it.screen ? activeScreen === it.screen : activeProduct === it.id)),
       onPick: () => handleNavClick(it),
+      badge: (it.id === 'assist' || it.id === 'family-help') ? familyUnread : undefined,
     })),
-  })), [activeProduct, activeScreen, showDashboard, handleNavClick]);
+  })), [activeProduct, activeScreen, showDashboard, handleNavClick, familyUnread]);
 
   const onGo = useCallback((it: RailItem) => {
     if (it.screen && onScreenChange) onScreenChange(it.screen as ScreenMode);

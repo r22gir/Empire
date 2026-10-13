@@ -160,6 +160,8 @@ load_router("app.routers.lifecycle", "/api/v1", ["lifecycle"])
 load_router("app.routers.finance", "/api/v1", ["finance"])
 load_router("app.routers.financial", "/api/v1", ["finance-v2"])
 load_router("app.routers.inbox", "/api/v1", ["inbox"])
+# Studio founder inbox for family editions (read-only help.db + Studio request log).
+load_router("app.routers.family_help", "/api/v1", ["family-help"])
 
 # Client Portal — public token-based customer access
 load_router("app.routers.client_portal", "/api/v1", ["client-portal"])

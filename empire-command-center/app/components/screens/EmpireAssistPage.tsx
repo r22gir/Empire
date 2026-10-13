@@ -1,478 +1,442 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Bot, Zap, FileText, Clock, Settings, Play, Pause, RotateCcw,
-  Mail, FileDown, Share2, BarChart3, PenTool, Users, Hash,
-  Sparkles, ChevronRight, Copy, Star, Activity, MessageSquare,
-  Cpu, Thermometer, SlidersHorizontal, CheckCircle, AlertTriangle, BookOpen, CreditCard,
+  LifeBuoy, Paperclip, Send, Link2, CheckCircle2, Clock,
+  CircleDot, Sparkles, RefreshCw, ExternalLink, ListTodo,
 } from 'lucide-react';
-import ProductDocs from '../business/docs/ProductDocs';
-import PaymentModule from '../business/payments/PaymentModule';
+import {
+  HelpTicket, LOG_STATUSES, LogStatus, REQUEST_TYPES, RequestType,
+  STATUS_LABEL, TYPE_LABEL, addWorkLog, attachmentUrl, createOrganizerTask,
+  fetchInbox, fetchTicket, fetchUnreadCount, patchRequest, replyTicket,
+  statusOf, typeOf, whoLabel,
+} from '../../lib/familyHelp';
 
 const ACCENT = '#b8960c';
-const ACCENT_BG = 'rgba(184,150,12,0.10)';
-const ACCENT_BORDER = 'rgba(184,150,12,0.25)';
+const ACCENT_BG = 'rgba(184,150,12,0.12)';
+const ACCENT_BORDER = 'rgba(184,150,12,0.28)';
 
-const NAV_SECTIONS = [
-  { id: 'dashboard', label: 'Dashboard', icon: Activity },
-  { id: 'automations', label: 'Automations', icon: Zap },
-  { id: 'templates', label: 'Templates', icon: FileText },
-  { id: 'history', label: 'History', icon: Clock },
-  { id: 'settings', label: 'Settings', icon: Settings },
-  { id: 'payments', label: 'Payments', icon: CreditCard },
-  { id: 'docs', label: 'Docs', icon: BookOpen },
-] as const;
+const STATUS_TONE: Record<LogStatus, { bg: string; color: string }> = {
+  new: { bg: 'rgba(184,150,12,0.16)', color: '#e8c547' },
+  planned: { bg: 'rgba(37,99,235,0.16)', color: '#60a5fa' },
+  in_progress: { bg: 'rgba(124,58,237,0.16)', color: '#c4b5fd' },
+  done: { bg: 'rgba(22,163,74,0.16)', color: '#4ade80' },
+  declined: { bg: 'rgba(239,68,68,0.14)', color: '#f87171' },
+};
 
-type Section = typeof NAV_SECTIONS[number]['id'];
+const TYPE_TONE: Record<RequestType, { bg: string; color: string }> = {
+  adjust: { bg: 'rgba(184,150,12,0.14)', color: ACCENT },
+  fix: { bg: 'rgba(239,68,68,0.14)', color: '#f87171' },
+  create: { bg: 'rgba(22,163,74,0.14)', color: '#4ade80' },
+};
 
-// ============ CONFIG DATA (UI definitions, not mock) ============
+function formatWhen(iso?: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 16).replace('T', ' ');
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
 
-const AUTOMATION_CONFIGS = [
-  {
-    id: '1', name: 'New lead → Welcome email', trigger: 'New CRM Lead',
-    action: 'Send welcome email via Mail', status: 'active' as const,
-    lastRun: '—', runCount: 0,
-  },
-  {
-    id: '2', name: 'Invoice overdue → Reminder', trigger: 'Invoice 30+ days',
-    action: 'Send reminder + Telegram alert', status: 'paused' as const,
-    lastRun: '—', runCount: 0,
-  },
-  {
-    id: '3', name: 'New order → Shipping label', trigger: 'Order confirmed',
-    action: 'Generate shipping label via ShipForge', status: 'paused' as const,
-    lastRun: '—', runCount: 0,
-  },
-];
-
-const TEMPLATE_CONFIGS = [
-  { id: '1', name: 'Draft Email', description: 'Compose a professional email from a brief prompt', icon: Mail, category: 'Communication' },
-  { id: '2', name: 'Summarize Doc', description: 'Condense a long document into key points', icon: FileDown, category: 'Productivity' },
-  { id: '3', name: 'Generate Social Post', description: 'Create platform-optimized social media content', icon: Share2, category: 'Marketing' },
-  { id: '4', name: 'Analyze Data', description: 'Extract insights and trends from CSV or JSON data', icon: BarChart3, category: 'Analytics' },
-  { id: '5', name: 'Write Proposal', description: 'Generate a client proposal from project details', icon: PenTool, category: 'Sales' },
-  { id: '6', name: 'Customer Response', description: 'Draft a helpful reply to a customer inquiry', icon: Users, category: 'Support' },
-];
-
-// History loaded from real API (token usage logs)
-
-const MODELS = ['Grok', 'Claude', 'Ollama'] as const;
-
-// ============ COMPONENT ============
-
-import { API } from '../../lib/api';
+function Badge({ text, bg, color }: { text: string; bg: string; color: string }) {
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 700, letterSpacing: 0.2, padding: '3px 8px',
+      borderRadius: 999, background: bg, color, whiteSpace: 'nowrap',
+    }}>{text}</span>
+  );
+}
 
 export default function EmpireAssistPage() {
-  const [activeSection, setActiveSection] = useState<Section>('dashboard');
-  const [automations, setAutomations] = useState(AUTOMATION_CONFIGS);
-  const [defaultModel, setDefaultModel] = useState<string>('Grok');
-  const [temperature, setTemperature] = useState(0.7);
-  const [maxTokens, setMaxTokens] = useState(2048);
-  const [history, setHistory] = useState<Array<{id: string; timestamp: string; prompt: string; module: string; tokens: number; model: string}>>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [stats, setStats] = useState({ requestsToday: 0, avgResponseTime: '—', activeAutomations: 0, popularCommands: [] as Array<{name: string; count: number}> });
+  const [tickets, setTickets] = useState<HelpTicket[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [active, setActive] = useState<HelpTicket | null>(null);
+  const [filter, setFilter] = useState<'all' | 'amp' | 'maxine'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | LogStatus>('all');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reply, setReply] = useState('');
+  const [logBody, setLogBody] = useState('');
+  const [logHref, setLogHref] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [unread, setUnread] = useState(0);
 
-  useEffect(() => {
-    setHistoryLoading(true);
-    fetch(`${API}/costs/transactions?limit=20`)
-      .then(r => r.json())
-      .then(data => {
-        const logs = (data.recent || data.logs || []).map((log: Record<string, unknown>, i: number) => ({
-          id: String(i),
-          timestamp: String(log.timestamp || '').slice(0, 16).replace('T', ' '),
-          prompt: String(log.prompt || log.description || 'AI request'),
-          module: String(log.desk || log.source || 'MAX'),
-          tokens: Number(log.total_tokens || log.tokens || 0),
-          model: String(log.model || 'unknown'),
-        }));
-        setHistory(logs);
-        // Compute stats from real data
-        const today = new Date().toISOString().slice(0, 10);
-        const todayLogs = logs.filter((l: {timestamp: string}) => l.timestamp.startsWith(today));
-        const deskCounts: Record<string, number> = {};
-        logs.forEach((l: {module: string}) => { deskCounts[l.module] = (deskCounts[l.module] || 0) + 1; });
-        const popular = Object.entries(deskCounts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count }));
-        setStats({
-          requestsToday: todayLogs.length,
-          avgResponseTime: logs.length > 0 ? '~1s' : '—',
-          activeAutomations: automations.filter(a => a.status === 'active').length,
-          popularCommands: popular,
-        });
-      })
-      .catch(() => setHistory([]))
-      .finally(() => setHistoryLoading(false));
-  }, []);
+  const load = useCallback(async (keepId?: string | null) => {
+    setLoading(true);
+    try {
+      const rows = await fetchInbox(filter === 'all' ? undefined : filter);
+      setTickets(rows);
+      const count = await fetchUnreadCount();
+      setUnread(count);
+      const want = keepId ?? activeId;
+      const next = (want && rows.find((r) => r.id === want)) || rows[0] || null;
+      setActiveId(next?.id || null);
+      if (next) {
+        const detail = await fetchTicket(next.id);
+        setActive(detail || next);
+      } else {
+        setActive(null);
+      }
+      setError(null);
+    } catch (err: any) {
+      setError(err?.message || 'Could not load family requests');
+    } finally {
+      setLoading(false);
+    }
+  }, [filter, activeId]);
 
-  const toggleAutomation = (id: string) => {
-    setAutomations(prev => prev.map(a =>
-      a.id === id ? { ...a, status: a.status === 'active' ? 'paused' as const : 'active' as const } : a
-    ));
+  useEffect(() => { load(null); }, [filter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visible = useMemo(() => {
+    return tickets.filter((t) => statusFilter === 'all' || statusOf(t) === statusFilter);
+  }, [tickets, statusFilter]);
+
+  const open = async (ticket: HelpTicket) => {
+    setActiveId(ticket.id);
+    setReply('');
+    setLogBody('');
+    setLogHref('');
+    const detail = await fetchTicket(ticket.id);
+    setActive(detail || ticket);
+    const rows = await fetchInbox(filter === 'all' ? undefined : filter);
+    setTickets(rows);
+    setUnread(await fetchUnreadCount());
   };
 
-  // ---- Sub-renders ----
-
-  const renderDashboard = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {/* Stat cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-        {[
-          { label: 'AI Requests Today', value: stats.requestsToday, icon: MessageSquare },
-          { label: 'Avg Response Time', value: stats.avgResponseTime, icon: Clock },
-          { label: 'Active Automations', value: stats.activeAutomations, icon: Zap },
-        ].map(s => (
-          <div key={s.label} style={{
-            background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
-            borderRadius: 12, padding: '20px 22px', display: 'flex', alignItems: 'center', gap: 16,
-          }}>
-            <div style={{ background: ACCENT_BG, borderRadius: 10, padding: 10 }}>
-              <s.icon size={22} color={ACCENT} />
-            </div>
-            <div>
-              <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--text, #fff)' }}>{s.value}</div>
-              <div style={{ fontSize: 12, color: 'var(--muted, #888)', marginTop: 2 }}>{s.label}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Popular commands */}
-      <div style={{
-        background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
-        borderRadius: 12, padding: '20px 24px',
-      }}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text, #fff)', marginBottom: 16 }}>
-          <Star size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} color={ACCENT} />
-          Popular Commands
-        </h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {stats.popularCommands.map((cmd, i) => (
-            <div key={cmd.name} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '8px 12px', borderRadius: 8,
-              background: i === 0 ? ACCENT_BG : 'transparent',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 12, color: 'var(--muted, #888)', width: 20 }}>#{i + 1}</span>
-                <span style={{ fontSize: 14, color: 'var(--text, #fff)' }}>{cmd.name}</span>
-              </div>
-              <span style={{
-                fontSize: 12, fontWeight: 600, color: ACCENT,
-                background: ACCENT_BG, padding: '2px 10px', borderRadius: 8,
-              }}>{cmd.count} uses</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderAutomations = () => (
-    <div style={{
-      background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
-      borderRadius: 12, overflow: 'hidden',
-    }}>
-      <div style={{ padding: '16px 24px', borderBottom: `1px solid ${ACCENT_BORDER}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text, #fff)' }}>
-          <Zap size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} color={ACCENT} />
-          Automations
-        </h3>
-        <span style={{ fontSize: 12, color: 'var(--muted, #888)' }}>{automations.filter(a => a.status === 'active').length} active</span>
-      </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-        <thead>
-          <tr style={{ borderBottom: `1px solid ${ACCENT_BORDER}` }}>
-            {['Name', 'Trigger', 'Action', 'Status', 'Last Run', 'Runs'].map(h => (
-              <th key={h} style={{ padding: '10px 16px', textAlign: 'left', color: 'var(--muted, #888)', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {automations.map(a => (
-            <tr key={a.id} style={{ borderBottom: `1px solid rgba(255,255,255,0.04)` }}>
-              <td style={{ padding: '12px 16px', color: 'var(--text, #fff)', fontWeight: 500 }}>{a.name}</td>
-              <td style={{ padding: '12px 16px', color: 'var(--muted, #888)' }}>{a.trigger}</td>
-              <td style={{ padding: '12px 16px', color: 'var(--muted, #888)' }}>{a.action}</td>
-              <td style={{ padding: '12px 16px' }}>
-                <button
-                  onClick={() => toggleAutomation(a.id)}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
-                    fontSize: 12, fontWeight: 600,
-                    background: a.status === 'active' ? 'rgba(22,163,74,0.15)' : 'rgba(255,255,255,0.06)',
-                    color: a.status === 'active' ? '#16a34a' : '#888',
-                  }}
-                >
-                  {a.status === 'active' ? <Play size={11} /> : <Pause size={11} />}
-                  {a.status === 'active' ? 'Active' : 'Paused'}
-                </button>
-              </td>
-              <td style={{ padding: '12px 16px', color: 'var(--muted, #888)', fontSize: 12 }}>{a.lastRun}</td>
-              <td style={{ padding: '12px 16px', color: ACCENT, fontWeight: 600 }}>{a.runCount}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-
-  const renderTemplates = () => (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-      {TEMPLATE_CONFIGS.map(t => (
-        <div key={t.id} style={{
-          background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
-          borderRadius: 12, padding: '20px 22px',
-          display: 'flex', flexDirection: 'column', gap: 12,
-          cursor: 'pointer', transition: 'border-color 0.2s',
-        }}
-        onMouseEnter={e => (e.currentTarget.style.borderColor = ACCENT)}
-        onMouseLeave={e => (e.currentTarget.style.borderColor = ACCENT_BORDER)}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ background: ACCENT_BG, borderRadius: 10, padding: 10 }}>
-              <t.icon size={20} color={ACCENT} />
-            </div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text, #fff)' }}>{t.name}</div>
-              <div style={{ fontSize: 11, color: ACCENT, fontWeight: 500 }}>{t.category}</div>
-            </div>
-          </div>
-          <p style={{ fontSize: 13, color: 'var(--muted, #888)', lineHeight: 1.5, margin: 0 }}>{t.description}</p>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
-            <span style={{ fontSize: 11, color: 'var(--muted, #888)' }}>
-              <Hash size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />{t.category}
-            </span>
-            <button style={{
-              background: ACCENT_BG, border: `1px solid ${ACCENT_BORDER}`, borderRadius: 8,
-              padding: '4px 12px', fontSize: 12, color: ACCENT, cursor: 'pointer', fontWeight: 500,
-            }}>
-              Use <ChevronRight size={12} style={{ verticalAlign: 'middle' }} />
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-
-  const renderHistory = () => (
-    <div style={{
-      background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
-      borderRadius: 12, overflow: 'hidden',
-    }}>
-      <div style={{ padding: '16px 24px', borderBottom: `1px solid ${ACCENT_BORDER}` }}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text, #fff)', margin: 0 }}>
-          <Clock size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} color={ACCENT} />
-          Recent AI Interactions
-        </h3>
-      </div>
-      {historyLoading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
-          <div style={{ width: 32, height: 32, border: `2px solid ${ACCENT}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-        </div>
-      ) : history.length === 0 ? (
-        <div style={{ padding: 32, textAlign: 'center', color: 'var(--muted, #888)', fontSize: 14 }}>No AI interactions yet</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {history.map((h, i) => (
-            <div key={h.id} style={{
-              display: 'grid', gridTemplateColumns: '130px 1fr 120px 80px 140px',
-              alignItems: 'center', padding: '12px 24px', gap: 12,
-              borderBottom: i < history.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
-            }}>
-              <span style={{ fontSize: 12, color: 'var(--muted, #888)', fontFamily: 'monospace' }}>{h.timestamp}</span>
-              <span style={{ fontSize: 13, color: 'var(--text, #fff)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.prompt}</span>
-              <span style={{
-                fontSize: 11, fontWeight: 500, color: ACCENT,
-                background: ACCENT_BG, padding: '2px 8px', borderRadius: 6, textAlign: 'center',
-              }}>{h.module}</span>
-              <span style={{ fontSize: 12, color: 'var(--muted, #888)', textAlign: 'right' }}>{h.tokens} tok</span>
-              <span style={{
-                fontSize: 11, color: 'var(--muted, #888)',
-                background: 'rgba(255,255,255,0.04)', padding: '2px 8px', borderRadius: 6, textAlign: 'center',
-                fontFamily: 'monospace',
-              }}>{h.model}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
-  const renderSettings = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 600 }}>
-      {/* Default Model */}
-      <div style={{
-        background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
-        borderRadius: 12, padding: '20px 24px',
-      }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text, #fff)', marginBottom: 14 }}>
-          <Cpu size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} color={ACCENT} />
-          Default AI Model
-        </h3>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {MODELS.map(m => (
-            <button key={m} onClick={() => setDefaultModel(m)} style={{
-              flex: 1, padding: '10px 16px', borderRadius: 10, cursor: 'pointer',
-              fontSize: 13, fontWeight: 600, border: `1px solid ${defaultModel === m ? ACCENT : ACCENT_BORDER}`,
-              background: defaultModel === m ? ACCENT_BG : 'transparent',
-              color: defaultModel === m ? ACCENT : 'var(--muted, #888)',
-              transition: 'all 0.2s',
-            }}>
-              {defaultModel === m && <CheckCircle size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />}
-              {m}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Temperature */}
-      <div style={{
-        background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
-        borderRadius: 12, padding: '20px 24px',
-      }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text, #fff)', marginBottom: 14 }}>
-          <Thermometer size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} color={ACCENT} />
-          Temperature
-          <span style={{ fontSize: 12, color: ACCENT, marginLeft: 10, fontWeight: 400 }}>{temperature.toFixed(1)}</span>
-        </h3>
-        <input
-          type="range" min="0" max="2" step="0.1"
-          value={temperature}
-          onChange={e => setTemperature(parseFloat(e.target.value))}
-          style={{ width: '100%', accentColor: ACCENT }}
-        />
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted, #888)', marginTop: 6 }}>
-          <span>Precise (0.0)</span>
-          <span>Creative (2.0)</span>
-        </div>
-      </div>
-
-      {/* Max Tokens */}
-      <div style={{
-        background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
-        borderRadius: 12, padding: '20px 24px',
-      }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text, #fff)', marginBottom: 14 }}>
-          <SlidersHorizontal size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} color={ACCENT} />
-          Max Tokens
-        </h3>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {[512, 1024, 2048, 4096].map(t => (
-            <button key={t} onClick={() => setMaxTokens(t)} style={{
-              flex: 1, padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
-              fontSize: 13, fontWeight: 500, border: `1px solid ${maxTokens === t ? ACCENT : ACCENT_BORDER}`,
-              background: maxTokens === t ? ACCENT_BG : 'transparent',
-              color: maxTokens === t ? ACCENT : 'var(--muted, #888)',
-              transition: 'all 0.2s',
-            }}>
-              {t.toLocaleString()}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Per-product AI config */}
-      <div style={{
-        background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
-        borderRadius: 12, padding: '20px 24px',
-      }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text, #fff)', marginBottom: 14 }}>
-          <Settings size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} color={ACCENT} />
-          Per-Product AI Config
-        </h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {[
-            { product: 'WorkroomForge', model: 'Grok', temp: 0.5 },
-            { product: 'CraftForge', model: 'Claude', temp: 0.8 },
-            { product: 'SocialForge', model: 'Grok', temp: 0.9 },
-            { product: 'ShipForge', model: 'Ollama', temp: 0.3 },
-            { product: 'SupportForge', model: 'Claude', temp: 0.6 },
-          ].map(cfg => (
-            <div key={cfg.product} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '8px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.02)',
-            }}>
-              <span style={{ fontSize: 13, color: 'var(--text, #fff)' }}>{cfg.product}</span>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                <span style={{
-                  fontSize: 11, color: ACCENT, background: ACCENT_BG,
-                  padding: '2px 10px', borderRadius: 6, fontWeight: 500,
-                }}>{cfg.model}</span>
-                <span style={{ fontSize: 11, color: 'var(--muted, #888)' }}>temp: {cfg.temp}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-
-  const SECTION_RENDER: Record<Section, () => React.ReactNode> = {
-    dashboard: renderDashboard,
-    automations: renderAutomations,
-    templates: renderTemplates,
-    history: renderHistory,
-    settings: renderSettings,
-    payments: () => <PaymentModule product="assist" />,
-    docs: () => <div style={{ padding: 24 }}><ProductDocs product="assist" /></div>,
+  const act = async (fn: () => Promise<HelpTicket | null | void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const ticket = await fn();
+      if (ticket) setActive(ticket);
+      await load(ticket?.id || activeId);
+    } catch (err: any) {
+      setError(err?.message || 'Action failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%', background: 'var(--chat-bg, #0a0a0a)' }}>
-      {/* Left nav */}
-      <div style={{
-        width: 200, borderRight: `1px solid ${ACCENT_BORDER}`,
-        display: 'flex', flexDirection: 'column', padding: '18px 0',
-        background: 'var(--card-bg, #111)',
+    <div
+      data-testid="empire-assist-family-requests"
+      style={{ display: 'flex', height: '100%', minHeight: 0, background: 'var(--chat-bg, #0b0f14)', color: 'var(--text, #f5f5f0)' }}
+    >
+      <aside style={{
+        width: 360, maxWidth: '42%', borderRight: `1px solid ${ACCENT_BORDER}`,
+        display: 'flex', flexDirection: 'column', background: 'var(--card-bg, #11151c)', minWidth: 280,
       }}>
-        <div style={{
-          padding: '0 18px 18px', borderBottom: `1px solid ${ACCENT_BORDER}`,
-          marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10,
-        }}>
-          <div style={{ background: ACCENT_BG, borderRadius: 10, padding: 8 }}>
-            <Bot size={20} color={ACCENT} />
+        <div style={{ padding: '18px 18px 12px', borderBottom: `1px solid ${ACCENT_BORDER}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+            <div style={{ background: ACCENT_BG, borderRadius: 10, padding: 8 }}>
+              <LifeBuoy size={18} color={ACCENT} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>Empire Assist: Family Requests</div>
+              <div style={{ fontSize: 11, color: 'var(--muted, #8b8b80)' }}>Juan / Max-e · Camilo / Maxine</div>
+            </div>
+            {unread > 0 && (
+              <span
+                data-testid="family-unread-badge"
+                aria-label={`${unread} unread family requests`}
+                style={{
+                  minWidth: 22, height: 22, borderRadius: 999, background: ACCENT, color: '#1a1403',
+                  fontSize: 11, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '0 7px',
+                }}
+              >{unread > 99 ? '99+' : unread}</span>
+            )}
           </div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text, #fff)' }}>EmpireAssist</div>
-            <div style={{ fontSize: 11, color: 'var(--muted, #888)' }}>AI Assistant</div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+            {([
+              ['all', 'All'],
+              ['amp', 'Juan'],
+              ['maxine', 'Camilo'],
+            ] as const).map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setFilter(id)} style={{
+                flex: 1, padding: '7px 8px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                border: `1px solid ${filter === id ? ACCENT : ACCENT_BORDER}`,
+                background: filter === id ? ACCENT_BG : 'transparent',
+                color: filter === id ? ACCENT : 'var(--muted, #8b8b80)',
+              }}>{label}</button>
+            ))}
           </div>
-        </div>
-        {NAV_SECTIONS.map(s => (
-          <button
-            key={s.id}
-            onClick={() => setActiveSection(s.id)}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
             style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '10px 18px', border: 'none', cursor: 'pointer',
-              background: activeSection === s.id ? ACCENT_BG : 'transparent',
-              color: activeSection === s.id ? ACCENT : 'var(--muted, #888)',
-              fontSize: 13, fontWeight: activeSection === s.id ? 600 : 400,
-              borderLeft: activeSection === s.id ? `3px solid ${ACCENT}` : '3px solid transparent',
-              transition: 'all 0.15s',
+              width: '100%', marginTop: 8, padding: '7px 8px', borderRadius: 8, fontSize: 12,
+              background: '#0b0f14', color: 'inherit', border: `1px solid ${ACCENT_BORDER}`,
             }}
           >
-            <s.icon size={16} />
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Main content */}
-      <div style={{ flex: 1, padding: '24px 32px', overflowY: 'auto' }}>
-        <div style={{ marginBottom: 24 }}>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text, #fff)', margin: 0 }}>
-            {NAV_SECTIONS.find(s => s.id === activeSection)?.label}
-          </h2>
-          <p style={{ fontSize: 13, color: 'var(--muted, #888)', marginTop: 4 }}>
-            {activeSection === 'dashboard' && 'Overview of AI assistant activity and popular commands'}
-            {activeSection === 'automations' && 'Manage AI-powered workflow automations'}
-            {activeSection === 'templates' && 'Reusable AI prompt templates for common tasks'}
-            {activeSection === 'history' && 'Recent AI interactions across all Empire products'}
-            {activeSection === 'settings' && 'Configure default AI model, parameters, and per-product settings'}
-          </p>
+            <option value="all">Every status</option>
+            {LOG_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+          </select>
         </div>
-        {SECTION_RENDER[activeSection]()}
-      </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: 10 }}>
+          {loading && <div style={{ padding: 16, fontSize: 13, color: 'var(--muted, #8b8b80)' }}>Loading requests…</div>}
+          {!loading && visible.length === 0 && (
+            <div style={{ padding: 18, fontSize: 13, color: 'var(--muted, #8b8b80)', lineHeight: 1.5 }}>
+              No family requests yet. When Juan or Camilo tap Pedir ayuda a Max, they land here.
+            </div>
+          )}
+          {visible.map((ticket) => {
+            const on = ticket.id === activeId;
+            const st = statusOf(ticket);
+            const ty = typeOf(ticket);
+            return (
+              <button
+                key={`${ticket.edition}-${ticket.id}`}
+                type="button"
+                onClick={() => open(ticket)}
+                data-ticket-id={ticket.id}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: 12,
+                  borderRadius: 12, cursor: 'pointer',
+                  border: on ? `1px solid ${ACCENT}` : '1px solid rgba(255,255,255,0.06)',
+                  background: on ? ACCENT_BG : 'rgba(255,255,255,0.02)',
+                  color: 'inherit',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, color: ACCENT, fontWeight: 700 }}>{whoLabel(ticket)}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted, #8b8b80)' }}>{formatWhen(ticket.created_at)}</span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.35, marginBottom: 8 }}>
+                  {(ticket.summary || ticket.message || ticket.transcript || ticket.id).slice(0, 110)}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <Badge text={TYPE_LABEL[ty]} bg={TYPE_TONE[ty].bg} color={TYPE_TONE[ty].color} />
+                  <Badge text={STATUS_LABEL[st]} bg={STATUS_TONE[st].bg} color={STATUS_TONE[st].color} />
+                  {(ticket.attachment_count || ticket.attachments?.length) ? (
+                    <span style={{ fontSize: 11, color: 'var(--muted, #8b8b80)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <Paperclip size={11} />{ticket.attachment_count || ticket.attachments?.length}
+                    </span>
+                  ) : null}
+                  {ticket.unread && <CircleDot size={11} color={ACCENT} aria-label="Unread" />}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </aside>
+
+      <section style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '22px 28px 40px' }}>
+        {!active && !loading && (
+          <div style={{ color: 'var(--muted, #8b8b80)', fontSize: 14, maxWidth: 520, lineHeight: 1.6 }}>
+            Family requests from Juan (Max-e) and Camilo (Maxine) show here. Type is suggested by Max
+            (Adjust / Fix / Create) and you can change it. Status and the work log stay on Studio —
+            the family help.db is never written.
+          </div>
+        )}
+        {active && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 860 }}>
+            <header>
+              <div style={{ fontSize: 12, color: 'var(--muted, #8b8b80)', marginBottom: 6 }}>
+                {active.id} · {formatWhen(active.created_at)}
+              </div>
+              <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>{whoLabel(active)}</h2>
+              <p style={{ margin: '8px 0 0', fontSize: 15, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                {active.message || active.transcript || '—'}
+              </p>
+              {active.transcript && active.message ? (
+                <p style={{ margin: '8px 0 0', fontSize: 13, color: 'var(--muted, #8b8b80)' }}>
+                  <strong>Transcript.</strong> {active.transcript}
+                </p>
+              ) : null}
+            </header>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <label style={fieldBox}>
+                <span style={fieldLabel}><Sparkles size={12} /> Type · Max suggested {TYPE_LABEL[active.type_suggested || typeOf(active)]}</span>
+                <select
+                  value={typeOf(active)}
+                  disabled={busy}
+                  onChange={(e) => act(() => patchRequest(active.edition, active.id, { type: e.target.value as RequestType }))}
+                  style={selectStyle}
+                >
+                  {REQUEST_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
+                </select>
+              </label>
+              <label style={fieldBox}>
+                <span style={fieldLabel}><Clock size={12} /> Status</span>
+                <select
+                  value={statusOf(active)}
+                  disabled={busy}
+                  onChange={(e) => act(() => patchRequest(active.edition, active.id, { status: e.target.value as LogStatus }))}
+                  style={selectStyle}
+                >
+                  {LOG_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <div style={card}>
+              <div style={cardTitle}><Paperclip size={14} color={ACCENT} /> Attachments</div>
+              {!(active.attachments || []).length && (
+                <div style={{ fontSize: 13, color: 'var(--muted, #8b8b80)' }}>No attachments.</div>
+              )}
+              {(active.attachments || []).map((att) => (
+                att.kind === 'voice' ? (
+                  <div key={att.id} style={{ margin: '8px 0' }}>
+                    <div style={{ fontSize: 12, marginBottom: 4 }}>{att.filename}</div>
+                    <audio controls src={attachmentUrl(active.id, att.id)} style={{ width: '100%' }} />
+                  </div>
+                ) : (
+                  <a
+                    key={att.id}
+                    href={attachmentUrl(active.id, att.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, color: ACCENT, fontSize: 13, marginBottom: 6 }}
+                  >
+                    <Paperclip size={13} /> {att.filename}
+                  </a>
+                )
+              ))}
+            </div>
+
+            {(active.replies || []).length > 0 && (
+              <div style={card}>
+                <div style={cardTitle}><Send size={14} color={ACCENT} /> Replies already sent</div>
+                {(active.replies || []).map((item) => (
+                  <div key={item.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <div style={{ fontSize: 12, color: ACCENT, fontWeight: 700 }}>{item.author} · {formatWhen(item.created_at)}</div>
+                    <div style={{ fontSize: 13, marginTop: 4, whiteSpace: 'pre-wrap' }}>{item.body}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={card}>
+              <div style={cardTitle}><CheckCircle2 size={14} color={ACCENT} /> What was done</div>
+              {(active.log || []).length === 0 && (
+                <div style={{ fontSize: 13, color: 'var(--muted, #8b8b80)', marginBottom: 10 }}>
+                  Nothing logged yet. Add a note, PR link, or Organizer task.
+                </div>
+              )}
+              {(active.log || []).map((entry) => (
+                <div key={entry.id} style={{ padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 13 }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted, #8b8b80)', marginBottom: 2 }}>
+                    {entry.kind} · {formatWhen(entry.created_at)}
+                  </div>
+                  <div>{entry.body}</div>
+                  {entry.href && (
+                    <a href={entry.href} target={entry.href.startsWith('/') ? undefined : '_blank'} rel="noreferrer" style={{ color: ACCENT, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <ExternalLink size={12} /> {entry.href_label || entry.href}
+                    </a>
+                  )}
+                </div>
+              ))}
+              <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+                <textarea
+                  value={logBody}
+                  onChange={(e) => setLogBody(e.target.value)}
+                  placeholder="What you did — and a PR or task link if there is one"
+                  rows={3}
+                  style={areaStyle}
+                />
+                <input
+                  value={logHref}
+                  onChange={(e) => setLogHref(e.target.value)}
+                  placeholder="https://github.com/…/pull/123 or /?screen=tasks&id=…"
+                  style={inputStyle}
+                />
+                <button
+                  type="button"
+                  disabled={busy || !logBody.trim()}
+                  onClick={() => act(() => addWorkLog(active.edition, active.id, {
+                    body: logBody,
+                    href: logHref || undefined,
+                    href_label: logHref ? 'Open link' : undefined,
+                    kind: logHref ? 'pr' : 'note',
+                  }))}
+                  style={btn(ACCENT)}
+                >
+                  <Link2 size={14} /> Add to log
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => act(async () => {
+                  const result = await createOrganizerTask(active.edition, active.id);
+                  return result.ticket;
+                })}
+                style={btn('#2563eb')}
+              >
+                <ListTodo size={14} /> Create Organizer task
+              </button>
+              <button type="button" disabled={busy} onClick={() => load(active.id)} style={ghostBtn}>
+                <RefreshCw size={14} /> Refresh
+              </button>
+            </div>
+
+            <div style={card}>
+              <div style={cardTitle}><Send size={14} color={ACCENT} /> Reply to the family chat</div>
+              <textarea
+                value={reply}
+                onChange={(e) => setReply(e.target.value)}
+                placeholder="Reply Juan or Camilo will see in Max-e / Maxine"
+                rows={4}
+                style={areaStyle}
+              />
+              <button
+                type="button"
+                disabled={busy || !reply.trim()}
+                onClick={() => act(async () => {
+                  const ticket = await replyTicket(active.id, reply);
+                  setReply('');
+                  return ticket;
+                })}
+                style={{ ...btn(ACCENT), marginTop: 10 }}
+              >
+                <Send size={14} /> Send reply
+              </button>
+            </div>
+
+            {error && <div style={{ color: '#f87171', fontSize: 13 }}>{error}</div>}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
+
+const card: React.CSSProperties = {
+  background: 'rgba(255,255,255,0.025)',
+  border: `1px solid ${ACCENT_BORDER}`,
+  borderRadius: 12,
+  padding: 16,
+};
+const cardTitle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, marginBottom: 10, color: '#f5f5f0',
+};
+const fieldBox: React.CSSProperties = { ...card, display: 'flex', flexDirection: 'column', gap: 8 };
+const fieldLabel: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700,
+  color: 'var(--muted, #8b8b80)', textTransform: 'uppercase', letterSpacing: 0.4,
+};
+const selectStyle: React.CSSProperties = {
+  width: '100%', padding: '8px 10px', borderRadius: 8, fontSize: 14,
+  background: '#0b0f14', color: 'inherit', border: `1px solid ${ACCENT_BORDER}`,
+};
+const inputStyle: React.CSSProperties = {
+  width: '100%', boxSizing: 'border-box', padding: '9px 10px', borderRadius: 8, fontSize: 13,
+  background: '#0b0f14', color: 'inherit', border: `1px solid ${ACCENT_BORDER}`,
+};
+const areaStyle: React.CSSProperties = { ...inputStyle, resize: 'vertical', fontFamily: 'inherit' };
+
+function btn(bg: string): React.CSSProperties {
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 8,
+    border: 'none', background: bg, color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+  };
+}
+const ghostBtn: React.CSSProperties = {
+  ...btn('transparent'),
+  color: 'inherit',
+  border: `1px solid ${ACCENT_BORDER}`,
+};

@@ -95,6 +95,8 @@ def test_spanish_aliases_and_named_features():
     assert lookup_feature("uso de minimax").id == "minimax-usage"
     assert lookup_feature("Family help").id == "family-help"
     assert lookup_feature("ayuda familiar").id == "family-help"
+    assert lookup_feature("empire assist").id in {"family-help", "assist"}
+    assert lookup_feature("family requests").id in {"family-help", "assist"}
     assert lookup_feature("Organizer").id == "organizer"
     assert lookup_feature("organizador").id == "organizer"
     sched = lookup_feature("where is the scheduler")

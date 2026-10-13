@@ -104,7 +104,7 @@ export function V3Rail({ active, onGo, onAll, badges = {}, className = '' }: {
   );
 }
 
-export interface SheetModule { id: string; name: string; icon: ReactNode; status?: string; href: string; onPick?: () => void; on?: boolean }
+export interface SheetModule { id: string; name: string; icon: ReactNode; status?: string; href: string; onPick?: () => void; on?: boolean; badge?: number }
 export interface SheetGroup { key: string; label: string; items: SheetModule[] }
 
 /** Every module, one click away (the rail only shows the main forges). */
@@ -128,6 +128,7 @@ export function BusinessesSheet({ open, onClose, groups }: { open: boolean; onCl
               {g.items.map(m => (
                 <a key={m.id} href={m.href} className={`v3-mod${m.on ? ' on' : ''}`} onClick={e => { if (m.onPick) { e.preventDefault(); m.onPick(); onClose(); } }}>
                   <span className="gl">{m.icon}</span><span className="nm">{m.name}</span>
+                  {m.badge ? <span className="bd" aria-label={`${m.badge} unread`}>{m.badge > 99 ? '99+' : m.badge}</span> : null}
                   {m.status && m.status !== 'active' ? <span className="st">{m.status === 'planned' ? 'soon' : m.status}</span> : null}
                 </a>
               ))}
