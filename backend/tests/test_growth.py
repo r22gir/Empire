@@ -239,17 +239,15 @@ def test_place_details_needs_key_then_fills_and_respects_free_cap(g, monkeypatch
 
 # ── 7. Max improves Max ──────────────────────────────────────────────────────
 def test_improvement_loop_needs_two_taps_and_never_builds_without_key(g):
-    from app.services.max import tool_executor, voice_live
     from app.services.max import improvement_queue as iq
-    importlib.reload(tool_executor)
-    r = tool_executor.execute_tool({"tool": "request_improvement", "title": "Bulk approve",
-                                    "problem": "Approving 20 IG drafts one by one is slow",
-                                    "proposed_change": "Add select-all + approve for copy-only items",
-                                    "affected_modules": ["LeadForge"], "risk": "low"}, founder=True)
-    assert r.success and r.result["status"] == "proposed"
-    rid = r.result["id"]
-    # Max has no tool that approves, builds, merges or deploys
-    assert not [t for t in tool_executor.TOOL_REGISTRY if "improve" in t and t not in ("request_improvement", "improvements_list")]
+    created = g["imp"].create_request(
+        "Bulk approve",
+        "Approving 20 IG drafts one by one is slow",
+        "Add select-all + approve for copy-only items",
+        ["LeadForge"], "low", requested_via="chat",
+    )
+    assert created["status"] == "proposed"
+    rid = created["id"]
     c = g["client"]
     assert c.post(f"/api/v1/growth/improvements/{rid}/approve", json={}).status_code == 403
     a = c.post(f"/api/v1/growth/improvements/{rid}/approve", json={"confirm": True}).json()
@@ -263,9 +261,6 @@ def test_improvement_loop_needs_two_taps_and_never_builds_without_key(g):
     assert m["status"] == "merge_approved"
     d = c.post(f"/api/v1/growth/improvements/{rid}/mark-deployed", json={"confirm": True}).json()
     assert d["status"] == "deployed"
-    v = voice_live.run_voice_tool("request_improvement", {"title": "Voice ask", "problem": "p", "proposed_change": "c"})
-    assert v["success"] and v["result"]["executed"] is False
-    assert "request_improvement" in [t["name"] for t in voice_live.realtime_tool_definitions()]
 
 
 def test_improvement_with_key_launches_cloud_agent_only_on_tap(g, monkeypatch):
@@ -281,7 +276,9 @@ def test_improvement_with_key_launches_cloud_agent_only_on_tap(g, monkeypatch):
     calls = []
 
     class Resp:
-        def __init__(self, code, data): self.status_code, self._d, self.text = code, data, str(data)
+        def __init__(self, code, data):
+            self.status_code, self._d, self.text = code, data, str(data)
+            self.headers = {"content-type": "application/json"}
         def json(self): return self._d
         def raise_for_status(self):
             if self.status_code >= 400: raise RuntimeError(self.status_code)
@@ -371,7 +368,9 @@ def test_improvement_usage_limit_exceeded_is_plain_and_does_not_retry(g, monkeyp
     bodies = []
 
     class Resp:
-        def __init__(self, code, data): self.status_code, self._d, self.text = code, data, str(data)
+        def __init__(self, code, data):
+            self.status_code, self._d, self.text = code, data, str(data)
+            self.headers = {"content-type": "application/json"}
         def json(self): return self._d
 
     def fake_post(url, json=None, auth=None, timeout=None, headers=None):

@@ -166,16 +166,14 @@ def test_daily_cap_stops_and_does_not_call_minimax(loop, monkeypatch):
     loop["planner"]._record_usage(calls=1, tokens=10)
     r = _req(loop)
     loop["imp"].approve_build(r["id"], confirm=True)
-    called = []
 
-    def boom(*a, **k):
-        called.append(1)
-        raise AssertionError("MiniMax must not be called at cap")
+    def no_http(*a, **k):
+        raise AssertionError("MiniMax HTTP must not be called at cap")
 
-    monkeypatch.setattr(loop["planner"], "call_minimax", boom)
+    monkeypatch.setattr(httpx, "Client", no_http)
     out = loop["worker"].process_one()
     assert out.get("status") == "failed" or out.get("error")
-    assert called == []
+    assert "cap" in str(out.get("error") or "").lower()
     got = loop["imp"].get(r["id"])
     assert got["status"] == "build_failed"
     assert "cap" in (got.get("build_note") or "").lower()

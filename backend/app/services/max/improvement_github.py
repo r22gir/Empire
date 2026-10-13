@@ -128,7 +128,10 @@ def open_improvement_issue(req: dict, plan: str) -> dict:
         )
     if r.status_code >= 400:
         raise GitHubUnavailable(f"GitHub HTTP {r.status_code}: {(r.text or '')[:240]}")
-    data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+    try:
+        data = r.json() or {}
+    except Exception:
+        data = {}
     url = (data or {}).get("html_url") or ""
     number = (data or {}).get("number")
     if not url:
