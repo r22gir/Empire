@@ -17,7 +17,6 @@ import '../chat/chat.css';
 import { chiefEHref } from '../../lib/chiefE';
 import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../lib/chatContent';
 import { useAssistantName } from '../../lib/assistant';
-import { isFamilyEdition } from '../../lib/edition';
 import VoiceDraftPanel, { VoiceDraftView } from '../voice/VoiceDraftPanel';
 import FounderPinCard from '../chat/FounderPinCard';
 import { useTranslation } from '../../lib/i18n';
