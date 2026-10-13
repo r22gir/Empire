@@ -431,14 +431,35 @@ class BenchRequest(BaseModel):
     right_depth: float = 0          # legacy return seat-depth; prefer side_right for wing LENGTH
 
 
+def _cut_list_model(req: BenchRequest):
+    from app.services.vision.bench_renderer import BenchModel
+
+    resolved = resolve_bench_request(req)
+    return BenchModel(
+        name=req.name,
+        width=resolved.width_in,
+        depth=resolved.seat_depth,
+        seat_h=resolved.seat_height,
+        back_h=resolved.back_height,
+        quote_num=req.quote_num or "",
+        has_back=resolved.has_back,
+        cushion_width=resolved.cushion_width,
+        panel_style=resolved.panel_style,
+        channel_count=resolved.channel_count,
+        bench_type=req.bench_type,
+        long=resolved.long_in,
+        short=resolved.short_in,
+        back=resolved.back_run_in,
+        left=resolved.side_in,
+        right=resolved.side_in,
+        side=resolved.side_in,
+    )
+
+
 @router.post("/drawings/bench")
 async def generate_bench_svg(req: BenchRequest):
     """Generate an SVG bench drawing from dimensions."""
-    from app.services.vision.bench_renderer import (
-        render_straight,
-        render_l_shape,
-        render_u_shape,
-    )
+    from app.services.vision.bench_renderer import generate_cut_list
 
     svg = _render(req)
     resolved = resolve_bench_request(req)
@@ -447,20 +468,34 @@ async def generate_bench_svg(req: BenchRequest):
         "bench_type": req.bench_type,
         "name": req.name,
         "resolved": resolved.public_dict(),
+        "cut_list": generate_cut_list(_cut_list_model(req)),
+        "quote_num": req.quote_num or "",
     }
 
 
 @router.post("/drawings/bench/pdf")
 async def generate_bench_pdf(req: BenchRequest):
-    """Generate a PDF bench drawing from dimensions."""
-    from app.services.vision.bench_renderer import drawings_to_pdf
+    """Generate a two-page PDF: live drawing + fraction cut list. Tempfile only."""
+    from app.services.vision.bench_renderer import (
+        drawings_to_pdf,
+        generate_cut_list,
+        render_cut_list_sheet,
+    )
 
     svg = _render(req)
+    cuts = generate_cut_list(_cut_list_model(req))
+    cut_svg = render_cut_list_sheet(cuts, name=req.name, quote_num=req.quote_num)
     output_path = os.path.join(
         tempfile.gettempdir(),
         f"bench_{req.bench_type}_{req.name.replace(' ', '_')}.pdf",
     )
-    drawings_to_pdf([{"name": req.name, "svg": svg, "lf": req.lf}], output_path)
+    drawings_to_pdf(
+        [
+            {"name": req.name, "svg": svg, "lf": req.lf},
+            {"name": f"{req.name} cut list", "svg": cut_svg, "lf": req.lf},
+        ],
+        output_path,
+    )
 
     with open(output_path, "rb") as f:
         pdf_bytes = f.read()
@@ -585,10 +620,8 @@ async def generate_bench_dxf(req: BenchRequest):
             **style,
         )
 
-    base_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
-    os.makedirs(base_dir, exist_ok=True)
     safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", req.name).strip("_") or "bench"
-    out_path = os.path.join(base_dir, f"{safe_name}_{req.bench_type}.dxf")
+    out_path = os.path.join(tempfile.gettempdir(), f"{safe_name}_{req.bench_type}.dxf")
 
     result_path = generate_dxf(model, out_path)
     if result_path is None:

@@ -100,6 +100,12 @@ interface DrawingAsset {
   dimensions?: Record<string, string>;
   notes?: string;
   created_at?: string;
+  cut_list?: {
+    wood?: Array<{ name: string; qty: number; size: string }>;
+    foam?: Array<{ name: string; qty: number; size: string }>;
+    fabric?: Array<{ name: string; qty: number; size: string }>;
+    rules?: string[];
+  };
 }
 
 type ItemCategory = 'upholstery' | 'drapery';
@@ -1447,6 +1453,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
           <>
             <StepRooms
               rooms={rooms} photos={photos} scan3DFiles={scan3DFiles} apiBase={API_BASE}
+              quoteNum={editQuoteId || ''}
               addRoom={addRoom} removeRoom={removeRoom} moveRoom={moveRoom} updateRoomName={updateRoomName}
               addItem={addItem} moveItem={moveItem} removeItem={removeItem} updateItem={updateItem}
               onBrowseCatalog={(roomId) => { setCatalogTargetRoom(roomId); setShowCatalog(true); }}
@@ -2751,8 +2758,8 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
   );
 }
 
-function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, moveRoom, updateRoomName, addItem, moveItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder, onView3D, onSelectFabric, onAssignPhotoToItem }: {
-  rooms: Room[]; photos?: PhotoFile[]; scan3DFiles?: Scan3DFile[]; apiBase?: string;
+function StepRooms({ rooms, photos, scan3DFiles, apiBase, quoteNum, addRoom, removeRoom, moveRoom, updateRoomName, addItem, moveItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder, onView3D, onSelectFabric, onAssignPhotoToItem }: {
+  rooms: Room[]; photos?: PhotoFile[]; scan3DFiles?: Scan3DFile[]; apiBase?: string; quoteNum?: string;
   addRoom: () => void; removeRoom: (id: string) => void; moveRoom: (id: string, dir: 'up' | 'down') => void; updateRoomName: (id: string, name: string) => void;
   addItem: (roomId: string, category?: ItemCategory) => void; moveItem: (roomId: string, itemId: string, dir: 'up' | 'down') => void; removeItem: (roomId: string, itemId: string) => void;
   updateItem: (roomId: string, itemId: string, field: keyof RoomItem, value: any) => void;
@@ -2773,15 +2780,26 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
       const itemName = `${formatItemType(item.type)} - ${room.name}`;
       const isBench = isBenchType(item.type);
       const routeTo = inferRouteTo(item.type, item.routeTo);
+      const widthIn = parseFractionInches(item.width) || 0;
+      const depthIn = parseFractionInches(item.depth) || 20;
+      const heightIn = parseFractionInches(item.height) || 18;
+      const isL = item.type.includes('_l') || item.type.includes('l_');
+      const isU = item.type.includes('_u') || item.type.includes('u_');
       const drawingBody = isBench
         ? {
-            bench_type: item.type.includes('_u') || item.type.includes('u_') ? 'u_shape' : item.type.includes('_l') || item.type.includes('l_') ? 'l_shape' : 'straight',
+            bench_type: isU ? 'u_shape' : isL ? 'l_shape' : 'straight',
             name: itemName,
-            lf: Math.max((parseFractionInches(item.width) || 0) / 12, 1),
-            seat_depth: parseFractionInches(item.depth) || 20,
-            seat_height: parseFractionInches(item.height) || 18,
-            back_height: parseFractionInches(item.height) || 18,
+            lf: widthIn || 10,
+            length_unit: 'in',
+            width_in: widthIn || undefined,
+            seat_depth: depthIn,
+            seat_height: heightIn,
+            back_height: heightIn,
             panel_style: item.panelConfig?.style || 'vertical_channels',
+            quote_num: quoteNum || '',
+            leg1_length: isL ? widthIn : 0,
+            leg2_length: isL && depthIn > 24 ? depthIn : 0,
+            back_length: isU ? widthIn : 0,
           }
         : {
             name: itemName,
@@ -2790,7 +2808,7 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
             notes: item.notes || '',
             bench_type: 'straight',
             lf: 0,
-            quote_num: '',
+            quote_num: quoteNum || '',
           };
       const drawingRes = await fetch(`${API}/drawings/${isBench ? 'bench' : 'general'}`, {
         method: 'POST',
@@ -2824,6 +2842,7 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
         item_key: item.id,
         dimensions,
         route_to: assetData.asset?.route_to || routeTo,
+        cut_list: drawingData.cut_list,
       };
       updateItem(room.id, item.id, 'drawings', [...(item.drawings || []), asset]);
     } catch (err) {
@@ -3275,6 +3294,16 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
                         >
                           {drawingItemId === item.id ? 'Generating Drawing...' : 'Generate Drawing'}
                         </button>
+                        <a
+                          href={`/?product=drawings${quoteNum ? `&quote=${encodeURIComponent(quoteNum)}` : ''}`}
+                          style={{
+                            padding: '5px 10px', borderRadius: 7, border: '1.5px solid #ece8e0',
+                            background: '#fff', color: '#b8960c', fontSize: 10, fontWeight: 700,
+                            textDecoration: 'none', minHeight: 32, display: 'inline-flex', alignItems: 'center',
+                          }}
+                        >
+                          Open Drawing Studio
+                        </a>
                         {(item.drawings || []).map((drawing) => (
                           <a key={drawing.id || drawing.url} href={drawing.url} target="_blank" rel="noreferrer"
                             style={{
@@ -3282,7 +3311,7 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
                               background: '#f0fdf4', color: '#15803d', fontSize: 10, fontWeight: 700,
                               textDecoration: 'none', minHeight: 32, display: 'inline-flex', alignItems: 'center',
                             }}>
-                            Drawing Attached
+                            Drawing Attached{drawing.cut_list?.wood?.length ? ` · ${drawing.cut_list.wood[0].size}` : ''}
                           </a>
                         ))}
                       </div>

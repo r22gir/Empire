@@ -37,6 +37,7 @@ from app.services.drawing.bench_quote_bridge import (  # noqa: E402
     sheet_chrome as _bridge_chrome,
 )
 from app.services.drawing.inches import format_inches as _in
+from app.services.vision.bench_cut_list import generate_cut_list, render_cut_list_sheet
 from app.services.drawing.quote_sheet_layout import (  # noqa: E402
     CAPTION_H,
     Rect,
@@ -102,7 +103,9 @@ class BenchModel:
     def __init__(self, name="Straight Bench", width=120, depth=18,
                  seat_h=18, back_h=18, cushion_width=24,
                  panel_style="vertical_channels", channel_count=6,
-                 client="", project="", quote_num="", has_back=True):
+                 client="", project="", quote_num="", has_back=True,
+                 bench_type="straight", long=0, short=0, back=0,
+                 left=0, right=0, side=0):
         self.name = name
         self.width = width
         self.depth = depth
@@ -115,6 +118,13 @@ class BenchModel:
         self.project = project
         self.quote_num = quote_num
         self.has_back = has_back
+        self.bench_type = bench_type
+        self.long = long
+        self.short = short
+        self.back = back
+        self.left = left
+        self.right = right
+        self.side = side
         self.date = datetime.now().strftime("%m/%d/%Y")
 
     @property
