@@ -6,7 +6,6 @@ import { API } from '../../lib/api';
 import { inchesToFraction } from '../../lib/fractions';
 
 const MB = `${API}/luxeforge/mood-boards`;
-const FABRIC_RE = /^V\d{3}-[A-Za-z][A-Za-z0-9]+$/;
 
 type BoardSummary = {
   id: string;
@@ -18,24 +17,44 @@ type BoardSummary = {
   swatch_count?: number;
 };
 
+type RegistryCode = {
+  code: string;
+  color?: string | null;
+  material_type?: string | null;
+  specs?: string | null;
+};
+
 type Board = BoardSummary & {
   description?: string;
   images?: Array<{ id: string; url: string; caption?: string; width_fraction?: string; height_fraction?: string; size_fraction?: string }>;
-  swatches?: Array<{ id: string; fabric_code: string; name?: string; hex?: string; notes?: string; size_fraction?: string }>;
+  swatches?: Array<{
+    id: string;
+    fabric_code?: string | null;
+    color?: string | null;
+    specs?: string | null;
+    uncoded?: boolean;
+    hex?: string;
+    size_fraction?: string;
+  }>;
   notes?: Array<{ id: string; text: string; created_at?: string }>;
 };
+
+function swatchLabel(s: { fabric_code?: string | null; color?: string | null; uncoded?: boolean }) {
+  if (!s.fabric_code || s.uncoded) return 'Uncoded';
+  return s.color ? `${s.fabric_code} · ${s.color}` : s.fabric_code;
+}
 
 export default function MoodBoardView({ readOnly = false, sharedBoard = null }: { readOnly?: boolean; sharedBoard?: Board | null }) {
   const [boards, setBoards] = useState<BoardSummary[]>([]);
   const [active, setActive] = useState<Board | null>(sharedBoard);
+  const [catalog, setCatalog] = useState<RegistryCode[]>([]);
   const [title, setTitle] = useState('New mood board');
   const [imageUrl, setImageUrl] = useState('');
   const [imageCaption, setImageCaption] = useState('');
   const [imageW, setImageW] = useState('');
   const [imageH, setImageH] = useState('');
-  const [swatchCode, setSwatchCode] = useState('V142-Navy');
-  const [swatchName, setSwatchName] = useState('');
-  const [swatchHex, setSwatchHex] = useState('#1d3557');
+  const [swatchCode, setSwatchCode] = useState('');
+  const [swatchHex, setSwatchHex] = useState('#c9a84c');
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -48,6 +67,14 @@ export default function MoodBoardView({ readOnly = false, sharedBoard = null }: 
     setBoards(data.items || []);
   }, [readOnly]);
 
+  const loadCatalog = useCallback(async () => {
+    if (readOnly) return;
+    const res = await fetch(`${MB}/fabric-codes`);
+    if (!res.ok) return;
+    const data = await res.json();
+    setCatalog(data.items || []);
+  }, [readOnly]);
+
   const openBoard = async (id: string) => {
     const res = await fetch(`${MB}/${id}`);
     if (!res.ok) return;
@@ -56,8 +83,11 @@ export default function MoodBoardView({ readOnly = false, sharedBoard = null }: 
 
   useEffect(() => {
     if (sharedBoard) setActive(sharedBoard);
-    else loadList().catch(err => setError(err.message));
-  }, [sharedBoard, loadList]);
+    else {
+      loadList().catch(err => setError(err.message));
+      loadCatalog().catch(() => undefined);
+    }
+  }, [sharedBoard, loadList, loadCatalog]);
 
   const createBoard = async () => {
     setError(null);
@@ -92,17 +122,22 @@ export default function MoodBoardView({ readOnly = false, sharedBoard = null }: 
 
   const addSwatch = async () => {
     if (!active) return;
-    if (!FABRIC_RE.test(swatchCode)) {
-      setError('Fabric code must look like V142-Navy');
-      return;
-    }
+    setError(null);
     const res = await fetch(`${MB}/${active.id}/swatches`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fabric_code: swatchCode, name: swatchName, hex_color: swatchHex }),
+      body: JSON.stringify({
+        fabric_code: swatchCode || null,
+        hex_color: swatchHex,
+      }),
     });
-    if (!res.ok) { setError('Swatch rejected — use V###-Color'); return; }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.detail || 'Pick a registered fabric code or leave the swatch uncoded.');
+      return;
+    }
     setActive(await res.json());
+    setSwatchCode('');
   };
 
   const addNote = async () => {
@@ -141,10 +176,10 @@ export default function MoodBoardView({ readOnly = false, sharedBoard = null }: 
             {readOnly ? active?.title || 'Mood board' : 'Designer mood boards'}
           </h2>
           <p style={{ fontSize: 12, color: '#888', margin: '4px 0 0' }}>
-            Inspiration only — images, V###-Color swatches, and notes. Separate from the fabric selection board.
+            Inspiration only — images, registered fabric codes, and notes. Separate from the fabric selection board.
           </p>
         </div>
-        {active?.share_token && (
+        {active?.share_token && !readOnly && (
           <button onClick={copyShare} style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #ddd6fe', background: '#f5f3ff', color: '#6d28d9', borderRadius: 10, padding: '8px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
             {copied ? <Copy size={14} /> : <Share2 size={14} />}
             {copied ? 'Copied' : 'Share read-only'}
@@ -217,19 +252,37 @@ export default function MoodBoardView({ readOnly = false, sharedBoard = null }: 
                 <div key={s.id} style={{ display: 'flex', gap: 10, alignItems: 'center', background: '#fff', border: '1px solid #ece8e0', borderRadius: 12, padding: 10 }}>
                   <div style={{ width: 36, height: 36, borderRadius: 8, background: s.hex || '#c9a84c', border: '1px solid #eee' }} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700 }}>{s.fabric_code}</div>
-                    <div style={{ fontSize: 11, color: '#888' }}>{s.name || 'Swatch'}{s.size_fraction ? ` · ${s.size_fraction}` : ''}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700 }}>{swatchLabel(s)}</div>
+                    <div style={{ fontSize: 11, color: '#888' }}>
+                      {s.specs || (s.uncoded || !s.fabric_code ? 'No registry code' : '')}
+                      {s.size_fraction ? ` · ${s.size_fraction}` : ''}
+                    </div>
                   </div>
                   {!readOnly && <button onClick={() => removeItem('swatches', s.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#aaa' }}><Trash2 size={12} /></button>}
                 </div>
               ))}
             </div>
             {!readOnly && (
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-                <input value={swatchCode} onChange={e => setSwatchCode(e.target.value)} placeholder="V142-Navy" style={{ width: 110, padding: '8px 10px', border: '1px solid #ece8e0', borderRadius: 8, fontSize: 12 }} />
-                <input value={swatchName} onChange={e => setSwatchName(e.target.value)} placeholder="Name" style={{ width: 90, padding: '8px 10px', border: '1px solid #ece8e0', borderRadius: 8, fontSize: 12 }} />
-                <input value={swatchHex} onChange={e => setSwatchHex(e.target.value)} style={{ width: 80, padding: '8px 10px', border: '1px solid #ece8e0', borderRadius: 8, fontSize: 12 }} />
-                <button onClick={addSwatch} style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 10px', fontSize: 12, cursor: 'pointer' }}>Add</button>
+              <div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                  <select
+                    value={swatchCode}
+                    onChange={e => setSwatchCode(e.target.value)}
+                    style={{ flex: 1, minWidth: 180, padding: '8px 10px', border: '1px solid #ece8e0', borderRadius: 8, fontSize: 12, background: '#fff' }}
+                  >
+                    <option value="">Uncoded — no registry code</option>
+                    {catalog.map(row => (
+                      <option key={row.code} value={row.code}>
+                        {row.code}{row.color ? ` · ${row.color}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <input value={swatchHex} onChange={e => setSwatchHex(e.target.value)} style={{ width: 80, padding: '8px 10px', border: '1px solid #ece8e0', borderRadius: 8, fontSize: 12 }} />
+                  <button onClick={addSwatch} style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 10px', fontSize: 12, cursor: 'pointer' }}>Add</button>
+                </div>
+                <div style={{ fontSize: 10, color: '#999', marginBottom: 16 }}>
+                  Codes come from the shared registry only. Next vinyl assignment is V008 — this board does not invent or type codes.
+                </div>
               </div>
             )}
 

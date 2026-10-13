@@ -1,4 +1,4 @@
-"""LuxeForge designer mood boards — images, V###-Color swatches, notes.
+"""LuxeForge designer mood boards — images, registry swatches, notes.
 
 Shareable read-only via token. Isolated JSON storage under EMPIRE_DATA_DIR.
 Does not touch the Sprint I fabric selection board.
@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -15,9 +14,17 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.services.data_paths import data_root
+from app.services.fabric_code_catalog import lookup_code
 from app.services.measurements import inches_to_fraction, pair_inches
 
-FABRIC_CODE_RE = re.compile(r"^V\d{3}-[A-Za-z][A-Za-z0-9]+$")
+SHARE_FORBIDDEN_KEYS = (
+    "brand", "supplier", "supplier_sku", "supplier_url", "vendor",
+)
+SHARE_SWATCH_KEYS = (
+    "id", "fabric_code", "color", "material_type", "specs", "backing",
+    "width_inches", "hex", "size_fraction", "width_fraction", "height_fraction",
+    "uncoded",
+)
 
 
 def mood_boards_dir() -> Path:
@@ -52,18 +59,30 @@ def _save_index(index: dict[str, str]) -> None:
         json.dump(index, fh, indent=2)
 
 
-def validate_fabric_code(code: str) -> str:
-    cleaned = (code or "").strip()
-    if not FABRIC_CODE_RE.match(cleaned):
-        raise ValueError(
-            f"Fabric code '{code}' must match V###-Color (example: V142-Navy, V003-Ivory)"
-        )
-    return cleaned
+def resolve_swatch_code(code: Optional[str]) -> Optional[dict[str, Any]]:
+    """Registry row or None when the swatch is left uncoded. Never invents codes."""
+    return lookup_code(code)
 
 
 def _decorate_swatch(swatch: dict[str, Any]) -> dict[str, Any]:
     out = dict(swatch)
-    out["fabric_code"] = validate_fabric_code(str(out.get("fabric_code") or ""))
+    for key in SHARE_FORBIDDEN_KEYS:
+        out.pop(key, None)
+    registry = resolve_swatch_code(out.get("fabric_code"))
+    if registry is None:
+        out["fabric_code"] = None
+        out["uncoded"] = True
+        out.pop("color", None)
+        out.pop("material_type", None)
+        out.pop("specs", None)
+    else:
+        out["fabric_code"] = registry["code"]
+        out["uncoded"] = False
+        out["color"] = registry.get("color")
+        out["material_type"] = registry.get("material_type")
+        out["specs"] = registry.get("specs")
+        out["backing"] = registry.get("backing")
+        out["width_inches"] = registry.get("width_inches")
     if out.get("width_in") is not None or out.get("height_in") is not None:
         out["size_fraction"] = pair_inches(out.get("width_in"), out.get("height_in"))
     return out
@@ -212,7 +231,7 @@ def add_image(board_id: str, url: str, caption: str = "", width_in: Any = None, 
 
 def add_swatch(
     board_id: str,
-    fabric_code: str,
+    fabric_code: Optional[str] = None,
     name: str = "",
     hex_color: str = "",
     notes: str = "",
@@ -222,9 +241,10 @@ def add_swatch(
     board = get_board(board_id)
     if not board:
         raise KeyError(f"Mood board '{board_id}' not found")
+    registry = resolve_swatch_code(fabric_code)
     swatch = {
         "id": uuid.uuid4().hex[:10],
-        "fabric_code": validate_fabric_code(fabric_code),
+        "fabric_code": registry["code"] if registry else None,
         "name": name.strip(),
         "hex": (hex_color or "").strip() or "#c9a84c",
         "notes": notes.strip(),
@@ -275,3 +295,38 @@ def rotate_share_token(board_id: str) -> dict[str, Any]:
         index.pop(old, None)
     _save_index(index)
     return _save(board)
+
+
+def _public_swatch(swatch: dict[str, Any]) -> dict[str, Any]:
+    decorated = _decorate_swatch(swatch)
+    public = {k: decorated.get(k) for k in SHARE_SWATCH_KEYS if k in decorated}
+    public["uncoded"] = bool(decorated.get("uncoded") or not decorated.get("fabric_code"))
+    return public
+
+
+def share_projection(board: dict[str, Any]) -> dict[str, Any]:
+    """Read-only share payload: no brand, supplier, or write handles."""
+    images = [
+        {
+            "id": img.get("id"),
+            "url": img.get("url"),
+            "caption": img.get("caption"),
+            "size_fraction": img.get("size_fraction"),
+            "width_fraction": img.get("width_fraction"),
+            "height_fraction": img.get("height_fraction"),
+        }
+        for img in board.get("images") or []
+    ]
+    notes = [{"id": n.get("id"), "text": n.get("text")} for n in board.get("notes") or []]
+    return {
+        "id": board.get("id"),
+        "title": board.get("title"),
+        "designer": board.get("designer"),
+        "client_name": board.get("client_name"),
+        "description": board.get("description"),
+        "images": images,
+        "swatches": [_public_swatch(s) for s in board.get("swatches") or []],
+        "notes": notes,
+        "read_only": True,
+        "module": "mood_board",
+    }

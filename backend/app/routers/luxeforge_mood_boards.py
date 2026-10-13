@@ -1,12 +1,13 @@
 """LuxeForge mood-board API. Owner CRUD + token-gated read-only share."""
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.services import luxeforge_mood_board as boards
+from app.services.fabric_code_catalog import client_catalog, next_vinyl_hint
 
 router = APIRouter(prefix="/luxeforge/mood-boards", tags=["luxeforge-mood-boards"])
 
@@ -33,7 +34,10 @@ class ImageAdd(BaseModel):
 
 
 class SwatchAdd(BaseModel):
-    fabric_code: str = Field(..., description="V###-Color, e.g. V142-Navy")
+    fabric_code: Optional[str] = Field(
+        None,
+        description="Code from the shared fabric registry, or omit to leave the swatch uncoded",
+    )
     name: str = ""
     hex_color: str = ""
     notes: str = ""
@@ -43,6 +47,18 @@ class SwatchAdd(BaseModel):
 
 class NoteAdd(BaseModel):
     text: str
+
+
+@router.get("/fabric-codes")
+async def fabric_codes():
+    """Client-safe registry list for the mood-board picker. No brand/supplier."""
+    catalog = client_catalog()
+    return {
+        "items": catalog,
+        "next_vinyl": next_vinyl_hint(),
+        "source": "docs/FABRIC_CODES.csv",
+        "note": "Pick a registered code or leave the swatch uncoded. Codes are never invented or reused.",
+    }
 
 
 @router.get("")
@@ -60,19 +76,7 @@ async def shared_board(token: str):
     board = boards.get_board_by_token(token)
     if not board:
         raise HTTPException(404, "Mood board not found")
-    # Read-only projection — no write URLs.
-    return {
-        "id": board["id"],
-        "title": board.get("title"),
-        "designer": board.get("designer"),
-        "client_name": board.get("client_name"),
-        "description": board.get("description"),
-        "images": board.get("images") or [],
-        "swatches": board.get("swatches") or [],
-        "notes": board.get("notes") or [],
-        "read_only": True,
-        "module": "mood_board",
-    }
+    return boards.share_projection(board)
 
 
 @router.get("/{board_id}")
