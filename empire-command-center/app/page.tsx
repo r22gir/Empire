@@ -41,6 +41,8 @@ import VisionAnalysisPage from './components/screens/VisionAnalysisPage';
 import DrawingStudioPage from './components/screens/DrawingStudioPage';
 import ForgeCRMPage from './components/screens/ForgeCRMPage';
 import BusinessProfileScreen from './components/screens/BusinessProfileScreen';
+import SettingsScreen from './components/screens/SettingsScreen';
+import StudioAuthGate from './components/auth/StudioAuthGate';
 import DesksScreen from './components/screens/DesksScreen';
 import InboxScreen from './components/screens/InboxScreen';
 import SystemReportScreen from './components/screens/SystemReportScreen';
@@ -340,7 +342,7 @@ export default function CommandCenter() {
       calendar: 'calendar',
       documents: 'docs',
       'business-profile': 'business-profile',
-      settings: 'business-profile',
+      settings: 'settings',
       jobs: 'jobs',
       invoices: 'invoices',
     };
@@ -477,6 +479,7 @@ export default function CommandCenter() {
       }
     }
     if (activeScreen === 'business-profile') return <BusinessProfileScreen />;
+    if (activeScreen === 'settings') return <SettingsScreen />;
     if (activeScreen === 'pricing' && activeProduct === 'platform') return <PricingPage />;
     if (activeScreen === 'pricing-studio') return <PricingStudioScreen />;
     if (activeScreen === 'desks') return <DesksScreen desks={sys.desks} onSendTask={handleSendMessage} />;
@@ -525,6 +528,7 @@ export default function CommandCenter() {
   };
 
   return (
+    <StudioAuthGate>
     <div className="h-screen flex flex-col">
       {clientView && (
         <div className="bg-[#16a34a] text-white text-center py-2 text-xs font-bold tracking-widest flex items-center justify-center gap-3 shadow-[0_2px_8px_rgba(22,163,74,0.3)]">
@@ -588,5 +592,6 @@ export default function CommandCenter() {
         onSelect={handleQuickSwitchSelect}
       />
     </div>
+    </StudioAuthGate>
   );
 }

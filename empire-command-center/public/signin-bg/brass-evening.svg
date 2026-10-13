@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#121018"/>
+      <stop offset="50%" stop-color="#1c1624"/>
+      <stop offset="100%" stop-color="#0a090c"/>
+    </linearGradient>
+    <radialGradient id="lamp" cx="22%" cy="30%" r="38%">
+      <stop offset="0%" stop-color="#e8c56a" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a2a1c"/>
+      <stop offset="100%" stop-color="#1a120c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#night)"/>
+  <rect width="1600" height="900" fill="url(#lamp)"/>
+  <rect y="620" width="1600" height="280" fill="url(#wood)"/>
+  <ellipse cx="360" cy="300" rx="160" ry="90" fill="#d4af37" opacity="0.12"/>
+  <rect x="200" y="200" width="14" height="420" fill="#b8960c" opacity="0.55"/>
+  <rect x="190" y="180" width="34" height="28" rx="4" fill="#d4af37" opacity="0.7"/>
+  <path d="M80 620 C400 540 700 700 1100 580 C1300 530 1500 640 1600 600 L1600 900 L0 900 Z" fill="#241810" opacity="0.8"/>
+  <rect x="980" y="240" width="420" height="280" rx="6" fill="#2a2230" opacity="0.5"/>
+  <rect x="1000" y="260" width="380" height="240" fill="#c9b48a" opacity="0.08"/>
+</svg>

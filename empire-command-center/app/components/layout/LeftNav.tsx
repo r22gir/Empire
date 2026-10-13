@@ -7,7 +7,7 @@ import {
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
-  Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
+  Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign, Settings,
   ChevronDown, ChevronRight,
 } from 'lucide-react';
 
@@ -48,6 +48,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04', kind: 'product' },
       // Daily Summary is the inline Dashboard panel (rightPanel) — toggled, not navigated.
       { id: 'daily-summary', name: 'Daily Summary', icon: <LayoutDashboard size={16} />, status: 'active', color: '#7c3aed', kind: 'daily-summary' },
+      { id: 'settings', name: 'Settings', icon: <Settings size={16} />, status: 'active', color: '#b8960c', screen: 'settings' as ScreenMode, kind: 'screen' },
     ],
   },
   {
