@@ -31,3 +31,8 @@ test('cloned request body accepts a multi-MB phone JPEG base64', () => {
   // 20MB file cap in PhotoAnalysisPanel becomes ~27MB of base64.
   assert.ok(sizeBytes(config.experimental.proxyClientMaxBodySize) >= 32 * 1024 * 1024);
 });
+
+test('family-help multipart (5×8 MiB files + 12 MiB voice) fits the rewrite proxy', () => {
+  const familyHelpMax = (5 * 8 + 12) * 1024 * 1024;
+  assert.ok(sizeBytes(config.experimental.proxyClientMaxBodySize) > familyHelpMax);
+});

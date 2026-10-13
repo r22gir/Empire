@@ -14,10 +14,12 @@ const BACKEND_UPSTREAM = empireUpstream();
 //
 // This is also the body-size ceiling for /api/v1/intake/projects/*/photos
 // and /scans (LuxeForge intake uploads — PDFs, CAD, 3D scans, video, ...
-// go through the same same-origin proxy below). Keep it in sync with
+// go through the same same-origin proxy below) and for family-help
+// multipart tickets (5×8 MiB files + 12 MiB voice). Keep it in sync with
 // backend/app/services/uploads/safe_file_serve.py:MAX_UPLOAD_BYTES
 // (~200MB) — raising one without the other just moves the 413/timeout
-// from the backend to this proxy or vice versa.
+// from the backend to this proxy or vice versa. A 10MB default would
+// silently truncate a Pedir-ayuda attachment before FastAPI sees it.
 const VISION_PROXY_TIMEOUT_MS = 180_000;
 const VISION_PROXY_BODY_LIMIT = '200mb';
 
