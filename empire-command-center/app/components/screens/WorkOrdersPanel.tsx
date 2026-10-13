@@ -308,7 +308,7 @@ export default function WorkOrdersPanel({ onClose, jobId }: { onClose?: () => vo
   const applyCredit = async () => {
     setError(null);
     try {
-      const result = await postJson(`/sprint-m/credits/${creditForm.customer_id}/apply`, {
+      const result = await postJson<any>(`/sprint-m/credits/${creditForm.customer_id}/apply`, {
         invoice_id: creditForm.invoice_id,
       });
       setCredits(result);

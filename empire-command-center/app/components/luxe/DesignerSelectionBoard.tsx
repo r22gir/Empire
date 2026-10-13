@@ -55,7 +55,8 @@ export default function DesignerSelectionBoard() {
   const filtered = pool.filter((item) => {
     if (!query.trim()) return true;
     const q = query.toLowerCase();
-    return `${item.name} ${item.house || ''} ${item.color || ''} ${item.material || ''} ${item.room || ''}`.toLowerCase().includes(q);
+    const rec = item as Record<string, unknown>;
+    return `${item.name} ${rec.house || ''} ${rec.color || ''} ${rec.material || ''} ${rec.room || ''}`.toLowerCase().includes(q);
   });
 
   async function preview() {
@@ -114,13 +115,14 @@ export default function DesignerSelectionBoard() {
           <input className="lxb-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the house library" />
           {filtered.map((item) => {
             const on = board.selections.some((s) => s.id === item.id);
+            const rec = item as Record<string, unknown>;
             return (
               <button key={item.id} className={`lxb-tile${on ? ' on' : ''}`} onClick={() => { setBoard(toggleSelection(board, item)); setServerEstimate(null); }}>
                 <div className="lxb-swatch" style={{ background: item.swatch }} />
                 <span>
                   <b>{item.name}</b>
                   <small>
-                    {item.house || item.family || item.room} · {item.color || item.mood || item.material}
+                    {String(rec.house || rec.family || rec.room || '')} · {String(rec.color || rec.mood || rec.material || '')}
                     {item.kind === 'fabric' ? ` · ${money(item.price_per_yard || 0)} / yd` : item.kind === 'finish' ? ` · ${money(item.price || 0)}` : ''}
                   </small>
                 </span>

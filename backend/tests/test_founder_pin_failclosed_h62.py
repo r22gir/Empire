@@ -217,11 +217,14 @@ def test_founder_token_refuses_with_empty_pin_when_env_unset(monkeypatch, caplog
     founder-token endpoint whenever FOUNDER_PIN was unset."""
     monkeypatch.delenv("FOUNDER_PIN", raising=False)
 
+    from unittest.mock import MagicMock
+    from starlette.responses import Response
+
     from app.routers.auth import founder_token, FounderPinRequest
 
     with caplog.at_level(logging.CRITICAL, logger="empire.auth"):
         with pytest.raises(HTTPException) as exc:
-            founder_token(FounderPinRequest(pin=""))
+            founder_token(FounderPinRequest(pin=""), request=MagicMock(), response=Response())
 
     assert exc.value.status_code == 401, (
         f"unset FOUNDER_PIN must refuse with 401 (same as mismatch); "
@@ -244,10 +247,17 @@ def test_founder_token_refuses_with_regression_literal_when_env_unset(monkeypatc
     a founder JWT just by typing the historical default."""
     monkeypatch.delenv("FOUNDER_PIN", raising=False)
 
+    from unittest.mock import MagicMock
+    from starlette.responses import Response
+
     from app.routers.auth import founder_token, FounderPinRequest
 
     with pytest.raises(HTTPException) as exc:
-        founder_token(FounderPinRequest(pin=REGRESSION_LITERAL))
+        founder_token(
+            FounderPinRequest(pin=REGRESSION_LITERAL),
+            request=MagicMock(),
+            response=Response(),
+        )
 
     assert exc.value.status_code == 401, (
         f"REGRESSION_LITERAL must not bypass the JWT gate; "

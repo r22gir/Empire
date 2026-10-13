@@ -286,11 +286,7 @@ class FounderPinRequest(BaseModel):
 
 
 @router.post("/founder-token")
-def founder_token(
-    data: FounderPinRequest,
-    request: Request | None = None,
-    response: Response | None = None,
-):
+def founder_token(data: FounderPinRequest, request: Request, response: Response):
     """Issue a JWT for the founder user after FOUNDER_PIN verification.
 
     This lets the Command Center obtain a real Bearer token for the founder
@@ -307,15 +303,7 @@ def founder_token(
             raise HTTPException(status_code=404, detail="No founder user found")
 
     user = dict_row(row)
-    if request is not None and response is not None:
-        return _issue_session(user, request, response)
-    token_data = {"user_id": user["id"], "email": user.get("email") or ""}
-    return {
-        "access_token": create_access_token(token_data),
-        "refresh_token": create_refresh_token(token_data),
-        "token_type": "bearer",
-        "user": _public_user(user),
-    }
+    return _issue_session(user, request, response)
 
 
 @router.get("/me")
