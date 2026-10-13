@@ -53,5 +53,12 @@
     "avg_deal_size": "Tamano Promedio de Negocio",
     "search_contacts": "Buscar contactos...",
     "no_results": "Sin resultados"
+  },
+  "thread": {
+    "title": "Hilo WhatsApp / SMS",
+    "policy": "Las respuestas salientes son borradores. El propietario debe aprobar cada mensaje. Nunca hay respuestas automaticas.",
+    "save_draft": "Guardar borrador",
+    "approve": "Aprobar para enviar",
+    "incoming": "Entrante"
   }
 }

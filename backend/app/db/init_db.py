@@ -468,6 +468,14 @@ def init_database():
         # Intake soft-delete migration (adds deleted_at to intake tables)
         _migrate_intake_soft_delete(conn)
 
+        # ForgeCRM unified thread + sandbox accounting staging (additive)
+        from app.services.crm_messaging import ensure_schema as _ensure_crm_msg
+        from app.services.accounting.qbo import ensure_schema as _ensure_qbo
+        from app.services.accounting.alegra_siigo import ensure_schema as _ensure_dian
+        _ensure_crm_msg(conn)
+        _ensure_qbo(conn)
+        _ensure_dian(conn)
+
         # Seed desk configs from desks.json if table is empty
         count = conn.execute("SELECT COUNT(*) FROM desk_configs").fetchone()[0]
         if count == 0 and DESKS_JSON_PATH.exists():
