@@ -12,6 +12,7 @@ import KPICard from '../shared/KPICard';
 import StatusBadge from '../shared/StatusBadge';
 import EmptyState from '../shared/EmptyState';
 import ClientThread from './ClientThread';
+import ClientFollowupPrefs from './ClientFollowupPrefs';
 
 interface CustomerDetailProps {
   customerId: string;
@@ -577,6 +578,8 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
                 </div>
               )}
             </div>
+
+            <ClientFollowupPrefs customerId={customerId} />
 
             {/* Finance Statement */}
             <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #ece8e0', padding: 20 }}>

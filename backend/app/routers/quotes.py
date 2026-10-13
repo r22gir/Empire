@@ -66,6 +66,16 @@ class Measurements(BaseModel):
     window_type: Optional[str] = None
     notes: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def parse_fraction_fields(cls, data):
+        if isinstance(data, dict):
+            from app.services.workroom_quote_commerce import parse_fraction_inches
+            for key in ("width", "height", "depth"):
+                if data.get(key) not in (None, ""):
+                    data[key] = parse_fraction_inches(data[key])
+        return data
+
 class DepositSchedule(BaseModel):
     deposit_percent: float = 50.0
     deposit_amount: float = 0.0
@@ -81,6 +91,7 @@ class QuoteCreate(BaseModel):
     project_description: Optional[str] = None
     desk_id: Optional[str] = None
     line_items: list[LineItem] = Field(default_factory=list)
+    addons: list[dict] = Field(default_factory=list)
     measurements: Optional[Measurements] = None
 
     @model_validator(mode="before")
@@ -131,6 +142,7 @@ class QuoteUpdate(BaseModel):
     project_description: Optional[str] = None
     desk_id: Optional[str] = None
     line_items: Optional[list[LineItem]] = None
+    addons: Optional[list[dict]] = None
     measurements: Optional[Measurements] = None
     subtotal: Optional[float] = None
     tax_rate: Optional[float] = None
@@ -279,6 +291,20 @@ def _compute_financials(data: dict) -> dict:
                 for u in room.get("upholstery", []):
                     subtotal += u.get("price", 0)
             subtotal = round(subtotal, 2)
+
+    addons = data.get("addons") or data.get("add_ons") or []
+    if addons:
+        from app.services.workroom_quote_commerce import (
+            money_float,
+            normalize_addon,
+            selected_addon_total,
+        )
+        data["addons"] = [normalize_addon(a) for a in addons]
+        addon_total = selected_addon_total(data["addons"])
+        data["addon_total"] = money_float(addon_total)
+        subtotal = round(subtotal + float(addon_total), 2)
+    else:
+        data["addon_total"] = 0.0
 
     tax_rate = data.get("tax_rate", 0.0)
     tax_amount = round(subtotal * tax_rate, 2)
@@ -1009,6 +1035,9 @@ async def create_quote_from_rooms(body: dict):
         quote["idea_diagram_error"] = f"Idea diagrams could not be attached: {idea_err}"
     quote["drawings"] = body.get("drawings") or _quote_item_drawings(rooms)
     quote["options"] = options
+    if body.get("addons"):
+        quote["addons"] = body.get("addons")
+        quote = _compute_financials(quote)
 
     if options.get("rush_order"):
         for tier_key in quote.get("tiers", {}):
@@ -1037,15 +1066,9 @@ async def create_quote_from_rooms(body: dict):
 
 
 def _parse_dim(val) -> float:
-    """Parse dimension to float (handles strings, ints, empty)."""
-    if isinstance(val, (int, float)):
-        return float(val)
-    if isinstance(val, str):
-        try:
-            return float(val) if val.strip() else 0.0
-        except ValueError:
-            return 0.0
-    return 0.0
+    """Parse dimension to float, including workroom fractions (36 1/2)."""
+    from app.services.workroom_quote_commerce import parse_fraction_inches
+    return parse_fraction_inches(val)
 
 
 @router.post("/preview-pricing")
@@ -1404,8 +1427,8 @@ async def update_quote(quote_id: str, payload: QuoteUpdate):
     if not selection_applied and "selected_proposal" in updates and updates["selected_proposal"] is not None:
         selection_applied = _apply_selected_proposal_or_tier(quote, updates["selected_proposal"])
 
-    # Recalculate if line items or tax changed
-    if any(k in updates for k in ("line_items", "tax_rate", "discount_amount")):
+    # Recalculate if line items, add-ons, or tax changed
+    if any(k in updates for k in ("line_items", "addons", "tax_rate", "discount_amount")):
         quote = _compute_financials(quote)
 
     # Update expiry if valid_days changed

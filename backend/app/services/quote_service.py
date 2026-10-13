@@ -531,6 +531,24 @@ def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
         2,
     )
 
+    addon_total = 0.0
+    try:
+        meta_row = conn.execute(
+            "SELECT metadata_json FROM quotes_v2 WHERE id = ?", (quote_id,)
+        ).fetchone()
+    except Exception:
+        meta_row = None
+    if meta_row and meta_row[0]:
+        try:
+            metadata = json.loads(meta_row[0])
+        except (json.JSONDecodeError, TypeError):
+            metadata = {}
+        addons = metadata.get("addons") or []
+        if addons:
+            from app.services.workroom_quote_commerce import selected_addon_total
+            addon_total = float(selected_addon_total(addons))
+    items_subtotal = round(items_subtotal + addon_total, 2)
+
     q = conn.execute(
         "SELECT subtotal, tax_rate, discount_amount, discount_type, total, deposit_percent, metadata_json FROM quotes_v2 WHERE id = ?",
         (quote_id,)
