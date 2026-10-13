@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build --webpack",
-    "start": "next start"
+    "start": "next start",
+    "test:signin": "node scripts/test-signin-assets.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",

@@ -1,0 +1,29 @@
+{
+  "intervalMs": 8000,
+  "slides": [
+    {
+      "src": "/signin-bg/drapery-atelier.svg",
+      "alt": "Empire Workroom drapery folds in warm atelier light",
+      "diagram": "/diagrams/window-treatments/drapery_pinch_pleat.svg",
+      "caption": "Custom drapery"
+    },
+    {
+      "src": "/signin-bg/linen-window.svg",
+      "alt": "Linen shade at a tall workroom window",
+      "diagram": "/diagrams/window-treatments/roman_hobbled.svg",
+      "caption": "Window treatments"
+    },
+    {
+      "src": "/signin-bg/workbench-oak.svg",
+      "alt": "Oak workbench in the Empire fabrication shop",
+      "diagram": "/diagrams/furniture/sofa_chesterfield.svg",
+      "caption": "Upholstery bench"
+    },
+    {
+      "src": "/signin-bg/brass-evening.svg",
+      "alt": "Evening brass light over a finished room",
+      "diagram": "/diagrams/wall-panels/wall_panel_channel.svg",
+      "caption": "Finished interiors"
+    }
+  ]
+}

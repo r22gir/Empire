@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="room" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1f1a14"/>
+      <stop offset="100%" stop-color="#0e0c0a"/>
+    </linearGradient>
+    <linearGradient id="linen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f4ead4"/>
+      <stop offset="50%" stop-color="#d7c4a0"/>
+      <stop offset="100%" stop-color="#b89a6a"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="70%" cy="28%" r="40%">
+      <stop offset="0%" stop-color="#fff6d8" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#room)"/>
+  <rect x="720" y="40" width="720" height="820" rx="8" fill="#2a241c"/>
+  <rect x="760" y="80" width="640" height="740" fill="url(#linen)" opacity="0.88"/>
+  <path d="M760 80 C900 260 820 500 980 820 L760 820 Z" fill="#8d7350" opacity="0.35"/>
+  <path d="M1080 80 C1220 300 1140 540 1280 820 L1080 820 Z" fill="#fff8e8" opacity="0.2"/>
+  <rect width="1600" height="900" fill="url(#sun)"/>
+  <rect y="780" width="1600" height="120" fill="#16120e"/>
+  <rect y="770" width="1600" height="8" fill="#b8960c" opacity="0.35"/>
+</svg>

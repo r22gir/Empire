@@ -109,6 +109,9 @@ load_router("app.routers.licenses", "/licenses", ["licenses"])
 load_router("app.routers.shipping", "/shipping", ["shipping"])
 load_router("app.routers.preorders", "/preorders", ["preorders"])
 load_router("app.routers.auth", "/auth", ["auth"])
+# Same router on /api/v1/auth so studio.empirebox.store same-origin
+# /api/v1 rewrites can reach sign-in and trusted-device endpoints.
+load_router("app.routers.auth", "/api/v1/auth", ["auth"])
 load_router("app.routers.users", "/users", ["users"])
 load_router("app.routers.listings", "/listings", ["listings"])
 load_router("app.routers.relistapp", "/api/v1", ["relistapp"])
