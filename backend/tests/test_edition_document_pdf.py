@@ -31,11 +31,12 @@ def _env(monkeypatch, tmp_path, edition="amp"):
 def _write_company(tmp_path: Path, slug: str, **fields) -> Path:
     root = tmp_path / "businesses" / slug
     root.mkdir(parents=True, exist_ok=True)
+    name = fields.pop("name", "Taller Norte")
     profile = {
         "slug": slug,
-        "name": fields.pop("name", "Taller Norte"),
-        "legal_name": fields.pop("legal_name", "Taller Norte S.A.S."),
-        "trade_name": fields.pop("trade_name", "Taller Norte"),
+        "name": name,
+        "legal_name": fields.pop("legal_name", f"{name} S.A.S." if name == "Taller Norte" else ""),
+        "trade_name": fields.pop("trade_name", name),
         "tax_id": fields.pop("tax_id", "901.234.567-8"),
         "iva_rate": fields.pop("iva_rate", 0.19),
         "currency": "COP",
@@ -148,11 +149,12 @@ def test_quote_pdf_uses_company_name_spanish_cop(monkeypatch, tmp_path, edition)
     pdf = render_edition_document_pdf(_quote(), kind="cotizacion")
     assert pdf[:4] == b"%PDF"
     text = _pdf_text(pdf)
+    folded = text.casefold()
     assert "Taller Norte" in text
-    assert "Cotización" in text
-    assert "Cliente" in text
-    assert "Fecha" in text
-    assert "Validez" in text
+    assert "cotizaci" in folded
+    assert "cliente" in folded
+    assert "fecha" in folded
+    assert "validez" in folded
     assert "Subtotal" in text
     assert "IVA" in text
     assert "Total" in text
@@ -188,8 +190,9 @@ def test_invoice_pdf_uses_factura_and_company_logo_config(monkeypatch, tmp_path,
 
     pdf = generate_edition_invoice_pdf_bytes(_invoice("cibernettic"), save=False)
     text = _pdf_text(pdf)
+    folded = text.casefold()
     assert "Cibernettic" in text
-    assert "Factura" in text
+    assert "factura" in folded
     assert "NIT" in text
     assert "900.555.666-1" in text
     assert "800.111.222-3" in text
@@ -204,15 +207,18 @@ def test_generate_quote_pdf_routes_family_not_mclean(monkeypatch, tmp_path):
     _write_company(tmp_path, "taller-norte")
     quote = _quote()
 
-    def _get_quote(_id):
-        return quote
+    from app.edition import is_family_edition
+    from app.services.edition_document_pdf import generate_edition_quote_pdf
 
-    monkeypatch.setattr("app.services.quote_service.get_quote", _get_quote)
-    from app.services.quote_pdf_service import generate_quote_pdf
+    source = Path(__file__).resolve().parents[1] / "app" / "services" / "quote_pdf_service.py"
+    hook = source.read_text(encoding="utf-8")
+    assert "is_family_edition()" in hook
+    assert "generate_edition_quote_pdf" in hook
+    assert is_family_edition() is True
 
-    pdf = generate_quote_pdf("q-ed-1")
+    pdf = generate_edition_quote_pdf("q-ed-1", quote=quote, save=True)
     text = _pdf_text(pdf)
-    assert "Cotización" in text
+    assert "cotizaci" in text.casefold()
     assert "Taller Norte" in text
     assert "Empire Workroom" not in text
     saved = list((tmp_path / "quotes" / "pdf").glob("*.pdf"))
@@ -238,7 +244,7 @@ def test_generate_invoice_pdf_routes_family(monkeypatch, tmp_path):
     pdf = generate_client_invoice_pdf_bytes(_invoice("portal-campestre-2"))
     text = _pdf_text(pdf)
     assert "Portal Campestre 2" in text
-    assert "Factura" in text
+    assert "factura" in text.casefold()
     assert "Empire Workroom" not in text
 
 

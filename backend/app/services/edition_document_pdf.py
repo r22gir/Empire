@@ -382,6 +382,8 @@ def render_edition_document_pdf(
     styles = _styles()
     story = []
     story.extend(_header_flowables(brand, title, number, styles))
+    story.append(Paragraph(f"<b>{title}</b>  {number}", styles["EdName"]))
+    story.append(Spacer(1, 8))
     story.append(_party_block(
         brand, document, customer=customer, styles=styles,
         valid_label=valid_label, valid_value=valid_value,
