@@ -47,6 +47,23 @@ def _cookie(client, email):
     client.cookies.set(SESSION_COOKIE, create_session_token(email))
 
 
+def test_workroom_put_upserts_full_client_id(monkeypatch, tmp_path):
+    import asyncio
+
+    _workroom_env(monkeypatch, tmp_path)
+    from app.api.v1 import chats
+
+    monkeypatch.setattr(chats, "CHATS_DIR", tmp_path)
+    chat_id = "30ea0046-2bc9-461c-8215-5793e12874cd"
+    req = chats.UpdateChatRequest(messages=[{"role": "user", "content": "finance readiness"}])
+    response = asyncio.run(chats.update_chat(chat_id, req))
+    assert response == {"status": "created", "chat_id": chat_id}
+    saved = json.loads((tmp_path / "founder" / f"{chat_id}.json").read_text())
+    assert saved["id"] == chat_id
+    assert saved["timezone"] == "America/New_York"
+    assert not (tmp_path / "founder" / f"{chat_id[:8]}.json").exists()
+
+
 def test_persist_exchange_uses_full_id_and_new_york_zone(monkeypatch, tmp_path):
     _workroom_env(monkeypatch, tmp_path)
     from app.services.chat_history_store import persist_exchange
