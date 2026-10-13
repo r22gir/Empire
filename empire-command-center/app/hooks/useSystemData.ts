@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { API } from '../lib/api';
+import { isFamilyEdition } from '../lib/edition';
 import { Desk } from '../lib/types';
 
 export function useSystemData() {
@@ -79,8 +80,10 @@ export function useSystemData() {
 
   useEffect(() => {
     fetchDesks();
-    fetchServices();
     fetchBriefing();
+    // Family editions get 403 on /system/health, /system/stats and OpenClaw.
+    if (isFamilyEdition()) return;
+    fetchServices();
     fetchSystem();
     const interval = setInterval(() => { fetchServices(); fetchSystem(); }, 60000);
     return () => clearInterval(interval);
