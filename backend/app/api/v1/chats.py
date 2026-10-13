@@ -1,11 +1,20 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Dict, Optional
-import json
 import os
 from pathlib import Path
-from datetime import datetime
-import uuid
+
+from app.services.chat_history_store import (
+    ChatHistoryIdError,
+    ChatHistoryOwnerError,
+    LegacyChatReadOnlyError,
+    chats_dir as store_chats_dir,
+    iter_searchable_chats,
+    list_chats_for_owner,
+    load_chat_for_owner,
+    update_meta,
+    upsert_chat,
+)
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
@@ -15,22 +24,25 @@ CHATS_DIR = Path(__file__).parent.parent.parent.parent / "data" / "chats"
 
 
 def _chats_dir() -> Path:
-    try:
-        from app.edition import is_family_edition, require_data_root
+    return store_chats_dir(workroom_dir=CHATS_DIR)
 
-        if is_family_edition():
-            path = require_data_root() / "chats"
-            path.mkdir(parents=True, exist_ok=True)
-            return path
-    except Exception:
-        pass
-    path = Path(CHATS_DIR)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+
+def _workroom_dir() -> Path:
+    return CHATS_DIR
+
+
+def _owner_or_403(request: Optional[Request], claimed: Optional[str] = None) -> str:
+    from app.services.chat_history_store import owner_key_for_request
+
+    try:
+        return owner_key_for_request(request, claimed)
+    except ChatHistoryOwnerError:
+        raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
 
 
 class SaveChatRequest(BaseModel):
     user_id: str = "founder"
+    id: Optional[str] = None
     messages: List[Dict]
     title: Optional[str] = None
 
@@ -47,131 +59,65 @@ class PinChatRequest(BaseModel):
     pinned: bool = True
 
 
-# ── Helpers ──────────────────────────────────────────────────
-
-
-def _get_preview(messages: List[Dict], max_len: int = 120) -> str:
-    """Extract a short preview from the first user message."""
-    for msg in messages:
-        if msg.get("role") == "user":
-            text = msg.get("content", "")
-            if isinstance(text, str) and text.strip():
-                return text.strip()[:max_len]
-    return ""
-
-
-def _auto_title(messages: List[Dict]) -> str:
-    """Generate a title from the first user message."""
-    for msg in messages:
-        if msg.get("role") == "user":
-            text = msg.get("content", "")
-            if isinstance(text, str) and text.strip():
-                # Take first sentence or first 60 chars
-                first_line = text.strip().split("\n")[0]
-                if len(first_line) > 60:
-                    return first_line[:57] + "..."
-                return first_line
-    return f"Chat {datetime.now().strftime('%m/%d %H:%M')}"
-
-
 # ── CRUD Endpoints ───────────────────────────────────────────
 
 
 @router.post("/save")
-async def save_chat(req: SaveChatRequest):
-    chat_id = str(uuid.uuid4())[:8]
-    title = req.title or _auto_title(req.messages)
-
-    user_dir = _chats_dir() / req.user_id
-    user_dir.mkdir(exist_ok=True)
-
-    chat_data = {
-        "id": chat_id,
-        "title": title,
-        "created_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat(),
-        "pinned": False,
-        "preview": _get_preview(req.messages),
-        "messages": req.messages,
-    }
-
-    with open(user_dir / f"{chat_id}.json", "w") as f:
-        json.dump(chat_data, f, indent=2)
-
-    return {"status": "saved", "chat_id": chat_id, "title": title}
+async def save_chat(req: SaveChatRequest, request: Request):
+    try:
+        data, _status = upsert_chat(
+            chat_id=req.id,
+            messages=req.messages,
+            title=req.title,
+            request=request,
+            claimed_user_id=req.user_id,
+            workroom_dir=_workroom_dir(),
+            generate_id=True,
+        )
+    except ChatHistoryOwnerError:
+        raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
+    except ChatHistoryIdError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "saved", "chat_id": data["id"], "title": data["title"]}
 
 
 @router.put("/{chat_id}")
-async def update_chat(chat_id: str, req: UpdateChatRequest, user_id: str = "founder"):
-    user_dir = _chats_dir() / user_id
-    user_dir.mkdir(parents=True, exist_ok=True)
-    chat_file = user_dir / f"{chat_id}.json"
-    now = datetime.now().isoformat()
-
-    if chat_file.exists():
-        with open(chat_file, "r") as f:
-            chat_data = json.load(f)
-        status = "updated"
-    else:
-        # The streaming client can generate its UUID before the first save.
-        # PUT is therefore an idempotent upsert, not a reason to turn a healthy
-        # completed response into a frontend "Connection error".
-        chat_data = {
-            "id": chat_id,
-            "title": _auto_title(req.messages),
-            "created_at": now,
-            "pinned": False,
-        }
-        status = "created"
-
-    chat_data["messages"] = req.messages
-    chat_data["updated_at"] = now
-    chat_data["preview"] = _get_preview(req.messages)
-
-    with open(chat_file, "w") as f:
-        json.dump(chat_data, f, indent=2)
-
-    return {"status": status, "chat_id": chat_id}
+async def update_chat(chat_id: str, req: UpdateChatRequest, request: Request = None, user_id: str = "founder"):
+    try:
+        data, status = upsert_chat(
+            chat_id=chat_id,
+            messages=req.messages,
+            request=request,
+            claimed_user_id=user_id,
+            workroom_dir=_workroom_dir(),
+        )
+    except ChatHistoryOwnerError:
+        raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
+    except ChatHistoryIdError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": status, "chat_id": data["id"]}
 
 
 @router.get("/list")
-async def list_chats(user_id: str = "founder", limit: int = 200, offset: int = 0):
+async def list_chats(request: Request = None, user_id: str = "founder", limit: int = 200, offset: int = 0):
     """Newest chats first (pinned on top), one page at a time.
 
     2026-10-04: the full list had grown to 2,812 chats / 687KB and was fetched on every
     studio page load (a suspect in the iPhone Safari tab crash). Default page = 200;
     pass limit=0 for everything. ``count`` is still the total.
 
-    Family editions read EMPIRE_DATA_DIR/chats via ``_chats_dir()`` so Max-e
-    and Maxine never list Rafael's Workroom history.
+    Family editions isolate by allowlisted session (not everyone under founder)
+    and read EMPIRE_DATA_DIR/chats so Max-e and Maxine never list Rafael's
+    Workroom history.
     """
-    user_dir = _chats_dir() / user_id
-    if not user_dir.exists():
-        return {"chats": [], "count": 0}
-
-    chats = []
-    for f in user_dir.glob("*.json"):
-        try:
-            with open(f, "r") as file:
-                data = json.load(file)
-                chats.append(
-                    {
-                        "id": data["id"],
-                        "title": data.get("title", "Untitled"),
-                        "updated_at": data.get("updated_at", ""),
-                        "created_at": data.get("created_at", ""),
-                        "message_count": len(data.get("messages", [])),
-                        "preview": data.get("preview", _get_preview(data.get("messages", []))),
-                        "pinned": data.get("pinned", False),
-                    }
-                )
-        except (json.JSONDecodeError, KeyError):
-            continue
-
-    # Pinned first, then by updated_at descending (newest on top)
-    chats.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
-    chats.sort(key=lambda x: x.get("pinned", False), reverse=True)
-
+    try:
+        chats = list_chats_for_owner(
+            request=request,
+            claimed_user_id=user_id,
+            workroom_dir=_workroom_dir(),
+        )
+    except ChatHistoryOwnerError:
+        raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
     total = len(chats)
     offset = max(0, int(offset or 0))
     page = chats[offset:offset + limit] if limit and limit > 0 else chats[offset:]
@@ -179,59 +125,61 @@ async def list_chats(user_id: str = "founder", limit: int = 200, offset: int = 0
 
 
 @router.get("/search")
-async def search_chats(q: str, user_id: str = "founder"):
+async def search_chats(q: str, request: Request = None, user_id: str = "founder"):
     """Search chat history by keyword across titles and message content."""
-    user_dir = _chats_dir() / user_id
-    if not user_dir.exists():
+    try:
+        _owner_or_403(request, user_id)
+        readable = list(
+            iter_searchable_chats(
+                request=request,
+                claimed_user_id=user_id,
+                workroom_dir=_workroom_dir(),
+            )
+        )
+    except ChatHistoryOwnerError:
+        raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
+    except ChatHistoryIdError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not readable:
         return {"results": [], "count": 0, "query": q}
 
     q_lower = q.lower()
     results = []
 
-    for f in user_dir.glob("*.json"):
-        try:
-            with open(f, "r") as file:
-                data = json.load(file)
-
-            # Search in title
-            title_match = q_lower in data.get("title", "").lower()
-
-            # Search in messages
-            matching_messages = []
-            for i, msg in enumerate(data.get("messages", [])):
-                content = msg.get("content", "")
-                if isinstance(content, str) and q_lower in content.lower():
-                    # Extract snippet around the match
-                    idx = content.lower().index(q_lower)
-                    start = max(0, idx - 40)
-                    end = min(len(content), idx + len(q) + 40)
-                    snippet = ("..." if start > 0 else "") + content[start:end] + ("..." if end < len(content) else "")
-                    matching_messages.append(
-                        {
-                            "message_index": i,
-                            "role": msg.get("role", ""),
-                            "snippet": snippet,
-                        }
-                    )
-
-            if title_match or matching_messages:
-                results.append(
+    for data, legacy in readable:
+        title_match = q_lower in data.get("title", "").lower()
+        matching_messages = []
+        for i, msg in enumerate(data.get("messages", [])):
+            content = msg.get("content", "")
+            if isinstance(content, str) and q_lower in content.lower():
+                idx = content.lower().index(q_lower)
+                start = max(0, idx - 40)
+                end = min(len(content), idx + len(q) + 40)
+                snippet = ("..." if start > 0 else "") + content[start:end] + ("..." if end < len(content) else "")
+                matching_messages.append(
                     {
-                        "id": data["id"],
-                        "title": data.get("title", "Untitled"),
-                        "updated_at": data.get("updated_at", ""),
-                        "message_count": len(data.get("messages", [])),
-                        "title_match": title_match,
-                        "matching_messages": matching_messages[:5],  # Cap at 5 snippets
-                        "total_matches": len(matching_messages),
+                        "message_index": i,
+                        "role": msg.get("role", ""),
+                        "snippet": snippet,
                     }
                 )
-        except (json.JSONDecodeError, KeyError):
-            continue
 
-    # Sort by relevance: title matches first, then by match count
+        if title_match or matching_messages:
+            hit = {
+                "id": data["id"],
+                "title": data.get("title", "Untitled"),
+                "updated_at": data.get("updated_at", ""),
+                "message_count": len(data.get("messages", [])),
+                "title_match": title_match,
+                "matching_messages": matching_messages[:5],
+                "total_matches": len(matching_messages),
+            }
+            if legacy:
+                hit["legacy"] = True
+                hit["read_only"] = True
+            results.append(hit)
+
     results.sort(key=lambda x: (not x["title_match"], -x["total_matches"]))
-
     return {"results": results, "count": len(results), "query": q}
 
 
@@ -328,47 +276,97 @@ async def memory_bank_threads(limit: int = 100):
 
 
 @router.get("/{chat_id}")
-async def load_chat(chat_id: str, user_id: str = "founder"):
-    chat_file = _chats_dir() / user_id / f"{chat_id}.json"
-    if not chat_file.exists():
+async def load_chat(chat_id: str, request: Request = None, user_id: str = "founder"):
+    try:
+        data = load_chat_for_owner(
+            chat_id,
+            request=request,
+            claimed_user_id=user_id,
+            workroom_dir=_workroom_dir(),
+        )
+    except ChatHistoryOwnerError:
+        raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
+    except ChatHistoryIdError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not data:
         raise HTTPException(status_code=404, detail="Chat not found")
-
-    with open(chat_file, "r") as f:
-        return json.load(f)
+    return data
 
 
 @router.patch("/{chat_id}/title")
-async def rename_chat(chat_id: str, req: RenameChatRequest, user_id: str = "founder"):
-    chat_file = _chats_dir() / user_id / f"{chat_id}.json"
-    if not chat_file.exists():
-        raise HTTPException(status_code=404, detail="Chat not found")
-    with open(chat_file, "r") as f:
-        chat_data = json.load(f)
-    chat_data["title"] = req.title
-    chat_data["updated_at"] = datetime.now().isoformat()
-    with open(chat_file, "w") as f:
-        json.dump(chat_data, f, indent=2)
+async def rename_chat(chat_id: str, req: RenameChatRequest, request: Request = None, user_id: str = "founder"):
+    try:
+        existing = load_chat_for_owner(
+            chat_id,
+            request=request,
+            claimed_user_id=user_id,
+            workroom_dir=_workroom_dir(),
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        update_meta(
+            chat_id,
+            title=req.title,
+            request=request,
+            claimed_user_id=user_id,
+            workroom_dir=_workroom_dir(),
+        )
+    except LegacyChatReadOnlyError:
+        raise HTTPException(status_code=409, detail="Chat heredado de solo lectura. Ejecuta la migración con --apply.")
+    except ChatHistoryOwnerError:
+        raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
+    except ChatHistoryIdError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"status": "renamed", "title": req.title}
 
 
 @router.patch("/{chat_id}/pin")
-async def pin_chat(chat_id: str, req: PinChatRequest, user_id: str = "founder"):
+async def pin_chat(chat_id: str, req: PinChatRequest, request: Request = None, user_id: str = "founder"):
     """Pin or unpin a chat conversation."""
-    chat_file = _chats_dir() / user_id / f"{chat_id}.json"
-    if not chat_file.exists():
-        raise HTTPException(status_code=404, detail="Chat not found")
-    with open(chat_file, "r") as f:
-        chat_data = json.load(f)
-    chat_data["pinned"] = req.pinned
-    chat_data["updated_at"] = datetime.now().isoformat()
-    with open(chat_file, "w") as f:
-        json.dump(chat_data, f, indent=2)
+    try:
+        existing = load_chat_for_owner(
+            chat_id,
+            request=request,
+            claimed_user_id=user_id,
+            workroom_dir=_workroom_dir(),
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        update_meta(
+            chat_id,
+            pinned=req.pinned,
+            request=request,
+            claimed_user_id=user_id,
+            workroom_dir=_workroom_dir(),
+        )
+    except LegacyChatReadOnlyError:
+        raise HTTPException(status_code=409, detail="Chat heredado de solo lectura. Ejecuta la migración con --apply.")
+    except ChatHistoryOwnerError:
+        raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
+    except ChatHistoryIdError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"status": "pinned" if req.pinned else "unpinned", "chat_id": chat_id}
 
 
 @router.delete("/{chat_id}")
-async def delete_chat(chat_id: str, user_id: str = "founder"):
-    chat_file = _chats_dir() / user_id / f"{chat_id}.json"
+async def delete_chat(chat_id: str, request: Request = None, user_id: str = "founder"):
+    try:
+        from app.services.chat_history_store import chat_path, owner_key_for_request
+        owner = owner_key_for_request(request, user_id)
+        chat_file = chat_path(owner, chat_id, workroom_dir=_workroom_dir())
+    except ChatHistoryOwnerError:
+        raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
+    except ChatHistoryIdError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if chat_file.exists():
         os.remove(chat_file)
+        return {"status": "deleted"}
+    from app.services.chat_history_store import founder_chats_dir, is_primary_legacy_viewer, safe_chat_id
+    if is_primary_legacy_viewer(owner):
+        legacy = founder_chats_dir(_workroom_dir()) / f"{safe_chat_id(chat_id)}.json"
+        if legacy.exists():
+            raise HTTPException(
+                status_code=409,
+                detail="Chat heredado de solo lectura. Ejecuta la migración con --apply.",
+            )
     return {"status": "deleted"}

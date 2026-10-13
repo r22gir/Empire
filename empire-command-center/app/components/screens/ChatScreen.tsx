@@ -4,6 +4,7 @@ import MaxRecordCard from '../docs/MaxRecordCard';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X, Copy, Check, ExternalLink, LifeBuoy } from 'lucide-react';
 import ChatHistoryPanel from '../ChatHistoryPanel';
+import RecentChatsList from '../RecentChatsList';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
 import QuoteCard from '../business/quotes/QuoteCard';
@@ -144,7 +145,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const voiceReleaseRef = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
+  const family = isFamilyEdition();
+  const isEmptyConversation = !isStreaming && !messages.some(m => m.role === 'user');
   const localeRef = useRef(locale);
   const familyHelp = isFamilyEdition(editionFromEnv());
   const helpCopy = familyHelpLabels(locale);
@@ -650,7 +653,11 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         borderBottom: '1px solid var(--border)',
         background: 'var(--card-bg)',
       }}>
-        <ViewPdfControl mode="print" title="Opens the browser print dialog for this conversation. Chat has no quote PDF of its own." />
+        {family ? (
+          <span style={{ width: 8, flexShrink: 0 }} />
+        ) : (
+          <ViewPdfControl mode="print" title="Opens the browser print dialog for this conversation. Chat has no quote PDF of its own." />
+        )}
         <span style={{
           fontSize: 14,
           fontWeight: 900,
@@ -713,20 +720,32 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           <ExternalLink size={13} /> Ask Chief e
         </a>
         <button
+          data-testid="chat-historial-button"
+          type="button"
           onClick={() => setHistoryOpen(prev => !prev)}
-          title="Chat History"
+          title={t('max.chat_history')}
+          aria-label={t('max.chat_history')}
           style={{
-            background: historyOpen ? '#d4a017' : 'none',
+            background: historyOpen ? '#d4a017' : '#fff',
             border: historyOpen ? 'none' : '1px solid var(--border)',
-            borderRadius: 6,
-            color: historyOpen ? '#000' : 'var(--text-muted)',
+            borderRadius: 999,
+            color: historyOpen ? '#000' : 'var(--text)',
             cursor: 'pointer',
-            padding: 6,
-            minHeight: 44, minWidth: 44,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '0 12px',
+            minHeight: 44,
+            minWidth: 44,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            fontSize: 13,
+            fontWeight: 800,
+            letterSpacing: 0.2,
+            flexShrink: 0,
           }}
         >
-          <Clock size={16} />
+          <Clock size={15} />
+          <span>{t('max.historial')}</span>
         </button>
         </div>
         {voiceMode && (
@@ -769,7 +788,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         </div>
       )}
 
-      {maxStatus && (
+      {maxStatus && !family && (
         <div
           data-testid="max-orchestration-status"
           style={{
@@ -855,7 +874,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         </div>
       )}
 
-      <ContinuityPanel mode="compact" onOpenContinuity={() => onProductNavigate?.('max-continuity', 'dashboard')} />
+      {!family && (
+        <ContinuityPanel mode="compact" onOpenContinuity={() => onProductNavigate?.('max-continuity', 'dashboard')} />
+      )}
 
       {/* Messages */}
       <div style={{
@@ -1085,6 +1106,13 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             ))}
           </div>
         ))}
+
+        {isEmptyConversation && (
+          <RecentChatsList
+            onLoadChat={onLoadChat}
+            onOpenHistory={() => setHistoryOpen(true)}
+          />
+        )}
 
         {/* Code Task progress card */}
         {codeTask && codeTask.state !== 'dismissed' && (

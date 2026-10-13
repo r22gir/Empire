@@ -2,6 +2,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, Plus, Clock, MessageSquare, Mail, Search, Pin, Trash2 } from 'lucide-react';
 import { API } from '../lib/api';
+import { isFamilyEdition } from '../lib/edition';
+import { useTranslation } from '../lib/i18n';
 
 interface ChatEntry {
   id: string;
@@ -11,6 +13,8 @@ interface ChatEntry {
   messageCount?: number;
   pinned?: boolean;
   channel?: string;
+  legacy?: boolean;
+  readOnly?: boolean;
 }
 
 interface EmailEntry {
@@ -54,7 +58,9 @@ interface SessionEntry {
 }
 
 export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat }: Props) {
-  const [tab, setTab] = useState<Tab>('all');
+  const family = isFamilyEdition();
+  const { t } = useTranslation();
+  const [tab, setTab] = useState<Tab>(family ? 'web' : 'all');
   const [allChannelItems, setAllChannelItems] = useState<AllChannelEntry[]>([]);
   const [webChats, setWebChats] = useState<ChatEntry[]>([]);
   const [telegramChats, setTelegramChats] = useState<ChatEntry[]>([]);
@@ -66,7 +72,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
 
   const fetchWebChats = useCallback(async () => {
     try {
-      const res = await fetch(API + '/chats/list?limit=200');
+      const res = await fetch(API + '/chats/list?limit=200', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setWebChats((data.chats || []).map((c: any) => ({
@@ -77,6 +83,8 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
           messageCount: c.message_count || 0,
           pinned: c.pinned || false,
           channel: 'web',
+          legacy: !!c.legacy,
+          readOnly: !!c.read_only || !!c.legacy,
         })).sort((a: ChatEntry, b: ChatEntry) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
       }
     } catch { /* silent */ }
@@ -84,7 +92,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
 
   const fetchAllChannels = useCallback(async () => {
     try {
-      const res = await fetch(API + '/chats/memory-bank?channel=all&limit=60');
+      const res = await fetch(API + '/chats/memory-bank?channel=all&limit=60', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setAllChannelItems((data.messages || []).map((m: any) => ({
@@ -124,7 +132,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
 
   const fetchTelegramChats = useCallback(async () => {
     try {
-      const res = await fetch(API + '/max/telegram/history');
+      const res = await fetch(API + '/max/telegram/history', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         // Two response formats: {chats:[...]} (list) or {messages:[...]} (single chat)
@@ -158,6 +166,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
     try {
       const res = await fetch(API + '/max/gmail/inbox?limit=10&unread_only=false', {
         signal: controller.signal,
+        credentials: 'include',
       });
       if (res.ok) {
         const data = await res.json();
@@ -171,18 +180,23 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    // Load each tab independently — don't let one hang block others
+    // Family editions only list this user's web chats. Telegram and
+    // Gmail belong to the founder Workroom inbox.
+    if (family) {
+      fetchWebChats().finally(() => setLoading(false));
+      return;
+    }
     fetchAllChannels().finally(() => setLoading(false));
     fetchWebChats();
     fetchSessions();
     fetchTelegramChats();
     fetchEmails();
-  }, [open, fetchAllChannels, fetchWebChats, fetchSessions, fetchTelegramChats, fetchEmails]);
+  }, [open, family, fetchAllChannels, fetchWebChats, fetchSessions, fetchTelegramChats, fetchEmails]);
 
   const handleSearch = useCallback(async () => {
     if (!search.trim()) { fetchWebChats(); return; }
     try {
-      const res = await fetch(API + `/chats/search?q=${encodeURIComponent(search)}`);
+      const res = await fetch(API + `/chats/search?q=${encodeURIComponent(search)}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setWebChats((data.results || []).map((c: any) => ({
@@ -202,6 +216,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
       await fetch(API + `/chats/${chatId}/pin`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ pinned: !pinned }),
       });
       fetchWebChats();
@@ -210,7 +225,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
 
   const handleDelete = useCallback(async (chatId: string) => {
     try {
-      await fetch(API + `/chats/${chatId}`, { method: 'DELETE' });
+      await fetch(API + `/chats/${chatId}`, { method: 'DELETE', credentials: 'include' });
       fetchWebChats();
     } catch { /* silent */ }
   }, [fetchWebChats]);
@@ -229,13 +244,15 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
 
   if (!open) return null;
 
-  const TABS: { key: Tab; label: string; icon: any; count?: number }[] = [
-    { key: 'all', label: 'ALL', icon: MessageSquare, count: allChannelItems.length },
-    { key: 'sessions', label: 'LOG', icon: Clock, count: sessions.length },
-    { key: 'web', label: 'WEB', icon: MessageSquare, count: webChats.length },
-    { key: 'telegram', label: 'TG ONLY', icon: MessageSquare, count: telegramChats.length },
-    { key: 'email', label: 'EMAIL', icon: Mail, count: unreadCount },
-  ];
+  const TABS: { key: Tab; label: string; icon: any; count?: number }[] = family
+    ? [{ key: 'web', label: t('max.historial'), icon: MessageSquare, count: webChats.length }]
+    : [
+        { key: 'all', label: 'ALL', icon: MessageSquare, count: allChannelItems.length },
+        { key: 'sessions', label: 'LOG', icon: Clock, count: sessions.length },
+        { key: 'web', label: 'WEB', icon: MessageSquare, count: webChats.length },
+        { key: 'telegram', label: 'TG ONLY', icon: MessageSquare, count: telegramChats.length },
+        { key: 'email', label: 'EMAIL', icon: Mail, count: unreadCount },
+      ];
 
   const channelColor = (channel: string) => {
     if (channel === 'web_chat') return '#60a5fa';
@@ -263,7 +280,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Clock size={16} color="#d4a017" />
-          <span style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>History</span>
+          <span style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>{t('max.historial')}</span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
@@ -275,7 +292,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
               minHeight: 44, minWidth: 44,
             }}
           >
-            <Plus size={14} /> New
+            <Plus size={14} /> {t('max.new_chat')}
           </button>
           <button
             onClick={onClose}
@@ -334,7 +351,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              placeholder="Search chats..."
+              placeholder={family ? 'Buscar chats...' : 'Search chats...'}
               style={{
                 flex: 1, background: '#1a1a1a', border: '1px solid #333',
                 borderRadius: 6, padding: '8px 10px', color: '#fff', fontSize: 13,
@@ -463,6 +480,14 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
                 maxWidth: '70%',
               }}>
                 {chat.pinned && <Pin size={10} style={{ color: '#d4a017', marginRight: 4 }} />}
+                {chat.legacy && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 800, color: '#111', background: '#d4a017',
+                    borderRadius: 6, padding: '1px 5px', marginRight: 6,
+                  }}>
+                    {t('max.legacy_chat')}
+                  </span>
+                )}
                 {chat.title}
               </span>
               <span style={{ fontSize: 11, color: '#666' }}>{formatDate(chat.timestamp)}</span>
@@ -477,6 +502,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
               <span style={{ fontSize: 11, color: '#555' }}>
                 {chat.messageCount} messages
               </span>
+              {!chat.readOnly && (
               <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
                 <button
                   onClick={() => handlePin(chat.id, !!chat.pinned)}
@@ -497,6 +523,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
                   <Trash2 size={12} />
                 </button>
               </div>
+              )}
             </div>
           </div>
         ))}

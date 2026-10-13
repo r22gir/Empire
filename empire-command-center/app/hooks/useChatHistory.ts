@@ -10,7 +10,7 @@ export function useChatHistory() {
   const fetchConversations = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(API + '/chats/list?limit=200');
+      const res = await fetch(API + '/chats/list?limit=200', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         const convs = (data.chats || data || []).map((c: any) => ({
@@ -31,6 +31,7 @@ export function useChatHistory() {
       const res = await fetch(API + '/chats/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ title: title || 'New Chat', messages: [] }),
       });
       if (res.ok) {

@@ -170,6 +170,11 @@
     "stop": "Stop",
     "clear_chat": "Clear chat",
     "chat_history": "Chat history",
+    "historial": "History",
+    "recent_chats": "Recent chats",
+    "see_all_history": "See all",
+    "no_recent_chats": "No chats yet. Type to start.",
+    "legacy_chat": "Earlier",
     "new_chat": "New chat",
     "code_mode": "Code Mode",
     "voice_mode": "Voice Mode"
