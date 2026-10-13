@@ -80,7 +80,7 @@ export default function StudioSignInPage() {
         <section className="signin-card" aria-labelledby="signin-title">
           <div className="signin-brand">
             <img
-              src="/brand/empire-mark.svg"
+              src="/brand/empire-icon.png"
               alt="Empire"
               width={48}
               height={48}
@@ -97,7 +97,7 @@ export default function StudioSignInPage() {
 
           {step === 'credentials' ? (
             <>
-              <p className="signin-lede">Owner sign-in. Existing allowlist and PIN checks stay in place.</p>
+              <p className="signin-lede">Sign in to open the Command Center on this device.</p>
 
               <div className="signin-tabs" role="tablist">
                 <button
@@ -127,9 +127,10 @@ export default function StudioSignInPage() {
                   <label className="signin-field">
                     <span>PIN</span>
                     <input
+                      data-testid="studio-pin"
                       type="password"
                       inputMode="numeric"
-                      autoComplete="current-password"
+                      autoComplete="one-time-code"
                       value={pin}
                       onChange={(e) => setPin(e.target.value)}
                       required
@@ -175,7 +176,7 @@ export default function StudioSignInPage() {
                   </>
                 )}
 
-                <button type="submit" className="signin-submit" disabled={loading}>
+                <button type="submit" data-testid="studio-signin" className="signin-submit" disabled={loading}>
                   {loading ? 'Signing in…' : 'Sign in'}
                 </button>
               </form>
@@ -192,6 +193,7 @@ export default function StudioSignInPage() {
               {error && <div className="signin-error" role="alert">{error}</div>}
               <button
                 type="button"
+                data-testid="remember-device"
                 className="signin-submit"
                 disabled={remembering}
                 onClick={() => onRemember(true)}

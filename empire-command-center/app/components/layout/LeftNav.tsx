@@ -304,6 +304,7 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
                       return (
                         <button
                           key={item.id}
+                          data-testid={`nav-${item.id}`}
                           onClick={() => handleNavClick(item)}
                           className="w-full text-left flex items-center gap-2.5 cursor-pointer transition-all"
                           style={{

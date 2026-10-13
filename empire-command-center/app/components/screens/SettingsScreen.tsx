@@ -79,8 +79,8 @@ export default function SettingsScreen() {
           </div>
         </div>
 
-        <section className="rounded-xl overflow-hidden mb-6" style={{ background: 'white', border: '1px solid #e8e4de' }}>
-          <div className="px-5 py-3 flex items-center justify-between" style={{ background: '#faf8f4', borderBottom: '1px solid #e8e4de' }}>
+        <section data-testid="my-devices" className="rounded-xl overflow-hidden mb-6" style={{ background: 'white', border: '1px solid #e8e4de' }}>
+          <div className="px-5 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ background: '#faf8f4', borderBottom: '1px solid #e8e4de' }}>
             <div>
               <h2 style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>My devices</h2>
               <p style={{ fontSize: 12, color: '#888', margin: '4px 0 0' }}>

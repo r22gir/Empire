@@ -30,7 +30,7 @@ export default function StudioAuthGate({ children }: { children: React.ReactNode
   if (!ready) {
     return (
       <div className="signin-gate" data-signin-page>
-        <img src="/brand/empire-mark.svg" alt="Empire" width={48} height={48} />
+        <img src="/brand/empire-icon.png" alt="Empire" width={48} height={48} />
         <p>Opening Studio…</p>
       </div>
     );

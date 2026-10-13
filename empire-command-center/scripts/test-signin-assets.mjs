@@ -41,7 +41,7 @@ assert.match(css, /min-height:\s*44px/);
 
 const page = readFileSync(pagePath, 'utf8');
 assert.match(page, /Remember this device/);
-assert.match(page, /empire-mark\.svg/);
+assert.match(page, /empire-icon\.png/);
 
 const bg = readFileSync(bgPath, 'utf8');
 assert.match(bg, /prefers-reduced-motion/);
