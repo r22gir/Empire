@@ -101,32 +101,40 @@ class BenchRequest(BaseModel):
     back_length: float = 0
     left_depth: float = 0
     right_depth: float = 0
+    client: str = ""
+    project: str = ""
 
 
 @router.post("/drawings/bench")
 async def generate_bench_svg(req: BenchRequest):
     """Generate an SVG bench drawing from dimensions."""
-    from app.services.vision.bench_renderer import (
-        render_straight,
-        render_l_shape,
-        render_u_shape,
-    )
-
-    svg = _render(req)
-    return {"svg": svg, "bench_type": req.bench_type, "name": req.name}
+    svg, cuts = _render_bundle(req)
+    return {
+        "svg": svg,
+        "bench_type": req.bench_type,
+        "name": req.name,
+        "cut_list": cuts,
+    }
 
 
 @router.post("/drawings/bench/pdf")
 async def generate_bench_pdf(req: BenchRequest):
     """Generate a PDF bench drawing from dimensions."""
-    from app.services.vision.bench_renderer import drawings_to_pdf
+    from app.services.vision.bench_renderer import drawings_to_pdf, render_cut_list_sheet
 
-    svg = _render(req)
+    svg, cuts = _render_bundle(req)
+    cut_svg = render_cut_list_sheet(cuts, name=req.name, quote_num=req.quote_num)
     output_path = os.path.join(
         tempfile.gettempdir(),
         f"bench_{req.bench_type}_{req.name.replace(' ', '_')}.pdf",
     )
-    drawings_to_pdf([{"name": req.name, "svg": svg, "lf": req.lf}], output_path)
+    drawings_to_pdf(
+        [
+            {"name": req.name, "svg": svg, "lf": req.lf},
+            {"name": f"{req.name} Cut List", "svg": cut_svg, "lf": req.lf},
+        ],
+        output_path,
+    )
 
     with open(output_path, "rb") as f:
         pdf_bytes = f.read()
@@ -221,10 +229,8 @@ async def generate_bench_dxf(req: BenchRequest):
             panel_style=panel_style,
         )
 
-    base_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
-    os.makedirs(base_dir, exist_ok=True)
     safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", req.name).strip("_") or "bench"
-    out_path = os.path.join(base_dir, f"{safe_name}_{req.bench_type}.dxf")
+    out_path = os.path.join(tempfile.gettempdir(), f"{safe_name}_{req.bench_type}.dxf")
 
     result_path = generate_dxf(model, out_path)
     if result_path is None:
@@ -288,7 +294,14 @@ async def estimate_yardage(req: YardageRequest):
 
 
 def _render(req: BenchRequest) -> str:
+    svg, _cuts = _render_bundle(req)
+    return svg
+
+
+def _render_bundle(req: BenchRequest) -> tuple[str, dict]:
     from app.services.vision.bench_renderer import (
+        BenchModel,
+        generate_cut_list,
         render_straight,
         render_l_shape,
         render_u_shape,
@@ -298,41 +311,45 @@ def _render(req: BenchRequest) -> str:
     d = req.seat_depth
     sh = req.seat_height
     bh = req.back_height
-
     ps = req.panel_style if req.panel_style != "flat" else "vertical_channels"
+    extra = {"client": req.client, "project": req.project}
 
     if req.bench_type == "l_shape":
         long_in = req.leg1_length * 12 if req.leg1_length > 0 else width_in * 0.6
         short_in = req.leg2_length * 12 if req.leg2_length > 0 else width_in * 0.4
-        return render_l_shape(
-            req.name,
-            long_in,
-            short_in,
-            d,
-            sh,
-            bh,
-            quote_num=req.quote_num,
-            panel_style=ps,
+        svg = render_l_shape(
+            req.name, long_in, short_in, d, sh, bh,
+            quote_num=req.quote_num, panel_style=ps, **extra,
+        )
+        model = BenchModel(
+            name=req.name, width=long_in, depth=d, seat_h=sh, back_h=bh,
+            panel_style=ps, quote_num=req.quote_num, bench_type="l_shape",
+            long=long_in, short=short_in, client=req.client, project=req.project,
         )
     elif req.bench_type == "u_shape":
         back_in = req.back_length * 12 if req.back_length > 0 else width_in * 0.45
         side_in = req.left_depth * 12 if req.left_depth > 0 else width_in * 0.275
         side_d = req.right_depth if req.right_depth > 0 else d
-        return render_u_shape(
-            req.name,
-            back_in,
-            side_in,
-            d,
-            side_d,
-            sh,
-            bh,
-            quote_num=req.quote_num,
-            panel_style=ps,
+        svg = render_u_shape(
+            req.name, back_in, side_in, d, side_d, sh, bh,
+            quote_num=req.quote_num, panel_style=ps, **extra,
+        )
+        model = BenchModel(
+            name=req.name, width=back_in + side_d * 2, depth=d, seat_h=sh, back_h=bh,
+            panel_style=ps, quote_num=req.quote_num, bench_type="u_shape",
+            back=back_in, side=side_in, side_depth=side_d,
+            client=req.client, project=req.project,
         )
     else:
-        return render_straight(
-            req.name, width_in, d, sh, bh, quote_num=req.quote_num, panel_style=ps
+        svg = render_straight(
+            req.name, width_in, d, sh, bh, quote_num=req.quote_num, panel_style=ps, **extra,
         )
+        model = BenchModel(
+            name=req.name, width=width_in, depth=d, seat_h=sh, back_h=bh,
+            panel_style=ps, quote_num=req.quote_num, bench_type="straight",
+            client=req.client, project=req.project,
+        )
+    return svg, generate_cut_list(model)
 
 
 SKETCH_EXTRACT_PROMPT = """You are a professional workroom estimator analyzing a hand-drawn sketch, measurement drawing, or photo of an item that needs custom fabrication.
@@ -789,6 +806,57 @@ def _render_universal_drawing(req: UniversalDrawingRequest) -> dict:
     name = params.get("name", "")
     style_key = params.get("style_key") or params.get("template_key")
     explicit_item_type = (params.get("item_type") or "").lower().strip() or None
+    style_norm = (style_key or "").lower().strip().replace("-", "_").replace(" ", "_")
+
+    # True L/U banquettes always use the dedicated bench renderer (not the
+    # parametric rectangle / unfolded-strip sheet).
+    if style_norm in ("l_shape", "u_shape"):
+        from app.services.vision.bench_renderer import (
+            generate_cut_list,
+            model_from_render_args,
+            render_l_shape,
+            render_u_shape,
+        )
+        width = params.get("width", 120)
+        depth = params.get("depth", 20)
+        seat_h = params.get("seat_height", 18)
+        back_h = params.get("back_height", 18)
+        if style_norm == "u_shape":
+            svg = render_u_shape(
+                name or "U-Shape Banquette", width, depth_in=depth,
+                seat_h_in=seat_h, back_h_in=back_h,
+                quote_num=params.get("quote_num", ""),
+                client=params.get("client", ""), project=params.get("project", ""),
+            )
+            bench_sub = "u_shape"
+        else:
+            short = params.get("short", params.get("depth", width * 0.5))
+            svg = render_l_shape(
+                name or "L-Shape Banquette", width, short,
+                depth_in=depth, seat_h_in=seat_h, back_h_in=back_h,
+                quote_num=params.get("quote_num", ""),
+                client=params.get("client", ""), project=params.get("project", ""),
+            )
+            bench_sub = "l_shape"
+        model = model_from_render_args(
+            bench_sub, name=name or "Banquette", width_in=width,
+            long_in=width, short_in=params.get("short", width * 0.5),
+            back_in=width, side_in=depth, depth_in=depth,
+            seat_h_in=seat_h, back_h_in=back_h,
+        )
+        return {
+            "svg": svg,
+            "item_type": "bench",
+            "bench_type": bench_sub,
+            "cut_list": generate_cut_list(model),
+            "classification": {
+                "type": "bench",
+                "renderer": "bench_renderer",
+                "views": 4,
+                "confidence": 1.0,
+            },
+            "name": name,
+        }
 
     if style_key:
         template_result = render_template_instance(style_key, params)
@@ -880,6 +948,11 @@ def _render_universal_drawing(req: UniversalDrawingRequest) -> dict:
         seat_h = params.get("seat_height", 18)
         back_h = params.get("back_height", 18)
 
+        extra = {
+            "quote_num": params.get("quote_num", ""),
+            "client": params.get("client", ""),
+            "project": params.get("project", ""),
+        }
         if bench_sub == "u_shape":
             svg = render_u_shape(
                 name or "Bench",
@@ -887,6 +960,7 @@ def _render_universal_drawing(req: UniversalDrawingRequest) -> dict:
                 depth_in=depth,
                 seat_h_in=seat_h,
                 back_h_in=back_h,
+                **extra,
             )
         elif bench_sub == "l_shape":
             short = params.get("short", params.get("depth", width * 0.5))
@@ -897,6 +971,7 @@ def _render_universal_drawing(req: UniversalDrawingRequest) -> dict:
                 depth_in=depth,
                 seat_h_in=seat_h,
                 back_h_in=back_h,
+                **extra,
             )
         else:
             svg = render_straight(
@@ -905,12 +980,21 @@ def _render_universal_drawing(req: UniversalDrawingRequest) -> dict:
                 depth_in=depth,
                 seat_h_in=seat_h,
                 back_h_in=back_h,
+                **extra,
             )
 
+        from app.services.vision.bench_renderer import generate_cut_list, model_from_render_args
+        model = model_from_render_args(
+            bench_sub, name=name or "Bench", width_in=width,
+            long_in=width, short_in=params.get("short", width * 0.5),
+            back_in=width, side_in=depth, depth_in=depth,
+            seat_h_in=seat_h, back_h_in=back_h,
+        )
         return {
             "svg": svg,
             "item_type": "bench",
             "bench_type": bench_sub,
+            "cut_list": generate_cut_list(model),
             "classification": classification,
             "name": name,
         }
@@ -936,7 +1020,7 @@ def _render_universal_drawing(req: UniversalDrawingRequest) -> dict:
 @router.post("/drawings/generate/pdf")
 async def generate_universal_drawing_pdf(req: UniversalDrawingRequest):
     """Generate a PDF from the same SVG used by /drawings/generate."""
-    from app.services.vision.bench_renderer import drawings_to_pdf
+    from app.services.vision.bench_renderer import drawings_to_pdf, render_cut_list_sheet
 
     result = _render_universal_drawing(req)
     svg = result.get("svg") or ""
@@ -951,7 +1035,15 @@ async def generate_universal_drawing_pdf(req: UniversalDrawingRequest):
     output_path = os.path.join(
         tempfile.gettempdir(), f"drawing_{safe_type}_{safe_name}.pdf"
     )
-    drawings_to_pdf([{"name": name, "svg": svg, "lf": 0}], output_path)
+    pages = [{"name": name, "svg": svg, "lf": 0}]
+    cuts = result.get("cut_list")
+    if cuts:
+        pages.append({
+            "name": f"{name} Cut List",
+            "svg": render_cut_list_sheet(cuts, name=name, quote_num=params.get("quote_num", "")),
+            "lf": 0,
+        })
+    drawings_to_pdf(pages, output_path)
 
     with open(output_path, "rb") as f:
         pdf_bytes = f.read()

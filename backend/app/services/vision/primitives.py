@@ -15,6 +15,8 @@ Usage:
 
 from datetime import datetime
 
+from .inches import format_inches, format_size, parse_inches  # re-export for renderers
+
 # ── LINE WEIGHTS ──────────────────────────────────────────────────
 HEAVY = 2.5        # Object outlines, borders
 MEDIUM = 1.5       # Structure lines, section cuts

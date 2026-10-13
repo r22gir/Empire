@@ -100,5 +100,13 @@ def parse_inches(value: Any, default: float = 0.0) -> float:
 
 
 def has_decimal_dimension(text: str) -> bool:
-    """True when a human-readable dimension label still contains a decimal inch."""
-    return bool(re.search(r'\d+\.\d+\s*"', text or ""))
+    """True when a human-readable dimension label still contains a decimal inch.
+
+    SVG geometry attributes like x="88.0" are ignored. We only flag printed
+    labels such as 22.5&quot; or a shop-sheet 22.5".
+    """
+    if not text:
+        return False
+    if re.search(r"\d+\.\d+\s*&quot;", text):
+        return True
+    return bool(re.search(r"(?:^|[\s>])\d+\.\d+\s*\"", text))
