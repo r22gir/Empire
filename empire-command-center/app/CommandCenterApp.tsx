@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BusinessTab, ScreenMode, EcosystemProduct } from './lib/types';
+import { hookFounderDeepLinks, isEmpireAssistPath, renderFounderScreen } from './lib/founderPortal';
 import { useChat } from './hooks/useChat';
 import { useSystemData } from './hooks/useSystemData';
 import { API } from './lib/api';
@@ -131,6 +132,8 @@ const PRODUCT_DEEP_LINKS: Partial<Record<string, EcosystemProduct>> = {
   apostapp: 'apost',
   llc: 'llc',
   llcfactory: 'llc',
+  empireassist: 'assist',
+  'empire-assist': 'assist',
 };
 
 // Generic deep links used by /preview/cockpit (hexagon menu): every left-nav
@@ -148,12 +151,14 @@ const NAV_SCREEN_IDS = new Set<string>([
   'report', 'desks', 'memory-bank', 'telegram', 'docs', 'research', 'final-docs', 'invoice',
   'presentation', 'video',
 ]);
+hookFounderDeepLinks(SCREEN_DEEP_LINKS as Record<string, string>, NAV_SCREEN_IDS);
 function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
   if (product === 'owner') return 'chat';
   if (product === 'max-avatar') return 'presentation';
   if (product === 'tokens') return 'costs';
   if (product === 'system') return 'report';
   if (product === 'dev') return 'dev';
+  if (product === 'assist') return 'family-help';
   return 'dashboard';
 }
 
@@ -243,6 +248,13 @@ export default function CommandCenter() {
       const params = new URLSearchParams(window.location.search);
       const productParam = params.get('product');
       const sectionParam = params.get('section');
+      if (isEmpireAssistPath(window.location.pathname) || productParam === 'empireassist' || productParam === 'empire-assist') {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct('assist');
+        setActiveScreen('family-help');
+        setActiveSection(null);
+        return;
+      }
       // Tailscale / on-box Command Center. Do not depend on studio.empirebox.store.
       if (productParam === 'workroom' || productParam === 'woodcraft') {
         pendingDeepLinkScreen.current = null;
@@ -352,7 +364,8 @@ export default function CommandCenter() {
     else if (product === 'max-avatar') setActiveScreen('presentation');
     else if (product === 'tokens') setActiveScreen('costs');
     else if (product === 'system') setActiveScreen('report');
-    else if (product === 'dev') setActiveScreen('dev');
+    else     if (product === 'dev') setActiveScreen('dev');
+    else if (product === 'assist') setActiveScreen('family-help');
     else setActiveScreen('dashboard');
   }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
@@ -610,6 +623,8 @@ export default function CommandCenter() {
   }, []);
 
   const renderCenterContent = () => {
+    const founderScreen = renderFounderScreen(activeScreen, activeProduct);
+    if (founderScreen) return founderScreen;
     // Dashboard renders product-specific pages
     if (activeScreen === 'dashboard') {
       switch (activeProduct) {

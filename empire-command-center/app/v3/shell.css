@@ -67,6 +67,8 @@
 .v3-mod .gl { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--v-chip); color: var(--v-accink); flex: none; }
 .v3-mod .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .v3-mod .st { margin-left: auto; font: 500 8.5px/1 var(--v-mono); letter-spacing: 0.1em; color: var(--v-mut); text-transform: uppercase; }
+.v3-mod .bd { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #b8960c; color: #1a1403;
+  font: 700 10px/18px var(--v-sans, inherit); text-align: center; }
 .v3-mod.on { border-color: var(--v-acc); }
 
 /* ---------- phone tab bar ---------- */

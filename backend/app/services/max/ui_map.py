@@ -298,17 +298,37 @@ _OVERLAYS: dict[str, dict] = {
         "workroom_only": False,
     },
     "family-help": {
-        "name": "Family help",
+        "name": "Empire Assist: Family Requests",
         "where": (
-            "Family editions (Max-e / Maxine): left nav → Ayuda, or /ayuda. "
-            "Studio/founder: Command → Family help inbox at /?screen=family-help "
-            "when that screen is on this checkout."
+            "Studio/founder: Command → Ayuda de ediciones familiares, "
+            "More → Empire Assist: Family Requests, /?screen=family-help, "
+            "/?product=assist, or /empireassist. Same view. "
+            "Family editions (Max-e / Maxine): left nav → Ayuda, or /ayuda."
         ),
         "href": "/?screen=family-help",
-        "aliases_en": ("family help", "help inbox", "ayuda", "help"),
-        "aliases_es": ("ayuda familiar", "ayuda", "ayuda de la familia", "buzon de ayuda"),
+        "aliases_en": (
+            "family help", "help inbox", "ayuda", "help",
+            "empire assist", "empireassist", "family requests",
+        ),
+        "aliases_es": (
+            "ayuda familiar", "ayuda", "ayuda de la familia", "buzon de ayuda",
+            "pedidos de la familia", "ediciones familiares",
+        ),
         "workroom_only": False,
-        "source_ids": ("family-help", "ayuda"),
+        "source_ids": ("family-help", "ayuda", "assist", "empireassist"),
+    },
+    "assist": {
+        "name": "Empire Assist: Family Requests",
+        "where": (
+            "Studio/founder: More → Empire Assist: Family Requests, "
+            "Command → Ayuda de ediciones familiares, /empireassist, "
+            "/?product=assist, or /?screen=family-help. Same view."
+        ),
+        "href": "/empireassist",
+        "aliases_en": ("empire assist", "empireassist", "family requests", "assist"),
+        "aliases_es": ("ayuda de ediciones familiares", "pedidos de la familia"),
+        "workroom_only": True,
+        "source_ids": ("assist", "empireassist", "family-help"),
     },
     "minimax-usage": {
         "name": "MiniMax usage",
