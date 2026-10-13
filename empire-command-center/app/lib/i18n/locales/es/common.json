@@ -170,6 +170,10 @@
     "stop": "Detener",
     "clear_chat": "Limpiar chat",
     "chat_history": "Historial de chat",
+    "historial": "Historial",
+    "recent_chats": "Chats recientes",
+    "see_all_history": "Ver todo",
+    "no_recent_chats": "Aún no hay chats. Escribe para empezar.",
     "new_chat": "Nuevo chat",
     "code_mode": "Modo Código",
     "voice_mode": "Modo Voz"

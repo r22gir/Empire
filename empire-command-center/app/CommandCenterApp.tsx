@@ -536,17 +536,19 @@ export default function CommandCenter() {
         fetch(API + `/chats/${chatId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ messages: payload }),
         }).catch(() => {});
       } else {
         fetch(API + '/chats/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ messages: payload }),
         }).catch(() => {});
       }
     }
-  }, [chat.messages]);
+  }, [chat.messages, chat.chatId]);
 
   const handleLoadChat = useCallback(async (chatId: string) => {
     // "session:<conversation_id>" = full Max session from the session
@@ -555,7 +557,7 @@ export default function CommandCenter() {
     if (chatId.startsWith('session:')) {
       const conversationId = chatId.slice('session:'.length);
       try {
-        const res = await fetch(API + `/max/sessions/${encodeURIComponent(conversationId)}`);
+        const res = await fetch(API + `/max/sessions/${encodeURIComponent(conversationId)}`, { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           const msgs = (data.turns || [])
@@ -582,7 +584,7 @@ export default function CommandCenter() {
       return;
     }
     try {
-      const res = await fetch(API + `/chats/${chatId}`);
+      const res = await fetch(API + `/chats/${chatId}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         const msgs = (data.messages || []).map((m: any, i: number) => ({
