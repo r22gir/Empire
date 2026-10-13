@@ -1,7 +1,7 @@
 'use client';
-import { useState } from 'react';
-import { Check, Sparkles, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
-import { businessopsCheckout, businessopsSignup, type SellablePackageId } from '../../lib/api';
+import { useEffect, useState } from 'react';
+import { Check, Clock, Sparkles, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { businessopsCheckout, businessopsInfo, businessopsSignup, type SellablePackageId } from '../../lib/api';
 
 const TIERS: Array<{
   id: SellablePackageId;
@@ -72,6 +72,10 @@ const TIERS: Array<{
 
 const FAQS = [
   {
+    q: 'When can I sign up?',
+    a: 'Public self-serve signup is coming soon. Until launch, new workspaces are not created from this page. Contact support@empirebox.store if you need to be notified.',
+  },
+  {
     q: 'How does the free trial work?',
     a: 'Every plan starts with a 14-day free trial. Stripe TEST / sandbox checkout is used in this environment — live charges are disabled.',
   },
@@ -110,6 +114,7 @@ export default function PricingPage() {
   const [error, setError] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [pendingPackage, setPendingPackage] = useState<SellablePackageId | null>(null);
+  const [publicSignupEnabled, setPublicSignupEnabled] = useState(false);
   const [draft, setDraft] = useState<SignupDraft>({
     email: '',
     password: '',
@@ -117,7 +122,22 @@ export default function PricingPage() {
     business_name: '',
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    businessopsInfo()
+      .then((info) => {
+        if (!cancelled) setPublicSignupEnabled(!!info.public_signup_enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setPublicSignupEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const startBuy = (packageId: SellablePackageId) => {
+    if (!publicSignupEnabled) return;
     setError(null);
     setPendingPackage(packageId);
   };
@@ -167,6 +187,50 @@ export default function PricingPage() {
           Starter $29, Growth $79, Empire $199, Apostille-only $49. Stripe TEST / sandbox only.
         </p>
       </div>
+
+      {!publicSignupEnabled && (
+        <div
+          data-testid="businessops-coming-soon"
+          style={{
+            maxWidth: 640,
+            margin: '0 auto 40px',
+            padding: '28px 28px 26px',
+            borderRadius: 16,
+            background: 'linear-gradient(180deg, #fffdf6 0%, #fff 100%)',
+            border: '1px solid #f0e4b8',
+            boxShadow: '0 10px 32px rgba(184,150,12,0.08)',
+            textAlign: 'center',
+          }}
+        >
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '6px 12px',
+              borderRadius: 999,
+              background: '#fdf8eb',
+              color: '#8a6d0a',
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              marginBottom: 14,
+            }}
+          >
+            <Clock size={13} />
+            Coming soon
+          </div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a', margin: '0 0 8px' }}>
+            Public signup is not open yet
+          </h2>
+          <p style={{ fontSize: 14, color: '#777', margin: 0, lineHeight: 1.65 }}>
+            Plans are listed so you can see what is coming. Self-serve workspace
+            creation stays locked until launch, so new tenants are not written
+            to the live database.
+          </p>
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 40 }}>
         <span style={{ fontSize: 14, fontWeight: annual ? 400 : 600, color: annual ? '#999' : '#1a1a1a', transition: 'all 0.2s' }}>Monthly</span>
@@ -287,20 +351,24 @@ export default function PricingPage() {
 
                 <button
                   onClick={() => startBuy(tier.id)}
-                  disabled={isLoading}
+                  disabled={!publicSignupEnabled || isLoading}
                   data-testid={`buy-${tier.id}`}
                   style={{
                     width: '100%',
                     padding: '12px 0',
                     borderRadius: 10,
-                    border: tier.highlighted ? 'none' : '1px solid #ece8e0',
-                    background: tier.highlighted
+                    border: !publicSignupEnabled
+                      ? '1px solid #f0e4b8'
+                      : tier.highlighted ? 'none' : '1px solid #ece8e0',
+                    background: !publicSignupEnabled
+                      ? '#fdf8eb'
+                      : tier.highlighted
                       ? 'linear-gradient(135deg, #b8960c, #d4af37)'
                       : '#fff',
-                    color: tier.highlighted ? '#fff' : '#1a1a1a',
+                    color: !publicSignupEnabled ? '#8a6d0a' : tier.highlighted ? '#fff' : '#1a1a1a',
                     fontSize: 14,
                     fontWeight: 700,
-                    cursor: isLoading ? 'not-allowed' : 'pointer',
+                    cursor: !publicSignupEnabled || isLoading ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -309,8 +377,19 @@ export default function PricingPage() {
                     opacity: isLoading ? 0.7 : 1,
                   }}
                 >
-                  {isLoading ? 'Redirecting...' : 'Buy'}
-                  {!isLoading && <ArrowRight size={14} />}
+                  {!publicSignupEnabled ? (
+                    <>
+                      <Clock size={14} />
+                      Coming soon
+                    </>
+                  ) : isLoading ? (
+                    'Redirecting...'
+                  ) : (
+                    <>
+                      Buy
+                      <ArrowRight size={14} />
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -318,7 +397,7 @@ export default function PricingPage() {
         })}
       </div>
 
-      {pendingPackage && (
+      {publicSignupEnabled && pendingPackage && (
         <div
           style={{
             position: 'fixed',
