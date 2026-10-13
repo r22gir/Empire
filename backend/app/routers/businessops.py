@@ -39,10 +39,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.db import database
+from app.services.accounts.founder import FounderAuthError, assert_founder
 from app.services.business.entitlements import check_entitlement
 from app.services.business.isolation import (
     assert_tenant_owns_business,
@@ -51,7 +52,7 @@ from app.services.business.isolation import (
     resolve_tenant_business_id,
     tenant_id_from_request,
 )
-from app.services.business.signup import signup_self_serve
+from app.services.business.signup import public_signup_enabled, signup_self_serve
 from app.services.business.stripe_checkout import (
     construct_test_event,
     create_subscription_checkout,
@@ -416,6 +417,7 @@ def businessops_info():
         "sellable_packages": ["pkg_starter", "pkg_growth", "pkg_empire", "pkg_apostille_only"],
         "never_sold": ["pkg_founder"],
         "stripe_mode": "test_sandbox_only",
+        "public_signup_enabled": public_signup_enabled(),
     }
 
 
@@ -847,9 +849,28 @@ def get_tenant(tenant_id: str, request: Request):
 
 # ── self-serve signup + Stripe TEST checkout ───────────────────
 
+def _require_internal_signup_auth(x_founder_pin: str | None) -> None:
+    """When public signup is off, only a founder PIN may create a prospect."""
+    if not x_founder_pin:
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        assert_founder(x_founder_pin)
+    except FounderAuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.post("/signup")
-def self_serve_signup(req: SignupRequest):
-    """Create a prospect business + tenant + owner + pending subscription."""
+def self_serve_signup(
+    req: SignupRequest,
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    """Create a prospect business + tenant + owner + pending subscription.
+
+    Public self-serve is off until launch (BUSINESSOPS_PUBLIC_SIGNUP_ENABLED).
+    Unauthenticated calls get 404. Founder PIN is required for internal use.
+    """
+    if not public_signup_enabled():
+        _require_internal_signup_auth(x_founder_pin)
     with _bo_db() as conn:
         return signup_self_serve(
             conn,

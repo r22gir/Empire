@@ -14,6 +14,7 @@ Never sells pkg_founder or pkg_custom. No live Stripe calls here.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from typing import Any
 
@@ -21,6 +22,13 @@ from fastapi import HTTPException
 
 from app.services.business.ids import new_id, unique_slug
 from app.utils.security import create_access_token, create_refresh_token
+
+PUBLIC_SIGNUP_ENV = "BUSINESSOPS_PUBLIC_SIGNUP_ENABLED"
+
+
+def public_signup_enabled() -> bool:
+    """Public self-serve signup is locked until launch. Default off."""
+    return (os.getenv(PUBLIC_SIGNUP_ENV) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _hash_password(password: str) -> str:

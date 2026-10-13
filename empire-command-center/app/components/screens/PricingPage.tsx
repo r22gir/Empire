@@ -1,7 +1,8 @@
 'use client';
-import { useState } from 'react';
-import { Check, Sparkles, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
-import { businessopsCheckout, businessopsSignup, type SellablePackageId } from '../../lib/api';
+import { useEffect, useState } from 'react';
+import { Check, Sparkles, ArrowRight, ChevronDown, ChevronUp, Clock } from 'lucide-react';
+import { businessopsCheckout, businessopsInfo, businessopsSignup, type SellablePackageId } from '../../lib/api';
+import { isPublicSignupEnabled } from '../../lib/businessopsSignup';
 
 const TIERS: Array<{
   id: SellablePackageId;
@@ -110,6 +111,7 @@ export default function PricingPage() {
   const [error, setError] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [pendingPackage, setPendingPackage] = useState<SellablePackageId | null>(null);
+  const [signupOpen, setSignupOpen] = useState(false);
   const [draft, setDraft] = useState<SignupDraft>({
     email: '',
     password: '',
@@ -117,13 +119,28 @@ export default function PricingPage() {
     business_name: '',
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    businessopsInfo()
+      .then((info) => {
+        if (!cancelled) setSignupOpen(isPublicSignupEnabled(info));
+      })
+      .catch(() => {
+        if (!cancelled) setSignupOpen(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const startBuy = (packageId: SellablePackageId) => {
+    if (!signupOpen) return;
     setError(null);
     setPendingPackage(packageId);
   };
 
   const handleCheckout = async () => {
-    if (!pendingPackage) return;
+    if (!signupOpen || !pendingPackage) return;
     setLoading(pendingPackage);
     setError(null);
     try {
@@ -166,6 +183,35 @@ export default function PricingPage() {
         <p style={{ fontSize: 16, color: '#777', margin: 0, lineHeight: 1.6 }}>
           Starter $29, Growth $79, Empire $199, Apostille-only $49. Stripe TEST / sandbox only.
         </p>
+        {!signupOpen && (
+          <div
+            data-testid="signup-coming-soon"
+            style={{
+              margin: '24px auto 0',
+              maxWidth: 480,
+              padding: '16px 20px',
+              borderRadius: 14,
+              background: '#fdf8eb',
+              border: '1px solid #f0e2b3',
+              color: '#7a5d0b',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              textAlign: 'left',
+            }}
+          >
+            <Clock size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '0.02em', marginBottom: 4 }}>
+                Coming soon
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.55, color: '#8a7018' }}>
+                Public signup opens at launch. Preview the plans below — we are not taking
+                self-serve workspaces yet.
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 40 }}>
@@ -287,20 +333,26 @@ export default function PricingPage() {
 
                 <button
                   onClick={() => startBuy(tier.id)}
-                  disabled={isLoading}
+                  disabled={!signupOpen || isLoading}
                   data-testid={`buy-${tier.id}`}
                   style={{
                     width: '100%',
                     padding: '12px 0',
                     borderRadius: 10,
-                    border: tier.highlighted ? 'none' : '1px solid #ece8e0',
-                    background: tier.highlighted
-                      ? 'linear-gradient(135deg, #b8960c, #d4af37)'
-                      : '#fff',
-                    color: tier.highlighted ? '#fff' : '#1a1a1a',
+                    border: signupOpen
+                      ? (tier.highlighted ? 'none' : '1px solid #ece8e0')
+                      : '1px solid #e6d9b0',
+                    background: signupOpen
+                      ? (tier.highlighted
+                        ? 'linear-gradient(135deg, #b8960c, #d4af37)'
+                        : '#fff')
+                      : '#f7f1dc',
+                    color: signupOpen
+                      ? (tier.highlighted ? '#fff' : '#1a1a1a')
+                      : '#6b5a2e',
                     fontSize: 14,
                     fontWeight: 700,
-                    cursor: isLoading ? 'not-allowed' : 'pointer',
+                    cursor: signupOpen && !isLoading ? 'pointer' : 'not-allowed',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -309,8 +361,9 @@ export default function PricingPage() {
                     opacity: isLoading ? 0.7 : 1,
                   }}
                 >
-                  {isLoading ? 'Redirecting...' : 'Buy'}
-                  {!isLoading && <ArrowRight size={14} />}
+                  {!signupOpen && <Clock size={14} />}
+                  {!signupOpen ? 'Coming soon' : isLoading ? 'Redirecting...' : 'Buy'}
+                  {signupOpen && !isLoading && <ArrowRight size={14} />}
                 </button>
               </div>
             </div>
@@ -318,7 +371,7 @@ export default function PricingPage() {
         })}
       </div>
 
-      {pendingPackage && (
+      {signupOpen && pendingPackage && (
         <div
           style={{
             position: 'fixed',

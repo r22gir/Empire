@@ -30,6 +30,7 @@ def client(monkeypatch, tmp_path):
     from app.db import database
     db_path = tmp_path / "biz_router_test.db"
     monkeypatch.setattr(database, "DB_PATH", str(db_path))
+    monkeypatch.delenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", raising=False)
     from app.main import app
     return TestClient(app)
 
@@ -46,6 +47,7 @@ def test_info_endpoint(client):
     assert body["phase"] == 2
     assert body["never_sold"] == ["pkg_founder"]
     assert body["stripe_mode"] == "test_sandbox_only"
+    assert body["public_signup_enabled"] is False
 
 
 def test_health_endpoint_after_init(client):
