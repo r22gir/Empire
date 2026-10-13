@@ -142,7 +142,13 @@ async def send_email(to: str, subject: str, html_body: str) -> bool:
     Send an HTML email. Tries SendGrid first, then SMTP.
 
     Returns True on success, False on failure or missing config.
+    Raises ValueError when the recipient violates the founder recipient
+    lock (IMP-0004: only empirebox2026@gmail.com, no cc/bcc).
     """
+    # IMP-0004 recipient lock (mandatory, server-side): reject anything
+    # that is not the single allowlisted founder address.
+    from app.services.max.email_recipient_guard import validate_outbound_email
+    validate_outbound_email(to)
     # Re-check env vars at call time (modules may load before .env is sourced)
     if _sendgrid_configured():
         sent = await _send_via_sendgrid(to, subject, html_body)

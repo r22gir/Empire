@@ -21,6 +21,17 @@ logger = logging.getLogger("empire.email.router")
 router = APIRouter()
 
 
+def _enforce_recipient_lock(to_email: str) -> None:
+    """IMP-0004 recipient lock: only empirebox2026@gmail.com may receive
+    email. Quotes/client emails remain drafts only — any other address is
+    rejected before render or send. Raises HTTPException(403) on violation."""
+    from app.services.max.email_recipient_guard import RecipientRejected, validate_outbound_email
+    try:
+        validate_outbound_email(to_email)
+    except RecipientRejected as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
 # ── Request models ─────────────────────────────────────────────────
 
 class QuoteEmailRequest(BaseModel):
@@ -85,6 +96,7 @@ def _log_notification(source: str, title: str, message: str, context: dict = Non
 @router.post("/emails/send-quote")
 async def send_quote_email(req: QuoteEmailRequest):
     """Send a branded quote email to a customer."""
+    _enforce_recipient_lock(str(req.to_email))
     html = render_quote_sent(req.model_dump())
 
     # Quality gate: validate email content
@@ -129,6 +141,7 @@ async def send_quote_email(req: QuoteEmailRequest):
 @router.post("/emails/send-invoice")
 async def send_invoice_email(req: InvoiceEmailRequest):
     """Send a branded invoice email with payment link."""
+    _enforce_recipient_lock(str(req.to_email))
     data = req.model_dump()
     if data.get("balance_due") is None:
         data["balance_due"] = data["total"]
@@ -155,6 +168,7 @@ async def send_invoice_email(req: InvoiceEmailRequest):
 @router.post("/emails/send-receipt")
 async def send_receipt_email(req: PaymentReceiptRequest):
     """Send a branded payment receipt email."""
+    _enforce_recipient_lock(str(req.to_email))
     html = render_payment_received(req.model_dump())
     subject = f"Payment Received — Thank You, {req.customer_name}!"
 

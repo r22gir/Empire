@@ -24,7 +24,7 @@ def test_successful_max_email_send_writes_unified_ledger_once(monkeypatch, tmp_p
 
     svc = EmailService()
     kwargs = {
-        "to": "founder@example.com",
+        "to": "empirebox2026@gmail.com",
         "subject": "Ledger proof",
         "body_html": "<p>Ledger body</p>",
         "attachments": [],
@@ -41,7 +41,7 @@ def test_successful_max_email_send_writes_unified_ledger_once(monkeypatch, tmp_p
     assert row["direction"] == "outbound"
     assert row["role"] == "assistant"
     assert row["sender"] == "max@empirebox.store"
-    assert row["recipient"] == "founder@example.com"
+    assert row["recipient"] == "empirebox2026@gmail.com"
     assert row["subject"] == "Ledger proof"
     assert row["source_message_id"].startswith("outbound-email:")
     assert row["metadata"]["identifier_fallback"] == "conversation_id_from_outbound_email_hash"
@@ -59,7 +59,7 @@ def test_failed_max_email_send_does_not_write_unified_ledger(monkeypatch, tmp_pa
 
     svc = EmailService()
     try:
-        svc.send(to="founder@example.com", subject="Failure", body_html="<p>No write</p>")
+        svc.send(to="empirebox2026@gmail.com", subject="Failure", body_html="<p>No write</p>")
     except RuntimeError:
         pass
 
@@ -100,12 +100,13 @@ def test_business_email_sender_success_writes_unified_ledger(monkeypatch, tmp_pa
 
     from app.services.email import sender
 
-    sent = asyncio.run(sender.send_email("client@example.com", "Business path", "<p>Invoice body</p>"))
+    # IMP-0004 recipient lock: only empirebox2026@gmail.com may receive email.
+    sent = asyncio.run(sender.send_email("empirebox2026@gmail.com", "Business path", "<p>Invoice body</p>"))
 
     assert sent is True
     rows = store.list_memory_bank(channel="email", limit=10)
     assert len(rows) == 1
     assert rows[0]["channel"] == "email"
     assert rows[0]["sender"] == "workroom@empirebox.store"
-    assert rows[0]["recipient"] == "client@example.com"
+    assert rows[0]["recipient"] == "empirebox2026@gmail.com"
     assert rows[0]["metadata"]["service"] == "app.services.email.sender.send_email/sendgrid"
