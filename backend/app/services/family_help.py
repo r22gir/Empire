@@ -172,6 +172,40 @@ HELP_INTENT_RE = re.compile(
     re.I,
 )
 
+FAMILY_REQUEST_TYPES = ("Arreglo", "Crear", "Ajuste")
+FAMILY_REQUEST_OFFER = "¿Quieres que le pase esto a Rafael como solicitud?"
+
+_ARREGLO_RE = re.compile(
+    r"(?:"
+    r"no\s+(?:me\s+)?(?:funciona|anda|carga|abre|sale|deja|puedo)"
+    r"|se\s+(?:romp|cae|traba|congela|cierra)"
+    r"|error|falla|bug|roto|rota|404|500"
+    r"|doesn'?t\s+work|not\s+working|broken|crashed|crash"
+    r")",
+    re.I,
+)
+_CREAR_RE = re.compile(
+    r"(?:"
+    r"(?:puedes|podrias|quiero|quisiera)\s+(?:agregar|anadir|crear|hacer)"
+    r"|agrega(?:r)?|anade(?:r)?|nueva\s+(?:funcion|caracteristica|feature)"
+    r"|can\s+you\s+add|please\s+add|new\s+feature|add\s+a\s+"
+    r")",
+    re.I,
+)
+_AJUSTE_RE = re.compile(
+    r"(?:"
+    r"quisiera\s+que|me\s+gustaria\s+que|preferiria"
+    r"|puedes\s+(?:cambiar|ajustar|mejorar)|podrias\s+(?:cambiar|ajustar|mejorar)"
+    r"|ajusta(?:r)?|cambia(?:r)?|mejorar|ajuste"
+    r"|would\s+like|please\s+change|adjust|tweak"
+    r")",
+    re.I,
+)
+_REQUEST_NOISE_RE = re.compile(
+    r"^(hola|hello|hi|hey|gracias|thanks|ok|okay|si|s[ií]|no|vale)(?:[!?.\s]*)$",
+    re.I,
+)
+
 _EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 _PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\s().-]?){8,15}\d(?!\w)")
 _PIN_RE = re.compile(r"\b(?:pin|founder[_-]?pin|c[oó]digo)\s*[:#]?\s*\d{4,8}\b", re.I)
@@ -247,6 +281,56 @@ def leftover_after_intent(message: str) -> str:
     # and slicing the original by the same offsets (accents are rare in the cue).
     cleaned = HELP_INTENT_RE.sub(" ", folded)
     return re.sub(r"\s+", " ", cleaned).strip(" .,;:-")
+
+
+def classify_family_request(message: str) -> Optional[str]:
+    """Ajuste / Arreglo / Crear when the chat sounds like a product request.
+
+    Explicit ``pide ayuda a Max`` is handled by ``is_help_intent`` and files
+    immediately. This classifier only *offers* a ticket — never files one.
+    """
+    text = _fold_accents((message or "").strip())
+    if not text or is_help_intent(text):
+        return None
+    if _REQUEST_NOISE_RE.match(text) and len(text.split()) <= 3:
+        return None
+    if _ARREGLO_RE.search(text):
+        return "Arreglo"
+    if _CREAR_RE.search(text):
+        return "Crear"
+    if _AJUSTE_RE.search(text):
+        return "Ajuste"
+    return None
+
+
+def family_request_offer(message: str) -> Optional[dict]:
+    kind = classify_family_request(message)
+    if not kind:
+        return None
+    return {
+        "suggested_type": kind,
+        "offer": FAMILY_REQUEST_OFFER,
+        "source_message": (message or "").strip()[:500],
+    }
+
+
+def normalize_request_type(value: Optional[str]) -> Optional[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    folded = _fold_accents(raw).lower()
+    aliases = {
+        "arreglo": "Arreglo",
+        "fix": "Arreglo",
+        "bug": "Arreglo",
+        "crear": "Crear",
+        "create": "Crear",
+        "feature": "Crear",
+        "ajuste": "Ajuste",
+        "adjust": "Ajuste",
+        "tweak": "Ajuste",
+    }
+    return aliases.get(folded) or (raw if raw in FAMILY_REQUEST_TYPES else None)
 
 
 def redact_text(text: str, *, edition: Optional[str] = None) -> str:
@@ -476,6 +560,8 @@ def _connect(edition: str) -> sqlite3.Connection:
         conn.execute(
             "ALTER TABLE tickets ADD COLUMN transcript_pending INTEGER NOT NULL DEFAULT 0"
         )
+    if "request_type" not in ticket_cols:
+        conn.execute("ALTER TABLE tickets ADD COLUMN request_type TEXT")
     reply_cols = {row[1] for row in conn.execute("PRAGMA table_info(replies)")}
     if "usage_tokens" not in reply_cols:
         conn.execute(
@@ -733,6 +819,7 @@ def _row_ticket(row: sqlite3.Row, *, include_private: bool = False) -> dict:
         "status": row["status"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "request_type": (row["request_type"] if "request_type" in keys else None) or "",
         "attachments": [],
         "replies": [],
         "usage": {
@@ -881,6 +968,7 @@ def create_ticket(
     attachments: Optional[list[dict]] = None,
     edition: Optional[str] = None,
     notify: bool = True,
+    request_type: Optional[str] = None,
 ) -> dict:
     if not is_family_edition():
         raise PermissionError("solo Max-e y Maxine pueden crear tickets de ayuda")
@@ -942,6 +1030,7 @@ def create_ticket(
     now = _iso()
     sender_name = (sender or "").strip() or edition_owner_name(mine)
     context = sanitize_context_turns(history, edition=mine)
+    suggested = normalize_request_type(request_type) or classify_family_request(text)
     files_root = None
     conn = _connect(mine)
     saved_files = []
@@ -950,13 +1039,15 @@ def create_ticket(
             """
             INSERT INTO tickets (
                 id, edition, sender, message, transcript, context_json,
-                status, created_at, updated_at, attachments_revealed, transcript_pending
-            ) VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, 0, ?)
+                status, created_at, updated_at, attachments_revealed, transcript_pending,
+                request_type
+            ) VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, 0, ?, ?)
             """,
             (
                 ticket_id, mine, sender_name, text, voice_text,
                 json.dumps(context, ensure_ascii=False), now, now,
                 1 if pending else 0,
+                suggested,
             ),
         )
         for item in prepared:
@@ -1461,7 +1552,9 @@ def build_notify_email(ticket: dict) -> dict:
     edition = ticket.get("edition")
     hidden = attachments_hidden_until_reveal(edition)
     label = "Max-e" if edition == "amp" else "Maxine"
-    title = f"Ayuda de {label}: {ticket.get('sender') or edition_owner_name(edition)}"
+    kind = (ticket.get("request_type") or "").strip()
+    kind_bit = f" ({kind})" if kind in FAMILY_REQUEST_TYPES else ""
+    title = f"Ayuda de {label}{kind_bit}: {ticket.get('sender') or edition_owner_name(edition)}"
     preview = (ticket.get("message") or ticket.get("transcript") or "").strip()[:400]
     if hidden:
         # Metadata only — do not read Maxine file bytes for email.
@@ -1633,6 +1726,7 @@ def handle_chat_intent(
         return None
     leftover = leftover_after_intent(message)
     body = leftover or "El usuario pidió ayuda a Max desde el chat."
+    suggested = classify_family_request(leftover) or classify_family_request(message)
     kept = []
     for item in attachments or []:
         try:
@@ -1651,6 +1745,7 @@ def handle_chat_intent(
         history=history,
         attachments=kept or None,
         notify=True,
+        request_type=suggested,
     )
     locale_es = True
     first = ticket["id"]

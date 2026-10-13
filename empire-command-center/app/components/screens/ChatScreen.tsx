@@ -34,7 +34,9 @@ import {
 } from '../../lib/voiceCapture';
 import { editionFromEnv, isFamilyEdition } from '../../lib/edition';
 import AskMaxHelp from '../family/AskMaxHelp';
-import { familyHelpLabels } from '../../lib/familyHelp';
+import { createHelpTicket, familyHelpLabels } from '../../lib/familyHelp';
+import { FAMILY_REQUEST_OFFER, classifyFamilyRequest } from '../../lib/familyHelpRequest';
+import { fileViewUrl, isChatImageFilename } from '../../lib/chatFiles';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -152,6 +154,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const familyHelp = isFamilyEdition(editionFromEnv());
   const helpCopy = familyHelpLabels(locale);
   const [helpNotes, setHelpNotes] = useState<Message[]>([]);
+  const [recentUploadFiles, setRecentUploadFiles] = useState<File[]>([]);
+  const [requestOfferBusy, setRequestOfferBusy] = useState<string | null>(null);
+  const [requestOfferDone, setRequestOfferDone] = useState<Record<string, string>>({});
   useEffect(() => { localeRef.current = locale; }, [locale]);
   useEffect(() => { recordingRef.current = recording; }, [recording]);
   useEffect(() => {
@@ -170,6 +175,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   }, [messages, streamingContent, codeTask]);
 
   useEffect(() => {
+    if (family) return;
     const fetchMaxStatus = async () => {
       try {
         const res = await fetch(API + '/max/orchestration/status', { signal: AbortSignal.timeout(5000) });
@@ -179,7 +185,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     fetchMaxStatus();
     const interval = setInterval(fetchMaxStatus, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [family]);
 
   // Keep voice routing refs in sync. Normal mic dictation goes to chat.
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
@@ -589,7 +595,10 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     try {
       const res = await fetch(API + '/files/upload', { method: 'POST', body: fd });
       const data = await res.json();
-      if (data.status === 'success') setAttachedImage(data.filename);
+      if (data.status === 'success') {
+        setAttachedImage(data.filename);
+        setRecentUploadFiles((prev) => [...prev.slice(-4), file]);
+      }
       if (file.type.startsWith('image/')) {
         const photo = new FormData();
         photo.append('file', file);
@@ -598,6 +607,38 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         fetch(`${API}/photos/intake`, { method: 'POST', body: photo }).catch(() => {});
       }
     } catch { /* silent */ }
+  };
+
+  const fileFamilyRequest = async (assistantMsg: Message, userText: string, suggestedType: string) => {
+    if (requestOfferBusy || requestOfferDone[assistantMsg.id]) return;
+    setRequestOfferBusy(assistantMsg.id);
+    const excerpt = messages
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .slice(-6)
+      .map((m) => ({ role: m.role, content: (m.content || '').slice(0, 400) }));
+    const result = await createHelpTicket({
+      message: userText,
+      history: excerpt,
+      files: recentUploadFiles,
+      language: sttLanguage(locale),
+      requestType: suggestedType,
+    });
+    setRequestOfferBusy(null);
+    if (!result.ok) {
+      setToast(typeof result.detail === 'string' ? result.detail : helpCopy.sending);
+      return;
+    }
+    setRequestOfferDone((prev) => ({ ...prev, [assistantMsg.id]: result.ticket?.id || 'ok' }));
+    setHelpNotes((prev) => [
+      ...prev,
+      {
+        id: `help-offer-${assistantMsg.id}`,
+        role: 'assistant',
+        content: `${helpCopy.requestFiled}${result.ticket?.id ? ` (${result.ticket.id})` : ''}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        model: 'family-help',
+      },
+    ]);
   };
 
   const primaryModel = maxStatus?.providers?.cloud?.find((p: any) => p.primary)?.name || streamingModel || 'MAX routing';
@@ -896,18 +937,35 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               const { cleanContent, toolCalls } = msg.role === 'assistant'
                 ? parseToolBlocks(msg.content)
                 : { cleanContent: msg.content, toolCalls: [] };
-              const msgImage = msg.imageUrl
-                || (msg.image ? `${API}/files/view/images/${encodeURIComponent(msg.image)}` : '');
+              const fileHref = msg.imageUrl || (msg.image ? fileViewUrl(msg.image, API) : '');
+              const showAsImage = !!fileHref && (!!msg.imageUrl || isChatImageFilename(msg.image || ''));
+              const prevUser = [...messages.slice(0, i)].reverse().find(m => m.role === 'user');
+              const offerMeta = msg.role === 'assistant' ? (msg.metadata as any)?.family_request_offer : null;
+              const inferredType = familyHelp && msg.role === 'assistant' && prevUser
+                ? (offerMeta?.suggested_type || classifyFamilyRequest(prevUser.content || ''))
+                : null;
+              const showRequestOffer = !!(familyHelp && inferredType && msg.role === 'assistant' && !requestOfferDone[msg.id]);
               return (
                 <>
-                  {msgImage && (
-                    <a href={msgImage} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 6, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
+                  {fileHref && showAsImage && (
+                    <a href={fileHref} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 6, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
                       <img
-                        src={msgImage}
+                        src={fileHref}
                         alt={msg.image || 'attached image'}
                         loading="lazy"
                         style={{ maxWidth: 240, maxHeight: 240, borderRadius: 10, border: '1px solid var(--border)', objectFit: 'cover' }}
                       />
+                    </a>
+                  )}
+                  {fileHref && !showAsImage && (
+                    <a href={fileHref} target="_blank" rel="noreferrer" style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 6,
+                      padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)',
+                      background: 'var(--card-bg)', color: 'var(--text)', fontSize: 12, fontWeight: 600,
+                      textDecoration: 'none',
+                    }}>
+                      <FileText size={14} />
+                      {msg.image}
                     </a>
                   )}
                   {cleanContent && (
@@ -915,6 +973,31 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                       {msg.role === 'user'
                         ? cleanContent
                         : renderContent(cleanContent, onScreenChange, [...messages.slice(0, i)].reverse().find(m => m.role === 'user')?.content)}
+                    </div>
+                  )}
+                  {showRequestOffer && msg.model !== 'family-help' && msg.id !== 'welcome' && (
+                    <div style={{
+                      marginTop: 8, padding: '10px 12px', borderRadius: 10,
+                      border: '1px solid var(--gold)', background: 'var(--gold-light, #fff8e8)',
+                      fontSize: 13,
+                    }}>
+                      {!(cleanContent || '').includes(FAMILY_REQUEST_OFFER) && (
+                        <div style={{ marginBottom: 8 }}>{helpCopy.passToRafael}</div>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          disabled={requestOfferBusy === msg.id}
+                          onClick={() => fileFamilyRequest(msg, prevUser?.content || '', String(inferredType))}
+                          style={{
+                            background: '#d4a017', color: '#1a1a1a', border: 'none',
+                            borderRadius: 8, padding: '6px 14px', fontWeight: 800, cursor: 'pointer',
+                          }}
+                        >
+                          {requestOfferBusy === msg.id ? helpCopy.sending : helpCopy.yesPass}
+                        </button>
+                        <span style={{ fontSize: 11, opacity: 0.7 }}>{helpCopy.requestType}: {inferredType}</span>
+                      </div>
                     </div>
                   )}
                   {/* Inline tool call cards (from message content) */}

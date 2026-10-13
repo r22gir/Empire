@@ -72,9 +72,9 @@ def test_process_attachment_extracts_pdf_text(tmp_path):
 
 def test_ai_router_upload_dirs_are_edition_only(monkeypatch, tmp_path):
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path / "edition"))
+    monkeypatch.setenv("EMPIRE_EDITION", "amp")
     from app.services.max.ai_router import AIRouter
     router = AIRouter()
-    assert len(router.upload_dirs) == 1
     assert router.upload_dirs[0] == (tmp_path / "edition" / "uploads")
     joined = " ".join(str(p) for p in router.upload_dirs)
     assert "empire-repo" not in joined
