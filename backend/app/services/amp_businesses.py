@@ -62,6 +62,8 @@ _EXTRA_KEYS = {
     "fiscal_year_start",
     "tax_id",
     "charges_iva",
+    "iva_rate",
+    "logo_path",
     "payment_methods",
     "customer_type",
     "customer_who",
@@ -736,6 +738,7 @@ def empty_interview_answers() -> dict:
         "fiscal_year_start": "01-01",
         "tax_id": "",
         "charges_iva": False,
+        "iva_rate": 0.19,
         "payment_methods": [],
         "team_mode": "solo",
         "roles": [],
@@ -778,6 +781,10 @@ def sanitize_interview_answers(raw: Optional[dict]) -> dict:
         base["currency"] = "COP"
     base["fiscal_year_start"] = _fiscal_year_start(raw.get("fiscal_year_start"))
     base["charges_iva"] = _as_bool(raw.get("charges_iva"))
+    if "iva_rate" in raw:
+        from app.services.edition_pdf_branding import normalize_iva_rate
+
+        base["iva_rate"] = normalize_iva_rate(raw.get("iva_rate"))
     base["payment_methods"] = _payment_methods(raw.get("payment_methods"))
     base["roles"] = _roles(raw.get("roles"))
     base["items"] = _sanitize_items(raw.get("items"))
@@ -1030,6 +1037,8 @@ def finish_interview(email: str, *, step: int = INTERVIEW_LAST_STEP, answers: Op
             "fiscal_year_start": clean["fiscal_year_start"],
             "tax_id": clean["tax_id"],
             "charges_iva": clean["charges_iva"],
+            "iva_rate": clean.get("iva_rate", 0.19),
+            "logo_path": _clip(clean.get("logo_path"), 400),
             "payment_methods": clean["payment_methods"],
             "customer_type": clean["customer_type"],
             "customer_who": clean["customer_who"],

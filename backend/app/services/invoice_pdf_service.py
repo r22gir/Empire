@@ -330,6 +330,13 @@ def generate_client_invoice_pdf_bytes(
     customer: Optional[dict] = None,
     is_woodcraft: bool = False,
 ) -> bytes:
+    from app.edition import is_family_edition
+
+    if is_family_edition():
+        from app.services.edition_document_pdf import generate_edition_invoice_pdf_bytes
+
+        return generate_edition_invoice_pdf_bytes(invoice, customer=customer)
+
     import weasyprint
 
     html = render_client_invoice_html(invoice, customer=customer, is_woodcraft=is_woodcraft)

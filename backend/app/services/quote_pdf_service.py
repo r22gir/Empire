@@ -152,12 +152,19 @@ def _append_idea_diagrams(story, styles, items) -> None:
 
 
 def generate_quote_pdf(quote_id: str) -> bytes:
-    """Default Max estimate PDF — McLean gold landscape chrome.
+    """Default estimate PDF.
 
-    Callers of GET/POST /quotes/{id}/pdf, portal compat, and quotes_v2
-    all land here. Willard/Empire portrait ReportLab remains available as
+    Max-e / Maxine use the company letterhead (Spanish, COP). Founder
+    Workroom stays on McLean gold. Willard portrait remains
     generate_quote_pdf_legacy_portrait for explicit opt-in only.
     """
+    from app.edition import is_family_edition
+
+    if is_family_edition():
+        from app.services.edition_document_pdf import generate_edition_quote_pdf
+
+        return generate_edition_quote_pdf(quote_id, save=True)
+
     from app.services.estimates.mclean_estimate_pdf import generate_mclean_estimate_pdf
 
     return generate_mclean_estimate_pdf(quote_id, save=True)
