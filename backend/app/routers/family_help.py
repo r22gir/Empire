@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app.services import family_help_store, family_request_log
+from app.services import family_help_drafts, family_help_store, family_request_log
 from app.services.family_help_store import HELP_EDITIONS
 from app.services.supportforge_proposed_action import classify_proposed_action
 
@@ -48,6 +48,18 @@ class OrganizerBody(BaseModel):
     description: Optional[str] = None
 
 
+class DraftSendBody(BaseModel):
+    body: str = Field(min_length=1)
+    author: str = "Max"
+    explicit_yes: bool = False
+
+
+class SaveGuideBody(BaseModel):
+    title: Optional[str] = None
+    body: str = Field(min_length=1)
+    steps: Optional[list] = None
+
+
 def _is_founder_process() -> bool:
     raw = (__import__("os").getenv("EMPIRE_EDITION") or "").strip().lower().replace("-", "_")
     return raw in ("", "main", "workroom", "empire")
@@ -59,6 +71,25 @@ def _founder_or_403() -> None:
             status_code=403,
             detail="El buzón de ediciones familiares solo lo ve el Max personal de Rafael.",
         )
+
+
+def _process_edition() -> Optional[str]:
+    raw = (__import__("os").getenv("EMPIRE_EDITION") or "").strip().lower().replace("-", "_")
+    if raw in ("amp", "max_e", "maxe"):
+        return "amp"
+    if raw == "maxine":
+        return "maxine"
+    return None
+
+
+def _guide_edition_or_403(requested: Optional[str]) -> Optional[str]:
+    """Founder may read any edition. A family process may read only its own."""
+    mine = _process_edition()
+    if mine is None:
+        return requested
+    if requested and requested != mine:
+        raise HTTPException(status_code=403, detail="Esta guía no es de tu edición.")
+    return mine
 
 
 def _merge(ticket: dict, *, mark: bool = False) -> dict:
@@ -268,3 +299,94 @@ async def create_organizer_task(edition: str, ticket_id: str, body: OrganizerBod
         transcript=ticket.get("transcript") or "",
     )
     return {"ok": True, "ticket": _merge(ticket), "meta": meta, "task": meta.get("organizer_task")}
+
+
+@router.post("/inbox/{ticket_id}/generate-reply")
+async def generate_reply(ticket_id: str):
+    """On-demand draft reply. Does not send or save."""
+    _founder_or_403()
+    ticket = family_help_store.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+    ticket = _merge(ticket)
+    try:
+        draft = await family_help_drafts.generate_reply(ticket)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"ok": True, "draft": draft, "would_send": False, "saved": False}
+
+
+@router.post("/inbox/{ticket_id}/generate-manual")
+async def generate_manual(ticket_id: str):
+    """On-demand how-to draft with ui-map links. Does not send or save."""
+    _founder_or_403()
+    ticket = family_help_store.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+    ticket = _merge(ticket)
+    try:
+        draft = await family_help_drafts.generate_manual(ticket)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"ok": True, "draft": draft, "would_send": False, "saved": False}
+
+
+@router.post("/inbox/{ticket_id}/send-draft")
+async def send_draft(ticket_id: str, body: DraftSendBody, request: Request):
+    """Send only after Rafael taps. Same path as /reply."""
+    return await founder_reply(
+        ticket_id,
+        ReplyBody(body=body.body, author=body.author, explicit_yes=body.explicit_yes),
+        request,
+    )
+
+
+@router.post("/inbox/{ticket_id}/save-guide")
+async def save_guide(ticket_id: str, body: SaveGuideBody):
+    """Save a manual to the per-edition help library. Founder tap only."""
+    _founder_or_403()
+    ticket = family_help_store.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+    try:
+        guide = family_request_log.save_guide(
+            ticket["edition"],
+            title=body.title or (ticket.get("summary") or ticket.get("message") or "Manual")[:80],
+            body=body.body,
+            ticket_id=ticket_id,
+            steps=body.steps,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    family_request_log.add_log(
+        ticket["edition"],
+        ticket_id,
+        body=f"Saved help guide: {guide['title']}",
+        kind="guide",
+        href=f"/?screen=family-help&guide={guide['id']}",
+        href_label="Open in help library",
+        message=ticket.get("message") or "",
+        transcript=ticket.get("transcript") or "",
+    )
+    return {"ok": True, "saved": True, "guide": guide, "ticket": _merge(ticket)}
+
+
+@router.get("/guides")
+async def list_help_guides(edition: Optional[str] = None):
+    """Per-edition help library. Family processes see only their edition."""
+    scoped = _guide_edition_or_403(edition)
+    if scoped and scoped not in HELP_EDITIONS:
+        return {"guides": []}
+    guides = family_request_log.list_guides(scoped)
+    return {"guides": guides, "edition": scoped}
+
+
+@router.get("/guides/{guide_id}")
+async def get_help_guide(guide_id: str, edition: Optional[str] = None):
+    scoped = _guide_edition_or_403(edition)
+    guide = family_request_log.get_guide(guide_id, edition=scoped)
+    if not guide:
+        raise HTTPException(status_code=404, detail="Guía no encontrada")
+    if not _is_founder_process() and guide["edition"] != _process_edition():
+        raise HTTPException(status_code=403, detail="Esta guía no es de tu edición.")
+    return {"guide": guide}

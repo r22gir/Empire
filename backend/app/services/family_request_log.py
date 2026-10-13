@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS family_request_log (
 );
 CREATE INDEX IF NOT EXISTS idx_family_request_log_ticket
     ON family_request_log(edition, ticket_id, created_at);
+CREATE TABLE IF NOT EXISTS family_help_guides (
+    id TEXT PRIMARY KEY,
+    edition TEXT NOT NULL,
+    ticket_id TEXT,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    steps_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_family_help_guides_edition
+    ON family_help_guides(edition, created_at);
 """
 
 
@@ -516,3 +528,105 @@ def create_organizer_task(
     meta = get_meta(edition, ticket_id)
     meta["organizer_task"] = {"id": task_id, "href": href, "area": "Empire"}
     return meta
+
+
+def _guide_row(row: sqlite3.Row) -> dict:
+    try:
+        steps = json.loads(row["steps_json"] or "[]")
+    except (json.JSONDecodeError, TypeError):
+        steps = []
+    return {
+        "id": row["id"],
+        "edition": row["edition"],
+        "ticket_id": row["ticket_id"],
+        "title": row["title"],
+        "body": row["body"],
+        "steps": steps if isinstance(steps, list) else [],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def save_guide(
+    edition: str,
+    *,
+    title: str,
+    body: str,
+    ticket_id: Optional[str] = None,
+    steps: Optional[list] = None,
+) -> dict:
+    """Persist a how-to in the per-edition help library. Never writes help.db."""
+    if edition not in ("amp", "maxine"):
+        raise ValueError("edition must be amp or maxine")
+    text = (body or "").strip()
+    if not text:
+        raise ValueError("guide body is required")
+    heading = (title or "").strip() or text.splitlines()[0][:80]
+    now = _now()
+    guide = {
+        "id": f"guide-{uuid.uuid4().hex[:12]}",
+        "edition": edition,
+        "ticket_id": ticket_id,
+        "title": heading,
+        "body": text,
+        "steps": steps or [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    conn = _connect()
+    try:
+        conn.execute(
+            """INSERT INTO family_help_guides
+               (id, edition, ticket_id, title, body, steps_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                guide["id"],
+                edition,
+                ticket_id,
+                heading,
+                text,
+                json.dumps(guide["steps"]),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return guide
+
+
+def list_guides(edition: Optional[str] = None) -> list[dict]:
+    conn = _connect()
+    try:
+        if edition:
+            rows = conn.execute(
+                """SELECT * FROM family_help_guides
+                   WHERE edition = ? ORDER BY created_at DESC""",
+                (edition,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM family_help_guides ORDER BY created_at DESC"
+            ).fetchall()
+        return [_guide_row(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_guide(guide_id: str, *, edition: Optional[str] = None) -> Optional[dict]:
+    conn = _connect()
+    try:
+        if edition:
+            row = conn.execute(
+                "SELECT * FROM family_help_guides WHERE id = ? AND edition = ?",
+                (guide_id, edition),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM family_help_guides WHERE id = ?",
+                (guide_id,),
+            ).fetchone()
+        return _guide_row(row) if row else None
+    finally:
+        conn.close()

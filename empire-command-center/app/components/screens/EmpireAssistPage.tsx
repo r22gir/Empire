@@ -6,11 +6,13 @@ import {
   CircleDot, Sparkles, RefreshCw, ExternalLink, ListTodo,
 } from 'lucide-react';
 import {
-  HelpTicket, LOG_STATUSES, LogStatus, REQUEST_TYPES, RequestType,
+  FamilyDraft, HelpGuide, HelpTicket, LOG_STATUSES, LogStatus, REQUEST_TYPES, RequestType,
   STATUS_LABEL, TYPE_LABEL, addWorkLog, attachmentUrl, createOrganizerTask,
-  fetchInbox, fetchTicket, fetchUnreadCount, patchRequest, replyTicket,
+  fetchGuides, fetchInbox, fetchTicket, fetchUnreadCount, generateManual, generateReply,
+  patchRequest, replyTicket, saveGuide, sendDraft,
   statusOf, typeOf, whoLabel,
 } from '../../lib/familyHelp';
+import { FamilyDraftPane, FamilyGenerateBar, FamilyHelpLibrary } from './FamilyRequestDraft';
 
 const ACCENT = '#b8960c';
 const ACCENT_BG = 'rgba(184,150,12,0.12)';
@@ -59,6 +61,9 @@ export default function EmpireAssistPage() {
   const [logHref, setLogHref] = useState('');
   const [busy, setBusy] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [draft, setDraft] = useState<FamilyDraft | null>(null);
+  const [guides, setGuides] = useState<HelpGuide[]>([]);
+  const [libraryGuide, setLibraryGuide] = useState<HelpGuide | null>(null);
 
   const load = useCallback(async (keepId?: string | null) => {
     setLoading(true);
@@ -73,8 +78,10 @@ export default function EmpireAssistPage() {
       if (next) {
         const detail = await fetchTicket(next.id);
         setActive(detail || next);
+        setGuides(await fetchGuides(next.edition));
       } else {
         setActive(null);
+        setGuides([]);
       }
       setError(null);
     } catch (err: any) {
@@ -95,8 +102,11 @@ export default function EmpireAssistPage() {
     setReply('');
     setLogBody('');
     setLogHref('');
+    setDraft(null);
+    setLibraryGuide(null);
     const detail = await fetchTicket(ticket.id);
     setActive(detail || ticket);
+    setGuides(await fetchGuides((detail || ticket).edition));
     const rows = await fetchInbox(filter === 'all' ? undefined : filter);
     setTickets(rows);
     setUnread(await fetchUnreadCount());
@@ -111,6 +121,20 @@ export default function EmpireAssistPage() {
       await load(ticket?.id || activeId);
     } catch (err: any) {
       setError(err?.message || 'Action failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runGenerate = async (kind: 'reply' | 'manual') => {
+    if (!active) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = kind === 'manual' ? await generateManual(active.id) : await generateReply(active.id);
+      setDraft(next);
+    } catch (err: any) {
+      setError(err?.message || 'Generate failed');
     } finally {
       setBusy(false);
     }
@@ -245,6 +269,34 @@ export default function EmpireAssistPage() {
               ) : null}
             </header>
 
+            <FamilyGenerateBar
+              busy={busy}
+              onReply={() => runGenerate('reply')}
+              onManual={() => runGenerate('manual')}
+            />
+
+            {draft && (
+              <FamilyDraftPane
+                draft={draft}
+                busy={busy}
+                onChange={(body) => setDraft({ ...draft, body })}
+                onSend={() => act(async () => {
+                  const ticket = await sendDraft(active.id, draft.body);
+                  setDraft(null);
+                  setReply('');
+                  return ticket;
+                })}
+                onRegenerate={() => runGenerate(draft.kind)}
+                onDiscard={() => setDraft(null)}
+                onSave={draft.kind === 'manual' ? () => act(async () => {
+                  const result = await saveGuide(active.id, draft);
+                  setGuides(await fetchGuides(active.edition));
+                  setDraft(null);
+                  return result.ticket;
+                }) : undefined}
+              />
+            )}
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <label style={fieldBox}>
                 <span style={fieldLabel}><Sparkles size={12} /> Type · Max suggested {TYPE_LABEL[active.type_suggested || typeOf(active)]}</span>
@@ -373,6 +425,30 @@ export default function EmpireAssistPage() {
                 <RefreshCw size={14} /> Refresh
               </button>
             </div>
+
+            <FamilyHelpLibrary
+              edition={active.edition}
+              guides={guides}
+              onOpen={(guide) => {
+                setLibraryGuide(guide);
+                setDraft({
+                  kind: 'manual',
+                  title: guide.title,
+                  body: guide.body,
+                  steps: guide.steps,
+                  edition: guide.edition,
+                  ticket_id: guide.ticket_id || active.id,
+                  would_send: false,
+                  saved: true,
+                });
+              }}
+            />
+            {libraryGuide && !draft && (
+              <div style={card} data-testid="library-guide-preview">
+                <div style={cardTitle}>Saved guide · {libraryGuide.title}</div>
+                <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{libraryGuide.body}</div>
+              </div>
+            )}
 
             <div style={card}>
               <div style={cardTitle}><Send size={14} color={ACCENT} /> Reply to the family chat</div>

@@ -89,3 +89,54 @@ export function statusOf(ticket: HelpTicket): LogStatus {
   const raw = ticket.log_status || ticket.studio_status || 'new';
   return (LOG_STATUSES as readonly string[]).includes(raw) ? (raw as LogStatus) : 'new';
 }
+
+export type DraftKind = 'reply' | 'manual';
+
+export type DraftScreen = {
+  id: string;
+  name: string;
+  href: string;
+  where?: string;
+  label?: string;
+  link?: string;
+};
+
+export type DraftStep = {
+  n: number;
+  text: string;
+  href?: string | null;
+  label?: string | null;
+};
+
+export type FamilyDraft = {
+  kind: DraftKind;
+  title?: string | null;
+  body: string;
+  steps?: DraftStep[];
+  screens?: DraftScreen[];
+  edition?: string;
+  ticket_id?: string;
+  model_used?: string;
+  included_model?: boolean;
+  would_send?: boolean;
+  saved?: boolean;
+};
+
+export type HelpGuide = {
+  id: string;
+  edition: string;
+  ticket_id?: string | null;
+  title: string;
+  body: string;
+  steps?: DraftStep[];
+  created_at: string;
+  updated_at?: string;
+};
+
+export function usesManito(text: string): boolean {
+  return /\bmanito\b/i.test(text || '');
+}
+
+export function hasForbiddenNames(text: string): boolean {
+  return /\b(juan|camilo)\b/i.test(text || '');
+}

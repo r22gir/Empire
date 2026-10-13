@@ -1,5 +1,5 @@
 import { API } from './api';
-import type { HelpTicket, LogStatus, RequestType } from './familyHelpModel';
+import type { FamilyDraft, HelpGuide, HelpTicket, LogStatus, RequestType } from './familyHelpModel';
 
 export * from './familyHelpModel';
 
@@ -94,4 +94,59 @@ export async function createOrganizerTask(
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
   return { ticket: data.ticket || null, task: data.task };
+}
+
+export async function generateReply(ticketId: string): Promise<FamilyDraft> {
+  const res = await fetch(`${familyApi()}/family-help/inbox/${ticketId}/generate-reply`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  return data.draft;
+}
+
+export async function generateManual(ticketId: string): Promise<FamilyDraft> {
+  const res = await fetch(`${familyApi()}/family-help/inbox/${ticketId}/generate-manual`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  return data.draft;
+}
+
+export async function sendDraft(ticketId: string, body: string): Promise<HelpTicket | null> {
+  const res = await fetch(`${familyApi()}/family-help/inbox/${ticketId}/send-draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Family-Help-Confirm': 'si-enviar' },
+    credentials: 'include',
+    body: JSON.stringify({ body, author: 'Max', explicit_yes: true }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  return data.ticket || null;
+}
+
+export async function saveGuide(
+  ticketId: string,
+  draft: Pick<FamilyDraft, 'title' | 'body' | 'steps'>,
+): Promise<{ guide: HelpGuide; ticket: HelpTicket | null }> {
+  const res = await fetch(`${familyApi()}/family-help/inbox/${ticketId}/save-guide`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ title: draft.title, body: draft.body, steps: draft.steps || [] }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  return { guide: data.guide, ticket: data.ticket || null };
+}
+
+export async function fetchGuides(edition?: string): Promise<HelpGuide[]> {
+  const q = edition ? `?edition=${encodeURIComponent(edition)}` : '';
+  const res = await fetch(`${familyApi()}/family-help/guides${q}`, { cache: 'no-store', credentials: 'include' });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.guides || [];
 }

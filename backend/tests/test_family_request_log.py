@@ -150,3 +150,22 @@ def test_organizer_task_area_empire(studio):
     conn.close()
     assert "request_type" not in cols
     assert "organizer_task_id" not in cols
+
+
+def test_help_library_isolated_per_edition(studio):
+    log = studio["log"]
+    amp = log.save_guide("amp", title="Perfil Max-e", body="Manito, abre el chat.")
+    maxine = log.save_guide("maxine", title="Recado Maxine", body="Manito, abre tareas.")
+    assert amp["edition"] == "amp"
+    assert maxine["edition"] == "maxine"
+    assert {g["id"] for g in log.list_guides("amp")} == {amp["id"]}
+    assert {g["id"] for g in log.list_guides("maxine")} == {maxine["id"]}
+    assert log.get_guide(amp["id"], edition="maxine") is None
+    assert log.get_guide(amp["id"], edition="amp")["title"] == "Perfil Max-e"
+    help_path = studio["tmp"] / "family-help" / "amp" / "help.db"
+    if help_path.exists():
+        import sqlite3
+        conn = sqlite3.connect(str(help_path))
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        conn.close()
+        assert "family_help_guides" not in tables

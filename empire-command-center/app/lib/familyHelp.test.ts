@@ -6,8 +6,10 @@ import {
   REQUEST_TYPES,
   STATUS_LABEL,
   TYPE_LABEL,
+  hasForbiddenNames,
   statusOf,
   typeOf,
+  usesManito,
   whoLabel,
 } from './familyHelpModel.ts';
 
@@ -33,4 +35,11 @@ test('type and status fallbacks', () => {
   assert.equal(typeOf({ id: '1', edition: 'amp', sender: 'Juan', message: '', created_at: '', request_type: 'fix' }), 'fix');
   assert.equal(statusOf({ id: '1', edition: 'amp', sender: 'Juan', message: '', created_at: '' }), 'new');
   assert.equal(statusOf({ id: '1', edition: 'amp', sender: 'Juan', message: '', created_at: '', log_status: 'done' }), 'done');
+});
+
+test('drafts greet with manito and never use their names', () => {
+  assert.equal(usesManito('Manito, ya lo vi.'), true);
+  assert.equal(usesManito('Hola hermano'), false);
+  assert.equal(hasForbiddenNames('Juan, lo arreglo'), true);
+  assert.equal(hasForbiddenNames('Manito, lo arreglo'), false);
 });
