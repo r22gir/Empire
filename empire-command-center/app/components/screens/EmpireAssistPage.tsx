@@ -297,6 +297,30 @@ export default function EmpireAssistPage() {
               />
             )}
 
+            <FamilyHelpLibrary
+              edition={active.edition}
+              guides={guides}
+              onOpen={(guide) => {
+                setLibraryGuide(guide);
+                setDraft({
+                  kind: 'manual',
+                  title: guide.title,
+                  body: guide.body,
+                  steps: guide.steps,
+                  edition: guide.edition,
+                  ticket_id: guide.ticket_id || active.id,
+                  would_send: false,
+                  saved: true,
+                });
+              }}
+            />
+            {libraryGuide && !draft && (
+              <div style={card} data-testid="library-guide-preview">
+                <div style={cardTitle}>Saved guide · {libraryGuide.title}</div>
+                <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{libraryGuide.body}</div>
+              </div>
+            )}
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <label style={fieldBox}>
                 <span style={fieldLabel}><Sparkles size={12} /> Type · Max suggested {TYPE_LABEL[active.type_suggested || typeOf(active)]}</span>
@@ -425,30 +449,6 @@ export default function EmpireAssistPage() {
                 <RefreshCw size={14} /> Refresh
               </button>
             </div>
-
-            <FamilyHelpLibrary
-              edition={active.edition}
-              guides={guides}
-              onOpen={(guide) => {
-                setLibraryGuide(guide);
-                setDraft({
-                  kind: 'manual',
-                  title: guide.title,
-                  body: guide.body,
-                  steps: guide.steps,
-                  edition: guide.edition,
-                  ticket_id: guide.ticket_id || active.id,
-                  would_send: false,
-                  saved: true,
-                });
-              }}
-            />
-            {libraryGuide && !draft && (
-              <div style={card} data-testid="library-guide-preview">
-                <div style={cardTitle}>Saved guide · {libraryGuide.title}</div>
-                <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{libraryGuide.body}</div>
-              </div>
-            )}
 
             <div style={card}>
               <div style={cardTitle}><Send size={14} color={ACCENT} /> Reply to the family chat</div>
