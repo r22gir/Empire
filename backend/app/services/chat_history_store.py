@@ -9,7 +9,9 @@ Timestamps are America/New_York with an explicit offset.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +34,10 @@ class ChatHistoryOwnerError(Exception):
 
 class ChatHistoryIdError(ValueError):
     """Chat id is empty or not a safe filename."""
+
+
+class LegacyChatReadOnlyError(Exception):
+    """A pre-isolation founder chat cannot be mutated until migration --apply."""
 
 
 def now_iso() -> str:
@@ -59,6 +65,45 @@ def user_key_from_email(email: str) -> str:
     raw = raw.replace("@", "_at_")
     cleaned = _UNSAFE_ID.sub("_", raw).strip("._-")
     return cleaned or "unknown"
+
+
+def primary_legacy_email(edition: Optional[str] = None) -> str:
+    """Allowlisted user who should still see pre-isolation ``founder/`` chats.
+
+    Max-e (amp) has one family user — Juan — identified by
+    ``AMP_OWNER_EMAIL`` unless an edition override is set:
+
+    * ``FAMILY_LEGACY_CHAT_EMAIL`` (any family edition)
+    * ``AMP_LEGACY_CHAT_EMAIL`` (Max-e)
+    * ``MAXINE_LEGACY_CHAT_EMAIL`` (Maxine)
+    """
+    try:
+        from app.edition import edition_name
+
+        name = (edition or edition_name()).strip().lower()
+    except Exception:
+        name = (edition or "").strip().lower()
+    override = (os.getenv("FAMILY_LEGACY_CHAT_EMAIL") or "").strip()
+    if not override and name == "amp":
+        override = (os.getenv("AMP_LEGACY_CHAT_EMAIL") or "").strip()
+    if not override and name == "maxine":
+        override = (os.getenv("MAXINE_LEGACY_CHAT_EMAIL") or "").strip()
+    if override:
+        return override.lower()
+    return (
+        (os.getenv("AMP_OWNER_EMAIL") or "").strip()
+        or (os.getenv("FOUNDER_EMAIL") or "").strip()
+    ).lower()
+
+
+def primary_legacy_owner_key(edition: Optional[str] = None) -> str:
+    email = primary_legacy_email(edition)
+    return user_key_from_email(email) if email else ""
+
+
+def is_primary_legacy_viewer(owner_key: str, edition: Optional[str] = None) -> bool:
+    primary = primary_legacy_owner_key(edition)
+    return bool(primary) and owner_key == primary
 
 
 def owner_key_for_request(request: Any = None, claimed_user_id: Optional[str] = None) -> str:
@@ -107,6 +152,37 @@ def user_dir(owner_key: str, *, workroom_dir: Optional[Path] = None) -> Path:
 
 def chat_path(owner_key: str, chat_id: str, *, workroom_dir: Optional[Path] = None) -> Path:
     return user_dir(owner_key, workroom_dir=workroom_dir) / f"{safe_chat_id(chat_id)}.json"
+
+
+def founder_chats_dir(workroom_dir: Optional[Path] = None) -> Path:
+    """Legacy pre-isolation bucket. Does not create the folder."""
+    return chats_dir(workroom_dir=workroom_dir) / WORKROOM_USER
+
+
+def _chat_summary(data: dict, *, legacy: bool = False) -> dict:
+    item = {
+        "id": data["id"],
+        "title": data.get("title", "Untitled"),
+        "updated_at": data.get("updated_at", ""),
+        "created_at": data.get("created_at", ""),
+        "timezone": data.get("timezone") or CHAT_TZ_NAME,
+        "message_count": len(data.get("messages") or []),
+        "preview": data.get("preview") or preview_from(data.get("messages") or []),
+        "pinned": data.get("pinned", False),
+    }
+    if legacy:
+        item["legacy"] = True
+        item["read_only"] = True
+    return item
+
+
+def _iter_folder_chats(folder: Path):
+    if not folder.exists():
+        return
+    for f in folder.glob("*.json"):
+        data = _read_json(f)
+        if data.get("id"):
+            yield f, data
 
 
 def _dumps(data: dict) -> str:
@@ -226,22 +302,19 @@ def list_chats_for_owner(
     owner = owner_key_for_request(request, claimed_user_id)
     folder = user_dir(owner, workroom_dir=workroom_dir)
     chats: list[dict] = []
-    for f in folder.glob("*.json"):
-        data = _read_json(f)
-        if not data.get("id"):
-            continue
-        chats.append(
-            {
-                "id": data["id"],
-                "title": data.get("title", "Untitled"),
-                "updated_at": data.get("updated_at", ""),
-                "created_at": data.get("created_at", ""),
-                "timezone": data.get("timezone") or CHAT_TZ_NAME,
-                "message_count": len(data.get("messages") or []),
-                "preview": data.get("preview") or preview_from(data.get("messages") or []),
-                "pinned": data.get("pinned", False),
-            }
-        )
+    seen: set[str] = set()
+    for _path, data in _iter_folder_chats(folder):
+        chats.append(_chat_summary(data))
+        seen.add(str(data["id"]))
+    # Until migrate_founder_chats.py --apply, the edition primary user
+    # (Juan on Max-e) still sees the old founder/ files, read-only.
+    if is_primary_legacy_viewer(owner):
+        for _path, data in _iter_folder_chats(founder_chats_dir(workroom_dir)):
+            cid = str(data["id"])
+            if cid in seen:
+                continue
+            chats.append(_chat_summary(data, legacy=True))
+            seen.add(cid)
     chats.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
     chats.sort(key=lambda x: x.get("pinned", False), reverse=True)
     return chats
@@ -256,10 +329,22 @@ def load_chat_for_owner(
 ) -> Optional[dict]:
     owner = owner_key_for_request(request, claimed_user_id)
     path = chat_path(owner, chat_id, workroom_dir=workroom_dir)
-    if not path.exists():
-        return None
-    data = _read_json(path)
-    return data or None
+    if path.exists():
+        data = _read_json(path)
+        return data or None
+    if is_primary_legacy_viewer(owner):
+        try:
+            legacy_path = founder_chats_dir(workroom_dir) / f"{safe_chat_id(chat_id)}.json"
+        except ChatHistoryIdError:
+            return None
+        if legacy_path.exists():
+            data = _read_json(legacy_path)
+            if data:
+                data = dict(data)
+                data["legacy"] = True
+                data["read_only"] = True
+                return data
+    return None
 
 
 def update_meta(
@@ -271,12 +356,15 @@ def update_meta(
     claimed_user_id: Optional[str] = None,
     workroom_dir: Optional[Path] = None,
 ) -> Optional[dict]:
-    existing = load_chat_for_owner(
-        chat_id,
-        request=request,
-        claimed_user_id=claimed_user_id,
-        workroom_dir=workroom_dir,
-    )
+    owner = owner_key_for_request(request, claimed_user_id)
+    path = chat_path(owner, chat_id, workroom_dir=workroom_dir)
+    if not path.exists():
+        if is_primary_legacy_viewer(owner):
+            legacy_path = founder_chats_dir(workroom_dir) / f"{safe_chat_id(chat_id)}.json"
+            if legacy_path.exists():
+                raise LegacyChatReadOnlyError(chat_id)
+        return None
+    existing = _read_json(path)
     if not existing:
         return None
     if title is not None:
@@ -285,10 +373,110 @@ def update_meta(
         existing["pinned"] = pinned
     existing["updated_at"] = now_iso()
     existing["timezone"] = CHAT_TZ_NAME
-    owner = owner_key_for_request(request, claimed_user_id)
-    path = chat_path(owner, chat_id, workroom_dir=workroom_dir)
     path.write_text(_dumps(existing), encoding="utf-8")
     return existing
+
+
+def iter_searchable_chats(
+    *,
+    request: Any = None,
+    claimed_user_id: Optional[str] = None,
+    workroom_dir: Optional[Path] = None,
+):
+    """Yield (data, legacy) pairs the current user is allowed to search."""
+    owner = owner_key_for_request(request, claimed_user_id)
+    seen: set[str] = set()
+    for _path, data in _iter_folder_chats(user_dir(owner, workroom_dir=workroom_dir)):
+        seen.add(str(data["id"]))
+        yield data, False
+    if is_primary_legacy_viewer(owner):
+        for _path, data in _iter_folder_chats(founder_chats_dir(workroom_dir)):
+            cid = str(data["id"])
+            if cid in seen:
+                continue
+            seen.add(cid)
+            yield data, True
+
+
+def plan_founder_migration(
+    root: Path,
+    target_email: Optional[str] = None,
+    edition: Optional[str] = None,
+) -> dict:
+    """Describe founder/ → allowlisted-user copies. Never writes."""
+    email = (target_email or primary_legacy_email(edition) or "").strip().lower()
+    dest_key = user_key_from_email(email) if email else ""
+    founder = Path(root) / WORKROOM_USER
+    dest = Path(root) / dest_key if dest_key else None
+    items = []
+    for path, data in _iter_folder_chats(founder):
+        cid = str(data.get("id") or path.stem)
+        dest_path = dest / f"{path.name}" if dest else None
+        exists = bool(dest_path and dest_path.exists())
+        items.append(
+            {
+                "id": cid,
+                "source": str(path),
+                "dest": str(dest_path) if dest_path else None,
+                "title": data.get("title") or title_from(data.get("messages") or []),
+                "already_copied": exists,
+                "would_copy": bool(dest_key) and not exists,
+            }
+        )
+    return {
+        "dry_run": True,
+        "applied": False,
+        "edition": edition,
+        "target_email": email or None,
+        "target_owner": dest_key or None,
+        "source_dir": str(founder),
+        "dest_dir": str(dest) if dest else None,
+        "count": len(items),
+        "would_copy": sum(1 for item in items if item["would_copy"]),
+        "items": items,
+        "note": "Dry-run. Pass --apply to copy into the allowlisted user folder. founder/ files are not deleted.",
+    }
+
+
+def apply_founder_migration(
+    root: Path,
+    target_email: Optional[str] = None,
+    edition: Optional[str] = None,
+) -> dict:
+    """Copy founder chats into the configured user folder. Leaves founder/ in place."""
+    plan = plan_founder_migration(root, target_email=target_email, edition=edition)
+    email = plan["target_email"]
+    dest_key = plan["target_owner"]
+    if not email or not dest_key:
+        raise ChatHistoryOwnerError("no primary allowlisted email configured")
+    dest = Path(root) / dest_key
+    dest.mkdir(parents=True, exist_ok=True)
+    copied = []
+    skipped = []
+    for item in plan["items"]:
+        source = Path(item["source"])
+        dest_path = Path(item["dest"])
+        if dest_path.exists():
+            item["copied"] = False
+            item["skipped"] = True
+            skipped.append(item)
+            continue
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest_path)
+        data = _read_json(dest_path)
+        data["id"] = data.get("id") or source.stem
+        data["owner"] = dest_key
+        data["timezone"] = data.get("timezone") or CHAT_TZ_NAME
+        dest_path.write_text(_dumps(data), encoding="utf-8")
+        item["copied"] = True
+        item["skipped"] = False
+        copied.append(item)
+    plan["dry_run"] = False
+    plan["applied"] = True
+    plan["copied"] = len(copied)
+    plan["skipped"] = len(skipped)
+    plan["note"] = "Copied into the allowlisted user folder. founder/ files were left in place."
+    return plan
 
 
 def find_short_id_duplicates(root: Path) -> list[dict]:

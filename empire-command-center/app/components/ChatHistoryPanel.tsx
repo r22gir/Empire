@@ -13,6 +13,8 @@ interface ChatEntry {
   messageCount?: number;
   pinned?: boolean;
   channel?: string;
+  legacy?: boolean;
+  readOnly?: boolean;
 }
 
 interface EmailEntry {
@@ -81,6 +83,8 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
           messageCount: c.message_count || 0,
           pinned: c.pinned || false,
           channel: 'web',
+          legacy: !!c.legacy,
+          readOnly: !!c.read_only || !!c.legacy,
         })).sort((a: ChatEntry, b: ChatEntry) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
       }
     } catch { /* silent */ }
@@ -476,6 +480,14 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
                 maxWidth: '70%',
               }}>
                 {chat.pinned && <Pin size={10} style={{ color: '#d4a017', marginRight: 4 }} />}
+                {chat.legacy && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 800, color: '#111', background: '#d4a017',
+                    borderRadius: 6, padding: '1px 5px', marginRight: 6,
+                  }}>
+                    {t('max.legacy_chat')}
+                  </span>
+                )}
                 {chat.title}
               </span>
               <span style={{ fontSize: 11, color: '#666' }}>{formatDate(chat.timestamp)}</span>
@@ -490,6 +502,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
               <span style={{ fontSize: 11, color: '#555' }}>
                 {chat.messageCount} messages
               </span>
+              {!chat.readOnly && (
               <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
                 <button
                   onClick={() => handlePin(chat.id, !!chat.pinned)}
@@ -510,6 +523,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
                   <Trash2 size={12} />
                 </button>
               </div>
+              )}
             </div>
           </div>
         ))}

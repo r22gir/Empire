@@ -9,6 +9,7 @@ interface ChatEntry {
   title: string;
   preview: string;
   timestamp: string;
+  legacy?: boolean;
 }
 
 interface Props {
@@ -47,6 +48,7 @@ export default function RecentChatsList({ onLoadChat, onOpenHistory }: Props) {
           title: c.title || 'Untitled',
           preview: c.preview || '',
           timestamp: c.updated_at || c.created_at || '',
+          legacy: !!c.legacy || !!c.read_only,
         }));
         setChats(items);
       })
@@ -132,6 +134,19 @@ export default function RecentChatsList({ onLoadChat, onOpenHistory }: Props) {
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                 }}>
+                  {chat.legacy && (
+                    <span style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      color: '#8a6d12',
+                      background: '#f7efd2',
+                      borderRadius: 6,
+                      padding: '1px 6px',
+                      marginRight: 6,
+                    }}>
+                      {t('max.legacy_chat')}
+                    </span>
+                  )}
                   {chat.title}
                 </span>
                 <span style={{ fontSize: 11, color: '#888', flexShrink: 0 }}>{formatWhen(chat.timestamp)}</span>

@@ -7,12 +7,13 @@ from pathlib import Path
 from app.services.chat_history_store import (
     ChatHistoryIdError,
     ChatHistoryOwnerError,
+    LegacyChatReadOnlyError,
     chats_dir as store_chats_dir,
+    iter_searchable_chats,
     list_chats_for_owner,
     load_chat_for_owner,
     update_meta,
     upsert_chat,
-    user_dir,
 )
 
 router = APIRouter(prefix="/chats", tags=["chats"])
@@ -127,29 +128,25 @@ async def list_chats(request: Request = None, user_id: str = "founder", limit: i
 async def search_chats(q: str, request: Request = None, user_id: str = "founder"):
     """Search chat history by keyword across titles and message content."""
     try:
-        owner = _owner_or_403(request, user_id)
-        folder = user_dir(owner, workroom_dir=_workroom_dir())
+        _owner_or_403(request, user_id)
+        readable = list(
+            iter_searchable_chats(
+                request=request,
+                claimed_user_id=user_id,
+                workroom_dir=_workroom_dir(),
+            )
+        )
+    except ChatHistoryOwnerError:
+        raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
     except ChatHistoryIdError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    if not folder.exists():
+    if not readable:
         return {"results": [], "count": 0, "query": q}
 
     q_lower = q.lower()
     results = []
 
-    for f in folder.glob("*.json"):
-        try:
-            data = load_chat_for_owner(
-                f.stem,
-                request=request,
-                claimed_user_id=user_id,
-                workroom_dir=_workroom_dir(),
-            )
-            if not data:
-                continue
-        except (ChatHistoryOwnerError, ChatHistoryIdError):
-            continue
-
+    for data, legacy in readable:
         title_match = q_lower in data.get("title", "").lower()
         matching_messages = []
         for i, msg in enumerate(data.get("messages", [])):
@@ -168,17 +165,19 @@ async def search_chats(q: str, request: Request = None, user_id: str = "founder"
                 )
 
         if title_match or matching_messages:
-            results.append(
-                {
-                    "id": data["id"],
-                    "title": data.get("title", "Untitled"),
-                    "updated_at": data.get("updated_at", ""),
-                    "message_count": len(data.get("messages", [])),
-                    "title_match": title_match,
-                    "matching_messages": matching_messages[:5],
-                    "total_matches": len(matching_messages),
-                }
-            )
+            hit = {
+                "id": data["id"],
+                "title": data.get("title", "Untitled"),
+                "updated_at": data.get("updated_at", ""),
+                "message_count": len(data.get("messages", [])),
+                "title_match": title_match,
+                "matching_messages": matching_messages[:5],
+                "total_matches": len(matching_messages),
+            }
+            if legacy:
+                hit["legacy"] = True
+                hit["read_only"] = True
+            results.append(hit)
 
     results.sort(key=lambda x: (not x["title_match"], -x["total_matches"]))
     return {"results": results, "count": len(results), "query": q}
@@ -312,6 +311,8 @@ async def rename_chat(chat_id: str, req: RenameChatRequest, request: Request = N
             claimed_user_id=user_id,
             workroom_dir=_workroom_dir(),
         )
+    except LegacyChatReadOnlyError:
+        raise HTTPException(status_code=409, detail="Chat heredado de solo lectura. Ejecuta la migración con --apply.")
     except ChatHistoryOwnerError:
         raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
     except ChatHistoryIdError as exc:
@@ -338,6 +339,8 @@ async def pin_chat(chat_id: str, req: PinChatRequest, request: Request = None, u
             claimed_user_id=user_id,
             workroom_dir=_workroom_dir(),
         )
+    except LegacyChatReadOnlyError:
+        raise HTTPException(status_code=409, detail="Chat heredado de solo lectura. Ejecuta la migración con --apply.")
     except ChatHistoryOwnerError:
         raise HTTPException(status_code=403, detail="Se requiere una sesión válida.")
     except ChatHistoryIdError as exc:
@@ -357,4 +360,13 @@ async def delete_chat(chat_id: str, request: Request = None, user_id: str = "fou
         raise HTTPException(status_code=400, detail=str(exc))
     if chat_file.exists():
         os.remove(chat_file)
+        return {"status": "deleted"}
+    from app.services.chat_history_store import founder_chats_dir, is_primary_legacy_viewer, safe_chat_id
+    if is_primary_legacy_viewer(owner):
+        legacy = founder_chats_dir(_workroom_dir()) / f"{safe_chat_id(chat_id)}.json"
+        if legacy.exists():
+            raise HTTPException(
+                status_code=409,
+                detail="Chat heredado de solo lectura. Ejecuta la migración con --apply.",
+            )
     return {"status": "deleted"}
