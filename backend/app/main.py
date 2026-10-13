@@ -210,6 +210,7 @@ load_router("app.routers.universal_search", "/api/v1", ["search"])
 load_router("app.routers.schedule", "/api/v1/schedule", ["schedule"])
 load_router("app.routers.organizer", "/api/v1/organizer", ["organizer"])
 load_router("app.routers.luxeforge_boards", "/api/v1/luxe", ["luxeforge-boards"])
+load_router("app.routers.luxeforge_mood_boards", "/api/v1", ["luxeforge-mood-boards"])
 load_router("app.routers.sprint_m", "/api/v1", ["sprint-m"])
 
 # Customer Journey Linkage MVP — read-only endpoints

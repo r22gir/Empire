@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import DesignerSelectionBoard from '../luxe/DesignerSelectionBoard';
+import MoodBoardView from '../luxeforge/MoodBoardView';
 
 interface IntakeUser {
   id: string;
@@ -83,7 +84,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
   const [sendingToWorkroom, setSendingToWorkroom] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [editUserData, setEditUserData] = useState<Partial<IntakeUser>>({});
-  const [activeTab, setActiveTab] = useState<'projects' | 'docs' | 'archived' | 'board'>('projects');
+  const [activeTab, setActiveTab] = useState<'projects' | 'docs' | 'archived' | 'board' | 'mood'>('projects');
   const [viewingPhoto, setViewingPhoto] = useState<{ url: string; name: string; projectName: string } | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [archivedUsers, setArchivedUsers] = useState<IntakeUser[]>([]);
@@ -130,7 +131,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const tab = new URLSearchParams(window.location.search).get('tab');
-    if (tab === 'board' || tab === 'docs' || tab === 'archived' || tab === 'projects') {
+    if (tab === 'board' || tab === 'mood' || tab === 'docs' || tab === 'archived' || tab === 'projects') {
       setActiveTab(tab);
     }
   }, []);
@@ -291,6 +292,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
         {[
           { id: 'projects' as const, label: 'Projects', icon: <FolderOpen size={14} /> },
           { id: 'board' as const, label: 'Selection board', icon: <LayoutGrid size={14} /> },
+          { id: 'mood' as const, label: 'Mood board', icon: <Image size={14} /> },
           { id: 'archived' as const, label: `Archived${archivedUsers.length > 0 ? ` (${archivedUsers.length})` : ''}`, icon: <Archive size={14} /> },
           { id: 'docs' as const, label: 'Documentation', icon: <BookOpen size={14} /> },
         ].map(tab => (
@@ -316,6 +318,8 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
         <ProductDocs product="luxe" />
       ) : activeTab === 'board' ? (
         <DesignerSelectionBoard />
+      ) : activeTab === 'mood' ? (
+        <MoodBoardView />
       ) : activeTab === 'archived' ? (
         /* ── Archived Tab ─────────────────────────────── */
         <div>
