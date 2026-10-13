@@ -15,6 +15,19 @@ import {
 } from '../../lib/luxe-board-logic';
 import './designer-board.css';
 
+type CatalogExtra = {
+  house?: string;
+  family?: string;
+  room?: string;
+  color?: string;
+  mood?: string;
+  material?: string;
+};
+
+function catalogExtra(item: object): CatalogExtra {
+  return item as CatalogExtra;
+}
+
 export default function DesignerSelectionBoard() {
   const [catalog, setCatalog] = useState(HOUSE_CATALOG);
   const [tab, setTab] = useState<LuxeKind>('fabric');
@@ -55,7 +68,8 @@ export default function DesignerSelectionBoard() {
   const filtered = pool.filter((item) => {
     if (!query.trim()) return true;
     const q = query.toLowerCase();
-    return `${item.name} ${item.house || ''} ${item.color || ''} ${item.material || ''} ${item.room || ''}`.toLowerCase().includes(q);
+    const extra = catalogExtra(item);
+    return `${item.name} ${extra.house || ''} ${extra.color || ''} ${extra.material || ''} ${extra.room || ''}`.toLowerCase().includes(q);
   });
 
   async function preview() {
@@ -114,13 +128,14 @@ export default function DesignerSelectionBoard() {
           <input className="lxb-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the house library" />
           {filtered.map((item) => {
             const on = board.selections.some((s) => s.id === item.id);
+            const extra = catalogExtra(item);
             return (
               <button key={item.id} className={`lxb-tile${on ? ' on' : ''}`} onClick={() => { setBoard(toggleSelection(board, item)); setServerEstimate(null); }}>
                 <div className="lxb-swatch" style={{ background: item.swatch }} />
                 <span>
                   <b>{item.name}</b>
                   <small>
-                    {item.house || item.family || item.room} · {item.color || item.mood || item.material}
+                    {extra.house || extra.family || extra.room} · {extra.color || extra.mood || extra.material}
                     {item.kind === 'fabric' ? ` · ${money(item.price_per_yard || 0)} / yd` : item.kind === 'finish' ? ` · ${money(item.price || 0)}` : ''}
                   </small>
                 </span>
@@ -143,7 +158,7 @@ export default function DesignerSelectionBoard() {
                   <article key={sel.id} className="lxb-card">
                     <div className="lxb-swatch" style={{ background: item.swatch }} />
                     <b>{item.name}</b>
-                    <small>{item.house || item.family || item.room}</small>
+                    <small>{catalogExtra(item).house || catalogExtra(item).family || catalogExtra(item).room}</small>
                     {item.kind !== 'photo' && (
                       <div>
                         <input
