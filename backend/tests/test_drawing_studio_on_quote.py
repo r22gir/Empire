@@ -46,19 +46,19 @@ def test_cut_list_wood_true_size_foam_matches_fabric_needs_thickness_when_unknow
     assert cuts["wood"] and cuts["foam"] and cuts["fabric"]
     assert cuts["fabric_allowance_status"] == NEEDS_FOAM_THICKNESS
     assert cuts["fabric_allowance_in"] is None
+    sizes = {wood["size"] for wood in cuts["wood"]}
+    assert sizes == {'22 1/2" × 96"', '22 1/2" × 60"'}
     for wood, foam, fabric in zip(cuts["wood"], cuts["foam"], cuts["fabric"]):
         assert wood["width"] == foam["width"] == 22.5
         assert wood["length"] == foam["length"]
         assert wood["label"] == "WOOD CUT — TRUE SIZE"
         assert foam["label"] == "FOAM CUT — MATCHES WOOD"
-        assert wood["size"] == '22 1/2" × 96"'
         assert foam["size"] == wood["size"]
         assert fabric["size"] == NEEDS_FOAM_THICKNESS
         assert fabric["width"] is None
         assert fabric["length"] is None
         assert fabric["label"] == "FABRIC CUT — LABELED SEPARATELY"
         assert "needs foam thickness" in fabric["note"].lower()
-        assert fabric["width"] != wood["width"] + 4
         assert "-" not in wood["size"]
         assert "." not in wood["size"]
     svg = render_cut_list_sheet(cuts, name="L Banquette", quote_num="EST-L")

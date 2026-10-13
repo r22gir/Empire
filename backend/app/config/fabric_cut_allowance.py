@@ -89,7 +89,7 @@ def lookup_fabric_allowance(foam_thickness_in: Optional[float]) -> dict[str, Any
             "foam_thickness_in": None,
             "allowance_in": None,
             "status": NEEDS_FOAM_THICKNESS,
-            "label": "Foam thickness is required before a fabric cut can be sized.",
+            "label": "needs foam thickness — required before a fabric cut can be sized.",
         }
     try:
         thickness = float(foam_thickness_in)
@@ -98,14 +98,14 @@ def lookup_fabric_allowance(foam_thickness_in: Optional[float]) -> dict[str, Any
             "foam_thickness_in": None,
             "allowance_in": None,
             "status": NEEDS_FOAM_THICKNESS,
-            "label": "Foam thickness is required before a fabric cut can be sized.",
+            "label": "needs foam thickness — required before a fabric cut can be sized.",
         }
     if thickness <= 0:
         return {
             "foam_thickness_in": None,
             "allowance_in": None,
             "status": NEEDS_FOAM_THICKNESS,
-            "label": "Foam thickness is required before a fabric cut can be sized.",
+            "label": "needs foam thickness — required before a fabric cut can be sized.",
         }
     key = _sixteenths(thickness)
     for row in FABRIC_CUT_ALLOWANCE_BY_FOAM_THICKNESS:

@@ -114,7 +114,10 @@ def generate_cut_list(model) -> dict:
                 "length": None,
                 "size": NEEDS_FOAM_THICKNESS,
                 "label": FABRIC_LABEL,
-                "note": allowance.get("label") or "Needs foam thickness. Do not guess an allowance.",
+                "note": (
+                    f"{NEEDS_FOAM_THICKNESS}. "
+                    f"{allowance.get('label') or 'Do not guess an allowance.'}"
+                ),
             })
         else:
             note = (
