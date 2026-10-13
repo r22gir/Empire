@@ -134,6 +134,17 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
   // Bench-specific
   const [benchType, setBenchType] = useState('straight');
   const [lf, setLf] = useState(0);
+  const [leg1, setLeg1] = useState(0);
+  const [leg2, setLeg2] = useState(0);
+  const [backLength, setBackLength] = useState(0);
+  const [leftDepth, setLeftDepth] = useState(0);
+  const [rightDepth, setRightDepth] = useState(0);
+  const [cutList, setCutList] = useState<{
+    wood?: Array<{ name: string; qty: number; size: string; label: string; note: string }>;
+    foam?: Array<{ name: string; qty: number; size: string; label: string; note: string }>;
+    fabric?: Array<{ name: string; qty: number; size: string; label: string; note: string }>;
+    rules?: string[];
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -399,6 +410,11 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
           back_height: parseDimVal('back_height', 18),
           panel_style: 'vertical_channels',
           quote_num: quoteNum,
+          leg1_length: benchType === 'l_shape' ? leg1 : 0,
+          leg2_length: benchType === 'l_shape' ? leg2 : 0,
+          back_length: benchType === 'u_shape' ? backLength : 0,
+          left_depth: benchType === 'u_shape' ? leftDepth : 0,
+          right_depth: benchType === 'u_shape' ? rightDepth : 0,
         },
       };
     }
@@ -417,7 +433,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
         quote_num: quoteNum,
       },
     };
-  }, [benchType, catalogTemplate, dimensions, itemType, lf, name, notes, parseDimVal, quoteNum]);
+  }, [backLength, benchType, catalogTemplate, dimensions, itemType, leftDepth, leg1, leg2, lf, name, notes, parseDimVal, quoteNum, rightDepth]);
 
   const currentPreviewSignature = stableSerialize(buildDrawingRequest().body);
   const previewIsCurrent = Boolean(svgPreview && previewSignature === currentPreviewSignature);
@@ -436,6 +452,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
       if (!res.ok) throw new Error(`Preview failed: ${res.status}`);
       const data = await res.json();
       setSvgPreview(data.svg || '');
+      setCutList(data.cut_list || null);
       if (data.svg) {
         setPreviewSignature(stableSerialize(drawingRequest.body));
         setStatusMsg('');
@@ -472,6 +489,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
       mode,
     });
     setSvgPreview('');
+    setCutList(null);
     setPreviewSignature('');
     setMultiMode(false);
     setAnalyzedItems([]);
@@ -506,6 +524,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
       const data = await res.json();
       if (!data.svg) throw new Error('Catalog drawing response did not include SVG');
       setSvgPreview(data.svg);
+      setCutList(data.cut_list || null);
       setPreviewSignature(stableSerialize({
         user_text: `${style.style_name} ${category.name} ${drawingMode}`,
         params: {
@@ -634,7 +653,8 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
           Professional Drawings
         </h1>
         <p style={{ color: '#888', fontSize: 14, margin: '6px 0 0' }}>
-          Upload any sketch or photo — AI identifies the item and generates a pro drawing with dimensions
+          Client-presentation drawings: dimensioned plan and elevation, branded title block, PDF export.
+          All sizes print as fractions. Wood is true size, foam matches wood, fabric is labeled separately.
         </p>
         {/* Tab toggle: Studio | Product Catalog */}
         <div style={{ marginTop: 14, display: 'flex', gap: 6 }}>
@@ -768,6 +788,37 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
               </div>
               <label style={labelStyle}>Total Linear Feet</label>
               <input type="number" value={lf || ''} onChange={e => setLf(Number(e.target.value))} placeholder="0" style={inputStyle} />
+              {benchType === 'l_shape' && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Long run (ft)</label>
+                    <input type="number" value={leg1 || ''} onChange={e => setLeg1(Number(e.target.value))} placeholder="e.g. 8" style={inputStyle} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Short run (ft)</label>
+                    <input type="number" value={leg2 || ''} onChange={e => setLeg2(Number(e.target.value))} placeholder="e.g. 5" style={inputStyle} />
+                  </div>
+                </div>
+              )}
+              {benchType === 'u_shape' && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Back (ft)</label>
+                    <input type="number" value={backLength || ''} onChange={e => setBackLength(Number(e.target.value))} placeholder="e.g. 6" style={inputStyle} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Left (ft)</label>
+                    <input type="number" value={leftDepth || ''} onChange={e => setLeftDepth(Number(e.target.value))} placeholder="e.g. 4" style={inputStyle} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Right (in)</label>
+                    <input type="number" value={rightDepth || ''} onChange={e => setRightDepth(Number(e.target.value))} placeholder="depth" style={inputStyle} />
+                  </div>
+                </div>
+              )}
+              <p style={{ fontSize: 11, color: '#999', margin: '8px 0 0' }}>
+                L and U plans draw the true footprint — not an unfolded strip. Dimensions print as 22 1/2&quot;, never 22.5&quot;.
+              </p>
             </div>
           )}
 
@@ -858,19 +909,45 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
         </div>
 
         {/* ── Right: Preview ── */}
-        <div style={{
-          background: '#fff', borderRadius: 14, border: '1px solid #ece8e0',
-          minHeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-        }}>
-          {svgPreview ? (
-            <div dangerouslySetInnerHTML={{ __html: svgPreview }} style={{ width: '100%', padding: 16 }} />
-          ) : (
-            <div style={{ textAlign: 'center', color: '#ccc', padding: 40 }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>&#9998;</div>
-              <div style={{ fontSize: 15, fontWeight: 600 }}>Upload a sketch or enter dimensions</div>
-              <div style={{ fontSize: 13, marginTop: 6 }}>AI generates professional drawings for any item type</div>
+        <div>
+          <div style={{
+            background: '#fff', borderRadius: 14, border: '1px solid #ece8e0',
+            minHeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+          }}>
+            {svgPreview ? (
+              <div dangerouslySetInnerHTML={{ __html: svgPreview }} style={{ width: '100%', padding: 16 }} />
+            ) : (
+              <div style={{ textAlign: 'center', color: '#ccc', padding: 40 }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>&#9998;</div>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>Upload a sketch or enter dimensions</div>
+                <div style={{ fontSize: 13, marginTop: 6 }}>Plan, elevation, branded title block, and PDF export</div>
+              </div>
+            )}
+          </div>
+          {cutList && (cutList.wood?.length || cutList.foam?.length || cutList.fabric?.length) ? (
+            <div style={{ marginTop: 14, background: '#fff', borderRadius: 14, border: '1px solid #ece8e0', padding: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, color: '#8a5a00', marginBottom: 10 }}>
+                CUT LIST · WOOD TRUE SIZE · FOAM = WOOD · FABRIC SEPARATE
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                {[
+                  { title: 'WOOD CUT — TRUE SIZE', items: cutList.wood || [] },
+                  { title: 'FOAM CUT — MATCHES WOOD', items: cutList.foam || [] },
+                  { title: 'FABRIC CUT — LABELED SEPARATELY', items: cutList.fabric || [] },
+                ].map(section => (
+                  <div key={section.title}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#555', marginBottom: 6 }}>{section.title}</div>
+                    {section.items.map((item, idx) => (
+                      <div key={`${section.title}-${idx}`} style={{ fontSize: 12, marginBottom: 6, color: '#333' }}>
+                        <div style={{ fontWeight: 600 }}>{item.name} × {item.qty}</div>
+                        <div style={{ color: '#8a5a00', fontWeight: 700 }}>{item.size}</div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>}
 
