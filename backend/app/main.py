@@ -151,6 +151,10 @@ load_router("app.routers.client_portal", "/api/v1", ["client-portal"])
 
 # CraftForge — CNC & 3D print business
 load_router("app.routers.craftforge", "/api/v1/craftforge", ["craftforge"])
+# X-Carve cut-list nesting (kerf, grain, tiling, fraction PDF)
+load_router("app.routers.cnc_nesting", "/api/v1", ["cnc-nesting"])
+# Supplier cart → owner approval → job PO (never live checkout/pay)
+load_router("app.routers.supplier_cart", "/api/v1", ["supplier-cart"])
 load_router("app.routers.socialforge", "/api/v1/socialforge", ["socialforge"])
 load_router("app.routers.social_setup", "/api/v1", ["social-setup"])
 
