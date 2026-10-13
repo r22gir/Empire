@@ -9,17 +9,30 @@ import { Orb } from '../../v3/ui';
 import { API } from '../../lib/api';
 import { EDITION } from '../../v3/edition';
 import { avatarFrameSrc, resolveAvatarEdition } from '../../lib/avatarEdition';
+import {
+  HOME_FACE_LOAD_TIMEOUT_MS,
+  HOME_FACE_UNAVAILABLE,
+  applyHomeFaceMessage,
+  applyHomeFaceTimeout,
+  startHomeFace,
+  type HomeFacePhase,
+  type HomeFaceView,
+} from './homeFaceMessages';
 
 export type HomeFaceHandle = { start: () => void };
 
-type Phase = 'orb' | 'ready' | 'live';
-
 const HomeFace = forwardRef<HomeFaceHandle, { size?: number }>(function HomeFace({ size = 176 }, ref) {
   const edition = resolveAvatarEdition(null, EDITION);
-  const [phase, setPhase] = useState<Phase>('orb');
+  const [phase, setPhase] = useState<HomeFacePhase>('orb');
   const [minutes, setMinutes] = useState('');
   const [hint, setHint] = useState('');
-  const started = useRef(false);
+  const view = useRef<HomeFaceView>({ phase: 'orb', started: false, loaded: false, hint: '' });
+
+  const commit = useCallback((next: HomeFaceView) => {
+    view.current = next;
+    setPhase(next.phase);
+    setHint(next.hint);
+  }, []);
 
   useEffect(() => {
     let stop = false;
@@ -43,42 +56,49 @@ const HomeFace = forwardRef<HomeFaceHandle, { size?: number }>(function HomeFace
             setMinutes(`${Number(usage.minutes).toFixed(2)} min used`);
           }
         }
-        setPhase(enabled ? 'ready' : 'orb');
-        setHint(enabled ? 'Tap to start face' : '');
+        if (view.current.started) return;
+        const nextHint = enabled ? 'Tap to start face' : '';
+        commit({
+          phase: enabled ? 'ready' : 'orb',
+          started: false,
+          loaded: false,
+          hint: nextHint,
+        });
       } catch {
-        if (!stop) {
-          setPhase('orb');
-          setHint('');
+        if (!stop && !view.current.started) {
+          commit({ phase: 'orb', started: false, loaded: false, hint: '' });
         }
       }
     };
     load();
     return () => { stop = true; };
-  }, [edition]);
+  }, [edition, commit]);
 
   const start = useCallback(() => {
-    if (started.current) return;
-    started.current = true;
-    setPhase('live');
-  }, []);
+    commit(startHomeFace(view.current));
+  }, [commit]);
 
   useImperativeHandle(ref, () => ({ start }), [start]);
 
   useEffect(() => {
     const onMsg = (event: MessageEvent) => {
-      if (event.data?.type !== 'avatar-status' && event.data?.type !== 'avatar-loaded') return;
-      const renderer = event.data.renderer;
-      const ok = event.data.success !== false && renderer === 'simli';
-      if (!ok && started.current) {
-        started.current = false;
-        setPhase(hint ? 'ready' : 'orb');
-      }
+      if (!view.current.started) return;
+      commit(applyHomeFaceMessage(view.current, event.data || {}));
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [hint]);
+  }, [commit]);
+
+  useEffect(() => {
+    if (phase !== 'live') return;
+    const timer = window.setTimeout(() => {
+      commit(applyHomeFaceTimeout(view.current, HOME_FACE_LOAD_TIMEOUT_MS));
+    }, HOME_FACE_LOAD_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [phase, commit]);
 
   const showOrb = phase !== 'live';
+  const unavailable = hint === HOME_FACE_UNAVAILABLE;
   return (
     <div className="mh-face-wrap">
       <div className="mh-face" data-testid="mh-face" data-phase={phase} data-edition={edition}>
@@ -91,12 +111,23 @@ const HomeFace = forwardRef<HomeFaceHandle, { size?: number }>(function HomeFace
         ) : (
           <Orb size={size} />
         )}
-        {showOrb && hint ? (
+        {showOrb && hint && !unavailable ? (
           <button type="button" className="mh-face-tap" onClick={start} aria-label="Start talking face">
             {hint}
           </button>
         ) : null}
       </div>
+      {unavailable ? (
+        <button
+          type="button"
+          className="mh-face-note"
+          onClick={start}
+          data-testid="mh-face-retry"
+          aria-label={HOME_FACE_UNAVAILABLE}
+        >
+          {HOME_FACE_UNAVAILABLE}
+        </button>
+      ) : null}
       {minutes ? <div className="mh-minutes" data-testid="mh-minutes">{minutes}</div> : null}
     </div>
   );

@@ -127,10 +127,13 @@ async function init() {
       video: face,
       onStatus: (status) => {
         if (status && status.reason) fallbackReason = status.reason;
+        const statusRenderer = status?.renderer === 'simli' ? 'simli' : 'talkinghead';
+        if (statusRenderer === 'simli') renderer = 'simli';
         // The TalkingHead placeholder note only applies when TalkingHead renders.
-        const th = !(status && status.renderer === 'simli');
+        const th = statusRenderer !== 'simli';
         tellParent({
           success: true,
+          renderer: statusRenderer,
           placeholder: th && model.placeholder,
           placeholderNote: th && model.placeholder ? PLACEHOLDER.note : '',
           simli: status,

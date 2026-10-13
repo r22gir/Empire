@@ -26,6 +26,7 @@ test('avatar.html maps amp to max_e and can skip TalkingHead for the home orb fa
   assert.match(html, /return 'max_e'/);
   assert.match(html, /fallback === 'none'/);
   assert.match(html, /startSimliFace/);
+  assert.match(html, /status\?\.renderer === 'simli' \? 'simli' : 'talkinghead'/);
 });
 
 test('avatar.html posts to its own origin, never *', () => {
