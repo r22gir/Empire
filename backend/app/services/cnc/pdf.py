@@ -20,11 +20,6 @@ FABRIC = Color(0.86, 0.78, 0.92)
 MARK = Color(0.75, 0.12, 0.12)
 
 
-def _no_decimal(text: str) -> str:
-    """Keep shop callouts fraction-only. Dates/ids are passed through elsewhere."""
-    return text
-
-
 def _fill_sheet_drawing(c: canvas.Canvas, sheet: dict[str, Any], x: float, y: float, w: float, h: float) -> None:
     sw = parse_inches(sheet["sheet_width"])
     sl = parse_inches(sheet["sheet_length"])
@@ -70,7 +65,7 @@ def _fill_sheet_drawing(c: canvas.Canvas, sheet: dict[str, Any], x: float, y: fl
 
 def render_nest_pdf(result: dict[str, Any]) -> bytes:
     buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=letter)
+    c = canvas.Canvas(buf, pagesize=letter, pageCompression=0)
     width, height = letter
 
     def header(title: str) -> None:

@@ -245,68 +245,38 @@ def _fits_machine(w: int, l: int, grain: str, max_w: int) -> tuple[int, int, boo
     )
 
 
-def _tile_long_panel(
-    part: CutPart,
-    w: int,
-    l: int,
-    *,
-    material: str,
-    tile_length: int,
-    max_width: int,
-    kerf: int,
-    start_index: int,
-) -> list[NestedSheet]:
-    """Split a panel longer than one machine pass. Registration marks on each seam."""
-    placed_w, placed_l, _ = _fits_machine(w, l, part.grain, max_width)
-    if placed_l <= tile_length:
-        return []
-    remaining = placed_l
-    tiles: list[NestedSheet] = []
-    tile_count = (placed_l + tile_length - 1) // tile_length
-    tile_no = 0
-    while remaining > 0:
-        tile_no += 1
-        this_l = min(tile_length, remaining)
-        sheet = NestedSheet(
-            index=start_index + tile_no,
-            material=material,
-            width=placed_w,
-            length=this_l,
-            kerf=kerf,
-            tiled=True,
-            tile_index=tile_no,
-            tile_count=tile_count,
-            parent_panel=part.name,
-        )
-        sheet.parts.append(PlacedRect(
-            part_id=part.id,
-            name=f"{part.name} tile {tile_no}/{tile_count}",
-            x=0,
-            y=0,
-            w=placed_w,
-            l=this_l,
-            rotated=False,
-            grain=part.grain,
-            tile_index=tile_no,
-            tile_count=tile_count,
-        ))
-        # Seams: after this tile (except the last) and before this tile (except the first).
-        if tile_no < tile_count:
-            sheet.marks.extend(_seam_marks(placed_w, this_l, f"{part.id}-T{tile_no}-END"))
-        if tile_no > 1:
-            sheet.marks.extend(_seam_marks(placed_w, 0, f"{part.id}-T{tile_no}-START", at_origin=True))
-        tiles.append(sheet)
-        remaining -= this_l
-    return tiles
-
-
-def _seam_marks(width: int, y: int, prefix: str, at_origin: bool = False) -> list[RegistrationMark]:
-    inset = min(REG_MARK_INSET, max(0, width // 4))
-    y_pos = 0 if at_origin else y
-    return [
-        RegistrationMark(name=f"{prefix}-L", x=inset, y=y_pos, size=REG_MARK_SIZE, seam_along="length"),
-        RegistrationMark(name=f"{prefix}-R", x=max(0, width - inset), y=y_pos, size=REG_MARK_SIZE, seam_along="length"),
-    ]
+def _stamp_registration_marks(sheets: list[NestedSheet], tile_length: int) -> None:
+    """Mark machine-pass seams on long panels. Yield stays on the stock sheet."""
+    for sheet in sheets:
+        for part in sheet.parts:
+            if part.l <= tile_length:
+                continue
+            tile_count = (part.l + tile_length - 1) // tile_length
+            part.tile_count = tile_count
+            part.tile_index = 1
+            sheet.tiled = True
+            sheet.tile_count = max(sheet.tile_count, tile_count)
+            sheet.parent_panel = sheet.parent_panel or part.name
+            inset = min(REG_MARK_INSET, max(0, part.w // 4))
+            seam_y = part.y + tile_length
+            n = 1
+            while seam_y < part.y + part.l:
+                sheet.marks.append(RegistrationMark(
+                    name=f"{part.part_id}-SEAM{n}-L",
+                    x=part.x + inset,
+                    y=seam_y,
+                    size=REG_MARK_SIZE,
+                    seam_along="length",
+                ))
+                sheet.marks.append(RegistrationMark(
+                    name=f"{part.part_id}-SEAM{n}-R",
+                    x=part.x + max(0, part.w - inset),
+                    y=seam_y,
+                    size=REG_MARK_SIZE,
+                    seam_along="length",
+                ))
+                n += 1
+                seam_y += tile_length
 
 
 def nest_cut_list(payload: dict[str, Any]) -> dict[str, Any]:
@@ -335,7 +305,6 @@ def nest_cut_list(payload: dict[str, Any]) -> dict[str, Any]:
     wood_items: list[tuple[CutPart, int, int, str]] = []
     foam_items: list[tuple[CutPart, int, int, str]] = []
     fabric_items: list[tuple[CutPart, int, int, str]] = []
-    tiled_sheets: list[NestedSheet] = []
     errors: list[str] = []
 
     for part in parts:
@@ -346,37 +315,26 @@ def nest_cut_list(payload: dict[str, Any]) -> dict[str, Any]:
             )
             # Still nest the declared wood; foam is forced equal for cutting.
             part.foam_w, part.foam_l = part.wood_w, part.wood_l
-        try:
-            pw, pl, _ = _fits_machine(part.wood_w, part.wood_l, part.grain, machine_width)
-        except NestError as exc:
-            errors.append(str(exc))
-            continue
-        if pl > tile_length:
-            tiled_sheets.extend(_tile_long_panel(
-                part, pw, pl,
-                material="wood",
-                tile_length=tile_length,
-                max_width=machine_width,
-                kerf=kerf,
-                start_index=len(tiled_sheets),
-            ))
-        else:
-            wood_items.append((part, pw, pl, "wood"))
+        pw, pl, _ = _fits_machine(part.wood_w, part.wood_l, part.grain, machine_width)
+        wood_items.append((part, pw, pl, "wood"))
         foam_items.append((part, part.foam_w, part.foam_l, "foam"))
         if part.fabric_w is not None and part.fabric_l is not None:
             fabric_items.append((part, part.fabric_w, part.fabric_l, "fabric"))
 
+    # Stock sheet must be long enough for the longest true-size wood part.
+    if wood_items:
+        longest = max(item[2] for item in wood_items)
+        if longest > sheet_l:
+            sheet_l = longest
     wood_sheets = GuillotinePacker(sheet_w, sheet_l, kerf).pack(wood_items) if wood_items else []
-    # Re-index tiled wood panels after packed sheets.
-    for i, sheet in enumerate(tiled_sheets, start=len(wood_sheets) + 1):
-        sheet.index = i
-    wood_sheets.extend(tiled_sheets)
+    _stamp_registration_marks(wood_sheets, tile_length)
 
+    if foam_items:
+        longest_foam = max(item[2] for item in foam_items)
+        if longest_foam > foam_l:
+            foam_l = longest_foam
     foam_sheets = GuillotinePacker(foam_w, foam_l, 0).pack(foam_items) if foam_items else []
-    fabric_sheets = GuillotinePacker(fabric_w, max((p[2] for p in fabric_items), default=fabric_w), 0).pack(fabric_items) if fabric_items else []
-    # Fabric packer above uses a single tall roll strip: rebuild as roll length = max y+l.
-    if fabric_items:
-        fabric_sheets = _pack_fabric_roll(fabric_items, fabric_w)
+    fabric_sheets = _pack_fabric_roll(fabric_items, fabric_w) if fabric_items else []
 
     cut_list = []
     for part in parts:
@@ -432,6 +390,8 @@ def _sheet_yield(sheet: NestedSheet) -> dict[str, Any]:
         "sheet_length": format_inches(sheet.length),
         "yield": yield_fraction(sheet.used_area, sheet.total_area),
         "tiled": sheet.tiled,
+        "tile_index": sheet.tile_index,
+        "tile_count": sheet.tile_count,
         "parent_panel": sheet.parent_panel,
     }
 
