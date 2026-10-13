@@ -563,7 +563,7 @@ async def start_background_services():
     try:
         from app.services.max.improvement_worker import worker_loop
         asyncio.create_task(worker_loop())
-        print("✓ Atlas Improvement Worker: polling max_improvement_jobs (CodeForge)")
+        print("✓ Atlas Improvement Worker: started (idle unless MAX_IMPROVE_WORKER_ENABLED=1)")
     except Exception as e:
         print(f"✗ Atlas Improvement Worker: {e}")
 

@@ -216,6 +216,11 @@ async def worker_loop(poll_seconds: Optional[float] = None) -> None:
     if blocked:
         logger.info(blocked)
         return
+    # Explicit opt-in: MiniMax/Cursor keys already exist in the Studio env for
+    # other features, so key presence alone must not start the loop.
+    if (os.getenv("MAX_IMPROVE_WORKER_ENABLED") or "").strip().lower() not in {"1", "true", "yes", "on"}:
+        logger.info("Atlas improvement worker off (set MAX_IMPROVE_WORKER_ENABLED=1 to enable)")
+        return
     interval = poll_seconds
     if interval is None:
         raw = (os.getenv("MAX_IMPROVE_WORKER_POLL") or "12").strip()
