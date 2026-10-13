@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { API } from '../../lib/api';
+import { fileViewUrl } from '../../lib/chatFiles';
 import { FileText, Send, Mail, Video, Printer, Download } from 'lucide-react';
 
 export default function DocumentScreen() {
@@ -20,7 +21,9 @@ export default function DocumentScreen() {
       {/* Main viewer */}
       <div className="flex-1 flex items-center justify-center p-6" style={{ background: 'var(--bg)' }}>
         {selected ? (
-          <iframe src={API.replace('/api/v1', '') + '/api/v1/files/view/' + selected.name}
+          <iframe src={selected.category
+            ? `${API}/files/view/${selected.category}/${encodeURIComponent(selected.name)}`
+            : fileViewUrl(selected.name || selected.filename, API)}
             style={{ width: 595, height: 842, background: 'white', borderRadius: 'var(--radius)', border: '1px solid var(--border)', boxShadow: '0 6px 24px rgba(0,0,0,0.08)' }} />
         ) : (
           <div style={{ width: 595, height: 842, background: 'white', borderRadius: 'var(--radius)', border: '1px solid var(--border)', boxShadow: '0 6px 24px rgba(0,0,0,0.08)' }}

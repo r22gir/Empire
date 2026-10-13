@@ -70,6 +70,28 @@ def test_is_help_intent_spanish_and_english():
     assert leftover_after_intent("pide ayuda a Max: no abre el chat") == "no abre el chat"
 
 
+def test_classify_family_request_ajuste_arreglo_crear():
+    from app.services.family_help import (
+        FAMILY_REQUEST_OFFER,
+        classify_family_request,
+        family_request_offer,
+        handle_chat_intent,
+    )
+
+    assert classify_family_request("no funciona el historial") == "Arreglo"
+    assert classify_family_request("quisiera que el chat abra más rápido") == "Ajuste"
+    assert classify_family_request("puedes agregar un botón de exportar") == "Crear"
+    assert classify_family_request("hola Max") is None
+    assert classify_family_request("sí") is None
+    assert classify_family_request("Si") is None
+    offer = family_request_offer("no funciona")
+    assert offer is not None
+    assert offer["offer"] == FAMILY_REQUEST_OFFER
+    assert offer["suggested_type"] == "Arreglo"
+    assert handle_chat_intent("sí") is None
+    assert handle_chat_intent("no funciona el chat") is None
+
+
 def test_redact_workroom_and_maxine_argos():
     from app.services.family_help import redact_text, sanitize_context_turns
 
@@ -383,6 +405,23 @@ def test_notify_email_only_founder_address(monkeypatch, tmp_path):
         assert "cliente@example.com" not in to
 
 
+def test_http_ticket_keeps_suggested_type(monkeypatch, tmp_path):
+    _family(monkeypatch, tmp_path, "amp")
+    client = _client()
+    res = client.post(
+        "/api/v1/family-help/tickets",
+        data={
+            "message": "no funciona abrir los PDF",
+            "history_json": '[{"role":"user","content":"subí tres PDF"},{"role":"assistant","content":"ok"}]',
+            "request_type": "Arreglo",
+        },
+    )
+    assert res.status_code == 200, res.text
+    ticket = res.json()["ticket"]
+    assert ticket["request_type"] == "Arreglo"
+    assert "PDF" in ticket["message"]
+
+
 def test_chat_intent_creates_ticket(monkeypatch, tmp_path):
     _family(monkeypatch, tmp_path, "maxine")
     from app.services.family_help import handle_chat_intent, list_tickets
@@ -405,6 +444,8 @@ def test_max_router_wires_family_help_intent():
     text = (Path(__file__).resolve().parents[1] / "app" / "routers" / "max" / "router.py").read_text(encoding="utf-8")
     assert "handle_chat_intent" in text
     assert 'skill_used="family_help"' in text
+    assert "_attach_family_request_offer" in text
+    assert "family_request_offer" in text
 
 
 def test_family_http_upload_roundtrip(monkeypatch, tmp_path):

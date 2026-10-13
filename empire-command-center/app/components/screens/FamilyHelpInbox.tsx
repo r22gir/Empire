@@ -103,7 +103,7 @@ export default function FamilyHelpInbox() {
               cursor: 'pointer',
             }}
           >
-            <div style={{ fontSize: 12, opacity: 0.7 }}>{EDITION_LABEL[ticket.edition] || ticket.edition} · {ticket.status}</div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>{EDITION_LABEL[ticket.edition] || ticket.edition} · {ticket.status}{ticket.request_type ? ` · ${ticket.request_type}` : ''}</div>
             <div style={{ fontWeight: 600 }}>{ticket.sender}</div>
             <div style={{ fontSize: 13 }}>{(ticket.message || ticket.transcript || '').slice(0, 90)}</div>
             {(ticket.attachment_count || ticket.attachments?.length) ? (
@@ -118,7 +118,7 @@ export default function FamilyHelpInbox() {
         {!active && <p>{t.empty}</p>}
         {active && (
           <>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>{active.id} · {EDITION_LABEL[active.edition]} · {active.status} · {active.created_at}</div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>{active.id} · {EDITION_LABEL[active.edition]} · {active.status}{active.request_type ? ` · ${active.request_type}` : ''} · {active.created_at}</div>
             <h3 style={{ marginTop: 6 }}>{active.sender}</h3>
             <p>{active.message || '—'}</p>
             {active.transcript ? (

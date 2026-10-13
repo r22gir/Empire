@@ -4,6 +4,7 @@ import { Bell, User, GitCommit, Wifi, WifiOff, Activity, Cpu, HardDrive } from '
 import { EmpireStatusPill } from './EmpireStatusPill';
 import { API } from '../../lib/api';
 import { useAssistantName } from '../../lib/assistant';
+import { isFamilyEdition } from '../../lib/edition';
 
 interface ProviderStatus {
   id: string;
@@ -24,6 +25,7 @@ export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: E
   const [frontendOk, setFrontendOk] = useState(false);
 
   useEffect(() => {
+    if (isFamilyEdition()) return;
     // Health polling
     const checkHealth = async () => {
       try {

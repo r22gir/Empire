@@ -41,10 +41,16 @@ export interface Message {
   pinPrompts?: PinPrompt[];
   quality?: QualityBadge;
   metadata?: {
-    registry_version: string;
-    surface: string;
-    response_at: string;
-    skill_used: string | null;
+    registry_version?: string;
+    surface?: string;
+    response_at?: string;
+    skill_used?: string | null;
+    family_request_offer?: {
+      suggested_type?: string;
+      offer?: string;
+      source_message?: string;
+    };
+    [key: string]: unknown;
   };
 }
 

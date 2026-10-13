@@ -13,6 +13,11 @@ from PIL import Image
 router = APIRouter(prefix="/files", tags=["files"])
 
 from app.services.data_paths import data_root
+from app.services.uploads.chat_uploads import (
+    category_for_filename,
+    decode_stored_name,
+    resolve_uploaded_file,
+)
 
 # Honor EMPIRE_DATA_DIR. Family editions never mkdir Workroom checkout paths;
 # ``_upload_dir()`` also routes them to require_data_root()/uploads.
@@ -50,16 +55,7 @@ def _log_dir() -> Path:
     return LOG_DIR
 
 def get_category(filename: str) -> str:
-    ext = filename.lower().split('.')[-1] if '.' in filename else ''
-    if ext in ['pdf', 'txt', 'md', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'json']:
-        return 'documents'
-    elif ext in ['py', 'js', 'ts', 'tsx', 'jsx', 'html', 'css', 'sh', 'yaml', 'yml']:
-        return 'code'
-    elif ext in ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico']:
-        return 'images'
-    elif ext in ['m4a', 'mp3', 'wav', 'ogg', 'flac', 'wma', 'aac']:
-        return 'audio'
-    return 'other'
+    return category_for_filename(filename)
 
 def log_access(action: str, filename: str, agent: str, details: str = ""):
     log_entry = {"timestamp": datetime.now().isoformat(), "action": action, "filename": filename, "agent": agent, "details": details}
@@ -74,15 +70,18 @@ class PathRequest(BaseModel):
 async def upload_file(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(400, "No filename")
-    category = get_category(file.filename)
-    save_path = _upload_dir() / category / file.filename
+    original_name = decode_stored_name(file.filename)
+    if not original_name:
+        raise HTTPException(400, "No filename")
+    category = get_category(original_name)
+    save_path = _upload_dir() / category / original_name
     if save_path.exists():
         stem, suffix = save_path.stem, save_path.suffix
         save_path = _upload_dir() / category / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
     raw_bytes = file.file.read()
     with open(save_path, 'wb') as f:
         f.write(raw_bytes)
-    log_access("upload", file.filename, "founder", f"category={category}")
+    log_access("upload", original_name, "founder", f"category={category}")
 
     # D44 — copy image-category uploads into the canonical job-images tree
     # so MAX can find them later via list_job_images / describe_job_image.
@@ -95,13 +94,19 @@ async def upload_file(file: UploadFile = File(...)):
             store_job_image(
                 raw_bytes,
                 source_channel="max_chat",
-                original_filename=file.filename,
+                original_filename=original_name,
             )
         except ValueError as _ve:
-            log_access("d44_reject", file.filename, "founder",
+            log_access("d44_reject", original_name, "founder",
                        f"channel=max_chat reason={_ve}")
 
-    return {"status": "success", "filename": save_path.name, "category": category, "size": save_path.stat().st_size}
+    return {
+        "status": "success",
+        "filename": save_path.name,
+        "category": category,
+        "url": f"/api/v1/files/view/{category}/{save_path.name}",
+        "size": save_path.stat().st_size,
+    }
 
 @router.post("/upload-from-path")
 async def upload_from_path(req: PathRequest):
@@ -186,17 +191,19 @@ async def list_files(category: Optional[str] = None):
                     files.append({"name": f.name, "category": cat, "size": f.stat().st_size, "uploaded_at": datetime.fromtimestamp(f.stat().st_mtime).isoformat()})
     return {"files": files, "total": len(files)}
 
-@router.get("/view/{category}/{filename}")
-@router.get("/{category}/{filename}")
-async def view_file(category: str, filename: str):
-    # Prevent matching other named routes (list, logs, browse, upload, etc.)
+@router.get("/view/{filename:path}")
+@router.get("/{category}/{filename:path}")
+async def view_file(filename: str, category: str | None = None):
+    # /view/<name> lands here with category=None. /<cat>/<name> may also
+    # be the leftover "/view/..." form from older clients.
     if category in ("list", "logs", "browse", "upload", "upload-from-path", "delete"):
         raise HTTPException(404, "File not found")
-    file_path = _upload_dir() / category / filename
-    if not file_path.exists():
+    hinted = None if category in (None, "", "view") else category
+    file_path = resolve_uploaded_file(filename, hinted)
+    if file_path is None:
         raise HTTPException(404, "File not found")
-    log_access("view", filename, "founder", f"category={category}")
-    return FileResponse(file_path)
+    log_access("view", file_path.name, "founder", f"category={file_path.parent.name}")
+    return FileResponse(file_path, filename=file_path.name)
 
 @router.get("/logs")
 async def get_logs(date: Optional[str] = None):
