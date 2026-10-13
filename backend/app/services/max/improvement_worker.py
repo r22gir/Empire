@@ -70,8 +70,14 @@ def _maybe_launch_cursor(req: dict, spec: str) -> dict:
         return {"cursor_error": str(exc)[:400]}
 
 
+def worker_enabled() -> bool:
+    return (os.getenv("MAX_IMPROVE_WORKER_ENABLED") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def run_atlas_plan(job: dict) -> dict:
     """Synchronous Atlas job. Safe to call from tests and the worker loop."""
+    if not worker_enabled():
+        raise PermissionError("Atlas improvement worker is off (MAX_IMPROVE_WORKER_ENABLED not set).")
     blocked = _family_blocked()
     if blocked:
         raise PermissionError(blocked)
@@ -218,7 +224,7 @@ async def worker_loop(poll_seconds: Optional[float] = None) -> None:
         return
     # Explicit opt-in: MiniMax/Cursor keys already exist in the Studio env for
     # other features, so key presence alone must not start the loop.
-    if (os.getenv("MAX_IMPROVE_WORKER_ENABLED") or "").strip().lower() not in {"1", "true", "yes", "on"}:
+    if not worker_enabled():
         logger.info("Atlas improvement worker off (set MAX_IMPROVE_WORKER_ENABLED=1 to enable)")
         return
     interval = poll_seconds
