@@ -17,6 +17,7 @@ import '../chat/chat.css';
 import { chiefEHref } from '../../lib/chiefE';
 import { copyTextToClipboard, displayModelLabel, splitChatContent } from '../../lib/chatContent';
 import { useAssistantName } from '../../lib/assistant';
+import { isFamilyEdition } from '../../lib/edition';
 import VoiceDraftPanel, { VoiceDraftView } from '../voice/VoiceDraftPanel';
 import FounderPinCard from '../chat/FounderPinCard';
 import { useTranslation } from '../../lib/i18n';
@@ -146,6 +147,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { locale, t } = useTranslation();
+  const family = isFamilyEdition();
   const isEmptyConversation = !isStreaming && !messages.some(m => m.role === 'user');
   const localeRef = useRef(locale);
   const familyHelp = isFamilyEdition(editionFromEnv());
@@ -652,7 +654,11 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         borderBottom: '1px solid var(--border)',
         background: 'var(--card-bg)',
       }}>
-        <ViewPdfControl mode="print" title="Opens the browser print dialog for this conversation. Chat has no quote PDF of its own." />
+        {family ? (
+          <span style={{ width: 8, flexShrink: 0 }} />
+        ) : (
+          <ViewPdfControl mode="print" title="Opens the browser print dialog for this conversation. Chat has no quote PDF of its own." />
+        )}
         <span style={{
           fontSize: 14,
           fontWeight: 900,
@@ -783,7 +789,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         </div>
       )}
 
-      {maxStatus && (
+      {maxStatus && !family && (
         <div
           data-testid="max-orchestration-status"
           style={{
@@ -869,7 +875,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         </div>
       )}
 
-      <ContinuityPanel mode="compact" onOpenContinuity={() => onProductNavigate?.('max-continuity', 'dashboard')} />
+      {!family && (
+        <ContinuityPanel mode="compact" onOpenContinuity={() => onProductNavigate?.('max-continuity', 'dashboard')} />
+      )}
 
       {/* Messages */}
       <div style={{

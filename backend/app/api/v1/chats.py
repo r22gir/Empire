@@ -10,8 +10,6 @@ from app.services.chat_history_store import (
     chats_dir as store_chats_dir,
     list_chats_for_owner,
     load_chat_for_owner,
-    preview_from as _get_preview,
-    title_from as _auto_title,
     update_meta,
     upsert_chat,
     user_dir,
