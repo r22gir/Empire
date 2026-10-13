@@ -1,0 +1,18 @@
+[Unit]
+Description=EmpireDell family edition data backup
+Documentation=file://%h/empire-repo/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/empire-repo
+Environment=BACKUP_DIR=/media/rg/BACKUP1/family-backups
+EnvironmentFile=-%h/.config/empire/family-backup.env
+ExecStart=%h/empire-repo/deploy/backup_family_data.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=default.target

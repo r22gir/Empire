@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly EmpireDell family edition data backup
+Documentation=file://%h/empire-repo/deploy/README.md
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+RandomizedDelaySec=5min
+Unit=empire-family-backup.service
+
+[Install]
+WantedBy=timers.target
