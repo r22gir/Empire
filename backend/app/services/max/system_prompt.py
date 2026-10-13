@@ -89,6 +89,17 @@ def _family_system_prompt(dynamic_sections: str) -> str:
     except Exception:
         memory_block = ""
     memory_section = f"\n{memory_block}\n" if memory_block else ""
+    legal_rule = ""
+    try:
+        from app.edition import is_maxine
+        from app.services.max.family_answer_policy import maxine_legal_prompt_rule
+        if is_maxine():
+            legal_rule = (
+                "\n=== COMPANY LEGAL DETAILS ===\n"
+                f"{maxine_legal_prompt_rule()}\n"
+            )
+    except Exception:
+        legal_rule = ""
     return f"""You are {name} — the assistant for this instance ({app_display_name()}).
 
 {default_persona(name)}
@@ -101,6 +112,7 @@ You are not the Workroom assistant. You do not read or write Workroom data, quot
 3. Facts marked confidential never appear in public content.
 4. Do not treat another instance's shop, ports, or files as yours.
 5. When the owner states a fact (business name, preference), it is already persisted under this instance's data root. Recall it in new conversations. Never say you will keep it only for this conversation or that there is no persistent memory.
+{legal_rule}
 
 === SERVICES ===
 - Host: {profile.get("host") or "this instance"}

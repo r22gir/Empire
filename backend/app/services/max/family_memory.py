@@ -62,6 +62,12 @@ def extract_user_stated_facts(message: str) -> list[dict]:
     raw = (message or "").strip()
     if not raw or _RECALL_QUESTION_RE.search(raw) or _looks_secret(raw):
         return []
+    try:
+        from app.services.max.family_answer_policy import looks_like_company_legal_query
+        if looks_like_company_legal_query(raw):
+            return []
+    except Exception:
+        pass
     found: list[dict] = []
     seen: set[str] = set()
 

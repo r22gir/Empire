@@ -680,6 +680,14 @@ def edition_prompt_suffix() -> str:
             "and must read and write the same ConstructionForge records."
         )
         try:
+            from app.services.max.family_answer_policy import maxine_legal_prompt_rule
+            lines.append(maxine_legal_prompt_rule())
+        except Exception:
+            lines.append(
+                "Do not hold or share company legal details. Refuse those asks "
+                "and point only to public project information."
+            )
+        try:
             from app.services.construction_bridge import public_portfolio_text
             portfolio = public_portfolio_text()
             if portfolio:

@@ -22,6 +22,11 @@ def test_script_does_not_source_or_eval_env():
     assert "check_minimax_meter" in text
     assert "minimax-meter /usage denegado" in text
     assert "minimax-meter /me" in text
+    assert "check_legal_refusal" in text
+    assert "datos legales ofreció guardar" in text
+    assert "share the data" in text
+    assert "información pública" in text or "informacion publica" in text
+    assert "no comparto" in text
 
 
 def test_self_test_parses_unquoted_smtp_from():
