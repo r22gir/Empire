@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional, List
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -12,10 +13,9 @@ from pathlib import Path
 from datetime import datetime, date, timedelta
 
 from app.db.database import DB_PATH, get_db, dict_row, dict_rows
-import logging
+from app.middleware.rate_limiter import limiter
 
 logger = logging.getLogger(__name__)
-from app.middleware.rate_limiter import limiter
 from app.services.pricing import (
     PRICING_ENGINE_VERSION,
     build_design_invoice_source,

@@ -217,9 +217,12 @@ def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
     )
 
     addon_total = 0.0
-    meta_row = conn.execute(
-        "SELECT metadata_json FROM quotes_v2 WHERE id = ?", (quote_id,)
-    ).fetchone()
+    try:
+        meta_row = conn.execute(
+            "SELECT metadata_json FROM quotes_v2 WHERE id = ?", (quote_id,)
+        ).fetchone()
+    except Exception:
+        meta_row = None
     if meta_row and meta_row[0]:
         try:
             metadata = json.loads(meta_row[0])

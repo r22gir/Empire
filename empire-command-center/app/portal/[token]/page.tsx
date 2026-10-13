@@ -309,12 +309,18 @@ export default function PortalPage() {
                 </div>
                 <div className="flex justify-between w-48">
                   <span className="text-gray-500">Tax</span>
-                  <span style={{ color: "#1a1a2e" }}>{fmt(quote.tax)}</span>
+                  <span style={{ color: "#1a1a2e" }}>{fmt(quote.tax ?? (quote as any).tax_amount ?? 0)}</span>
                 </div>
                 <div className="flex justify-between w-48 pt-2 border-t font-bold text-base" style={{ borderColor: "#e0ddd6" }}>
                   <span style={{ color: "#1a1a2e" }}>Total</span>
                   <span style={{ color: "#1a1a2e" }}>{fmt(quote.total)}</span>
                 </div>
+                {(quote as any).deposit_amount || (quote as any).deposit?.deposit_amount ? (
+                  <div className="flex justify-between w-48 text-green-700 font-semibold">
+                    <span>Deposit</span>
+                    <span>{fmt((quote as any).deposit_amount || (quote as any).deposit?.deposit_amount)}</span>
+                  </div>
+                ) : null}
               </div>
             </div>
 
