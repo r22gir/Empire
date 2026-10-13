@@ -204,7 +204,7 @@ def list_messages(conn, thread_id: str) -> list[dict]:
         conn.execute(
             """SELECT * FROM crm_thread_messages
                WHERE thread_id = ?
-               ORDER BY created_at ASC, id ASC""",
+               ORDER BY created_at ASC, rowid ASC""",
             (thread_id,),
         ).fetchall()
     )
