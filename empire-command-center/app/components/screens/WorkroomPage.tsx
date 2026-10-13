@@ -25,6 +25,7 @@ const WorkroomOrganizer = lazy(() => import('../business/organizer/WorkroomOrgan
 const PhotoAnalysisPanel = lazy(() => import('../business/vision/PhotoAnalysisPanel'));
 const InventorySection = lazy(() => import('../business/inventory/InventorySection'));
 const QuoteReviewScreen = lazy(() => import('./QuoteReviewScreen'));
+const WorkOrdersPanel = lazy(() => import('./WorkOrdersPanel'));
 const QuoteBuilderScreen = lazy(() => import('./QuoteBuilderScreen'));
 const TemplateModule = lazy(() => import('../business/templates/TemplateModule'));
 const JobHub = lazy(() => import('../jobhub/JobHub'));
@@ -41,6 +42,7 @@ const NAV_SECTIONS = [
   { id: 'inventory', label: 'Inventory', icon: Package },
   { id: 'jobs', label: 'Jobs', icon: Calendar },
   { id: 'schedule', label: 'Organizer', icon: Clock },
+  { id: 'work-orders', label: 'Work orders', icon: ClipboardList },
   { id: 'templates', label: 'Templates', icon: Ruler },
   { id: 'tasks', label: 'Tasks', icon: CheckCircle2 },
   { id: 'analysis', label: 'AI Analysis', icon: Camera },
@@ -123,6 +125,8 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
         return <Suspense fallback={<Loading />}><JobBoard /></Suspense>;
       case 'schedule':
         return <Suspense fallback={<Loading />}><WorkroomOrganizer business="workroom" /></Suspense>;
+      case 'work-orders':
+        return <Suspense fallback={<Loading />}><WorkOrdersPanel /></Suspense>;
       case 'templates':
         return <Suspense fallback={<Loading />}><TemplateModule /></Suspense>;
       case 'tasks':
