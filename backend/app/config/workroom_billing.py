@@ -132,14 +132,17 @@ def resolve_billing(billed_by: Optional[str] = None) -> WorkroomBilling:
     from app.edition import assistant_name, is_founder_edition
 
     if not is_founder_edition():
+        from app.services.edition_pdf_branding import resolve_edition_pdf_brand
+
+        brand = resolve_edition_pdf_brand()
         return WorkroomBilling(
             billed_by="instance",
-            name=assistant_name(),
-            address="",
-            phone="",
-            email="",
-            website="",
-            tagline="",
+            name=brand.name or assistant_name(),
+            address=brand.address,
+            phone=brand.phone,
+            email=brand.email,
+            website=brand.website,
+            tagline=brand.tagline,
         )
     key = normalize_billed_by(billed_by)
     data = _load_business_json()

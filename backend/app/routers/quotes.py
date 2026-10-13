@@ -3096,6 +3096,19 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
                 },
             )
 
+    from app.edition import is_family_edition
+
+    if is_family_edition():
+        from app.services.edition_document_pdf import generate_edition_quote_pdf
+
+        pdf_bytes = generate_edition_quote_pdf(quote_id, quote=quote, save=True)
+        filename = f"{quote.get('quote_number', quote_id)}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     rooms = quote.get("rooms") or []
     ai_mockups = quote.get("ai_mockups") or []
 
