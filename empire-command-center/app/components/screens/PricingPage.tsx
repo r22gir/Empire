@@ -1,51 +1,70 @@
 'use client';
 import { useState } from 'react';
 import { Check, Sparkles, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
-import { API } from '../../lib/api';
+import { businessopsCheckout, businessopsSignup, type SellablePackageId } from '../../lib/api';
 
-const TIERS = [
+const TIERS: Array<{
+  id: SellablePackageId;
+  name: string;
+  monthlyPrice: number;
+  annualPrice: number;
+  description: string;
+  features: string[];
+  highlighted: boolean;
+}> = [
   {
-    id: 'lite' as const,
-    name: 'Lite',
+    id: 'pkg_starter',
+    name: 'Starter',
     monthlyPrice: 29,
     annualPrice: 24,
-    description: 'Everything you need to launch your first business.',
+    description: 'Workroom + WoodCraft core + ForgeCRM. The entry tier for solo operators.',
     features: [
       '1 business workspace',
-      'Basic AI assistant',
+      'MAX chat (standard)',
       'Quote & invoice management',
       'Email support',
     ],
     highlighted: false,
   },
   {
-    id: 'pro' as const,
-    name: 'Pro',
+    id: 'pkg_growth',
+    name: 'Growth',
     monthlyPrice: 79,
     annualPrice: 66,
-    description: 'Scale with advanced AI and multi-business tools.',
+    description: 'Starter + Drawing Studio + SocialForge + LeadForge + MarketForge.',
     features: [
-      'Everything in Lite',
-      '3 business workspaces',
-      'Advanced AI (vision, voice)',
-      'CraftForge + SocialForge',
+      'Everything in Starter',
+      'Drawing Studio + SocialForge',
+      'LeadForge + MarketForge',
       'Priority support',
     ],
     highlighted: true,
   },
   {
-    id: 'empire' as const,
+    id: 'pkg_empire',
     name: 'Empire',
     monthlyPrice: 199,
     annualPrice: 166,
-    description: 'The full suite for ambitious operators.',
+    description: 'Growth + ApostApp + VendorOps + SupportForge + ArchiveForge.',
     features: [
-      'Everything in Pro',
-      'Unlimited workspaces',
-      'Full AI suite (all desks)',
-      'Custom integrations',
+      'Everything in Growth',
+      'ApostApp (Founder-handled)',
+      'VendorOps + SupportForge',
       'Dedicated support',
-      'White-label option',
+    ],
+    highlighted: false,
+  },
+  {
+    id: 'pkg_apostille_only',
+    name: 'Apostille-only',
+    monthlyPrice: 49,
+    annualPrice: 41,
+    description: 'ApostApp + VendorOps only. The DMV market entry tier.',
+    features: [
+      'Apostille intake + status',
+      'VendorOps notary routing',
+      'Founder-handled fulfillment',
+      'Email updates',
     ],
     highlighted: false,
   },
@@ -54,7 +73,7 @@ const TIERS = [
 const FAQS = [
   {
     q: 'How does the free trial work?',
-    a: 'Every plan starts with a 14-day free trial. No credit card required to begin. You get full access to all features in your chosen tier during the trial period.',
+    a: 'Every plan starts with a 14-day free trial. Stripe TEST / sandbox checkout is used in this environment — live charges are disabled.',
   },
   {
     q: 'Can I switch plans later?',
@@ -62,15 +81,15 @@ const FAQS = [
   },
   {
     q: 'What happens to my data if I cancel?',
-    a: 'Your data is retained for 30 days after cancellation. You can export everything at any time. We never delete your data without notice.',
+    a: 'Your data is retained for 30 days after cancellation. You can export everything at any time. We never delete your data without notice. Tenant isolation keeps other businesses off your records.',
   },
   {
     q: 'Is there a discount for annual billing?',
     a: 'Yes. Annual billing saves you 2 months — that is roughly 17% off the monthly price. You can switch between monthly and annual billing at any time.',
   },
   {
-    q: 'What AI models are included?',
-    a: 'Lite includes our basic AI assistant powered by efficient models. Pro adds vision and voice capabilities. Empire unlocks the full AI suite with all 12 specialized desks, including advanced models like Grok, Claude, and local Ollama models.',
+    q: 'Is the Founder package for sale?',
+    a: 'No. Founder / Internal ($0) is never sold. It is the operator workspace only.',
   },
   {
     q: 'Do you offer custom enterprise plans?',
@@ -78,64 +97,77 @@ const FAQS = [
   },
 ];
 
+type SignupDraft = {
+  email: string;
+  password: string;
+  display_name: string;
+  business_name: string;
+};
+
 export default function PricingPage() {
   const [annual, setAnnual] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [pendingPackage, setPendingPackage] = useState<SellablePackageId | null>(null);
+  const [draft, setDraft] = useState<SignupDraft>({
+    email: '',
+    password: '',
+    display_name: '',
+    business_name: '',
+  });
 
-  const handleCheckout = async (tier: 'lite' | 'pro' | 'empire') => {
-    setLoading(tier);
+  const startBuy = (packageId: SellablePackageId) => {
+    setError(null);
+    setPendingPackage(packageId);
+  };
+
+  const handleCheckout = async () => {
+    if (!pendingPackage) return;
+    setLoading(pendingPackage);
     setError(null);
     try {
-      const res = await fetch(`${API}/payments/checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tier,
-          success_url: window.location.origin + '/success',
-          cancel_url: window.location.href,
-        }),
+      const signup = await businessopsSignup({
+        ...draft,
+        package_id: pendingPackage,
       });
-
-      if (res.status === 503) {
-        setError('Stripe checkout is not yet configured. Coming soon!');
-        setLoading(null);
-        return;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('empire_tenant_id', signup.tenant.id);
+        localStorage.setItem('empire_business_id', signup.business.id);
+        if (signup.access_token) localStorage.setItem('empire_access_token', signup.access_token);
       }
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setError(body.detail || 'Something went wrong. Please try again.');
-        setLoading(null);
-        return;
-      }
-
-      const data = await res.json();
+      const data = await businessopsCheckout({
+        business_id: signup.business.id,
+        tenant_id: signup.tenant.id,
+        package_id: pendingPackage,
+        customer_email: draft.email,
+        interval: annual ? 'year' : 'month',
+        success_url: window.location.origin + '/success?session_id={CHECKOUT_SESSION_ID}',
+        cancel_url: window.location.href,
+      });
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
-      } else {
-        setError('No checkout URL returned. Please try again.');
+        return;
       }
-    } catch {
-      setError('Could not reach the server. Please check your connection.');
+      setError('No checkout URL returned. Please try again.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
+      setError(message);
     }
     setLoading(null);
   };
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', background: '#f5f3ef', padding: '48px 24px 80px' }}>
-      {/* Header */}
       <div style={{ textAlign: 'center', maxWidth: 640, margin: '0 auto 40px' }}>
         <h1 style={{ fontSize: 32, fontWeight: 700, color: '#1a1a1a', margin: '0 0 12px', lineHeight: 1.2 }}>
           Simple, transparent pricing
         </h1>
         <p style={{ fontSize: 16, color: '#777', margin: 0, lineHeight: 1.6 }}>
-          Start free for 14 days. No credit card required. Pick the plan that fits your business.
+          Starter $29, Growth $79, Empire $199, Apostille-only $49. Stripe TEST / sandbox only.
         </p>
       </div>
 
-      {/* Billing Toggle */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 40 }}>
         <span style={{ fontSize: 14, fontWeight: annual ? 400 : 600, color: annual ? '#999' : '#1a1a1a', transition: 'all 0.2s' }}>Monthly</span>
         <button
@@ -177,12 +209,11 @@ export default function PricingPage() {
         )}
       </div>
 
-      {/* Tier Cards */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
         gap: 20,
-        maxWidth: 1000,
+        maxWidth: 1120,
         margin: '0 auto 60px',
         alignItems: 'start',
       }}>
@@ -197,7 +228,6 @@ export default function PricingPage() {
                 background: '#fff',
                 borderRadius: 16,
                 border: tier.highlighted ? '2px solid #b8960c' : '1px solid #ece8e0',
-                padding: tier.highlighted ? '0' : '0',
                 position: 'relative',
                 overflow: 'hidden',
                 boxShadow: tier.highlighted
@@ -206,7 +236,6 @@ export default function PricingPage() {
                 transition: 'box-shadow 0.2s',
               }}
             >
-              {/* Recommended badge */}
               {tier.highlighted && (
                 <div style={{
                   background: '#b8960c',
@@ -223,7 +252,6 @@ export default function PricingPage() {
               )}
 
               <div style={{ padding: '28px 24px 24px' }}>
-                {/* Tier name */}
                 <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', margin: '0 0 6px' }}>
                   {tier.name}
                 </h2>
@@ -231,7 +259,6 @@ export default function PricingPage() {
                   {tier.description}
                 </p>
 
-                {/* Price */}
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 4 }}>
                   <span style={{ fontSize: 40, fontWeight: 700, color: '#1a1a1a', lineHeight: 1 }}>
                     ${price}
@@ -249,7 +276,6 @@ export default function PricingPage() {
 
                 <div style={{ height: 1, background: '#ece8e0', margin: '20px 0' }} />
 
-                {/* Features */}
                 <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 24px' }}>
                   {tier.features.map((f, i) => (
                     <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
@@ -259,10 +285,10 @@ export default function PricingPage() {
                   ))}
                 </ul>
 
-                {/* CTA */}
                 <button
-                  onClick={() => handleCheckout(tier.id)}
+                  onClick={() => startBuy(tier.id)}
                   disabled={isLoading}
+                  data-testid={`buy-${tier.id}`}
                   style={{
                     width: '100%',
                     padding: '12px 0',
@@ -282,18 +308,8 @@ export default function PricingPage() {
                     transition: 'all 0.2s',
                     opacity: isLoading ? 0.7 : 1,
                   }}
-                  onMouseEnter={(e) => {
-                    if (!tier.highlighted) {
-                      (e.currentTarget as HTMLButtonElement).style.background = '#faf9f7';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!tier.highlighted) {
-                      (e.currentTarget as HTMLButtonElement).style.background = '#fff';
-                    }
-                  }}
                 >
-                  {isLoading ? 'Redirecting...' : 'Start Free Trial'}
+                  {isLoading ? 'Redirecting...' : 'Buy'}
                   {!isLoading && <ArrowRight size={14} />}
                 </button>
               </div>
@@ -302,24 +318,86 @@ export default function PricingPage() {
         })}
       </div>
 
-      {/* Error message */}
+      {pendingPackage && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 40,
+          }}
+        >
+          <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 420, padding: 24 }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 18 }}>Create your workspace</h3>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#777' }}>
+              Self-serve signup, then Stripe TEST checkout for{' '}
+              {TIERS.find((t) => t.id === pendingPackage)?.name}.
+            </p>
+            {(['display_name', 'business_name', 'email', 'password'] as const).map((field) => (
+              <label key={field} style={{ display: 'block', marginBottom: 10, fontSize: 12, color: '#555' }}>
+                {field.replace('_', ' ')}
+                <input
+                  type={field === 'password' ? 'password' : field === 'email' ? 'email' : 'text'}
+                  value={draft[field]}
+                  onChange={(e) => setDraft({ ...draft, [field]: e.target.value })}
+                  style={{
+                    width: '100%',
+                    marginTop: 4,
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #ece8e0',
+                    fontSize: 14,
+                  }}
+                />
+              </label>
+            ))}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button
+                onClick={() => setPendingPackage(null)}
+                style={{ flex: 1, padding: 12, borderRadius: 10, border: '1px solid #ece8e0', background: '#fff', fontWeight: 600 }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCheckout}
+                disabled={!!loading}
+                style={{
+                  flex: 1,
+                  padding: 12,
+                  borderRadius: 10,
+                  border: 'none',
+                  background: '#b8960c',
+                  color: '#fff',
+                  fontWeight: 700,
+                }}
+              >
+                {loading ? 'Redirecting...' : 'Buy'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div style={{
           maxWidth: 500,
           margin: '-40px auto 40px',
           padding: '14px 20px',
           borderRadius: 12,
-          background: error.includes('Coming soon') ? '#fdf8eb' : '#fef2f2',
-          border: error.includes('Coming soon') ? '1px solid #fde68a' : '1px solid #fecaca',
+          background: error.includes('not configured') ? '#fdf8eb' : '#fef2f2',
+          border: error.includes('not configured') ? '1px solid #fde68a' : '1px solid #fecaca',
           fontSize: 13,
-          color: error.includes('Coming soon') ? '#92400e' : '#dc2626',
+          color: error.includes('not configured') ? '#92400e' : '#dc2626',
           textAlign: 'center',
         }}>
           {error}
         </div>
       )}
 
-      {/* FAQ Section */}
       <div style={{ maxWidth: 720, margin: '0 auto' }}>
         <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a', textAlign: 'center', marginBottom: 24 }}>
           Frequently asked questions

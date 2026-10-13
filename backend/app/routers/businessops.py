@@ -1,17 +1,17 @@
 """
-BusinessOps Foundation router (Phase 1, 2026-06-09).
+BusinessOps Foundation router (Phase 2 — self-serve + Stripe TEST checkout).
 
 Source of truth:
   - REPORT-businessops-tenantops-design.md
   - REPORT-businessops-design-decisions.md
 
-Scope (Phase 1, gate summary in the closure report):
-  - Read-only GET endpoints only
-  - No POST / PUT / PATCH / DELETE in Phase 1
-  - No customer-facing UI
+Phase 1 (kept): read-only GET surfaces for businesses / packages / entitlements.
+Phase 2 (this file): bo_tenants isolation, self-serve signup, Stripe TEST
+subscription checkout. pkg_founder is never sold. Live Stripe keys are refused.
 
 Tables (bo_ prefix to match VendorOps vo_ pattern):
   bo_businesses
+  bo_tenants
   bo_business_profiles
   bo_packages
   bo_business_subscriptions
@@ -20,6 +20,7 @@ Tables (bo_ prefix to match VendorOps vo_ pattern):
   bo_business_users
   bo_business_integrations
   bo_business_audit_events
+  bo_stripe_events
 
 DB pattern: raw SQLite + CREATE TABLE IF NOT EXISTS on first call.
 This matches the VendorOps pattern (vendorops.py::_init_vendorops_schema)
@@ -33,17 +34,29 @@ Prefix: /api/v1/businessops
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 from app.db import database
 from app.services.business.entitlements import check_entitlement
+from app.services.business.isolation import (
+    assert_tenant_owns_business,
+    assert_tenant_owns_subscription,
+    resolve_tenant,
+    resolve_tenant_business_id,
+    tenant_id_from_request,
+)
+from app.services.business.signup import signup_self_serve
+from app.services.business.stripe_checkout import (
+    construct_test_event,
+    create_subscription_checkout,
+    process_stripe_event,
+)
 
 
 router = APIRouter(prefix="/businessops", tags=["BusinessOps"])
@@ -77,6 +90,19 @@ CREATE TABLE IF NOT EXISTS bo_businesses (
 );
 CREATE INDEX IF NOT EXISTS idx_bo_businesses_status ON bo_businesses(status);
 CREATE INDEX IF NOT EXISTS idx_bo_businesses_type ON bo_businesses(business_type);
+
+CREATE TABLE IF NOT EXISTS bo_tenants (
+    id              TEXT PRIMARY KEY,
+    business_id     TEXT UNIQUE NOT NULL REFERENCES bo_businesses(id) ON DELETE RESTRICT,
+    slug            TEXT UNIQUE NOT NULL,
+    isolation_key   TEXT UNIQUE NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'active',
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CHECK (status IN ('active', 'paused', 'canceled'))
+);
+CREATE INDEX IF NOT EXISTS idx_bo_tenants_business ON bo_tenants(business_id);
+CREATE INDEX IF NOT EXISTS idx_bo_tenants_status ON bo_tenants(status);
 
 CREATE TABLE IF NOT EXISTS bo_business_profiles (
     business_id            TEXT PRIMARY KEY REFERENCES bo_businesses(id) ON DELETE CASCADE,
@@ -117,6 +143,8 @@ CREATE TABLE IF NOT EXISTS bo_business_subscriptions (
     canceled_at             TIMESTAMP,
     cancellation_reason     TEXT,
     stripe_subscription_id  TEXT,
+    stripe_customer_id      TEXT,
+    stripe_session_id       TEXT,
     notes                   TEXT,
     created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -207,6 +235,17 @@ CREATE TABLE IF NOT EXISTS bo_business_audit_events (
 );
 CREATE INDEX IF NOT EXISTS idx_bo_bae_business_time ON bo_business_audit_events(business_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_bo_bae_action        ON bo_business_audit_events(action);
+
+CREATE TABLE IF NOT EXISTS bo_stripe_events (
+    event_id            TEXT PRIMARY KEY,
+    event_type          TEXT NOT NULL,
+    business_id         TEXT,
+    stripe_session_id   TEXT,
+    processed_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    result              TEXT,
+    payload_summary     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bo_stripe_events_type ON bo_stripe_events(event_type);
 """
 
 
@@ -286,9 +325,17 @@ def _seed_entitlements_from_json(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, typ: str) -> None:
+    cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {typ}")
+
+
 def _init_businessops_schema(conn: sqlite3.Connection) -> None:
     """Create all bo_ tables and seed from JSON. Idempotent."""
     conn.executescript(_BO_DDL)
+    _ensure_column(conn, "bo_business_subscriptions", "stripe_customer_id", "TEXT")
+    _ensure_column(conn, "bo_business_subscriptions", "stripe_session_id", "TEXT")
     _seed_packages_from_json(conn)
     _seed_entitlements_from_json(conn)
     conn.commit()
@@ -333,6 +380,24 @@ class EntitlementCheckRequest(BaseModel):
     actor_role: Optional[str] = None
 
 
+class SignupRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+    display_name: str
+    business_name: str
+    package_id: str
+
+
+class CheckoutRequest(BaseModel):
+    business_id: str
+    package_id: str
+    tenant_id: Optional[str] = None
+    customer_email: Optional[str] = None
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+    interval: str = "month"
+
+
 # ──────────────────────────────────────────────────────────────────
 # GET endpoints — read-only
 # ──────────────────────────────────────────────────────────────────
@@ -345,9 +410,12 @@ def businessops_info():
         "module": "businessops",
         "route_prefix": "/api/v1/businessops",
         "db_prefix": "bo_",
-        "phase": 1,
-        "scope": "read-only foundation (additive; no module rewiring)",
+        "phase": 2,
+        "scope": "tenant isolation + self-serve signup + Stripe TEST checkout",
         "source_of_truth": "REPORT-businessops-tenantops-design.md",
+        "sellable_packages": ["pkg_starter", "pkg_growth", "pkg_empire", "pkg_apostille_only"],
+        "never_sold": ["pkg_founder"],
+        "stripe_mode": "test_sandbox_only",
     }
 
 
@@ -357,9 +425,10 @@ def businessops_health():
     with _bo_db() as conn:
         return {
             "status": "ok",
-            "phase": 1,
+            "phase": 2,
             "tables": {
                 "bo_businesses": conn.execute("SELECT COUNT(*) AS c FROM bo_businesses").fetchone()["c"],
+                "bo_tenants": conn.execute("SELECT COUNT(*) AS c FROM bo_tenants").fetchone()["c"],
                 "bo_packages": conn.execute("SELECT COUNT(*) AS c FROM bo_packages").fetchone()["c"],
                 "bo_module_entitlements": conn.execute("SELECT COUNT(*) AS c FROM bo_module_entitlements").fetchone()["c"],
                 "bo_business_subscriptions": conn.execute("SELECT COUNT(*) AS c FROM bo_business_subscriptions").fetchone()["c"],
@@ -367,6 +436,7 @@ def businessops_health():
                 "bo_business_users": conn.execute("SELECT COUNT(*) AS c FROM bo_business_users").fetchone()["c"],
                 "bo_business_integrations": conn.execute("SELECT COUNT(*) AS c FROM bo_business_integrations").fetchone()["c"],
                 "bo_business_audit_events": conn.execute("SELECT COUNT(*) AS c FROM bo_business_audit_events").fetchone()["c"],
+                "bo_stripe_events": conn.execute("SELECT COUNT(*) AS c FROM bo_stripe_events").fetchone()["c"],
             },
         }
 
@@ -375,12 +445,14 @@ def businessops_health():
 
 @router.get("/businesses")
 def list_businesses(
+    request: Request,
     status: Optional[str] = Query(None, description="Filter by status (prospect/active/paused/canceled)"),
     business_type: Optional[str] = Query(None),
+    tenant_id: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    """List businesses. Read-only."""
+    """List businesses. Tenant-scoped when X-Empire-Tenant-Id / tenant_id is set."""
     where = []
     params: list = []
     if status is not None:
@@ -389,8 +461,12 @@ def list_businesses(
     if business_type is not None:
         where.append("business_type = ?")
         params.append(business_type)
-    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
     with _bo_db() as conn:
+        scoped = resolve_tenant_business_id(conn, tenant_id_from_request(request, tenant_id))
+        if scoped is not None:
+            where.append("id = ?")
+            params.append(scoped)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         rows = conn.execute(
             f"SELECT * FROM bo_businesses{where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (*params, limit, offset),
@@ -400,9 +476,10 @@ def list_businesses(
 
 
 @router.get("/businesses/{business_id}")
-def get_business(business_id: str):
-    """Get one business. Read-only."""
+def get_business(business_id: str, request: Request, tenant_id: Optional[str] = Query(None)):
+    """Get one business. Read-only. Tenant mismatch → 404."""
     with _bo_db() as conn:
+        assert_tenant_owns_business(conn, tenant_id_from_request(request, tenant_id), business_id)
         row = conn.execute("SELECT * FROM bo_businesses WHERE id = ?", (business_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"business {business_id!r} not found")
@@ -410,9 +487,10 @@ def get_business(business_id: str):
 
 
 @router.get("/businesses/{business_id}/profile")
-def get_business_profile(business_id: str):
+def get_business_profile(business_id: str, request: Request, tenant_id: Optional[str] = Query(None)):
     """Get the 1:1 profile for a business. Read-only."""
     with _bo_db() as conn:
+        assert_tenant_owns_business(conn, tenant_id_from_request(request, tenant_id), business_id)
         row = conn.execute(
             "SELECT * FROM bo_business_profiles WHERE business_id = ?",
             (business_id,),
@@ -548,11 +626,13 @@ def check_entitlement_endpoint(req: EntitlementCheckRequest):
 
 @router.get("/subscriptions")
 def list_subscriptions(
+    request: Request,
     business_id: Optional[str] = Query(None),
     package_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    tenant_id: Optional[str] = Query(None),
 ):
-    """List subscriptions. Read-only."""
+    """List subscriptions. Tenant-scoped when a tenant id is present."""
     where = []
     params: list = []
     if business_id is not None:
@@ -564,8 +644,12 @@ def list_subscriptions(
     if status is not None:
         where.append("status = ?")
         params.append(status)
-    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
     with _bo_db() as conn:
+        scoped = resolve_tenant_business_id(conn, tenant_id_from_request(request, tenant_id))
+        if scoped is not None:
+            where.append("business_id = ?")
+            params.append(scoped)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         rows = conn.execute(
             f"SELECT * FROM bo_business_subscriptions{where_sql} ORDER BY created_at DESC",
             params,
@@ -574,24 +658,22 @@ def list_subscriptions(
 
 
 @router.get("/subscriptions/{subscription_id}")
-def get_subscription(subscription_id: str):
+def get_subscription(subscription_id: str, request: Request, tenant_id: Optional[str] = Query(None)):
     with _bo_db() as conn:
-        row = conn.execute(
-            "SELECT * FROM bo_business_subscriptions WHERE id = ?",
-            (subscription_id,),
-        ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"subscription {subscription_id!r} not found")
-    return _row_to_dict(row)
+        return assert_tenant_owns_subscription(
+            conn, tenant_id_from_request(request, tenant_id), subscription_id
+        )
 
 
 # ── /provisioning-checklists ──────────────────────────────────
 
 @router.get("/provisioning-checklists")
 def list_provisioning_checklists(
+    request: Request,
     business_id: Optional[str] = Query(None),
     step_key: Optional[str] = Query(None),
     completed: Optional[bool] = Query(None),
+    tenant_id: Optional[str] = Query(None),
 ):
     where = []
     params: list = []
@@ -605,8 +687,12 @@ def list_provisioning_checklists(
         where.append("completed_at IS NOT NULL")
     elif completed is False:
         where.append("completed_at IS NULL")
-    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
     with _bo_db() as conn:
+        scoped = resolve_tenant_business_id(conn, tenant_id_from_request(request, tenant_id))
+        if scoped is not None:
+            where.append("business_id = ?")
+            params.append(scoped)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         rows = conn.execute(
             f"SELECT * FROM bo_provisioning_checklists{where_sql} ORDER BY business_id, sort_order, step_key",
             params,
@@ -618,9 +704,11 @@ def list_provisioning_checklists(
 
 @router.get("/business-users")
 def list_business_users(
+    request: Request,
     business_id: Optional[str] = Query(None),
     role: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    tenant_id: Optional[str] = Query(None),
 ):
     where = []
     params: list = []
@@ -633,8 +721,12 @@ def list_business_users(
     if status is not None:
         where.append("status = ?")
         params.append(status)
-    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
     with _bo_db() as conn:
+        scoped = resolve_tenant_business_id(conn, tenant_id_from_request(request, tenant_id))
+        if scoped is not None:
+            where.append("business_id = ?")
+            params.append(scoped)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         rows = conn.execute(
             f"SELECT * FROM bo_business_users{where_sql} ORDER BY business_id, role, email",
             params,
@@ -646,9 +738,11 @@ def list_business_users(
 
 @router.get("/integrations")
 def list_integrations(
+    request: Request,
     business_id: Optional[str] = Query(None),
     provider: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    tenant_id: Optional[str] = Query(None),
 ):
     where = []
     params: list = []
@@ -661,8 +755,12 @@ def list_integrations(
     if status is not None:
         where.append("status = ?")
         params.append(status)
-    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
     with _bo_db() as conn:
+        scoped = resolve_tenant_business_id(conn, tenant_id_from_request(request, tenant_id))
+        if scoped is not None:
+            where.append("business_id = ?")
+            params.append(scoped)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         rows = conn.execute(
             f"SELECT * FROM bo_business_integrations{where_sql} ORDER BY business_id, provider",
             params,
@@ -674,9 +772,11 @@ def list_integrations(
 
 @router.get("/audit-events")
 def list_audit_events(
+    request: Request,
     business_id: Optional[str] = Query(None),
     action: Optional[str] = Query(None),
     actor: Optional[str] = Query(None),
+    tenant_id: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
@@ -691,8 +791,12 @@ def list_audit_events(
     if actor is not None:
         where.append("actor = ?")
         params.append(actor)
-    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
     with _bo_db() as conn:
+        scoped = resolve_tenant_business_id(conn, tenant_id_from_request(request, tenant_id))
+        if scoped is not None:
+            where.append("business_id = ?")
+            params.append(scoped)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         rows = conn.execute(
             f"SELECT * FROM bo_business_audit_events{where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (*params, limit, offset),
@@ -702,3 +806,88 @@ def list_audit_events(
             params,
         ).fetchone()["c"]
     return {"total": total, "limit": limit, "offset": offset, "items": [_row_to_dict(r) for r in rows]}
+
+
+# ── tenants ────────────────────────────────────────────────────
+
+@router.get("/tenants")
+def list_tenants(
+    request: Request,
+    tenant_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+):
+    """List tenants. When a tenant id is present, only that tenant is returned."""
+    where = []
+    params: list = []
+    if status is not None:
+        where.append("status = ?")
+        params.append(status)
+    with _bo_db() as conn:
+        scoped = tenant_id_from_request(request, tenant_id)
+        if scoped:
+            resolve_tenant(conn, scoped)
+            where.append("id = ?")
+            params.append(scoped)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        rows = conn.execute(
+            f"SELECT * FROM bo_tenants{where_sql} ORDER BY created_at DESC",
+            params,
+        ).fetchall()
+    return {"items": [_row_to_dict(r) for r in rows]}
+
+
+@router.get("/tenants/{tenant_id}")
+def get_tenant(tenant_id: str, request: Request):
+    header_tid = tenant_id_from_request(request, None)
+    if header_tid and header_tid != tenant_id:
+        raise HTTPException(status_code=404, detail="tenant not found")
+    with _bo_db() as conn:
+        return resolve_tenant(conn, tenant_id)
+
+
+# ── self-serve signup + Stripe TEST checkout ───────────────────
+
+@router.post("/signup")
+def self_serve_signup(req: SignupRequest):
+    """Create a prospect business + tenant + owner + pending subscription."""
+    with _bo_db() as conn:
+        return signup_self_serve(
+            conn,
+            email=str(req.email),
+            password=req.password,
+            display_name=req.display_name,
+            business_name=req.business_name,
+            package_id=req.package_id,
+        )
+
+
+@router.post("/checkout")
+def create_package_checkout(req: CheckoutRequest, request: Request):
+    """Create a Stripe TEST-mode subscription Checkout Session."""
+    success_url = req.success_url or "https://studio.empirebox.store/success?session_id={CHECKOUT_SESSION_ID}"
+    cancel_url = req.cancel_url or "https://studio.empirebox.store/pricing"
+    with _bo_db() as conn:
+        assert_tenant_owns_business(
+            conn,
+            tenant_id_from_request(request, req.tenant_id),
+            req.business_id,
+        )
+        return create_subscription_checkout(
+            conn,
+            business_id=req.business_id,
+            package_id=req.package_id,
+            customer_email=req.customer_email,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            interval=req.interval,
+        )
+
+
+@router.post("/stripe-webhook")
+async def businessops_stripe_webhook(request: Request):
+    """Stripe TEST webhook. Fail-closed without signature + TEST key."""
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+    event = construct_test_event(payload, signature)
+    with _bo_db() as conn:
+        return process_stripe_event(conn, event)
