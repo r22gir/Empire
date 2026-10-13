@@ -2,6 +2,11 @@
 """Map pre-isolation founder/ chats to the edition's allowlisted primary user.
 
 Dry-run by default. Writes only with --apply (copy, never delete).
+Never runs automatically — this file has no import-time side effects and
+is not called from app startup. You must invoke the script yourself.
+
+Reads EMPIRE_EDITION when --edition is omitted. Skips 8-character short-id
+files that sit beside a full-id record (those are leftovers, not chats).
 
 On Max-e the only family user is Juan (AMP_OWNER_EMAIL unless
 AMP_LEGACY_CHAT_EMAIL / FAMILY_LEGACY_CHAT_EMAIL is set). Maxine uses
@@ -20,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -29,10 +35,11 @@ from app.services.chat_history_store import (  # noqa: E402
     apply_founder_migration,
     plan_founder_migration,
     primary_legacy_email,
+    resolve_legacy_edition,
 )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Dry-run (default): map founder/ chats to the allowlisted user. --apply copies."
     )
@@ -56,13 +63,15 @@ def main() -> int:
         action="store_true",
         help="Copy founder/*.json into the user folder. Without this flag, only print the plan.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     root = Path(args.dir).expanduser().resolve()
     if not root.exists():
         print(json.dumps({"error": f"missing dir: {root}"}, indent=2))
         return 2
-    edition = (args.edition or None)
-    email = (args.email or primary_legacy_email(edition) or "").strip().lower()
+    edition = resolve_legacy_edition(args.edition)
+    if args.edition.strip():
+        os.environ["EMPIRE_EDITION"] = edition
+    email = (args.email or primary_legacy_email(edition or None) or "").strip().lower()
     if args.apply:
         report = apply_founder_migration(root, target_email=email, edition=edition)
     else:

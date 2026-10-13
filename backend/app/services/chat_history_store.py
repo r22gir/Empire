@@ -15,7 +15,7 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 from zoneinfo import ZoneInfo
 
 CHAT_TZ_NAME = "America/New_York"
@@ -398,21 +398,54 @@ def iter_searchable_chats(
             yield data, True
 
 
+SHORT_ID_LEN = 8
+
+
+def matching_full_ids(stem: str, sibling_stems: Iterable[str]) -> list[str]:
+    """Full-id filenames that the 8-char short stem is a prefix of."""
+    if len(stem) != SHORT_ID_LEN:
+        return []
+    return sorted(other for other in sibling_stems if other != stem and other.startswith(stem))
+
+
+def is_short_id_duplicate(stem: str, sibling_stems: Iterable[str]) -> bool:
+    """True when an 8-char file sits beside a longer record with the same prefix."""
+    return bool(matching_full_ids(stem, sibling_stems))
+
+
+def resolve_legacy_edition(cli_edition: Optional[str] = None) -> str:
+    """``--edition`` wins, then ``EMPIRE_EDITION``. Never guesses a live path."""
+    raw = (cli_edition or os.getenv("EMPIRE_EDITION") or "").strip().lower()
+    return raw
+
+
 def plan_founder_migration(
     root: Path,
     target_email: Optional[str] = None,
     edition: Optional[str] = None,
 ) -> dict:
     """Describe founder/ → allowlisted-user copies. Never writes."""
-    email = (target_email or primary_legacy_email(edition) or "").strip().lower()
+    resolved = resolve_legacy_edition(edition)
+    email = (target_email or primary_legacy_email(resolved or None) or "").strip().lower()
     dest_key = user_key_from_email(email) if email else ""
     founder = Path(root) / WORKROOM_USER
     dest = Path(root) / dest_key if dest_key else None
+    found = list(_iter_folder_chats(founder))
+    stems = {path.stem for path, _data in found}
+    dest_stems: set[str] = set()
+    if dest and dest.exists():
+        dest_stems = {p.stem for p in dest.glob("*.json")}
     items = []
-    for path, data in _iter_folder_chats(founder):
+    for path, data in found:
         cid = str(data.get("id") or path.stem)
         dest_path = dest / f"{path.name}" if dest else None
         exists = bool(dest_path and dest_path.exists())
+        short_dup = is_short_id_duplicate(path.stem, stems) or is_short_id_duplicate(path.stem, dest_stems)
+        skip_reason = ""
+        if short_dup:
+            skip_reason = "short-id duplicate of full record"
+        elif exists:
+            skip_reason = "already copied"
         items.append(
             {
                 "id": cid,
@@ -420,21 +453,24 @@ def plan_founder_migration(
                 "dest": str(dest_path) if dest_path else None,
                 "title": data.get("title") or title_from(data.get("messages") or []),
                 "already_copied": exists,
-                "would_copy": bool(dest_key) and not exists,
+                "short_id_duplicate": short_dup,
+                "skipped_reason": skip_reason or None,
+                "would_copy": bool(dest_key) and not exists and not short_dup,
             }
         )
     return {
         "dry_run": True,
         "applied": False,
-        "edition": edition,
+        "edition": resolved or None,
         "target_email": email or None,
         "target_owner": dest_key or None,
         "source_dir": str(founder),
         "dest_dir": str(dest) if dest else None,
         "count": len(items),
         "would_copy": sum(1 for item in items if item["would_copy"]),
+        "skipped_short_id": sum(1 for item in items if item["short_id_duplicate"]),
         "items": items,
-        "note": "Dry-run. Pass --apply to copy into the allowlisted user folder. founder/ files are not deleted.",
+        "note": "Dry-run. Pass --apply to copy into the allowlisted user folder. founder/ files are not deleted. Short-id duplicates are skipped.",
     }
 
 
@@ -456,7 +492,7 @@ def apply_founder_migration(
     for item in plan["items"]:
         source = Path(item["source"])
         dest_path = Path(item["dest"])
-        if dest_path.exists():
+        if dest_path.exists() or item.get("short_id_duplicate"):
             item["copied"] = False
             item["skipped"] = True
             skipped.append(item)
@@ -492,7 +528,7 @@ def find_short_id_duplicates(root: Path) -> list[dict]:
         shorts = [stem for stem in files if len(stem) == 8]
         longs = [stem for stem in files if len(stem) > 8]
         for short in shorts:
-            matches = [long for long in longs if long.startswith(short)]
+            matches = matching_full_ids(short, files)
             report.append(
                 {
                     "user": user_folder.name,

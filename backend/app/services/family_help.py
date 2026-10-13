@@ -1645,8 +1645,24 @@ def build_notify_email(ticket: dict) -> dict:
 
 
 def notify_new_ticket(ticket: dict) -> dict:
-    """In-app notice + email to empirebox2026@gmail.com only."""
-    result = {"notification": None, "email": "skipped", "email_attachments": 0, "email_mentioned": 0}
+    """In-app notice + email to empirebox2026@gmail.com only.
+
+    Also sends a Rafael-only WhatsApp/SMS alert when FAMILY_ALERT_ENABLED=true.
+    The alert is independent of the email path (whitelist / SMTP).
+    """
+    result = {
+        "notification": None,
+        "email": "skipped",
+        "email_attachments": 0,
+        "email_mentioned": 0,
+        "alert": {"status": "off"},
+    }
+    try:
+        from app.services.family_alert import notify_rafael_alert
+
+        result["alert"] = notify_rafael_alert(ticket)
+    except Exception as exc:
+        result["alert"] = {"status": f"error:{type(exc).__name__}"}
     built = build_notify_email(ticket)
     edition = ticket.get("edition")
     label = built["label"]
