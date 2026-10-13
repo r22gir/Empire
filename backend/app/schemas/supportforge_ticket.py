@@ -10,12 +10,12 @@ from uuid import UUID
 # Ticket schemas
 class TicketCreate(BaseModel):
     """Schema for creating a new ticket."""
-    customer_email: EmailStr
+    customer_email: Optional[EmailStr] = None
     customer_name: Optional[str] = None
     subject: str = Field(..., min_length=1, max_length=500)
     content: str = Field(..., min_length=1)
-    channel: str = Field(default="portal", pattern="^(email|chat|phone|sms|portal)$")
-    priority: str = Field(default="normal", pattern="^(low|normal|high|urgent)$")
+    channel: str = Field(default="portal", pattern="^(email|chat|phone|sms|portal|family-help)$")
+    priority: str = Field(default="normal", pattern="^(low|normal|medium|high|urgent)$")
     tags: List[str] = Field(default=[])
     category: Optional[str] = None
 
@@ -23,11 +23,14 @@ class TicketCreate(BaseModel):
 class TicketUpdate(BaseModel):
     """Schema for updating a ticket."""
     subject: Optional[str] = Field(None, min_length=1, max_length=500)
-    status: Optional[str] = Field(None, pattern="^(new|open|pending|resolved|closed)$")
-    priority: Optional[str] = Field(None, pattern="^(low|normal|high|urgent)$")
+    status: Optional[str] = Field(None, pattern="^(new|open|pending|progress|in_progress|waiting|resolved|closed)$")
+    priority: Optional[str] = Field(None, pattern="^(low|normal|medium|high|urgent)$")
     assigned_agent_id: Optional[UUID] = None
     tags: Optional[List[str]] = None
     category: Optional[str] = None
+    proposed_action_status: Optional[str] = Field(
+        None, pattern="^(proposed|accepted|rejected|completed)$"
+    )
 
 
 class MessageCreate(BaseModel):
@@ -40,23 +43,31 @@ class MessageCreate(BaseModel):
 
 class TicketResponse(BaseModel):
     """Schema for ticket response."""
-    id: UUID
-    tenant_id: UUID
+    id: str
+    tenant_id: Optional[str] = None
     ticket_number: int
-    customer_id: UUID
-    assigned_agent_id: Optional[UUID]
+    customer_id: Optional[str] = None
+    assigned_agent_id: Optional[str] = None
     subject: str
+    content: Optional[str] = None
     status: str
     priority: str
     channel: str
-    tags: List[str]
-    category: Optional[str]
-    first_response_at: Optional[datetime]
-    resolved_at: Optional[datetime]
-    closed_at: Optional[datetime]
+    tags: List[str] = []
+    category: Optional[str] = None
+    source: Optional[str] = None
+    edition_id: Optional[str] = None
+    family_help_request_id: Optional[str] = None
+    proposed_action: Optional[str] = None
+    proposed_action_summary: Optional[str] = None
+    proposed_action_status: Optional[str] = None
+    auto_build: bool = False
+    first_response_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
     created_at: datetime
-    updated_at: Optional[datetime]
-    
+    updated_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 

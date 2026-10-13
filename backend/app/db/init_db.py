@@ -476,6 +476,15 @@ def init_database():
     # Initialize chat_backup tables in SQLAlchemy database (empirebox.db)
     _init_chat_backup_tables()
 
+    # SupportForge tickets (SQLite) — the PostgreSQL alembic revision never
+    # created sf_tickets on empire.db. Schema only; no live ticket rows.
+    try:
+        from app.db.supportforge_migration import ensure_supportforge_tables
+        ensure_supportforge_tables()
+        print("✓ SupportForge tickets tables initialized")
+    except Exception as e:
+        print(f"✗ SupportForge tickets table init failed (non-fatal): {e}")
+
 
 def _migrate_pipeline_columns(conn):
     """Add pipeline columns to tasks table (v6.0). Safe to re-run."""

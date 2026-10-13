@@ -127,6 +127,7 @@ load_router("app.routers.marketforge_products", "", ["marketforge-products"])
 load_router("app.routers.webhooks", "/webhooks", ["webhooks"])
 load_router("app.routers.ai", "/ai", ["ai"])
 load_router("app.routers.supportforge_tickets", "/api/v1/tickets", ["supportforge"])
+load_router("app.routers.family_help", "/api/v1/family-help", ["family-help"])
 load_router("app.routers.supportforge_customers", "/api/v1/customers", ["supportforge"])
 load_router("app.routers.supportforge_kb", "/api/v1/kb", ["supportforge"])
 load_router("app.routers.supportforge_ai", "/api/v1/ai", ["supportforge"])
@@ -386,6 +387,13 @@ async def start_background_services():
         print("✓ Unified Business tables: ready")
     except Exception as _e:
         print(f"✗ Unified Business migration: {_e}")
+
+    try:
+        from app.db.supportforge_migration import ensure_supportforge_tables
+        ensure_supportforge_tables()
+        print("✓ SupportForge tickets table: ready")
+    except Exception as _e:
+        print(f"✗ SupportForge tickets migration: {_e}")
 
     # Telegram Bot — webhook mode (avoids Conflict error from polling)
     try:

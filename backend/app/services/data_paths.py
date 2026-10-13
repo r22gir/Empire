@@ -83,3 +83,20 @@ def transcriptforge_dir() -> Path:
 
 def measurements_dir() -> Path:
     return data_root() / "measurements"
+
+
+def family_help_dir() -> Path:
+    """Isolated family-help store root.
+
+    Honors FAMILY_HELP_DIR first so tests never touch live /data/family-help.
+    Production EmpireDell can set FAMILY_HELP_DIR=/data/family-help or
+    EMPIRE_FAMILY_DATA_ROOT=/data (resolved as <root>/family-help).
+    Default is EMPIRE_DATA_DIR/family-help — never a hardcoded live path.
+    """
+    override = os.getenv("FAMILY_HELP_DIR")
+    if override:
+        return Path(override)
+    family_root = os.getenv("EMPIRE_FAMILY_DATA_ROOT")
+    if family_root:
+        return Path(family_root) / "family-help"
+    return data_root() / "family-help"
