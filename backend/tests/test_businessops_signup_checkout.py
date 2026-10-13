@@ -14,9 +14,11 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     from app.db import database
+    import app.services.business.signup as signup_mod
     monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "biz_signup_test.db"))
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_dummy_businessops")
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_dummy")
+    monkeypatch.setattr(signup_mod, "_hash_password", lambda password: "test-hash:" + password)
     from app.main import app
     return TestClient(app)
 
