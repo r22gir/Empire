@@ -370,3 +370,17 @@ def migrate_organizer_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organizer_rituals (
+            id TEXT PRIMARY KEY,
+            edition TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            ritual_date TEXT NOT NULL,
+            notes TEXT,
+            payload_json TEXT,
+            sent INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT
+        )
+        """
+    )

@@ -76,6 +76,14 @@
 .org-root[data-org-theme="a"] .org-progress-bar i { background: linear-gradient(90deg, #d4a017, #f0d78c); }
 .org-root[data-org-theme="a"] .org-links a { color: #e8c04a; }
 .org-root[data-org-theme="a"] .org-warn { background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.35); color: #fcd34d; }
+.org-root[data-org-theme="a"] .org-ritual-head h3,
+.org-root[data-org-theme="a"] .org-weekly .org-ritual-head h3 {
+  font-family: var(--org-display); font-style: italic; font-size: 28px;
+}
+.org-root[data-org-theme="a"] .org-ritual-steps button.on,
+.org-root[data-org-theme="a"] .org-ritual-dest button.on {
+  background: linear-gradient(135deg, #e8c04a, #c49212); color: #1a1406;
+}
 .org-root[data-org-theme="a"] .org-hero {
   display: block; padding: 8px 4px 4px;
 }
@@ -180,6 +188,13 @@
 .org-root[data-org-theme="b"] .org-btn-gold,
 .org-root[data-org-theme="b"] .org-themes button.on {
   background: #2a241c; color: #f7f1e8; border-color: #2a241c;
+}
+.org-root[data-org-theme="b"] .org-ritual-head h3 {
+  font-family: var(--org-display); font-size: 36px; letter-spacing: -0.03em;
+}
+.org-root[data-org-theme="b"] .org-ritual-steps button.on,
+.org-root[data-org-theme="b"] .org-ritual-dest button.on {
+  background: #2a241c; color: #f7f1e8;
 }
 .org-root[data-org-theme="b"] .org-progress-bar i { background: #8b5a3c; }
 .org-root[data-org-theme="b"] .org-links a { color: #8b5a3c; }
@@ -314,6 +329,14 @@
 .org-root[data-org-theme="c"] .org-sheet textarea {
   background: #111114; color: var(--org-ink); border-color: #2a2a31;
 }
+.org-root[data-org-theme="c"] .org-ritual-head h3 {
+  font-family: var(--org-display); font-size: 18px; letter-spacing: -0.03em;
+}
+.org-root[data-org-theme="c"] .org-ritual-steps button.on,
+.org-root[data-org-theme="c"] .org-ritual-dest button.on {
+  background: #27223a; color: #ddd6fe; border-color: #4c1d95;
+}
+.org-root[data-org-theme="c"] .org-weekly-grid { gap: 10px; }
 .org-root[data-org-theme="c"] .org-progress-bar { background: #27272f; }
 .org-root[data-org-theme="c"] .org-progress-bar i { background: #a78bfa; }
 .org-root[data-org-theme="c"] .org-links a { color: #c4b5fd; }

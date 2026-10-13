@@ -202,6 +202,7 @@ load_router("app.routers.jobs_unified", "/api/v1", ["jobs-unified"])
 load_router("app.routers.universal_search", "/api/v1", ["search"])
 load_router("app.routers.schedule", "/api/v1/schedule", ["schedule"])
 load_router("app.routers.organizer", "/api/v1/organizer", ["organizer"])
+load_router("app.routers.luxeforge_boards", "/api/v1/luxe", ["luxeforge-boards"])
 
 # Customer Journey Linkage MVP — read-only endpoints
 # (mounted at /api/v1 so the paths /customers/{id}/journey, /quotes/{id}/invoice,

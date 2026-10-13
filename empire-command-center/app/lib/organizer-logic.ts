@@ -44,6 +44,8 @@ export type OrganizerItem = {
   nudge_after_days?: number | null;
   invoice_id?: string | null;
   last_moved_at?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
 };
 
 export type OrganizerProgress = {
@@ -511,29 +513,184 @@ export function formatOrganizerDate(d: Date): string {
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
+export type ReviewBucket = 'slipped' | 'stuck' | 'next_week' | 'wins';
+
+export function groupBySpace<T extends { space_id?: string | null }>(items: T[]): Record<string, T[]> {
+  const out: Record<string, T[]> = {};
+  for (const it of items) {
+    const slug = String(it.space_id || 'personal');
+    (out[slug] ||= []).push(it);
+  }
+  return out;
+}
+
 export function weeklyReview(
   items: OrganizerItem[],
   today: string,
-): { slipped: OrganizerItem[]; stuck: OrganizerItem[]; next_week: OrganizerItem[]; counts: { slipped: number; stuck: number; next_week: number } } {
+): {
+  slipped: OrganizerItem[];
+  stuck: OrganizerItem[];
+  next_week: OrganizerItem[];
+  wins: OrganizerItem[];
+  by_space: Record<string, Record<string, OrganizerItem[]>>;
+  areas: string[];
+  counts: { slipped: number; stuck: number; next_week: number; wins: number; areas: number };
+  workroom_only: false;
+} {
   const start = parseStamp(`${today}T00:00:00`) || new Date(`${today}T00:00:00`);
   const weekEnd = new Date(start);
   weekEnd.setDate(weekEnd.getDate() + 7);
+  const weekStart = new Date(start);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  if (weekStart > start) weekStart.setDate(weekStart.getDate() - 7);
   const stuckBefore = new Date(start);
   stuckBefore.setDate(stuckBefore.getDate() - 7);
   const weekEndY = ymd(weekEnd);
+  const weekStartY = ymd(weekStart);
   const stuckY = ymd(stuckBefore);
   const slipped: OrganizerItem[] = [];
   const stuck: OrganizerItem[] = [];
   const nextWeek: OrganizerItem[] = [];
+  const wins: OrganizerItem[] = [];
   for (const it of items) {
-    if (['done', 'cancelled'].includes(String(it.status || ''))) continue;
+    const status = String(it.status || '');
     const due = (it.due_at || it.start_time || '').slice(0, 10);
-    const moved = String(it.last_moved_at || it.due_at || it.start_time || '').slice(0, 10);
+    const moved = String(it.last_moved_at || it.updated_at || it.due_at || it.start_time || '').slice(0, 10);
+    if (status === 'done') {
+      if (moved && moved >= weekStartY && moved <= today) wins.push(it);
+      continue;
+    }
+    if (status === 'cancelled') continue;
     if (due && due < today) slipped.push(it);
     else if (due && due > today && due <= weekEndY) nextWeek.push(it);
     if (moved && moved <= stuckY) stuck.push(it);
   }
-  return { slipped, stuck, next_week: nextWeek, counts: { slipped: slipped.length, stuck: stuck.length, next_week: nextWeek.length } };
+  const areas = [...new Set([...slipped, ...stuck, ...nextWeek, ...wins].map((i) => String(i.space_id || 'personal')))];
+  return {
+    slipped,
+    stuck,
+    next_week: nextWeek,
+    wins,
+    by_space: {
+      slipped: groupBySpace(slipped),
+      stuck: groupBySpace(stuck),
+      next_week: groupBySpace(nextWeek),
+      wins: groupBySpace(wins),
+    },
+    areas,
+    counts: { slipped: slipped.length, stuck: stuck.length, next_week: nextWeek.length, wins: wins.length, areas: areas.length },
+    workroom_only: false,
+  };
+}
+
+export type ShutdownDestination = 'tomorrow' | 'later' | 'keep' | 'drop';
+
+export function eveningShutdown(
+  items: OrganizerItem[],
+  today: string,
+): {
+  date: string;
+  tomorrow: string;
+  completed: OrganizerItem[];
+  unfinished: OrganizerItem[];
+  tomorrow_preview: OrganizerItem[];
+  undated: OrganizerItem[];
+  by_space: Record<string, Record<string, OrganizerItem[]>>;
+  areas: string[];
+  counts: { completed: number; unfinished: number; tomorrow: number; undated: number; areas: number };
+  steps: string[];
+  workroom_only: false;
+} {
+  const start = parseStamp(`${today}T00:00:00`) || new Date(`${today}T00:00:00`);
+  const tmr = new Date(start);
+  tmr.setDate(tmr.getDate() + 1);
+  const tomorrow = ymd(tmr);
+  const completed: OrganizerItem[] = [];
+  const unfinished: OrganizerItem[] = [];
+  const tomorrowPreview: OrganizerItem[] = [];
+  const undated: OrganizerItem[] = [];
+  for (const it of items) {
+    const status = String(it.status || '');
+    const due = (it.due_at || it.start_time || '').slice(0, 10);
+    const moved = String(it.last_moved_at || it.updated_at || due).slice(0, 10);
+    if (status === 'done' && (moved === today || due === today)) {
+      completed.push(it);
+      continue;
+    }
+    if (status === 'cancelled') continue;
+    if (due === tomorrow) {
+      tomorrowPreview.push(it);
+      continue;
+    }
+    if (due === today || (due && due < today)) unfinished.push(it);
+    else if (!due && !['done', 'cancelled'].includes(status)) undated.push(it);
+  }
+  const areas = [...new Set([...completed, ...unfinished, ...tomorrowPreview, ...undated].map((i) => String(i.space_id || 'personal')))];
+  return {
+    date: today,
+    tomorrow,
+    completed,
+    unfinished,
+    tomorrow_preview: tomorrowPreview,
+    undated,
+    by_space: {
+      completed: groupBySpace(completed),
+      unfinished: groupBySpace(unfinished),
+      tomorrow: groupBySpace(tomorrowPreview),
+      undated: groupBySpace(undated),
+    },
+    areas,
+    counts: {
+      completed: completed.length,
+      unfinished: unfinished.length,
+      tomorrow: tomorrowPreview.length,
+      undated: undated.length,
+      areas: areas.length,
+    },
+    steps: ['review', 'move', 'plan'],
+    workroom_only: false,
+  };
+}
+
+export function shutdownDueAt(destination: ShutdownDestination, today: string, later?: string | null): string | null {
+  if (destination === 'tomorrow') {
+    const d = parseStamp(`${today}T00:00:00`) || new Date(`${today}T00:00:00`);
+    d.setDate(d.getDate() + 1);
+    return `${ymd(d)}T09:00:00`;
+  }
+  if (destination === 'later') {
+    const day = (later || '').slice(0, 10) || (() => {
+      const d = parseStamp(`${today}T00:00:00`) || new Date(`${today}T00:00:00`);
+      d.setDate(d.getDate() + 2);
+      return ymd(d);
+    })();
+    return `${day}T09:00:00`;
+  }
+  return null;
+}
+
+export function applyShutdownMoves(
+  items: OrganizerItem[],
+  moves: { id: string; destination: ShutdownDestination; due_at?: string | null }[],
+  today: string,
+): OrganizerItem[] {
+  const map = new Map(items.map((it) => [it.id, { ...it }]));
+  for (const move of moves) {
+    const row = map.get(move.id);
+    if (!row) continue;
+    if (move.destination === 'keep') continue;
+    if (move.destination === 'drop') {
+      row.status = 'cancelled';
+      continue;
+    }
+    const due = shutdownDueAt(move.destination, today, move.due_at);
+    if (due) {
+      row.due_at = due;
+      if (row.start_time) row.start_time = due;
+      row.last_moved_at = today;
+    }
+  }
+  return [...map.values()];
 }
 
 export function formatMoney(n?: number | null): string {

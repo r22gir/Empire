@@ -40,6 +40,13 @@ Campestre legal or company details. Model is **grok-4.6** only.
 16. People: add anyone this life needs (family, friend, doctor, teacher, crew). Assign them on an event; map/call links work.
 17. Hitting the edition usage cap shows a 429 toast and does not write.
 18. **Pending messages** card (sidebar) and **messages** view list unanswered/waiting mail from this edition's connected Gmail/Outlook only. Each row shows area / job / person when linked, plus a suggested reply. **Open** opens the mailbox. **Draft reply** queues a draft (approval queue). **Snooze** hides it. **To-do / Follow-up** saves an Organizer item. Nothing is sent without **Approve & Send**. Maxine never shows Argos Campestre mail. Another edition's mailboxes never appear.
+19. **Evening shutdown** (`?orgView=shutdown` or the Shutdown button) is a three-step ritual: review today → move unfinished (tomorrow / later / keep / drop) → plan tomorrow. It must show family, personal, Empire, ventures, and Workroom together when **All areas** is selected. Compare `?orgTheme=a|b|c`. Closing the day writes item due dates only and never sends.
+20. **Weekly review** (`?orgView=review`) lists wins, slipped, stuck, and next week grouped by life/business area. Not Workroom-only. Same three themes.
+
+## LuxeForge selection board
+
+1. `/luxe/board` or LuxeForge → **Selection board**. Pin fabrics, finishes, and rooms. **Compose estimate** shows a study total.
+2. Confirm the response / UI copy says the estimate is a preview and that no live quote was written.
 
 ## iPhone (Safari, 390-wide)
 
@@ -79,7 +86,8 @@ Keep `?orgTheme=a|b|c` (or the Luxe / Editorial / Command switcher). Each flow m
 4. **Waiting-on**: item sheet has who + nudge-after-N-days. When due, Max prepares a draft nudge for Rafael to review. Dispatch never sends.
 5. **Checklists / recurring**: Apply checklist (Job: order materials, cut, build, upholster, install, invoice, collect balance). Custom templates work in any space. Recurring daily/weekly/monthly spawns a copy when due — original stays.
 6. **Money on job cards**: deposit / paid / balance / margin, read-only from quotes + invoices, with a collected fraction (`paid/total` or `N/100`). Family editions do not show Workroom money.
-7. **Smart search** (2+ characters) covers items, jobs, clients, estimates. **Weekly review** view: slipped, stuck (no movement 7+ days), next week.
+7. **Smart search** (2+ characters) covers items, jobs, clients, estimates. **Weekly review** view: wins, slipped, stuck (no movement 7+ days), next week — by area, not Workroom-only.
+8. **Evening shutdown**: review today → move unfinished → plan tomorrow, all areas, all three themes.
 
 ## Max / Max-e / Maxine chat
 
