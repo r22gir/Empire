@@ -125,6 +125,37 @@ def test_family_users_cannot_see_each_others_chats(monkeypatch, tmp_path):
     assert not (juan_dir / f"{full_id[:8]}.json").exists()
 
 
+def test_family_list_keeps_owner_isolation_and_studio_pagination(monkeypatch, tmp_path):
+    _family_env(monkeypatch, tmp_path, "amp")
+    from app.services.amp_allowlist import add_entry
+
+    add_entry(email="juan@example.com", role="member")
+    client = _client(tmp_path)
+    _cookie(client, "juan@example.com")
+    for i, cid in enumerate(("page-aaa-0001", "page-bbb-0002", "page-ccc-0003")):
+        saved = client.put(
+            f"/api/v1/chats/{cid}",
+            json={"messages": [{"role": "user", "content": f"nota {i}"}]},
+        )
+        assert saved.status_code == 200
+
+    first = client.get("/api/v1/chats/list?limit=2&offset=0")
+    assert first.status_code == 200
+    body = first.json()
+    assert body["count"] == 3
+    assert body["offset"] == 0
+    assert body["has_more"] is True
+    assert len(body["chats"]) == 2
+
+    second = client.get("/api/v1/chats/list?limit=2&offset=2")
+    assert second.status_code == 200
+    page = second.json()
+    assert page["count"] == 3
+    assert page["offset"] == 2
+    assert page["has_more"] is False
+    assert len(page["chats"]) == 1
+
+
 def test_family_save_rejects_claimed_founder_bucket(monkeypatch, tmp_path):
     _family_env(monkeypatch, tmp_path)
     client = _client(tmp_path)
