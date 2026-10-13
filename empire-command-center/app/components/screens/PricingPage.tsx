@@ -341,15 +341,15 @@ export default function PricingPage() {
                     borderRadius: 10,
                     border: signupOpen
                       ? (tier.highlighted ? 'none' : '1px solid #ece8e0')
-                      : '1px solid #ece8e0',
+                      : '1px solid #e6d9b0',
                     background: signupOpen
                       ? (tier.highlighted
                         ? 'linear-gradient(135deg, #b8960c, #d4af37)'
                         : '#fff')
-                      : '#f7f4ee',
+                      : '#f7f1dc',
                     color: signupOpen
                       ? (tier.highlighted ? '#fff' : '#1a1a1a')
-                      : '#9a8f78',
+                      : '#6b5a2e',
                     fontSize: 14,
                     fontWeight: 700,
                     cursor: signupOpen && !isLoading ? 'pointer' : 'not-allowed',
@@ -361,6 +361,7 @@ export default function PricingPage() {
                     opacity: isLoading ? 0.7 : 1,
                   }}
                 >
+                  {!signupOpen && <Clock size={14} />}
                   {!signupOpen ? 'Coming soon' : isLoading ? 'Redirecting...' : 'Buy'}
                   {signupOpen && !isLoading && <ArrowRight size={14} />}
                 </button>
