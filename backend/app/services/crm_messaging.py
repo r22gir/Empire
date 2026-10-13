@@ -15,7 +15,7 @@ import json
 import re
 import secrets
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from app.db.database import dict_row, dict_rows
 

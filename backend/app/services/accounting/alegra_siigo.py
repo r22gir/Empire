@@ -7,14 +7,12 @@ path that would submit to DIAN, Alegra production, or Siigo production.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Optional
 
 from app.db.database import dict_row, dict_rows
 from app.services.accounting.guards import (
     ALEGRA_SANDBOX_HOSTS,
     SIIGO_SANDBOX_HOSTS,
-    LiveWriteBlocked,
     SandboxOnlyError,
     assert_sandbox_credentials,
     assert_sandbox_url,

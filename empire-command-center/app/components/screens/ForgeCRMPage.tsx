@@ -4,6 +4,7 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 import {
   Users, Search, Plus, BarChart3, Target, FileText, Phone, Mail,
   Loader2, Crown, TrendingUp, UserPlus, DollarSign, Activity, BookOpen, CreditCard,
+  MessageSquare, Landmark,
 } from 'lucide-react';
 import { API } from '../../lib/api';
 import ProductDocs from '../business/docs/ProductDocs';
@@ -11,6 +12,7 @@ import PaymentModule from '../business/payments/PaymentModule';
 
 const CustomerList = lazy(() => import('../business/crm/CustomerList'));
 const CustomerDetail = lazy(() => import('../business/crm/CustomerDetail'));
+const AccountingConnectors = lazy(() => import('../business/crm/AccountingConnectors'));
 
 const Loading = () => (
   <div className="flex-1 flex items-center justify-center py-16">
@@ -20,10 +22,12 @@ const Loading = () => (
 
 const NAV = [
   { id: 'customers', label: 'All Customers', icon: <Users size={16} /> },
+  { id: 'messages', label: 'Messages', icon: <MessageSquare size={16} /> },
   { id: 'pipeline', label: 'Pipeline', icon: <Target size={16} /> },
   { id: 'add', label: 'Add Customer', icon: <UserPlus size={16} /> },
   { id: 'stats', label: 'Stats', icon: <BarChart3 size={16} /> },
   { id: 'payments', label: 'Payments', icon: <CreditCard size={16} /> },
+  { id: 'accounting', label: 'Accounting', icon: <Landmark size={16} /> },
   { id: 'docs', label: 'Docs', icon: <BookOpen size={16} /> },
 ];
 
@@ -33,6 +37,7 @@ export default function ForgeCRMPage() {
   const [pipeline, setPipeline] = useState<any>(null);
   const [stats, setStats] = useState({ total: 0, revenue: 0, avgQuotes: 0, sources: {} as Record<string, number> });
   const [customers, setCustomers] = useState<any[]>([]);
+  const [threads, setThreads] = useState<any[]>([]);
 
   // New customer form
   const [newCustomer, setNewCustomer] = useState({ name: '', email: '', phone: '', address: '', company: '', type: 'residential', source: 'direct', notes: '' });
@@ -51,6 +56,7 @@ export default function ForgeCRMPage() {
       custs.forEach((c: any) => { sources[c.source || 'direct'] = (sources[c.source || 'direct'] || 0) + 1; });
       setStats({ total: custs.length, revenue: totalRev, avgQuotes: custs.length ? Math.round(totalQuotes / custs.length * 10) / 10 : 0, sources });
     }).catch(() => {});
+    fetch(`${API}/crm/threads`).then(r => r.json()).then(data => setThreads(data.threads || [])).catch(() => {});
   }, []);
 
   const handleAddCustomer = async () => {
@@ -227,6 +233,46 @@ export default function ForgeCRMPage() {
               </button>
             </div>
           </div>
+        );
+
+      case 'messages':
+        return (
+          <div style={{ maxWidth: 760, margin: '0 auto' }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', marginBottom: 8 }}>Client threads</h2>
+            <p style={{ fontSize: 12, color: '#777', marginBottom: 16 }}>
+              Unified WhatsApp + SMS. Incoming is shown. Replies stay drafts until you approve each one. No automatic replies.
+            </p>
+            {threads.length === 0 ? (
+              <div className="empire-card flat" style={{ padding: 24, textAlign: 'center', color: '#999', fontSize: 13 }}>
+                No client threads yet. Open a customer and use the Messages tab, or wait for inbound WhatsApp/SMS.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {threads.map((t: any) => (
+                  <button
+                    key={t.id}
+                    onClick={() => { setSelectedCustomerId(t.customer_id); setSection('customers'); }}
+                    className="empire-card flat cursor-pointer text-left"
+                    style={{ padding: '12px 14px', border: '1px solid #ece8e0', background: '#fff' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>{t.customer_name || t.customer_id}</span>
+                      <span style={{ fontSize: 11, color: '#b8960c', fontWeight: 700 }}>{t.draft_count || 0} draft{(t.draft_count || 0) === 1 ? '' : 's'}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#777', marginTop: 4 }}>{t.last_body || 'No messages yet'}</div>
+                    <div style={{ fontSize: 10, color: '#aaa', marginTop: 4 }}>{t.inbound_count || 0} incoming</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+
+      case 'accounting':
+        return (
+          <Suspense fallback={<Loading />}>
+            <AccountingConnectors />
+          </Suspense>
         );
 
       case 'payments':

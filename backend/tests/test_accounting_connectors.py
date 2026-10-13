@@ -189,3 +189,22 @@ def test_accounting_status_never_claims_live_writes(monkeypatch, tmp_path):
     assert body["reads_client_aliases"] is False
     assert body["reads_business_json"] is False
     assert body["flags"]["auto_replies"] is False
+
+
+def test_connectors_do_not_read_tenant_secret_files():
+    import re
+    from pathlib import Path
+
+    roots = [
+        Path(__file__).resolve().parents[1] / "app" / "services" / "accounting",
+        Path(__file__).resolve().parents[1] / "app" / "services" / "feature_flags.py",
+        Path(__file__).resolve().parents[1] / "app" / "routers" / "accounting_connectors.py",
+        Path(__file__).resolve().parents[1] / "app" / "routers" / "crm_messaging.py",
+        Path(__file__).resolve().parents[1] / "app" / "services" / "crm_messaging.py",
+    ]
+    loader = re.compile(r"""(?:open|Path|read_text|json\.load)\([^)]*(?:client_aliases\.json|business\.json|(?<!example)\.env)""")
+    for path in roots:
+        files = [path] if path.is_file() else list(path.glob("*.py"))
+        for file in files:
+            text = file.read_text()
+            assert not loader.search(text), f"{file} must not load client_aliases.json, business.json, or .env"
