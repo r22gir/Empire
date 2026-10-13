@@ -57,7 +57,7 @@ import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
 import MaxContinuityScreen from './components/screens/MaxContinuityScreen';
 import JobsScreen from './components/screens/JobsScreen';
 import InvoiceScreen from './components/screens/InvoiceScreen';
-import OrganizerPage from './components/screens/OrganizerPage';
+import WorkroomOrganizer from './components/business/organizer/WorkroomOrganizer';
 import ConstructionForgePage from './components/screens/ConstructionForgePage';
 import StoreFrontForgePage from './components/screens/StoreFrontForgePage';
 import TranscriptForgePage from './components/screens/TranscriptForgePage';
@@ -100,7 +100,9 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
 
 const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'pricing-studio': 'pricing-studio',
-  organizer: 'organizer',
+  calendar: 'calendar',
+  schedule: 'calendar',
+  organizer: 'calendar',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -267,7 +269,8 @@ export default function CommandCenter() {
 
   const handleScreenChange = useCallback((screen: ScreenMode | string) => {
     pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
-    setActiveScreen(screen as ScreenMode);
+    const mapped = screen === 'organizer' || screen === 'schedule' ? 'calendar' : screen;
+    setActiveScreen(mapped as ScreenMode);
     setActiveSection(null);
   }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
@@ -345,7 +348,7 @@ export default function CommandCenter() {
       settings: 'business-profile',
       jobs: 'jobs',
       invoices: 'invoices',
-      organizer: 'organizer',
+      organizer: 'calendar',
     };
     setActiveSection(null);
     setActiveScreen(moduleScreenMap[module] || 'dashboard');
@@ -515,7 +518,7 @@ export default function CommandCenter() {
     }
     if (activeScreen === 'quote') return <QuoteReviewScreen />;
     if (activeScreen === 'jobs') return <JobsScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : undefined} />;
-    if (activeScreen === 'organizer') return <OrganizerPage />;
+    if (activeScreen === 'calendar' || activeScreen === 'organizer') return <WorkroomOrganizer />;
     if (activeScreen === 'invoices') return <InvoiceScreen />;
     if (activeScreen === 'docs') return <DocumentScreen />;
     if (activeScreen === 'product-docs') return (

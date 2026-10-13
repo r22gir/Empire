@@ -10,8 +10,15 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from app.services.sprint_m.fabric import FabricCodeError, sanitize_fabric_code
+from app.services.sprint_m.fabric import FabricCodeError, sanitize_fabric_code, strip_client_facing
 from app.services.sprint_m.measurements import normalize_dimensions, normalize_measurement
+from app.services.sprint_m.organizer_bridge import (
+    list_tasks_for_job,
+    publish_to_founder_organizer,
+    publish_work_order_tasks,
+    space_for_job,
+    task_summaries,
+)
 from app.services.sprint_m.store import audit, get_store, now_iso, row_to_dict
 
 APPROVED_STATUSES = {"approved", "accepted", "ordered", "signed", "proposal_signed"}
@@ -88,9 +95,10 @@ def _photos(quote: dict, item: dict | None = None) -> list[str]:
     return unique
 
 
-def _item_fabric(item: dict) -> str | None:
+def _item_fabric(item: dict, conn) -> str | None:
     raw = item.get("fabric_code") or item.get("fabric") or item.get("fabric_name")
-    return sanitize_fabric_code(raw)
+    material_type = item.get("material_type") or item.get("fabric_type")
+    return sanitize_fabric_code(raw, conn=conn, material_type=material_type)
 
 
 def _item_style(item: dict) -> str:
@@ -144,55 +152,6 @@ def create_organizer_job_from_quote(quote: dict, *, actor: str = "owner") -> dic
     styles: list[str] = []
     all_photos = _photos(quote)
 
-    for idx, raw in enumerate(items, start=1):
-        try:
-            fabric = _item_fabric(raw)
-        except FabricCodeError:
-            fabric = None
-        if fabric:
-            fabric_codes.append(fabric)
-        style = _item_style(raw)
-        if style:
-            styles.append(style)
-        hours, rate, pay = _item_hours(raw)
-        total_hours += hours
-        total_pay += pay
-        if rate:
-            blended_rate = rate
-        photos = _photos(quote, raw)
-        for url in photos:
-            if url not in all_photos:
-                all_photos.append(url)
-        built_items.append(
-            {
-                "line_number": raw.get("line_number") or idx,
-                "item_type": raw.get("item_type") or raw.get("type") or "",
-                "style": style,
-                "description": raw.get("description") or raw.get("name") or "",
-                "room": raw.get("room") or "",
-                "fabric_code": fabric,
-                "measurements": _item_measurements(raw),
-                "photos": photos,
-                "seamstress_hours": hours,
-                "seamstress_rate": rate,
-                "seamstress_pay": pay,
-                "quantity": float(raw.get("quantity") or 1),
-            }
-        )
-
-    if total_hours and not blended_rate:
-        blended_rate = round(total_pay / total_hours, 2) if total_hours else 0
-
-    due_date = (
-        quote.get("due_date")
-        or quote.get("production_due_date")
-        or quote.get("install_date")
-        or (quote.get("seamstress") or {}).get("due_date")
-    )
-    quoted_amount = float(quote.get("total") or quote.get("grand_total") or quote.get("quoted_amount") or 0)
-    job_id = str(uuid.uuid4())[:12]
-    now = now_iso()
-
     with get_store() as conn:
         existing = conn.execute(
             "SELECT * FROM sm_organizer_jobs WHERE quote_id = ?", (quote_id,)
@@ -200,8 +159,71 @@ def create_organizer_job_from_quote(quote: dict, *, actor: str = "owner") -> dic
         if existing:
             return get_organizer_job(existing["id"])
 
+        for idx, raw in enumerate(items, start=1):
+            try:
+                fabric = _item_fabric(raw, conn)
+            except FabricCodeError:
+                fabric = None
+            if fabric:
+                fabric_codes.append(fabric)
+            style = strip_client_facing(_item_style(raw))
+            if style:
+                styles.append(style)
+            hours, rate, pay = _item_hours(raw)
+            total_hours += hours
+            total_pay += pay
+            if rate:
+                blended_rate = rate
+            photos = _photos(quote, raw)
+            for url in photos:
+                if url not in all_photos:
+                    all_photos.append(url)
+            built_items.append(
+                {
+                    "line_number": raw.get("line_number") or idx,
+                    "item_type": raw.get("item_type") or raw.get("type") or "",
+                    "style": style,
+                    "description": strip_client_facing(raw.get("description") or raw.get("name") or ""),
+                    "room": raw.get("room") or "",
+                    "fabric_code": fabric,
+                    "measurements": _item_measurements(raw),
+                    "photos": photos,
+                    "seamstress_hours": hours,
+                    "seamstress_rate": rate,
+                    "seamstress_pay": pay,
+                    "quantity": float(raw.get("quantity") or 1),
+                }
+            )
+
+        if total_hours and not blended_rate:
+            blended_rate = round(total_pay / total_hours, 2) if total_hours else 0
+
+        due_date = (
+            quote.get("due_date")
+            or quote.get("production_due_date")
+            or quote.get("install_date")
+            or (quote.get("seamstress") or {}).get("due_date")
+        )
+        quoted_amount = float(quote.get("total") or quote.get("grand_total") or quote.get("quoted_amount") or 0)
+        job_id = str(uuid.uuid4())[:12]
+        now = now_iso()
+
         job_number = _next_job_number(conn)
-        title = quote.get("project_name") or quote.get("title") or f"Job from {quote.get('quote_number') or quote_id}"
+        title = strip_client_facing(
+            quote.get("project_name") or quote.get("title") or f"Job from {quote.get('quote_number') or quote_id}"
+        )
+        job_stub = {
+            "id": job_id,
+            "job_number": job_number,
+            "quote_id": quote_id,
+            "customer_id": quote.get("customer_id"),
+            "title": title,
+            "style": ", ".join(dict.fromkeys(styles)),
+            "fabric_codes": fabric_codes,
+            "due_date": due_date,
+            "business_unit": quote.get("business_unit") or "workroom",
+        }
+        org_tasks = publish_work_order_tasks(job_stub, conn)
         conn.execute(
             """INSERT INTO sm_organizer_jobs (
                 id, job_number, quote_id, quote_number, customer_id, customer_name,
@@ -226,14 +248,16 @@ def create_organizer_job_from_quote(quote: dict, *, actor: str = "owner") -> dic
                 total_pay,
                 due_date,
                 quoted_amount,
-                quote.get("notes") or "",
+                strip_client_facing(quote.get("notes") or ""),
                 json.dumps(quote.get("measurements") or {}),
                 json.dumps(
                     {
                         "source": "approved_quote",
                         "quote_status": quote.get("status"),
-                        "fabric_policy": "V###-Color only",
+                        "fabric_policy": "docs/FABRIC_CODES.csv sequential registry",
                         "measurements": "fractions",
+                        "organizer_space": space_for_job(job_stub),
+                        "organizer_item_ids": [t.get("id") for t in org_tasks if t.get("id")],
                     }
                 ),
                 now,
@@ -266,7 +290,9 @@ def create_organizer_job_from_quote(quote: dict, *, actor: str = "owner") -> dic
             )
         audit(conn, "organizer_job", job_id, "created_from_quote", actor, quote_id)
 
-    return get_organizer_job(job_id)
+    job = get_organizer_job(job_id)
+    publish_to_founder_organizer(job)
+    return job
 
 
 def get_organizer_job(job_id: str) -> dict:
@@ -283,6 +309,8 @@ def get_organizer_job(job_id: str) -> dict:
         job["fabric_codes"] = _parse_json(job.pop("fabric_codes_json", "[]"), [])
         job["measurements"] = _parse_json(job.pop("measurements_json", "{}"), {})
         job["metadata"] = _parse_json(job.pop("metadata_json", "{}"), {})
+        job["organizer_tasks"] = task_summaries(list_tasks_for_job(conn, job_id))
+        job["organizer_space"] = job["metadata"].get("organizer_space") or space_for_job(job)
         return job
 
 
@@ -317,6 +345,8 @@ def list_organizer_jobs(status: str | None = None, limit: int = 50) -> list[dict
             job["fabric_codes"] = _parse_json(job.pop("fabric_codes_json", "[]"), [])
             job["measurements"] = _parse_json(job.pop("measurements_json", "{}"), {})
             job["metadata"] = _parse_json(job.pop("metadata_json", "{}"), {})
+            job["organizer_tasks"] = task_summaries(list_tasks_for_job(conn, job_id))
+            job["organizer_space"] = job["metadata"].get("organizer_space") or space_for_job(job)
             jobs.append(job)
         return jobs
 

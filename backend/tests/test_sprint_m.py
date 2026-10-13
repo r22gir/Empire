@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from app.routers import sprint_m
 from app.services.sprint_m.fabric import sanitize_fabric_code
 from app.services.sprint_m.measurements import inches_to_fraction
+from app.services.sprint_m.store import get_store
 
 
 def _app():
@@ -73,11 +74,41 @@ APPROVED_QUOTE = {
 }
 
 
-def test_fabric_codes_are_internal_only():
-    assert sanitize_fabric_code("V639-Navy") == "V639-Navy"
-    assert sanitize_fabric_code("Kravet V639 Navy Velvet") == "V639-Navy Velvet"
-    assert sanitize_fabric_code("Fabricut V012-Soft Gold wholesale") == "V012-Soft Gold"
-    assert sanitize_fabric_code("Kravet Velvet") is None
+def test_fabric_codes_come_from_shared_registry(isolated):
+    """Kravet V639 must never leak. Next vinyl after reserved V001–V007 is V008."""
+    first = sanitize_fabric_code("Kravet V639 Navy Velvet")
+    assert first == "V008-Navy"
+    assert "V639" not in first
+    assert "Kravet" not in first
+    # Same material looks up the existing assignment — never a new SKU, never reuse a new number.
+    again = sanitize_fabric_code("Kravet V639 Navy Velvet")
+    assert again == "V008-Navy"
+    # A supplier-looking 'V639-Navy' is not in the registry, so it also assigns/looks up.
+    assert sanitize_fabric_code("V639-Navy") == "V008-Navy"
+    gold = sanitize_fabric_code("Fabricut V012-Soft Gold wholesale")
+    assert gold == "V009-SoftGold"
+    assert "V012" not in gold
+    assert "Fabricut" not in gold
+    assert sanitize_fabric_code("Kravet Velvet") == "V010-Unspecified"
+
+
+def test_reserved_v001_through_v007_are_not_reused(isolated):
+    from app.services.fabric_codes import highest_sequence, next_sequence
+
+    with get_store() as conn:
+        assert highest_sequence(conn, "V") == 7
+        assert next_sequence(conn, "V") == 8
+        code = sanitize_fabric_code("Kravet V639 Navy Velvet", conn=conn)
+        assert code == "V008-Navy"
+        row = conn.execute(
+            "SELECT code, supplier_sku, brand FROM fabric_code_registry WHERE code = ?",
+            ("V008-Navy",),
+        ).fetchone()
+        assert row["supplier_sku"] == "V639"
+        assert (row["brand"] or "").lower() == "kravet"
+        client = {"code": row["code"], "color": "Navy"}
+        assert "Kravet" not in str(client)
+        assert "V639" not in client["code"]
 
 
 def test_measurements_use_fractions():
@@ -102,14 +133,30 @@ def test_work_order_from_approved_quote_carries_fields(isolated):
     job = res.json()["job"]
     assert job["status"] == "sold"
     assert job["style"] == "pinch pleat"
-    assert job["fabric_codes"] == ["V639-Navy Velvet"]
-    assert "Kravet" not in str(job)
+    assert job["fabric_codes"] == ["V008-Navy"]
+    assert job["organizer_space"] == "workroom"
+    dumped = str(job)
+    assert "Kravet" not in dumped
+    assert "V639" not in dumped
     assert job["seamstress_hours"] == 8
     assert job["seamstress_pay"] == 360
     assert job["due_date"] == "2026-11-02"
     assert "/uploads/quote/east-window.jpg" in job["photos"]
     item = job["items"][0]
-    assert item["fabric_code"] == "V639-Navy Velvet"
+    assert item["fabric_code"] == "V008-Navy"
+    tasks = job["organizer_tasks"]
+    assert tasks
+    assert all(t["space_id"] == "workroom" for t in tasks)
+    assert any(t["kind"] in {"deadline", "todo"} and job["job_number"] in (t["title"] or "") for t in tasks)
+    assert any(t["kind"] == "job_milestone" for t in tasks)
+    assert any(t["kind"] == "material_order" and t.get("order_ref") == "V008-Navy" for t in tasks)
+    with get_store() as conn:
+        rows = conn.execute(
+            "SELECT kind, title, space_id, job_id FROM organizer_items WHERE job_id = ?",
+            (job["id"],),
+        ).fetchall()
+        assert rows
+        assert all(r["space_id"] == "workroom" for r in rows)
     assert item["measurements"]["width"]["display"] == "84 1/2 in"
     assert item["measurements"]["height"]["display"] == "96 1/4 in"
     listed = client.get("/api/v1/sprint-m/jobs").json()["jobs"]
@@ -275,7 +322,10 @@ def test_status_declares_studio_isolation(isolated):
     assert status["sprint"] == "M"
     assert status["isolated_store"] is True
     assert status["max_sends_to_clients"] is False
-    assert status["fabric_policy"] == "V###-Color only"
+    assert status["fabric_policy"] == "docs/FABRIC_CODES.csv sequential registry"
+    assert status["organizer"]["surface"] == "WorkroomOrganizer"
+    assert status["organizer"]["screen"] == "calendar"
+    assert status["organizer"]["duplicate_removed"] is True
     assert status["measurements"] == "fractions"
     assert status["amp_maxine_merged"] is False
     assert status["family_alerts"]["owner_only"] is True

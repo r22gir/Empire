@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle2, ClipboardList, CreditCard, DollarSign,
   FileText, MessageSquare, Plus, Scale, Scissors, Shield, Smartphone,
 } from 'lucide-react';
-import { API } from '../../lib/api';
+import { API } from '../../../lib/api';
 
 type Tab = 'jobs' | 'rules' | 'drafts' | 'pay' | 'costing' | 'credits' | 'family';
 
@@ -149,7 +149,7 @@ function Card({ children, style }: { children: React.ReactNode; style?: React.CS
   );
 }
 
-export default function OrganizerPage() {
+export default function SprintMRail({ onClose, jobId }: { onClose?: () => void; jobId?: string }) {
   const [tab, setTab] = useState<Tab>('jobs');
   const [jobs, setJobs] = useState<OrganizerJob[]>([]);
   const [draftRows, setDraftRows] = useState<Draft[]>([]);
@@ -218,7 +218,7 @@ export default function OrganizerPage() {
     try {
       const quote = JSON.parse(quoteJson);
       const result = await postJson<any>('/sprint-m/work-orders/from-quote', { quote });
-      setNotice(`Work order ${result.job.job_number} created. Fabric stored as internal codes only.`);
+      setNotice(`Work order ${result.job.job_number} created on the Organizer board (${result.job.organizer_space || 'workroom'}). Fabric ${((result.job.fabric_codes || [])[0]) || 'assigned'} from the shared registry.`);
       setSelectedJob(result.job);
       await load();
     } catch (exc: any) {
@@ -329,8 +329,14 @@ export default function OrganizerPage() {
     }
   };
 
+  useEffect(() => {
+    if (!jobId || !jobs.length) return;
+    const match = jobs.find(j => j.id === jobId);
+    if (match) setSelectedJob(match);
+  }, [jobId, jobs]);
+
   return (
-    <div style={{ padding: '20px 24px', overflow: 'auto', height: '100%' }}>
+    <div style={{ padding: '16px 18px', overflow: 'auto', height: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, gap: 12 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -338,15 +344,20 @@ export default function OrganizerPage() {
               <ClipboardList size={18} color="#16a34a" />
             </div>
             <div>
-              <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Organizer</h2>
-              <p style={{ fontSize: 12, color: '#888', margin: 0 }}>Sprint M — approved quotes become jobs. Max drafts only. Owner sends.</p>
+              <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Work orders</h2>
+              <p style={{ fontSize: 12, color: '#888', margin: 0 }}>
+                Wired into the founder Organizer (Workroom area). Costing, credits, rules and drafts live here — jobs appear as Organizer tasks.
+              </p>
             </div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <Pill label="Drafts never auto-send" color="#b8960c" />
-          <Pill label="V###-Color only" color="#16a34a" />
+          <Pill label="Registry V008+" color="#16a34a" />
           <Pill label="Fractions" color="#2563eb" />
+          {onClose && (
+            <button onClick={onClose} style={ghostBtn} aria-label="Close work orders">Close</button>
+          )}
         </div>
       </div>
 
@@ -389,19 +400,19 @@ export default function OrganizerPage() {
         ))}
       </div>
 
-      {loading && <div style={{ fontSize: 12, color: '#999' }}>Loading Organizer…</div>}
+      {loading && <div style={{ fontSize: 12, color: '#999' }}>Loading work orders…</div>}
 
       {tab === 'jobs' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.1fr)', gap: 14 }}>
           <Card>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>Approved quote → work order</div>
             <p style={{ fontSize: 12, color: '#666', marginTop: 0 }}>
-              Fabric is stored as internal <code>V###-Color</code> only. Brand and supplier names are stripped. Measurements become fractions.
+              Fabric codes come from <code>docs/FABRIC_CODES.csv</code> (next vinyl is V008). Brand, supplier and SKU never appear on the job. Measurements become fractions. Jobs land as Organizer tasks in Workroom.
             </p>
             <textarea value={quoteJson} onChange={e => setQuoteJson(e.target.value)}
               style={{ width: '100%', minHeight: 220, fontSize: 11, fontFamily: 'ui-monospace, monospace', border: '1px solid #e5e2dc', borderRadius: 8, padding: 8 }} />
-            <button onClick={convertQuote} style={primaryBtn}>
-              <Plus size={12} /> Create Organizer job
+              <button onClick={convertQuote} style={primaryBtn}>
+              <Plus size={12} /> Create work order
             </button>
           </Card>
           <div>

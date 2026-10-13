@@ -23,7 +23,7 @@ const JobBoard = lazy(() => import('../business/jobs/JobBoard'));
 const PhotoAnalysisPanel = lazy(() => import('../business/vision/PhotoAnalysisPanel'));
 const InventorySection = lazy(() => import('../business/inventory/InventorySection'));
 const QuoteReviewScreen = lazy(() => import('./QuoteReviewScreen'));
-const OrganizerPage = lazy(() => import('./OrganizerPage'));
+const WorkroomOrganizer = lazy(() => import('../business/organizer/WorkroomOrganizer'));
 const QuoteBuilderScreen = lazy(() => import('./QuoteBuilderScreen'));
 const TemplateModule = lazy(() => import('../business/templates/TemplateModule'));
 
@@ -114,7 +114,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
       case 'jobs':
         return <Suspense fallback={<Loading />}><JobBoard /></Suspense>;
       case 'organizer':
-        return <Suspense fallback={<Loading />}><OrganizerPage /></Suspense>;
+        return <Suspense fallback={<Loading />}><WorkroomOrganizer /></Suspense>;
       case 'templates':
         return <Suspense fallback={<Loading />}><TemplateModule /></Suspense>;
       case 'tasks':

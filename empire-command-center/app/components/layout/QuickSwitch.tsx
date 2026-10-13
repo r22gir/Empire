@@ -18,7 +18,7 @@ const SECTIONS = [
   { label: 'Dev Panel', shortcut: 'X', screen: 'dev', icon: Terminal, color: '#b8960c' },
   { label: 'RecoveryForge', shortcut: 'Y', screen: 'recovery', icon: HardDrive, color: '#b8960c' },
   { label: 'Pricing Studio', shortcut: 'Z', screen: 'pricing-studio', icon: Scissors, color: '#16a34a' },
-  { label: 'Organizer', shortcut: 'O', screen: 'organizer', icon: ClipboardList, color: '#16a34a' },
+  { label: 'Organizer', shortcut: 'O', screen: 'calendar', icon: ClipboardList, color: '#16a34a' },
   { label: 'RelistApp', shortcut: 'L', screen: 'relist', icon: ShoppingBag, color: '#b8960c' },
   { label: 'ApostApp', shortcut: 'A', screen: 'apostapp', icon: FileText, color: '#b8960c' },
 ];
