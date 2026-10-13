@@ -23,8 +23,10 @@ class UnsafeBaseRef(ValueError):
 
 def normalize_ref(ref: str) -> str:
     r = (ref or "").strip()
-    if r.startswith("refs/heads/"):
-        r = r[len("refs/heads/") :]
+    for prefix in ("refs/heads/", "refs/remotes/origin/", "refs/remotes/", "remotes/origin/", "origin/"):
+        if r.startswith(prefix):
+            r = r[len(prefix) :]
+            break
     return r
 
 
@@ -36,6 +38,8 @@ def is_forbidden_base_ref(ref: str) -> bool:
     if low in FORBIDDEN_EXACT:
         return True
     parts = [p for p in re.split(r"[\\/]+", low) if p]
+    if parts and parts[-1] in FORBIDDEN_EXACT:
+        return True
     for p in parts:
         if p in {"amp", "maxine"}:
             return True
