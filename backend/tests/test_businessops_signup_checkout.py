@@ -16,6 +16,7 @@ def client(monkeypatch, tmp_path):
     from app.db import database
     import app.services.business.signup as signup_mod
     monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "biz_signup_test.db"))
+    monkeypatch.setenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", "true")
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_dummy_businessops")
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_dummy")
     monkeypatch.setattr(signup_mod, "_hash_password", lambda password: "test-hash:" + password)
@@ -23,7 +24,7 @@ def client(monkeypatch, tmp_path):
     return TestClient(app)
 
 
-def _signup(client, *, email="owner@alpha.test", package_id="pkg_starter", name="Alpha Co"):
+def _signup(client, *, email="owner@alpha.test", package_id="pkg_starter", name="Alpha Co", headers=None):
     return client.post(
         "/api/v1/businessops/signup",
         json={
@@ -33,6 +34,7 @@ def _signup(client, *, email="owner@alpha.test", package_id="pkg_starter", name=
             "business_name": name,
             "package_id": package_id,
         },
+        headers=headers or {},
     )
 
 
@@ -55,6 +57,58 @@ class _FakeStripe:
         @staticmethod
         def construct_event(payload, signature, secret):
             return json.loads(payload)
+
+
+def test_public_signup_disabled_by_default(client, monkeypatch):
+    """Anonymous POST must 404 and must not write a tenant when the flag is off."""
+    monkeypatch.delenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", raising=False)
+    r = _signup(client, email="locked@public.test", name="Should Not Land")
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Not found"
+    listed = client.get("/api/v1/businessops/businesses")
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 0
+    assert listed.json()["items"] == []
+
+
+def test_public_signup_disabled_explicit_false(client, monkeypatch):
+    monkeypatch.setenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", "false")
+    r = _signup(client)
+    assert r.status_code == 404
+
+
+def test_wrong_founder_pin_is_404_when_public_disabled(client, monkeypatch):
+    monkeypatch.setenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", "0")
+    monkeypatch.setenv("FOUNDER_PIN", "correct-founder-pin")
+    r = _signup(client, headers={"X-Founder-Pin": "wrong-pin"})
+    assert r.status_code == 404
+    listed = client.get("/api/v1/businessops/businesses")
+    assert listed.json()["total"] == 0
+
+
+def test_founder_can_signup_when_public_disabled(client, monkeypatch):
+    monkeypatch.setenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", "false")
+    monkeypatch.setenv("FOUNDER_PIN", "correct-founder-pin")
+    r = _signup(
+        client,
+        email="founder-internal@tmp.test",
+        name="Internal Prospect",
+        headers={"X-Founder-Pin": "correct-founder-pin"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["business"]["display_name"] == "Internal Prospect"
+    assert body["next_step"] == "checkout"
+
+
+def test_info_reports_public_signup_flag(client, monkeypatch):
+    monkeypatch.delenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", raising=False)
+    off = client.get("/api/v1/businessops/info")
+    assert off.status_code == 200
+    assert off.json()["public_signup_enabled"] is False
+    monkeypatch.setenv("BUSINESSOPS_PUBLIC_SIGNUP_ENABLED", "true")
+    on = client.get("/api/v1/businessops/info")
+    assert on.json()["public_signup_enabled"] is True
 
 
 def test_signup_creates_business_tenant_and_pending_subscription(client):
