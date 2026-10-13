@@ -24,10 +24,15 @@ from pathlib import Path
 from typing import Optional
 
 from app.services.leadforge import growth
+from app.services.max.improve_base_ref import UnsafeBaseRef, resolve_base_ref
 
 REPO_URL = os.getenv("MAX_IMPROVE_REPO", "https://github.com/r22gir/Empire")
-BASE_REF = os.getenv("MAX_IMPROVE_BASE_REF", "main")
 SPEC_DIR = Path(os.getenv("MAX_IMPROVE_SPEC_DIR", str(Path.home() / "empire-data" / "improvements")))
+
+
+def base_ref() -> str:
+    """Live Studio line. Never main. See improve_base_ref.resolve_base_ref."""
+    return resolve_base_ref()
 RISKS = ("low", "medium", "high")
 API = "https://api.cursor.com"
 # Cloud-agent launches must include a model. Always grok-4.6 unless an
@@ -159,7 +164,7 @@ def list_requests(status: Optional[str] = None) -> dict:
     return {"items": [_row(r) for r in rows], "cursor_configured": cursor_configured(),
             "github_configured": github_configured(),
             "minimax_configured": bool(os.getenv("MINIMAX_API_KEY")),
-            "repo": REPO_URL, "base_ref": BASE_REF,
+            "repo": REPO_URL, "base_ref": base_ref(),
             "pipeline": list(PIPELINE),
             "minimax": usage_snapshot(),
             "queue": queue_counts(),
@@ -190,10 +195,12 @@ def build_prompt(req: dict) -> str:
     mods = ", ".join(req.get("affected_modules") or []) or "(see proposed change)"
     acceptance = req.get("acceptance") or ("- Behaviour described above works.\n"
                                            "- Existing tests pass; add a test for the new behaviour.")
+    ref = base_ref()
     return f"""# Empire improvement IMP-{req['id']}: {req['title']}
 
-Repository: {REPO_URL} (base: {BASE_REF}). Work on a NEW branch (never {BASE_REF}) and open a pull request
-titled "IMP-{req['id']:04d}: {req['title']}". Do not merge. Do not deploy. Do not push to {BASE_REF}.
+Repository: {REPO_URL} (base: {ref}). Work on a NEW branch (never {ref}) and open a pull request
+titled "IMP-{req['id']:04d}: {req['title']}". Do not merge. Do not deploy. Do not push to {ref}.
+Do not target main, master, or any amp/maxine branch.
 
 ## Problem
 {req['problem']}
@@ -267,11 +274,14 @@ def _auth():
 def _launch_cursor_agent(req: dict) -> dict:
     """POST /v1/agents. Only called from approve_build (Rafael's tap). Never merges; the agent opens a PR."""
     import httpx
+    from app.services.max.improve_base_ref import assert_safe_improve_base_ref
+
+    ref = assert_safe_improve_base_ref(base_ref())
     model = pick_model(req)
     prompt_text = req.get("_prompt_override") or build_prompt(req)
     body = {"prompt": {"text": prompt_text},
             "name": f"IMP-{req['id']:04d} {req['title']}"[:100],
-            "repos": [{"url": REPO_URL, "startingRef": BASE_REF}],
+            "repos": [{"url": REPO_URL, "startingRef": ref}],
             "workOnCurrentBranch": False,   # new cursor/... branch, never the base branch
             "autoCreatePR": True,
             "model": model}

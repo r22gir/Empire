@@ -11,7 +11,8 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.services.max.improvements import BASE_REF, REPO_URL
+from app.services.max.improve_base_ref import assert_safe_improve_base_ref, resolve_base_ref
+from app.services.max.improvements import REPO_URL
 
 LABEL = "max-improvement"
 API_ROOT = "https://api.github.com"
@@ -73,6 +74,7 @@ def _ensure_label(client: httpx.Client, owner: str, name: str) -> None:
 
 
 def issue_body(req: dict, plan: str) -> str:
+    BASE_REF = assert_safe_improve_base_ref(resolve_base_ref())
     mods = ", ".join(req.get("affected_modules") or []) or "(see plan)"
     return f"""# IMP-{int(req['id']):04d}: {req.get('title')}
 

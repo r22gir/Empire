@@ -78,6 +78,9 @@ def run_atlas_plan(job: dict) -> dict:
     """Synchronous Atlas job. Safe to call from tests and the worker loop."""
     if not worker_enabled():
         raise PermissionError("Atlas improvement worker is off (MAX_IMPROVE_WORKER_ENABLED not set).")
+    from app.services.max.improve_base_ref import assert_safe_improve_base_ref, resolve_base_ref
+    # Refuses main/master/amp/maxine before any GitHub issue or Cursor agent.
+    assert_safe_improve_base_ref(resolve_base_ref())
     blocked = _family_blocked()
     if blocked:
         raise PermissionError(blocked)
