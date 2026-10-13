@@ -5,9 +5,10 @@ import {
   Gem, RefreshCw, Users, FolderOpen, Camera, Ruler, Clock,
   CheckCircle2, FileText, MessageSquare, ChevronDown, ChevronUp,
   ExternalLink, Image, Maximize2, Send, AlertCircle, Eye, Scissors, Loader2, TreePine,
-  Pencil, Trash2, X, Save, BookOpen, Download, Archive, RotateCcw,
+  Pencil, Trash2, X, Save, BookOpen, Download, Archive, RotateCcw, LayoutGrid,
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
+import DesignerSelectionBoard from '../luxe/DesignerSelectionBoard';
 
 interface IntakeUser {
   id: string;
@@ -82,7 +83,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
   const [sendingToWorkroom, setSendingToWorkroom] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [editUserData, setEditUserData] = useState<Partial<IntakeUser>>({});
-  const [activeTab, setActiveTab] = useState<'projects' | 'docs' | 'archived'>('projects');
+  const [activeTab, setActiveTab] = useState<'projects' | 'docs' | 'archived' | 'board'>('projects');
   const [viewingPhoto, setViewingPhoto] = useState<{ url: string; name: string; projectName: string } | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [archivedUsers, setArchivedUsers] = useState<IntakeUser[]>([]);
@@ -126,6 +127,13 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    if (tab === 'board' || tab === 'docs' || tab === 'archived' || tab === 'projects') {
+      setActiveTab(tab);
+    }
+  }, []);
   useEffect(() => { if (activeTab === 'archived') fetchArchived(); }, [activeTab, fetchArchived]);
 
   const parseJSON = (str?: string): any[] => {
@@ -282,6 +290,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         {[
           { id: 'projects' as const, label: 'Projects', icon: <FolderOpen size={14} /> },
+          { id: 'board' as const, label: 'Selection board', icon: <LayoutGrid size={14} /> },
           { id: 'archived' as const, label: `Archived${archivedUsers.length > 0 ? ` (${archivedUsers.length})` : ''}`, icon: <Archive size={14} /> },
           { id: 'docs' as const, label: 'Documentation', icon: <BookOpen size={14} /> },
         ].map(tab => (
@@ -305,6 +314,8 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
 
       {activeTab === 'docs' ? (
         <ProductDocs product="luxe" />
+      ) : activeTab === 'board' ? (
+        <DesignerSelectionBoard />
       ) : activeTab === 'archived' ? (
         /* ── Archived Tab ─────────────────────────────── */
         <div>

@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CalendarDays, Camera, Check, Inbox, Mic, Plus, Scissors, Crown, Home,
   Sparkles, Rocket, Target, CircleDot, AlertTriangle, Banknote, Briefcase,
-  Search, Clock, ListChecks,
+  Search, Clock, ListChecks, Moon,
 } from 'lucide-react';
 import { API } from '../../../lib/api';
 import {
@@ -13,9 +13,11 @@ import {
   inferSpaceClient, itemsInColumn, itemsOnDay, isOrganizerCommand, jobProgressFromItems,
   KIND_COLOR, KIND_LABEL, monthCells, ORG_THEME_STORAGE, ORG_THEMES, organizerKpis,
   overdueItems, PX_PER_MIN, resolveOrgTheme, shouldOfferCrewDraft, showsWorkroomJobs,
-  STATUS_COLUMNS, themedSpaceStyle, timeFromOffset, weekDays, weeklyReview, ymd,
+  STATUS_COLUMNS, themedSpaceStyle, timeFromOffset, weekDays, ymd,
   type OrganizerAction, type OrganizerItem, type OrganizerSpace, type OrgTheme, type TodayBucket,
 } from '../../../lib/organizer-logic';
+import EveningShutdown from './EveningShutdown';
+import WeeklyReviewScreen from './WeeklyReviewScreen';
 import './organizer.css';
 import './organizer-themes.css';
 
@@ -30,7 +32,7 @@ function readTheme(): OrgTheme {
   return resolveOrgTheme(q, stored);
 }
 
-type View = 'today' | 'board' | 'day' | 'week' | 'month' | 'lanes' | 'agenda' | 'mail' | 'review';
+type View = 'today' | 'board' | 'day' | 'week' | 'month' | 'lanes' | 'agenda' | 'mail' | 'review' | 'shutdown';
 
 const KINDS = Object.keys(KIND_LABEL);
 
@@ -83,6 +85,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [review, setReview] = useState<any>(null);
+  const [shutdown, setShutdown] = useState<any>(null);
   const [searchHits, setSearchHits] = useState<any>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
@@ -97,7 +100,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     if (typeof window === 'undefined') return;
     const qs = new URLSearchParams(window.location.search);
     const v = qs.get('orgView');
-    if (v && ['today', 'board', 'day', 'week', 'month', 'lanes', 'agenda', 'mail', 'review'].includes(v)) {
+    if (v && ['today', 'board', 'day', 'week', 'month', 'lanes', 'agenda', 'mail', 'review', 'shutdown'].includes(v)) {
       setView(v as View);
     }
     const sheet = qs.get('orgSheet');
@@ -162,7 +165,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     const to = new Date(anchor); to.setDate(to.getDate() + 40);
     const spaceQs = spaceFilter ? `&space_id=${encodeURIComponent(spaceFilter)}` : '';
     const qs = `start_date=${ymd(from)}&end_date=${ymd(to)}${spaceQs}`;
-    const [b, r, p, rt, m, caps, u, pm, td, sg, tpl, rv] = await Promise.all([
+    const [b, r, p, rt, m, caps, u, pm, td, sg, tpl, rv, sd] = await Promise.all([
       fetch(`${API}/organizer/board?${qs}`).then((x) => x.json()).catch(() => ({ items: [], overdue: [] })),
       fetch(`${API}/organizer/resources`).then((x) => x.json()).catch(() => ({ resources: [] })),
       fetch(`${API}/organizer/day-plan?plan_date=${day}`).then((x) => x.json()).catch(() => null),
@@ -175,6 +178,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
       fetch(`${API}/organizer/suggestions`).then((x) => x.json()).catch(() => ({ suggestions: [] })),
       fetch(`${API}/organizer/templates`).then((x) => x.json()).catch(() => ({ templates: [] })),
       fetch(`${API}/organizer/review/weekly`).then((x) => x.json()).catch(() => null),
+      fetch(`${API}/organizer/review/shutdown?plan_date=${day}`).then((x) => x.json()).catch(() => null),
     ]);
     const allowsJobs = !!(m?.edition?.allows_workroom_jobs);
     const jobSpace = showsWorkroomJobs(m?.edition, spaceFilter);
@@ -203,6 +207,7 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     setSuggestions(sg.suggestions || []);
     setTemplates(tpl.templates || []);
     setReview(rv);
+    setShutdown(sd);
     setLoaded(true);
     if (jobFilter && jobSpace) {
       const tl = await fetch(`${API}/organizer/jobs/${jobFilter}/timeline`).then((x) => x.ok ? x.json() : null).catch(() => null);
@@ -667,6 +672,23 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
     await load();
   }
 
+  async function completeShutdown(payload: {
+    notes: string;
+    tomorrow_focus: string;
+    tomorrow_space_id: string;
+    moves: { id: string; destination: string; due_at?: string }[];
+  }) {
+    const res = await fetch(`${API}/organizer/review/shutdown/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: day, ...payload }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setToast(data.sent === false ? 'Day closed. Unfinished items moved. Nothing sent.' : (data.detail || 'Shutdown saved.'));
+    setView('today');
+    await load();
+  }
+
   async function addPerson() {
     await fetch(`${API}/organizer/resources`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -755,8 +777,10 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
           })}
         </div>
         <div className="org-toolbar">
-          {(['today', 'board', 'day', 'week', 'month', 'lanes', 'agenda', 'mail', 'review'] as View[]).map((v) => (
-            <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{v === 'mail' ? 'messages' : v === 'review' ? 'weekly review' : v}</button>
+          {(['today', 'board', 'day', 'week', 'month', 'lanes', 'agenda', 'mail', 'review', 'shutdown'] as View[]).map((v) => (
+            <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
+              {v === 'mail' ? 'messages' : v === 'review' ? 'weekly review' : v === 'shutdown' ? 'evening shutdown' : v}
+            </button>
           ))}
           <button onClick={() => setAnchor(new Date())}>Today</button>
           <button onClick={() => setAnchor((d) => { const n = new Date(d); n.setDate(n.getDate() - (view === 'month' ? 30 : view === 'week' ? 7 : 1)); return n; })}>‹</button>
@@ -785,6 +809,12 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
           />
           <button className="org-btn-gold" onClick={() => { setPlanOpen(true); }} data-plan-open="1">
             <CalendarDays size={14} /> Plan my day
+          </button>
+          <button className="org-btn-gold" onClick={() => setView('shutdown')} data-shutdown-open="1">
+            <Moon size={14} /> Shutdown
+          </button>
+          <button onClick={() => setView('review')} data-weekly-open="1">
+            <ListChecks size={14} /> Weekly
           </button>
           {templates[0] && (
             <select aria-label="Apply checklist" defaultValue="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); e.target.value = ''; }}>
@@ -1223,32 +1253,34 @@ export default function WorkroomOrganizer({ business, initialJobId }: { business
             </div>
           )}
           {view === 'review' && (
-            <div className="org-review org-card" data-weekly-review="1">
-              <h3><ListChecks size={14} /> Weekly review</h3>
-              <div className="org-note">Slipped, stuck (no movement 7+ days), and next week — across every area. Family stays on this edition only.</div>
-              {(['slipped', 'stuck', 'next_week'] as const).map((bucket) => {
-                const rows = (review?.[bucket] || weeklyReview(filtered, day)[bucket]) as OrganizerItem[];
-                const label = bucket === 'next_week' ? 'Next week' : bucket === 'stuck' ? 'Stuck' : 'Slipped';
-                return (
-                  <div key={bucket} className="org-review-col" data-review={bucket}>
-                    <h4>{label} <span>{rows.length}</span></h4>
-                    {rows.length === 0 && <div className="org-note">None.</div>}
-                    {rows.map((it) => (
-                      <div className="org-row" key={it.id} onClick={() => setForm(it)}>
-                        <span className="tm">{(it.due_at || it.start_time || '').slice(5, 10) || '—'}</span>
-                        <span>
-                          <b>{it.title}</b>
-                          <small>{it.space_id} · {KIND_LABEL[it.kind || it.type || ''] || it.kind}</small>
-                          <WaitingChip item={it} />
-                          <MoneyStrip item={it} />
-                          <ActionBar item={it} compact />
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
+            <WeeklyReviewScreen
+              items={filtered}
+              day={day}
+              pack={review}
+              spaces={spaces}
+              theme={theme}
+              onOpenItem={(it) => setForm(it)}
+              renderExtra={(it) => (
+                <>
+                  <WaitingChip item={it} />
+                  <MoneyStrip item={it} />
+                  <ActionBar item={it} compact />
+                </>
+              )}
+            />
+          )}
+          {view === 'shutdown' && (
+            <EveningShutdown
+              items={filtered}
+              day={day}
+              pack={shutdown}
+              spaces={spaces}
+              theme={theme}
+              owner={edition.owner}
+              assistant={assistant}
+              onComplete={completeShutdown}
+              onOpenItem={(it) => setForm(it)}
+            />
           )}
           <div className="org-note">{meta?.google_calendar?.note} {meta?.outbound_policy} {usage ? `Today ${edition.assistant || 'this edition'}: ${usage.used?.items || 0}/${usage.caps?.items || 0} items.` : ''}</div>
           {icsNote && <div className="org-note">{icsNote}</div>}

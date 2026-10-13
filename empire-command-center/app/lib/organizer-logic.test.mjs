@@ -7,6 +7,7 @@ import {
   spaceStyle, todayBuckets, columnForStatus, itemsInColumn, dueForTodayColumn, progressFromTasks,
   inferSpaceClient, timeFromOffset, weekDays, parseOrgTheme, resolveOrgTheme, themedSpaceStyle,
   organizerKpis, jobProgressFromItems, formatOrganizerTime, weeklyReview, formatMoney,
+  eveningShutdown, applyShutdownMoves, groupBySpace,
 } from './organizer-logic.ts';
 
 test('filter by job, person, kind', () => {
@@ -166,9 +167,32 @@ test('weekly review buckets slipped stuck next week', () => {
   assert.ok(pack.stuck.some((i) => i.id === 'k'));
   assert.deepEqual(pack.next_week.map((i) => i.id), ['n']);
   assert.equal(pack.counts.next_week, 1);
+  assert.equal(pack.workroom_only, false);
+  assert.ok('wins' in pack);
   assert.equal(columnForStatus('waiting_on'), 'doing');
   assert.equal(formatMoney(1200), '$1200');
   assert.equal(formatMoney(50.5), '$50.50');
+});
+
+test('evening shutdown reviews every area then moves leftovers', () => {
+  const pack = eveningShutdown([
+    { id: 'f', title: 'School form', due_at: '2026-10-11T09:00:00', status: 'open', space_id: 'family' },
+    { id: 'w', title: 'Call Nelma', due_at: '2026-10-12T11:00:00', status: 'open', space_id: 'workroom' },
+    { id: 'p', title: 'Dentist', due_at: '2026-10-13T09:00:00', status: 'planned', space_id: 'personal' },
+    { id: 'd', title: 'Paid AMP', due_at: '2026-10-12T08:00:00', status: 'done', last_moved_at: '2026-10-12', space_id: 'empire' },
+  ], '2026-10-12');
+  assert.deepEqual(pack.unfinished.map((i) => i.id), ['f', 'w']);
+  assert.deepEqual(pack.completed.map((i) => i.id), ['d']);
+  assert.deepEqual(pack.tomorrow_preview.map((i) => i.id), ['p']);
+  assert.equal(pack.workroom_only, false);
+  assert.ok(pack.areas.includes('family'));
+  const moved = applyShutdownMoves(pack.unfinished, [
+    { id: 'f', destination: 'tomorrow' },
+    { id: 'w', destination: 'drop' },
+  ], '2026-10-12');
+  assert.ok(moved.find((i) => i.id === 'f')?.due_at?.startsWith('2026-10-13'));
+  assert.equal(moved.find((i) => i.id === 'w')?.status, 'cancelled');
+  assert.equal(Object.keys(groupBySpace(pack.unfinished)).includes('family'), true);
 });
 
 test('pending mail hides snoozed ids', () => {
