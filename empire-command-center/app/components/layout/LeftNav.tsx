@@ -8,7 +8,7 @@ import {
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, ClipboardList,
 } from 'lucide-react';
 
 interface NavItem {
@@ -72,6 +72,7 @@ const NAV_GROUPS: NavGroup[] = [
       // default sidebar view. Public /pricing (SaaS pricing page) is a
       // separate route and is not affected. QuickSwitch Z still works.
       { id: 'pricing-studio', name: 'Pricing Studio', icon: <DollarSign size={16} />, status: 'active', color: '#16a34a', screen: 'pricing-studio', kind: 'screen' },
+      { id: 'organizer', name: 'Organizer', icon: <ClipboardList size={16} />, status: 'active', color: '#16a34a', screen: 'calendar' as ScreenMode, kind: 'screen' },
     ],
   },
   {

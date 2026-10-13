@@ -99,6 +99,9 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
 
 const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'pricing-studio': 'pricing-studio',
+  calendar: 'calendar',
+  schedule: 'calendar',
+  organizer: 'calendar',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -265,7 +268,8 @@ export default function CommandCenter() {
 
   const handleScreenChange = useCallback((screen: ScreenMode | string) => {
     pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
-    setActiveScreen(screen as ScreenMode);
+    const mapped = screen === 'organizer' || screen === 'schedule' ? 'calendar' : screen;
+    setActiveScreen(mapped as ScreenMode);
     setActiveSection(null);
   }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
@@ -343,6 +347,7 @@ export default function CommandCenter() {
       settings: 'business-profile',
       jobs: 'jobs',
       invoices: 'invoices',
+      organizer: 'calendar',
     };
     setActiveSection(null);
     setActiveScreen(moduleScreenMap[module] || 'dashboard');
