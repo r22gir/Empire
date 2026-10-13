@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Bell, ChevronDown, Check, ArrowLeft, Search } from 'lucide-react';
+import { Bell, ChevronDown, Check, ArrowLeft, Search, Settings } from 'lucide-react';
 import { API } from '../../lib/api';
 import { stripTelegramHtml } from '../../lib/plainText';
 import LanguageSwitcher from '../LanguageSwitcher';
@@ -550,7 +550,16 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack
           )}
         </div>
 
-        {/* Settings */}
+        <button
+          onClick={() => onNavigate?.('owner', 'settings')}
+          className="icon-btn hide-sm"
+          aria-label="Settings"
+          title="Settings"
+        >
+          <Settings size={16} />
+        </button>
+
+        {/* Client view */}
         <button onClick={onClientView} className="icon-btn hide-sm" aria-label="Client view (hide internal data)" title="Client view">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>

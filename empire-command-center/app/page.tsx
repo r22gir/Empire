@@ -8,11 +8,16 @@
 // - The classic app is also reachable directly at /classic.
 import CommandCenterApp from './CommandCenterApp';
 import MaxHome from './components/home3/MaxHome';
+import StudioAuthGate from './components/auth/StudioAuthGate';
 
 type SP = Record<string, string | string[] | undefined>;
 
 export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const deepLink = Object.keys(sp).some(k => !k.startsWith('utm_') && k !== '_v' && k !== 'theme' && k !== 'fbclid' && k !== 'gclid');
-  return deepLink ? <CommandCenterApp /> : <MaxHome />;
+  return (
+    <StudioAuthGate>
+      {deepLink ? <CommandCenterApp /> : <MaxHome />}
+    </StudioAuthGate>
+  );
 }

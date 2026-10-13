@@ -13,7 +13,7 @@ import {
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
   Video, MessageCircle,
   ChevronDown, ChevronRight, LayoutGrid, CalendarCheck,
-  FileStack,
+  FileStack, Settings,
 } from 'lucide-react';
 import { hookFounderNav } from '../../lib/founderPortal';
 
@@ -59,6 +59,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // Final Docs hub: latest final estimate / presentation / invoice / drawings / photos per job.
       { id: 'final-docs', name: 'Final Docs', icon: <FileStack size={16} />, status: 'active', color: '#00e5ff', screen: 'final-docs' as ScreenMode, kind: 'screen' },
       { id: 'max-avatar', name: 'MAX Avatar', icon: <Monitor size={16} />, status: 'active', color: '#b8960c', screen: 'presentation' as ScreenMode, kind: 'screen' },
+      { id: 'settings', name: 'Settings', icon: <Settings size={16} />, status: 'active', color: '#b8960c', screen: 'settings' as ScreenMode, kind: 'screen' },
     ],
   },
   {

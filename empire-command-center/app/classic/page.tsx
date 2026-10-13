@@ -2,7 +2,12 @@
 // All in-app deep links keep working here (/classic?product=workroom, ...),
 // and "/?<param>" still opens this same app (see app/page.tsx).
 import CommandCenterApp from '../CommandCenterApp';
+import StudioAuthGate from '../components/auth/StudioAuthGate';
 
 export default function ClassicHome() {
-  return <CommandCenterApp />;
+  return (
+    <StudioAuthGate>
+      <CommandCenterApp />
+    </StudioAuthGate>
+  );
 }
