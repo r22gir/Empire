@@ -55,7 +55,7 @@ export default function DesignerSelectionBoard() {
   const filtered = pool.filter((item) => {
     if (!query.trim()) return true;
     const q = query.toLowerCase();
-    return `${item.name} ${item.house || ''} ${item.color || ''} ${item.material || ''} ${item.room || ''}`.toLowerCase().includes(q);
+    return `${item.name} ${(item as any).house || ''} ${(item as any).color || ''} ${(item as any).material || ''} ${(item as any).room || ''}`.toLowerCase().includes(q);
   });
 
   async function preview() {
@@ -120,7 +120,7 @@ export default function DesignerSelectionBoard() {
                 <span>
                   <b>{item.name}</b>
                   <small>
-                    {item.house || item.family || item.room} · {item.color || item.mood || item.material}
+                    {(item as any).house || (item as any).family || (item as any).room} · {(item as any).color || (item as any).mood || (item as any).material}
                     {item.kind === 'fabric' ? ` · ${money(item.price_per_yard || 0)} / yd` : item.kind === 'finish' ? ` · ${money(item.price || 0)}` : ''}
                   </small>
                 </span>
