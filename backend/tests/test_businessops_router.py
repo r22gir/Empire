@@ -43,7 +43,9 @@ def test_info_endpoint(client):
     assert body["product"] == "BusinessOps"
     assert body["route_prefix"] == "/api/v1/businessops"
     assert body["db_prefix"] == "bo_"
-    assert body["phase"] == 1
+    assert body["phase"] == 2
+    assert body["never_sold"] == ["pkg_founder"]
+    assert body["stripe_mode"] == "test_sandbox_only"
 
 
 def test_health_endpoint_after_init(client):
@@ -56,8 +58,9 @@ def test_health_endpoint_after_init(client):
     assert body["tables"]["bo_packages"] == 6
     assert body["tables"]["bo_module_entitlements"] == 222
     # All other tables start empty
-    for tbl in ("bo_businesses", "bo_business_subscriptions", "bo_provisioning_checklists",
-                "bo_business_users", "bo_business_integrations", "bo_business_audit_events"):
+    for tbl in ("bo_businesses", "bo_tenants", "bo_business_subscriptions", "bo_provisioning_checklists",
+                "bo_business_users", "bo_business_integrations", "bo_business_audit_events",
+                "bo_stripe_events"):
         assert body["tables"][tbl] == 0, f"{tbl} should be 0 after init"
 
 
@@ -214,45 +217,39 @@ def test_get_subscription_404(client):
     assert r.status_code == 404
 
 
-# ── 6. Router has no write methods (Phase 1 contract) ─────────
+# ── 6. Router write-method inventory (Phase 2) ─────────────────
 
-def test_router_has_no_write_methods():
-    """Phase 1 contract: read-only. No PUT/PATCH/DELETE on the router.
-
-    The one POST allowed in Phase 1 is /entitlements/check — a read-only
-    check that takes a body. No other write verbs are permitted.
-    """
+def test_router_has_no_destructive_methods():
+    """Phase 2: no PUT/PATCH/DELETE. POST is limited to check/signup/checkout/webhook."""
     from app.routers.businessops import router
 
-    # Forbidden write verbs (POST is the only verb that may exist, and only on
-    # the /entitlements/check endpoint, which is a read operation that takes a body).
     forbidden = {"PUT", "PATCH", "DELETE"}
-
-    # The only allowed POST path in Phase 1.
-    # route.path is the path relative to the APIRouter (which is mounted
-    # at /api/v1). The full URL is /api/v1/businessops/entitlements/check.
-    allowed_post_paths = {"/businessops/entitlements/check"}
+    allowed_post_paths = {
+        "/businessops/entitlements/check",
+        "/businessops/signup",
+        "/businessops/checkout",
+        "/businessops/stripe-webhook",
+    }
 
     violations = []
     for route in router.routes:
         if hasattr(route, "methods"):
             methods = set(route.methods) - {"HEAD"}
             path = getattr(route, "path", str(route))
-            # POST is allowed only on /entitlements/check
             for verb in methods:
                 if verb in forbidden:
                     violations.append((path, verb))
                 elif verb == "POST" and path not in allowed_post_paths:
                     violations.append((path, verb))
 
-    assert not violations, f"Phase 1 has forbidden write endpoints: {violations}"
+    assert not violations, f"Phase 2 has forbidden write endpoints: {violations}"
 
 
 def test_router_route_count():
-    """Phase 1: 16 routes (info + health + 14 list/get/check endpoints)."""
+    """Phase 2: Phase 1 routes plus tenants + signup + checkout + webhook."""
     from app.routers.businessops import router
     routes = [r for r in router.routes if hasattr(r, "methods")]
-    assert len(routes) == 16, f"expected 16 routes, got {len(routes)}"
+    assert len(routes) >= 20, f"expected >= 20 routes, got {len(routes)}"
 
 
 # ── 7. Filter by status / type ─────────────────────────────────

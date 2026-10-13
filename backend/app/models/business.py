@@ -99,6 +99,41 @@ class Business(Base):
 
 
 # ──────────────────────────────────────────────────────────────────
+# 1b. BusinessTenant — 1:1 isolation record (TenantOps surface)
+# ──────────────────────────────────────────────────────────────────
+
+class BusinessTenant(Base):
+    """Isolation record for a business. One tenant per business.
+
+    Customer-scoped queries key off `tenant_id`. The business remains
+    the catalog entity; the tenant is the data-scope primitive.
+    """
+    __tablename__ = "bo_tenants"
+
+    id = Column(String, primary_key=True)                # ten_<ulid>
+    business_id = Column(
+        String,
+        ForeignKey("bo_businesses.id", ondelete="RESTRICT"),
+        unique=True,
+        nullable=False,
+    )
+    slug = Column(String, unique=True, nullable=False)
+    isolation_key = Column(String, unique=True, nullable=False)
+    status = Column(String, nullable=False, default="active")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'paused', 'canceled')",
+            name="ck_bo_tenants_status",
+        ),
+        Index("idx_bo_tenants_business", "business_id"),
+        Index("idx_bo_tenants_status", "status"),
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
 # 2. BusinessProfile — 1:1 extension for module-specific profile fields
 # ──────────────────────────────────────────────────────────────────
 
@@ -185,7 +220,9 @@ class BusinessSubscription(Base):
     current_period_end = Column(DateTime, nullable=True)
     canceled_at = Column(DateTime, nullable=True)
     cancellation_reason = Column(Text, nullable=True)
-    stripe_subscription_id = Column(String, nullable=True)  # nullable in v1
+    stripe_subscription_id = Column(String, nullable=True)
+    stripe_customer_id = Column(String, nullable=True)
+    stripe_session_id = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -393,6 +430,7 @@ class BusinessAuditEvent(Base):
 
 __all__ = [
     "Business",
+    "BusinessTenant",
     "BusinessProfile",
     "Package",
     "BusinessSubscription",

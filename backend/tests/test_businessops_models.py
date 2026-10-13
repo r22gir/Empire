@@ -70,14 +70,16 @@ def test_all_nine_tables_create(bo_db):
     # Drop the typo check; just assert the 9 tables exist
     for t in [
         "bo_businesses",
+        "bo_tenants",
         "bo_business_profiles",
         "bo_packages",
         "bo_business_subscriptions",
         "bo_module_entitlements",
         "bo_provisioning_checklists",
         "bo_business_users",
-        "bo_business_integrations",  # placeholder
+        "bo_business_integrations",
         "bo_business_audit_events",
+        "bo_stripe_events",
     ]:
         assert t in names, f"missing table {t}; got {names}"
 
@@ -150,6 +152,24 @@ def test_seed_includes_openclaw_founder_only_for_all_packages(bo_db_with_seed):
 
 
 # ── 2. UNIQUE constraints ─────────────────────────────────────
+
+def test_tenant_is_one_to_one_with_business(bo_db_with_seed):
+    bo_db_with_seed.execute(
+        "INSERT INTO bo_businesses (id, slug, display_name) VALUES (?, ?, ?)",
+        ("biz_1", "alpha", "Alpha"),
+    )
+    bo_db_with_seed.execute(
+        "INSERT INTO bo_tenants (id, business_id, slug, isolation_key) VALUES (?, ?, ?, ?)",
+        ("ten_1", "biz_1", "alpha", "ten_1"),
+    )
+    bo_db_with_seed.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        bo_db_with_seed.execute(
+            "INSERT INTO bo_tenants (id, business_id, slug, isolation_key) VALUES (?, ?, ?, ?)",
+            ("ten_2", "biz_1", "alpha-2", "ten_2"),
+        )
+    bo_db_with_seed.rollback()
+
 
 def test_businesses_slug_unique(bo_db_with_seed):
     bo_db_with_seed.execute(

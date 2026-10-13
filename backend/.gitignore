@@ -30,6 +30,13 @@ ENV/
 .env
 .env.local
 
+# Live business / tenant secrets — never commit
+client_aliases.json
+**/client_aliases.json
+app/config/business.json
+app/config/woodcraft_business.json
+**/business.json
+
 # IDEs
 .vscode/
 .idea/

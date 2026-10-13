@@ -116,6 +116,7 @@ except ImportError:
 try:
     from app.models.business import (
         Business,
+        BusinessTenant,
         BusinessProfile,
         Package,
         BusinessSubscription,
@@ -127,6 +128,7 @@ try:
     )
 except ImportError:
     Business = None
+    BusinessTenant = None
     BusinessProfile = None
     Package = None
     BusinessSubscription = None
@@ -172,6 +174,7 @@ __all__ = [
     "DisruptionEvent",
     # BusinessOps Foundation
     "Business",
+    "BusinessTenant",
     "BusinessProfile",
     "Package",
     "BusinessSubscription",

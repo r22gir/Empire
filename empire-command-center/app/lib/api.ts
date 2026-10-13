@@ -73,6 +73,55 @@ export async function obtainFounderToken(pin: string): Promise<{ access_token: s
   return res.json();
 }
 
+export type SellablePackageId =
+  | 'pkg_starter'
+  | 'pkg_growth'
+  | 'pkg_empire'
+  | 'pkg_apostille_only';
+
+export async function businessopsSignup(payload: {
+  email: string;
+  password: string;
+  display_name: string;
+  business_name: string;
+  package_id: SellablePackageId;
+}) {
+  const res = await fetch(`${API}/businessops/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail || `Signup failed (${res.status})`);
+  }
+  return body;
+}
+
+export async function businessopsCheckout(payload: {
+  business_id: string;
+  package_id: SellablePackageId;
+  tenant_id?: string;
+  customer_email?: string;
+  success_url?: string;
+  cancel_url?: string;
+  interval?: 'month' | 'year';
+}) {
+  const res = await fetch(`${API}/businessops/checkout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 503) {
+    throw new Error('Stripe TEST checkout is not configured yet.');
+  }
+  if (!res.ok) {
+    throw new Error(body.detail || `Checkout failed (${res.status})`);
+  }
+  return body as { checkout_url: string; session_id: string; test_mode: boolean };
+}
+
 export function apiStream(path: string, body: any): ReadableStream<string> {
   return new ReadableStream({
     async start(controller) {
