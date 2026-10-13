@@ -395,6 +395,13 @@ async def update_order(order_id: str, update: ApostilleOrderUpdate):
 
     _save_json(ORDERS_DIR, f"{order_id}.json", order)
     logger.info(f"ApostApp order updated: {order_id} — {list(changes.keys())}")
+    if "status" in changes:
+        try:
+            from app.services.apostapp_status_emails import draft_status_email
+
+            draft_status_email(order, trigger=str(changes["status"]))
+        except Exception as exc:
+            logger.warning("Status email draft skipped for %s: %s", order_id, exc)
     return order
 
 

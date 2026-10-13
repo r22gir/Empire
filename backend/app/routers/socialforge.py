@@ -22,12 +22,50 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["socialforge"])
 
+# Live Graph publish is off unless the owner explicitly enables it.
+# Even then, a post must be owner-approved before anything is published.
+_PUBLISHER = None  # tests inject a fake publisher here
+
+
+def _data_root() -> str:
+    return os.environ.get(
+        "SOCIALFORGE_DATA_DIR",
+        os.path.expanduser("~/empire-repo/backend/data/socialforge"),
+    )
+
+
+def _posts_dir() -> str:
+    path = os.path.join(_data_root(), "posts")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _campaigns_dir() -> str:
+    path = os.path.join(_data_root(), "campaigns")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 DATA_DIR = os.path.expanduser("~/empire-repo/backend/data/socialforge")
 POSTS_DIR = os.path.join(DATA_DIR, "posts")
 CAMPAIGNS_DIR = os.path.join(DATA_DIR, "campaigns")
 
-for d in [POSTS_DIR, CAMPAIGNS_DIR]:
-    os.makedirs(d, exist_ok=True)
+APPROVAL_PENDING = "pending_approval"
+APPROVAL_APPROVED = "approved"
+APPROVAL_REJECTED = "rejected"
+TERMINAL_POST_STATUSES = {"posted"}
+
+
+def _live_publish_enabled() -> bool:
+    return os.getenv("SOCIALFORGE_ALLOW_LIVE_PUBLISH", "0") in ("1", "true", "True")
+
+
+def _require_owner_approval(post: dict) -> None:
+    if post.get("approval_status") != APPROVAL_APPROVED:
+        raise HTTPException(
+            status_code=403,
+            detail="Owner approval required — nothing posts without owner approval",
+        )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -52,6 +90,7 @@ def _load_one(directory: str, item_id: str) -> dict | None:
 
 
 def _save(directory: str, item_id: str, data: dict):
+    os.makedirs(directory, exist_ok=True)
     with open(os.path.join(directory, f"{item_id}.json"), "w") as f:
         json.dump(data, f, indent=2)
 
@@ -85,7 +124,8 @@ class PostCreate(BaseModel):
     media_url: Optional[str] = None
     scheduled_for: Optional[str] = None  # ISO datetime
     campaign_id: Optional[str] = None
-    status: str = "draft"  # draft, scheduled, posted, failed
+    status: str = "draft"  # draft, scheduled — posted is refused until owner approval
+    business_slug: Optional[str] = None
 
 class PostUpdate(BaseModel):
     content: Optional[str] = None
@@ -115,7 +155,7 @@ class AIContentRequest(BaseModel):
 
 @router.get("/posts")
 async def list_posts(status: Optional[str] = None, platform: Optional[str] = None):
-    posts = _load_all(POSTS_DIR)
+    posts = _load_all(_posts_dir())
     if status:
         posts = [p for p in posts if p.get("status") == status]
     if platform:
@@ -125,8 +165,14 @@ async def list_posts(status: Optional[str] = None, platform: Optional[str] = Non
 
 @router.post("/posts")
 async def create_post(data: PostCreate):
+    if data.status in TERMINAL_POST_STATUSES:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot create a posted item — owner approval is required first",
+        )
     post_id = uuid.uuid4().hex[:12]
-    code = _next_code(POSTS_DIR, "POST")
+    code = _next_code(_posts_dir(), "POST")
+    status = data.status if data.status in ("draft", "scheduled") else "draft"
     post = {
         "id": post_id,
         "code": code,
@@ -136,19 +182,25 @@ async def create_post(data: PostCreate):
         "media_url": data.media_url,
         "scheduled_for": data.scheduled_for,
         "campaign_id": data.campaign_id,
-        "status": data.status,
+        "business_slug": data.business_slug,
+        "status": status,
+        "approval_status": APPROVAL_PENDING,
+        "approved_at": None,
+        "approved_by": None,
+        "published_at": None,
+        "publish_result": None,
         "engagement": {"likes": 0, "comments": 0, "shares": 0, "reach": 0},
         "created_at": datetime.utcnow().isoformat(),
         "updated_at": datetime.utcnow().isoformat(),
         "posted_at": None,
     }
-    _save(POSTS_DIR, post_id, post)
+    _save(_posts_dir(), post_id, post)
     return post
 
 
 @router.get("/posts/{post_id}")
 async def get_post(post_id: str):
-    post = _load_one(POSTS_DIR, post_id)
+    post = _load_one(_posts_dir(), post_id)
     if not post:
         raise HTTPException(404, "Post not found")
     return post
@@ -156,21 +208,30 @@ async def get_post(post_id: str):
 
 @router.put("/posts/{post_id}")
 async def update_post(post_id: str, data: PostUpdate):
-    post = _load_one(POSTS_DIR, post_id)
+    post = _load_one(_posts_dir(), post_id)
     if not post:
         raise HTTPException(404, "Post not found")
-    for field, val in data.model_dump(exclude_none=True).items():
+    updates = data.model_dump(exclude_none=True)
+    if updates.get("status") in TERMINAL_POST_STATUSES:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot mark posted via update — use the approval queue + scheduler",
+        )
+    if updates.get("approval_status") == APPROVAL_APPROVED:
+        raise HTTPException(
+            status_code=403,
+            detail="Use POST /posts/{id}/approve — approval cannot be set via update",
+        )
+    for field, val in updates.items():
         post[field] = val
-    if data.status == "posted" and not post.get("posted_at"):
-        post["posted_at"] = datetime.utcnow().isoformat()
     post["updated_at"] = datetime.utcnow().isoformat()
-    _save(POSTS_DIR, post_id, post)
+    _save(_posts_dir(), post_id, post)
     return post
 
 
 @router.delete("/posts/{post_id}")
 async def delete_post(post_id: str):
-    if not _delete(POSTS_DIR, post_id):
+    if not _delete(_posts_dir(), post_id):
         raise HTTPException(404, "Post not found")
     return {"deleted": True}
 
@@ -179,13 +240,13 @@ async def delete_post(post_id: str):
 
 @router.get("/campaigns")
 async def list_campaigns():
-    return _load_all(CAMPAIGNS_DIR)
+    return _load_all(_campaigns_dir())
 
 
 @router.post("/campaigns")
 async def create_campaign(data: CampaignCreate):
     camp_id = uuid.uuid4().hex[:12]
-    code = _next_code(CAMPAIGNS_DIR, "CAMP")
+    code = _next_code(_campaigns_dir(), "CAMP")
     campaign = {
         "id": camp_id,
         "code": code,
@@ -199,13 +260,13 @@ async def create_campaign(data: CampaignCreate):
         "created_at": datetime.utcnow().isoformat(),
         "updated_at": datetime.utcnow().isoformat(),
     }
-    _save(CAMPAIGNS_DIR, camp_id, campaign)
+    _save(_campaigns_dir(), camp_id, campaign)
     return campaign
 
 
 @router.delete("/campaigns/{camp_id}")
 async def delete_campaign(camp_id: str):
-    if not _delete(CAMPAIGNS_DIR, camp_id):
+    if not _delete(_campaigns_dir(), camp_id):
         raise HTTPException(404, "Campaign not found")
     return {"deleted": True}
 
@@ -271,16 +332,45 @@ async def generate_content(data: AIContentRequest):
 class InstagramPostRequest(BaseModel):
     caption: str
     image_url: Optional[str] = None
+    post_id: Optional[str] = None
 
 
 class FacebookPostRequest(BaseModel):
     message: str
     link: Optional[str] = None
+    post_id: Optional[str] = None
+
+
+class ApprovalAction(BaseModel):
+    actor: str = "owner"
+    note: Optional[str] = None
+
+
+def _load_approved_post(post_id: Optional[str]) -> dict:
+    if not post_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Owner approval required — pass an approved post_id",
+        )
+    post = _load_one(_posts_dir(), post_id)
+    if not post:
+        raise HTTPException(404, "Post not found")
+    _require_owner_approval(post)
+    return post
 
 
 @router.post("/post/instagram")
 async def api_post_to_instagram(data: InstagramPostRequest):
-    """Publish a post to Instagram via Graph API."""
+    """Publish to Instagram only after owner approval. Live Graph is off by default."""
+    post = _load_approved_post(data.post_id)
+    if not _live_publish_enabled():
+        return {
+            "posted": False,
+            "dry_run": True,
+            "post_id": post["id"],
+            "reason": "live_publish_disabled",
+            "approval_status": post.get("approval_status"),
+        }
     result = await post_to_instagram(caption=data.caption, image_url=data.image_url)
     if not result["posted"]:
         raise HTTPException(400, result.get("error", "Instagram post failed"))
@@ -289,11 +379,151 @@ async def api_post_to_instagram(data: InstagramPostRequest):
 
 @router.post("/post/facebook")
 async def api_post_to_facebook(data: FacebookPostRequest):
-    """Publish a post to Facebook Page via Graph API."""
+    """Publish to Facebook only after owner approval. Live Graph is off by default."""
+    post = _load_approved_post(data.post_id)
+    if not _live_publish_enabled():
+        return {
+            "posted": False,
+            "dry_run": True,
+            "post_id": post["id"],
+            "reason": "live_publish_disabled",
+            "approval_status": post.get("approval_status"),
+        }
     result = await post_to_facebook(message=data.message, link=data.link)
     if not result["posted"]:
         raise HTTPException(400, result.get("error", "Facebook post failed"))
     return result
+
+
+@router.get("/approval-queue")
+async def approval_queue():
+    """Posts waiting for owner approval. Nothing in this list has been published."""
+    posts = _load_all(_posts_dir())
+    pending = [p for p in posts if p.get("approval_status") == APPROVAL_PENDING]
+    approved = [p for p in posts if p.get("approval_status") == APPROVAL_APPROVED and p.get("status") != "posted"]
+    rejected = [p for p in posts if p.get("approval_status") == APPROVAL_REJECTED]
+    return {
+        "pending": pending,
+        "approved_unpublished": approved,
+        "rejected": rejected,
+        "counts": {
+            "pending": len(pending),
+            "approved_unpublished": len(approved),
+            "rejected": len(rejected),
+        },
+        "policy": "nothing_posts_without_owner_approval",
+        "live_publish": _live_publish_enabled(),
+    }
+
+
+@router.post("/posts/{post_id}/submit-for-approval")
+async def submit_for_approval(post_id: str):
+    post = _load_one(_posts_dir(), post_id)
+    if not post:
+        raise HTTPException(404, "Post not found")
+    post["approval_status"] = APPROVAL_PENDING
+    post["status"] = "scheduled" if post.get("scheduled_for") else "draft"
+    post["updated_at"] = datetime.utcnow().isoformat()
+    _save(_posts_dir(), post_id, post)
+    return post
+
+
+@router.post("/posts/{post_id}/approve")
+async def approve_post(post_id: str, body: ApprovalAction = ApprovalAction()):
+    post = _load_one(_posts_dir(), post_id)
+    if not post:
+        raise HTTPException(404, "Post not found")
+    post["approval_status"] = APPROVAL_APPROVED
+    post["approved_at"] = datetime.utcnow().isoformat()
+    post["approved_by"] = body.actor
+    if post.get("scheduled_for"):
+        post["status"] = "scheduled"
+    else:
+        post["status"] = "approved"
+    post["updated_at"] = datetime.utcnow().isoformat()
+    _save(_posts_dir(), post_id, post)
+    return post
+
+
+@router.post("/posts/{post_id}/reject")
+async def reject_post(post_id: str, body: ApprovalAction = ApprovalAction()):
+    post = _load_one(_posts_dir(), post_id)
+    if not post:
+        raise HTTPException(404, "Post not found")
+    post["approval_status"] = APPROVAL_REJECTED
+    post["rejected_at"] = datetime.utcnow().isoformat()
+    post["rejected_by"] = body.actor
+    post["reject_note"] = body.note
+    post["status"] = "draft"
+    post["updated_at"] = datetime.utcnow().isoformat()
+    _save(_posts_dir(), post_id, post)
+    return post
+
+
+def _is_due(scheduled_for: Optional[str], now: datetime) -> bool:
+    if not scheduled_for:
+        return True
+    try:
+        raw = scheduled_for.replace("Z", "+00:00")
+        when = datetime.fromisoformat(raw)
+        if when.tzinfo:
+            when = when.replace(tzinfo=None)
+        return when <= now
+    except ValueError:
+        return False
+
+
+async def _publish_post(post: dict) -> dict:
+    """Publish an approved due post. Default is a recorded dry-run."""
+    if _PUBLISHER is not None:
+        return await _PUBLISHER(post)
+    if not _live_publish_enabled():
+        return {
+            "posted": False,
+            "dry_run": True,
+            "reason": "live_publish_disabled",
+            "platform": post.get("platform"),
+        }
+    platform = (post.get("platform") or "").lower()
+    caption = ((post.get("content") or "") + " " + (post.get("hashtags") or "")).strip()
+    if platform == "instagram":
+        return await post_to_instagram(caption=caption, image_url=post.get("media_url"))
+    if platform == "facebook":
+        return await post_to_facebook(message=caption, link=post.get("media_url"))
+    return {"posted": False, "error": f"unsupported platform: {platform}"}
+
+
+@router.post("/scheduler/tick")
+async def scheduler_tick():
+    """Publish due, owner-approved posts only. Never publishes pending drafts."""
+    now = datetime.utcnow()
+    results = []
+    for post in _load_all(_posts_dir()):
+        if post.get("approval_status") != APPROVAL_APPROVED:
+            continue
+        if post.get("status") == "posted":
+            continue
+        if post.get("status") not in ("scheduled", "approved"):
+            continue
+        if not _is_due(post.get("scheduled_for"), now):
+            continue
+        publish = await _publish_post(post)
+        post["publish_result"] = publish
+        post["updated_at"] = now.isoformat()
+        if publish.get("posted"):
+            post["status"] = "posted"
+            post["posted_at"] = now.isoformat()
+            post["published_at"] = now.isoformat()
+        else:
+            post["status"] = "queued_publish" if publish.get("dry_run") else "failed"
+        _save(_posts_dir(), post["id"], post)
+        results.append({"id": post["id"], "result": publish, "status": post["status"]})
+    return {
+        "processed": len(results),
+        "results": results,
+        "live_publish": _live_publish_enabled(),
+        "policy": "nothing_posts_without_owner_approval",
+    }
 
 
 @router.get("/connected-accounts")
@@ -306,12 +536,13 @@ async def api_get_social_accounts():
 
 @router.get("/dashboard")
 async def dashboard():
-    posts = _load_all(POSTS_DIR)
-    campaigns = _load_all(CAMPAIGNS_DIR)
+    posts = _load_all(_posts_dir())
+    campaigns = _load_all(_campaigns_dir())
 
     drafts = [p for p in posts if p.get("status") == "draft"]
     scheduled = [p for p in posts if p.get("status") == "scheduled"]
     posted = [p for p in posts if p.get("status") == "posted"]
+    pending_approval = [p for p in posts if p.get("approval_status") == APPROVAL_PENDING]
 
     total_engagement = sum(
         p.get("engagement", {}).get("likes", 0) +
@@ -331,6 +562,8 @@ async def dashboard():
         "drafts": len(drafts),
         "scheduled": len(scheduled),
         "posted": len(posted),
+        "pending_approval": len(pending_approval),
+        "live_publish": _live_publish_enabled(),
         "total_engagement": total_engagement,
         "active_campaigns": len([c for c in campaigns if c.get("status") == "active"]),
         "by_platform": by_platform,
@@ -344,7 +577,7 @@ async def dashboard():
 @router.get("/calendar")
 async def content_calendar(month: Optional[str] = None):
     """Get posts organized by date for calendar view."""
-    posts = _load_all(POSTS_DIR)
+    posts = _load_all(_posts_dir())
     calendar = {}
 
     for p in posts:
@@ -366,6 +599,14 @@ async def content_calendar(month: Optional[str] = None):
 
 
 # ── Accounts / Setup ──────────────────────────────────────────────────────
+
+def _accounts_file() -> str:
+    return os.path.join(_data_root(), "accounts.json")
+
+
+def _profile_file() -> str:
+    return os.path.join(_data_root(), "business_profile.json")
+
 
 ACCOUNTS_FILE = os.path.join(DATA_DIR, "accounts.json")
 PROFILE_FILE = os.path.join(DATA_DIR, "business_profile.json")
@@ -418,16 +659,20 @@ class ProfileUpdate(BaseModel):
 
 
 def _load_profile() -> dict:
-    if os.path.exists(PROFILE_FILE):
-        with open(PROFILE_FILE) as f:
+    path = _profile_file()
+    if os.path.exists(path):
+        with open(path) as f:
             return json.load(f)
-    with open(PROFILE_FILE, "w") as f:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
         json.dump(DEFAULT_PROFILE, f, indent=2)
     return DEFAULT_PROFILE.copy()
 
 
 def _save_profile(profile: dict):
-    with open(PROFILE_FILE, "w") as f:
+    path = _profile_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
         json.dump(profile, f, indent=2)
 
 
@@ -499,8 +744,9 @@ DEFAULT_ACCOUNTS = [
 
 
 def _load_accounts() -> list[dict]:
-    if os.path.exists(ACCOUNTS_FILE):
-        with open(ACCOUNTS_FILE) as f:
+    path = _accounts_file()
+    if os.path.exists(path):
+        with open(path) as f:
             return json.load(f)
     # Initialize with defaults
     _save_accounts(DEFAULT_ACCOUNTS)
@@ -508,7 +754,9 @@ def _load_accounts() -> list[dict]:
 
 
 def _save_accounts(accounts: list[dict]):
-    with open(ACCOUNTS_FILE, "w") as f:
+    path = _accounts_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
         json.dump(accounts, f, indent=2)
 
 

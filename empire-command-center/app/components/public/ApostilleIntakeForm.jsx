@@ -76,6 +76,12 @@ export default function ApostilleIntakeForm() {
           var msg = (res.body && res.body.detail) ? res.body.detail : ('Request failed (' + res.body ? 'unknown' : 'unknown') + ')';
           throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
         }
+        // Stripe test-mode checkout when a session URL is returned. Status
+        // emails are drafted server-side and never auto-sent to clients.
+        if (res.body && res.body.checkout_url) {
+          window.location.href = res.body.checkout_url;
+          return;
+        }
         window.location.href = '/apostille/confirmation?order_id=' + res.body.order_id;
       })
       .catch(function (err) {

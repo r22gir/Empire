@@ -204,6 +204,10 @@ load_router("app.routers.apostapp", "/api/v1", ["apostapp"])
 # ApostApp — Public client-facing intake & status (R1B Fast Lane)
 load_router("app.routers.apostapp_public", "/api/v1", ["apostapp-public"])
 
+# Public Link-in-Bio pages + LeadForge quote intake
+load_router("app.routers.linkinbio", "/api/v1", ["linkinbio"])
+load_router("app.routers.leadforge_public", "/api/v1", ["leadforge-public"])
+
 # ConstructionForge — Colombian real estate land development
 load_router("app.routers.construction", "/api/v1", ["construction"])
 

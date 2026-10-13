@@ -83,3 +83,9 @@ uploads/arch_drawings/*.svg
 /.empire/runtime/HERMES_HARRY_SYNC.json
 /.empire/runtime/HERMES_HARRY_SYNC.html
 /HERMES-HARRY-HANDOFF.md
+
+# Local identity / alias maps (never commit)
+client_aliases.json
+**/client_aliases.json
+# Local business identity overrides (never commit new copies)
+**/business.json.local

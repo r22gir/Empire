@@ -7,7 +7,7 @@ import {
   Settings, ExternalLink, CircleDot, SkipForward, Loader2, ChevronRight,
   TrendingUp, Users, Heart, Eye, Share2, MessageCircle, Image,
   ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Hash,
-  LinkIcon, Globe, Zap, Target, Award, ThumbsUp, Video, BookOpen, CreditCard
+  LinkIcon, Globe, Zap, Target, Award, ThumbsUp, Video, BookOpen, CreditCard, ShieldCheck
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
@@ -28,6 +28,8 @@ const PLATFORMS = [
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   draft: { bg: '#f5f3ef', text: '#777' },
   scheduled: { bg: '#dbeafe', text: '#2563eb' },
+  approved: { bg: '#fef9c3', text: '#a16207' },
+  queued_publish: { bg: '#fef3c7', text: '#92400e' },
   posted: { bg: '#dcfce7', text: '#16a34a' },
   failed: { bg: '#fef2f2', text: '#dc2626' },
 };
@@ -55,12 +57,13 @@ const EMPTY_ANALYTICS = {
 
 // ============ TAB CONFIG ============
 
-type Tab = 'dashboard' | 'calendar' | 'compose' | 'analytics' | 'accounts' | 'setup' | 'payments' | 'docs';
+type Tab = 'dashboard' | 'calendar' | 'compose' | 'approval' | 'analytics' | 'accounts' | 'setup' | 'payments' | 'docs';
 
 const NAV_TABS: { id: Tab; label: string; icon: any }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   { id: 'calendar', label: 'Calendar', icon: Calendar },
   { id: 'compose', label: 'Compose', icon: PenTool },
+  { id: 'approval', label: 'Approval', icon: ShieldCheck },
   { id: 'analytics', label: 'Analytics', icon: TrendingUp },
   { id: 'accounts', label: 'Accounts', icon: Users },
   { id: 'setup', label: 'Setup Wizard', icon: Settings },
@@ -79,6 +82,7 @@ export default function SocialForgePage() {
   const [connectedAccounts, setConnectedAccounts] = useState<any[]>([]);
   const [scheduledPosts, setScheduledPosts] = useState<any[]>([]);
   const [pastPosts, setPastPosts] = useState<any[]>([]);
+  const [approvalQueue, setApprovalQueue] = useState<{ pending: any[]; approved_unpublished: any[]; rejected: any[] }>({ pending: [], approved_unpublished: [], rejected: [] });
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
 
   // Compose state
@@ -110,11 +114,17 @@ export default function SocialForgePage() {
     setLoading(true);
     setError(null);
     try {
-      const [dashRes, postsRes, accountsRes] = await Promise.all([
+      const [dashRes, postsRes, accountsRes, queueRes] = await Promise.all([
         fetch(`${SF_API}/dashboard`).then(r => { if (!r.ok) throw new Error('Dashboard fetch failed'); return r.json(); }),
         fetch(`${SF_API}/posts`).then(r => { if (!r.ok) throw new Error('Posts fetch failed'); return r.json(); }),
         fetch(`${SF_API}/accounts`).then(r => { if (!r.ok) throw new Error('Accounts fetch failed'); return r.json(); }),
+        fetch(`${SF_API}/approval-queue`).then(r => r.ok ? r.json() : { pending: [], approved_unpublished: [], rejected: [] }),
       ]);
+      setApprovalQueue({
+        pending: queueRes.pending || [],
+        approved_unpublished: queueRes.approved_unpublished || [],
+        rejected: queueRes.rejected || [],
+      });
 
       // Set accounts from API — backend returns { accounts: [...], categories, progress }
       const rawAccounts = Array.isArray(accountsRes) ? accountsRes : (accountsRes?.accounts || []);
@@ -236,7 +246,10 @@ export default function SocialForgePage() {
   };
 
   const handleStatusChange = async (id: string, status: string) => {
-    // Optimistic update
+    if (status === 'posted') {
+      setError('Nothing posts without owner approval. Use the Approval tab.');
+      return;
+    }
     setScheduledPosts(prev => prev.map(p => p.id === id ? { ...p, status } : p));
     try {
       const res = await fetch(`${SF_API}/posts/${id}`, {
@@ -245,12 +258,28 @@ export default function SocialForgePage() {
         body: JSON.stringify({ status }),
       });
       if (!res.ok) throw new Error('Status update failed');
-      // If marked as posted, reload to move it to pastPosts
-      if (status === 'posted') await loadData();
     } catch (err: any) {
       console.error('SocialForge status change error:', err);
       await loadData();
     }
+  };
+
+  const handleApprovePost = async (id: string) => {
+    const res = await fetch(`${SF_API}/posts/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actor: 'owner' }) });
+    if (!res.ok) {
+      setError('Approve failed');
+      return;
+    }
+    await loadData();
+  };
+
+  const handleRejectPost = async (id: string) => {
+    const res = await fetch(`${SF_API}/posts/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actor: 'owner' }) });
+    if (!res.ok) {
+      setError('Reject failed');
+      return;
+    }
+    await loadData();
   };
 
   const handleDisconnectAccount = async (id: string) => {
@@ -864,10 +893,43 @@ export default function SocialForgePage() {
                   )}
                 </button>
                 <span style={{ fontSize: 11, color: '#aaa' }}>
-                  Posting to {composePlatforms.length} platform{composePlatforms.length !== 1 ? 's' : ''}
+                  Saves to the approval queue — nothing posts without owner approval
                 </span>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ==================== APPROVAL QUEUE ==================== */}
+        {!loading && tab === 'approval' && (
+          <div data-testid="socialforge-approval-queue">
+            <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', marginBottom: 8 }}>Approval queue</h2>
+            <p style={{ fontSize: 13, color: '#777', marginBottom: 16 }}>
+              Nothing publishes until you approve it. The scheduler will not post pending drafts.
+            </p>
+            {[
+              { title: 'Pending approval', items: approvalQueue.pending, actions: 'decide' as const },
+              { title: 'Approved, not published', items: approvalQueue.approved_unpublished, actions: 'none' as const },
+              { title: 'Rejected', items: approvalQueue.rejected, actions: 'none' as const },
+            ].map((group) => (
+              <div key={group.title} className="empire-card" style={{ marginBottom: 16, padding: 16 }}>
+                <div className="section-label" style={{ marginBottom: 10 }}>{group.title} ({group.items.length})</div>
+                {group.items.length === 0 ? (
+                  <p style={{ fontSize: 12, color: '#aaa', margin: 0 }}>None</p>
+                ) : group.items.map((post: any) => (
+                  <div key={post.id} style={{ borderTop: '1px solid #f0ece4', padding: '10px 0' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{post.platform} · {post.status}</div>
+                    <div style={{ fontSize: 13, color: '#444', margin: '6px 0' }}>{post.content}</div>
+                    {group.actions === 'decide' && (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button type="button" onClick={() => handleApprovePost(post.id)} style={{ padding: '6px 10px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Approve</button>
+                        <button type="button" onClick={() => handleRejectPost(post.id)} style={{ padding: '6px 10px', background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Reject</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         )}
 
