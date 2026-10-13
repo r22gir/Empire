@@ -67,6 +67,37 @@ def _get_styles():
     return styles
 
 
+def _client_fabric_line(item: dict) -> str:
+    """Client-facing fabric line: code, color, specs — never brand or supplier."""
+    try:
+        from app.services.fabric_codes import format_client_material
+        line = format_client_material({
+            "code": item.get("fabric_code") or item.get("code"),
+            "color": item.get("fabric_color") or item.get("color_pattern") or item.get("color"),
+            "specs": item.get("fabric_specs") or item.get("specs"),
+            "width_inches": item.get("fabric_width") or item.get("width_inches"),
+            "material_type": item.get("material_type"),
+            "pattern_repeat_v": item.get("pattern_repeat_v"),
+            "pattern_repeat_h": item.get("pattern_repeat_h"),
+            "backing": item.get("backing"),
+            "brand": item.get("brand") or item.get("fabric_brand"),
+            "supplier": item.get("supplier"),
+        })
+        if line:
+            return line
+    except Exception:
+        pass
+    code = item.get("fabric_code") or item.get("code") or ""
+    color = item.get("fabric_color") or item.get("color_pattern") or ""
+    if code or color:
+        return " ".join(p for p in (code, color) if p)
+    # Legacy name only when it does not look like a supplier/brand dump.
+    name = (item.get("fabric_name") or "").strip()
+    if name and not any(k in name.lower() for k in ("supplier", "kravet", "schumacher", "fabricut")):
+        return name
+    return ""
+
+
 def generate_quote_pdf(quote_id: str) -> bytes:
     """Generate a branded PDF for a quote. Returns PDF bytes."""
     quote = get_quote(quote_id)
@@ -157,8 +188,9 @@ def generate_quote_pdf(quote_id: str) -> bytes:
                 h = item.get('height', 0) or 0
                 if w or h:
                     desc_parts.append(f"Dimensions: {w}\" × {h}\"")
-            if item.get('fabric_name'):
-                desc_parts.append(f"Fabric: {item['fabric_name']}")
+            fabric_line = _client_fabric_line(item)
+            if fabric_line:
+                desc_parts.append(f"Fabric: {fabric_line}")
             if item.get('yards_needed') and float(item.get('yards_needed', 0) or 0) > 0:
                 yds = item['yards_needed']
                 ppyd = item.get('fabric_price_per_yard', 0) or 0

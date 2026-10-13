@@ -99,6 +99,19 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
 
 const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'pricing-studio': 'pricing-studio',
+  presentation: 'presentation',
+  quote: 'quote',
+  chat: 'chat',
+  tasks: 'tasks',
+  docs: 'docs',
+  research: 'research',
+  video: 'video',
+  telegram: 'telegram',
+  'memory-bank': 'memory-bank',
+  jobs: 'jobs',
+  invoices: 'invoices',
+  'business-profile': 'business-profile',
+  dashboard: 'dashboard',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -110,6 +123,16 @@ const PRODUCT_DEEP_LINKS: Partial<Record<string, EcosystemProduct>> = {
   apostapp: 'apost',
   llc: 'llc',
   llcfactory: 'llc',
+  workroom: 'workroom',
+  vision: 'vision',
+  organizer: 'vision',
+  quotes: 'workroom',
+  craft: 'craft',
+  owner: 'owner',
+  'max-avatar': 'max-avatar',
+  tokens: 'tokens',
+  recovery: 'recovery',
+  relist: 'relist',
 };
 
 export default function CommandCenter() {
@@ -195,7 +218,48 @@ export default function CommandCenter() {
   useEffect(() => {
     const applyDeepLink = () => {
       const params = new URLSearchParams(window.location.search);
+      const productParam = params.get('product');
+      const sectionParam = params.get('section');
       const candidate = params.get('screen') || window.location.hash.replace(/^#/, '');
+
+      // Explicit ?product= / ?section= (tappable Max "where is" links).
+      if (productParam) {
+        const aliased = PRODUCT_DEEP_LINKS[productParam] || (productParam as EcosystemProduct);
+        pendingDeepLinkScreen.current = null;
+        if (productParam === 'max-avatar' || candidate === 'presentation') {
+          setActiveProduct('max-avatar');
+          setActiveScreen('presentation');
+        } else {
+          setActiveProduct(aliased);
+          setActiveScreen('dashboard');
+        }
+        setActiveSection(sectionParam);
+        return;
+      }
+
+      // Aliases from the live screen-path map.
+      if (candidate === 'organizer') {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct('vision');
+        setActiveScreen('dashboard');
+        setActiveSection('analyzer');
+        return;
+      }
+      if (candidate === 'quotes') {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct('workroom');
+        setActiveScreen('dashboard');
+        setActiveSection('quotes');
+        return;
+      }
+      if (candidate === 'presentation') {
+        pendingDeepLinkScreen.current = 'presentation';
+        setActiveProduct('max-avatar');
+        setActiveScreen('presentation');
+        setActiveSection(null);
+        return;
+      }
+
       // First check product deep links (e.g. apostapp -> activeProduct='apost').
       // This lets screens reached via activeProduct (ApostApp) be deep-linked
       // even though they are not in the ScreenMode enum.
@@ -204,15 +268,16 @@ export default function CommandCenter() {
         pendingDeepLinkScreen.current = null;
         setActiveProduct(product);
         setActiveScreen('dashboard');
-        setActiveSection(null);
+        setActiveSection(candidate === 'organizer' ? 'analyzer' : candidate === 'quotes' ? 'quotes' : sectionParam);
         return;
       }
       // Then check screen deep links (e.g. pricing-studio -> ScreenMode).
       const screen = candidate ? SCREEN_DEEP_LINKS[candidate] : null;
       if (screen) {
         pendingDeepLinkScreen.current = screen;
+        if (screen === 'presentation') setActiveProduct('max-avatar');
         setActiveScreen(screen);
-        setActiveSection(null);
+        setActiveSection(sectionParam);
       }
     };
 
@@ -470,7 +535,7 @@ export default function CommandCenter() {
         case 'transcript':
           return <TranscriptForgePage />;
         case 'vision':
-          return <VisionAnalysisPage />;
+          return <VisionAnalysisPage initialSection={activeSection || undefined} />;
         case 'drawings':
           return <DrawingStudioPage initialView={activeSection === 'catalog' ? 'catalog' : 'studio'} />;
         default: return <DashboardScreen activeTab={activeTab} />;

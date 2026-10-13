@@ -49,8 +49,11 @@ const Loading = () => (
    Main Component
    ═══════════════════════════════════════════════════════════ */
 
-export default function VisionAnalysisPage() {
-  const [section, setSection] = useState('analyzer');
+export default function VisionAnalysisPage({ initialSection }: { initialSection?: string } = {}) {
+  const [section, setSection] = useState(initialSection || 'analyzer');
+  useEffect(() => {
+    if (initialSection) setSection(initialSection);
+  }, [initialSection]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [customerSearch, setCustomerSearch] = useState('');

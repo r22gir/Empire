@@ -133,6 +133,22 @@ def test_blank_code_row_allocates_after_highest_existing():
     assert row["color"] == "Sand"
 
 
+def test_quote_pdf_line_never_shows_supplier():
+    from app.services.quote_pdf_service import _client_fabric_line
+    line = _client_fabric_line({
+        "fabric_code": "V008-Cognac",
+        "fabric_color": "Cognac",
+        "fabric_specs": "54in marine vinyl",
+        "brand": "Kravet",
+        "supplier": "Secret Mill",
+        "fabric_name": "Kravet Cognac from Secret Mill",
+    })
+    assert "V008-Cognac" in line
+    assert "Cognac" in line
+    assert "Kravet" not in line
+    assert "Secret Mill" not in line
+
+
 def test_internal_view_keeps_supplier():
     row = {
         "code": "V008-Cognac",

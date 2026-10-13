@@ -243,23 +243,37 @@ async def calculate_yards(
 
 @router.get("/catalog")
 async def fabric_catalog(search: Optional[str] = None):
-    """Client-safe fabric list. NO cost, margin, supplier, supplier_link."""
+    """Client-safe fabric list: code, color, specs. Never brand or supplier."""
     with get_db() as conn:
-        query = "SELECT id, name, color_pattern, material_type, swatch_photo_path, backing_fabric_id FROM fabrics WHERE is_active = 1"
+        query = (
+            "SELECT id, code, color_pattern, material_type, width_inches, "
+            "pattern_repeat_v, pattern_repeat_h, durability, swatch_photo_path, "
+            "backing_fabric_id FROM fabrics WHERE is_active = 1"
+        )
         params = []
 
         if search:
-            query += " AND (name LIKE ? OR color_pattern LIKE ? OR material_type LIKE ?)"
+            query += " AND (code LIKE ? OR color_pattern LIKE ? OR material_type LIKE ?)"
             s = f"%{search}%"
             params.extend([s, s, s])
 
-        query += " ORDER BY name"
+        query += " ORDER BY code, color_pattern"
         rows = conn.execute(query, params).fetchall()
         fabrics = dict_rows(rows)
 
-        # Only expose whether backing exists, not the backing details
+        # Only expose whether backing exists, not the backing details.
+        # name is aliased to color for older client UI — never a brand/supplier.
         for f in fabrics:
             f["has_backing"] = bool(f.pop("backing_fabric_id", None))
+            f["color"] = f.get("color_pattern")
+            f["name"] = f.get("color_pattern") or f.get("code")
+            f["specs"] = ", ".join(
+                p for p in (
+                    f.get("material_type"),
+                    f'{f["width_inches"]}"' if f.get("width_inches") else None,
+                    f.get("durability"),
+                ) if p
+            )
 
         return fabrics
 
@@ -688,6 +702,58 @@ def seed_ramiro_fabrics():
         conn.execute("UPDATE fabrics SET backing_fabric_id = (SELECT id FROM fabrics WHERE code = 'D3222') WHERE code = 'V1012'")
 
         logger.info("✓ Seeded 6 Ramiro Quote fabrics (3 seat + 3 backing)")
+
+
+# ── Internal code registry (V###-Color). No auto-write on import. ──
+
+class FabricCodeAssign(BaseModel):
+    color: str
+    material_type: str
+    width_inches: Optional[float] = None
+    pattern_repeat_v: Optional[float] = None
+    pattern_repeat_h: Optional[float] = None
+    backing: Optional[str] = None
+    specs: Optional[str] = None
+    brand: Optional[str] = None
+    supplier: Optional[str] = None
+    supplier_sku: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.get("/codes")
+async def list_fabric_codes(internal: bool = False):
+    """List registry codes. Default is client-safe (no brand/supplier)."""
+    from app.services.fabric_codes import client_view, ensure_registry, internal_view
+    with get_db() as conn:
+        ensure_registry(conn)
+        rows = conn.execute(
+            "SELECT * FROM fabric_code_registry ORDER BY prefix, sequence"
+        ).fetchall()
+        view = internal_view if internal else client_view
+        return [view(dict(r)) for r in rows]
+
+
+@router.get("/codes/catalog")
+async def fabric_code_catalog():
+    """Client-facing registry: code, color, specs only."""
+    return await list_fabric_codes(internal=False)
+
+
+@router.post("/codes/assign")
+async def assign_fabric_code(data: FabricCodeAssign):
+    """Allocate the next sequential internal code. Never reuses a prior number."""
+    from app.services.fabric_codes import assign_code
+    with get_db() as conn:
+        return assign_code(conn, **data.model_dump())
+
+
+@router.post("/codes/import")
+async def import_fabric_codes(file: UploadFile = File(...)):
+    """Import a CSV whose header matches docs/FABRIC_CODES.csv. Existing codes are skipped."""
+    from app.services.fabric_codes import import_csv
+    raw = (await file.read()).decode("utf-8")
+    with get_db() as conn:
+        return import_csv(conn, csv_text=raw)
 
 
 # Auto-seed on import

@@ -180,3 +180,24 @@ def test_markdown_link_helpers():
     assert link.startswith("[Open Presentation](/?screen=presentation")
     formatted = format_feature_reply(pres, channel="web", family=False)
     assert "[Open Presentation](/?screen=presentation" in formatted
+
+
+def test_chat_helper_answers_common_where_is_questions():
+    import importlib
+    max_router = importlib.import_module("app.routers.max.router")
+    cases = (
+        ("Where is presentation mode", "Open Presentation", "/?screen=presentation"),
+        ("where is Organizer", "Open Organizer", "/?product=vision"),
+        ("where are quotes", "Open Quotes", "/?product=workroom&section=quotes"),
+    )
+    for message, label, href in cases:
+        req = max_router.ChatRequest(message=message, history=[], channel="web")
+        resp = max_router._maybe_handle_where_is_request(req)
+        assert resp is not None, message
+        assert resp.model_used == "ui-map"
+        assert resp.metadata["skill_used"] == "find_in_app"
+        assert f"[{label}]({href}" in resp.response
+        for banned in BANNED_STALE:
+            assert banned not in resp.response.lower()
+    named = max_router.ChatRequest(message="where is the last Marley's quote", history=[], channel="web")
+    assert max_router._maybe_handle_where_is_request(named) is None

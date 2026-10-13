@@ -7,6 +7,7 @@ import { API } from '../../lib/api';
 import QuoteCard from '../business/quotes/QuoteCard';
 import InlineDrawing from '../InlineDrawing';
 import ContinuityPanel from '../ContinuityPanel';
+import { isAppDeepLink, safeUrl } from '../chat/safeUrl';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -1209,6 +1210,14 @@ function renderContent(content: string, onScreenChange?: (s: string) => void) {
     let processed = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     // Italic
     processed = processed.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    // Tappable screen-path deep links from Max "where is X" answers.
+    processed = processed.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, href) => {
+      const safe = safeUrl(String(href || ''));
+      if (!safe) return String(label);
+      const sameOrigin = isAppDeepLink(safe);
+      const extra = sameOrigin ? ' class="cm-link cm-app"' : ' class="cm-link" target="_blank" rel="noopener noreferrer"';
+      return `<a href="${safe}"${extra} style="color:#b8960c;font-weight:600;text-decoration:underline;text-underline-offset:2px">${label}</a>`;
+    });
     // Detect QuoteBuilder / quote references and make them clickable
     const hasQuoteRef = /QuoteBuilder|quote.*interface/i.test(processed);
     if (hasQuoteRef && onScreenChange) {
