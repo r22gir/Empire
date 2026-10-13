@@ -1,0 +1,11 @@
+[Unit]
+Description=Empire nightly isolated test run (files failures as Max fix improvements)
+# Documented only — do NOT auto-install. Enable on the Dell after review.
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 America/New_York
+Persistent=true
+Unit=empire-nightly-improvements.service
+
+[Install]
+WantedBy=timers.target

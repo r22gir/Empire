@@ -37,6 +37,8 @@ class CodeForgeDesk(BaseDesk):
         combined = f"{task.title} {task.description}".lower()
 
         try:
+            if "improvement" in combined or "imp-" in combined or "max-improvement" in combined:
+                return await self._handle_improvement(task)
             if any(w in combined for w in ["read", "show", "view", "cat", "look at", "what's in"]):
                 return await self._handle_read(task)
             elif any(w in combined for w in ["create", "scaffold", "new file", "new router", "new component", "new desk"]):
@@ -96,6 +98,45 @@ class CodeForgeDesk(BaseDesk):
             f"```\n{head}\n```\n\n"
             f"... ({skipped} lines skipped) ...\n\n"
             f"```\n{tail}\n```"
+        )
+
+    async def handle_improvement_job(self, job: dict) -> dict:
+        """Atlas path for the persistent improvement queue. Never merges or deploys."""
+        from app.services.max.improvement_worker import run_atlas_plan
+
+        return run_atlas_plan(job)
+
+    async def _handle_improvement(self, task: DeskTask) -> DeskTask:
+        """Desk-task entry: plan + GitHub issue. Never merge/deploy, never outbound."""
+        task.actions.append(DeskAction(action="improvement_plan", detail="Atlas planning an approved improvement"))
+        from app.services.max import improvement_queue as queue
+        from app.services.max.improvement_worker import process_one, run_atlas_plan
+
+        desc = f"{task.title} {task.description}"
+        m = re.search(r"IMP-(\d+)", desc, re.I) or re.search(r"improvement\s+#?(\d+)", desc, re.I)
+        if m:
+            req_id = int(m.group(1))
+            job = queue.latest_for(req_id) or queue.enqueue(req_id)
+            if job.get("status") == "queued":
+                result = process_one(job)
+            else:
+                result = run_atlas_plan(job)
+            if result and result.get("error"):
+                return await self.fail_task(task, result["error"])
+            return await self.complete_task(
+                task,
+                f"Atlas planned IMP-{req_id:04d}. issue={result.get('issue_url') or 'n/a'}. "
+                "Draft PR only. Never merged. Never deployed.",
+            )
+        result = process_one()
+        if not result:
+            return await self.complete_task(task, "No queued improvement jobs.")
+        if result.get("error"):
+            return await self.fail_task(task, result["error"])
+        return await self.complete_task(
+            task,
+            f"Atlas processed job {result.get('job_id')} for IMP-{result.get('improvement_id')}. "
+            "Nothing merged or deployed.",
         )
 
     async def _handle_read(self, task: DeskTask) -> DeskTask:

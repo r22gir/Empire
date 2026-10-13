@@ -559,6 +559,14 @@ async def start_background_services():
     except Exception as e:
         print(f"✗ Task Auto-Worker: {e}")
 
+    # Atlas improvement queue — MiniMax plan + GitHub issue, never merge/deploy
+    try:
+        from app.services.max.improvement_worker import worker_loop
+        asyncio.create_task(worker_loop())
+        print("✓ Atlas Improvement Worker: polling max_improvement_jobs (CodeForge)")
+    except Exception as e:
+        print(f"✗ Atlas Improvement Worker: {e}")
+
     # ── Autonomous Startup Probes ──
     # Run immediate health check + brain context warm-up on boot
     asyncio.create_task(_startup_probes())
