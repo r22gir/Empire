@@ -98,11 +98,12 @@ def sprint_m_status():
         "isolated_store": True,
         "max_sends_to_clients": False,
         "measurements": "fractions",
-        "fabric_policy": "docs/FABRIC_CODES.csv sequential registry",
+        "fabric_policy": "docs/FABRIC_CODES.csv sequential registry (PR #128)",
         "organizer": {
             "surface": "WorkroomOrganizer",
             "screen": "calendar",
             "api": "/api/v1/organizer",
+            "depends_on": ["#111", "#120", "#129"],
             "duplicate_removed": True,
         },
         "family_alerts": family_alerts.alert_status(),

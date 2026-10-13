@@ -221,10 +221,9 @@ def init_store(conn: sqlite3.Connection) -> None:
                VALUES (?, ?, 1, ?, ?, ?, 'owner')""",
             (rule["id"], rule["name"], rule["trigger_event"], rule["action"], rule["params_json"]),
         )
-    from app.services.fabric_codes import DEFAULT_CSV, ensure_registry, import_csv
+    from app.services.sprint_m.fabric import seed_reserved_codes
 
-    ensure_registry(conn)
-    import_csv(conn, path=DEFAULT_CSV)
+    seed_reserved_codes(conn)
     conn.commit()
 
 

@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle2, ClipboardList, CreditCard, DollarSign,
   FileText, MessageSquare, Plus, Scale, Scissors, Shield, Smartphone,
 } from 'lucide-react';
-import { API } from '../../../lib/api';
+import { API } from '../../lib/api';
 
 type Tab = 'jobs' | 'rules' | 'drafts' | 'pay' | 'costing' | 'credits' | 'family';
 
@@ -149,7 +149,7 @@ function Card({ children, style }: { children: React.ReactNode; style?: React.CS
   );
 }
 
-export default function SprintMRail({ onClose, jobId }: { onClose?: () => void; jobId?: string }) {
+export default function WorkOrdersPanel({ onClose, jobId }: { onClose?: () => void; jobId?: string }) {
   const [tab, setTab] = useState<Tab>('jobs');
   const [jobs, setJobs] = useState<OrganizerJob[]>([]);
   const [draftRows, setDraftRows] = useState<Draft[]>([]);

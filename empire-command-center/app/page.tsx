@@ -57,7 +57,6 @@ import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
 import MaxContinuityScreen from './components/screens/MaxContinuityScreen';
 import JobsScreen from './components/screens/JobsScreen';
 import InvoiceScreen from './components/screens/InvoiceScreen';
-import WorkroomOrganizer from './components/business/organizer/WorkroomOrganizer';
 import ConstructionForgePage from './components/screens/ConstructionForgePage';
 import StoreFrontForgePage from './components/screens/StoreFrontForgePage';
 import TranscriptForgePage from './components/screens/TranscriptForgePage';
@@ -518,7 +517,6 @@ export default function CommandCenter() {
     }
     if (activeScreen === 'quote') return <QuoteReviewScreen />;
     if (activeScreen === 'jobs') return <JobsScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : undefined} />;
-    if (activeScreen === 'calendar' || activeScreen === 'organizer') return <WorkroomOrganizer />;
     if (activeScreen === 'invoices') return <InvoiceScreen />;
     if (activeScreen === 'docs') return <DocumentScreen />;
     if (activeScreen === 'product-docs') return (

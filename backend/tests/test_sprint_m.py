@@ -93,7 +93,7 @@ def test_fabric_codes_come_from_shared_registry(isolated):
 
 
 def test_reserved_v001_through_v007_are_not_reused(isolated):
-    from app.services.fabric_codes import highest_sequence, next_sequence
+    from app.services.sprint_m.fabric import highest_sequence, next_sequence
 
     with get_store() as conn:
         assert highest_sequence(conn, "V") == 7
@@ -101,7 +101,7 @@ def test_reserved_v001_through_v007_are_not_reused(isolated):
         code = sanitize_fabric_code("Kravet V639 Navy Velvet", conn=conn)
         assert code == "V008-Navy"
         row = conn.execute(
-            "SELECT code, supplier_sku, brand FROM fabric_code_registry WHERE code = ?",
+            "SELECT code, supplier_sku, brand FROM sm_fabric_codes WHERE code = ?",
             ("V008-Navy",),
         ).fetchone()
         assert row["supplier_sku"] == "V639"
@@ -322,7 +322,7 @@ def test_status_declares_studio_isolation(isolated):
     assert status["sprint"] == "M"
     assert status["isolated_store"] is True
     assert status["max_sends_to_clients"] is False
-    assert status["fabric_policy"] == "docs/FABRIC_CODES.csv sequential registry"
+    assert status["fabric_policy"] == "docs/FABRIC_CODES.csv sequential registry (PR #128)"
     assert status["organizer"]["surface"] == "WorkroomOrganizer"
     assert status["organizer"]["screen"] == "calendar"
     assert status["organizer"]["duplicate_removed"] is True

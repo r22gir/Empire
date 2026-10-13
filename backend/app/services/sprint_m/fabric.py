@@ -1,11 +1,13 @@
-"""Intake fabric codes from the shared sequential registry.
+"""Sprint M fabric intake.
 
-Source of truth: docs/FABRIC_CODES.csv (PR #128).
-V001–V007 are reserved. The next vinyl code is V008. Sequences are never reused.
+Depends on PR #128 (`docs/FABRIC_CODES.csv` + `app.services.fabric_codes`)
+when that branch is present. This module does not copy that registry.
 
-'Kravet V639 Navy Velvet' must NOT become V639 — that is the supplier SKU.
-On intake we look up the material or assign the next registry code.
-Client-facing fields expose code + color only. Brand, supplier, and SKU stay internal.
+Contract (same either way):
+- Codes are sequential and never reused. V001–V007 are already taken.
+- Next vinyl assignment is V008.
+- 'Kravet V639 Navy Velvet' must NOT become V639 (that is the supplier SKU).
+- Client-facing fields: code + color only. Never brand, supplier, or SKU.
 """
 
 from __future__ import annotations
@@ -14,19 +16,14 @@ import re
 import sqlite3
 from typing import Any
 
-from app.services.fabric_codes import (
-    CODE_RE,
-    DEFAULT_CSV,
-    FabricCodeError,
-    assign_code,
-    client_view,
-    ensure_registry,
-    get_code,
-    import_csv,
-    normalize_color,
-)
+CODE_RE = re.compile(r"^([VFL])(\d{3,})-(.+)$")
 
-# Words that must never appear in a client-facing fabric field.
+# V001–V007 reserved by the shared registry (PR #128). Never reallocate.
+RESERVED_VINYL = 7
+
+PREFIX_BY_TYPE = {"vinyl": "V", "fabric": "F", "leather": "L", "v": "V", "f": "F", "l": "L"}
+TYPE_BY_PREFIX = {"V": "vinyl", "F": "fabric", "L": "leather"}
+
 FORBIDDEN_BRAND_TOKENS = {
     "kravet",
     "fabricut",
@@ -88,14 +85,48 @@ MATERIAL_HINTS = {
     "velvet": "vinyl",
 }
 
-# Supplier-looking tokens in incoming text. Never treat these as our codes.
 SKU_TOKEN_RE = re.compile(r"\b([VFL])(\d{3,})\b", re.IGNORECASE)
 
+LOCAL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sm_fabric_codes (
+    code TEXT NOT NULL PRIMARY KEY,
+    prefix TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    color TEXT NOT NULL,
+    material_type TEXT NOT NULL,
+    brand TEXT,
+    supplier_sku TEXT,
+    retired INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(prefix, sequence)
+);
+"""
 
-def ensure_shared_registry(conn: sqlite3.Connection) -> None:
-    """Load reserved V001–V007 (and any other CSV rows) without overwriting."""
-    ensure_registry(conn)
-    import_csv(conn, path=DEFAULT_CSV)
+
+class FabricCodeError(ValueError):
+    """Raised when a fabric value cannot be reduced to a registry code."""
+
+
+def _shared():
+    """PR #128 registry, if that PR is on the tree. Never required here."""
+    try:
+        from app.services import fabric_codes as fc
+
+        return fc
+    except ImportError:
+        return None
+
+
+def normalize_color(color: str) -> str:
+    raw = (color or "").strip()
+    if not raw:
+        raise FabricCodeError("color is required")
+    parts = re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+", raw)
+    if not parts:
+        parts = re.split(r"[^A-Za-z0-9]+", raw)
+    cleaned = "".join(p[:1].upper() + p[1:].lower() for p in parts if p)
+    if not cleaned:
+        raise FabricCodeError(f"color {color!r} is empty after normalize")
+    return cleaned
 
 
 def infer_material_type(raw: str | None, explicit: str | None = None) -> str:
@@ -103,48 +134,43 @@ def infer_material_type(raw: str | None, explicit: str | None = None) -> str:
         key = str(explicit).strip().lower()
         if key in MATERIAL_HINTS:
             return MATERIAL_HINTS[key]
-        if key in ("vinyl", "fabric", "leather", "v", "f", "l"):
-            return {"v": "vinyl", "f": "fabric", "l": "leather"}.get(key, key)
+        if key in PREFIX_BY_TYPE:
+            return TYPE_BY_PREFIX[PREFIX_BY_TYPE[key]]
     text = (raw or "").lower()
     for hint, material in MATERIAL_HINTS.items():
         if re.search(rf"\b{re.escape(hint)}\b", text):
             return material
-    # Workroom reserved series is V001–V007; untyped intake continues that series.
     return "vinyl"
 
 
 def parse_intake(raw: str) -> dict[str, str]:
-    """Split incoming material into internal-only brand/SKU and a client color."""
     text = re.sub(r"[|/]+", " ", str(raw or "")).strip()
     brand = ""
     supplier_sku = ""
     lowered = text.lower()
     for token in FORBIDDEN_BRAND_TOKENS:
         if len(token) > 2 and re.search(rf"\b{re.escape(token)}\b", lowered):
-            brand = token.title() if not brand else brand
+            if not brand:
+                brand = token.title()
             text = re.sub(rf"\b{re.escape(token)}\b", " ", text, flags=re.IGNORECASE)
-
     sku_match = SKU_TOKEN_RE.search(text)
     if sku_match:
         supplier_sku = f"{sku_match.group(1).upper()}{sku_match.group(2)}"
         text = text[: sku_match.start()] + " " + text[sku_match.end() :]
-
     text = re.sub(r"[-–]+", " ", text)
     parts = [
         p
         for p in re.split(r"[^A-Za-z0-9]+", text)
         if p and p.lower() not in FORBIDDEN_BRAND_TOKENS and p.lower() not in COLOR_STOPWORDS
     ]
-    color_src = " ".join(parts) or "Unspecified"
     return {
-        "color": color_src,
+        "color": " ".join(parts) or "Unspecified",
         "brand": brand,
         "supplier_sku": supplier_sku,
     }
 
 
 def strip_client_facing(value: Any) -> str:
-    """Remove brand / supplier / SKU tokens from a client-visible string."""
     if value is None:
         return ""
     text = str(value)
@@ -155,11 +181,56 @@ def strip_client_facing(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def seed_reserved_codes(conn: sqlite3.Connection) -> None:
+    """Mark V001–V007 consumed so the next vinyl code is V008. Never reuse."""
+    conn.executescript(LOCAL_SCHEMA)
+    for seq in range(1, RESERVED_VINYL + 1):
+        conn.execute(
+            """INSERT OR IGNORE INTO sm_fabric_codes
+               (code, prefix, sequence, color, material_type, retired)
+               VALUES (?, 'V', ?, 'Assigned', 'vinyl', 0)""",
+            (f"V{seq:03d}-Assigned", seq),
+        )
+
+
+def ensure_shared_registry(conn: sqlite3.Connection) -> None:
+    fc = _shared()
+    if fc is not None:
+        fc.ensure_registry(conn)
+        csv_path = getattr(fc, "DEFAULT_CSV", None)
+        if csv_path is not None and getattr(csv_path, "exists", lambda: False)():
+            fc.import_csv(conn, path=csv_path)
+            return
+    seed_reserved_codes(conn)
+
+
+def _registry_table(conn: sqlite3.Connection) -> str:
+    names = {
+        r[0]
+        for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "fabric_code_registry" in names:
+        return "fabric_code_registry"
+    seed_reserved_codes(conn)
+    return "sm_fabric_codes"
+
+
+def highest_sequence(conn: sqlite3.Connection, prefix: str) -> int:
+    table = _registry_table(conn)
+    row = conn.execute(f"SELECT MAX(sequence) FROM {table} WHERE prefix = ?", (prefix,)).fetchone()
+    return int(row[0] or 0)
+
+
+def next_sequence(conn: sqlite3.Connection, prefix: str) -> int:
+    return highest_sequence(conn, prefix) + 1
+
+
 def _existing_by_sku(conn: sqlite3.Connection, sku: str) -> dict | None:
     if not sku:
         return None
+    table = _registry_table(conn)
     row = conn.execute(
-        "SELECT * FROM fabric_code_registry WHERE upper(supplier_sku) = upper(?) AND retired = 0",
+        f"SELECT * FROM {table} WHERE upper(supplier_sku) = upper(?) AND retired = 0",
         (sku,),
     ).fetchone()
     return dict(row) if row else None
@@ -168,13 +239,44 @@ def _existing_by_sku(conn: sqlite3.Connection, sku: str) -> dict | None:
 def _existing_by_color(conn: sqlite3.Connection, color: str, material_type: str) -> dict | None:
     if not color or color.lower() in {"assigned", "unspecified"}:
         return None
+    table = _registry_table(conn)
     row = conn.execute(
-        """SELECT * FROM fabric_code_registry
+        f"""SELECT * FROM {table}
            WHERE color = ? AND material_type = ? AND retired = 0
            ORDER BY sequence ASC LIMIT 1""",
         (color, material_type),
     ).fetchone()
     return dict(row) if row else None
+
+
+def _client_view(row: dict) -> dict:
+    return {
+        "code": row.get("code"),
+        "color": row.get("color"),
+        "material_type": row.get("material_type"),
+    }
+
+
+def _assign_local(
+    conn: sqlite3.Connection,
+    *,
+    color: str,
+    material_type: str,
+    brand: str | None,
+    supplier_sku: str | None,
+) -> dict:
+    seed_reserved_codes(conn)
+    prefix = PREFIX_BY_TYPE[material_type]
+    color_n = normalize_color(color)
+    seq = next_sequence(conn, prefix)
+    code = f"{prefix}{seq:03d}-{color_n}"
+    conn.execute(
+        """INSERT INTO sm_fabric_codes
+           (code, prefix, sequence, color, material_type, brand, supplier_sku, retired)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0)""",
+        (code, prefix, seq, color_n, TYPE_BY_PREFIX[prefix], brand, supplier_sku),
+    )
+    return {"code": code, "color": color_n, "material_type": TYPE_BY_PREFIX[prefix]}
 
 
 def lookup_or_assign(
@@ -184,10 +286,6 @@ def lookup_or_assign(
     material_type: str | None = None,
     required: bool = False,
 ) -> dict | None:
-    """Look up a registry row or assign the next sequential code.
-
-    Never returns a supplier SKU as the public code.
-    """
     if raw is None or not str(raw).strip():
         if required:
             raise FabricCodeError("fabric code is required")
@@ -195,31 +293,40 @@ def lookup_or_assign(
 
     text = str(raw).strip()
     ensure_shared_registry(conn)
+    fc = _shared()
 
-    if CODE_RE.match(text):
+    if CODE_RE.match(text) and fc is not None:
         try:
-            return get_code(conn, text, internal=False)
-        except FabricCodeError:
+            return fc.get_code(conn, text, internal=False)
+        except Exception:
             pass
 
     parsed = parse_intake(text)
     kind = infer_material_type(text, material_type)
-
     found = _existing_by_sku(conn, parsed["supplier_sku"]) or _existing_by_color(
         conn, normalize_color(parsed["color"]), kind
     )
     if found:
-        return client_view(found)
+        return _client_view(found)
 
-    assigned = assign_code(
+    if fc is not None and _registry_table(conn) == "fabric_code_registry":
+        assigned = fc.assign_code(
+            conn,
+            color=parsed["color"],
+            material_type=kind,
+            brand=parsed.get("brand") or None,
+            supplier_sku=parsed.get("supplier_sku") or None,
+            notes="Assigned on Sprint M intake; supplier SKU stored internally only",
+        )
+        return _client_view(assigned)
+
+    return _assign_local(
         conn,
         color=parsed["color"],
         material_type=kind,
         brand=parsed.get("brand") or None,
         supplier_sku=parsed.get("supplier_sku") or None,
-        notes="Assigned on Sprint M intake; supplier SKU stored internally only",
     )
-    return client_view(assigned)
 
 
 def _open_registry_conn(conn: sqlite3.Connection | None) -> tuple[sqlite3.Connection, bool]:
@@ -244,18 +351,13 @@ def sanitize_fabric_code(
     opened, owns = _open_registry_conn(conn)
     try:
         row = lookup_or_assign(raw, conn=opened, material_type=material_type, required=required)
-        if not row:
-            return None
-        code = row.get("code")
-        if not code:
+        if not row or not row.get("code"):
             if required:
                 raise FabricCodeError("fabric code is required")
             return None
-        lowered = str(code).lower()
-        if any(token in lowered for token in FORBIDDEN_BRAND_TOKENS if len(token) > 3):
+        code = str(row["code"])
+        if any(token in code.lower() for token in FORBIDDEN_BRAND_TOKENS if len(token) > 3):
             raise FabricCodeError("sanitized fabric code still contained a brand or supplier token")
-        if SKU_TOKEN_RE.fullmatch(str(raw or "").strip()) and not CODE_RE.match(str(raw or "").strip()):
-            pass
         return code
     finally:
         if owns:
@@ -268,10 +370,9 @@ def is_internal_fabric_code(value: str | None, conn: sqlite3.Connection | None =
         return False
     opened, owns = _open_registry_conn(conn)
     try:
-        get_code(opened, value.strip(), internal=False)
-        return True
-    except FabricCodeError:
-        return False
+        table = _registry_table(opened)
+        row = opened.execute(f"SELECT 1 FROM {table} WHERE code = ?", (value.strip(),)).fetchone()
+        return bool(row)
     finally:
         if owns:
             opened.close()
