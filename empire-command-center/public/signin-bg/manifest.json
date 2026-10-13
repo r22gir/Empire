@@ -1,0 +1,100 @@
+{
+  "intervalMs": 9000,
+  "slides": [
+    {
+      "src": "/signin-bg/drapery-bay-cream-lounge.jpg",
+      "alt": "Cream drapery bay lounge",
+      "caption": "Workroom · cream lounge"
+    },
+    {
+      "src": "/signin-bg/romans-bay-nook.jpg",
+      "alt": "Roman shade bay nook",
+      "caption": "Workroom · roman nook"
+    },
+    {
+      "src": "/signin-bg/drapery-bay-floral.jpg",
+      "alt": "Floral drapery bay",
+      "caption": "Workroom · floral bay"
+    },
+    {
+      "src": "/signin-bg/drapery-music-room.jpg",
+      "alt": "Drapery in a music room",
+      "caption": "Workroom · music room"
+    },
+    {
+      "src": "/signin-bg/drapery-window-nook.jpg",
+      "alt": "Window nook drapery",
+      "caption": "Workroom · window nook"
+    },
+    {
+      "src": "/signin-bg/sheers-tall-living.jpg",
+      "alt": "Tall living room sheers",
+      "caption": "Workroom · sheers"
+    },
+    {
+      "src": "/signin-bg/seating-grey-sectional-bay.jpg",
+      "alt": "Grey sectional in a bay",
+      "caption": "Workroom · sectional bay"
+    },
+    {
+      "src": "/signin-bg/seating-herringbone-sectional.jpg",
+      "alt": "Herringbone sectional",
+      "caption": "Workroom · herringbone"
+    },
+    {
+      "src": "/signin-bg/seating-barstools.jpg",
+      "alt": "Upholstered barstools",
+      "caption": "Workroom · barstools"
+    },
+    {
+      "src": "/signin-bg/banquette-plant-wall.jpg",
+      "alt": "Banquette against a plant wall",
+      "caption": "Workroom · banquette"
+    },
+    {
+      "src": "/signin-bg/banquette-teal-tufted-bench.jpg",
+      "alt": "Teal tufted banquette",
+      "caption": "Workroom · tufted bench"
+    },
+    {
+      "src": "/signin-bg/softgoods-trellis-corner.jpg",
+      "alt": "Trellis softgoods corner",
+      "caption": "Workroom · trellis"
+    },
+    {
+      "src": "/signin-bg/valance-bath-dragonfly.jpg",
+      "alt": "Dragonfly bath valance",
+      "caption": "Workroom · valance"
+    },
+    {
+      "src": "/signin-bg/bed-cognac-panel-headboard.jpg",
+      "alt": "Cognac panel headboard",
+      "caption": "Workroom · cognac bed"
+    },
+    {
+      "src": "/signin-bg/bed-mauve-channel.jpg",
+      "alt": "Mauve channel headboard",
+      "caption": "Workroom · channel bed"
+    },
+    {
+      "src": "/signin-bg/bed-white-tufted-headboard.jpg",
+      "alt": "White tufted headboard",
+      "caption": "Workroom · tufted bed"
+    },
+    {
+      "src": "/signin-bg/chairs-maze-dining.jpg",
+      "alt": "Maze dining chairs",
+      "caption": "Workroom · dining"
+    },
+    {
+      "src": "/signin-bg/woodcraft-champagne-lounge.jpg",
+      "alt": "Champagne woodcraft lounge",
+      "caption": "WoodCraft · lounge"
+    },
+    {
+      "src": "/signin-bg/woodcraft-chevron-island.jpg",
+      "alt": "Chevron woodcraft island",
+      "caption": "WoodCraft · island"
+    }
+  ]
+}

@@ -42,6 +42,7 @@ import VisionAnalysisPage from './components/screens/VisionAnalysisPage';
 import DrawingStudioPage from './components/screens/DrawingStudioPage';
 import ForgeCRMPage from './components/screens/ForgeCRMPage';
 import BusinessProfileScreen from './components/screens/BusinessProfileScreen';
+import SettingsScreen from './components/screens/SettingsScreen';
 import DesksScreen from './components/screens/DesksScreen';
 import InboxScreen from './components/screens/InboxScreen';
 import SystemReportScreen from './components/screens/SystemReportScreen';
@@ -123,6 +124,7 @@ const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   calendar: 'calendar',
   schedule: 'calendar',
   organizer: 'calendar',
+  settings: 'settings',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -149,7 +151,7 @@ const NAV_PRODUCT_IDS = new Set<string>([
 const NAV_SCREEN_IDS = new Set<string>([
   'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
   'report', 'desks', 'memory-bank', 'telegram', 'whatsapp', 'docs', 'research', 'final-docs', 'invoice',
-  'calendar', 'presentation', 'video',
+  'calendar', 'presentation', 'video', 'settings',
 ]);
 hookFounderDeepLinks(SCREEN_DEEP_LINKS as Record<string, string>, NAV_SCREEN_IDS);
 function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
@@ -481,7 +483,7 @@ export default function CommandCenter() {
       calendar: 'calendar',
       documents: 'docs',
       'business-profile': 'business-profile',
-      settings: 'business-profile',
+      settings: 'settings',
       jobs: 'jobs',
       invoices: 'invoices',
       'final-docs': 'final-docs',
@@ -692,6 +694,7 @@ export default function CommandCenter() {
       }
     }
     if (activeScreen === 'business-profile') return <BusinessProfileScreen />;
+    if (activeScreen === 'settings') return <SettingsScreen />;
     if (activeScreen === 'pricing' && activeProduct === 'platform') return <PricingPage />;
     if (activeScreen === 'pricing-studio') return <PricingStudioScreen />;
     if (activeScreen === 'desks') return <DesksScreen desks={sys.desks} onSendTask={handleSendMessage} />;
