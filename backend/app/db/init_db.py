@@ -595,6 +595,13 @@ def init_database():
             migrate_organizer_tables(conn)
         except Exception as e:
             print(f"✗ Organizer migration failed (non-fatal): {e}")
+        # ForgeCRM unified thread + sandbox accounting staging (additive)
+        from app.services.crm_messaging import ensure_schema as _ensure_crm_msg
+        from app.services.accounting.qbo import ensure_schema as _ensure_qbo
+        from app.services.accounting.alegra_siigo import ensure_schema as _ensure_dian
+        _ensure_crm_msg(conn)
+        _ensure_qbo(conn)
+        _ensure_dian(conn)
 
         # Seed desk configs from desks.json if table is empty
         count = conn.execute("SELECT COUNT(*) FROM desk_configs").fetchone()[0]

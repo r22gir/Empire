@@ -53,5 +53,12 @@
     "avg_deal_size": "Avg Deal Size",
     "search_contacts": "Search contacts...",
     "no_results": "No results found"
+  },
+  "thread": {
+    "title": "WhatsApp / SMS thread",
+    "policy": "Outgoing replies are drafts. Owner must approve each message. No automatic replies.",
+    "save_draft": "Save draft",
+    "approve": "Approve to send",
+    "incoming": "Incoming"
   }
 }

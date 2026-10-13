@@ -11,6 +11,7 @@ import DataTable, { Column } from '../shared/DataTable';
 import KPICard from '../shared/KPICard';
 import StatusBadge from '../shared/StatusBadge';
 import EmptyState from '../shared/EmptyState';
+import ClientThread from './ClientThread';
 
 interface CustomerDetailProps {
   customerId: string;
@@ -100,7 +101,7 @@ const TYPE_STYLES: Record<string, { bg: string; text: string; label: string }> =
   contractor:  { bg: '#fffbeb', text: '#d97706', label: 'Contractor' },
 };
 
-type Tab = 'overview' | 'quotes' | 'invoices' | 'payments' | 'notes';
+type Tab = 'overview' | 'quotes' | 'invoices' | 'payments' | 'messages' | 'notes';
 
 export default function CustomerDetail({ customerId, onBack }: CustomerDetailProps) {
   const [customer, setCustomer] = useState<CustomerInfo | null>(null);
@@ -149,7 +150,7 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
   }, [customerId]);
 
   const fetchTabData = useCallback(async (t: Tab) => {
-    if (t === 'notes' || t === 'overview') {
+    if (t === 'notes' || t === 'overview' || t === 'messages') {
       setTabData([]);
       return;
     }
@@ -297,7 +298,8 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
     { key: 'quotes', label: 'Quotes', icon: <ClipboardList size={14} /> },
     { key: 'invoices', label: 'Invoices', icon: <FileText size={14} /> },
     { key: 'payments', label: 'Payments', icon: <CreditCard size={14} /> },
-    { key: 'notes', label: 'Notes', icon: <MessageSquare size={14} /> },
+    { key: 'messages', label: 'Messages', icon: <MessageSquare size={14} /> },
+    { key: 'notes', label: 'Notes', icon: <Pencil size={14} /> },
   ];
 
   const quoteColumns: Column[] = [
@@ -339,6 +341,7 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
     quotes: quoteColumns,
     invoices: invoiceColumns,
     payments: paymentColumns,
+    messages: [],
     notes: [],
   };
 
@@ -650,6 +653,8 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
               )}
             </div>
           </div>
+        ) : tab === 'messages' ? (
+          <ClientThread customerId={customerId} customerName={name} />
         ) : tab === 'notes' ? (
           <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #ece8e0', padding: 20 }}>
             {editing ? (
