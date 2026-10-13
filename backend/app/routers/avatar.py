@@ -47,24 +47,28 @@ class ChatResponse(BaseModel):
 # ── Helpers ──────────────────────────────────────────────────────────
 
 def _estimate_word_timestamps(text: str, audio_bytes: bytes) -> list:
-    """Estimate word-level timestamps from text and audio duration.
-    Assumes ~150 words/minute speaking rate for Rex voice."""
-    words = text.split()
+    """Word times aligned to Simli/TalkingHead lip-sync offset.
+
+    MP3 size is a last-resort duration hint. Mouth cues are shifted by
+    ``LIP_SYNC_OFFSET_MS`` so they do not lead heard speech.
+    """
+    from app.services.simli_lipsync import (
+        LIP_SYNC_OFFSET_MS,
+        estimate_word_timestamps,
+    )
+
+    words = [w for w in (text or "").split() if w]
     if not words:
         return []
-    # Estimate audio duration from mp3 size (~16kbps for speech)
-    estimated_duration = len(audio_bytes) / 2000  # rough seconds estimate
+    # ~16 kbps speech MP3 ≈ 2000 bytes/s; floor so tiny clips still space words.
+    estimated_duration = len(audio_bytes or b"") / 2000
     if estimated_duration < 0.5:
-        estimated_duration = len(words) * 0.4  # fallback: 0.4s per word
-    gap = estimated_duration / max(len(words), 1)
-    timestamps = []
-    for i, word in enumerate(words):
-        timestamps.append({
-            "word": word,
-            "start": round(i * gap, 3),
-            "end": round((i + 1) * gap, 3),
-        })
-    return timestamps
+        estimated_duration = len(words) * 0.4
+    return estimate_word_timestamps(
+        text,
+        estimated_duration,
+        offset_seconds=LIP_SYNC_OFFSET_MS / 1000.0,
+    )
 
 
 EMOTION_MAP = {
