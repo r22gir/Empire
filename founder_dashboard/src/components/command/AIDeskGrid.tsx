@@ -253,7 +253,7 @@ export default function AIDeskGrid({ aiDeskStatuses, backendOnline }: Props) {
 
       {open && aiDeskStatuses.length > 0 && (
         <div className="mt-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-          {/* Desk rows — all 12 desks, compact */}
+          {/* Desk rows — all 17 desks, compact */}
           <div className="space-y-0.5">
             {aiDeskStatuses.map(desk => {
               const isExpanded = expandedDesk === desk.desk_id;

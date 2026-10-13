@@ -258,7 +258,7 @@ export default function LeftColumn({
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#22c55e' }} />
         <span>Grok</span>
         <span style={{ color: 'var(--glass-border)' }}>|</span>
-        <span>12 desks</span>
+        <span>17 desks</span>
       </div>
     </div>
   );

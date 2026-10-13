@@ -39,6 +39,7 @@ const nextConfig: NextConfig = {
   },
   // Force unique chunk URLs on every build so phones never use stale JS
   generateBuildId: async () => `build-${BUILD_TIMESTAMP}`,
+  ...(process.env.NEXT_OUTPUT === 'standalone' ? { output: 'standalone' as const } : {}),
 };
 
 export default nextConfig;

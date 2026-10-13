@@ -5,6 +5,7 @@ import { Mic, MicOff, Send, Monitor, Square, MessageSquare, Sparkles, Wifi, Wifi
 import InlineDrawing from '../InlineDrawing';
 
 import { API } from '../../lib/api';
+import { deskCountLabel } from '../../lib/deskRegistry';
 
 type PresentationMode = 'presentation' | 'compact' | 'text';
 
@@ -762,7 +763,7 @@ export default function PresentationScreen() {
             {connected ? <Wifi size={10} color="#22c55e" /> : <WifiOff size={10} color="#ef4444" />}
             {connected ? 'Connected' : 'Disconnected'}
           </span>
-          <span>18 desks</span>
+          <span>{deskCountLabel()}</span>
           <span>Grok TTS Rex</span>
           <span>Quality engine active</span>
         </div>

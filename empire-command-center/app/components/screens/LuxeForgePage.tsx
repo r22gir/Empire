@@ -5,9 +5,11 @@ import {
   Gem, RefreshCw, Users, FolderOpen, Camera, Ruler, Clock,
   CheckCircle2, FileText, MessageSquare, ChevronDown, ChevronUp,
   ExternalLink, Image, Maximize2, Send, AlertCircle, Eye, Scissors, Loader2, TreePine,
-  Pencil, Trash2, X, Save, BookOpen, Download, Archive, RotateCcw,
+  Pencil, Trash2, X, Save, BookOpen, Download, Archive, RotateCcw, Palette,
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
+import MoodBoardView from '../luxeforge/MoodBoardView';
+import { inchesToFraction } from '../../lib/fractions';
 
 interface IntakeUser {
   id: string;
@@ -82,7 +84,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
   const [sendingToWorkroom, setSendingToWorkroom] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [editUserData, setEditUserData] = useState<Partial<IntakeUser>>({});
-  const [activeTab, setActiveTab] = useState<'projects' | 'docs' | 'archived'>('projects');
+  const [activeTab, setActiveTab] = useState<'projects' | 'docs' | 'archived' | 'mood'>('projects');
   const [viewingPhoto, setViewingPhoto] = useState<{ url: string; name: string; projectName: string } | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [archivedUsers, setArchivedUsers] = useState<IntakeUser[]>([]);
@@ -282,6 +284,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         {[
           { id: 'projects' as const, label: 'Projects', icon: <FolderOpen size={14} /> },
+          { id: 'mood' as const, label: 'Mood Board', icon: <Palette size={14} /> },
           { id: 'archived' as const, label: `Archived${archivedUsers.length > 0 ? ` (${archivedUsers.length})` : ''}`, icon: <Archive size={14} /> },
           { id: 'docs' as const, label: 'Documentation', icon: <BookOpen size={14} /> },
         ].map(tab => (
@@ -303,7 +306,9 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
         ))}
       </div>
 
-      {activeTab === 'docs' ? (
+      {activeTab === 'mood' ? (
+        <MoodBoardView />
+      ) : activeTab === 'docs' ? (
         <ProductDocs product="luxe" />
       ) : activeTab === 'archived' ? (
         /* ── Archived Tab ─────────────────────────────── */
@@ -643,7 +648,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
                                             padding: '6px 10px', background: '#eff6ff', borderRadius: 6, fontSize: 11, color: '#2563eb', fontWeight: 600,
                                           }}>
                                             <Ruler size={11} style={{ display: 'inline', marginRight: 4 }} />
-                                            {m.room || m.location || `Window ${i + 1}`}: {m.width || '?'}″ × {m.height || '?'}″
+                                            {m.room || m.location || `Window ${i + 1}`}: {inchesToFraction(m.width)} × {inchesToFraction(m.height)}
                                             {m.mount_type && ` (${m.mount_type})`}
                                           </div>
                                         ))}
@@ -1103,8 +1108,8 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
                             {measurements.map((m: any, i: number) => (
                               <tr key={i} style={{ borderTop: '1px solid #ece8e0' }}>
                                 <td style={{ padding: '8px 12px', color: '#333' }}>{m.room || `Window ${i + 1}`}</td>
-                                <td style={{ padding: '8px 12px', textAlign: 'center', color: '#333', fontWeight: 600 }}>{m.width}&quot;</td>
-                                <td style={{ padding: '8px 12px', textAlign: 'center', color: '#333', fontWeight: 600 }}>{m.height}&quot;</td>
+                                <td style={{ padding: '8px 12px', textAlign: 'center', color: '#333', fontWeight: 600 }}>{inchesToFraction(m.width)}</td>
+                                <td style={{ padding: '8px 12px', textAlign: 'center', color: '#333', fontWeight: 600 }}>{inchesToFraction(m.height)}</td>
                                 <td style={{ padding: '8px 12px', color: '#888', textTransform: 'capitalize' }}>{m.reference?.replace('-', ' ') || '—'}</td>
                               </tr>
                             ))}

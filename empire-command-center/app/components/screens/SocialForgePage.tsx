@@ -12,6 +12,7 @@ import {
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
 import AccountSetupWizard from './AccountSetupWizard';
+import BestTimesPanel from '../socialforge/BestTimesPanel';
 
 const SF_API = `${API}/socialforge`;
 
@@ -789,6 +790,14 @@ export default function SocialForgePage() {
                 </div>
               </div>
 
+              <BestTimesPanel
+                platform={composePlatforms[0]}
+                onPick={(date, time) => {
+                  setComposeScheduleDate(date);
+                  setComposeScheduleTime(time);
+                }}
+              />
+
               {/* Schedule */}
               <div>
                 <label className="section-label" style={{ display: 'block', marginBottom: 6 }}>Schedule (optional)</label>
@@ -875,6 +884,10 @@ export default function SocialForgePage() {
         {!loading && tab === 'analytics' && (
           <div>
             <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', marginBottom: 16 }}>Analytics</h2>
+
+            <div style={{ marginBottom: 16 }}>
+              <BestTimesPanel />
+            </div>
 
             {/* Overview KPIs */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">

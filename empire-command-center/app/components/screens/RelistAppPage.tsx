@@ -6,9 +6,10 @@ import {
   BarChart3, Search, Package, RefreshCw, ShoppingCart, DollarSign,
   TrendingUp, AlertTriangle, ExternalLink, Plus, Eye, Heart,
   ArrowRight, Clock, CheckCircle, Loader2, Link, Target, Tag,
-  Calculator, Activity, Filter, ChevronRight, Globe, Star, Crown, Zap, Lock
+  Calculator, Activity, Filter, ChevronRight, Globe, Star, Crown, Zap, Lock, Shield
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
+import SaleDetectionSection from '../relist/SaleDetectionSection';
 
 const RA_API = `${API}/relist`;
 
@@ -18,6 +19,7 @@ const NAV = [
   { id: 'deals', label: 'AI Deal Finder', icon: Target },
   { id: 'listings', label: 'My Listings', icon: Package },
   { id: 'crosslist', label: 'Cross-List', icon: Link },
+  { id: 'salesdetect', label: 'Sale Detection', icon: Shield },
   { id: 'orders', label: 'Orders', icon: ShoppingCart },
   { id: 'pricemon', label: 'Price Monitor', icon: TrendingUp },
   { id: 'services', label: 'Services', icon: Activity },
@@ -49,6 +51,7 @@ export default function RelistAppPage({ initialSection }: RelistAppPageProps) {
       case 'deals': return <DealsSection />;
       case 'listings': return <ListingsSection />;
       case 'crosslist': return <CrossListSection />;
+      case 'salesdetect': return <SaleDetectionSection />;
       case 'orders': return <OrdersSection />;
       case 'pricemon': return <PriceMonitorSection />;
       case 'services': return <ServicesSection />;
