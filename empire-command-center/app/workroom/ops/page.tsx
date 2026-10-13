@@ -10,6 +10,7 @@ interface DailyAction {
   detail: string;
   entity_type: string;
   entity_id: string;
+  href?: string;
   priority: "urgent" | "high" | "medium";
 }
 
@@ -200,11 +201,12 @@ export default function OpsPage() {
             ) : (
               <div className="bg-white rounded-xl shadow-sm border border-black/5 overflow-hidden divide-y divide-gray-100">
                 {dailyActions.actions.map((action, i) => (
-                  <div
+                  <a
                     key={`${action.entity_type}-${action.entity_id}-${i}`}
+                    href={action.href || `/?screen=${action.entity_type === "invoice" ? "invoices" : action.entity_type === "work_order" ? "jobs" : action.entity_type}&id=${action.entity_id}`}
                     className={`flex items-center justify-between px-5 py-4 gap-4 ${
                       i % 2 === 1 ? "bg-gray-50/50" : ""
-                    }`}
+                    } hover:bg-amber-50/80`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="text-xl flex-shrink-0">{action.icon}</span>
@@ -222,7 +224,7 @@ export default function OpsPage() {
                     >
                       {action.priority}
                     </span>
-                  </div>
+                  </a>
                 ))}
               </div>
             )}

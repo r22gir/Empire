@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS lf_leads (
     next_action TEXT,
     next_action_date TEXT,
     last_contacted TEXT,
+    customer_id TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -168,6 +169,18 @@ CREATE TABLE IF NOT EXISTS lf_followup_queue (
 def _init_tables():
     with _db() as conn:
         conn.executescript(_SCHEMA)
+        # Existing DBs created before customer_id was on lf_leads.
+        try:
+            conn.execute("ALTER TABLE lf_leads ADD COLUMN customer_id TEXT")
+        except Exception:
+            pass
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_leads_email ON lf_leads(email)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_leads_status ON lf_leads(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_leads_business ON lf_leads(business_unit)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_leads_customer ON lf_leads(customer_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_leads_updated ON lf_leads(updated_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_activities_lead ON lf_activities(lead_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lf_followup_scheduled ON lf_followup_queue(scheduled_for, sent)")
 
 
 _init_tables()
@@ -644,7 +657,7 @@ def promote_lead_to_forgecrm(lead_id: int):
                (lead_id, type, channel, subject, content, ai_generated, status,
                 scheduled_at, completed_at)
                VALUES (?,?,?,?,?,?,?, NULL, datetime('now'))""",
-            (lead_id, "forge_crm_promoted", "internal",
+            (lead_id, "note", "internal",
              f"Promoted lead #{lead_id} to ForgeCRM customer {customer_id}",
              f"dedupe_outcome={dedupe_outcome}; customer_id={customer_id}; "
              f"business={business}; phone_digits={phone_digits or 'none'}",

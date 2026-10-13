@@ -238,9 +238,16 @@ CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to);
 CREATE INDEX IF NOT EXISTS idx_activity_task ON task_activity(task_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_type ON contacts(type);
 CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);
+CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
+CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
+CREATE INDEX IF NOT EXISTS idx_customers_business ON customers(business);
 CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
+CREATE INDEX IF NOT EXISTS idx_invoices_quote ON invoices(quote_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_due ON invoices(due_date);
+CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON invoices(created_at);
 CREATE INDEX IF NOT EXISTS idx_payments_invoice ON payments(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_payments_customer ON payments(customer_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
 CREATE INDEX IF NOT EXISTS idx_inventory_category ON inventory_items(category);
@@ -248,6 +255,10 @@ CREATE INDEX IF NOT EXISTS idx_inventory_business ON inventory_items(business);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_customer ON jobs(customer_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_scheduled ON jobs(scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_jobs_quote ON jobs(quote_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_desk ON tasks(status, desk);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_priority_created ON tasks(status, priority, created_at);
 CREATE INDEX IF NOT EXISTS idx_saved_patterns_shape ON saved_patterns(shape_type);
 CREATE INDEX IF NOT EXISTS idx_saved_patterns_customer ON saved_patterns(customer_id);
 CREATE INDEX IF NOT EXISTS idx_saved_patterns_job ON saved_patterns(job_id);
@@ -458,6 +469,10 @@ def init_database():
     with get_db() as conn:
         conn.executescript(SCHEMA_SQL)
         print(f"✓ Task Engine database initialized at {DB_PATH}")
+        # invoices.job_id is added by later migrations; index only if the column exists.
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(invoices)").fetchall()}
+        if "job_id" in cols:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_invoices_job ON invoices(job_id)")
 
         # v6.0 Pipeline columns (additive migration — safe to re-run)
         _migrate_pipeline_columns(conn)

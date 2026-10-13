@@ -28,6 +28,10 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
   const [tgStatus, setTgStatus] = useState<{ configured: boolean } | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [contextData, setContextData] = useState<any>(null);
+  const [dailyActions, setDailyActions] = useState<Array<{
+    type: string; icon: string; label: string; detail: string;
+    entity_type: string; entity_id: string; href?: string; priority: string;
+  }>>([]);
 
   const safeFetch = useCallback(async (url: string) => {
     try { const r = await fetch(url); if (!r.ok) return null; return await r.json(); } catch { return null; }
@@ -37,6 +41,25 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
   const toggle = (key: string) => setCollapsed(c => ({ ...c, [key]: !c[key] }));
 
   // (Tasks moved to dedicated WorkroomPage Tasks tab)
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API}/lifecycle/daily-actions`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!cancelled && data?.actions) setDailyActions(data.actions);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const openDailyAction = (action: { entity_type: string; href?: string }) => {
+    if (action.entity_type === 'quote') onScreenChange('quote');
+    else if (action.entity_type === 'invoice') onScreenChange('invoices');
+    else if (action.entity_type === 'work_order' || action.entity_type === 'job') onScreenChange('jobs');
+    else if (action.entity_type === 'customer') onModuleClick('empire-crm');
+    else if (action.href && typeof window !== 'undefined') window.location.href = action.href;
+  };
 
   // Fetch context-specific data based on active view
   const fetchContextData = useCallback(async () => {
@@ -160,6 +183,32 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
 
   return (
     <aside className="w-full h-full bg-[var(--panel)] flex flex-col shrink-0 overflow-y-auto p-3 gap-3" style={{ maxWidth: 320 }}>
+
+      {/* ── DAILY BRIEF (deep-links to quote / job / invoice / client) ── */}
+      {dailyActions.length > 0 && (
+        <div>
+          <span className="section-label">Today</span>
+          <div className="flex flex-col gap-1.5 mt-1">
+            {dailyActions.slice(0, 6).map((action, i) => (
+              <button
+                key={`${action.entity_type}-${action.entity_id}-${i}`}
+                type="button"
+                onClick={() => openDailyAction(action)}
+                className="text-left empire-card cursor-pointer"
+                style={{ padding: '8px 10px' }}
+              >
+                <div className="flex items-start gap-2">
+                  <span className="text-[13px] shrink-0">{action.icon}</span>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold text-[var(--text)] truncate">{action.label}</div>
+                    <div className="text-[10px] text-[var(--muted)] truncate">{action.detail}</div>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── QUALITY GATE ── */}
       <QualityGateWidget collapsed={!!collapsed.quality} onToggle={() => toggle('quality')} />
