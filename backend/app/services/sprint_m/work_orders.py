@@ -307,6 +307,12 @@ def list_organizer_jobs(status: str | None = None, limit: int = 50) -> list[dict
         jobs = []
         for row in rows:
             job = row_to_dict(row)
+            job_id = job["id"]
+            items = conn.execute(
+                "SELECT * FROM sm_job_items WHERE job_id = ? ORDER BY line_number",
+                (job_id,),
+            ).fetchall()
+            job["items"] = [_hydrate_item(row_to_dict(i)) for i in items]
             job["photos"] = _parse_json(job.pop("photos_json", "[]"), [])
             job["fabric_codes"] = _parse_json(job.pop("fabric_codes_json", "[]"), [])
             job["measurements"] = _parse_json(job.pop("measurements_json", "{}"), {})

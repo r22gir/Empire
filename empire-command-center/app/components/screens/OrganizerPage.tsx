@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, CheckCircle2, ClipboardList, CreditCard, DollarSign,
   FileText, MessageSquare, Plus, Scale, Scissors, Shield, Smartphone,
@@ -168,6 +168,8 @@ export default function OrganizerPage() {
   const [familyForm, setFamilyForm] = useState({ requester: 'juan', message: 'Pedir ayuda a Max — need a fix on the measurement drawing' });
   const [actualLabor, setActualLabor] = useState('380');
   const [actualMaterials, setActualMaterials] = useState('2100');
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedJob?.id || null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -185,13 +187,17 @@ export default function OrganizerPage() {
       setRuleRows(rulesRes.rules || []);
       setAlerts(alertsRes.alerts || []);
       setFamilyStatus(alertsRes.status || dash.family_alert_status);
-      if (!selectedJob && jobsRes.jobs?.[0]) setSelectedJob(jobsRes.jobs[0]);
+      if (jobsRes.jobs?.[0]) {
+        const currentId = selectedIdRef.current;
+        const next = jobsRes.jobs.find(j => j.id === currentId) || jobsRes.jobs[0];
+        setSelectedJob(next);
+      }
     } catch (exc: any) {
       setError(exc?.message || 'Organizer unavailable');
     } finally {
       setLoading(false);
     }
-  }, [selectedJob]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -414,6 +420,11 @@ export default function OrganizerPage() {
                   </div>
                   <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>{job.customer_name} · {job.style || '—'}</div>
                   <div style={{ fontSize: 11, color: '#888' }}>{(job.fabric_codes || []).join(', ') || 'No fabric code'} · due {job.due_date || '—'}</div>
+                  {(job.items || [])[0]?.measurements && (
+                    <div style={{ fontSize: 11, color: '#16a34a', marginTop: 2 }}>
+                      {Object.entries((job.items || [])[0].measurements || {}).map(([k, v]) => `${k} ${v.display}`).join(' · ')}
+                    </div>
+                  )}
                 </button>
               ))}
             </Card>

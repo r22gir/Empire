@@ -112,6 +112,8 @@ def test_work_order_from_approved_quote_carries_fields(isolated):
     assert item["fabric_code"] == "V639-Navy Velvet"
     assert item["measurements"]["width"]["display"] == "84 1/2 in"
     assert item["measurements"]["height"]["display"] == "96 1/4 in"
+    listed = client.get("/api/v1/sprint-m/jobs").json()["jobs"]
+    assert listed[0]["items"][0]["measurements"]["width"]["display"] == "84 1/2 in"
     assert isolated["sprint_db"].exists()
     assert not Path("/data/ed/family-help/ed/help.db").exists() or isolated["help_db"] != Path("/data/ed/family-help/ed/help.db")
 
