@@ -288,7 +288,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
               minHeight: 44, minWidth: 44,
             }}
           >
-            <Plus size={14} /> New
+            <Plus size={14} /> {t('max.new_chat')}
           </button>
           <button
             onClick={onClose}
@@ -347,7 +347,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              placeholder="Search chats..."
+              placeholder={family ? 'Buscar chats...' : 'Search chats...'}
               style={{
                 flex: 1, background: '#1a1a1a', border: '1px solid #333',
                 borderRadius: 6, padding: '8px 10px', color: '#fff', fontSize: 13,

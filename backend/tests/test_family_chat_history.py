@@ -172,6 +172,8 @@ def test_chat_screen_historial_and_family_skip_inbox_calls():
     assert "max.historial" in screen
     assert "RecentChatsList" in screen
     assert "isEmptyConversation" in screen
+    assert "isFamilyEdition" in screen
+    assert "{maxStatus && !family && (" in screen
     assert "isFamilyEdition" in panel
     assert "fetchTelegramChats" in panel
     assert "if (family)" in panel
