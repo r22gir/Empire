@@ -252,6 +252,8 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
     ...SHARED_ARCHITECTURE,
     ...DESIGN_IMAGES,
     ...SHARED_REPORTS,
+    { title: "Willard CST-23 3D Assembly Review & Spec", path: "docs/woodcraft/WILLARD_CST23_3D_ASSEMBLY_REVIEW.md", type: "spec", description: "Willard CST-23 curved banquette 3D assembly, layers, channel sizing, 8-sheet CNC nest & open items" },
+    { title: "Willard CST-23 CNC Cut Schedule (8 Sheets)", path: "docs/woodcraft/WILLARD_CST23_CNC_CUT_SCHEDULE.md", type: "spec", description: "CNC production cut schedule (8 sheets, 25 parts) linking to /workspace/willard_cst23_rev/" },
     { title: "CraftForge Status Report (Mar 8)", path: "docs/CRAFTFORGE_STATUS_2026-03-08.md", type: "report", description: "CraftForge current status — March 8, 2026" },
     { title: "WoodCraft Module README", path: "modules/craft/README.md", type: "readme", description: "CNC routing, 3D printing, woodworking" },
     { title: "CraftForge Spec", path: "docs/CRAFTFORGE_SPEC.md", type: "spec", description: "AI-powered wood design & CNC platform" },
