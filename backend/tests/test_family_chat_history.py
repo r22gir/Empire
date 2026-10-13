@@ -259,6 +259,12 @@ def test_tests_never_point_at_live_data_root():
     assert "Dry-run by default" in migrate
     assert "--apply" in migrate
     assert "never delete" in migrate.lower() or "not deleted" in migrate
+    assert "EMPIRE_EDITION" in migrate
+    assert "--edition" in migrate
+    assert "Never runs automatically" in migrate
+    assert "if __name__ == \"__main__\"" in migrate
+    main_py = (ROOT / "backend" / "app" / "main.py").read_text(encoding="utf-8")
+    assert "migrate_founder_chats" not in main_py
 
 
 def _write_founder_chat(tmp_path, chat_id, title="Chat de Juan"):
@@ -377,6 +383,79 @@ def test_founder_migration_is_dry_run_until_apply(tmp_path, monkeypatch):
     skipped = json.loads(again.stdout)
     assert skipped["copied"] == 0
     assert skipped["skipped"] == 1
+
+
+def test_founder_migration_reads_edition_env_and_skips_short_ids(tmp_path, monkeypatch):
+    _family_env(monkeypatch, tmp_path, "amp")
+    monkeypatch.setenv("AMP_OWNER_EMAIL", "juan@example.com")
+    short_id = "30ea0046"
+    full_id = "30ea0046-2bc9-461c-8215-5793e12874cd"
+    _write_founder_chat(tmp_path, short_id, "Corto")
+    _write_founder_chat(tmp_path, full_id, "Completo")
+    chats_root = tmp_path / "chats"
+    script = ROOT / "backend" / "scripts" / "migrate_founder_chats.py"
+    env = {
+        **os.environ,
+        "EMPIRE_EDITION": "amp",
+        "AMP_OWNER_EMAIL": "juan@example.com",
+        "EMPIRE_DATA_DIR": str(tmp_path),
+    }
+    dry = subprocess.run(
+        [sys.executable, str(script), "--dir", str(chats_root)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(ROOT / "backend"),
+    )
+    plan = json.loads(dry.stdout)
+    assert plan["dry_run"] is True
+    assert plan["edition"] == "amp"
+    assert plan["skipped_short_id"] == 1
+    assert plan["would_copy"] == 1
+    short_item = next(item for item in plan["items"] if item["id"] == short_id)
+    assert short_item["short_id_duplicate"] is True
+    assert short_item["would_copy"] is False
+    applied = subprocess.run(
+        [sys.executable, str(script), "--dir", str(chats_root), "--edition", "amp", "--apply"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(ROOT / "backend"),
+    )
+    report = json.loads(applied.stdout)
+    assert report["edition"] == "amp"
+    assert report["copied"] == 1
+    dest = chats_root / "juan_at_example.com"
+    assert (dest / f"{full_id}.json").is_file()
+    assert not (dest / f"{short_id}.json").exists()
+
+
+def test_migrate_script_edition_flag_overrides_env(tmp_path, monkeypatch):
+    _family_env(monkeypatch, tmp_path, "amp")
+    monkeypatch.setenv("AMP_OWNER_EMAIL", "owner@example.com")
+    monkeypatch.setenv("MAXINE_LEGACY_CHAT_EMAIL", "camilo@example.com")
+    _write_founder_chat(tmp_path, "eeeeeeee-ffff-0000-1111-222222222222")
+    script = ROOT / "backend" / "scripts" / "migrate_founder_chats.py"
+    env = {
+        **os.environ,
+        "EMPIRE_EDITION": "amp",
+        "AMP_OWNER_EMAIL": "owner@example.com",
+        "MAXINE_LEGACY_CHAT_EMAIL": "camilo@example.com",
+        "EMPIRE_DATA_DIR": str(tmp_path),
+    }
+    dry = subprocess.run(
+        [sys.executable, str(script), "--dir", str(tmp_path / "chats"), "--edition", "maxine"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(ROOT / "backend"),
+    )
+    plan = json.loads(dry.stdout)
+    assert plan["edition"] == "maxine"
+    assert plan["target_email"] == "camilo@example.com"
 
 
 def test_put_on_legacy_id_copies_forward_without_touching_founder(monkeypatch, tmp_path):

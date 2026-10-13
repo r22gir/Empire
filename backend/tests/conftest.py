@@ -49,11 +49,14 @@ import pytest
 # See tests/_live_data_guard.py. There is no opt-out marker for this layer.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _live_data_guard as _ldg  # noqa: E402
+import _outbound_send_guard as _osg  # noqa: E402
 
 _LIVE_WATCH_BEFORE = _ldg.fingerprint()  # stat-only, before anything runs
 _TEST_TMP_ROOT = Path(tempfile.mkdtemp(prefix=f"empire_test_pid{os.getpid()}_"))
 _LIVE_GUARD_LOG = _TEST_TMP_ROOT / "live_data_violations.log"
 _REDIRECTED_ENV = _ldg.redirect_env(_TEST_TMP_ROOT)
+_osg.neutralize_send_env()
+_osg.install_network_tripwires()
 _ldg.write_sitecustomize(_TEST_TMP_ROOT)
 _ldg.install(str(_LIVE_GUARD_LOG))
 
@@ -717,8 +720,23 @@ _ISOLATED_ENV_NAMES = (
     "EMPIRE_BRAIN_DIR", "MAX_MEMORY_PATH", "OPENCLAW_DB_PATH", "EMPIRE_TEST_GUARD_LOG",
     "EMPIRE_MAX_JOURNAL_DB", "EMPIRE_MAX_JOURNAL_ARCHIVE", "COST_TRACKER_DB",
     "MAX_IMPROVE_SPEC_DIR", "VOICE_DOC_SESSIONS_PATH", "CHAT_BACKUP_DIR",
+    "FAMILY_ALERT_ENABLED",
 )
 _ISOLATED_ENV = {n: os.environ[n] for n in _ISOLATED_ENV_NAMES if n in os.environ}
+
+
+@pytest.fixture(autouse=True)
+def _force_outbound_send_fakes(monkeypatch):
+    """SMTP constants stay empty; WhatsApp/SMS alerts record instead of sending."""
+    _osg.install_fakes(monkeypatch)
+    start = len(_osg.violations)
+    yield
+    new = _osg.violations[start:]
+    if new:
+        pytest.fail(
+            "test reached a live email/WhatsApp/SMS send:\n  " + "\n  ".join(new[:10]),
+            pytrace=False,
+        )
 
 
 @pytest.fixture(autouse=True)
