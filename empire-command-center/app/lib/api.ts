@@ -79,6 +79,15 @@ export type SellablePackageId =
   | 'pkg_empire'
   | 'pkg_apostille_only';
 
+export async function businessopsInfo(): Promise<{ public_signup_enabled?: boolean }> {
+  const res = await fetch(`${API}/businessops/info`, { cache: 'no-store' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail || `BusinessOps info failed (${res.status})`);
+  }
+  return body;
+}
+
 export async function businessopsSignup(payload: {
   email: string;
   password: string;

@@ -34,6 +34,7 @@ Prefix: /api/v1/businessops
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -43,6 +44,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.db import database
+from app.services.accounts.founder import FounderAuthError, assert_founder
 from app.services.business.entitlements import check_entitlement
 from app.services.business.isolation import (
     assert_tenant_owns_business,
@@ -60,6 +62,29 @@ from app.services.business.stripe_checkout import (
 
 
 router = APIRouter(prefix="/businessops", tags=["BusinessOps"])
+
+# Public self-serve signup writes prospect tenants to the live DB.
+# Locked until launch. Founder PIN unlocks internal use.
+PUBLIC_SIGNUP_ENABLED_ENV = "BUSINESSOPS_PUBLIC_SIGNUP_ENABLED"
+
+
+def public_signup_enabled() -> bool:
+    return os.getenv(PUBLIC_SIGNUP_ENABLED_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _require_public_or_founder_signup(request: Request) -> None:
+    """404 when public signup is off and the caller is not the founder."""
+    if public_signup_enabled():
+        return
+    try:
+        assert_founder(request.headers.get("X-Founder-Pin"))
+    except FounderAuthError:
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -416,6 +441,7 @@ def businessops_info():
         "sellable_packages": ["pkg_starter", "pkg_growth", "pkg_empire", "pkg_apostille_only"],
         "never_sold": ["pkg_founder"],
         "stripe_mode": "test_sandbox_only",
+        "public_signup_enabled": public_signup_enabled(),
     }
 
 
@@ -848,8 +874,13 @@ def get_tenant(tenant_id: str, request: Request):
 # ── self-serve signup + Stripe TEST checkout ───────────────────
 
 @router.post("/signup")
-def self_serve_signup(req: SignupRequest):
-    """Create a prospect business + tenant + owner + pending subscription."""
+def self_serve_signup(req: SignupRequest, request: Request):
+    """Create a prospect business + tenant + owner + pending subscription.
+
+    Public writes are off until launch (BUSINESSOPS_PUBLIC_SIGNUP_ENABLED).
+    Founder PIN (X-Founder-Pin) is required for internal use when the flag is off.
+    """
+    _require_public_or_founder_signup(request)
     with _bo_db() as conn:
         return signup_self_serve(
             conn,

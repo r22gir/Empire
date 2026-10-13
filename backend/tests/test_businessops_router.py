@@ -46,6 +46,23 @@ def test_info_endpoint(client):
     assert body["phase"] == 2
     assert body["never_sold"] == ["pkg_founder"]
     assert body["stripe_mode"] == "test_sandbox_only"
+    assert body["public_signup_enabled"] is False
+
+
+def test_anonymous_signup_is_404_until_launch(client):
+    r = client.post(
+        "/api/v1/businessops/signup",
+        json={
+            "email": "anon@public.test",
+            "password": "password12",
+            "display_name": "Anon",
+            "business_name": "Should Not Land",
+            "package_id": "pkg_starter",
+        },
+    )
+    assert r.status_code == 404
+    listed = client.get("/api/v1/businessops/businesses")
+    assert listed.json()["total"] == 0
 
 
 def test_health_endpoint_after_init(client):
