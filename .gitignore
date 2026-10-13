@@ -51,6 +51,12 @@ backend/data/journey_review_queue.json
 # Environment files with secrets
 .env.local
 
+# Tenant-local identity / secrets — never commit
+client_aliases.json
+**/client_aliases.json
+business.json
+**/business.json
+
 # OAuth credentials (Gmail, Google API)
 credentials.json
 token.json

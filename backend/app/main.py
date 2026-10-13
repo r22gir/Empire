@@ -180,6 +180,8 @@ load_router("app.routers.payments", "/api/v1", ["payments"])
 load_router("app.routers.crypto_checkout", "/api/v1", ["crypto-checkout"])
 load_router("app.routers.emails", "/api/v1", ["emails"])
 load_router("app.routers.customer_mgmt", "/api/v1", ["crm"])
+load_router("app.routers.crm_messaging", "/api/v1", ["crm-messaging"])
+load_router("app.routers.accounting_connectors", "/api/v1", ["accounting"])
 load_router("app.routers.inventory", "/api/v1", ["inventory"])
 # load_router("app.routers.jobs", "/api/v1", ["jobs"])  # replaced by jobs_unified
 load_router("app.routers.jobs_unified", "/api/v1", ["jobs-unified"])
