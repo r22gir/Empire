@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BusinessTab, ScreenMode, EcosystemProduct } from './lib/types';
-import { AMP_HIDDEN_NAV, editionFromEnv, homeProductForEdition } from './lib/edition';
+import { AMP_HIDDEN_NAV, editionFromEnv, homeProductForEdition, isFamilyEdition } from './lib/edition';
 import { API_BASE } from './lib/api';
 import { useChat } from './hooks/useChat';
 import { useSystemData } from './hooks/useSystemData';
@@ -807,9 +807,11 @@ export default function CommandCenter() {
         {/* Right panel moved into left nav as Dashboard tab */}
       </div>
 
-      <div className="hidden md:block">
-        <BottomBar services={sys.services} />
-      </div>
+      {!isFamilyEdition() && (
+        <div className="hidden md:block">
+          <BottomBar services={sys.services} />
+        </div>
+      )}
 
       <DocViewerHost />
 

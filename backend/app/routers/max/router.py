@@ -2554,6 +2554,40 @@ def family_search_failure_response(tool_entry=None) -> ChatResponse:
     )
 
 
+def _attach_family_request_offer(request: ChatRequest, response: ChatResponse) -> ChatResponse:
+    """Offer to file a family-help ticket. Never files without the user's Sí tap."""
+    if request.desk or not _is_family_edition():
+        return response
+    skill = (response.metadata or {}).get("skill_used")
+    if skill == "family_help":
+        return response
+    try:
+        from app.services.family_help import FAMILY_REQUEST_OFFER, family_request_offer
+    except Exception:
+        return response
+    offer = family_request_offer(request.message or "")
+    if not offer:
+        return response
+    text = response.response or ""
+    if FAMILY_REQUEST_OFFER not in text:
+        text = (text.rstrip() + "\n\n" + FAMILY_REQUEST_OFFER).strip()
+    meta = dict(response.metadata or {})
+    meta["family_request_offer"] = offer
+    response.response = text
+    response.metadata = meta
+    return response
+
+
+def _family_request_offer_for_stream(message: str) -> dict | None:
+    if not _is_family_edition():
+        return None
+    try:
+        from app.services.family_help import family_request_offer
+    except Exception:
+        return None
+    return family_request_offer(message or "")
+
+
 def _stream_immediate_response(response: ChatResponse, conversation_id: str | None = None) -> StreamingResponse:
     async def gen():
         cleaned_response = sanitize_output(_sanitize_internal_leakage_text(response.response))
@@ -2590,18 +2624,14 @@ def _attachment_upload_path(image_filename: str | None) -> Path | None:
     images-only lookup falsely returned IMAGE_NOT_AVAILABLE.
 
     Family editions only search data_root()/uploads (EMPIRE_DATA_DIR), never
-    the Workroom ~/empire-repo or ~/empire-data upload trees.
+    the Workroom ~/empire-repo or ~/empire-data upload trees. Encoded
+    names (spaces, parentheses, accents) are decoded before lookup.
     """
     if not image_filename:
         return None
-    safe = Path(image_filename).name
-    roots = [data_root() / "uploads"]
-    candidates: list[Path] = []
-    for root in roots:
-        for cat in _UPLOAD_CATEGORIES:
-            candidates.append(root / cat / safe)
-        candidates.append(root / safe)
-    return next((path for path in candidates if path.exists() and path.is_file()), None)
+    from app.services.uploads.chat_uploads import resolve_uploaded_file, upload_search_roots
+
+    return resolve_uploaded_file(image_filename, roots=upload_search_roots())
 
 
 def _image_upload_path(image_filename: str | None) -> Path | None:
@@ -2849,12 +2879,12 @@ async def _chat_with_max_service_impl(
     link_intel = await _link_intelligence_response(request)
     if link_intel is not None:
         link_intel.response = sanitize_output(_sanitize_internal_leakage_text(link_intel.response))
-        return link_intel
+        return _attach_family_request_offer(request, link_intel)
 
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
         direct_route.response = sanitize_output(_sanitize_internal_leakage_text(direct_route.response))
-        return direct_route
+        return _attach_family_request_offer(request, direct_route)
 
     # EmpireDell GPU stability lock — warn on risky GPU/kernel/apt queries
     gpu_guard = _maybe_handle_gpu_safety_request(request)
@@ -4065,11 +4095,11 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
     link_intel = await _link_intelligence_response(request)
     if link_intel is not None:
         link_intel.response = sanitize_output(_sanitize_internal_leakage_text(link_intel.response))
-        return _stream_immediate_response(link_intel, request.conversation_id)
+        return _stream_immediate_response(_attach_family_request_offer(request, link_intel), request.conversation_id)
 
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
-        return _stream_immediate_response(direct_route, request.conversation_id)
+        return _stream_immediate_response(_attach_family_request_offer(request, direct_route), request.conversation_id)
 
     # EmpireDell GPU stability lock — warn on risky GPU/kernel/apt queries
     gpu_guard = _maybe_handle_gpu_safety_request(request)
@@ -4891,6 +4921,11 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                 full_response = scrub_internal_sources(full_response)
             except Exception:
                 pass
+            _family_offer = None if request.desk else _family_request_offer_for_stream(request.message or "")
+            if _family_offer:
+                from app.services.family_help import FAMILY_REQUEST_OFFER
+                if FAMILY_REQUEST_OFFER not in (full_response or ""):
+                    full_response = ((full_response or "").rstrip() + "\n\n" + FAMILY_REQUEST_OFFER).strip()
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
             conversation_tracker.add_message(conv_id, "assistant", full_response)
@@ -4907,11 +4942,15 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
             except Exception as _flag_err:
                 logger.debug("[stream] quality flag logging failed: %s", _flag_err)
 
+            _done_meta = _response_metadata(request.channel)
+            if _family_offer:
+                _done_meta = dict(_done_meta or {})
+                _done_meta["family_request_offer"] = _family_offer
             _done_data = {
                 'type': 'done',
                 'model_used': resolve_display_model_used(model_used, request.model),
                 'conversation_id': conv_id,
-                'metadata': _response_metadata(request.channel),
+                'metadata': _done_meta,
             }
             if _stream_step_lines:
                 _done_data['steps'] = _stream_step_lines

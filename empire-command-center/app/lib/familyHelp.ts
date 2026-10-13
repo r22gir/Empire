@@ -45,6 +45,9 @@ export type HelpUsage = {
   note?: string;
 };
 
+export type { FamilyRequestType } from './familyHelpRequest';
+export { FAMILY_REQUEST_OFFER, classifyFamilyRequest, familyRequestOffer } from './familyHelpRequest';
+
 export type HelpTicket = {
   id: string;
   edition: string;
@@ -55,6 +58,7 @@ export type HelpTicket = {
   attachments_hidden?: boolean;
   attachments_revealed?: boolean;
   attachment_count?: number;
+  request_type?: string;
   context?: Array<{ role: string; content: string }>;
   status: HelpStatus;
   created_at: string;
@@ -125,6 +129,7 @@ export async function createHelpTicket(input: {
   voice?: Blob | null;
   voiceName?: string;
   language?: string | null;
+  requestType?: string | null;
 }): Promise<{ ok: boolean; ticket?: HelpTicket; detail?: string }> {
   const rejected: string[] = [];
   const kept: File[] = [];
@@ -146,6 +151,7 @@ export async function createHelpTicket(input: {
   body.append('message', input.message || '');
   body.append('history_json', JSON.stringify(input.history || []));
   if (input.language) body.append('language', input.language);
+  if (input.requestType) body.append('request_type', input.requestType);
   if (input.voice) {
     body.append('voice', input.voice, input.voiceName || 'recording.webm');
   }

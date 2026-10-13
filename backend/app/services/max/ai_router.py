@@ -641,13 +641,9 @@ class AIRouter:
     CODE_EXTS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.sh', '.yaml', '.yml'}
 
     def _find_file(self, filename: str) -> Optional[Path]:
-        safe = Path(filename).name
-        for root in self.upload_dirs:
-            for cat in ['images', 'documents', 'audio', 'other', 'code']:
-                path = root / cat / safe
-                if path.exists() and path.is_file():
-                    return path
-        return None
+        from app.services.uploads.chat_uploads import resolve_uploaded_file
+
+        return resolve_uploaded_file(filename, roots=self.upload_dirs)
 
     def _find_image(self, filename: str) -> Optional[Path]:
         return self._find_file(filename)

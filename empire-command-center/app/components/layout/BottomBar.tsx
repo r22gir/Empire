@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ExternalLink, ChevronUp, ChevronDown, Newspaper, Power } from 'lucide-react';
 import { API } from '../../lib/api';
+import { isFamilyEdition } from '../../lib/edition';
 
 interface Props {
   services?: any;
@@ -26,6 +27,7 @@ export default function BottomBar({ services }: Props) {
 
   // Poll Ollama status
   useEffect(() => {
+    if (isFamilyEdition()) return;
     const check = () => {
       fetch(API + '/system/ollama/status')
         .then(r => r.ok ? r.json() : null)
