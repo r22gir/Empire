@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Mic, MicOff, Send, Monitor, Square, MessageSquare, Sparkles, Wifi, WifiOff } from 'lucide-react';
 
 import InlineDrawing from '../InlineDrawing';
+import LiveVoiceCall from '../LiveVoiceCall';
 
 import { API } from '../../lib/api';
 
@@ -251,9 +252,11 @@ function ModeToggle({ mode, onChange }: { mode: PresentationMode; onChange: (m: 
 export default function PresentationScreen() {
   const [mode, setMode] = useState<PresentationMode>(() => {
     if (typeof window !== 'undefined') {
-      return (localStorage.getItem('empire-presentation-mode') as PresentationMode) || 'text';
+      const fromUrl = new URLSearchParams(window.location.search).get('mode');
+      if (fromUrl === 'presentation' || fromUrl === 'compact' || fromUrl === 'text') return fromUrl;
+      return (localStorage.getItem('empire-presentation-mode') as PresentationMode) || 'presentation';
     }
-    return 'text';
+    return 'presentation';
   });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -779,6 +782,8 @@ export default function PresentationScreen() {
           isThinking={isLoading}
         />
       )}
+
+      <LiveVoiceCall />
 
       <style>{`
         @keyframes dot-bounce {
