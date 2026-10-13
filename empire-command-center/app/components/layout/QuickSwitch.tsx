@@ -20,6 +20,21 @@ const SECTIONS = [
   { label: 'Pricing Studio', shortcut: 'Z', screen: 'pricing-studio', icon: Scissors, color: '#16a34a' },
   { label: 'RelistApp', shortcut: 'L', screen: 'relist', icon: ShoppingBag, color: '#b8960c' },
   { label: 'ApostApp', shortcut: 'A', screen: 'apostapp', icon: FileText, color: '#b8960c' },
+  { label: 'ForgeCRM', shortcut: 'E', screen: 'crm', icon: FileText, color: '#b8960c' },
+  { label: 'LeadForge', shortcut: 'N', screen: 'leadforge', icon: FileText, color: '#16a34a' },
+  { label: 'SocialForge', shortcut: 'S', screen: 'socialforge', icon: FileText, color: '#ec4899' },
+  { label: 'MarketForge', shortcut: 'B', screen: 'marketforge', icon: ShoppingBag, color: '#2563eb' },
+  { label: 'VendorOps', shortcut: 'O', screen: 'vendorops', icon: FileText, color: '#0d9488' },
+  { label: 'SupportForge', shortcut: 'U', screen: 'supportforge', icon: FileText, color: '#7c3aed' },
+  { label: 'ShipForge', shortcut: 'H', screen: 'shipforge', icon: FileText, color: '#2563eb' },
+  { label: 'ArchiveForge', shortcut: 'I', screen: 'archiveforge', icon: FileText, color: '#06b6d4' },
+  { label: 'ContractorForge', shortcut: 'J', screen: 'contractorforge', icon: Hammer, color: '#d97706' },
+  { label: 'LuxeForge', shortcut: 'U2', screen: 'luxeforge', icon: FileText, color: '#7c3aed' },
+  { label: 'Drawing Studio', shortcut: 'I2', screen: 'drawing-studio', icon: FileText, color: '#b8960c' },
+  { label: 'AI Desks', shortcut: 'K2', screen: 'desks', icon: ListTodo, color: '#7c3aed' },
+  { label: 'Jobs', shortcut: 'J2', screen: 'jobs', icon: ListTodo, color: '#16a34a' },
+  { label: 'Invoices', shortcut: 'N2', screen: 'invoices', icon: FileText, color: '#2563eb' },
+  { label: 'Daily Ops', shortcut: '1', screen: 'daily-ops', icon: BarChart3, color: '#7c3aed' },
 ];
 
 interface Props {

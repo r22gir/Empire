@@ -32,7 +32,6 @@ import MarketForgePage from './components/screens/MarketForgePage';
 import ContractorForgePage from './components/screens/ContractorForgePage';
 import SupportForgePage from './components/screens/SupportForgePage';
 import EmpireAssistPage from './components/screens/EmpireAssistPage';
-import LeadForgePage from './components/screens/LeadForgePage';
 import ApostAppPage from './components/screens/ApostAppPage';
 import ShipForgePage from './components/screens/ShipForgePage';
 import VetForgePage from './components/screens/VetForgePage';
@@ -99,6 +98,20 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
 
 const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'pricing-studio': 'pricing-studio',
+  quote: 'quote',
+  quotes: 'quote',
+  jobs: 'jobs',
+  invoices: 'invoices',
+  desks: 'desks',
+  tasks: 'tasks',
+  inbox: 'inbox',
+  chat: 'chat',
+  tickets: 'tickets',
+  shipping: 'shipping',
+  costs: 'costs',
+  telegram: 'telegram',
+  presentation: 'presentation',
+  'business-profile': 'business-profile',
 };
 
 // Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
@@ -108,8 +121,49 @@ const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
 // activeProduct === 'apost' rather than a specific ScreenMode).
 const PRODUCT_DEEP_LINKS: Partial<Record<string, EcosystemProduct>> = {
   apostapp: 'apost',
+  apost: 'apost',
   llc: 'llc',
   llcfactory: 'llc',
+  crm: 'crm',
+  forgecrm: 'crm',
+  lead: 'lead',
+  leadforge: 'lead',
+  social: 'social',
+  socialforge: 'social',
+  market: 'market',
+  marketforge: 'market',
+  ship: 'ship',
+  shipforge: 'ship',
+  support: 'support',
+  supportforge: 'support',
+  vendorops: 'vendorops',
+  archive: 'archive',
+  archiveforge: 'archive',
+  contractor: 'contractor',
+  contractorforge: 'contractor',
+  luxe: 'luxe',
+  luxeforge: 'luxe',
+  drawings: 'drawings',
+  drawing: 'drawings',
+  'drawing-studio': 'drawings',
+  craft: 'craft',
+  woodcraft: 'craft',
+  workroom: 'workroom',
+  relist: 'relist',
+  relistapp: 'relist',
+  vision: 'vision',
+  construction: 'construction',
+  storefront: 'storefront',
+  transcript: 'transcript',
+  transcriptforge: 'transcript',
+  recovery: 'recovery',
+  recoveryforge: 'recovery',
+  platform: 'platform',
+  openclaw: 'openclaw',
+  assist: 'assist',
+  pay: 'pay',
+  amp: 'amp',
+  owner: 'owner',
 };
 
 export default function CommandCenter() {
@@ -408,6 +462,14 @@ export default function CommandCenter() {
     else if (screen === 'recovery') { setActiveProduct('recovery'); setActiveScreen('dashboard'); }
     else if (screen === 'relist') { setActiveProduct('relist'); setActiveScreen('dashboard'); }
     else if (screen === 'apost-page' || screen === 'apostapp') { setActiveProduct('apost'); setActiveScreen('dashboard'); }
+    else if (screen === 'daily-ops') { window.location.href = '/workroom/ops'; return; }
+    else if (PRODUCT_DEEP_LINKS[screen]) {
+      const product = PRODUCT_DEEP_LINKS[screen]!;
+      setActiveProduct(product);
+      setActiveScreen(product === 'owner' ? 'chat' : 'dashboard');
+    } else if (SCREEN_DEEP_LINKS[screen]) {
+      setActiveScreen(SCREEN_DEEP_LINKS[screen]!);
+    }
     else handleScreenChange(screen);
   }, [activeProduct, activeScreen, activeSection, handleScreenChange, pushHistory]);
 

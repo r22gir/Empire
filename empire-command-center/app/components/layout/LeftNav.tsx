@@ -8,7 +8,7 @@ import {
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, ListTodo, Receipt, Briefcase,
 } from 'lucide-react';
 
 interface NavItem {
@@ -48,6 +48,8 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04', kind: 'product' },
       // Daily Summary is the inline Dashboard panel (rightPanel) — toggled, not navigated.
       { id: 'daily-summary', name: 'Daily Summary', icon: <LayoutDashboard size={16} />, status: 'active', color: '#7c3aed', kind: 'daily-summary' },
+      { id: 'desks', name: 'AI Desks', icon: <Bot size={16} />, status: 'active', color: '#7c3aed', screen: 'desks', kind: 'screen' },
+      { id: 'tasks', name: 'Tasks', icon: <ListTodo size={16} />, status: 'active', color: '#d97706', screen: 'tasks', kind: 'screen' },
     ],
   },
   {
@@ -65,6 +67,8 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'contractor', name: 'ContractorForge', icon: <Wrench size={16} />, status: 'active', color: '#d97706', kind: 'product' },
       { id: 'lead', name: 'LeadForge', icon: <Target size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
       { id: 'crm', name: 'ForgeCRM', icon: <Users size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
+      { id: 'jobs', name: 'Jobs', icon: <Briefcase size={16} />, status: 'active', color: '#16a34a', screen: 'jobs', kind: 'screen' },
+      { id: 'invoices', name: 'Invoices', icon: <Receipt size={16} />, status: 'active', color: '#2563eb', screen: 'invoices', kind: 'screen' },
       { id: 'pay', name: 'EmpirePay', icon: <Wallet size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
       // Patch B: Pricing Studio is the operator's revenue/quoting engine.
       // It was previously hidden in the collapsed Tools group. Moved here

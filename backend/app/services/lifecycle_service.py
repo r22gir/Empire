@@ -8,9 +8,29 @@ import json
 import uuid
 import logging
 from datetime import datetime
+from typing import Optional
 from app.db.database import get_db
 
 logger = logging.getLogger(__name__)
+
+
+# Command Center home deep-links. Screens ignore `id=` today; the href still
+# opens the right surface (quote review, jobs, invoices, ForgeCRM).
+_CC_HREF = {
+    "quote": "/?screen=quote&id={id}",
+    "invoice": "/?screen=invoices&id={id}",
+    "work_order": "/?screen=jobs&id={id}",
+    "job": "/?screen=jobs&id={id}",
+    "customer": "/?screen=crm&id={id}",
+}
+
+
+def command_center_href(entity_type: str, entity_id: Optional[str] = None) -> str:
+    """Return a Command Center home URL for a lifecycle entity."""
+    template = _CC_HREF.get(entity_type or "")
+    if not template:
+        return "/?screen=dashboard"
+    return template.format(id=entity_id or "")
 
 
 def _audit_log(conn, entity_type, entity_id, action, field=None, old=None, new=None, by="system", reason=None):
@@ -409,6 +429,7 @@ def get_daily_actions() -> dict:
                 "label": f"Send quote to {d['customer_name']}",
                 "detail": f"{d['quote_number']} — ${d.get('total', 0):,.2f}",
                 "entity_type": "quote", "entity_id": d["id"],
+                "href": command_center_href("quote", d["id"]),
             })
 
         # 2. Approved quotes needing deposit
@@ -425,6 +446,7 @@ def get_daily_actions() -> dict:
                 "label": f"Collect deposit from {a['customer_name']}",
                 "detail": f"${round(a.get('total', 0) * 0.5, 2):,.2f} on {a['quote_number']}",
                 "entity_type": "quote", "entity_id": a["id"],
+                "href": command_center_href("quote", a["id"]),
             })
 
         # 3. Approved quotes without work orders
@@ -441,6 +463,7 @@ def get_daily_actions() -> dict:
                 "label": f"Create work order for {n['customer_name']}",
                 "detail": n["quote_number"],
                 "entity_type": "quote", "entity_id": n["id"],
+                "href": command_center_href("quote", n["id"]),
             })
 
         # 4. Overdue invoices
@@ -459,6 +482,7 @@ def get_daily_actions() -> dict:
                 "label": f"Overdue: {o.get('customer_name', 'Unknown')}",
                 "detail": f"Invoice #{o.get('invoice_number')} — ${o.get('balance_due', 0):,.2f}",
                 "entity_type": "invoice", "entity_id": o["id"],
+                "href": command_center_href("invoice", o["id"]),
             })
 
         # 5. Complete work orders ready for invoicing
@@ -475,6 +499,7 @@ def get_daily_actions() -> dict:
                 "label": f"Invoice {c['customer_name']} — work complete",
                 "detail": c["work_order_number"],
                 "entity_type": "work_order", "entity_id": c["id"],
+                "href": command_center_href("work_order", c["id"]),
             })
 
     # Sort by priority
