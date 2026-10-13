@@ -5,10 +5,14 @@ import { useEffect, useState } from 'react';
 export default function ApostilleConfirmationContent() {
   const [orderId, setOrderId] = useState('');
   const [testMode, setTestMode] = useState(true);
+  const [sessionId, setSessionId] = useState('');
+  const [canceled, setCanceled] = useState(false);
 
   useEffect(function () {
     var params = new URLSearchParams(window.location.search);
     setOrderId(params.get('order_id') || '');
+    setSessionId(params.get('session_id') || '');
+    setCanceled(params.get('canceled') === '1');
     fetch('/api/v1/apostapp/public/config')
       .then(function (r) { return r.json(); })
       .then(function (d) { setTestMode(d.test_mode); })
@@ -27,9 +31,15 @@ export default function ApostilleConfirmationContent() {
         <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#dcfce7', color: '#16a34a', fontSize: 32, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
           ✓
         </div>
-        <h1 style={{ fontSize: 28, fontWeight: 900, margin: 0 }}>Request received</h1>
+        <h1 style={{ fontSize: 28, fontWeight: 900, margin: 0 }}>
+          {sessionId ? 'Payment received (test mode)' : canceled ? 'Checkout canceled' : 'Request received'}
+        </h1>
         <p style={{ fontSize: 15, color: '#525252', marginTop: 8 }}>
-          Thank you. We have your apostille request and will review your documents within 1 business day.
+          {sessionId
+            ? 'Stripe test checkout completed. We have your apostille request and will review your documents within 1 business day.'
+            : canceled
+              ? 'No charge was made. Your request is still on file — you can pay later or track the order below.'
+              : 'Thank you. We have your apostille request and will review your documents within 1 business day.'}
         </p>
       </div>
 
@@ -48,7 +58,7 @@ export default function ApostilleConfirmationContent() {
         <h2 style={{ fontSize: 16, fontWeight: 'bold', marginTop: 0, marginBottom: 8 }}>What happens next</h2>
         <ol style={{ margin: 0, paddingLeft: 20, fontSize: 14, color: '#404040', lineHeight: 1.6 }}>
           <li>We review your documents and confirm eligibility (1 business day).</li>
-          <li>We email you with submission instructions and any clarifications.</li>
+          <li>Status emails are drafted for the owner to approve — they are never auto-sent.</li>
           <li>We submit to the issuing authority.</li>
           <li>When the apostille is issued, we ship it back to you.</li>
         </ol>

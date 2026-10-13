@@ -286,7 +286,10 @@ body:has([data-intake-page]) {
 }
 
 /* Allow scrolling on the private owner review pages (/review/addons) */
-body:has([data-review-page]) {
+body:has([data-review-page]),
+/* Public Link-in-Bio + LeadForge quote intake */
+body:has([data-bio-page]),
+body:has([data-quote-intake-page]) {
   overflow: auto;
   height: auto;
 }
