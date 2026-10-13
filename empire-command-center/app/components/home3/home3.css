@@ -22,6 +22,12 @@
   background: rgba(20, 16, 8, 0.72); color: #fff; font: 600 11px/1 var(--v-sans);
   padding: 6px 10px; cursor: pointer; z-index: 2;
 }
+.mh-face-note {
+  margin-top: 8px; border: 0; background: none; padding: 0;
+  color: var(--v-mut); font: 500 11.5px/1.35 var(--v-sans);
+  cursor: pointer; text-align: center; max-width: 176px;
+}
+.mh-face-note:hover { color: var(--v-ink); }
 .mh-minutes { margin-top: 6px; font: 500 10px/1 var(--v-mono); color: var(--v-mut); letter-spacing: 0.04em; }
 .mh-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; align-items: center; }
 .mh-hero-btn { height: 40px !important; padding: 0 16px !important; font-size: 14px !important; font-weight: 600 !important; }
@@ -139,6 +145,7 @@ html[data-theme="gold"] .mh-greet em { font-style: italic; }
   .mh-orbcol .v3-orb { width: 84px; height: 84px; }
   .mh-face, .mh-face iframe { width: 84px; height: 84px; }
   .mh-face-tap { font-size: 9px; padding: 4px 7px; inset: auto 2px 18px; }
+  .mh-face-note { max-width: 140px; font-size: 10.5px; }
   .mh-hero-actions { grid-column: 1 / -1; }
   .mh-quick { grid-column: 1 / -1; }
   .mh-orbcol .v3-wave { display: none; }
