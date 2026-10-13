@@ -156,6 +156,8 @@ load_router("app.routers.social_setup", "/api/v1", ["social-setup"])
 
 # Avatar / Presentation Mode
 load_router("app.routers.avatar", "/api/v1", ["avatar"])
+load_router("app.routers.simli_avatar", "/api/v1", ["simli-avatar"])
+load_router("app.routers.voice_documents", "/api/v1", ["voice-documents"])
 
 # RecoveryForge — Layer 3 classifier status/control
 load_router("app.routers.recovery", "/api/v1", ["recovery"])

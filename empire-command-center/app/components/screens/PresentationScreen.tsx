@@ -5,6 +5,7 @@ import { Mic, MicOff, Send, Monitor, Square, MessageSquare, Sparkles, Wifi, Wifi
 import InlineDrawing from '../InlineDrawing';
 
 import { API } from '../../lib/api';
+import { LIP_SYNC_OFFSET_MS, playbackDelayMs } from '../../lib/simliLipsync';
 
 type PresentationMode = 'presentation' | 'compact' | 'text';
 
@@ -262,10 +263,13 @@ export default function PresentationScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [sessionCost, setSessionCost] = useState(0);
   const [connected, setConnected] = useState(false);
+  const [lipSyncDelayMs, setLipSyncDelayMs] = useState(LIP_SYNC_OFFSET_MS);
+  const [avatarRenderer, setAvatarRenderer] = useState<'simli' | 'talkinghead'>('talkinghead');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const playTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Persist mode
   useEffect(() => {
@@ -301,6 +305,26 @@ export default function PresentationScreen() {
     return () => clearInterval(iv);
   }, []);
 
+  // Simli mouth lags local TTS by the compose buffer (~220 ms).
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const resp = await fetch(`${API}/avatar/simli/lipsync`, { signal: AbortSignal.timeout(3000) });
+        if (resp.ok) {
+          const cfg = await resp.json();
+          setLipSyncDelayMs(playbackDelayMs(cfg));
+        }
+      } catch { /* keep compiled default */ }
+      try {
+        const st = await fetch(`${API}/avatar/simli/status`, { signal: AbortSignal.timeout(3000) });
+        if (!st.ok) return;
+        const body = await st.json();
+        if (body.renderer === 'simli' && body.enabled) setAvatarRenderer('simli');
+      } catch { /* TalkingHead is the heard track */ }
+    };
+    load();
+  }, []);
+
   // Auto-scroll
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -317,13 +341,31 @@ export default function PresentationScreen() {
 
   const playAudio = useCallback((audioB64: string) => {
     if (!audioB64) return;
+    if (playTimerRef.current) {
+      clearTimeout(playTimerRef.current);
+      playTimerRef.current = null;
+    }
     const audio = new Audio(`data:audio/mp3;base64,${audioB64}`);
     audioRef.current = audio;
     setIsSpeaking(true);
     audio.onended = () => setIsSpeaking(false);
     audio.onerror = () => setIsSpeaking(false);
-    audio.play().catch(() => setIsSpeaking(false));
-  }, []);
+    // Face starts immediately. Heard speech is delayed only for Simli
+    // (TalkingHead speakAudio is already locked to its own mouth).
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'speak-audio', audio: audioB64, lipSyncOffsetMs: lipSyncDelayMs },
+      window.location.origin,
+    );
+    const start = () => {
+      audio.muted = avatarRenderer !== 'simli';
+      audio.play().catch(() => setIsSpeaking(false));
+    };
+    if (avatarRenderer === 'simli' && lipSyncDelayMs > 0) {
+      playTimerRef.current = setTimeout(start, lipSyncDelayMs);
+    } else {
+      start();
+    }
+  }, [lipSyncDelayMs, avatarRenderer]);
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
@@ -365,10 +407,6 @@ export default function PresentationScreen() {
       if (mode === 'presentation') {
         if (data.audio) {
           playAudio(data.audio);
-          // Send audio to avatar for lip-sync
-          iframeRef.current?.contentWindow?.postMessage(
-            { type: 'speak-audio', audio: data.audio }, '*'
-          );
           setSessionCost(prev => prev + 0.015); // ~$0.015 per TTS call
         } else if (assistMsg.content) {
           // No audio — use TalkingHead's built-in TTS for lip-sync
@@ -446,9 +484,6 @@ export default function PresentationScreen() {
               if (mode === 'presentation') {
                 if (data.audio) {
                   playAudio(data.audio);
-                  iframeRef.current?.contentWindow?.postMessage(
-                    { type: 'speak-audio', audio: data.audio }, '*'
-                  );
                   setSessionCost(prev => prev + 0.015);
                 } else if (data.response) {
                   iframeRef.current?.contentWindow?.postMessage(
@@ -526,9 +561,6 @@ export default function PresentationScreen() {
             if (mode === 'presentation') {
               if (data.audio) {
                 playAudio(data.audio);
-                iframeRef.current?.contentWindow?.postMessage(
-                  { type: 'speak-audio', audio: data.audio }, '*'
-                );
                 setSessionCost(prev => prev + 0.015);
               } else if (data.response) {
                 iframeRef.current?.contentWindow?.postMessage(
