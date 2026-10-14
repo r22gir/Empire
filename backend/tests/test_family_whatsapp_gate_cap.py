@@ -380,8 +380,8 @@ def test_tutorial_routes_linked_from_dashboard_and_help():
     dashboard = (root / "empire-command-center" / "app" / "amp" / "dashboard" / "page.tsx").read_text(encoding="utf-8")
     amp_nav = (root / "empire-command-center" / "app" / "components" / "amp" / "AmpNav.tsx").read_text(encoding="utf-8")
     dashboard_screen = (root / "empire-command-center" / "app" / "components" / "screens" / "DashboardScreen.tsx").read_text(encoding="utf-8")
-    assert 'href="/amp/whatsapp"' in help_menu
     assert 'href="/ayuda/whatsapp"' in help_menu
+    assert "/amp/whatsapp" not in help_menu
     assert 'href: \'/amp/whatsapp\'' in dashboard or 'href: "/amp/whatsapp"' in dashboard
     assert "/ayuda/whatsapp" in dashboard
     assert "/amp/whatsapp" in amp_nav
