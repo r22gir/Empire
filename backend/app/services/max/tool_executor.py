@@ -823,6 +823,18 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                 )
             logger.info(f"PIN verified — executing dangerous tool '{tool_name}'")
 
+        # Shadow confidence: log only. Never blocks or rewrites the tool.
+        try:
+            from app.services.max.confidence import record_tool_action
+
+            record_tool_action(
+                tool_name,
+                tool_call.get("parameters") if isinstance(tool_call, dict) else {},
+                known=tool_name in TOOL_REGISTRY,
+            )
+        except Exception:
+            pass
+
         # Tier check
         from app.middleware.tier_middleware import require_tool
         tier_error = require_tool(tool_name)

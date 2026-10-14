@@ -1695,12 +1695,25 @@ async def default_text_handler(text: str, wa_id: str) -> str:
     if is_link_or_article_message(body):
         logger.info("WhatsApp inbound routed to read-and-summarize (link/article)")
         try:
+            from app.services.max.confidence import record_whatsapp_route
+
+            record_whatsapp_route(body, "article_link")
+        except Exception:
+            pass
+        try:
             return await max_chat(body, wa_id)
         except Exception:
             logger.warning("WhatsApp link-intelligence chat failed", exc_info=True)
             return "Could not read that link. Nothing sent."
     if is_frustration_correction(body):
         logger.info("WhatsApp inbound treated as previous-answer miss")
+        try:
+            from app.services.max.confidence import mark_correction, record_whatsapp_route
+
+            mark_correction(body)
+            record_whatsapp_route(body, "frustration_reread", correction=True)
+        except Exception:
+            pass
         try:
             return await _reread_after_miss(body, wa_id)
         except Exception:
@@ -1729,6 +1742,12 @@ async def default_text_handler(text: str, wa_id: str) -> str:
         probe = extract_transcript(body)
         open_draft = active_session(_session_key(wa_id)) is not None
         if _belongs_to_voice_draft(body, probe, open_draft):
+            try:
+                from app.services.max.confidence import record_whatsapp_route
+
+                record_whatsapp_route(body, "quote_intake")
+            except Exception:
+                pass
             result = ingest_transcript(
                 body,
                 channel="whatsapp",
@@ -1749,6 +1768,17 @@ async def default_text_handler(text: str, wa_id: str) -> str:
             return photo_reply
     except Exception:
         logger.warning("WhatsApp photo-status reply failed", exc_info=True)
+    try:
+        from app.services.max.confidence import record_whatsapp_route
+
+        path = "other"
+        if body.endswith("?"):
+            path = "question"
+        elif re.search(r"\b(?:create|make|generate|draw|queue|run)\b", body, re.I):
+            path = "task"
+        record_whatsapp_route(body, path)
+    except Exception:
+        pass
     try:
         return await max_chat(body, wa_id)
     except Exception:
