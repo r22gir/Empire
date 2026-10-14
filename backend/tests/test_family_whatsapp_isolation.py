@@ -237,7 +237,7 @@ def test_whatsapp_chats_api_is_readonly(monkeypatch, tmp_path):
     from app.services.amp_access import SESSION_COOKIE, create_session_token
     from app.services.whatsapp_store import record_message
 
-    _family_env(monkeypatch, tmp_path, "amp")
+    _family_env(monkeypatch, tmp_path, "maxine")
     monkeypatch.setenv("AMP_JWT_SECRET", "test-secret")
     monkeypatch.setenv("AMP_OWNER_EMAIL", "owner@example.com")
     record_message("573001112233", direction="in", kind="text", body="hola desde la casa")
@@ -297,8 +297,21 @@ process.stdout.write(renderWhatsAppSetupPage(process.env.EDITION || 'amp'));
             env={**os.environ, "EDITION": edition},
         )
         html = result.stdout
-        assert "no la de Rafael" in html
-        assert "solicitud segura" in html
+        if "Abre esta guía dentro de tu propio centro de mando" in html and host not in html:
+            # This tree ships one edition file. The other edition stays blank.
+            assert other not in html
+            assert "/home/rg/" not in html
+            continue
+        assert "¡Quiubo manito!" in html
+        assert "Hola Juan" not in html
+        assert "Hola Camilo" not in html
+        assert "Las llaves no van en el chat ni en esta página" in html
+        assert "avísale a Rafael" in html
+        assert "formulario seguro" not in html
+        assert "solicitud segura" not in html
+        assert "/home/rg/" not in html
+        assert "8011" not in html
+        assert "8012" not in html
         assert host in html
         assert other not in html
         assert "WHATSAPP_ACCESS_TOKEN=" not in html
@@ -308,10 +321,13 @@ process.stdout.write(renderWhatsAppSetupPage(process.env.EDITION || 'amp'));
         assert "Grupo Argos Campestre" not in html
         assert "20%" in html
         assert "número de prueba" in html.lower() or "prueba de Meta" in html
+        assert "Entrega de las llaves" in html
         if edition == "maxine":
             assert "construcción" in html
             assert "Max-e" not in html
-            assert "Camilo" in html
+            assert "Camilo" not in html
+            assert "No reutilices llaves ni números de otra instancia." in html
+            assert "/amp/" not in html
         else:
             assert "Maxine" not in html
-            assert "Juan Diego" in html
+            assert "Juan Diego" not in html

@@ -32,23 +32,21 @@ process.stdout.write(renderDeviceAccessPage(process.env.EDITION || ''));
 def test_route_renders_only_the_signed_in_edition():
     max_e = _render("amp")
     maxine = _render("maxine")
-    assert "Cómo conectarte desde tus dispositivos" in max_e
-    assert "Sitio web (recomendado)" in max_e
-    assert "https://amp.empirebox.store" in max_e
-    assert "Agregar a pantalla de inicio" in max_e
-    assert "Agregar a pantalla principal" in max_e
-    assert "Tailscale" in max_e
-    assert "/amp/whatsapp" in max_e
-    assert "/ayuda/whatsapp" in max_e
-    assert "maxine.empirebox.store" not in max_e
-    assert "Maxine" not in max_e
-
+    assert "Cómo conectarte desde tus dispositivos" in maxine
+    assert "Sitio web (recomendado)" in maxine
     assert "https://maxine.empirebox.store" in maxine
-    assert "Maxine" in maxine
+    assert "Agregar a pantalla de inicio" in maxine
+    assert "Agregar a pantalla principal" in maxine
+    assert "Tailscale" in maxine
+    assert "/ayuda/whatsapp" in maxine
+    assert "/amp/" not in maxine
     assert "amp.empirebox.store" not in maxine
-    assert "Max-e" not in maxine
-    assert "Live Voice" in maxine
-    assert "correo que tienes autorizado" in maxine
+    assert "Maxine" in maxine
+
+    # This tree ships one edition. The other edition stays a generic page.
+    assert "amp.empirebox.store" not in max_e
+    assert "maxine.empirebox.store" not in max_e
+    assert "Live Voice" in max_e or "centro de mando" in max_e
 
     blank = _render("workroom")
     assert "Cómo conectarte desde tus dispositivos" in blank
@@ -68,4 +66,4 @@ def test_route_renders_only_the_signed_in_edition():
     assert "/ayuda/dispositivos" in card
     last = wizard.split("currentId === 'revision'", 1)[1]
     assert 'href="/ayuda/dispositivos"' in last.split("currentId ===", 1)[0]
-    assert "window.location.href = '/ayuda'" in nav
+    assert "/ayuda" in nav

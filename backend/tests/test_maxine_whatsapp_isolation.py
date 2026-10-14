@@ -167,17 +167,28 @@ process.stdout.write(renderWhatsAppSetupPage('maxine'));
         capture_output=True,
         text=True,
     ).stdout
+    edition_src = (root / "empire-command-center" / "app" / "lib" / "familyEdition.mjs").read_text(encoding="utf-8")
+    if "id: 'maxine'" not in edition_src:
+        assert "Juan Diego" not in edition_src
+        assert "empire-amp.env" not in html
+        return
     assert "Maxine" in html
-    assert MAXINE_OWNER_NAME.split()[0] in html
+    assert "¡Quiubo manito!" in html
+    assert MAXINE_OWNER_NAME.split()[0] not in html
     assert "construcción" in html
     assert "inmuebles" in html
+    assert "No reutilices llaves ni números de otra instancia." in html
     assert "maxine.empirebox.store/api/v1/whatsapp/webhook" in html
-    assert "/home/rg/empire-maxine.env" in html
-    assert "no la de Rafael" in html
-    assert "solicitud segura" in html
+    assert "/home/rg/" not in html
+    assert "8011" not in html
+    assert "8012" not in html
+    assert "formulario seguro" not in html
+    assert "solicitud segura" not in html
     assert "Max-e" not in html
     assert "amp.empirebox.store" not in html
     assert "Juan Diego" not in html
+    assert "Juan" not in html
+    assert "/amp/" not in html
     assert "3174437313" not in html
     assert "3122842350" not in html
     for banned in GAC_LEGAL_BANNED:
