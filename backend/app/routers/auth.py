@@ -22,6 +22,7 @@ from app.utils.security import (
     create_access_token, create_refresh_token, decode_token,
 )
 from app.services import trusted_devices as devices
+from app.services.founder_access import email_is_founder_alias
 from app.services.studio_login_guard import (
     record_studio_login_failure,
     record_studio_login_success,
@@ -369,6 +370,18 @@ def _authenticate_studio(data: StudioLoginRequest) -> dict:
         return dict_row(row)
 
     if data.email and data.password:
+        if email_is_founder_alias(str(data.email)):
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT * FROM access_users WHERE role = 'founder' AND is_active = 1 LIMIT 1"
+                ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="No founder user found")
+            user = dict_row(row)
+            if not user.get("password_hash") or not verify_password(data.password, user["password_hash"]):
+                raise HTTPException(status_code=401, detail="Invalid email or password")
+            return user
+
         with get_db() as conn:
             row = conn.execute(
                 "SELECT * FROM access_users WHERE lower(email) = lower(?) AND is_active = 1",

@@ -451,6 +451,123 @@ def test_guard_ip_lock_does_not_trip_global_when_limits_differ():
     assert guard.check("203.0.113.1") is None
 
 
+def test_founder_access_emails_authenticate_as_founder(client, monkeypatch):
+    monkeypatch.setenv(
+        "FOUNDER_ACCESS_EMAILS",
+        "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
+    )
+    for addr in ("rafa22giraldo@gmail.com", "EmpireBox2026@gmail.com"):
+        client.cookies.clear()
+        r = client.post(
+            "/api/v1/auth/studio-login",
+            json={"email": addr, "password": "founder-pass"},
+        )
+        assert r.status_code == 200, (addr, r.text)
+        assert r.json()["user"]["id"] == "founder1"
+        assert r.json()["user"]["role"] == "founder"
+        assert r.json()["remember_offered"] is True
+
+
+def test_founder_alias_works_when_founder_email_empty(client, monkeypatch):
+    from app.db.database import get_db
+
+    monkeypatch.setenv(
+        "FOUNDER_ACCESS_EMAILS",
+        "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
+    )
+    with get_db() as conn:
+        conn.execute("UPDATE access_users SET email = NULL WHERE id = 'founder1'")
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "rafa22giraldo@gmail.com", "password": "founder-pass"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["id"] == "founder1"
+
+
+def test_founder_alias_without_password_hash_is_401(client, monkeypatch):
+    from app.db.database import get_db
+
+    monkeypatch.setenv("FOUNDER_ACCESS_EMAILS", "rafa22giraldo@gmail.com")
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE access_users SET email = NULL, password_hash = NULL WHERE id = 'founder1'"
+        )
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "rafa22giraldo@gmail.com", "password": "founder-pass"},
+    )
+    assert r.status_code == 401
+    assert r.json()["detail"] == "Invalid email or password"
+
+
+def test_set_founder_password_script_mocked(tmp_path, monkeypatch, capsys):
+    import importlib.util
+    import sqlite3
+
+    from app.services.founder_access import backup_sqlite, set_founder_password
+    from app.utils.security import verify_password
+
+    db = tmp_path / "founder_pw_test.db"
+    assert "studio_auth_test" not in str(db)
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE access_users (
+               id TEXT, name TEXT, role TEXT, email TEXT,
+               password_hash TEXT, is_active INTEGER, updated_at TEXT
+           )"""
+    )
+    conn.execute(
+        "INSERT INTO access_users VALUES ('f1','Founder','founder','',NULL,1,NULL)"
+    )
+    conn.execute(
+        "INSERT INTO access_users VALUES ('v1','Viewer','viewer','v@x.com','leave-me',1,NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv(
+        "FOUNDER_ACCESS_EMAILS",
+        "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
+    )
+    backup = backup_sqlite(db)
+    assert backup.is_file()
+    assert backup.read_bytes()  # copy of empty-hash founder
+    assert set_founder_password(db, "s3cret-founder") == 1
+
+    conn = sqlite3.connect(db)
+    founder = conn.execute(
+        "SELECT email, password_hash FROM access_users WHERE id = 'f1'"
+    ).fetchone()
+    viewer = conn.execute(
+        "SELECT password_hash FROM access_users WHERE id = 'v1'"
+    ).fetchone()
+    conn.close()
+    assert founder[0] == "rafa22giraldo@gmail.com"
+    assert founder[1]
+    assert founder[1] != "s3cret-founder"
+    assert verify_password("s3cret-founder", founder[1])
+    assert viewer[0] == "leave-me"
+
+    spec = importlib.util.spec_from_file_location(
+        "set_founder_password_cli",
+        Path(__file__).resolve().parents[1] / "scripts" / "set_founder_password.py",
+    )
+    cli = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(cli)
+    answers = iter(["s3cret-founder", "s3cret-founder"])
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="": next(answers))
+    assert cli.main(["--db", str(db)]) == 0
+    captured = capsys.readouterr()
+    assert "s3cret-founder" not in captured.out
+    assert "s3cret-founder" not in captured.err
+    assert "Rows updated: 1" in captured.out
+    assert "Backup:" in captured.out
+    live = Path(__file__).resolve().parents[1] / "data" / "empire.db"
+    assert live.resolve() != Path(db).resolve()
+
+
 def test_guard_lock_message_includes_remaining_time():
     assert "15 minutes" in format_remaining(15 * 60)
     assert "1 second" in format_remaining(1)
