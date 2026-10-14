@@ -16,6 +16,7 @@ from math import gcd
 from app.config.fabric_cut_allowance import (
     CONFIRM_WITH_RAFAEL,
     NEEDS_FOAM_THICKNESS,
+    fabric_dimension_in,
     lookup_fabric_allowance,
 )
 
@@ -120,19 +121,22 @@ def generate_cut_list(model) -> dict:
                 ),
             })
         else:
+            fw = fabric_dimension_in(width, extra)
+            fl = fabric_dimension_in(length, extra)
             note = (
                 f"Fabric cut — labeled separately. "
-                f"Allowance {format_cut_inches(extra)} from the foam-thickness table"
+                f"Allowance {format_cut_inches(extra)} per side "
+                f"(wood + 2 × allowance; Rafael 2026-10-14) from the foam-thickness table"
             )
             if allowance.get("status") == CONFIRM_WITH_RAFAEL:
-                note += " (confirm with Rafael)"
+                note += " (allowance unconfirmed)"
             note += "."
             fabric.append({
                 "name": f"{name} fabric",
                 "qty": 1,
-                "width": width + extra,
-                "length": length + extra,
-                "size": _size(width + extra, length + extra),
+                "width": fw,
+                "length": fl,
+                "size": _size(fw, fl),
                 "label": FABRIC_LABEL,
                 "note": note,
             })

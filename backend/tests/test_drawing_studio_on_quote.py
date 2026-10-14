@@ -86,10 +86,10 @@ def test_cut_list_fabric_allowance_from_foam_thickness_table():
     assert cuts["foam_thickness_in"] == 2.0
     assert cuts["fabric_allowance_in"] == extra
     assert cuts["fabric_allowance_status"] == CONFIRM_WITH_RAFAEL
-    assert fabric["width"] == wood["width"] + extra
-    assert fabric["length"] == wood["length"] + extra
-    assert fabric["size"] == '27 1/2" × 101"'
-    assert "confirm with Rafael" in fabric["note"]
+    assert fabric["width"] == wood["width"] + 2 * extra
+    assert fabric["length"] == wood["length"] + 2 * extra
+    assert fabric["size"] == '32 1/2" × 106"'
+    assert "allowance unconfirmed" in fabric["note"]
     assert "+" not in fabric["size"]
     assert "-" not in fabric["size"]
     assert "." not in fabric["size"]
@@ -148,8 +148,8 @@ def test_bench_api_passes_foam_thickness_into_fabric_cut():
     wood = cuts["wood"][0]
     fabric = cuts["fabric"][0]
     assert cuts["foam_thickness_in"] == 4.0
-    assert fabric["width"] == wood["width"] + extra
-    assert fabric["size"] == format_cut_inches(wood["width"] + extra) + " × " + format_cut_inches(wood["length"] + extra)
+    assert fabric["width"] == wood["width"] + 2 * extra
+    assert fabric["size"] == format_cut_inches(wood["width"] + 2 * extra) + " × " + format_cut_inches(wood["length"] + 2 * extra)
     assert "22 1/2" in wood["size"]
     assert "22-1/2" not in wood["size"]
 

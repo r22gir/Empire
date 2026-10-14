@@ -2732,6 +2732,48 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
     return None
 
 
+def _maybe_handle_quoteiq_request(request: ChatRequest, *, founder: bool = False) -> ChatResponse | None:
+    """Founder job-request chain. Cheap regex first; extract_transcript only after.
+
+    Lives after runtime-truth / health routing. Failures log as warning.
+    ``founder`` must be founder_session.current_verified() evaluated on the
+    request task after resolve_founder_session is applied. Body channel is
+    ignored. Fail closed when founder is not True.
+    """
+    if request.desk or request.image_filename:
+        return None
+    if founder is not True:
+        return None
+    text = request.message or ""
+    try:
+        from app.services.max.quoteiq_chain import looks_like_quote_request, try_handle_inbound
+    except Exception as exc:
+        logger.warning("quoteiq chain import failed: %s", exc, exc_info=True)
+        return None
+    if not looks_like_quote_request(text):
+        return None
+    try:
+        _qiq = try_handle_inbound(
+            text,
+            channel=request.channel or "web_cc",
+            desk=request.desk,
+            has_image=bool(request.image_filename),
+            founder=True,
+        )
+    except Exception as _qiq_err:
+        logger.warning("quoteiq chain failed: %s", _qiq_err, exc_info=True)
+        return None
+    if _qiq and _qiq.get("handled"):
+        return ChatResponse(
+            response=_qiq.get("reply_text") or "Draft ready. Not sent.",
+            model_used="quoteiq-chain",
+            fallback_used=False,
+            tool_results=_qiq.get("tool_results") or _qiq.get("steps") or [],
+            metadata=_response_metadata(request.channel, skill_used="quoteiq_chain"),
+        )
+    return None
+
+
 def _maybe_handle_gpu_safety_request(request: ChatRequest) -> ChatResponse | None:
     """Check if a message is about risky GPU/kernel/apt operations on EmpireDell.
 
@@ -3313,6 +3355,12 @@ async def _chat_with_max_service_impl(
             tool_results=[result.to_dict()],
             metadata=metadata,
         )
+
+    from app.services.max.founder_session import current_verified
+    quoteiq = _maybe_handle_quoteiq_request(request, founder=current_verified())
+    if quoteiq is not None:
+        quoteiq.response = sanitize_output(_sanitize_internal_leakage_text(quoteiq.response))
+        return quoteiq
 
     if not request.desk and not request.image_filename and should_clarify_inventory_request(request.message):
         return ChatResponse(
@@ -4635,6 +4683,14 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
             yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'empire-runtime-truth-check', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='empire_runtime_truth_check')})}\n\n"
 
         return StreamingResponse(runtime_truth_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    from starlette.concurrency import run_in_threadpool
+    from app.services.max.founder_session import current_verified
+    quoteiq = await run_in_threadpool(
+        _maybe_handle_quoteiq_request, request, founder=current_verified(),
+    )
+    if quoteiq is not None:
+        return _stream_immediate_response(quoteiq, request.conversation_id)
 
     if not request.desk and not request.image_filename and should_clarify_inventory_request(request.message):
         async def clarification_gen():

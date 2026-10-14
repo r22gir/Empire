@@ -1763,6 +1763,35 @@ async def default_text_handler(text: str, wa_id: str) -> str:
 
         probe = extract_transcript(body)
         open_draft = active_session(_session_key(wa_id)) is not None
+        if not open_draft:
+            try:
+                from app.services.max.quoteiq_chain import (
+                    is_quoteiq_whatsapp_founder,
+                    remember_whatsapp_session,
+                    try_handle_inbound,
+                )
+
+                _qiq = None
+                if is_quoteiq_whatsapp_founder(wa_id):
+                    _qiq = try_handle_inbound(
+                        body,
+                        channel="whatsapp",
+                        sender=wa_id,
+                        founder=True,
+                    )
+            except Exception:
+                logger.warning("WhatsApp QuoteIQ chain failed", exc_info=True)
+                _qiq = None
+            if _qiq and _qiq.get("handled"):
+                if _qiq.get("quote_id"):
+                    remember_whatsapp_session(wa_id, body, _qiq)
+                try:
+                    from app.services.max.confidence import record_whatsapp_route
+
+                    record_whatsapp_route(body, "quoteiq_chain")
+                except Exception:
+                    pass
+                return _outbound(_qiq.get("reply_text") or "Draft ready. Not sent.", _qiq)
         if _belongs_to_voice_draft(body, probe, open_draft):
             try:
                 from app.services.max.confidence import record_whatsapp_route
