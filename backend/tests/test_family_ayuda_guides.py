@@ -103,3 +103,7 @@ def test_static_ayuda_pages_open_with_manito():
     assert "/ayuda/empresa" in menu
     assert "/ayuda/empresa" in help_menu
     assert "renderEmpresaGuidePage" in empresa_page
+    if "Max-e arma cotizaciones" in voz:
+        assert "Maxine" not in voz
+        assert "lote 12" not in voz
+        assert "Cibernettic" in voz
