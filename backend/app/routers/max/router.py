@@ -2698,8 +2698,13 @@ def _maybe_handle_quoteiq_request(request: ChatRequest, *, founder: bool = False
     """Founder job-request chain. Cheap regex first; extract_transcript only after.
 
     Lives after runtime-truth / health routing. Failures log as warning.
+    ``founder`` must be founder_session.current_verified() evaluated on the
+    request task after resolve_founder_session is applied. Body channel is
+    ignored. Fail closed when founder is not True.
     """
     if request.desk or request.image_filename:
+        return None
+    if founder is not True:
         return None
     text = request.message or ""
     try:
@@ -2709,8 +2714,6 @@ def _maybe_handle_quoteiq_request(request: ChatRequest, *, founder: bool = False
         return None
     if not looks_like_quote_request(text):
         return None
-    if not founder:
-        return None
     try:
         _qiq = try_handle_inbound(
             text,
@@ -2718,7 +2721,6 @@ def _maybe_handle_quoteiq_request(request: ChatRequest, *, founder: bool = False
             desk=request.desk,
             has_image=bool(request.image_filename),
             founder=True,
-            chat_id=request.chat_id,
         )
     except Exception as _qiq_err:
         logger.warning("quoteiq chain failed: %s", _qiq_err, exc_info=True)
@@ -3316,7 +3318,8 @@ async def _chat_with_max_service_impl(
             metadata=metadata,
         )
 
-    quoteiq = _maybe_handle_quoteiq_request(request, founder=founder)
+    from app.services.max.founder_session import current_verified
+    quoteiq = _maybe_handle_quoteiq_request(request, founder=current_verified())
     if quoteiq is not None:
         quoteiq.response = sanitize_output(_sanitize_internal_leakage_text(quoteiq.response))
         return quoteiq
@@ -4637,7 +4640,10 @@ async def _chat_stream_impl(request: ChatRequest):
         return StreamingResponse(runtime_truth_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     from starlette.concurrency import run_in_threadpool
-    quoteiq = await run_in_threadpool(_maybe_handle_quoteiq_request, request, founder=founder)
+    from app.services.max.founder_session import current_verified
+    quoteiq = await run_in_threadpool(
+        _maybe_handle_quoteiq_request, request, founder=current_verified(),
+    )
     if quoteiq is not None:
         return _stream_immediate_response(quoteiq, request.conversation_id)
 

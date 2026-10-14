@@ -23,19 +23,27 @@ add-on is gone):
   Leftover board after whole channels is reported, never silently dropped.
 
 Fabric allowance table semantics (see fabric_cut_allowance.py):
-  ``allowance_in`` is the TOTAL extra added to EACH wood dimension
-  (wrap both faces + sew), not a per-side add. Starter wrap = 2×foam + 1" sew.
+  ``allowance_in`` is per side (Rafael 2026-10-14). Fabric = wood + 2 ×
+  allowance. Table amounts stay confirm_with_rafael until signed off.
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
 
-from app.config.fabric_cut_allowance import NEEDS_FOAM_THICKNESS, lookup_fabric_allowance
+from app.config.fabric_cut_allowance import (
+    CONFIRM_WITH_RAFAEL,
+    NEEDS_FOAM_THICKNESS,
+    fabric_dimension_in,
+    lookup_fabric_allowance,
+)
 from app.config.workroom_billing import BILLED_BY_EMPIRE
 from app.services.max.whatsapp_format import has_real_job_signals, is_link_or_article_message
 from app.services.pricing.dimensions import plain_fractions
@@ -124,10 +132,6 @@ _ITEM_TO_CATEGORY = {
 }
 
 _CATALOG_CATEGORIES = frozenset({"drapery", "roman_shade"})
-_FOUNDER_CHAT_CHANNELS = frozenset({
-    "web", "web_cc", "cc", "command_center", "command-center",
-    "dashboard", "studio_browser", "mobile_browser",
-})
 
 
 def _params(raw: Any) -> dict[str, Any]:
@@ -246,34 +250,63 @@ def looks_like_quote_request(message: str) -> bool:
     return True
 
 
+def quoteiq_whatsapp_founder_phones() -> frozenset[str]:
+    """WhatsApp QuoteIQ founder numbers only.
+
+    Sources: WHATSAPP_FOUNDER_PHONES and business.json founder_phones /
+    owner_phones. Not business_phone, not the phonebook, not is_allowlisted.
+    """
+    from app.services.max.whatsapp_channel import normalize_msisdn
+
+    raw: list[str] = []
+    env_phones = os.getenv("WHATSAPP_FOUNDER_PHONES") or ""
+    if env_phones.strip():
+        raw.extend(part.strip() for part in env_phones.split(",") if part.strip())
+    path = Path(__file__).resolve().parents[2] / "config" / "business.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        data = {}
+    for key in ("founder_phones", "owner_phones"):
+        extra = data.get(key) or []
+        if isinstance(extra, str):
+            extra = [extra]
+        if isinstance(extra, dict):
+            extra = list(extra.values())
+        if isinstance(extra, list):
+            for item in extra:
+                if isinstance(item, dict):
+                    raw.append(str(item.get("phone") or item.get("number") or item.get("wa_id") or ""))
+                else:
+                    raw.append(str(item))
+    return frozenset(n for n in (normalize_msisdn(item) for item in raw if str(item).strip()) if n)
+
+
+def is_quoteiq_whatsapp_founder(wa_id: str | None) -> bool:
+    from app.services.max.whatsapp_channel import normalize_msisdn
+
+    number = normalize_msisdn(wa_id)
+    if not number:
+        return False
+    allowed = quoteiq_whatsapp_founder_phones()
+    if number in allowed:
+        return True
+    tail = number[-10:]
+    return bool(tail) and any(item.endswith(tail) and len(tail) == 10 for item in allowed)
+
+
 def quoteiq_founder_allowed(
     *,
-    channel: str = "",
-    sender: Optional[str] = None,
     founder: Optional[bool] = None,
-    chat_id: Optional[str] = None,
+    **_ignored: Any,
 ) -> bool:
-    """Both entry points (WhatsApp + /chat) require founder identity."""
-    if founder is False:
-        return False
-    if founder is True:
-        return True
-    ch = (channel or "").strip().lower()
-    if ch == "whatsapp":
-        try:
-            from app.services.max.whatsapp_channel import is_allowlisted
+    """Fail closed unless the caller passed founder=True.
 
-            return is_allowlisted(sender)
-        except Exception:
-            return False
-    if ch in _FOUNDER_CHAT_CHANNELS:
-        return True
-    try:
-        from app.services.max.guardrails import is_founder_message
-
-        return is_founder_message({"channel": ch, "chat_id": chat_id or ""})
-    except Exception:
-        return False
+    Chat/stream must pass founder_session.current_verified() after
+    resolve_founder_session is applied. WhatsApp must pass the
+    founder-phones check. Body channel strings are never enough.
+    """
+    return founder is True
 
 
 def should_run_quoteiq_chain(
@@ -622,13 +655,19 @@ def _channel_cuts(intake: dict[str, Any], dims: dict[str, str]) -> tuple[list[di
     foam_th = _inches(intake.get("foam_thickness_in"))
     allowance = lookup_fabric_allowance(foam_th)
     extra = allowance.get("allowance_in")
+    status = allowance.get("status")
     wood = f"{_as_fraction(ch_w)} x {_as_fraction(ch_h)}"
     foam = wood
     if extra is None:
         fabric = NEEDS_FOAM_THICKNESS
     else:
-        # allowance_in = TOTAL extra on EACH wood dimension (wrap both faces + sew), not per-side.
-        fabric = f"{_as_fraction(ch_w + float(extra))} x {_as_fraction(ch_h + float(extra))}"
+        # allowance_in is per side (Rafael 2026-10-14): fabric = wood + 2 × allowance.
+        fabric = (
+            f"{_as_fraction(fabric_dimension_in(ch_w, extra))} x "
+            f"{_as_fraction(fabric_dimension_in(ch_h, extra))}"
+        )
+        if status == CONFIRM_WITH_RAFAEL:
+            fabric = f"{fabric} (allowance unconfirmed)"
     cuts = []
     for idx in range(count):
         cuts.append({
@@ -636,6 +675,7 @@ def _channel_cuts(intake: dict[str, Any], dims: dict[str, str]) -> tuple[list[di
             "wood_cut": wood,
             "foam_cut": foam,
             "fabric_cut": fabric,
+            "allowance_status": status,
         })
     meta = {
         "channel_count": count,
@@ -643,9 +683,11 @@ def _channel_cuts(intake: dict[str, Any], dims: dict[str, str]) -> tuple[list[di
         "channel_remainder": _as_fraction(remainder_in) if remainder_in > 1e-6 else "",
         "channel_remainder_note": remainder_note,
         "allowance_in": extra,
+        "allowance_status": status,
         "allowance_semantics": (
-            "allowance_in is the total extra added to each wood dimension "
-            "(wrap both faces + sew), not a per-side add."
+            "allowance_in is per side (Rafael 2026-10-14): fabric = wood + 2 × allowance. "
+            "Table amounts stay confirm_with_rafael until signed off. "
+            "Row status is surfaced; confirm_with_rafael is labeled unconfirmed."
         ),
     }
     return cuts, meta
@@ -689,17 +731,17 @@ def parse_job_dimensions(params: dict[str, Any]) -> dict[str, Any]:
         "channel_cuts": channels,
         "channel_remainder": channel_meta.get("channel_remainder") or "",
         "channel_remainder_note": channel_meta.get("channel_remainder_note") or "",
+        "allowance_status": channel_meta.get("allowance_status"),
         "channel_rules": [
             "Wood / board cut is true size with no add-ons.",
             "Foam cut equals the wood cut.",
             "Fabric cut is labeled separately. Allowance depends on foam thickness.",
-            "allowance_in is the total extra added to each wood dimension (wrap both faces + sew), not per-side.",
+            "allowance_in is per side (Rafael 2026-10-14): fabric = wood + 2 × allowance.",
             "Leftover board after whole channels is reported — never silently dropped.",
             "Never add 2 1/2\" or treat a 12\" channel as needing 18\".",
         ],
         "allowance_semantics": channel_meta.get("allowance_semantics") or (
-            "allowance_in is the total extra added to each wood dimension "
-            "(wrap both faces + sew), not a per-side add."
+            "allowance_in is per side (Rafael 2026-10-14): fabric = wood + 2 × allowance."
         ),
         "measurements_format": "fractions",
         "ask_founder": False,
@@ -1234,7 +1276,7 @@ def try_handle_inbound(
     chat_id: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """Shared WhatsApp/chat door. None when this is not a founder job request."""
-    if not quoteiq_founder_allowed(channel=channel, sender=sender, founder=founder, chat_id=chat_id):
+    if not quoteiq_founder_allowed(founder=founder):
         return None
     if not looks_like_quote_request(message):
         return None

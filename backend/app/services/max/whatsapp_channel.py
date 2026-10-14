@@ -1765,10 +1765,14 @@ async def default_text_handler(text: str, wa_id: str) -> str:
         open_draft = active_session(_session_key(wa_id)) is not None
         if not open_draft:
             try:
-                from app.services.max.quoteiq_chain import remember_whatsapp_session, try_handle_inbound
+                from app.services.max.quoteiq_chain import (
+                    is_quoteiq_whatsapp_founder,
+                    remember_whatsapp_session,
+                    try_handle_inbound,
+                )
 
                 _qiq = None
-                if is_allowlisted(wa_id):
+                if is_quoteiq_whatsapp_founder(wa_id):
                     _qiq = try_handle_inbound(
                         body,
                         channel="whatsapp",

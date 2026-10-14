@@ -7,6 +7,9 @@ def test_fraction_rule_in_style_directive():
     assert "Wood/board cut is true size with no add-ons" in STYLE_DIRECTIVE
     assert "Foam cut equals the wood cut" in STYLE_DIRECTIVE
     assert "Fabric cut is a separate labeled size" in STYLE_DIRECTIVE
+    assert "per side" in STYLE_DIRECTIVE
+    assert "wood + 2 × allowance" in STYLE_DIRECTIVE
+    assert "Rafael 2026-10-14" in STYLE_DIRECTIVE
     assert "quoteiq_chain" in STYLE_DIRECTIVE
     # Old add-on rule must stay gone.
     assert '12" channel as needing 18"' in STYLE_DIRECTIVE

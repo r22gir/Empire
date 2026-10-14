@@ -364,6 +364,7 @@ def test_quote_text_stays_on_the_draft_and_send_it_does_not_send(monkeypatch):
 
     monkeypatch.setattr(wa, "max_chat", _chat)
     monkeypatch.setattr(wa, "founder_documents", lambda pipeline: ([], ""))
+    monkeypatch.setenv("WHATSAPP_FOUNDER_PHONES", "15555550111")
     import asyncio
 
     def _shown(reply):
@@ -371,11 +372,11 @@ def test_quote_text_stays_on_the_draft_and_send_it_does_not_send(monkeypatch):
 
     first = asyncio.run(wa.default_text_handler(
         "Quote 3 roman shades 34 1/2 x 60 for kitchen",
-        _founder(),
+        "15555550111",
     ))
     shown = _shown(first)
     assert "Not sent" in shown or "not emailed" in shown.lower()
-    second = _shown(asyncio.run(wa.default_text_handler("send it", _founder())))
+    second = _shown(asyncio.run(wa.default_text_handler("send it", "15555550111")))
     assert mail == []
     assert "blocked" in second.lower() or "not emailed" in second.lower() or "not sent" in second.lower()
 

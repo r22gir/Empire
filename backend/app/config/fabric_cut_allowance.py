@@ -7,19 +7,22 @@ Rafael's rule
 - Fabric cut is a separately labeled size. Its allowance depends on foam
   thickness. There is no single fixed seam (never “+ 4" for every job”).
 
-Allowance table semantics (confirmed from this table)
------------------------------------------------------
-``allowance_in`` is the TOTAL extra inches added to EACH wood dimension
-(width and length), not a per-side add. Starter wrap = 2 × foam thickness
-+ 1" sew (wrap both faces + sew). Example: 2" foam → allowance_in = 5
-(2×2 + 1). A 12" × 18" wood cut with 2" foam becomes a 17" × 23" fabric
-cut. Never treat the number as "per side" (that would double it).
+Allowance table semantics
+-------------------------
+``allowance_in`` is the extra inches on EACH SIDE of a wood dimension.
+Fabric cut = wood + 2 × allowance_in (both sides). Confirmed by Rafael
+2026-10-14. The table *amounts* stay ``confirm_with_rafael`` until he
+signs a row off.
+
+Starter wrap used to pick the numbers: 2 × foam thickness + 1" sew.
+Example: 2" foam → allowance_in = 5. A 12" × 18" wood cut becomes
+22" × 28" fabric (12 + 2×5, 18 + 2×5). Fractions only when printed.
 
 How to edit
 -----------
 Add, remove, or change rows in FABRIC_CUT_ALLOWANCE_BY_FOAM_THICKNESS.
-Each row is inches of foam → extra inches added to EACH wood dimension
-(width and length) to produce the fabric cut.
+Each row is inches of foam → extra inches added to EACH SIDE of EACH
+wood dimension.
 
 ``status``:
   - ``confirm_with_rafael`` — default starter row, not signed off
@@ -32,8 +35,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-# Extra inches added to each wood dimension for the fabric cut.
-# Starter wrap = 2 × foam thickness + 1" sew. All defaults are unconfirmed.
+# Extra inches on EACH SIDE of each wood dimension (Rafael 2026-10-14).
+# Fabric = wood + 2 × allowance_in. Starter wrap numbers = 2 × foam + 1" sew.
+# Row amounts stay confirm_with_rafael until signed off.
 FABRIC_CUT_ALLOWANCE_BY_FOAM_THICKNESS: list[dict[str, Any]] = [
     {
         "foam_thickness_in": 1.0,
@@ -81,6 +85,15 @@ FABRIC_CUT_ALLOWANCE_BY_FOAM_THICKNESS: list[dict[str, Any]] = [
 
 NEEDS_FOAM_THICKNESS = "needs foam thickness"
 CONFIRM_WITH_RAFAEL = "confirm_with_rafael"
+# How to apply allowance_in. Semantics confirmed Rafael 2026-10-14.
+# Table amounts remain confirm_with_rafael until a row is signed off.
+ALLOWANCE_APPLY = "per_side"
+ALLOWANCE_APPLY_CONFIRMED = "2026-10-14"
+
+
+def fabric_dimension_in(wood_in: float, allowance_in: float) -> float:
+    """Wood size plus allowance on each side. Fractions only when formatted."""
+    return float(wood_in) + 2.0 * float(allowance_in)
 
 
 def _sixteenths(value: float) -> int:
