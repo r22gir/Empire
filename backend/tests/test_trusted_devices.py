@@ -501,6 +501,69 @@ def test_founder_alias_without_password_hash_is_401(client, monkeypatch):
     assert r.json()["detail"] == "Invalid email or password"
 
 
+def test_founder_alias_failures_share_lockout(client, monkeypatch):
+    monkeypatch.setenv(
+        "FOUNDER_ACCESS_EMAILS",
+        "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
+    )
+    headers = {"X-Forwarded-For": "192.0.2.88"}
+    addrs = (
+        "rafa22giraldo@gmail.com",
+        "empirebox2026@gmail.com",
+        "rafa22giraldo@gmail.com",
+        "empirebox2026@gmail.com",
+        "rafa22giraldo@gmail.com",
+    )
+    last = None
+    for i, addr in enumerate(addrs):
+        last = client.post(
+            "/api/v1/auth/studio-login",
+            json={"email": addr, "password": "wrong"},
+            headers=headers,
+        )
+        if i < 4:
+            assert last.status_code == 401, last.text
+    assert last is not None
+    assert last.status_code == 429
+    assert "Try again in" in last.json()["detail"]
+    even_correct = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "empirebox2026@gmail.com", "password": "founder-pass"},
+        headers=headers,
+    )
+    assert even_correct.status_code == 429
+
+
+def test_script_then_both_alias_emails_login(client, isolated_db, monkeypatch):
+    """Production-like founder row: empty email, no hash, then CLI set."""
+    from app.db.database import get_db
+    from app.services.founder_access import set_founder_password
+
+    monkeypatch.setenv(
+        "FOUNDER_ACCESS_EMAILS",
+        "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
+    )
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE access_users SET email = '', password_hash = NULL WHERE id = 'founder1'"
+        )
+    assert set_founder_password(isolated_db, "post-script-pass") == 1
+    denied = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "owner@empire.example", "password": "post-script-pass"},
+    )
+    assert denied.status_code == 401
+    for addr in ("rafa22giraldo@gmail.com", "empirebox2026@gmail.com"):
+        client.cookies.clear()
+        r = client.post(
+            "/api/v1/auth/studio-login",
+            json={"email": addr, "password": "post-script-pass"},
+        )
+        assert r.status_code == 200, (addr, r.text)
+        assert r.json()["user"]["id"] == "founder1"
+        assert r.json()["user"]["role"] == "founder"
+
+
 def test_set_founder_password_script_mocked(tmp_path, monkeypatch, capsys):
     import importlib.util
     import sqlite3
