@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+import hashlib
+import hmac
 import os
 import uuid
 import logging
@@ -20,6 +22,12 @@ from app.utils.security import (
     create_access_token, create_refresh_token, decode_token,
 )
 from app.services import trusted_devices as devices
+from app.services.founder_access import email_is_founder_alias
+from app.services.studio_login_guard import (
+    record_studio_login_failure,
+    record_studio_login_success,
+    studio_login_lockout_message,
+)
 
 logger = logging.getLogger("empire.auth")
 router = APIRouter(tags=["auth"])
@@ -65,9 +73,19 @@ def _configured_founder_pin() -> str:
     return founder_pin
 
 
+def _pins_match(given: Optional[str], expected: str) -> bool:
+    """Constant-time PIN compare. Hash first so length mismatches cannot 500."""
+    left = hashlib.sha256((given or "").encode("utf-8")).digest()
+    right = hashlib.sha256(expected.encode("utf-8")).digest()
+    return hmac.compare_digest(left, right)
+
+
 def _require_founder_pin(pin: Optional[str]) -> None:
     founder_pin = _configured_founder_pin()
-    if not founder_pin or not pin or pin != founder_pin:
+    # Dummy expected when unset so an empty submitted PIN cannot match.
+    expected = founder_pin if founder_pin else "\x00UNSET_FOUNDER_PIN"
+    matched = _pins_match(pin, expected)
+    if not founder_pin or not matched:
         raise HTTPException(status_code=401, detail="Invalid founder PIN")
 
 
@@ -115,6 +133,22 @@ def _request_meta(request: Request) -> dict:
         "ip": devices.client_ip(headers, remote),
         "location": devices.client_location(headers),
     }
+
+
+def _studio_lockout_ip(request: Request) -> str:
+    """Cloudflare tunnel IP, else the socket peer. Do not trust X-Forwarded-For."""
+    cf = (request.headers.get("cf-connecting-ip") or "").strip()
+    if cf:
+        return cf
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _has_active_trusted_device(request: Request) -> bool:
+    devices.ensure_schema()
+    raw = request.cookies.get(devices.DEVICE_COOKIE) or ""
+    return bool(devices.lookup_active(raw))
 
 
 def _public_user(user: dict) -> dict:
@@ -352,10 +386,22 @@ def _authenticate_studio(data: StudioLoginRequest) -> dict:
         return dict_row(row)
 
     if data.email and data.password:
+        if email_is_founder_alias(str(data.email)):
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT * FROM access_users WHERE role = 'founder' AND is_active = 1 LIMIT 1"
+                ).fetchone()
+            if not row:
+                raise HTTPException(status_code=401, detail="Invalid email or password")
+            user = dict_row(row)
+            if not user.get("password_hash") or not verify_password(data.password, user["password_hash"]):
+                raise HTTPException(status_code=401, detail="Invalid email or password")
+            return user
+
         with get_db() as conn:
             row = conn.execute(
-                "SELECT * FROM access_users WHERE email = ? AND is_active = 1",
-                (data.email,),
+                "SELECT * FROM access_users WHERE lower(email) = lower(?) AND is_active = 1",
+                (str(data.email),),
             ).fetchone()
         if not row:
             raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -370,7 +416,20 @@ def _authenticate_studio(data: StudioLoginRequest) -> dict:
 @router.post("/studio-login")
 def studio_login(data: StudioLoginRequest, request: Request, response: Response):
     """Owner/operator sign-in for Empire Command Center (Studio)."""
-    user = _authenticate_studio(data)
+    ip = _studio_lockout_ip(request)
+    if not _has_active_trusted_device(request):
+        locked = studio_login_lockout_message(ip)
+        if locked:
+            raise HTTPException(status_code=429, detail=locked)
+    try:
+        user = _authenticate_studio(data)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            lock_msg = record_studio_login_failure(ip)
+            if lock_msg:
+                raise HTTPException(status_code=429, detail=lock_msg) from exc
+        raise
+    record_studio_login_success(ip)
     issued = _issue_session(user, request, response)
     issued["remember_offered"] = True
     return issued
