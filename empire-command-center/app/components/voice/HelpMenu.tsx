@@ -12,7 +12,10 @@ export default function HelpMenu() {
           <Link href="/ayuda/dispositivos" style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>Cómo conectarte desde tus dispositivos</Link>
         </li>
         <li style={{ marginTop: 6 }}>
-          <Link href="/amp/whatsapp" style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>Cómo configurar WhatsApp</Link>
+          <Link href="/ayuda/empresa" style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>Tu empresa</Link>
+        </li>
+        <li style={{ marginTop: 6 }}>
+          <Link href="/ayuda/whatsapp" style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>Cómo configurar WhatsApp</Link>
         </li>
       </ul>
     </nav>
