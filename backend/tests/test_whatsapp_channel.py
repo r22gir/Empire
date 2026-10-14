@@ -475,8 +475,8 @@ def test_voice_text_sends_ogg_voice_note_and_summary(monkeypatch):
     summary = posts[1]["text"]["body"]
     assert "Total: $66.00" in summary
     assert "Not sent" in summary
-    assert len(summary) < len(full)
     assert "Voice note unavailable" not in summary
+    # Full text is sent (chunked if needed). Phone must not get a truncated twin.
 
 
 def test_tts_failure_falls_back_to_text_with_a_note(monkeypatch):

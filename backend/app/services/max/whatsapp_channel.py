@@ -539,14 +539,29 @@ def _persist_inbound_media(
 
 
 def _log_chat(**kwargs: Any) -> int:
-    """Best-effort durable log. Failures never block send or webhook ack."""
+    """Best-effort durable log + founder whatsapp.json. Failures never block send."""
+    mid = 0
     try:
         from app.services.max.whatsapp_log import log_message
 
-        return int(log_message(**kwargs) or 0)
+        mid = int(log_message(**kwargs) or 0)
     except Exception:
         logger.warning("WhatsApp chat log write failed", exc_info=True)
-        return 0
+    try:
+        from app.services.max.whatsapp_founder_chat import append_founder_whatsapp
+
+        append_founder_whatsapp(
+            direction=str(kwargs.get("direction") or ""),
+            body=str(kwargs.get("body") or ""),
+            message_type=str(kwargs.get("message_type") or "text"),
+            timestamp=kwargs.get("timestamp"),
+            attachments=kwargs.get("attachments"),
+            wa_message_id=str(kwargs.get("wa_message_id") or ""),
+            metadata=kwargs.get("metadata") if isinstance(kwargs.get("metadata"), dict) else {},
+        )
+    except Exception:
+        logger.warning("founder whatsapp.json write failed", exc_info=True)
+    return mid
 
 
 def _apply_status_updates(payload: dict | None) -> int:
@@ -713,7 +728,10 @@ async def _post_graph(body: dict, http_post: Optional[Callable[..., Any]] = None
         if hasattr(payload, "__await__"):
             payload = await payload
     if status >= 400:
-        logger.warning("WhatsApp graph send failed status=%s", status)
+        err = ""
+        if isinstance(payload, dict):
+            err = payload.get("error") or payload.get("message") or payload
+        logger.warning("WhatsApp graph send failed status=%s error=%s", status, err)
         raise WhatsAppSendBlocked(f"WhatsApp graph rejected the send ({status})")
     return payload if isinstance(payload, dict) else {"ok": True}
 
@@ -810,6 +828,9 @@ def founder_documents(pipeline: dict | None) -> tuple[list[dict[str, Any]], str]
     """Quote and drawing PDFs for the founder. Failures stay in the note."""
     if not pipeline or not pipeline.get("handled"):
         return [], ""
+    if pipeline.get("attach_documents") is False:
+        logger.info("WhatsApp skipped estimate PDF (no real job / empty $0.00 draft)")
+        return [], ""
     docs: list[dict[str, Any]] = []
     notes: list[str] = []
     quote_id = str(pipeline.get("quote_id") or "").strip()
@@ -861,10 +882,14 @@ def founder_documents(pipeline: dict | None) -> tuple[list[dict[str, Any]], str]
     return docs, " ".join(notes)
 
 
-def _split_reply(reply: Any) -> tuple[str, list]:
+def _split_reply(reply: Any) -> tuple[str, list, list]:
     if isinstance(reply, dict):
-        return str(reply.get("text") or ""), list(reply.get("documents") or [])
-    return str(reply or ""), []
+        return (
+            str(reply.get("text") or ""),
+            list(reply.get("documents") or []),
+            list(reply.get("images") or []),
+        )
+    return str(reply or ""), [], []
 
 
 def _outbound(text: str, pipeline: dict | None = None):
@@ -886,15 +911,24 @@ async def reply_in_window(
     inbound_type: str = "",
     inbound_voice: bool = False,
     documents: Optional[list[dict[str, Any]]] = None,
+    images: Optional[list[dict[str, Any]]] = None,
     synthesize: Optional[Callable[..., Any]] = None,
 ) -> dict[str, Any]:
     """Session reply inside the 24h window.
 
-    voice_text sends an OGG/Opus voice note plus a text summary.
+    voice_text sends an OGG/Opus voice note plus the full text, chunked
+    on paragraph boundaries so the phone is not truncated at 4096.
     text sends the words only. match follows the inbound message.
     A TTS failure sends the full text and says the voice note was skipped.
-    PDFs ride along as document messages. This does not email a client.
+    PDFs ride along as document messages. Images ride as image messages.
+    This does not email a client.
     """
+    try:
+        from app.services.max.whatsapp_logging import ensure_whatsapp_file_logging
+
+        ensure_whatsapp_file_logging()
+    except Exception:
+        pass
     _require_enabled()
     if not is_allowlisted(to):
         raise WhatsAppSendBlocked("recipient is not on the founder allowlist")
@@ -923,25 +957,38 @@ async def reply_in_window(
                     "audio": {"id": media_id, "voice": True},
                 }, http_post=http_post)
                 voice_sent = True
-            except WhatsAppSendBlocked:
+            except WhatsAppSendBlocked as exc:
                 voice_fallback = VOICE_FALLBACK_NOTE
+                logger.warning("WhatsApp voice send failed: %s", exc)
         else:
             voice_fallback = VOICE_FALLBACK_NOTE
             if reason and reason not in voice_fallback:
                 logger.info("WhatsApp voice fallback: %s", reason[:120])
-    if voice_sent:
-        shown = summarize_reply(original)
-    else:
-        shown = original
-        if voice_fallback:
-            shown = f"{voice_fallback}\n{shown}".strip()
-    text_graph = await _post_graph({
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": number,
-        "type": "text",
-        "text": {"preview_url": False, "body": shown[:4096]},
-    }, http_post=http_post)
+    from app.services.max.whatsapp_format import (
+        chunk_whatsapp_text,
+        number_chunks,
+        prepare_whatsapp_text,
+    )
+
+    shown = prepare_whatsapp_text(original)
+    if voice_fallback:
+        shown = f"{voice_fallback}\n{shown}".strip()
+    parts = number_chunks(chunk_whatsapp_text(shown))
+    if not parts and (documents or images or voice_fallback):
+        parts = [shown or voice_fallback]
+    text_graph: dict[str, Any] = {}
+    for part in parts:
+        try:
+            text_graph = await _post_graph({
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": number,
+                "type": "text",
+                "text": {"preview_url": False, "body": part[:4096]},
+            }, http_post=http_post)
+        except WhatsAppSendBlocked as exc:
+            logger.warning("WhatsApp text chunk send failed: %s", exc)
+            raise
     if not graph:
         graph = text_graph
     outbound_msg_id = _public_graph(graph).get("message_id", "")
@@ -972,8 +1019,39 @@ async def reply_in_window(
                 },
             }, http_post=http_post)
             attached.append({"filename": filename, "media_id": media_id, "doc_id": doc_id, "data": bytes(payload)})
-        except WhatsAppSendBlocked:
-            logger.warning("WhatsApp PDF attach failed for %s", filename)
+        except WhatsAppSendBlocked as exc:
+            logger.warning("WhatsApp PDF attach failed for %s: %s", filename, exc)
+
+    attached_images: list[dict[str, Any]] = []
+    for img in images or []:
+        if not isinstance(img, dict):
+            continue
+        payload = img.get("data") or b""
+        if isinstance(payload, str):
+            payload = payload.encode()
+        if not payload:
+            continue
+        filename = str(img.get("filename") or "image.png")
+        mime = str(img.get("mime") or img.get("mime_type") or "image/png")
+        try:
+            media_id = await upload_media(
+                bytes(payload), mime, filename, http_upload=http_upload,
+            )
+            await _post_graph({
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": number,
+                "type": "image",
+                "image": {
+                    "id": media_id,
+                    "caption": str(img.get("caption") or "")[:1024],
+                },
+            }, http_post=http_post)
+            attached_images.append({
+                "filename": filename, "media_id": media_id, "data": bytes(payload), "mime": mime,
+            })
+        except WhatsAppSendBlocked as exc:
+            logger.warning("WhatsApp image attach failed for %s: %s", filename, exc)
 
     outbound_atts: list[dict[str, Any]] = []
     try:
@@ -996,6 +1074,23 @@ async def reply_in_window(
                 "doc_id": row.get("doc_id") or "",
                 "filing_status": "outbound",
             })
+        for row in attached_images:
+            stored = store_edition_media(
+                row.get("data") or b"",
+                row.get("filename") or "image.png",
+                row.get("mime") or "image/png",
+                "image",
+            )
+            outbound_atts.append({
+                "wa_media_id": row.get("media_id", ""),
+                "filename": stored.get("filename") or row.get("filename"),
+                "mime_type": row.get("mime") or "image/png",
+                "size_bytes": stored.get("size_bytes") or 0,
+                "local_path": stored.get("local_path") or "",
+                "media_type": "image",
+                "doc_id": "",
+                "filing_status": "outbound",
+            })
     except Exception:
         logger.warning("WhatsApp outbound document copy failed", exc_info=True)
 
@@ -1006,10 +1101,14 @@ async def reply_in_window(
             for row in attached
         )
         log_body = f"{shown}\n[document: {markers}]".strip() if shown else f"[document: {markers}]"
+    if attached_images:
+        img_marks = ", ".join(row.get("filename") or "image" for row in attached_images)
+        log_body = f"{log_body}\n[image: {img_marks}]".strip()
+    msg_type = "voice" if voice_sent else ("document" if attached else ("image" if attached_images else "text"))
     _log_chat(
         wa_id=number,
         direction="outbound",
-        message_type="voice" if voice_sent else ("document" if attached else "text"),
+        message_type=msg_type,
         body=log_body,
         wa_message_id=outbound_msg_id,
         delivery_status="sent",
@@ -1017,7 +1116,9 @@ async def reply_in_window(
             "voice_sent": voice_sent,
             "voice_fallback": voice_fallback,
             "reply_mode": mode,
+            "chunks": len(parts),
             "documents": [{"filename": d.get("filename", ""), "doc_id": d.get("doc_id", "")} for d in attached],
+            "images": [{"filename": d.get("filename", "")} for d in attached_images],
         },
         attachments=outbound_atts,
     )
@@ -1030,8 +1131,49 @@ async def reply_in_window(
         "voice_sent": voice_sent,
         "voice_fallback": voice_fallback,
         "documents": [{"filename": d.get("filename", ""), "media_id": d.get("media_id", ""), "doc_id": d.get("doc_id", "")} for d in attached],
+        "images": [{"filename": d.get("filename", ""), "media_id": d.get("media_id", "")} for d in attached_images],
+        "chunks": len(parts),
         "graph": _public_graph(graph),
     }
+
+
+async def notify_founder_whatsapp(
+    text: str,
+    *,
+    images: Optional[list[dict[str, Any]]] = None,
+    documents: Optional[list[dict[str, Any]]] = None,
+    http_post: Optional[Callable[..., Any]] = None,
+    http_upload: Optional[Callable[..., Any]] = None,
+) -> dict[str, Any]:
+    """Deliver a founder notification on WhatsApp when a 24h window is open.
+
+    Used for background image/desk tasks that previously only pinged Telegram
+    (root cause of image task #0641b8ef never arriving on the phone).
+    """
+    errors: list[str] = []
+    for number in founder_allowlist():
+        if not customer_window_open(number):
+            continue
+        try:
+            return await reply_in_window(
+                number,
+                text,
+                images=images,
+                documents=documents,
+                http_post=http_post,
+                http_upload=http_upload,
+            )
+        except WhatsAppSendBlocked as exc:
+            errors.append(str(exc))
+            logger.warning("WhatsApp founder notify blocked: %s", exc)
+        except Exception as exc:
+            errors.append(str(exc)[:200])
+            logger.warning("WhatsApp founder notify failed", exc_info=True)
+    logger.warning(
+        "WhatsApp founder notify not delivered window_open=0 errors=%s",
+        errors or "none",
+    )
+    return {"sent": False, "reason": "no_open_founder_window", "errors": errors}
 
 
 async def send_template(
@@ -1152,7 +1294,11 @@ WHATSAPP_DIRECTIVE = (
     "his phone.\n"
     "- If open_final_doc did not find the document, say so plainly and name the closest matches it "
     "returned. Never describe a document as found, opened or attached when the tool failed.\n"
-    "- Short, plain text. No markdown headers or tables."
+    "- Short, plain text. No markdown headers or tables.\n"
+    "- A message that is only a URL or an article/tweet link is READ-AND-SUMMARIZE. "
+    "Never create an estimate, quote, or EST PDF for it.\n"
+    "- If Rafael says Dude / No / read article, your previous answer missed. "
+    "Re-read the last request. Do not repeat the same summary."
 )
 
 
@@ -1323,7 +1469,9 @@ def _finish_doc_reply(
     fetch: Optional[Callable[[str], bytes]] = None,
 ):
     documents, missing = _attach_final_docs(docs, fetch=fetch)
-    body = strip_studio_links(text)
+    from app.services.max.whatsapp_format import prepare_whatsapp_text
+
+    body = prepare_whatsapp_text(strip_studio_links(text))
     if documents:
         body = f"{body}\nPDF attached ({len(documents)}). For you only; nothing was sent to the client.".strip()
     if missing:
@@ -1370,7 +1518,13 @@ async def max_chat(text: str, wa_id: str, *, fetch: Optional[Callable[[str], byt
     if docs:
         return _finish_doc_reply(wa_id, text, reply, docs, fetch=fetch)
     clean = strip_studio_links(reply)
+    from app.services.max.whatsapp_format import extract_image_payloads, prepare_whatsapp_text
+
+    clean = prepare_whatsapp_text(clean)
+    images = extract_image_payloads(tool_results)
     remember_whatsapp_turn(wa_id, text, clean)
+    if images:
+        return {"text": clean, "images": images}
     return clean
 
 
@@ -1433,7 +1587,8 @@ async def whatsapp_doc_request(
 
 
 _DICTATION_DETAIL = re.compile(
-    r"\d|\b(?:inch|inches|foot|feet|yard|yards|fabric|cushion|bench|pillow|drape|drapes|drapery|shade|shades|"
+    r"\d+(?:\.\d+)?\s*(?:inches|inch|in\b|\"|foot|feet|ft\b)|"
+    r"\b(?:inch|inches|foot|feet|yard|yards|fabric|cushion|bench|pillow|drape|drapes|drapery|shade|shades|"
     r"valance|cornice|headboard|upholster\w*|foam|welt|tuft\w*|channel|piping|lining|pleat\w*|ripplefold|track|rod|"
     r"client|customer|address|deposit|quantity|qty|price|rate|color|colour)\b",
     re.IGNORECASE,
@@ -1449,8 +1604,15 @@ def _belongs_to_voice_draft(body: str, probe: Any, open_draft: bool) -> bool:
     go to Max chat; only dictation joins the draft.
     """
     from app.services.max.quick_replies import is_greeting, parse_quote_lookup
+    from app.services.max.whatsapp_format import (
+        has_real_job_signals,
+        is_frustration_correction,
+        is_link_or_article_message,
+    )
 
     t = body.strip()
+    if is_link_or_article_message(t) or is_frustration_correction(t):
+        return False
     if is_greeting(t) or parse_quote_lookup(t):
         return False
     question = bool(re.match(
@@ -1462,8 +1624,8 @@ def _belongs_to_voice_draft(body: str, probe: Any, open_draft: bool) -> bool:
     if question and not creating:
         return False
     if open_draft:
-        return bool(probe.done or _SEND_IT.match(t) or probe.document_intent or _DICTATION_DETAIL.search(t))
-    return bool(probe.document_intent or probe.done)
+        return bool(probe.done or _SEND_IT.match(t) or has_real_job_signals(t, probe) or _DICTATION_DETAIL.search(t))
+    return has_real_job_signals(t, probe)
 
 
 async def _quick_whatsapp_reply(body: str):
@@ -1493,16 +1655,62 @@ async def _quick_whatsapp_reply(body: str):
     return text
 
 
+async def _reread_after_miss(body: str, wa_id: str):
+    """Founder correction: re-read the last request instead of repeating the miss."""
+    from app.services.max.whatsapp_format import first_url, is_link_or_article_message
+
+    conv = whatsapp_conversation(wa_id)
+    last_user = ""
+    last_asst = ""
+    for turn in reversed(conv.get("history") or []):
+        role = turn.get("role")
+        content = str(turn.get("content") or "")
+        if role == "user" and not last_user:
+            last_user = content
+        elif role == "assistant" and not last_asst:
+            last_asst = content
+        if last_user and last_asst:
+            break
+    target = last_user or body
+    prompt = (
+        "PREVIOUS ANSWER MISSED. The founder is correcting you. "
+        "Re-read the last request and answer that. Do not repeat the previous summary.\n"
+        f"Founder said: {body}\n"
+        f"Last request: {target}"
+    )
+    if is_link_or_article_message(target) or first_url(target):
+        prompt += "\nRead the article at that URL and summarize it. Do not create an estimate."
+    if last_asst:
+        prompt += f"\nDo not repeat this previous answer: {last_asst[:400]}"
+    return await max_chat(prompt, wa_id)
+
+
 async def default_text_handler(text: str, wa_id: str) -> str:
     """Dictation joins the open voice draft. Everything else is Max chat."""
     body = (text or "").strip()
     if not body:
         return "Empty message. Nothing sent."
+    from app.services.max.whatsapp_format import is_frustration_correction, is_link_or_article_message
+
+    if is_link_or_article_message(body):
+        logger.info("WhatsApp inbound routed to read-and-summarize (link/article)")
+        try:
+            return await max_chat(body, wa_id)
+        except Exception:
+            logger.warning("WhatsApp link-intelligence chat failed", exc_info=True)
+            return "Could not read that link. Nothing sent."
+    if is_frustration_correction(body):
+        logger.info("WhatsApp inbound treated as previous-answer miss")
+        try:
+            return await _reread_after_miss(body, wa_id)
+        except Exception:
+            logger.warning("WhatsApp correction reread failed", exc_info=True)
+            return "Got it — I'll re-read the last request. Nothing sent."
     try:
         quick = await _quick_whatsapp_reply(body)
         if quick:
             whatsapp_conversation(wa_id)
-            q_text, _q_docs = _split_reply(quick)
+            q_text, _q_docs, _q_imgs = _split_reply(quick)
             remember_whatsapp_turn(wa_id, body, q_text)
             return quick
     except Exception:
@@ -1714,6 +1922,12 @@ async def process_webhook(
     http_upload: Optional[Callable[..., Any]] = None,
 ) -> dict[str, Any]:
     """Verify, route, and reply inside the window. Does not send client drafts."""
+    try:
+        from app.services.max.whatsapp_logging import ensure_whatsapp_file_logging
+
+        ensure_whatsapp_file_logging()
+    except Exception:
+        pass
     status = channel_status()
     if not status["enabled"]:
         return {**status, "accepted": False, "http_status": 503, "results": []}
@@ -1939,12 +2153,12 @@ async def process_webhook(
             except Exception:
                 logger.warning("WhatsApp inbound handler failed", exc_info=True)
                 reply = "That message failed. Nothing sent."
-            reply_text, documents = _split_reply(reply)
+            reply_text, documents, images = _split_reply(reply)
             reply_sent = False
             reply_error = ""
             voice_sent = False
             voice_fallback = ""
-            if reply_text or documents:
+            if reply_text or documents or images:
                 try:
                     delivered = await reply_in_window(
                         sender,
@@ -1954,12 +2168,21 @@ async def process_webhook(
                         inbound_type=message["type"],
                         inbound_voice=bool(message.get("voice")),
                         documents=documents,
+                        images=images,
                     )
                     reply_sent = True
                     voice_sent = bool(delivered.get("voice_sent"))
                     voice_fallback = delivered.get("voice_fallback") or ""
                 except WhatsAppSendBlocked as exc:
                     reply_error = str(exc)
+                    logger.warning(
+                        "WhatsApp send blocked inbound_id=%s route=%s error=%s",
+                        message_id, route, reply_error,
+                    )
+        logger.info(
+            "whatsapp inbound id=%s type=%s route=%s reply_sent=%s error=%s",
+            message_id, message.get("type"), route, reply_sent, reply_error or "-",
+        )
         results.append({
             "message_id": message_id,
             "type": message["type"],

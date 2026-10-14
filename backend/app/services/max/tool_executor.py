@@ -5539,6 +5539,25 @@ async def _run_desk_background(task_id: str, title: str, params: dict, desk_id: 
                 await telegram_bot.send_message(_notify)
         except Exception:
             pass
+        # 2026-10-13: image/desk completions only notified Telegram. WhatsApp
+        # founder chat never received the file (task #0641b8ef VW Beetle).
+        try:
+            from app.services.max.whatsapp_channel import notify_founder_whatsapp
+
+            from app.services.max.whatsapp_format import images_from_desk_result
+
+            images = images_from_desk_result(task.result)
+            wa_text = _notify
+            if images:
+                wa_text = f"{_notify}\nImage attached."
+            delivered = await notify_founder_whatsapp(wa_text, images=images or None)
+            if not delivered.get("sent"):
+                logger.warning(
+                    "Desk task #%s WhatsApp delivery skipped: %s",
+                    task_id, delivered.get("reason") or delivered.get("errors"),
+                )
+        except Exception:
+            logger.warning("Desk task #%s WhatsApp notify failed", task_id, exc_info=True)
         logger.info(f"Desk background task #{task_id} {state}: {title}")
     except Exception as e:
         _log_async_task(task_id, title, "failed", error=str(e))

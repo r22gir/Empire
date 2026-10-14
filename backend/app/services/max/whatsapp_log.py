@@ -502,7 +502,17 @@ def sanitize_no_secrets(text: str) -> str:
     )
     for secret_env in _SECRET_ENVS:
         val = os.getenv(secret_env)
-        if val and len(val) > 3:
+        if not val or len(val) <= 3:
+            continue
+        # Short numeric ids (phone-number id "123456") must not redact
+        # tweet/status ids, quote numbers, or other longer digit strings.
+        if len(val) <= 12:
+            sanitized = re.sub(
+                rf"(?<![A-Za-z0-9]){re.escape(val)}(?![A-Za-z0-9])",
+                "[REDACTED]",
+                sanitized,
+            )
+        else:
             sanitized = sanitized.replace(val, "[REDACTED]")
     return sanitized
 
