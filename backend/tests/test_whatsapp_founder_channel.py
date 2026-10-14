@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -149,6 +150,21 @@ def test_quote_intake_requires_job_signals():
     assert has_real_job_signals("Quote for Maggie. Straight bench 48 inches long.") is True
     assert has_real_job_signals("https://example.com/a-blog-post") is False
     assert has_real_job_signals("1845123456789012345") is False
+
+
+def test_job_signals_win_over_link_host_and_fabric_link():
+    banquette = "Banquette 96 inches for Smith, fabric link https://site.com/f.jpg"
+    lopez = 'Quote for Lopez: bench 48" like this https://x.com/a/status/123'
+    ana = 'Make estimate for Ana, 2 cushions 22 1/2" x 18" https://pin.it/abc'
+    linkedin_job = "Chair 36 inches for Rivera, see https://www.linkedin.com/in/someone"
+    for text in (banquette, lopez, ana, linkedin_job):
+        assert is_link_or_article_message(text) is False, text
+        assert has_real_job_signals(text) is True, text
+    assert is_link_or_article_message(TWEET) is True
+    assert has_real_job_signals(TWEET) is False
+    assert is_link_or_article_message(f"read this {TWEET}") is True
+    assert is_link_or_article_message(f"read this link {TWEET}") is True
+    assert is_link_or_article_message("read article https://example.com/post") is True
 
 
 def test_url_goes_to_max_chat_not_intake(monkeypatch):
@@ -291,6 +307,21 @@ def test_markdown_converts_to_whatsapp_markup():
     assert "##" not in out
     assert "src" in out
     assert "****" not in strip_empty_markdown("** **")
+
+
+def test_empty_bold_then_real_bold_leaves_no_stray_asterisks():
+    raw = "**** x **a** 2*3*4 [t](http://u)"
+    out = markdown_to_whatsapp(raw)
+    assert "****" not in out
+    assert "**" not in out
+    assert "*a*" in out
+    assert "2*3*4" in out
+    assert "t" in out
+    assert "http://u" in out
+    assert out.startswith("x ")
+    # No glued leftover from empty **** + **a** (was 'x*a**').
+    assert "x*a" not in out
+    assert not re.search(r"\*{2,}", out)
 
 
 # ── 5. Sources footer ─────────────────────────────────────────

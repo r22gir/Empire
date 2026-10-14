@@ -22,16 +22,21 @@ _ARTICLE_HOSTS = (
     "www.twitter.com",
     "nitter.net",
 )
-_ARTICLE_HINTS = (
-    "article",
-    "link",
-    "read this",
-    "read article",
-    "read the article",
-    "summar",
-    "what does this mean",
-    "analy",
-    "venturebeat",
+# Whole phrases only. Bare "link" also matches "linkedin".
+_ARTICLE_PHRASE_RE = re.compile(
+    r"(?:"
+    r"\bread\s+this\s+link\b|"
+    r"\bread\s+(?:the\s+)?article\b|"
+    r"\bread\s+this\b|"
+    r"\bthis\s+link\b|"
+    r"\bthe\s+article\b|"
+    r"\barticle\b|"
+    r"\bsummar(?:y|ize|ise)\b|"
+    r"\bwhat does this mean\b|"
+    r"\banalys[ei]|"
+    r"\bventurebeat\b"
+    r")",
+    re.IGNORECASE,
 )
 _FRUSTRATION_RE = re.compile(
     r"^\s*(?:"
@@ -51,11 +56,13 @@ _FRUSTRATION_RE = re.compile(
 )
 _JOB_ITEM_RE = re.compile(
     r"\b(?:bench|banquette|booth|cushion|cushions|pillow|drape|drapes|drapery|"
-    r"shade|shades|roman|headboard|valance|cornice|upholster\w*)\b",
+    r"shade|shades|roman|headboard|valance|cornice|upholster\w*|"
+    r"chair|seat|ottoman|sofa|curtain|slipcover|foam)\b",
     re.IGNORECASE,
 )
 _JOB_DIM_RE = re.compile(
-    r"\d+(?:\.\d+)?\s*(?:inches|inch|in\b|\"|foot|feet|ft\b|yards?|yd\b)",
+    r"(?:\d+\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+(?:\.\d+)?)\s*"
+    r"(?:inches|inch|in\b|\"|foot|feet|ft\b|yards?|yd\b)",
     re.IGNORECASE,
 )
 _JOB_CLIENT_RE = re.compile(
@@ -97,9 +104,15 @@ def _host(url: str) -> str:
 
 
 def is_link_or_article_message(text: str | None) -> bool:
-    """True for URL-only / article-share turns. Those are never quote intake."""
+    """True for URL-only / article-share turns. Those are never quote intake.
+
+    Job signals win: item + dimensions/client/create-verb is quote intake
+    even when the message also has an X/twitter/Pinterest URL.
+    """
     raw = (text or "").strip()
     if not raw:
+        return False
+    if _text_has_job_signals(raw):
         return False
     url = first_url(raw)
     if not url:
@@ -113,8 +126,7 @@ def is_link_or_article_message(text: str | None) -> bool:
     host = _host(url)
     if any(host == h or host.endswith("." + h) for h in _ARTICLE_HOSTS):
         return True
-    lower = raw.lower()
-    return any(marker in lower for marker in _ARTICLE_HINTS)
+    return bool(_ARTICLE_PHRASE_RE.search(raw))
 
 
 def is_frustration_correction(text: str | None) -> bool:
@@ -125,14 +137,8 @@ def is_frustration_correction(text: str | None) -> bool:
     return bool(_FRUSTRATION_RE.search(raw))
 
 
-def has_real_job_signals(text: str | None, extraction: Any = None) -> bool:
-    """Quote intake needs a real job: item and/or dimensions plus client or create-verb.
-
-    A URL, a tweet, or a lone number is not enough.
-    """
-    raw = (text or "").strip()
-    if not raw or is_link_or_article_message(raw):
-        return False
+def _text_has_job_signals(raw: str, extraction: Any = None) -> bool:
+    """Item + (dims/client/create) or create + (item/dims/client). Ignores URLs."""
     item = False
     dims = False
     client = False
@@ -158,6 +164,18 @@ def has_real_job_signals(text: str | None, extraction: Any = None) -> bool:
     return False
 
 
+def has_real_job_signals(text: str | None, extraction: Any = None) -> bool:
+    """Quote intake needs a real job: item and/or dimensions plus client or create-verb.
+
+    A URL, a tweet, or a lone number is not enough. A job that happens to
+    include a fabric/X/Pinterest URL still counts.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    return _text_has_job_signals(raw, extraction)
+
+
 def strip_empty_markdown(text: str) -> str:
     """Drop empty emphasis such as ``****`` / ``____`` left by a blank title."""
     out = text or ""
@@ -172,12 +190,22 @@ def strip_empty_markdown(text: str) -> str:
 def markdown_to_whatsapp(text: str) -> str:
     """Convert common markdown to WhatsApp markup. Empty bold becomes nothing."""
     out = text or ""
-    out = _MD_LINK_RE.sub(lambda m: (m.group(1).strip() or m.group(2).strip()), out)
+    # Strip **** / ** ** first so they cannot glue onto a later **bold**.
+    out = strip_empty_markdown(out)
+    out = _MD_LINK_RE.sub(_format_md_link, out)
     out = _MD_HEADING_RE.sub("", out)
     out = _MD_BOLD_RE.sub(lambda m: f"*{m.group(1).strip()}*" if m.group(1).strip() else "", out)
-    # Remaining *italic* is already WhatsApp italic. Leave it.
     out = strip_empty_markdown(out)
-    return out
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return out.strip()
+
+
+def _format_md_link(match: re.Match) -> str:
+    label = (match.group(1) or "").strip()
+    url = (match.group(2) or "").strip()
+    if label and url and label != url:
+        return f"{label} ({url})"
+    return label or url
 
 
 def compact_sources_footer(text: str, *, max_sources: int = 3) -> str:
