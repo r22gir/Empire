@@ -1,5 +1,7 @@
 /** Spanish device-access guide. Plain JS so Node 20 can import it. */
 
+import { AYUDA_OPENER, ayudaOpenerHtml } from './ayudaCopy.mjs';
+
 const SITES = {
   amp: { name: 'Max-e', url: 'https://amp.empirebox.store' },
   maxine: { name: 'Maxine', url: 'https://maxine.empirebox.store' },
@@ -27,7 +29,7 @@ export function renderDeviceAccessPage(edition) {
   const name = site ? escapeHtml(site.name) : 'tu Max';
   const url = site ? escapeHtml(site.url) : '';
   const intro = site
-    ? `Hola. Esta página es solo de ${name}. Úsala en el celular, la tableta o el computador.`
+    ? `Esta página es solo de ${name}. Úsala en el celular, la tableta o el computador.`
     : 'Abre esta guía dentro de tu propio centro de mando.';
   const website = site
     ? `<p>Abre <a href="${url}">${url}</a> en cualquier celular, tableta o computador. Entra con el correo que tienes autorizado. La página es HTTPS, así que el micrófono y Live Voice funcionan.</p>`
@@ -40,6 +42,7 @@ export function renderDeviceAccessPage(edition) {
 <nav aria-label="Navegación de ayuda" style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:24px;font-size:14px"><a href="/ayuda" style="color:#b8960c;font-weight:700">← Volver a Ayuda</a><a href="/" style="color:#444;font-weight:600">Centro de mando</a></nav>
 <p style="font-size:12px;letter-spacing:0.4px;color:#b8960c;font-weight:700;margin:0">CENTRO DE MANDO</p>
 <h1 style="font-size:32px;margin:8px 0">Cómo conectarte desde tus dispositivos</h1>
+${ayudaOpenerHtml('font-size:26px;font-family:Inter,sans-serif')}
 <p style="font-size:16px;line-height:1.5">${intro}</p>
 <h2>1. Sitio web (recomendado)</h2>
 ${website}
@@ -66,6 +69,9 @@ ${tailscale}
 
   if (other && (html.includes(other.url) || html.includes(other.name))) {
     throw new Error('device access page leaked the other edition');
+  }
+  if (!html.includes(AYUDA_OPENER)) {
+    throw new Error('device access page missing manito opener');
   }
   return html;
 }
