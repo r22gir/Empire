@@ -103,7 +103,7 @@ def add(
 
     Default: INSERT OR REPLACE (desk_manager._persist_inbox semantics).
     skip_existing=True (cascade only): leave an open or recently-resolved
-    row untouched.
+    row untouched. Older resolved rows are replaced.
     """
     ensure_schema()
     with _conn() as conn:
@@ -119,8 +119,7 @@ def add(
                 if _recently_resolved(row, recent_resolved_hours):
                     row["skipped"] = "recently_resolved"
                     return row
-                row["skipped"] = "resolved"
-                return row
+                # Older than the window: fall through to INSERT OR REPLACE.
         conn.execute(
             """INSERT OR REPLACE INTO founder_inbox
                (id, title, description, priority, reason, source, customer_name,

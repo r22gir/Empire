@@ -451,6 +451,8 @@ def test_chat_and_stream_share_confidence_cascade_helper():
     assert src.count("is_founder=") >= 2
     assert src.count("_confidence_cascade_extra(") >= 3
     assert "Return early unless MAX_CONFIDENCE_GATE is on" in src
+    assert "_founder_session = _fs.resolve_founder_session(http_request)" in src
+    assert "is_founder=bool((_founder_session or {}).get(\"verified\"))" in src
     conf_src = Path(__file__).resolve().parents[1].joinpath(
         "app/services/max/confidence.py"
     ).read_text(encoding="utf-8")

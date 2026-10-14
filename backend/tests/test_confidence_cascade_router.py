@@ -75,9 +75,15 @@ def test_both_chat_doors_use_shared_helper_and_founder_flag():
     assert src.count("_apply_confidence_cascade_to_reply(") >= 3
     assert src.count("is_founder=") >= 2
     assert "canonical_founder and _cascade_founder()" in src
-    assert "_stream_cascade_founder()" in src
+    assert "_founder_session = _fs.resolve_founder_session(http_request)" in src
+    assert "is_founder=bool((_founder_session or {}).get(\"verified\"))" in src
     assert "apply_router_cascade" in src
     assert "FOUNDER_CASCADE_CHANNELS" not in src
+    assert "'whatsapp'" not in src.split("def _apply_confidence_cascade_to_reply")[1][:800]
+    assert "''" not in "".join(
+        line for line in src.splitlines()
+        if "FOUNDER_CASCADE" in line or "cascade_allowed" in line
+    )
 
 
 def test_web_channel_without_founder_session_untouched(isolated, monkeypatch):
@@ -122,6 +128,13 @@ def test_founder_session_gate_on_can_rewrite(isolated, monkeypatch):
 
 def test_inbox_default_replace_reopens_resolved(isolated):
     inbox = isolated["inbox"]
+    desk_src = (
+        Path(__file__).resolve().parents[1]
+        / "app" / "services" / "max" / "desks" / "desk_manager.py"
+    ).read_text(encoding="utf-8")
+    persist = desk_src.split("def _persist_inbox")[1].split("def ")[0]
+    assert "founder_inbox.add(" in persist
+    assert "skip_existing" not in persist
     first = inbox.add(task_id="desk-1", title="Unrouted", reason="no desk")
     assert first["status"] == "open"
     assert inbox.resolve("desk-1") is True
@@ -162,6 +175,19 @@ def test_inbox_skip_existing_used_by_cascade(isolated, monkeypatch):
     assert third.get("skipped") == "recently_resolved"
     assert inbox.get(task_id)["status"] == "resolved"
     assert inbox.count_open() == 0
+
+    # Older than the recent window: skip_existing falls through to replace.
+    from datetime import datetime, timedelta, timezone
+    old = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
+    with inbox._conn() as conn:
+        conn.execute(
+            "UPDATE founder_inbox SET resolved_at=? WHERE id=?",
+            (old, task_id),
+        )
+    fourth = conf._file_founder_ask(record, TWEET)
+    assert not fourth.get("skipped")
+    assert fourth["status"] == "open"
+    assert inbox.get(task_id)["status"] == "open"
 
 
 def test_inbox_daily_cap(isolated, monkeypatch):

@@ -4438,7 +4438,7 @@ async def chat_stream(request: ChatRequest, http_request: Request = None):
     async def _prepare():
         _fs_token = _fs.set_current(_founder_session)
         try:
-            return await _chat_stream_impl(request)
+            return await _chat_stream_impl(request, _founder_session=_founder_session)
         finally:
             _fs.reset_current(_fs_token)
 
@@ -4540,7 +4540,7 @@ async def _keepalive_stream(prepare):
         yield _sse({"type": "done", "model_used": "error"})
 
 
-async def _chat_stream_impl(request: ChatRequest):
+async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None = None):
     """SSE streaming endpoint body (see chat_stream)."""
     msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
     founder = is_founder_message(msg_ctx)
@@ -5543,11 +5543,10 @@ async def _chat_stream_impl(request: ChatRequest):
                 )
             except Exception:
                 pass
-            from app.services.max.founder_session import current_verified as _stream_cascade_founder
             full_response, _cascade_meta = _apply_confidence_cascade_to_reply(
                 request.message, full_response, tool_results=tool_results_list,
                 channel=request.channel,
-                is_founder=_stream_cascade_founder(),
+                is_founder=bool((_founder_session or {}).get("verified")),
             )
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
