@@ -79,7 +79,8 @@ STYLE_DIRECTIVE = """
 - Job visuals (mockup, drawing, diagram, picture, layout; typos like "mick up drwings"): run find_files, name the actual file and its folder, and share it with share_file (via="studio" link in Studio, this chat on WhatsApp; email only if he asked to email it). Never describe the design in words instead of the file.
 - When find_files / share_file returns documents, the FIRST reply must list each title as a full absolute markdown link using each match's markdown_link (host from the public base URL). Never relative paths. Never paste those URLs on voice or Telegram. Family editions do not emit a public host. "Show me X docs" is that list, not a drawing.
 - Weather: call get_weather (Empire Workroom is in Hyattsville, MD).
-- Measurements are always fractions of an inch, never decimals (26 3/4", not 26.75"). Channel cuts add 2 1/2" for board and foam, so a 12" channel is cut at least 18".
+- Measurements are always fractions of an inch, never decimals (26 3/4", not 26.75"). Channels state wood/foam cut and fabric cut separately (wood = true size, foam matches wood, fabric is the labeled allowance cut).
+- Job request (WhatsApp/chat) with a client/item/dims: call quoteiq_chain in that same turn (intake → CRM upsert → dims → Pricing Studio rates → DRAFT). Do not ask Rafael to re-enter fields already in the message. The quote stays DRAFT — never email or WhatsApp it to a client.
 - Upholstery estimates: group lines by area (U banquette, L banquette, material) with room=area, sq_ft and price_per_sqft per piece, measurements on the second description line in fractions; subtotal per area, then grand total, deposit, balance.
 - One quote per ask: never create a companion, split or alternate quote he did not ask for (offer it in one line instead). When he says go to a plan, run its tools in that same reply.
 """
@@ -541,7 +542,10 @@ def unrequested_send_error(tool_call: dict, message: Optional[str], history: Any
 
 # ── 2026-10-08: no unrequested companion quotes ─────────────────────────────────────────────────
 # EST-2026-300 (U-only copy of EST-2026-299) was created next to the quote Rafael asked for.
-QUOTE_CREATE_TOOLS = {"create_engine_quote", "create_quick_quote", "create_quote", "photo_to_quote", "create_v2_quote"}
+QUOTE_CREATE_TOOLS = {
+    "create_engine_quote", "create_quick_quote", "create_quote", "photo_to_quote",
+    "create_v2_quote", "quoteiq_chain", "quoteiq_draft_quote",
+}
 _MULTI_QUOTE_ASK = re.compile(
     r"\b(?:two|2|three|3|four|4|both|each|separate(?:ly)?|split|another|second|other|option|options|alternat\w*|"
     r"phases?|per\s+(?:bench|room|piece|area|section)|quotes|estimates|cotizaciones|dos|tres|cada|separad[ao]s?|otra)\b",

@@ -669,6 +669,11 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "payment_link": "deposit_pay_link",
             "make_quote": "create_engine_quote",
             "new_quote": "create_engine_quote",
+            "quoteiq": "quoteiq_chain",
+            "quote_chain": "quoteiq_chain",
+            "job_chain": "quoteiq_chain",
+            "quoteiq_crm": "quoteiq_crm_upsert",
+            "quoteiq_dims": "quoteiq_parse_dimensions",
             # NOTE: do NOT map bare "quote" → create_engine_quote;
             # "quote" can mean retrieve/show — auto-correcting that to a
             # CREATE causes silent quote creation from read intent.
@@ -8711,6 +8716,15 @@ try:
     TOOLS_DOC = TOOLS_DOC + _tools_ui_map.UI_MAP_TOOLS_DOC
 except Exception as _ui_map_err:
     logger.error(f"tools_ui_map not loaded: {_ui_map_err}")
+
+# QuoteIQ job-request chain (intake → CRM → dims → Pricing Studio → DRAFT).
+try:
+    _quoteiq_name = "app.services.max.tools_quoteiq"
+    _tools_quoteiq = (_importlib.reload(_sys.modules[_quoteiq_name]) if _quoteiq_name in _sys.modules
+                      else _importlib.import_module(_quoteiq_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_quoteiq.QUOTEIQ_TOOLS_DOC
+except Exception as _quoteiq_err:
+    logger.error(f"tools_quoteiq not loaded: {_quoteiq_err}")
 
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))

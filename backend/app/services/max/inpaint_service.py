@@ -28,7 +28,11 @@ from app.services.max.token_tracker import token_tracker
 logger = logging.getLogger("max.inpaint")
 
 GENERATED_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "generated"
-GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+except (PermissionError, OSError):
+    # Tests (and any read-only checkout) must not create backend/data.
+    pass
 
 MAX_IMAGE_DIM = 1024
 MASK_PADDING = 0.12

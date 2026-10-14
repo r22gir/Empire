@@ -2619,6 +2619,25 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
                 fallback_used=False,
                 metadata=_response_metadata(request.channel, skill_used=_qr["skill"]),
             )
+        try:
+            from app.services.max.quoteiq_chain import try_handle_inbound
+            _qiq = try_handle_inbound(
+                request.message or "",
+                channel=request.channel or "chat",
+                desk=request.desk,
+                has_image=bool(request.image_filename),
+            )
+        except Exception as _qiq_err:
+            logger.debug(f"quoteiq chain skipped: {_qiq_err}")
+            _qiq = None
+        if _qiq and _qiq.get("handled"):
+            return ChatResponse(
+                response=_qiq.get("reply_text") or "Draft ready. Not sent.",
+                model_used="quoteiq-chain",
+                fallback_used=False,
+                tool_results=_qiq.get("tool_results") or _qiq.get("steps") or [],
+                metadata=_response_metadata(request.channel, skill_used="quoteiq_chain"),
+            )
     if not request.desk and not request.image_filename:
         # Runtime truth / health / boundary questions must route to the live
         # truth check (async handler at line ~2030), not to module knowledge
