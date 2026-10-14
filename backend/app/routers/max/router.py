@@ -2619,25 +2619,6 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
                 fallback_used=False,
                 metadata=_response_metadata(request.channel, skill_used=_qr["skill"]),
             )
-        try:
-            from app.services.max.quoteiq_chain import try_handle_inbound
-            _qiq = try_handle_inbound(
-                request.message or "",
-                channel=request.channel or "chat",
-                desk=request.desk,
-                has_image=bool(request.image_filename),
-            )
-        except Exception as _qiq_err:
-            logger.debug(f"quoteiq chain skipped: {_qiq_err}")
-            _qiq = None
-        if _qiq and _qiq.get("handled"):
-            return ChatResponse(
-                response=_qiq.get("reply_text") or "Draft ready. Not sent.",
-                model_used="quoteiq-chain",
-                fallback_used=False,
-                tool_results=_qiq.get("tool_results") or _qiq.get("steps") or [],
-                metadata=_response_metadata(request.channel, skill_used="quoteiq_chain"),
-            )
     if not request.desk and not request.image_filename:
         # Runtime truth / health / boundary questions must route to the live
         # truth check (async handler at line ~2030), not to module knowledge
@@ -2710,6 +2691,46 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
     if answer_policy.shortcut_allowed("email_reply_boundary") and not request.desk and not request.image_filename and _is_email_reply_read_request(request.message):
         return _email_reply_boundary_response(request)
 
+    return None
+
+
+def _maybe_handle_quoteiq_request(request: ChatRequest, *, founder: bool = False) -> ChatResponse | None:
+    """Founder job-request chain. Cheap regex first; extract_transcript only after.
+
+    Lives after runtime-truth / health routing. Failures log as warning.
+    """
+    if request.desk or request.image_filename:
+        return None
+    text = request.message or ""
+    try:
+        from app.services.max.quoteiq_chain import looks_like_quote_request, try_handle_inbound
+    except Exception as exc:
+        logger.warning("quoteiq chain import failed: %s", exc, exc_info=True)
+        return None
+    if not looks_like_quote_request(text):
+        return None
+    if not founder:
+        return None
+    try:
+        _qiq = try_handle_inbound(
+            text,
+            channel=request.channel or "web_cc",
+            desk=request.desk,
+            has_image=bool(request.image_filename),
+            founder=True,
+            chat_id=request.chat_id,
+        )
+    except Exception as _qiq_err:
+        logger.warning("quoteiq chain failed: %s", _qiq_err, exc_info=True)
+        return None
+    if _qiq and _qiq.get("handled"):
+        return ChatResponse(
+            response=_qiq.get("reply_text") or "Draft ready. Not sent.",
+            model_used="quoteiq-chain",
+            fallback_used=False,
+            tool_results=_qiq.get("tool_results") or _qiq.get("steps") or [],
+            metadata=_response_metadata(request.channel, skill_used="quoteiq_chain"),
+        )
     return None
 
 
@@ -3294,6 +3315,11 @@ async def _chat_with_max_service_impl(
             tool_results=[result.to_dict()],
             metadata=metadata,
         )
+
+    quoteiq = _maybe_handle_quoteiq_request(request, founder=founder)
+    if quoteiq is not None:
+        quoteiq.response = sanitize_output(_sanitize_internal_leakage_text(quoteiq.response))
+        return quoteiq
 
     if not request.desk and not request.image_filename and should_clarify_inventory_request(request.message):
         return ChatResponse(
@@ -4609,6 +4635,11 @@ async def _chat_stream_impl(request: ChatRequest):
             yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'empire-runtime-truth-check', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='empire_runtime_truth_check')})}\n\n"
 
         return StreamingResponse(runtime_truth_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    from starlette.concurrency import run_in_threadpool
+    quoteiq = await run_in_threadpool(_maybe_handle_quoteiq_request, request, founder=founder)
+    if quoteiq is not None:
+        return _stream_immediate_response(quoteiq, request.conversation_id)
 
     if not request.desk and not request.image_filename and should_clarify_inventory_request(request.message):
         async def clarification_gen():

@@ -1,25 +1,44 @@
 """QuoteIQ-style multi-step tool chain for Max.
 
-When a job request arrives (WhatsApp / chat), run these steps as real tool
-calls, passing each result forward so the founder never re-enters data:
+When a founder job request arrives (WhatsApp / chat), run these steps as
+real tool calls, passing each result forward so the founder never
+re-enters data:
 
-  intake → CRM lookup/upsert → dimension parse → Pricing Studio rates → DRAFT quote
+  intake → dimension parse → Pricing Studio rates
+  → (only if item + dims + a real catalog price)
+  → CRM lookup/upsert → DRAFT quote
+
+Trigger requires a request phrase (quote / estimate / cotización / price /
+how much) AND an item AND at least one dimension. Bare "W x H" and casual
+chat do not run the chain.
 
 The result is always a DRAFT. Nothing is emailed or sent on WhatsApp to a
-client. Measurements are shop fractions (26 3/4"), never decimals. Channel
-cuts state wood/foam and fabric separately (wood = true size, foam matches
-wood, fabric is the labeled allowance cut).
+client. Measurements are shop fractions (26 3/4"), never decimals.
+
+Channel cuts (current rule — the old "add 2 1/2\" / 12\" channel needs 18\""
+add-on is gone):
+  - Wood / board cut is true size with no add-ons.
+  - Foam cut equals the wood cut.
+  - Fabric cut is a separately labeled size.
+  Leftover board after whole channels is reported, never silently dropped.
+
+Fabric allowance table semantics (see fabric_cut_allowance.py):
+  ``allowance_in`` is the TOTAL extra added to EACH wood dimension
+  (wrap both faces + sew), not a per-side add. Starter wrap = 2×foam + 1" sew.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.config.fabric_cut_allowance import NEEDS_FOAM_THICKNESS, lookup_fabric_allowance
+from app.config.workroom_billing import BILLED_BY_EMPIRE
 from app.services.max.whatsapp_format import has_real_job_signals, is_link_or_article_message
 from app.services.pricing.dimensions import plain_fractions
-from app.services.pricing.rate_cards import lookup_rate
 from app.services.vision.bench_cut_list import format_cut_inches
 from app.services.voice_documents.extract import extract_transcript
 from app.services.workroom_quote_commerce import parse_fraction_inches
@@ -28,11 +47,18 @@ logger = logging.getLogger("max.quoteiq_chain")
 
 CHAIN_STEPS = (
     "quoteiq_intake",
-    "quoteiq_crm_upsert",
     "quoteiq_parse_dimensions",
     "quoteiq_price",
+    "quoteiq_crm_upsert",
     "quoteiq_draft_quote",
 )
+
+EMPIRE_WORKROOM_BRAND = "Empire Workroom"
+DEDUPE_WINDOW_HOURS = 24
+PLACEHOLDER_NAMES = frozenset({
+    "customer", "client", "item", "unknown", "n/a", "na", "tbd", "none",
+    "test", "user",
+})
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _PHONE_RE = re.compile(
@@ -59,6 +85,32 @@ _CHANNEL_WIDTH_RE = re.compile(
     re.IGNORECASE,
 )
 _DECIMAL_INCH_RE = re.compile(r"\d+\.\d+\s*\"")
+_REQUEST_PHRASE_RE = re.compile(
+    r"\b("
+    r"quote|quotes|quoted|quoting|"
+    r"estimate|estimates|estimated|"
+    r"cotizaci[oó]n|cotizar|cotizo|"
+    r"presupuesto|"
+    r"price|priced|pricing|"
+    r"how\s+much|"
+    r"cu[aá]nto(?:\s+cuesta|\s+vale)?"
+    r")\b",
+    re.IGNORECASE,
+)
+_DIM_HINT_RE = re.compile(
+    rf"(?:"
+    rf"{_FRAC}\s*[xX×]\s*{_FRAC}"
+    rf"|{_FRAC}\s*(?:inches|inch|in\b|\")"
+    rf")",
+    re.IGNORECASE,
+)
+
+# SQLite last-10 phone compare without loading the table.
+_PHONE_STRIP_SQL = (
+    "replace(replace(replace(replace(replace(replace(replace("
+    "coalesce(phone,''), '-', ''), ' ', ''), '(', ''), ')', ''),"
+    "'+', ''), '.', ''), '/', '')"
+)
 
 _ITEM_TO_CATEGORY = {
     "drapery": "drapery",
@@ -71,7 +123,11 @@ _ITEM_TO_CATEGORY = {
     "back_cushion": "cushions",
 }
 
-_SEATING = frozenset({"bench", "banquette", "seat_cushion", "back_cushion"})
+_CATALOG_CATEGORIES = frozenset({"drapery", "roman_shade"})
+_FOUNDER_CHAT_CHANNELS = frozenset({
+    "web", "web_cc", "cc", "command_center", "command-center",
+    "dashboard", "studio_browser", "mobile_browser",
+})
 
 
 def _params(raw: Any) -> dict[str, Any]:
@@ -152,17 +208,87 @@ def _address_from(text: str, params: dict[str, Any]) -> str:
     return found.group(1).strip(" .,") if found else ""
 
 
+def _phone_digits(phone: str) -> str:
+    return re.sub(r"\D", "", phone or "")
+
+
+def _last10(phone: str) -> str:
+    digits = _phone_digits(phone)
+    return digits[-10:] if len(digits) >= 10 else ""
+
+
+def _is_real_name(name: str) -> bool:
+    cleaned = (name or "").strip()
+    if not cleaned or cleaned.lower() in PLACEHOLDER_NAMES:
+        return False
+    if "@" in cleaned:
+        return False
+    return any(ch.isalpha() for ch in cleaned)
+
+
+def _item_label(intake: dict[str, Any]) -> str:
+    return str(intake.get("item_name") or intake.get("item_type") or "").strip()
+
+
+def looks_like_quote_request(message: str) -> bool:
+    """Cheap regex prefilter: request phrase AND a dimension hint.
+
+    Does not call extract_transcript. Bare 'W x H' or chat without a
+    quote/estimate/price phrase returns False.
+    """
+    raw = (message or "").strip()
+    if not raw:
+        return False
+    if not _REQUEST_PHRASE_RE.search(raw):
+        return False
+    if not _DIM_HINT_RE.search(raw):
+        return False
+    return True
+
+
+def quoteiq_founder_allowed(
+    *,
+    channel: str = "",
+    sender: Optional[str] = None,
+    founder: Optional[bool] = None,
+    chat_id: Optional[str] = None,
+) -> bool:
+    """Both entry points (WhatsApp + /chat) require founder identity."""
+    if founder is False:
+        return False
+    if founder is True:
+        return True
+    ch = (channel or "").strip().lower()
+    if ch == "whatsapp":
+        try:
+            from app.services.max.whatsapp_channel import is_allowlisted
+
+            return is_allowlisted(sender)
+        except Exception:
+            return False
+    if ch in _FOUNDER_CHAT_CHANNELS:
+        return True
+    try:
+        from app.services.max.guardrails import is_founder_message
+
+        return is_founder_message({"channel": ch, "chat_id": chat_id or ""})
+    except Exception:
+        return False
+
+
 def should_run_quoteiq_chain(
     message: str,
     *,
     desk: Optional[str] = None,
     has_image: bool = False,
 ) -> bool:
-    """True when inbound text is a new job request, not a lookup/greeting/link."""
+    """True when inbound text is a founder job request, not casual chat."""
     if desk or has_image:
         return False
     raw = (message or "").strip()
     if not raw or is_link_or_article_message(raw):
+        return False
+    if not looks_like_quote_request(raw):
         return False
     try:
         from app.services.max.quick_replies import is_greeting, parse_quote_lookup
@@ -185,9 +311,9 @@ def should_run_quoteiq_chain(
             for key in ("width_in", "depth_in", "seat_height_in", "back_height_in")
         )
     )
-    if _WXH_RE.search(raw):
+    if _WXH_RE.search(raw) or _LABELED_DIM_RE.search(raw):
         has_dims = True
-    return bool(has_item or has_dims)
+    return bool(has_item and has_dims)
 
 
 def intake_job_request(params: dict[str, Any]) -> dict[str, Any]:
@@ -236,7 +362,8 @@ def intake_job_request(params: dict[str, Any]) -> dict[str, Any]:
     ch_match = _CHANNEL_WIDTH_RE.search(text)
     if ch_match:
         channel_width = parse_fraction_inches(ch_match.group(1))
-    client = (params.get("customer_name") or params.get("client_name") or probe.client_name or "").strip()
+    raw_name = (params.get("customer_name") or params.get("client_name") or probe.client_name or "").strip()
+    client = raw_name if _is_real_name(raw_name) else ""
     email = _email_from(text, params)
     phone = _phone_from(text, params)
     address = _address_from(text, params)
@@ -271,38 +398,46 @@ def intake_job_request(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _find_customer(conn, *, email: str, phone: str, name: str) -> Optional[dict]:
+def _find_customer(conn, *, email: str, phone: str) -> Optional[dict]:
+    """Match only on email or last-10 phone digits. SQL filter, never name-only."""
     if email:
         row = conn.execute(
             """SELECT * FROM customers
                WHERE email IS NOT NULL AND trim(email) != ''
-                 AND lower(email) = lower(?)
+                 AND lower(trim(email)) = lower(?)
                ORDER BY updated_at DESC LIMIT 1""",
-            (email,),
+            (email.strip(),),
         ).fetchone()
         if row:
             return dict(row)
-    digits = re.sub(r"\D", "", phone or "")
-    if len(digits) >= 7:
+    last10 = _last10(phone)
+    if last10:
         row = conn.execute(
-            "SELECT * FROM customers WHERE phone IS NOT NULL AND phone != ''"
-        ).fetchall()
-        for candidate in row:
-            existing = re.sub(r"\D", "", str(candidate["phone"] or ""))
-            if existing and existing[-10:] == digits[-10:]:
-                return dict(candidate)
-    if name:
-        row = conn.execute(
-            "SELECT * FROM customers WHERE lower(name) = lower(?) ORDER BY updated_at DESC LIMIT 1",
-            (name,),
+            f"""SELECT * FROM customers
+                WHERE phone IS NOT NULL AND trim(phone) != ''
+                  AND length({_PHONE_STRIP_SQL}) >= 10
+                  AND substr({_PHONE_STRIP_SQL}, -10) = ?
+                ORDER BY updated_at DESC LIMIT 1""",
+            (last10,),
         ).fetchone()
         if row:
             return dict(row)
     return None
 
 
+def _field_mismatch(field: str, existing: str, incoming: str) -> str:
+    return f"{field} mismatch: kept {existing!r}, inbound {incoming!r}"
+
+
+def _same_phone(a: str, b: str) -> bool:
+    left, right = _last10(a), _last10(b)
+    if left and right:
+        return left == right
+    return _phone_digits(a) == _phone_digits(b)
+
+
 def lookup_or_upsert_client(params: dict[str, Any]) -> dict[str, Any]:
-    """Step 2 — ForgeCRM lookup/upsert. Reuses upsert_forgecrm_customer."""
+    """CRM lookup/upsert: email or last-10 phone only. Fill empty fields, never overwrite."""
     params = _params(params)
     intake = params.get("intake") if isinstance(params.get("intake"), dict) else params
     name = (intake.get("customer_name") or intake.get("client_name") or intake.get("name") or "").strip()
@@ -310,61 +445,23 @@ def lookup_or_upsert_client(params: dict[str, Any]) -> dict[str, Any]:
     phone = (intake.get("customer_phone") or intake.get("phone") or "").strip()
     address = (intake.get("customer_address") or intake.get("address") or "").strip()
     business = (intake.get("business_unit") or "workroom").strip() or "workroom"
-    if not name and not email and not phone:
-        return {
-            "ok": True,
-            "upsert_outcome": "skipped",
-            "reason": "no client identity in the job request",
-            "customer": None,
-            "customer_id": None,
-            "customer_name": "",
-            "customer_email": email,
-            "customer_phone": phone,
-            "customer_address": address,
-        }
-    try:
-        from app.routers.customer_mgmt import upsert_forgecrm_customer
-        from app.db.database import get_db
-
-        with get_db() as conn:
-            existing = _find_customer(conn, email=email, phone=phone, name=name)
-            payload = {
-                "name": name or (existing or {}).get("name") or "Customer",
-                "email": email or (existing or {}).get("email"),
-                "phone": phone or (existing or {}).get("phone"),
-                "address": address or (existing or {}).get("address"),
-                "business": business,
-                "source": f"quoteiq_{_channel(intake)}",
-                "notes": "QuoteIQ job-request chain",
-            }
-            if existing:
-                payload["customer_id"] = existing["id"]
-            result = upsert_forgecrm_customer(payload, conn=conn)
-        customer = result.get("customer") or {}
-        return {
-            "ok": True,
-            "upsert_outcome": result.get("upsert_outcome") or "created",
-            "customer_id": result.get("customer_id") or customer.get("id"),
-            "customer": {
-                "id": customer.get("id"),
-                "name": customer.get("name"),
-                "email": customer.get("email"),
-                "phone": customer.get("phone"),
-                "address": customer.get("address"),
-                "business": customer.get("business"),
-            },
-            "customer_name": customer.get("name") or name,
-            "customer_email": customer.get("email") or email,
-            "customer_phone": customer.get("phone") or phone,
-            "customer_address": customer.get("address") or address,
-            "business_unit": customer.get("business") or business,
-            "ask_founder": False,
-        }
-    except Exception:
-        logger.debug("ForgeCRM router upsert unavailable; using customers table directly", exc_info=True)
-        return _upsert_customer_direct(
-            name=name, email=email, phone=phone, address=address, business=business, channel=_channel(intake),
-        )
+    skipped = {
+        "ok": True,
+        "upsert_outcome": "skipped",
+        "customer": None,
+        "customer_id": None,
+        "customer_name": name if _is_real_name(name) else "",
+        "customer_email": email,
+        "customer_phone": phone,
+        "customer_address": address,
+        "mismatches": [],
+    }
+    if not email and not _last10(phone):
+        skipped["reason"] = "CRM match requires email or last-10 phone digits"
+        return skipped
+    return _upsert_customer_direct(
+        name=name, email=email, phone=phone, address=address, business=business, channel=_channel(intake),
+    )
 
 
 def _upsert_customer_direct(
@@ -376,40 +473,65 @@ def _upsert_customer_direct(
     business: str,
     channel: str,
 ) -> dict[str, Any]:
-    """ForgeCRM customers table lookup/upsert without importing the API router."""
-    import uuid
-
+    """ForgeCRM customers table: SQL email/last-10 match, fill-empty only."""
     from app.db.database import get_db
 
-    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+    mismatches: list[str] = []
     with get_db() as conn:
-        existing = _find_customer(conn, email=email, phone=phone, name=name)
+        existing = _find_customer(conn, email=email, phone=phone)
         if existing:
-            conn.execute(
-                """UPDATE customers
-                   SET name = COALESCE(NULLIF(?, ''), name),
-                       email = COALESCE(NULLIF(?, ''), email),
-                       phone = COALESCE(NULLIF(?, ''), phone),
-                       address = COALESCE(NULLIF(?, ''), address),
-                       business = COALESCE(NULLIF(?, ''), business),
-                       updated_at = ?
-                   WHERE id = ?""",
-                (name, email, phone, address, business, now, existing["id"]),
-            )
+            updates: dict[str, str] = {}
+            for field, incoming, same in (
+                ("email", email, lambda a, b: a.lower() == b.lower()),
+                ("phone", phone, _same_phone),
+                ("address", address, lambda a, b: a.strip().lower() == b.strip().lower()),
+                ("name", name if _is_real_name(name) else "", lambda a, b: a.strip().lower() == b.strip().lower()),
+            ):
+                old = str(existing.get(field) or "").strip()
+                incoming = (incoming or "").strip()
+                if not incoming:
+                    continue
+                if not old:
+                    updates[field] = incoming
+                elif not same(old, incoming):
+                    mismatches.append(_field_mismatch(field, old, incoming))
+            if updates:
+                sets = ", ".join(f"{col} = ?" for col in updates)
+                conn.execute(
+                    f"UPDATE customers SET {sets}, updated_at = ? WHERE id = ?",
+                    (*updates.values(), now, existing["id"]),
+                )
             row = conn.execute("SELECT * FROM customers WHERE id = ?", (existing["id"],)).fetchone()
             outcome = "matched"
         else:
+            if not _is_real_name(name):
+                return {
+                    "ok": True,
+                    "upsert_outcome": "skipped",
+                    "reason": "no customer without a real name",
+                    "customer": None,
+                    "customer_id": None,
+                    "customer_name": "",
+                    "customer_email": email,
+                    "customer_phone": phone,
+                    "customer_address": address,
+                    "mismatches": [],
+                }
             cid = uuid.uuid4().hex[:12]
             conn.execute(
                 """INSERT INTO customers
                    (id, name, email, phone, address, type, source, business, notes, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, 'residential', ?, ?, 'QuoteIQ job-request chain', ?, ?)""",
-                (cid, name or "Customer", email or None, phone or None, address or None,
+                (cid, name, email or None, phone or None, address or None,
                  f"quoteiq_{channel}", business, now, now),
             )
             row = conn.execute("SELECT * FROM customers WHERE id = ?", (cid,)).fetchone()
             outcome = "created"
         customer = dict(row)
+    real = customer.get("name") or ""
+    if not _is_real_name(real):
+        real = name if _is_real_name(name) else ""
     return {
         "ok": True,
         "upsert_outcome": outcome,
@@ -422,11 +544,12 @@ def _upsert_customer_direct(
             "address": customer.get("address"),
             "business": customer.get("business"),
         },
-        "customer_name": customer.get("name") or name,
+        "customer_name": real,
         "customer_email": customer.get("email") or email,
         "customer_phone": customer.get("phone") or phone,
         "customer_address": customer.get("address") or address,
         "business_unit": customer.get("business") or business,
+        "mismatches": mismatches,
         "ask_founder": False,
     }
 
@@ -452,13 +575,14 @@ def _drawing_dims(text: str, item_type: str) -> dict[str, str]:
     return out
 
 
-def _channel_cuts(intake: dict[str, Any], dims: dict[str, str]) -> list[dict[str, str]]:
+def _channel_cuts(intake: dict[str, Any], dims: dict[str, str]) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    """Wood/foam = true size, fabric labeled separately. Leftover board is reported."""
     style = str(intake.get("panel_style") or "")
     sections = intake.get("seat_sections") or intake.get("back_sections")
     text = str(intake.get("message") or "")
     channel_width = _inches(intake.get("channel_width_in"))
     if "channel" not in style and not sections and not channel_width and "channel" not in text.lower():
-        return []
+        return [], {}
     width = _inches(intake.get("width_in")) or _inches(dims.get("width"))
     height = (
         _inches(intake.get("height_in"))
@@ -467,9 +591,24 @@ def _channel_cuts(intake: dict[str, Any], dims: dict[str, str]) -> list[dict[str
         or _inches(dims.get("back height"))
     )
     ch_h = height or _inches(intake.get("depth_in")) or _inches(dims.get("depth")) or width
-    if channel_width:
+    remainder_in = 0.0
+    remainder_note = ""
+    if channel_width and width and width + 1e-9 >= channel_width:
         ch_w = channel_width
-        count = int(sections) if sections else (max(1, int(round((width or channel_width) / channel_width))) if width else 1)
+        count = max(1, int(width // channel_width))
+        remainder_in = round(width - (count * channel_width), 4)
+        if remainder_in > 1e-6:
+            remainder_note = (
+                f"{_as_fraction(remainder_in)} leftover after {count} × {_as_fraction(channel_width)} "
+                "channels — do not drop."
+            )
+    elif channel_width and width and width < channel_width:
+        count = 1
+        ch_w = width
+        remainder_note = (
+            f"board {_as_fraction(width)} is narrower than channel {_as_fraction(channel_width)} "
+            "— one channel at true board size."
+        )
     elif width and sections:
         count = int(sections)
         ch_w = width / count
@@ -477,9 +616,9 @@ def _channel_cuts(intake: dict[str, Any], dims: dict[str, str]) -> list[dict[str
         count = 1
         ch_w = width
     else:
-        return []
+        return [], {}
     if not ch_w:
-        return []
+        return [], {}
     foam_th = _inches(intake.get("foam_thickness_in"))
     allowance = lookup_fabric_allowance(foam_th)
     extra = allowance.get("allowance_in")
@@ -488,6 +627,7 @@ def _channel_cuts(intake: dict[str, Any], dims: dict[str, str]) -> list[dict[str
     if extra is None:
         fabric = NEEDS_FOAM_THICKNESS
     else:
+        # allowance_in = TOTAL extra on EACH wood dimension (wrap both faces + sew), not per-side.
         fabric = f"{_as_fraction(ch_w + float(extra))} x {_as_fraction(ch_h + float(extra))}"
     cuts = []
     for idx in range(count):
@@ -497,11 +637,22 @@ def _channel_cuts(intake: dict[str, Any], dims: dict[str, str]) -> list[dict[str
             "foam_cut": foam,
             "fabric_cut": fabric,
         })
-    return cuts
+    meta = {
+        "channel_count": count,
+        "channel_width": _as_fraction(ch_w),
+        "channel_remainder": _as_fraction(remainder_in) if remainder_in > 1e-6 else "",
+        "channel_remainder_note": remainder_note,
+        "allowance_in": extra,
+        "allowance_semantics": (
+            "allowance_in is the total extra added to each wood dimension "
+            "(wrap both faces + sew), not a per-side add."
+        ),
+    }
+    return cuts, meta
 
 
 def parse_job_dimensions(params: dict[str, Any]) -> dict[str, Any]:
-    """Step 3 — dimensions as fractions; channel wood/foam vs fabric separately."""
+    """Step 2 — dimensions as fractions; channel wood/foam vs fabric separately."""
     params = _params(params)
     intake = params.get("intake") if isinstance(params.get("intake"), dict) else params
     text = _text(intake) or _text(params)
@@ -523,7 +674,7 @@ def parse_job_dimensions(params: dict[str, Any]) -> dict[str, Any]:
         dimensions["seat_height"] = seat_h
     if back_h:
         dimensions["back_height"] = back_h
-    channels = _channel_cuts(intake, dimensions)
+    channels, channel_meta = _channel_cuts(intake, dimensions)
     blob = " ".join([*dimensions.values(), *(c["wood_cut"] + c["foam_cut"] + c["fabric_cut"] for c in channels)])
     if _DECIMAL_INCH_RE.search(blob):
         raise ValueError("QuoteIQ dimensions leaked a decimal inch")
@@ -536,11 +687,20 @@ def parse_job_dimensions(params: dict[str, Any]) -> dict[str, Any]:
         "seat_height": seat_h,
         "back_height": back_h,
         "channel_cuts": channels,
+        "channel_remainder": channel_meta.get("channel_remainder") or "",
+        "channel_remainder_note": channel_meta.get("channel_remainder_note") or "",
         "channel_rules": [
-            "Wood / board cut is true size.",
+            "Wood / board cut is true size with no add-ons.",
             "Foam cut equals the wood cut.",
             "Fabric cut is labeled separately. Allowance depends on foam thickness.",
+            "allowance_in is the total extra added to each wood dimension (wrap both faces + sew), not per-side.",
+            "Leftover board after whole channels is reported — never silently dropped.",
+            "Never add 2 1/2\" or treat a 12\" channel as needing 18\".",
         ],
+        "allowance_semantics": channel_meta.get("allowance_semantics") or (
+            "allowance_in is the total extra added to each wood dimension "
+            "(wrap both faces + sew), not a per-side add."
+        ),
         "measurements_format": "fractions",
         "ask_founder": False,
     }
@@ -571,8 +731,27 @@ def _catalog_inputs(item_type: str, intake: dict[str, Any], dims: dict[str, Any]
     }
 
 
+def _has_dimension(intake: dict[str, Any], dims: dict[str, Any]) -> bool:
+    for key in ("width", "height", "depth", "seat_height", "back_height"):
+        if dims.get(key) or _inches(intake.get(f"{key}_in") or intake.get(key)):
+            return True
+    return False
+
+
+def _draft_ready(intake: dict[str, Any], dims: dict[str, Any], pricing: dict[str, Any]) -> list[str]:
+    """Missing pieces before a draft may be created. Empty list = ready."""
+    missing: list[str] = []
+    if not _item_label(intake):
+        missing.append("item")
+    if not _has_dimension(intake, dims):
+        missing.append("dimensions")
+    if not pricing.get("has_real_price"):
+        missing.append("a Pricing Studio price")
+    return missing
+
+
 def price_with_studio(params: dict[str, Any]) -> dict[str, Any]:
-    """Step 4 — price from Pricing Studio rate cards / engine. No invented dims."""
+    """Step 3 — real Pricing Studio catalog price only. No invented lines."""
     params = _params(params)
     intake = params.get("intake") if isinstance(params.get("intake"), dict) else params
     dims = params.get("dimensions") if isinstance(params.get("dimensions"), dict) else {}
@@ -580,98 +759,127 @@ def price_with_studio(params: dict[str, Any]) -> dict[str, Any]:
         dims = params["parse"].get("dimensions") or params["parse"]
     business = (intake.get("business_unit") or params.get("business_unit") or "workroom").strip() or "workroom"
     item_type = str(intake.get("item_type") or "")
-    studio_rates: dict[str, float] = {}
-    try:
-        studio_rates["labor_rate"] = lookup_rate(business, "labor_rate")
-    except KeyError:
-        studio_rates["labor_rate"] = lookup_rate("workroom", "labor_rate")
     category, inputs = _catalog_inputs(item_type, intake, dims)
-    line: dict[str, Any] = {
-        "category": category or "",
-        "description": _line_description(intake, dims),
-        "quantity": 1,
-        "inputs": dict(inputs),
-        "rate_source": "pricing_studio",
-    }
     priced = None
     error = None
-    if category in ("drapery", "roman_shade") and inputs:
+    line: dict[str, Any] = {}
+    if category in _CATALOG_CATEGORIES and inputs:
         try:
             from app.services.pricing.engine import price_workroom_line
 
             priced = price_workroom_line(category, inputs, business_unit=business)
-            line["category"] = category
-            line["inputs"] = inputs
-            line["proposed_price"] = priced.get("proposed_price")
+            amount = priced.get("proposed_price")
+            if amount is None:
+                priced = None
+            else:
+                line = {
+                    "category": category,
+                    "description": _line_description(intake, dims),
+                    "quantity": 1,
+                    "inputs": dict(inputs),
+                    "rate_source": "pricing_studio",
+                    "proposed_price": amount,
+                }
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             priced = None
-    if priced is None and item_type in _SEATING:
-        try:
-            from app.services.pricing.engine import price_workroom_item
-
-            hours = _inches(params.get("labor_hours") or intake.get("labor_hours"))
-            studio_inputs = {
-                "labor_rate": studio_rates["labor_rate"],
-                "quantity": 1,
-            }
-            if hours:
-                studio_inputs["labor_hours"] = hours
-            priced = price_workroom_item("upholstery", studio_inputs)
-            line["category"] = ""
-            line["unit_price"] = studio_rates["labor_rate"]
-            line["inputs"] = {
-                "description": line["description"],
-                "unit_price": studio_rates["labor_rate"],
-                "quantity": 1,
-            }
-            line["proposed_price"] = priced.get("final_price") if hours else studio_rates["labor_rate"]
-            line["note"] = (
-                "Pricing Studio labor_rate applied. Hours not in the request — founder confirms hours."
-                if not hours
-                else "Priced from Pricing Studio labor_rate."
-            )
-        except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
-    if priced is None and not line.get("unit_price"):
-        line["unit_price"] = studio_rates["labor_rate"]
-        line["inputs"] = {
-            "description": line["description"],
-            "unit_price": studio_rates["labor_rate"],
-            "quantity": 1,
-        }
-        line["proposed_price"] = studio_rates["labor_rate"]
-        line["note"] = "Pricing Studio labor_rate. Confirm quantity/hours before sending."
+    has_real = bool(priced and line.get("proposed_price") is not None)
     return {
         "ok": True,
         "engine": "pricing_studio",
         "business_unit": business,
-        "studio_rates": studio_rates,
-        "line_items": [line],
+        "has_real_price": has_real,
+        "studio_rates": {},
+        "line_items": [line] if has_real else [],
         "priced": {
             "final_price": (priced or {}).get("final_price") or (priced or {}).get("proposed_price"),
+            "proposed_price": (priced or {}).get("proposed_price"),
             "product_category": (priced or {}).get("product_category"),
             "rate_table_version": (priced or {}).get("rate_table_version"),
-        } if priced else None,
+        } if has_real else None,
         "pricing_error": error,
+        "need": None if has_real else "a Pricing Studio price",
         "ask_founder": False,
     }
 
 
 def _line_description(intake: dict[str, Any], dims: dict[str, Any]) -> str:
-    name = (intake.get("item_name") or intake.get("item_type") or "Item").strip() or "Item"
+    name = _item_label(intake)
     parts = []
     for key in ("width", "height", "depth", "seat_height", "back_height"):
         value = dims.get(key) or _as_fraction(intake.get(f"{key}_in") or intake.get(key))
         if value:
             parts.append(f"{value} {key.replace('_', ' ')}")
-    if parts:
+    if name and parts:
         return f"{name}\n" + " · ".join(parts)
     return name
 
 
+def _norm_blob(*parts: str) -> str:
+    return " ".join(" ".join(p or "" for p in parts).lower().split())
+
+
+def _fingerprint(message: str, customer: str, item: str) -> str:
+    blob = _norm_blob(message, customer, item)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
+
+
+def _parse_created(raw: Any) -> Optional[datetime]:
+    if not raw:
+        return None
+    text = str(raw).strip()
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
+def _find_recent_draft(fp: str) -> Optional[dict[str, Any]]:
+    from app.db.database import get_db
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=DEDUPE_WINDOW_HOURS)
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT id, quote_number, customer_name, notes, created_at, status, billed_by, total, subtotal
+               FROM quotes_v2
+               WHERE status = 'draft' AND notes LIKE ?
+               ORDER BY created_at DESC""",
+            (f"%quoteiq_fp:{fp}%",),
+        ).fetchall()
+    for row in rows:
+        created = _parse_created(row["created_at"] if not isinstance(row, dict) else row.get("created_at"))
+        if created is None or created >= cutoff:
+            data = dict(row)
+            return data
+    return None
+
+
+def _set_empire_brand(quote_id: str) -> None:
+    from app.db.database import get_db
+    from app.config.workroom_billing import ensure_billed_by_schema
+
+    try:
+        with get_db() as conn:
+            ensure_billed_by_schema(conn)
+            conn.execute(
+                "UPDATE quotes_v2 SET billed_by = ? WHERE id = ?",
+                (BILLED_BY_EMPIRE, quote_id),
+            )
+    except Exception:
+        logger.debug("QuoteIQ billed_by brand write skipped", exc_info=True)
+
+
 def draft_quote_only(params: dict[str, Any]) -> dict[str, Any]:
-    """Step 5 — persist a DRAFT via quote_service.create_quote. Never send."""
+    """Step 5 — persist a DRAFT via quote_service.create_quote. Never send.
+
+    Requires item + dims + a real Pricing Studio price. No invented lines,
+    no labor_rate placeholder, no 'Customer'/'Item' names.
+    """
     params = _params(params)
     intake = params.get("intake") if isinstance(params.get("intake"), dict) else params
     client = params.get("client") if isinstance(params.get("client"), dict) else {}
@@ -679,32 +887,85 @@ def draft_quote_only(params: dict[str, Any]) -> dict[str, Any]:
     if not dims and isinstance(params.get("parse"), dict):
         dims = params["parse"].get("dimensions") or {}
     pricing = params.get("pricing") if isinstance(params.get("pricing"), dict) else {}
-    lines = pricing.get("line_items") or params.get("line_items") or []
-    if not lines:
-        lines = [{
-            "category": "",
-            "description": _line_description(intake, dims),
-            "quantity": 1,
-            "unit_price": (pricing.get("studio_rates") or {}).get("labor_rate") or lookup_rate("workroom", "labor_rate"),
-        }]
-    name = (
+    missing = _draft_ready(intake, dims, pricing)
+    if missing:
+        need = ", ".join(missing)
+        return {
+            "ok": True,
+            "created": False,
+            "sent": False,
+            "status": "incomplete",
+            "need": need,
+            "reply_text": f"need {need}",
+            "quote_id": None,
+            "notice": f"need {need}. Nothing created.",
+        }
+    raw_name = (
         client.get("customer_name")
         or intake.get("customer_name")
         or client.get("name")
-        or "Customer"
+        or ""
     )
+    name = raw_name if _is_real_name(str(raw_name)) else ""
+    item = _item_label(intake)
+    message = str(intake.get("message") or params.get("message") or "")
+    fp = _fingerprint(message, name or str(client.get("customer_email") or intake.get("customer_email") or ""), item)
+    existing = _find_recent_draft(fp)
+    if existing:
+        return {
+            "ok": True,
+            "created": False,
+            "deduped": True,
+            "sent": False,
+            "status": "draft",
+            "store": "quotes_v2",
+            "quote_id": existing.get("id"),
+            "quote_number": existing.get("quote_number"),
+            "customer_name": existing.get("customer_name") or name,
+            "customer_id": client.get("customer_id"),
+            "total": existing.get("total"),
+            "subtotal": existing.get("subtotal"),
+            "billed_by": existing.get("billed_by") or BILLED_BY_EMPIRE,
+            "brand": EMPIRE_WORKROOM_BRAND,
+            "channel_cuts": params.get("channel_cuts")
+            or (params.get("parse") or {}).get("channel_cuts")
+            or [],
+            "notice": "Existing DRAFT within 24h. Not sent.",
+            "ask_founder": False,
+        }
+    lines = [row for row in (pricing.get("line_items") or params.get("line_items") or []) if row]
+    if not lines:
+        return {
+            "ok": True,
+            "created": False,
+            "sent": False,
+            "status": "incomplete",
+            "need": "a Pricing Studio price",
+            "reply_text": "need a Pricing Studio price",
+            "quote_id": None,
+        }
+    notes = (
+        f"quoteiq chain draft — not sent. Brand: {EMPIRE_WORKROOM_BRAND}. "
+        f"quoteiq_fp:{fp}"
+    )
+    mismatches = client.get("mismatches") or []
+    if mismatches:
+        notes += " CRM: " + "; ".join(mismatches)
     body = {
         "customer_name": name,
         "customer_email": client.get("customer_email") or intake.get("customer_email") or "",
         "customer_phone": client.get("customer_phone") or intake.get("customer_phone") or "",
         "customer_address": client.get("customer_address") or intake.get("customer_address") or "",
         "business_unit": intake.get("business_unit") or "workroom",
-        "project_name": intake.get("item_name") or intake.get("item_type") or "QuoteIQ draft",
-        "project_description": intake.get("message") or "",
-        "notes": "quoteiq chain draft — not sent",
+        "billed_by": BILLED_BY_EMPIRE,
+        "project_name": item,
+        "project_description": message,
+        "notes": notes,
         "line_items": lines,
         "measurements": {
             "format": "fractions",
+            "brand": EMPIRE_WORKROOM_BRAND,
+            "billed_by": BILLED_BY_EMPIRE,
             "dimensions": dims,
             "channel_cuts": params.get("channel_cuts")
             or (params.get("parse") or {}).get("channel_cuts")
@@ -717,19 +978,26 @@ def draft_quote_only(params: dict[str, Any]) -> dict[str, Any]:
     status = str(quote.get("status") or "draft").lower()
     if status != "draft":
         raise RuntimeError(f"QuoteIQ must persist draft only, got {status!r}")
+    quote_id = quote.get("id")
+    if quote_id:
+        _set_empire_brand(str(quote_id))
     return {
         "ok": True,
+        "created": True,
+        "deduped": False,
         "sent": False,
         "status": "draft",
         "store": "quotes_v2",
-        "quote_id": quote.get("id"),
+        "quote_id": quote_id,
         "quote_number": quote.get("quote_number"),
-        "customer_name": quote.get("customer_name"),
+        "customer_name": quote.get("customer_name") or name,
         "customer_id": client.get("customer_id"),
         "total": quote.get("total"),
         "subtotal": quote.get("subtotal"),
         "line_items": quote.get("line_items") or [],
         "channel_cuts": body["measurements"]["channel_cuts"],
+        "billed_by": BILLED_BY_EMPIRE,
+        "brand": EMPIRE_WORKROOM_BRAND,
         "notice": "DRAFT only. Not sent to the client. Not emailed. Not WhatsApped.",
         "ask_founder": False,
     }
@@ -756,7 +1024,7 @@ def _step_payload(name: str, ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_quoteiq_chain(params: dict[str, Any]) -> dict[str, Any]:
-    """Run all five steps as execute_tool calls, carrying context forward."""
+    """Run the chain. CRM + draft run only after item+dims+real price."""
     params = _params(params)
     text = _text(params)
     channel = _channel(params)
@@ -792,7 +1060,8 @@ def run_quoteiq_chain(params: dict[str, Any]) -> dict[str, Any]:
         "quoteiq_price": "pricing",
         "quoteiq_draft_quote": "quote",
     }
-    for name in CHAIN_STEPS:
+
+    def _run_step(name: str) -> dict[str, Any]:
         payload = runners[name](_step_payload(name, ctx))
         ok = bool(payload.get("ok", True))
         entry = {
@@ -802,38 +1071,103 @@ def run_quoteiq_chain(params: dict[str, Any]) -> dict[str, Any]:
             "error": None if ok else payload.get("error") or f"{name} failed",
         }
         steps.append(entry)
-        if not ok:
+        if ok:
+            ctx[mapping[name]] = payload
+            for key in (
+                "customer_name",
+                "customer_email",
+                "customer_phone",
+                "customer_address",
+                "customer_id",
+                "business_unit",
+                "item_type",
+                "item_name",
+                "width_in",
+                "height_in",
+                "depth_in",
+            ):
+                if payload.get(key) not in (None, ""):
+                    ctx[key] = payload[key]
+        return entry
+
+    for name in ("quoteiq_intake", "quoteiq_parse_dimensions", "quoteiq_price"):
+        entry = _run_step(name)
+        if not entry["success"]:
             return {
                 "ok": False,
                 "handled": True,
                 "sent": False,
+                "created": False,
                 "status": "blocked",
                 "error": entry.get("error") or f"{name} failed",
                 "steps": steps,
                 "tool_results": steps,
                 "reply_text": _founder_reply({"ok": False, "error": entry.get("error"), "steps": steps}),
             }
-        ctx[mapping[name]] = payload
-        for key in (
-            "customer_name",
-            "customer_email",
-            "customer_phone",
-            "customer_address",
-            "customer_id",
-            "business_unit",
-            "item_type",
-            "item_name",
-            "width_in",
-            "height_in",
-            "depth_in",
-        ):
-            if payload.get(key) not in (None, ""):
-                ctx[key] = payload[key]
+
+    intake = ctx.get("intake") or {}
+    parse = ctx.get("parse") or {}
+    pricing = ctx.get("pricing") or {}
+    dims = parse.get("dimensions") or {}
+    missing = _draft_ready(intake, dims, pricing)
+    if missing:
+        need = ", ".join(missing)
+        reply = {
+            "ok": True,
+            "handled": True,
+            "sent": False,
+            "created": False,
+            "status": "incomplete",
+            "need": need,
+            "quote_id": None,
+            "steps": steps,
+            "tool_results": steps,
+            "dimensions": dims,
+            "channel_cuts": parse.get("channel_cuts") or [],
+            "channel_remainder": parse.get("channel_remainder") or "",
+            "notice": f"need {need}. Nothing created.",
+            "ask_founder": False,
+        }
+        reply["reply_text"] = f"need {need}"
+        return reply
+
+    for name in ("quoteiq_crm_upsert", "quoteiq_draft_quote"):
+        entry = _run_step(name)
+        if not entry["success"]:
+            return {
+                "ok": False,
+                "handled": True,
+                "sent": False,
+                "created": False,
+                "status": "blocked",
+                "error": entry.get("error") or f"{name} failed",
+                "steps": steps,
+                "tool_results": steps,
+                "reply_text": _founder_reply({"ok": False, "error": entry.get("error"), "steps": steps}),
+            }
+
     quote = ctx.get("quote") or {}
+    if quote.get("status") == "incomplete" or not quote.get("quote_id"):
+        need = quote.get("need") or "item"
+        return {
+            "ok": True,
+            "handled": True,
+            "sent": False,
+            "created": False,
+            "status": "incomplete",
+            "need": need,
+            "quote_id": None,
+            "steps": steps,
+            "tool_results": steps,
+            "reply_text": f"need {need}",
+            "ask_founder": False,
+        }
     reply = {
         "ok": True,
         "handled": True,
         "sent": False,
+        "created": bool(quote.get("created")),
+        "deduped": bool(quote.get("deduped")),
         "status": "draft",
         "quote_id": quote.get("quote_id"),
         "quote_number": quote.get("quote_number"),
@@ -841,8 +1175,12 @@ def run_quoteiq_chain(params: dict[str, Any]) -> dict[str, Any]:
         "customer_id": ctx.get("customer_id"),
         "total": quote.get("total"),
         "channel_cuts": (ctx.get("parse") or {}).get("channel_cuts") or [],
+        "channel_remainder": (ctx.get("parse") or {}).get("channel_remainder") or "",
+        "channel_remainder_note": (ctx.get("parse") or {}).get("channel_remainder_note") or "",
         "dimensions": (ctx.get("parse") or {}).get("dimensions") or {},
         "studio_rates": (ctx.get("pricing") or {}).get("studio_rates") or {},
+        "billed_by": quote.get("billed_by") or BILLED_BY_EMPIRE,
+        "brand": EMPIRE_WORKROOM_BRAND,
         "steps": steps,
         "tool_results": steps,
         "notice": "DRAFT only. Not sent to the client.",
@@ -853,17 +1191,20 @@ def run_quoteiq_chain(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _founder_reply(result: dict[str, Any]) -> str:
+    if result.get("status") == "incomplete" or result.get("need"):
+        return f"need {result.get('need')}"
     if not result.get("ok"):
         err = result.get("error") or "chain stopped"
         return f"QuoteIQ chain stopped: {err}. Nothing sent."
     number = result.get("quote_number") or "draft"
-    name = result.get("customer_name") or "the client"
+    name = result.get("customer_name") or "the job"
     total = result.get("total")
     try:
         money = f"${float(total):,.2f}" if total is not None else ""
     except (TypeError, ValueError):
         money = ""
-    lines = [f"Draft {number} for {name}{f' · {money}' if money else ''}. Not sent."]
+    prefix = "Existing draft" if result.get("deduped") else "Draft"
+    lines = [f"{prefix} {number} for {name}{f' · {money}' if money else ''}. Brand: {EMPIRE_WORKROOM_BRAND}. Not sent."]
     dims = result.get("dimensions") or {}
     if dims:
         shown = " · ".join(f"{k} {v}" for k, v in dims.items() if v)
@@ -873,6 +1214,11 @@ def _founder_reply(result: dict[str, Any]) -> str:
         lines.append(
             f"{cut.get('channel')}: wood/foam {cut.get('wood_cut')} · fabric {cut.get('fabric_cut')}"
         )
+    leftover = result.get("channel_remainder_note") or ""
+    if leftover:
+        lines.append(leftover)
+    elif result.get("channel_remainder"):
+        lines.append(f"Leftover channel width: {result['channel_remainder']}")
     lines.append("CRM, dims, Pricing Studio rates, and the draft ran as one chain. Nothing went to the client.")
     return "\n".join(lines)
 
@@ -883,8 +1229,15 @@ def try_handle_inbound(
     channel: str = "chat",
     desk: Optional[str] = None,
     has_image: bool = False,
+    sender: Optional[str] = None,
+    founder: Optional[bool] = None,
+    chat_id: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
-    """Shared WhatsApp/chat door. None when this is not a new job request."""
+    """Shared WhatsApp/chat door. None when this is not a founder job request."""
+    if not quoteiq_founder_allowed(channel=channel, sender=sender, founder=founder, chat_id=chat_id):
+        return None
+    if not looks_like_quote_request(message):
+        return None
     if not should_run_quoteiq_chain(message, desk=desk, has_image=has_image):
         return None
     try:

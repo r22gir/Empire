@@ -43,7 +43,7 @@ def _quoteiq_draft_quote(params: dict, desk=None) -> ToolResult:
 
 @tool("quoteiq_chain")
 def _quoteiq_chain(params: dict, desk=None) -> ToolResult:
-    """Full intake → CRM → dims → Pricing Studio → DRAFT. Never sends."""
+    """Full intake → dims → Pricing Studio → CRM → DRAFT. Never sends."""
     result = qiq.run_quoteiq_chain(params)
     if not result.get("ok"):
         return ToolResult(
@@ -56,12 +56,12 @@ def _quoteiq_chain(params: dict, desk=None) -> ToolResult:
 
 
 QUOTEIQ_TOOLS_DOC = """
-### QuoteIQ job chain (intake → CRM → dims → Pricing Studio → DRAFT)
-When a job request arrives (WhatsApp or chat) with a client/item/dims, call **quoteiq_chain** in that same turn. It runs the five tools below as multi-step calls and forwards every field — never ask Rafael to re-type a name, email, phone, or measurement already in the message. Result is a DRAFT quote only. Never email it. Never WhatsApp it to a client.
-- **quoteiq_chain** — full chain. `{"tool": "quoteiq_chain", "message": "Quote for Maggie. Straight bench 48 inches long, 12 inch channels."}`
+### QuoteIQ job chain (intake → dims → Pricing Studio → CRM → DRAFT)
+Founder-only. Trigger needs a quote/estimate/cotización/price/how much phrase AND an item AND at least one dimension. Bare W x H and casual chat do not run. Call **quoteiq_chain** in that same turn. CRM + draft run only after a real Pricing Studio catalog price. Result is a DRAFT (Empire Workroom brand) only. Never email it. Never WhatsApp it to a client.
+- **quoteiq_chain** — full chain. `{"tool": "quoteiq_chain", "message": "Quote 3 roman shades 34 1/2 x 60 for kitchen"}`
 - **quoteiq_intake** — parse the inbound job text (client, item, dims, channel).
-- **quoteiq_crm_upsert** — lookup/upsert the client in ForgeCRM from intake fields.
-- **quoteiq_parse_dimensions** — shop fractions only (26 3/4"), never decimals. Channels list wood_cut / foam_cut (same, true size) and fabric_cut separately.
-- **quoteiq_price** — price from Pricing Studio rate cards / engine.
-- **quoteiq_draft_quote** — persist quotes_v2 status=draft. sent=false always.
+- **quoteiq_parse_dimensions** — shop fractions only (26 3/4"), never decimals. Wood/board = true size, foam = wood, fabric labeled separately. Leftover channel width is reported.
+- **quoteiq_price** — real Pricing Studio catalog price only. No labor_rate placeholder.
+- **quoteiq_crm_upsert** — email or last-10 phone match, fill empty fields only, never name-only, no customer without a real name.
+- **quoteiq_draft_quote** — persist quotes_v2 status=draft, billed_by=empire_workroom. sent=false always. 24h dedupe.
 """

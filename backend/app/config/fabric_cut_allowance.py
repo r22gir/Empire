@@ -7,6 +7,14 @@ Rafael's rule
 - Fabric cut is a separately labeled size. Its allowance depends on foam
   thickness. There is no single fixed seam (never “+ 4" for every job”).
 
+Allowance table semantics (confirmed from this table)
+-----------------------------------------------------
+``allowance_in`` is the TOTAL extra inches added to EACH wood dimension
+(width and length), not a per-side add. Starter wrap = 2 × foam thickness
++ 1" sew (wrap both faces + sew). Example: 2" foam → allowance_in = 5
+(2×2 + 1). A 12" × 18" wood cut with 2" foam becomes a 17" × 23" fabric
+cut. Never treat the number as "per side" (that would double it).
+
 How to edit
 -----------
 Add, remove, or change rows in FABRIC_CUT_ALLOWANCE_BY_FOAM_THICKNESS.

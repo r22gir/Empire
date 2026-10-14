@@ -1767,12 +1767,20 @@ async def default_text_handler(text: str, wa_id: str) -> str:
             try:
                 from app.services.max.quoteiq_chain import remember_whatsapp_session, try_handle_inbound
 
-                _qiq = try_handle_inbound(body, channel="whatsapp")
+                _qiq = None
+                if is_allowlisted(wa_id):
+                    _qiq = try_handle_inbound(
+                        body,
+                        channel="whatsapp",
+                        sender=wa_id,
+                        founder=True,
+                    )
             except Exception:
                 logger.warning("WhatsApp QuoteIQ chain failed", exc_info=True)
                 _qiq = None
-            if _qiq and _qiq.get("handled") and _qiq.get("quote_id"):
-                remember_whatsapp_session(wa_id, body, _qiq)
+            if _qiq and _qiq.get("handled"):
+                if _qiq.get("quote_id"):
+                    remember_whatsapp_session(wa_id, body, _qiq)
                 try:
                     from app.services.max.confidence import record_whatsapp_route
 
