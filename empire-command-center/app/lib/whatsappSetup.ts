@@ -1,1 +1,1 @@
-export { AYUDA_OPENER, WHATSAPP_SETUP, familyEdition, renderWhatsAppSetupPage, setupConfig } from './whatsappSetup.mjs';
+export { AYUDA_OPENER, KEYS_HANDOFF, WHATSAPP_SETUP, FAMILY_EDITION, familyEdition, renderWhatsAppSetupPage, setupConfig } from './whatsappSetup.mjs';

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import FamilyWelcomeReplayButton from '../family/FamilyWelcomeReplayButton';
 
 export default function HelpMenu() {
   return (
@@ -6,6 +7,9 @@ export default function HelpMenu() {
       <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>Ayuda</div>
       <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0' }}>
         <li>
+          <FamilyWelcomeReplayButton style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }} />
+        </li>
+        <li style={{ marginTop: 6 }}>
           <Link href="/ayuda/voz" style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>Cómo usar la voz</Link>
         </li>
         <li style={{ marginTop: 6 }}>
@@ -15,7 +19,7 @@ export default function HelpMenu() {
           <Link href="/ayuda/empresa" style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>Tu proyecto</Link>
         </li>
         <li style={{ marginTop: 6 }}>
-          <Link href="/amp/whatsapp" style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>Cómo configurar WhatsApp</Link>
+          <Link href="/ayuda/whatsapp" style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>Cómo configurar WhatsApp</Link>
         </li>
       </ul>
     </nav>

@@ -1,11 +1,12 @@
 import Link from 'next/link';
+import FamilyWelcomeReplayButton from '../components/family/FamilyWelcomeReplayButton';
 import { AYUDA_OPENER } from '../lib/ayudaCopy';
 
 const ARTICLES = [
   { href: '/ayuda/empresa', title: 'Tu proyecto', note: 'Portafolio, lotes, obra, compradores, WhatsApp y voz.' },
   { href: '/ayuda/voz', title: 'Cómo usar la voz', note: 'Dicta lote, etapa y el plan de pagos. El borrador espera tu visto bueno.' },
   { href: '/ayuda/dispositivos', title: 'Cómo conectarte desde tus dispositivos', note: 'Sitio web, pantalla de inicio y acceso privado.' },
-  { href: '/ayuda/whatsapp', title: 'Cómo configurar WhatsApp', note: 'Tu cuenta de Meta, número de prueba y webhook. Sin secretos en la página.' },
+  { href: '/ayuda/whatsapp', title: 'Cómo configurar WhatsApp', note: 'Tu cuenta de Meta, número de prueba y webhook. No reutilices llaves ni números de otra instancia.' },
 ];
 
 export default function AyudaMenu() {
@@ -15,6 +16,12 @@ export default function AyudaMenu() {
       <h1 style={{ fontSize: 32, margin: '8px 0' }}>Ayuda</h1>
       <p data-ayuda-opener="1" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 26, margin: '8px 0 16px', color: '#1a1a1a' }}>{AYUDA_OPENER}</p>
       <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+        <li style={{ borderTop: '1px solid #e5e2dc', padding: '14px 0' }}>
+          <FamilyWelcomeReplayButton style={{ color: '#1a1a1a', fontWeight: 700, fontSize: 18 }} />
+          <p style={{ margin: '6px 0 0', color: '#444' }}>
+            Repite la presentación de bienvenida en español.
+          </p>
+        </li>
         {ARTICLES.map((article) => (
           <li key={article.href} style={{ borderTop: '1px solid #e5e2dc', padding: '14px 0' }}>
             <Link href={article.href} style={{ color: '#1a1a1a', fontWeight: 700, fontSize: 18 }}>

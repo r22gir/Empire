@@ -6,20 +6,25 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+HANDOFF = (
+    "Las llaves no van en el chat ni en esta página. "
+    "Cuando las tengas, avísale a Rafael y él te dice cómo entregárselas de forma segura."
+)
+FORGE = ROOT / "empire-command-center" / "app" / "components" / "screens" / "ConstructionForgePage.tsx"
 
 WHATSAPP_SCRIPT = """
 import { renderWhatsAppSetupPage } from './empire-command-center/app/lib/whatsappSetup.mjs';
-process.stdout.write(renderWhatsAppSetupPage(process.env.EDITION || 'amp'));
+process.stdout.write(renderWhatsAppSetupPage(process.env.EDITION || 'maxine'));
 """
 
 EMPRESA_SCRIPT = """
 import { renderEmpresaGuidePage } from './empire-command-center/app/lib/empresaGuide.mjs';
-process.stdout.write(renderEmpresaGuidePage(process.env.EDITION || 'amp'));
+process.stdout.write(renderEmpresaGuidePage(process.env.EDITION || 'maxine'));
 """
 
 DEVICE_SCRIPT = """
 import { renderDeviceAccessPage } from './empire-command-center/app/lib/deviceAccess.mjs';
-process.stdout.write(renderDeviceAccessPage(process.env.EDITION || 'amp'));
+process.stdout.write(renderDeviceAccessPage(process.env.EDITION || 'maxine'));
 """
 
 
@@ -35,77 +40,55 @@ def _render(script: str, edition: str) -> str:
     return result.stdout
 
 
-def test_whatsapp_guides_have_manito_sections_and_no_sends():
-    for edition, host, other, must, must_not in (
-        (
-            "amp",
-            "amp.empirebox.store",
-            "maxine.empirebox.store",
-            ("coaching", "Cibernettic", "formulario seguro", "¡Quiubo manito!"),
-            ("Maxine", "Camilo", "Juan Diego", "lote 12"),
-        ),
-        (
-            "maxine",
-            "maxine.empirebox.store",
-            "amp.empirebox.store",
-            ("construcción", "inmuebles", "lote 12", "Juan ni de Rafael", "¡Quiubo manito!"),
-            ("Max-e", "Camilo", "Juan Diego", "Cibernettic"),
-        ),
-    ):
-        html = _render(WHATSAPP_SCRIPT, edition)
-        assert f"https://{host}/api/v1/whatsapp/webhook" in html
-        assert other not in html
-        assert "WHATSAPP_ACCESS_TOKEN=" not in html
-        assert "EAA" not in html
-        assert "graph.facebook.com/v" not in html
-        assert "3174437313" not in html
-        assert "3122842350" not in html
-        assert "Nunca escribe a clientes" in html or "nunca escribe a clientes" in html
-        assert 'id="wa-0"' in html and 'id="wa-9"' in html
-        assert "<figcaption>" in html
-        assert "token permanente" in html
-        assert "24" in html
-        assert "plantillas" in html.lower()
-        assert "número real" in html.lower() or "numero real" in html.lower()
-        assert "solicitud segura" in html
-        assert "formulario seguro" in html
-        for needle in must:
-            assert needle in html, needle
-        for needle in must_not:
-            assert needle not in html, needle
+def test_whatsapp_guide_is_maxine_handoff_not_a_form():
+    html = _render(WHATSAPP_SCRIPT, "maxine")
+    assert "¡Quiubo manito!" in html
+    assert HANDOFF in html
+    assert "Entrega de las llaves" in html
+    assert "No reutilices llaves ni números de otra instancia." in html
+    assert "formulario seguro" not in html
+    assert "/home/rg/" not in html
+    assert "8011" not in html
+    assert "8012" not in html
+    assert "https://maxine.empirebox.store/api/v1/whatsapp/webhook" in html
+    assert "/whatsapp/chats" in html
+    assert "/amp/" not in html
+    assert "Max-e" not in html
+    assert "Juan" not in html
+    assert "Conectar con clientes por WhatsApp" in html
+    edition_src = (ROOT / "empire-command-center" / "app" / "lib" / "familyEdition.mjs").read_text(encoding="utf-8")
+    assert "id: 'maxine'" in edition_src
+    assert "Juan Diego" not in edition_src
+    assert "empire-amp.env" not in edition_src
+    assert "8011" not in edition_src
+    assert "Max-e" not in edition_src
 
 
-def test_empresa_and_device_guides_open_with_manito():
-    for edition, host, other, must in (
-        ("amp", "amp.empirebox.store", "maxine.empirebox.store", ("/amp/dashboard", "/amp/empresas", "Cibernettic")),
-        ("maxine", "maxine.empirebox.store", "amp.empirebox.store", ("Portafolio", "Lotes", "construcción")),
-    ):
-        empresa = _render(EMPRESA_SCRIPT, edition)
-        device = _render(DEVICE_SCRIPT, edition)
-        assert "¡Quiubo manito!" in empresa
-        assert "¡Quiubo manito!" in device
-        assert host in empresa
-        assert other not in empresa
-        assert other not in device
-        for needle in must:
-            assert needle in empresa, needle
-        assert "<figcaption>" in empresa
-        assert "graph.facebook.com" not in empresa
+def test_empresa_links_match_construction_screens():
+    empresa = _render(EMPRESA_SCRIPT, "maxine")
+    device = _render(DEVICE_SCRIPT, "maxine")
+    forge = FORGE.read_text(encoding="utf-8")
+    assert "¡Quiubo manito!" in empresa
+    assert "/?product=construction&amp;section=lotmap" in empresa
+    assert "/?product=construction&amp;section=buyers" in empresa
+    assert "/?product=construction&amp;section=payments" in empresa
+    assert "/amp/" not in empresa
+    assert "id: 'lotmap'" in forge
+    assert "case 'buyers'" in forge
+    assert "case 'payments'" in forge
+    assert "/ayuda/whatsapp" in device
+    assert "/amp/" not in device
 
 
 def test_static_ayuda_pages_open_with_manito():
     menu = (ROOT / "empire-command-center" / "app" / "ayuda" / "page.tsx").read_text(encoding="utf-8")
     voz = (ROOT / "empire-command-center" / "app" / "ayuda" / "voz" / "page.tsx").read_text(encoding="utf-8")
     help_menu = (ROOT / "empire-command-center" / "app" / "components" / "voice" / "HelpMenu.tsx").read_text(encoding="utf-8")
-    empresa_page = (ROOT / "empire-command-center" / "app" / "ayuda" / "empresa" / "page.tsx").read_text(encoding="utf-8")
-    for text in (menu, voz):
-        assert "AYUDA_OPENER" in text or "¡Quiubo manito!" in text
-    assert "/ayuda/empresa" in menu
-    assert "/ayuda/empresa" in help_menu
-    assert "renderEmpresaGuidePage" in empresa_page
-    if "FamilyWelcomeReplayButton" in menu:
-        assert "Juan ni de Rafael" in menu or "lotes" in menu.lower()
-    if "Maxine arma reservas" in voz:
-        assert "Max-e" not in voz
-        assert "Cibernettic" not in voz
-        assert "Juan ni de Rafael" in voz
+    chats = (ROOT / "empire-command-center" / "app" / "whatsapp" / "chats" / "page.tsx").read_text(encoding="utf-8")
+    assert "AYUDA_OPENER" in menu
+    assert "Maxine" in voz
+    assert "Max-e" not in voz
+    assert help_menu.count("whatsapp") == 1
+    assert "/amp/whatsapp" not in help_menu
+    assert "/whatsapp/chats" in chats
+    assert "AmpNav" not in chats
