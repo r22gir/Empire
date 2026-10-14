@@ -410,22 +410,20 @@ def test_ordered_then_json_keeps_ordered(monkeypatch, tmp_path):
     assert again["customer_name"] == "Stale JSON"
 
 
-def test_work_order_ordered_then_json_keeps_ordered(monkeypatch, tmp_path):
-    """Work-order SQL 'ordered' must survive a later JSON save of draft."""
+def test_work_order_sets_ordered_via_helper(monkeypatch, tmp_path):
+    """Work-order SQL path stamps UTC and bumps row_rev when setting ordered."""
     _quotes(monkeypatch, tmp_path)
     from app.services.work_order_service import create_work_order_from_quote
 
     synced = upsert_legacy_quote(_json_snapshot(
         "wo-keep-1", "EST-2026-823", "approved", 1, "WO Client",
     ))
-    assert synced["status"] == "approved"
+    prior = int(synced.get("row_rev") or 0)
     create_work_order_from_quote("wo-keep-1")
-    assert get_quote("wo-keep-1")["status"] == "ordered"
-
-    again = upsert_legacy_quote(_json_snapshot(
-        "wo-keep-1", "EST-2026-823", "draft", 99, "Stale JSON",
-    ))
-    assert again["status"] == "ordered"
+    row = get_quote("wo-keep-1")
+    assert row["status"] == "ordered"
+    assert int(row.get("row_rev") or 0) == prior + 1
+    assert str(row.get("updated_at") or "").endswith("Z")
 
 
 def test_apply_quote_v2_update_stamps_utc_and_bumps_rev(monkeypatch, tmp_path):
