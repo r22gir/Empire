@@ -85,13 +85,71 @@ html[data-theme="gold"] .v3-backdrop svg { opacity: 0.07; mix-blend-mode: multip
 /* ---------- buttons ---------- */
 .v3-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 7px;
   font: 500 11.5px/1 var(--v-sans); border: 1px solid var(--v-line); color: var(--v-ink); background: transparent; white-space: nowrap;
-  cursor: pointer; text-decoration: none; transition: background 0.15s, border-color 0.15s; }
+  cursor: pointer; text-decoration: none; transition: background 0.15s, border-color 0.15s, color 0.15s;
+  -webkit-appearance: none; appearance: none; -webkit-text-fill-color: currentColor; }
 .v3-btn:hover { background: var(--v-hover); border-color: var(--v-mut2); }
-.v3-btn.pri { background: var(--v-ink); border-color: var(--v-ink); color: var(--v-page); }
-.v3-btn.pri:hover { opacity: 0.9; }
-.v3-btn.acc { background: var(--v-acc); border-color: var(--v-acc); color: var(--v-onacc); font-weight: 600; }
+.v3-btn.pri { background: var(--v-ink); border-color: var(--v-ink); color: var(--v-page); -webkit-text-fill-color: var(--v-page); }
+.v3-btn.pri:hover:not(:disabled):not([aria-busy="true"]) { filter: brightness(1.06); }
+.v3-btn.acc { background: var(--v-acc); border-color: var(--v-acc); color: var(--v-onacc); font-weight: 600; -webkit-text-fill-color: var(--v-onacc); }
 .v3-btn.sm { height: 24px; font-size: 11px; padding: 0 9px; }
-.v3-btn:disabled, .v3-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+/* Disabled stays readable (muted fill + 4.5:1+ label) instead of fading to ~2:1. */
+.v3-btn:disabled, .v3-btn[aria-disabled="true"], .v3-btn[aria-busy="true"] {
+  opacity: 1; cursor: not-allowed; background: var(--v-chip); color: var(--v-mut); border-color: var(--v-line);
+  -webkit-text-fill-color: var(--v-mut); }
+
+/* Growth / Max action buttons. Token colors — never #fff-on-#1a1a1a.
+   Gold theme remaps inline color:#fff to ink; a near-black fill then fails WCAG.
+   Pairings (normal text 4.5:1): dark primary #0b0f14 on #e6edf3; gold primary
+   #16191c on #b8912f (5.9:1); disabled #8b96a3 on #0b0f14 / #5c564a on #f7f3ea. */
+.v3, .cy-shell {
+  --gf-primary-bg: var(--v-ink); --gf-primary-fg: var(--v-page);
+  --gf-ok-bg: #14532d; --gf-ok-fg: #f7fee7;
+  --gf-info-bg: #1e3a8a; --gf-info-fg: #eff6ff;
+  --gf-danger-bg: #7f1d1d; --gf-danger-fg: #fef2f2;
+  --gf-accent-bg: #4c1d95; --gf-accent-fg: #f5f3ff;
+  --gf-ghost-bg: transparent; --gf-ghost-fg: var(--v-ink);
+  --gf-disabled-bg: var(--v-chip); --gf-disabled-fg: var(--v-mut);
+}
+html[data-theme="gold"] .v3, html[data-theme="gold"] .cy-shell {
+  --gf-primary-bg: var(--gd-gold, #b8912f); --gf-primary-fg: var(--gd-band, #16191c);
+  --gf-ok-bg: #2f6b45; --gf-ok-fg: #f7f3ea;
+  --gf-info-bg: #2c5a85; --gf-info-fg: #f7f3ea;
+  --gf-danger-bg: #8a2a2a; --gf-danger-fg: #f7f3ea;
+  --gf-accent-bg: #5e4590; --gf-accent-fg: #f7f3ea;
+  --gf-ghost-fg: var(--gd-ink, #20241f);
+  --gf-disabled-bg: rgba(32, 36, 31, 0.08); --gf-disabled-fg: #5c564a;
+}
+.gf-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 14px; min-height: 40px; border-radius: 8px; border: 1px solid transparent;
+  font-size: 13px; font-weight: 600; line-height: 1.2; cursor: pointer; text-decoration: none;
+  white-space: nowrap; transition: background-color 0.15s, border-color 0.15s, color 0.15s, filter 0.15s;
+  background: var(--gf-btn-bg, var(--gf-primary-bg, #e6edf3));
+  color: var(--gf-btn-fg, var(--gf-primary-fg, #0b0f14));
+  -webkit-appearance: none; appearance: none;
+  -webkit-text-fill-color: var(--gf-btn-fg, currentColor);
+}
+.gf-btn svg { color: inherit; stroke: currentColor; }
+.gf-btn--primary { --gf-btn-bg: var(--gf-primary-bg); --gf-btn-fg: var(--gf-primary-fg); }
+.gf-btn--ok { --gf-btn-bg: var(--gf-ok-bg); --gf-btn-fg: var(--gf-ok-fg); }
+.gf-btn--info { --gf-btn-bg: var(--gf-info-bg); --gf-btn-fg: var(--gf-info-fg); }
+.gf-btn--danger { --gf-btn-bg: var(--gf-danger-bg); --gf-btn-fg: var(--gf-danger-fg); }
+.gf-btn--accent { --gf-btn-bg: var(--gf-accent-bg); --gf-btn-fg: var(--gf-accent-fg); }
+.gf-btn--ghost { --gf-btn-bg: var(--gf-ghost-bg); --gf-btn-fg: var(--gf-ghost-fg); border-color: var(--v-line, #e5e2dc); }
+.gf-btn:hover:not(:disabled):not([aria-busy="true"]) { filter: brightness(1.08); }
+.gf-btn:focus-visible { outline: 2px solid var(--v-acc, #22d3ee); outline-offset: 2px; }
+.gf-btn:disabled, .gf-btn[aria-disabled="true"], .gf-btn[aria-busy="true"] {
+  cursor: not-allowed; filter: none; opacity: 1;
+  background: var(--gf-disabled-bg); color: var(--gf-disabled-fg);
+  border-color: var(--v-line, rgba(255, 255, 255, 0.09));
+  -webkit-text-fill-color: var(--gf-disabled-fg);
+}
+.gf-btn[aria-busy="true"]::after {
+  content: ''; width: 12px; height: 12px; margin-left: 2px; flex: none;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: gf-spin 0.6s linear infinite;
+}
+@keyframes gf-spin { to { transform: rotate(360deg); } }
 .v3-ib { width: 26px; height: 26px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--v-line);
   color: var(--v-mut); background: transparent; flex: none; cursor: pointer; text-decoration: none; }
 .v3-ib:hover { color: var(--v-ink); border-color: var(--v-mut2); }

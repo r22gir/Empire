@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { API } from '../../lib/api';
 import { IMPROVEMENT_PIPELINE, isRetryable, pipelineIndex, usageBarPct } from '../../lib/improvementPipeline';
-import { Badge, Header, btn, card, ghost, input, muted, useIsMobile } from './shared';
+import { Badge, Btn, Header, card, ghost, input, muted, useIsMobile } from './shared';
 
 const G = `${API}/growth/improvements`;
 const STATUS: Record<string, { label: string; bg: string; color: string }> = {
@@ -122,23 +122,23 @@ function Req({ r, onChange }: { r: any; onChange: () => void }) {
       {err && <div style={{ color: '#dc2626', fontSize: 13 }}>{err}</div>}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {r.status === 'proposed' && (
-          <button disabled={busy} onClick={() => act(() => post(`${G}/${r.id}/approve`, { confirm: true }))} style={btn('#16a34a')}>
+          <Btn kind="ok" loading={busy} onClick={() => act(() => post(`${G}/${r.id}/approve`, { confirm: true }))}>
             <Rocket size={15} /> Approve
-          </button>)}
+          </Btn>)}
         {isRetryable(r.status) && (
-          <button disabled={busy} onClick={() => act(() => post(`${G}/${r.id}/retry`, { confirm: true }))} style={btn(r.status === 'build_failed' ? '#b91c1c' : '#1d4ed8')}>
+          <Btn kind={r.status === 'build_failed' ? 'danger' : 'info'} loading={busy} onClick={() => act(() => post(`${G}/${r.id}/retry`, { confirm: true }))}>
             <RotateCcw size={15} /> Retry
-          </button>)}
-        {r.status === 'proposed' && <button disabled={busy} onClick={() => act(() => post(`${G}/${r.id}/reject`, { confirm: true }))} style={ghost}><XCircle size={15} /> Reject</button>}
-        {(r.status === 'planning' || r.status === 'building') && <button disabled={busy} onClick={() => act(() => post(`${G}/${r.id}/refresh`))} style={ghost}><RefreshCw size={15} /> Check for PR</button>}
+          </Btn>)}
+        {r.status === 'proposed' && <Btn kind="ghost" loading={busy} onClick={() => act(() => post(`${G}/${r.id}/reject`, { confirm: true }))}><XCircle size={15} /> Reject</Btn>}
+        {(r.status === 'planning' || r.status === 'building') && <Btn kind="ghost" loading={busy} onClick={() => act(() => post(`${G}/${r.id}/refresh`))}><RefreshCw size={15} /> Check for PR</Btn>}
         {r.status === 'pr_open' && (
-          <button disabled={busy} onClick={() => act(() => post(`${G}/${r.id}/approve-merge`, { confirm: true }))} style={btn('#1d4ed8')}>
+          <Btn kind="info" loading={busy} onClick={() => act(() => post(`${G}/${r.id}/approve-merge`, { confirm: true }))}>
             <CheckCircle size={15} /> I reviewed it: approve merge
-          </button>)}
+          </Btn>)}
         {r.status === 'merge_approved' && (
-          <button disabled={busy} onClick={() => act(() => post(`${G}/${r.id}/mark-deployed`, { confirm: true }))} style={btn('#15803d')}>
+          <Btn kind="ok" loading={busy} onClick={() => act(() => post(`${G}/${r.id}/mark-deployed`, { confirm: true }))}>
             <CheckCircle size={15} /> Record deploy (after Chief e)
-          </button>)}
+          </Btn>)}
         {r.spec_path && <button onClick={spec ? () => setSpec(null) : showSpec} style={ghost}><FileText size={15} /> {spec ? 'Hide spec' : 'View spec'}</button>}
       </div>
       {['approved', 'planning', 'awaiting_build', 'building'].includes(r.status) && (
@@ -181,7 +181,7 @@ export default function ImprovementsPage() {
   return (
     <div className="cy-module-main" style={{ padding: mobile ? '16px 14px' : '20px 24px', height: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
       <Header title="Improvements" subtitle="Ask Max for a system change. Approve enqueues Atlas (CodeForge). MiniMax-M2 writes a plan, then a GitHub issue labeled max-improvement is opened for a grok-4.6 draft PR. Merge and deploy need you — after Chief e review. Max never deploys."
-        right={<button onClick={() => setOpen(!open)} style={btn('#1a1a1a')}><Plus size={15} /> New request</button>} />
+        right={<Btn onClick={() => setOpen(!open)} aria-expanded={open} data-testid="imp-new-request"><Plus size={15} /> New request</Btn>} />
       <UsageMeter mm={data.minimax} />
       <div style={{ ...card, marginBottom: 14, display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
         <Lightbulb size={16} style={{ marginTop: 2, flexShrink: 0 }} />
@@ -208,7 +208,7 @@ export default function ImprovementsPage() {
             <input style={input} placeholder="Modules (comma separated)" value={f.affected_modules} onChange={e => setF({ ...f, affected_modules: e.target.value })} />
             <select style={input} value={f.risk} onChange={e => setF({ ...f, risk: e.target.value })}>{['low', 'medium', 'high'].map(r => <option key={r}>{r}</option>)}</select>
           </div>
-          <button disabled={!f.title || !f.problem || !f.proposed_change} onClick={create} style={btn('#16a34a')}>Save request</button>
+          <Btn kind="ok" disabled={!f.title || !f.problem || !f.proposed_change} onClick={create}>Save request</Btn>
         </div>)}
       <div style={{ display: 'grid', gap: 12, gridTemplateColumns: mobile ? 'minmax(0, 1fr)' : 'repeat(auto-fill, minmax(min(460px, 100%), 1fr))' }}>
         {data.items.map((r: any) => <Req key={`${r.id}-${r.status}`} r={r} onChange={load} />)}

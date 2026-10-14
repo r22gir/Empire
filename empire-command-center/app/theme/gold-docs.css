@@ -111,9 +111,13 @@ html[data-theme="gold"] button.fixed[aria-label="Open menu"] { background: var(-
 
 /* solid inline/utility fills are turned into light tints by the theme sheets; white label text
    on those tints would vanish on paper, so it becomes ink (outside the dark top band) */
-html[data-theme="gold"] .cy-shell [style*="background"]:is([style*="color: rgb(255, 255, 255)"], [style*="color:#fff;" i], [style$="color:#fff" i], [style*="color:#ffffff" i], [style*="color: white"], [style*="color:white"]):not(header *),
-html[data-theme="gold"] .cy-shell .text-white:is([class*="bg-["], [class*="bg-green"], [class*="bg-red"], [class*="bg-blue"], [class*="bg-emerald"], [class*="bg-amber"]):not(header *, header) { color: var(--gd-ink) !important; }
-html[data-theme="gold"] .cy-shell [style*="background"]:is([style*="color: rgb(255, 255, 255)"], [style*="color:#fff" i], [style*="color: white"]):not(header *) svg { color: var(--gd-ink) !important; }
+html[data-theme="gold"] .cy-shell [style*="background"]:is([style*="color: rgb(255, 255, 255)"], [style*="color:#fff;" i], [style$="color:#fff" i], [style*="color:#ffffff" i], [style*="color: white"], [style*="color:white"]):not(header *, .gf-btn, .gf-btn *),
+html[data-theme="gold"] .cy-shell .text-white:is([class*="bg-["], [class*="bg-green"], [class*="bg-red"], [class*="bg-blue"], [class*="bg-emerald"], [class*="bg-amber"]):not(header *, header, .gf-btn) { color: var(--gd-ink) !important; }
+html[data-theme="gold"] .cy-shell [style*="background"]:is([style*="color: rgb(255, 255, 255)"], [style*="color:#fff" i], [style*="color: white"]):not(header *, .gf-btn, .gf-btn *) svg { color: var(--gd-ink) !important; }
+html[data-theme="gold"] .cy-shell .gf-btn { color: var(--gf-btn-fg, var(--gf-primary-fg, var(--gd-band))) !important; -webkit-text-fill-color: var(--gf-btn-fg, var(--gf-primary-fg, var(--gd-band))) !important; }
+html[data-theme="gold"] .cy-shell .gf-btn svg { color: inherit !important; }
+html[data-theme="gold"] .cy-shell .gf-btn:disabled,
+html[data-theme="gold"] .cy-shell .gf-btn[aria-busy="true"] { color: var(--gf-disabled-fg, #5c564a) !important; -webkit-text-fill-color: var(--gf-disabled-fg, #5c564a) !important; }
 
 /* glow pulses read as smudges on paper */
 html[data-theme="gold"] :is(.is-pulse, .cy-pulse) { animation: none !important; }

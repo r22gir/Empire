@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle, Copy, ExternalLink, Mail, MessageCircle, Image as ImageIcon, Clock, X, Send } from 'lucide-react';
 import { API, API_BASE } from '../../lib/api';
-import { Badge, Header, btn, card, ghost, input, muted, useIsMobile } from './shared';
+import { Badge, Btn, Header, card, ghost, input, muted, useIsMobile } from './shared';
 
 const G = `${API}/growth`;
 const KIND: Record<string, { label: string; bg: string; color: string; icon: any }> = {
@@ -78,15 +78,15 @@ function Item({ it, onDone }: { it: any; onDone: (msg: string) => void }) {
       {pending && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {isEmail ? (
-            <button disabled={busy || !to} onClick={approve} style={{ ...btn('#16a34a'), opacity: busy || !to ? 0.6 : 1 }}>
+            <Btn kind="ok" loading={busy} disabled={!to} onClick={approve}>
               <Send size={15} /> {busy ? 'Sending…' : 'Approve & send email'}
-            </button>
+            </Btn>
           ) : (
-            <button disabled={busy} onClick={approve} style={btn('#7c3aed')}>
+            <Btn kind="accent" loading={busy} onClick={approve}>
               <Copy size={15} /> Copy & open {it.channel === 'facebook' ? 'Facebook' : it.channel === 'sms' ? 'Messages' : 'Instagram'} <ExternalLink size={13} />
-            </button>
+            </Btn>
           )}
-          <button disabled={busy} onClick={dismiss} style={ghost}><X size={15} /> Dismiss</button>
+          <Btn kind="ghost" loading={busy} onClick={dismiss}><X size={15} /> Dismiss</Btn>
         </div>
       )}
       {pending && !isEmail && <div style={muted}>Empire never posts or DMs for you. This copies the text and opens the app.</div>}

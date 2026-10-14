@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Trash2, Plus, MapPin } from 'lucide-react';
 import { API } from '../../lib/api';
-import { Header, btn, card, ghost, input, money, muted, useIsMobile } from './shared';
+import { Btn, Header, card, ghost, input, money, muted, useIsMobile } from './shared';
 
 const G = `${API}/growth`;
 const CHANNELS = ['google_ads', 'instagram', 'facebook', 'google_maps', 'website', 'referral', 'prospecting', 'houzz', 'yelp', 'email', 'print', 'events'];
@@ -105,7 +105,7 @@ export default function RoiDashboard() {
             <input type="number" inputMode="decimal" placeholder="Amount $" style={input} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} />
             <input placeholder="Notes" style={input} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
           </div>
-          <button onClick={save} style={{ ...btn('#1d4ed8'), marginTop: 10 }}><Plus size={15} /> Save spend</button>
+          <Btn kind="info" onClick={save} style={{ marginTop: 10 }}><Plus size={15} /> Save spend</Btn>
           {msg && <div style={{ ...muted, marginTop: 8 }}>{msg}</div>}
           <div style={{ marginTop: 12, display: 'grid', gap: 6 }}>
             {(d?.spend_entries || []).map((s: any) => (
