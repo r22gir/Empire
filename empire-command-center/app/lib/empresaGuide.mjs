@@ -1,63 +1,9 @@
-/** Spanish company / project intro for family editions. Plain JS so Node 20 can import it. */
+/** Spanish company / project intro. Plain JS so Node 20 can import it. */
 
 import { AYUDA_OPENER, ayudaOpenerHtml } from './ayudaCopy.mjs';
+import { FAMILY_EDITION, familyEdition } from './familyEdition.mjs';
 
-export { AYUDA_OPENER };
-
-const GUIDES = {
-  amp: {
-    id: 'amp',
-    assistant: 'Max-e',
-    siteUrl: 'https://amp.empirebox.store',
-    otherName: 'Maxine',
-    otherHost: 'maxine.empirebox.store',
-    headline: 'Tu empresa en Max-e',
-    lead: 'Aquí viven AMP (coaching) y Cibernettic (TI), más las empresas que tú armes. Nada se publica solo. Los documentos salen en borrador hasta que los apruebas.',
-    screens: [
-      { href: '/', title: 'Centro de mando', note: 'Chat, voz y el pulso del día.' },
-      { href: '/amp/dashboard', title: 'Panel AMP', note: 'Cursos, afirmaciones y el tablero de AMP.' },
-      { href: '/amp/cursos', title: 'Cursos', note: 'Programas, membresías y material de coaching.' },
-      { href: '/amp/empresas', title: 'Empresas', note: 'AMP, Cibernettic y las que agregues.' },
-      { href: '/amp/empresas/entrevista', title: 'Entrevista de empresa', note: 'Una pregunta por pantalla para armar una empresa.' },
-      { href: '/amp/empresas/cibernettic', title: 'Cibernettic', note: 'Propuestas, SLA, órdenes de trabajo y facturas.' },
-      { href: '/amp/whatsapp', title: 'WhatsApp', note: 'Voz, fotos y borradores. Nunca escribe a clientes.' },
-      { href: '/amp/whatsapp/chats', title: 'Chats', note: 'Solo lectura. Revisa el primer mensaje de prueba.' },
-      { href: '/ayuda/whatsapp', title: 'Guía de WhatsApp', note: 'Meta, número de prueba y webhook.' },
-      { href: '/ayuda/voz', title: 'Cómo usar la voz', note: 'Dicta y arma el borrador.' },
-      { href: '/ayuda/dispositivos', title: 'Dispositivos', note: 'Celular, tableta o computador.' },
-    ],
-  },
-  maxine: {
-    id: 'maxine',
-    assistant: 'Maxine',
-    siteUrl: 'https://maxine.empirebox.store',
-    otherName: 'Max-e',
-    otherHost: 'amp.empirebox.store',
-    headline: 'Tu proyecto de inmuebles y construcción',
-    lead: 'Aquí viven el portafolio, los lotes, la obra, los compradores y los planes de pago. El lote no cambia de estado y el precio no se inventa: lo dices tú. WhatsApp arma borradores; nunca escribe a clientes.',
-    screens: [
-      { href: '/', title: 'Centro de mando', note: 'Chat, voz y el pulso del día.' },
-      { href: '/?product=construction', title: 'Portafolio', note: 'Proyectos de construcción e inmuebles.' },
-      { href: '/?product=construction&section=lotmap', title: 'Lotes', note: 'Mapa de lotes y disponibilidad.' },
-      { href: '/?product=construction&section=construction', title: 'Obra', note: 'Avance de obra y etapas (cimentación, estructura).' },
-      { href: '/?product=construction&section=buyers', title: 'Compradores', note: 'Reservas y ventas. El estado del lote solo cambia cuando tú confirmas.' },
-      { href: '/?product=construction&section=payments', title: 'Planes de pago', note: 'Cuota inicial y saldo. El precio lo dices tú.' },
-      { href: '/amp/empresas', title: 'Nuevo proyecto', note: 'Entrevista guiada para armar un proyecto.' },
-      { href: '/amp/whatsapp', title: 'WhatsApp', note: 'Notas de voz, fotos de obra y borradores. Nunca escribe a clientes.' },
-      { href: '/amp/whatsapp/chats', title: 'Chats', note: 'Solo lectura. Revisa el primer mensaje de prueba.' },
-      { href: '/ayuda/whatsapp', title: 'Guía de WhatsApp', note: 'Meta, número de prueba y webhook. No reutilices las llaves de Juan ni de Rafael.' },
-      { href: '/ayuda/voz', title: 'Cómo usar la voz', note: 'Dicta lote, etapa y plan de pagos.' },
-      { href: '/ayuda/dispositivos', title: 'Dispositivos', note: 'Celular, tableta o computador.' },
-    ],
-  },
-};
-
-export function familyEdition(edition) {
-  const key = String(edition || '').trim().toLowerCase().replace(/-/g, '_');
-  if (key === 'amp' || key === 'max_e' || key === 'maxe') return 'amp';
-  if (key === 'maxine') return 'maxine';
-  return null;
-}
+export { AYUDA_OPENER, familyEdition };
 
 function escapeHtml(value) {
   return String(value)
@@ -88,7 +34,7 @@ const CSS = `
 
 export function renderEmpresaGuidePage(edition) {
   const family = familyEdition(edition);
-  const cfg = family ? GUIDES[family] : null;
+  const cfg = family && family === FAMILY_EDITION.id ? FAMILY_EDITION : null;
   if (!cfg) {
     return `<main class="em-guide"><p>Abre esta guía dentro de tu propio centro de mando.</p></main>`;
   }
@@ -105,9 +51,9 @@ export function renderEmpresaGuidePage(edition) {
 <a href="/" style="color:#6F685F;font-weight:600">Centro de mando</a>
 </nav>
 <p class="em-kicker">${name.toUpperCase()} · CENTRO DE MANDO</p>
-<h1>${escapeHtml(cfg.headline)}</h1>
+<h1>${escapeHtml(cfg.empresaHeadline)}</h1>
 ${ayudaOpenerHtml()}
-<p>${escapeHtml(cfg.lead)}</p>
+<p>${escapeHtml(cfg.empresaLead)}</p>
 <figure class="em-figure">
 <div class="em-frame" role="img" aria-label="Pantallas de esta instancia">
 <div class="em-tile">${tiles}</div>
@@ -118,11 +64,11 @@ ${ayudaOpenerHtml()}
 <p style="margin-top:22px"><a class="em-link" href="/ayuda">Volver a Ayuda</a> · <a class="em-link" href="/ayuda/whatsapp">WhatsApp</a></p>
 </main>`;
 
-  if (html.includes(cfg.otherName) || html.includes(cfg.otherHost)) {
-    throw new Error('empresa guide leaked the other edition');
-  }
   if (!html.includes(AYUDA_OPENER)) {
     throw new Error('empresa guide missing manito opener');
+  }
+  if (html.includes('/home/rg/') || html.includes('8011') || html.includes('8012')) {
+    throw new Error('empresa guide leaked infra');
   }
   return html;
 }
