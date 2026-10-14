@@ -74,10 +74,14 @@ _SHORT_FOLLOWUP = {
 
 _EXPLICIT_DRAW_PHRASES = (
     "draw a ", "draw me ", "draw it ", "draw the ", "draw this ",
+    "give a drawing", "give me a drawing", "give drawing",
+    "give me a sketch", "give a sketch",
     "shop drawing", "generate drawing", "generate the b1",
     "make it 4-view", "make it four-view", "make it a 4-view",
     "dibuja un ", "dibuja una ", "dibuja el ", "dibuja la ", "dibuja este ",
     "dibújame ", "dibujame ", "dibujar un ", "dibujar una ", "dibujar el ",
+    "dame un dibujo", "dame el dibujo", "dame un plano", "dame el plano",
+    "dame un boceto",
     "haz un dibujo", "hazme un dibujo", "hazme el dibujo",
     "rehaz el dibujo", "rehaz la ", "rehace el dibujo",
     "redibuja ", "regenera el dibujo", "regenera la ",
@@ -1522,8 +1526,19 @@ def build_drawing_handoff(
     image_filename: str | None = None,
     history: Any = None,
     pending_drawing: bool = False,
+    vision_text: str | None = None,
 ) -> DrawingHandoff:
-    if not is_drawing_intent(message, history=history, pending_drawing=pending_drawing):
+    photo_drawing = False
+    if image_filename:
+        try:
+            from app.services.max.image_turn import is_photo_drawing_request
+            photo_drawing = is_photo_drawing_request(message, image_filename)
+        except Exception:
+            photo_drawing = False
+    if not (
+        is_drawing_intent(message, history=history, pending_drawing=pending_drawing)
+        or photo_drawing
+    ):
         # Even when the message is not a drawing intent, classify it for
         # log visibility. D3: routes that the MAX router logs "intent_mode
         # = unknown" for non-drawing messages.
@@ -1540,6 +1555,11 @@ def build_drawing_handoff(
     subject, item_type = _extract_item_type(message)
     dimensions = _extract_dimensions(message, item_type=item_type)
     dimensions.update(_extract_compact_dimensions(message))
+    if vision_text:
+        vision_dims = _extract_dimensions(vision_text, item_type=item_type)
+        vision_dims.update(_extract_compact_dimensions(vision_text))
+        for key, value in vision_dims.items():
+            dimensions.setdefault(key, value)
     views = _extract_views(message)
 
     # HOTFIX 4.0b — resolve B1 product_type, alias-translate dims,
@@ -1550,6 +1570,13 @@ def build_drawing_handoff(
     # template's REQUIRED set covered by translated dims AND a known
     # B1 product_type.
     b1_product_type = _try_resolve_b1_type(message, item_type)
+    if not b1_product_type and vision_text:
+        b1_product_type = _try_resolve_b1_type(vision_text, item_type)
+    if not b1_product_type and image_filename and (dimensions or vision_text):
+        # Window photo + "give a drawing" — workroom default heading.
+        b1_product_type = "pinch_pleat"
+        if not subject or item_type == "generic":
+            subject, item_type = "drapery", "window"
     translated_dims = _translate_dims_for_b1_product(
         dimensions, b1_product_type
     )

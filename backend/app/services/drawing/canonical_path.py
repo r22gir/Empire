@@ -131,17 +131,23 @@ def resolve_canonical_root(start: os.PathLike | str | None = None) -> Path:
     )
 
 
-def _default_drawings_dir() -> Path:
-    """Drawings land in the live Workroom checkout, not a historical path.
+def _empire_data_dir() -> Path:
+    """Runtime data lives under ~/empire-data (or $EMPIRE_DATA_DIR)."""
+    raw = os.getenv("EMPIRE_DATA_DIR")
+    if raw:
+        return Path(raw)
+    return Path.home() / "empire-data"
 
-    The historical default `~/empire-repo-main/backend/data/drawings`
-    is not the live tree when this code runs from another checkout of
-    feature/drawing-standard. The marker root is the live tree.
+
+def _default_drawings_dir() -> Path:
+    """Drawings land under the data dir, never inside the git checkout.
+
+    Shop PDFs used to write to ``backend/data/drawings`` in the repo.
+    That path is not writable on the phone/studio host and is not the
+    canonical data tree. Default is ``~/empire-data/drawings``.
+    Tests redirect via EMPIRE_DATA_DIR / MAX_DRAWINGS_OUTPUT_DIR.
     """
-    try:
-        return resolve_canonical_root() / "backend" / "data" / "drawings"
-    except CanonicalRootError:
-        return Path(__file__).resolve().parents[4] / "backend" / "data" / "drawings"
+    return _empire_data_dir() / "drawings"
 
 
 # The canonical output dir lives under the live checkout's data tree.
@@ -283,7 +289,7 @@ def canonical_drawings_dir() -> Path:
 
     Resolution order:
       1. $MAX_DRAWINGS_OUTPUT_DIR (if set) — checked for staleness.
-      2. <live Workroom checkout>/backend/data/drawings/ — the marker root.
+      2. $EMPIRE_DATA_DIR/drawings or ~/empire-data/drawings.
 
     Returns the path with mkdir(parents=True, exist_ok=True) applied.
     Raises RuntimeError if either source resolves to a known stale
@@ -292,7 +298,7 @@ def canonical_drawings_dir() -> Path:
     is caught at first-render time rather than data-loss time.
     """
     override = os.getenv(_ENV_OVERRIDE)
-    candidate = Path(override) if override else _DEFAULT_CANON_DIR
+    candidate = Path(override) if override else _default_drawings_dir()
 
     if _is_stale_fork_root(candidate):
         logger.critical(

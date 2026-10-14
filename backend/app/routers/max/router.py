@@ -49,6 +49,12 @@ from app.services.max.drawing_intent import (
     is_drawing_intent,
     is_text_measurement_drawing_request,
 )
+from app.services.max.image_turn import (
+    describe_attached_image,
+    inject_vision_context,
+    is_photo_drawing_request,
+    resolve_turn_image,
+)
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.factual_guard import is_factual_question, enforce_web_search, grounding_directive
@@ -379,11 +385,73 @@ def _resolve_max_chat_timeout(message: str | None = None) -> float:
     return base
 
 
+# Stream first-chunk wait. wait_for() cancels the producer — MiniMax
+# vision is ~12s+ so a 15s cap used to drop the image-bearing reply.
+_STREAM_CHUNK_TIMEOUT_S = 15.0
+_STREAM_IMAGE_CHUNK_TIMEOUT_S = 60.0
+
+
+def _stream_chunk_timeout(image_filename: str | None) -> float:
+    """60s when an image is on the turn so vision is never cancelled."""
+    return _STREAM_IMAGE_CHUNK_TIMEOUT_S if image_filename else _STREAM_CHUNK_TIMEOUT_S
+
+
+async def _next_stream_chunk(pending, aiter, timeout: float):
+    """Wait for the next stream chunk without cancelling the producer.
+
+    ``asyncio.wait_for`` cancels the awaited coroutine on timeout. The
+    reply that holds the image description must stay alive; ``asyncio.wait``
+    only times out the waiter.
+
+    Returns ``(chunk, model, next_pending, finished)``.
+    """
+    task = pending or asyncio.ensure_future(aiter.__anext__())
+    done, _ = await asyncio.wait({task}, timeout=timeout)
+    if not done:
+        return None, None, task, False
+    try:
+        chunk, model = task.result()
+    except StopAsyncIteration:
+        return None, None, None, True
+    return chunk, model, None, False
+
+
+def _image_turn_reply_is_empty(text: str | None) -> bool:
+    return not (text or "").strip()
+
+
 def _drawing_intent_active(message: str | None, image_filename: str | None) -> bool:
-    if image_filename:
-        return False
     text = message or ""
+    if image_filename:
+        return (
+            is_photo_drawing_request(text, image_filename)
+            or is_drawing_intent(text)
+            or is_text_measurement_drawing_request(text)
+        )
     return is_drawing_intent(text) or is_text_measurement_drawing_request(text)
+
+
+def _resolve_request_image(request) -> str | None:
+    """Current upload, or the last photo this conversation still holds."""
+    return resolve_turn_image(
+        getattr(request, "conversation_id", None),
+        getattr(request, "message", None),
+        getattr(request, "image_filename", None),
+    )
+
+
+async def _vision_for_request(request, resolved_image: str | None) -> tuple[str, str | None]:
+    """Run image description before any stream timeout starts.
+
+    Tests mock ``describe_attached_image`` — this path must not send.
+    """
+    if not resolved_image:
+        return "", None
+    for_drawing = _drawing_intent_active(request.message, resolved_image)
+    description, error, _raw = await describe_attached_image(
+        resolved_image, for_drawing=for_drawing,
+    )
+    return description or "", error
 
 
 def _db_query_cap_reached(message: str | None, tool_results: list[Any] | None) -> bool:
@@ -3385,6 +3453,17 @@ async def _chat_with_max_service_impl(
             metadata=_response_metadata(request.channel, skill_used=_unavail_skill),
         )
 
+    resolved_image = _resolve_request_image(request)
+    vision_text, vision_error = await _vision_for_request(request, resolved_image)
+    if vision_error and request.image_filename:
+        return ChatResponse(
+            response=f"I could not analyze the image because MiniMax vision verification failed: {vision_error}",
+            model_used="mmx-vision",
+            fallback_used=False,
+            tool_results=[],
+            metadata=_response_metadata(request.channel, skill_used="mmx_vision"),
+        )
+
     # Sprint 1d Phase A Fix #3 — clear any stale handoff state at the start
     # of every chat turn (belt-and-suspenders for any future state-creep).
     try:
@@ -3442,8 +3521,9 @@ async def _chat_with_max_service_impl(
         else (
             build_drawing_handoff(
                 request.message,
-                image_filename=request.image_filename,
+                image_filename=resolved_image,
                 history=request.history,
+                vision_text=vision_text,
             )
             if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
             else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
@@ -3684,8 +3764,16 @@ async def _chat_with_max_service_impl(
         if _prelookup_msg:
             messages.insert(-1, AIMessage(role="system", content=_prelookup_msg))
 
+        if vision_text:
+            messages = inject_vision_context(messages, vision_text, resolved_image)
+        _turn_image = resolved_image or request.image_filename
         response = await asyncio.wait_for(
-            ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
+            ai_router.chat(
+                messages, model=model, image_filename=_turn_image,
+                desk=request.desk, system_prompt=enriched_prompt,
+                conversation_id=request.conversation_id or "", tools=_tools,
+                skip_vision=bool(vision_text),
+            ),
             timeout=_resolve_max_chat_timeout(request.message),
         )
 
@@ -4026,6 +4114,8 @@ async def _chat_with_max_service_impl(
                 _final_resp = await ai_router.chat(
                     _final_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
                     conversation_id=request.conversation_id or "",
+                    image_filename=resolved_image or request.image_filename,
+                    skip_vision=bool(vision_text),
                 )
                 _recovered = strip_tool_blocks(_final_resp.content or "")
                 if _recovered.strip():
@@ -4044,6 +4134,23 @@ async def _chat_with_max_service_impl(
                     + (f"Failed: {'; '.join(_bad)}. " if _bad else "")
                     + "The raw tool results are attached to this reply."
                 )
+
+        _turn_image = resolved_image or request.image_filename
+        if _turn_image and _image_turn_reply_is_empty(final_content):
+            try:
+                _img_retry = await ai_router.chat(
+                    messages, model=model, desk=request.desk,
+                    system_prompt=enriched_prompt,
+                    conversation_id=request.conversation_id or "",
+                    image_filename=_turn_image,
+                    skip_vision=bool(vision_text),
+                )
+                if (_img_retry.content or "").strip():
+                    final_content = strip_tool_blocks(_img_retry.content)
+                    if getattr(_img_retry, "model_used", None):
+                        response.model_used = _img_retry.model_used
+            except Exception as _img_retry_err:
+                logger.warning("[chat] image-turn empty retry failed: %s", _img_retry_err)
 
         # Grounding verification: strip hallucinated citations from web-sourced responses
         if tool_results_list:
@@ -4710,6 +4817,14 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
             yield f"data: {_safe_dumps({'type': 'done', 'model_used': _unavail_model, 'metadata': _response_metadata(request.channel, skill_used=_unavail_skill)})}\n\n"
         return StreamingResponse(image_unavailable_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
+    resolved_image = _resolve_request_image(request)
+    vision_text, vision_error = await _vision_for_request(request, resolved_image)
+    if vision_error and request.image_filename:
+        async def image_vision_error_gen():
+            yield f"data: {_safe_dumps({'type': 'text', 'content': f'I could not analyze the image because MiniMax vision verification failed: {vision_error}'})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'mmx-vision', 'metadata': _response_metadata(request.channel, skill_used='mmx_vision')})}\n\n"
+        return StreamingResponse(image_vision_error_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
     # H57 FIX M-bM-^@M-^T stream door: also release pending on non-continuation
     # turns. Same logic as /chat non-stream (router.py:2356-2380).
     merged_handoff = None
@@ -4746,8 +4861,9 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
         else (
             build_drawing_handoff(
                 request.message,
-                image_filename=request.image_filename,
+                image_filename=resolved_image,
                 history=request.history,
+                vision_text=vision_text,
             )
             if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
             else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
@@ -5018,21 +5134,30 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
         _stream_prelookup_entries, _stream_prelookup_msg = await _run_prelookups(request, founder)
         if _stream_prelookup_msg:
             messages.insert(-1, AIMessage(role="system", content=_stream_prelookup_msg))
+        if vision_text:
+            messages = inject_vision_context(messages, vision_text, resolved_image)
+        _turn_image = resolved_image or request.image_filename
+        _chunk_timeout = _stream_chunk_timeout(_turn_image)
         try:
             # Buffer each model turn before publishing it. Tool calls are a
             # model-side protocol, not user-visible text; emitting chunks as
             # they arrive used to leak fenced JSON into the chat transcript.
+            # Vision already ran above — skip it here so the 15s waiter
+            # cannot cancel the image-bearing reply.
             _initial_iter = ai_router.chat_stream(
-                messages, model=model, image_filename=request.image_filename,
+                messages, model=model, image_filename=_turn_image,
                 desk=request.desk, system_prompt=enriched_prompt,
+                skip_vision=bool(vision_text),
                 source=request.channel or "", conversation_id=request.conversation_id or "",
             ).__aiter__()
+            _pending_chunk = None
             while True:
-                try:
-                    chunk, m_used = await asyncio.wait_for(_initial_iter.__anext__(), timeout=15)
-                except StopAsyncIteration:
+                chunk, m_used, _pending_chunk, _done = await _next_stream_chunk(
+                    _pending_chunk, _initial_iter, _chunk_timeout,
+                )
+                if _done:
                     break
-                except asyncio.TimeoutError:
+                if chunk is None:
                     yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'model'})}\n\n"
                     continue
                 model_used = m_used
@@ -5120,12 +5245,14 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                             system_prompt=enriched_prompt, source=request.channel or "",
                             conversation_id=request.conversation_id or "",
                         ).__aiter__()
+                        _pending_action = None
                         while True:
-                            try:
-                                chunk, m_used = await asyncio.wait_for(_action_followup_iter.__anext__(), timeout=15)
-                            except StopAsyncIteration:
+                            chunk, m_used, _pending_action, _done = await _next_stream_chunk(
+                                _pending_action, _action_followup_iter, _chunk_timeout,
+                            )
+                            if _done:
                                 break
-                            except asyncio.TimeoutError:
+                            if chunk is None:
                                 yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'followup'})}\n\n"
                                 continue
                             model_used = m_used
@@ -5319,12 +5446,14 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                     system_prompt=enriched_prompt, source=request.channel or "",
                     conversation_id=request.conversation_id or "",
                 ).__aiter__()
+                _pending_follow = None
                 while True:
-                    try:
-                        chunk, m_used = await asyncio.wait_for(_followup_iter.__anext__(), timeout=15)
-                    except StopAsyncIteration:
+                    chunk, m_used, _pending_follow, _done = await _next_stream_chunk(
+                        _pending_follow, _followup_iter, _chunk_timeout,
+                    )
+                    if _done:
                         break
-                    except asyncio.TimeoutError:
+                    if chunk is None:
                         yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'followup'})}\n\n"
                         continue
                     model_used = m_used
@@ -5350,6 +5479,8 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                     _complete_resp = await ai_router.chat(
                         _complete_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
                         conversation_id=request.conversation_id or "",
+                        image_filename=_turn_image,
+                        skip_vision=bool(vision_text),
                     )
                     _replacement = repair_reply_structure(strip_tool_blocks(_complete_resp.content or ""))
                     if _replacement:
@@ -5358,6 +5489,21 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                         model_used = _complete_resp.model_used
                 except Exception as _complete_err:
                     logger.warning("[stream] completeness recovery failed: %s", _complete_err)
+            if _turn_image and _image_turn_reply_is_empty(full_response):
+                try:
+                    _img_retry = await ai_router.chat(
+                        messages, model=model, desk=request.desk,
+                        system_prompt=enriched_prompt,
+                        conversation_id=request.conversation_id or "",
+                        image_filename=_turn_image,
+                        skip_vision=bool(vision_text),
+                    )
+                    if (_img_retry.content or "").strip():
+                        full_response = strip_tool_blocks(_img_retry.content)
+                        if getattr(_img_retry, "model_used", None):
+                            model_used = _img_retry.model_used
+                except Exception as _img_retry_err:
+                    logger.warning("[stream] image-turn empty retry failed: %s", _img_retry_err)
             full_response = repair_reply_structure(full_response)
             truth_checked_response = _apply_truth_guardrails(
                 request.message, full_response, tool_results_list,
