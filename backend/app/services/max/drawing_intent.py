@@ -41,6 +41,9 @@ DRAWING_KEYWORDS = (
     # / "make a" matched invoice and quote requests ("generate the
     # invoice", "make a quote for the bench").
     "generate drawing",
+    "give a drawing",
+    "give me a drawing",
+    "make a drawing",
     "generate the b1",
     "b1 sheet",
     # Sprint 1d Phase A Fix #2: founder re-ask keywords — so "redraw the
@@ -200,6 +203,9 @@ INTENT_MODE_KEYWORDS = {
         "draw me ",
         "draw the ",
         "draw this ",
+        "give a drawing",
+        "give me a drawing",
+        "make a drawing",
     ),
     "sketch_analysis": (
         "analyze this sketch",
@@ -491,7 +497,7 @@ def _intent_mode_keywords_imply_drawing(lowered: str) -> bool:
     return False
 
 
-def is_drawing_intent(text: str) -> bool:
+def is_drawing_intent(text: str, image_filename: str | None = None) -> bool:
     """Returns True if text requests a drawing/rendering action.
 
     H57 FIX (2026-08-19): route on INTENT TO GENERATE, never on
@@ -538,6 +544,11 @@ def is_drawing_intent(text: str) -> bool:
     if any(neg in lowered for neg in negation_patterns):
         return False
 
+    if image_filename:
+        from app.services.max.chat_attachments import is_photo_drawing_request
+        if is_photo_drawing_request(text, image_filename):
+            return True
+
     # Strong fabrication signals beat billing vocabulary (e.g. TEST ONLY: do not
     # create quotes … + draw a banquette with dims).
     if any(pattern in lowered for pattern in (
@@ -546,6 +557,9 @@ def is_drawing_intent(text: str) -> bool:
         "draw it ",
         "draw the ",
         "draw this ",
+        "give a drawing",
+        "give me a drawing",
+        "make a drawing",
     )):
         return True
 
@@ -617,6 +631,9 @@ def is_drawing_intent(text: str) -> bool:
         "draw it ",
         "draw the ",
         "draw this ",
+        "give a drawing",
+        "give me a drawing",
+        "make a drawing",
     )
     if any(pattern in lowered for pattern in strong_draw_patterns):
         return True
@@ -1381,7 +1398,7 @@ def enrich_b1_message_dims(message: str, b1_product_type: str | None, dims: dict
 
 
 def build_drawing_handoff(message: str, *, image_filename: str | None = None) -> DrawingHandoff:
-    if not is_drawing_intent(message):
+    if not is_drawing_intent(message, image_filename=image_filename):
         # Even when the message is not a drawing intent, classify it for
         # log visibility. D3: routes that the MAX router logs "intent_mode
         # = unknown" for non-drawing messages.

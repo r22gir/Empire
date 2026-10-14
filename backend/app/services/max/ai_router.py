@@ -629,19 +629,26 @@ class AIRouter:
     CODE_EXTS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.sh', '.yaml', '.yml'}
 
     def _find_file(self, filename: str) -> Optional[Path]:
+        from app.services.max.chat_attachments import resolve_chat_upload
+        found = resolve_chat_upload(filename)
+        if found:
+            return found
         safe = Path(filename).name
         for root in self.upload_dirs:
             for cat in ['images', 'documents', 'audio', 'other', 'code']:
                 path = root / cat / safe
                 if path.exists() and path.is_file():
                     return path
+            path = root / safe
+            if path.exists() and path.is_file():
+                return path
         return None
 
     def _find_image(self, filename: str) -> Optional[Path]:
         return self._find_file(filename)
 
     def _is_image(self, path: Path) -> bool:
-        return path.suffix.lower() in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+        return path.suffix.lower() in {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic', '.heif', '.bmp'}
 
     def _is_audio(self, path: Path) -> bool:
         return path.suffix.lower() in self.AUDIO_EXTS
@@ -800,7 +807,7 @@ class AIRouter:
             f"Description:\n{description}\n\n"
         )
         updated = list(messages)
-        updated[-1] = AIMessage(role=last.role, content=vision_context + last.content, image_path=None)
+        updated[-1] = AIMessage(role=last.role, content=vision_context + last.content, image_path=last.image_path)
         return updated, None, result
 
     def _encode_image(self, path: Path) -> tuple:
@@ -1195,22 +1202,24 @@ class AIRouter:
         image_path = None
         local_attachment_answer = None
         if image_filename:
+            from app.services.max.chat_attachments import apply_photo_context
             image_path, attachment_text = self._process_attachment(image_filename)
+            messages = apply_photo_context(messages, image_filename, image_path)
             if attachment_text and messages:
                 last = messages[-1]
                 messages = list(messages)
-                messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content)
+                messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content, image_path=last.image_path)
                 local_attachment_answer = f"MAX read the attached file. Extracted context:\n{attachment_text[:1500]}"
             if image_path:
                 messages, vision_error, _vision_result = await self._prepend_mmx_vision_context(messages, image_path, image_filename)
                 if vision_error:
-                    return AIResponse(
-                        content=f"I could not analyze the image because MiniMax vision verification failed: {vision_error}",
-                        model_used="mmx-vision",
-                        fallback_used=False,
-                    )
-                image_path = None
-            if local_attachment_answer and model is None and not desk:
+                    logger.warning(f"[MAX] MiniMax vision fallback (keeping image parts): {vision_error}")
+                    try:
+                        messages = await self._prepend_local_vision_triage(messages, image_path)
+                    except Exception as triage_exc:
+                        logger.debug(f"local vision triage skipped: {triage_exc}")
+                # Keep image_path so MiniMax/Grok/Claude still receive image parts.
+            if local_attachment_answer and model is None and not desk and not image_path:
                 model_used = "attachment-reader"
                 return AIResponse(content=local_attachment_answer, model_used=model_used, fallback_used=False)
 
@@ -1411,19 +1420,23 @@ class AIRouter:
         image_path = None
         local_attachment_answer = None
         if image_filename:
+            from app.services.max.chat_attachments import apply_photo_context
             image_path, attachment_text = self._process_attachment(image_filename)
+            messages = apply_photo_context(messages, image_filename, image_path)
             if attachment_text and messages:
                 last = messages[-1]
                 messages = list(messages)
-                messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content)
+                messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content, image_path=last.image_path)
                 local_attachment_answer = f"MAX read the attached file. Extracted context:\n{attachment_text[:1500]}"
             if image_path:
                 messages, vision_error, _vision_result = await self._prepend_mmx_vision_context(messages, image_path, image_filename)
                 if vision_error:
-                    yield f"I could not analyze the image because MiniMax vision verification failed: {vision_error}", "mmx-vision"
-                    return
-                image_path = None
-            if local_attachment_answer and model is None and not desk:
+                    logger.warning(f"[MAX] MiniMax vision fallback (keeping image parts): {vision_error}")
+                    try:
+                        messages = await self._prepend_local_vision_triage(messages, image_path)
+                    except Exception as triage_exc:
+                        logger.debug(f"local vision triage skipped: {triage_exc}")
+            if local_attachment_answer and model is None and not desk and not image_path:
                 yield local_attachment_answer, "attachment-reader"
                 return
 
@@ -1511,12 +1524,9 @@ class AIRouter:
                         return
 
                     elif provider_type == "minimax":
-                        if image_path:
-                            logger.info("[MAX] Skipping MiniMax for vision task (image not supported)")
-                            raise Exception("MiniMax vision not supported")
                         logger.info(f"[MAX] Streaming via MiniMax ({self.minimax_model}){' (fallback)' if fallback else ''}")
                         collected = []
-                        async for chunk in self._minimax_chat_stream(full_messages, image_path=None):
+                        async for chunk in self._minimax_chat_stream(full_messages, image_path=image_path):
                             collected.append(chunk)
                             yield chunk, self.minimax_model
                         self._log_chat_cost(full_messages, "".join(collected), self.minimax_model, feature, business, tenant_id)

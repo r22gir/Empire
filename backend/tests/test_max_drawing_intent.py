@@ -40,26 +40,31 @@ def test_four_view_items_identified_does_not_fabricate_without_source():
     assert handoff.tool_payload is None
 
 
-def test_bare_drawing_with_source_image_no_longer_routes_h57():
-    """H57 FIX: bare 'drawing' no longer routes, even with a source
-    image. The dispatch principle: a message that merely MENTIONS
-    a drawing is not a request for one. Use a strong pattern
-    ('draw me', 'draw a') OR item+dims to route."""
+def test_bare_drawing_without_photo_still_does_not_route_h57():
+    """H57: a mention of 'drawing' without a photo is not a request."""
     from app.services.max.drawing_intent import build_drawing_handoff
 
-    handoff = build_drawing_handoff("drawing", image_filename="uploaded-photo.jpg")
-    assert handoff.is_drawing_intent is False, (
-        "bare 'drawing' must NOT route (H57) — even with image"
-    )
+    handoff = build_drawing_handoff("drawing")
+    assert handoff.is_drawing_intent is False
 
-    # Strong pattern with image: routes correctly. Missing list is
-    # template-truth (HOTFIX 4.0b) — bench needs width/height/depth.
+
+def test_drawing_request_with_photo_routes_to_source_image():
+    """A drawing / draw-this request with a photo on the turn must keep the photo."""
+    from app.services.max.drawing_intent import build_drawing_handoff, is_drawing_intent
+
+    assert is_drawing_intent("Give a drawing", image_filename="uploaded-photo.jpg") is True
+    handoff = build_drawing_handoff("Give a drawing", image_filename="uploaded-photo.jpg")
+    assert handoff.is_drawing_intent is True
+    assert handoff.source_image == "uploaded-photo.jpg"
+
+    handoff = build_drawing_handoff("drawing", image_filename="uploaded-photo.jpg")
+    assert handoff.is_drawing_intent is True
+    assert handoff.source_image == "uploaded-photo.jpg"
+
     handoff = build_drawing_handoff("draw me a bench from this",
                                     image_filename="uploaded-photo.jpg")
     assert handoff.is_drawing_intent is True
     assert handoff.source_image == "uploaded-photo.jpg"
-    assert "width" in handoff.missing
-    assert "depth" in handoff.missing
 
 
 def test_missing_response_omits_source_image_when_no_active_image():

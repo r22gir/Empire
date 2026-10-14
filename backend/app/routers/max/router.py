@@ -48,6 +48,10 @@ from app.services.max.drawing_intent import (
     is_drawing_intent,
     is_text_measurement_drawing_request,
 )
+from app.services.max.chat_attachments import (
+    resolve_chat_upload,
+    sanitize_attached_photo_reply,
+)
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.factual_guard import is_factual_question, enforce_web_search, grounding_directive
@@ -440,12 +444,33 @@ def _handoff_to_render_shop_tool_call(handoff) -> dict | None:
     return payload
 
 
+def _inject_turn_image(tool_call: dict, image_filename: str | None) -> dict:
+    """Put this turn's photo on drawing/quote tools so they cannot miss it."""
+    if not image_filename or not isinstance(tool_call, dict):
+        return tool_call
+    name = str(tool_call.get("tool") or "")
+    if name not in {
+        "sketch_to_drawing", "render_shop_drawing",
+        "create_quick_quote", "photo_to_quote",
+    }:
+        return tool_call
+    out = dict(tool_call)
+    if not out.get("image") and not out.get("image_filename"):
+        out["image"] = image_filename
+        out["image_filename"] = image_filename
+    path = _image_upload_path(image_filename)
+    if path and not out.get("image_path"):
+        out["image_path"] = str(path)
+    return out
+
+
 def _coerce_drawing_tool_call(
     tool_call: dict,
     message: str | None,
     image_filename: str | None,
 ) -> dict:
     """Route text+dims to render_shop_drawing; sketch_to_drawing only with images."""
+    tool_call = _inject_turn_image(tool_call, image_filename)
     name = str(tool_call.get("tool") or "")
     has_image = bool(
         image_filename
@@ -606,6 +631,39 @@ def _drawing_render(handoff) -> dict:
         (handoff.subject or "")[:120],
     )
 
+    # Photo on this turn: send it to sketch_to_drawing instead of asking
+    # for dimensions the sketch already shows, and instead of falling
+    # through to a text model that cannot see the file.
+    if not handoff.ready and getattr(handoff, "source_image", None):
+        src = handoff.source_image
+        path = _image_upload_path(src)
+        params = {
+            "tool": "sketch_to_drawing",
+            "image": src,
+            "image_filename": src,
+            "description": getattr(handoff, "raw_message", "") or "",
+            "name": getattr(handoff, "subject", None) or "Source Image Drawing",
+        }
+        if path:
+            params["image_path"] = str(path)
+        result = execute_tool(params)
+        if result.success:
+            body = (
+                "Drawn from the attached photo "
+                f"({Path(str(src)).name})."
+            )
+        else:
+            body = f"Drawing workflow failed: {result.error}"
+        return {
+            "ready": True,
+            "response_text": body,
+            "tool_result_dict": _drawing_tool_result_dict(result),
+            "missing_template_keys": [],
+            "metadata_skill_used": "sketch_to_drawing",
+            "model_used": "drawing-router",
+            "status_event": "Drawing from attached photo." if result.success else None,
+        }
+
     # ── Incomplete: surface the template-truth missing list ──
     if not handoff.ready:
         if handoff.missing_template_keys and handoff.b1_product_type:
@@ -634,7 +692,6 @@ def _drawing_render(handoff) -> dict:
         }
 
     # ── Complete: invoke render_shop_drawing (the B1 entry point) ──
-    from app.services.max.tool_executor import execute_tool
     translated_dims, _shape, _construction = _dims_for_render_shop(handoff)
     _render_params = {
         "tool":         "render_shop_drawing",
@@ -2469,17 +2526,7 @@ def _stream_immediate_response(response: ChatResponse, conversation_id: str | No
 
 
 def _image_upload_path(image_filename: str | None) -> Path | None:
-    if not image_filename:
-        return None
-    safe = Path(image_filename).name
-    candidates = [
-        data_root() / "uploads" / "images" / safe,
-        data_root() / "uploads" / safe,
-        Path.home() / "empire-repo" / "backend" / "data" / "uploads" / "images" / safe,
-        Path.home() / "empire-repo" / "uploads" / "images" / safe,
-        Path.home() / "empire-repo" / "backend" / "data" / "uploads" / safe,
-    ]
-    return next((path for path in candidates if path.exists() and path.is_file()), None)
+    return resolve_chat_upload(image_filename)
 
 
 def _explicit_no_drawing_router(message: str | None) -> bool:
@@ -2975,6 +3022,11 @@ async def _chat_with_max_service(
             request.conversation_id,
             request.message,
         )
+        if request.image_filename:
+            from app.services.max.chat_attachments import apply_photo_context
+            messages = apply_photo_context(
+                messages, request.image_filename, _image_upload_path(request.image_filename),
+            )
         model = None
         if request.model:
             try:
@@ -3234,7 +3286,7 @@ async def _chat_with_max_service(
 
             for tc in tool_calls:
                 # Inject image_filename into quote tools so uploaded photos flow through
-                if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
+                if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote", "sketch_to_drawing", "render_shop_drawing") and "image_filename" not in tc:
                     tc["image_filename"] = request.image_filename
 
                 tc = _coerce_drawing_tool_call(
@@ -3486,6 +3538,7 @@ async def _chat_with_max_service(
         # Guard: GPU safety output fail-safe — replace model output recommending risky commands
         final_content = _apply_gpu_safety_output_guardrail(request.message, final_content)
         final_content = _sanitize_internal_leakage_text(final_content)
+        final_content = sanitize_attached_photo_reply(final_content, request.image_filename)
 
         # ── Code-mode honesty guardrail ─────────────────────────────────
         # If MAX's text claims a repo write action (e.g. "I just wrote the
@@ -4029,6 +4082,11 @@ async def chat_stream(request: ChatRequest):
         request.conversation_id,
         request.message,
     )
+    if request.image_filename:
+        from app.services.max.chat_attachments import apply_photo_context
+        messages = apply_photo_context(
+            messages, request.image_filename, _image_upload_path(request.image_filename),
+        )
     model = None
     if request.model:
         try:
@@ -4246,7 +4304,7 @@ async def chat_stream(request: ChatRequest):
 
                 for tc in tool_calls:
                     # Inject image_filename into quote tools so uploaded photos flow through
-                    if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
+                    if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote", "sketch_to_drawing", "render_shop_drawing") and "image_filename" not in tc:
                         tc["image_filename"] = request.image_filename
 
                     tc = _coerce_drawing_tool_call(
@@ -4419,6 +4477,7 @@ async def chat_stream(request: ChatRequest):
             # Completeness guard for streamed assembly. Since model turns are
             # buffered, the client receives only this final sanitized response.
             full_response = _sanitize_internal_leakage_text(full_response)
+            full_response = sanitize_attached_photo_reply(full_response, request.image_filename)
             if needs_continuation(full_response, user_message=request.message, tool_results=tool_results_list):
                 try:
                     _verified_context = "\n\n".join(
@@ -4531,6 +4590,7 @@ async def chat_stream(request: ChatRequest):
                 full_response = _gpu_guard_resp
                 yield f"data: {_safe_dumps({'type': 'gpu_safety_replace', 'replacement': full_response})}\n\n"
             full_response = _sanitize_internal_leakage_text(full_response)
+            full_response = sanitize_attached_photo_reply(full_response, request.image_filename)
 
             # Emit grounding events (after quality engine so all fixes are sequential)
             for _ge in _grounding_events:
@@ -6712,3 +6772,10 @@ async def get_memory_status_endpoint():
     """
     from app.services.max.control_plane import get_memory_status
     return get_memory_status()
+
+
+# max-sessions — session log + daily export
+# (/max/sessions, /max/sessions/{id}, /max/sessions/attachment/{sha},
+#  POST /max/sessions/export?date=YYYY-MM-DD).
+from app.routers.max.sessions import router as _sessions_router  # noqa: E402
+router.include_router(_sessions_router)
