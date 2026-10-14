@@ -448,6 +448,10 @@ PROOF_TOOL_EXACT = frozenset({
     "max_status",
     "share_file",
     "open_final_doc",
+    "get_today_agenda",
+    "list_schedule",
+    "send_me_this_link",
+    "can_you_do",
 })
 
 

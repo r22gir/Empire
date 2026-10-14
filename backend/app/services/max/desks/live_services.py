@@ -18,6 +18,7 @@ LIVE_SERVICES: list[dict[str, Any]] = [
     {"id": "empire-portal", "name": "empire-portal", "kind": "tcp", "port": 3005},
     {"id": "empire-amp", "name": "empire-amp", "kind": "systemd", "unit": "empire-amp"},
     {"id": "empire-maxine", "name": "empire-maxine", "kind": "systemd", "unit": "empire-maxine"},
+    {"id": "avatar", "name": "avatar", "kind": "module", "module": "app.routers.avatar"},
     {"id": "tunnel", "name": "tunnel", "kind": "process", "process": "cloudflared"},
     {"id": "disk", "name": "disk", "kind": "disk", "path": "/"},
 ]
@@ -93,6 +94,15 @@ def _disk_status(path: str = "/") -> dict[str, Any]:
     }
 
 
+def _module_importable(name: str) -> bool:
+    try:
+        import importlib
+        importlib.import_module(name)
+        return True
+    except Exception:
+        return False
+
+
 def check_live_services(
     *,
     port_checker=port_open,
@@ -100,6 +110,7 @@ def check_live_services(
     systemd_checker=_systemd_active,
     process_checker=_process_running,
     disk_checker=_disk_status,
+    module_checker=_module_importable,
 ) -> list[dict[str, Any]]:
     """Return a status row for each live service. Inject checkers in tests."""
     rows: list[dict[str, Any]] = []
@@ -125,6 +136,13 @@ def check_live_services(
                 **svc,
                 "up": up,
                 "detail": f"container {svc.get('container')} {'running' if up else 'not running'}",
+            })
+        elif kind == "module":
+            up = bool(module_checker(svc.get("module") or svc.get("name")))
+            rows.append({
+                **svc,
+                "up": up,
+                "detail": f"module {svc.get('module')} {'loaded' if up else 'missing'}",
             })
         elif kind == "process":
             up = bool(process_checker(svc["process"]))

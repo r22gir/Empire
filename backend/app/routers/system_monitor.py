@@ -57,6 +57,13 @@ async def system_health():
         sock.settimeout(0.5)
         services[name] = sock.connect_ex(("127.0.0.1", int(port_str))) == 0
         sock.close()
+    avatar_ok = False
+    try:
+        from app.routers import avatar as _avatar_mod
+        avatar_ok = bool(getattr(_avatar_mod, "router", None)) and services.get("API", False)
+    except Exception:
+        avatar_ok = False
+    services["Avatar"] = avatar_ok
     mem = psutil.virtual_memory()
     return {
         "status": "ok",

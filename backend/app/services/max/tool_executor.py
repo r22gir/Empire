@@ -3093,6 +3093,19 @@ def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult
         except Exception:
             results[name] = {"status": "offline", "port": svc["port"], "description": svc["description"]}
 
+    avatar_online = False
+    try:
+        from app.routers.avatar import router as _avatar_router
+        avatar_online = _avatar_router is not None
+    except Exception:
+        avatar_online = False
+    results["avatar"] = {
+        "status": "online" if avatar_online else "offline",
+        "port": 8000,
+        "description": "Avatar / Presentation Mode (served on backend port 8000)",
+        "type": "module",
+    }
+
     online = sum(1 for s in results.values() if s["status"] == "online")
     return ToolResult(tool="get_services_health", success=True, result={
         "services": results, "online": online, "total": len(results),
@@ -8716,6 +8729,34 @@ try:
     TOOLS_DOC = TOOLS_DOC + _tools_ui_map.UI_MAP_TOOLS_DOC
 except Exception as _ui_map_err:
     logger.error(f"tools_ui_map not loaded: {_ui_map_err}")
+
+# Today's calendar + Organizer + tasks (Fix A).
+try:
+    _today_name = "app.services.max.today_agenda"
+    _today_agenda = (_importlib.reload(_sys.modules[_today_name]) if _today_name in _sys.modules
+                     else _importlib.import_module(_today_name))
+    TOOLS_DOC = TOOLS_DOC + _today_agenda.TODAY_AGENDA_DOC
+except Exception as _today_err:
+    logger.error(f"today_agenda not loaded: {_today_err}")
+
+# Founder-only send-me-this-link (Fix B).
+try:
+    _send_me_name = "app.services.max.send_me_link"
+    _send_me_link = (_importlib.reload(_sys.modules[_send_me_name]) if _send_me_name in _sys.modules
+                     else _importlib.import_module(_send_me_name))
+    TOOLS_DOC = TOOLS_DOC + _send_me_link.SEND_ME_LINK_DOC
+except Exception as _send_me_err:
+    logger.error(f"send_me_link not loaded: {_send_me_err}")
+
+# Voice "can you do X" from the capability list.
+try:
+    _can_do_name = "app.services.max.voice_can_do"
+    if _can_do_name in _sys.modules:
+        _importlib.reload(_sys.modules[_can_do_name])
+    else:
+        _importlib.import_module(_can_do_name)
+except Exception as _can_do_err:
+    logger.error(f"voice_can_do not loaded: {_can_do_err}")
 
 # QuoteIQ job-request chain (intake → CRM → dims → Pricing Studio → DRAFT).
 try:

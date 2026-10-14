@@ -75,7 +75,9 @@ STYLE_DIRECTIVE = """
 - Reply in the language he wrote in (Spanish or English).
 - Short never means dropping facts: keep the client name, quote numbers (EST-...), totals and file names you looked up. Lists are plain "- " bullets.
 - Voice-message or quick status asks: under 70 words (quote number, client, total, status, next step).
-- "Brief me / today / rundown / what's on my plate": one "- " line per active job from the Chief e brief (Marley's, Dahlia/Nehal, Philipp/Naomi, Willard, the Travelers claim, ...) with its next step, then what waits on his tap. Under 150 words.
+- "What's on today / my schedule / my agenda / qué hay hoy / mi agenda / qué tengo hoy": ALWAYS call get_today_agenda plus list_schedule and get_tasks. List today's calendar, Organizer and due tasks from those tool results. Never invent from open projects or the Chief e brief. Never say you have no reliable calendar — an empty tool result is "Nothing on the calendar or Organizer today."
+- "Brief me / rundown / what's on my plate / today's jobs": one "- " line per active job from the Chief e brief (Marley's, Dahlia/Nehal, Philipp/Naomi, Willard, the Travelers claim, ...) with its next step, then what waits on his tap. Under 150 words. This is jobs, not the calendar.
+- When he says the last answer missed the point (English or Spanish: "you missed the point", "that's not what I asked", "eso no es lo que pregunté", "no es eso"): retry with the tools for his previous question BEFORE offering Chief e. Do not hand off to Chief e on the first miss.
 - Job visuals (mockup, drawing, diagram, picture, layout; typos like "mick up drwings"): run find_files, name the actual file and its folder, and share it with share_file (via="studio" link in Studio, this chat on WhatsApp; email only if he asked to email it). Never describe the design in words instead of the file.
 - When find_files / share_file returns documents, the FIRST reply must list each title as a full absolute markdown link using each match's markdown_link (host from the public base URL). Never relative paths. Never paste those URLs on voice or Telegram. Family editions do not emit a public host. "Show me X docs" is that list, not a drawing.
 - Weather: call get_weather (Empire Workroom is in Hyattsville, MD).
@@ -370,8 +372,34 @@ _QUOTEY = re.compile(r"\b(?:quotes?|estimates?|cotizaci[oó]n\w*|total|phase|sta
 _WEATHER = re.compile(r"\b(?:weather|forecast|rain\w*|temperature|clima|lluvia)\b", re.I)
 _WEATHER_CITY = re.compile(r"\b(?:in|en|for)\s+([A-Z][A-Za-z.]+(?:[ ,]+[A-Z][A-Za-z.]+)?)")
 _BRIEF = re.compile(
-    r"\b(?:brief\s+me|briefing|rundown|run\s+down|on\s+my\s+plate|today'?s\s+(?:jobs|work|plan|agenda)|"
-    r"(?:what'?s|what\s+is)\s+(?:on\s+)?(?:for\s+)?today|my\s+day|agenda|resumen\s+de\s+hoy)\b", re.I)
+    r"\b(?:brief\s+me|briefing|rundown|run\s+down|on\s+my\s+plate|today'?s\s+(?:jobs|work|plan)|"
+    r"resumen\s+de\s+hoy)\b", re.I)
+# Calendar / Organizer / schedule — not open projects. EN + ES.
+_TODAY_AGENDA = re.compile(
+    r"(?:"
+    r"(?:what'?s|what\s+is|whats)\s+(?:on\s+)?(?:for\s+)?(?:today|my\s+(?:schedule|agenda|calendar|day)|the\s+calendar)|"
+    r"(?:my|today'?s|the)\s+(?:schedule|agenda|calendar)(?:\s+today|\s+for\s+today)?|"
+    r"(?:show|list|check|see)\s+(?:me\s+)?(?:my\s+)?(?:today'?s\s+)?(?:schedule|agenda|calendar)|"
+    r"what do i have (?:on\s+)?today|"
+    r"my\s+day\b|"
+    r"qu[eé]\s+(?:hay|tengo)\s+(?:hoy|para\s+hoy)|"
+    r"qu[eé]\s+hay\s+en\s+(?:la\s+|el\s+)?(?:agenda|calendario|horario)|"
+    r"(?:mi|la)\s+(?:agenda|horario|calendario)(?:\s+de\s+hoy)?|"
+    r"agenda\s+de\s+hoy|horario\s+de\s+hoy|calendario\s+de\s+hoy"
+    r")",
+    re.I,
+)
+_MISSED_POINT = re.compile(
+    r"(?:"
+    r"missed the point|missed (?:it|that)|not what i (?:asked|said|meant)|"
+    r"that(?:'s| is) not (?:it|what|the point)|you missed|"
+    r"eso no (?:es|era)(?:\s+lo que)?|no (?:es|era) (?:eso|lo que)|"
+    r"no (?:entendiste|captaste)|te (?:fuiste|desviaste)|"
+    r"no toca(?:s)?(?:\s+el\s+(?:tema|punto))?|no es el punto|no era eso|"
+    r"perdiste el punto"
+    r")",
+    re.I,
+)
 _DOC_WORDS = re.compile(r"\b(?:addendum|led|lighting|mockups?|basketweave|wall\s+unit|invoice|final|drawing|layout|comparison)\b", re.I)
 
 
@@ -403,13 +431,63 @@ def wants_document_search(message: Optional[str]) -> bool:
     return bool(_DOC_SEARCH.search(t))
 
 
-def prelookup_calls(message: Optional[str], history: Any = None, channel: Optional[str] = None) -> list[dict]:
+def is_today_agenda_ask(message: Optional[str]) -> bool:
+    """True for schedule/agenda/what's-on-today (EN + ES). Not 'brief me on today's jobs'."""
+    return bool(_TODAY_AGENDA.search(message or ""))
+
+
+def missed_the_point(message: Optional[str]) -> bool:
+    """Rafael saying the previous answer missed. Retry tools before Chief e."""
+    raw = (message or "").strip()
+    if not raw or len(raw) > 280:
+        return False
+    if _MISSED_POINT.search(raw):
+        return True
+    try:
+        from app.services.max.whatsapp_format import is_frustration_correction
+        return bool(is_frustration_correction(raw))
+    except Exception:
+        return False
+
+
+def last_user_question(history: Any) -> str:
+    """Most recent prior user turn — the question that missed."""
+    for h in reversed(list(history or [])):
+        role = h.get("role") if isinstance(h, dict) else getattr(h, "role", "")
+        if role == "user":
+            c = h.get("content") if isinstance(h, dict) else getattr(h, "content", "")
+            return str(c or "").strip()
+    return ""
+
+
+def _today_agenda_calls() -> list[dict]:
+    try:
+        from app.services.max.today_agenda import today_et
+        day = today_et()
+    except Exception:
+        from datetime import date
+        day = date.today().isoformat()
+    return [
+        {"tool": "get_today_agenda", "date": day},
+        {"tool": "list_schedule", "start_date": f"{day}T00:00:00", "end_date": f"{day}T23:59:59"},
+        {"tool": "get_tasks", "limit": 15},
+    ]
+
+
+def prelookup_calls(message: Optional[str], history: Any = None, channel: Optional[str] = None,
+                    _retry_depth: int = 0) -> list[dict]:
     """Tool calls to run before the model sees the message (model-first mode only)."""
     if not model_first():
         return []
     t = (message or "").strip()
     if not t or wants_research(t):
         return []
+    if _retry_depth == 0 and missed_the_point(t):
+        prior = last_user_question(history)
+        retried = prelookup_calls(prior, history, channel, _retry_depth=1) if prior else []
+        if not retried:
+            retried = _today_agenda_calls()
+        return retried
     calls: list[dict] = []
     nums = []
     for n in _EST.findall(t):
@@ -428,6 +506,8 @@ def prelookup_calls(message: Optional[str], history: Any = None, channel: Option
         m = _WEATHER_CITY.search(t)
         calls.append({"tool": "get_weather", "city": (m.group(1).strip(" ,.") if m else "Hyattsville")})
         return calls
+    if is_today_agenda_ask(t):
+        return _today_agenda_calls()
     if _BRIEF.search(t):
         calls += [{"tool": "get_tasks", "limit": 10}, {"tool": "list_quotes_awaiting_review"},
                   {"tool": "pipeline_followups"}]
@@ -472,11 +552,23 @@ def prelookup_message(message: Optional[str], results: list[tuple[str, str]], hi
             rules.append(first_reply_link_instruction())
         except Exception:
             rules.append("Name each found file. Do not emit relative paths.")
-    if _BRIEF.search(message or ""):
+    if is_today_agenda_ask(message or "") or any(tool == "get_today_agenda" for tool, _body in results):
+        rules.append(
+            "This is today's schedule/agenda. List the calendar, Organizer and task items from "
+            "the tool results. Do not answer from open projects or the Chief e brief. "
+            "Do not say you have no reliable calendar."
+        )
+    elif _BRIEF.search(message or ""):
         jobs = active_jobs_section()
         if jobs:
             parts.append("[Chief e brief: active jobs]\n" + jobs)
         rules.append("List each active job by name with its next step (one '- ' line each), then what waits on his tap.")
+    if missed_the_point(message):
+        rules.append(
+            "Rafael said the previous answer missed the point. Retry from these tool results. "
+            "Do not hand off to Chief e until you have used the tools. Only after this "
+            "tool-backed retry may you offer [Ask Chief e](chief-e:ask)."
+        )
     parts.append(" ".join(rules))
     return "\n\n".join(parts)
 
@@ -531,6 +623,8 @@ def unrequested_send_error(tool_call: dict, message: Optional[str], history: Any
             kind = "WhatsApp message"
         else:
             return None  # Studio link, or a file into the WhatsApp chat he is writing from
+    elif name == "send_me_this_link":
+        kind = "founder-only send"
     else:
         return None
     if asked_to_send(message, history):
