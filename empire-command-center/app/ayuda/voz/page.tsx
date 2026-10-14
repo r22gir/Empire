@@ -35,7 +35,7 @@ export default function ComoUsarLaVoz() {
         Las fotos de la obra se etiquetan con lote y etapa (cimentación, estructura, acabados). Google Photos solo trae lo que tú eliges. El borrador queda en la copia de trabajo de esta máquina y, si conectaste tu Drive, en tu carpeta Maxine/.
       </p>
       <p style={{ fontSize: 14, color: '#444' }}>
-        WhatsApp usa el número de esta instancia. No reutilices las llaves ni el número de Juan ni de Rafael. Si las variables no están, el canal queda apagado. Las notas de voz arman el mismo borrador. El PDF sale solo cuando escribes que lo envíe. La guía está en <Link href="/ayuda/whatsapp" style={{ color: '#b8960c', fontWeight: 700 }}>/ayuda/whatsapp</Link>.
+        WhatsApp usa el número de esta instancia. No reutilices llaves ni números de otra instancia. Si las variables no están, el canal queda apagado. Las notas de voz arman el mismo borrador. El PDF sale solo cuando escribes que lo envíe. La guía está en <Link href="/ayuda/whatsapp" style={{ color: '#b8960c', fontWeight: 700 }}>/ayuda/whatsapp</Link>.
       </p>
       <Link href="/" style={{ color: '#b8960c', fontWeight: 700 }}>Volver al centro de mando</Link>
     </main>
