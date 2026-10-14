@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from app.db.database import get_db
+from app.services.job_mail_intake.filters import is_internal_mail, parse_from_header
 from app.services.job_mail_intake.match import match_message
 from app.services.job_mail_intake.readers import (
     OUTBOUND_POLICY,
@@ -18,6 +19,8 @@ from app.services.job_mail_intake.readers import (
     connected_accounts,
     fetch_raw_messages,
     intake_enabled,
+    outlook_inbox_enabled,
+    personal_inbox_enabled,
 )
 from app.services.job_mail_intake.schema import ensure_schema
 
@@ -32,6 +35,7 @@ __all__ = [
     "list_review_queue",
     "list_supplier_events",
     "list_timeline_notes",
+    "intake_status",
     "run_intake",
 ]
 
@@ -155,17 +159,29 @@ def _upsert_scan(conn, **fields) -> None:
         "backoff_until": existing.get("backoff_until"),
         "fail_count": existing.get("fail_count") or 0,
         "last_error_type": existing.get("last_error_type"),
+        "last_scanned": existing.get("last_scanned") or 0,
+        "last_matched": existing.get("last_matched") or 0,
+        "last_unmatched": existing.get("last_unmatched") or 0,
+        "last_duplicates": existing.get("last_duplicates") or 0,
+        "last_ignored": existing.get("last_ignored") or 0,
     }
     payload.update(fields)
     conn.execute(
         """INSERT INTO jmi_scan_state
-           (id, last_success_at, backoff_until, fail_count, last_error_type, updated_at)
-           VALUES (?, ?, ?, ?, ?, datetime('now'))
+           (id, last_success_at, backoff_until, fail_count, last_error_type,
+            last_scanned, last_matched, last_unmatched, last_duplicates, last_ignored,
+            updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
            ON CONFLICT(id) DO UPDATE SET
              last_success_at = excluded.last_success_at,
              backoff_until = excluded.backoff_until,
              fail_count = excluded.fail_count,
              last_error_type = excluded.last_error_type,
+             last_scanned = excluded.last_scanned,
+             last_matched = excluded.last_matched,
+             last_unmatched = excluded.last_unmatched,
+             last_duplicates = excluded.last_duplicates,
+             last_ignored = excluded.last_ignored,
              updated_at = datetime('now')""",
         (
             SCAN_ROW,
@@ -173,6 +189,11 @@ def _upsert_scan(conn, **fields) -> None:
             payload.get("backoff_until"),
             int(payload.get("fail_count") or 0),
             payload.get("last_error_type"),
+            int(payload.get("last_scanned") or 0),
+            int(payload.get("last_matched") or 0),
+            int(payload.get("last_unmatched") or 0),
+            int(payload.get("last_duplicates") or 0),
+            int(payload.get("last_ignored") or 0),
         ),
     )
 
@@ -212,7 +233,50 @@ def _record_fetch_error(conn, exc: BaseException) -> dict:
         "matched": 0,
         "unmatched": 0,
         "duplicates": 0,
+        "ignored": 0,
         "results": [],
+    }
+
+
+def _empty_result(**extra) -> dict:
+    payload = {
+        "read_only": True,
+        "sent": False,
+        "outbound_policy": OUTBOUND_POLICY,
+        "scanned": 0,
+        "matched": 0,
+        "unmatched": 0,
+        "duplicates": 0,
+        "ignored": 0,
+        "results": [],
+    }
+    payload.update(extra)
+    return payload
+
+
+def _summarize(conn, scanned: int, results: list) -> dict:
+    matched = sum(1 for r in results if r.get("status") == "matched")
+    unmatched = sum(1 for r in results if r.get("status") == "unmatched")
+    duplicates = sum(1 for r in results if r.get("status") == "duplicate")
+    ignored = sum(1 for r in results if r.get("status") == "ignored")
+    logger.warning(
+        "job-mail scan: scanned=%s matched=%s unmatched=%s duplicates=%s ignored=%s",
+        scanned, matched, unmatched, duplicates, ignored,
+    )
+    _upsert_scan(
+        conn,
+        last_scanned=scanned,
+        last_matched=matched,
+        last_unmatched=unmatched,
+        last_duplicates=duplicates,
+        last_ignored=ignored,
+    )
+    return {
+        "scanned": scanned,
+        "matched": matched,
+        "unmatched": unmatched,
+        "duplicates": duplicates,
+        "ignored": ignored,
     }
 
 
@@ -237,6 +301,22 @@ def _process_one(conn, msg: dict) -> dict:
         msg["message_id"] = rfc_id or fp[:16]
     if _already(conn, fp, rfc_id):
         return {"status": "duplicate", "fingerprint": fp, "sent": False}
+
+    if is_internal_mail(msg):
+        _name, email = parse_from_header(msg.get("from"))
+        stub = {
+            "from_email": email or (msg.get("from_email") or ""),
+            "job_id": None,
+            "customer_id": None,
+            "reason": "internal",
+        }
+        _record_processed(conn, msg, stub, "ignored")
+        return {
+            "status": "ignored",
+            "reason": "internal",
+            "account": account,
+            "sent": False,
+        }
 
     match = match_message(conn, msg)
     facts = match.get("facts") or {}
@@ -403,31 +483,11 @@ def run_intake(*, messages: Optional[list] = None, conn=None) -> dict:
     try:
         ensure_schema(conn)
         if messages is None and not intake_enabled():
-            return {
-                "read_only": True,
-                "sent": False,
-                "outbound_policy": OUTBOUND_POLICY,
-                "disabled": True,
-                "scanned": 0,
-                "matched": 0,
-                "unmatched": 0,
-                "duplicates": 0,
-                "results": [],
-            }
+            return _empty_result(disabled=True)
         if messages is None:
             until = _in_backoff(conn)
             if until:
-                return {
-                    "read_only": True,
-                    "sent": False,
-                    "outbound_policy": OUTBOUND_POLICY,
-                    "backoff_until": until,
-                    "scanned": 0,
-                    "matched": 0,
-                    "unmatched": 0,
-                    "duplicates": 0,
-                    "results": [],
-                }
+                return _empty_result(backoff_until=until)
         since = None
         if messages is None:
             since = (_scan_state(conn) or {}).get("last_success_at")
@@ -443,6 +503,7 @@ def run_intake(*, messages: Optional[list] = None, conn=None) -> dict:
             if not isinstance(msg, dict):
                 continue
             results.append(_process_one(conn, msg))
+        counts = _summarize(conn, len(injected), results)
         if messages is None:
             _record_success(conn)
         return {
@@ -450,11 +511,39 @@ def run_intake(*, messages: Optional[list] = None, conn=None) -> dict:
             "sent": False,
             "outbound_policy": OUTBOUND_POLICY,
             "accounts": connected_accounts(),
-            "scanned": len(injected),
-            "matched": sum(1 for r in results if r.get("status") == "matched"),
-            "unmatched": sum(1 for r in results if r.get("status") == "unmatched"),
-            "duplicates": sum(1 for r in results if r.get("status") == "duplicate"),
+            **counts,
             "results": results,
+        }
+    finally:
+        if owns:
+            ctx.__exit__(None, None, None)
+
+
+def intake_status(conn=None) -> dict:
+    """Last scan counts. Safe to read when INFO logs are filtered."""
+    owns = conn is None
+    if owns:
+        ctx = get_db()
+        conn = ctx.__enter__()
+    try:
+        ensure_schema(conn)
+        state = _scan_state(conn)
+        return {
+            "read_only": True,
+            "sent": False,
+            "outbound_policy": OUTBOUND_POLICY,
+            "scanned": int(state.get("last_scanned") or 0),
+            "matched": int(state.get("last_matched") or 0),
+            "unmatched": int(state.get("last_unmatched") or 0),
+            "duplicates": int(state.get("last_duplicates") or 0),
+            "ignored": int(state.get("last_ignored") or 0),
+            "last_success_at": state.get("last_success_at"),
+            "last_error_type": state.get("last_error_type"),
+            "backoff_until": state.get("backoff_until"),
+            "fail_count": int(state.get("fail_count") or 0),
+            "personal_inbox_enabled": personal_inbox_enabled(),
+            "outlook_inbox_enabled": outlook_inbox_enabled(),
+            "accounts": connected_accounts(),
         }
     finally:
         if owns:

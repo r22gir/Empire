@@ -31,6 +31,11 @@ STRONG_KEYS = {
     "job_number",
 }
 
+# Estimate numbers are a weak hint only. A lone EST-YYYY-NNN never attaches.
+CLOSED_STATUSES = frozenset({"completed", "cancelled"})
+COMPLETED_PENALTY = 50
+ESTIMATE_SCORE = 25
+
 MIN_TITLE_LEN = 8
 MIN_ATTACH_SCORE = 40
 AMBIGUOUS_GAP = 10
@@ -115,8 +120,6 @@ def _full_name_match(left: str, right: str) -> bool:
 
 def _has_strong_key(reason: str) -> bool:
     parts = {p.strip() for p in (reason or "").split(",") if p.strip()}
-    if any(p.startswith("estimate:") or p == "estimate" for p in parts):
-        return True
     return bool(parts & STRONG_KEYS)
 
 
@@ -143,8 +146,13 @@ def _score_job(job: dict, *, name: str, email: str, facts: dict, blob: str) -> t
 
     for est in facts.get("estimate_numbers") or []:
         if _norm(est) in job_norm or _norm(est) == _norm(job.get("quote_number") or ""):
-            score += 90
+            score += ESTIMATE_SCORE
             reasons.append(f"estimate:{est}")
+
+    status = _norm(job.get("status"))
+    if status in CLOSED_STATUSES:
+        score -= COMPLETED_PENALTY
+        reasons.append("completed_low")
 
     for mark in facts.get("sidemarks") or []:
         if _norm(mark) and _norm(mark) in job_norm:
@@ -261,30 +269,18 @@ def match_message(conn, msg: dict) -> dict[str, Any]:
                 customer_name = cust.get("name")
                 best_score = cscore
                 best_reason = ",".join(creason)
-                for job in _load_jobs(conn):
-                    if job.get("customer_id") == customer_id:
-                        best = job
-                        best_reason = best_reason + ",customer_job"
-                        break
-
-    if (not best or best_score < MIN_ATTACH_SCORE or not _has_strong_key(best_reason)) and facts.get("estimate_numbers"):
-        for q in _load_quotes(conn):
-            qn = (q.get("quote_number") or "").upper()
-            if qn in {n.upper() for n in facts["estimate_numbers"]}:
-                best_score = 95
-                best_reason = f"estimate:{qn}"
-                if q.get("job_id"):
-                    for job in _load_jobs(conn):
-                        if str(job.get("id")) == str(q.get("job_id")):
-                            best = job
-                            break
-                customer_id = customer_id or q.get("customer_id")
-                customer_name = customer_name or q.get("customer_name")
-                if best:
-                    break
-                if q.get("customer_name"):
-                    customer_id = customer_id or q.get("customer_id")
-                    customer_name = customer_name or q.get("customer_name")
+                candidates = [
+                    job for job in _load_jobs(conn)
+                    if job.get("customer_id") == customer_id
+                ]
+                open_jobs = [
+                    job for job in candidates
+                    if _norm(job.get("status")) not in CLOSED_STATUSES
+                ]
+                pick = (open_jobs or candidates)
+                if pick:
+                    best = pick[0]
+                    best_reason = best_reason + ",customer_job"
 
     has_strong = _has_strong_key(best_reason)
     matched = bool(best and best_score >= MIN_ATTACH_SCORE and has_strong)

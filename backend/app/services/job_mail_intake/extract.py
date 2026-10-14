@@ -9,7 +9,9 @@ import re
 from datetime import datetime
 from typing import Any
 
-ESTIMATE_RE = re.compile(r"\bEST[- ]?(\d{4})[- ]?(\d{2,4})\b", re.I)
+# Require separators. A lone EST2026034 or timezone "EST 2026 15:34"
+# must not mint an estimate number. Sequence is 3–4 digits (EST-2026-034).
+ESTIMATE_RE = re.compile(r"\bEST[- ](\d{4})[- ](\d{3,4})\b", re.I)
 SIDEMARK_RE = re.compile(r"\bsidemark\s*[:\-]\s*([^\n,;]{2,80})", re.I)
 ORDER_NO_RE = re.compile(
     r"\b(?:order|po|purchase\s*order|confirmation)\s*#?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-]{4,24})\b",
@@ -158,6 +160,11 @@ def proposed_dates(text: str) -> list[dict[str, str]]:
 
 
 def is_supplier_order(msg: dict) -> bool:
+    from app.services.job_mail_intake.filters import is_empire_identity, is_internal_mail
+
+    # Never treat Empire / Max / our own mailboxes as a supplier.
+    if is_internal_mail(msg) or is_empire_identity(msg):
+        return False
     blob = _blob(msg).lower()
     if any(h in blob for h in ORDER_HINTS):
         return True

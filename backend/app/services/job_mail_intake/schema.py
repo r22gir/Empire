@@ -95,6 +95,11 @@ CREATE TABLE IF NOT EXISTS jmi_scan_state (
     backoff_until TEXT,
     fail_count INTEGER NOT NULL DEFAULT 0,
     last_error_type TEXT,
+    last_scanned INTEGER NOT NULL DEFAULT 0,
+    last_matched INTEGER NOT NULL DEFAULT 0,
+    last_unmatched INTEGER NOT NULL DEFAULT 0,
+    last_duplicates INTEGER NOT NULL DEFAULT 0,
+    last_ignored INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -123,6 +128,11 @@ _ALTERS = (
     ("jmi_supplier_order_events", "rfc_message_id", "TEXT"),
     ("jmi_timeline_notes", "account", "TEXT"),
     ("jmi_timeline_notes", "rfc_message_id", "TEXT"),
+    ("jmi_scan_state", "last_scanned", "INTEGER NOT NULL DEFAULT 0"),
+    ("jmi_scan_state", "last_matched", "INTEGER NOT NULL DEFAULT 0"),
+    ("jmi_scan_state", "last_unmatched", "INTEGER NOT NULL DEFAULT 0"),
+    ("jmi_scan_state", "last_duplicates", "INTEGER NOT NULL DEFAULT 0"),
+    ("jmi_scan_state", "last_ignored", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 
