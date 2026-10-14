@@ -73,6 +73,8 @@ const page = readFileSync(pagePath, 'utf8');
 assert.match(page, /Remember this device/);
 assert.match(page, /empire-icon\.png/);
 assert.doesNotMatch(page, /7777/);
+assert.match(page, /data-testid="studio-email"/);
+assert.match(page, /autoCapitalize="none"/);
 assert.match(page, /data-testid="studio-pin"/);
 assert.match(page, /inputMode="text"/);
 assert.match(page, /autoComplete="current-password"/);

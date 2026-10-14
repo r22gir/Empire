@@ -339,6 +339,15 @@ def test_studio_login_admin_email_success(client):
     assert r.json()["remember_offered"] is True
 
 
+def test_studio_login_email_is_case_insensitive(client):
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "Owner@Empire.Example", "password": "founder-pass"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["role"] == "founder"
+
+
 def test_studio_login_email_wrong_password(client):
     r = client.post(
         "/api/v1/auth/studio-login",

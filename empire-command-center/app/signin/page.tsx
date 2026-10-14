@@ -160,7 +160,11 @@ export default function StudioSignInPage() {
                       <input
                         data-testid="studio-email"
                         type="email"
+                        inputMode="email"
                         autoComplete="username"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required

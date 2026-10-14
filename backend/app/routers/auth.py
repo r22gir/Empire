@@ -371,8 +371,8 @@ def _authenticate_studio(data: StudioLoginRequest) -> dict:
     if data.email and data.password:
         with get_db() as conn:
             row = conn.execute(
-                "SELECT * FROM access_users WHERE email = ? AND is_active = 1",
-                (data.email,),
+                "SELECT * FROM access_users WHERE lower(email) = lower(?) AND is_active = 1",
+                (str(data.email),),
             ).fetchone()
         if not row:
             raise HTTPException(status_code=401, detail="Invalid email or password")
