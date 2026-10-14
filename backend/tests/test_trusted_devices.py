@@ -11,6 +11,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.services.studio_login_guard import (
+    StudioLoginGuard,
+    format_remaining,
+    reset_studio_login_guard,
+)
 from app.utils.security import get_password_hash
 
 
@@ -25,6 +30,7 @@ def isolated_db(monkeypatch, tmp_path):
     monkeypatch.setenv("FOUNDER_PIN", "2468")
     devices.reset_schema_cache()
     devices.ensure_schema()
+    reset_studio_login_guard()
     return db_path
 
 
@@ -45,6 +51,13 @@ def _seed_users():
                (id, name, role, email, password_hash, tier, is_active)
                VALUES (?, ?, 'viewer', ?, ?, 'lite', 1)""",
             ("viewer1", "Viewer", "viewer@example.com", viewer_hash),
+        )
+        admin_hash = get_password_hash("admin-pass")
+        conn.execute(
+            """INSERT INTO access_users
+               (id, name, role, email, password_hash, tier, is_active)
+               VALUES (?, ?, 'admin', ?, ?, 'empire', 1)""",
+            ("admin1", "Admin", "admin@empire.example", admin_hash),
         )
 
 
@@ -280,3 +293,165 @@ def test_isolated_db_is_not_live_empire_db(isolated_db):
     assert "empire.db" not in str(path) or "studio_auth_test" in str(path)
     assert "empire-data" not in str(path)
     assert path.parent != (Path(__file__).resolve().parents[1] / "data").resolve()
+
+
+def test_studio_login_alphanumeric_pin(client, monkeypatch):
+    monkeypatch.setenv("FOUNDER_PIN", "Kx9mQ2vL8aB")
+    r = client.post("/api/v1/auth/studio-login", json={"pin": "Kx9mQ2vL8aB"})
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["role"] == "founder"
+    assert r.json()["remember_offered"] is True
+
+
+def test_studio_login_pin_length_mismatch_is_401_not_500(client):
+    r = client.post("/api/v1/auth/studio-login", json={"pin": "1"})
+    assert r.status_code == 401
+    assert r.json()["detail"] == "Invalid founder PIN"
+
+
+def test_require_founder_pin_uses_constant_time_compare():
+    src = Path(__file__).resolve().parents[1] / "app" / "routers" / "auth.py"
+    text = src.read_text()
+    assert "hmac.compare_digest" in text
+    assert "pin != founder_pin" not in text
+
+
+def test_studio_login_founder_email_success(client):
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "owner@empire.example", "password": "founder-pass"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["user"]["role"] == "founder"
+    assert body["user"]["email"] == "owner@empire.example"
+    assert body["remember_offered"] is True
+    assert client.cookies.get("empire_session")
+
+
+def test_studio_login_admin_email_success(client):
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "admin@empire.example", "password": "admin-pass"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["role"] == "admin"
+    assert r.json()["remember_offered"] is True
+
+
+def test_studio_login_email_wrong_password(client):
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "owner@empire.example", "password": "wrong-pass"},
+    )
+    assert r.status_code == 401
+    assert r.json()["detail"] == "Invalid email or password"
+    assert not client.cookies.get("empire_session")
+
+
+def test_remember_device_after_email_login(client):
+    login = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "owner@empire.example", "password": "founder-pass"},
+    )
+    assert login.status_code == 200, login.text
+    r = client.post("/api/v1/auth/remember-device", json={"device_name": "Email iPhone"})
+    assert r.status_code == 200, r.text
+    assert client.cookies.get("empire_device")
+    assert r.json()["device"]["device_name"] == "Email iPhone"
+
+
+def test_studio_login_lockout_per_ip_and_message(client):
+    headers = {"X-Forwarded-For": "203.0.113.77"}
+    statuses = []
+    last = None
+    for _ in range(5):
+        last = client.post(
+            "/api/v1/auth/studio-login",
+            json={"pin": "0000"},
+            headers=headers,
+        )
+        statuses.append(last.status_code)
+    assert statuses[:4] == [401, 401, 401, 401]
+    assert last is not None
+    assert last.status_code == 429
+    detail = last.json()["detail"]
+    assert "Try again in" in detail
+    assert "minute" in detail
+
+    even_correct = client.post(
+        "/api/v1/auth/studio-login",
+        json={"pin": "2468"},
+        headers=headers,
+    )
+    assert even_correct.status_code == 429
+    assert "Try again in" in even_correct.json()["detail"]
+
+
+def test_studio_login_global_lockout_blocks_other_ip(client):
+    for i in range(5):
+        r = client.post(
+            "/api/v1/auth/studio-login",
+            json={"pin": "nope"},
+            headers={"X-Forwarded-For": f"198.51.100.{i}"},
+        )
+        if i < 4:
+            assert r.status_code == 401, r.text
+        else:
+            assert r.status_code == 429, r.text
+    blocked = client.post(
+        "/api/v1/auth/studio-login",
+        json={"pin": "2468"},
+        headers={"X-Forwarded-For": "198.51.100.200"},
+    )
+    assert blocked.status_code == 429
+    assert "Try again in" in blocked.json()["detail"]
+
+
+def test_studio_login_email_failures_count_toward_lockout(client):
+    headers = {"X-Forwarded-For": "192.0.2.55"}
+    for _ in range(4):
+        r = client.post(
+            "/api/v1/auth/studio-login",
+            json={"email": "owner@empire.example", "password": "bad"},
+            headers=headers,
+        )
+        assert r.status_code == 401
+    fifth = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "owner@empire.example", "password": "bad"},
+        headers=headers,
+    )
+    assert fifth.status_code == 429
+    assert "Try again in" in fifth.json()["detail"]
+
+
+def test_guard_ip_lock_does_not_trip_global_when_limits_differ():
+    clock = {"t": 1_000.0}
+    guard = StudioLoginGuard(
+        ip_limit=5,
+        global_limit=20,
+        lock_seconds=15 * 60,
+        clock=lambda: clock["t"],
+    )
+    for _ in range(5):
+        guard.record_failure("203.0.113.1")
+    assert guard.check("203.0.113.1")
+    assert guard.check("203.0.113.2") is None
+    clock["t"] += 15 * 60
+    assert guard.check("203.0.113.1") is None
+
+
+def test_guard_lock_message_includes_remaining_time():
+    assert "15 minutes" in format_remaining(15 * 60)
+    assert "1 second" in format_remaining(1)
+    clock = {"t": 50.0}
+    guard = StudioLoginGuard(lock_seconds=15 * 60, clock=lambda: clock["t"])
+    for _ in range(5):
+        msg = guard.record_failure("10.0.0.1")
+    assert msg is not None
+    assert "15 minutes" in msg
+    clock["t"] += 60
+    remaining = guard.check("10.0.0.1")
+    assert remaining is not None
+    assert "14 minutes" in remaining

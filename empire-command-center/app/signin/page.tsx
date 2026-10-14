@@ -29,6 +29,7 @@ export default function StudioSignInPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showPin, setShowPin] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [remembering, setRemembering] = useState(false);
@@ -126,23 +127,38 @@ export default function StudioSignInPage() {
                 {mode === 'pin' ? (
                   <label className="signin-field">
                     <span>PIN</span>
-                    <input
-                      data-testid="studio-pin"
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      value={pin}
-                      onChange={(e) => setPin(e.target.value)}
-                      required
-                      autoFocus
-                      placeholder="••••"
-                    />
+                    <div className="signin-password">
+                      <input
+                        data-testid="studio-pin"
+                        type={showPin ? 'text' : 'password'}
+                        inputMode="text"
+                        autoComplete="current-password"
+                        value={pin}
+                        onChange={(e) => setPin(e.target.value)}
+                        required
+                        autoFocus
+                        placeholder="Enter founder PIN"
+                        spellCheck={false}
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                      />
+                      <button
+                        type="button"
+                        className="signin-eye"
+                        data-testid="studio-pin-toggle"
+                        onClick={() => setShowPin((v) => !v)}
+                        aria-label={showPin ? 'Hide PIN' : 'Show PIN'}
+                      >
+                        {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
                   </label>
                 ) : (
                   <>
                     <label className="signin-field">
                       <span>Email</span>
                       <input
+                        data-testid="studio-email"
                         type="email"
                         autoComplete="username"
                         value={email}
@@ -156,8 +172,10 @@ export default function StudioSignInPage() {
                       <span>Password</span>
                       <div className="signin-password">
                         <input
+                          data-testid="studio-password"
                           type={showPassword ? 'text' : 'password'}
                           autoComplete="current-password"
+                          inputMode="text"
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           required
