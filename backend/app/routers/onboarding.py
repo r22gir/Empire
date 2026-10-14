@@ -1,76 +1,180 @@
-"""
-Onboarding router — first-time business setup.
-POST /api/v1/onboarding/setup configures business.json for new installations.
-"""
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from typing import Optional
+"""Company setup interview — founder-only, edition-scoped, merge-only.
 
-from app.config.business_config import biz, BusinessConfig, CONFIG_PATH
+Replaces the single-shot POST /onboarding/setup that rebuilt business.json
+from a dataclass and wiped business_phone / founder_phones.
+"""
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
+
+from app.edition import edition_name, is_family_edition
+from app.services.company_setup.auth import require_verified_founder
+from app.services.company_setup.invites import create_invite, list_invites
+from app.services.company_setup.schema import SECTION_IDS, configured_report, is_configured, section_by_id
+from app.services.company_setup.store import (
+    interview_state,
+    load_merged,
+    load_progress,
+    mark_complete,
+    review_payload,
+    save_progress,
+    save_section,
+)
+from app.services.company_setup.whatsapp_secrets import save_secrets, status_panel
 
 router = APIRouter()
 
 
-class OnboardingRequest(BaseModel):
-    business_name: str = Field(..., min_length=1, max_length=100)
-    owner_name: str = Field(..., min_length=1, max_length=100)
-    industry: str = Field(default="general")
-    tax_rate: float = Field(default=0.0, ge=0, le=0.5)
-    currency: str = Field(default="USD", max_length=3)
-    timezone: str = Field(default="America/New_York")
-    ai_assistant_name: Optional[str] = Field(default="MAX")
-    tier: str = Field(default="free")
+class SectionSave(BaseModel):
+    data: dict[str, Any] = Field(default_factory=dict)
+    mark_complete: bool = True
 
 
-class OnboardingResponse(BaseModel):
-    success: bool
-    message: str
-    config: dict
+class ProgressSave(BaseModel):
+    current_section: Optional[str] = None
+    completed_sections: Optional[list[str]] = None
+    completed: Optional[bool] = None
 
 
-@router.post("/onboarding/setup", response_model=OnboardingResponse)
-async def setup_business(req: OnboardingRequest):
-    """First-time business configuration. Creates/updates business.json."""
-    global biz
+class InviteIn(BaseModel):
+    email: str
+    role: str = "viewer"
+    name: str = ""
 
-    # Validate tier
-    valid_tiers = ["free", "lite", "pro", "empire"]
-    if req.tier not in valid_tiers:
-        raise HTTPException(400, f"Invalid tier. Must be one of: {valid_tiers}")
 
-    # Update config
-    import app.config.business_config as cfg
-    new_config = BusinessConfig(
-        business_name=req.business_name,
-        owner_name=req.owner_name,
-        industry=req.industry,
-        tax_rate=req.tax_rate,
-        currency=req.currency,
-        timezone=req.timezone,
-        ai_assistant_name=req.ai_assistant_name or "MAX",
-        tier=req.tier,
-    )
-    new_config.save()
+class WhatsAppKeysIn(BaseModel):
+    WHATSAPP_ACCESS_TOKEN: Optional[str] = None
+    WHATSAPP_PHONE_NUMBER_ID: Optional[str] = None
+    WHATSAPP_APP_SECRET: Optional[str] = None
+    WHATSAPP_VERIFY_TOKEN: Optional[str] = None
+    owner_numbers: Optional[list[str]] = None
+    founder_phones: Optional[list[str]] = None
 
-    # Reload singleton
-    cfg.biz = BusinessConfig.load()
 
-    from dataclasses import asdict
-    return OnboardingResponse(
-        success=True,
-        message=f"{req.business_name} configured successfully",
-        config=asdict(cfg.biz),
-    )
+def _founder(request: Request) -> dict:
+    return require_verified_founder(request)
 
 
 @router.get("/onboarding/status")
-async def onboarding_status():
-    """Check if onboarding has been completed (business.json exists with non-default name)."""
-    is_configured = CONFIG_PATH.exists() and biz.business_name != "Empire"
-    from dataclasses import asdict
+async def onboarding_status(request: Request):
+    """Configured check. Founder session required — does not leak the file."""
+    _founder(request)
+    data = load_merged()
+    report = configured_report(data)
     return {
-        "configured": is_configured or biz.owner_name != "Founder",
-        "business_name": biz.business_name,
-        "tier": biz.tier,
-        "config": asdict(biz),
+        "configured": is_configured(data),
+        "edition": edition_name(),
+        "family_edition": is_family_edition(),
+        **report,
+    }
+
+
+@router.get("/onboarding/interview")
+async def get_interview(request: Request):
+    _founder(request)
+    return interview_state()
+
+
+@router.get("/onboarding/interview/review")
+async def get_review(request: Request):
+    _founder(request)
+    return review_payload()
+
+
+@router.put("/onboarding/interview/{section_id}")
+async def put_section(section_id: str, body: SectionSave, request: Request):
+    _founder(request)
+    if section_by_id(section_id) is None:
+        raise HTTPException(400, f"Unknown section. Must be one of: {SECTION_IDS}")
+    try:
+        save_section(section_id, body.data, mark_complete=body.mark_complete)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return interview_state()
+
+
+@router.post("/onboarding/interview/progress")
+async def post_progress(body: ProgressSave, request: Request):
+    _founder(request)
+    current = load_progress()
+    if body.current_section:
+        current["current_section"] = body.current_section
+    if body.completed_sections is not None:
+        current["completed_sections"] = body.completed_sections
+    if body.completed is not None:
+        current["completed"] = body.completed
+    save_progress(current)
+    return interview_state()
+
+
+@router.post("/onboarding/interview/complete")
+async def complete_interview(request: Request):
+    _founder(request)
+    mark_complete()
+    return interview_state()
+
+
+@router.get("/onboarding/team/invites")
+async def get_invites(request: Request):
+    _founder(request)
+    return {"invites": list_invites()}
+
+
+@router.post("/onboarding/team/invites")
+async def post_invite(body: InviteIn, request: Request):
+    """Record an invite. Never sends email or WhatsApp."""
+    _founder(request)
+    try:
+        row = create_invite(body.email, body.role, body.name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"invite": row, "sent": False}
+
+
+@router.get("/onboarding/whatsapp")
+async def get_whatsapp_keys(request: Request):
+    _founder(request)
+    return status_panel()
+
+
+@router.post("/onboarding/whatsapp")
+async def post_whatsapp_keys(body: WhatsAppKeysIn, request: Request):
+    _founder(request)
+    payload = body.model_dump(exclude_none=True)
+    return save_secrets(payload)
+
+
+@router.post("/onboarding/setup")
+async def setup_business(request: Request, body: dict[str, Any] | None = None):
+    """Legacy single-shot path. Merges identity only — never replaces the file."""
+    _founder(request)
+    payload = body if isinstance(body, dict) else {}
+    identity = {
+        "legal_name": payload.get("legal_name") or payload.get("business_name") or "",
+        "dba": payload.get("dba") or payload.get("business_name") or "",
+        "business_name": payload.get("business_name") or "",
+        "owner_name": payload.get("owner_name") or "",
+        "tagline": payload.get("business_tagline") or payload.get("tagline") or "",
+    }
+    save_section("identity", identity, mark_complete=True)
+    contact = {}
+    for src, dest in (
+        ("business_address", "address"),
+        ("business_phone", "phone"),
+        ("business_email", "email"),
+        ("timezone", "timezone"),
+    ):
+        if payload.get(src):
+            contact[dest] = payload[src]
+    if contact:
+        save_section("contact", contact, mark_complete=True)
+    state = interview_state()
+    return {
+        "success": True,
+        "message": "Merged into company setup. Use the interview to finish.",
+        "configured": state["status"]["configured"],
+        "edition": edition_name(),
     }

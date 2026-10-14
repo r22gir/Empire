@@ -4,7 +4,7 @@ export function isAppDeepLink(u: string): boolean {
   if (!t || t.startsWith('//')) return false;
   if (t === '/') return true;
   if (/^\/\?[\w.&=%-]*$/.test(t)) return true;
-  if (/^\/(?:ayuda|archivo|classic)(?:\?[\w.&=%-]*)?$/.test(t)) return true;
+  if (/^\/(?:ayuda|archivo|classic|help)(?:\/[\w.-]+)*(?:\?[\w.&=%-]*)?$/.test(t)) return true;
   return false;
 }
 
@@ -21,5 +21,5 @@ export function safeUrl(u: string): string {
 }
 
 export function markdownLinkCount(s: string): number {
-  return (s.match(/\]\((?:https?:\/\/|\/api\/v1\/files\/found\?|\/docs\/view\?|\/(?:\?|ayuda|archivo|classic))/g) || []).length;
+  return (s.match(/\]\((?:https?:\/\/|\/api\/v1\/files\/found\?|\/docs\/view\?|\/(?:\?|ayuda|archivo|classic|help))/g) || []).length;
 }

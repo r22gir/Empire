@@ -42,6 +42,7 @@ import VisionAnalysisPage from './components/screens/VisionAnalysisPage';
 import DrawingStudioPage from './components/screens/DrawingStudioPage';
 import ForgeCRMPage from './components/screens/ForgeCRMPage';
 import BusinessProfileScreen from './components/screens/BusinessProfileScreen';
+import CompanySetupInterview from './components/screens/CompanySetupInterview';
 import SettingsScreen from './components/screens/SettingsScreen';
 import DesksScreen from './components/screens/DesksScreen';
 import InboxScreen from './components/screens/InboxScreen';
@@ -121,6 +122,7 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
 const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'pricing-studio': 'pricing-studio',
   'jobs': 'jobs',
+  'company-setup': 'company-setup',
   calendar: 'calendar',
   schedule: 'calendar',
   organizer: 'calendar',
@@ -149,7 +151,7 @@ const NAV_PRODUCT_IDS = new Set<string>([
   'max-avatar', 'dev', 'drawings', 'construction', 'storefront', 'archive', 'transcript', 'improvements',
 ]);
 const NAV_SCREEN_IDS = new Set<string>([
-  'chat', 'dashboard', 'business-profile', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
+  'chat', 'dashboard', 'business-profile', 'company-setup', 'jobs', 'invoices', 'quote', 'tasks', 'inbox', 'costs',
   'report', 'desks', 'memory-bank', 'telegram', 'whatsapp', 'docs', 'research', 'final-docs', 'invoice',
   'calendar', 'presentation', 'video', 'settings',
 ]);
@@ -483,6 +485,7 @@ export default function CommandCenter() {
       calendar: 'calendar',
       documents: 'docs',
       'business-profile': 'business-profile',
+      'company-setup': 'company-setup',
       settings: 'settings',
       jobs: 'jobs',
       invoices: 'invoices',
@@ -694,6 +697,7 @@ export default function CommandCenter() {
       }
     }
     if (activeScreen === 'business-profile') return <BusinessProfileScreen />;
+    if (activeScreen === 'company-setup') return <CompanySetupInterview />;
     if (activeScreen === 'settings') return <SettingsScreen />;
     if (activeScreen === 'pricing' && activeProduct === 'platform') return <PricingPage />;
     if (activeScreen === 'pricing-studio') return <PricingStudioScreen />;

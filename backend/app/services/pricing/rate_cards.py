@@ -70,12 +70,27 @@ def lookup_rate(business_unit: str, key: str) -> float:
 
 
 def component_rates(business_unit: str) -> dict[str, float]:
-    """Copy of the component rate card for API responses."""
+    """Copy of the component rate card for API responses.
+
+    Company setup rate cards overlay matching numeric keys when present.
+    """
     unit = (business_unit or "").strip().lower()
     card = COMPONENT_RATES.get(unit)
     if not card:
         raise KeyError(f"No rate card for '{business_unit}'")
-    return dict(card)
+    out = dict(card)
+    try:
+        from app.services.company_setup.store import load_merged
+
+        overlay = load_merged().get("rate_cards") or {}
+        unit_overlay = overlay.get(unit) if isinstance(overlay, dict) else None
+        if isinstance(unit_overlay, dict):
+            for key, value in unit_overlay.items():
+                if isinstance(value, (int, float)):
+                    out[str(key)] = float(value)
+    except Exception:
+        pass
+    return out
 
 
 def client_rate_rules(client_key: str) -> dict[str, object]:

@@ -61,10 +61,18 @@ def _state_path() -> Path:
 
 
 def _blank(name: str) -> bool:
-    return not (os.getenv(name) or "").strip()
+    return not _secret(name)
 
 
 def _secret(name: str) -> str:
+    try:
+        from app.services.company_setup.whatsapp_secrets import get_secret
+
+        val = get_secret(name)
+        if val:
+            return val
+    except Exception:
+        pass
     return (os.getenv(name) or "").strip()
 
 
@@ -225,6 +233,12 @@ def founder_allowlist() -> frozenset[str]:
     env_phones = os.getenv("WHATSAPP_FOUNDER_PHONES") or ""
     if env_phones.strip():
         raw.extend(part.strip() for part in env_phones.split(",") if part.strip())
+    try:
+        from app.services.company_setup.whatsapp_secrets import owner_numbers
+
+        raw.extend(owner_numbers())
+    except Exception:
+        pass
     try:
         from app.services.max.whatsapp_log import load_whatsapp_phonebook
 

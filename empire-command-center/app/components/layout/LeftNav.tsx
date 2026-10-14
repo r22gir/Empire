@@ -73,6 +73,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // Business Profile = BusinessOps (Phase 1) entry point. Routes to the
       // `business-profile` screen; product remains unchanged.
       { id: 'business-profile', name: 'Business Profile', icon: <BadgeCheck size={16} />, status: 'active', color: '#16a34a', screen: 'business-profile' as ScreenMode, kind: 'screen' },
+      { id: 'company-setup', name: 'Company Setup', icon: <Building2 size={16} />, status: 'active', color: '#b8960c', screen: 'company-setup' as ScreenMode, kind: 'screen' },
       { id: 'vendorops', name: 'VendorOps', icon: <BadgeCheck size={16} />, status: 'active', color: '#0d9488', kind: 'product' },
       { id: 'contractor', name: 'ContractorForge', icon: <Wrench size={16} />, status: 'active', color: '#d97706', kind: 'product' },
       { id: 'lead', name: 'LeadForge', icon: <Target size={16} />, status: 'active', color: '#16a34a', kind: 'product' },

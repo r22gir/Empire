@@ -129,7 +129,18 @@ def lookup_fabric_allowance(foam_thickness_in: Optional[float]) -> dict[str, Any
             "label": "needs foam thickness — required before a fabric cut can be sized.",
         }
     key = _sixteenths(thickness)
-    for row in FABRIC_CUT_ALLOWANCE_BY_FOAM_THICKNESS:
+    rows = list(FABRIC_CUT_ALLOWANCE_BY_FOAM_THICKNESS)
+    try:
+        from app.services.company_setup.store import load_merged
+
+        merged = load_merged()
+        fabric = merged.get("fabric") if isinstance(merged.get("fabric"), dict) else {}
+        extra = fabric.get("allowance_by_foam_thickness") if isinstance(fabric, dict) else None
+        if isinstance(extra, list) and extra:
+            rows = [r for r in extra if isinstance(r, dict)] + rows
+    except Exception:
+        pass
+    for row in rows:
         if _sixteenths(row["foam_thickness_in"]) == key:
             return dict(row)
     return {

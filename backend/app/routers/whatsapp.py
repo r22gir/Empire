@@ -223,6 +223,31 @@ async def whatsapp_export_chat(
     )
 
 
+@router.get("/whatsapp/keys")
+async def whatsapp_keys_status(request: Request):
+    """Founder-only. Masked status — never returns secret values."""
+    from app.services.company_setup.auth import require_verified_founder
+    from app.services.company_setup.whatsapp_secrets import status_panel
+
+    require_verified_founder(request)
+    return status_panel()
+
+
+@router.post("/whatsapp/keys")
+async def whatsapp_keys_save(request: Request):
+    """Founder-only. Store edition secrets. Body values are never logged."""
+    from app.services.company_setup.auth import require_verified_founder
+    from app.services.company_setup.whatsapp_secrets import apply_to_environ, save_secrets
+
+    require_verified_founder(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    result = save_secrets(body)
+    apply_to_environ()
+    return result
+
+
 @router.get("/whatsapp/webhook")
 async def whatsapp_verify(request: Request):
     status = channel_status()
@@ -233,6 +258,15 @@ async def whatsapp_verify(request: Request):
         request.query_params.get("hub.verify_token"),
         request.query_params.get("hub.challenge"),
     )
+    try:
+        from app.services.company_setup.whatsapp_secrets import record_webhook_challenge
+
+        if challenge is None:
+            record_webhook_challenge(ok=False, reason="verify token rejected")
+        else:
+            record_webhook_challenge(ok=True)
+    except Exception:
+        pass
     if challenge is None:
         return JSONResponse({"ok": False, "reason": "verify token rejected"}, status_code=403)
     return PlainTextResponse(challenge)
