@@ -5,9 +5,10 @@ Never prints or logs the password. Updates only the active founder row.
 If that row has an empty email, fills it with the first FOUNDER_ACCESS_EMAILS
 entry.
 
-  python backend/scripts/set_founder_password.py --db /path/to/empire.db
+  python backend/scripts/set_founder_password.py --db ~/empire-data/empire.db
 
-Tests must pass --db (or EMPIRE_TASK_DB) to an isolated temp file.
+Default (EMPIRE_TASK_DB unset) is ~/empire-data/empire.db — same as the backend.
+Tests must pass --db to an isolated temp file.
 """
 from __future__ import annotations
 
@@ -31,13 +32,22 @@ from app.services.founder_access import (  # noqa: E402
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Set founder Studio password (getpass, backup first).")
-    parser.add_argument("--db", help="SQLite path. Defaults to EMPIRE_TASK_DB or backend/data/empire.db")
+    parser.add_argument(
+        "--db",
+        help="SQLite path. Defaults to EMPIRE_TASK_DB or ~/empire-data/empire.db",
+    )
     args = parser.parse_args(argv)
 
     db_path = resolve_db_path(args.db)
+    print(f"Database: {db_path}")
     if not db_path.is_file():
         print(f"database not found: {db_path}", file=sys.stderr)
         return 2
+
+    answer = input("Proceed? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        print("Aborted.")
+        return 4
 
     password = getpass.getpass("New founder password: ")
     confirm = getpass.getpass("Confirm password: ")

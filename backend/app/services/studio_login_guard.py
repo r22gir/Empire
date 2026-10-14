@@ -13,8 +13,9 @@ from typing import Optional
 
 
 IP_FAIL_LIMIT = 5
-GLOBAL_FAIL_LIMIT = 5
+GLOBAL_FAIL_LIMIT = 50
 LOCK_SECONDS = 15 * 60
+REMEMBERED_DEVICE_HINT = "A remembered device still works."
 
 
 def format_remaining(seconds: float) -> str:
@@ -28,6 +29,13 @@ def format_remaining(seconds: float) -> str:
     return " ".join(parts)
 
 
+def lockout_message(seconds: float) -> str:
+    return (
+        "Too many failed sign-in attempts. Try again in "
+        f"{format_remaining(seconds)}. {REMEMBERED_DEVICE_HINT}"
+    )
+
+
 @dataclass
 class _Bucket:
     failures: int = 0
@@ -35,7 +43,7 @@ class _Bucket:
 
 
 class StudioLoginGuard:
-    """5 failures → 15 minute lock, per IP and globally."""
+    """5 failures / 15 min per IP; 50 failures / 15 min globally."""
 
     def __init__(
         self,
@@ -66,10 +74,7 @@ class StudioLoginGuard:
         """Return a lockout message if this IP (or everyone) is locked."""
         remaining = self.remaining_lock(ip, now)
         if remaining > 0:
-            return (
-                "Too many failed sign-in attempts. Try again in "
-                f"{format_remaining(remaining)}."
-            )
+            return lockout_message(remaining)
         return None
 
     def record_failure(self, ip: str, now: Optional[float] = None) -> Optional[str]:
@@ -87,13 +92,13 @@ class StudioLoginGuard:
                 self._global.locked_until = now + self.lock_seconds
             remaining = self._remaining_unlocked(key, now)
         if remaining > 0:
-            return (
-                "Too many failed sign-in attempts. Try again in "
-                f"{format_remaining(remaining)}."
-            )
+            return lockout_message(remaining)
         return None
 
     def record_success(self, ip: str) -> None:
+        # Clear this IP so a successful sign-in is not immediately locked.
+        # Do not reset the global count — one success must not erase a
+        # distributed brute-force tally.
         key = ip or "unknown"
         with self._lock:
             self._ips.pop(key, None)

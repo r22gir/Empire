@@ -12,8 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.services.studio_login_guard import (
+    GLOBAL_FAIL_LIMIT,
     StudioLoginGuard,
     format_remaining,
+    record_studio_login_failure,
     reset_studio_login_guard,
 )
 from app.utils.security import get_password_hash
@@ -371,7 +373,7 @@ def test_remember_device_after_email_login(client):
 
 
 def test_studio_login_lockout_per_ip_and_message(client):
-    headers = {"X-Forwarded-For": "203.0.113.77"}
+    headers = {"CF-Connecting-IP": "203.0.113.77"}
     statuses = []
     last = None
     for _ in range(5):
@@ -387,6 +389,7 @@ def test_studio_login_lockout_per_ip_and_message(client):
     detail = last.json()["detail"]
     assert "Try again in" in detail
     assert "minute" in detail
+    assert "remembered device still works" in detail.lower()
 
     even_correct = client.post(
         "/api/v1/auth/studio-login",
@@ -395,30 +398,87 @@ def test_studio_login_lockout_per_ip_and_message(client):
     )
     assert even_correct.status_code == 429
     assert "Try again in" in even_correct.json()["detail"]
+    assert "remembered device still works" in even_correct.json()["detail"].lower()
 
 
 def test_studio_login_global_lockout_blocks_other_ip(client):
-    for i in range(5):
-        r = client.post(
-            "/api/v1/auth/studio-login",
-            json={"pin": "nope"},
-            headers={"X-Forwarded-For": f"198.51.100.{i}"},
-        )
-        if i < 4:
-            assert r.status_code == 401, r.text
-        else:
-            assert r.status_code == 429, r.text
+    assert GLOBAL_FAIL_LIMIT == 50
+    for i in range(GLOBAL_FAIL_LIMIT):
+        record_studio_login_failure(f"198.51.100.{i}")
     blocked = client.post(
         "/api/v1/auth/studio-login",
         json={"pin": "2468"},
-        headers={"X-Forwarded-For": "198.51.100.200"},
+        headers={"CF-Connecting-IP": "198.51.100.200"},
     )
     assert blocked.status_code == 429
     assert "Try again in" in blocked.json()["detail"]
+    assert "remembered device still works" in blocked.json()["detail"].lower()
+
+
+def test_lockout_uses_cf_connecting_ip_not_x_forwarded_for(client):
+    for i in range(5):
+        r = client.post(
+            "/api/v1/auth/studio-login",
+            json={"pin": "0000"},
+            headers={
+                "CF-Connecting-IP": "203.0.113.9",
+                "X-Forwarded-For": f"198.51.100.{i}",
+            },
+        )
+        if i < 4:
+            assert r.status_code == 401, r.text
+    assert r.status_code == 429
+    other = client.post(
+        "/api/v1/auth/studio-login",
+        json={"pin": "2468"},
+        headers={
+            "CF-Connecting-IP": "203.0.113.10",
+            "X-Forwarded-For": "203.0.113.9",
+        },
+    )
+    assert other.status_code == 200, other.text
+
+
+def test_lockout_ignores_x_forwarded_for_without_cf(client):
+    last = None
+    for i in range(5):
+        last = client.post(
+            "/api/v1/auth/studio-login",
+            json={"pin": "0000"},
+            headers={"X-Forwarded-For": f"198.51.100.{i}"},
+        )
+    assert last is not None
+    assert last.status_code == 429
+
+
+def test_remembered_device_gets_in_during_global_lock(client):
+    login = client.post("/api/v1/auth/studio-login", json={"pin": "2468"})
+    assert login.status_code == 200, login.text
+    remember = client.post("/api/v1/auth/remember-device", json={"device_name": "Lock Phone"})
+    assert remember.status_code == 200, remember.text
+    raw = client.cookies.get("empire_device")
+    assert raw
+
+    for i in range(GLOBAL_FAIL_LIMIT):
+        record_studio_login_failure(f"203.0.113.{i % 200}")
+
+    client.cookies.clear()
+    blocked = client.post("/api/v1/auth/studio-login", json={"pin": "2468"})
+    assert blocked.status_code == 429
+    assert "remembered device still works" in blocked.json()["detail"].lower()
+
+    client.cookies.set("empire_device", raw)
+    session = client.get("/api/v1/auth/session")
+    assert session.status_code == 200, session.text
+    assert session.json()["authenticated"] is True
+    assert session.json()["user"]["role"] == "founder"
+
+    again = client.post("/api/v1/auth/studio-login", json={"pin": "2468"})
+    assert again.status_code == 200, again.text
 
 
 def test_studio_login_email_failures_count_toward_lockout(client):
-    headers = {"X-Forwarded-For": "192.0.2.55"}
+    headers = {"CF-Connecting-IP": "192.0.2.55"}
     for _ in range(4):
         r = client.post(
             "/api/v1/auth/studio-login",
@@ -433,6 +493,15 @@ def test_studio_login_email_failures_count_toward_lockout(client):
     )
     assert fifth.status_code == 429
     assert "Try again in" in fifth.json()["detail"]
+
+
+def test_record_success_does_not_clear_global_count():
+    guard = StudioLoginGuard(ip_limit=5, global_limit=3, lock_seconds=15 * 60)
+    guard.record_failure("1.1.1.1")
+    guard.record_failure("1.1.1.2")
+    guard.record_success("1.1.1.1")
+    guard.record_failure("1.1.1.3")
+    assert guard.check("9.9.9.9")
 
 
 def test_guard_ip_lock_does_not_trip_global_when_limits_differ():
@@ -506,7 +575,7 @@ def test_founder_alias_failures_share_lockout(client, monkeypatch):
         "FOUNDER_ACCESS_EMAILS",
         "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
     )
-    headers = {"X-Forwarded-For": "192.0.2.88"}
+    headers = {"CF-Connecting-IP": "192.0.2.88"}
     addrs = (
         "rafa22giraldo@gmail.com",
         "empirebox2026@gmail.com",
@@ -562,6 +631,42 @@ def test_script_then_both_alias_emails_login(client, isolated_db, monkeypatch):
         assert r.status_code == 200, (addr, r.text)
         assert r.json()["user"]["id"] == "founder1"
         assert r.json()["user"]["role"] == "founder"
+
+
+def test_alias_email_no_founder_row_is_401_counted(client, monkeypatch):
+    from app.db.database import get_db
+
+    monkeypatch.setenv("FOUNDER_ACCESS_EMAILS", "rafa22giraldo@gmail.com")
+    with get_db() as conn:
+        conn.execute("DELETE FROM access_users WHERE role = 'founder'")
+    headers = {"CF-Connecting-IP": "198.51.100.40"}
+    first = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "rafa22giraldo@gmail.com", "password": "anything"},
+        headers=headers,
+    )
+    assert first.status_code == 401
+    assert first.json()["detail"] == "Invalid email or password"
+    last = None
+    for _ in range(4):
+        last = client.post(
+            "/api/v1/auth/studio-login",
+            json={"email": "rafa22giraldo@gmail.com", "password": "anything"},
+            headers=headers,
+        )
+    assert last is not None
+    assert last.status_code == 429
+    assert "remembered device still works" in last.json()["detail"].lower()
+
+
+def test_resolve_db_path_matches_backend_default(monkeypatch):
+    from app.services.founder_access import resolve_db_path
+
+    monkeypatch.delenv("EMPIRE_TASK_DB", raising=False)
+    assert resolve_db_path() == (Path.home() / "empire-data" / "empire.db").resolve()
+    assert resolve_db_path("~/empire-data/empire.db") == (
+        Path.home() / "empire-data" / "empire.db"
+    ).resolve()
 
 
 def test_set_founder_password_script_mocked(tmp_path, monkeypatch, capsys):
@@ -621,12 +726,15 @@ def test_set_founder_password_script_mocked(tmp_path, monkeypatch, capsys):
     spec.loader.exec_module(cli)
     answers = iter(["s3cret-founder", "s3cret-founder"])
     monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="": next(answers))
+    monkeypatch.setattr(cli, "input", lambda prompt="": "y", raising=False)
     assert cli.main(["--db", str(db)]) == 0
     captured = capsys.readouterr()
     assert "s3cret-founder" not in captured.out
     assert "s3cret-founder" not in captured.err
     assert "Rows updated: 1" in captured.out
     assert "Backup:" in captured.out
+    assert "Database:" in captured.out
+    assert str(db) in captured.out
     live = Path(__file__).resolve().parents[1] / "data" / "empire.db"
     assert live.resolve() != Path(db).resolve()
 
@@ -640,7 +748,9 @@ def test_guard_lock_message_includes_remaining_time():
         msg = guard.record_failure("10.0.0.1")
     assert msg is not None
     assert "15 minutes" in msg
+    assert "remembered device still works" in msg.lower()
     clock["t"] += 60
     remaining = guard.check("10.0.0.1")
     assert remaining is not None
     assert "14 minutes" in remaining
+    assert "remembered device still works" in remaining.lower()

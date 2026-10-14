@@ -135,6 +135,22 @@ def _request_meta(request: Request) -> dict:
     }
 
 
+def _studio_lockout_ip(request: Request) -> str:
+    """Cloudflare tunnel IP, else the socket peer. Do not trust X-Forwarded-For."""
+    cf = (request.headers.get("cf-connecting-ip") or "").strip()
+    if cf:
+        return cf
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _has_active_trusted_device(request: Request) -> bool:
+    devices.ensure_schema()
+    raw = request.cookies.get(devices.DEVICE_COOKIE) or ""
+    return bool(devices.lookup_active(raw))
+
+
 def _public_user(user: dict) -> dict:
     return {
         "id": user["id"],
@@ -376,7 +392,7 @@ def _authenticate_studio(data: StudioLoginRequest) -> dict:
                     "SELECT * FROM access_users WHERE role = 'founder' AND is_active = 1 LIMIT 1"
                 ).fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="No founder user found")
+                raise HTTPException(status_code=401, detail="Invalid email or password")
             user = dict_row(row)
             if not user.get("password_hash") or not verify_password(data.password, user["password_hash"]):
                 raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -400,10 +416,11 @@ def _authenticate_studio(data: StudioLoginRequest) -> dict:
 @router.post("/studio-login")
 def studio_login(data: StudioLoginRequest, request: Request, response: Response):
     """Owner/operator sign-in for Empire Command Center (Studio)."""
-    ip = _request_meta(request).get("ip") or "unknown"
-    locked = studio_login_lockout_message(ip)
-    if locked:
-        raise HTTPException(status_code=429, detail=locked)
+    ip = _studio_lockout_ip(request)
+    if not _has_active_trusted_device(request):
+        locked = studio_login_lockout_message(ip)
+        if locked:
+            raise HTTPException(status_code=429, detail=locked)
     try:
         user = _authenticate_studio(data)
     except HTTPException as exc:

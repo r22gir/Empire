@@ -34,15 +34,12 @@ def email_is_founder_alias(email: Optional[str]) -> bool:
 
 
 def resolve_db_path(explicit: Optional[str] = None) -> Path:
+    """Same default as app.db.database: EMPIRE_TASK_DB or ~/empire-data/empire.db."""
     if explicit:
         return Path(explicit).expanduser().resolve()
-    env = os.getenv("EMPIRE_TASK_DB")
-    if env:
-        return Path(env).expanduser().resolve()
-    backend_data = Path(__file__).resolve().parents[2] / "data" / "empire.db"
-    if backend_data.exists():
-        return backend_data.resolve()
-    return Path.home().joinpath("empire-data", "empire.db").resolve()
+    return Path(
+        os.getenv("EMPIRE_TASK_DB", str(Path.home() / "empire-data" / "empire.db"))
+    ).expanduser().resolve()
 
 
 def backup_sqlite(db_path: Path) -> Path:
