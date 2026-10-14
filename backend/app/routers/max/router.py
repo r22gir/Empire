@@ -2321,6 +2321,13 @@ async def _link_intelligence_response(request: ChatRequest) -> ChatResponse | No
     if not url:
         return None
 
+    try:
+        from app.services.max.confidence import record_whatsapp_route
+
+        record_whatsapp_route(request.message, "article_link")
+    except Exception:
+        pass
+
     read_result = execute_tool({"tool": "web_read", "url": url, "max_chars": 18000})
     tool_evidence = [read_result.to_dict()]
     payload = read_result.result or {}
@@ -4289,7 +4296,10 @@ async def _chat_with_max_service_impl(
             pass
 
         _quality_flags = detect_quality_flags(
-            final_content, user_message=request.message, tool_results=normalize_tool_results(tool_results_list)
+            final_content,
+            user_message=request.message,
+            tool_results=normalize_tool_results(tool_results_list),
+            founder=founder,
         )
         try:
             evaluation_service.log_answer_quality_flags(_response_id, request.channel or "web", _quality_flags)
@@ -5497,7 +5507,10 @@ async def _chat_stream_impl(request: ChatRequest):
             ))
 
             _quality_flags = detect_quality_flags(
-                full_response, user_message=request.message, tool_results=normalize_tool_results(tool_results_list)
+                full_response,
+                user_message=request.message,
+                tool_results=normalize_tool_results(tool_results_list),
+                founder=founder,
             )
             try:
                 evaluation_service.log_answer_quality_flags(conv_id, request.channel or "web", _quality_flags)

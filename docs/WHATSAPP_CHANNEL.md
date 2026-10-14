@@ -161,6 +161,16 @@ Each inbound and outbound turn lives under this edition’s data directory:
 
 `EMPIRE_DATA_DIR/whatsapp/whatsapp_chat_log.db`
 
+The founder-visible Command Center thread is also appended on every inbound
+and outbound turn (link-only, media, and attachments included):
+
+`EMPIRE_DATA_DIR/chats/founder/whatsapp.json`
+
+(defaults to `backend/data/chats/founder/whatsapp.json` when `EMPIRE_DATA_DIR` is unset)
+
+Webhook and send lines go to **journald** (`SyslogIdentifier=empire-backend`) and
+a rotating file `EMPIRE_DATA_DIR/logs/whatsapp.log` (send errors included, no tokens).
+
 Family editions (Max-e `/data/amp`, Maxine `/data/maxine`) use their own `EMPIRE_DATA_DIR` and never see Rafael’s log or jobs.
 
 Recorded fields:

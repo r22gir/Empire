@@ -138,8 +138,16 @@ def _auto_save_exchange_to_memory(
 
 # ── Per-chat conversation history — persisted to disk ──
 _MAX_HISTORY = 30  # Keep last 30 exchanges per chat (was 10)
-_TELEGRAM_CHAT_DIR = Path.home() / "empire-repo" / "backend" / "data" / "chats" / "telegram"
-_TELEGRAM_CHAT_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    from app.services.data_paths import chats_dir as _chats_dir
+
+    _TELEGRAM_CHAT_DIR = _chats_dir() / "telegram"
+except Exception:
+    _TELEGRAM_CHAT_DIR = Path.home() / "empire-repo" / "backend" / "data" / "chats" / "telegram"
+try:
+    _TELEGRAM_CHAT_DIR.mkdir(parents=True, exist_ok=True)
+except (OSError, PermissionError):
+    pass
 
 
 def _load_telegram_history(chat_id: str) -> list[dict]:

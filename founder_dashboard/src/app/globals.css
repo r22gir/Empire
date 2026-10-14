@@ -136,6 +136,23 @@ html, body {
   color: var(--text-secondary); font-style: italic;
 }
 .chat-markdown strong { color: #fff; font-weight: 600; }
+.presentation-slide-paper,
+.presentation-slide-paper .chat-markdown,
+.presentation-slide-copy {
+  color: #16191c;
+}
+.presentation-slide-paper .chat-markdown h1,
+.presentation-slide-paper .chat-markdown h2,
+.presentation-slide-paper .chat-markdown h3,
+.presentation-slide-paper .chat-markdown strong {
+  color: #16191c;
+}
+.presentation-slide-paper .chat-markdown em { color: #4a453c; }
+.presentation-slide-paper .chat-markdown p,
+.presentation-slide-paper .chat-markdown li,
+.presentation-slide-paper .chat-markdown blockquote {
+  color: #16191c;
+}
 .chat-markdown em     { color: #c4a8f0; }
 .chat-markdown hr     { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
 .chat-markdown a      { color: var(--purple); text-decoration: underline; text-underline-offset: 2px; }

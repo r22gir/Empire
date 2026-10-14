@@ -174,15 +174,24 @@ export default function PresentationCanvas({ slides, autoAdvance = 0, isStreamin
         </div>
       </div>
 
-      {/* Slide content */}
+      {/* Slide content — paper card so title/body stay readable on dark and gold */}
       <div className="flex-1 overflow-auto px-6 py-4" style={{ minHeight: 0 }}>
         <div
+          className="presentation-slide-paper"
           style={{
             opacity: 1,
             animation: 'slide-fade-in 0.3s ease',
+            background: '#fffdf7',
+            color: '#16191c',
+            border: '1px solid #c4b48a',
+            borderRadius: 12,
+            padding: '16px 18px',
           }}
           key={currentIdx}
         >
+          <h2 className="text-base font-semibold mb-2" style={{ color: '#16191c' }}>
+            {slide.title}
+          </h2>
           {/* Render type-specific content */}
           {slide.type === 'chart' && slide.analysisSlice?.charts && (
             <ChartCanvas charts={slide.analysisSlice.charts} inline />
@@ -198,7 +207,7 @@ export default function PresentationCanvas({ slides, autoAdvance = 0, isStreamin
           )}
 
           {/* Always render markdown content */}
-          <div className="chat-markdown mt-2" style={{ fontSize: isFullscreen ? 16 : 14 }}>
+          <div className="chat-markdown presentation-slide-copy mt-2" style={{ fontSize: isFullscreen ? 16 : 14, color: '#16191c' }}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {slide.content}
             </ReactMarkdown>

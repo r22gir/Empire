@@ -6,6 +6,7 @@ email send is monkeypatched). Nothing is sent anywhere.
 import asyncio
 import importlib
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -244,7 +245,7 @@ def test_improvement_loop_needs_two_taps_and_never_builds_without_key(g):
         "Bulk approve",
         "Approving 20 IG drafts one by one is slow",
         "Add select-all + approve for copy-only items",
-        ["LeadForge"], "low", requested_via="chat",
+        ["LeadForge"], "low", requested_via="voice",
     )
     assert created["status"] == "proposed"
     rid = created["id"]
@@ -252,7 +253,13 @@ def test_improvement_loop_needs_two_taps_and_never_builds_without_key(g):
     assert c.post(f"/api/v1/growth/improvements/{rid}/approve", json={}).status_code == 403
     a = c.post(f"/api/v1/growth/improvements/{rid}/approve", json={"confirm": True}).json()
     assert a["status"] == "approved"
-    assert a.get("spec_path") in (None, "")
+    spec = a.get("spec_path") or created.get("spec_path")
+    assert spec and Path(spec).is_file()
+    assert created["status"] == "proposed"
+    spec_text = Path(spec).read_text()
+    assert "Do not merge" in spec_text
+    assert "proposed" in spec_text.lower()
+    assert "voice" in spec_text.lower()
     job = iq.latest_for(rid)
     assert job and job["status"] == "queued"
     assert c.post(f"/api/v1/growth/improvements/{rid}/approve-merge", json={"confirm": True}).status_code == 400

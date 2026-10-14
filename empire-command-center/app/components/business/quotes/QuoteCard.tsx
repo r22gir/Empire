@@ -57,27 +57,29 @@ export default function QuoteCard({ result, onScreenChange, onSend }: QuoteCardP
   };
 
   return (
-    <div style={{
+    <div className="cy-keep-light quote-paper-card" style={{
       marginTop: 12,
       borderRadius: 16,
-      border: '1.5px solid #f0e6c0',
+      border: '1.5px solid #c4b48a',
       background: '#fffdf7',
+      color: '#16191c',
       overflow: 'hidden',
     }}>
       {/* Header */}
       <div style={{
         padding: '14px 18px',
-        background: 'linear-gradient(135deg, #fdf8eb 0%, #fff9ee 100%)',
-        borderBottom: '1px solid #f0e6c0',
+        background: 'linear-gradient(135deg, #f3ebd2 0%, #fff6e4 100%)',
+        borderBottom: '1px solid #c4b48a',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
+        color: '#16191c',
       }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#16191c' }}>
             {quote_number}
           </div>
-          <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: '#4a453c', marginTop: 2 }}>
             {customer_name} · {items_count || 0} item{items_count !== 1 ? 's' : ''}
           </div>
         </div>

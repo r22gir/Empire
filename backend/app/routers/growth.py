@@ -161,6 +161,20 @@ class Links(BaseModel):
     preview_url: str = ""
 
 
+@router.get("/confidence/report")
+def confidence_report(days: int = Query(7, ge=1, le=90), feed: bool = False):
+    """Week of shadow confidence scores vs founder corrections. GET-only.
+
+    Does not change routing. feed=true files draft improvements (proposed only).
+    """
+    from app.services.max import confidence as conf
+
+    report = conf.week_report(days)
+    if feed:
+        report["filed"] = conf.feed_low_scores_to_improvements(days)
+    return report
+
+
 @router.get("/improvements")
 def imp_list(status: Optional[str] = None):
     return imp.list_requests(status)
