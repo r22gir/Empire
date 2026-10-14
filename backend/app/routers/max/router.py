@@ -2144,6 +2144,44 @@ def _with_attachment_reader_proof(
     return merged
 
 
+def _confidence_cascade_extra(meta: dict[str, Any] | None) -> dict[str, Any] | None:
+    from app.services.max.confidence import cascade_metadata_extra
+
+    return cascade_metadata_extra(meta)
+
+
+def _apply_confidence_cascade_to_reply(
+    user_text: str,
+    answer: str,
+    *,
+    tool_results: list | None = None,
+    chosen_path: str | None = None,
+    channel: str | None = None,
+    is_founder: bool = False,
+) -> tuple[str, dict[str, Any]]:
+    """Shared /chat and /chat/stream confidence cascade.
+
+    Return early unless MAX_CONFIDENCE_GATE is on: no scoring, no DB write,
+    no log, no confidence_cascade metadata key. Runs only when is_founder
+    is a server-verified founder session, not a body channel string.
+    Fail-open — a cascade error never replaces the reply.
+    """
+    try:
+        from app.services.max.confidence import apply_router_cascade
+
+        return apply_router_cascade(
+            user_text,
+            answer,
+            tool_results=tool_results,
+            chosen_path=chosen_path,
+            channel=channel,
+            is_founder=is_founder,
+        )
+    except Exception:
+        logger.debug("confidence cascade hook failed", exc_info=True)
+        return answer, {}
+
+
 def _apply_truth_guardrails(
     message: str | None,
     response_text: str,
@@ -4295,6 +4333,13 @@ async def _chat_with_max_service_impl(
         except Exception:
             pass
 
+        from app.services.max.founder_session import current_verified as _cascade_founder
+        final_content, _cascade_meta = _apply_confidence_cascade_to_reply(
+            request.message, final_content, tool_results=tool_results_list,
+            channel=request.channel,
+            is_founder=bool(canonical_founder and _cascade_founder()),
+        )
+
         _quality_flags = detect_quality_flags(
             final_content,
             user_message=request.message,
@@ -4314,7 +4359,7 @@ async def _chat_with_max_service_impl(
             steps=_founder_step_lines if _founder_step_lines else None,
             quality=quality_badge,
             response_id=_response_id,
-            metadata=_response_metadata(request.channel),
+            metadata=_response_metadata(request.channel, extra=_confidence_cascade_extra(_cascade_meta)),
         )
 
         # Log response for evaluation loop (non-blocking)
@@ -4393,7 +4438,7 @@ async def chat_stream(request: ChatRequest, http_request: Request = None):
     async def _prepare():
         _fs_token = _fs.set_current(_founder_session)
         try:
-            return await _chat_stream_impl(request)
+            return await _chat_stream_impl(request, _founder_session=_founder_session)
         finally:
             _fs.reset_current(_fs_token)
 
@@ -4495,7 +4540,7 @@ async def _keepalive_stream(prepare):
         yield _sse({"type": "done", "model_used": "error"})
 
 
-async def _chat_stream_impl(request: ChatRequest):
+async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None = None):
     """SSE streaming endpoint body (see chat_stream)."""
     msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
     founder = is_founder_message(msg_ctx)
@@ -5498,6 +5543,11 @@ async def _chat_stream_impl(request: ChatRequest):
                 )
             except Exception:
                 pass
+            full_response, _cascade_meta = _apply_confidence_cascade_to_reply(
+                request.message, full_response, tool_results=tool_results_list,
+                channel=request.channel,
+                is_founder=bool((_founder_session or {}).get("verified")),
+            )
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
             conversation_tracker.add_message(conv_id, "assistant", full_response)
@@ -5521,7 +5571,7 @@ async def _chat_stream_impl(request: ChatRequest):
                 'type': 'done',
                 'model_used': resolve_display_model_used(model_used, request.model),
                 'conversation_id': conv_id,
-                'metadata': _response_metadata(request.channel),
+                'metadata': _response_metadata(request.channel, extra=_confidence_cascade_extra(_cascade_meta)),
             }
             if _stream_step_lines:
                 _done_data['steps'] = _stream_step_lines

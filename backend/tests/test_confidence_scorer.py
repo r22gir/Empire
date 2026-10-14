@@ -218,3 +218,271 @@ def test_week_report_includes_unfiled_low(isolated):
     conf.score_intent(TWEET, chosen_path="quote_intake")
     report = conf.week_report(7)
     assert report["unfiled_low"] >= 1
+    assert report["behavior_changed"] is False
+    assert report["auto_credits"] is False
+
+
+def test_unset_gate_cascade_is_exact_shadow_score_only(isolated, monkeypatch):
+    """Unset MAX_CONFIDENCE_GATE: no score, no DB write, no log, no rewrite."""
+    conf = isolated["conf"]
+    monkeypatch.delenv("MAX_CONFIDENCE_GATE", raising=False)
+    importlib.reload(conf)
+    assert conf.gate_mode() == "shadow"
+    assert conf.cascade_enabled() is False
+
+    retries: list[str] = []
+    asks: list[str] = []
+    original = "I'll start a quote from that link."
+
+    def _retry(*_a, **_k):
+        retries.append("retry")
+        return "retried answer"
+
+    def _ask(*_a, **_k):
+        asks.append("ask")
+        return {"id": "should-not-file"}
+
+    monkeypatch.setattr(conf, "_file_founder_ask", lambda *a, **k: asks.append("inbox") or {"id": "nope"})
+    dest = conf.db_path()
+    hit = conf.apply_answer_cascade(
+        TWEET,
+        original,
+        chosen_path="quote_intake",
+        retry_fn=_retry,
+        ask_founder_fn=_ask,
+        channel="web",
+    )
+    assert hit["mode"] == "shadow"
+    assert hit["action"] == "proceed"
+    assert hit["behavior_changed"] is False
+    assert hit["answer"] == original
+    assert hit["retried"] is False
+    assert hit["asked_founder"] is False
+    assert hit["auto_credits"] is False
+    assert hit["skipped"] == "gate_off"
+    assert hit["score"] is None
+    assert retries == []
+    assert asks == []
+    assert not dest.exists()
+    report = conf.week_report(7)
+    assert report["total"] == 0
+    assert report["behavior_changed"] is False
+    assert report["mode"] == "shadow"
+
+
+def test_explicit_shadow_matches_unset_cascade(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "shadow")
+    importlib.reload(conf)
+    original = "I'll start a quote from that link."
+    called = []
+    shadow = conf.apply_answer_cascade(
+        TWEET,
+        original,
+        chosen_path="quote_intake",
+        retry_fn=lambda *a, **k: called.append("r") or "x",
+        ask_founder_fn=lambda *a, **k: called.append("a") or {},
+    )
+    monkeypatch.delenv("MAX_CONFIDENCE_GATE", raising=False)
+    importlib.reload(conf)
+    unset = conf.apply_answer_cascade(
+        TWEET,
+        original,
+        chosen_path="quote_intake",
+        retry_fn=lambda *a, **k: called.append("r") or "x",
+        ask_founder_fn=lambda *a, **k: called.append("a") or {},
+    )
+    assert shadow["mode"] == unset["mode"] == "shadow"
+    assert shadow["action"] == unset["action"] == "proceed"
+    assert shadow["behavior_changed"] is False
+    assert unset["behavior_changed"] is False
+    assert shadow["answer"] == unset["answer"] == original
+    assert shadow["skipped"] == unset["skipped"] == "gate_off"
+    assert shadow["score"] is None
+    assert unset["score"] is None
+    assert called == []
+    assert conf.week_report(7)["total"] == 0
+
+
+def test_gate_on_high_confidence_proceeds(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    importlib.reload(conf)
+    original = "Quote for Maggie: straight bench 48 inches. I have the dims."
+    called = []
+    hit = conf.apply_answer_cascade(
+        JOB,
+        original,
+        chosen_path="quote_intake",
+        tool_results=[{"tool": "create_quote", "success": True}],
+        retry_fn=lambda *a, **k: called.append("retry") or "nope",
+        ask_founder_fn=lambda *a, **k: called.append("ask") or {},
+        is_founder=True,
+    )
+    assert hit["mode"] == "on"
+    assert hit["action"] == "proceed"
+    assert hit["behavior_changed"] is False
+    assert hit["answer"] == original
+    assert hit["asked_founder"] is False
+    assert called == []
+    assert hit["score"]["would_gate"] is False
+
+
+def test_gate_on_low_retries_then_asks_founder(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    importlib.reload(conf)
+    original = "I think I'll open a quote from that tweet."
+    retries = []
+    asks = []
+
+    def _retry(text, answer, record, tools):
+        retries.append({"text": text, "answer": answer})
+        return "I think maybe it is still a quote?"
+
+    def _ask(record, text, question):
+        asks.append(question)
+        return {"id": "inbox-test", "status": "open"}
+
+    hit = conf.apply_answer_cascade(
+        TWEET,
+        original,
+        chosen_path="quote_intake",
+        retry_fn=_retry,
+        ask_founder_fn=_ask,
+        is_founder=True,
+    )
+    assert len(retries) == 1
+    assert hit["retried"] is True
+    assert hit["action"] == "ask_founder"
+    assert hit["behavior_changed"] is True
+    assert hit["asked_founder"] is True
+    assert hit["answer"] != original
+    assert "need a call from you" in hit["answer"].lower()
+    assert asks and ("quote" in asks[0].lower() or "link" in asks[0].lower())
+    assert hit["auto_credits"] is False
+    report = conf.week_report(7)
+    assert report["behavior_changed"] is True
+    assert report["cascade_asked_founder"] >= 1
+
+
+def test_gate_on_retry_can_recover_and_proceed(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    importlib.reload(conf)
+    original = "I think?"
+
+    def _retry(*_a, **_k):
+        return (
+            "This is an X/Twitter link, not a job. Here is the article reading: "
+            "the post is a product announcement, not a quote request."
+        )
+
+    first = conf.score_answer(TWEET, original, chosen_path="article_link", persist=False)
+    assert first["would_gate"] is True
+    hit = conf.apply_answer_cascade(
+        TWEET,
+        original,
+        chosen_path="article_link",
+        retry_fn=_retry,
+        ask_founder_fn=lambda *a, **k: {"id": "should-not"},
+        is_founder=True,
+    )
+    assert hit["retried"] is True
+    assert hit["action"] == "proceed"
+    assert hit["asked_founder"] is False
+    assert "article" in hit["answer"].lower()
+    assert hit["behavior_changed"] is True
+    assert hit["score"]["would_gate"] is False
+
+
+def test_stronger_check_never_spends_minimax_credits(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    monkeypatch.setenv("MAX_CONFIDENCE_MODEL_CHECK", "1")
+    importlib.reload(conf)
+
+    def _snap():
+        return {
+            "stopped": True,
+            "calls_left": 0,
+            "tokens_left": 0,
+            "auto_credits": False,
+        }
+
+    monkeypatch.setattr("app.services.max.improvement_planner.usage_snapshot", _snap)
+    checked = conf.stronger_check(
+        TWEET,
+        "I think I'll start a quote.",
+        {"scores": {"quote_intake": 0.08, "article_link": 0.94}, "chosen_path": "quote_intake"},
+        tool_results=[],
+    )
+    assert checked["auto_credits"] is False
+    assert (checked.get("nudge") or {}).get("auto_credits") is False
+    assert (checked.get("nudge") or {}).get("skipped") == "quota"
+
+
+def test_unset_gate_never_files_founder_inbox(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.delenv("MAX_CONFIDENCE_GATE", raising=False)
+    importlib.reload(conf)
+    filed = []
+    monkeypatch.setattr(conf, "_file_founder_ask", lambda *a, **k: filed.append(1) or {"id": "x"})
+    conf.apply_answer_cascade(TWEET, "I'll start a quote.", chosen_path="quote_intake")
+    assert filed == []
+
+
+def test_cascade_source_never_sends_email_or_whatsapp():
+    src = Path(__file__).resolve().parents[1] / "app" / "services" / "max" / "confidence.py"
+    text = src.read_text(encoding="utf-8")
+    assert "send_email(" not in text
+    assert "send_quote_email(" not in text
+    assert "WHATSAPP_ACCESS_TOKEN" not in text
+    assert "smtp" not in text.lower()
+    assert "auto_credits" in text
+    assert "Never sends email or WhatsApp" in text
+
+
+def test_chat_and_stream_share_confidence_cascade_helper():
+    router = Path(__file__).resolve().parents[1] / "app" / "routers" / "max" / "router.py"
+    src = router.read_text(encoding="utf-8")
+    assert src.count("def _apply_confidence_cascade_to_reply(") == 1
+    assert src.count("_apply_confidence_cascade_to_reply(") >= 3
+    assert src.count("is_founder=") >= 2
+    assert src.count("_confidence_cascade_extra(") >= 3
+    assert "Return early unless MAX_CONFIDENCE_GATE is on" in src
+    assert "_founder_session = _fs.resolve_founder_session(http_request)" in src
+    assert "is_founder=bool((_founder_session or {}).get(\"verified\"))" in src
+    conf_src = Path(__file__).resolve().parents[1].joinpath(
+        "app/services/max/confidence.py"
+    ).read_text(encoding="utf-8")
+    assert "FOUNDER_CASCADE_CHANNELS" not in src
+    assert "FOUNDER_CASCADE_CHANNELS" not in conf_src
+
+
+def test_web_channel_without_founder_session_untouched(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    importlib.reload(conf)
+    original = "I think I'll start a quote from that tweet."
+    hit = conf.apply_answer_cascade(
+        TWEET, original, chosen_path="quote_intake", channel="web", is_founder=False,
+    )
+    assert hit["skipped"] == "not_founder"
+    assert hit["answer"] == original
+    assert hit["behavior_changed"] is False
+    assert "need a call from you" not in hit["answer"].lower()
+
+
+def test_decide_cascade_shadow_always_proceeds(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.delenv("MAX_CONFIDENCE_GATE", raising=False)
+    importlib.reload(conf)
+    low = {"would_gate": True, "score": 0.1}
+    assert conf.decide_cascade(low, attempt=0) == "proceed"
+    assert conf.decide_cascade(low, attempt=1) == "proceed"
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    importlib.reload(conf)
+    assert conf.decide_cascade(low, attempt=0) == "retry"
+    assert conf.decide_cascade(low, attempt=1) == "ask_founder"
+    assert conf.decide_cascade({"would_gate": False, "score": 0.9}, attempt=0) == "proceed"
