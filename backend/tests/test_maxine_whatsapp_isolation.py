@@ -168,13 +168,16 @@ process.stdout.write(renderWhatsAppSetupPage('maxine'));
         text=True,
     ).stdout
     assert "Maxine" in html
-    assert MAXINE_OWNER_NAME.split()[0] in html
+    assert "¡Quiubo manito!" in html
+    assert MAXINE_OWNER_NAME.split()[0] not in html
     assert "construcción" in html
     assert "inmuebles" in html
+    assert "Juan ni de Rafael" in html
     assert "maxine.empirebox.store/api/v1/whatsapp/webhook" in html
     assert "/home/rg/empire-maxine.env" in html
     assert "no la de Rafael" in html
     assert "solicitud segura" in html
+    assert "formulario seguro" in html
     assert "Max-e" not in html
     assert "amp.empirebox.store" not in html
     assert "Juan Diego" not in html
