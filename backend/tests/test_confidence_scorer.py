@@ -223,7 +223,7 @@ def test_week_report_includes_unfiled_low(isolated):
 
 
 def test_unset_gate_cascade_is_exact_shadow_score_only(isolated, monkeypatch):
-    """Unset MAX_CONFIDENCE_GATE must match today's shadow mode: log only."""
+    """Unset MAX_CONFIDENCE_GATE: no score, no DB write, no log, no rewrite."""
     conf = isolated["conf"]
     monkeypatch.delenv("MAX_CONFIDENCE_GATE", raising=False)
     importlib.reload(conf)
@@ -243,12 +243,14 @@ def test_unset_gate_cascade_is_exact_shadow_score_only(isolated, monkeypatch):
         return {"id": "should-not-file"}
 
     monkeypatch.setattr(conf, "_file_founder_ask", lambda *a, **k: asks.append("inbox") or {"id": "nope"})
+    dest = conf.db_path()
     hit = conf.apply_answer_cascade(
         TWEET,
         original,
         chosen_path="quote_intake",
         retry_fn=_retry,
         ask_founder_fn=_ask,
+        channel="web",
     )
     assert hit["mode"] == "shadow"
     assert hit["action"] == "proceed"
@@ -257,10 +259,13 @@ def test_unset_gate_cascade_is_exact_shadow_score_only(isolated, monkeypatch):
     assert hit["retried"] is False
     assert hit["asked_founder"] is False
     assert hit["auto_credits"] is False
+    assert hit["skipped"] == "gate_off"
+    assert hit["score"] is None
     assert retries == []
     assert asks == []
+    assert not dest.exists()
     report = conf.week_report(7)
-    assert report["total"] >= 1
+    assert report["total"] == 0
     assert report["behavior_changed"] is False
     assert report["mode"] == "shadow"
 
@@ -292,7 +297,11 @@ def test_explicit_shadow_matches_unset_cascade(isolated, monkeypatch):
     assert shadow["behavior_changed"] is False
     assert unset["behavior_changed"] is False
     assert shadow["answer"] == unset["answer"] == original
+    assert shadow["skipped"] == unset["skipped"] == "gate_off"
+    assert shadow["score"] is None
+    assert unset["score"] is None
     assert called == []
+    assert conf.week_report(7)["total"] == 0
 
 
 def test_gate_on_high_confidence_proceeds(isolated, monkeypatch):
@@ -436,7 +445,26 @@ def test_chat_and_stream_share_confidence_cascade_helper():
     src = router.read_text(encoding="utf-8")
     assert src.count("def _apply_confidence_cascade_to_reply(") == 1
     assert src.count("_apply_confidence_cascade_to_reply(") >= 3
-    assert "Unset MAX_CONFIDENCE_GATE stays today's shadow mode" in src
+    assert src.count("channel=request.channel") >= 2
+    assert src.count("_confidence_cascade_extra(") >= 3
+    assert "Return early unless MAX_CONFIDENCE_GATE is on" in src
+
+
+def test_non_founder_channel_skips_even_when_gate_on(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    importlib.reload(conf)
+    original = "I think I'll start a quote from that tweet."
+    hit = conf.apply_answer_cascade(
+        TWEET, original, chosen_path="quote_intake", channel="storefront",
+    )
+    assert hit["skipped"] == "non_founder_channel"
+    assert hit["answer"] == original
+    assert hit["behavior_changed"] is False
+    assert "need a call from you" not in hit["answer"].lower()
+    assert conf.cascade_allowed_for_channel("web") is True
+    assert conf.cascade_allowed_for_channel("storefront") is False
+    assert conf.cascade_allowed_for_channel("email") is False
 
 
 def test_decide_cascade_shadow_always_proceeds(isolated, monkeypatch):

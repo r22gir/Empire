@@ -1,0 +1,172 @@
+"""Router-level confidence cascade: unset is a no-op, founder-only, inbox cap.
+
+Tests the production hook both /chat and /chat/stream call
+(`apply_router_cascade` / `_apply_confidence_cascade_to_reply`).
+Isolated temp EMPIRE_DATA_DIR / EMPIRE_TASK_DB. No WhatsApp, SMTP, or live writes.
+Does not import app.routers.max.router (that module mkdir's live data).
+"""
+from __future__ import annotations
+
+import importlib
+from pathlib import Path
+
+import pytest
+
+TWEET = "https://x.com/someuser/status/1845123456789012345"
+LOW_ANSWER = "I think I'll start a quote from that tweet."
+HIGH_ANSWER = "Quote for Maggie: straight bench 48 inches. I have the dims."
+ROUTER = Path(__file__).resolve().parents[1] / "app" / "routers" / "max" / "router.py"
+
+
+@pytest.fixture()
+def isolated(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path / "edition-data"))
+    monkeypatch.setenv("EMPIRE_TASK_DB", str(tmp_path / "empire.db"))
+    monkeypatch.setenv("MAX_CONFIDENCE_DB", str(tmp_path / "confidence.db"))
+    monkeypatch.setenv("MAX_CONFIDENCE_LOG", str(tmp_path / "confidence.log"))
+    monkeypatch.setenv("MAX_IMPROVE_SPEC_DIR", str(tmp_path / "specs"))
+    monkeypatch.delenv("MAX_CONFIDENCE_MODEL_CHECK", raising=False)
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
+    monkeypatch.delenv("WHATSAPP_EDITION_OWNER", raising=False)
+    monkeypatch.delenv("MAX_CONFIDENCE_GATE", raising=False)
+    from app.db import database, init_db
+
+    importlib.reload(database)
+    importlib.reload(init_db)
+    init_db.init_database()
+    from app.services.max import confidence
+    from app.services.max.desks import founder_inbox
+
+    importlib.reload(confidence)
+    importlib.reload(founder_inbox)
+    return dict(conf=confidence, inbox=founder_inbox, tmp=tmp_path)
+
+
+def _envelope(conf, channel: str, meta: dict) -> dict:
+    extra = conf.cascade_metadata_extra(meta)
+    base = {"surface": channel or "web"}
+    if extra:
+        base.update(extra)
+    return base
+
+
+def test_unset_router_helper_no_db_write_no_metadata_key(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.delenv("MAX_CONFIDENCE_GATE", raising=False)
+    importlib.reload(conf)
+
+    dest = conf.db_path()
+    log = conf.log_path()
+    text, meta = conf.apply_router_cascade(TWEET, LOW_ANSWER, channel="web")
+    assert text == LOW_ANSWER
+    assert meta == {}
+    envelope = _envelope(conf, "web", meta)
+    assert "confidence_cascade" not in envelope
+    assert conf.cascade_metadata_extra(meta) is None
+    assert not dest.exists()
+    assert not log.exists() or log.stat().st_size == 0
+
+
+def test_both_chat_doors_use_shared_helper_and_omit_empty_meta():
+    src = ROUTER.read_text(encoding="utf-8")
+    assert src.count("def _apply_confidence_cascade_to_reply(") == 1
+    assert src.count("_apply_confidence_cascade_to_reply(") >= 3
+    assert src.count("channel=request.channel") >= 2
+    assert src.count("extra=_confidence_cascade_extra(_cascade_meta)") == 2
+    assert "apply_router_cascade" in src
+    assert "Return early unless MAX_CONFIDENCE_GATE is on" in src
+
+
+def test_non_founder_channel_untouched_when_gate_on(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    importlib.reload(conf)
+
+    dest = conf.db_path()
+    text, meta = conf.apply_router_cascade(TWEET, LOW_ANSWER, channel="storefront")
+    assert text == LOW_ANSWER
+    assert "need a call from you" not in text.lower()
+    assert meta == {}
+    assert "confidence_cascade" not in _envelope(conf, "storefront", meta)
+    assert not dest.exists()
+    email_text, email_meta = conf.apply_router_cascade(TWEET, LOW_ANSWER, channel="email")
+    assert email_text == LOW_ANSWER
+    assert email_meta == {}
+
+
+def test_founder_channel_gate_on_can_rewrite(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    importlib.reload(conf)
+
+    text, meta = conf.apply_router_cascade(
+        TWEET, LOW_ANSWER, channel="web", chosen_path="quote_intake",
+    )
+    assert "need a call from you" in text.lower()
+    assert meta.get("asked_founder") is True
+    assert meta.get("behavior_changed") is True
+    assert "confidence_cascade" in _envelope(conf, "web", meta)
+    high, high_meta = conf.apply_router_cascade(
+        "Quote for Maggie. Straight bench 48 inches long.",
+        HIGH_ANSWER,
+        channel="web",
+        tool_results=[{"tool": "create_quote", "success": True}],
+    )
+    assert high == HIGH_ANSWER
+    assert high_meta.get("asked_founder") is False
+
+
+def test_inbox_dedupe_skips_open_and_recently_resolved(isolated, monkeypatch):
+    conf = isolated["conf"]
+    inbox = isolated["inbox"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    importlib.reload(conf)
+
+    record = {
+        "kind": "answer",
+        "chosen_path": "quote_intake",
+        "best_path": "article_link",
+        "text": TWEET,
+        "gated_action": "Read this link, or start a quote from it?",
+        "score": 0.08,
+    }
+    first = conf._file_founder_ask(record, TWEET)
+    assert first and first.get("status") == "open"
+    assert not first.get("skipped")
+    task_id = first["id"]
+    second = conf._file_founder_ask(record, TWEET)
+    assert second.get("skipped") == "open"
+    assert second["id"] == task_id
+    assert inbox.count_open() == 1
+
+    assert inbox.resolve(task_id) is True
+    assert inbox.get(task_id)["status"] == "resolved"
+    third = conf._file_founder_ask(record, TWEET)
+    assert third.get("skipped") == "recently_resolved"
+    assert inbox.get(task_id)["status"] == "resolved"
+    assert inbox.count_open() == 0
+
+
+def test_inbox_daily_cap(isolated, monkeypatch):
+    conf = isolated["conf"]
+    inbox = isolated["inbox"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    monkeypatch.setenv("MAX_CONFIDENCE_INBOX_DAILY_CAP", "2")
+    importlib.reload(conf)
+
+    filed = []
+    for i in range(3):
+        record = {
+            "kind": "answer",
+            "chosen_path": "quote_intake",
+            "best_path": "article_link",
+            "text": f"{TWEET}?n={i}",
+            "gated_action": "Read this link, or start a quote from it?",
+            "score": 0.08,
+        }
+        filed.append(conf._file_founder_ask(record, f"{TWEET}-{i}"))
+    assert filed[0].get("status") == "open"
+    assert filed[1].get("status") == "open"
+    assert filed[2].get("skipped") == "daily_cap"
+    assert inbox.count_open() == 2
+    assert inbox.count_by_source_since("confidence_cascade", "1970-01-01") == 2

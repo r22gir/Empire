@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger("max.desks.inbox")
@@ -39,6 +40,51 @@ def ensure_schema(conn=None) -> None:
     conn.executescript(SCHEMA)
 
 
+def _parse_ts(raw: str | None) -> Optional[datetime]:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(text[:19], fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _recently_resolved(row: dict[str, Any], hours: int) -> bool:
+    if (row.get("status") or "") != "resolved":
+        return False
+    when = _parse_ts(row.get("resolved_at"))
+    if when is None:
+        return True
+    return datetime.now(timezone.utc) - when <= timedelta(hours=max(1, int(hours or 24)))
+
+
+def get(task_id: str) -> Optional[dict[str, Any]]:
+    ensure_schema()
+    with _conn() as conn:
+        row = conn.execute("SELECT * FROM founder_inbox WHERE id=?", (task_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def count_by_source_since(source: str, since: str) -> int:
+    ensure_schema()
+    with _conn() as conn:
+        n = conn.execute(
+            "SELECT COUNT(*) FROM founder_inbox WHERE source=? AND created_at>=?",
+            (source, since),
+        ).fetchone()[0]
+    return int(n or 0)
+
+
 def add(
     *,
     task_id: str,
@@ -50,11 +96,31 @@ def add(
     customer_name: Optional[str] = None,
     conversation_id: Optional[str] = None,
     desk: Optional[str] = None,
+    recent_resolved_hours: int = 24,
 ) -> dict[str, Any]:
+    """Insert a new inbox row. Never INSERT OR REPLACE over an existing id.
+
+    Skip (return the existing row) when the id is already open or was
+    recently resolved. Older resolved rows are also left untouched so a
+    cascade cannot reopen a closed item.
+    """
     ensure_schema()
     with _conn() as conn:
+        existing = conn.execute(
+            "SELECT * FROM founder_inbox WHERE id=?", (task_id,)
+        ).fetchone()
+        if existing:
+            row = dict(existing)
+            if (row.get("status") or "") == "open":
+                row["skipped"] = "open"
+                return row
+            if _recently_resolved(row, recent_resolved_hours):
+                row["skipped"] = "recently_resolved"
+                return row
+            row["skipped"] = "resolved"
+            return row
         conn.execute(
-            """INSERT OR REPLACE INTO founder_inbox
+            """INSERT INTO founder_inbox
                (id, title, description, priority, reason, source, customer_name,
                 conversation_id, desk, status, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', datetime('now'))""",

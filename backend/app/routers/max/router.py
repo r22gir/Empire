@@ -2144,31 +2144,39 @@ def _with_attachment_reader_proof(
     return merged
 
 
+def _confidence_cascade_extra(meta: dict[str, Any] | None) -> dict[str, Any] | None:
+    from app.services.max.confidence import cascade_metadata_extra
+
+    return cascade_metadata_extra(meta)
+
+
 def _apply_confidence_cascade_to_reply(
     user_text: str,
     answer: str,
     *,
     tool_results: list | None = None,
     chosen_path: str | None = None,
+    channel: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Shared /chat and /chat/stream confidence cascade.
 
-    Unset MAX_CONFIDENCE_GATE stays today's shadow mode: score logged only,
-    answer unchanged. Fail-open — a cascade error never replaces the reply.
+    Return early unless MAX_CONFIDENCE_GATE is on: no scoring, no DB write,
+    no log, no confidence_cascade metadata key. Founder channels only.
+    Fail-open — a cascade error never replaces the reply.
     """
     try:
-        from app.services.max.confidence import apply_reply_cascade, cascade_public_meta
+        from app.services.max.confidence import apply_router_cascade
 
-        hit = apply_reply_cascade(
+        return apply_router_cascade(
             user_text,
             answer,
             tool_results=tool_results,
             chosen_path=chosen_path,
+            channel=channel,
         )
-        return str(hit.get("answer") if hit.get("answer") is not None else answer), cascade_public_meta(hit)
     except Exception:
         logger.debug("confidence cascade hook failed", exc_info=True)
-        return answer, {"behavior_changed": False, "error": True, "action": "proceed"}
+        return answer, {}
 
 
 def _apply_truth_guardrails(
@@ -4324,6 +4332,7 @@ async def _chat_with_max_service_impl(
 
         final_content, _cascade_meta = _apply_confidence_cascade_to_reply(
             request.message, final_content, tool_results=tool_results_list,
+            channel=request.channel,
         )
 
         _quality_flags = detect_quality_flags(
@@ -4345,7 +4354,7 @@ async def _chat_with_max_service_impl(
             steps=_founder_step_lines if _founder_step_lines else None,
             quality=quality_badge,
             response_id=_response_id,
-            metadata=_response_metadata(request.channel, extra={"confidence_cascade": _cascade_meta}),
+            metadata=_response_metadata(request.channel, extra=_confidence_cascade_extra(_cascade_meta)),
         )
 
         # Log response for evaluation loop (non-blocking)
@@ -5531,6 +5540,7 @@ async def _chat_stream_impl(request: ChatRequest):
                 pass
             full_response, _cascade_meta = _apply_confidence_cascade_to_reply(
                 request.message, full_response, tool_results=tool_results_list,
+                channel=request.channel,
             )
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
@@ -5555,7 +5565,7 @@ async def _chat_stream_impl(request: ChatRequest):
                 'type': 'done',
                 'model_used': resolve_display_model_used(model_used, request.model),
                 'conversation_id': conv_id,
-                'metadata': _response_metadata(request.channel, extra={"confidence_cascade": _cascade_meta}),
+                'metadata': _response_metadata(request.channel, extra=_confidence_cascade_extra(_cascade_meta)),
             }
             if _stream_step_lines:
                 _done_data['steps'] = _stream_step_lines
