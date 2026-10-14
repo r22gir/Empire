@@ -1,8 +1,14 @@
 """Edition-scoped company setup store.
 
 The overlay file stores ONLY keys the interview changed. It is never a
-full snapshot of config/business.json. Later edits to business.json for
-keys the interview did not touch stay authoritative.
+full snapshot of config/business.json.
+
+Precedence for a given key
+--------------------------
+- If the interview saved it, the overlay value wins — including over
+  later hand edits of that same key in config/business.json.
+- If the interview never touched it, config/business.json (or the seed)
+  stays authoritative.
 
 Family editions write only under their EMPIRE_DATA_DIR. Path overrides
 (COMPANY_SETUP_BUSINESS_PATH) are honored only in tests and must stay
@@ -28,8 +34,10 @@ from app.services.company_setup.io import (
     atomic_write,
     edition_lock,
     ensure_dir,
+    existing_mode,
     in_test,
     read_json,
+    workroom_backup_dir,
 )
 
 # Re-export so tests can pin the gate without patching io.
@@ -151,7 +159,7 @@ def _write_overlay(overlay: dict[str, Any]) -> None:
     atomic_write(business_json_path(), overlay, mode=0o600, backup=True)
     progress = overlay.get("company_setup") if isinstance(overlay.get("company_setup"), dict) else {}
     if progress:
-        atomic_write(progress_path(), progress, mode=0o600, backup=True)
+        atomic_write(progress_path(), progress, mode=0o600, backup=False)
 
 
 def save_progress(progress: dict[str, Any]) -> dict[str, Any]:
@@ -295,8 +303,11 @@ def _next_section(section_id: str) -> str:
 def _maybe_mirror_patch(patch: dict[str, Any]) -> None:
     """Founder live only: write THIS patch's keys into config/business.json.
 
-    Never remirrors the whole overlay. Keys the interview did not change
-    are left alone so later business.json edits survive.
+    Never remirrors the whole overlay. Interview-set keys in the patch
+    win (including over later hand edits of those same keys). Keys the
+    interview did not change are left alone. Backups go to
+    ``~/backups/company-setup/``, not next to the repo file. Existing
+    file mode is preserved.
     """
     if in_test() or is_family_edition() or not is_founder_edition():
         return
@@ -306,7 +317,13 @@ def _maybe_mirror_patch(patch: dict[str, Any]) -> None:
     mirrored = deep_merge(current, public_view(patch))
     mirrored = preserve_existing(current, mirrored)
     try:
-        atomic_write(_WORKROOM_CONFIG, mirrored, mode=0o600, backup=True)
+        atomic_write(
+            _WORKROOM_CONFIG,
+            mirrored,
+            mode=existing_mode(_WORKROOM_CONFIG),
+            backup=True,
+            backup_dir=workroom_backup_dir(),
+        )
     except OSError as exc:
         logger.warning("company setup could not patch workroom business.json: %s", type(exc).__name__)
 

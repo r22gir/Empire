@@ -70,6 +70,7 @@ backend/token.json
 
 # Backup files
 *.bak
+**/*.bak
 *.bak2
 
 # Runtime data — databases, chats, quotes, inbox (never commit)

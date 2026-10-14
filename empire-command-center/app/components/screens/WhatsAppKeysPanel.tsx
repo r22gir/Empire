@@ -179,7 +179,7 @@ function friendlyWhatsAppError(raw: string): string {
   if (t.includes('e.164') || t.includes('owner number')) {
     return 'Owner numbers must look like +17035551212 (plus sign, country code, no spaces).';
   }
-  if (t.includes('newline') || t.includes('may only use') || t.includes('letters, numbers')) {
+  if (t.includes('invalid') || t.includes('newline') || t.includes('may only use') || t.includes('letters, numbers')) {
     return 'Keys may only use letters, numbers, and _ - . | — no spaces or line breaks. Leave a box blank to keep the stored value.';
   }
   if (t.includes('founder session')) return 'Sign in as the founder to save WhatsApp keys.';

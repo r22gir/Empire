@@ -5,10 +5,11 @@ from a dataclass and wiped business_phone / founder_phones.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.edition import edition_name, is_family_edition
 from app.services.company_setup.auth import require_verified_founder
@@ -34,9 +35,11 @@ from app.services.company_setup.whatsapp_secrets import (
     WhatsAppKeysIn,
     save_secrets,
     status_panel,
+    whatsapp_client_error,
 )
 
 router = APIRouter()
+logger = logging.getLogger("max.company_setup")
 
 
 class SectionSave(BaseModel):
@@ -155,8 +158,11 @@ async def post_whatsapp_keys(request: Request):
         raw = await request.json()
         body = WhatsAppKeysIn.model_validate(raw)
         return save_secrets(body)
+    except (ValidationError, SecretValueError) as exc:
+        raise HTTPException(400, whatsapp_client_error(exc)) from exc
     except Exception as exc:
-        raise HTTPException(400, str(exc)) from exc
+        logger.error("whatsapp keys save failed type=%s", type(exc).__name__)
+        raise HTTPException(500, "Could not save WhatsApp keys") from None
 
 
 @router.post("/onboarding/setup")

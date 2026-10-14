@@ -182,8 +182,9 @@ SECTION_ALLOWLIST: dict[str, frozenset[str]] = {
     "review": frozenset(),
 }
 
-# Overlay keys a section is allowed to write. Seed keys not in this set stay
-# out of the overlay so later edits to config/business.json are not stale-copied.
+# Overlay keys a section is allowed to write. Interview-set keys win over
+# later hand edits of the same key. Seed keys not in this set stay out of
+# the overlay so later edits to those keys in config/business.json survive.
 SECTION_OVERLAY_KEYS: dict[str, frozenset[str]] = {
     "identity": frozenset({"identity", "brands", "legal_name", "dba", "business_name", "owner_name", "business_tagline"}),
     "contact": frozenset({"contact", "business_address", "business_phone", "business_email", "business_website", "timezone"}),

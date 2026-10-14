@@ -9,6 +9,7 @@ unset or blank. ``apply_to_environ`` never overwrites a value already in
 """
 from __future__ import annotations
 
+import fcntl
 import logging
 import os
 import re
@@ -18,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.edition import data_root_or_none, edition_name, is_family_edition, require_data_root
 from app.services.company_setup.io import (
@@ -69,6 +70,39 @@ logger.addFilter(_SecretRedactFilter())
 
 class SecretValueError(ValueError):
     """Rejected WhatsApp secret or owner number."""
+
+
+# Fixed per-field messages. Never include the submitted value.
+WHATSAPP_FIELD_ERRORS = {
+    "WHATSAPP_ACCESS_TOKEN": "Access token is invalid",
+    "WHATSAPP_PHONE_NUMBER_ID": "Phone number ID is invalid",
+    "WHATSAPP_APP_SECRET": "App secret is invalid",
+    "WHATSAPP_VERIFY_TOKEN": "Verify token is invalid",
+    "owner_numbers": "Owner numbers must be E.164",
+    "founder_phones": "Owner numbers must be E.164",
+}
+
+
+def whatsapp_client_error(exc: Exception) -> str:
+    """Client-safe 400 text. Never echoes submitted values."""
+    if isinstance(exc, ValidationError):
+        seen: list[str] = []
+        for err in exc.errors():
+            loc = err.get("loc") or ()
+            field = str(loc[0]) if loc else ""
+            if err.get("type") == "extra_forbidden":
+                msg = "Unknown field"
+            else:
+                msg = WHATSAPP_FIELD_ERRORS.get(field, "WhatsApp field is invalid")
+            if msg not in seen:
+                seen.append(msg)
+        return seen[0] if len(seen) == 1 else "; ".join(seen) if seen else "WhatsApp field is invalid"
+    if isinstance(exc, SecretValueError):
+        text = str(exc)
+        if "E.164" in text or "Owner number" in text:
+            return WHATSAPP_FIELD_ERRORS["owner_numbers"]
+        return "WhatsApp field is invalid"
+    return "WhatsApp field is invalid"
 
 
 def validate_secret_value(value: str, *, kind: str = "token") -> str:
@@ -213,6 +247,7 @@ def owner_numbers() -> list[str]:
 
 
 def _write_audit(event: str, extra: dict[str, Any]) -> None:
+    """Append one audit line. Caller must hold ``edition_lock``; also flocks the file."""
     row = {
         "at": datetime.now(timezone.utc).isoformat(),
         "edition": edition_name(),
@@ -221,8 +256,17 @@ def _write_audit(event: str, extra: dict[str, Any]) -> None:
     }
     path = audit_path()
     ensure_dir(path.parent, 0o700)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(__import__("json").dumps(row) + "\n")
+    payload = (__import__("json").dumps(row) + "\n").encode("utf-8")
+    fd = os.open(str(path), os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        os.write(fd, payload)
+        os.fsync(fd)
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def save_secrets(payload: dict[str, Any] | WhatsAppKeysIn) -> dict[str, Any]:
@@ -293,7 +337,7 @@ def record_webhook_challenge(*, ok: bool, reason: str = "") -> None:
         "edition": edition_name(),
     }
     with edition_lock(edition_company_dir()):
-        atomic_write(webhook_status_path(), row, mode=0o600, backup=True)
+        atomic_write(webhook_status_path(), row, mode=0o600, backup=False)
 
 
 def webhook_state() -> dict[str, Any]:

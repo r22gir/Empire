@@ -225,6 +225,75 @@ def test_timestamped_backup_and_0600(isolated):
     assert backups
     mode = stat.S_IMODE(path.stat().st_mode)
     assert mode == 0o600
+    progress = isolated / "company" / "setup_progress.json"
+    assert progress.exists()
+    assert list(progress.parent.glob("setup_progress.json.*.bak")) == []
+
+
+def test_backup_rotation_keeps_10_and_drops_old(isolated, tmp_path):
+    import time
+
+    from app.services.company_setup.io import BACKUP_KEEP, rotate_backups
+
+    dest = tmp_path / "baks"
+    dest.mkdir()
+    now = time.time()
+    for i in range(12):
+        p = dest / f"business.json.202601{i:02d}T000000Z.bak"
+        p.write_text(str(i), encoding="utf-8")
+        os.utime(p, (now - i * 60, now - i * 60))
+    old = dest / "business.json.old.bak"
+    old.write_text("old", encoding="utf-8")
+    os.utime(old, (now - 8 * 86400, now - 8 * 86400))
+    rotate_backups(dest, "business.json")
+    left = sorted(dest.glob("business.json.*.bak"))
+    assert old not in left
+    assert not old.exists()
+    assert len(left) == BACKUP_KEEP
+
+
+def test_workroom_backups_go_outside_repo(isolated, monkeypatch):
+    from app.services.company_setup.io import backup_file, workroom_backup_dir
+
+    src = isolated / "config" / "business.json"
+    src.parent.mkdir()
+    src.write_text('{"business_name":"Empire"}', encoding="utf-8")
+    dest = backup_file(src, backup_dir=workroom_backup_dir())
+    assert dest is not None
+    assert dest.parent == workroom_backup_dir()
+    assert "backups/company-setup" in dest.as_posix()
+    assert list(src.parent.glob("*.bak")) == []
+
+
+def test_mirror_preserves_file_mode(isolated, monkeypatch):
+    from app.services.company_setup import store as store_mod
+
+    target = isolated / "workroom-config.json"
+    target.write_text('{"business_name":"Empire"}', encoding="utf-8")
+    os.chmod(target, 0o644)
+    bak = isolated / "off-repo-baks"
+    bak.mkdir()
+    monkeypatch.setattr(store_mod, "_WORKROOM_CONFIG", target)
+    monkeypatch.setattr(store_mod, "in_test", lambda: False)
+    monkeypatch.setattr(store_mod, "is_family_edition", lambda: False)
+    monkeypatch.setattr(store_mod, "is_founder_edition", lambda: True)
+    monkeypatch.setattr(store_mod, "workroom_backup_dir", lambda: bak)
+    store_mod._maybe_mirror_patch({"legal_name": "Empire Workroom LLC"})
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+    assert json.loads(target.read_text())["legal_name"] == "Empire Workroom LLC"
+    assert list(target.parent.glob("workroom-config.json.*.bak")) == []
+    assert list(bak.glob("workroom-config.json.*.bak"))
+
+
+def test_interview_set_key_wins_over_later_hand_edit(isolated, monkeypatch):
+    seed = _seed_file(isolated, monkeypatch, legal_name="Hand LLC")
+    from app.services.company_setup.store import load_merged, save_section
+
+    save_section("identity", {"legal_name": "Interview LLC", "dba": "Empire Workroom"})
+    data = json.loads(seed.read_text())
+    data["legal_name"] = "Hand Edited LLC"
+    seed.write_text(json.dumps(data), encoding="utf-8")
+    assert load_merged()["legal_name"] == "Interview LLC"
 
 
 def test_concurrent_saves(isolated):
@@ -399,13 +468,14 @@ def test_whatsapp_keys_masked_never_returned(isolated, caplog):
 
 def test_whatsapp_newline_rejected(isolated):
     client = _client()
-    res = client.post(
-        "/api/v1/onboarding/whatsapp",
-        headers=_auth(),
-        json={"WHATSAPP_ACCESS_TOKEN": "good\nbad"},
-    )
-    assert res.status_code == 400
-    assert "newline" in res.text.lower() or "letters" in res.text.lower()
+    bad = "good\nbad-token-must-not-leak"
+    for path in ("/api/v1/onboarding/whatsapp", "/api/v1/whatsapp/keys"):
+        res = client.post(path, headers=_auth(), json={"WHATSAPP_ACCESS_TOKEN": bad})
+        assert res.status_code == 400
+        assert bad not in res.text
+        assert "good" not in res.text
+        assert "bad-token-must-not-leak" not in res.text
+        assert res.json()["detail"] == "Access token is invalid"
 
 
 def test_whatsapp_e164_rejected(isolated):
@@ -416,7 +486,35 @@ def test_whatsapp_e164_rejected(isolated):
         json={"owner_numbers": ["7035550111"]},
     )
     assert res.status_code == 400
-    assert "E.164" in res.text or "e.164" in res.text.lower()
+    assert "7035550111" not in res.text
+    assert "E.164" in res.json()["detail"]
+
+
+def test_whatsapp_unexpected_error_is_500_without_values(isolated, monkeypatch):
+    def boom(_body):
+        raise RuntimeError("boom leak-this-token-xyz")
+
+    monkeypatch.setattr("app.routers.onboarding.save_secrets", boom)
+    monkeypatch.setattr("app.services.company_setup.whatsapp_secrets.save_secrets", boom)
+    client = _client()
+    for path in ("/api/v1/onboarding/whatsapp", "/api/v1/whatsapp/keys"):
+        res = client.post(path, headers=_auth(), json={"WHATSAPP_ACCESS_TOKEN": "ValidToken_123"})
+        assert res.status_code == 500
+        assert "ValidToken_123" not in res.text
+        assert "leak-this-token-xyz" not in res.text
+        assert res.json()["detail"] == "Could not save WhatsApp keys"
+
+
+def test_webhook_status_has_no_backup(isolated):
+    from app.services.company_setup.whatsapp_secrets import (
+        record_webhook_challenge,
+        webhook_status_path,
+    )
+
+    record_webhook_challenge(ok=True)
+    path = webhook_status_path()
+    assert path.exists()
+    assert list(path.parent.glob("whatsapp_webhook_status.json.*.bak")) == []
 
 
 def test_whatsapp_env_not_overridden(isolated, monkeypatch):

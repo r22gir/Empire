@@ -6,6 +6,7 @@ from the chats viewer.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
@@ -24,6 +25,7 @@ from app.services.max.whatsapp_channel import (
 )
 
 router = APIRouter()
+logger = logging.getLogger("max.company_setup")
 
 _PIN_FAILS: dict[str, list[float]] = {}
 _PIN_LOCK = threading.Lock()
@@ -237,21 +239,24 @@ async def whatsapp_keys_status(request: Request):
 async def whatsapp_keys_save(request: Request):
     """Founder-only. Store edition secrets. Body values are never logged."""
     from app.services.company_setup.auth import require_verified_founder
+    from pydantic import ValidationError
+
     from app.services.company_setup.whatsapp_secrets import (
         SecretValueError,
         WhatsAppKeysIn,
         save_secrets,
+        whatsapp_client_error,
     )
 
     require_verified_founder(request)
     try:
         body = WhatsAppKeysIn.model_validate(await request.json())
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
         return save_secrets(body)
-    except (SecretValueError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValidationError, SecretValueError) as exc:
+        raise HTTPException(status_code=400, detail=whatsapp_client_error(exc)) from exc
+    except Exception as exc:
+        logger.error("whatsapp keys save failed type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Could not save WhatsApp keys") from None
 
 
 @router.get("/whatsapp/webhook")
