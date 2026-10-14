@@ -959,7 +959,11 @@ export default function PresentationScreen() {
         }
         .presentation-stage {
           flex: 1; min-height: 120px; min-width: 0; display: flex; flex-direction: column;
-          padding: 10px 12px; background: #f7f4ee; border-bottom: 1px solid #e5e2dc; overflow: hidden;
+          padding: 10px 12px; background: #f7f4ee; color: #16191c;
+          border-bottom: 1px solid #e5e2dc; overflow: hidden;
+        }
+        .presentation-stage, .presentation-stage strong, .presentation-stage p {
+          color: #16191c;
         }
         .presentation-stage-full {
           position: fixed; inset: 0; z-index: 80; min-height: 0;

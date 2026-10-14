@@ -1692,6 +1692,15 @@ async def default_text_handler(text: str, wa_id: str) -> str:
         return "Empty message. Nothing sent."
     from app.services.max.whatsapp_format import is_frustration_correction, is_link_or_article_message
 
+    try:
+        from app.services.max.answer_quality import detect_quality_flags
+        from app.services.max.evaluation_service import evaluation_service
+
+        _qf = detect_quality_flags("", user_message=body)
+        evaluation_service.log_answer_quality_flags(f"wa:{wa_id}", "whatsapp", _qf)
+    except Exception:
+        pass
+
     if is_link_or_article_message(body):
         logger.info("WhatsApp inbound routed to read-and-summarize (link/article)")
         try:
