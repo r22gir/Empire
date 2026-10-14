@@ -359,7 +359,7 @@ def test_gate_on_retry_can_recover_and_proceed(isolated, monkeypatch):
     conf = isolated["conf"]
     monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
     importlib.reload(conf)
-    original = "I think I'll start a quote."
+    original = "I think?"
 
     def _retry(*_a, **_k):
         return (
@@ -367,11 +367,12 @@ def test_gate_on_retry_can_recover_and_proceed(isolated, monkeypatch):
             "the post is a product announcement, not a quote request."
         )
 
+    first = conf.score_answer(TWEET, original, chosen_path="article_link", persist=False)
+    assert first["would_gate"] is True
     hit = conf.apply_answer_cascade(
         TWEET,
         original,
         chosen_path="article_link",
-        tool_results=[{"tool": "web_read", "success": True, "result": {"content": "hello"}}],
         retry_fn=_retry,
         ask_founder_fn=lambda *a, **k: {"id": "should-not"},
     )
