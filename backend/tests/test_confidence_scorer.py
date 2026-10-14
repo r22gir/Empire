@@ -20,6 +20,7 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path / "edition-data"))
     monkeypatch.setenv("EMPIRE_TASK_DB", str(tmp_path / "empire.db"))
     monkeypatch.setenv("MAX_CONFIDENCE_DB", str(tmp_path / "confidence.db"))
+    monkeypatch.setenv("MAX_CONFIDENCE_LOG", str(tmp_path / "confidence.log"))
     monkeypatch.setenv("MAX_CONFIDENCE_GATE", "shadow")
     monkeypatch.setenv("MAX_IMPROVE_SPEC_DIR", str(tmp_path / "specs"))
     monkeypatch.delenv("MAX_CONFIDENCE_MODEL_CHECK", raising=False)
@@ -179,3 +180,41 @@ def test_script_exists_and_is_read_only():
     assert "week_report" in text
     assert "send_email" not in text
     assert "WHATSAPP_ACCESS_TOKEN" not in text
+
+
+def test_on_mode_still_does_not_change_behavior(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
+    importlib.reload(conf)
+    hit = conf.score_intent(TWEET, chosen_path="quote_intake")
+    assert hit["mode"] == "on"
+    assert hit["would_gate"] is True
+    assert hit["behavior_changed"] is False
+    assert hit["gated_action"]
+
+
+def test_unset_gate_defaults_to_shadow(isolated, monkeypatch):
+    conf = isolated["conf"]
+    monkeypatch.delenv("MAX_CONFIDENCE_GATE", raising=False)
+    importlib.reload(conf)
+    assert conf.gate_mode() == "shadow"
+
+
+def test_confidence_log_file_records_decision(isolated):
+    conf = isolated["conf"]
+    dest = conf.ensure_confidence_file_logging()
+    assert dest == conf.log_path()
+    assert "edition-data" in str(dest) or "confidence" in str(dest)
+    hit = conf.score_intent(TWEET, chosen_path="quote_intake")
+    logged = dest.read_text(encoding="utf-8")
+    assert "chosen=quote_intake" in logged
+    assert "best=article_link" in logged
+    assert "would_gate=True" in logged
+    assert str(hit["score"]) in logged or "score=" in logged
+
+
+def test_week_report_includes_unfiled_low(isolated):
+    conf = isolated["conf"]
+    conf.score_intent(TWEET, chosen_path="quote_intake")
+    report = conf.week_report(7)
+    assert report["unfiled_low"] >= 1

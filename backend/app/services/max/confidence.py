@@ -17,6 +17,7 @@ import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Optional
 
@@ -29,6 +30,7 @@ from app.services.max.whatsapp_format import (
 )
 
 logger = logging.getLogger("max.confidence")
+_FILE_MARKER = "_empire_confidence_file"
 
 INTENTS = (
     "quote_intake",
@@ -104,6 +106,38 @@ def db_path() -> Path:
     if override:
         return Path(override)
     return data_root() / "logs" / "confidence.db"
+
+
+def log_path() -> Path:
+    override = (os.getenv("MAX_CONFIDENCE_LOG") or "").strip()
+    if override:
+        return Path(override)
+    return data_root() / "logs" / "confidence.log"
+
+
+def ensure_confidence_file_logging() -> Path:
+    """Rotating file + journald (propagate). Never logs tokens."""
+    dest = log_path()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest_key = str(dest.resolve()) if dest.parent.exists() else str(dest)
+    already = False
+    for handler in logger.handlers:
+        if getattr(handler, _FILE_MARKER, False) and getattr(handler, "baseFilename", "") == dest_key:
+            already = True
+            break
+    if not already:
+        handler = RotatingFileHandler(
+            dest, maxBytes=5 * 1024 * 1024, backupCount=7, encoding="utf-8",
+        )
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S%z",
+        ))
+        setattr(handler, _FILE_MARKER, True)
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = True
+    return dest
 
 
 @contextmanager
@@ -266,6 +300,10 @@ def score_intent(
         "behavior_changed": False,
     }
     if persist and is_enabled():
+        try:
+            ensure_confidence_file_logging()
+        except Exception:
+            pass
         _store(record)
         _log_event(record)
     return record
@@ -315,6 +353,10 @@ def score_tool(
         "context": {"known": bool(known), "param_keys": sorted(str(k) for k in params.keys())[:12]},
     }
     if persist and is_enabled():
+        try:
+            ensure_confidence_file_logging()
+        except Exception:
+            pass
         _store(record)
         _log_event(record)
     return record
@@ -387,6 +429,7 @@ def week_report(days: int = 7) -> dict[str, Any]:
         "behavior_changed": False,
         "total": n,
         "low_confidence": len(low),
+        "unfiled_low": sum(1 for r in low if not r.get("improvement_id")),
         "corrections": len(corrections),
         "family_low_flagged": len(family),
         "avg_score": round(sum(float(r.get("score") or 0) for r in rows) / n, 3) if n else 0,

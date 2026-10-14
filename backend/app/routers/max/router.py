@@ -2321,6 +2321,13 @@ async def _link_intelligence_response(request: ChatRequest) -> ChatResponse | No
     if not url:
         return None
 
+    try:
+        from app.services.max.confidence import record_whatsapp_route
+
+        record_whatsapp_route(request.message, "article_link")
+    except Exception:
+        pass
+
     read_result = execute_tool({"tool": "web_read", "url": url, "max_chars": 18000})
     tool_evidence = [read_result.to_dict()]
     payload = read_result.result or {}

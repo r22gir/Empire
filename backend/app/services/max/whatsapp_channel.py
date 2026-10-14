@@ -1722,6 +1722,13 @@ async def default_text_handler(text: str, wa_id: str) -> str:
     try:
         quick = await _quick_whatsapp_reply(body)
         if quick:
+            try:
+                from app.services.max.confidence import record_whatsapp_route
+                from app.services.max.quick_replies import is_greeting
+
+                record_whatsapp_route(body, "greeting" if is_greeting(body) else "question")
+            except Exception:
+                pass
             whatsapp_conversation(wa_id)
             q_text, _q_docs, _q_imgs = _split_reply(quick)
             remember_whatsapp_turn(wa_id, body, q_text)
@@ -1731,6 +1738,12 @@ async def default_text_handler(text: str, wa_id: str) -> str:
     try:
         doc_reply = await whatsapp_doc_request(body, wa_id)
         if doc_reply:
+            try:
+                from app.services.max.confidence import record_whatsapp_route
+
+                record_whatsapp_route(body, "question")
+            except Exception:
+                pass
             return doc_reply
     except Exception:
         logger.warning("WhatsApp doc request failed", exc_info=True)

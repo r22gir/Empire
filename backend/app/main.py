@@ -426,6 +426,13 @@ async def start_background_services():
         print(f"✗ WhatsApp file logging: {e}")
 
     try:
+        from app.services.max.confidence import ensure_confidence_file_logging
+        dest = ensure_confidence_file_logging()
+        print(f"✓ Confidence logs: journald (empire-backend) + {dest}")
+    except Exception as e:
+        print(f"✗ Confidence file logging: {e}")
+
+    try:
         from app.services.minimax_m31_flash import maybe_startup_probe
         probe = maybe_startup_probe()
         if probe.get("live"):
