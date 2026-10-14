@@ -554,12 +554,12 @@ def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
     if not q:
         return
 
-    old_subtotal = q[0] or 0
-    tax_rate = q[1] or 0
-    discount_amount = q[2] or 0
+    old_subtotal = q[0] if q[0] is not None else 0
+    tax_rate = q[1] if q[1] is not None else 0
+    discount_amount = q[2] if q[2] is not None else 0
     discount_type = q[3] or 'dollar'
-    old_total = q[4] or 0
-    deposit_percent = q[5] or 50
+    old_total = q[4] if q[4] is not None else 0
+    deposit_percent = q[5] if q[5] is not None else 50
 
     # Area-grouped addenda have original items in metadata, not line rows.
     # Store the customer-facing subtotal/total as original + add-ons while
@@ -1776,29 +1776,53 @@ def _has_explicit_tz(value) -> bool:
     return False
 
 
-def _naive_local_iso_to_utc_z(value, tz) -> Optional[str]:
-    """Convert a naive local timestamp to UTC Z. Already-zoned values return None."""
-    if value is None or value == "" or _has_explicit_tz(value):
+# SQLite datetime('now') / CURRENT_TIMESTAMP: already UTC, space-separated.
+_SQLITE_NAIVE_UTC = re.compile(
+    r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$"
+)
+# Old Python datetime.now() writes: local wall time, T-separated, no zone.
+_PYTHON_NAIVE_T = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$"
+)
+
+
+def _rewrite_naive_timestamp(value, tz) -> Optional[str]:
+    """UTC Z rewrite, or None if the stamp should stay as-is.
+
+    Space-separated SQLite values are already UTC — append Z only.
+    T-style naive values from datetime.now() are local — shift from tz.
+    """
+    if value is None or value == "":
         return None
     if isinstance(value, datetime):
-        dt = value
-    else:
-        text = str(value).strip().replace(" ", "T")
-        if "." in text:
-            text = text.split(".", 1)[0]
+        if value.tzinfo is not None:
+            return None
+        return (
+            value.replace(tzinfo=tz)
+            .astimezone(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+    text = str(value).strip()
+    if _has_explicit_tz(text):
+        return None
+    if _SQLITE_NAIVE_UTC.match(text):
+        return text.split(".", 1)[0].replace(" ", "T") + "Z"
+    if _PYTHON_NAIVE_T.match(text):
+        core = text.split(".", 1)[0]
         try:
-            dt = datetime.fromisoformat(text)
+            dt = datetime.fromisoformat(core)
         except ValueError:
             return None
-    if dt.tzinfo is not None:
-        return None
-    return (
-        dt.replace(tzinfo=tz)
-        .astimezone(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+        return (
+            dt.replace(tzinfo=tz)
+            .astimezone(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+    return None
 
 
 def convert_naive_quote_timestamps_to_utc(
@@ -1806,9 +1830,9 @@ def convert_naive_quote_timestamps_to_utc(
 ) -> dict:
     """Rewrite naive quotes_v2 created_at/updated_at as timezone-aware UTC.
 
-    Optional repair for rows written with datetime.now() (local, no zone).
-    Stamps that already have Z or an offset are left alone. Does not bump
-    row_rev — this is a clock rewrite, not a business edit.
+    SQLite 'YYYY-MM-DD HH:MM:SS' stays the same instant and gets a Z.
+    Python datetime.now() 'YYYY-MM-DDTHH:MM:SS' is treated as local.
+    Already-zoned values are left alone. Does not bump row_rev.
     """
     try:
         from zoneinfo import ZoneInfo
@@ -1823,15 +1847,25 @@ def convert_naive_quote_timestamps_to_utc(
         return {"converted": 0, "skipped": 0, "error": str(exc), "tz": tz_name}
     converted = 0
     skipped = 0
+    sqlite_utc_z = 0
+    local_t_shifted = 0
     for row in rows:
         rid = row["id"] if hasattr(row, "keys") else row[0]
         created = row["created_at"] if hasattr(row, "keys") else row[1]
         updated = row["updated_at"] if hasattr(row, "keys") else row[2]
-        new_created = _naive_local_iso_to_utc_z(created, tz)
-        new_updated = _naive_local_iso_to_utc_z(updated, tz)
+        new_created = _rewrite_naive_timestamp(created, tz)
+        new_updated = _rewrite_naive_timestamp(updated, tz)
         if new_created is None and new_updated is None:
             skipped += 1
             continue
+        for raw, rewritten in ((created, new_created), (updated, new_updated)):
+            if rewritten is None:
+                continue
+            raw_text = str(raw).strip()
+            if _SQLITE_NAIVE_UTC.match(raw_text):
+                sqlite_utc_z += 1
+            elif _PYTHON_NAIVE_T.match(raw_text):
+                local_t_shifted += 1
         sets, params = [], []
         if new_created:
             sets.append("created_at = ?")
@@ -1842,7 +1876,13 @@ def convert_naive_quote_timestamps_to_utc(
         params.append(rid)
         conn.execute(f"UPDATE quotes_v2 SET {', '.join(sets)} WHERE id = ?", params)
         converted += 1
-    return {"converted": converted, "skipped": skipped, "tz": tz_name}
+    return {
+        "converted": converted,
+        "skipped": skipped,
+        "sqlite_utc_z": sqlite_utc_z,
+        "local_t_shifted": local_t_shifted,
+        "tz": tz_name,
+    }
 
 
 def _replace_legacy_line_items(conn, quote_id: str, line_items: list) -> None:
@@ -1909,14 +1949,56 @@ def _legacy_extra_fields(quote: dict, billed_by, existing: Optional[dict] = None
     return extras
 
 
+_UPSERT_ERROR: Optional[dict] = None
+
+
+def last_upsert_error() -> Optional[dict]:
+    return dict(_UPSERT_ERROR) if _UPSERT_ERROR else None
+
+
+def _json_numeric(data: dict, key: str):
+    """Present numeric JSON field, including 0. Missing/None/'' → None."""
+    if not isinstance(data, dict) or key not in data:
+        return None
+    val = data[key]
+    if val is None or val == "":
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _incoming_deposit_percent(quote: dict):
+    dep = quote.get("deposit")
+    if isinstance(dep, dict):
+        got = _json_numeric(dep, "deposit_percent")
+        if got is not None:
+            return got
+    return _json_numeric(quote, "deposit_percent")
+
+
+def _incoming_line_items(quote: dict) -> list:
+    raw = quote.get("line_items")
+    if raw is None:
+        raw = quote.get("items")
+    if isinstance(raw, list):
+        return [li for li in raw if isinstance(li, dict)]
+    return []
+
+
 def upsert_legacy_quote(quote: dict) -> Optional[dict]:
     """Insert or update quotes_v2 keyed on quote id. Never emails.
 
     Does not overwrite a quotes_v2 row whose updated_at is newer than the
-    incoming JSON. Line items are replaced in the same transaction.
-    JSON sync never moves status backwards — the more advanced status wins.
+    incoming JSON. Line items are replaced in the same transaction when
+    the JSON actually has items. JSON sync never moves status backwards
+    and never writes missing money/deposit/source over a live row.
     """
+    global _UPSERT_ERROR
+    _UPSERT_ERROR = None
     if not isinstance(quote, dict) or not quote.get("id"):
+        _UPSERT_ERROR = {"id": None, "error": "quote dict is missing id"}
         return None
     quote_id = str(quote["id"])
     existing = _get_quote_sql(quote_id)
@@ -1924,12 +2006,10 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
         return existing
     from app.config.workroom_billing import billed_by_for_storage, ensure_billed_by_schema
 
-    dep = quote.get("deposit") or {}
-    deposit_percent = dep.get("deposit_percent", quote.get("deposit_percent", 50)) if isinstance(dep, dict) else 50
     billed_by = billed_by_for_storage(
         quote.get("billed_by") or quote.get("business_name") or quote.get("business")
     )
-    line_items = quote.get("line_items") or quote.get("items") or []
+    line_items = _incoming_line_items(quote)
     created = _as_utc(quote.get("created_at"))
     created_iso = created.isoformat().replace("+00:00", "Z") if created else None
     fields = {
@@ -1945,10 +2025,7 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
             existing.get("status") if existing else None,
             quote.get("status"),
         ),
-        "tax_rate": quote.get("tax_rate", 0.0) or 0.0,
-        "discount_amount": quote.get("discount_amount", 0.0) or 0.0,
         "discount_type": quote.get("discount_type") or "dollar",
-        "deposit_percent": deposit_percent or 50,
         "valid_days": quote.get("valid_days", 30) or 30,
         "terms": quote.get("terms", "") or "",
         "notes": quote.get("notes", "") or "",
@@ -1959,13 +2036,33 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
         "ai_mockups_json": json.dumps(quote.get("ai_mockups") or [], default=str) if quote.get("ai_mockups") else None,
         "ai_outlines_json": json.dumps(quote.get("ai_outlines") or [], default=str) if quote.get("ai_outlines") else None,
         "measurements_json": json.dumps(quote.get("measurements") or {}, default=str) if quote.get("measurements") else None,
-        "source": "json_create_path",
         "source_json_path": str(_legacy_json_path(quote_id)),
-        "subtotal": float(quote.get("subtotal") or 0),
-        "tax_amount": float(quote.get("tax_amount") or 0),
-        "total": float(quote.get("total") or 0),
         "expires_at": quote.get("expires_at"),
     }
+    tax_rate = _json_numeric(quote, "tax_rate")
+    if tax_rate is not None:
+        fields["tax_rate"] = tax_rate
+    elif not existing:
+        fields["tax_rate"] = 0.0
+    discount_amount = _json_numeric(quote, "discount_amount")
+    if discount_amount is not None:
+        fields["discount_amount"] = discount_amount
+    elif not existing:
+        fields["discount_amount"] = 0.0
+    dep_pct = _incoming_deposit_percent(quote)
+    if dep_pct is not None:
+        fields["deposit_percent"] = dep_pct
+    elif not existing:
+        fields["deposit_percent"] = 50
+    for key in ("subtotal", "tax_amount", "total"):
+        val = _json_numeric(quote, key)
+        if val is not None:
+            fields[key] = val
+    existing_source = (existing or {}).get("source")
+    if existing_source:
+        pass
+    else:
+        fields["source"] = quote.get("source") or "json_create_path"
     fields.update(_legacy_extra_fields(quote, billed_by, existing))
     try:
         with get_db() as conn:
@@ -1981,11 +2078,9 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
                 if created_iso:
                     insert["created_at"] = created_iso
                 apply_quote_v2_insert(conn, insert)
-            _replace_legacy_line_items(conn, quote_id, line_items)
-            try:
-                _recalculate_totals(conn, quote_id, "json_import")
-            except Exception:
-                pass
+            if line_items:
+                _replace_legacy_line_items(conn, quote_id, line_items)
+            _recalculate_totals(conn, quote_id, "json_import")
             try:
                 _audit_log(
                     conn, "quote", quote_id,
@@ -1995,6 +2090,7 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
             except Exception:
                 pass
     except Exception as exc:
+        _UPSERT_ERROR = {"id": quote_id, "error": str(exc)}
         logger.warning("upsert_legacy_quote failed for %s: %s", quote_id, exc)
         return None
     return _get_quote_sql(quote_id)
@@ -2014,8 +2110,36 @@ def _import_legacy_json_quote_by_number(quote_number: str) -> Optional[dict]:
     return upsert_legacy_quote(data)
 
 
+_BACKUP_KEEP = 10
+
+
+def _backup_root():
+    from pathlib import Path
+    raw = os.getenv("EMPIRE_BACKUP_DIR")
+    if raw:
+        return Path(raw)
+    return Path.home() / "backups"
+
+
+def _rotate_backups(root, prefix: str = "empire-pre-migrate-", keep: int = _BACKUP_KEEP) -> None:
+    import shutil
+    matches = sorted(
+        [p for p in root.iterdir() if p.name.startswith(prefix)],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for old in matches[keep:]:
+        if old.is_dir():
+            shutil.rmtree(old, ignore_errors=True)
+        else:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+
 def _backup_quotes_before_migrate() -> Optional[str]:
-    """Copy the task DB (and quotes dir when present) before an apply run."""
+    """Copy the task DB (and quotes dir) into ~/backups with rotation."""
     import shutil
     from pathlib import Path
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -2025,23 +2149,32 @@ def _backup_quotes_before_migrate() -> Optional[str]:
         src = Path(DB_PATH)
     if not src.exists():
         return None
-    dest = src.with_name(src.name + f".pre-migrate-{stamp}")
-    shutil.copy2(src, dest)
+    root = _backup_root()
+    root.mkdir(parents=True, exist_ok=True)
+    dest = root / f"empire-pre-migrate-{stamp}"
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest / src.name)
     try:
         from app.services.data_paths import quotes_data_dir
         folder = quotes_data_dir()
         if folder.exists():
-            shutil.copytree(folder, Path(str(folder) + f".pre-migrate-{stamp}"), dirs_exist_ok=True)
+            shutil.copytree(folder, dest / "quotes", dirs_exist_ok=True)
     except Exception:
         pass
+    _rotate_backups(root)
     return str(dest)
 
 
-def migrate_legacy_json_quotes(*, apply: bool = False, limit: Optional[int] = None) -> dict:
+def migrate_legacy_json_quotes(
+    *,
+    apply: bool = False,
+    limit: Optional[int] = None,
+    convert_timestamps: bool = False,
+) -> dict:
     """Import JSON create-path quotes into quotes_v2.
 
-    Dry-run by default. Pass apply=True to write. Optional limit caps how
-    many files are considered. A DB backup is taken before any apply.
+    Dry-run by default. Pass apply=True to write. Timestamp conversion is
+    a separate convert_timestamps flag and is never implied by apply.
     """
     imported = []
     skipped = []
@@ -2056,6 +2189,7 @@ def migrate_legacy_json_quotes(*, apply: bool = False, limit: Optional[int] = No
         return {
             "imported": [], "skipped": [], "failed": [str(exc)],
             "apply": apply, "dry_run": not apply, "sent": False,
+            "convert_timestamps": convert_timestamps,
         }
     candidates = []
     for path in paths:
@@ -2064,40 +2198,51 @@ def migrate_legacy_json_quotes(*, apply: bool = False, limit: Optional[int] = No
         candidates.append(path)
     if limit is not None:
         candidates = candidates[: max(0, int(limit))]
-    if apply and candidates:
+    writes = apply or convert_timestamps
+    if writes:
         try:
             backup = _backup_quotes_before_migrate()
         except Exception as exc:
             return {
                 "imported": [], "skipped": [], "failed": [{"error": f"backup failed: {exc}"}],
                 "apply": False, "dry_run": True, "sent": False,
+                "convert_timestamps": False,
             }
-    for path in candidates:
-        try:
-            data = json.loads(path.read_text())
-        except Exception as exc:
-            failed.append({"path": str(path), "error": str(exc)})
-            continue
-        if not isinstance(data, dict):
-            continue
-        data.setdefault("id", path.stem)
-        existing = _get_quote_sql(data["id"])
-        if existing and _v2_is_newer(existing, data):
-            skipped.append(data["id"])
-            continue
-        if existing and not apply:
-            planned.append(data["id"])
-            continue
-        if not apply:
-            planned.append(data["id"])
-            continue
-        row = upsert_legacy_quote(data)
-        if row:
-            imported.append(row.get("id"))
-        else:
-            failed.append({"id": data.get("id"), "error": "upsert failed"})
-    naive_timestamps_utc = None
     if apply:
+        for path in candidates:
+            try:
+                data = json.loads(path.read_text())
+            except Exception as exc:
+                failed.append({"path": str(path), "error": str(exc)})
+                continue
+            if not isinstance(data, dict):
+                continue
+            data.setdefault("id", path.stem)
+            existing = _get_quote_sql(data["id"])
+            if existing and _v2_is_newer(existing, data):
+                skipped.append(data["id"])
+                continue
+            row = upsert_legacy_quote(data)
+            if row:
+                imported.append(row.get("id"))
+            else:
+                err = last_upsert_error() or {}
+                failed.append({
+                    "id": data.get("id"),
+                    "error": err.get("error") or "upsert failed",
+                })
+    elif not convert_timestamps:
+        for path in candidates:
+            try:
+                data = json.loads(path.read_text())
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            data.setdefault("id", path.stem)
+            planned.append(data["id"])
+    naive_timestamps_utc = None
+    if convert_timestamps:
         try:
             with get_db() as conn:
                 naive_timestamps_utc = convert_naive_quote_timestamps_to_utc(conn)
@@ -2110,8 +2255,9 @@ def migrate_legacy_json_quotes(*, apply: bool = False, limit: Optional[int] = No
         "failed": failed,
         "count": len(imported) if apply else len(planned),
         "apply": apply,
-        "dry_run": not apply,
+        "dry_run": not apply and not convert_timestamps,
         "backup": backup,
         "sent": False,
+        "convert_timestamps": convert_timestamps,
         "naive_timestamps_utc": naive_timestamps_utc,
     }

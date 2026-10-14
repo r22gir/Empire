@@ -457,7 +457,149 @@ def test_naive_local_updated_at_converts_to_utc(monkeypatch, tmp_path):
         )
         result = convert_naive_quote_timestamps_to_utc(conn)
     assert result["converted"] >= 1
+    assert result.get("local_t_shifted", 0) >= 1
     row = get_quote("naive-ts-1")
     # 14:00 America/New_York on 2026-10-14 is EDT (UTC-4) → 18:00Z
     assert row["updated_at"] == "2026-10-14T18:00:00Z"
     assert row["created_at"] == "2026-10-14T18:00:00Z"
+
+
+def test_timestamp_convert_sqlite_utc_and_python_local(monkeypatch, tmp_path):
+    """Space-separated SQLite stamps are already UTC; T-style is local."""
+    _quotes(monkeypatch, tmp_path)
+    from app.db.database import get_db
+    from app.services.quote_service import convert_naive_quote_timestamps_to_utc
+
+    upsert_legacy_quote(_json_snapshot("sqlite-utc-1", "EST-2026-826", "draft", 1))
+    upsert_legacy_quote(_json_snapshot("python-local-1", "EST-2026-827", "draft", 1))
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE quotes_v2 SET updated_at = ?, created_at = ? WHERE id = ?",
+            ("2026-10-14 14:00:00", "2026-10-14 14:00:00", "sqlite-utc-1"),
+        )
+        conn.execute(
+            "UPDATE quotes_v2 SET updated_at = ?, created_at = ? WHERE id = ?",
+            ("2026-10-14T14:00:00", "2026-10-14T14:00:00", "python-local-1"),
+        )
+        result = convert_naive_quote_timestamps_to_utc(conn)
+    assert result["converted"] >= 2
+    assert result.get("sqlite_utc_z", 0) >= 1
+    assert result.get("local_t_shifted", 0) >= 1
+    sqlite_row = get_quote("sqlite-utc-1")
+    local_row = get_quote("python-local-1")
+    # SQLite datetime('now') is UTC — do not shift 4 hours.
+    assert sqlite_row["updated_at"] == "2026-10-14T14:00:00Z"
+    assert sqlite_row["created_at"] == "2026-10-14T14:00:00Z"
+    assert local_row["updated_at"] == "2026-10-14T18:00:00Z"
+    assert local_row["created_at"] == "2026-10-14T18:00:00Z"
+
+
+def test_migrate_apply_does_not_convert_timestamps(monkeypatch, tmp_path):
+    quotes = _quotes(monkeypatch, tmp_path)
+    from app.db.database import get_db
+
+    upsert_legacy_quote(_json_snapshot("keep-sqlite-1", "EST-2026-828", "draft", 1))
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE quotes_v2 SET updated_at = ?, created_at = ? WHERE id = ?",
+            ("2026-10-14 14:00:00", "2026-10-14 14:00:00", "keep-sqlite-1"),
+        )
+    (tmp_path / "quotes" / "keep-sqlite-1.json").write_text(json.dumps({
+        "id": "keep-sqlite-1",
+        "quote_number": "EST-2026-828",
+        "customer_name": "Keep",
+        "row_rev": 1,
+        "line_items": [],
+        "total": 0,
+    }))
+    result = migrate_legacy_json_quotes(apply=True)
+    assert result["convert_timestamps"] is False
+    assert result.get("naive_timestamps_utc") is None
+    row = get_quote("keep-sqlite-1")
+    assert row["updated_at"] == "2026-10-14 14:00:00"
+
+
+def test_json_save_without_totals_keeps_v2_money_and_source(monkeypatch, tmp_path):
+    _quotes(monkeypatch, tmp_path)
+    first = upsert_legacy_quote({
+        "id": "money-284",
+        "quote_number": "EST-2026-284",
+        "customer_name": "Sent Client",
+        "status": "sent",
+        "source": "max_quick_quote",
+        "deposit_percent": 0,
+        "subtotal": 395,
+        "total": 395,
+        "line_items": [
+            {"description": "Labor", "quantity": 1, "rate": 395, "amount": 395},
+        ],
+    })
+    assert float(first["total"]) == 395
+    assert float(first["deposit_percent"]) == 0
+    assert first["source"] == "max_quick_quote"
+    prior_rev = int(first.get("row_rev") or 0)
+
+    again = upsert_legacy_quote({
+        "id": "money-284",
+        "quote_number": "EST-2026-284",
+        "customer_name": "Sent Client",
+        "status": "sent",
+        "row_rev": prior_rev + 10,
+        # no subtotal, total, deposit, source, or line items
+    })
+    assert again is not None
+    assert float(again["total"]) == 395
+    assert float(again["subtotal"]) == 395
+    assert float(again["deposit_percent"]) == 0
+    assert again["source"] == "max_quick_quote"
+    lines = again.get("line_items") or []
+    assert lines and float(lines[0].get("subtotal") or lines[0].get("amount") or 0) == 395
+
+
+def test_json_sync_recalculates_totals_from_line_items(monkeypatch, tmp_path):
+    _quotes(monkeypatch, tmp_path)
+    first = upsert_legacy_quote({
+        "id": "recalc-1",
+        "quote_number": "EST-2026-829",
+        "customer_name": "Recalc",
+        "status": "sent",
+        "subtotal": 100,
+        "total": 100,
+        "line_items": [
+            {"description": "Old", "quantity": 1, "rate": 100, "amount": 100},
+        ],
+    })
+    prior_rev = int(first.get("row_rev") or 0)
+    again = upsert_legacy_quote({
+        "id": "recalc-1",
+        "quote_number": "EST-2026-829",
+        "customer_name": "Recalc",
+        "status": "sent",
+        "row_rev": prior_rev + 10,
+        "line_items": [
+            {"description": "Labor", "quantity": 1, "rate": 395, "amount": 395},
+        ],
+    })
+    assert float(again["total"]) == 395
+    assert float(again["subtotal"]) == 395
+
+
+def test_migrate_reports_real_upsert_error(monkeypatch, tmp_path):
+    quotes = _quotes(monkeypatch, tmp_path)
+    (tmp_path / "quotes" / "boom-1.json").write_text(json.dumps({
+        "id": "boom-1",
+        "quote_number": "EST-2026-830",
+        "customer_name": "Boom",
+        "line_items": [{"description": "Seat", "quantity": 1, "rate": 10, "amount": 10}],
+        "total": 10,
+    }))
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("line items fk exploded")
+
+    monkeypatch.setattr(
+        "app.services.quote_service._recalculate_totals", _boom,
+    )
+    result = migrate_legacy_json_quotes(apply=True)
+    assert result["failed"]
+    assert "line items fk exploded" in result["failed"][0]["error"]

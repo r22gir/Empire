@@ -328,6 +328,7 @@ def redirect_env(tmp_root: Path) -> dict[str, str]:
         "VOICE_DOC_SESSIONS_PATH": str(data / "voice_document_sessions.json"),
         "CHAT_BACKUP_DIR": str(tmp_root / "chat_backups"),
         "FAMILY_HELP_INBOX_DIR": str(data / "family-help"),
+        "EMPIRE_BACKUP_DIR": str(tmp_root / "backups"),
     }
     for name, value in forced.items():
         if os.environ.get(name) != value:

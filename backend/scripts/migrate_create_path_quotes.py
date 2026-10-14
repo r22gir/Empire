@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Import JSON create-path quotes into the canonical quotes_v2 store.
 
-Dry-run by default. Pass --apply to write. Optional --limit. A backup is
-taken before any apply. Does not send email.
+Dry-run by default. Pass --apply to write. Timestamp conversion is a
+separate --convert-timestamps flag (never implied by --apply). Optional
+--limit. Backups go to ~/backups (or EMPIRE_BACKUP_DIR) with rotation.
+Does not send email.
 """
 from __future__ import annotations
 
@@ -20,9 +22,18 @@ from app.services.quote_service import migrate_legacy_json_quotes  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(description="Migrate JSON create-path quotes into quotes_v2")
     parser.add_argument("--apply", action="store_true", help="Write changes (default is dry-run)")
+    parser.add_argument(
+        "--convert-timestamps",
+        action="store_true",
+        help="Rewrite naive quotes_v2 timestamps to UTC Z (not implied by --apply)",
+    )
     parser.add_argument("--limit", type=int, default=None, help="Max JSON files to consider")
     args = parser.parse_args()
-    result = migrate_legacy_json_quotes(apply=args.apply, limit=args.limit)
+    result = migrate_legacy_json_quotes(
+        apply=args.apply,
+        limit=args.limit,
+        convert_timestamps=args.convert_timestamps,
+    )
     print(json.dumps(result, indent=2))
     return 0 if not result.get("failed") else 1
 
