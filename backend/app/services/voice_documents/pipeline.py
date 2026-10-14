@@ -24,6 +24,18 @@ from app.services.voice_documents.session import (
 logger = logging.getLogger("voice_documents.pipeline")
 
 
+def _is_empty_zero_estimate(result: dict) -> bool:
+    """A $0.00 draft with no priced lines is not a real estimate."""
+    lines = result.get("line_items") or []
+    if lines:
+        return False
+    total = result.get("total")
+    try:
+        return float(total or 0) == 0.0
+    except (TypeError, ValueError):
+        return total in (None, "", 0, "0")
+
+
 def _apply_overrides(extraction, overrides: dict):
     if not extraction.items or not overrides:
         return extraction
@@ -62,7 +74,8 @@ def _reply(result: dict) -> str:
         lines.append(f"Brand: {brand}")
     quote_no = result.get("quote_number") or ""
     status = result.get("quote_status") or result.get("status") or "draft"
-    if quote_no:
+    empty_zero = _is_empty_zero_estimate(result)
+    if quote_no and not empty_zero:
         lines.append(f"Draft {quote_no} ({status}). Not sent.")
     for item in result.get("line_items") or []:
         amount = item.get("amount")
@@ -71,7 +84,7 @@ def _reply(result: dict) -> str:
         except (TypeError, ValueError):
             amount_s = ""
         lines.append(f"{item.get('description')}: {amount_s}".rstrip())
-    if result.get("total") is not None:
+    if result.get("line_items") and result.get("total") is not None:
         lines.append(f"Total: ${float(result['total']):,.2f}")
     drawing = result.get("drawing") or {}
     fab = drawing.get("fabrication") or {}
@@ -84,11 +97,15 @@ def _reply(result: dict) -> str:
             f"Overhang {fab['overhang_in']:g} in. "
             + ("Back vertical." if fab.get("vertical_back") else f"Back raked {fab['back_angle_deg']:g} deg.")
         )
-    missing = result.get("missing") or []
-    if missing:
+    missing_labels = [
+        str(row.get("label") or "").strip()
+        for row in (result.get("missing") or [])
+        if isinstance(row, dict) and str(row.get("label") or "").strip()
+    ]
+    if missing_labels:
         lines.append("Missing:")
-        for row in missing:
-            lines.append(f"- {row.get('label')}")
+        for label in missing_labels:
+            lines.append(f"- {label}")
     options = result.get("options") or []
     if options:
         lines.append("Choices:")
@@ -203,6 +220,29 @@ def ingest_transcript(
         save_session(session)
 
     probe = extract_transcript(text)
+    try:
+        from app.services.max.whatsapp_format import has_real_job_signals, is_link_or_article_message
+
+        if is_link_or_article_message(text):
+            return {
+                "handled": False,
+                "sent": False,
+                "transcript": text,
+                "session_id": session.id,
+                "reply_text": "",
+                "reason": "link_or_article",
+            }
+        if not session.transcripts and not has_real_job_signals(text, probe) and not probe.done:
+            return {
+                "handled": False,
+                "sent": False,
+                "transcript": text,
+                "session_id": session.id,
+                "reply_text": "",
+                "reason": "no_job_signals",
+            }
+    except Exception:
+        pass
     if not session.transcripts and not probe.document_intent and not probe.done:
         return {
             "handled": False,
@@ -222,6 +262,18 @@ def ingest_transcript(
     save_session(session)
     result = _assemble(session)
     result["sent"] = False
+    if _is_empty_zero_estimate(result) and not (result.get("missing") or []):
+        result["handled"] = False
+        result["attach_documents"] = False
+        result["reply_text"] = (
+            "Need a real job to draft an estimate — client, item, and dimensions. Nothing sent."
+        )
+        # Drop the empty transcript so a later URL does not keep this stub session.
+        if session.transcripts == [text]:
+            session.transcripts = []
+            save_session(session)
+        return result
+    result["attach_documents"] = not _is_empty_zero_estimate(result)
     _remember(session.id, text, result.get("reply_text") or "")
     return result
 

@@ -73,9 +73,9 @@ function DraftCard({ payload }: { payload: Record<string, unknown> }) {
   const items = Array.isArray(payload.line_items) ? payload.line_items : [];
   const missing = Array.isArray(payload.missing) ? payload.missing : [];
   return (
-    <div style={{ padding: 12, borderRadius: 12, background: '#fff', border: '1px solid #e5e2dc' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
-        <strong style={{ fontSize: 13 }}>
+    <div className="cy-keep-light" style={{ padding: 12, borderRadius: 12, background: '#fffdf7', border: '1px solid #c4b48a', color: '#16191c' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6, color: '#16191c' }}>
+        <strong style={{ fontSize: 13, color: '#16191c' }}>
           {payload.quote_number ? `Draft ${String(payload.quote_number)}` : 'Voice draft'} · not sent
         </strong>
         <span style={{ fontSize: 11, color: '#888' }}>{String(payload.client_brand || 'Empire Workroom')}</span>
@@ -182,11 +182,11 @@ export default function PresentationStage({
   if (!artifact && history.length === 0) return null;
 
   const panel = (
-    <div className={full ? 'presentation-stage presentation-stage-full' : 'presentation-stage'}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <strong style={{ fontSize: 13, flex: 1 }}>{artifact?.title || 'Stage'}</strong>
-        {slideLabel && <span style={{ fontSize: 11, color: '#888' }}>{slideLabel}</span>}
-        {artifact?.brand && <span style={{ fontSize: 11, color: '#888' }}>{artifact.brand}</span>}
+    <div className={full ? 'presentation-stage presentation-stage-full' : 'presentation-stage'} style={{ color: '#16191c' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, color: '#16191c' }}>
+        <strong style={{ fontSize: 13, flex: 1, color: '#16191c' }}>{artifact?.title || 'Stage'}</strong>
+        {slideLabel && <span style={{ fontSize: 11, color: '#4a453c' }}>{slideLabel}</span>}
+        {artifact?.brand && <span style={{ fontSize: 11, color: '#4a453c' }}>{artifact.brand}</span>}
         <button type="button" onClick={() => setFull((v) => !v)} title={full ? 'Exit full screen' : 'Full screen'} style={iconBtn}>
           {full ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>

@@ -218,6 +218,16 @@ def _item_type(text: str) -> tuple[str, str, str]:
 
 def _has_document_intent(text: str, item_type: str) -> bool:
     t = text.lower()
+    try:
+        from app.services.max.whatsapp_format import is_link_or_article_message
+
+        if is_link_or_article_message(text):
+            return False
+    except Exception:
+        if re.search(r"https?://", text or "", re.IGNORECASE) and not item_type:
+            leftover = re.sub(r"https?://\S+", "", text or "").strip()
+            if not leftover:
+                return False
     if item_type:
         return True
     return bool(re.search(

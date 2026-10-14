@@ -11,6 +11,47 @@ from typing import Any
 
 FLAGS = ("truncated", "stale_source", "empty_section", "user_repeat", "pushback")
 
+# Founder said the previous reply was cut off on the phone.
+_CUTOFF_RE = re.compile(
+    r"(?i)\b(?:message\s+)?cut(?:s|ting)?\s+off\b|"
+    r"\bgot\s+cut\b|"
+    r"\bwas\s+cut\b|"
+    r"\bcut\s+short\b|"
+    r"\btruncated\b|"
+    r"\bstopped\s+mid\b|"
+    r"\bincomplete\s+message\b"
+)
+# Founder repeating / correcting because the last answer missed.
+_USER_REPEAT_RE = re.compile(
+    r"(?i)(?:"
+    r"(?:^|\b)dude\b|"
+    r"(?:^\s*no+\b)|"          # "No..." / "No read the article"
+    r"(?:\bno+\.{2,})|"        # mid-turn "no..."
+    r"\bnope\b|"
+    r"\bwrong\b|"
+    r"\bagain\b|"
+    r"\brepeat\b|"
+    r"same thing|"
+    r"once more|"
+    r"you forgot|"
+    r"incomplete|"
+    r"read(?:\s+the)?\s+article|"
+    r"not (?:that|it|this|what i)|"
+    r"try again|"
+    r"re-?read"
+    r")"
+)
+_PUSHBACK_RE = re.compile(
+    r"(?i)\b(?:that'?s wrong|incorrect|not right|you misunderstood|not what i asked|wrong)\b"
+)
+# Filing-only: bare again/wrong/^no/incomplete/repeat are not enough.
+_WEAK_FILE_RE = re.compile(
+    r"(?i)^\s*(?:"
+    r"(?:no+|nope)(?:\s+(?:thanks|thank you|thx))?"
+    r"|wrong|again|repeat|incomplete"
+    r")\s*[.!?]?\s*$"
+)
+
 _CURRENT_RE = re.compile(r"\b(latest|current|today|now|recent|this\s+(?:week|month|year)|breaking|news)\b", re.I)
 _HISTORICAL_RE = re.compile(r"\b(history|historical|in\s+\d{4}|during|before\s+\d{4}|originally|at\s+the\s+time)\b", re.I)
 _HEADING_ONLY_RE = re.compile(r"(?m)^\s{0,3}#{1,6}\s+[^\n]+\s*$")
@@ -209,14 +250,52 @@ def enforce_reply_structure(text: str | None, regenerate=None) -> str:
     return filled_old
 
 
+def _is_frustration_correction(msg: str) -> bool:
+    try:
+        from app.services.max.whatsapp_format import is_frustration_correction
+
+        return bool(is_frustration_correction(msg))
+    except Exception:
+        return False
+
+
+def is_strong_quality_filing_signal(user_message: str | None) -> bool:
+    """Filing gate. Flags may stay broad; this is cut-off or real frustration.
+
+    Bare again / wrong / ^no / incomplete / repeat are not enough.
+    """
+    msg = (user_message or "").strip()
+    if not msg:
+        return False
+    if _CUTOFF_RE.search(msg):
+        return True
+    if not _is_frustration_correction(msg):
+        return False
+    return _WEAK_FILE_RE.fullmatch(msg) is None
+
+
+def _quality_dedupe_key(hit: list[str], *, thread_id: str | None = None) -> str:
+    day = date.today().isoformat()
+    flags = ",".join(hit)
+    if thread_id:
+        return f"aq:{flags}:thread:{thread_id}:{day}"
+    return f"aq:{flags}:day:{day}"
+
+
 def detect_quality_flags(
     text: str | None,
     *,
     user_message: str | None = None,
     tool_results: list[dict[str, Any]] | None = None,
     finish_reason: str | None = None,
+    founder: bool = False,
+    thread_id: str | None = None,
 ) -> dict[str, bool]:
-    """Return the requested per-turn self-score flags."""
+    """Return the requested per-turn self-score flags.
+
+    Filing (proposed improvement) happens only for the founder channel/user
+    and only on a strong cut-off or frustration signal.
+    """
     body = (text or "").strip()
     tools = tool_results or []
     flags = {name: False for name in FLAGS}
@@ -225,14 +304,75 @@ def detect_quality_flags(
         finish_reason == "length"
         or (body and _HEADING_ONLY_RE.fullmatch(body) is not None)
         or (tools and len(body) < 40)
+        or _CUTOFF_RE.search(user_message or "")
     )
-    msg = (user_message or "").lower()
-    flags["user_repeat"] = bool(re.search(r"\b(again|repeat|same thing|once more|you forgot|incomplete)\b", msg))
-    flags["pushback"] = bool(re.search(r"\b(that'?s wrong|incorrect|not right|you misunderstood|not what i asked)\b", msg))
+    msg = user_message or ""
+    flags["user_repeat"] = bool(_is_frustration_correction(msg) or _USER_REPEAT_RE.search(msg))
+    flags["pushback"] = bool(_PUSHBACK_RE.search(msg))
     # A web answer that has no date or source marker is a stale-source risk.
     has_web = any(str(item.get("tool", "")) in {"web_search", "web_read"} for item in tools if isinstance(item, dict))
     flags["stale_source"] = bool(has_web and not re.search(r"(?:https?://|\b(?:published|posted|updated|date)\b|\b20\d{2}\b)", body, re.I))
+    if founder and (msg or "").strip():
+        try:
+            file_quality_miss(
+                {
+                    "truncated": bool(_CUTOFF_RE.search(msg)),
+                    "user_repeat": flags["user_repeat"],
+                    "pushback": flags["pushback"],
+                },
+                user_message=msg,
+                founder=True,
+                thread_id=thread_id,
+            )
+        except Exception:
+            pass
     return flags
+
+
+def file_quality_miss(
+    flags: dict[str, bool],
+    *,
+    user_message: str = "",
+    founder: bool = False,
+    thread_id: str | None = None,
+) -> dict | None:
+    """File a proposed improvement for a founder quality miss. Never approves.
+
+    Founder channel/user only. Strong signal only. Deduped on flag set + day
+    (or thread), not message text.
+    """
+    if not founder:
+        return None
+    if not is_strong_quality_filing_signal(user_message):
+        return None
+    hit = [name for name in ("truncated", "user_repeat", "pushback") if flags.get(name)]
+    if not hit:
+        return None
+    from app.services.max import improvements as imp
+
+    title = f"Answer-quality miss: {', '.join(hit)}"
+    key = _quality_dedupe_key(hit, thread_id=thread_id)
+    existing = imp.list_requests("proposed").get("items") or []
+    for row in existing:
+        if row.get("requested_via") == "answer_quality" and (row.get("requested_text") or "") == key:
+            return row
+    return imp.create_request(
+        title=title[:200],
+        problem=(
+            f"Founder correction flagged {', '.join(hit)}. "
+            f"Said: {(user_message or '')[:400] or '(no text)'}"
+        ),
+        proposed_change=(
+            "Re-read the last request and fix the miss "
+            "(chunk long WhatsApp replies; do not repeat a failed summary)."
+        ),
+        affected_modules=["answer_quality", "whatsapp_channel"],
+        risk="low",
+        acceptance="truncated/user_repeat flags fire on founder cut-off and Dude/No/read-article turns.",
+        requested_via="answer_quality",
+        requested_text=key,
+        kind="fix",
+    )
 
 
 def needs_continuation(text: str | None, *, user_message: str | None = None, tool_results: list[dict[str, Any]] | None = None) -> bool:
