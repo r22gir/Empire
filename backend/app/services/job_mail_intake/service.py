@@ -123,6 +123,89 @@ def _add_job_event(conn, job_id: str, event_type: str, summary: str, metadata: O
         pass
 
 
+def _supplier_event_type(facts: dict) -> str:
+    if facts.get("tracking_numbers"):
+        return "tracking"
+    if facts.get("invoice_numbers"):
+        return "invoice"
+    return "order_confirmation"
+
+
+def _should_record_supplier(facts: dict) -> bool:
+    return bool(
+        facts.get("is_supplier_order")
+        or facts.get("tracking_numbers")
+        or facts.get("order_numbers")
+        or facts.get("invoice_numbers")
+    )
+
+
+def _record_supplier_event(conn, msg: dict, match: dict, facts: dict, *, personal: bool) -> list[str]:
+    if not _should_record_supplier(facts):
+        return []
+    fp = _fingerprint(msg)
+    rfc_id = _rfc_message_id(msg)
+    account = _account(msg)
+    job_id = match.get("job_id")
+    tracks = facts.get("tracking_numbers") or [None]
+    orders = facts.get("order_numbers") or facts.get("invoice_numbers") or [None]
+    event_type = _supplier_event_type(facts)
+    if event_type == "order_confirmation":
+        preview = (msg.get("preview") or msg.get("body") or "")[:400]
+        low = preview.lower() + " " + (msg.get("subject") or "").lower()
+        if "receipt" in low:
+            event_type = "receipt"
+        elif "invoice" in low:
+            event_type = "invoice"
+    who = match.get("from_name") or match.get("from_email") or "unknown"
+    preview = (msg.get("preview") or msg.get("body") or "")[:400]
+    sid = _new_id()
+    conn.execute(
+        """INSERT OR IGNORE INTO jmi_supplier_order_events
+           (id, job_id, customer_id, customer_name, source, account, message_id,
+            rfc_message_id, fingerprint, event_type, tracking_number, order_number,
+            supplier_name, excerpt, sent)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+        (
+            sid,
+            job_id,
+            match.get("customer_id"),
+            match.get("customer_name"),
+            msg.get("source"),
+            account,
+            str(msg.get("message_id") or ""),
+            rfc_id or None,
+            fp,
+            event_type,
+            (tracks[0] if tracks and tracks[0] else None),
+            (orders[0] if orders and orders[0] else None),
+            who,
+            preview if not personal else None,
+        ),
+    )
+    ids = []
+    row = conn.execute(
+        "SELECT id FROM jmi_supplier_order_events WHERE fingerprint = ?", (fp,)
+    ).fetchone()
+    if row:
+        ids.append(dict(row)["id"] if not isinstance(row, str) else row[0])
+    if job_id and not personal:
+        _add_job_event(
+            conn,
+            job_id,
+            "supplier_order",
+            f"Supplier {event_type}: {tracks[0] or orders[0] or (msg.get('subject') or '')}",
+            {
+                "account": account,
+                "customer_id": match.get("customer_id"),
+                "tracking_numbers": facts.get("tracking_numbers"),
+                "order_numbers": facts.get("order_numbers"),
+                "sent": False,
+            },
+        )
+    return ids
+
+
 def _record_processed(conn, msg: dict, match: dict, kind: str) -> None:
     conn.execute(
         """INSERT OR IGNORE INTO jmi_processed
@@ -356,8 +439,9 @@ def _process_one(conn, msg: dict) -> dict:
         conn.execute(
             """INSERT OR IGNORE INTO jmi_review_queue
                (id, source, account, message_id, rfc_message_id, fingerprint, subject,
-                from_name, from_addr, preview, received_at, status, sent)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unmatched', 0)""",
+                from_name, from_addr, preview, received_at, customer_id, customer_name,
+                status, sent)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unmatched', 0)""",
             (
                 _new_id(),
                 msg.get("source") or "",
@@ -370,14 +454,20 @@ def _process_one(conn, msg: dict) -> dict:
                 match.get("from_email") or "",
                 preview,
                 msg.get("date"),
+                match.get("customer_id"),
+                match.get("customer_name"),
             ),
         )
+        supplier_ids = _record_supplier_event(conn, msg, match, facts, personal=personal)
         _record_processed(conn, msg, match, "unmatched")
         return {
             "status": "unmatched",
             "review": True,
             "reason": match.get("reason"),
             "account": account,
+            "customer_id": match.get("customer_id"),
+            "customer_name": match.get("customer_name"),
+            "supplier_events": supplier_ids,
             "sent": False,
         }
 
@@ -442,50 +532,7 @@ def _process_one(conn, msg: dict) -> dict:
         if row:
             calendar_ids.append(dict(row)["id"] if not isinstance(row, str) else row[0])
 
-    supplier_ids = []
-    if facts.get("is_supplier_order") or facts.get("tracking_numbers") or facts.get("order_numbers"):
-        tracks = facts.get("tracking_numbers") or [None]
-        orders = facts.get("order_numbers") or [None]
-        event_type = "tracking" if facts.get("tracking_numbers") else "order_confirmation"
-        sid = _new_id()
-        conn.execute(
-            """INSERT OR IGNORE INTO jmi_supplier_order_events
-               (id, job_id, source, account, message_id, rfc_message_id, fingerprint,
-                event_type, tracking_number, order_number, supplier_name, excerpt, sent)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
-            (
-                sid,
-                job_id,
-                msg.get("source"),
-                account,
-                str(msg.get("message_id") or ""),
-                rfc_id or None,
-                fp,
-                event_type,
-                (tracks[0] if tracks and tracks[0] else None),
-                (orders[0] if orders and orders[0] else None),
-                who,
-                preview if not personal else None,
-            ),
-        )
-        row = conn.execute(
-            "SELECT id FROM jmi_supplier_order_events WHERE fingerprint = ?", (fp,)
-        ).fetchone()
-        if row:
-            supplier_ids.append(dict(row)["id"] if not isinstance(row, str) else row[0])
-        if not personal:
-            _add_job_event(
-                conn,
-                job_id,
-                "supplier_order",
-                f"Supplier {event_type}: {tracks[0] or orders[0] or subject}",
-                {
-                    "account": account,
-                    "tracking_numbers": facts.get("tracking_numbers"),
-                    "order_numbers": facts.get("order_numbers"),
-                    "sent": False,
-                },
-            )
+    supplier_ids = _record_supplier_event(conn, msg, match, facts, personal=personal)
 
     _record_processed(conn, msg, match, "matched")
     return {

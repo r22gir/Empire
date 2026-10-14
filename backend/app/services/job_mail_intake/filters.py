@@ -189,9 +189,13 @@ def is_marketing_mail(msg: dict) -> bool:
 
 
 def noise_reason(msg: dict) -> str | None:
-    """Login codes always drop. Marketing and bare no-reply drop unless noted."""
+    """Login codes always drop. Marketing and bare no-reply drop unless supplier."""
     if is_login_code_mail(msg):
         return "login"
+    from app.services.job_mail_intake.extract import is_supplier_mail
+    # Never apply the no-reply or marketing drop to supplier mail.
+    if is_supplier_mail(msg):
+        return None
     if is_marketing_mail(msg):
         return "marketing"
     if is_noreply_mail(msg):

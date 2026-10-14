@@ -58,6 +58,12 @@ ORDER_HINTS = (
     "purchase order",
     "po #",
     "we have received your order",
+    "invoice for order",
+    "invoice for",
+    "receipt for payment",
+    "receipt for",
+    "has been prepared",
+    "sales order",
 )
 SUPPLIER_HINTS = (
     "fabric",
@@ -73,6 +79,30 @@ SUPPLIER_HINTS = (
     "mayer",
     "kravet",
     "schumacher",
+    "keystone",
+    "angel's distributing",
+    "angels distributing",
+)
+SUPPLIER_DOMAINS = frozenset({
+    "rowleycompany.com",
+    "rowley.com",
+    "keystonebros.com",
+    "keystone-bros.com",
+    "angelsdistributing.com",
+    "angels-distributing.com",
+    "kravet.com",
+    "schumacher.com",
+    "mayerfabrics.com",
+    "horizon-fabrics.com",
+    "ups.com",
+    "fedex.com",
+    "usps.com",
+    "dhl.com",
+})
+SO_RE = re.compile(r"\b(SO[- ]?\d{5,12})\b", re.I)
+INVOICE_RE = re.compile(
+    r"\binvoice(?:\s+for)?(?:\s+order)?\s*#?\s*[:\-]?\s*([A-Z0-9]*\d[A-Z0-9.\-]{3,24})\b",
+    re.I,
 )
 
 
@@ -130,8 +160,17 @@ def tracking_numbers(text: str) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+def invoice_numbers(text: str) -> list[str]:
+    out = []
+    for m in INVOICE_RE.finditer(text or ""):
+        val = m.group(1).strip()
+        if any(ch.isdigit() for ch in val):
+            out.append(val)
+    return list(dict.fromkeys(out))
+
+
 def order_numbers(text: str) -> list[str]:
-    skip = {"ORDER", "CONFIRMATION", "NUMBER", "TRACKING"}
+    skip = {"ORDER", "CONFIRMATION", "NUMBER", "TRACKING", "INVOICE", "RECEIPT"}
     out = []
     for rx in ORDER_NO_RES:
         for m in rx.finditer(text or ""):
@@ -141,6 +180,9 @@ def order_numbers(text: str) -> list[str]:
             if not any(ch.isdigit() for ch in val):
                 continue
             out.append(val)
+    for m in SO_RE.finditer(text or ""):
+        out.append(re.sub(r"\s+", "", m.group(1).upper()))
+    out.extend(invoice_numbers(text))
     return list(dict.fromkeys(out))
 
 
@@ -194,18 +236,44 @@ def proposed_dates(text: str) -> list[dict[str, str]]:
     return unique
 
 
+def _sender_domain(msg: dict) -> str:
+    raw = (msg.get("from") or msg.get("from_email") or "")
+    addr_m = re.search(r"<([^>]+)>", raw)
+    email = (addr_m.group(1) if addr_m else raw).strip().lower()
+    if "@" not in email:
+        email = str(msg.get("from_email") or "").strip().lower()
+    if "@" not in email:
+        return ""
+    return email.rsplit("@", 1)[-1]
+
+
 def is_supplier_order(msg: dict) -> bool:
     from app.services.job_mail_intake.filters import is_empire_identity, is_internal_mail
 
     # Never treat Empire / Max / our own mailboxes as a supplier.
     if is_internal_mail(msg) or is_empire_identity(msg):
         return False
-    blob = _blob(msg).lower()
-    if any(h in blob for h in ORDER_HINTS):
+    blob = _blob(msg)
+    low = blob.lower()
+    if any(h in low for h in ORDER_HINTS):
         return True
-    if tracking_numbers(blob) and any(h in blob for h in SUPPLIER_HINTS):
+    if order_numbers(blob) or invoice_numbers(blob):
+        return True
+    if re.search(r"\breceipt\b", low) and ("payment" in low or "$" in blob):
+        return True
+    if tracking_numbers(blob) and any(h in low for h in SUPPLIER_HINTS):
+        return True
+    domain = _sender_domain(msg)
+    if domain in SUPPLIER_DOMAINS:
+        return True
+    if any(h in low for h in ("keystone bros", "angel's distributing", "angels distributing")):
         return True
     return False
+
+
+def is_supplier_mail(msg: dict) -> bool:
+    """Order / invoice / receipt / PO / tracking / known supplier — not noise."""
+    return is_supplier_order(msg)
 
 
 def extract_mail_facts(msg: dict) -> dict[str, Any]:
@@ -216,6 +284,7 @@ def extract_mail_facts(msg: dict) -> dict[str, Any]:
         "sidemarks": sidemarks(blob),
         "tracking_numbers": tracking_numbers(blob),
         "order_numbers": order_numbers(blob),
+        "invoice_numbers": invoice_numbers(blob),
         "proposed_dates": proposed_dates(blob),
         "is_supplier_order": is_supplier_order(msg),
         "sent": False,

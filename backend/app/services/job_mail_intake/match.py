@@ -212,13 +212,8 @@ def _full_name_match(left: str, right: str) -> bool:
 
 
 def _contact_name_hit(sender_name: str, contact_name: str) -> bool:
-    listed = _name_parts(contact_name)
-    sender = _name_parts(sender_name)
-    if not listed or not sender:
-        return False
-    if len(listed) >= 2:
-        return _full_name_match(sender_name, contact_name)
-    return listed[0] in sender
+    """Full first+last only. A one-word listed name is never enough by itself."""
+    return _full_name_match(sender_name, contact_name)
 
 
 def _is_open(job: dict) -> bool:
@@ -262,19 +257,29 @@ def _score_job(job: dict, *, name: str, email: str, facts: dict, blob: str) -> t
     for contact in _job_contacts(job):
         c_email = _norm(contact.get("email"))
         c_domain = _email_domain(contact.get("email"))
-        if email and c_email and email == c_email:
+        email_hit = bool(email and c_email and email == c_email)
+        domain_hit = bool(
+            domain and c_domain and domain == c_domain and domain not in PUBLIC_MAIL_DOMAINS
+        )
+        if email_hit:
             score += 80
             reasons.append("contact_email")
-        elif domain and c_domain and domain == c_domain and domain not in PUBLIC_MAIL_DOMAINS:
+        elif domain_hit:
             score += 70
             reasons.append("contact_domain")
+        # One-word listed names ("Emma") never attach on first name alone.
         if name and _contact_name_hit(name, contact.get("name") or ""):
             score += 75
             reasons.append("contact_name")
         elif name and contact.get("company") and _full_name_match(name, contact.get("company") or ""):
             score += 75
             reasons.append("contact_name")
-        elif name and contact.get("company") and _norm(contact.get("company")) in _norm(name):
+        elif (
+            name
+            and contact.get("company")
+            and len(_name_parts(contact.get("company"))) >= 2
+            and _norm(contact.get("company")) in _norm(name)
+        ):
             score += 75
             reasons.append("contact_name")
 
@@ -629,6 +634,11 @@ def match_message(conn, msg: dict) -> dict[str, Any]:
                         name, email, facts, "ambiguous", 70,
                         customer_id=cid, customer_name=cust_hits[0].get("name"),
                     )
+                # Exactly one customer, no open job — keep the customer link.
+                return _unmatched(
+                    name, email, facts, "sidemark_customer", 60,
+                    customer_id=cid, customer_name=cust_hits[0].get("name"),
+                )
 
     if best and _has_strong_key(best_reason) and _only_shared_customer_keys(best_reason):
         open_for = _open_jobs_for_customer(jobs, best.get("customer_id"))

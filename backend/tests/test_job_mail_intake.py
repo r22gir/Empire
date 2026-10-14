@@ -1052,3 +1052,147 @@ def test_noreply_login_and_marketing_skipped_before_queue():
         assert result["unmatched"] == 0
         assert list_review_queue(conn)["count"] == 0
         assert list_timeline_notes(conn, job_id="job-willard")["count"] == 0
+
+
+def _seed_mccool_customer_only(conn):
+    """Sidemark McCool — customer exists, no open job (replay SO1391374)."""
+    ensure_schema(conn)
+    conn.execute(
+        """INSERT INTO customers (id, name, email, notes)
+           VALUES ('cust-mccool', 'McCool', 'mccool@clients.test',
+                   'Sidemark McCool')"""
+    )
+
+
+def test_sidemark_mccool_keeps_customer_on_queue_and_supplier_event():
+    from app.services.job_mail_intake.match import match_message
+    with get_db() as conn:
+        _seed_mccool_customer_only(conn)
+        msg = {
+            "source": "gmail_business",
+            "message_id": "rowley-so1391374",
+            "from": "Rowley Company <noreply@rowleycompany.com>",
+            "subject": "SO1391374",
+            "preview": "Sidemark: McCool\nSales order SO1391374 is in production.",
+            "date": "2026-10-14",
+        }
+        matched = match_message(conn, msg)
+        assert matched["matched"] is False
+        assert matched["job_id"] is None
+        assert matched["customer_id"] == "cust-mccool"
+        assert matched["customer_name"] == "McCool"
+        result = run_intake(messages=[msg], conn=conn)
+        assert result["matched"] == 0
+        assert result["ignored"] == 0
+        assert result["unmatched"] == 1
+        queue = list_review_queue(conn)
+        assert queue["count"] == 1
+        assert queue["items"][0]["customer_id"] == "cust-mccool"
+        assert queue["items"][0]["customer_name"] == "McCool"
+        events = list_supplier_events(conn)
+        assert events["count"] >= 1
+        assert events["items"][0]["customer_id"] == "cust-mccool"
+        assert events["items"][0]["customer_name"] == "McCool"
+        assert events["items"][0].get("job_id") in (None, "")
+
+
+def test_supplier_invoice_receipt_order_not_dropped_as_noise():
+    from app.services.job_mail_intake.extract import extract_mail_facts, is_supplier_mail
+    replay = [
+        {
+            "source": "gmail_business",
+            "message_id": "keystone-inv",
+            "from": "Keystone Bros <noreply@keystonebros.com>",
+            "subject": "Invoice for order 6471485-00",
+            "preview": "Invoice for order 6471485-00 is attached. Unsubscribe below.",
+            "list_unsubscribe": "<mailto:unsub@keystonebros.com>",
+            "date": "2026-10-14",
+        },
+        {
+            "source": "gmail_business",
+            "message_id": "angels-receipt",
+            "from": "Angel's Distributing <noreply@angelsdistributing.com>",
+            "subject": "Receipt for payment of $753.27",
+            "preview": "Receipt for payment of $753.27. Thank you for your order.",
+            "date": "2026-10-14",
+        },
+        {
+            "source": "gmail_business",
+            "message_id": "angels-pkg",
+            "from": "Angel's Distributing <noreply@angelsdistributing.com>",
+            "subject": "Your order PKG-26036 has been prepared",
+            "preview": "Your order PKG-26036 has been prepared and will ship shortly.",
+            "date": "2026-10-14",
+        },
+    ]
+    for msg in replay:
+        facts = extract_mail_facts(msg)
+        assert facts["is_supplier_order"] is True, msg["subject"]
+        assert is_supplier_mail(msg) is True, msg["subject"]
+    with get_db() as conn:
+        ensure_schema(conn)
+        result = run_intake(messages=replay, conn=conn)
+        assert result["ignored"] == 0
+        assert result["matched"] == 0
+        assert result["unmatched"] == 3
+        queue = list_review_queue(conn)
+        assert queue["count"] == 3
+        subjects = {item["subject"] for item in queue["items"]}
+        assert "Invoice for order 6471485-00" in subjects
+        assert "Receipt for payment of $753.27" in subjects
+        assert "Your order PKG-26036 has been prepared" in subjects
+        events = list_supplier_events(conn)
+        assert events["count"] == 3
+
+
+def test_one_word_contact_name_emma_does_not_attach():
+    from app.services.job_mail_intake.match import match_message
+    with get_db() as conn:
+        ensure_schema(conn)
+        conn.execute(
+            """INSERT INTO customers (id, name, email)
+               VALUES ('cust-emma-job', 'Atelier East', 'atelier.east@clients.test')"""
+        )
+        contacts = '[{"name":"Emma"}]'
+        try:
+            conn.execute(
+                """INSERT INTO jobs
+                   (id, title, customer_id, status, notes, client_name, client_email,
+                    job_number, contacts)
+                   VALUES ('job-emma-listed', 'East dining drapery',
+                           'cust-emma-job', 'pending', 'Designer listed as Emma',
+                           'Atelier East', 'atelier.east@clients.test',
+                           'JOB-2026-0077', ?)""",
+                (contacts,),
+            )
+        except Exception:
+            conn.execute(
+                """INSERT INTO jobs (id, title, customer_id, status, notes)
+                   VALUES ('job-emma-listed', 'East dining drapery',
+                           'cust-emma-job', 'pending', 'Designer listed as Emma')"""
+            )
+        lone = match_message(conn, {
+            "from": "Emma Stone <emma.stone@other.test>",
+            "subject": "Checking in",
+            "preview": "Hi, this is Emma about a sofa.",
+        })
+        assert lone["matched"] is False
+        assert lone["job_id"] is None
+        # Email or domain on the listed contact still attaches.
+        try:
+            conn.execute(
+                "UPDATE jobs SET contacts = ? WHERE id = 'job-emma-listed'",
+                ('[{"name":"Emma","email":"emma.stone@other.test"}]',),
+            )
+        except Exception:
+            pass
+        with_email = match_message(conn, {
+            "from": "Emma Stone <emma.stone@other.test>",
+            "subject": "Checking in",
+            "preview": "Hi, this is Emma about a sofa.",
+        })
+        if conn.execute(
+            "SELECT contacts FROM jobs WHERE id = 'job-emma-listed'"
+        ).fetchone():
+            assert with_email["matched"] is True
+            assert with_email["job_id"] == "job-emma-listed"
