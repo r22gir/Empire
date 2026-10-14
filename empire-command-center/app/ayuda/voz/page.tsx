@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AYUDA_OPENER } from '../../lib/ayudaCopy';
 
 const STEPS = [
   'Mantén presionado el micrófono en el chat. Al soltarlo, la nota se envía a transcribir.',
@@ -18,8 +19,9 @@ export default function ComoUsarLaVoz() {
       </nav>
       <p style={{ fontSize: 12, letterSpacing: 0.4, color: '#b8960c', fontWeight: 700, margin: 0 }}>CENTRO DE MANDO</p>
       <h1 style={{ fontSize: 32, margin: '8px 0' }}>Cómo usar la voz</h1>
+      <p data-ayuda-opener="1" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 26, margin: '8px 0 12px' }}>{AYUDA_OPENER}</p>
       <p style={{ fontSize: 16, lineHeight: 1.5 }}>
-        Max, Max-e y Maxine arman cotizaciones, facturas, contratos y planes de pago a partir de lo que dictas. El resultado es un borrador hasta que tú lo apruebas.
+        Maxine arma reservas, planes de pago y notas de obra a partir de lo que dictas. El resultado es un borrador hasta que tú lo apruebas. No escribe a compradores.
       </p>
       <ol style={{ paddingLeft: 20, lineHeight: 1.55 }}>
         {STEPS.map((step) => (
@@ -27,16 +29,13 @@ export default function ComoUsarLaVoz() {
         ))}
       </ol>
       <p style={{ fontSize: 14, color: '#444' }}>
-        En Maxine puedes separar un lote: “separar el lote 12 para Juan Pérez, cuota inicial 30%, saldo en 24 meses”. El precio tiene que decirlo tú. El estado del lote pasa a reservado, separado o vendido solo cuando lo confirmas.
+        Puedes separar un lote: “separar el lote 12, cuota inicial 30%, saldo en 24 meses”. El precio tiene que decirlo tú. El estado del lote pasa a reservado, separado o vendido solo cuando lo confirmas.
       </p>
       <p style={{ fontSize: 14, color: '#444' }}>
-        Max-e tiene dos empresas. En AMP dictas cursos, programas y membresías. En Cibernettic dictas propuestas, cotizaciones, SLA, NDA, tratamiento de datos, órdenes de trabajo y facturas en pesos o dólares. Si no se entiende cuál empresa es, Max-e pregunta. Las plantillas legales salen en blanco, marcadas BORRADOR, hasta que las reemplazas por las tuyas.
+        Las fotos de la obra se etiquetan con lote y etapa (cimentación, estructura, acabados). Google Photos solo trae lo que tú eliges. El borrador queda en la copia de trabajo de esta máquina y, si conectaste tu Drive, en tu carpeta Maxine/.
       </p>
       <p style={{ fontSize: 14, color: '#444' }}>
-        Max-e y Maxine guardan el borrador en la copia de trabajo de esta máquina y, si conectaste tu Google Drive, en tu carpeta Max-e/ o Maxine/. Las fotos de un proyecto se etiquetan con lote y etapa. Google Photos solo trae lo que tú eliges.
-      </p>
-      <p style={{ fontSize: 14, color: '#444' }}>
-        WhatsApp usa el número de esta instancia. Si las variables no están, el canal queda apagado. Las notas de voz arman el mismo borrador. El PDF sale solo cuando escribes que lo envíe. La guía está en docs/WHATSAPP_CHANNEL.md.
+        WhatsApp usa el número de esta instancia. No reutilices las llaves ni el número de Juan ni de Rafael. Si las variables no están, el canal queda apagado. Las notas de voz arman el mismo borrador. El PDF sale solo cuando escribes que lo envíe. La guía está en <Link href="/ayuda/whatsapp" style={{ color: '#b8960c', fontWeight: 700 }}>/ayuda/whatsapp</Link>.
       </p>
       <Link href="/" style={{ color: '#b8960c', fontWeight: 700 }}>Volver al centro de mando</Link>
     </main>

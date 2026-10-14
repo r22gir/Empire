@@ -297,8 +297,12 @@ process.stdout.write(renderWhatsAppSetupPage(process.env.EDITION || 'amp'));
             env={**os.environ, "EDITION": edition},
         )
         html = result.stdout
+        assert "¡Quiubo manito!" in html
+        assert "Hola Juan" not in html
+        assert "Hola Camilo" not in html
         assert "no la de Rafael" in html
         assert "solicitud segura" in html
+        assert "formulario seguro" in html
         assert host in html
         assert other not in html
         assert "WHATSAPP_ACCESS_TOKEN=" not in html
@@ -311,7 +315,8 @@ process.stdout.write(renderWhatsAppSetupPage(process.env.EDITION || 'amp'));
         if edition == "maxine":
             assert "construcción" in html
             assert "Max-e" not in html
-            assert "Camilo" in html
+            assert "Camilo" not in html
+            assert "Juan ni de Rafael" in html
         else:
             assert "Maxine" not in html
-            assert "Juan Diego" in html
+            assert "Juan Diego" not in html
