@@ -258,6 +258,9 @@ load_router("app.routers.custom_shapes", "/api/v1", ["custom-shapes"])
 # Drawing Studio — architectural bench drawings (SVG + PDF)
 load_router("app.routers.drawings", "/api/v1", ["drawings"])
 
+# Max 3D job viewer (preview draft; publish is founder-tap only)
+load_router("app.routers.job_viewer", "/api/v1", ["job-viewer"])
+
 # Voice notes → draft quote / drawing (same pipeline as Telegram voice)
 load_router("app.routers.voice_documents", "/api/v1", ["voice-documents"])
 

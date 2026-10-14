@@ -1,0 +1,4 @@
+code,color,material_type,width_inches,pattern_repeat_v,pattern_repeat_h,backing,specs,brand,supplier,supplier_sku,notes
+V003-Cognac,Cognac,vinyl,54,0.5625,0.75,,Basketweave vinyl,SecretBrand,Acme Textiles,AT-COG-003,Internal only
+V008-Charcoal,Charcoal,vinyl,54,0.5625,0.75,,Basketweave vinyl,SecretBrand,Acme Textiles,AT-CHR-008,Internal only
+F012-Navy,Navy,fabric,54,0,0,,Solid weave,HiddenMill,Northside Supply,NS-NVY-12,Internal only

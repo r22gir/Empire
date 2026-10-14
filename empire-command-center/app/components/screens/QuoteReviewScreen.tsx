@@ -17,6 +17,7 @@ import DocViewer from '../docs/DocViewer';
 import { orderByRoom } from '../docs/DocPaper';
 import { openRecord } from '../docs/recordBus';
 import { openDocViewer } from '../docs/viewerBus';
+import JobViewerButton from '../jobs/JobViewerButton';
 import { HudHeader, GaugeRow, RadialGauge, MaxStrip, fmtMoney, daysSince, type HudChip, type MaxSuggestion } from '../cyber/hud';
 
 interface UploadedPhoto {
@@ -654,7 +655,10 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder, onBack }: Pr
             convertLabel={invoiceNumber ? `Open ${invoiceNumber}` : 'Convert to invoice'}
             convertDisabledReason={invoiceNumber ? null : ['draft', 'founder_review'].includes(quote.status) ? 'Approve & send the quote first (founder PIN), then convert' : null}
             converting={creatingInvoice}
-            extraTools={onOpenBuilder ? <button type="button" className="dh-act" onClick={onOpenBuilder}><ExternalLink size={15} /> QuoteBuilder</button> : null}
+            extraTools={<>
+              <JobViewerButton quoteId={quote.id} compact />
+              {onOpenBuilder ? <button type="button" className="dh-act" onClick={onOpenBuilder}><ExternalLink size={15} /> QuoteBuilder</button> : null}
+            </>}
           />
         </div>
       ) : tab === 'pdf' ? (
