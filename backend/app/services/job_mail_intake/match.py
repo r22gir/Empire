@@ -1,4 +1,11 @@
-"""Match inbound mail to a job or client. Read-only against the local DB."""
+"""Match inbound mail to a job or client. Read-only against the local DB.
+
+A name alone (full or partial) never attaches. Attach requires an email,
+estimate number, job number, sidemark, or address match. A full first-and-
+last name may accompany one of those keys but is never enough by itself.
+Short / common job titles (Lobby, Living, Channel, …) are ignored.
+Ties or scores within 10 points go to review.
+"""
 
 from __future__ import annotations
 
@@ -8,9 +15,33 @@ from typing import Any, Optional
 
 from app.services.job_mail_intake.extract import extract_mail_facts
 
+COMMON_TITLE_WORDS = {
+    "lobby", "living", "room", "kitchen", "dining", "bedroom", "office",
+    "hall", "hallway", "bath", "bathroom", "master", "guest", "den",
+    "channel", "shop", "store", "house", "home", "suite", "unit",
+    "area", "space", "entry", "foyer", "patio", "porch",
+}
+
+STRONG_KEYS = {
+    "client_email",
+    "customer_email",
+    "address",
+    "customer_address",
+    "sidemark",
+    "job_number",
+}
+
+MIN_TITLE_LEN = 8
+MIN_ATTACH_SCORE = 40
+AMBIGUOUS_GAP = 10
+
 
 def _norm(value: Optional[str]) -> str:
     return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+
+def _name_parts(value: Optional[str]) -> list[str]:
+    return [t for t in re.findall(r"[a-z]+", _norm(value)) if len(t) >= 2]
 
 
 def _tokens(value: Optional[str]) -> set[str]:
@@ -62,6 +93,33 @@ def _job_blob(job: dict) -> str:
     ) + " " + str(meta)
 
 
+def _usable_title(title: str) -> bool:
+    t = _norm(title)
+    if not t or len(t) < MIN_TITLE_LEN:
+        return False
+    parts = _name_parts(t)
+    if parts and all(p in COMMON_TITLE_WORDS for p in parts):
+        return False
+    if t in COMMON_TITLE_WORDS:
+        return False
+    return True
+
+
+def _full_name_match(left: str, right: str) -> bool:
+    a = _name_parts(left)
+    b = _name_parts(right)
+    if len(a) < 2 or len(b) < 2:
+        return False
+    return a == b or (a[0] == b[0] and a[-1] == b[-1])
+
+
+def _has_strong_key(reason: str) -> bool:
+    parts = {p.strip() for p in (reason or "").split(",") if p.strip()}
+    if any(p.startswith("estimate:") or p == "estimate" for p in parts):
+        return True
+    return bool(parts & STRONG_KEYS)
+
+
 def _score_job(job: dict, *, name: str, email: str, facts: dict, blob: str) -> tuple[int, str]:
     score = 0
     reasons: list[str] = []
@@ -73,12 +131,9 @@ def _score_job(job: dict, *, name: str, email: str, facts: dict, blob: str) -> t
         reasons.append("client_email")
 
     cname = _norm(job.get("client_name") or job.get("customer_name") or "")
-    if name and cname and (cname in _norm(name) or _norm(name) in cname):
-        score += 50
-        reasons.append("client_name")
-    elif name and _tokens(name) & _tokens(cname):
-        score += 30
-        reasons.append("client_name_token")
+    if name and cname and _full_name_match(name, cname):
+        score += 20
+        reasons.append("client_full_name")
 
     addr = _addr_key(job.get("client_address") or job.get("address") or "")
     mail_addr = _addr_key(blob)
@@ -97,7 +152,7 @@ def _score_job(job: dict, *, name: str, email: str, facts: dict, blob: str) -> t
             reasons.append("sidemark")
 
     title = _norm(job.get("title") or "")
-    if title and len(title) >= 4 and title in _norm(blob):
+    if _usable_title(title) and title in _norm(blob):
         score += 25
         reasons.append("job_title")
 
@@ -147,25 +202,46 @@ def _load_quotes(conn) -> list[dict]:
     )
 
 
+def _unmatched(name: str, email: str, facts: dict, reason: str, score: int = 0) -> dict[str, Any]:
+    return {
+        "matched": False,
+        "confidence": score,
+        "reason": reason,
+        "job_id": None,
+        "job_title": None,
+        "job_number": None,
+        "customer_id": None,
+        "customer_name": None,
+        "from_name": name,
+        "from_email": email,
+        "facts": facts,
+        "sent": False,
+    }
+
+
 def match_message(conn, msg: dict) -> dict[str, Any]:
     """Return the best job/client match or an unmatched payload."""
     name, email = _parse_from(msg.get("from"))
     facts = extract_mail_facts(msg)
     blob = " ".join(str(msg.get(k) or "") for k in ("subject", "from", "preview", "body"))
 
-    best: Optional[dict] = None
-    best_score = 0
-    best_reason = ""
+    scored: list[tuple[int, str, dict]] = []
     for job in _load_jobs(conn):
         score, reason = _score_job(job, name=name, email=email, facts=facts, blob=blob)
-        if score > best_score:
-            best_score = score
-            best = job
-            best_reason = reason
+        if score > 0:
+            scored.append((score, reason, job))
+    scored.sort(key=lambda row: row[0], reverse=True)
+
+    best: Optional[dict] = scored[0][2] if scored else None
+    best_score = scored[0][0] if scored else 0
+    best_reason = scored[0][1] if scored else ""
+
+    if len(scored) >= 2 and scored[1][0] > 0 and best_score - scored[1][0] <= AMBIGUOUS_GAP:
+        return _unmatched(name, email, facts, "ambiguous", best_score)
 
     customer_id = None
     customer_name = None
-    if not best or best_score < 40:
+    if not best or best_score < MIN_ATTACH_SCORE or not _has_strong_key(best_reason):
         for cust in _load_customers(conn):
             cscore = 0
             creason = []
@@ -173,26 +249,25 @@ def match_message(conn, msg: dict) -> dict[str, Any]:
                 cscore += 80
                 creason.append("customer_email")
             cname = _norm(cust.get("name"))
-            if name and cname and (cname in _norm(name) or _norm(name) in cname):
-                cscore += 45
-                creason.append("customer_name")
+            if name and cname and _full_name_match(name, cname):
+                cscore += 20
+                creason.append("customer_full_name")
             caddr = _addr_key(cust.get("address"))
             if caddr and len(caddr) >= 8 and caddr in _addr_key(blob):
                 cscore += 40
                 creason.append("customer_address")
-            if cscore >= 40 and cscore > best_score:
+            if cscore >= MIN_ATTACH_SCORE and _has_strong_key(",".join(creason)) and cscore > best_score:
                 customer_id = cust.get("id")
                 customer_name = cust.get("name")
                 best_score = cscore
                 best_reason = ",".join(creason)
-                # Prefer a job for this customer if one exists
                 for job in _load_jobs(conn):
                     if job.get("customer_id") == customer_id:
                         best = job
                         best_reason = best_reason + ",customer_job"
                         break
 
-    if (not best or best_score < 40) and facts.get("estimate_numbers"):
+    if (not best or best_score < MIN_ATTACH_SCORE or not _has_strong_key(best_reason)) and facts.get("estimate_numbers"):
         for q in _load_quotes(conn):
             qn = (q.get("quote_number") or "").upper()
             if qn in {n.upper() for n in facts["estimate_numbers"]}:
@@ -207,12 +282,15 @@ def match_message(conn, msg: dict) -> dict[str, Any]:
                 customer_name = customer_name or q.get("customer_name")
                 if best:
                     break
-                # Quote matched but no job — still a client match
                 if q.get("customer_name"):
                     customer_id = customer_id or q.get("customer_id")
                     customer_name = customer_name or q.get("customer_name")
 
-    matched = bool(best and best_score >= 40)
+    has_strong = _has_strong_key(best_reason)
+    matched = bool(best and best_score >= MIN_ATTACH_SCORE and has_strong)
+    if best and best_score >= MIN_ATTACH_SCORE and not has_strong:
+        return _unmatched(name, email, facts, "name_only", best_score)
+
     return {
         "matched": matched,
         "confidence": best_score,

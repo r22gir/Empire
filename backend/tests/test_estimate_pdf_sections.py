@@ -25,6 +25,7 @@ def _quote() -> dict:
         "project_name": "Living room drapery",
         "status": "draft",
         "created_at": "2026-10-01",
+        "billed_by": "nelmas_workroom",
         "notes": notes,
         "line_items": [
             {"description": "SECTION — Drapery", "unit": "section"},
@@ -81,8 +82,8 @@ def test_rendered_quote_shows_qty_rate_and_keeps_notes_above_the_footer():
     flat = " ".join(text.split())
     squashed = "".join(text.split()).upper()
     # Letterhead is tracked, so the brand name is checked without spaces.
-    assert "EMPIREWORKROOM" in squashed
-    assert "NELMA" not in squashed
+    assert "NELMA" in squashed
+    assert "EMPIREWORKROOM" not in squashed
     assert "RAFAEL" not in squashed
     assert "DRAPERY" in squashed
     assert "HARDWARE" in squashed

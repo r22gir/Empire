@@ -23,7 +23,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 from app.config.workroom_billing import get_workroom_billing, resolve_billing
-from app.services.quote_service import get_quote, resolve_quote, upsert_legacy_quote
+from app.services.quote_service import get_quote
 from app.services.data_paths import quote_pdf_dir
 from app.services.pricing.dimensions import quote_item_dimension_text
 from app.services.fabric_codes import client_fabric_line
@@ -151,13 +151,9 @@ def generate_quote_pdf(quote_id: str) -> bytes:
     """
     from app.services.estimates.mclean_estimate_pdf import render_mclean_estimate_bytes
 
-    quote = get_quote(quote_id) or resolve_quote(quote_id)
+    quote = get_quote(quote_id)
     if not quote:
         raise FileNotFoundError(f"Quote {quote_id} not found")
-    try:
-        upsert_legacy_quote(quote)
-    except Exception:
-        pass
     pdf_bytes = render_mclean_estimate_bytes(quote)
     try:
         pdf_dir = str(quote_pdf_dir())

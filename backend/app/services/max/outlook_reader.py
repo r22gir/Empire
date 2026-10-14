@@ -62,7 +62,7 @@ _ALLOWED_PATHS = (
     re.compile(r"^/me/mailFolders/[A-Za-z0-9_\-=%]+/messages$"),
 )
 
-_LIST_FIELDS = "id,subject,from,receivedDateTime,bodyPreview,isRead,hasAttachments"
+_LIST_FIELDS = "id,subject,from,receivedDateTime,bodyPreview,isRead,hasAttachments,internetMessageId,conversationId"
 _READ_FIELDS = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments,webLink"
 MAX_BODY_CHARS = 8000
 
@@ -79,7 +79,9 @@ def tenant() -> str:
     return (os.getenv("OUTLOOK_TENANT") or DEFAULT_TENANT).strip()
 
 
-def token_path() -> Path:
+def token_path(override: Optional[str] = None) -> Path:
+    if override:
+        return Path(override).expanduser()
     env = os.getenv("OUTLOOK_TOKEN_PATH")
     if env:
         return Path(env).expanduser()
@@ -92,8 +94,8 @@ def _authority() -> str:
 
 # ── token storage ───────────────────────────────────────────────────────────
 
-def load_token() -> Optional[dict]:
-    p = token_path()
+def load_token(path: Optional[str] = None) -> Optional[dict]:
+    p = token_path(path)
     if not p.exists():
         return None
     try:
@@ -104,9 +106,9 @@ def load_token() -> Optional[dict]:
     return data if isinstance(data, dict) and data.get("refresh_token") else None
 
 
-def save_token(data: dict) -> Path:
+def save_token(data: dict, path: Optional[str] = None) -> Path:
     """Write the token file with 600 perms (dir 700), atomically."""
-    p = token_path()
+    p = token_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(p.parent, 0o700)
@@ -121,7 +123,7 @@ def save_token(data: dict) -> Path:
     return p
 
 
-def _store_token_response(resp: dict) -> dict:
+def _store_token_response(resp: dict, path: Optional[str] = None) -> dict:
     granted = str(resp.get("scope") or "")
     data = {
         "access_token": resp.get("access_token"),
@@ -132,7 +134,7 @@ def _store_token_response(resp: dict) -> dict:
         "tenant": tenant(),
         "saved_at": datetime.now(timezone.utc).isoformat(),
     }
-    save_token(data)
+    save_token(data, path)
     return data
 
 
@@ -191,8 +193,8 @@ def poll_device_code(flow: dict, http: Optional[httpx.Client] = None,
 
 # ── access token ────────────────────────────────────────────────────────────
 
-def _access_token(http: httpx.Client) -> str:
-    tok = load_token()
+def _access_token(http: httpx.Client, token_file: Optional[str] = None) -> str:
+    tok = load_token(token_file)
     if not tok:
         raise OutlookNotSignedIn(NOT_SIGNED_IN)
     if tok.get("access_token") and int(tok.get("expires_at") or 0) > time.time():
@@ -212,15 +214,15 @@ def _access_token(http: httpx.Client) -> str:
         raise RuntimeError(f"Outlook token refresh failed: {err}")
     if not data.get("refresh_token"):
         data["refresh_token"] = tok["refresh_token"]
-    return _store_token_response(data)["access_token"]
+    return _store_token_response(data, token_file)["access_token"]
 
 
 def _graph_get(http: httpx.Client, path: str, params: Optional[dict] = None,
-               headers: Optional[dict] = None) -> dict:
+               headers: Optional[dict] = None, token_file: Optional[str] = None) -> dict:
     """The ONLY way this module talks to Graph: GET on an allowlisted read path."""
     if not any(rx.match(path) for rx in _ALLOWED_PATHS):
         raise PermissionError(f"Outlook reader: path not allowed (read-only): {path}")
-    h = {"Authorization": f"Bearer {_access_token(http)}"}
+    h = {"Authorization": f"Bearer {_access_token(http, token_file)}"}
     if headers:
         h.update(headers)
     r = http.request("GET", GRAPH + path, params=params, headers=h)
@@ -265,7 +267,7 @@ def _parse_since(since: Optional[str]) -> Optional[str]:
     raise ValueError(f"since not understood: {since!r} (use YYYY-MM-DD, 7d, 24h, today)")
 
 
-def _folder_path(http: httpx.Client, folder: Optional[str]) -> str:
+def _folder_path(http: httpx.Client, folder: Optional[str], token_file: Optional[str] = None) -> str:
     if not folder:
         return "/me/messages"
     key = str(folder).strip().lower()
@@ -275,7 +277,8 @@ def _folder_path(http: httpx.Client, folder: Optional[str]) -> str:
         return f"/me/mailFolders/{WELL_KNOWN_FOLDERS[key]}/messages"
     name = str(folder).strip().replace("'", "''")
     data = _graph_get(http, "/me/mailFolders",
-                      params={"$filter": f"displayName eq '{name}'", "$select": "id,displayName"})
+                      params={"$filter": f"displayName eq '{name}'", "$select": "id,displayName"},
+                      token_file=token_file)
     vals = data.get("value") or []
     if not vals:
         raise ValueError(f"No Outlook folder named {folder!r}")
@@ -285,10 +288,11 @@ def _folder_path(http: httpx.Client, folder: Optional[str]) -> str:
 def search_messages(query: Optional[str] = None, folder: Optional[str] = None,
                     since: Optional[str] = None, limit: int = 10,
                     from_sender: Optional[str] = None, unread_only: bool = False,
-                    http: Optional[httpx.Client] = None) -> dict:
+                    http: Optional[httpx.Client] = None,
+                    token_path: Optional[str] = None) -> dict:
     limit = max(1, min(int(limit or 10), 50))
     c = http or httpx.Client(timeout=TIMEOUT)
-    path = _folder_path(c, folder)
+    path = _folder_path(c, folder, token_file=token_path)
     since_iso = _parse_since(since)
     params: dict = {"$top": str(limit), "$select": _LIST_FIELDS}
     headers: dict = {}
@@ -315,7 +319,7 @@ def search_messages(query: Optional[str] = None, folder: Optional[str] = None,
         if filters:
             params["$filter"] = " and ".join(filters)
         params["$orderby"] = "receivedDateTime desc"
-    data = _graph_get(c, path, params=params, headers=headers or None)
+    data = _graph_get(c, path, params=params, headers=headers or None, token_file=token_path)
     msgs = []
     for m in (data.get("value") or [])[:limit]:
         msgs.append({
@@ -326,6 +330,8 @@ def search_messages(query: Optional[str] = None, folder: Optional[str] = None,
             "preview": (m.get("bodyPreview") or "")[:300],
             "unread": not m.get("isRead", True),
             "has_attachments": bool(m.get("hasAttachments")),
+            "rfc_message_id": m.get("internetMessageId") or "",
+            "thread_id": m.get("conversationId") or "",
         })
     return {"success": True, "source": "outlook", "count": len(msgs), "emails": msgs,
             "query": query, "from_sender": from_sender, "folder": folder or "all", "since": since}

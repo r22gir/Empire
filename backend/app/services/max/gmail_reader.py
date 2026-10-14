@@ -29,25 +29,47 @@ def _configured_path(env_name: str, default_path: Path) -> Path:
     return default_path
 
 
-def get_oauth_paths() -> dict:
-    """Return non-secret Gmail OAuth path metadata for status endpoints."""
-    token_env = bool(os.getenv("GMAIL_TOKEN_PATH"))
-    credentials_env = bool(os.getenv("GMAIL_CREDENTIALS_PATH"))
-    token_path = _configured_path("GMAIL_TOKEN_PATH", DEFAULT_TOKEN_FILE)
-    credentials_path = _configured_path("GMAIL_CREDENTIALS_PATH", DEFAULT_CREDS_FILE)
+def get_oauth_paths(
+    token_path: Optional[str] = None,
+    credentials_path: Optional[str] = None,
+) -> dict:
+    """Return non-secret Gmail OAuth path metadata for status endpoints.
+
+    Explicit ``token_path`` / ``credentials_path`` win over env and never
+    mutate process environment.
+    """
+    if token_path:
+        resolved_token = Path(token_path).expanduser()
+        token_env = False
+        token_source = "explicit token_path"
+    else:
+        token_env = bool(os.getenv("GMAIL_TOKEN_PATH"))
+        resolved_token = _configured_path("GMAIL_TOKEN_PATH", DEFAULT_TOKEN_FILE)
+        token_source = "GMAIL_TOKEN_PATH" if token_env else "canonical backend token.json"
+    if credentials_path:
+        resolved_creds = Path(credentials_path).expanduser()
+        credentials_env = False
+        creds_source = "explicit credentials_path"
+    else:
+        credentials_env = bool(os.getenv("GMAIL_CREDENTIALS_PATH"))
+        resolved_creds = _configured_path("GMAIL_CREDENTIALS_PATH", DEFAULT_CREDS_FILE)
+        creds_source = "GMAIL_CREDENTIALS_PATH" if credentials_env else "canonical backend credentials.json"
     return {
-        "token_path": token_path,
-        "credentials_path": credentials_path,
-        "token_path_source": "GMAIL_TOKEN_PATH" if token_env else "canonical backend token.json",
-        "credentials_path_source": "GMAIL_CREDENTIALS_PATH" if credentials_env else "canonical backend credentials.json",
+        "token_path": resolved_token,
+        "credentials_path": resolved_creds,
+        "token_path_source": token_source,
+        "credentials_path_source": creds_source,
         "token_env_configured": token_env,
         "credentials_env_configured": credentials_env,
-        "token_exists": token_path.exists(),
-        "credentials_exists": credentials_path.exists(),
+        "token_exists": resolved_token.exists(),
+        "credentials_exists": resolved_creds.exists(),
     }
 
 
-def _get_service():
+def _get_service(
+    token_path: Optional[str] = None,
+    credentials_path: Optional[str] = None,
+):
     """Build Gmail API service from saved OAuth2 token."""
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -55,7 +77,7 @@ def _get_service():
     from google_auth_httplib2 import AuthorizedHttp
     import httplib2
 
-    paths = get_oauth_paths()
+    paths = get_oauth_paths(token_path=token_path, credentials_path=credentials_path)
     token_file = paths["token_path"]
     if not paths["token_exists"]:
         raise RuntimeError(
@@ -113,6 +135,8 @@ def _check_inbox_sync(
     from_sender: Optional[str] = None,
     query: Optional[str] = None,
     disable_default_to_filter: bool = False,
+    token_path: Optional[str] = None,
+    credentials_path: Optional[str] = None,
 ) -> dict:
     """Internal sync implementation — always run in a thread.
 
@@ -133,7 +157,7 @@ def _check_inbox_sync(
     old_timeout = socket.getdefaulttimeout()
     socket.setdefaulttimeout(_GMAIL_TIMEOUT)
     try:
-        service = _get_service()
+        service = _get_service(token_path=token_path, credentials_path=credentials_path)
 
         results = service.users().messages().list(
             userId="me", q=query, maxResults=limit
@@ -144,11 +168,12 @@ def _check_inbox_sync(
         for msg_ref in message_ids:
             msg = service.users().messages().get(
                 userId="me", id=msg_ref["id"], format="metadata",
-                metadataHeaders=["From", "To", "Subject", "Date", "List-Unsubscribe", "List-Id"],
+                metadataHeaders=["From", "To", "Subject", "Date", "List-Unsubscribe", "List-Id", "Message-ID"],
             ).execute()
 
             headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
             snippet = msg.get("snippet", "")
+            rfc_id = headers.get("Message-ID") or headers.get("Message-Id") or ""
 
             emails.append({
                 "id": msg_ref["id"],
@@ -161,6 +186,7 @@ def _check_inbox_sync(
                 "unread": "UNREAD" in msg.get("labelIds", []),
                 "labels": msg.get("labelIds", []),
                 "list_unsubscribe": headers.get("List-Unsubscribe", ""),
+                "rfc_message_id": rfc_id,
             })
 
         unread_total = 0
@@ -193,12 +219,14 @@ def check_inbox(
     from_sender: Optional[str] = None,
     query: Optional[str] = None,
     disable_default_to_filter: bool = False,
+    token_path: Optional[str] = None,
+    credentials_path: Optional[str] = None,
 ) -> dict:
     """Fetch recent emails with a hard 15s timeout. Thread-safe, never blocks event loop."""
     try:
         future = _executor.submit(
             _check_inbox_sync, limit, unread_only, filter_to, from_sender, query,
-            disable_default_to_filter,
+            disable_default_to_filter, token_path, credentials_path,
         )
         return future.result(timeout=15)
     except FuturesTimeout:

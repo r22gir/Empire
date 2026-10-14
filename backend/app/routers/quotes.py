@@ -257,10 +257,15 @@ def _load_quote(quote_id: str) -> dict:
     raise HTTPException(404, f"Quote {quote_id} not found")
 
 
-def _save_quote(quote: dict):
+def _write_quote_json(quote: dict):
+    """Write the JSON sidecar only. Does not import into quotes_v2."""
     with open(_quote_path(quote["id"]), "w") as f:
         json.dump(quote, f, indent=2, default=str)
-    # Keep the PDF / quotes-v2 store in sync with the standard create path.
+
+
+def _save_quote(quote: dict):
+    _write_quote_json(quote)
+    # Dual-write: create/update path keeps quotes_v2 in sync.
     try:
         from app.services.quote_service import upsert_legacy_quote
         upsert_legacy_quote(quote)
@@ -818,24 +823,26 @@ def _attach_photo_analysis_to_quote(quote_id: str, analysis: dict) -> bool:
     found in either — the caller still returns the analysis either way.
     """
     items = analysis.get("items", [])
+    found = False
     try:
         from app.services.quote_service import get_quote as _get_quote_v2, update_quote as _update_quote_v2
         if _get_quote_v2(quote_id):
             _update_quote_v2(quote_id, {"ai_outlines": items})
-            return True
+            found = True
     except Exception:
         pass
-    try:
-        existing = _load_quote(quote_id)
-    except HTTPException:
-        return False
-    existing["ai_outlines"] = items
-    existing["updated_at"] = datetime.utcnow().isoformat()
-    try:
-        _save_quote(existing)
-        return True
-    except Exception:
-        return False
+    path = _quote_path(quote_id)
+    if os.path.exists(path):
+        try:
+            with open(path) as handle:
+                existing = json.load(handle)
+            existing["ai_outlines"] = items
+            existing["updated_at"] = datetime.utcnow().isoformat()
+            _write_quote_json(existing)
+            return True
+        except Exception:
+            return found
+    return found
 
 
 @router.post("/analyze-photo")

@@ -80,6 +80,8 @@ class MaxScheduler:
             CronTrigger(minute="*/15"),
             id="job_mail_intake",
             name="Job Mail Intake (read-only)",
+            max_instances=1,
+            coalesce=True,
         )
 
         # Every 5 minutes — Organizer due-date reminders through notify_founder
@@ -424,9 +426,14 @@ class MaxScheduler:
 
     async def run_job_mail_intake(self):
         """Read connected inboxes and attach job notes. Never sends."""
+        if os.getenv("JOB_MAIL_INTAKE_ENABLED", "1").strip().lower() not in {
+            "1", "true", "yes", "on",
+        }:
+            logger.info("Job-mail intake skipped: disabled")
+            return
         try:
             from app.services.job_mail_intake.service import run_intake
-            result = run_intake()
+            result = await asyncio.to_thread(run_intake)
             logger.info(
                 "Job-mail intake: scanned=%s matched=%s unmatched=%s sent=%s",
                 result.get("scanned"),
@@ -435,7 +442,7 @@ class MaxScheduler:
                 result.get("sent"),
             )
         except Exception as e:
-            logger.error(f"Job-mail intake failed: {e}")
+            logger.error("Job-mail intake failed: %s", type(e).__name__)
 
     async def expire_crypto_payments(self):
         """Run every 15 minutes to expire stale pending crypto payments."""

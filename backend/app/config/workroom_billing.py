@@ -89,7 +89,18 @@ class WorkroomBilling:
 
     @property
     def chrome_subheader_upper(self) -> str:
-        return "CUSTOM UPHOLSTERY & FABRICATION"
+        if self.billed_by == BILLED_BY_EMPIRE:
+            return "CUSTOM UPHOLSTERY & FABRICATION"
+        return (self.tagline or "").upper()
+
+    @property
+    def chrome_locale(self) -> str:
+        if self.billed_by == BILLED_BY_EMPIRE:
+            return "HYATTSVILLE MD"
+        addr = (self.address or "").strip()
+        if not addr:
+            return ""
+        return addr.upper()
 
     @property
     def signature_phone_plain(self) -> str:
@@ -222,23 +233,43 @@ def resolve_quote_billing(quote: Optional[dict] = None) -> WorkroomBilling:
     edition = quote.get("edition") or meta.get("edition")
     empire_aliases = {"", "empire_workroom", "empire", "workroom", BILLED_BY_EMPIRE}
 
+    def _own(quote: dict, meta: dict, key: str) -> dict:
+        return {
+            "address": quote.get("business_address") or meta.get("business_address") or "",
+            "phone": quote.get("business_phone") or meta.get("business_phone") or "",
+            "email": quote.get("business_email") or meta.get("business_email") or "",
+            "website": client_facing_website(
+                quote.get("business_website") or meta.get("business_website") or ""
+            ) if (quote.get("business_website") or meta.get("business_website")) else "",
+            "tagline": quote.get("business_tagline") or meta.get("business_tagline") or "",
+        }
+
     def _custom(name: str, key: str) -> WorkroomBilling:
-        base = resolve_billing(None)
+        own = _own(quote, meta, key)
         return WorkroomBilling(
             billed_by=key,
             name=name,
-            address=base.address,
-            phone=base.phone,
-            email=base.email,
-            website=base.website,
-            tagline=base.tagline,
+            address=own["address"],
+            phone=own["phone"],
+            email=own["email"],
+            website=own["website"],
+            tagline=own["tagline"],
         )
 
     if billed:
         raw = str(billed).strip()
         compact = raw.lower().replace(" ", "_").replace("'", "")
         if "nelma" in compact:
-            return resolve_billing(BILLED_BY_NELMA)
+            own = _own(quote, meta, BILLED_BY_NELMA)
+            return WorkroomBilling(
+                billed_by=BILLED_BY_NELMA,
+                name=_NELMA_NAME,
+                address=own["address"],
+                phone=own["phone"] or _NELMA_PHONE,
+                email=own["email"],
+                website=own["website"],
+                tagline=own["tagline"],
+            )
         if compact in empire_aliases:
             return resolve_billing(BILLED_BY_EMPIRE)
         if raw and "empire" not in raw.lower():
@@ -248,7 +279,16 @@ def resolve_quote_billing(quote: Optional[dict] = None) -> WorkroomBilling:
     if edition and str(edition).strip().lower() not in {"", "main", "empire", "workroom"}:
         ed = str(edition).strip()
         if "nelma" in ed.lower():
-            return resolve_billing(BILLED_BY_NELMA)
+            own = _own(quote, meta, BILLED_BY_NELMA)
+            return WorkroomBilling(
+                billed_by=BILLED_BY_NELMA,
+                name=_NELMA_NAME,
+                address=own["address"],
+                phone=own["phone"] or _NELMA_PHONE,
+                email=own["email"],
+                website=own["website"],
+                tagline=own["tagline"],
+            )
         label = meta.get("edition_label") or quote.get("business_name")
         if label and "empire" not in str(label).lower():
             return _custom(str(label), ed.lower().replace(" ", "_")[:40])

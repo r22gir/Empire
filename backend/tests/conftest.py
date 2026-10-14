@@ -133,6 +133,7 @@ _DATA_TABLES = [
     "jmi_calendar_proposals",
     "jmi_supplier_order_events",
     "jmi_timeline_notes",
+    "jmi_scan_state",
     "payments_v2",
     "financial_audit_log",
     "chart_of_accounts",

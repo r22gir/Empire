@@ -466,6 +466,7 @@ def _paint_page_chrome(c: canvas.Canvas, quote: Dict[str, Any], page: int, pages
         rev=_quote_rev(quote),
         date=created,
         status=_status_banner(quote),
+        locale=bill.chrome_locale,
     )
     # Estimate meta strip under header
     serif_b, sans, sans_b, mono = _ensure_body_fonts()
@@ -1273,6 +1274,14 @@ def _line_sqft(it: Dict[str, Any]) -> Tuple[float | None, float | None]:
                     if _num(src.get(k)) is not None), None)
         if sq is not None:
             return sq, pps
+        width = _num(src.get("width"))
+        height = _num(src.get("height"))
+        if width is not None and height is not None and width > 0 and height > 0:
+            if width <= 240 and height <= 240:
+                computed = (width * height) / 144.0
+            else:
+                computed = width * height
+            return computed, pps
     unit = str(it.get("unit") or "").strip().lower()
     if unit in _SQFT_UNITS:
         return _num(it.get("quantity")), _line_rate(it)
@@ -1425,8 +1434,8 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
 
     sections = group_estimate_sections(items)
     global _SQFT_DESC_W
-    # Always use the area-grouped 6-column layout the founder asked for.
-    sqft_mode = True
+    # Sq ft column only when a line has sq_ft or both width and height.
+    sqft_mode = _sqft_layout(sections)
     # Description | Qty | Unit | Sq ft | Price | Total
     total_x = PW - MARGIN_R
     price_x = total_x - 92
@@ -1638,14 +1647,9 @@ def generate_mclean_estimate_pdf(quote_id: str, save: bool = True) -> bytes:
     from app.services.quote_service import get_quote
     from app.services.data_paths import quote_pdf_dir
 
-    from app.services.quote_service import resolve_quote, upsert_legacy_quote
-    quote = get_quote(quote_id) or resolve_quote(quote_id)
+    quote = get_quote(quote_id)
     if not quote:
         raise FileNotFoundError(f"Quote {quote_id} not found")
-    try:
-        upsert_legacy_quote(quote)
-    except Exception:
-        pass
 
     pdf_bytes = render_mclean_estimate_bytes(quote)
 

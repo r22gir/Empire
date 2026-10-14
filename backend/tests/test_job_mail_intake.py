@@ -128,7 +128,8 @@ def test_tracking_becomes_supplier_order_event():
     with get_db() as conn:
         _seed_job(conn)
         run_intake(messages=[{
-            "source": "gmail_personal",
+            "source": "gmail_business",
+            "account": "business",
             "message_id": "m-track-1",
             "from": "UPS <mcinfo@ups.com>",
             "subject": "Your order for EST-2026-410 has shipped",
@@ -174,3 +175,212 @@ def test_module_never_imports_senders():
         for banned in FORBIDDEN_SEND_NAMES:
             assert banned not in text
     assert os.getenv("EMPIRE_TASK_DB", "").startswith(("/tmp", "/var/tmp")) or "empire_test" in os.getenv("EMPIRE_TASK_DB", "")
+
+
+def test_name_alone_does_not_attach_lauren_smith_to_lauren_jones():
+    from app.services.job_mail_intake.match import match_message
+    with get_db() as conn:
+        ensure_schema(conn)
+        conn.execute(
+            """INSERT INTO customers (id, name, email, address)
+               VALUES ('cust-lj', 'Lauren Jones', 'lauren.jones@example.com', '9 Oak Ave')"""
+        )
+        try:
+            conn.execute(
+                """INSERT INTO jobs
+                   (id, title, customer_id, status, client_name, client_email, client_address)
+                   VALUES ('job-lj', 'Lauren Jones drapery', 'cust-lj', 'pending',
+                           'Lauren Jones', 'lauren.jones@example.com', '9 Oak Ave')"""
+            )
+        except Exception:
+            conn.execute(
+                """INSERT INTO jobs (id, title, customer_id, status, notes)
+                   VALUES ('job-lj', 'Lauren Jones drapery', 'cust-lj', 'pending',
+                           'Lauren Jones lauren.jones@example.com')"""
+            )
+        result = match_message(conn, {
+            "from": "Lauren Smith <lauren.smith@other.test>",
+            "subject": "Checking in",
+            "preview": "Hi, this is Lauren Smith about a sofa.",
+        })
+        assert result["matched"] is False
+        assert result["job_id"] is None
+
+
+def test_channel_in_supplier_email_does_not_match_client_channel():
+    from app.services.job_mail_intake.match import match_message
+    with get_db() as conn:
+        ensure_schema(conn)
+        conn.execute(
+            """INSERT INTO customers (id, name, email, address)
+               VALUES ('cust-ch', 'Channel', 'client@channel-home.test', '1 Harbor Way')"""
+        )
+        try:
+            conn.execute(
+                """INSERT INTO jobs
+                   (id, title, customer_id, status, client_name, client_email)
+                   VALUES ('job-ch', 'Channel', 'cust-ch', 'pending', 'Channel',
+                           'client@channel-home.test')"""
+            )
+        except Exception:
+            conn.execute(
+                """INSERT INTO jobs (id, title, customer_id, status, notes)
+                   VALUES ('job-ch', 'Channel', 'cust-ch', 'pending', 'Channel client')"""
+            )
+        result = match_message(conn, {
+            "from": "Sales <orders@rowleycompany.com>",
+            "subject": "New Channel collection swatches",
+            "preview": "Browse the Channel book for this season.",
+        })
+        assert result["matched"] is False
+        assert result["job_id"] is None
+
+
+def test_second_intake_on_same_messages_adds_nothing():
+    with get_db() as conn:
+        _seed_job(conn)
+        messages = [{
+            "source": "gmail_business",
+            "account": "business",
+            "message_id": "gmail-1",
+            "rfc_message_id": "<same-rfc@mail.test>",
+            "from": "Nehal Elrefai <nehal@example.com>",
+            "subject": "Re: Living room — EST-2026-410",
+            "preview": "Confirming the install at 100 Main Street McLean VA.",
+            "date": "2026-10-14",
+        }, {
+            "source": "outlook",
+            "account": "outlook",
+            "message_id": "outlook-other-id",
+            "rfc_message_id": "<same-rfc@mail.test>",
+            "from": "Nehal Elrefai <nehal@example.com>",
+            "subject": "Re: Living room — EST-2026-410",
+            "preview": "Confirming the install at 100 Main Street McLean VA.",
+            "date": "2026-10-14",
+        }]
+        first = run_intake(messages=messages, conn=conn)
+        notes_after_first = list_timeline_notes(conn, job_id="job-nehal")["count"]
+        cals_after_first = list_calendar_proposals(conn)["count"]
+        suppliers_after_first = list_supplier_events(conn, job_id="job-nehal")["count"]
+        second = run_intake(messages=messages, conn=conn)
+        assert first["matched"] >= 1
+        assert second["duplicates"] == len(messages)
+        assert second["matched"] == 0
+        assert second["unmatched"] == 0
+        assert list_timeline_notes(conn, job_id="job-nehal")["count"] == notes_after_first
+        assert list_calendar_proposals(conn)["count"] == cals_after_first
+        assert list_supplier_events(conn, job_id="job-nehal")["count"] == suppliers_after_first
+
+
+def test_approve_calendar_proposal_stays_pending_when_insert_fails(monkeypatch):
+    with get_db() as conn:
+        _seed_job(conn)
+        run_intake(messages=[{
+            "source": "gmail_business",
+            "message_id": "m-cal-fail",
+            "from": "Nehal Elrefai <nehal@example.com>",
+            "subject": "Re: EST-2026-410",
+            "preview": "Install by November 3, 2026 at 100 Main Street McLean VA.",
+            "date": "2026-10-14",
+        }], conn=conn)
+        cals = list_calendar_proposals(conn)
+        assert cals["count"] >= 1
+        pid = cals["items"][0]["id"]
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("organizer down")
+
+        monkeypatch.setattr("app.services.organizer.store.insert_item", _boom)
+        result = approve_calendar_proposal(pid, conn=conn, approved_by="founder")
+        assert result["ok"] is False
+        assert result["status"] == "pending"
+        row = dict(conn.execute(
+            "SELECT status, approved_by FROM jmi_calendar_proposals WHERE id = ?", (pid,)
+        ).fetchone())
+        assert row["status"] == "pending"
+        assert not row.get("approved_by")
+
+
+def test_job_mail_routes_are_founder_only(monkeypatch):
+    monkeypatch.setenv("FOUNDER_PIN", "246810")
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    denied = client.get("/api/v1/job-mail/review-queue")
+    assert denied.status_code in (403, 503)
+    denied_run = client.post("/api/v1/job-mail/run")
+    assert denied_run.status_code in (403, 503)
+    ok = client.get("/api/v1/job-mail/review-queue", headers={"X-Founder-Pin": "246810"})
+    assert ok.status_code == 200
+
+
+def test_approve_records_who_approved():
+    with get_db() as conn:
+        _seed_job(conn)
+        run_intake(messages=[{
+            "source": "gmail_business",
+            "message_id": "m-cal-ok",
+            "from": "Nehal Elrefai <nehal@example.com>",
+            "subject": "Re: EST-2026-410",
+            "preview": "Install by December 1, 2026 at 100 Main Street McLean VA.",
+            "date": "2026-10-14",
+        }], conn=conn)
+        pid = list_calendar_proposals(conn)["items"][0]["id"]
+        result = approve_calendar_proposal(pid, conn=conn, approved_by="founder")
+        if result.get("ok"):
+            row = dict(conn.execute(
+                "SELECT approved_by, status FROM jmi_calendar_proposals WHERE id = ?", (pid,)
+            ).fetchone())
+            assert row["status"] == "approved"
+            assert row["approved_by"] == "founder"
+
+
+def test_personal_inbox_off_by_default(monkeypatch, tmp_path):
+    monkeypatch.delenv("JOB_MAIL_PERSONAL_INBOX", raising=False)
+    from app.services.job_mail_intake.readers import personal_inbox_enabled, _connected_paths
+    assert personal_inbox_enabled() is False
+    token = tmp_path / "personal-token.json"
+    token.write_text("{}")
+    monkeypatch.setenv("GMAIL_PERSONAL_TOKEN_PATH", str(token))
+    paths = _connected_paths()
+    assert paths.get("gmail_personal") is None
+
+
+def test_readers_never_mutate_token_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("GMAIL_TOKEN_PATH", "/original/business.json")
+    from app.services.job_mail_intake import readers as rdr
+
+    def _fake_check(**kwargs):
+        assert kwargs.get("token_path") == str(tmp_path / "other.json")
+        assert os.environ.get("GMAIL_TOKEN_PATH") == "/original/business.json"
+        return {"success": True, "emails": []}
+
+    monkeypatch.setattr("app.services.max.gmail_reader.check_inbox", _fake_check)
+    rdr._fetch_gmail("business", str(tmp_path / "other.json"))
+    assert os.environ.get("GMAIL_TOKEN_PATH") == "/original/business.json"
+
+
+def test_account_stored_and_personal_preview_stays_out_of_job_events():
+    with get_db() as conn:
+        _seed_job(conn)
+        run_intake(messages=[{
+            "source": "gmail_personal",
+            "account": "personal",
+            "message_id": "m-personal-1",
+            "from": "Nehal Elrefai <nehal@example.com>",
+            "subject": "Re: EST-2026-410 private note",
+            "preview": "PERSONAL-PREVIEW-SECRET about 100 Main Street McLean VA",
+            "date": "2026-10-14",
+        }], conn=conn)
+        notes = list_timeline_notes(conn, job_id="job-nehal")
+        assert notes["count"] >= 1
+        assert notes["items"][0]["account"] == "personal"
+        events = conn.execute(
+            "SELECT summary, metadata FROM job_events WHERE job_id = ?",
+            ("job-nehal",),
+        ).fetchall()
+        blob = " ".join(
+            f"{row[0] or ''} {row[1] or ''}" for row in events
+        )
+        assert "PERSONAL-PREVIEW-SECRET" not in blob
