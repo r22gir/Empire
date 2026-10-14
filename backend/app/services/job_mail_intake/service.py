@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from app.db.database import get_db
+from app.services.job_mail_intake.extract import extract_mail_facts
+from app.services.job_mail_intake.filters import is_internal_mail, noise_reason, parse_from_header
 from app.services.job_mail_intake.match import match_message
 from app.services.job_mail_intake.readers import (
     OUTBOUND_POLICY,
@@ -18,6 +20,8 @@ from app.services.job_mail_intake.readers import (
     connected_accounts,
     fetch_raw_messages,
     intake_enabled,
+    outlook_inbox_enabled,
+    personal_inbox_enabled,
 )
 from app.services.job_mail_intake.schema import ensure_schema
 
@@ -32,6 +36,7 @@ __all__ = [
     "list_review_queue",
     "list_supplier_events",
     "list_timeline_notes",
+    "intake_status",
     "run_intake",
 ]
 
@@ -118,6 +123,89 @@ def _add_job_event(conn, job_id: str, event_type: str, summary: str, metadata: O
         pass
 
 
+def _supplier_event_type(facts: dict) -> str:
+    if facts.get("tracking_numbers"):
+        return "tracking"
+    if facts.get("invoice_numbers"):
+        return "invoice"
+    return "order_confirmation"
+
+
+def _should_record_supplier(facts: dict) -> bool:
+    return bool(
+        facts.get("is_supplier_order")
+        or facts.get("tracking_numbers")
+        or facts.get("order_numbers")
+        or facts.get("invoice_numbers")
+    )
+
+
+def _record_supplier_event(conn, msg: dict, match: dict, facts: dict, *, personal: bool) -> list[str]:
+    if not _should_record_supplier(facts):
+        return []
+    fp = _fingerprint(msg)
+    rfc_id = _rfc_message_id(msg)
+    account = _account(msg)
+    job_id = match.get("job_id")
+    tracks = facts.get("tracking_numbers") or [None]
+    orders = facts.get("order_numbers") or facts.get("invoice_numbers") or [None]
+    event_type = _supplier_event_type(facts)
+    if event_type == "order_confirmation":
+        preview = (msg.get("preview") or msg.get("body") or "")[:400]
+        low = preview.lower() + " " + (msg.get("subject") or "").lower()
+        if "receipt" in low:
+            event_type = "receipt"
+        elif "invoice" in low:
+            event_type = "invoice"
+    who = match.get("from_name") or match.get("from_email") or "unknown"
+    preview = (msg.get("preview") or msg.get("body") or "")[:400]
+    sid = _new_id()
+    conn.execute(
+        """INSERT OR IGNORE INTO jmi_supplier_order_events
+           (id, job_id, customer_id, customer_name, source, account, message_id,
+            rfc_message_id, fingerprint, event_type, tracking_number, order_number,
+            supplier_name, excerpt, sent)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+        (
+            sid,
+            job_id,
+            match.get("customer_id"),
+            match.get("customer_name"),
+            msg.get("source"),
+            account,
+            str(msg.get("message_id") or ""),
+            rfc_id or None,
+            fp,
+            event_type,
+            (tracks[0] if tracks and tracks[0] else None),
+            (orders[0] if orders and orders[0] else None),
+            who,
+            preview if not personal else None,
+        ),
+    )
+    ids = []
+    row = conn.execute(
+        "SELECT id FROM jmi_supplier_order_events WHERE fingerprint = ?", (fp,)
+    ).fetchone()
+    if row:
+        ids.append(dict(row)["id"] if not isinstance(row, str) else row[0])
+    if job_id and not personal:
+        _add_job_event(
+            conn,
+            job_id,
+            "supplier_order",
+            f"Supplier {event_type}: {tracks[0] or orders[0] or (msg.get('subject') or '')}",
+            {
+                "account": account,
+                "customer_id": match.get("customer_id"),
+                "tracking_numbers": facts.get("tracking_numbers"),
+                "order_numbers": facts.get("order_numbers"),
+                "sent": False,
+            },
+        )
+    return ids
+
+
 def _record_processed(conn, msg: dict, match: dict, kind: str) -> None:
     conn.execute(
         """INSERT OR IGNORE INTO jmi_processed
@@ -155,17 +243,29 @@ def _upsert_scan(conn, **fields) -> None:
         "backoff_until": existing.get("backoff_until"),
         "fail_count": existing.get("fail_count") or 0,
         "last_error_type": existing.get("last_error_type"),
+        "last_scanned": existing.get("last_scanned") or 0,
+        "last_matched": existing.get("last_matched") or 0,
+        "last_unmatched": existing.get("last_unmatched") or 0,
+        "last_duplicates": existing.get("last_duplicates") or 0,
+        "last_ignored": existing.get("last_ignored") or 0,
     }
     payload.update(fields)
     conn.execute(
         """INSERT INTO jmi_scan_state
-           (id, last_success_at, backoff_until, fail_count, last_error_type, updated_at)
-           VALUES (?, ?, ?, ?, ?, datetime('now'))
+           (id, last_success_at, backoff_until, fail_count, last_error_type,
+            last_scanned, last_matched, last_unmatched, last_duplicates, last_ignored,
+            updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
            ON CONFLICT(id) DO UPDATE SET
              last_success_at = excluded.last_success_at,
              backoff_until = excluded.backoff_until,
              fail_count = excluded.fail_count,
              last_error_type = excluded.last_error_type,
+             last_scanned = excluded.last_scanned,
+             last_matched = excluded.last_matched,
+             last_unmatched = excluded.last_unmatched,
+             last_duplicates = excluded.last_duplicates,
+             last_ignored = excluded.last_ignored,
              updated_at = datetime('now')""",
         (
             SCAN_ROW,
@@ -173,6 +273,11 @@ def _upsert_scan(conn, **fields) -> None:
             payload.get("backoff_until"),
             int(payload.get("fail_count") or 0),
             payload.get("last_error_type"),
+            int(payload.get("last_scanned") or 0),
+            int(payload.get("last_matched") or 0),
+            int(payload.get("last_unmatched") or 0),
+            int(payload.get("last_duplicates") or 0),
+            int(payload.get("last_ignored") or 0),
         ),
     )
 
@@ -212,7 +317,50 @@ def _record_fetch_error(conn, exc: BaseException) -> dict:
         "matched": 0,
         "unmatched": 0,
         "duplicates": 0,
+        "ignored": 0,
         "results": [],
+    }
+
+
+def _empty_result(**extra) -> dict:
+    payload = {
+        "read_only": True,
+        "sent": False,
+        "outbound_policy": OUTBOUND_POLICY,
+        "scanned": 0,
+        "matched": 0,
+        "unmatched": 0,
+        "duplicates": 0,
+        "ignored": 0,
+        "results": [],
+    }
+    payload.update(extra)
+    return payload
+
+
+def _summarize(conn, scanned: int, results: list) -> dict:
+    matched = sum(1 for r in results if r.get("status") == "matched")
+    unmatched = sum(1 for r in results if r.get("status") == "unmatched")
+    duplicates = sum(1 for r in results if r.get("status") == "duplicate")
+    ignored = sum(1 for r in results if r.get("status") == "ignored")
+    logger.warning(
+        "job-mail scan: scanned=%s matched=%s unmatched=%s duplicates=%s ignored=%s",
+        scanned, matched, unmatched, duplicates, ignored,
+    )
+    _upsert_scan(
+        conn,
+        last_scanned=scanned,
+        last_matched=matched,
+        last_unmatched=unmatched,
+        last_duplicates=duplicates,
+        last_ignored=ignored,
+    )
+    return {
+        "scanned": scanned,
+        "matched": matched,
+        "unmatched": unmatched,
+        "duplicates": duplicates,
+        "ignored": ignored,
     }
 
 
@@ -238,6 +386,47 @@ def _process_one(conn, msg: dict) -> dict:
     if _already(conn, fp, rfc_id):
         return {"status": "duplicate", "fingerprint": fp, "sent": False}
 
+    if is_internal_mail(msg):
+        _name, email = parse_from_header(msg.get("from"))
+        stub = {
+            "from_email": email or (msg.get("from_email") or ""),
+            "job_id": None,
+            "customer_id": None,
+            "reason": "internal",
+        }
+        _record_processed(conn, msg, stub, "ignored")
+        return {
+            "status": "ignored",
+            "reason": "internal",
+            "account": account,
+            "sent": False,
+        }
+
+    noise = noise_reason(msg)
+    if noise:
+        facts = extract_mail_facts(msg)
+        keep_tokens = (
+            (facts.get("estimate_numbers") or [])
+            or (facts.get("job_codes") or [])
+            or (facts.get("sidemarks") or [])
+        )
+        # Login codes never attach. Other noise drops unless it carries a job token.
+        if noise == "login" or not keep_tokens:
+            _name, email = parse_from_header(msg.get("from"))
+            stub = {
+                "from_email": email or (msg.get("from_email") or ""),
+                "job_id": None,
+                "customer_id": None,
+                "reason": noise,
+            }
+            _record_processed(conn, msg, stub, "ignored")
+            return {
+                "status": "ignored",
+                "reason": noise,
+                "account": account,
+                "sent": False,
+            }
+
     match = match_message(conn, msg)
     facts = match.get("facts") or {}
     subject = (msg.get("subject") or "(no subject)").strip()
@@ -250,8 +439,9 @@ def _process_one(conn, msg: dict) -> dict:
         conn.execute(
             """INSERT OR IGNORE INTO jmi_review_queue
                (id, source, account, message_id, rfc_message_id, fingerprint, subject,
-                from_name, from_addr, preview, received_at, status, sent)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unmatched', 0)""",
+                from_name, from_addr, preview, received_at, customer_id, customer_name,
+                status, sent)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unmatched', 0)""",
             (
                 _new_id(),
                 msg.get("source") or "",
@@ -264,14 +454,20 @@ def _process_one(conn, msg: dict) -> dict:
                 match.get("from_email") or "",
                 preview,
                 msg.get("date"),
+                match.get("customer_id"),
+                match.get("customer_name"),
             ),
         )
+        supplier_ids = _record_supplier_event(conn, msg, match, facts, personal=personal)
         _record_processed(conn, msg, match, "unmatched")
         return {
             "status": "unmatched",
             "review": True,
             "reason": match.get("reason"),
             "account": account,
+            "customer_id": match.get("customer_id"),
+            "customer_name": match.get("customer_name"),
+            "supplier_events": supplier_ids,
             "sent": False,
         }
 
@@ -336,50 +532,7 @@ def _process_one(conn, msg: dict) -> dict:
         if row:
             calendar_ids.append(dict(row)["id"] if not isinstance(row, str) else row[0])
 
-    supplier_ids = []
-    if facts.get("is_supplier_order") or facts.get("tracking_numbers") or facts.get("order_numbers"):
-        tracks = facts.get("tracking_numbers") or [None]
-        orders = facts.get("order_numbers") or [None]
-        event_type = "tracking" if facts.get("tracking_numbers") else "order_confirmation"
-        sid = _new_id()
-        conn.execute(
-            """INSERT OR IGNORE INTO jmi_supplier_order_events
-               (id, job_id, source, account, message_id, rfc_message_id, fingerprint,
-                event_type, tracking_number, order_number, supplier_name, excerpt, sent)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
-            (
-                sid,
-                job_id,
-                msg.get("source"),
-                account,
-                str(msg.get("message_id") or ""),
-                rfc_id or None,
-                fp,
-                event_type,
-                (tracks[0] if tracks and tracks[0] else None),
-                (orders[0] if orders and orders[0] else None),
-                who,
-                preview if not personal else None,
-            ),
-        )
-        row = conn.execute(
-            "SELECT id FROM jmi_supplier_order_events WHERE fingerprint = ?", (fp,)
-        ).fetchone()
-        if row:
-            supplier_ids.append(dict(row)["id"] if not isinstance(row, str) else row[0])
-        if not personal:
-            _add_job_event(
-                conn,
-                job_id,
-                "supplier_order",
-                f"Supplier {event_type}: {tracks[0] or orders[0] or subject}",
-                {
-                    "account": account,
-                    "tracking_numbers": facts.get("tracking_numbers"),
-                    "order_numbers": facts.get("order_numbers"),
-                    "sent": False,
-                },
-            )
+    supplier_ids = _record_supplier_event(conn, msg, match, facts, personal=personal)
 
     _record_processed(conn, msg, match, "matched")
     return {
@@ -403,31 +556,11 @@ def run_intake(*, messages: Optional[list] = None, conn=None) -> dict:
     try:
         ensure_schema(conn)
         if messages is None and not intake_enabled():
-            return {
-                "read_only": True,
-                "sent": False,
-                "outbound_policy": OUTBOUND_POLICY,
-                "disabled": True,
-                "scanned": 0,
-                "matched": 0,
-                "unmatched": 0,
-                "duplicates": 0,
-                "results": [],
-            }
+            return _empty_result(disabled=True)
         if messages is None:
             until = _in_backoff(conn)
             if until:
-                return {
-                    "read_only": True,
-                    "sent": False,
-                    "outbound_policy": OUTBOUND_POLICY,
-                    "backoff_until": until,
-                    "scanned": 0,
-                    "matched": 0,
-                    "unmatched": 0,
-                    "duplicates": 0,
-                    "results": [],
-                }
+                return _empty_result(backoff_until=until)
         since = None
         if messages is None:
             since = (_scan_state(conn) or {}).get("last_success_at")
@@ -443,6 +576,7 @@ def run_intake(*, messages: Optional[list] = None, conn=None) -> dict:
             if not isinstance(msg, dict):
                 continue
             results.append(_process_one(conn, msg))
+        counts = _summarize(conn, len(injected), results)
         if messages is None:
             _record_success(conn)
         return {
@@ -450,11 +584,39 @@ def run_intake(*, messages: Optional[list] = None, conn=None) -> dict:
             "sent": False,
             "outbound_policy": OUTBOUND_POLICY,
             "accounts": connected_accounts(),
-            "scanned": len(injected),
-            "matched": sum(1 for r in results if r.get("status") == "matched"),
-            "unmatched": sum(1 for r in results if r.get("status") == "unmatched"),
-            "duplicates": sum(1 for r in results if r.get("status") == "duplicate"),
+            **counts,
             "results": results,
+        }
+    finally:
+        if owns:
+            ctx.__exit__(None, None, None)
+
+
+def intake_status(conn=None) -> dict:
+    """Last scan counts. Safe to read when INFO logs are filtered."""
+    owns = conn is None
+    if owns:
+        ctx = get_db()
+        conn = ctx.__enter__()
+    try:
+        ensure_schema(conn)
+        state = _scan_state(conn)
+        return {
+            "read_only": True,
+            "sent": False,
+            "outbound_policy": OUTBOUND_POLICY,
+            "scanned": int(state.get("last_scanned") or 0),
+            "matched": int(state.get("last_matched") or 0),
+            "unmatched": int(state.get("last_unmatched") or 0),
+            "duplicates": int(state.get("last_duplicates") or 0),
+            "ignored": int(state.get("last_ignored") or 0),
+            "last_success_at": state.get("last_success_at"),
+            "last_error_type": state.get("last_error_type"),
+            "backoff_until": state.get("backoff_until"),
+            "fail_count": int(state.get("fail_count") or 0),
+            "personal_inbox_enabled": personal_inbox_enabled(),
+            "outlook_inbox_enabled": outlook_inbox_enabled(),
+            "accounts": connected_accounts(),
         }
     finally:
         if owns:

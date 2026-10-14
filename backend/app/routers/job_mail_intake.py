@@ -10,6 +10,7 @@ from app.services.accounts.founder import FounderAuthError, assert_founder
 from app.services.job_mail_intake.service import (
     OUTBOUND_POLICY,
     approve_calendar_proposal,
+    intake_status,
     list_calendar_proposals,
     list_review_queue,
     list_supplier_events,
@@ -37,6 +38,15 @@ async def run_job_mail_intake(
     result["outbound_policy"] = OUTBOUND_POLICY
     result["sent"] = False
     return result
+
+
+@router.get("/status")
+async def job_mail_status(
+    x_founder_pin: str | None = Header(default=None, alias="X-Founder-Pin"),
+):
+    """Last scanned/matched counts. Founder-only. INFO logs are filtered on Dell."""
+    _require_founder(x_founder_pin)
+    return intake_status()
 
 
 @router.get("/review-queue")

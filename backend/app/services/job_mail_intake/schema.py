@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS jmi_review_queue (
     from_addr TEXT,
     preview TEXT,
     received_at TEXT,
+    customer_id TEXT,
+    customer_name TEXT,
     status TEXT NOT NULL DEFAULT 'unmatched',
     sent INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
@@ -61,6 +63,8 @@ CREATE TABLE IF NOT EXISTS jmi_calendar_proposals (
 CREATE TABLE IF NOT EXISTS jmi_supplier_order_events (
     id TEXT PRIMARY KEY,
     job_id TEXT,
+    customer_id TEXT,
+    customer_name TEXT,
     source TEXT,
     account TEXT,
     message_id TEXT,
@@ -95,6 +99,11 @@ CREATE TABLE IF NOT EXISTS jmi_scan_state (
     backoff_until TEXT,
     fail_count INTEGER NOT NULL DEFAULT 0,
     last_error_type TEXT,
+    last_scanned INTEGER NOT NULL DEFAULT 0,
+    last_matched INTEGER NOT NULL DEFAULT 0,
+    last_unmatched INTEGER NOT NULL DEFAULT 0,
+    last_duplicates INTEGER NOT NULL DEFAULT 0,
+    last_ignored INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -116,13 +125,23 @@ _ALTERS = (
     ("jmi_processed", "rfc_message_id", "TEXT"),
     ("jmi_review_queue", "account", "TEXT"),
     ("jmi_review_queue", "rfc_message_id", "TEXT"),
+    ("jmi_review_queue", "customer_id", "TEXT"),
+    ("jmi_review_queue", "customer_name", "TEXT"),
     ("jmi_calendar_proposals", "account", "TEXT"),
     ("jmi_calendar_proposals", "rfc_message_id", "TEXT"),
     ("jmi_calendar_proposals", "approved_by", "TEXT"),
     ("jmi_supplier_order_events", "account", "TEXT"),
     ("jmi_supplier_order_events", "rfc_message_id", "TEXT"),
+    ("jmi_supplier_order_events", "customer_id", "TEXT"),
+    ("jmi_supplier_order_events", "customer_name", "TEXT"),
     ("jmi_timeline_notes", "account", "TEXT"),
     ("jmi_timeline_notes", "rfc_message_id", "TEXT"),
+    ("jmi_scan_state", "last_scanned", "INTEGER NOT NULL DEFAULT 0"),
+    ("jmi_scan_state", "last_matched", "INTEGER NOT NULL DEFAULT 0"),
+    ("jmi_scan_state", "last_unmatched", "INTEGER NOT NULL DEFAULT 0"),
+    ("jmi_scan_state", "last_duplicates", "INTEGER NOT NULL DEFAULT 0"),
+    ("jmi_scan_state", "last_ignored", "INTEGER NOT NULL DEFAULT 0"),
+    ("jobs", "contacts", "TEXT"),
 )
 
 
@@ -142,6 +161,12 @@ def _ensure_columns(conn) -> None:
 def ensure_schema(conn) -> None:
     conn.executescript(SCHEMA_SQL)
     _ensure_columns(conn)
+    try:
+        job_cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if job_cols and "contacts" not in job_cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN contacts TEXT")
+    except Exception:
+        pass
     try:
         conn.execute(
             """CREATE TABLE IF NOT EXISTS job_events (

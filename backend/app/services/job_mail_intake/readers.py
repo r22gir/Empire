@@ -1,8 +1,9 @@
 """Read-only inbox connectors for job-mail intake.
 
-Business Gmail, personal Gmail (read-only token), Outlook when present.
-Tests assign TEST_INBOX to skip live connectors. Nothing is sent.
-Token paths are passed into the readers — process env is never mutated.
+Business Gmail, personal Gmail (read-only token), Outlook when opted in
+via JOB_MAIL_OUTLOOK_INBOX (default off). Tests assign TEST_INBOX to skip
+live connectors. Nothing is sent. Token paths are passed into the readers
+— process env is never mutated.
 """
 
 from __future__ import annotations
@@ -30,6 +31,11 @@ class JobMailFetchError(Exception):
 def personal_inbox_enabled() -> bool:
     """Personal Gmail is OFF unless JOB_MAIL_PERSONAL_INBOX is truthy."""
     return os.getenv("JOB_MAIL_PERSONAL_INBOX", "").strip().lower() in _TRUTHY
+
+
+def outlook_inbox_enabled() -> bool:
+    """Outlook is OFF unless JOB_MAIL_OUTLOOK_INBOX is truthy. Default 0."""
+    return os.getenv("JOB_MAIL_OUTLOOK_INBOX", "0").strip().lower() in _TRUTHY
 
 
 def intake_enabled() -> bool:
@@ -83,11 +89,12 @@ def _connected_paths() -> dict:
             or str(Path.home() / ".config" / "empirebox" / "gmail-personal" / "token.json")
         )
     outlook = None
-    try:
-        from app.services.max.outlook_reader import token_path
-        outlook = _exists(str(token_path()) if token_path() else None)
-    except Exception:
-        outlook = _exists(os.getenv("OUTLOOK_TOKEN_PATH"))
+    if outlook_inbox_enabled():
+        try:
+            from app.services.max.outlook_reader import token_path
+            outlook = _exists(str(token_path()) if token_path() else None)
+        except Exception:
+            outlook = _exists(os.getenv("OUTLOOK_TOKEN_PATH"))
 
     sources = []
     if business:
@@ -191,7 +198,8 @@ def fetch_raw_messages(since: Optional[str] = None) -> list[dict]:
     items.extend(_fetch_gmail("business", paths.get("gmail_business"), since=since))
     if personal_inbox_enabled():
         items.extend(_fetch_gmail("personal", paths.get("gmail_personal"), since=since))
-    items.extend(_fetch_outlook(paths.get("outlook"), since=since))
+    if outlook_inbox_enabled():
+        items.extend(_fetch_outlook(paths.get("outlook"), since=since))
     return items
 
 
@@ -204,6 +212,7 @@ def connected_accounts() -> dict:
             "gmail_personal": "gmail_personal" in sources,
             "outlook": "outlook" in sources,
             "personal_inbox_enabled": personal_inbox_enabled(),
+            "outlook_inbox_enabled": outlook_inbox_enabled(),
             "test_inbox": True,
             "read_only": True,
             "sent": False,
@@ -215,6 +224,7 @@ def connected_accounts() -> dict:
         "gmail_personal": bool(paths.get("gmail_personal")),
         "outlook": bool(paths.get("outlook")),
         "personal_inbox_enabled": personal_inbox_enabled(),
+        "outlook_inbox_enabled": outlook_inbox_enabled(),
         "test_inbox": False,
         "read_only": True,
         "sent": False,
