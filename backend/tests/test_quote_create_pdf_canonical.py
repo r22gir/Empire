@@ -135,32 +135,44 @@ def test_upsert_is_idempotent(monkeypatch, tmp_path):
 
 
 def test_upsert_does_not_overwrite_newer_v2(monkeypatch, tmp_path):
+    """JSON utcnow (no zone) can look 4h newer than a local quotes_v2 edit.
+
+    A JSON snapshot that is actually older must not overwrite that edit.
+    row_rev is the source of truth; naive clock strings are not compared.
+    """
     _quotes(monkeypatch, tmp_path)
     from app.db.database import get_db
+    from app.services.quote_service import ensure_row_rev_schema
     first = upsert_legacy_quote({
         "id": "newer-1",
         "quote_number": "EST-2026-815",
         "customer_name": "Canonical Name",
-        "updated_at": "2026-10-14T12:00:00",
+        "updated_at": "2026-10-14T12:00:00Z",
         "line_items": [{"description": "Seat", "quantity": 1, "rate": 10, "amount": 10}],
         "total": 10,
     })
     assert first["customer_name"] == "Canonical Name"
     with get_db() as conn:
+        ensure_row_rev_schema(conn)
+        # v2 edit at 18:00 UTC stored the way datetime.now() used to
+        # (local EDT 14:00, no zone). JSON snapshot below is 16:00 UTC
+        # naive — numerically later, actually two hours older.
         conn.execute(
-            "UPDATE quotes_v2 SET customer_name = ?, updated_at = ? WHERE id = ?",
-            ("Newer V2 Name", "2026-10-14T18:00:00", "newer-1"),
+            "UPDATE quotes_v2 SET customer_name = ?, updated_at = ?, row_rev = ? WHERE id = ?",
+            ("Newer V2 Name", "2026-10-14T14:00:00", 5, "newer-1"),
         )
     again = upsert_legacy_quote({
         "id": "newer-1",
         "quote_number": "EST-2026-815",
         "customer_name": "Stale JSON Name",
-        "updated_at": "2026-10-14T10:00:00",
+        "updated_at": "2026-10-14T16:00:00",  # utcnow-style, no zone
+        "row_rev": 1,
         "line_items": [{"description": "Other", "quantity": 2, "rate": 5, "amount": 10}],
         "total": 10,
     })
     assert again["customer_name"] == "Newer V2 Name"
     assert [i.get("description") for i in (again.get("line_items") or [])] == ["Seat"]
+    assert int(again.get("row_rev") or 0) == 5
 
 
 def test_migrate_is_dry_run_by_default(monkeypatch, tmp_path):
@@ -193,6 +205,72 @@ def test_quote_branding_follows_business_and_edition():
     assert custom.tagline == ""
     empire = resolve_quote_billing({"billed_by": "empire_workroom"})
     assert empire.name == "Empire Workroom"
+
+
+def test_line_sqft_always_divides_inches_by_144():
+    from app.services.estimates.mclean_estimate_pdf import _line_sqft
+    sq, _pps = _line_sqft({"width": 300, "height": 96})
+    assert sq == 200.0
+    pdf = render_mclean_estimate_bytes({
+        "quote_number": "EST-2026-817",
+        "customer_name": "Long Panel",
+        "status": "sent",
+        "line_items": [{
+            "description": "Wide panel",
+            "quantity": 1,
+            "rate": 200,
+            "amount": 200,
+            "width": 300,
+            "height": 96,
+        }],
+        "total": 200,
+        "deposit_percent": 50,
+    })
+    from pypdf import PdfReader
+    text = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert "200" in text
+    assert "Sq ft" in text or "SQ FT" in text.upper() or "SQFT" in "".join(text.split()).upper()
+
+
+def test_sqft_column_hidden_when_no_line_has_dimensions():
+    pdf = render_mclean_estimate_bytes({
+        "quote_number": "EST-2026-818",
+        "customer_name": "No Dims",
+        "status": "sent",
+        "line_items": [{
+            "description": "Labor only",
+            "quantity": 2,
+            "unit": "ea",
+            "rate": 50,
+            "amount": 100,
+        }],
+        "total": 100,
+        "deposit_percent": 50,
+    })
+    from pypdf import PdfReader
+    text = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Sq ft" not in text
+    assert "SQFT" not in "".join(text.split()).upper()
+
+
+def test_footer_omits_empty_parts_and_separators():
+    from app.services.drawing.max_sheet_chrome import brand_footer
+    assert brand_footer("ACME DRAPERY CO", "", "") == "ACME DRAPERY CO"
+    assert "·" not in brand_footer("ACME DRAPERY CO", "", "")
+    pdf = render_mclean_estimate_bytes({
+        "quote_number": "EST-2026-819",
+        "customer_name": "Atelier Client",
+        "status": "sent",
+        "business_name": "ACME DRAPERY CO",
+        "edition": "acme",
+        "line_items": [{"description": "Seat", "quantity": 1, "rate": 10, "amount": 10}],
+        "total": 10,
+        "deposit_percent": 50,
+    })
+    from pypdf import PdfReader
+    text = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert "ACME DRAPERY CO · ·" not in text
+    assert "ACMEDRAPERYCO··" not in "".join(text.split()).upper()
 
 
 def test_non_empire_pdf_never_shows_empire_contact(monkeypatch, tmp_path):

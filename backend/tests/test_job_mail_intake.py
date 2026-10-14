@@ -207,6 +207,42 @@ def test_name_alone_does_not_attach_lauren_smith_to_lauren_jones():
         assert result["job_id"] is None
 
 
+def test_tie_or_close_score_goes_to_review():
+    from app.services.job_mail_intake.match import match_message
+    with get_db() as conn:
+        ensure_schema(conn)
+        conn.execute(
+            """INSERT INTO customers (id, name, email, address)
+               VALUES ('cust-a', 'Ada West', 'shared@example.com', '10 Pine St'),
+                      ('cust-b', 'Bea East', 'shared@example.com', '20 Oak Ave')"""
+        )
+        for job_id, title, cust, name in (
+            ("job-ada", "Ada living drapery", "cust-a", "Ada West"),
+            ("job-bea", "Bea dining drapery", "cust-b", "Bea East"),
+        ):
+            try:
+                conn.execute(
+                    """INSERT INTO jobs
+                       (id, title, customer_id, status, client_name, client_email)
+                       VALUES (?, ?, ?, 'pending', ?, 'shared@example.com')""",
+                    (job_id, title, cust, name),
+                )
+            except Exception:
+                conn.execute(
+                    """INSERT INTO jobs (id, title, customer_id, status, notes)
+                       VALUES (?, ?, ?, 'pending', ?)""",
+                    (job_id, title, cust, f"{name} shared@example.com"),
+                )
+        tied = match_message(conn, {
+            "from": "Shared Mailbox <shared@example.com>",
+            "subject": "Checking both jobs",
+            "preview": "Please confirm the shared mailbox thread.",
+        })
+        assert tied["matched"] is False
+        assert tied["reason"] == "ambiguous"
+        assert tied["job_id"] is None
+
+
 def test_channel_in_supplier_email_does_not_match_client_channel():
     from app.services.job_mail_intake.match import match_message
     with get_db() as conn:
@@ -259,7 +295,10 @@ def test_second_intake_on_same_messages_adds_nothing():
             "date": "2026-10-14",
         }]
         first = run_intake(messages=messages, conn=conn)
+        assert first["matched"] == 1
+        assert first["duplicates"] == 1
         notes_after_first = list_timeline_notes(conn, job_id="job-nehal")["count"]
+        assert notes_after_first == 1
         cals_after_first = list_calendar_proposals(conn)["count"]
         suppliers_after_first = list_supplier_events(conn, job_id="job-nehal")["count"]
         second = run_intake(messages=messages, conn=conn)
@@ -270,6 +309,35 @@ def test_second_intake_on_same_messages_adds_nothing():
         assert list_timeline_notes(conn, job_id="job-nehal")["count"] == notes_after_first
         assert list_calendar_proposals(conn)["count"] == cals_after_first
         assert list_supplier_events(conn, job_id="job-nehal")["count"] == suppliers_after_first
+
+
+def test_same_email_in_two_inboxes_is_recorded_once():
+    with get_db() as conn:
+        _seed_job(conn)
+        result = run_intake(messages=[{
+            "source": "gmail_business",
+            "account": "business",
+            "message_id": "biz-mid",
+            "rfc_message_id": "<cross-inbox@mail.test>",
+            "from": "Nehal Elrefai <nehal@example.com>",
+            "subject": "Re: EST-2026-410",
+            "preview": "See you at 100 Main Street McLean VA.",
+            "date": "2026-10-14",
+        }, {
+            "source": "outlook",
+            "account": "outlook",
+            "message_id": "out-mid",
+            "rfc_message_id": "<cross-inbox@mail.test>",
+            "from": "Nehal Elrefai <nehal@example.com>",
+            "subject": "Re: EST-2026-410",
+            "preview": "See you at 100 Main Street McLean VA.",
+            "date": "2026-10-14",
+        }], conn=conn)
+        assert result["matched"] == 1
+        assert result["duplicates"] == 1
+        assert list_timeline_notes(conn, job_id="job-nehal")["count"] == 1
+        processed = conn.execute("SELECT COUNT(*) FROM jmi_processed").fetchone()[0]
+        assert processed == 1
 
 
 def test_approve_calendar_proposal_stays_pending_when_insert_fails(monkeypatch):

@@ -74,42 +74,48 @@ def test_attach_photo_analysis_unknown_quote_id_returns_false(isolated_empire_db
 
 
 def test_next_quote_number_never_collides_with_quotes_v2(isolated_empire_db, tmp_path, monkeypatch):
-    """quotes_v2 already at EST-<year>-292; the legacy JSON store only has
-    files up to EST-<year>-005. _next_quote_number must return a number
-    ABOVE the quotes_v2 max, not reuse an already-issued v2 number."""
-    from datetime import datetime
+    """Old-path JSON quotes now dual-write into quotes_v2 via _save_quote.
+
+    _next_quote_number must sit above the highest sequence in either store,
+    not reuse a number already issued as JSON or as quotes_v2.
+    """
+    from datetime import datetime, timezone
 
     from app.routers import quotes as quotes_router
-    from app.services.quote_service import create_quote
+    from app.services.quote_service import max_quote_number_seq, upsert_legacy_quote
 
-    year = datetime.utcnow().year
+    year = datetime.now(timezone.utc).year
 
     quotes_dir = tmp_path / "quotes_json"
     quotes_dir.mkdir()
     monkeypatch.setattr(quotes_router, "QUOTES_DIR", str(quotes_dir))
     monkeypatch.setattr(quotes_router, "COUNTER_FILE", str(quotes_dir / "_counter.json"))
 
-    # A handful of low-numbered legacy JSON quotes.
+    json_max = 0
     for seq in range(1, 6):
         quotes_router._save_quote({
             "id": f"legacy-{seq}",
             "quote_number": f"EST-{year}-{seq:03d}",
             "line_items": [],
         })
+        json_max = seq
 
-    # quotes_v2 already issued a much higher number.
-    high_quote = None
-    for _ in range(292):
-        high_quote = create_quote({
-            "customer_name": "Bulk V2 Customer",
-            "business_unit": "workroom",
-            "pricing_mode": "flat",
-            "tax_rate": 0,
-        })
-    assert high_quote["quote_number"] == f"EST-{year}-292"
+    upsert_legacy_quote({
+        "id": "high-v2",
+        "quote_number": f"EST-{year}-292",
+        "customer_name": "High V2",
+        "line_items": [],
+        "total": 0,
+    })
 
+    def _seq(number: str) -> int:
+        return int(str(number).split("-")[-1])
+
+    v2_max = max_quote_number_seq(year)
+    highest = max(json_max, v2_max)
     next_number = quotes_router._next_quote_number()
-    assert next_number == f"EST-{year}-293"
+    assert _seq(next_number) > highest
+    assert next_number == f"EST-{year}-{highest + 1:03d}"
 
 
 def test_analyze_photo_response_documents_ephemeral_quote(isolated_empire_db):

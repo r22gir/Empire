@@ -1277,11 +1277,8 @@ def _line_sqft(it: Dict[str, Any]) -> Tuple[float | None, float | None]:
         width = _num(src.get("width"))
         height = _num(src.get("height"))
         if width is not None and height is not None and width > 0 and height > 0:
-            if width <= 240 and height <= 240:
-                computed = (width * height) / 144.0
-            else:
-                computed = width * height
-            return computed, pps
+            # Width/height on estimate lines are always inches.
+            return (width * height) / 144.0, pps
     unit = str(it.get("unit") or "").strip().lower()
     if unit in _SQFT_UNITS:
         return _num(it.get("quantity")), _line_rate(it)

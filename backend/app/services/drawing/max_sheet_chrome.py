@@ -64,8 +64,13 @@ _FONTS_READY = False
 def brand_footer(letterhead: str = LETTERHEAD,
                  powered_by: str = POWERED_BY,
                  locale: str = LOCALE) -> str:
-    """Footer left zone — matches McLean golden string."""
-    return f"{letterhead}  ·  {powered_by}  ·  {locale}"
+    """Footer left zone — matches McLean golden string.
+
+    Empty parts (and their separators) are omitted so a name-only shop
+    renders as ``ACME DRAPERY CO``, never ``ACME DRAPERY CO · ·``.
+    """
+    parts = [str(p).strip() for p in (letterhead, powered_by, locale) if str(p or "").strip()]
+    return "  ·  ".join(parts)
 
 
 def project_line(client: str, project: str) -> str:

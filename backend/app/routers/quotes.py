@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import uuid
 import os
@@ -268,7 +268,16 @@ def _save_quote(quote: dict):
     # Dual-write: create/update path keeps quotes_v2 in sync.
     try:
         from app.services.quote_service import upsert_legacy_quote
-        upsert_legacy_quote(quote)
+        incoming_rev = int(quote.get("row_rev") or 0)
+        row = upsert_legacy_quote(quote)
+        # Write row_rev back only when this snapshot was applied, so a
+        # skipped stale JSON cannot pick up the newer revision and then
+        # overwrite on the next save.
+        if row and int(row.get("row_rev") or 0) == incoming_rev + 1:
+            quote["row_rev"] = row["row_rev"]
+            if row.get("updated_at"):
+                quote["updated_at"] = row["updated_at"]
+            _write_quote_json(quote)
     except Exception as exc:
         logger.warning("canonical quote sync skipped for %s: %s", quote.get("id"), exc)
 
@@ -649,7 +658,7 @@ def _apply_selected_proposal_or_tier(quote: dict, selection) -> bool:
 async def create_quote(payload: QuoteCreate):
     """Create a new quote/estimate."""
     quote_id = str(uuid.uuid4())[:8]
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     quote = {
         "id": quote_id,
@@ -660,7 +669,8 @@ async def create_quote(payload: QuoteCreate):
         "updated_at": now,
         "sent_at": None,
         "accepted_at": None,
-        "expires_at": (datetime.utcnow() + timedelta(days=payload.valid_days)).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=payload.valid_days))
+        .replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }
 
     # Convert nested models to dicts

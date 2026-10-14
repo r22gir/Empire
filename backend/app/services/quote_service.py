@@ -6,7 +6,7 @@ All financial writes logged to financial_audit_log.
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from app.db.database import get_db, dict_row, dict_rows
 from app.data.product_catalog import PRICING_SPECS
@@ -597,7 +597,7 @@ def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
         UPDATE quotes_v2 SET subtotal=?, tax_amount=?, total=?,
         deposit_required=?, balance_due=?, updated_at=? WHERE id=?
     """, (subtotal, tax_amount, total, deposit_required, balance_due,
-          datetime.now().isoformat(), quote_id))
+          _utc_now_iso(), quote_id))
 
 
 def _quote_to_dict(row) -> dict:
@@ -1051,7 +1051,8 @@ def update_quote(quote_id: str, data: dict) -> dict:
             'photos': 'photos_json', 'metadata': 'metadata_json',
         }
 
-        sets, params = ["updated_at = ?"], [datetime.now().isoformat()]
+        ensure_row_rev_schema(conn)
+        sets, params = ["updated_at = ?", "row_rev = COALESCE(row_rev, 0) + 1"], [_utc_now_iso()]
         for field in updatable:
             if field in data and data[field] is not None:
                 old_val = existing[field] if field in existing.keys() else None
@@ -1609,26 +1610,90 @@ def _legacy_json_by_number(quote_number: str) -> Optional[dict]:
     return None
 
 
-def _parse_quote_ts(value) -> Optional[datetime]:
-    if not value:
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    """Timezone-aware UTC stamp. Always compare these, never local naive now()."""
+    return _utc_now().replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _as_utc(value) -> Optional[datetime]:
+    """Parse a quote timestamp as UTC.
+
+    Naive values (JSON utcnow, SQLite datetime('now')) are treated as UTC.
+    Local datetime.now() stamps are not reliable — row_rev wins those races.
+    """
+    if value is None or value == "":
         return None
-    text = str(value).strip().replace("Z", "")
-    if "." in text:
-        text = text.split(".", 1)[0]
-    text = text.replace(" ", "T")
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if text.endswith(("Z", "z")):
+            text = text[:-1] + "+00:00"
+        text = text.replace(" ", "T")
+        if "." in text:
+            main, frac = text.split(".", 1)
+            tz = ""
+            for i, ch in enumerate(frac):
+                if ch in "+-":
+                    tz = frac[i:]
+                    break
+            text = main + tz
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _row_rev(quote: Optional[dict]) -> int:
+    if not quote:
+        return 0
+    raw = quote.get("row_rev")
+    if raw is None or raw == "":
+        return 0
     try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        return None
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _v2_is_newer(existing: dict, incoming: dict) -> bool:
-    """True when quotes_v2 was changed after the incoming JSON snapshot."""
-    existing_ts = _parse_quote_ts(existing.get("updated_at"))
-    incoming_ts = _parse_quote_ts(incoming.get("updated_at") or incoming.get("created_at"))
+    """True when quotes_v2 is ahead of the incoming JSON snapshot.
+
+    row_rev is the source of truth (local datetime.now vs utcnow is a 4h
+    trap). Equal revisions fall back to timezone-aware UTC timestamps.
+    """
+    existing_rev = _row_rev(existing)
+    incoming_rev = _row_rev(incoming)
+    if existing_rev > incoming_rev:
+        return True
+    if incoming_rev > existing_rev:
+        return False
+    existing_ts = _as_utc(existing.get("updated_at"))
+    incoming_ts = _as_utc(incoming.get("updated_at") or incoming.get("created_at"))
     if existing_ts and incoming_ts:
         return existing_ts > incoming_ts
     return False
+
+
+def ensure_row_rev_schema(conn) -> None:
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(quotes_v2)").fetchall()}
+    except Exception:
+        return
+    if "row_rev" not in cols:
+        try:
+            conn.execute(
+                "ALTER TABLE quotes_v2 ADD COLUMN row_rev INTEGER NOT NULL DEFAULT 0"
+            )
+        except Exception:
+            pass
 
 
 def _replace_legacy_line_items(conn, quote_id: str, line_items: list) -> None:
@@ -1723,7 +1788,10 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
         quote.get("billed_by") or quote.get("business_name") or quote.get("business")
     )
     line_items = quote.get("line_items") or quote.get("items") or []
-    now = datetime.now().isoformat()
+    now = _utc_now_iso()
+    created = _as_utc(quote.get("created_at"))
+    created_iso = created.isoformat().replace("+00:00", "Z") if created else now
+    next_rev = _row_rev(existing) + 1
     values = (
         quote.get("quote_number") or quote_id,
         quote.get("customer_name", ""),
@@ -1754,13 +1822,14 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
         float(quote.get("tax_amount") or 0),
         float(quote.get("total") or 0),
         quote.get("expires_at"),
-        quote.get("created_at") or now,
+        created_iso,
         now,
     )
     try:
         with get_db() as conn:
             ensure_billed_by_schema(conn)
             ensure_project_address_schema(conn)
+            ensure_row_rev_schema(conn)
             _ensure_idea_diagram_column(conn)
             if existing:
                 conn.execute(
@@ -1796,6 +1865,13 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
             _replace_legacy_line_items(conn, quote_id, line_items)
             try:
                 _recalculate_totals(conn, quote_id, "json_import")
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    "UPDATE quotes_v2 SET row_rev = ?, updated_at = ? WHERE id = ?",
+                    (next_rev, now, quote_id),
+                )
             except Exception:
                 pass
             try:
