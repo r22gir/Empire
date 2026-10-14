@@ -484,6 +484,27 @@ def set_quote_test_flag(quote_id: str, is_test: bool = True, changed_by: str = "
     return get_quote(quote_id)
 
 
+def _line_total_for_recalc(row) -> float:
+    """Line extension used when rolling quote totals.
+
+    final_price defaults to 0.0 on quote_line_items, so 'is not None'
+    cannot mean 'has a real override'. Honor price_overridden; otherwise
+    use subtotal (the JSON amount / qty × rate).
+    """
+    keys = row.keys() if hasattr(row, "keys") else []
+    overridden = row["price_overridden"] if "price_overridden" in keys else 0
+    final = row["final_price"] if "final_price" in keys else None
+    sub = row["subtotal"] if "subtotal" in keys else None
+    if overridden:
+        val = final if final is not None else sub
+    else:
+        val = sub if sub is not None else final
+    try:
+        return float(val or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _area_grouped_financials(metadata) -> Optional[dict]:
     """Return the canonical financial split for area-grouped addenda.
 
@@ -512,22 +533,15 @@ def _area_grouped_financials(metadata) -> Optional[dict]:
 def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
     """Recalculate quote totals from line items. Log changes to audit.
 
-    Sprint 1b fix: sum final_price (honoring price_overridden=1 rows),
-    fall back to subtotal only when final_price is NULL (defensive —
-    legacy rows should already have been backfilled).
+    Honor price_overridden final_price; otherwise sum line subtotals.
+    final_price defaults to 0.0, so a NULL check alone would zero the quote.
     """
     items = conn.execute(
         "SELECT subtotal, final_price, price_overridden "
         "FROM quote_line_items WHERE quote_id = ?",
         (quote_id,),
     ).fetchall()
-    items_subtotal = round(
-        sum(
-            (r["final_price"] if r["final_price"] is not None else r["subtotal"]) or 0
-            for r in items
-        ),
-        2,
-    )
+    items_subtotal = round(sum(_line_total_for_recalc(r) for r in items), 2)
 
     addon_total = 0.0
     try:
@@ -1902,8 +1916,9 @@ def _replace_legacy_line_items(conn, quote_id: str, line_items: list) -> None:
             """
             INSERT INTO quote_line_items (
                 quote_id, line_number, item_type, description, room, quantity, unit,
-                unit_price, subtotal, category, width, height, depth
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                unit_price, subtotal, category, width, height, depth,
+                proposed_price, final_price, price_overridden
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 quote_id,
@@ -1919,6 +1934,9 @@ def _replace_legacy_line_items(conn, quote_id: str, line_items: list) -> None:
                 li.get("width"),
                 li.get("height"),
                 li.get("depth"),
+                subtotal,
+                subtotal,
+                0,
             ),
         )
 
