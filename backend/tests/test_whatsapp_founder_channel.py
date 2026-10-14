@@ -158,14 +158,42 @@ def test_job_signals_win_over_link_host_and_fabric_link():
     ana = 'Make estimate for Ana, 2 cushions 22 1/2" x 18" https://pin.it/abc'
     linkedin_job = "Chair 36 inches for Rivera, see https://www.linkedin.com/in/someone"
     ruiz = "sofa slipcover foam chair for Ruiz https://p.com/a"
-    for text in (banquette, lopez, ana, linkedin_job, ruiz):
+    shades = "Quote 3 roman shades 34 1/2 x 60 for kitchen https://x.com/a/status/1"
+    for text in (banquette, lopez, ana, linkedin_job, ruiz, shades):
         assert is_link_or_article_message(text) is False, text
         assert has_real_job_signals(text) is True, text
     assert is_link_or_article_message(TWEET) is True
     assert has_real_job_signals(TWEET) is False
+    assert is_link_or_article_message("https://x.com/a/status/1") is True
+    assert has_real_job_signals("https://x.com/a/status/1") is False
     assert is_link_or_article_message(f"read this {TWEET}") is True
     assert is_link_or_article_message(f"read this link {TWEET}") is True
     assert is_link_or_article_message("read article https://example.com/post") is True
+
+
+def test_dims_without_inch_marks_request_verbs_and_room_are_job_signals():
+    """N x N / N N/N x N / NxN, quote/estimate/price/bid, and item-for-room."""
+    jobs = (
+        "roman shades 34 1/2 x 60 https://x.com/a/status/1",
+        "bench 48 x 18 https://x.com/a/status/1",
+        "bench 48x18 https://x.com/a/status/1",
+        "cushion 40 x 40 cm https://x.com/a/status/1",
+        'valance 36in x 12" https://x.com/a/status/1',
+        "Quote 3 roman shades https://x.com/a/status/1",
+        "Estimate a bench https://x.com/a/status/1",
+        "Price 4 cushions https://x.com/a/status/1",
+        "Bid 1 headboard https://x.com/a/status/1",
+        "roman shades for kitchen https://x.com/a/status/1",
+        "drapes for the living room https://x.com/a/status/1",
+        "Quote 3 roman shades 34 1/2 x 60 for kitchen https://x.com/a/status/1",
+    )
+    for text in jobs:
+        assert is_link_or_article_message(text) is False, text
+        assert has_real_job_signals(text) is True, text
+    assert is_link_or_article_message("https://x.com/a/status/1") is True
+    assert has_real_job_signals("https://x.com/a/status/1") is False
+    assert is_link_or_article_message(TWEET) is True
+    assert has_real_job_signals(TWEET) is False
 
 
 def test_url_goes_to_max_chat_not_intake(monkeypatch):
