@@ -906,12 +906,11 @@ def _set_empire_brand(quote_id: str) -> None:
     from app.config.workroom_billing import ensure_billed_by_schema
 
     try:
+        from app.services.quote_service import apply_quote_v2_update
+
         with get_db() as conn:
             ensure_billed_by_schema(conn)
-            conn.execute(
-                "UPDATE quotes_v2 SET billed_by = ? WHERE id = ?",
-                (BILLED_BY_EMPIRE, quote_id),
-            )
+            apply_quote_v2_update(conn, quote_id, {"billed_by": BILLED_BY_EMPIRE})
     except Exception:
         logger.debug("QuoteIQ billed_by brand write skipped", exc_info=True)
 

@@ -1668,14 +1668,12 @@ def generate_mclean_estimate_pdf(quote_id: str, save: bool = True) -> bytes:
 
         try:
             from app.db.database import get_db
+            from app.services.quote_service import apply_quote_v2_update
 
             with get_db() as conn:
                 cols = {r[1] for r in conn.execute("PRAGMA table_info(quotes_v2)").fetchall()}
                 if "pdf_path" in cols:
-                    conn.execute(
-                        "UPDATE quotes_v2 SET pdf_path = ? WHERE id = ?",
-                        (pdf_path, quote_id),
-                    )
+                    apply_quote_v2_update(conn, quote_id, {"pdf_path": pdf_path})
         except Exception as e:  # noqa: BLE001
             logger.debug("pdf_path update skipped: %s", e)
 

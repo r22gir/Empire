@@ -143,10 +143,10 @@ def persist_drawing_to_quote(
                     "quote_num": quote_num, "created_at": now,
                 })
                 meta["drawings"] = drawings
-                cur.execute(
-                    "UPDATE quotes_v2 SET metadata_json = ?, updated_at = ? WHERE id = ?",
-                    (json.dumps(meta, default=str), now, quote_id),
-                )
+                from app.services.quote_service import apply_quote_v2_update
+                apply_quote_v2_update(conn, quote_id, {
+                    "metadata_json": json.dumps(meta, default=str),
+                })
                 out["metadata_drawings_count"] = len(drawings)
         except sqlite3.OperationalError as e:
             out["metadata_error"] = str(e)

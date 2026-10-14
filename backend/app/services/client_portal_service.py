@@ -299,10 +299,8 @@ def approve_quote_via_portal(token: str) -> dict:
         if dict(quote)["status"] == "approved":
             return {"success": True, "message": "Quote was already approved"}
 
-        conn.execute(
-            "UPDATE quotes_v2 SET status = 'approved' WHERE id = ?",
-            (quote_id,),
-        )
+        from app.services.quote_service import apply_quote_v2_update
+        apply_quote_v2_update(conn, quote_id, {"status": "approved"})
 
     return {"success": True, "quote_id": quote_id, "message": "Quote approved"}
 

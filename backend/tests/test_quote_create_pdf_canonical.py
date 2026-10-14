@@ -331,3 +331,135 @@ def test_estimate_groups_by_area_and_uses_fractions():
     squashed = "".join(text.split()).upper()
     assert "NELMA" in squashed
     assert "EMPIREWORKROOM" not in squashed
+
+
+def _json_snapshot(quote_id, quote_number, status, row_rev, name="JSON Client"):
+    return {
+        "id": quote_id,
+        "quote_number": quote_number,
+        "customer_name": name,
+        "status": status,
+        "row_rev": row_rev,
+        "updated_at": "2026-10-14T23:00:00Z",
+        "line_items": [{"description": "Seat", "quantity": 1, "rate": 10, "amount": 10}],
+        "total": 10,
+    }
+
+
+def test_portal_approve_then_json_keeps_approved(monkeypatch, tmp_path):
+    """Portal SQL approval must survive a later JSON save of an earlier status."""
+    _quotes(monkeypatch, tmp_path)
+    from app.db.database import get_db
+    from app.services.client_portal_service import (
+        approve_quote_via_portal,
+        generate_portal_link,
+        init_portal_tables,
+    )
+
+    synced = upsert_legacy_quote(_json_snapshot(
+        "portal-keep-1", "EST-2026-821", "sent", 1, "Portal Client",
+    ))
+    assert synced["status"] == "sent"
+    prior_rev = int(synced.get("row_rev") or 0)
+
+    init_portal_tables()
+    link = generate_portal_link("cust-portal-1", quote_id="portal-keep-1")
+    result = approve_quote_via_portal(link["token"])
+    assert result["success"] is True
+
+    approved = get_quote("portal-keep-1")
+    assert approved["status"] == "approved"
+    assert int(approved.get("row_rev") or 0) == prior_rev + 1
+    assert str(approved.get("updated_at") or "").endswith("Z")
+
+    again = upsert_legacy_quote(_json_snapshot(
+        "portal-keep-1", "EST-2026-821", "draft", prior_rev + 50, "Stale JSON",
+    ))
+    assert again["status"] == "approved"
+    assert again["customer_name"] == "Stale JSON"
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT status, row_rev, updated_at FROM quotes_v2 WHERE id = ?",
+            ("portal-keep-1",),
+        ).fetchone()
+        assert row["status"] == "approved"
+        assert str(row["updated_at"]).endswith("Z")
+
+
+def test_ordered_then_json_keeps_ordered(monkeypatch, tmp_path):
+    """Lifecycle SQL 'ordered' must survive a later JSON save of an earlier status."""
+    _quotes(monkeypatch, tmp_path)
+    from app.services.lifecycle_service import _cascade_update_quote_to_ordered
+
+    synced = upsert_legacy_quote(_json_snapshot(
+        "ordered-keep-1", "EST-2026-822", "approved", 1, "Ordered Client",
+    ))
+    assert synced["status"] == "approved"
+    prior_rev = int(synced.get("row_rev") or 0)
+
+    assert _cascade_update_quote_to_ordered("ordered-keep-1") == "quote → ordered"
+    ordered = get_quote("ordered-keep-1")
+    assert ordered["status"] == "ordered"
+    assert int(ordered.get("row_rev") or 0) == prior_rev + 1
+    assert str(ordered.get("updated_at") or "").endswith("Z")
+
+    again = upsert_legacy_quote(_json_snapshot(
+        "ordered-keep-1", "EST-2026-822", "sent", prior_rev + 50, "Stale JSON",
+    ))
+    assert again["status"] == "ordered"
+    assert again["customer_name"] == "Stale JSON"
+
+
+def test_work_order_ordered_then_json_keeps_ordered(monkeypatch, tmp_path):
+    """Work-order SQL 'ordered' must survive a later JSON save of draft."""
+    _quotes(monkeypatch, tmp_path)
+    from app.services.work_order_service import create_work_order_from_quote
+
+    synced = upsert_legacy_quote(_json_snapshot(
+        "wo-keep-1", "EST-2026-823", "approved", 1, "WO Client",
+    ))
+    assert synced["status"] == "approved"
+    create_work_order_from_quote("wo-keep-1")
+    assert get_quote("wo-keep-1")["status"] == "ordered"
+
+    again = upsert_legacy_quote(_json_snapshot(
+        "wo-keep-1", "EST-2026-823", "draft", 99, "Stale JSON",
+    ))
+    assert again["status"] == "ordered"
+
+
+def test_apply_quote_v2_update_stamps_utc_and_bumps_rev(monkeypatch, tmp_path):
+    _quotes(monkeypatch, tmp_path)
+    from app.db.database import get_db
+    from app.services.quote_service import apply_quote_v2_update
+
+    first = upsert_legacy_quote(_json_snapshot(
+        "helper-1", "EST-2026-824", "draft", 1,
+    ))
+    prior = int(first.get("row_rev") or 0)
+    with get_db() as conn:
+        stamp = apply_quote_v2_update(conn, "helper-1", {"notes": "helper"})
+    row = get_quote("helper-1")
+    assert stamp.endswith("Z")
+    assert str(row.get("updated_at") or "").endswith("Z")
+    assert int(row.get("row_rev") or 0) == prior + 1
+    assert row["notes"] == "helper"
+
+
+def test_naive_local_updated_at_converts_to_utc(monkeypatch, tmp_path):
+    _quotes(monkeypatch, tmp_path)
+    from app.db.database import get_db
+    from app.services.quote_service import convert_naive_quote_timestamps_to_utc
+
+    upsert_legacy_quote(_json_snapshot("naive-ts-1", "EST-2026-825", "draft", 1))
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE quotes_v2 SET updated_at = ?, created_at = ? WHERE id = ?",
+            ("2026-10-14T14:00:00", "2026-10-14T14:00:00", "naive-ts-1"),
+        )
+        result = convert_naive_quote_timestamps_to_utc(conn)
+    assert result["converted"] >= 1
+    row = get_quote("naive-ts-1")
+    # 14:00 America/New_York on 2026-10-14 is EDT (UTC-4) → 18:00Z
+    assert row["updated_at"] == "2026-10-14T18:00:00Z"
+    assert row["created_at"] == "2026-10-14T18:00:00Z"

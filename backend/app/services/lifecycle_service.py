@@ -146,8 +146,8 @@ def create_job_from_quote(quote_id: str, changed_by: str = "system") -> dict:
         ))
 
         # Link quote to job
-        conn.execute("UPDATE quotes_v2 SET job_id = ?, updated_at = ? WHERE id = ?",
-                     (job_id, now, quote_id))
+        from app.services.quote_service import apply_quote_v2_update
+        apply_quote_v2_update(conn, quote_id, {"job_id": job_id})
 
         _audit_log(conn, 'job', job_id, 'created_from_quote',
                    'quote_id', None, quote_id, changed_by)
@@ -396,9 +396,9 @@ def _cascade_send_portal_link_if_email(quote_id: str, changed_by: str = "cascade
 
 
 def _cascade_update_quote_to_ordered(quote_id: str, changed_by: str = "cascade") -> str:
+    from app.services.quote_service import apply_quote_v2_update
     with get_db() as conn:
-        conn.execute("UPDATE quotes_v2 SET status = 'ordered', updated_at = ? WHERE id = ?",
-                     (datetime.now().isoformat(), quote_id))
+        apply_quote_v2_update(conn, quote_id, {"status": "ordered"})
     return "quote → ordered"
 
 

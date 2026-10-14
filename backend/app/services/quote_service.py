@@ -6,6 +6,7 @@ All financial writes logged to financial_audit_log.
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from app.db.database import get_db, dict_row, dict_rows
@@ -479,10 +480,7 @@ def set_quote_test_flag(quote_id: str, is_test: bool = True, changed_by: str = "
         new_val = 1 if is_test else 0
         if int(old_val or 0) != new_val:
             _audit_log(conn, 'quote', quote_id, 'updated', 'is_test', old_val, new_val, changed_by)
-        conn.execute(
-            "UPDATE quotes_v2 SET is_test = ?, updated_at = ? WHERE id = ?",
-            (new_val, datetime.now().isoformat(), quote_id),
-        )
+        apply_quote_v2_update(conn, quote_id, {"is_test": new_val})
     return get_quote(quote_id)
 
 
@@ -593,11 +591,13 @@ def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
         _audit_log(conn, 'quote', quote_id, 'recalculate', 'total',
                    old_total, total, changed_by, 'Auto-recalculated from line items')
 
-    conn.execute("""
-        UPDATE quotes_v2 SET subtotal=?, tax_amount=?, total=?,
-        deposit_required=?, balance_due=?, updated_at=? WHERE id=?
-    """, (subtotal, tax_amount, total, deposit_required, balance_due,
-          _utc_now_iso(), quote_id))
+    apply_quote_v2_update(conn, quote_id, {
+        "subtotal": subtotal,
+        "tax_amount": tax_amount,
+        "total": total,
+        "deposit_required": deposit_required,
+        "balance_due": balance_due,
+    })
 
 
 def _quote_to_dict(row) -> dict:
@@ -891,7 +891,6 @@ def create_quote(data: dict) -> dict:
         import uuid
         quote_id = str(uuid.uuid4())[:8]
         billed_by = billed_by_for_storage(data.get("billed_by"))
-        now = datetime.now().isoformat()
         quote_number = _next_quote_number(conn)
 
         dep = data.get('deposit', {})
@@ -909,55 +908,42 @@ def create_quote(data: dict) -> dict:
             f"issued:{issued_document}" if issued_document else "catalog"
         )
 
-        conn.execute("""
-            INSERT INTO quotes_v2 (
-                id, quote_number, customer_name, customer_email, customer_phone,
-                customer_address, business_unit, project_name, project_description,
-                status, tax_rate, discount_amount, discount_type, deposit_percent,
-                valid_days, terms, notes, pricing_mode, location, lining_preference,
-                rooms_json, ai_mockups_json, ai_outlines_json, measurements_json,
-                issued_document, expires_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            quote_id, quote_number,
-            data.get('customer_name', ''),
-            data.get('customer_email', ''),
-            data.get('customer_phone', ''),
-            data.get('customer_address', ''),
-            data.get('business_unit', 'workroom'),
-            data.get('project_name', ''),
-            data.get('project_description', ''),
-            'draft',
-            data.get('tax_rate', 0.0),
-            data.get('discount_amount', 0.0),
-            data.get('discount_type', 'dollar'),
-            deposit_percent,
-            data.get('valid_days', 30),
-            data.get('terms', ''),
-            data.get('notes', ''),
-            data.get('pricing_mode', ''),
-            data.get('location', ''),
-            data.get('lining_preference', ''),
-            json.dumps(data.get('rooms', []), default=str) if data.get('rooms') else None,
-            json.dumps(data.get('ai_mockups', []), default=str) if data.get('ai_mockups') else None,
-            json.dumps(data.get('ai_outlines', []), default=str) if data.get('ai_outlines') else None,
-            json.dumps(data.get('measurements', {}), default=str) if data.get('measurements') else None,
-            issued_document,
-            (datetime.now() + timedelta(days=data.get('valid_days', 30))).isoformat(),
-            now, now,
-        ))
-
+        valid_days = data.get('valid_days', 30)
+        insert_fields = {
+            "id": quote_id,
+            "quote_number": quote_number,
+            "customer_name": data.get('customer_name', ''),
+            "customer_email": data.get('customer_email', ''),
+            "customer_phone": data.get('customer_phone', ''),
+            "customer_address": data.get('customer_address', ''),
+            "business_unit": data.get('business_unit', 'workroom'),
+            "project_name": data.get('project_name', ''),
+            "project_description": data.get('project_description', ''),
+            "status": "draft",
+            "tax_rate": data.get('tax_rate', 0.0),
+            "discount_amount": data.get('discount_amount', 0.0),
+            "discount_type": data.get('discount_type', 'dollar'),
+            "deposit_percent": deposit_percent,
+            "valid_days": valid_days,
+            "terms": data.get('terms', ''),
+            "notes": data.get('notes', ''),
+            "pricing_mode": data.get('pricing_mode', ''),
+            "location": data.get('location', ''),
+            "lining_preference": data.get('lining_preference', ''),
+            "rooms_json": json.dumps(data.get('rooms', []), default=str) if data.get('rooms') else None,
+            "ai_mockups_json": json.dumps(data.get('ai_mockups', []), default=str) if data.get('ai_mockups') else None,
+            "ai_outlines_json": json.dumps(data.get('ai_outlines', []), default=str) if data.get('ai_outlines') else None,
+            "measurements_json": json.dumps(data.get('measurements', {}), default=str) if data.get('measurements') else None,
+            "issued_document": issued_document,
+            "expires_at": (_utc_now() + timedelta(days=valid_days)).replace(microsecond=0)
+            .isoformat().replace("+00:00", "Z"),
+        }
         if billed_by:
-            conn.execute(
-                "UPDATE quotes_v2 SET billed_by = ? WHERE id = ?",
-                (billed_by, quote_id),
-            )
+            insert_fields["billed_by"] = billed_by
         project_address = (data.get("project_address") or "").strip()
         if project_address:
-            conn.execute(
-                "UPDATE quotes_v2 SET project_address = ? WHERE id = ?",
-                (project_address, quote_id),
-            )
+            insert_fields["project_address"] = project_address
+        apply_quote_v2_insert(conn, insert_fields)
 
         _ensure_idea_diagram_column(conn)
 
@@ -1051,23 +1037,20 @@ def update_quote(quote_id: str, data: dict) -> dict:
             'photos': 'photos_json', 'metadata': 'metadata_json',
         }
 
-        ensure_row_rev_schema(conn)
-        sets, params = ["updated_at = ?", "row_rev = COALESCE(row_rev, 0) + 1"], [_utc_now_iso()]
+        field_updates = {}
         for field in updatable:
             if field in data and data[field] is not None:
                 old_val = existing[field] if field in existing.keys() else None
                 if str(old_val) != str(data[field]):
                     _audit_log(conn, 'quote', quote_id, 'updated', field, old_val, data[field], 'api')
-                sets.append(f"{field} = ?")
-                params.append(data[field])
+                field_updates[field] = data[field]
 
         for src, dest in json_fields.items():
             if src in data and data[src] is not None:
-                sets.append(f"{dest} = ?")
-                params.append(json.dumps(data[src], default=str))
+                field_updates[dest] = json.dumps(data[src], default=str)
 
-        params.append(quote_id)
-        conn.execute(f"UPDATE quotes_v2 SET {', '.join(sets)} WHERE id = ?", params)
+        if field_updates:
+            apply_quote_v2_update(conn, quote_id, field_updates)
 
         # Workroom QuoteBuilder autosave: replace line items when provided.
         # Keeps UI create/update on quotes_v2 without dual-writing JSON.
@@ -1298,11 +1281,7 @@ def submit_for_review(quote_id: str, changed_by: str = "api",
     """
     with get_db() as conn:
         prior = _check_transition(conn, quote_id, "founder_review")
-        conn.execute(
-            "UPDATE quotes_v2 SET status='founder_review', updated_at=datetime('now') "
-            "WHERE id = ?",
-            (quote_id,),
-        )
+        apply_quote_v2_update(conn, quote_id, {"status": "founder_review"})
         _audit_log(
             conn, "quote", quote_id, "submit_for_review", "status",
             prior, "founder_review", changed_by, reason,
@@ -1323,11 +1302,10 @@ def approve_quote(quote_id: str, changed_by: str = "founder",
     _require_founder_pin(founder_pin, "approve_quote")
     with get_db() as conn:
         prior = _check_transition(conn, quote_id, "sent")
-        conn.execute(
-            "UPDATE quotes_v2 SET status='sent', sent_at=datetime('now'), "
-            "updated_at=datetime('now') WHERE id = ?",
-            (quote_id,),
-        )
+        apply_quote_v2_update(conn, quote_id, {
+            "status": "sent",
+            "sent_at": _utc_now_iso(),
+        })
         _audit_log(
             conn, "quote", quote_id, "approve", "status",
             prior, "sent", changed_by, reason,
@@ -1348,11 +1326,7 @@ def reject_quote(quote_id: str, changed_by: str = "founder",
     _require_founder_pin(founder_pin, "reject_quote")
     with get_db() as conn:
         prior = _check_transition(conn, quote_id, "draft")
-        conn.execute(
-            "UPDATE quotes_v2 SET status='draft', updated_at=datetime('now') "
-            "WHERE id = ?",
-            (quote_id,),
-        )
+        apply_quote_v2_update(conn, quote_id, {"status": "draft"})
         _audit_log(
             conn, "quote", quote_id, "reject", "status",
             prior, "draft", changed_by, reason,
@@ -1440,7 +1414,7 @@ def update_line_item(quote_id: str, item_id: int, data: dict) -> dict:
             'manual_price_override', 'price_is_manual',
             'pricing_snapshot_json',
         ]
-        sets, params = ["updated_at = ?"], [datetime.now().isoformat()]
+        sets, params = ["updated_at = ?"], [_utc_now_iso()]
         for f in updatable:
             if f in data and data[f] is not None:
                 sets.append(f"{f} = ?")
@@ -1696,6 +1670,181 @@ def ensure_row_rev_schema(conn) -> None:
             pass
 
 
+_COL_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# JSON sync never moves status backwards. Higher rank always wins.
+QUOTE_STATUS_RANK = {
+    "draft": 10,
+    "proposal": 10,
+    "founder_review": 20,
+    "sent": 30,
+    "accepted": 40,
+    "approved": 50,
+    "ordered": 60,
+    "in_production": 70,
+    "completed": 80,
+    "cancelled": 90,
+}
+
+
+def _quotes_v2_columns(conn) -> set:
+    try:
+        return {r[1] for r in conn.execute("PRAGMA table_info(quotes_v2)").fetchall()}
+    except Exception:
+        return set()
+
+
+def apply_quote_v2_update(conn, quote_id: str, fields: Optional[dict] = None) -> str:
+    """Bump row_rev and stamp timezone-aware UTC updated_at.
+
+    Every quotes_v2 UPDATE must go through this helper. Callers pass only
+    the business fields they want to change; updated_at and row_rev are
+    owned here and must not be set by callers.
+    """
+    ensure_row_rev_schema(conn)
+    stamp = _utc_now_iso()
+    cols = _quotes_v2_columns(conn)
+    payload = dict(fields or {})
+    payload.pop("updated_at", None)
+    payload.pop("row_rev", None)
+    sets = []
+    params = []
+    for col, val in payload.items():
+        if not _COL_NAME_RE.match(col) or col not in cols:
+            continue
+        sets.append(f"{col} = ?")
+        params.append(val)
+    if "updated_at" in cols:
+        sets.append("updated_at = ?")
+        params.append(stamp)
+    if "row_rev" in cols:
+        sets.append("row_rev = COALESCE(row_rev, 0) + 1")
+    if not sets:
+        return stamp
+    params.append(quote_id)
+    conn.execute(f"UPDATE quotes_v2 SET {', '.join(sets)} WHERE id = ?", params)
+    return stamp
+
+
+def apply_quote_v2_insert(conn, fields: dict) -> str:
+    """INSERT a quotes_v2 row with UTC created_at/updated_at and row_rev=1."""
+    ensure_row_rev_schema(conn)
+    stamp = _utc_now_iso()
+    cols = _quotes_v2_columns(conn)
+    payload = dict(fields or {})
+    payload.setdefault("created_at", stamp)
+    payload["updated_at"] = stamp
+    payload["row_rev"] = 1
+    insert_cols = []
+    insert_vals = []
+    for col, val in payload.items():
+        if not _COL_NAME_RE.match(col) or col not in cols:
+            continue
+        insert_cols.append(col)
+        insert_vals.append(val)
+    if not insert_cols:
+        raise ValueError("apply_quote_v2_insert: no writable columns")
+    placeholders = ", ".join("?" for _ in insert_cols)
+    conn.execute(
+        f"INSERT INTO quotes_v2 ({', '.join(insert_cols)}) VALUES ({placeholders})",
+        insert_vals,
+    )
+    return stamp
+
+
+def quote_status_rank(status) -> int:
+    return QUOTE_STATUS_RANK.get(str(status or "").strip().lower(), 0)
+
+
+def winning_quote_status(existing_status, incoming_status) -> str:
+    """More advanced lifecycle status always wins on JSON sync."""
+    if quote_status_rank(existing_status) > quote_status_rank(incoming_status):
+        return existing_status or "draft"
+    return incoming_status or existing_status or "draft"
+
+
+def _has_explicit_tz(value) -> bool:
+    if value is None or value == "":
+        return False
+    if isinstance(value, datetime):
+        return value.tzinfo is not None
+    text = str(value).strip()
+    if text.endswith(("Z", "z")):
+        return True
+    if len(text) >= 15 and ("+" in text[10:] or text[-6] == "-"):
+        return True
+    return False
+
+
+def _naive_local_iso_to_utc_z(value, tz) -> Optional[str]:
+    """Convert a naive local timestamp to UTC Z. Already-zoned values return None."""
+    if value is None or value == "" or _has_explicit_tz(value):
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip().replace(" ", "T")
+        if "." in text:
+            text = text.split(".", 1)[0]
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if dt.tzinfo is not None:
+        return None
+    return (
+        dt.replace(tzinfo=tz)
+        .astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def convert_naive_quote_timestamps_to_utc(
+    conn, tz_name: str = "America/New_York"
+) -> dict:
+    """Rewrite naive quotes_v2 created_at/updated_at as timezone-aware UTC.
+
+    Optional repair for rows written with datetime.now() (local, no zone).
+    Stamps that already have Z or an offset are left alone. Does not bump
+    row_rev — this is a clock rewrite, not a business edit.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(tz_name)
+    except Exception as exc:
+        return {"converted": 0, "skipped": 0, "error": str(exc), "tz": tz_name}
+    try:
+        rows = conn.execute(
+            "SELECT id, created_at, updated_at FROM quotes_v2"
+        ).fetchall()
+    except Exception as exc:
+        return {"converted": 0, "skipped": 0, "error": str(exc), "tz": tz_name}
+    converted = 0
+    skipped = 0
+    for row in rows:
+        rid = row["id"] if hasattr(row, "keys") else row[0]
+        created = row["created_at"] if hasattr(row, "keys") else row[1]
+        updated = row["updated_at"] if hasattr(row, "keys") else row[2]
+        new_created = _naive_local_iso_to_utc_z(created, tz)
+        new_updated = _naive_local_iso_to_utc_z(updated, tz)
+        if new_created is None and new_updated is None:
+            skipped += 1
+            continue
+        sets, params = [], []
+        if new_created:
+            sets.append("created_at = ?")
+            params.append(new_created)
+        if new_updated:
+            sets.append("updated_at = ?")
+            params.append(new_updated)
+        params.append(rid)
+        conn.execute(f"UPDATE quotes_v2 SET {', '.join(sets)} WHERE id = ?", params)
+        converted += 1
+    return {"converted": converted, "skipped": skipped, "tz": tz_name}
+
+
 def _replace_legacy_line_items(conn, quote_id: str, line_items: list) -> None:
     conn.execute("DELETE FROM quote_line_items WHERE quote_id = ?", (quote_id,))
     for idx, li in enumerate(line_items):
@@ -1734,38 +1883,30 @@ def _replace_legacy_line_items(conn, quote_id: str, line_items: list) -> None:
         )
 
 
-def _apply_legacy_quote_extras(conn, quote_id: str, quote: dict, billed_by) -> None:
+def _legacy_extra_fields(quote: dict, billed_by, existing: Optional[dict] = None) -> dict:
+    extras = {}
     if billed_by:
-        try:
-            conn.execute(
-                "UPDATE quotes_v2 SET billed_by = ? WHERE id = ?",
-                (billed_by, quote_id),
-            )
-        except Exception:
-            pass
+        extras["billed_by"] = billed_by
     edition = quote.get("edition")
-    if edition:
-        try:
-            cols = {r[1] for r in conn.execute("PRAGMA table_info(quotes_v2)").fetchall()}
-            meta = {}
-            if "metadata_json" in cols:
-                raw = conn.execute(
-                    "SELECT metadata_json FROM quotes_v2 WHERE id = ?", (quote_id,)
-                ).fetchone()
-                if raw and raw[0]:
-                    try:
-                        meta = json.loads(raw[0])
-                    except Exception:
-                        meta = {}
-                meta["edition"] = edition
-                if quote.get("business_name"):
-                    meta["business_name"] = quote.get("business_name")
-                conn.execute(
-                    "UPDATE quotes_v2 SET metadata_json = ? WHERE id = ?",
-                    (json.dumps(meta), quote_id),
-                )
-        except Exception:
-            pass
+    if not edition:
+        return extras
+    meta = {}
+    if existing:
+        raw = existing.get("metadata")
+        if isinstance(raw, dict):
+            meta = dict(raw)
+        elif existing.get("metadata_json"):
+            try:
+                parsed = json.loads(existing["metadata_json"])
+                if isinstance(parsed, dict):
+                    meta = parsed
+            except Exception:
+                meta = {}
+    meta["edition"] = edition
+    if quote.get("business_name"):
+        meta["business_name"] = quote.get("business_name")
+    extras["metadata_json"] = json.dumps(meta)
+    return extras
 
 
 def upsert_legacy_quote(quote: dict) -> Optional[dict]:
@@ -1773,6 +1914,7 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
 
     Does not overwrite a quotes_v2 row whose updated_at is newer than the
     incoming JSON. Line items are replaced in the same transaction.
+    JSON sync never moves status backwards — the more advanced status wins.
     """
     if not isinstance(quote, dict) or not quote.get("id"):
         return None
@@ -1788,43 +1930,43 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
         quote.get("billed_by") or quote.get("business_name") or quote.get("business")
     )
     line_items = quote.get("line_items") or quote.get("items") or []
-    now = _utc_now_iso()
     created = _as_utc(quote.get("created_at"))
-    created_iso = created.isoformat().replace("+00:00", "Z") if created else now
-    next_rev = _row_rev(existing) + 1
-    values = (
-        quote.get("quote_number") or quote_id,
-        quote.get("customer_name", ""),
-        quote.get("customer_email", ""),
-        quote.get("customer_phone", ""),
-        quote.get("customer_address", ""),
-        quote.get("business_unit") or "workroom",
-        quote.get("project_name", ""),
-        quote.get("project_description", ""),
-        quote.get("status") or "draft",
-        quote.get("tax_rate", 0.0) or 0.0,
-        quote.get("discount_amount", 0.0) or 0.0,
-        quote.get("discount_type") or "dollar",
-        deposit_percent or 50,
-        quote.get("valid_days", 30) or 30,
-        quote.get("terms", "") or "",
-        quote.get("notes", "") or "",
-        quote.get("pricing_mode", "") or "",
-        quote.get("location", "") or "",
-        quote.get("lining_preference", "") or "",
-        json.dumps(quote.get("rooms") or [], default=str) if quote.get("rooms") else None,
-        json.dumps(quote.get("ai_mockups") or [], default=str) if quote.get("ai_mockups") else None,
-        json.dumps(quote.get("ai_outlines") or [], default=str) if quote.get("ai_outlines") else None,
-        json.dumps(quote.get("measurements") or {}, default=str) if quote.get("measurements") else None,
-        "json_create_path",
-        str(_legacy_json_path(quote_id)),
-        float(quote.get("subtotal") or 0),
-        float(quote.get("tax_amount") or 0),
-        float(quote.get("total") or 0),
-        quote.get("expires_at"),
-        created_iso,
-        now,
-    )
+    created_iso = created.isoformat().replace("+00:00", "Z") if created else None
+    fields = {
+        "quote_number": quote.get("quote_number") or quote_id,
+        "customer_name": quote.get("customer_name", ""),
+        "customer_email": quote.get("customer_email", ""),
+        "customer_phone": quote.get("customer_phone", ""),
+        "customer_address": quote.get("customer_address", ""),
+        "business_unit": quote.get("business_unit") or "workroom",
+        "project_name": quote.get("project_name", ""),
+        "project_description": quote.get("project_description", ""),
+        "status": winning_quote_status(
+            existing.get("status") if existing else None,
+            quote.get("status"),
+        ),
+        "tax_rate": quote.get("tax_rate", 0.0) or 0.0,
+        "discount_amount": quote.get("discount_amount", 0.0) or 0.0,
+        "discount_type": quote.get("discount_type") or "dollar",
+        "deposit_percent": deposit_percent or 50,
+        "valid_days": quote.get("valid_days", 30) or 30,
+        "terms": quote.get("terms", "") or "",
+        "notes": quote.get("notes", "") or "",
+        "pricing_mode": quote.get("pricing_mode", "") or "",
+        "location": quote.get("location", "") or "",
+        "lining_preference": quote.get("lining_preference", "") or "",
+        "rooms_json": json.dumps(quote.get("rooms") or [], default=str) if quote.get("rooms") else None,
+        "ai_mockups_json": json.dumps(quote.get("ai_mockups") or [], default=str) if quote.get("ai_mockups") else None,
+        "ai_outlines_json": json.dumps(quote.get("ai_outlines") or [], default=str) if quote.get("ai_outlines") else None,
+        "measurements_json": json.dumps(quote.get("measurements") or {}, default=str) if quote.get("measurements") else None,
+        "source": "json_create_path",
+        "source_json_path": str(_legacy_json_path(quote_id)),
+        "subtotal": float(quote.get("subtotal") or 0),
+        "tax_amount": float(quote.get("tax_amount") or 0),
+        "total": float(quote.get("total") or 0),
+        "expires_at": quote.get("expires_at"),
+    }
+    fields.update(_legacy_extra_fields(quote, billed_by, existing))
     try:
         with get_db() as conn:
             ensure_billed_by_schema(conn)
@@ -1832,46 +1974,16 @@ def upsert_legacy_quote(quote: dict) -> Optional[dict]:
             ensure_row_rev_schema(conn)
             _ensure_idea_diagram_column(conn)
             if existing:
-                conn.execute(
-                    """
-                    UPDATE quotes_v2 SET
-                        quote_number=?, customer_name=?, customer_email=?, customer_phone=?,
-                        customer_address=?, business_unit=?, project_name=?, project_description=?,
-                        status=?, tax_rate=?, discount_amount=?, discount_type=?, deposit_percent=?,
-                        valid_days=?, terms=?, notes=?, pricing_mode=?, location=?, lining_preference=?,
-                        rooms_json=?, ai_mockups_json=?, ai_outlines_json=?, measurements_json=?,
-                        source=?, source_json_path=?, subtotal=?, tax_amount=?, total=?,
-                        expires_at=?, created_at=?, updated_at=?
-                    WHERE id=?
-                    """,
-                    values + (quote_id,),
-                )
+                apply_quote_v2_update(conn, quote_id, fields)
             else:
-                conn.execute(
-                    """
-                    INSERT INTO quotes_v2 (
-                        id, quote_number, customer_name, customer_email, customer_phone,
-                        customer_address, business_unit, project_name, project_description,
-                        status, tax_rate, discount_amount, discount_type, deposit_percent,
-                        valid_days, terms, notes, pricing_mode, location, lining_preference,
-                        rooms_json, ai_mockups_json, ai_outlines_json, measurements_json,
-                        source, source_json_path, subtotal, tax_amount, total,
-                        expires_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (quote_id,) + values,
-                )
-            _apply_legacy_quote_extras(conn, quote_id, quote, billed_by)
+                insert = dict(fields)
+                insert["id"] = quote_id
+                if created_iso:
+                    insert["created_at"] = created_iso
+                apply_quote_v2_insert(conn, insert)
             _replace_legacy_line_items(conn, quote_id, line_items)
             try:
                 _recalculate_totals(conn, quote_id, "json_import")
-            except Exception:
-                pass
-            try:
-                conn.execute(
-                    "UPDATE quotes_v2 SET row_rev = ?, updated_at = ? WHERE id = ?",
-                    (next_rev, now, quote_id),
-                )
             except Exception:
                 pass
             try:
@@ -1984,6 +2096,13 @@ def migrate_legacy_json_quotes(*, apply: bool = False, limit: Optional[int] = No
             imported.append(row.get("id"))
         else:
             failed.append({"id": data.get("id"), "error": "upsert failed"})
+    naive_timestamps_utc = None
+    if apply:
+        try:
+            with get_db() as conn:
+                naive_timestamps_utc = convert_naive_quote_timestamps_to_utc(conn)
+        except Exception as exc:
+            naive_timestamps_utc = {"error": str(exc)}
     return {
         "imported": imported,
         "planned": planned,
@@ -1994,4 +2113,5 @@ def migrate_legacy_json_quotes(*, apply: bool = False, limit: Optional[int] = No
         "dry_run": not apply,
         "backup": backup,
         "sent": False,
+        "naive_timestamps_utc": naive_timestamps_utc,
     }

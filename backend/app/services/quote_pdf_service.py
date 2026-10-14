@@ -429,9 +429,9 @@ def generate_quote_pdf_legacy_portrait(quote_id: str) -> bytes:
     # Update quote with pdf_path
     try:
         from app.db.database import get_db
+        from app.services.quote_service import apply_quote_v2_update
         with get_db() as conn:
-            conn.execute("UPDATE quotes_v2 SET pdf_path = ? WHERE id = ?",
-                        (pdf_path, quote_id))
+            apply_quote_v2_update(conn, quote_id, {"pdf_path": pdf_path})
     except Exception:
         pass
 

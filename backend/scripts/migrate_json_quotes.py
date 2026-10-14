@@ -152,50 +152,42 @@ def migrate_one(conn, json_path):
         total = round(subtotal + tax_amount, 2)
 
     # INSERT quote header
-    conn.execute(
-        """INSERT INTO quotes_v2 (
-            id, quote_number, customer_name, customer_email, customer_phone,
-            customer_address, business_unit, project_name, project_description,
-            status, tax_rate, tax_amount, discount_amount, discount_type,
-            subtotal, total, deposit_percent,
-            valid_days, expires_at, terms, notes, max_analysis, source,
-            rooms_json, ai_mockups_json, ai_outlines_json, photos_json,
-            design_proposals_json, selected_proposal_idx,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            qid, quote_number,
-            customer_name,
-            q.get("customer_email", ""),
-            q.get("customer_phone", ""),
-            q.get("customer_address", ""),
-            business,
-            q.get("project_name", ""),
-            q.get("max_analysis", ""),  # store max_analysis as project_description-ish blob
-            new_status,
-            float(q.get("tax_rate") or 0),
-            tax_amount,
-            0.0,
-            "dollar",
-            subtotal,
-            total,
-            50.0,
-            int(q.get("valid_days") or 30),
-            q.get("expires_at") or now,
-            q.get("terms", ""),
-            "",  # notes
-            q.get("max_analysis", ""),
-            q.get("source", "max_quick_quote"),
-            json.dumps(q.get("rooms") or [], default=str),
-            json.dumps(q.get("ai_mockups") or [], default=str),
-            json.dumps(q.get("ai_outlines") or [], default=str),
-            json.dumps(q.get("photos") or [], default=str),
-            json.dumps(design_proposals, default=str),
-            sp_idx,
-            q.get("created_at") or now,
-            q.get("updated_at") or now,
-        ),
-    )
+    from app.services.quote_service import apply_quote_v2_insert
+
+    insert_fields = {
+        "id": qid,
+        "quote_number": quote_number,
+        "customer_name": customer_name,
+        "customer_email": q.get("customer_email", ""),
+        "customer_phone": q.get("customer_phone", ""),
+        "customer_address": q.get("customer_address", ""),
+        "business_unit": business,
+        "project_name": q.get("project_name", ""),
+        "project_description": q.get("max_analysis", ""),
+        "status": new_status,
+        "tax_rate": float(q.get("tax_rate") or 0),
+        "tax_amount": tax_amount,
+        "discount_amount": 0.0,
+        "discount_type": "dollar",
+        "subtotal": subtotal,
+        "total": total,
+        "deposit_percent": 50.0,
+        "valid_days": int(q.get("valid_days") or 30),
+        "expires_at": q.get("expires_at") or now,
+        "terms": q.get("terms", ""),
+        "notes": "",
+        "max_analysis": q.get("max_analysis", ""),
+        "source": q.get("source", "max_quick_quote"),
+        "rooms_json": json.dumps(q.get("rooms") or [], default=str),
+        "ai_mockups_json": json.dumps(q.get("ai_mockups") or [], default=str),
+        "ai_outlines_json": json.dumps(q.get("ai_outlines") or [], default=str),
+        "photos_json": json.dumps(q.get("photos") or [], default=str),
+        "design_proposals_json": json.dumps(design_proposals, default=str),
+        "selected_proposal_idx": sp_idx,
+    }
+    if q.get("created_at"):
+        insert_fields["created_at"] = q.get("created_at")
+    apply_quote_v2_insert(conn, insert_fields)
 
     # INSERT line items (Amendment A: proposed = final = line total)
     items = q.get("line_items") or q.get("items") or []

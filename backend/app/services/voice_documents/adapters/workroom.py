@@ -310,12 +310,13 @@ def _set_billed_by(quote_id: str, billed_by: str | None) -> None:
     from app.config.workroom_billing import ensure_billed_by_schema
     from app.db.database import get_db
 
+    from app.services.quote_service import apply_quote_v2_update
+
     with get_db() as conn:
         ensure_billed_by_schema(conn)
-        conn.execute(
-            "UPDATE quotes_v2 SET billed_by = ? WHERE id = ?",
-            (billed_by_for_storage(billed_by), quote_id),
-        )
+        apply_quote_v2_update(conn, quote_id, {
+            "billed_by": billed_by_for_storage(billed_by),
+        })
 
 
 def persist_drawing(quote: dict, drawing: dict, item: ExtractedItem) -> dict:

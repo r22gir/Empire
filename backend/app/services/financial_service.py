@@ -93,11 +93,16 @@ def create_payment(data: dict) -> dict:
 
         # Update quote deposit_paid if this is a deposit
         if data.get('payment_type') == 'deposit' and data.get('quote_id'):
-            conn.execute("""
-                UPDATE quotes_v2 SET deposit_paid = deposit_paid + ?,
-                balance_due = balance_due - ?, updated_at = ?
-                WHERE id = ?
-            """, (amount, amount, now, data['quote_id']))
+            from app.services.quote_service import apply_quote_v2_update
+            row = conn.execute(
+                "SELECT deposit_paid, balance_due FROM quotes_v2 WHERE id = ?",
+                (data['quote_id'],),
+            ).fetchone()
+            if row:
+                apply_quote_v2_update(conn, data['quote_id'], {
+                    "deposit_paid": (row[0] or 0) + amount,
+                    "balance_due": (row[1] or 0) - amount,
+                })
 
         _audit_log(conn, 'payment', str(pmt_id), 'created', 'amount', None, amount,
                    data.get('changed_by', 'api'),

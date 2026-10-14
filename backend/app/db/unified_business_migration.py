@@ -579,61 +579,47 @@ def migrate_quotes_json_to_sql(conn: sqlite3.Connection) -> dict:
         balance_due = total - _safe_float(data.get('deposit_paid', 0))
 
         try:
-            conn.execute("""
-                INSERT OR IGNORE INTO quotes_v2 (
-                    id, quote_number, customer_name, customer_email, customer_phone,
-                    customer_address, business_unit, job_id, project_name, project_description,
-                    status, subtotal, tax_rate, tax_amount, discount_amount, discount_type,
-                    total, deposit_percent, deposit_required, deposit_paid, balance_due,
-                    valid_days, expires_at, terms, source, source_json_path,
-                    notes, max_analysis, pricing_mode, location, lining_preference,
-                    rooms_json, tiers_json, design_proposals_json, ai_mockups_json,
-                    ai_outlines_json, photos_json, measurements_json, metadata_json,
-                    sent_at, accepted_at, created_at, updated_at
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )
-            """, (
-                quote_id,
-                quote_number,
-                customer_name,
-                customer_email or '',
-                customer_phone or '',
-                customer_address or '',
-                data.get('business_unit', 'workroom'),
-                data.get('job_id'),
-                data.get('project_name', ''),
-                data.get('project_description', ''),
-                data.get('status', 'draft'),
-                subtotal,
-                tax_rate,
-                tax_amount,
-                discount_amount,
-                data.get('discount_type', 'dollar'),
-                total,
-                deposit_percent,
-                deposit_required,
-                0.0,  # deposit_paid
-                balance_due,
-                int(data.get('valid_days', 30)),
-                data.get('expires_at'),
-                data.get('terms', ''),
-                data.get('source', 'migrated'),
-                fpath,
-                data.get('notes', ''),
-                data.get('max_analysis', ''),
-                data.get('pricing_mode', ''),
-                data.get('location', ''),
-                data.get('lining_preference', ''),
-                json.dumps(data.get('rooms', []), default=str) if data.get('rooms') else None,
-                json.dumps(data.get('tiers', {}), default=str) if data.get('tiers') else None,
-                json.dumps(data.get('design_proposals', []), default=str) if data.get('design_proposals') else None,
-                json.dumps(data.get('ai_mockups', []), default=str) if data.get('ai_mockups') else None,
-                json.dumps(data.get('ai_outlines', []), default=str) if data.get('ai_outlines') else None,
-                json.dumps(data.get('photos', []), default=str) if data.get('photos') else None,
-                json.dumps(data.get('measurements', {}), default=str) if data.get('measurements') else None,
-                json.dumps({k: v for k, v in data.items() if k not in {
+            from app.services.quote_service import apply_quote_v2_insert
+            insert_fields = {
+                "id": quote_id,
+                "quote_number": quote_number,
+                "customer_name": customer_name,
+                "customer_email": customer_email or '',
+                "customer_phone": customer_phone or '',
+                "customer_address": customer_address or '',
+                "business_unit": data.get('business_unit', 'workroom'),
+                "job_id": data.get('job_id'),
+                "project_name": data.get('project_name', ''),
+                "project_description": data.get('project_description', ''),
+                "status": data.get('status', 'draft'),
+                "subtotal": subtotal,
+                "tax_rate": tax_rate,
+                "tax_amount": tax_amount,
+                "discount_amount": discount_amount,
+                "discount_type": data.get('discount_type', 'dollar'),
+                "total": total,
+                "deposit_percent": deposit_percent,
+                "deposit_required": deposit_required,
+                "deposit_paid": 0.0,
+                "balance_due": balance_due,
+                "valid_days": int(data.get('valid_days', 30)),
+                "expires_at": data.get('expires_at'),
+                "terms": data.get('terms', ''),
+                "source": data.get('source', 'migrated'),
+                "source_json_path": fpath,
+                "notes": data.get('notes', ''),
+                "max_analysis": data.get('max_analysis', ''),
+                "pricing_mode": data.get('pricing_mode', ''),
+                "location": data.get('location', ''),
+                "lining_preference": data.get('lining_preference', ''),
+                "rooms_json": json.dumps(data.get('rooms', []), default=str) if data.get('rooms') else None,
+                "tiers_json": json.dumps(data.get('tiers', {}), default=str) if data.get('tiers') else None,
+                "design_proposals_json": json.dumps(data.get('design_proposals', []), default=str) if data.get('design_proposals') else None,
+                "ai_mockups_json": json.dumps(data.get('ai_mockups', []), default=str) if data.get('ai_mockups') else None,
+                "ai_outlines_json": json.dumps(data.get('ai_outlines', []), default=str) if data.get('ai_outlines') else None,
+                "photos_json": json.dumps(data.get('photos', []), default=str) if data.get('photos') else None,
+                "measurements_json": json.dumps(data.get('measurements', {}), default=str) if data.get('measurements') else None,
+                "metadata_json": json.dumps({k: v for k, v in data.items() if k not in {
                     'id','quote_number','customer_name','customer_email','customer_phone',
                     'customer_address','business_unit','job_id','project_name','project_description',
                     'status','subtotal','tax_rate','tax_amount','discount_amount','discount_type',
@@ -642,11 +628,12 @@ def migrate_quotes_json_to_sql(conn: sqlite3.Connection) -> dict:
                     'design_proposals','ai_mockups','ai_outlines','photos','measurements',
                     'line_items','items','sent_at','accepted_at','created_at','updated_at'
                 }}, default=str),
-                data.get('sent_at'),
-                data.get('accepted_at'),
-                data.get('created_at', datetime.now(tz=None).isoformat()),
-                data.get('updated_at', datetime.now(tz=None).isoformat()),
-            ))
+                "sent_at": data.get('sent_at'),
+                "accepted_at": data.get('accepted_at'),
+            }
+            if data.get('created_at'):
+                insert_fields['created_at'] = data.get('created_at')
+            apply_quote_v2_insert(conn, insert_fields)
 
             # Migrate line items
             line_items = _extract_line_items(data)

@@ -121,8 +121,8 @@ def create_work_order_from_quote(quote_id: str, assigned_to: str = None) -> dict
             ))
 
         # Update quote status
-        conn.execute("UPDATE quotes_v2 SET status = 'ordered', updated_at = ? WHERE id = ?",
-                     (now, quote_id))
+        from app.services.quote_service import apply_quote_v2_update
+        apply_quote_v2_update(conn, quote_id, {"status": "ordered"})
 
         _audit_log(conn, 'work_order', str(wo_id), 'created', 'quote_id', None, quote_id,
                    'system', f'Created from quote {quote_id}')

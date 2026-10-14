@@ -68,6 +68,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 # Known test/smoke/QA customer-name fragments. Case-insensitive substring
 # match against quotes_v2.customer_name.
 DEFAULT_TEST_NAME_PATTERNS = [
@@ -201,11 +205,10 @@ def main() -> int:
             print("\nNothing to change.")
             return 0
 
+        from app.services.quote_service import apply_quote_v2_update
+
         for row in to_change:
-            conn.execute(
-                "UPDATE quotes_v2 SET is_test = ?, updated_at = datetime('now') WHERE id = ?",
-                (target_flag, row["id"]),
-            )
+            apply_quote_v2_update(conn, row["id"], {"is_test": target_flag})
             conn.execute(
                 "INSERT INTO financial_audit_log "
                 "(entity_type, entity_id, action, field_name, old_value, new_value, changed_by, reason) "
