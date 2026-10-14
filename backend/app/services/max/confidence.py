@@ -1,11 +1,15 @@
-"""Shadow-mode confidence scorer for Max routing and tool actions.
+"""Shadow-mode confidence scorer + optional answer cascade for Max.
 
-Default MAX_CONFIDENCE_GATE=shadow: score and log, never change behavior.
-Cheap heuristics first. Optional included-model nudge only when quota remains
-(no auto-credits). Low-score cases can be filed as proposed improvements
+Default / unset MAX_CONFIDENCE_GATE=shadow: score and log, never change
+behavior. Gate on: low-confidence answers escalate (retry with a stronger
+local reasoning/tool check, then ask the founder). High-confidence answers
+proceed. Optional included-model nudge only when quota remains (no
+auto-credits). Low-score cases can be filed as proposed improvements
 (draft only — never approved).
 
-Tests must set EMPIRE_DATA_DIR / EMPIRE_TASK_DB to temp paths.
+Never sends email or WhatsApp. Founder ask is in-reply text plus an
+optional founder_inbox row. Tests must set EMPIRE_DATA_DIR / EMPIRE_TASK_DB
+to temp paths.
 """
 from __future__ import annotations
 
@@ -45,6 +49,16 @@ LOW_THRESHOLD = 0.55
 FAMILY_EDITIONS = frozenset({"max_e", "maxine", "amp", "juan", "camilo"})
 FAMILY_OWNERS = frozenset({"juan", "camilo", "max-e", "max_e", "maxe", "maxine"})
 
+CASCADE_PROCEED = "proceed"
+CASCADE_RETRY = "retry"
+CASCADE_ASK_FOUNDER = "ask_founder"
+
+_HEDGE_RE = re.compile(
+    r"\b(?:I think|probably|might be|I['’]m not sure|I believe|possibly|"
+    r"it seems|I['’]m guessing|not certain|could be)\b",
+    re.IGNORECASE,
+)
+
 _TASK_RE = re.compile(
     r"\b(?:create|make|generate|draw|render|queue|run|start|do)\b.+"
     r"\b(?:task|image|drawing|render|desk|photo|picture)\b",
@@ -69,6 +83,11 @@ def gate_mode() -> str:
 
 def is_enabled() -> bool:
     return gate_mode() != "off"
+
+
+def cascade_enabled() -> bool:
+    """True only when the founder turned the real gate on. Unset is shadow."""
+    return gate_mode() == "on"
 
 
 def low_threshold() -> float:
@@ -379,6 +398,401 @@ def record_tool_action(tool_name: str, parameters: Any = None, **kw: Any) -> dic
         return {"score": 0.0, "would_gate": False, "behavior_changed": False, "error": True}
 
 
+def _tool_entries(tool_results: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for item in tool_results or []:
+        if isinstance(item, dict):
+            entries.append(item)
+            continue
+        entries.append({
+            "tool": getattr(item, "tool", None),
+            "success": getattr(item, "success", None),
+            "error": getattr(item, "error", None),
+        })
+    return entries
+
+
+def _answer_quality_score(answer: str, tool_results: Any = None) -> float:
+    raw = (answer or "").strip()
+    if not raw:
+        return 0.12
+    score = 0.78
+    hedges = len(_HEDGE_RE.findall(raw))
+    if hedges:
+        score -= min(0.36, 0.12 * hedges)
+    if len(raw) < 20:
+        score = min(score, 0.48)
+    entries = _tool_entries(tool_results)
+    if entries:
+        fails = [row for row in entries if row.get("success") is False]
+        oks = [row for row in entries if row.get("success") is True]
+        if fails and not oks:
+            score = min(score, 0.30)
+        elif oks and not fails:
+            score = max(score, 0.80)
+        elif fails:
+            score = min(score, 0.50)
+    return max(0.05, min(0.98, score))
+
+
+def score_answer(
+    text: str,
+    answer: str,
+    *,
+    chosen_path: str | None = None,
+    tool_results: Any = None,
+    edition: str | None = None,
+    requester: str | None = None,
+    persist: bool = True,
+    correction: bool = False,
+) -> dict[str, Any]:
+    """Score a finished reply. Does not change the answer."""
+    intent = score_intent(
+        text,
+        chosen_path=chosen_path,
+        edition=edition,
+        requester=requester,
+        persist=False,
+        correction=correction,
+    )
+    ans_score = _answer_quality_score(answer, tool_results)
+    score = min(float(intent.get("score") or 0), ans_score)
+    low = score < low_threshold()
+    record = {
+        **intent,
+        "kind": "answer",
+        "score": round(score, 3),
+        "answer_score": round(ans_score, 3),
+        "would_gate": bool(low),
+        "gated_action": intent.get("gated_action") or (
+            clarifying_question(
+                str(intent.get("chosen_path") or "other"),
+                intent.get("scores") or heuristic_intent_scores(text),
+                text,
+            ) if low else ""
+        ),
+        "behavior_changed": False,
+        "context": {
+            "answer_score": round(ans_score, 3),
+            "tool_names": [
+                str(row.get("tool") or "")
+                for row in _tool_entries(tool_results)
+                if row.get("tool")
+            ][:12],
+        },
+    }
+    if persist and is_enabled():
+        try:
+            ensure_confidence_file_logging()
+        except Exception:
+            pass
+        _store(record)
+        _log_event(record)
+    return record
+
+
+def decide_cascade(record: dict[str, Any] | None, *, attempt: int = 0) -> str:
+    """Pure decision. Unset / shadow / off always proceed."""
+    if not cascade_enabled():
+        return CASCADE_PROCEED
+    if not record or not record.get("would_gate"):
+        return CASCADE_PROCEED
+    if int(attempt or 0) <= 0:
+        return CASCADE_RETRY
+    return CASCADE_ASK_FOUNDER
+
+
+def stronger_check(
+    text: str,
+    answer: str,
+    record: dict[str, Any] | None = None,
+    tool_results: Any = None,
+) -> dict[str, Any]:
+    """One local retry: tool evidence + quality gate + quota-safe nudge.
+
+    Never calls a live model unless MAX_CONFIDENCE_MODEL_CHECK is on and
+    MiniMax quota remains. Never spends auto-credits. Never sends.
+    """
+    base = record or {}
+    nudge = optional_model_nudge(text, base.get("scores") or heuristic_intent_scores(text))
+    quality_level = ""
+    try:
+        from app.services.max.quality_gate import validate_response
+
+        quality_level = str(
+            getattr(validate_response(answer or "", tool_results=tool_results or []), "level", "")
+            or ""
+        ).lower()
+    except Exception:
+        quality_level = ""
+    retry_record = score_answer(
+        text,
+        answer,
+        chosen_path=base.get("chosen_path"),
+        tool_results=tool_results,
+        edition=base.get("edition"),
+        persist=False,
+    )
+    aligned = retry_record.get("chosen_path") == retry_record.get("best_path")
+    if quality_level in {"verified", "high"} and aligned and float(retry_record.get("score") or 0) < 0.72:
+        retry_record = dict(retry_record)
+        retry_record["score"] = round(max(float(retry_record.get("score") or 0), 0.72), 3)
+        retry_record["would_gate"] = retry_record["score"] < low_threshold()
+        retry_record["gated_action"] = "" if not retry_record["would_gate"] else retry_record.get("gated_action")
+    return {
+        "record": retry_record,
+        "nudge": nudge,
+        "quality_level": quality_level,
+        "auto_credits": False,
+        "answer": answer,
+    }
+
+
+def founder_ask_text(record: dict[str, Any] | None, text: str = "") -> str:
+    """In-chat founder question. Never an email or WhatsApp send."""
+    question = ((record or {}).get("gated_action") or "").strip()
+    if not question:
+        scores = (record or {}).get("scores") or heuristic_intent_scores(text)
+        chosen = str((record or {}).get("chosen_path") or "other")
+        question = clarifying_question(chosen, scores, text)
+    return (
+        "I need a call from you before I continue.\n\n"
+        f"{question}"
+    )
+
+
+def _file_founder_ask(record: dict[str, Any], text: str = "") -> dict[str, Any] | None:
+    """Local founder_inbox only. Fail-open. Never email / WhatsApp / Telegram."""
+    try:
+        from app.services.max.desks import founder_inbox
+
+        key = _dedupe_key(record)
+        return founder_inbox.add(
+            task_id=f"conf-{key}",
+            title=f"Max needs a call: {record.get('chosen_path') or 'answer'}",
+            description=(
+                f"{record.get('gated_action') or ''}\n"
+                f"score={record.get('score')} chosen={record.get('chosen_path')} "
+                f"best={record.get('best_path')}\n"
+                f"{(text or record.get('text') or '')[:400]}"
+            ),
+            priority="high",
+            reason="low_confidence_cascade",
+            source="confidence_cascade",
+        )
+    except Exception:
+        logger.info("confidence founder inbox file skipped", exc_info=True)
+        return None
+
+
+def apply_answer_cascade(
+    text: str,
+    answer: str,
+    *,
+    chosen_path: str | None = None,
+    tool_results: Any = None,
+    edition: str | None = None,
+    requester: str | None = None,
+    persist: bool = True,
+    retry_fn: Any = None,
+    ask_founder_fn: Any = None,
+) -> dict[str, Any]:
+    """Score a reply and, only when the gate is on, escalate low confidence.
+
+    Unset / shadow / off: score_intent log only (today's shadow mode). The
+    answer is returned unchanged. retry_fn / ask_founder_fn are never called.
+    """
+    mode = gate_mode()
+    original = answer
+    if mode != "on":
+        record = score_intent(
+            text,
+            chosen_path=chosen_path,
+            edition=edition,
+            requester=requester,
+            persist=persist,
+        )
+        return {
+            "answer": original,
+            "original_answer": original,
+            "action": CASCADE_PROCEED,
+            "behavior_changed": False,
+            "retried": False,
+            "asked_founder": False,
+            "mode": mode,
+            "score": record,
+            "attempts": [record],
+            "auto_credits": False,
+            "founder_inbox": None,
+        }
+
+    record = score_answer(
+        text,
+        original,
+        chosen_path=chosen_path,
+        tool_results=tool_results,
+        edition=edition,
+        requester=requester,
+        persist=persist,
+    )
+    result: dict[str, Any] = {
+        "answer": original,
+        "original_answer": original,
+        "action": CASCADE_PROCEED,
+        "behavior_changed": False,
+        "retried": False,
+        "asked_founder": False,
+        "mode": mode,
+        "score": record,
+        "attempts": [record],
+        "auto_credits": False,
+        "founder_inbox": None,
+    }
+    if decide_cascade(record, attempt=0) != CASCADE_RETRY:
+        if persist:
+            _persist_cascade(result, text)
+        return result
+
+    retry_answer = original
+    retry_record = record
+    if retry_fn is not None:
+        try:
+            retry_answer = retry_fn(text, original, record, tool_results)
+        except Exception:
+            logger.info("confidence cascade retry_fn failed", exc_info=True)
+            retry_answer = original
+        retry_record = score_answer(
+            text,
+            retry_answer if isinstance(retry_answer, str) else original,
+            chosen_path=chosen_path,
+            tool_results=tool_results,
+            edition=edition,
+            requester=requester,
+            persist=persist,
+        )
+    else:
+        checked = stronger_check(text, original, record, tool_results)
+        retry_record = checked.get("record") or record
+        retry_answer = checked.get("answer") if isinstance(checked.get("answer"), str) else original
+        result["auto_credits"] = False
+        result["nudge"] = checked.get("nudge")
+    result["retried"] = True
+    result["attempts"].append(retry_record)
+    result["score"] = retry_record
+
+    if decide_cascade(retry_record, attempt=1) == CASCADE_PROCEED:
+        changed = retry_answer != original
+        result["answer"] = retry_answer
+        result["action"] = CASCADE_PROCEED
+        result["behavior_changed"] = bool(changed)
+        if persist:
+            _persist_cascade(result, text)
+        return result
+
+    question = founder_ask_text(retry_record, text)
+    inbox = None
+    if ask_founder_fn is not None:
+        try:
+            inbox = ask_founder_fn(retry_record, text, question)
+        except Exception:
+            logger.info("confidence cascade ask_founder_fn failed", exc_info=True)
+    else:
+        inbox = _file_founder_ask(retry_record, text)
+    result["answer"] = question
+    result["action"] = CASCADE_ASK_FOUNDER
+    result["behavior_changed"] = True
+    result["asked_founder"] = True
+    result["founder_inbox"] = inbox
+    if persist:
+        _persist_cascade(result, text)
+    return result
+
+
+def apply_reply_cascade(
+    user_text: str,
+    answer: str,
+    *,
+    tool_results: Any = None,
+    chosen_path: str | None = None,
+    persist: bool = True,
+) -> dict[str, Any]:
+    """Shared /chat and /chat/stream entry. Fail-open wrapper."""
+    try:
+        return apply_answer_cascade(
+            user_text,
+            answer,
+            chosen_path=chosen_path,
+            tool_results=tool_results,
+            persist=persist,
+        )
+    except Exception:
+        logger.warning("confidence reply cascade failed", exc_info=True)
+        return {
+            "answer": answer,
+            "original_answer": answer,
+            "action": CASCADE_PROCEED,
+            "behavior_changed": False,
+            "retried": False,
+            "asked_founder": False,
+            "mode": gate_mode(),
+            "score": {"score": 0.0, "would_gate": False, "error": True},
+            "auto_credits": False,
+            "error": True,
+        }
+
+
+def cascade_public_meta(hit: dict[str, Any] | None) -> dict[str, Any]:
+    """Safe response-metadata subset. No message text, no tokens."""
+    row = hit or {}
+    score = row.get("score") if isinstance(row.get("score"), dict) else {}
+    return {
+        "mode": row.get("mode") or gate_mode(),
+        "action": row.get("action") or CASCADE_PROCEED,
+        "behavior_changed": bool(row.get("behavior_changed")),
+        "would_gate": bool(score.get("would_gate")),
+        "score": score.get("score"),
+        "retried": bool(row.get("retried")),
+        "asked_founder": bool(row.get("asked_founder")),
+    }
+
+
+def _persist_cascade(result: dict[str, Any], text: str) -> None:
+    if not is_enabled():
+        return
+    score = result.get("score") if isinstance(result.get("score"), dict) else {}
+    record = {
+        "kind": "cascade",
+        "text": (text or "")[:500],
+        "chosen_path": score.get("chosen_path"),
+        "best_path": score.get("best_path"),
+        "score": float(score.get("score") or 0),
+        "scores": score.get("scores") or {},
+        "would_gate": bool(score.get("would_gate")),
+        "gated_action": (score.get("gated_action") or "")[:240],
+        "edition": score.get("edition") or process_edition(),
+        "family_flag": bool(score.get("family_flag")),
+        "mode": result.get("mode") or gate_mode(),
+        "correction": False,
+        "behavior_changed": bool(result.get("behavior_changed")),
+        "context": {
+            "cascade_action": result.get("action"),
+            "behavior_changed": bool(result.get("behavior_changed")),
+            "retried": bool(result.get("retried")),
+            "asked_founder": bool(result.get("asked_founder")),
+            "auto_credits": False,
+        },
+    }
+    try:
+        ensure_confidence_file_logging()
+    except Exception:
+        pass
+    try:
+        _store(record)
+        _log_event(record)
+    except Exception:
+        logger.info("confidence cascade persist skipped", exc_info=True)
+
+
 def mark_correction(text: str = "", edition: str | None = None) -> None:
     """Founder frustration/edit: attach a correction to the latest intent event."""
     if not is_enabled():
@@ -423,21 +837,50 @@ def week_report(days: int = 7) -> dict[str, Any]:
         }
         for path, vals in sorted(by_path.items())
     }
+    cascade_changed = False
+    cascade_asked = 0
+    cascade_retried = 0
+    for r in rows:
+        ctx = {}
+        raw_ctx = r.get("context_json")
+        if raw_ctx:
+            try:
+                parsed = json.loads(raw_ctx)
+                if isinstance(parsed, dict):
+                    ctx = parsed
+            except Exception:
+                ctx = {}
+        if ctx.get("behavior_changed"):
+            cascade_changed = True
+        if ctx.get("asked_founder"):
+            cascade_asked += 1
+        if ctx.get("retried"):
+            cascade_retried += 1
+    mode = gate_mode()
     return {
         "days": days,
-        "mode": gate_mode(),
-        "behavior_changed": False,
+        "mode": mode,
+        "behavior_changed": bool(mode == "on" and cascade_changed),
         "total": n,
         "low_confidence": len(low),
         "unfiled_low": sum(1 for r in low if not r.get("improvement_id")),
         "corrections": len(corrections),
         "family_low_flagged": len(family),
+        "cascade_asked_founder": cascade_asked,
+        "cascade_retried": cascade_retried,
         "avg_score": round(sum(float(r.get("score") or 0) for r in rows) / n, 3) if n else 0,
         "paths": paths,
         "threshold": low_threshold(),
+        "auto_credits": False,
         "note": (
             "Shadow mode: scores vs founder corrections (frustration/edits). "
             "Validate here before enabling a real gate. No auto-credits."
+            if mode != "on"
+            else (
+                "Gate on: low-confidence answers retry once (local stronger "
+                "check; no auto-credits) then ask the founder. High-confidence "
+                "answers proceed."
+            )
         ),
     }
 
