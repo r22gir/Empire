@@ -21,7 +21,11 @@ async function authFetch<T>(path: string, opts?: RequestInit): Promise<T> {
     let detail = `Auth ${res.status}`;
     try {
       const body = await res.json();
-      if (body?.detail) detail = typeof body.detail === 'string' ? body.detail : detail;
+      if (typeof body?.detail === 'string') {
+        detail = body.detail;
+      } else if (Array.isArray(body?.detail) && body.detail[0]?.msg) {
+        detail = String(body.detail[0].msg);
+      }
     } catch {
       /* ignore */
     }

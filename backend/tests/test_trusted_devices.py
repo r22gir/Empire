@@ -11,6 +11,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.services.studio_login_guard import (
+    GLOBAL_FAIL_LIMIT,
+    StudioLoginGuard,
+    format_remaining,
+    record_studio_login_failure,
+    reset_studio_login_guard,
+)
 from app.utils.security import get_password_hash
 
 
@@ -25,6 +32,7 @@ def isolated_db(monkeypatch, tmp_path):
     monkeypatch.setenv("FOUNDER_PIN", "2468")
     devices.reset_schema_cache()
     devices.ensure_schema()
+    reset_studio_login_guard()
     return db_path
 
 
@@ -45,6 +53,13 @@ def _seed_users():
                (id, name, role, email, password_hash, tier, is_active)
                VALUES (?, ?, 'viewer', ?, ?, 'lite', 1)""",
             ("viewer1", "Viewer", "viewer@example.com", viewer_hash),
+        )
+        admin_hash = get_password_hash("admin-pass")
+        conn.execute(
+            """INSERT INTO access_users
+               (id, name, role, email, password_hash, tier, is_active)
+               VALUES (?, ?, 'admin', ?, ?, 'empire', 1)""",
+            ("admin1", "Admin", "admin@empire.example", admin_hash),
         )
 
 
@@ -280,3 +295,462 @@ def test_isolated_db_is_not_live_empire_db(isolated_db):
     assert "empire.db" not in str(path) or "studio_auth_test" in str(path)
     assert "empire-data" not in str(path)
     assert path.parent != (Path(__file__).resolve().parents[1] / "data").resolve()
+
+
+def test_studio_login_alphanumeric_pin(client, monkeypatch):
+    monkeypatch.setenv("FOUNDER_PIN", "Kx9mQ2vL8aB")
+    r = client.post("/api/v1/auth/studio-login", json={"pin": "Kx9mQ2vL8aB"})
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["role"] == "founder"
+    assert r.json()["remember_offered"] is True
+
+
+def test_studio_login_pin_length_mismatch_is_401_not_500(client):
+    r = client.post("/api/v1/auth/studio-login", json={"pin": "1"})
+    assert r.status_code == 401
+    assert r.json()["detail"] == "Invalid founder PIN"
+
+
+def test_require_founder_pin_uses_constant_time_compare():
+    src = Path(__file__).resolve().parents[1] / "app" / "routers" / "auth.py"
+    text = src.read_text()
+    assert "hmac.compare_digest" in text
+    assert "pin != founder_pin" not in text
+
+
+def test_studio_login_founder_email_success(client):
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "owner@empire.example", "password": "founder-pass"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["user"]["role"] == "founder"
+    assert body["user"]["email"] == "owner@empire.example"
+    assert body["remember_offered"] is True
+    assert client.cookies.get("empire_session")
+
+
+def test_studio_login_admin_email_success(client):
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "admin@empire.example", "password": "admin-pass"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["role"] == "admin"
+    assert r.json()["remember_offered"] is True
+
+
+def test_studio_login_email_is_case_insensitive(client):
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "Owner@Empire.Example", "password": "founder-pass"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["role"] == "founder"
+
+
+def test_studio_login_email_wrong_password(client):
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "owner@empire.example", "password": "wrong-pass"},
+    )
+    assert r.status_code == 401
+    assert r.json()["detail"] == "Invalid email or password"
+    assert not client.cookies.get("empire_session")
+
+
+def test_remember_device_after_email_login(client):
+    login = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "owner@empire.example", "password": "founder-pass"},
+    )
+    assert login.status_code == 200, login.text
+    r = client.post("/api/v1/auth/remember-device", json={"device_name": "Email iPhone"})
+    assert r.status_code == 200, r.text
+    assert client.cookies.get("empire_device")
+    assert r.json()["device"]["device_name"] == "Email iPhone"
+
+
+def test_studio_login_lockout_per_ip_and_message(client):
+    headers = {"CF-Connecting-IP": "203.0.113.77"}
+    statuses = []
+    last = None
+    for _ in range(5):
+        last = client.post(
+            "/api/v1/auth/studio-login",
+            json={"pin": "0000"},
+            headers=headers,
+        )
+        statuses.append(last.status_code)
+    assert statuses[:4] == [401, 401, 401, 401]
+    assert last is not None
+    assert last.status_code == 429
+    detail = last.json()["detail"]
+    assert "Try again in" in detail
+    assert "minute" in detail
+    assert "remembered device still works" in detail.lower()
+
+    even_correct = client.post(
+        "/api/v1/auth/studio-login",
+        json={"pin": "2468"},
+        headers=headers,
+    )
+    assert even_correct.status_code == 429
+    assert "Try again in" in even_correct.json()["detail"]
+    assert "remembered device still works" in even_correct.json()["detail"].lower()
+
+
+def test_studio_login_global_lockout_blocks_other_ip(client):
+    assert GLOBAL_FAIL_LIMIT == 50
+    for i in range(GLOBAL_FAIL_LIMIT):
+        record_studio_login_failure(f"198.51.100.{i}")
+    blocked = client.post(
+        "/api/v1/auth/studio-login",
+        json={"pin": "2468"},
+        headers={"CF-Connecting-IP": "198.51.100.200"},
+    )
+    assert blocked.status_code == 429
+    assert "Try again in" in blocked.json()["detail"]
+    assert "remembered device still works" in blocked.json()["detail"].lower()
+
+
+def test_lockout_uses_cf_connecting_ip_not_x_forwarded_for(client):
+    for i in range(5):
+        r = client.post(
+            "/api/v1/auth/studio-login",
+            json={"pin": "0000"},
+            headers={
+                "CF-Connecting-IP": "203.0.113.9",
+                "X-Forwarded-For": f"198.51.100.{i}",
+            },
+        )
+        if i < 4:
+            assert r.status_code == 401, r.text
+    assert r.status_code == 429
+    other = client.post(
+        "/api/v1/auth/studio-login",
+        json={"pin": "2468"},
+        headers={
+            "CF-Connecting-IP": "203.0.113.10",
+            "X-Forwarded-For": "203.0.113.9",
+        },
+    )
+    assert other.status_code == 200, other.text
+
+
+def test_lockout_ignores_x_forwarded_for_without_cf(client):
+    last = None
+    for i in range(5):
+        last = client.post(
+            "/api/v1/auth/studio-login",
+            json={"pin": "0000"},
+            headers={"X-Forwarded-For": f"198.51.100.{i}"},
+        )
+    assert last is not None
+    assert last.status_code == 429
+
+
+def test_remembered_device_gets_in_during_global_lock(client):
+    login = client.post("/api/v1/auth/studio-login", json={"pin": "2468"})
+    assert login.status_code == 200, login.text
+    remember = client.post("/api/v1/auth/remember-device", json={"device_name": "Lock Phone"})
+    assert remember.status_code == 200, remember.text
+    raw = client.cookies.get("empire_device")
+    assert raw
+
+    for i in range(GLOBAL_FAIL_LIMIT):
+        record_studio_login_failure(f"203.0.113.{i % 200}")
+
+    client.cookies.clear()
+    blocked = client.post("/api/v1/auth/studio-login", json={"pin": "2468"})
+    assert blocked.status_code == 429
+    assert "remembered device still works" in blocked.json()["detail"].lower()
+
+    client.cookies.set("empire_device", raw)
+    session = client.get("/api/v1/auth/session")
+    assert session.status_code == 200, session.text
+    assert session.json()["authenticated"] is True
+    assert session.json()["user"]["role"] == "founder"
+
+    again = client.post("/api/v1/auth/studio-login", json={"pin": "2468"})
+    assert again.status_code == 200, again.text
+
+
+def test_studio_login_email_failures_count_toward_lockout(client):
+    headers = {"CF-Connecting-IP": "192.0.2.55"}
+    for _ in range(4):
+        r = client.post(
+            "/api/v1/auth/studio-login",
+            json={"email": "owner@empire.example", "password": "bad"},
+            headers=headers,
+        )
+        assert r.status_code == 401
+    fifth = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "owner@empire.example", "password": "bad"},
+        headers=headers,
+    )
+    assert fifth.status_code == 429
+    assert "Try again in" in fifth.json()["detail"]
+
+
+def test_record_success_does_not_clear_global_count():
+    guard = StudioLoginGuard(ip_limit=5, global_limit=3, lock_seconds=15 * 60)
+    guard.record_failure("1.1.1.1")
+    guard.record_failure("1.1.1.2")
+    guard.record_success("1.1.1.1")
+    guard.record_failure("1.1.1.3")
+    assert guard.check("9.9.9.9")
+
+
+def test_guard_ip_lock_does_not_trip_global_when_limits_differ():
+    clock = {"t": 1_000.0}
+    guard = StudioLoginGuard(
+        ip_limit=5,
+        global_limit=20,
+        lock_seconds=15 * 60,
+        clock=lambda: clock["t"],
+    )
+    for _ in range(5):
+        guard.record_failure("203.0.113.1")
+    assert guard.check("203.0.113.1")
+    assert guard.check("203.0.113.2") is None
+    clock["t"] += 15 * 60
+    assert guard.check("203.0.113.1") is None
+
+
+def test_founder_access_emails_authenticate_as_founder(client, monkeypatch):
+    monkeypatch.setenv(
+        "FOUNDER_ACCESS_EMAILS",
+        "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
+    )
+    for addr in ("rafa22giraldo@gmail.com", "EmpireBox2026@gmail.com"):
+        client.cookies.clear()
+        r = client.post(
+            "/api/v1/auth/studio-login",
+            json={"email": addr, "password": "founder-pass"},
+        )
+        assert r.status_code == 200, (addr, r.text)
+        assert r.json()["user"]["id"] == "founder1"
+        assert r.json()["user"]["role"] == "founder"
+        assert r.json()["remember_offered"] is True
+
+
+def test_founder_alias_works_when_founder_email_empty(client, monkeypatch):
+    from app.db.database import get_db
+
+    monkeypatch.setenv(
+        "FOUNDER_ACCESS_EMAILS",
+        "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
+    )
+    with get_db() as conn:
+        conn.execute("UPDATE access_users SET email = NULL WHERE id = 'founder1'")
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "rafa22giraldo@gmail.com", "password": "founder-pass"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["id"] == "founder1"
+
+
+def test_founder_alias_without_password_hash_is_401(client, monkeypatch):
+    from app.db.database import get_db
+
+    monkeypatch.setenv("FOUNDER_ACCESS_EMAILS", "rafa22giraldo@gmail.com")
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE access_users SET email = NULL, password_hash = NULL WHERE id = 'founder1'"
+        )
+    r = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "rafa22giraldo@gmail.com", "password": "founder-pass"},
+    )
+    assert r.status_code == 401
+    assert r.json()["detail"] == "Invalid email or password"
+
+
+def test_founder_alias_failures_share_lockout(client, monkeypatch):
+    monkeypatch.setenv(
+        "FOUNDER_ACCESS_EMAILS",
+        "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
+    )
+    headers = {"CF-Connecting-IP": "192.0.2.88"}
+    addrs = (
+        "rafa22giraldo@gmail.com",
+        "empirebox2026@gmail.com",
+        "rafa22giraldo@gmail.com",
+        "empirebox2026@gmail.com",
+        "rafa22giraldo@gmail.com",
+    )
+    last = None
+    for i, addr in enumerate(addrs):
+        last = client.post(
+            "/api/v1/auth/studio-login",
+            json={"email": addr, "password": "wrong"},
+            headers=headers,
+        )
+        if i < 4:
+            assert last.status_code == 401, last.text
+    assert last is not None
+    assert last.status_code == 429
+    assert "Try again in" in last.json()["detail"]
+    even_correct = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "empirebox2026@gmail.com", "password": "founder-pass"},
+        headers=headers,
+    )
+    assert even_correct.status_code == 429
+
+
+def test_script_then_both_alias_emails_login(client, isolated_db, monkeypatch):
+    """Production-like founder row: empty email, no hash, then CLI set."""
+    from app.db.database import get_db
+    from app.services.founder_access import set_founder_password
+
+    monkeypatch.setenv(
+        "FOUNDER_ACCESS_EMAILS",
+        "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
+    )
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE access_users SET email = '', password_hash = NULL WHERE id = 'founder1'"
+        )
+    assert set_founder_password(isolated_db, "post-script-pass") == 1
+    denied = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "owner@empire.example", "password": "post-script-pass"},
+    )
+    assert denied.status_code == 401
+    for addr in ("rafa22giraldo@gmail.com", "empirebox2026@gmail.com"):
+        client.cookies.clear()
+        r = client.post(
+            "/api/v1/auth/studio-login",
+            json={"email": addr, "password": "post-script-pass"},
+        )
+        assert r.status_code == 200, (addr, r.text)
+        assert r.json()["user"]["id"] == "founder1"
+        assert r.json()["user"]["role"] == "founder"
+
+
+def test_alias_email_no_founder_row_is_401_counted(client, monkeypatch):
+    from app.db.database import get_db
+
+    monkeypatch.setenv("FOUNDER_ACCESS_EMAILS", "rafa22giraldo@gmail.com")
+    with get_db() as conn:
+        conn.execute("DELETE FROM access_users WHERE role = 'founder'")
+    headers = {"CF-Connecting-IP": "198.51.100.40"}
+    first = client.post(
+        "/api/v1/auth/studio-login",
+        json={"email": "rafa22giraldo@gmail.com", "password": "anything"},
+        headers=headers,
+    )
+    assert first.status_code == 401
+    assert first.json()["detail"] == "Invalid email or password"
+    last = None
+    for _ in range(4):
+        last = client.post(
+            "/api/v1/auth/studio-login",
+            json={"email": "rafa22giraldo@gmail.com", "password": "anything"},
+            headers=headers,
+        )
+    assert last is not None
+    assert last.status_code == 429
+    assert "remembered device still works" in last.json()["detail"].lower()
+
+
+def test_resolve_db_path_matches_backend_default(monkeypatch):
+    from app.services.founder_access import resolve_db_path
+
+    monkeypatch.delenv("EMPIRE_TASK_DB", raising=False)
+    assert resolve_db_path() == (Path.home() / "empire-data" / "empire.db").resolve()
+    assert resolve_db_path("~/empire-data/empire.db") == (
+        Path.home() / "empire-data" / "empire.db"
+    ).resolve()
+
+
+def test_set_founder_password_script_mocked(tmp_path, monkeypatch, capsys):
+    import importlib.util
+    import sqlite3
+
+    from app.services.founder_access import backup_sqlite, set_founder_password
+    from app.utils.security import verify_password
+
+    db = tmp_path / "founder_pw_test.db"
+    assert "studio_auth_test" not in str(db)
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE access_users (
+               id TEXT, name TEXT, role TEXT, email TEXT,
+               password_hash TEXT, is_active INTEGER, updated_at TEXT
+           )"""
+    )
+    conn.execute(
+        "INSERT INTO access_users VALUES ('f1','Founder','founder','',NULL,1,NULL)"
+    )
+    conn.execute(
+        "INSERT INTO access_users VALUES ('v1','Viewer','viewer','v@x.com','leave-me',1,NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv(
+        "FOUNDER_ACCESS_EMAILS",
+        "rafa22giraldo@gmail.com,empirebox2026@gmail.com",
+    )
+    backup = backup_sqlite(db)
+    assert backup.is_file()
+    assert backup.read_bytes()  # copy of empty-hash founder
+    assert set_founder_password(db, "s3cret-founder") == 1
+
+    conn = sqlite3.connect(db)
+    founder = conn.execute(
+        "SELECT email, password_hash FROM access_users WHERE id = 'f1'"
+    ).fetchone()
+    viewer = conn.execute(
+        "SELECT password_hash FROM access_users WHERE id = 'v1'"
+    ).fetchone()
+    conn.close()
+    assert founder[0] == "rafa22giraldo@gmail.com"
+    assert founder[1]
+    assert founder[1] != "s3cret-founder"
+    assert verify_password("s3cret-founder", founder[1])
+    assert viewer[0] == "leave-me"
+
+    spec = importlib.util.spec_from_file_location(
+        "set_founder_password_cli",
+        Path(__file__).resolve().parents[1] / "scripts" / "set_founder_password.py",
+    )
+    cli = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(cli)
+    answers = iter(["s3cret-founder", "s3cret-founder"])
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="": next(answers))
+    monkeypatch.setattr(cli, "input", lambda prompt="": "y", raising=False)
+    assert cli.main(["--db", str(db)]) == 0
+    captured = capsys.readouterr()
+    assert "s3cret-founder" not in captured.out
+    assert "s3cret-founder" not in captured.err
+    assert "Rows updated: 1" in captured.out
+    assert "Backup:" in captured.out
+    assert "Database:" in captured.out
+    assert str(db) in captured.out
+    live = Path(__file__).resolve().parents[1] / "data" / "empire.db"
+    assert live.resolve() != Path(db).resolve()
+
+
+def test_guard_lock_message_includes_remaining_time():
+    assert "15 minutes" in format_remaining(15 * 60)
+    assert "1 second" in format_remaining(1)
+    clock = {"t": 50.0}
+    guard = StudioLoginGuard(lock_seconds=15 * 60, clock=lambda: clock["t"])
+    for _ in range(5):
+        msg = guard.record_failure("10.0.0.1")
+    assert msg is not None
+    assert "15 minutes" in msg
+    assert "remembered device still works" in msg.lower()
+    clock["t"] += 60
+    remaining = guard.check("10.0.0.1")
+    assert remaining is not None
+    assert "14 minutes" in remaining
+    assert "remembered device still works" in remaining.lower()
