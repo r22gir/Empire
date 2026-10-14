@@ -54,31 +54,49 @@ _FRUSTRATION_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
-_JOB_ITEM_RE = re.compile(
-    r"\b(?:bench|banquette|booth|cushion|cushions|pillow|drape|drapes|drapery|"
+_JOB_ITEM_WORDS = (
+    r"bench|banquette|booth|cushion|cushions|pillow|drape|drapes|drapery|"
     r"shade|shades|roman|headboard|valance|cornice|upholster\w*|"
-    r"chair|seat|ottoman|sofa|curtain|slipcover|foam)\b",
-    re.IGNORECASE,
+    r"chair|seat|ottoman|sofa|curtain|slipcover|foam"
 )
+_JOB_ITEM_RE = re.compile(rf"\b(?:{_JOB_ITEM_WORDS})\b", re.IGNORECASE)
+# Whole inches, fractions, or mixed numbers: 34, 1/2, 34 1/2, 34.5
+_DIM_NUM = r"(?:\d+\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+(?:\.\d+)?)"
+# Optional pair units. Single measurements still require a unit so tweet IDs
+# and lone counts do not count as dimensions.
+_DIM_UNIT = r"(?:inches?|in\b|\"|cm\b|foot|feet|ft\b|yards?|yd\b)"
 _JOB_DIM_RE = re.compile(
-    r"(?:\d+\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+(?:\.\d+)?)\s*"
-    r"(?:inches|inch|in\b|\"|foot|feet|ft\b|yards?|yd\b)",
+    rf"(?:"
+    rf"{_DIM_NUM}\s*{_DIM_UNIT}?\s*[xX×]\s*{_DIM_NUM}(?:\s*{_DIM_UNIT})?"
+    rf"|{_DIM_NUM}\s*{_DIM_UNIT}"
+    rf")",
     re.IGNORECASE,
 )
 _JOB_CLIENT_RE = re.compile(
     r"\b(?:quote|estimate|invoice|drawing)\s+for\s+[A-Za-z]",
     re.IGNORECASE,
 )
-# "<item> for <Name>" — sofa/chair for Ruiz. Name keeps its capital.
+_JOB_ROOM_WORDS = (
+    r"kitchen|bedroom|bath(?:room)?|living(?:\s+room)?|dining(?:\s+room)?|"
+    r"family(?:\s+room)?|office|foyer|nursery|patio|porch|hallway|hall|"
+    r"laundry|guest(?:\s+room)?|master(?:\s+(?:bed)?room)?|den|loft|"
+    r"pantry|mudroom|sunroom|basement|garage|entry|lobby|studio|"
+    r"powder(?:\s+room)?|nook|closet|alcove"
+)
+# "<item> for <Name>" (Ruiz) or "<item> for <room>" (kitchen / the living room).
 _JOB_ITEM_FOR_NAME_RE = re.compile(
-    r"(?i)\b(?:bench|banquette|booth|cushion|cushions|pillow|drape|drapes|drapery|"
-    r"shade|shades|roman|headboard|valance|cornice|upholster\w*|"
-    r"chair|seat|ottoman|sofa|curtain|slipcover|foam)\b"
-    r"[^.\n]{0,48}?\bfor\s+(?-i:[A-Z][A-Za-z'-]{1,30})\b"
+    rf"(?i)\b(?:{_JOB_ITEM_WORDS})\b"
+    rf"[^.\n]{{0,48}}?\bfor\s+(?:the\s+)?"
+    rf"(?:(?-i:[A-Z][A-Za-z'-]{{1,30}})|{_JOB_ROOM_WORDS})\b"
 )
 _JOB_CREATE_RE = re.compile(
     r"\b(?:new|make|create|start|draft|build|prepare|write up)\b[^.?!]{0,40}"
     r"\b(?:quote|estimate|invoice|drawing)\b",
+    re.IGNORECASE,
+)
+# Imperative / request verbs. "Quote 3 roman shades..." is intake, not an article.
+_JOB_REQUEST_RE = re.compile(
+    r"\b(?:quote|estimate|price|bid)\b",
     re.IGNORECASE,
 )
 _EMPTY_EMPHASIS_RE = re.compile(
@@ -113,8 +131,8 @@ def _host(url: str) -> str:
 def is_link_or_article_message(text: str | None) -> bool:
     """True for URL-only / article-share turns. Those are never quote intake.
 
-    Job signals win: item + dimensions/client/create-verb is quote intake
-    even when the message also has an X/twitter/Pinterest URL.
+    Job signals win: item + dimensions/client/create-or-request-verb is
+    quote intake even when the message also has an X/twitter/Pinterest URL.
     """
     raw = (text or "").strip()
     if not raw:
@@ -145,11 +163,15 @@ def is_frustration_correction(text: str | None) -> bool:
 
 
 def _text_has_job_signals(raw: str, extraction: Any = None) -> bool:
-    """Item + (dims/client/create) or create + (item/dims/client). Ignores URLs."""
+    """Item + (dims/client/create/request) or create + (item/dims/client). Ignores URLs."""
     item = False
     dims = False
     client = False
-    create = bool(_JOB_CREATE_RE.search(raw) or _JOB_CLIENT_RE.search(raw))
+    create = bool(
+        _JOB_CREATE_RE.search(raw)
+        or _JOB_CLIENT_RE.search(raw)
+        or _JOB_REQUEST_RE.search(raw)
+    )
     if extraction is not None:
         items = getattr(extraction, "items", None) or []
         if items:
