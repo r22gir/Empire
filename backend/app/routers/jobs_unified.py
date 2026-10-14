@@ -449,6 +449,7 @@ def init_schema():
             "client_email": "TEXT",
             "client_phone": "TEXT",
             "client_address": "TEXT",
+            "contacts": "TEXT",  # JSON list of {name, email, company} for job-mail
             "business_unit": "TEXT DEFAULT 'workroom'",
             "room": "TEXT",
             "description": "TEXT",

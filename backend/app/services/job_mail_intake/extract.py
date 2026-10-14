@@ -12,9 +12,19 @@ from typing import Any
 # Require separators. A lone EST2026034 or timezone "EST 2026 15:34"
 # must not mint an estimate number. Sequence is 3–4 digits (EST-2026-034).
 ESTIMATE_RE = re.compile(r"\bEST[- ](\d{4})[- ](\d{3,4})\b", re.I)
-SIDEMARK_RE = re.compile(r"\bsidemark\s*[:\-]\s*([^\n,;]{2,80})", re.I)
-ORDER_NO_RE = re.compile(
-    r"\b(?:order|po|purchase\s*order|confirmation)\s*#?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-]{4,24})\b",
+# Stop at the end of the line. Flattened bodies are trimmed after capture.
+SIDEMARK_RE = re.compile(r"\bsidemark\s*[:\-]\s*([^\n]{2,80})", re.I)
+JOB_CODE_RE = re.compile(r"\b((?:JOB|CF|WO)[- ]\d{4}[- ]\d{3,4})\b", re.I)
+ORDER_NO_RES = (
+    re.compile(
+        r"\b(?:order|purchase\s*order|confirmation)(?:\s*(?:number|#|no\.?))?\s*[:\-]?\s*"
+        r"([A-Z0-9]*\d[A-Z0-9\-]{2,24})\b",
+        re.I,
+    ),
+    re.compile(r"\bPO\s*[#:\-]\s*([A-Z0-9]*\d[A-Z0-9\-]{2,24})\b", re.I),
+)
+_SIDEMARK_TRAIL_RE = re.compile(
+    r"\s{2,}|\s+[|•]\s+|\s+(?:order|tracking|po|quote|estimate|confirmation)\b",
     re.I,
 )
 TRACKING_RES = (
@@ -81,7 +91,29 @@ def estimate_numbers(text: str) -> list[str]:
 
 
 def sidemarks(text: str) -> list[str]:
-    return [m.group(1).strip() for m in SIDEMARK_RE.finditer(text or "") if m.group(1).strip()]
+    out = []
+    for m in SIDEMARK_RE.finditer(text or ""):
+        val = _SIDEMARK_TRAIL_RE.split(m.group(1).strip(), maxsplit=1)[0]
+        val = val.strip(" -:;,.")
+        if 2 <= len(val) <= 80:
+            out.append(val)
+    return list(dict.fromkeys(out))
+
+
+def _pad_code(prefix: str, year: str, seq: str) -> str:
+    width = 4 if prefix == "JOB" else 3
+    return f"{prefix}-{year}-{int(seq):0{width}d}"
+
+
+def job_codes(text: str) -> list[str]:
+    out = []
+    for m in JOB_CODE_RE.finditer(text or ""):
+        raw = re.sub(r"[\s_]+", "-", m.group(1).upper())
+        parts = raw.split("-")
+        if len(parts) < 3:
+            continue
+        out.append(_pad_code(parts[0], parts[1], parts[2]))
+    return list(dict.fromkeys(out))
 
 
 def tracking_numbers(text: str) -> list[str]:
@@ -101,11 +133,14 @@ def tracking_numbers(text: str) -> list[str]:
 def order_numbers(text: str) -> list[str]:
     skip = {"ORDER", "CONFIRMATION", "NUMBER", "TRACKING"}
     out = []
-    for m in ORDER_NO_RE.finditer(text or ""):
-        val = m.group(1).strip()
-        if val.upper() in skip:
-            continue
-        out.append(val)
+    for rx in ORDER_NO_RES:
+        for m in rx.finditer(text or ""):
+            val = m.group(1).strip()
+            if val.upper() in skip:
+                continue
+            if not any(ch.isdigit() for ch in val):
+                continue
+            out.append(val)
     return list(dict.fromkeys(out))
 
 
@@ -177,6 +212,7 @@ def extract_mail_facts(msg: dict) -> dict[str, Any]:
     blob = _blob(msg)
     return {
         "estimate_numbers": estimate_numbers(blob),
+        "job_codes": job_codes(blob),
         "sidemarks": sidemarks(blob),
         "tracking_numbers": tracking_numbers(blob),
         "order_numbers": order_numbers(blob),

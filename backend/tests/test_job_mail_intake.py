@@ -113,16 +113,16 @@ def test_unmatched_mail_goes_to_review_queue():
         result = run_intake(messages=[{
             "source": "outlook",
             "message_id": "m-unknown-1",
-            "from": "Random Vendor <noreply@spam.test>",
-            "subject": "Wholesale catalog 2026",
-            "preview": "Browse our new catalog of office chairs.",
+            "from": "Random Vendor <sales@vendor-catalog.test>",
+            "subject": "Stock check for next season",
+            "preview": "Do you still need the extra chairs for the lobby?",
             "date": "2026-10-14",
         }], conn=conn)
         assert result["unmatched"] == 1
         assert result["sent"] is False
         queue = list_review_queue(conn)
         assert queue["count"] == 1
-        assert queue["items"][0]["from_addr"] == "noreply@spam.test"
+        assert queue["items"][0]["from_addr"] == "sales@vendor-catalog.test"
 
 
 def test_tracking_becomes_supplier_order_event():
@@ -659,9 +659,9 @@ def test_scan_summary_warning_and_status(caplog):
         result = run_intake(messages=[_ayuda_message(0), {
             "source": "gmail_business",
             "message_id": "noise-status",
-            "from": "Random Vendor <noreply@spam.test>",
-            "subject": "Wholesale catalog 2026",
-            "preview": "Browse our new catalog of office chairs.",
+            "from": "Random Vendor <sales@vendor-catalog.test>",
+            "subject": "Stock check for next season",
+            "preview": "Do you still need the extra chairs for the lobby?",
             "date": "2026-10-14",
         }], conn=conn)
         assert result["ignored"] == 1
@@ -725,3 +725,330 @@ def test_founder_and_max_self_sends_are_ignored():
         assert result["matched"] == 0
         assert list_timeline_notes(conn, job_id="job-nehal")["count"] == 0
         assert list_review_queue(conn)["count"] == 0
+
+
+def _seed_willard_open(conn):
+    """Synthetic stand-in for Willard + EST-2026-110 (open job)."""
+    ensure_schema(conn)
+    conn.execute(
+        """INSERT INTO customers (id, name, email, address, company)
+           VALUES ('cust-willard', 'Willard Hotel',
+                   'purchasing@willard.test', '1401 Pennsylvania Ave',
+                   'Willard InterContinental')"""
+    )
+    contacts = '[{"name":"Maggie Oneil","email":"maggie.oneil@willard.test"}]'
+    try:
+        conn.execute(
+            """INSERT INTO jobs
+               (id, title, customer_id, status, notes, client_name, client_email,
+                client_address, address, job_number, contacts)
+               VALUES ('job-willard', 'Willard InterContinental lobby',
+                       'cust-willard', 'in_progress',
+                       'Quote EST-2026-110 lobby drapery',
+                       'Willard Hotel', 'purchasing@willard.test',
+                       '1401 Pennsylvania Ave', '1401 Pennsylvania Ave',
+                       'JOB-2026-0110', ?)""",
+            (contacts,),
+        )
+    except Exception:
+        conn.execute(
+            """INSERT INTO jobs (id, title, customer_id, status, notes)
+               VALUES ('job-willard', 'Willard InterContinental lobby',
+                       'cust-willard', 'in_progress',
+                       'Willard Hotel EST-2026-110 purchasing@willard.test')"""
+        )
+    try:
+        conn.execute(
+            """INSERT INTO quotes_v2
+               (id, quote_number, customer_name, customer_email, customer_address,
+                customer_id, job_id, project_name, status, created_at, updated_at)
+               VALUES ('q-110', 'EST-2026-110', 'Willard Hotel',
+                       'purchasing@willard.test', '1401 Pennsylvania Ave',
+                       'cust-willard', 'job-willard', 'Willard lobby',
+                       'sent', datetime('now'), datetime('now'))"""
+        )
+    except Exception:
+        pass
+
+
+def _seed_watson_job(conn):
+    ensure_schema(conn)
+    conn.execute(
+        """INSERT INTO customers (id, name, email, address, company)
+           VALUES ('cust-watson', 'Watson Client',
+                   'office@watsonclient.test', '10 Harbor St',
+                   'Watson Client LLC')"""
+    )
+    contacts = (
+        '[{"name":"Watson & Watson","email":"watsonins@verizon.net",'
+        '"company":"Watson & Watson"}]'
+    )
+    try:
+        conn.execute(
+            """INSERT INTO jobs
+               (id, title, customer_id, status, notes, client_name, client_email,
+                job_number, contacts)
+               VALUES ('job-watson', 'Watson insurance drapery',
+                       'cust-watson', 'scheduled',
+                       'Designer contact Watson & Watson',
+                       'Watson Client', 'office@watsonclient.test',
+                       'JOB-2026-0010', ?)""",
+            (contacts,),
+        )
+    except Exception:
+        conn.execute(
+            """INSERT INTO jobs (id, title, customer_id, status, notes)
+               VALUES ('job-watson', 'Watson insurance drapery',
+                       'cust-watson', 'scheduled',
+                       'watsonins@verizon.net Watson & Watson JOB-2026-0010')"""
+        )
+
+
+def _seed_mariella_job(conn):
+    ensure_schema(conn)
+    conn.execute(
+        """INSERT INTO customers (id, name, email)
+           VALUES ('cust-mariella', 'Atelier Client', 'atelier@clients.test')"""
+    )
+    contacts = '[{"name":"Mariella","email":"mariella@atelier.test"}]'
+    try:
+        conn.execute(
+            """INSERT INTO jobs
+               (id, title, customer_id, status, notes, client_name, job_number, contacts)
+               VALUES ('job-mariella', 'Atelier dining drapery',
+                       'cust-mariella', 'pending', 'Designer Mariella',
+                       'Atelier Client', 'JOB-2026-0003', ?)""",
+            (contacts,),
+        )
+    except Exception:
+        conn.execute(
+            """INSERT INTO jobs (id, title, customer_id, status, notes)
+               VALUES ('job-mariella', 'Atelier dining drapery',
+                       'cust-mariella', 'pending',
+                       'Mariella mariella@atelier.test JOB-2026-0003')"""
+        )
+
+
+def test_willard_plus_est_2026_110_attaches():
+    from app.services.job_mail_intake.match import match_message
+    with get_db() as conn:
+        _seed_willard_open(conn)
+        result = match_message(conn, {
+            "from": "Rowley <orders@rowleycompany.com>",
+            "subject": "Willard fabric — EST-2026-110",
+            "preview": "Confirming the Willard lobby order for EST-2026-110.",
+        })
+        assert result["matched"] is True
+        assert result["job_id"] == "job-willard"
+        assert "estimate_open" in (result.get("reason") or "")
+        intake = run_intake(messages=[{
+            "source": "gmail_business",
+            "message_id": "willard-est-110",
+            "from": "Rowley <orders@rowleycompany.com>",
+            "subject": "Willard fabric — EST-2026-110",
+            "preview": "Confirming the Willard lobby order for EST-2026-110.",
+            "date": "2026-10-14",
+        }], conn=conn)
+        assert intake["matched"] == 1
+        assert list_timeline_notes(conn, job_id="job-willard")["count"] == 1
+
+
+def test_help_email_still_ignored_when_est_110_exists():
+    with get_db() as conn:
+        _seed_willard_open(conn)
+        msg = _ayuda_message(1)
+        msg["preview"] = msg["preview"] + " Mention of EST-2026-110 in a ticket."
+        result = run_intake(messages=[msg], conn=conn)
+        assert result["ignored"] == 1
+        assert result["matched"] == 0
+        assert list_timeline_notes(conn, job_id="job-willard")["count"] == 0
+        assert list_review_queue(conn)["count"] == 0
+
+
+def test_watson_attaches_through_job_contact():
+    from app.services.job_mail_intake.match import match_message
+    with get_db() as conn:
+        _seed_watson_job(conn)
+        result = match_message(conn, {
+            "from": "Watson & Watson <watsonins@verizon.net>",
+            "subject": "Fabric approval for the living room",
+            "preview": "Please hold the reserve until we confirm.",
+        })
+        assert result["matched"] is True
+        assert result["job_id"] == "job-watson"
+        assert "contact" in (result.get("reason") or "")
+        by_domain = match_message(conn, {
+            "from": "Watson assistant <front@verizon.net>",
+            "subject": "Measure window",
+            "preview": "Sending widths this afternoon.",
+        })
+        assert by_domain["matched"] is True
+        assert by_domain["job_id"] == "job-watson"
+        assert "contact_domain" in (by_domain.get("reason") or "")
+
+
+def test_mariella_contact_and_job_number_are_strong():
+    from app.services.job_mail_intake.match import match_message
+    with get_db() as conn:
+        _seed_mariella_job(conn)
+        by_contact = match_message(conn, {
+            "from": "Mariella <mariella@atelier.test>",
+            "subject": "Measure photos",
+            "preview": "Sending the dining room widths.",
+        })
+        assert by_contact["matched"] is True
+        assert by_contact["job_id"] == "job-mariella"
+        by_code = match_message(conn, {
+            "from": "Shop <cut@workroom.test>",
+            "subject": "Status on JOB-2026-0003",
+            "preview": "Panels are on the table.",
+        })
+        assert by_code["matched"] is True
+        assert by_code["job_id"] == "job-mariella"
+        assert "job_number" in (by_code.get("reason") or "")
+
+
+def test_cf_code_is_a_strong_key():
+    from app.services.job_mail_intake.match import match_message
+    with get_db() as conn:
+        ensure_schema(conn)
+        conn.execute(
+            """INSERT INTO customers (id, name, email)
+               VALUES ('cust-cf', 'Bench Client', 'bench@clients.test')"""
+        )
+        try:
+            conn.execute(
+                """INSERT INTO jobs
+                   (id, title, customer_id, status, notes, client_name, job_number)
+                   VALUES ('job-cf', 'Freestanding bench', 'cust-cf', 'pending',
+                           'WoodCraft CF-2026-001', 'Bench Client', 'JOB-2026-0099')"""
+            )
+        except Exception:
+            conn.execute(
+                """INSERT INTO jobs (id, title, customer_id, status, notes)
+                   VALUES ('job-cf', 'Freestanding bench', 'cust-cf', 'pending',
+                           'CF-2026-001 Bench Client')"""
+            )
+        try:
+            conn.execute(
+                """INSERT INTO quotes_v2
+                   (id, quote_number, customer_name, customer_id, job_id,
+                    status, created_at, updated_at)
+                   VALUES ('q-cf', 'CF-2026-001', 'Bench Client', 'cust-cf',
+                           'job-cf', 'sent', datetime('now'), datetime('now'))"""
+            )
+        except Exception:
+            pass
+        result = match_message(conn, {
+            "from": "Mill <shop@wood.test>",
+            "subject": "CF-2026-001 shop drawing",
+            "preview": "Ready for review.",
+        })
+        assert result["matched"] is True
+        assert result["job_id"] == "job-cf"
+        assert "cf_number" in (result.get("reason") or "")
+
+
+def test_supplier_sidemark_links_to_customer_when_no_job_token():
+    from app.services.job_mail_intake.extract import extract_mail_facts, order_numbers, sidemarks
+    from app.services.job_mail_intake.match import match_message
+
+    blob = (
+        "Sidemark: Nehal Elrefai\n"
+        "Thank you. See our order policies and confirmation details."
+    )
+    assert sidemarks(blob) == ["Nehal Elrefai"]
+    assert "licies" not in [x.lower() for x in order_numbers(blob)]
+    assert order_numbers("order policies confirmation number") == []
+    facts = extract_mail_facts({
+        "from": "Rowley <orders@rowleycompany.com>",
+        "subject": "Your order has shipped",
+        "preview": blob + " Tracking 1Z999AA10123456784",
+    })
+    assert facts["is_supplier_order"] is True
+    assert facts["sidemarks"] == ["Nehal Elrefai"]
+
+    with get_db() as conn:
+        _seed_job(conn)
+        result = match_message(conn, {
+            "from": "Rowley <orders@rowleycompany.com>",
+            "subject": "Your order has shipped",
+            "preview": blob + " Tracking 1Z999AA10123456784",
+        })
+        assert result["matched"] is True
+        assert result["job_id"] == "job-nehal"
+        assert "sidemark" in (result.get("reason") or "")
+
+
+def test_several_open_jobs_for_one_customer_are_ambiguous():
+    from app.services.job_mail_intake.match import match_message
+    with get_db() as conn:
+        _seed_emily_completed(conn, also_active=True)
+        try:
+            conn.execute(
+                """INSERT INTO jobs
+                   (id, title, customer_id, status, notes, client_name, client_email,
+                    job_number)
+                   VALUES ('job-emily-two', 'Emily Richardson bedroom',
+                           'cust-emily', 'pending',
+                           'Second open job',
+                           'Emily Richardson', 'emily.richardson@clients.test',
+                           'JOB-2026-089')"""
+            )
+        except Exception:
+            conn.execute(
+                """INSERT INTO jobs (id, title, customer_id, status, notes)
+                   VALUES ('job-emily-two', 'Emily Richardson bedroom',
+                           'cust-emily', 'pending',
+                           'Emily Richardson emily.richardson@clients.test')"""
+            )
+        result = match_message(conn, {
+            "from": "Emily Richardson <emily.richardson@clients.test>",
+            "subject": "Quick question",
+            "preview": "Can you call me tomorrow?",
+        })
+        assert result["matched"] is False
+        assert result["reason"] == "ambiguous"
+        intake = run_intake(messages=[{
+            "source": "gmail_business",
+            "message_id": "emily-multi-open",
+            "from": "Emily Richardson <emily.richardson@clients.test>",
+            "subject": "Quick question",
+            "preview": "Can you call me tomorrow?",
+            "date": "2026-10-14",
+        }], conn=conn)
+        assert intake["matched"] == 0
+        assert intake["unmatched"] == 1
+        assert list_review_queue(conn)["count"] == 1
+
+
+def test_noreply_login_and_marketing_skipped_before_queue():
+    with get_db() as conn:
+        _seed_willard_open(conn)
+        result = run_intake(messages=[{
+            "source": "gmail_business",
+            "message_id": "login-1",
+            "from": "Google <no-reply@accounts.google.com>",
+            "subject": "Your login code is 482193",
+            "preview": "Use this login code to sign in. EST-2026-110 is in the footer.",
+            "date": "2026-10-14",
+        }, {
+            "source": "gmail_business",
+            "message_id": "mkt-1",
+            "from": "Wayfair <deals@wayfair.com>",
+            "subject": "Flash sale — 40% off lookbook",
+            "preview": "Shop now. Limited time. Unsubscribe at the bottom.",
+            "date": "2026-10-14",
+        }, {
+            "source": "gmail_business",
+            "message_id": "nr-1",
+            "from": "Alerts <noreply@bank-alerts.test>",
+            "subject": "Account notice",
+            "preview": "This is an automated no-reply message.",
+            "date": "2026-10-14",
+        }], conn=conn)
+        assert result["ignored"] == 3
+        assert result["matched"] == 0
+        assert result["unmatched"] == 0
+        assert list_review_queue(conn)["count"] == 0
+        assert list_timeline_notes(conn, job_id="job-willard")["count"] == 0

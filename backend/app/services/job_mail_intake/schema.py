@@ -133,6 +133,7 @@ _ALTERS = (
     ("jmi_scan_state", "last_unmatched", "INTEGER NOT NULL DEFAULT 0"),
     ("jmi_scan_state", "last_duplicates", "INTEGER NOT NULL DEFAULT 0"),
     ("jmi_scan_state", "last_ignored", "INTEGER NOT NULL DEFAULT 0"),
+    ("jobs", "contacts", "TEXT"),
 )
 
 
@@ -152,6 +153,12 @@ def _ensure_columns(conn) -> None:
 def ensure_schema(conn) -> None:
     conn.executescript(SCHEMA_SQL)
     _ensure_columns(conn)
+    try:
+        job_cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if job_cols and "contacts" not in job_cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN contacts TEXT")
+    except Exception:
+        pass
     try:
         conn.execute(
             """CREATE TABLE IF NOT EXISTS job_events (

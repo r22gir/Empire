@@ -10,7 +10,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from app.db.database import get_db
-from app.services.job_mail_intake.filters import is_internal_mail, parse_from_header
+from app.services.job_mail_intake.extract import extract_mail_facts
+from app.services.job_mail_intake.filters import is_internal_mail, noise_reason, parse_from_header
 from app.services.job_mail_intake.match import match_message
 from app.services.job_mail_intake.readers import (
     OUTBOUND_POLICY,
@@ -317,6 +318,31 @@ def _process_one(conn, msg: dict) -> dict:
             "account": account,
             "sent": False,
         }
+
+    noise = noise_reason(msg)
+    if noise:
+        facts = extract_mail_facts(msg)
+        keep_tokens = (
+            (facts.get("estimate_numbers") or [])
+            or (facts.get("job_codes") or [])
+            or (facts.get("sidemarks") or [])
+        )
+        # Login codes never attach. Other noise drops unless it carries a job token.
+        if noise == "login" or not keep_tokens:
+            _name, email = parse_from_header(msg.get("from"))
+            stub = {
+                "from_email": email or (msg.get("from_email") or ""),
+                "job_id": None,
+                "customer_id": None,
+                "reason": noise,
+            }
+            _record_processed(conn, msg, stub, "ignored")
+            return {
+                "status": "ignored",
+                "reason": noise,
+                "account": account,
+                "sent": False,
+            }
 
     match = match_message(conn, msg)
     facts = match.get("facts") or {}

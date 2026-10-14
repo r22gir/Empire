@@ -52,6 +52,28 @@ _ENV_ADDR_KEYS = (
 
 _EMPIRE_NAME_RE = re.compile(r"\bempire(?:box)?\b", re.I)
 
+NOREPLY_LOCALS = (
+    "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply",
+    "mailer-daemon", "mailerdaemon",
+)
+LOGIN_SUBJECTS = (
+    "login code", "verification code", "security code", "sign-in code",
+    "signin code", "one-time password", "one time password", "your otp",
+    "magic link", "two-factor", "2fa code", "authentication code",
+    "your code is", "passcode",
+)
+MARKETING_SENDERS = (
+    "macy", "macys.com", "wayfair", "facebook", "fbmail", "experian",
+    "etsy", "pinterest", "linkedin", "mailchimp", "substack",
+    "crate and barrel", "crateandbarrel", "home depot", "homedepot",
+)
+MARKETING_KEYWORDS = (
+    "webinar", "market invite", "invitation to", "% off", "percent off",
+    "lookbook", "unsubscribe", "exclusive offer", "flash sale",
+    "limited time", "shop now", "don't miss", "high point market",
+    "trade show", "tradeshow", "market week", "wholesale catalog",
+)
+
 
 def parse_from_header(raw: Optional[str]) -> tuple[str, str]:
     blob = (raw or "").strip()
@@ -132,3 +154,50 @@ def is_internal_mail(msg: dict) -> bool:
     if _subject_is_internal(msg.get("subject")):
         return True
     return False
+
+
+def is_noreply_mail(msg: dict) -> bool:
+    name, email = parse_from_header(msg.get("from"))
+    if not email:
+        email = str(msg.get("from_email") or "").strip().lower()
+    local = email.split("@")[0] if "@" in email else _norm(name)
+    blob = f"{local} {email} {_norm(msg.get('from'))}"
+    return any(h in blob for h in NOREPLY_LOCALS)
+
+
+def is_login_code_mail(msg: dict) -> bool:
+    subj = _norm(msg.get("subject"))
+    preview = _norm(msg.get("preview") or msg.get("body"))
+    text = f"{subj} {preview[:160]}"
+    return any(tag in text for tag in LOGIN_SUBJECTS)
+
+
+def is_marketing_mail(msg: dict) -> bool:
+    labels = {str(x) for x in (msg.get("labels") or msg.get("labelIds") or [])}
+    if labels & {"CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_UPDATES"}:
+        return True
+    if str(msg.get("list_unsubscribe") or msg.get("list-unsubscribe") or "").strip():
+        return True
+    blob = _norm(" ".join(
+        str(msg.get(k) or "") for k in ("from", "from_email", "subject", "preview")
+    ))
+    if any(s in blob for s in MARKETING_SENDERS):
+        return True
+    if any(k in blob for k in MARKETING_KEYWORDS):
+        return True
+    return False
+
+
+def noise_reason(msg: dict) -> str | None:
+    """Login codes always drop. Marketing and bare no-reply drop unless noted."""
+    if is_login_code_mail(msg):
+        return "login"
+    if is_marketing_mail(msg):
+        return "marketing"
+    if is_noreply_mail(msg):
+        return "noreply"
+    return None
+
+
+def is_noise_mail(msg: dict) -> bool:
+    return noise_reason(msg) is not None
