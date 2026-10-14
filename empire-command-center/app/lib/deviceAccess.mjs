@@ -1,18 +1,9 @@
 /** Spanish device-access guide. Plain JS so Node 20 can import it. */
 
 import { AYUDA_OPENER, ayudaOpenerHtml } from './ayudaCopy.mjs';
+import { FAMILY_EDITION, familyEdition } from './familyEdition.mjs';
 
-const SITES = {
-  amp: { name: 'Max-e', url: 'https://amp.empirebox.store' },
-  maxine: { name: 'Maxine', url: 'https://maxine.empirebox.store' },
-};
-
-export function familyEdition(edition) {
-  const key = String(edition || '').trim().toLowerCase().replace(/-/g, '_');
-  if (key === 'amp' || key === 'max_e' || key === 'maxe') return 'amp';
-  if (key === 'maxine') return 'maxine';
-  return null;
-}
+export { familyEdition };
 
 function escapeHtml(value) {
   return String(value)
@@ -24,10 +15,10 @@ function escapeHtml(value) {
 
 export function renderDeviceAccessPage(edition) {
   const family = familyEdition(edition);
-  const site = family ? SITES[family] : null;
-  const other = family === 'amp' ? SITES.maxine : family === 'maxine' ? SITES.amp : null;
-  const name = site ? escapeHtml(site.name) : 'tu Max';
-  const url = site ? escapeHtml(site.url) : '';
+  const site = family && family === FAMILY_EDITION.id ? FAMILY_EDITION : null;
+  const name = site ? escapeHtml(site.assistant) : 'tu Max';
+  const url = site ? escapeHtml(site.siteUrl) : '';
+  const setupPath = site ? escapeHtml(site.setupPath) : '/ayuda/whatsapp';
   const intro = site
     ? `Esta página es solo de ${name}. Úsala en el celular, la tableta o el computador.`
     : 'Abre esta guía dentro de tu propio centro de mando.';
@@ -63,13 +54,10 @@ ${website}
 <h2>2. Tailscale, si prefieres una red privada</h2>
 ${tailscale}
 <h2>3. WhatsApp</h2>
-<p>Ya puedes configurar tu propio WhatsApp (cuenta nueva de Meta, no la de Rafael) en <a href="/amp/whatsapp" style="color:#b8960c;font-weight:700">la guía de WhatsApp</a>. También está en <a href="/ayuda/whatsapp" style="color:#b8960c;font-weight:700">/ayuda/whatsapp</a>.</p>
+<p>Ya puedes configurar tu propio WhatsApp (cuenta nueva de Meta, no la de Rafael) en <a href="${setupPath}" style="color:#b8960c;font-weight:700">la guía de WhatsApp</a>.</p>
 <p><a href="/ayuda" style="color:#b8960c;font-weight:700">Volver a Ayuda</a></p>
 </main>`;
 
-  if (other && (html.includes(other.url) || html.includes(other.name))) {
-    throw new Error('device access page leaked the other edition');
-  }
   if (!html.includes(AYUDA_OPENER)) {
     throw new Error('device access page missing manito opener');
   }
