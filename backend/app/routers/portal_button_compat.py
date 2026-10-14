@@ -46,12 +46,18 @@ router = APIRouter(tags=["portal-button-compat"])
 
 
 def _existing_or_404(quote_id: str) -> dict:
-    """Load the canonical quote or raise 404."""
-    from app.services.quote_service import get_quote
+    """Load the quote from quotes_v2, importing the JSON create-path row if needed."""
+    from app.services.quote_service import get_quote, resolve_quote, upsert_legacy_quote
     q = get_quote(quote_id)
-    if not q:
-        raise HTTPException(404, f"Quote {quote_id} not found in canonical store")
-    return q
+    if q:
+        return q
+    legacy = resolve_quote(quote_id)
+    if legacy:
+        imported = upsert_legacy_quote(legacy)
+        if imported:
+            return imported
+        return legacy
+    raise HTTPException(404, f"Quote {quote_id} not found in canonical store")
 
 
 @router.post("/quotes/{quote_id}/accept")

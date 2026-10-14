@@ -126,7 +126,13 @@ _DATA_TABLES = [
     "payments",
     "invoices",
     "jobs",
+    "job_events",
     "job_documents",   # D44 — job images landing table
+    "jmi_processed",
+    "jmi_review_queue",
+    "jmi_calendar_proposals",
+    "jmi_supplier_order_events",
+    "jmi_timeline_notes",
     "payments_v2",
     "financial_audit_log",
     "chart_of_accounts",

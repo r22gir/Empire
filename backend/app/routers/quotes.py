@@ -43,6 +43,12 @@ class LineItem(BaseModel):
     rate: float = 0.0
     amount: float = 0.0         # quantity * rate (computed)
     category: str = "labor"     # labor, materials, other
+    room: Optional[str] = None
+    area: Optional[str] = None
+    width: Optional[float] = None
+    height: Optional[float] = None
+    depth: Optional[float] = None
+    sq_ft: Optional[float] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -116,6 +122,8 @@ class QuoteCreate(BaseModel):
     business_name: Optional[str] = None
     business_logo_url: Optional[str] = None
     business_unit: Optional[str] = "workroom"
+    billed_by: Optional[str] = None
+    edition: Optional[str] = None
     customer_id: Optional[str] = None
     source: Optional[str] = None
     source_url: Optional[str] = None
@@ -252,6 +260,12 @@ def _load_quote(quote_id: str) -> dict:
 def _save_quote(quote: dict):
     with open(_quote_path(quote["id"]), "w") as f:
         json.dump(quote, f, indent=2, default=str)
+    # Keep the PDF / quotes-v2 store in sync with the standard create path.
+    try:
+        from app.services.quote_service import upsert_legacy_quote
+        upsert_legacy_quote(quote)
+    except Exception as exc:
+        logger.warning("canonical quote sync skipped for %s: %s", quote.get("id"), exc)
 
 
 def _compute_financials(data: dict) -> dict:
@@ -718,7 +732,10 @@ async def create_quote(payload: QuoteCreate):
         quote["idea_diagram_error"] = f"Idea diagrams could not be attached: {idea_err}"
 
     _save_quote(quote)
-    _sync_quote_customer_to_crm(quote)
+    try:
+        _sync_quote_customer_to_crm(quote)
+    except Exception as crm_err:
+        logger.warning("CRM sync skipped for quote %s: %s", quote.get("id"), crm_err)
     return {"status": "created", "quote": quote}
 
 

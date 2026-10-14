@@ -203,6 +203,58 @@ def get_workroom_billing(billed_by: Optional[str] = None) -> WorkroomBilling:
     return resolve_billing(billed_by)
 
 
+def resolve_quote_billing(quote: Optional[dict] = None) -> WorkroomBilling:
+    """Use the quote's own business / edition branding.
+
+    Do not default to Empire Workroom when billed_by, business_name,
+    business, or edition names a different shop.
+    """
+    quote = quote or {}
+    meta = quote.get("metadata") if isinstance(quote.get("metadata"), dict) else {}
+    billed = (
+        quote.get("billed_by")
+        or meta.get("billed_by")
+        or quote.get("business")
+        or quote.get("business_name")
+        or meta.get("business_name")
+        or meta.get("edition_business")
+    )
+    edition = quote.get("edition") or meta.get("edition")
+    empire_aliases = {"", "empire_workroom", "empire", "workroom", BILLED_BY_EMPIRE}
+
+    def _custom(name: str, key: str) -> WorkroomBilling:
+        base = resolve_billing(None)
+        return WorkroomBilling(
+            billed_by=key,
+            name=name,
+            address=base.address,
+            phone=base.phone,
+            email=base.email,
+            website=base.website,
+            tagline=base.tagline,
+        )
+
+    if billed:
+        raw = str(billed).strip()
+        compact = raw.lower().replace(" ", "_").replace("'", "")
+        if "nelma" in compact:
+            return resolve_billing(BILLED_BY_NELMA)
+        if compact in empire_aliases:
+            return resolve_billing(BILLED_BY_EMPIRE)
+        if raw and "empire" not in raw.lower():
+            return _custom(raw, compact[:40] or "custom")
+        return resolve_billing(raw)
+
+    if edition and str(edition).strip().lower() not in {"", "main", "empire", "workroom"}:
+        ed = str(edition).strip()
+        if "nelma" in ed.lower():
+            return resolve_billing(BILLED_BY_NELMA)
+        label = meta.get("edition_label") or quote.get("business_name")
+        if label and "empire" not in str(label).lower():
+            return _custom(str(label), ed.lower().replace(" ", "_")[:40])
+    return resolve_billing(None)
+
+
 def reload_workroom_billing(billed_by: Optional[str] = None) -> WorkroomBilling:
     return resolve_billing(billed_by)
 

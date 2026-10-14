@@ -805,22 +805,40 @@ def list_quotes(status: str = None, business_unit: str = None,
         return {"quotes": quotes, "total": total, "limit": limit, "offset": offset}
 
 
-def get_quote(quote_id: str) -> dict:
+def _hydrate_quote_row(conn, row) -> dict:
+    q = _quote_to_dict(row)
+    quote_id = q["id"]
+    items = conn.execute(
+        "SELECT * FROM quote_line_items WHERE quote_id = ? ORDER BY line_number",
+        (quote_id,),
+    ).fetchall()
+    q["line_items"] = [_item_to_dict(i) for i in items]
+    try:
+        photos = conn.execute(
+            "SELECT * FROM quote_photos WHERE quote_id = ?", (quote_id,)
+        ).fetchall()
+        q["quote_photos"] = dict_rows(photos)
+    except Exception:
+        q["quote_photos"] = []
+    return _align_flat_financials(q)
+
+
+def _get_quote_sql(quote_id: str) -> dict | None:
+    if not quote_id:
+        return None
     with get_db() as conn:
         row = conn.execute("SELECT * FROM quotes_v2 WHERE id = ?", (quote_id,)).fetchone()
         if not row:
             return None
-        q = _quote_to_dict(row)
-        items = conn.execute(
-            "SELECT * FROM quote_line_items WHERE quote_id = ? ORDER BY line_number",
-            (quote_id,)
-        ).fetchall()
-        q['line_items'] = [_item_to_dict(i) for i in items]
-        photos = conn.execute(
-            "SELECT * FROM quote_photos WHERE quote_id = ?", (quote_id,)
-        ).fetchall()
-        q['quote_photos'] = dict_rows(photos)
-        return _align_flat_financials(q)
+        return _hydrate_quote_row(conn, row)
+
+
+def get_quote(quote_id: str) -> dict:
+    q = _get_quote_sql(quote_id)
+    if q:
+        return q
+    # Fallback: standard create path writes JSON; import into canonical store.
+    return _import_legacy_json_quote(quote_id)
 
 
 def get_quote_by_number(quote_number: str) -> dict | None:
@@ -832,14 +850,17 @@ def get_quote_by_number(quote_number: str) -> dict | None:
     which silently opened the most recent quote (any active list moved
     EST-2026-110's link to EST-2026-124's row).
 
-    Returns None if not found. Pinned to canonical quotes_v2 (SQL),
-    never reads the legacy JSON store."""
+    Returns None if not found. Canonical quotes_v2 first; falls back to
+    the JSON create-path store and imports the row when found."""
     with get_db() as conn:
         row = conn.execute(
             "SELECT * FROM quotes_v2 WHERE quote_number = ? LIMIT 1",
             (quote_number,)
         ).fetchone()
         if not row:
+            imported = _import_legacy_json_quote_by_number(quote_number)
+            if imported:
+                return imported
             return None
         q = _quote_to_dict(row)
         quote_id = q['id']
@@ -1547,3 +1568,252 @@ def resolve_quote(quote_id: str) -> Optional[dict]:
     except Exception:
         pass
     return None
+
+
+def _legacy_json_path(quote_id: str):
+    from pathlib import Path
+    from app.services.data_paths import quotes_data_dir
+    return Path(quotes_data_dir()) / f"{quote_id}.json"
+
+
+def _load_legacy_json_file(quote_id: str) -> Optional[dict]:
+    path = _legacy_json_path(quote_id)
+    try:
+        if path.exists():
+            with open(path) as handle:
+                data = json.load(handle)
+            if isinstance(data, dict):
+                data.setdefault("id", quote_id)
+                return data
+    except Exception as exc:
+        logger.warning("legacy quote JSON load failed for %s: %s", quote_id, exc)
+    return None
+
+
+def _legacy_json_by_number(quote_number: str) -> Optional[dict]:
+    if not quote_number:
+        return None
+    try:
+        from app.services.data_paths import quotes_data_dir
+        folder = quotes_data_dir()
+        if not folder.exists():
+            return None
+        wanted = str(quote_number).strip().upper()
+        for path in folder.glob("*.json"):
+            if path.name.startswith("_") or "_verification" in path.name:
+                continue
+            try:
+                data = json.loads(path.read_text())
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            if str(data.get("quote_number") or "").strip().upper() == wanted:
+                data.setdefault("id", path.stem)
+                return data
+    except Exception as exc:
+        logger.warning("legacy quote scan failed: %s", exc)
+    return None
+
+
+def upsert_legacy_quote(quote: dict) -> Optional[dict]:
+    """Copy a JSON-store quote into quotes_v2. Idempotent on id. Never emails."""
+    if not isinstance(quote, dict) or not quote.get("id"):
+        return None
+    quote_id = str(quote["id"])
+    existing = _get_quote_sql(quote_id)
+    if existing:
+        return existing
+    from app.config.workroom_billing import billed_by_for_storage, ensure_billed_by_schema
+
+    dep = quote.get("deposit") or {}
+    deposit_percent = dep.get("deposit_percent", quote.get("deposit_percent", 50)) if isinstance(dep, dict) else 50
+    billed_by = billed_by_for_storage(
+        quote.get("billed_by") or quote.get("business_name") or quote.get("business")
+    )
+    line_items = quote.get("line_items") or quote.get("items") or []
+    now = datetime.now().isoformat()
+    try:
+        with get_db() as conn:
+            ensure_billed_by_schema(conn)
+            ensure_project_address_schema(conn)
+            conn.execute(
+                """
+                INSERT INTO quotes_v2 (
+                    id, quote_number, customer_name, customer_email, customer_phone,
+                    customer_address, business_unit, project_name, project_description,
+                    status, tax_rate, discount_amount, discount_type, deposit_percent,
+                    valid_days, terms, notes, pricing_mode, location, lining_preference,
+                    rooms_json, ai_mockups_json, ai_outlines_json, measurements_json,
+                    source, source_json_path, subtotal, tax_amount, total,
+                    expires_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    quote_id,
+                    quote.get("quote_number") or quote_id,
+                    quote.get("customer_name", ""),
+                    quote.get("customer_email", ""),
+                    quote.get("customer_phone", ""),
+                    quote.get("customer_address", ""),
+                    quote.get("business_unit") or "workroom",
+                    quote.get("project_name", ""),
+                    quote.get("project_description", ""),
+                    quote.get("status") or "draft",
+                    quote.get("tax_rate", 0.0) or 0.0,
+                    quote.get("discount_amount", 0.0) or 0.0,
+                    quote.get("discount_type") or "dollar",
+                    deposit_percent or 50,
+                    quote.get("valid_days", 30) or 30,
+                    quote.get("terms", "") or "",
+                    quote.get("notes", "") or "",
+                    quote.get("pricing_mode", "") or "",
+                    quote.get("location", "") or "",
+                    quote.get("lining_preference", "") or "",
+                    json.dumps(quote.get("rooms") or [], default=str) if quote.get("rooms") else None,
+                    json.dumps(quote.get("ai_mockups") or [], default=str) if quote.get("ai_mockups") else None,
+                    json.dumps(quote.get("ai_outlines") or [], default=str) if quote.get("ai_outlines") else None,
+                    json.dumps(quote.get("measurements") or {}, default=str) if quote.get("measurements") else None,
+                    "json_create_path",
+                    str(_legacy_json_path(quote_id)),
+                    float(quote.get("subtotal") or 0),
+                    float(quote.get("tax_amount") or 0),
+                    float(quote.get("total") or 0),
+                    quote.get("expires_at"),
+                    quote.get("created_at") or now,
+                    now,
+                ),
+            )
+            if billed_by:
+                try:
+                    conn.execute(
+                        "UPDATE quotes_v2 SET billed_by = ? WHERE id = ?",
+                        (billed_by, quote_id),
+                    )
+                except Exception:
+                    pass
+            edition = quote.get("edition")
+            if edition:
+                try:
+                    cols = {r[1] for r in conn.execute("PRAGMA table_info(quotes_v2)").fetchall()}
+                    meta = {}
+                    if "metadata_json" in cols:
+                        raw = conn.execute(
+                            "SELECT metadata_json FROM quotes_v2 WHERE id = ?", (quote_id,)
+                        ).fetchone()
+                        if raw and raw[0]:
+                            try:
+                                meta = json.loads(raw[0])
+                            except Exception:
+                                meta = {}
+                        meta["edition"] = edition
+                        if quote.get("business_name"):
+                            meta["business_name"] = quote.get("business_name")
+                        conn.execute(
+                            "UPDATE quotes_v2 SET metadata_json = ? WHERE id = ?",
+                            (json.dumps(meta), quote_id),
+                        )
+                except Exception:
+                    pass
+            _ensure_idea_diagram_column(conn)
+            for idx, li in enumerate(line_items):
+                if not isinstance(li, dict):
+                    continue
+                qty = _line_quantity(li)
+                unit_price = li.get("unit_price", li.get("rate", 0)) or 0
+                subtotal = li.get("subtotal", li.get("amount"))
+                if subtotal is None:
+                    try:
+                        subtotal = round(float(qty) * float(unit_price), 2)
+                    except (TypeError, ValueError):
+                        subtotal = 0
+                conn.execute(
+                    """
+                    INSERT INTO quote_line_items (
+                        quote_id, line_number, item_type, description, room, quantity, unit,
+                        unit_price, subtotal, category, width, height, depth
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        quote_id,
+                        idx + 1,
+                        li.get("item_type") or li.get("type") or "",
+                        li.get("description", ""),
+                        str(li.get("room") or li.get("area") or ""),
+                        qty,
+                        li.get("unit", "ea"),
+                        unit_price,
+                        subtotal,
+                        li.get("category", "labor"),
+                        li.get("width"),
+                        li.get("height"),
+                        li.get("depth"),
+                    ),
+                )
+            try:
+                _recalculate_totals(conn, quote_id, "json_import")
+            except Exception:
+                pass
+            try:
+                _audit_log(conn, "quote", quote_id, "migrated_from_json", None, None,
+                           quote.get("quote_number"), "json_import")
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.warning("upsert_legacy_quote failed for %s: %s", quote_id, exc)
+        return None
+    return _get_quote_sql(quote_id)
+
+
+def _import_legacy_json_quote(quote_id: str) -> Optional[dict]:
+    data = _load_legacy_json_file(quote_id)
+    if not data:
+        return None
+    return upsert_legacy_quote(data)
+
+
+def _import_legacy_json_quote_by_number(quote_number: str) -> Optional[dict]:
+    data = _legacy_json_by_number(quote_number)
+    if not data:
+        return None
+    return upsert_legacy_quote(data)
+
+
+def migrate_legacy_json_quotes() -> dict:
+    """Import every JSON create-path quote missing from quotes_v2."""
+    imported = []
+    skipped = []
+    failed = []
+    try:
+        from app.services.data_paths import quotes_data_dir
+        folder = quotes_data_dir()
+        paths = list(folder.glob("*.json")) if folder.exists() else []
+    except Exception as exc:
+        return {"imported": [], "skipped": [], "failed": [str(exc)], "sent": False}
+    for path in paths:
+        if path.name.startswith("_") or "_verification" in path.name:
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except Exception as exc:
+            failed.append({"path": str(path), "error": str(exc)})
+            continue
+        if not isinstance(data, dict):
+            continue
+        data.setdefault("id", path.stem)
+        existing = _get_quote_sql(data["id"])
+        if existing:
+            skipped.append(data["id"])
+            continue
+        row = upsert_legacy_quote(data)
+        if row:
+            imported.append(row.get("id"))
+        else:
+            failed.append({"id": data.get("id"), "error": "upsert failed"})
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "failed": failed,
+        "count": len(imported),
+        "sent": False,
+    }

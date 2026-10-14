@@ -74,6 +74,14 @@ class MaxScheduler:
             name="Expire Stale Crypto Payments",
         )
 
+        # Every 15 minutes — read-only job-mail intake (never sends)
+        self.scheduler.add_job(
+            self.run_job_mail_intake,
+            CronTrigger(minute="*/15"),
+            id="job_mail_intake",
+            name="Job Mail Intake (read-only)",
+        )
+
         # Every 5 minutes — Organizer due-date reminders through notify_founder
         self.scheduler.add_job(
             self.dispatch_organizer_reminders,
@@ -413,6 +421,21 @@ class MaxScheduler:
                 logger.info("Organizer reminders dispatched: %s", len(fired))
         except Exception as e:
             logger.error(f"Organizer reminder dispatch failed: {e}")
+
+    async def run_job_mail_intake(self):
+        """Read connected inboxes and attach job notes. Never sends."""
+        try:
+            from app.services.job_mail_intake.service import run_intake
+            result = run_intake()
+            logger.info(
+                "Job-mail intake: scanned=%s matched=%s unmatched=%s sent=%s",
+                result.get("scanned"),
+                result.get("matched"),
+                result.get("unmatched"),
+                result.get("sent"),
+            )
+        except Exception as e:
+            logger.error(f"Job-mail intake failed: {e}")
 
     async def expire_crypto_payments(self):
         """Run every 15 minutes to expire stale pending crypto payments."""

@@ -25,7 +25,6 @@ def _quote() -> dict:
         "project_name": "Living room drapery",
         "status": "draft",
         "created_at": "2026-10-01",
-        "billed_by": "nelmas_workroom",
         "notes": notes,
         "line_items": [
             {"description": "SECTION — Drapery", "unit": "section"},

@@ -30,7 +30,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
-from app.config.workroom_billing import WorkroomBilling, get_workroom_billing
+from app.config.workroom_billing import WorkroomBilling
 from app.services.pricing.dimensions import quote_item_dimension_text
 from app.services.fabric_codes import client_fabric_line
 from app.services.drawing.max_sheet_chrome import (
@@ -429,18 +429,14 @@ def _status_banner(quote: Dict[str, Any]) -> str:
     return "ESTIMATE"
 
 
-def _estimate_bill() -> WorkroomBilling:
-    """Client estimates bill as Empire Workroom. Never a person's name."""
-    base = get_workroom_billing(None)
-    return WorkroomBilling(
-        billed_by="empire_workroom",
-        name="Empire Workroom",
-        address=base.address,
-        phone=base.phone,
-        email=base.email,
-        website=base.website,
-        tagline=base.tagline,
-    )
+def _estimate_bill(quote: Dict[str, Any] | None = None) -> WorkroomBilling:
+    """Use the quote's own business / edition branding.
+
+    Empire Workroom is the default only when the quote does not name a
+    different shop. Never substitute a person's name.
+    """
+    from app.config.workroom_billing import resolve_quote_billing
+    return resolve_quote_billing(quote)
 
 
 def _quote_rev(quote: Dict[str, Any]) -> str:
@@ -457,7 +453,7 @@ def _paint_page_chrome(c: canvas.Canvas, quote: Dict[str, Any], page: int, pages
     client, project = _client_project(quote)
     qn = quote.get("quote_number") or quote.get("id") or "ESTIMATE"
     created = _fmt_date(quote.get("created_at") or quote.get("updated_at"))
-    bill = _estimate_bill()
+    bill = _estimate_bill(quote)
     render_chrome_bands(
         c,
         sheet_no=page,
@@ -853,7 +849,7 @@ def _draw_grouped_client_copy(quote: Dict[str, Any], grouping: Dict[str, Any]) -
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=(PW, PH))
     qn = quote.get("quote_number") or quote.get("id") or "estimate"
-    _bill = _estimate_bill()
+    _bill = _estimate_bill(quote)
     c.setTitle(f"Estimate {qn} — {_bill.name}")
     c.setAuthor(_bill.pdf_author)
     c.setCreator(_bill.name)
@@ -1182,7 +1178,7 @@ def _line_section_name(it: Dict[str, Any], header: str | None) -> str:
     category. An open SECTION header applies only when this line does not
     name its own. 'Rate needed' is never a section.
     """
-    for key in ("section", "section_name", "room"):
+    for key in ("section", "section_name", "room", "area"):
         raw = it.get(key)
         if isinstance(raw, str) and raw.strip() and not _is_rate_marker(raw):
             return raw.strip()
@@ -1407,18 +1403,18 @@ def _estimate_note_lines(quote: Dict[str, Any]) -> List[str]:
 def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     """Render a McLean landscape estimate.
 
-    Each section keeps its own lines. Every line shows description, qty
-    with unit, rate, and amount. Notes start on a new page when they
-    would otherwise run into the footer. The bill-to name is Empire Workroom.
+    Each section keeps its own lines. Columns are Description, Qty, Unit,
+    Sq ft, Price, Total, with a subtotal per area/room, then grand total,
+    deposit and balance. Measurements render as fractions.
     """
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=(PW, PH))
     qn = quote.get("quote_number") or quote.get("id") or "estimate"
-    bill = _estimate_bill()
+    bill = _estimate_bill(quote)
     c.setTitle(f"Estimate {qn} — {bill.name}")
     c.setAuthor(bill.pdf_author)
     c.setCreator(bill.name)
-    c.setSubject("Client estimate — Empire Workroom")
+    c.setSubject(f"Client estimate — {bill.name}")
 
     _serif_b, sans, sans_b, mono = _ensure_body_fonts()
     items = list(quote.get("line_items") or quote.get("items") or [])
@@ -1429,7 +1425,8 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
 
     sections = group_estimate_sections(items)
     global _SQFT_DESC_W
-    sqft_mode = _sqft_layout(sections)
+    # Always use the area-grouped 6-column layout the founder asked for.
+    sqft_mode = True
     # Description | Qty | Unit | Sq ft | Price | Total
     total_x = PW - MARGIN_R
     price_x = total_x - 92
@@ -1641,9 +1638,14 @@ def generate_mclean_estimate_pdf(quote_id: str, save: bool = True) -> bytes:
     from app.services.quote_service import get_quote
     from app.services.data_paths import quote_pdf_dir
 
-    quote = get_quote(quote_id)
+    from app.services.quote_service import resolve_quote, upsert_legacy_quote
+    quote = get_quote(quote_id) or resolve_quote(quote_id)
     if not quote:
         raise FileNotFoundError(f"Quote {quote_id} not found")
+    try:
+        upsert_legacy_quote(quote)
+    except Exception:
+        pass
 
     pdf_bytes = render_mclean_estimate_bytes(quote)
 
